@@ -681,10 +681,26 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         ArgumentNullException.ThrowIfNull(publication);
 
         var link = LinkOpen();
+
+        publication.CancellationToken.ThrowIfCancellationRequested();
+
+        // * counted from its hand-over to its outcome, which its link's stop awaits (spec 15.24)
+        link.Handed();
+
+        try
+        {
+            return await Publishing(link, publication);
+        }
+        finally
+        {
+            link.Answered();
+        }
+    }
+
+    // a publication handed over: sent on its sender once that one began, and its outcome read
+    private async Task<BrokerPublished> Publishing(Incarnation link, BrokerPublication publication)
+    {
         var token = publication.CancellationToken;
-
-        token.ThrowIfCancellationRequested();
-
         var isInbox = IsInbox(publication.Topic);
         var address = AmqpMessages.AddressOf(publication.Topic);
         var ttl = MillisecondsOf(publication.ExpiresAfter);
@@ -745,11 +761,14 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     }
 
     /// <summary>
-    /// Ends its link with no error (spec 15.33): each receiver detached and its DETACH awaited, each
-    /// session ended, then its CLOSE and its broker's, all within its connect timeout; its inbox ends
-    /// with its connection. Each publication without an outcome, sent or waiting for credit, and each
-    /// subscription awaiting its ATTACH fail with its stop, an <see cref="IOException"/>. Nothing
-    /// where it has none.
+    /// Ends its link with no error (spec 15.33): what it was handed to publish before it goes first,
+    /// sent as its credit comes and each outcome awaited, within its connect timeout, as a graceful
+    /// close sends what is queued before its FIN (spec 15.24, RFC 9293 §3.6); then each receiver
+    /// detached and its DETACH awaited, each session ended, then its CLOSE and its broker's, each
+    /// within its connect timeout; its inbox ends with its connection. Each publication without an
+    /// outcome by then, sent or waiting for credit, and each subscription awaiting its ATTACH fail
+    /// with its stop, an <see cref="IOException"/>. Nothing where it has none; a later start a new
+    /// link.
     /// </summary>
     public async Task Stop()
     {
@@ -776,6 +795,25 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
         try
         {
+            // * what it was handed goes first, no new publication taken meanwhile: each outcome come,
+            // within its connect timeout
+            if (link.Connection is { IsClosed: false })
+            {
+                using var draining = new CancellationTokenSource(_options.ConnectTimeout, TimeProvider.System);
+
+                try
+                {
+                    await link.AllAnswered().WaitAsync(draining.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    // what has not gone by then fails with its stop
+                }
+            }
+
+            // ! from here, an outcome its library gives as its sessions end is none its broker gave
+            link.IsEnding = true;
+
             if (link.Connection is { IsClosed: false } connection)
             {
                 List<Receiving> receivings;
@@ -899,9 +937,10 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         var (link, sender, address) = sent;
         var (outcome, published) = read;
 
-        // ! none read once its stop began: its library releases what its sessions held as they end,
-        // a release no broker gave, so that every publication without an outcome fails with the stop
-        if (link.IsStopping)
+        // ! none read once its stop's drain ended: its library releases what its sessions held as they
+        // end, a release no broker gave, so that every publication without an outcome fails with the
+        // stop
+        if (link.IsEnding)
         {
             published.TrySetException(new IOException(link.Ended?.Message));
 
@@ -1712,6 +1751,12 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     // one incarnation: its connection, what ends with it, its sessions and receivers, and its names
     private sealed class Incarnation
     {
+        private readonly Lock _gate = new();
+
+        // the publications handed to it without an outcome, and what its stop awaits of them
+        private int _unanswered;
+        private TaskCompletionSource? _answered;
+
         public CancellationTokenSource Life { get; } = new();
 
         public Connection? Connection { get; set; }
@@ -1741,6 +1786,53 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
         public bool IsStopping { get; set; }
 
+        // its stop's drain ended: an outcome its library gives from now on is none its broker gave
+        public bool IsEnding { get; set; }
+
         public Exception? Ended { get; set; }
+
+        /// <summary>A publication handed to it, counted until its outcome.</summary>
+        public void Handed()
+        {
+            lock (_gate)
+            {
+                _unanswered += 1;
+            }
+        }
+
+        /// <summary>A publication's outcome come, or its failure: its stop told once none is left.</summary>
+        public void Answered()
+        {
+            TaskCompletionSource? answered = null;
+
+            lock (_gate)
+            {
+                _unanswered -= 1;
+
+                if (_unanswered == 0 && _answered is not null)
+                {
+                    answered = _answered;
+                    _answered = null;
+                }
+            }
+
+            answered?.TrySetResult();
+        }
+
+        /// <summary>Settles once every publication handed to it has its outcome.</summary>
+        public Task AllAnswered()
+        {
+            lock (_gate)
+            {
+                if (_unanswered == 0)
+                {
+                    return Task.CompletedTask;
+                }
+
+                _answered ??= new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+                return _answered.Task;
+            }
+        }
     }
 }

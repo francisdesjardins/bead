@@ -505,7 +505,13 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         return BrokerPublished.Taken;
     }
 
-    /// <summary>Ends its link with a DISCONNECT of 0x00, so that its broker publishes no will (spec 15.26); nothing where it has none.</summary>
+    /// <summary>
+    /// Ends its link with a DISCONNECT of 0x00, so that its broker publishes no will (spec 15.26):
+    /// what it was handed to publish before it goes first, each PUBACK awaited, within its
+    /// <see cref="MqttBrokerAdapterOptions.ConnectTimeout"/>, what has not gone by then failed, as a
+    /// graceful close sends what is queued before its FIN (spec 15.24, RFC 9293 §3.6); its DISCONNECT
+    /// within a bound of its own. Nothing where it has none; a later start a new link.
+    /// </summary>
     public async Task Stop()
     {
         Link? link;
@@ -530,6 +536,17 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
         try
         {
+            // * what it was handed goes first, no new publication taken meanwhile: its quota drained,
+            // each PUBACK come, within its connect timeout
+            if (link.IsUp && link.Client.IsConnected && link.Quota is { } quota)
+            {
+                using var draining = new CancellationTokenSource(_options.ConnectTimeout, TimeProvider.System);
+
+                await Quietly(quota.Drained().WaitAsync(draining.Token));
+            }
+
+            // ! a bound of its own: a drain that spent its time leaves its DISCONNECT one, or the
+            // broker would read no DISCONNECT and publish its will
             if (link.IsUp && link.Client.IsConnected)
             {
                 using var timeout = new CancellationTokenSource(_options.ConnectTimeout, TimeProvider.System);

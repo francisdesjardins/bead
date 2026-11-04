@@ -1614,4 +1614,74 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
             return MqttFixture.IsGiven;
         }
     }
+
+    // a CONNACK that holds its publications to a Receive Maximum
+    private static MqttConnAckPacket ConnAckOf(ushort receiveMaximum)
+    {
+        var answer = ScriptedLink.ConnAck();
+
+        answer.ReceiveMaximum = receiveMaximum;
+
+        return answer;
+    }
+
+    // spec 15.24
+    [Fact]
+    public async Task Sends_what_waits_on_its_broker_s_Receive_Maximum_before_its_stop_s_DISCONNECT_within_its_connectTimeout_and_fails_what_has_not_gone_by_then()
+    {
+        await using var adapter = AdapterOf();
+        var link = await LinkUp((adapter, _script), (ConnAckOf(1), null));
+        var publishing = Enumerable.Range(1, 3).Select((index) =>
+        {
+            return adapter.Publish(new BrokerPublication { Topic = Inbox, Payload = (byte[])[(byte)index] });
+        }).ToList();
+        var first = await link.Next<MqttPublishPacket>();
+        var stopping = adapter.Stop();
+
+        // * its stop waits for what it was handed, each PUBACK given late, then its DISCONNECT
+        await Task.Delay(100, Cancelled);
+        Assert.False(stopping.IsCompleted);
+        await PubAckOf((link, first.PacketIdentifier, 0));
+
+        foreach (var _ in new[] { 2, 3 })
+        {
+            var next = await link.Next<MqttPublishPacket>();
+
+            await Task.Delay(50, Cancelled);
+            await PubAckOf((link, next.PacketIdentifier, 0));
+        }
+
+        var disconnect = await link.Next<MqttDisconnectPacket>();
+
+        await stopping.WaitAsync(Patience, Cancelled);
+        Assert.Equal(MqttDisconnectReasonCode.NormalDisconnection, disconnect.ReasonCode);
+        Assert.Equal(Enumerable.Repeat(BrokerPublished.Taken, 3), await Task.WhenAll(publishing).WaitAsync(Patience, Cancelled));
+        Assert.Equal([1, 2, 3], link.PacketsOf<MqttPublishPacket>().Select((publish) =>
+        {
+            return (int)publish.Payload.FirstSpan[0];
+        }));
+
+        // * past its connectTimeout, what has not gone fails, and its DISCONNECT goes all the same
+        await using var bounded = AdapterOf((options) =>
+        {
+            return options with { ConnectTimeout = TimeSpan.FromMilliseconds(300) };
+        });
+        var held = await LinkUp((bounded, _script), (ConnAckOf(1), null));
+        var unanswered = bounded.Publish(new BrokerPublication { Topic = Inbox, Payload = (byte[])[4] });
+        var waiting = bounded.Publish(new BrokerPublication { Topic = Inbox, Payload = (byte[])[5] });
+
+        await held.Next<MqttPublishPacket>();
+        await bounded.Stop().WaitAsync(Patience, Cancelled);
+
+        foreach (var pending in new[] { unanswered, waiting })
+        {
+            Assert.Equal("the link of ada stopped", Assert.IsType<IOException>(await FailureOf(() =>
+            {
+                return pending;
+            })).Message);
+        }
+
+        Assert.Equal(MqttDisconnectReasonCode.NormalDisconnection, (await held.Next<MqttDisconnectPacket>()).ReasonCode);
+        Assert.Single(held.PacketsOf<MqttPublishPacket>());
+    }
 }
