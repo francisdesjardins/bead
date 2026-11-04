@@ -259,3 +259,23 @@ fn a_draws_error_names_bead_and_keeps_the_systems_cause() {
         "the exact cause"
     );
 }
+
+#[test]
+fn are_drawn_again_when_all_zero_or_in_use() {
+    let fills = crate::testing::scripted::TokenFills::new(
+        vec![[0; 16], [0; 16], [1; 16], [1; 16], [2; 16]],
+        [3; 16],
+    );
+    let used = SessionToken::new([1; 16]).expect("a token in use");
+    let drawn = SessionToken::draw_with(
+        |candidate| *candidate == used,
+        |bytes| {
+            bytes.copy_from_slice(&fills.draw());
+            Ok(())
+        },
+    )
+    .expect("a fresh token");
+
+    assert_eq!(drawn.bytes(), &[2; 16]);
+    assert_eq!(fills.remaining(), 0);
+}

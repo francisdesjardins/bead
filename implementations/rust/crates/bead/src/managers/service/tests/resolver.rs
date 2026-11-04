@@ -47,6 +47,49 @@ fn application(code: u16, detail: &str) -> Failure {
 }
 
 #[tokio::test]
+async fn makes_a_resolver_named_after_its_procedure_that_answers_its_callbacks_response_through_its_router_and_leaves_its_registration_to_its_manager()
+ {
+    let fixture = Fixture::new();
+    let recording = Arc::new(Recording::default());
+    let resolver = Resolving {
+        manager: Arc::clone(&fixture.manager.inner),
+        admit: None,
+        procedure: echo(),
+        request: JsonCodec,
+        result: Arc::new(JsonCodec),
+        validate: None,
+        fail_fast: false,
+        callback: Arc::new(|request, response| {
+            assert_eq!(request.payload, serde_json::json!({"text": "hi"}));
+            assert_eq!(request.connection_handle, handle_of(1));
+            assert_eq!(request.header, header());
+            response.result(serde_json::json!({"text": "hi!"}))
+        }),
+        call_type: DebugType::Request,
+        listed: None,
+    };
+    assert_eq!(resolver.procedure.procedure_name, "echo");
+    resolver
+        .resolve(props(&recording, br#"{"text":"hi"}"#))
+        .await
+        .expect("the callback's response answered");
+    assert_eq!(
+        recording.answers(),
+        [RouterAnswer::Result(Bytes::from_static(
+            br#"{"text":"hi!"}"#
+        ))]
+    );
+    fixture
+        .router
+        .owner()
+        .run(|state| assert!(locked(&state.core.resolvers).is_empty()))
+        .await
+        .expect("the factory registers no callback");
+    assert_eq!(fixture.transport.take(), []);
+    fixture.router.dispose().await;
+}
+
+#[tokio::test]
 async fn makes_and_registers_the_resolver_only_once_it_is_given_its_callback() {
     let fixture = Fixture::new();
     let define = fixture

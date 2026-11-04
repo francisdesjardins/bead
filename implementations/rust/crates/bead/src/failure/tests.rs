@@ -19,6 +19,31 @@ fn received((code, scope, relays): (u16, FailureScope, u8)) -> Failure {
 }
 
 #[test]
+fn is_of_no_known_side_through_a_relay_and_names_where_its_call_went() {
+    let header = EnvelopeHeader::Failure(FailureHeader {
+        call_id: 3,
+        credential: None,
+    });
+    let failure = received((18, FailureScope::Protocol, 1))
+        .of_call(None, Some(4))
+        .about(&header);
+    assert_eq!(failure.destination_id(), Some(4));
+    assert_eq!(failure.origin(), FailureOrigin::Relayed);
+    assert_eq!(failure.relays(), 1);
+    assert_eq!(failure.side(), None);
+    assert_eq!(failure.header(), Some(&header));
+}
+
+#[test]
+fn is_of_no_known_side_when_received_through_a_relay() {
+    let failure = received((18, FailureScope::Protocol, 1));
+    assert_eq!(
+        (failure.origin(), failure.side(), failure.relays()),
+        (FailureOrigin::Relayed, None, 1)
+    );
+}
+
+#[test]
 fn matches_failure_code_sets_by_scope_code_and_the_known_side() {
     for error in [
         received((21, FailureScope::Protocol, 0)),

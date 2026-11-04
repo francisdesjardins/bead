@@ -74,10 +74,19 @@ impl SessionToken {
     ///
     /// A [`SessionTokenDrawError`] when the system's source gives nothing, retaining its cause.
     pub fn draw<F: Fn(&Self) -> bool>(is_in_use: F) -> Result<Self, SessionTokenDrawError> {
+        Self::draw_with(is_in_use, getrandom::fill)
+    }
+
+    /// Draws through the supplied byte source, retrying zero and occupied tokens.
+    pub(crate) fn draw_with<F, G>(is_in_use: F, mut fill: G) -> Result<Self, SessionTokenDrawError>
+    where
+        F: Fn(&Self) -> bool,
+        G: FnMut(&mut [u8]) -> Result<(), getrandom::Error>,
+    {
         loop {
             let mut bytes = [0_u8; SESSION_TOKEN_BYTES];
 
-            getrandom::fill(&mut bytes).map_err(|cause| SessionTokenDrawError { cause })?;
+            fill(&mut bytes).map_err(|cause| SessionTokenDrawError { cause })?;
 
             if let Ok(token) = Self::new(bytes)
                 && !is_in_use(&token)

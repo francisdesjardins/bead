@@ -33,6 +33,8 @@ use crate::transport::{
     TransportClientReconnectOptions, TransportServerClient,
 };
 
+mod reconnection;
+
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
@@ -1220,6 +1222,7 @@ async fn refuses_a_reconnect_never_connected_and_a_connect_unless_closed_nothing
         Some("the transport client was never connected"),
         "said why"
     );
+    assert_eq!(client.ready_state(), ReadyState::Uninitialized);
 
     // its token cancelled already, and a server not started: refused, the first leaving its state
     // as it was
