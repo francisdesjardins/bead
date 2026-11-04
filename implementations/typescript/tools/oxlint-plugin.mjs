@@ -21,7 +21,7 @@
  */
 const LISTED_RESTS = Object.freeze({
   'IBoundCall(...Options)':
-    "a call's options, one element: `RequestOptionsParameters`, its default, or a registration's `Pick` of `IRequestOptions`",
+    "a call's options, one element: a request's `IRequestOptions`, its default, a command's `ICommandOptions`, required, or a registration's `IRegistrationOptions`",
   'createServiceServer(...ServiceServerOptions<S>)':
     "a server side's options, one element, required when a procedure names a hook",
   'EmitterListener(...P)': "an event's values, judged at its map",

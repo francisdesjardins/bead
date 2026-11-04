@@ -532,17 +532,18 @@ credential goes out `ACCESS_DENIED`, so its client keeps a credential that may h
 `&&`, it loses that refusal and the composition refuses with `ACCESS_DENIED` — a caller that wants
 to keep it puts `refusal` on its own function.
 
-The server asks a client with a command, `getCommand`, which names the connection; the client runs
-it with `getCommandResolver`, and resolves the command's credential as a server does, by the
-`credentials` among its own options, the session it learned standing for its connection's. None of
-this package's server transports carries a credential beside an envelope it sends, so a command
-presenting `ELSEWHERE` fails before it goes, `DESTINATION_UNREACHABLE`, as a `JWT` command does
-over a connection that is not secure. A command left unanswered past its timeout closes its
-connection when the server's `closeOnCommandTimeout` says so, or the command's own
-`closeOnTimeout`. `ws-server` is the server over WebSocket. A server hears what goes wrong where
-each layer tells it: a call's on its router's `error`, and its transport's — a socket's, or what a
-listener of its events threw — on the transport's `error`, beside each refusal it tells, both on
-`server.transport` whichever transport it was built on
+The server asks a client with a command, `getCommand`, whose options, `ICommandOptions`, name the
+connection, which the types require; a server's manager makes no request nor notification, and a
+client's no command, each refused as it is made. The client runs it with `getCommandResolver`, and
+resolves the command's credential as a server does, by the `credentials` among its own options, the
+session it learned standing for its connection's. None of this package's server transports carries a
+credential beside an envelope it sends, so a command presenting `ELSEWHERE` fails before it goes,
+`DESTINATION_UNREACHABLE`, as a `JWT` command does over a connection that is not secure. A command
+left unanswered past its timeout closes its connection when the server's `closeOnCommandTimeout`
+says so, or the command's own `closeOnTimeout`. `ws-server` is the server over WebSocket. A server
+hears what goes wrong where each layer tells it: a call's on its router's `error`, and its
+transport's — a socket's, or what a listener of its events threw — on the transport's `error`,
+beside each refusal it tells, both on `server.transport` whichever transport it was built on
 ([decision 0023](../../docs/decisions/0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md)):
 
 ```ts
@@ -723,15 +724,16 @@ procedure that notifies opens no subscription. Its `on` answers a command, its `
 refused with the client router's own `SESSION_REQUIRED`; a client side is given no hooks, so a
 command a hook admits is a `ProgrammerError` there. Each requester and resolver is declared once. A
 call stays curried, `request.sayHello(payload)(options)`: what the payload gives is a bound call,
-`IBoundCall`, or `IRegistrar` for a notification, whose `then` no promise matches, so
-`await greeter.request.sayHello('Ada')`, its options' call forgotten, does not compile. A descriptor
-may carry `validate`, its request's rules (spec 18), which beadc generates: the side that answers
-judges every request once it reads, before its resolver, and answers one its rules refuse
-`PAYLOAD_INVALID`, its violations in its detail, lines of canonical JSON that `violationsOf` reads
-back; a client whose options say `validates: true`, or a server's for its commands, judges the value
-before it is written, and a value its rules refuse fails its call before anything goes, with the
-same failure, counted and traced as a call refused before it goes. `failFast: true` stops a judging
-at its first violation. A `validate` that throws is its side's own error, `PROCEDURE_FAILED`.
+`IBoundCall`, `IBoundCommand` for a command, or `IRegistrar` for a notification, whose `then` no
+promise matches, so `await greeter.request.sayHello('Ada')`, its options' call forgotten, does not
+compile. A descriptor may carry `validate`, its request's rules (spec 18), which beadc generates:
+the side that answers judges every request once it reads, before its resolver, and answers one its
+rules refuse `PAYLOAD_INVALID`, its violations in its detail, lines of canonical JSON that
+`violationsOf` reads back; a client whose options say `validates: true`, or a server's for its
+commands, judges the value before it is written, and a value its rules refuse fails its call before
+anything goes, with the same failure, counted and traced as a call refused before it goes.
+`failFast: true` stops a judging at its first violation. A `validate` that throws is its side's own
+error, `PROCEDURE_FAILED`.
 
 ### Transfers
 

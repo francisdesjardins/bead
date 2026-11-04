@@ -172,7 +172,6 @@ export const codeOfCall = (call: ICall): string | undefined => {
       ? []
       : [`timeout: ${timeout === 'never' ? 'Infinity' : String(timeout)}`]),
     ...(destination === undefined ? [] : [`destinationId: ${String(destination)}`]),
-    ...(call.opening?.closeOnTimeout === true ? ['closeOnTimeout: true'] : []),
   ];
   const head = [
     `// ${call.procedureName}${call.callId === undefined ? '' : `, call #${String(call.callId)}`}, as client ${String(call.source)} made it at ${clockOf(startOf(call))}`,

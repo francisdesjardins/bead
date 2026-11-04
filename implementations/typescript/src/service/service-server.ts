@@ -11,11 +11,11 @@ import type {
   AdmissionFailure,
   CallId,
   IBeforeRequest,
+  ICommand,
   INotificationResolver,
   INotificationResponse,
   INotifyOptions,
   IProcedure,
-  IRequest,
   IRequestProps,
   IResponse,
   ResolverFailure,
@@ -55,7 +55,7 @@ export interface IServiceServer<S extends ServiceProcedures, Data = unknown> {
   readonly command: {
     // ! keyof S, filtered: a computed key drops the link to the descriptor, and its
     // @deprecated with it
-    readonly [Name in keyof S as Name extends CommandName<S> ? Name : never]: IRequest<
+    readonly [Name in keyof S as Name extends CommandName<S> ? Name : never]: ICommand<
       GivenOf<S[Name]['request']>,
       ValueOf<S[Name]['result']>,
       TransportServerConnectionHandle
@@ -303,7 +303,7 @@ export const createServiceServer = <const S extends ServiceProcedures, Data = un
   const callbacks = new Map<string, AnyCallback>();
   // what the offer made: the requester of each command, and the resolver of each procedure that
   // notifies, once registered
-  const commands = new Map<string, IRequest<unknown, unknown, TransportServerConnectionHandle>>();
+  const commands = new Map<string, ICommand<unknown, unknown, TransportServerConnectionHandle>>();
   const notifiers = new Map<
     string,
     INotificationResolver<unknown, TransportServerConnectionHandle>

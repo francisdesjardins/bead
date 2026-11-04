@@ -8,7 +8,7 @@ import { ProgrammerError, toError } from '../../transport/shared/errors';
 import { createEventMethods } from '../../transport/shared/lifecycle';
 import { isAdmissionFailure } from './admission';
 import { DEBUG_EVENT, DEPRECATED_EVENT, DROPPED_EVENT } from './constants';
-import { checkDeclaration } from './identity';
+import { checkDeclaration, checkProcedureKind } from './identity';
 import { createNotification } from './notification';
 import { createProcedureMap } from './procedure-map';
 import { createServiceRequester, REQUEST_DEFAULTS } from './service-requester';
@@ -31,6 +31,7 @@ import type {
   NotificationResolverCallback,
   RequestResolverCallback,
   ResolverFailure,
+  RouterSide,
   ServiceManagerEventMap,
 } from './types';
 
@@ -124,8 +125,9 @@ const procedureOf = (given: IProcedure): IProcedure => {
 
 /**
  * The requesters and resolvers of the services on one router: what a requester calls, and what
- * answers it on the other side. Both sides of a router use the same manager, which runs on its
- * router's clock: one its options give that differs is a {@link ProgrammerError}.
+ * answers it on the other side. Both sides of a router use the same manager — a request or a
+ * notification made on a client's router, a command on a server's — which runs on its router's
+ * clock: one its options give that differs is a {@link ProgrammerError}.
  *
  * @example
  * import { createServiceManager } from '@francisdesjardins/bead/service-manager';
@@ -209,12 +211,34 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
     trace: serviceTrace,
   });
 
+  // * spec 16.10's reasons first — its identity, then its kind for the way its router's requester
+  // declares, a notification's subscribing call's included — then the side the maker belongs to,
+  // before any reason of the maker's own: a maker refused declares nothing
+  const checkMaker = (
+    procedure: IProcedure,
+    { refusal, side }: { refusal: string; side: RouterSide }
+  ): void => {
+    checkDeclaration(procedure);
+    checkProcedureKind(
+      procedure,
+      router.failures.side === 'client' ? 'client-requester' : 'server-requester'
+    );
+
+    if (router.failures.side !== side) {
+      throw new ProgrammerError(refusal);
+    }
+  };
+
   const getNotification = <RequestPayload, ResponsePayload, NotificationPayload>(
     procedure: IProcedure,
     dependencies: INotificationDependencies<RequestPayload, ResponsePayload, NotificationPayload>
   ): INotification<RequestPayload, NotificationPayload> => {
-    // * the router's check before the manager's own reason, so spec 16.10's order holds here too
-    checkDeclaration(procedure);
+    // * the router's checks and the side before the manager's own reason, so spec 16.10's order
+    // holds here too
+    checkMaker(procedure, {
+      refusal: 'only a client hears notifications; a server notifies them',
+      side: 'client',
+    });
 
     const known = notifications.get(procedure);
 
@@ -423,12 +447,22 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
     },
 
     getCommand: (procedure, dependencies) => {
+      checkMaker(procedure, {
+        refusal: "a client's router makes requests: getRequest",
+        side: 'server',
+      });
+
       return requestOf(procedure, { dependencies, type: 'command' });
     },
     getCommandResolver,
     getNotification,
     getNotificationResolver,
     getRequest: (procedure, dependencies) => {
+      checkMaker(procedure, {
+        refusal: "a server's router makes commands: getCommand",
+        side: 'client',
+      });
+
       return requestOf(procedure, { dependencies, type: 'request' });
     },
     getRequestResolver,
@@ -482,6 +516,9 @@ export type {
   IApplicationFailure,
   IBeforeRequest,
   IBoundCall,
+  IBoundCommand,
+  ICommand,
+  ICommandOptions,
   IDebugEvent,
   IDebugFilter,
   IFailure,
@@ -513,6 +550,7 @@ export type {
   IRequestResolverProps,
   IRequestSerializerClient,
   IRegistrar,
+  IRegistrationOptions,
   IRequestSerializerServer,
   IResolvedRequestOptions,
   IResponse,
@@ -529,7 +567,6 @@ export type {
   NotificationResolverCallback,
   ProcedureId,
   RedactedHeader,
-  RequestOptionsParameters,
   RequestResolverCallback,
   ResolverFailure,
   RouterAnswer,

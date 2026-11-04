@@ -2227,7 +2227,7 @@ test.describe('createRouterClient', () => {
       expect(received).toEqual([2]);
     });
 
-    test('fails a command to no connection or to none named', async () => {
+    test('fails a command to a connection not open', async () => {
       const pipe = createPipedTransports({
         connectionHandle: 'type=WS;ip=127.0.0.1;port=50001;ordinal=1',
       });
@@ -2238,16 +2238,13 @@ test.describe('createRouterClient', () => {
 
       pipe.open();
 
-      // * through its server's service manager: a connection it does not hold, then none named
+      // * through its server's service manager: a connection it does not hold
       await expect(
         command('now')({
           connectionHandle: 'type=WS;ip=127.0.0.1;port=1;ordinal=1',
           timeout: 1_000,
         })
       ).rejects.toBeInstanceOf(DisconnectError);
-      await expect(
-        command('now')({ timeout: 1_000 } as unknown as Parameters<ReturnType<typeof command>>[0])
-      ).rejects.toBeInstanceOf(ProgrammerError);
     });
 
     test('cancelled by the server, abort their resolver’s signal, and are answered by nothing', async () => {

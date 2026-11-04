@@ -56,8 +56,7 @@ export interface IServiceClient<S extends ServiceProcedures> {
     // @deprecated with it
     readonly [Name in keyof S as Name extends AnsweredName<S> ? Name : never]: IRequest<
       GivenOf<S[Name]['request']>,
-      ValueOf<S[Name]['result']>,
-      RouterClientConnectionHandle
+      ValueOf<S[Name]['result']>
     >;
   };
 

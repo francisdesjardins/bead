@@ -46,7 +46,7 @@ test.describe('createServiceManager', () => {
     // debugging 1.1, 4.1, 4.1.1, 4.1.2, 4.1.3, 4.1.4, 4.1.6 and 4.1.8
     test('tells each step of a request, with copies and, once answered, a duration', async () => {
       const clock = createTestClock(1_000);
-      const { control, router } = createFakeRouter('server', clock);
+      const { control, router } = createFakeRouter('client', clock);
       const manager = createServiceManager(router);
       const steps = recordDebug(manager);
       const payload = { text: 'hello' };
@@ -64,7 +64,8 @@ test.describe('createServiceManager', () => {
 
       const sent = {
         callId: 7,
-        connectionHandle: undefined,
+        // a client's call names its one peer, the server
+        connectionHandle: 'server',
         direction: 'tx',
         duration: undefined,
         options: { timeout: 5_000 },
@@ -146,7 +147,7 @@ test.describe('createServiceManager', () => {
 
     // debugging 4.4
     test('tells a call made over a router that draws no id with none, its tx step then its rx step', async () => {
-      const { control, router } = createFakeRouter();
+      const { control, router } = createFakeRouter('client');
       const manager = createServiceManager(router);
       const seen = recordDebug(manager);
 
@@ -166,7 +167,7 @@ test.describe('createServiceManager', () => {
     });
 
     test('raises deprecated before the call’s tx step', async () => {
-      const manager = createServiceManager(createFakeRouter().router);
+      const manager = createServiceManager(createFakeRouter('client').router);
       const heard: string[] = [];
 
       manager.on('deprecated', () => {
@@ -189,7 +190,7 @@ test.describe('createServiceManager', () => {
     // debugging 3.2, 4.1.5 and 4.1.6
     test("reads its router's clock: a call's start on the wall clock, its duration on the monotonic reading", async () => {
       const clock = createTestClock(Date.UTC(2026, 0, 1));
-      const { control, router } = createFakeRouter('server', clock);
+      const { control, router } = createFakeRouter('client', clock);
       const manager = createServiceManager(router);
       const seen = recordDebug(manager);
 
@@ -221,7 +222,7 @@ test.describe('createServiceManager', () => {
     // debugging 4.1.6 and 11.4
     test('tells a duration in whole milliseconds, its fraction dropped', async () => {
       const clock = createTestClock(Date.UTC(2026, 0, 1));
-      const { control, router } = createFakeRouter('server', clock);
+      const { control, router } = createFakeRouter('client', clock);
       const manager = createServiceManager(router);
       const seen = recordDebug(manager);
       // the readings, as Bead reads them
@@ -367,7 +368,7 @@ test.describe('createServiceManager', () => {
 
     // debugging 2.2 and 2.3
     test('a debug listener that throws on the answer is reported through the router, and the call resolves with its result, each step told', async () => {
-      const { calls, router } = createFakeRouter();
+      const { calls, router } = createFakeRouter('client');
       const manager = createServiceManager(router);
       const seen: string[] = [];
       const heard: string[] = [];
@@ -421,7 +422,7 @@ test.describe('createServiceManager', () => {
     });
 
     test('a payload debug cannot copy is told as it is, and the call goes on', async () => {
-      const { control, router } = createFakeRouter();
+      const { control, router } = createFakeRouter('client');
       const manager = createServiceManager(router);
       const seen = recordDebug(manager);
       const odd = {

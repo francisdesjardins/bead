@@ -14,7 +14,12 @@ import { expect, test } from '@playwright/test';
 import { createRelay } from '../../router/server/relay';
 import { createSessionManager } from '../../router/server/session-manager';
 import type { RelayTarget } from '../../router/server/types';
-import { EnvelopeKind, LIMIT_DEFAULTS, SERVER_FAILURES } from '../../router/shared/constants';
+import {
+  CLIENT_FAILURES,
+  EnvelopeKind,
+  LIMIT_DEFAULTS,
+  SERVER_FAILURES,
+} from '../../router/shared/constants';
 import { PAYLOAD_CODECS } from '../../router/shared/payloads';
 import { createRouterCore } from '../../router/shared/router-core';
 import { createServiceManager } from '../../router/shared/service-manager';
@@ -306,12 +311,15 @@ const endedAt = async (clock: TestClock, isEnded: () => boolean): Promise<number
   return due;
 };
 
-/** A router that answers each request with its payload, and keeps the options each was handed. */
+/**
+ * A client's router, whose manager makes requests, that answers each request with its payload, and
+ * keeps the options each was handed.
+ */
 const createFakeRouter = () => {
   const handed: IResolvedRequestOptions[] = [];
   const router: IRouterLike = {
     clock: createTestClock(),
-    failures: SERVER_FAILURES,
+    failures: CLIENT_FAILURES,
     limits: LIMIT_DEFAULTS,
 
     answeredOf: () => {
