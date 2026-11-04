@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use bytes::Bytes;
 
 use super::{ClientFixture, Fixture, header, locked};
-use crate::constants::{ProtocolCode, RouterSide};
+use crate::constants::{ProcedureKind, ProtocolCode, RouterSide};
 use crate::envelope::{Credential, Envelope, ResultHeader};
 use crate::failure::Failure;
 use crate::managers::service::{
@@ -23,6 +23,7 @@ use crate::testing::scripted::handle_of;
 #[tokio::test]
 async fn refuses_a_resolver_off_section_16_as_it_is_asked_for_before_its_callback_is_given() {
     let fixture = Fixture::new();
+    let client = ClientFixture::new();
     let named = crate::identity::Procedure {
         procedure_name: "Echo".to_owned(),
         ..echo()
@@ -38,7 +39,7 @@ async fn refuses_a_resolver_off_section_16_as_it_is_asked_for_before_its_callbac
             RequestResolverDependencies::new(TextCodec, TextCodec),
         )
         .expect_err("the request's name is off its form");
-    let command = fixture
+    let command = client
         .manager
         .get_command_resolver(
             &named,
@@ -67,6 +68,209 @@ async fn refuses_a_resolver_off_section_16_as_it_is_asked_for_before_its_callbac
         .expect("no callback is registered");
     assert_eq!(fixture.transport.take(), []);
     fixture.router.dispose().await;
+    assert_eq!(client.transport.envelopes(), []);
+    client.router.dispose().await;
+}
+
+// spec 16.10, 16.11; debugging 4.1.2
+#[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "each resolver maker on each router, by kind, as both other sides tell them"
+)]
+async fn makes_the_resolvers_of_requests_and_notifications_on_a_server_router_alone_and_of_commands_on_a_client_router_alone()
+ {
+    use crate::errors::{ProgrammerError, Refusal};
+    use crate::identity::IdentityRefusal;
+
+    const ANSWERS_COMMANDS: &str = "a client's router answers commands: get_command_resolver";
+    const ANSWERS_REQUESTS: &str = "a server's router answers requests: get_request_resolver";
+    const NOTIFIES: &str = "only a server notifies; a client hears notifications";
+
+    let of_kind = |procedure_kind| crate::identity::Procedure {
+        procedure_kind,
+        ..echo()
+    };
+    let unranged = crate::identity::Procedure {
+        service_id: 0,
+        procedure_kind: None,
+        ..echo()
+    };
+    let every = || {
+        [
+            None,
+            Some(ProcedureKind::Request),
+            Some(ProcedureKind::Notifies),
+            Some(ProcedureKind::Command),
+        ]
+        .into_iter()
+        .map(of_kind)
+        .chain([unranged.clone()])
+    };
+    let told = |refused: ProgrammerError| (refused.reason(), refused.message().to_owned());
+    let by_side = |message: &str| (None, message.to_owned());
+    let reason_of = |refused: Result<(), (Option<Refusal>, String)>| {
+        refused.expect_err("refused as it is asked for").0
+    };
+    let against = Some(Refusal::Identity(IdentityRefusal::AgainstItsKind));
+    let ranged = Some(Refusal::Identity(IdentityRefusal::OutOfItsRange));
+    let resolving = || RequestResolverDependencies::new(TextCodec, TextCodec);
+    let notifying = || NotificationResolverDependencies::new(resolving(), TextCodec);
+    let answered: crate::managers::service::ResolverCallback<TextCodec, TextCodec> =
+        Arc::new(|request, response| response.result(request.payload));
+
+    // on a client's router
+    let client = ClientFixture::new();
+    let request = |procedure: &crate::identity::Procedure| {
+        client
+            .manager
+            .get_request_resolver(procedure, resolving())
+            .map(drop)
+            .map_err(told)
+    };
+    let notification = |procedure: &crate::identity::Procedure| {
+        client
+            .manager
+            .get_notification_resolver(procedure, notifying())
+            .map(drop)
+            .map_err(told)
+    };
+    let command = |procedure: &crate::identity::Procedure| {
+        client
+            .manager
+            .get_command_resolver(procedure, resolving())
+            .map(drop)
+            .map_err(told)
+    };
+    // * the side first, whatever the procedure: of every kind, and out of its range
+    for procedure in every() {
+        assert_eq!(
+            request(&procedure),
+            Err(by_side(ANSWERS_COMMANDS)),
+            "{procedure:?}"
+        );
+        assert_eq!(
+            notification(&procedure),
+            Err(by_side(NOTIFIES)),
+            "{procedure:?}"
+        );
+    }
+    // then spec 16.10's reasons, for the way of the maker of its side
+    for kind in [ProcedureKind::Request, ProcedureKind::Notifies] {
+        assert_eq!(
+            reason_of(command(&of_kind(Some(kind)))),
+            against,
+            "{kind:?}"
+        );
+    }
+    assert_eq!(reason_of(command(&unranged)), ranged);
+    // then the maker's own: a refusal that is not an admission's comes after the side
+    let mut admitting = resolving();
+    admitting.before_request = Some(BeforeRequest::new(
+        |_| false,
+        Some(Failure::protocol(
+            ProtocolCode::PROCEDURE_FAILED,
+            RouterSide::Client,
+        )),
+    ));
+    assert_eq!(
+        client
+            .manager
+            .get_request_resolver(&echo(), admitting)
+            .map(drop)
+            .map_err(told),
+        Err(by_side(ANSWERS_COMMANDS))
+    );
+    // * nothing registered: its own maker registers at the same address
+    client
+        .manager
+        .get_command_resolver(&of_kind(Some(ProcedureKind::Command)), resolving())
+        .expect("a command resolver, on a client's router")
+        .on(Arc::clone(&answered))
+        .expect("registered, nothing before it");
+    client.router.dispose().await;
+
+    // on a server's router
+    let server = Fixture::new();
+    let request = |procedure: &crate::identity::Procedure| {
+        server
+            .manager
+            .get_request_resolver(procedure, resolving())
+            .map(drop)
+            .map_err(told)
+    };
+    let notification = |procedure: &crate::identity::Procedure| {
+        server
+            .manager
+            .get_notification_resolver(procedure, notifying())
+            .map(drop)
+            .map_err(told)
+    };
+    let command = |procedure: &crate::identity::Procedure| {
+        server
+            .manager
+            .get_command_resolver(procedure, resolving())
+            .map(drop)
+            .map_err(told)
+    };
+    for procedure in every() {
+        assert_eq!(
+            command(&procedure),
+            Err(by_side(ANSWERS_REQUESTS)),
+            "{procedure:?}"
+        );
+    }
+    for kind in [ProcedureKind::Notifies, ProcedureKind::Command] {
+        assert_eq!(
+            reason_of(request(&of_kind(Some(kind)))),
+            against,
+            "{kind:?}"
+        );
+    }
+    for kind in [ProcedureKind::Request, ProcedureKind::Command] {
+        assert_eq!(
+            reason_of(notification(&of_kind(Some(kind)))),
+            against,
+            "{kind:?}"
+        );
+    }
+    assert_eq!(reason_of(request(&unranged)), ranged);
+    assert_eq!(reason_of(notification(&unranged)), ranged);
+    server
+        .router
+        .owner()
+        .run(|state| assert!(locked(&state.core.resolvers).is_empty()))
+        .await
+        .expect("no callback is registered");
+    // each maker of its side makes, and registers once it is given its callback
+    server
+        .manager
+        .get_request_resolver(&of_kind(None), resolving())
+        .expect("a request resolver, on a server's router")
+        .on(Arc::clone(&answered))
+        .expect("registered");
+    server
+        .manager
+        .get_notification_resolver(
+            &crate::identity::Procedure {
+                procedure_id: 2,
+                procedure_name: "news".to_owned(),
+                procedure_kind: Some(ProcedureKind::Notifies),
+                ..echo()
+            },
+            notifying(),
+        )
+        .expect("a notification resolver, on a server's router")
+        .on(answered)
+        .expect("registered");
+    server
+        .router
+        .owner()
+        .run(|state| assert_eq!(locked(&state.core.resolvers).len(), 2))
+        .await
+        .expect("both registered");
+    assert_eq!(server.transport.take(), []);
+    server.router.dispose().await;
 }
 
 #[tokio::test]

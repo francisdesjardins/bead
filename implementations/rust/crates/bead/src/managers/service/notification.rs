@@ -11,14 +11,14 @@ use bytes::Bytes;
 use tokio::sync::Notify;
 
 use super::{
-    Inner, RegistrationOptions, Request, RequestDependencies, ServiceManager, ServiceRouter, Step,
+    Inner, Maker, RegistrationOptions, Request, RequestDependencies, ServiceManager, Step,
     Validate, traced,
 };
 use crate::constants::ProtocolCode;
 use crate::debug::{DebugDirection, DebugType};
 use crate::errors::{CallError, ProgrammerError};
 use crate::failure::Failure;
-use crate::identity::{Procedure, check_declaration, check_procedure_kind};
+use crate::identity::Procedure;
 use crate::payloads::PayloadCodec;
 use crate::router::client::{NotificationLike, RouterClient, UnregisterNotificationOptions};
 use crate::router::types::{BoxFuture, RouterError};
@@ -666,16 +666,8 @@ where
     Res::Value: Clone + fmt::Debug + Sync,
     Not::Value: Clone + fmt::Debug + Sync,
 {
-    // * spec 16.10's reasons first, the kind for the way its router's requester declares, then the
-    // side, before the manager's own reasons
-    check_declaration(procedure)?;
-    check_procedure_kind(procedure, manager.inner.router.requester_way())?;
-
-    let ServiceRouter::Client(router) = &manager.inner.router else {
-        return Err(ProgrammerError::new(
-            "only a client hears notifications; a server notifies them",
-        ));
-    };
+    // * the side first, then spec 16.10's reasons for its way, before the manager's own reasons
+    let router = manager.client_router((procedure, Maker::Notification))?;
     let key = (procedure.service_id, procedure.procedure_id);
     let known = locked(&manager.inner.notifications).get(&key).map(|known| {
         (

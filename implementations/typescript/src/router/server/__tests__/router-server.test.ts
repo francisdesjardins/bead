@@ -2727,7 +2727,7 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS) {
 
         const ping = { ...echo, procedureId: 40, procedureName: 'ping' };
 
-        client.services.getRequestResolver(ping, { serializer: answering })(
+        client.services.getCommandResolver(ping, { serializer: answering })(
           (_request, response) => {
             return response('pong');
           }

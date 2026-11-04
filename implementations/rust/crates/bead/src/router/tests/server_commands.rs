@@ -204,8 +204,8 @@ async fn commands_name_their_connection_and_it_must_be_open_a_server_holds_no_su
             .message(),
         "a server does not subscribe to notifications; it sends them"
     );
-    // its service layer refuses a subscriber before any call is made: by its kind first (spec
-    // 16.10), a requester on a server's router taking a command alone
+    // its service layer refuses a subscriber before any call is made: by its side first, before
+    // spec 16.10's reasons, a notification being a client's router's alone (spec 16.11)
     let refused = served
         .services
         .get_notification(
@@ -217,10 +217,11 @@ async fn commands_name_their_connection_and_it_must_be_open_a_server_holds_no_su
         )
         .expect_err("a server cannot subscribe");
     assert_eq!(
-        refused.reason(),
-        Some(crate::errors::Refusal::Identity(
-            crate::identity::IdentityRefusal::AgainstItsKind
-        ))
+        (refused.reason(), refused.message()),
+        (
+            None,
+            "only a client hears notifications; a server notifies them"
+        )
     );
     served.transport.close_connection(&first());
     assert!(matches!(

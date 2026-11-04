@@ -21,9 +21,9 @@ fn rules(given: &Arc<Mutex<Vec<ValidateOptions>>>) -> Validate<String> {
     Arc::new(move |value, options| {
         locked(&given).push(options.clone());
         if !value.is_empty() {
-            return Judged::default();
+            return Ok(Judged::default());
         }
-        Judged {
+        Ok(Judged {
             violations: vec![Violation {
                 bounds: Some(
                     serde_json::json!({ "min_len": "1" })
@@ -39,7 +39,7 @@ fn rules(given: &Arc<Mutex<Vec<ValidateOptions>>>) -> Validate<String> {
             }],
             stopped: options.fail_fast.unwrap_or(false),
             ..Judged::default()
-        }
+        })
     })
 }
 
@@ -172,12 +172,12 @@ async fn answers_procedure_failed_to_rules_that_throw_and_hands_why_on_for_its_r
         &fixture,
         Arc::new(|_, _| panic!("the broken rule never reaches the callback")),
     );
-    resolver.validate = Some(Arc::new(|_, _| panic!("a rule that fails to judge")));
+    resolver.validate = Some(Arc::new(|_, _| Err("a rule that fails to judge".into())));
     let error = resolver
         .resolve(props(&recording, b"hi"))
         .await
         .expect_err("the router hears why");
-    assert!(error.to_string().contains("a rule that fails to judge"));
+    assert_eq!(error.to_string(), "a rule that fails to judge");
     assert_eq!(
         recording.answers(),
         [RouterAnswer::Failure(
@@ -191,12 +191,10 @@ async fn answers_procedure_failed_to_rules_that_throw_and_hands_why_on_for_its_r
             .collect::<Vec<_>>(),
         [(DebugDirection::Rx, false), (DebugDirection::Tx, true)]
     );
-    assert!(
-        locked(&heard)[1]
-            .0
-            .as_ref()
-            .expect("why beside the answer")
-            .contains("a rule that fails to judge")
+    assert_eq!(
+        locked(&heard)[1].0.as_deref(),
+        Some("a rule that fails to judge"),
+        "why beside the answer, in the rule's own words"
     );
 }
 

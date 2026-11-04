@@ -625,4 +625,49 @@ public sealed class ServiceServerTests
         Assert.Equal("HI", await validating.CommandOf(CheckedProcedures.Shout)("hi")(call).WaitAsync(Patience, Cancelled));
         Assert.Equal(["hi"], heard);
     }
+
+    // spec 18.2
+    [Fact]
+    public async Task Fails_a_command_whose_rule_throws_as_it_judges_with_that_throw_before_anything_goes()
+    {
+        await using var link = await ServiceLink.Open();
+        var broken = new InvalidOperationException("this rule fails to judge, on purpose first");
+        var shout = new CommandProcedure<CheckedProcedures, string, string, NoFailure>(
+            CheckedProcedures.Shout.Procedure,
+            CheckedProcedures.BindingsOf((_, _) =>
+            {
+                throw broken;
+            }));
+        var validating = new ServiceServer<CheckedProcedures, string>(
+            [shout],
+            new ServiceServerOptions<CheckedProcedures> { Admissions = new CheckedAdmissions(), Validates = true });
+        var client = new ServiceClient<CheckedProcedures>(CheckedProcedures.All, link.Client);
+        var heard = new List<string>();
+        var sent = new List<EnvelopeKind>();
+
+        client.On(CheckedProcedures.Shout, (request, response) =>
+        {
+            heard.Add(request.Payload);
+
+            return response.Answer(request.Payload.ToUpperInvariant());
+        });
+        link.Server.Router.Debug += (direction, envelope) =>
+        {
+            if (direction == DebugDirection.Tx)
+            {
+                sent.Add(envelope.Header.Kind);
+            }
+        };
+        validating.Offer(link.Server);
+
+        var thrown = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        {
+            return validating.CommandOf(shout)("hi")(new CommandOptions { ConnectionHandle = ServiceLink.Handle }).WaitAsync(Patience, Cancelled);
+        });
+
+        // * its call fails with the rule's own throw, and nothing went: the client never heard it
+        Assert.Same(broken, thrown);
+        Assert.Empty(sent);
+        Assert.Empty(heard);
+    }
 }

@@ -236,7 +236,7 @@ async fn makes_each_command_s_requester_once_as_it_is_offered_and_refuses_one_ca
         });
     pair.client
         .services()
-        .get_request_resolver(
+        .get_command_resolver(
             greeter.clock.procedure(),
             RequestResolverDependencies::new(TextCodec, TextCodec),
         )
@@ -653,9 +653,9 @@ const NOT_EMPTY_DETAIL: &str = "{\"bounds\":{\"min_len\":\"1\"},\"message\":\"mu
 fn not_empty() -> Validate<String> {
     Arc::new(|value, _| {
         if !value.is_empty() {
-            return Judged::default();
+            return Ok(Judged::default());
         }
-        Judged {
+        Ok(Judged {
             violations: vec![Violation {
                 bounds: Some(
                     serde_json::json!({ "min_len": "1" })
@@ -669,7 +669,7 @@ fn not_empty() -> Validate<String> {
                 ..Violation::default()
             }],
             ..Judged::default()
-        }
+        })
     })
 }
 
@@ -817,7 +817,7 @@ async fn validates_a_command_before_it_goes_when_its_options_say_so() {
     let hearing = Arc::clone(&heard);
     pair.client
         .services()
-        .get_request_resolver(
+        .get_command_resolver(
             descriptor.procedure(),
             RequestResolverDependencies::new(TextCodec, TextCodec),
         )
@@ -859,4 +859,85 @@ async fn validates_a_command_before_it_goes_when_its_options_say_so() {
         "HI"
     );
     assert_eq!(*locked(&heard), ["hi"]);
+}
+
+// a validating service's command judged by `validate`, its client's resolver recording what it hears
+async fn judged_before_it_goes(
+    validate: Validate<String>,
+) -> (Pair, CallError, Arc<Mutex<Vec<String>>>) {
+    let pair = pair().await;
+    let descriptor = checked(validate, true);
+    let service = ServiceServer::new(
+        vec![ServiceProcedure::from(&descriptor)],
+        &ServiceServerOptions {
+            validates: Some(true),
+            ..ServiceServerOptions::default()
+        },
+    )
+    .expect("a validating service");
+    let heard = Arc::new(Mutex::new(Vec::new()));
+    let hearing = Arc::clone(&heard);
+    pair.client
+        .services()
+        .get_command_resolver(
+            descriptor.procedure(),
+            RequestResolverDependencies::new(TextCodec, TextCodec),
+        )
+        .expect("a command resolver")
+        .on(Arc::new(move |request, response| {
+            locked(&hearing).push(request.payload.clone());
+            response.result(request.payload)
+        }))
+        .expect("registered");
+    service.offer(&pair.server).expect("offered");
+    let failed = service
+        .command(&descriptor)
+        .expect("made")
+        .call(
+            "hi".to_owned(),
+            &CommandOptions::new(Arc::clone(&pair.connection_handle)),
+        )
+        .expect("a call")
+        .await
+        .expect_err("its rule failed to judge");
+    pair.settle().await;
+    (pair, failed, heard)
+}
+
+// spec 18.2
+#[tokio::test]
+async fn fails_a_command_whose_rule_throws_as_it_judges_with_that_throw_before_anything_goes() {
+    let (pair, failed, heard) = judged_before_it_goes(Arc::new(|_, _| {
+        Err("this rule fails to judge, on purpose".into())
+    }))
+    .await;
+
+    let CallError::Other(error) = failed else {
+        panic!("its rule's own error: {failed:?}");
+    };
+    assert_eq!(error.to_string(), "this rule fails to judge, on purpose");
+    // * failed on this side, before it went: its client heard nothing, and neither router reported
+    assert!(locked(&heard).is_empty());
+    assert!(locked(&pair.server_reports).is_empty());
+    assert!(locked(&pair.client_reports).is_empty());
+}
+
+// spec 18.2, decision 0044: a rule's panic is its throw, named as a rule's
+#[tokio::test]
+async fn fails_a_command_whose_rule_panics_as_it_judges_with_that_panic_before_anything_goes() {
+    let (pair, failed, heard) = judged_before_it_goes(Arc::new(|_, _| {
+        panic!("this rule panics as it judges, on purpose")
+    }))
+    .await;
+
+    let CallError::Other(error) = failed else {
+        panic!("its rule's panic: {failed:?}");
+    };
+    assert_eq!(
+        error.to_string(),
+        "a rule panicked: this rule panics as it judges, on purpose"
+    );
+    assert!(locked(&heard).is_empty());
+    assert!(locked(&pair.server_reports).is_empty());
+    assert!(locked(&pair.client_reports).is_empty());
 }

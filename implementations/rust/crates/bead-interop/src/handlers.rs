@@ -368,7 +368,9 @@ fn failed(error: ProgrammerError) -> ResolverError {
     reason = "one resolver per procedure, as the service states them"
 )]
 pub fn offer_interop(server: &Server) -> Result<ServiceServer, ProgrammerError> {
-    let validate: Validate<Value> = Arc::new(judge_checked);
+    // its rules judge every value: none fails to judge
+    let validate: Validate<Value> =
+        Arc::new(|request, options| Ok(judge_checked(request, options)));
     let procedures = Arc::new(interop_procedures(Some(validate))?);
     let mut options = ServiceServerOptions::default();
 

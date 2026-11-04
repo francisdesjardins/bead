@@ -728,7 +728,7 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
     },
     notify: () => {
       return Promise.reject(
-        new ProgrammerError('only a server notifies; a client asks with a request')
+        new ProgrammerError('only a server notifies; a client hears notifications')
       );
     },
     registerNotification: (notification) => {

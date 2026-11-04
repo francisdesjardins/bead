@@ -199,7 +199,7 @@ test.describe('createBrokerTransportServer', () => {
     using router = createRouterServer(server);
     using routerClient = createRouterClient(client);
 
-    createServiceManager(routerClient).getRequestResolver(echo, {
+    createServiceManager(routerClient).getCommandResolver(echo, {
       serializer: PAYLOAD_CODECS.text,
     })((request, response) => {
       return response(request.payload);

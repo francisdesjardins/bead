@@ -272,8 +272,8 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS) {
         .toEqual(['first', 'news']);
     });
 
-    test('answers the server’s requests, on even call ids, with the resolver registered', async () => {
-      client.services.getRequestResolver(echo, { serializer: serverSerializer })(
+    test('answers the server’s commands, on even call ids, with the resolver registered', async () => {
+      client.services.getCommandResolver(echo, { serializer: serverSerializer })(
         (request, response) => {
           return response(request.payload.toUpperCase());
         }

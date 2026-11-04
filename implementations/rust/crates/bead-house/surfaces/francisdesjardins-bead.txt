@@ -1199,7 +1199,7 @@ crate::managers::service
     pub fail_fast: Option<bool>
     pub maximum_bytes: Option<usize>
     derives Clone, Debug, Default, Eq, PartialEq
-  type Validate<T> = Arc<dyn Fn(&T, &ValidateOptions) -> Judged + Send + Sync>
+  type Validate<T> = Arc<dyn Fn(&T, &ValidateOptions) -> Result<Judged, Box<dyn Error + Send + Sync>> + Send + Sync>
   struct RequestDependencies<Req: PayloadCodec, Res: PayloadCodec>
     pub request: Req
     pub result: Res

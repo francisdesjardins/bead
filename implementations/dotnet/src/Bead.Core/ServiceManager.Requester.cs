@@ -31,16 +31,17 @@ public sealed partial class ServiceManager
             internal required Action<Procedure> Deprecated { get; init; }
         }
 
-        // a declaration checked as its maker makes it: spec 16.10's reasons first, for the way of its
-        // router's requester, then the side the maker is for, before anything is declared
+        // a declaration checked as its maker makes it, before anything is declared: the side the
+        // maker is for first, since a maker that is not its router's way declares nothing, then spec
+        // 16.10's reasons, for the way of its side's requester
         internal void CheckMade(Procedure procedure, (RouterSide Side, string Refusal) maker)
         {
-            Identity.Check(procedure, (Identity.RequesterWayOf(_router.Side), nameof(procedure)));
-
             if (_router.Side != maker.Side)
             {
                 throw new InvalidOperationException(maker.Refusal);
             }
+
+            Identity.Check(procedure, (Identity.RequesterWayOf(maker.Side), nameof(procedure)));
         }
 
         // a requester of a client's: given a payload, then options, one request

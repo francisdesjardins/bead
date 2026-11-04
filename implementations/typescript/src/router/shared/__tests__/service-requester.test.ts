@@ -579,9 +579,17 @@ test.describe('createServiceManager', () => {
       const COMMANDS = "a server's router makes commands: getCommand";
       const REQUESTS = "a client's router makes requests: getRequest";
       const NOTIFIES = 'only a client hears notifications; a server notifies them';
-      const ofKind = (procedureKind?: IProcedure['procedureKind']): IProcedure => {
-        return procedureKind === undefined ? echo : { ...echo, procedureKind };
+      const ofKind = (procedureKind: NonNullable<IProcedure['procedureKind']>): IProcedure => {
+        return { ...echo, procedureKind };
       };
+      // every kind, none included, and a procedure out of its range
+      const every = [
+        echo,
+        ofKind('request'),
+        ofKind('notifies'),
+        ofKind('command'),
+        { ...echo, serviceId: 0 },
+      ];
       const refusalOf = (make: () => unknown): string => {
         try {
           make();
@@ -610,22 +618,24 @@ test.describe('createServiceManager', () => {
         });
       };
 
-      for (const kind of [undefined, 'command'] as const) {
-        expect(request(ofKind(kind))).toBe(COMMANDS);
-        expect(notification(ofKind(kind))).toBe(NOTIFIES);
+      // * the side first, whatever the procedure: a maker that is not its router's way declares
+      // nothing, so no reason of spec 16.10 is reached
+      for (const procedure of every) {
+        expect(request(procedure)).toBe(COMMANDS);
+        expect(notification(procedure)).toBe(NOTIFIES);
       }
 
-      expect(request(ofKind('request'))).toContain('is against its kind');
+      const command = (procedure: IProcedure): string => {
+        return refusalOf(() => {
+          return onServer.getCommand(procedure, { serializer });
+        });
+      };
 
       for (const kind of ['request', 'notifies'] as const) {
-        expect(notification(ofKind(kind))).toContain('is against its kind');
+        expect(command(ofKind(kind))).toContain('is against its kind');
       }
 
-      // * out of its range before the side, as before its kind
-      for (const refused of [request, notification]) {
-        expect(refused({ ...echo, serviceId: 0 })).toContain('is out of its range');
-      }
-
+      expect(command({ ...echo, serviceId: 0 })).toContain('is out of its range');
       expect(server.calls.declareRequester).toEqual([]);
       expect(server.calls.registerNotification).toEqual([]);
       expect(onServer.getCommand(echo, { serializer }).name).toBe('echo');
@@ -634,19 +644,33 @@ test.describe('createServiceManager', () => {
       // on a client's router
       const client = createFakeRouter('client');
       const onClient = createServiceManager(client.router as IRouterLike<'server'>);
-      const command = (procedure: IProcedure): string => {
+      const commandOnClient = (procedure: IProcedure): string => {
         return refusalOf(() => {
           return onClient.getCommand(procedure, { serializer });
         });
       };
+      const requestOnClient = (procedure: IProcedure): string => {
+        return refusalOf(() => {
+          return onClient.getRequest(procedure, { serializer });
+        });
+      };
+      const notificationOnClient = (procedure: IProcedure): string => {
+        return refusalOf(() => {
+          return onClient.getNotification(procedure, { serializer });
+        });
+      };
 
-      for (const kind of [undefined, 'request', 'notifies'] as const) {
-        expect(command(ofKind(kind))).toBe(REQUESTS);
+      for (const procedure of every) {
+        expect(commandOnClient(procedure)).toBe(REQUESTS);
       }
 
-      expect(command(ofKind('command'))).toContain('is against its kind');
-      expect(command({ ...echo, serviceId: 0 })).toContain('is out of its range');
+      for (const refused of [requestOnClient, notificationOnClient]) {
+        expect(refused(ofKind('command'))).toContain('is against its kind');
+        expect(refused({ ...echo, serviceId: 0 })).toContain('is out of its range');
+      }
+
       expect(client.calls.declareRequester).toEqual([]);
+      expect(client.calls.registerNotification).toEqual([]);
       expect(onClient.getRequest(echo, { serializer }).name).toBe('echo');
       expect(
         onClient.getNotification(
