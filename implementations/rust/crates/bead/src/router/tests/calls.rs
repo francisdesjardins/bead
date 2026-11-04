@@ -788,7 +788,7 @@ async fn detaches_calls_before_settling_an_incoming_resolver_awaiting_an_outgoin
     // the client takes the command and never answers it
     pair.client
         .services()
-        .get_request_resolver(
+        .get_command_resolver(
             &hold,
             RequestResolverDependencies::new(JsonCodec, JsonCodec),
         )

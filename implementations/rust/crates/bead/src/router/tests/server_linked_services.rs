@@ -173,7 +173,7 @@ async fn a_client_and_a_server_ask_answer_subscribe_notify_unsubscribe_and_comma
         }))
         .expect("unsubscribe registered");
     link.caller
-        .get_request_resolver(
+        .get_command_resolver(
             &procedure(40, "ping"),
             RequestResolverDependencies::new(TextCodec, TextCodec),
         )

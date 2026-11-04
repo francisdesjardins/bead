@@ -624,7 +624,7 @@ async fn counts_a_request_whose_codec_panics_as_it_reads_as_failure_procedure_fa
 async fn counts_a_request_whose_rule_fails_to_judge_as_failure_procedure_failed() {
     let (sent, reported, counted) = counted_through(RequestResolverDependencies {
         validate: Some(Arc::new(|_value: &String, _options| {
-            panic!("this rule fails to judge, on purpose")
+            Err("this rule fails to judge, on purpose".into())
         })),
         ..RequestResolverDependencies::new(TextCodec, TextCodec)
     })
@@ -635,11 +635,35 @@ async fn counts_a_request_whose_rule_fails_to_judge_as_failure_procedure_failed(
         ["first failure 1 PROCEDURE_FAILED"],
         "answered PROCEDURE_FAILED"
     );
-    assert_eq!(reported.len(), 1, "its failure reported once: {reported:?}");
-    assert!(
-        reported[0].contains("this rule fails to judge, on purpose")
-            && reported[0].ends_with(" first"),
-        "its failure reported, with its connection: {reported:?}"
+    assert_eq!(
+        reported,
+        ["this rule fails to judge, on purpose first"],
+        "its failure reported once, in its own words, with its connection"
+    );
+    assert_counted_procedure_failed(&counted);
+}
+
+// debugging 9.4.14, spec 18.2, decision 0044: a rule's panic is its throw, named as a rule's
+#[tokio::test]
+async fn counts_a_request_whose_rule_panics_as_failure_procedure_failed_reported_as_a_rule_s_panic()
+{
+    let (sent, reported, counted) = counted_through(RequestResolverDependencies {
+        validate: Some(Arc::new(|_value: &String, _options| {
+            panic!("this rule panics as it judges, on purpose")
+        })),
+        ..RequestResolverDependencies::new(TextCodec, TextCodec)
+    })
+    .await;
+
+    assert_eq!(
+        sent,
+        ["first failure 1 PROCEDURE_FAILED"],
+        "answered PROCEDURE_FAILED"
+    );
+    assert_eq!(
+        reported,
+        ["a rule panicked: this rule panics as it judges, on purpose first"],
+        "its panic reported once, with its connection"
     );
     assert_counted_procedure_failed(&counted);
 }
