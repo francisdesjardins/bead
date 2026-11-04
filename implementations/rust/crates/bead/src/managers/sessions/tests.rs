@@ -564,7 +564,7 @@ fn says_nothing_of_a_session_timeout_given_the_one_it_has() {
 }
 
 #[tokio::test]
-async fn runs_on_the_clock_its_options_give_the_system_s_when_none() {
+async fn runs_on_the_clock_its_options_give_the_platform_s_when_none() {
     let clock = stepping();
     let given = SessionState::new(&SessionManagerOptions {
         clock: Some(Arc::clone(&clock)),

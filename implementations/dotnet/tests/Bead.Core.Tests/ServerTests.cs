@@ -1139,7 +1139,7 @@ public sealed class ServerTests : IAsyncLifetime
     }
 
     [Fact]
-    public void Runs_every_layer_on_its_transport_s_clock_and_refuses_another_which_leaves_nothing_on_its_transport()
+    public void Runs_every_layer_on_its_transport_s_clock_the_sessions_are_built_with_it_and_a_layer_on_another_is_refused_leaving_nothing_on_its_transport()
     {
         Start(new ServerOptions { Clock = _time });
 
@@ -1150,25 +1150,30 @@ public sealed class ServerTests : IAsyncLifetime
         Assert.Same(_time, Server.Sessions.Clock);
 
         var other = new FakeTimeProvider();
-        var refusal = Assert.Throws<ArgumentException>(() =>
-        {
-            return new Server<string>(_transport, new ServerOptions { Clock = other });
-        });
+        var elsewhere = new ScriptedTransport { Clock = new FakeTimeProvider() };
 
         Assert.Equal(
-            "a server runs on the clock of its transport, a FakeTimeProvider, and was given another, a FakeTimeProvider",
-            refusal.Message);
-        Assert.Throws<ArgumentException>(() =>
-        {
-            return new Server<string>(_transport, new ServerOptions { Sessions = new SessionManagerOptions { Clock = other } });
-        });
-        Assert.Throws<ArgumentException>(() =>
-        {
-            return new Server<string>(new ScriptedTransport(), new ServerOptions { Clock = _time });
-        });
+            "a server runs on the clock of its transport, one of its own, and was given another, one of its own",
+            Assert.Throws<ArgumentException>(() =>
+            {
+                return new Server<string>(_transport, new ServerOptions { Clock = other });
+            }).Message);
+        Assert.Equal(
+            "a server's session manager runs on the clock of its server, one of its own, and was given another, one of its own",
+            Assert.Throws<ArgumentException>(() =>
+            {
+                return new Server<string>(_transport, new ServerOptions { Sessions = new SessionManagerOptions { Clock = other } });
+            }).Message);
+        Assert.Equal(
+            "a server runs on the clock of its transport, one of its own, and was given another, one of its own",
+            Assert.Throws<ArgumentException>(() =>
+            {
+                return new Server<string>(elsewhere, new ServerOptions { Clock = _time });
+            }).Message);
 
         // what the server started with is all it holds
         Assert.Equal(subscribers, _transport.Subscribers);
+        Assert.Equal(0, elsewhere.Subscribers);
     }
 
     [Fact]

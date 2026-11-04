@@ -378,7 +378,7 @@ public sealed partial class RouterServerTests : IDisposable
 
         Assert.Equal((_time, _time), (Router.Clock, same.Clock));
         Assert.Equal(
-            "a server's router runs on the clock of its transport, a FakeTimeProvider, and was given another, the system's",
+            "a server's router runs on the clock of its transport, one of its own, and was given another, the platform's",
             Assert.Throws<ArgumentException>(() =>
             {
                 return new RouterServer(_transport, new RouterServerOptions { Clock = TimeProvider.System });

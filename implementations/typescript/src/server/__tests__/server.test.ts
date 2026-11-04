@@ -1303,6 +1303,33 @@ test.describe('createServer', () => {
     ).toEqual([0, 0, 0, 0]);
   });
 
+  test('builds its sessions with their own options on its transport’s clock', async () => {
+    const clock = createTestClock();
+    const { open, transport } = createScriptedTransport();
+
+    await using server = createServer({
+      sessions: (options) => {
+        return createSessionManager({ ...options, sessionInactivityTimeout: 3_000 });
+      },
+      transport: { ...transport, clock },
+    });
+
+    open(first);
+
+    const session = server.sessions.set({
+      ...server.sessions.create(first),
+      sessionInactivityTimeout: undefined,
+    });
+
+    // the default of its own options, timed by the server's clock
+    expect([session.sessionInactivityTimeout, delaysOn(clock)]).toEqual([3_000, [3_000]]);
+
+    clock.tick(3_000);
+    await sleep(0);
+
+    expect(server.sessions.has(first)).toBe(false);
+  });
+
   test("runs every layer on its transport's clock: the sessions are built with it, and a layer on another is refused, leaving nothing on its transport", async () => {
     const clock = createTestClock();
     const { emitter, transport } = createScriptedTransport();

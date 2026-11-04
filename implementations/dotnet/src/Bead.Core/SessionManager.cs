@@ -83,8 +83,8 @@ public sealed record SessionManagerOptions
     public TimeSpan SessionInactivityTimeout { get; init; } = Timeout.InfiniteTimeSpan;
 
     /// <summary>
-    /// What its timers run on; the system's clock when none. A server's sessions run on the server's
-    /// clock, and one given that differs is an <see cref="ArgumentException"/>.
+    /// What its timers run on; the system's clock when none. A server's session manager runs on its
+    /// server's clock, and one given that differs is an <see cref="ArgumentException"/>.
     /// </summary>
     public TimeProvider? Clock { get; init; }
 

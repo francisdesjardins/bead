@@ -228,7 +228,7 @@ public sealed partial class ServiceManagerTests
 
         Assert.NotNull(new ServiceManager(router, new ServiceManagerOptions { Clock = time }));
         Assert.Equal(
-            "a service manager runs on the clock of its router, a FakeTimeProvider, and was given another, the system's",
+            "a service manager runs on the clock of its router, one of its own, and was given another, the platform's",
             Assert.Throws<ArgumentException>(() =>
             {
                 return new ServiceManager(router, new ServiceManagerOptions { Clock = TimeProvider.System });

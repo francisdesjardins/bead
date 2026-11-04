@@ -329,13 +329,13 @@ public sealed class ClocksTests
         Assert.Same(beneath, Clocks.Of((null, beneath), names));
         Assert.Same(beneath, Clocks.Of((beneath, beneath), names));
         Assert.Equal(
-            "a server runs on the clock of its transport, a FakeTimeProvider, and was given another, a FakeTimeProvider",
+            "a server runs on the clock of its transport, one of its own, and was given another, one of its own",
             Assert.Throws<ArgumentException>(() =>
             {
                 Clocks.Of((given, beneath), names);
             }).Message);
         Assert.Equal(
-            "a server runs on the clock of its transport, a FakeTimeProvider, and was given another, the system's",
+            "a server runs on the clock of its transport, one of its own, and was given another, the platform's",
             Assert.Throws<ArgumentException>(() =>
             {
                 Clocks.Of((TimeProvider.System, beneath), names);
