@@ -246,7 +246,7 @@ that takes none. A client class takes its Bead client, then the layer's options,
 a requester of each procedure its server answers, under the procedure's name, its notifications
 under `notifications`, at the windows its caller gives, unpaced by default
 ([0002](0002-a-subscription-goes-at-its-clients-pace.md)), and `on` for the commands it answers. A
-file names its runtime's contract, `GENERATED_CODE_SUPPORTS_VERSION_6` or
+file names its runtime's contract, `GENERATED_CODE_SUPPORTS_VERSION_7` or
 `GeneratedCode.SupportsVersion7`, each runtime's counter its own, and a route table 5,
 `./transcoding`'s `GENERATED_CODE_SUPPORTS_VERSION_5` or `GeneratedCode.SupportsVersion5`, each
 runtime carrying its own and 5

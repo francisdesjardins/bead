@@ -320,9 +320,19 @@ What the server side does: `on` registers a resolver, before or after `offer`; `
 resolver, now and later, to one Bead server, once; `command` gives a requester of each command, made
 as the service is offered; `notify` notifies each procedure's subscribers;
 `proceduresWithoutResolver` lists what no `on` answered, which the router answers
-`PROCEDURE_UNKNOWN` (spec 9.2, step 5). What the client side does: a requester of each procedure its
-server answers and a notification of each that notifies, made as the client side is built, at the
-windows its caller gives, unpaced by default
+`PROCEDURE_UNKNOWN` (spec 9.2, step 5). The server side gives one handle per procedure on every
+side, before its offer, as a generated server holds a field per procedure: the TypeScript side's
+`command[name]` and `notify[name]`, the C# side's `CommandOf(procedure)` and
+`NotifierOf(procedure)`, the Rust side's `command_of(&descriptor)` and `notifier_of(&descriptor)`.
+Each refuses a procedure its service does not hold, on the C# and Rust sides a descriptor that is
+not the same one, as `on` does; a command's handle refuses its call before the offer, and a
+notifier sends nothing and resolves until then. A notifier's type is the TypeScript side's
+`INotifier`, the C# side's delegate `Notifier<TNotification>`, whose options are optional, which a
+`Func` cannot say, and the Rust side's `Notifier`; the C# command handle stays a
+`Func<TRequest, BoundCommand<TResult>>`, its options given to the bound call, as the C# client's
+requesters are `Func<TRequest, BoundCall<TResult>>`. What the client side does: a requester of
+each procedure its server answers and a notification of each that notifies, made as the client
+side is built, at the windows its caller gives, unpaced by default
 ([0002](0002-a-subscription-goes-at-its-clients-pace.md)); and `on`, for the commands it answers.
 Each requester and resolver is declared once
 ([0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)).
@@ -412,7 +422,7 @@ _Conformance:_ none. _Matrix:_ none; `Connect` outside `IClient` is a type's sha
   `SupportPackageIsVersion9`: "The SupportPackageIsVersion variables are referenced from generated
   protocol buffer files to ensure compatibility with the gRPC version used. The latest support
   package version is 9. Older versions are kept for compatibility" (pkg.go.dev,
-  `google.golang.org/grpc`). `GENERATED_CODE_SUPPORTS_VERSION_6` on the TypeScript side, and
+  `google.golang.org/grpc`). `GENERATED_CODE_SUPPORTS_VERSION_7` on the TypeScript side, and
   `GeneratedCode.SupportsVersion7` on the C# side, with no underscore, so CA1707 stands, each
   runtime's counter its own, as gRPC-Go's is its package's; 2 since the
   layer's options are typed by the service, which generated code names, 3 since it calls the
@@ -422,8 +432,10 @@ _Conformance:_ none. _Matrix:_ none; `Connect` outside `IClient` is a type's sha
   ([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)),
   6 since its codec is the runtime's codec of a schema, which judges a message's required fields
   ([0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)),
-  and on the C# side 7 since a server class's commands are typed `BoundCommand` over
-  `CommandOptions`; and 5 beside it, `GENERATED_CODE_SUPPORTS_VERSION_5` of `./transcoding` and
+  and 7 since a server class's commands are typed `BoundCommand` over `CommandOptions` and its
+  notifiers `Notifier<TNotification>` on the C# side, and a catalogue takes its service's id and its
+  codes as two parameters on the TypeScript side; and 5 beside it,
+  `GENERATED_CODE_SUPPORTS_VERSION_5` of `./transcoding` and
   `GeneratedCode.SupportsVersion5`, for an output that writes a route table, which names the
   transcoding layer's types
   ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)).
@@ -644,10 +656,10 @@ export interface IFailureCatalogue<Name extends string> {
 }
 
 /** A catalogue; a code outside 1 to 65,535, or two names of one code, is a ProgrammerError. */
-export const failuresOf: <const Name extends string>(catalogue: {
-  codes: Readonly<Record<Name, number>>;
-  serviceId: ServiceId;
-}) => IFailureCatalogue<Name>;
+export const failuresOf: <const Name extends string>(
+  serviceId: ServiceId,
+  codes: Readonly<Record<Name, number>>
+) => IFailureCatalogue<Name>;
 ```
 
 ```csharp
@@ -792,10 +804,10 @@ export interface IServiceServer<S extends ServiceProcedures, Data = unknown> {
   };
   /** Notifies each procedure's subscribers; before the service is offered, it sends nothing and resolves. */
   readonly notify: {
-    readonly [Name in NotifyingName<S>]: (
-      notification: GivenOf<S[Name]['notification']>,
-      options?: INotifyOptions<TransportServerConnectionHandle>
-    ) => Promise<void>;
+    readonly [Name in NotifyingName<S>]: INotifier<
+      GivenOf<S[Name]['notification']>,
+      TransportServerConnectionHandle
+    >;
   };
   /** Offers every resolver, now and later, on `server`; a second offer is a ProgrammerError. */
   offer: (server: IServer<IServerTransportLike, Data>) => void;
@@ -878,7 +890,7 @@ public sealed class ServiceServer<TService, TData>
         CommandProcedure<TService, TRequest, TResult, TFailure> procedure)
         where TFailure : IApplicationFailure;
 
-    public Func<TNotification, NotifyOptions?, Task> NotifierOf<TRequest, TResult, TNotification, TFailure>(
+    public Notifier<TNotification> NotifierOf<TRequest, TResult, TNotification, TFailure>(
         RequestProcedure<TService, TRequest, TResult, TNotification, TFailure> procedure)
         where TFailure : IApplicationFailure;
 
@@ -1279,19 +1291,19 @@ doc holds one example that compiles, `client.services().get_request(…)` and
 **The TypeScript side's service layer is one entry**, `"./service": "./src/service/service.ts"` in
 `package.json`'s `exports`: `createServiceServer`, `createServiceClient`, `requestOf`, `commandOf`,
 `failuresOf`, `payloadCodecOf`, `PAYLOAD_CODECS`, `ProcedureKind`,
-`GENERATED_CODE_SUPPORTS_VERSION_6`, `FailureError`, `ProgrammerError`, and their types. A generated
+`GENERATED_CODE_SUPPORTS_VERSION_7`, `FailureError`, `ProgrammerError`, and their types. A generated
 service's file imports nothing else of Bead's but `./proto`'s codec and validators, where it binds
 `proto`
 ([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md));
 a route table, `bead_http.ts`, imports `./transcoding`
 ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)).
 
-**Generated code names the contract it needs.** `GENERATED_CODE_SUPPORTS_VERSION_6` in `./service`,
+**Generated code names the contract it needs.** `GENERATED_CODE_SUPPORTS_VERSION_7` in `./service`,
 `true`; `GeneratedCode.SupportsVersion7`, a `const bool` on a static class in `Bead.Core`, each
 runtime's counter its own, as gRPC-Go's is its package's; and, for a route table,
 `GENERATED_CODE_SUPPORTS_VERSION_5` in `./transcoding` (`src/transcoding/routes.ts`) and
 `GeneratedCode.SupportsVersion5` beside it. A generated file names the highest it needs,
-`void GENERATED_CODE_SUPPORTS_VERSION_6;`, and in C# a private constant of its runtime's. The
+`void GENERATED_CODE_SUPPORTS_VERSION_7;`, and in C# a private constant of its runtime's. The
 counter moves only when generated code needs something the runtime did not have: 2 for the layer's
 options typed by the service, `IServiceClientOptions` and the client side's Bead client apart on the
 TypeScript side, `IServiceAdmissions<TService>`, `IServiceWindows<TService>`,
@@ -1306,14 +1318,16 @@ side, `HttpRoute`, `HttpRouteTemplate` and `HttpPayload` on the C# side
 ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md));
 6 for the runtime codec of a schema, `protoCodecOf` and `ProtoCodecs.Of`
 ([0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md));
-7 on the C# side for what a server class's commands are typed by, `BoundCommand` and
-`CommandOptions`, where the TypeScript side's generated code names `IServiceServer`'s `command`,
-which needs nothing new, and stays at 6. An older constant stays while the runtime still serves the
-code that names it: before 1.0.0, it goes once the code that names it no longer conforms through the
-runtime, and from 1.0.0 it stays for the whole major. The TypeScript runtime holds 5 and 6, and the
-C# runtime 5, 6 and 7: 5 for a route table, which calls no codec; on the C# side 6 for a file whose
-`…Commands` class holds no command, which still conforms, while one that holds a command fails at
-its type, `BoundCall` against `BoundCommand`; and none older: code that names 4 judges no required
+7 for what a server's handles and a catalogue are typed by: on the C# side a server class's commands,
+`BoundCommand` and `CommandOptions`, and its notifiers, `Notifier<TNotification>`; on the
+TypeScript side a catalogue of two parameters, `failuresOf(serviceId, codes)`. An older constant
+stays while the runtime still serves the code that names it: before 1.0.0, it goes once the code
+that names it no longer conforms through the runtime, and from 1.0.0 it stays for the whole major.
+Each runtime holds 5, 6 and 7: 5 for a route table, which calls no codec; 6 for a file that still
+conforms, on the C# side one whose `…Commands` class holds no command and whose `…Notifiers` class
+holds no notifier, and on the TypeScript side one that makes no catalogue, while one that does fails
+at its type, `BoundCall` against `BoundCommand`, a `Func` against `Notifier<TNotification>`, an
+object against two parameters; and none older: code that names 4 judges no required
 field, code that names 3 judges no request by its rules, and code that names 2 reads a `proto`
 payload unchecked, none of which conforms through any runtime. A file of a later beadc, built
 against a runtime that lacks its constant, fails on the counter (TS2724, CS0117), not on a

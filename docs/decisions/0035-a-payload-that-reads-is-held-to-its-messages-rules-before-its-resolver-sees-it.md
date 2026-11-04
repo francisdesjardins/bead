@@ -135,8 +135,8 @@ side alone. `beadc breaking` reports `PROCEDURE_RULES_TIGHTENED`, a `WIRE` rule,
 earlier peer sends that the current refuses; a rule loosened moves the revision alone. Generated
 code holds the validators from contract 4 on, by
 [0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)'s
-counter. The TypeScript runtime holds 6, `GENERATED_CODE_SUPPORTS_VERSION_6`, and the C# runtime 6
-and 7, `GeneratedCode.SupportsVersion6` and `SupportsVersion7`, whose code calls the runtime codec
+counter. Each runtime holds 6 and 7, `GENERATED_CODE_SUPPORTS_VERSION_6` and `_7`,
+`GeneratedCode.SupportsVersion6` and `SupportsVersion7`, whose code calls the runtime codec
 of a schema
 ([0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)),
 and beside it 5, a route table's

@@ -13,7 +13,7 @@ hello.on('sayHello', async ({ connectionHandle, payload }, response) => {
 hello.offer(server);
 
 // the client: answers the server's command, calls, and follows a subscription at its own pace
-await using client = createWSClient();
+await using client = createWebSocketClient();
 const greeter = new HelloClient(client, { windows: { countDown: 1 } });
 
 greeter.on('askName', (_request, response) => {
