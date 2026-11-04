@@ -4,6 +4,8 @@ use serde_json::Value;
 
 #[path = "tests/notifications.rs"]
 mod notifications;
+#[path = "tests/server.rs"]
+mod server;
 
 #[test]
 fn bounds_the_interop_bytes_before_allocating_and_reserves_them_fallibly() {
