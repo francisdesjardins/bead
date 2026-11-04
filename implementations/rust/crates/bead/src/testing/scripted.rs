@@ -70,6 +70,31 @@ impl DestinationFills {
     }
 }
 
+#[cfg(test)]
+#[derive(Debug)]
+pub(crate) struct TokenFills {
+    fills: Mutex<VecDeque<[u8; 16]>>,
+    fallback: [u8; 16],
+}
+
+#[cfg(test)]
+impl TokenFills {
+    pub(crate) fn new(fills: Vec<[u8; 16]>, fallback: [u8; 16]) -> Self {
+        Self {
+            fills: Mutex::new(fills.into()),
+            fallback,
+        }
+    }
+
+    pub(crate) fn draw(&self) -> [u8; 16] {
+        locked(&self.fills).pop_front().unwrap_or(self.fallback)
+    }
+
+    pub(crate) fn remaining(&self) -> usize {
+        locked(&self.fills).len()
+    }
+}
+
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }

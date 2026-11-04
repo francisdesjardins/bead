@@ -263,6 +263,8 @@ pub(crate) struct SessionState {
     tokens: Ordered<ConnectionHandle, SessionToken>,
     timers: Ordered<ConnectionHandle, Timers>,
     is_disposed: bool,
+    #[cfg(test)]
+    fills: Option<Arc<crate::testing::scripted::TokenFills>>,
 }
 
 fn held_or(timeout: Option<Duration>, fallback: Duration) -> Result<Duration, ProgrammerError> {
@@ -306,7 +308,24 @@ impl SessionState {
             tokens: Ordered::new(),
             timers: Ordered::new(),
             is_disposed: false,
+            #[cfg(test)]
+            fills: None,
         })
+    }
+
+    fn draw_token(&self) -> Result<SessionToken, crate::session_token::SessionTokenDrawError> {
+        #[cfg(test)]
+        if let Some(fills) = &self.fills {
+            return SessionToken::draw_with(
+                |token| self.sessions.contains_key(token),
+                |bytes| {
+                    bytes.copy_from_slice(&fills.draw());
+                    Ok(())
+                },
+            );
+        }
+
+        SessionToken::draw(|token| self.sessions.contains_key(token))
     }
 
     fn stored_of(&self, connection_handle: &ConnectionHandle) -> Option<&Stored> {
@@ -555,7 +574,8 @@ impl SessionState {
         .map_err(CallError::Refused)?;
         let token = match session.session_token {
             Some(token) => token,
-            None => SessionToken::draw(|token| self.sessions.contains_key(token))
+            None => self
+                .draw_token()
                 .map_err(|error| CallError::Other(Arc::new(error)))?,
         };
         let next = Stored {

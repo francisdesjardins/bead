@@ -111,3 +111,27 @@ fn count_the_sessions_and_the_connections_timed_and_tell_timers_kept_with_no_ses
     assert_eq!(sessions.manager.gauges().expect("gauges"), expected);
     assert_eq!(sessions.arming.live(), []);
 }
+
+#[test]
+fn draws_a_token_again_when_all_zero_or_in_use() {
+    let fills = std::sync::Arc::new(crate::testing::scripted::TokenFills::new(
+        vec![[0; 16], [0; 16], [1; 16], [1; 16], [2; 16]],
+        [3; 16],
+    ));
+    let mut sessions = SessionManager::new();
+    sessions.manager.fills = Some(std::sync::Arc::clone(&fills));
+    sessions.stored(Session {
+        session_token: Some(token_of(1)),
+        ..SessionManager::create(SECOND)
+    });
+    assert_eq!(fills.remaining(), 5, "a supplied token draws nothing");
+    let stored = sessions.stored(SessionManager::create(FIRST));
+
+    assert_eq!(stored.session_token, Some(token_of(2)));
+    assert_eq!(fills.remaining(), 0);
+    assert_eq!(
+        sessions.manager.token_of(&handle(SECOND)),
+        Some(token_of(1))
+    );
+    assert_eq!(sessions.manager.token_of(&handle(FIRST)), Some(token_of(2)));
+}
