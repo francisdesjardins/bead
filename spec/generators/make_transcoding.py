@@ -4155,7 +4155,10 @@ if __name__ == '__main__':
         file.write(required_proto_file())
 
     with open(ROOT + 'transcoding.json', 'w', encoding='utf-8', newline='\n') as file:
-        json.dump(DOCUMENT_JSON, file, ensure_ascii=False, indent=2)
+        # U+2028 and U+2029 escaped, as they only ever stand in a string: the same values, and no editor
+        # reads them as line ends
+        text = json.dumps(DOCUMENT_JSON, ensure_ascii=False, indent=2)
+        file.write(text.replace('\u2028', '\\u2028').replace('\u2029', '\\u2029'))
         file.write('\n')
 
     print(', '.join(f'{len(DOCUMENT_JSON[group])} {group}' for group in

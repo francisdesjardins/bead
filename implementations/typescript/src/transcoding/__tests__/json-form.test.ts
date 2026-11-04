@@ -419,7 +419,7 @@ test('writes a proto result in Bead’s proto JSON form, its fields by number, i
       EverythingSchema,
       create(EverythingSchema, {
         aDouble: 1e21,
-        aString: ' <>\u001f',
+        aString: '\u2028<>\u001f',
         anInt64: -5n,
         byId: { '10': 'x', '2': 'y', '-1': 'z' },
         customNamed: 'r',
@@ -431,7 +431,7 @@ test('writes a proto result in Bead’s proto JSON form, its fields by number, i
   );
 
   expect(writeProtoJson(EverythingSchema, { message, registry: REGISTRY })).toBe(
-    '{"aDouble":1e+21,"anInt64":"-5","aString":" <>\\u001f","someBytes":"+w==","labels":{"Z":4,"a":2,"b":1,"é":3},"byId":{"-1":"z","10":"x","2":"y"},"wrappedInt64":"0","renamed":"r"}'
+    '{"aDouble":1e+21,"anInt64":"-5","aString":"\u2028<>\\u001f","someBytes":"+w==","labels":{"Z":4,"a":2,"b":1,"é":3},"byId":{"-1":"z","10":"x","2":"y"},"wrappedInt64":"0","renamed":"r"}'
   );
   expect(
     writeEdges({

@@ -3701,7 +3701,7 @@
       ],
       "message": "bead.transcoding.v1.Everything",
       "payload": "42 0F E2 80 A8 3C 3E 26 7F 1F 09 22 5C F0 9F 98 80",
-      "body": "{\"aString\":\" <>&\\u001f\\t\\\"\\\\😀\"}"
+      "body": "{\"aString\":\"\u2028<>&\\u001f\\t\\\"\\\\😀\"}"
     },
     {
       "name": "a oneof's member at its default",
@@ -6246,13 +6246,13 @@
         },
         {
           "notification": {
-            "text": "hé\n\r "
+            "text": "hé\n\r\u2028"
           }
         }
       ],
       "status": 200,
       "contentType": "text/event-stream",
-      "body": "event: result\nid: 1\ndata: \"r\"\n\nid: 2\ndata: \"hé\\n\\r \"\n\n"
+      "body": "event: result\nid: 1\ndata: \"r\"\n\nid: 2\ndata: \"hé\\n\\r\u2028\"\n\n"
     },
     {
       "name": "a raw result and notification, each a JSON string of base64",
