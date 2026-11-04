@@ -200,9 +200,9 @@ const isSameCredential = (first: DefaultCredential, second: DefaultCredential): 
  *
  * @example
  * import { createRouterClient } from '@francisdesjardins/bead/router-client';
- * import { createWSTransportClient } from '@francisdesjardins/bead/ws-transport-client';
+ * import { createWebSocketTransportClient } from '@francisdesjardins/bead/websocket-transport-client';
  *
- * const router = createRouterClient(createWSTransportClient());
+ * const router = createRouterClient(createWebSocketTransportClient());
  *
  * router.on('error', (error) => {
  *   console.error(error);

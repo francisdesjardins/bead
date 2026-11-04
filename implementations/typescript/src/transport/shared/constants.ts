@@ -13,8 +13,8 @@ export const TRANSPORT_BROKER = 'BROKER';
 export const TRANSPORT_HTTP = 'HTTP';
 export const TRANSPORT_MEMORY = 'MEMORY';
 export const TRANSPORT_MQTT = 'MQTT';
+export const TRANSPORT_WEBSOCKET = 'WS';
 export const TRANSPORT_WORKER = 'WORKER';
-export const TRANSPORT_WS = 'WS';
 
 /**
  * A Bead envelope's media type over HTTP, in the personal tree (RFC 6838 §3.3): no vendor owns Bead.
@@ -121,13 +121,13 @@ export type TRANSPORT_BROKER = typeof TRANSPORT_BROKER;
 export type TRANSPORT_HTTP = typeof TRANSPORT_HTTP;
 export type TRANSPORT_MEMORY = typeof TRANSPORT_MEMORY;
 export type TRANSPORT_MQTT = typeof TRANSPORT_MQTT;
+export type TRANSPORT_WEBSOCKET = typeof TRANSPORT_WEBSOCKET;
 export type TRANSPORT_WORKER = typeof TRANSPORT_WORKER;
-export type TRANSPORT_WS = typeof TRANSPORT_WS;
 export type TRANSPORTS =
   | TRANSPORT_AMQP
   | TRANSPORT_BROKER
   | TRANSPORT_HTTP
   | TRANSPORT_MEMORY
   | TRANSPORT_MQTT
-  | TRANSPORT_WORKER
-  | TRANSPORT_WS;
+  | TRANSPORT_WEBSOCKET
+  | TRANSPORT_WORKER;

@@ -135,8 +135,7 @@ test('traces each incoming verdict once after judgment and names a loss by its a
     await pair.send(writeParcel({ ...parcel, sequence: 6 }));
     await pair.send(Uint8Array.of(0));
     await pair.send(encodeParcel({ ...parcel, kind: 0x0a, sequence: 7 }));
-    await pair.serverAdapter.publish({
-      retained: true,
+    await pair.serverAdapter.publishRetained({
       payload: writeParcel(parcel),
       topic: ['bead', 'i', 'client'],
     });

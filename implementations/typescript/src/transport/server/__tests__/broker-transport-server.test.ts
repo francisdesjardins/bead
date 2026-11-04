@@ -96,7 +96,7 @@ test.describe('createBrokerTransportServer', () => {
     const opened: TransportServerConnectionHandle[] = [];
     const halfOpen: number[] = [];
 
-    server.on('connection', (...[peer, request, connectionHandle]) => {
+    server.on('connection', (...[{ request, socket: peer }, connectionHandle]) => {
       expect([peer.id, request]).toEqual(['ada', undefined]);
       opened.push(connectionHandle);
     });

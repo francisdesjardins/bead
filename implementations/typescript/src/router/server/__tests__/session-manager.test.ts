@@ -216,11 +216,11 @@ test.describe('createSessionManager', () => {
 
       sessions.on('created', tamper);
       sessions.on('updated', tamper);
-      sessions.on('dataChanged', (session, newValue) => {
+      sessions.on('dataChanged', ({ newValue, session }) => {
         tamper(session);
         newValue?.roles.push('intruder');
       });
-      sessions.on('lastActivityChanged', (session) => {
+      sessions.on('lastActivityChanged', ({ session }) => {
         tamper(session);
       });
 
@@ -431,7 +431,15 @@ test.describe('createSessionManager', () => {
 
       expect(sessions.get(first)?.data).toEqual({ roles: ['admin'], username: 'guest' });
       expect(stored?.data).toEqual({ roles: ['admin'], username: 'guest' });
-      expect(changed).toEqual([[stored, { roles: ['admin'], username: 'guest' }, undefined]]);
+      expect(changed).toEqual([
+        [
+          {
+            newValue: { roles: ['admin'], username: 'guest' },
+            oldValue: undefined,
+            session: stored,
+          },
+        ],
+      ]);
     });
 
     test('updateData emits nothing for similar data', () => {
@@ -460,7 +468,7 @@ test.describe('createSessionManager', () => {
 
       sessions.updateConnectionInactivityTimeout({ ...session, connectionInactivityTimeout: 30 });
 
-      expect(changed).toEqual([[stored, 30, Infinity]]);
+      expect(changed).toEqual([[{ newValue: 30, oldValue: Infinity, session: stored }]]);
       expect(stored?.sessionInactivityTimeout).toBe(Infinity);
 
       const reached = record(sessions, 'connectionInactivityTimeoutReached');
@@ -487,7 +495,7 @@ test.describe('createSessionManager', () => {
         sessionInactivityTimeout: 30,
       });
 
-      expect(changed).toEqual([[stored, 30, Infinity]]);
+      expect(changed).toEqual([[{ newValue: 30, oldValue: Infinity, session: stored }]]);
       expect(stored?.connectionInactivityTimeout).toBe(Infinity);
 
       const reached = record(sessions, 'sessionInactivityTimeoutReached');
@@ -790,7 +798,15 @@ test.describe('createSessionManager', () => {
 
       const stored = sessions.updateLastActivity(session);
 
-      expect(changed).toEqual([[stored, Date.UTC(2026, 0, 1) + 5, Date.UTC(2026, 0, 1)]]);
+      expect(changed).toEqual([
+        [
+          {
+            newValue: Date.UTC(2026, 0, 1) + 5,
+            oldValue: Date.UTC(2026, 0, 1),
+            session: stored,
+          },
+        ],
+      ]);
       expect(stored?.lastActivity).toBe(Date.UTC(2026, 0, 1) + 5);
       // the first two stopped, two more of the same delay going
       expect(
@@ -880,7 +896,15 @@ test.describe('createSessionManager', () => {
       sessions.touch(first);
 
       // back a day, the instant reported with it; the timer counts its 200 ms all the same
-      expect(changed).toEqual([[expect.anything(), Date.UTC(2025, 11, 31), Date.UTC(2026, 0, 1)]]);
+      expect(changed).toEqual([
+        [
+          {
+            newValue: Date.UTC(2025, 11, 31),
+            oldValue: Date.UTC(2026, 0, 1),
+            session: expect.anything(),
+          },
+        ],
+      ]);
       expect(delaysOn(clock)).toEqual([200]);
       expect(sessions.clock).toBe(clock);
     });

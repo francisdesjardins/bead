@@ -2,7 +2,7 @@ import type {
   ICloseEventLike,
   IWebSocketConstructor,
   IWebSocketLike,
-} from '../ws-transport-client';
+} from '../websocket-transport-client';
 
 /**
  * A WebSocket a test scripts by hand, for only what neither real implementation does on demand: an

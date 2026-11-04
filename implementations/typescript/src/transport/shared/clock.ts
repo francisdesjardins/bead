@@ -15,7 +15,7 @@ import { ProgrammerError } from './errors';
  * clock's.
  *
  * @example
- * const transport = createWSTransportClient({ clock: createClock() });
+ * const transport = createWebSocketTransportClient({ clock: createClock() });
  */
 export interface IClock {
   readonly Date: { now(): number };

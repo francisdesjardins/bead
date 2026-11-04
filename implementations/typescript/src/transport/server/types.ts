@@ -88,6 +88,16 @@ export interface ITransportServerClientAware<Socket> extends ITransportServerCli
 }
 
 /**
+ * What a connection's platform opened it with, as its `connection` event tells it: the transport's
+ * own socket, and the request that opened it — over a WebSocket a frozen copy of its upgrade, its
+ * headers aside; over HTTP the drawing request; none where nothing opened it but a peer.
+ */
+export interface ITransportServerConnection<Socket = unknown, Request = unknown> {
+  readonly request: Request;
+  readonly socket: Socket;
+}
+
+/**
  * What names a connection a transport holds (spec 15.1): its type, who it came from, its peer's port
  * when it comes on a socket of its own, and the rank its transport took it at, which none shares.
  */
@@ -328,8 +338,11 @@ export type TransportServerResolvedStartOptions = Readonly<{
 export type TransportServerEventMap<Socket = unknown, Request = unknown> = {
   /** `wasClean` is whether the connection closed normally (1000). */
   close: [wasClean: boolean, connectionHandle: TransportServerConnectionHandle];
-  /** The connection's socket, the request that opened it, and its handle, once it is registered. */
-  connection: [socket: Socket, request: Request, connectionHandle: TransportServerConnectionHandle];
+  /** What its platform opened the connection with, then its handle, once it is registered. */
+  connection: [
+    connection: ITransportServerConnection<Socket, Request>,
+    connectionHandle: TransportServerConnectionHandle,
+  ];
   /**
    * What went wrong on a connection, or what a listener of its events threw, which changes nothing
    * the server does; when it ends the connection, its `close` follows. An empty handle is the
@@ -455,7 +468,7 @@ export interface IWebSocketServerConstructor {
   }): IWebSocketServerLike;
 }
 
-export interface IWSTransportServerOptions extends ITransportServerOptions {
+export interface IWebSocketTransportServerOptions extends ITransportServerOptions {
   /** Defaults to {@link TRANSPORT_WEBSOCKET_BINARYTYPE}, for every connection. */
   binaryType?: 'arraybuffer' | 'blob' | 'nodebuffer' | undefined;
   /**
@@ -504,7 +517,7 @@ export interface IWSTransportServerOptions extends ITransportServerOptions {
    * fails a connection that sends a larger one with 1009, reported on `error` naming the bound, its
    * close unclean whatever the peer answers (spec 15.3). Defaults to {@link MAXIMUM_MESSAGE_BYTES},
    * the default envelope's limit: a router whose `maximumEnvelopeBytes` is raised needs it raised
-   * alike, as `createWSServer` does.
+   * alike, as `createWebSocketServer` does.
    */
   maxPayload?: number | undefined;
   /**
@@ -525,7 +538,7 @@ export interface IWSTransportServerOptions extends ITransportServerOptions {
    * The bytes that may wait for one connection's socket — handed to it and not yet taken: an
    * envelope that would take them past it drops the connection, reported on `error` naming it, its
    * close unclean (spec 15.12). A whole number above 0. Defaults to {@link MAXIMUM_UNSENT_BYTES};
-   * `createWSServer` derives it from its router's limits.
+   * `createWebSocketServer` derives it from its router's limits.
    */
   maximumUnsentBytes?: number | undefined;
   /**
@@ -603,7 +616,7 @@ export interface IWSTransportServerOptions extends ITransportServerOptions {
  * connect, headers aside: a frozen {@link IDrawingRequest}, never the platform's request, which
  * holds the credential the connection carries.
  */
-export type WSTransportServer = ITransportServer<IServerSocketLike, IDrawingRequest>;
+export type WebSocketTransportServer = ITransportServer<IServerSocketLike, IDrawingRequest>;
 
 // ── HTTP ──────────────────────────────────────────────────────────────────────
 

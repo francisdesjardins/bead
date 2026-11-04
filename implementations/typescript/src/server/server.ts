@@ -94,6 +94,8 @@ export type {
   TransportServerConnectionHandle,
 } from '../router/server/router-server';
 export type { ISession, ISessionManager } from '../router/server/types';
+export type { ITransportServerConnection } from '../transport/server/types';
+export type { IGauges } from '../transport/shared/types';
 export type { IServer, IServerLayers, IServerOptions, IServerTransportLike } from './types';
 export { WARNING_RATIO } from './health';
 export type { HealthStatus, IHealth, IHealthCheck, ILayerGauges, ServerGauges } from './health';
@@ -130,9 +132,9 @@ export type { HealthStatus, IHealth, IHealthCheck, ILayerGauges, ServerGauges } 
  *
  * @example
  * import { createServer } from '@francisdesjardins/bead/server';
- * import { createWSTransportServer } from '@francisdesjardins/bead/ws-transport-server';
+ * import { createWebSocketTransportServer } from '@francisdesjardins/bead/websocket-transport-server';
  *
- * const server = createServer({ transport: createWSTransportServer({ WebSocketServer }) });
+ * const server = createServer({ transport: createWebSocketTransportServer({ WebSocketServer }) });
  *
  * server.router.on('error', (error, connectionHandle) => {
  *   console.error(connectionHandle, error);
@@ -243,7 +245,7 @@ export const createServer = <Transport extends IServerTransportLike, Data = unkn
   // before the router's own: a resolver that stores a session as the router reads the envelope finds
   // its connection open already
   const onConnection = (
-    ...[, , connectionHandle]: TransportServerEventMap[CONNECTION_EVENT]
+    ...[, connectionHandle]: TransportServerEventMap[CONNECTION_EVENT]
   ): void => {
     connections.add(connectionHandle);
     wait(connectionHandle);
@@ -399,10 +401,7 @@ export const createServer = <Transport extends IServerTransportLike, Data = unkn
   // and leaves the connection the server's own timeout, counted from the end
   const onSessionDeleted = ({ connectionHandle }: ISession<Data>): void => {
     if (connections.has(connectionHandle)) {
-      void router.dropSubscriptions({
-        connectionHandle,
-        failure: router.failures.sessionRequired,
-      });
+      void router.dropSubscriptions(connectionHandle, router.failures.sessionRequired);
       wait(connectionHandle);
     }
   };

@@ -46,7 +46,7 @@ import {
   type ITransportClientAddressOptions,
 } from '../../transport/client/transport-client';
 import { createWorkerTransportClient } from '../../transport/client/worker-transport-client';
-import { createWSTransportClient } from '../../transport/client/ws-transport-client';
+import { createWebSocketTransportClient } from '../../transport/client/websocket-transport-client';
 import {
   ParcelFlag,
   ParcelKind,
@@ -73,8 +73,11 @@ import {
   REFUSAL_HEADER,
   WAIT_HEADER,
 } from '../../transport/server/http-transport-server';
-import type { TransportServerConnectionHandle } from '../../transport/server/types';
-import { createWSTransportServer } from '../../transport/server/ws-transport-server';
+import type {
+  ITransportServerConnection,
+  TransportServerConnectionHandle,
+} from '../../transport/server/types';
+import { createWebSocketTransportServer } from '../../transport/server/websocket-transport-server';
 import { createFakeHTTPServer } from '../../transport/server/__tests__/fake-http-server';
 import { createFakeWebSocketServer } from '../../transport/server/__tests__/fake-websocket-server';
 import { LONGEST_TIMER } from '../../transport/shared/clock';
@@ -736,7 +739,7 @@ const resetOf = (name: SessionTimeout): Way => {
 const createScriptedTransport = () => {
   const emitter = createEmitter<{
     close: [wasClean: boolean, connectionHandle: Handle];
-    connection: [socket: unknown, request: unknown, connectionHandle: Handle];
+    connection: [connection: ITransportServerConnection, connectionHandle: Handle];
     listen: [isHeld: boolean, connectionHandle: Handle];
     message: [message: ITransportMessage, connectionHandle: Handle];
   }>();
@@ -788,7 +791,7 @@ const serverOfOptions: Way = async (given) => {
 
   await using _server = building.built;
 
-  emitter.emit('connection', {}, {}, first);
+  emitter.emit('connection', { request: {}, socket: {} }, first);
 
   return {
     held: await endedAt(clock, () => {
@@ -1185,11 +1188,11 @@ const pauseOfOptions: Way = async (given) => {
 };
 
 // a WebSocket client's option `name`, as it is built
-const ofWSClient = (name: 'closeTimeout' | 'heartbeat'): Way => {
+const ofWebSocketClient = (name: 'closeTimeout' | 'heartbeat'): Way => {
   return (given) => {
     const { FakeWebSocket, sockets } = createFakeWebSocket();
     const building = attempt(() => {
-      return createWSTransportClient({ WebSocket: FakeWebSocket, ...optionOf(name, given) });
+      return createWebSocketTransportClient({ WebSocket: FakeWebSocket, ...optionOf(name, given) });
     });
 
     return Promise.resolve(
@@ -1201,13 +1204,13 @@ const ofWSClient = (name: 'closeTimeout' | 'heartbeat'): Way => {
 };
 
 // a WebSocket server's option `name`, as it is built
-const ofWSServer = (
+const ofWebSocketServer = (
   name: 'closeTimeout' | 'headersTimeout' | 'heartbeat' | 'sendGracePeriod'
 ): Way => {
   return (given) => {
     const fake = createFakeWebSocketServer();
     const building = attempt(() => {
-      return createWSTransportServer({
+      return createWebSocketTransportServer({
         WebSocketServer: fake.FakeWebSocketServer,
         ...optionOf(name, given),
       });
@@ -1310,7 +1313,7 @@ const connectOfHTTP: Way = (given) => {
 const connectOfWebSocket: Way = (given) => {
   const clock = createTestClock();
   const { FakeWebSocket, sockets } = createFakeWebSocket();
-  const client = createWSTransportClient({ clock, WebSocket: FakeWebSocket });
+  const client = createWebSocketTransportClient({ clock, WebSocket: FakeWebSocket });
 
   return connectTimed(
     { client, clock },
@@ -2030,11 +2033,11 @@ const PLAYED: Readonly<Record<string, IPlayed>> = Object.freeze({
   },
   'webSocketTransport.heartbeat': {
     phrase: 'a heartbeat',
-    ways: { client: ofWSClient('heartbeat'), server: ofWSServer('heartbeat') },
+    ways: { client: ofWebSocketClient('heartbeat'), server: ofWebSocketServer('heartbeat') },
   },
   'webSocketTransport.closeTimeout': {
     phrase: 'a close timeout',
-    ways: { client: ofWSClient('closeTimeout'), server: ofWSServer('closeTimeout') },
+    ways: { client: ofWebSocketClient('closeTimeout'), server: ofWebSocketServer('closeTimeout') },
   },
   'transportClient.connectTimeout': {
     phrase: "a connect's timeout",
@@ -2052,11 +2055,11 @@ const PLAYED: Readonly<Record<string, IPlayed>> = Object.freeze({
   },
   'webSocketTransportServer.sendGracePeriod': {
     phrase: 'sendGracePeriod',
-    ways: { options: ofWSServer('sendGracePeriod') },
+    ways: { options: ofWebSocketServer('sendGracePeriod') },
   },
   'webSocketTransportServer.headersTimeout': {
     phrase: 'headersTimeout',
-    ways: { options: ofWSServer('headersTimeout') },
+    ways: { options: ofWebSocketServer('headersTimeout') },
   },
   'brokerParticipant.heartbeat': {
     phrase: 'a heartbeat',

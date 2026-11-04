@@ -244,7 +244,10 @@ export const createBrokerTransportServer = (
 
                 entry.handle = handle;
                 connections.set(handle, registered);
-                tell(CONNECTION_EVENT, [peer, undefined, handle]);
+                tell(CONNECTION_EVENT, [
+                  Object.freeze({ request: undefined, socket: peer }),
+                  handle,
+                ]);
               },
               envelope: ({ credential, data }) => {
                 const { handle } = entry;

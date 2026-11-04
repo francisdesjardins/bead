@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { createClient } from '../../src/client/client';
-import { FailureError, ProtocolCode } from '../../src/client/ws-client';
+import { FailureError, ProtocolCode } from '../../src/client/websocket-client';
 import { createMetricsRegistry } from '../../src/router/shared/metrics-registry';
 import { createServer } from '../../src/server/server';
 import { violationsOf } from '../../src/service/service';

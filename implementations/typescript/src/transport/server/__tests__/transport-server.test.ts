@@ -197,7 +197,7 @@ test.describe('@francisdesjardins/bead/transport-server', () => {
       'MESSAGE_EVENT',
       'REFUSAL_EVENT',
       'TRANSPORT_HTTP',
-      'TRANSPORT_WS',
+      'TRANSPORT_WEBSOCKET',
     ] as const) {
       expect(entry[name]).toBe(constants[name]);
     }
@@ -694,7 +694,7 @@ test.describe('createTransportServer', () => {
     server.on('connection', () => {
       throw thrown;
     });
-    server.on('connection', (...[, , connectionHandle]) => {
+    server.on('connection', (...[, connectionHandle]) => {
       lifecycle.push(['connection', connectionHandle]);
     });
     server.on('close', () => {
@@ -704,7 +704,9 @@ test.describe('createTransportServer', () => {
       lifecycle.push(['close', clean, connectionHandle]);
     });
 
-    expect(defineOptions.tell('connection', [{ id: handle }, undefined, handle])).toBe(true);
+    expect(
+      defineOptions.tell('connection', [{ request: undefined, socket: { id: handle } }, handle])
+    ).toBe(true);
     expect(defineOptions.tell('close', [false, handle])).toBe(true);
     expect(lifecycle).toEqual([
       ['connection', handle],

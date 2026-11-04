@@ -23,10 +23,11 @@ import { callIdsOf, envelopeOf } from '../../router/shared/__tests__/fixtures';
 import { LONGEST_TIMER } from '../../transport/shared/clock';
 import { createTestClock, delaysOn, duesOn } from '../../transport/shared/__tests__/fixtures';
 import type {
+  ITransportServerConnection,
   ITransportServerRefusal,
   TransportServerConnectionHandle,
 } from '../../transport/server/types';
-import { createWSTransportServer } from '../../transport/server/ws-transport-server';
+import { createWebSocketTransportServer } from '../../transport/server/websocket-transport-server';
 import { createEmitter } from '../../transport/shared/emitter';
 import { ProgrammerError } from '../../transport/shared/errors';
 import type { ITransportMessage } from '../../transport/shared/types';
@@ -78,7 +79,7 @@ const echo: IProcedure = {
 const createScriptedTransport = () => {
   const emitter = createEmitter<{
     close: [wasClean: boolean, connectionHandle: Handle];
-    connection: [socket: unknown, request: unknown, connectionHandle: Handle];
+    connection: [connection: ITransportServerConnection, connectionHandle: Handle];
     listen: [isHeld: boolean, connectionHandle: Handle];
     message: [message: ITransportMessage, connectionHandle: Handle];
   }>();
@@ -161,7 +162,7 @@ const createScriptedTransport = () => {
   };
 
   const open = (connectionHandle: Handle) => {
-    emitter.emit('connection', {}, {}, connectionHandle);
+    emitter.emit('connection', { request: {}, socket: {} }, connectionHandle);
   };
 
   /** A listen held on `connectionHandle`, as an HTTP transport tells it, or its end. */
@@ -1416,7 +1417,7 @@ test.describe('createServer', () => {
   });
 
   test("hears its transport's error and refusal through the server's transport", async () => {
-    const transport = createWSTransportServer({ WebSocketServer });
+    const transport = createWebSocketTransportServer({ WebSocketServer });
     // typed by what a server asks of its transport alone, as code over any transport sees it
     await using server: IServer = createServer({ transport });
     const refusals: [status: number, reason: string][] = [];

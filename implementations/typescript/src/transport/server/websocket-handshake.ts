@@ -39,7 +39,7 @@ export interface IHandshakeRefusal {
 // constants
 
 /** The refusals of a WebSocket server's own, each its `bead-refusal` (spec 15.6). */
-export const WS_REFUSALS = Object.freeze({
+export const WEBSOCKET_REFUSALS = Object.freeze({
   BUSY: 'busy',
   HOST: HOST_REFUSAL,
   MALFORMED: 'malformed',
@@ -117,30 +117,30 @@ const refused = (
   });
 };
 
-const HOST_REFUSED = refused(403, { refusal: WS_REFUSALS.HOST });
+const HOST_REFUSED = refused(403, { refusal: WEBSOCKET_REFUSALS.HOST });
 
 // a method the address does not serve, and those it does, named (RFC 9110 §15.5.6)
 const METHOD_REFUSED = refused(405, {
   fields: { allow: 'GET, HEAD' },
-  refusal: WS_REFUSALS.METHOD,
+  refusal: WEBSOCKET_REFUSALS.METHOD,
 });
 
-const ORIGIN_REFUSED = refused(403, { refusal: WS_REFUSALS.ORIGIN });
+const ORIGIN_REFUSED = refused(403, { refusal: WEBSOCKET_REFUSALS.ORIGIN });
 
 // a request that asks no WebSocket: the one protocol the address speaks, named (RFC 9110 §15.5.22)
 const UPGRADE_REQUIRED = refused(426, {
   fields: { upgrade: 'websocket' },
-  refusal: WS_REFUSALS.UPGRADE,
+  refusal: WEBSOCKET_REFUSALS.UPGRADE,
 });
 
 // the one version the server speaks, named (RFC 6455 §4.2.2)
 const VERSION_REFUSED = refused(426, {
   fields: { upgrade: 'websocket', 'sec-websocket-version': '13' },
-  refusal: WS_REFUSALS.VERSION,
+  refusal: WEBSOCKET_REFUSALS.VERSION,
 });
 
 /** A handshake the server cannot take, refused 400 `malformed`. */
-export const MALFORMED_HANDSHAKE = refused(400, { refusal: WS_REFUSALS.MALFORMED });
+export const MALFORMED_HANDSHAKE = refused(400, { refusal: WEBSOCKET_REFUSALS.MALFORMED });
 
 /**
  * An upgrade the server would take once its stop began, refused 503 `busy`, told when to come back
@@ -148,7 +148,7 @@ export const MALFORMED_HANDSHAKE = refused(400, { refusal: WS_REFUSALS.MALFORMED
  */
 export const BUSY_HANDSHAKE = refused(503, {
   fields: { 'retry-after': '1' },
-  refusal: WS_REFUSALS.BUSY,
+  refusal: WEBSOCKET_REFUSALS.BUSY,
 });
 
 // what HTTP refuses of its own (RFC 9112 §3.2, §3.2.2; RFC 9110 §5.5), unmarked

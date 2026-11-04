@@ -1,6 +1,6 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
-import { createWSTransportClient } from '../../../transport/client/ws-transport-client';
+import { createWebSocketTransportClient } from '../../../transport/client/websocket-transport-client';
 import { createEmitter } from '../../../transport/shared/emitter';
 import { createHold } from '../../../transport/shared/hold';
 import { nextTask } from '../../../transport/shared/later-task';
@@ -255,7 +255,7 @@ const notificationOf = (
 
 test.describe('createRouterClient', () => {
   test('takes any transport of this package', () => {
-    const transport = createWSTransportClient();
+    const transport = createWebSocketTransportClient();
     using router = createRouterClient(transport);
 
     expect(router.transport).toBe(transport);
@@ -266,7 +266,7 @@ test.describe('createRouterClient', () => {
   test("runs on its transport's clock, or on the one it is given when its transport has none, and refuses one that differs", () => {
     const clock = createTestClock();
     const { transport } = createScriptedTransport();
-    using onItsTransport = createRouterClient(createWSTransportClient({ clock }));
+    using onItsTransport = createRouterClient(createWebSocketTransportClient({ clock }));
     using onItsOwn = createRouterClient(transport, { clock });
     using alone = createRouterClient(transport);
 
@@ -276,7 +276,7 @@ test.describe('createRouterClient', () => {
       PLATFORM_CLOCK,
     ]);
     expect(() => {
-      createRouterClient(createWSTransportClient({ clock }), { clock: PLATFORM_CLOCK });
+      createRouterClient(createWebSocketTransportClient({ clock }), { clock: PLATFORM_CLOCK });
     }).toThrow(
       new ProgrammerError(
         "a client's router runs on the clock of its transport, one of its own, and was given another, the platform's"

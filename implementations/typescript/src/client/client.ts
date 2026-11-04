@@ -64,9 +64,9 @@ export type {
  *
  * @example
  * import { createClient } from '@francisdesjardins/bead/client';
- * import { createWSTransportClient } from '@francisdesjardins/bead/ws-transport-client';
+ * import { createWebSocketTransportClient } from '@francisdesjardins/bead/websocket-transport-client';
  *
- * const client = createClient({ transport: createWSTransportClient() });
+ * const client = createClient({ transport: createWebSocketTransportClient() });
  *
  * client.services.on('debug', (error, info) => {
  *   console.log(info.direction, info.procedureName, error);

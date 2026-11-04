@@ -6,7 +6,7 @@ import { protoCodecOf, validatorOf } from "@francisdesjardins/bead/proto";
 import type { CountDownRequest } from "../../../messages/hello/v1/hello_pb.ts";
 import { AskNameRequestSchema, AskNameResponseSchema, CountDownRequestSchema, CountDownResponseSchema, SayHelloRequestSchema, SayHelloResponseSchema, TickSchema } from "../../../messages/hello/v1/hello_pb.ts";
 import type { IServiceClient, IServiceClientOptions, IServiceServer, ServiceResolvers, ServiceServerOptions } from "@francisdesjardins/bead/service";
-import { commandOf, createServiceClient, createServiceServer, failuresOf, GENERATED_CODE_SUPPORTS_VERSION_6, requestOf } from "@francisdesjardins/bead/service";
+import { commandOf, createServiceClient, createServiceServer, failuresOf, GENERATED_CODE_SUPPORTS_VERSION_7, requestOf } from "@francisdesjardins/bead/service";
 
 
 // * each request's rules, judged before its resolver, every rule a site of its own (spec 18, decision 0035)
@@ -69,7 +69,7 @@ export const HelloProcedures = Object.freeze({
 /**
  * The failures of `hello.v1.HelloService`, by name: service 1's catalogue.
  */
-export const HelloFailures = failuresOf({ codes: { NAMELESS: 1 }, serviceId: 1 });
+export const HelloFailures = failuresOf(1, { NAMELESS: 1 });
 
 /**
  * Each procedure's resolver, by its name: for resolvers written in a module of their own.
@@ -170,4 +170,4 @@ export class HelloClient {
 }
 
 // the contract with the runtime this file needs: an older runtime lacks the constant, and fails here
-void GENERATED_CODE_SUPPORTS_VERSION_6;
+void GENERATED_CODE_SUPPORTS_VERSION_7;

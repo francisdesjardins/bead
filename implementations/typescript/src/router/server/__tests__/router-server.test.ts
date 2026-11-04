@@ -2,12 +2,15 @@ import { createHmac } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
 import { WebSocketServer } from 'ws';
-import { createWSClient } from '../../../client/ws-client';
+import { createWebSocketClient } from '../../../client/websocket-client';
 import { allClosed, host, IMPLEMENTATIONS } from '../../../transport/shared/__tests__/fixtures';
-import { createWSTransportServer } from '../../../transport/server/ws-transport-server';
+import { createWebSocketTransportServer } from '../../../transport/server/websocket-transport-server';
 import { createMemoryTransportServer } from '../../../transport/server/memory-transport-server';
 import { createMemoryTransportClient } from '../../../transport/client/memory-transport-client';
-import type { TransportServerConnectionHandle } from '../../../transport/server/types';
+import type {
+  ITransportServerConnection,
+  TransportServerConnectionHandle,
+} from '../../../transport/server/types';
 import { createEmitter } from '../../../transport/shared/emitter';
 import { createHold, type IHold } from '../../../transport/shared/hold';
 import { nextTask } from '../../../transport/shared/later-task';
@@ -281,7 +284,7 @@ const createScriptedTransport = ({
 }: { carriesCredential?: boolean; isSecure?: boolean } = {}) => {
   const emitter = createEmitter<{
     close: [wasClean: boolean, connectionHandle: Handle];
-    connection: [socket: unknown, request: unknown, connectionHandle: Handle];
+    connection: [connection: ITransportServerConnection, connectionHandle: Handle];
     message: [message: ITransportMessage, connectionHandle: Handle];
   }>();
   const sent: ISentEnvelope[] = [];
@@ -359,7 +362,7 @@ const createScriptedTransport = ({
   };
 
   const open = (connectionHandle: Handle) => {
-    emitter.emit('connection', {}, {}, connectionHandle);
+    emitter.emit('connection', { request: {}, socket: {} }, connectionHandle);
   };
 
   const close = (connectionHandle: Handle) => {
@@ -455,7 +458,7 @@ const recordActivity = (router: ReturnType<typeof createRouterServer>) => {
 
 test.describe('createRouterServer', () => {
   test('takes this package’s transport server', () => {
-    const transport = createWSTransportServer({ WebSocketServer });
+    const transport = createWebSocketTransportServer({ WebSocketServer });
     using router = createRouterServer(transport);
 
     expect(router.transport).toBe(transport);
@@ -466,13 +469,17 @@ test.describe('createRouterServer', () => {
   test("runs on its transport's clock, or on the one it is given when its transport has none, and refuses one that differs", () => {
     const clock = createTestClock();
     const { transport } = createScriptedTransport();
-    using onItsTransport = createRouterServer(createWSTransportServer({ clock, WebSocketServer }));
+    using onItsTransport = createRouterServer(
+      createWebSocketTransportServer({ clock, WebSocketServer })
+    );
     using onItsOwn = createRouterServer(transport, { clock });
-    using same = createRouterServer(createWSTransportServer({ clock, WebSocketServer }), { clock });
+    using same = createRouterServer(createWebSocketTransportServer({ clock, WebSocketServer }), {
+      clock,
+    });
 
     expect([onItsTransport.clock, onItsOwn.clock, same.clock]).toEqual([clock, clock, clock]);
     expect(() => {
-      createRouterServer(createWSTransportServer({ WebSocketServer }), { clock });
+      createRouterServer(createWebSocketTransportServer({ WebSocketServer }), { clock });
     }).toThrow(
       new ProgrammerError(
         "a server's router runs on the clock of its transport, the platform's, and was given another, one of its own"
@@ -2032,10 +2039,7 @@ test.describe('createRouterServer', () => {
 
         await sleep(0);
         sent.length = 0;
-        await router.dropSubscriptions({
-          connectionHandle: first,
-          failure: SERVER_FAILURES.sessionRequired,
-        });
+        await router.dropSubscriptions(first, SERVER_FAILURES.sessionRequired);
         release();
         await sleep(0);
 
@@ -2181,10 +2185,7 @@ test.describe('createRouterServer', () => {
       sent.length = 0;
       token = undefined;
 
-      await router.dropSubscriptions({
-        connectionHandle: first,
-        failure: SERVER_FAILURES.sessionRequired,
-      });
+      await router.dropSubscriptions(first, SERVER_FAILURES.sessionRequired);
 
       expect(
         sent.map(({ connectionHandle, envelope }) => {
@@ -2215,10 +2216,7 @@ test.describe('createRouterServer', () => {
 
       // a failure that cannot go out is reported, and the subscription goes all the same
       control.sendErrors.set(second, new Error('gone'));
-      await router.dropSubscriptions({
-        connectionHandle: second,
-        failure: SERVER_FAILURES.sessionRequired,
-      });
+      await router.dropSubscriptions(second, SERVER_FAILURES.sessionRequired);
 
       expect(reportedOf(errors)).toEqual([['gone', second]]);
       expect(router.notifications.subscriptions(second)).toEqual([]);
@@ -2237,10 +2235,7 @@ test.describe('createRouterServer', () => {
       await sleep(0);
       sent.length = 0;
 
-      await router.dropSubscriptions({
-        connectionHandle: first,
-        failure: SERVER_FAILURES.sessionRequired,
-      });
+      await router.dropSubscriptions(first, SERVER_FAILURES.sessionRequired);
 
       expect(answersOf(sent.splice(0))).toEqual([
         [first, 'failure', 5, ProtocolCode.SESSION_REQUIRED],
@@ -2253,6 +2248,36 @@ test.describe('createRouterServer', () => {
 
       expect(answersOf(sent)).toEqual([[first, 'result', 1, 'held']]);
       expect(router.notifications.subscriptions()).toEqual(held());
+    });
+
+    test('dropSubscriptions takes a connection’s handle, a string, and rejects anything else', async () => {
+      const { router, sent } = createHolding('answer');
+
+      using _router = router;
+
+      await sleep(0);
+      sent.length = 0;
+
+      const subscriptions = router.notifications.subscriptions();
+
+      // * the record of 0.9.0's call among them: two things are two parameters
+      for (const [handle, shown] of [
+        [{ connectionHandle: first }, '[object Object]'],
+        [undefined, 'undefined'],
+        [7, '7'],
+      ] as const) {
+        const dropping = router.dropSubscriptions(handle as never, SERVER_FAILURES.sessionRequired);
+
+        await expect(dropping).rejects.toBeInstanceOf(ProgrammerError);
+        await expect(dropping).rejects.toThrow(
+          `dropSubscriptions takes a connection's handle, a string, not ${shown}`
+        );
+      }
+
+      await sleep(0);
+
+      expect(sent).toEqual([]);
+      expect(router.notifications.subscriptions()).toEqual(subscriptions);
     });
 
     // a handle opened again finds no call of the connection that closed waiting
@@ -2682,14 +2707,14 @@ test.describe('createRouterServer', () => {
 for (const [label, TrackedWebSocket] of IMPLEMENTATIONS) {
   test.describe(`a WebSocket client and server, the client on ${label}`, () => {
     test('ask, answer, subscribe, notify, unsubscribe and command each other over the wire', async () => {
-      const serverRouter = createRouterServer(createWSTransportServer({ WebSocketServer }), {
+      const serverRouter = createRouterServer(createWebSocketTransportServer({ WebSocketServer }), {
         sessionTokenOf: () => {
           return TOKEN;
         },
       });
       const serverServices = createServiceManager(serverRouter);
       const { port } = await serverRouter.transport.start({ address: host, findOpenPort: true });
-      const client = createWSClient({ transport: { WebSocket: TrackedWebSocket } });
+      const client = createWebSocketClient({ transport: { WebSocket: TrackedWebSocket } });
       const told: unknown[] = [];
 
       client.router.on('debug', ({ direction, header }) => {
@@ -5264,10 +5289,7 @@ test.describe('createRouterServer, its paced subscriptions', () => {
 
     expect(queuedOf(router)).toEqual({ pausedSubscriptions: 1, queuedNotifications: 2 });
 
-    await router.dropSubscriptions({
-      connectionHandle: third,
-      failure: SERVER_FAILURES.sessionRequired,
-    });
+    await router.dropSubscriptions(third, SERVER_FAILURES.sessionRequired);
 
     expect(queuedOf(router)).toEqual({ pausedSubscriptions: 0, queuedNotifications: 0 });
 
@@ -5766,7 +5788,7 @@ test.describe('createRouterServer, its metrics', () => {
     sent.length = 0;
 
     for (const [connectionHandle, failure] of ending) {
-      await router.dropSubscriptions({ connectionHandle, failure });
+      await router.dropSubscriptions(connectionHandle, failure);
     }
 
     expect(answersOf(sent)).toEqual([

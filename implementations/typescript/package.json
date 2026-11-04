@@ -38,14 +38,14 @@
     "./transcoding": "./src/transcoding/transcoding.ts",
     "./transport-client": "./src/transport/client/transport-client.ts",
     "./transport-server": "./src/transport/server/transport-server.ts",
+    "./websocket-client": "./src/client/websocket-client.ts",
+    "./websocket-server": "./src/server/websocket-server.ts",
+    "./websocket-transport-client": "./src/transport/client/websocket-transport-client.ts",
+    "./websocket-transport-server": "./src/transport/server/websocket-transport-server.ts",
     "./worker-client": "./src/client/worker-client.ts",
     "./worker-server": "./src/server/worker-server.ts",
     "./worker-transport-client": "./src/transport/client/worker-transport-client.ts",
     "./worker-transport-server": "./src/transport/server/worker-transport-server.ts",
-    "./ws-client": "./src/client/ws-client.ts",
-    "./ws-server": "./src/server/ws-server.ts",
-    "./ws-transport-client": "./src/transport/client/ws-transport-client.ts",
-    "./ws-transport-server": "./src/transport/server/ws-transport-server.ts",
     "./package.json": "./package.json"
   },
   "scripts": {

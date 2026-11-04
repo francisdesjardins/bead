@@ -46,6 +46,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `IOwnProblemOptions`.
 - Four rows of `spec/codecs.json` read a closed enum's number past 32 bits by its low 32 bits,
   singular and required (spec 17.9.7, 17.9.8).
+- The TypeScript side exports `IGauges`, the type its server transports' `gauges()` give,
+  `ISessionChange`, a session manager's change, and `INotifier`, the type of a service server's
+  `notify` members.
 
 ### Changed
 
@@ -232,6 +235,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   anything goes (spec 18.2).
 - **Breaking:** a registration takes `RegistrationOptions` (`IRegistrationOptions`): a timeout, a
   destination and a cancellation, and no credential, which its subscribing call never presented.
+- **Breaking:** on the TypeScript side a broker's message says it was kept by its broker as
+  `isRetained`, as `IsRetained` and `is_retained` say it on the other sides, where it was
+  `retained`. An adapter of an application's own sets `isRetained`; a message that still holds
+  `retained`, however it was built, is dropped and reported on the participant's `error`. The
+  in-memory broker hands a message on marked retained through `publishRetained(publication)`, as on
+  the other sides; `IMemoryBrokerPublication` is gone (spec 15.23).
+- **Breaking:** on the TypeScript side a router server's `dropSubscriptions(connectionHandle,
+  failure)` takes two parameters, as on the other sides, where it took `{ connectionHandle, failure
+  }`, and refuses a handle that is no string.
+- **Breaking:** on the TypeScript side a transport server's `connection` event carries two values,
+  what its platform opened the connection with, then its handle:
+  `[connection: ITransportServerConnection<Socket, Request>, connectionHandle]`, the socket and the
+  request in one record, where it carried the socket, the request and the handle.
+- **Breaking:** the TypeScript side names its WebSocket transport `WebSocket`, as the C# side does,
+  where it named it `WS`: `createWebSocketClient`, `createWebSocketServer`,
+  `createWebSocketTransportClient`, `createWebSocketTransportServer`, their types and options,
+  `TRANSPORT_WEBSOCKET` and `WEBSOCKET_REFUSALS`, from `./websocket-client`, `./websocket-server`,
+  `./websocket-transport-client` and `./websocket-transport-server`. The transport's type is still
+  `'WS'`. A file that imports Bead's `WebSocketServer` type beside `ws`'s class aliases one.
 
 ### Removed
 

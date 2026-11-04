@@ -7,7 +7,7 @@ import { codePointLength, protoCodecOf, validatorOf } from "../../../proto/proto
 import type { Ruled } from "./transcoding_pb";
 import { AskResponseSchema, BookSchema, CancelsRequestSchema, CancelsResponseSchema, EdgesSchema, EverythingSchema, FailRequestSchema, GetBookRequestSchema, GetOperationRequestSchema, ListBooksRequestSchema, ListBooksResponseSchema, ListOperationsRequestSchema, ListOperationsResponseSchema, OperationSchema, RequiringSchema, RuledSchema, TickSchema, TicksRequestSchema, TicksResponseSchema, UpdateBookRequestSchema, WhoAmIResponseSchema } from "./transcoding_pb";
 import type { IServiceClient, IServiceClientOptions, IServiceServer, ServiceResolvers, ServiceServerOptions } from "../../../service/service";
-import { commandOf, createServiceClient, createServiceServer, failuresOf, GENERATED_CODE_SUPPORTS_VERSION_6, PAYLOAD_CODECS, requestOf } from "../../../service/service";
+import { commandOf, createServiceClient, createServiceServer, failuresOf, GENERATED_CODE_SUPPORTS_VERSION_7, PAYLOAD_CODECS, requestOf } from "../../../service/service";
 import { EmptySchema } from "@bufbuild/protobuf/wkt";
 import { NeedsSchema, NeedsUpdateSchema } from "./transcoding-required_pb";
 
@@ -284,7 +284,7 @@ export const TranscodingProcedures = Object.freeze({
 /**
  * The failures of `bead.transcoding.v1.TranscodingService`, by name: service 1's catalogue.
  */
-export const TranscodingFailures = failuresOf({ codes: { REFUSED: 1, COUNTED: 2 }, serviceId: 1 });
+export const TranscodingFailures = failuresOf(1, { REFUSED: 1, COUNTED: 2 });
 
 /**
  * Each procedure's resolver, by its name: for resolvers written in a module of their own.
@@ -485,4 +485,4 @@ export class TranscodingClient {
 }
 
 // the contract with the runtime this file needs: an older runtime lacks the constant, and fails here
-void GENERATED_CODE_SUPPORTS_VERSION_6;
+void GENERATED_CODE_SUPPORTS_VERSION_7;

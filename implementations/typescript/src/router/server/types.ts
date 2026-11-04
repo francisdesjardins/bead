@@ -1,6 +1,9 @@
 // dependencies
 
-import type { TransportServerConnectionHandle } from '../../transport/server/types';
+import type {
+  ITransportServerConnection,
+  TransportServerConnectionHandle,
+} from '../../transport/server/types';
 import type { IClock, TimeoutId } from '../../transport/shared/clock';
 import type {
   EmitterListener,
@@ -228,6 +231,16 @@ export interface ISession<Data> {
 }
 
 /**
+ * A change of one session, as its event tells it: the session as it is now, a copy, and the value
+ * that changed, new beside old.
+ */
+export interface ISessionChange<Data, Value> {
+  readonly newValue: Value;
+  readonly oldValue: Value;
+  readonly session: ISession<Data>;
+}
+
+/**
  * The sessions, by connection, with their inactivity timers. A connection with no session has no
  * timer.
  */
@@ -380,16 +393,16 @@ export interface ISessionTimeoutIds {
 
 // types
 
-/** Event name → the arguments its listeners receive; every session is a copy. */
+/** Event name → the arguments its listeners receive; every session is a copy, a change's among them. */
 export type SessionManagerEventMap<Data = unknown> = {
-  connectionInactivityTimeoutChanged: [session: ISession<Data>, newValue: number, oldValue: number];
+  connectionInactivityTimeoutChanged: [change: ISessionChange<Data, number>];
   /** The session as it is when its timer fires. */
   connectionInactivityTimeoutReached: [session: ISession<Data>];
   created: [session: ISession<Data>];
-  dataChanged: [session: ISession<Data>, newValue: Data | undefined, oldValue: Data | undefined];
+  dataChanged: [change: ISessionChange<Data, Data | undefined>];
   deleted: [session: ISession<Data>];
-  lastActivityChanged: [session: ISession<Data>, newValue: number, oldValue: number];
-  sessionInactivityTimeoutChanged: [session: ISession<Data>, newValue: number, oldValue: number];
+  lastActivityChanged: [change: ISessionChange<Data, number>];
+  sessionInactivityTimeoutChanged: [change: ISessionChange<Data, number>];
   /** The session as it is when its timer fires. */
   sessionInactivityTimeoutReached: [session: ISession<Data>];
   updated: [session: ISession<Data>];
@@ -440,12 +453,13 @@ export interface IRouterServer<
    * Ends each subscription `connectionHandle` holds, established by its answer, with `failure` on
    * its call id — SESSION_REQUIRED when its session ended, say, whose end the first failure
    * announces — then forgets it. A subscribing call still in flight is left to its own answer.
-   * Resolves once each failure was tried; one that cannot go out is reported to `error`.
+   * Resolves once each failure was tried; one that cannot go out is reported to `error`. A handle
+   * that is no string is a {@link ProgrammerError}, nothing moved.
    */
-  dropSubscriptions(connection: {
-    connectionHandle: TransportServerConnectionHandle;
-    failure: IFailure;
-  }): Promise<void>;
+  dropSubscriptions(
+    connectionHandle: TransportServerConnectionHandle,
+    failure: IFailure
+  ): Promise<void>;
   /**
    * Ends a credential's session by its identifier on every connection that keeps it, and nothing
    * else (spec 13.10): each subscription it bounds ends with SESSION_REQUIRED on its call id, a
@@ -702,7 +716,7 @@ export interface IRouterServerTransportLike {
   off(
     event: 'connection',
     listener: EmitterListener<
-      [socket: unknown, request: unknown, connectionHandle: TransportServerConnectionHandle]
+      [connection: ITransportServerConnection, connectionHandle: TransportServerConnectionHandle]
     >
   ): unknown;
   off(
@@ -720,7 +734,7 @@ export interface IRouterServerTransportLike {
   on(
     event: 'connection',
     listener: EmitterListener<
-      [socket: unknown, request: unknown, connectionHandle: TransportServerConnectionHandle]
+      [connection: ITransportServerConnection, connectionHandle: TransportServerConnectionHandle]
     >
   ): unknown;
   on(

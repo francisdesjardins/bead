@@ -37,7 +37,7 @@ const startWorker = async () => {
   const channels: MessageChannel[] = [];
 
   worker.port1.start();
-  server.on('connection', (...[, request, connectionHandle]) => {
+  server.on('connection', (...[{ request }, connectionHandle]) => {
     events.push(['connection', request, connectionHandle]);
   });
   server.on('message', ({ data }, connectionHandle) => {

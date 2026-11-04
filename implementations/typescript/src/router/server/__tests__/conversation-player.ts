@@ -398,7 +398,7 @@ const createMemoryConnections = (clock: TestClock) => {
 
       ports.set(name, port);
       clients.set(name, client);
-      transport.once('connection', (...[, , connectionHandle]) => {
+      transport.once('connection', (...[, connectionHandle]) => {
         handles.set(name, connectionHandle);
       });
       await client.connect({ address: '127.0.0.1', port, server: transport });
@@ -459,7 +459,7 @@ const createBrokerConnections = (clock: TestClock) => {
     return client;
   };
 
-  transport.on('connection', (...[peer, , connectionHandle]) => {
+  transport.on('connection', (...[{ socket: peer }, connectionHandle]) => {
     handles.set(peer.id, connectionHandle);
   });
 

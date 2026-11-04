@@ -17,6 +17,7 @@ import type {
   RouterLimitsOptions,
 } from '../router/shared/types';
 import type {
+  ITransportServerConnection,
   ITransportServerRefusal,
   TransportServerConnectionHandle,
 } from '../transport/server/types';
@@ -213,7 +214,7 @@ export interface IServerTransportLike extends IRouterServerTransportLike {
   off(
     event: 'connection',
     listener: EmitterListener<
-      [socket: unknown, request: unknown, connectionHandle: TransportServerConnectionHandle]
+      [connection: ITransportServerConnection, connectionHandle: TransportServerConnectionHandle]
     >
   ): unknown;
   off(
@@ -242,7 +243,7 @@ export interface IServerTransportLike extends IRouterServerTransportLike {
   on(
     event: 'connection',
     listener: EmitterListener<
-      [socket: unknown, request: unknown, connectionHandle: TransportServerConnectionHandle]
+      [connection: ITransportServerConnection, connectionHandle: TransportServerConnectionHandle]
     >
   ): unknown;
   /**

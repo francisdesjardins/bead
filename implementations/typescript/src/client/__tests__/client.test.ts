@@ -18,7 +18,7 @@ import {
 } from '../client';
 import { createHTTPClient } from '../http-client';
 import { createWorkerClient } from '../worker-client';
-import { createWSClient } from '../ws-client';
+import { createWebSocketClient } from '../websocket-client';
 
 // helpers
 
@@ -151,7 +151,7 @@ test.describe('createClient', () => {
     const worker = { postMessage: () => {} };
 
     for (const client of [
-      createWSClient({ transport: { clock } }),
+      createWebSocketClient({ transport: { clock } }),
       createHTTPClient({ transport: { clock } }),
       createWorkerClient({ transport: { clock, worker } }),
       createClient({ transport: { ...createEchoTransport().transport, clock } }),

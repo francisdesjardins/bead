@@ -78,7 +78,11 @@ export {
   ProgrammerError,
   TimeoutError,
 } from '../../transport/shared/errors';
-export type { TransportServerConnectionHandle } from '../../transport/server/types';
+export type {
+  ITransportServerConnection,
+  TransportServerConnectionHandle,
+} from '../../transport/server/types';
+export type { IGauges } from '../../transport/shared/types';
 export type {
   AccessRefusalStage,
   AdmissionFailure,
@@ -195,9 +199,9 @@ const subscribingOf = (
  *
  * @example
  * import { createRouterServer } from '@francisdesjardins/bead/router-server';
- * import { createWSTransportServer } from '@francisdesjardins/bead/ws-transport-server';
+ * import { createWebSocketTransportServer } from '@francisdesjardins/bead/websocket-transport-server';
  *
- * const router = createRouterServer(createWSTransportServer({ WebSocketServer }));
+ * const router = createRouterServer(createWebSocketTransportServer({ WebSocketServer }));
  *
  * router.on('error', (error, connectionHandle) => {
  *   console.error(connectionHandle, error);
@@ -539,7 +543,7 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
   };
 
   const onConnection = (
-    ...[, , connectionHandle]: TransportServerEventMap[CONNECTION_EVENT]
+    ...[, connectionHandle]: TransportServerEventMap[CONNECTION_EVENT]
   ): void => {
     connections.set(connectionHandle, connectionHandle);
   };
@@ -761,7 +765,15 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
     destinations: () => {
       return relay.destinations();
     },
-    dropSubscriptions: ({ connectionHandle, failure }) => {
+    dropSubscriptions: (connectionHandle, failure) => {
+      if (typeof connectionHandle !== 'string') {
+        return Promise.reject(
+          new ProgrammerError(
+            `dropSubscriptions takes a connection's handle, a string, not ${String(connectionHandle)}`
+          )
+        );
+      }
+
       return telling.later(() => {
         return endSession({ connectionHandle }, failure);
       });
