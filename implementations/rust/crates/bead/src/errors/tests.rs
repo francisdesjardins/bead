@@ -128,3 +128,23 @@ fn each_error_enum_displays_its_cause_once_and_keeps_its_sources() {
         assert_eq!(words, ["refused"], "no duplicate wrapper");
     }
 }
+
+// both states named in its words and held by its value; this side reads neither back
+#[test]
+fn ready_state_error_names_both_states() {
+    use crate::transport::ReadyState;
+
+    let error = super::ReadyStateError::new(ReadyState::Closed.name(), ReadyState::Open.name());
+    assert_eq!(
+        error.to_string(),
+        "the transport client is closed, not open"
+    );
+    assert_eq!(
+        error,
+        super::ReadyStateError::new(ReadyState::Closed.name(), ReadyState::Open.name())
+    );
+    assert_ne!(
+        error,
+        super::ReadyStateError::new(ReadyState::Open.name(), ReadyState::Closed.name())
+    );
+}
