@@ -585,17 +585,45 @@ const agree = (cells, keysOf) => {
   );
 };
 
+// a Rust variant's keys: its own, and, where its first word is a regular English participle, the
+// stems it may come of, as std's `io::ErrorKind::TimedOut` names the end a timeout met: -ed or -d
+// taken off, and a doubled last consonant single again, `Disconnected` a disconnect, `Cancelled` a
+// cancel, `TimedOut` a timeout (0044)
+//
+// ! a stem that is no word, `Disconnecte`, matches only a name no side writes, and a row is placed
+// by hand, under review
+const endOf = (variant, kind) => {
+  const [first, ...rest] = variant.split(/(?=[A-Z])/);
+  const stems = [first.replace(/ed$/, ''), first.replace(/d$/, '')]
+    .filter((stem) => {
+      return stem !== first;
+    })
+    .flatMap((stem) => {
+      return /([b-df-hj-np-tv-z])\1$/i.test(stem) ? [stem, stem.slice(0, -1)] : [stem];
+    });
+  const names = [
+    variant,
+    ...stems.map((stem) => {
+      return `${stem}${rest.join('')}`;
+    }),
+  ];
+
+  return names.map((name) => {
+    return keyOf(name, kind);
+  });
+};
+
 /**
  * The renderings, each the rule a record states: whether the row's first names, `{ side: [{ name,
  * kind }] }`, render each other by it.
  */
 export const RULES = Object.freeze({
-  // a TypeScript `…Error` is C#'s `…Exception`, and a Rust `…Error` or an error enum's variant
-  // (0007, 0044)
+  // a TypeScript `…Error` is C#'s `…Exception`, and a Rust `…Error` or an error enum's variant,
+  // named as the error or as the end the operation met (0007, 0044)
   error: (cells) => {
     return agree(cells, (side, { name, kind }) => {
       if (kind === 'variant') {
-        return [keyOf(name.split('::')[1], kind)];
+        return endOf(name.split('::')[1], kind);
       }
 
       return stemOf(keyOf(name, kind), side === 'csharp' ? 'exception' : 'error');

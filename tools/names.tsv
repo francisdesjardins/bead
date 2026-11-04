@@ -1,4 +1,4 @@
-# alone: typescript 335, csharp 71, rust 87
+# alone: typescript 333, csharp 71, rust 87
 # concept	typescript	csharp	rust	class
 ACCEPT_TIMEOUT	ACCEPT_TIMEOUT [constant]	-	ACCEPT_TIMEOUT [constant]	same
 AccessRefusal	IAccessRefusal [record]	AccessRefusal [record]	AccessRefusal [record]	same
@@ -41,6 +41,7 @@ BrokerTransportServerOptions	IBrokerTransportServerOptions [record]	BrokerTransp
 CallAddress	-	CallAddress [record]	CallAddress [record]	same
 CallError	-	-	CallError [choice]	own: a Result's error, where the other sides throw (0044)
 CallSession	ICallSession [record]	CallSession [record]	CallSession [record]	same
+CancelError	CancelError [record]	-	CallError::Cancelled [variant]	rendered: error (0007, 0044)
 CancelHeader	ICancelHeader [record]	CancelHeader [record]	CancelHeader [record]	same
 ChunkHeader	IChunkHeader [record]	ChunkHeader [record]	ChunkHeader [record]	same
 Client	IClient [record], createClient [function]	IClient [record]	Client [record]	same
@@ -76,7 +77,7 @@ Destination	IDestination [record]	Destination [record]	Destination [record]	same
 DestinationOptions	IDestinationOptions [record]	DestinationOptions [record]	DestinationOptions [record]	same
 DestinationRegistration	IDestinationRegistration [record]	DestinationRegistration [record]	DestinationRegistration [record]	same
 detailBoundOf	detailBoundOf [function]	-	detail_bound_of [function]	same
-DisconnectError	DisconnectError [record]	DisconnectException [record]	-	rendered: error (0007, 0044)
+DisconnectError	DisconnectError [record]	DisconnectException [record]	CallError::Disconnected [variant]	rendered: error (0007, 0044)
 DroppedListener	-	-	DroppedListener [function type]	own: a listener the Rust side registers for an event the other sides emit (0044)
 DurationRefusal	-	-	DurationRefusal [choice]	own: a Result's error, where the other sides throw (0044)
 ElsewhereSession	IElsewhereSession [record]	ElsewhereSession [record]	ElsewhereSession [record]	same
@@ -271,6 +272,7 @@ shareLegBSession	shareLegBSession [function]	-	share_leg_b_session [function]	sa
 Subscriber	ISubscriber [record]	Subscriber [record]	Subscriber [record]	same
 SystemClock	-	-	SystemClock [record]	own: the platform's clock and its timers, which the other sides take from their platform (0044, 0011)
 SystemClockOptions	-	-	SystemClockOptions [record]	own: the platform's clock and its timers, which the other sides take from their platform (0044, 0011)
+TimeoutError	TimeoutError [record]	-	CallError::TimedOut [variant]	rendered: error (0007, 0044)
 Timer	-	-	Timer [record]	own: the platform's clock and its timers, which the other sides take from their platform (0044, 0011)
 TimerCallback	-	-	TimerCallback [function type]	own: the platform's clock and its timers, which the other sides take from their platform (0044, 0011)
 TracedEnvelope	-	TracedEnvelope [record]	TracedEnvelope [record]	same
@@ -345,7 +347,6 @@ CallIds.FirstOf	-	CallIds.FirstOf [function]	-	alone
 CallIds.LastOf	-	CallIds.LastOf [function]	-	alone
 CallIds.PeerOf	-	CallIds.PeerOf [function]	-	alone
 CallIds.SideOf	-	CallIds.SideOf [function]	-	alone
-CancelError	CancelError [record]	-	-	alone
 CapacityError	-	-	CapacityError [record]	alone
 check_records	-	-	check_records [function]	alone
 check_required	-	-	check_required [function]	alone
@@ -713,7 +714,6 @@ templateOf	templateOf [function]	-	-	alone
 TemplateReading	TemplateReading [choice]	-	-	alone
 TextCodec	-	-	TextCodec [record]	alone
 TIMEOUT	TIMEOUT [constant]	-	-	alone
-TimeoutError	TimeoutError [record]	-	-	alone
 TimeoutId	TimeoutId [choice]	-	-	alone
 Traced	-	-	Traced [record]	alone
 TracedError	-	-	TracedError [record]	alone
