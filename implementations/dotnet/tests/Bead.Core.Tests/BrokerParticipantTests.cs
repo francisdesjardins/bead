@@ -832,7 +832,8 @@ public sealed class BrokerParticipantTests
     public async Task Reports_its_link_given_up_on_once_its_reconnection_s_attempts_run_out()
     {
         var broker = new MemoryBroker();
-        var adapter = broker.Adapter(new MemoryBrokerAdapterOptions { Id = "ada" });
+        var memory = broker.Adapter(new MemoryBrokerAdapterOptions { Id = "ada" });
+        var adapter = new CallingAdapter(memory);
         await using var participant = new BrokerParticipant(adapter, new BrokerParticipantOptions
         {
             Reconnect = new TransportClientReconnectOptions { Delay = Immediately, MaximumAttempts = 2 },
@@ -844,10 +845,10 @@ public sealed class BrokerParticipantTests
             reported.TrySetResult(reason);
         };
         await participant.Start();
-        adapter.Lose();
 
         // * its broker holds its id's link of another start already: each attempt is refused
-        await adapter.Start();
+        adapter.Refusing = true;
+        memory.Lose();
         Assert.Equal("the link of ada went down, and 2 attempts did not bring it back", (await reported.Task.WaitAsync(BrokerPair.Patience, Cancelled)).Message);
         Assert.False(participant.IsLinked);
     }
@@ -955,8 +956,8 @@ public sealed class BrokerParticipantTests
         var reported = Hearing(participant);
 
         await participant.Start();
+        recording.Refusing = true;
         adapter.Lose();
-        await adapter.Start();
 
         // * past the 5 attempts a transport client's reconnection makes when it names none
         await BrokerPair.Until(
@@ -968,7 +969,7 @@ public sealed class BrokerParticipantTests
         Assert.Equal(([], false), (WordsOf(reported), participant.IsLinked));
 
         // its broker lets it through: linked again, by its own reconnection
-        await adapter.Stop();
+        recording.Refusing = false;
         await BrokerPair.Until(
             () =>
             {
@@ -992,8 +993,8 @@ public sealed class BrokerParticipantTests
         var reported = Hearing(participant);
 
         await participant.Start();
+        recording.Refusing = true;
         adapter.Lose();
-        await adapter.Start();
         await BrokerPair.Until(
             () =>
             {
@@ -1001,8 +1002,9 @@ public sealed class BrokerParticipantTests
             },
             "its attempts refused");
 
-        // * its stop ends its link, the test's own among it: its broker would let it through now
+        // * its stop ends its reconnection: its broker would let it through now
         await participant.Stop();
+        recording.Refusing = false;
 
         var stopped = StartsIn(recording);
 
@@ -1056,7 +1058,8 @@ public sealed class BrokerParticipantTests
     public async Task Links_anew_at_its_next_start_once_its_reconnection_ended()
     {
         var broker = new MemoryBroker();
-        var adapter = broker.Adapter(new MemoryBrokerAdapterOptions { Id = "ada" });
+        var memory = broker.Adapter(new MemoryBrokerAdapterOptions { Id = "ada" });
+        var adapter = new CallingAdapter(memory);
         await using var participant = new BrokerParticipant(adapter, new BrokerParticipantOptions
         {
             Reconnect = new TransportClientReconnectOptions { Delay = Immediately, MaximumAttempts = 2 },
@@ -1067,8 +1070,9 @@ public sealed class BrokerParticipantTests
 
         var former = participant.Incarnation;
 
-        adapter.Lose();
-        await adapter.Start();
+        // its broker holds its id's link of another start already, decided before the loss is heard
+        adapter.Refusing = true;
+        memory.Lose();
         await BrokerPair.Until(
             () =>
             {
@@ -1078,13 +1082,13 @@ public sealed class BrokerParticipantTests
         Assert.Equal(["the link of ada went down, and 2 attempts did not bring it back"], WordsOf(reported));
 
         // its broker lets it through: it stays down until it is started
-        await adapter.Stop();
+        adapter.Refusing = false;
         await participant.Scheduler.WhenIdle();
         Assert.False(participant.IsLinked);
 
         // * its next start links it anew, another incarnation, not the first start's outcome
         await participant.Start().WaitAsync(BrokerPair.Patience, Cancelled);
-        Assert.Equal((true, true), (participant.IsLinked, adapter.IsLinked));
+        Assert.Equal((true, true), (participant.IsLinked, memory.IsLinked));
         Assert.NotEqual(former, participant.Incarnation);
     }
 

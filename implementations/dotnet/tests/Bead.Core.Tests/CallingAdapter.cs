@@ -8,13 +8,18 @@ namespace Bead.Tests;
 /// <see cref="Secure"/> says when given; each start after its first <see cref="Starts"/> refused as
 /// it returns when given; its first <see cref="Refuses"/> starts refused as a misuse, as an adapter
 /// whose link is up already refuses one, when given; each start waiting for its stop's token, then
-/// failing, where <see cref="GivesUp"/> says so; and each start after its first
-/// <see cref="HoldsStart"/> held, heeding no token, until the test releases it, when given.
+/// failing, where <see cref="GivesUp"/> says so; each start after its first
+/// <see cref="HoldsStart"/> held, heeding no token, until the test releases it, when given; and each
+/// start refused as a misuse while <see cref="Refusing"/> holds, as its broker would refuse one while
+/// a link of its id is up, decided before its participant hears a loss, so no thread races it.
 /// </summary>
 internal sealed class CallingAdapter(MemoryBrokerAdapter inner) : IBrokerAdapter
 {
     // the starts it holds, unreleased, the first asked first
     private readonly ConcurrentQueue<TaskCompletionSource> _held = new();
+
+    // whether a start is refused as a misuse, set by the test from its own thread
+    private volatile bool _refusing;
 
     public long? Room { get; init; }
 
@@ -27,6 +32,20 @@ internal sealed class CallingAdapter(MemoryBrokerAdapter inner) : IBrokerAdapter
     public bool GivesUp { get; init; }
 
     public int? HoldsStart { get; init; }
+
+    /// <summary>Whether each start is refused as a misuse, as a link of its id up already is.</summary>
+    public bool Refusing
+    {
+        get
+        {
+            return _refusing;
+        }
+
+        set
+        {
+            _refusing = value;
+        }
+    }
 
     /// <summary>The starts it holds, unreleased.</summary>
     public int Holding
@@ -125,7 +144,7 @@ internal sealed class CallingAdapter(MemoryBrokerAdapter inner) : IBrokerAdapter
             return Task.FromException(new IOException("refused at once"));
         }
 
-        if (Refuses is { } refuses && started <= refuses)
+        if (_refusing || (Refuses is { } refuses && started <= refuses))
         {
             return Task.FromException(new InvalidOperationException($"the link of {Id} is up already"));
         }
