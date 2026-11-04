@@ -566,36 +566,15 @@ async fn counted_through<Req: PayloadCodec<Value = String>>(
 // a request's call counted once, a failure under PROCEDURE_FAILED, never as its codec's refusal
 // nor as an error
 fn assert_counted_procedure_failed(counted: &[String]) {
-    assert!(
-        counted.contains(&"bead_server_call_started_total{type=\"request\"} 1".to_owned()),
-        "started once: {counted:?}"
-    );
-    assert!(
-        counted.contains(
-            &"bead_server_call_handled_total{type=\"request\",outcome=\"failure\",code=\"PROCEDURE_FAILED\"} 1"
-                .to_owned()
-        ),
-        "handled a failure, PROCEDURE_FAILED: {counted:?}"
-    );
     assert_eq!(
-        counted
-            .iter()
-            .filter(|line| line.starts_with("bead_server_call_handled_total"))
-            .count(),
-        1,
-        "handled once: {counted:?}"
-    );
-    assert!(
-        !counted
-            .iter()
-            .any(|line| line.contains("PAYLOAD_UNDECODABLE")),
-        "never as its codec's refusal: {counted:?}"
-    );
-    assert!(
-        !counted
-            .iter()
-            .any(|line| line.contains("outcome=\"error\"")),
-        "never as an error: {counted:?}"
+        counted,
+        [
+            "bead_server_call_duration_seconds_bucket{type=\"request\",le=\"0.0\"} 1",
+            "bead_server_call_duration_seconds_count{type=\"request\"} 1",
+            "bead_server_call_handled_total{type=\"request\",outcome=\"failure\",code=\"PROCEDURE_FAILED\"} 1",
+            "bead_server_call_started_total{type=\"request\"} 1",
+        ],
+        "one immediate failure, never PAYLOAD_UNDECODABLE or an error"
     );
 }
 
