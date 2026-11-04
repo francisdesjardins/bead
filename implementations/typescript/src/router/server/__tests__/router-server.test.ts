@@ -28,6 +28,7 @@ import type {
   IHandedRequestHeader,
   INotificationLike,
   IProcedure,
+  IRequestResolverDependencies,
   IRequestResolverProps,
   OutgoingEnvelope,
   RequestCredential,
@@ -5511,6 +5512,84 @@ test.describe('createRouterServer, its metrics', () => {
         return line.startsWith('bead_subscriptions_dropped_total');
       })
     ).toEqual([]);
+  });
+
+  // echo served on the first connection with `dependencies`, a request delivered to it: what it
+  // sent, what it reported and what the registry counted of its server calls
+  const countedThrough = async (
+    dependencies: IRequestResolverDependencies<string, string, Handle>
+  ) => {
+    const metricsRegistry = createMetricsRegistry();
+    const { deliver, open, sent, transport } = createScriptedTransport();
+    using router = createRouterServer(transport, { clock: createTestClock(), metricsRegistry });
+    const errors = recordErrors(router);
+    const reached: string[] = [];
+    const services = createServiceManager(router);
+
+    services.getRequestResolver(
+      echo,
+      dependencies
+    )((request, response) => {
+      reached.push(request.payload);
+
+      return response(request.payload);
+    });
+    open(first);
+    deliver(first, requestOf(1, { payload: text.encode('x') }));
+    await sleep(0);
+
+    // never reaching the callback
+    expect(reached).toEqual([]);
+
+    return {
+      answers: answersOf(sent),
+      counted: countedOf(metricsRegistry).filter((line) => {
+        return line.startsWith('bead_server_call_');
+      }),
+      errors,
+    };
+  };
+
+  // a request's call counted once, a failure under PROCEDURE_FAILED: never as its codec's refusal,
+  // PAYLOAD_UNDECODABLE, nor as an error
+  const echoed = lineOf('bead_server_call_', 'service="2",procedure="echo",type="request"');
+  const countedProcedureFailed = [
+    echoed('duration_seconds_count{} 1'),
+    echoed('handled_total{outcome="failure",code="PROCEDURE_FAILED"} 1'),
+    echoed('started_total{} 1'),
+  ];
+
+  // debugging 9.4.14, spec 9.0, 17.2
+  test('counts a request whose codec throws other than its refusal as failure PROCEDURE_FAILED', async () => {
+    // * a TypeError, not the SyntaxError a codec refuses with: its side's own error
+    const broken = new TypeError('this codec breaks as it reads, on purpose');
+    const { answers, counted, errors } = await countedThrough({
+      serializer: {
+        ...answering,
+        decode: () => {
+          throw broken;
+        },
+      },
+    });
+
+    expect(answers).toEqual([[first, 'failure', 1, ProtocolCode.PROCEDURE_FAILED]]);
+    expect(errors).toEqual([[broken, first]]);
+    expect(counted).toEqual(countedProcedureFailed);
+  });
+
+  // debugging 9.4.14, spec 18.2
+  test('counts a request whose rule fails to judge as failure PROCEDURE_FAILED', async () => {
+    const broken = new RangeError('this rule fails to judge, on purpose');
+    const { answers, counted, errors } = await countedThrough({
+      serializer: answering,
+      validate: () => {
+        throw broken;
+      },
+    });
+
+    expect(answers).toEqual([[first, 'failure', 1, ProtocolCode.PROCEDURE_FAILED]]);
+    expect(errors).toEqual([[broken, first]]);
+    expect(counted).toEqual(countedProcedureFailed);
   });
 
   test('one registry given to a client’s router and a server’s counts a call at each of its ends, a command among them', async () => {

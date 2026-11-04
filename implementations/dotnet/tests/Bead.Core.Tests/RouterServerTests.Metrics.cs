@@ -36,6 +36,44 @@ public sealed partial class RouterServerTests
         })];
     }
 
+    // echo served on the first connection through `dependencies`, a request delivered to it: what
+    // it sent, what it reported and what the registry counted of it
+    private async Task<(List<string> Sent, List<string> Reported, List<string> Counted)> CountedThrough(RequestResolverDependencies<string, string> dependencies)
+    {
+        var registry = new MetricsRegistry();
+        var reached = new List<string>();
+
+        Start(new RouterServerOptions { MetricsRegistry = registry });
+        _transport.Open(First);
+        Services.GetRequestResolver(Echo, dependencies)((request, response) =>
+        {
+            reached.Add(request.Payload);
+
+            return response.Answer(request.Payload);
+        });
+
+        Deliver(First, RequestOf(1, Echo, "x"));
+        await Settle();
+
+        Assert.Empty(reached);
+
+        return (SentSince(), Reported(), CountedOf((registry, "echo")));
+    }
+
+    // a request's call counted once, a failure under PROCEDURE_FAILED, never as its codec's refusal
+    // nor as an error
+    private static void AssertCountedProcedureFailed(List<string> counted)
+    {
+        Assert.Equal(
+            [
+                "bead_server_call_duration_seconds_bucket{type=\"request\",le=\"0.0\"} 1",
+                "bead_server_call_duration_seconds_count{type=\"request\"} 1",
+                "bead_server_call_handled_total{type=\"request\",outcome=\"failure\",code=\"PROCEDURE_FAILED\"} 1",
+                "bead_server_call_started_total{type=\"request\"} 1",
+            ],
+            counted);
+    }
+
     // definition
 
     // debugging 9.2
@@ -171,6 +209,35 @@ public sealed partial class RouterServerTests
         {
             return line.StartsWith("bead_subscriptions_dropped_total", StringComparison.Ordinal);
         });
+    }
+
+    // debugging 9.4.14, spec 9.0, 17.2
+    [Fact]
+    public async Task Counts_a_request_whose_codec_throws_other_than_its_refusal_as_failure_PROCEDURE_FAILED()
+    {
+        var (sent, reported, counted) = await CountedThrough(new RequestResolverDependencies<string, string> { Serializer = new Unreadable() });
+
+        Assert.Equal(["first failure 1 ProcedureFailed"], sent);
+        Assert.Equal(["this codec breaks as it reads, on purpose first"], reported);
+        AssertCountedProcedureFailed(counted);
+    }
+
+    // debugging 9.4.14, spec 18.2
+    [Fact]
+    public async Task Counts_a_request_whose_rule_fails_to_judge_as_failure_PROCEDURE_FAILED()
+    {
+        var (sent, reported, counted) = await CountedThrough(new RequestResolverDependencies<string, string>
+        {
+            Serializer = Text,
+            Validate = (_, _) =>
+            {
+                throw new InvalidOperationException("this rule fails to judge, on purpose");
+            },
+        });
+
+        Assert.Equal(["first failure 1 ProcedureFailed"], sent);
+        Assert.Equal(["this rule fails to judge, on purpose first"], reported);
+        AssertCountedProcedureFailed(counted);
     }
 
     // debugging 9.7
@@ -359,6 +426,21 @@ public sealed partial class RouterServerTests
         public Task Handle(RequestResolverProps props)
         {
             return Task.FromException(new InvalidOperationException("this handler breaks, on purpose"));
+        }
+    }
+
+    // a codec of text that throws as it reads, as an application's might: its throw other than its
+    // refusal, the FormatException
+    private sealed class Unreadable : IRequestSerializerServer<string, string>
+    {
+        public string Decode(ReadOnlyMemory<byte> request)
+        {
+            throw new InvalidOperationException("this codec breaks as it reads, on purpose");
+        }
+
+        public ReadOnlyMemory<byte> Encode(string response)
+        {
+            return BytesOf(response);
         }
     }
 }
