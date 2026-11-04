@@ -44,6 +44,9 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     private long _namesBound = AmqpMessages.LargestBound;
     private int _unsettled;
 
+    // its dispose, which every later one shares: set under its gate, and a start after it refused
+    private Task? _disposed;
+
     // the links each connection draws, so that no two of one connection share a name
     private int _drawn;
 
@@ -232,6 +235,8 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     /// none. A connection refused or ended, or a sender refused, before then fails it naming why, an
     /// <see cref="IOException"/>; no password, or none of it, within its connect timeout, a
     /// <see cref="TimeoutException"/>; a link up already, an <see cref="InvalidOperationException"/>.
+    /// Refused with an <see cref="ObjectDisposedException"/> once disposed, before anything moves
+    /// (decision 0003).
     /// </summary>
     public async Task Start(BrokerStart? start = null)
     {
@@ -244,6 +249,12 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
         lock (_gate)
         {
+            // ! a dispose is final: a start after it is its application's misuse (decision 0003)
+            if (_disposed is not null)
+            {
+                throw new ObjectDisposedException(null, $"the adapter of {Id} is disposed");
+            }
+
             if (_link is { IsEnded: false })
             {
                 throw new InvalidOperationException($"the link of {Id} is up already");
@@ -853,10 +864,35 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         }
     }
 
-    /// <summary>As <see cref="Stop"/>.</summary>
+    /// <summary>
+    /// Stops it, then ends it for good (decision 0003): a start after it is its application's
+    /// misuse, an <see cref="ObjectDisposedException"/>; a later dispose settles with the first.
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
-        await Stop();
+        var disposing = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task disposed;
+
+        lock (_gate)
+        {
+            _disposed ??= disposing.Task;
+            disposed = _disposed;
+        }
+
+        if (disposed == disposing.Task)
+        {
+            try
+            {
+                await Stop();
+                disposing.SetResult();
+            }
+            catch (Exception reason)
+            {
+                disposing.SetException(reason);
+            }
+        }
+
+        await disposed;
     }
 
     /// <summary>

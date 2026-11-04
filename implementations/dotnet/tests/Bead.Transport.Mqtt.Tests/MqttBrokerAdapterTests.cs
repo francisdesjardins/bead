@@ -1684,4 +1684,25 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         Assert.Equal(MqttDisconnectReasonCode.NormalDisconnection, (await held.Next<MqttDisconnectPacket>()).ReasonCode);
         Assert.Single(held.PacketsOf<MqttPublishPacket>());
     }
+
+    // decision 0003
+    [Fact]
+    public async Task Refuses_a_start_once_disposed_its_state_kept_and_disposes_once_stopping_it_first()
+    {
+        var adapter = AdapterOf();
+        var link = await LinkUp((adapter, _script));
+
+        // * two disposes: one stop, one DISCONNECT of 0x00
+        await Task.WhenAll(adapter.DisposeAsync().AsTask(), adapter.DisposeAsync().AsTask()).WaitAsync(Patience, Cancelled);
+        await link.Closed.WaitAsync(Patience, Cancelled);
+        Assert.Single(link.PacketsOf<MqttDisconnectPacket>());
+        Assert.False(adapter.IsLinked);
+
+        // * a start after it: its application's misuse, refused before anything goes
+        Assert.Equal("the adapter of ada is disposed", (await Assert.ThrowsAsync<ObjectDisposedException>(() =>
+        {
+            return adapter.Start();
+        })).Message);
+        Assert.False(adapter.IsLinked);
+    }
 }

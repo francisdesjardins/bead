@@ -43,6 +43,9 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     private long _publicationBound = MqttPackets.LargestPacketSize;
     private int _unsettled;
 
+    // its dispose, which every later one shares: set under its gate, and a start after it refused
+    private Task? _disposed;
+
     /// <summary>
     /// An adapter of <see cref="MqttBrokerAdapterOptions.Id"/> to the broker at
     /// <see cref="MqttBrokerAdapterOptions.Uri"/>, not yet started. A scheme but <c>mqtt</c>,
@@ -212,7 +215,8 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     /// does not authenticate it; settles once its CONNACK said 0x00. A CONNACK of any other code, or of
     /// Maximum QoS 0, fails it naming it, a <see cref="IOException"/>; no password nor CONNACK within
     /// its connect timeout, a <see cref="TimeoutException"/>; a link up already, an
-    /// <see cref="InvalidOperationException"/>.
+    /// <see cref="InvalidOperationException"/>. Refused with an <see cref="ObjectDisposedException"/>
+    /// once disposed, before anything moves (decision 0003).
     /// </summary>
     public async Task Start(BrokerStart? start = null)
     {
@@ -221,6 +225,14 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
         lock (_gate)
         {
+            // ! a dispose is final: a start after it is its application's misuse (decision 0003)
+            if (_disposed is not null)
+            {
+                client.Dispose();
+
+                throw DisposedRefusal();
+            }
+
             if (_link is { IsEnded: false })
             {
                 client.Dispose();
@@ -560,10 +572,41 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         }
     }
 
-    /// <summary>As <see cref="Stop"/>.</summary>
+    /// <summary>
+    /// Stops it, then ends it for good (decision 0003): a start after it is its application's
+    /// misuse, an <see cref="ObjectDisposedException"/>; a later dispose settles with the first.
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
-        await Stop();
+        var disposing = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task disposed;
+
+        lock (_gate)
+        {
+            _disposed ??= disposing.Task;
+            disposed = _disposed;
+        }
+
+        if (disposed == disposing.Task)
+        {
+            try
+            {
+                await Stop();
+                disposing.SetResult();
+            }
+            catch (Exception reason)
+            {
+                disposing.SetException(reason);
+            }
+        }
+
+        await disposed;
+    }
+
+    // what a start after its dispose is refused with
+    private ObjectDisposedException DisposedRefusal()
+    {
+        return new ObjectDisposedException(null, $"the adapter of {Id} is disposed");
     }
 
     // a Maximum Packet Size, a Four Byte Integer no larger than the largest packet MQTT 5 writes

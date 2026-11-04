@@ -286,27 +286,7 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
     /// </summary>
     public Task Stop()
     {
-        return _life.Stop(() =>
-        {
-            return _participant.Scheduler.Run(async () =>
-            {
-                List<string> names;
-
-                lock (_gate)
-                {
-                    names = [.. _subscribed];
-                }
-
-                foreach (var connection in _held.ToList())
-                {
-                    connection.Close((1001, false));
-                }
-
-                // * all let go at once, a name counted until its UNSUBACK came: its broker's word, not
-                // the request's
-                await Task.WhenAll(names.Select(LeaveOne));
-            });
-        });
+        return _life.Stop(Stopping);
     }
 
     /// <summary>As <see cref="Stop"/>: a server's facade stops its transport with it.</summary>
@@ -315,10 +295,37 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
         return Stop();
     }
 
-    /// <summary>As <see cref="Stop"/>.</summary>
+    /// <summary>
+    /// Stops it, as <see cref="Stop"/>, then ends it for good (decision 0003): a start after it is
+    /// its application's misuse, an <see cref="ObjectDisposedException"/>, its state kept; a later
+    /// dispose settles with the first. Its participant is its application's to dispose.
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
-        await Stop();
+        await _life.Dispose(Stopping);
+    }
+
+    // its stop's body, in its participant's turn: each connection closed with 1001, its names let go
+    private Task Stopping()
+    {
+        return _participant.Scheduler.Run(async () =>
+        {
+            List<string> names;
+
+            lock (_gate)
+            {
+                names = [.. _subscribed];
+            }
+
+            foreach (var connection in _held.ToList())
+            {
+                connection.Close((1001, false));
+            }
+
+            // * all let go at once, a name counted until its UNSUBACK came: its broker's word, not
+            // the request's
+            await Task.WhenAll(names.Select(LeaveOne));
+        });
     }
 
     /// <summary>Closes a connection with a CLOSE of 1000, its close told clean; false when it held none by that handle.</summary>

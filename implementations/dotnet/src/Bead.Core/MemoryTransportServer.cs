@@ -166,8 +166,9 @@ public sealed class MemoryTransportServer : IServerTransport, IAsyncDisposable
 
     /// <summary>
     /// Takes connects from now on, and gives where: <c>local</c>, port 0, since it serves no port.
-    /// Refused with an <see cref="InvalidOperationException"/> unless Uninitialized or Closed — a
-    /// second start even while the first is under way.
+    /// Refused with an <see cref="ObjectDisposedException"/> once disposed, its state kept; then with
+    /// an <see cref="InvalidOperationException"/> unless Uninitialized or Closed — a second start
+    /// even while the first is under way.
     /// </summary>
     public Task<TransportServerAddress> Start()
     {
@@ -295,10 +296,14 @@ public sealed class MemoryTransportServer : IServerTransport, IAsyncDisposable
         return Task.CompletedTask;
     }
 
-    /// <summary>As <see cref="Stop"/>.</summary>
+    /// <summary>
+    /// Stops it, as <see cref="Stop"/>, then ends it for good (decision 0003): a start after it is
+    /// its application's misuse, an <see cref="ObjectDisposedException"/>, its state kept; a later
+    /// dispose settles with the first.
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
-        await Stop();
+        await _life.Dispose(Stopping);
     }
 
     /// <summary>

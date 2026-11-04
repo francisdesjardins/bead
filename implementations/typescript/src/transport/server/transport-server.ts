@@ -232,6 +232,8 @@ export const createTransportServer = <Socket extends object, Request>(
     port: 0,
   };
   let stopping: Promise<void> | undefined;
+  // ! its dispose, final: a start since is its application's misuse; later disposes share it
+  let disposed: Promise<void> | undefined;
   let hasStarted = false;
 
   // each listener within a guard (spec 15.1): what one throws is reported with the connection it
@@ -353,6 +355,11 @@ export const createTransportServer = <Socket extends object, Request>(
       }
     },
     start: async (options) => {
+      // ! disposed: final, refused before anything moves (decision 0003)
+      if (disposed !== undefined) {
+        throw new ProgrammerError('the transport server is disposed');
+      }
+
       // * what its transport's owner forbids first, as a connect's options are held first
       implementation.assertStart?.();
 
@@ -416,8 +423,11 @@ export const createTransportServer = <Socket extends object, Request>(
 
       return stopping;
     },
+    // * stopped, then done for good: a later dispose settles with the first
     [Symbol.asyncDispose]: () => {
-      return server.stop();
+      disposed ??= server.stop();
+
+      return disposed;
     },
   };
 

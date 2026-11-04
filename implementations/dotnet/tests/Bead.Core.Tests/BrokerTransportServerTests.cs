@@ -653,4 +653,30 @@ public sealed class BrokerTransportServerTests
             return inner.Stop();
         }
     }
+
+    // decision 0003
+    [Fact]
+    public async Task Refuses_a_start_once_disposed_its_state_kept_and_disposes_once_stopping_it_first()
+    {
+        var broker = new MemoryBroker();
+        var calling = new CallingAdapter(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "ada" }));
+        await using var participant = new BrokerParticipant(calling);
+        var server = participant.Server(new BrokerTransportServerOptions { Names = ["interop"] });
+
+        await server.Start();
+
+        // * two disposes: its name let go once, its participant's link kept
+        await Task.WhenAll(server.DisposeAsync().AsTask(), server.DisposeAsync().AsTask());
+        Assert.Equal(ReadyState.Closed, server.ReadyState);
+        Assert.Equal(["start", "subscribe bead/i/ada", "subscribe bead/s/interop", "unsubscribe bead/s/interop"], calling.Calls);
+        Assert.True(participant.IsLinked);
+
+        // * a start after it: its application's misuse, its state kept, nothing asked of its adapter
+        Assert.Equal("the transport server is disposed", (await Assert.ThrowsAsync<ObjectDisposedException>(() =>
+        {
+            return server.Start();
+        })).Message);
+        Assert.Equal(ReadyState.Closed, server.ReadyState);
+        Assert.Equal(4, calling.Calls.Count);
+    }
 }

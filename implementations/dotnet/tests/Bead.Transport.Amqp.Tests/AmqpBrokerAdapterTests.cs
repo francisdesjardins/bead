@@ -3290,4 +3290,25 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
         Assert.Null(Assert.Single(held.Of<AmqpClose>()).Error);
         Assert.Single(TransfersTo((held, "/exchanges/bead/bead.i.peer")));
     }
+
+    // decision 0003
+    [Fact]
+    public async Task Refuses_a_start_once_disposed_its_state_kept_and_disposes_once_stopping_it_first()
+    {
+        var adapter = AdapterOf();
+        var connection = await LinkUp((adapter, _script));
+
+        // * two disposes: one stop, one CLOSE
+        await Task.WhenAll(adapter.DisposeAsync().AsTask(), adapter.DisposeAsync().AsTask()).WaitAsync(Patience, Cancelled);
+        await connection.Closed.WaitAsync(Patience, Cancelled);
+        Assert.Single(connection.Of<AmqpClose>());
+        Assert.False(adapter.IsLinked);
+
+        // * a start after it: its application's misuse, refused before anything goes
+        Assert.Equal("the adapter of ada is disposed", (await Assert.ThrowsAsync<ObjectDisposedException>(() =>
+        {
+            return adapter.Start();
+        })).Message);
+        Assert.False(adapter.IsLinked);
+    }
 }
