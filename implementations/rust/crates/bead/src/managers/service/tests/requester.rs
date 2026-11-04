@@ -39,6 +39,28 @@ fn command() -> Procedure {
 }
 
 #[tokio::test]
+async fn is_named_after_its_procedure_and_carries_it() {
+    let fixture = ClientFixture::new();
+    for procedure in [
+        echo(),
+        Procedure {
+            procedure_id: 72,
+            procedure_kind: Some(ProcedureKind::Request),
+            ..echo()
+        },
+    ] {
+        let request = fixture
+            .manager
+            .get_request(&procedure, RequestDependencies::new(TextCodec, TextCodec))
+            .expect("a request declared");
+        assert_eq!(request.procedure().procedure_name, "echo");
+        assert_eq!(request.procedure(), &procedure);
+    }
+    assert_eq!(fixture.transport.envelopes(), []);
+    fixture.router.dispose().await;
+}
+
+#[tokio::test]
 async fn declares_its_requester_to_its_router_as_it_is_made_and_hands_each_of_its_calls_the_series_it_gave()
  {
     let registry =
