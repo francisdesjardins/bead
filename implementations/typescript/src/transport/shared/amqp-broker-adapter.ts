@@ -164,6 +164,8 @@ interface IIncarnation {
   /** Its broker's OPEN's channel-max: its sessions number one more at most. */
   channelMax: number;
   readonly connection: Connection;
+  /** Told, while its stop drains it, each time a publication settles. */
+  drained: (() => void) | undefined;
   /** What its awaited operations are failed with as it ends. */
   readonly failures: Set<(error: Error) => void>;
   inbox: IReceiving | undefined;
@@ -185,6 +187,8 @@ interface IIncarnation {
   readonly reattached: Set<string>;
   /** Its two sending sessions: to inboxes, and to names. */
   readonly sending: { inboxes: ISending | undefined; names: ISending | undefined };
+  /** Its stop under way, which a later stop shares. */
+  stopping: Promise<void> | undefined;
 }
 
 type SendingKind = keyof IIncarnation['sending'];
@@ -365,7 +369,10 @@ const assertAuthentication = ({
  * to its sender's credit, later ones waiting in their order; `accepted` is taken, `released` no
  * subscriber, any other outcome refuses it. The end of its connection, of its inbox's session or
  * receiver, is its link lost; a name's receiver its broker ends is attached again once, on a
- * session of its own. No link of an id takes another over. Its leg is secure under TLS or to the
+ * session of its own. Its stop, within its connectTimeout, takes no publication, sends what waits on
+ * a sender's credit and awaits each outcome, fails what has not gone by then, detaches each
+ * receiver, ends each session and closes its connection with no error. No link of an id takes
+ * another over. Its leg is secure under TLS or to the
  * loopback; it runs in Node alone.
  *
  * @example
@@ -491,6 +498,127 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
     }
 
     sending.pending.clear();
+  };
+
+  // * what it was handed to publish before its stop, sent and its outcome come first: settles once
+  // nothing waits on a sender's credit or for its outcome (spec 15.24)
+  const drain = (incarnation: IIncarnation): Promise<void> => {
+    return new Promise<void>((resolve) => {
+      incarnation.drained = () => {
+        const isDrained = Object.values(incarnation.sending).every((sending) => {
+          return (
+            sending === undefined ||
+            sending.isEnded ||
+            (sending.waiting.length === 0 && sending.pending.size === 0)
+          );
+        });
+
+        if (isDrained) {
+          incarnation.drained = undefined;
+          resolve();
+        }
+      };
+      incarnation.drained();
+    });
+  };
+
+  // * its stop, once, within one bounded shutdown: no down told, a stop is no loss, and no
+  // publication taken from it; what it was handed sent first, then what is left failed, each
+  // receiver detached, each session ended and its CLOSE sent
+  const endOf = async (incarnation: IIncarnation): Promise<void> => {
+    incarnation.isLinked = false;
+    incarnation.isUp = false;
+
+    const { connection } = incarnation;
+    // * one bounded shutdown: what does not come within it is not waited for
+    const bounded = Promise.withResolvers<void>();
+    const timer = PLATFORM_CLOCK.setTimeout(
+      bounded.resolve,
+      Math.min(connectTimeout, LONGEST_TIMER)
+    );
+    const gone = new Promise<void>((resolve) => {
+      connection.once('connection_close', () => {
+        resolve();
+      });
+      connection.once('disconnected', () => {
+        resolve();
+      });
+    });
+
+    // ! before what waits is failed below: what it was handed goes first, its outcome awaited
+    await Promise.race([bounded.promise, gone, drain(incarnation)]);
+    incarnation.drained = undefined;
+    incarnation.isRetired = true;
+
+    if (current === incarnation) {
+      current = undefined;
+      unsettled = 0;
+    }
+
+    const stopped = new GenericError(`the link of ${id} stopped`);
+
+    for (const fail of incarnation.failures) {
+      fail(stopped);
+    }
+
+    incarnation.failures.clear();
+
+    for (const sending of Object.values(incarnation.sending)) {
+      if (sending !== undefined) {
+        endSending(sending, stopped);
+      }
+    }
+
+    if (connection.is_open()) {
+      // * each receiver detached, its DETACH awaited, then each session ended
+      const receivings = [
+        ...(incarnation.inbox === undefined ? [] : [incarnation.inbox]),
+        ...incarnation.names.values(),
+      ];
+
+      await Promise.race([
+        bounded.promise,
+        gone,
+        Promise.all(
+          receivings.map(({ receiver }) => {
+            return new Promise<void>((resolve) => {
+              if (receiver === undefined || !receiver.is_open()) {
+                resolve();
+
+                return;
+              }
+
+              receiver.once('receiver_close', () => {
+                resolve();
+              });
+              close(receiver);
+            });
+          })
+        ),
+      ]);
+
+      for (const { session } of receivings) {
+        endSession(session);
+      }
+
+      endSession(incarnation.inboxSession);
+
+      for (const sending of Object.values(incarnation.sending)) {
+        endSession(sending?.session);
+      }
+
+      // * then its CLOSE, of no error, and its peer's awaited
+      try {
+        connection.close();
+      } catch {
+        // its socket ended
+      }
+
+      await Promise.race([bounded.promise, gone]);
+    }
+
+    PLATFORM_CLOCK.clearTimeout(timer);
+    abandon(connection);
   };
 
   // * an incarnation ended: what it awaits failed, what it holds let go, its connection abandoned;
@@ -1327,6 +1455,7 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
     const held: IIncarnation = {
       channelMax: 65_535,
       connection,
+      drained: undefined,
       failures: new Set(),
       inbox: undefined,
       inboxSession: undefined,
@@ -1337,6 +1466,7 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
       pending: new Map(),
       reattached: new Set(),
       sending: { inboxes: undefined, names: undefined },
+      stopping: undefined,
     };
 
     current = held;
@@ -1559,6 +1689,8 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
           } else {
             resolve(published ?? BROKER_PUBLISHED.TAKEN);
           }
+
+          incarnation.drained?.();
         };
         const entry = {
           fail: (error: Error) => {
@@ -1659,93 +1791,8 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
         return;
       }
 
-      // * no down told: a stop is no loss
-      incarnation.isLinked = false;
-      incarnation.isRetired = true;
-      incarnation.isUp = false;
-      current = undefined;
-      unsettled = 0;
-
-      const stopped = new GenericError(`the link of ${id} stopped`);
-
-      for (const fail of incarnation.failures) {
-        fail(stopped);
-      }
-
-      incarnation.failures.clear();
-
-      for (const sending of Object.values(incarnation.sending)) {
-        if (sending !== undefined) {
-          endSending(sending, stopped);
-        }
-      }
-
-      const { connection } = incarnation;
-      // * one bounded shutdown: what does not come within it is not waited for
-      const bounded = Promise.withResolvers<void>();
-      const timer = PLATFORM_CLOCK.setTimeout(
-        bounded.resolve,
-        Math.min(connectTimeout, LONGEST_TIMER)
-      );
-      const gone = new Promise<void>((resolve) => {
-        connection.once('connection_close', () => {
-          resolve();
-        });
-        connection.once('disconnected', () => {
-          resolve();
-        });
-      });
-
-      if (connection.is_open()) {
-        // * each receiver detached, its DETACH awaited, then each session ended
-        const receivings = [
-          ...(incarnation.inbox === undefined ? [] : [incarnation.inbox]),
-          ...incarnation.names.values(),
-        ];
-
-        await Promise.race([
-          bounded.promise,
-          gone,
-          Promise.all(
-            receivings.map(({ receiver }) => {
-              return new Promise<void>((resolve) => {
-                if (receiver === undefined || !receiver.is_open()) {
-                  resolve();
-
-                  return;
-                }
-
-                receiver.once('receiver_close', () => {
-                  resolve();
-                });
-                close(receiver);
-              });
-            })
-          ),
-        ]);
-
-        for (const { session } of receivings) {
-          endSession(session);
-        }
-
-        endSession(incarnation.inboxSession);
-
-        for (const sending of Object.values(incarnation.sending)) {
-          endSession(sending?.session);
-        }
-
-        // * then its CLOSE, of no error, and its peer's awaited
-        try {
-          connection.close();
-        } catch {
-          // its socket ended
-        }
-
-        await Promise.race([bounded.promise, gone]);
-      }
-
-      PLATFORM_CLOCK.clearTimeout(timer);
-      abandon(connection);
+      incarnation.stopping ??= endOf(incarnation);
+      await incarnation.stopping;
     },
     subscribe: (topic, subscription?: IBrokerSubscription) => {
       const incarnation = live();

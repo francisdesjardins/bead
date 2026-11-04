@@ -320,6 +320,49 @@ test('tells a takeover once after clearing names and connections and tells no la
   }
 });
 
+// debugging 13.5
+test('tells a stop once, then its next link’s up as another incarnation, and nothing after a dispose', async () => {
+  const pair = await pairOf();
+  const participant = pair.clientParticipant;
+
+  try {
+    // * a stop, then another with no link between, which tells nothing
+    await participant.stop();
+    await participant.stop();
+    await settled();
+
+    // * its next link, then its dispose, then nothing more: a stop, a dispose, a start refused
+    await participant.start();
+    await settled();
+    await participant[Symbol.asyncDispose]();
+    await participant.stop();
+    await participant[Symbol.asyncDispose]();
+    await expect(participant.start(), 'a start refused').rejects.toThrow(
+      'the participant client is disposed'
+    );
+    await settled();
+
+    const links = pair.events.filter(({ event }) => {
+      return event === 'link';
+    });
+
+    expect(
+      links.map(({ state }) => {
+        return state;
+      }),
+      "each stop told once, its next link's up between them, and nothing after its dispose"
+    ).toEqual(['up', 'stopped', 'up', 'stopped']);
+    expect(links[1]?.ended, 'the connection its stop ended').toEqual([1]);
+    expect(links[1]?.incarnation, 'its stop names the link it ended').toBe(links[0]?.incarnation);
+    expect(links[2]?.incarnation, 'its next link another incarnation').not.toBe(
+      links[1]?.incarnation
+    );
+    expect(links[3]?.incarnation, 'its dispose stops that link').toBe(links[2]?.incarnation);
+  } finally {
+    await pair.stop();
+  }
+});
+
 // debugging 13.6, 13.9
 test('reports a debug listener’s throw and calls later listeners while the participant carries on', async () => {
   const broker = createMemoryBroker();

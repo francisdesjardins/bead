@@ -107,6 +107,10 @@ export interface IMqttBrokerAdapter extends IBrokerAdapter {
 // one network connection, from its CONNECT to its end: every callback of a former one does nothing
 interface IIncarnation {
   readonly client: MqttClient;
+  /** Told, while its stop drains it, each time a publication settles or it ends. */
+  drained: (() => void) | undefined;
+  /** Its stop under way, which a later stop shares. */
+  ending: Promise<void> | undefined;
   /** What its awaited operations are failed with as it ends. */
   readonly failures: Set<(error: Error) => void>;
   /** The filter each topic was subscribed by, which its UNSUBSCRIBE names. */
@@ -226,9 +230,11 @@ const assertAuthentication = ({
  * to its byte and refused past its CONNACK's Maximum Packet Size, held to its CONNACK's Receive
  * Maximum, later ones waiting in their order; its PUBACK of 0x10 says no subscriber, of 0x80 or
  * more refuses it. Each message is handed on before its PUBACK, which goes once it is settled. A
- * DISCONNECT of 0x8E tells its link taken over; any other end, lost; its stop sends a DISCONNECT
- * of 0x00, so that no will goes. Its leg is secure under TLS or to the loopback. In a page, its
- * WebSocket sends no message past 16 KiB, which Chromium sends as one frame.
+ * DISCONNECT of 0x8E tells its link taken over; any other end, lost; its stop takes no publication,
+ * sends what waits on the quota and awaits each PUBACK, within its connectTimeout, fails what has
+ * not gone by then, and sends a DISCONNECT of 0x00, so that no will goes. Its leg is secure under
+ * TLS or to the loopback. In a page, its WebSocket sends no message past 16 KiB, which Chromium
+ * sends as one frame.
  *
  * @example
  * const adapter = createMqttBrokerAdapter({ id: 'server', password, url: 'mqtts://broker:8883' });
@@ -344,6 +350,7 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
     incarnation.failures.clear();
     incarnation.reasons.clear();
     incarnation.filters.clear();
+    incarnation.drained?.();
 
     // ! a client whose network connection never opened has no stream to end
     try {
@@ -425,6 +432,72 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
       incarnation.waiting.length > 0
     ) {
       incarnation.waiting.shift()?.send();
+    }
+
+    incarnation.drained?.();
+  };
+
+  // * what it was handed to publish before its stop, sent and answered first: settles once nothing
+  // waits on the quota and every PUBACK came, its link ended, or its connectTimeout passed
+  // (spec 15.24)
+  const drain = (incarnation: IIncarnation): Promise<void> => {
+    return new Promise<void>((resolve) => {
+      const done = (): void => {
+        PLATFORM_CLOCK.clearTimeout(timer);
+        incarnation.drained = undefined;
+        resolve();
+      };
+      const timer = PLATFORM_CLOCK.setTimeout(done, Math.min(connectTimeout, LONGEST_TIMER));
+
+      incarnation.drained = () => {
+        if (
+          incarnation.isRetired ||
+          (incarnation.waiting.length === 0 && incarnation.inFlight === 0)
+        ) {
+          done();
+        }
+      };
+      incarnation.drained();
+    });
+  };
+
+  // * its stop, once: no down told, a stop is no loss, and no publication taken from it; what it
+  // was handed sent first, then what is left failed and its DISCONNECT of 0x00 sent
+  const endOf = async (incarnation: IIncarnation): Promise<void> => {
+    incarnation.isLinked = false;
+
+    // ! before any packet awaiting its answer is let go below, whose PUBACK it waits on: what it
+    // was handed goes first, so that its broker reads it before the DISCONNECT
+    await drain(incarnation);
+
+    const stopped = new GenericError(`the link of ${id} stopped`);
+
+    for (const fail of incarnation.failures) {
+      fail(stopped);
+    }
+
+    for (const { fail } of incarnation.waiting.splice(0)) {
+      fail(stopped);
+    }
+
+    incarnation.isRetired = true;
+    current = undefined;
+    unsettled = 0;
+
+    if (incarnation.client.connected) {
+      // ! MQTT.js's clean end waits for every packet it awaits an answer to, a SUBACK that never
+      // comes among them: its DISCONNECT goes now, behind what was written
+      for (const messageId of Object.keys(incarnation.client.outgoing)) {
+        incarnation.client.removeOutgoingMessage(Number(messageId));
+      }
+
+      await new Promise<void>((resolve) => {
+        incarnation.client.end(false, { reasonCode: 0 }, () => {
+          resolve();
+        });
+      });
+    } else {
+      incarnation.client.end(true);
     }
   };
 
@@ -622,6 +695,8 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
     const client = mqtt.connect(url, clientOptions);
     const held: IIncarnation = {
       client,
+      drained: undefined,
+      ending: undefined,
       failures: new Set(),
       filters: new Map(),
       inFlight: 0,
@@ -877,6 +952,7 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
           if (!isSent && index !== -1 && signal !== undefined) {
             incarnation.waiting.splice(index, 1);
             reject(toCancelError(signal));
+            incarnation.drained?.();
           }
         };
 
@@ -940,38 +1016,8 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
         return;
       }
 
-      // * no down told: a stop is no loss
-      incarnation.isLinked = false;
-
-      const stopped = new GenericError(`the link of ${id} stopped`);
-
-      for (const fail of incarnation.failures) {
-        fail(stopped);
-      }
-
-      for (const { fail } of incarnation.waiting.splice(0)) {
-        fail(stopped);
-      }
-
-      incarnation.isRetired = true;
-      current = undefined;
-      unsettled = 0;
-
-      if (incarnation.client.connected) {
-        // ! MQTT.js's clean end waits for every packet it awaits an answer to, a SUBACK that never
-        // comes among them: its DISCONNECT goes now, behind what was written
-        for (const messageId of Object.keys(incarnation.client.outgoing)) {
-          incarnation.client.removeOutgoingMessage(Number(messageId));
-        }
-
-        await new Promise<void>((resolve) => {
-          incarnation.client.end(false, { reasonCode: 0 }, () => {
-            resolve();
-          });
-        });
-      } else {
-        incarnation.client.end(true);
-      }
+      incarnation.ending ??= endOf(incarnation);
+      await incarnation.ending;
     },
     subscribe: (topic, subscription?: IBrokerSubscription) => {
       const group = subscription?.group;

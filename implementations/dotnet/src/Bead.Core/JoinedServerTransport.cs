@@ -274,10 +274,17 @@ public sealed class JoinedServerTransport : IServerTransport, IAsyncDisposable
         };
     }
 
-    /// <summary>As <see cref="Shutdown"/>.</summary>
+    /// <summary>
+    /// Disposes every transport it joined, each one's dispose final, a start after it its
+    /// application's misuse (decision 0003); one that disposes nothing is stopped. It settles once
+    /// all have, with what each threw.
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
-        await Shutdown();
+        await Task.WhenAll(_transports.Select((transport) =>
+        {
+            return transport is IAsyncDisposable disposable ? disposable.DisposeAsync().AsTask() : transport.Shutdown();
+        }));
     }
 
     // the transport that drew a handle, by the type it begins with; none for one of another type

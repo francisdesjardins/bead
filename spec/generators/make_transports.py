@@ -1431,6 +1431,12 @@ def take_over(participant):
     return {'takeover': participant}
 
 
+def participant(act):
+    """The participant under test stopped in place, or started again, its stop or its start settled
+    (spec 15.21)."""
+    return {'participant': act}
+
+
 def leave(peer):
     """A peer lets its inbox go, so that the next parcel to it finds no subscriber."""
     return {'leave': peer}
@@ -2034,11 +2040,13 @@ def connects(name=NAME):
     return {'connect': name}
 
 
-def opening_read(captures, connection, *, secure=True):
+def opening_read(captures, connection, *, secure=True, incarnation=None):
     """The OPEN the client's connect publishes to the server's name, as a peer reads it there: its
-    half captured under the connection's label, or put in where another peer read it first."""
+    half captured under the connection's label, or put in where another peer read it first, and its
+    incarnation unless one is given."""
     opening = connection.by_side(Kind.OPEN, flags=Flag.SECURE if secure else 0, id=CLIENT,
-                                 incarnation=captures('incarnation', 'incarnation'), bound=captures.bound(CLIENT))
+                                 incarnation=incarnation or captures('incarnation', 'incarnation'),
+                                 bound=captures.bound(CLIENT))
     opening['opener'] = connection.opener or {'capture': connection.label, 'shape': 'half'}
     opening['acceptor'] = NO_HALF
     connection.opener = connection.opener or connection.captured()
@@ -2304,6 +2312,53 @@ def a_link_taken_over(transport):
                 reported(SERVER, 'taken over'), until('connections', 0), until('names', 0),
                 publish(PEER, 'name', open_of(second), refused='no-subscriber'),
                 publish(PEER, 'inbox', first.by_peer(Kind.PING), refused='no-subscriber')])
+
+
+@case(IN_MEMORY, MQTT, AMQP, over_mqtt=['15.26'], over_amqp=['15.33', '15.38'])
+def a_participant_stopped_in_place(transport):
+    captures = Captures(transport)
+    first, second = Connection('first', opener=half(1)), Connection('second', opener=half(2))
+    name = 'a participant that stops closes each connection with 1001 and serves no name, and at its next link serves it as another incarnation, resetting no peer'
+    steps = [*opened(captures, first), participant('stop'), closed(False, on=PEER),
+             closes(first, GOING_AWAY), until('names', 0)]
+    anew = captures('anew', 'incarnation', unlike='incarnation')
+
+    if transport == AMQP:
+        # ! an OPEN published while the participant is stopped waits in the name's queue, which its
+        # deployment provisioned, and is served at its next link within its life (spec 15.38): its
+        # ACCEPT, the new incarnation's, is the next parcel its peer reads after the CLOSE, so a
+        # RESET would fail the case
+        waiting, answered = accepted(captures, second, incarnation=anew)
+        return (name, ['15.21'], {}, [
+                    *steps, waiting, participant('start'), until('names', 1), answered])
+
+    # ! the stop let the name go, so an OPEN finds no subscriber; the next start serves it again, and
+    # the next parcel the peer reads after the CLOSE is the ACCEPT of another incarnation, so a RESET
+    # would fail the case
+    third = Connection('third', opener=half(3))
+    return (name, ['15.21'], {}, [
+                *steps, publish(PEER, 'name', open_of(second), refused='no-subscriber'),
+                participant('start'), until('names', 1), *accepted(captures, third, incarnation=anew)])
+
+
+@case(IN_MEMORY, MQTT, over_mqtt=['15.26'])
+def a_clients_participant_stopped_in_place(transport):
+    captures = Captures(transport)
+    first, second = Connection('first', acceptor=half(1)), Connection('second', acceptor=half(2))
+    steps = client_opened(captures, first)
+    anew = captures('anew', 'incarnation', unlike='incarnation')
+
+    # ! no start comes between the stop and the connect: the connect links the participant anew,
+    # another incarnation, and the GONE its peer reads once that link is lost is the new one's alone,
+    # the stop having left no will (spec 15.21, 15.26). AMQP leaves none, so its read is the MQTT
+    # binding's and the in-memory broker's
+    return ('a client whose participant stops closes its connection with 1001 and leaves no will, and its next connect links the participant anew as another incarnation',
+            ['15.21'], {'role': 'client'}, [
+                *steps, participant('stop'), reads(PEER, first.by_side(Kind.CLOSE, code=GOING_AWAY)),
+                side(closed={'clean': False}),
+                connects(), opening_read(captures, second, incarnation=anew), accepts(second), side(opened=True),
+                reads(PEER, second.by_side(Kind.PING)),
+                lose(CLIENT), reads(PEER, gone_of(CLIENT, captures('anew', 'incarnation')), at='departure'), side(closed={'clean': False})])
 
 
 # responses as a server may cut them, which every side's reader reads alike

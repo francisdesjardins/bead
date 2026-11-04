@@ -51,9 +51,9 @@ public sealed record BrokerParticipantOptions
     /// <see cref="TransportClientReconnectOptions.MaximumAttempts"/> bounds them; its token read
     /// before each attempt and during each wait, an attempt under way not cut short; a wait of zero
     /// none, its next attempt in a later turn of its scheduler; its tap told each wait. A stop ends
-    /// it at its next attempt, and at once during one. Once it ends it is reported through
-    /// <see cref="BrokerParticipant.Error"/>, what ended it the inner exception, and, unless it
-    /// stopped, the next start or connect links it anew.
+    /// it at once, in a wait or once its attempt under way failed, no wait told after it, the stop its
+    /// cause. Once it ends it is reported through <see cref="BrokerParticipant.Error"/>, what ended it
+    /// the inner exception, and the next start or connect links it anew.
     /// </summary>
     public TransportClientReconnectOptions? Reconnect { get; init; }
 
@@ -77,7 +77,10 @@ public sealed record BrokerParticipantOptions
 /// and connects again as another incarnation, its inbox and names subscribed anew before anything
 /// goes, then resets each peer it held a connection with; when another link of its id takes its
 /// link over, it closes each connection alike, reports it, and connects no more until it is started
-/// again, so that two holders of one id never take each other over without end.
+/// again, so that two holders of one id never take each other over without end. Its stop ends its
+/// link in place, each connection closed with 1001 and no will gone, and what is under way with it;
+/// its next link, at its application's word, is another incarnation, its transports kept. Its
+/// dispose is final.
 /// </summary>
 public sealed class BrokerParticipant : IAsyncDisposable
 {
@@ -107,14 +110,23 @@ public sealed class BrokerParticipant : IAsyncDisposable
     // what gives up the reconnection under way, as its link is taken over
     private CancellationTokenSource? _relinking;
     private TaskCompletionSource _live = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    private bool _isStopped;
-    // what its stop cancels: its adapter's start under way gives up on it, and a client's reconnection
-    // under way ends; cancelled, never disposed
-    private readonly CancellationTokenSource _stopping = new();
+    // ! the current stop's record, which each operation captures at its call; renewed under its gate
+    // as its stop settles, the former never disposed, an operation holding it still
+    private BrokerStopRecord _current = new();
+    // its stop under way, and its dispose come: a start in either is its application's misuse
+    private bool _isStopping;
+    private bool _isDisposed;
     // its adapter's start under way, which its stop awaits before it stops its adapter; touched in its turn alone
     private Task? _adapterStart;
-    // its stop's end, which every later stop shares; set under its gate
+    // its last stop's end, which a stop called before its next link's start shares; set under its gate
     private Task? _stopped;
+    // its dispose's end, which every later dispose shares; set under its gate
+    private Task? _disposed;
+    // each peer whose CLOSE its broker did not take as it last stopped, reset at its next link; touched in its turn alone
+    private readonly List<(string PeerId, (ulong Opener, ulong Acceptor) Pair)> _unreset = [];
+    // what hears its adapter, let go of as it is disposed
+    private readonly Action<BrokerMessage> _hearMessage;
+    private readonly Action<BrokerDown> _hearDown;
     private long _ordinal;
     private UInt128 _incarnation;
     private readonly Dictionary<string, string?> _heldNames = new(StringComparer.Ordinal);
@@ -186,20 +198,22 @@ public sealed class BrokerParticipant : IAsyncDisposable
             Budget = _budget,
             Clock = _clock,
         };
-        adapter.Message += (message) =>
+        _hearMessage = (message) =>
         {
             _scheduler.Post(() =>
             {
                 Take(message);
             });
         };
-        adapter.Down += (down) =>
+        _hearDown = (down) =>
         {
             _scheduler.Post(() =>
             {
                 LinkDown(down);
             });
         };
+        adapter.Message += _hearMessage;
+        adapter.Down += _hearDown;
     }
 
     /// <summary>What it reports of its own: a message to it that is no parcel, which it drops, its link given up on, or its link taken over.</summary>
@@ -547,17 +561,37 @@ public sealed class BrokerParticipant : IAsyncDisposable
     /// <summary>
     /// Starts its link: its incarnation drawn, its adapter started, its will set where it offers
     /// one, its inbox subscribed and the names of its server transports that serve; settles once all
-    /// of it is held. A second start shares the first, or starts anew once the first failed, or once
-    /// its link was taken over. Refused with an <see cref="ObjectDisposedException"/> once stopped: a
-    /// stopped participant links no more (spec 15.21).
+    /// of it is held. A second start shares the first, or starts anew once the first failed, once its
+    /// link went down and stays down, once its link was taken over, its application's start lifting
+    /// the fence a takeover set, or once its stop settled: another incarnation, its transports kept,
+    /// each peer whose CLOSE its broker did not take as it stopped reset (spec 15.21). Refused with
+    /// an <see cref="InvalidOperationException"/> while its stop is under way, and with an
+    /// <see cref="ObjectDisposedException"/> once it is disposed, before anything moves.
     /// </summary>
     public Task Start()
     {
+        return Starting(null);
+    }
+
+    // its start; for a connect, given the stop's record it captured, failed once that stop came, so
+    // that a connect a stop overtook links nothing after it
+    private Task Starting(BrokerStopRecord? captured)
+    {
         lock (_gate)
         {
-            if (_isStopped)
+            if (_isDisposed)
             {
-                return Task.FromException(StoppedRefusal());
+                return Task.FromException(DisposedRefusal());
+            }
+
+            if (_isStopping)
+            {
+                return Task.FromException(new InvalidOperationException($"the participant {Id} is stopping"));
+            }
+
+            if (captured is { IsMarked: true })
+            {
+                return Task.FromException(StoppedAsItStarted());
             }
 
             // * its application's start lifts the fence a takeover set
@@ -566,7 +600,15 @@ public sealed class BrokerParticipant : IAsyncDisposable
             // * one attempt shared; one that failed is let go, so the next starts another
             if (_starting is null || _starting.IsFaulted || _starting.IsCanceled)
             {
-                _starting = _scheduler.Run(Link);
+                var record = _current;
+
+                // * a link starts: the last stop is shared no more, and a stop called from now on
+                // stops this link
+                _stopped = null;
+                _starting = _scheduler.Run(() =>
+                {
+                    return Link(record);
+                });
             }
 
             return _starting;
@@ -574,71 +616,111 @@ public sealed class BrokerParticipant : IAsyncDisposable
     }
 
     /// <summary>
-    /// Gives up its link's start under way and awaits it, closes each of its connections with a
-    /// CLOSE of 1001, then ends its link cleanly, so its broker publishes no will of a link it held
-    /// (spec 15.21); a later stop settles with the first.
+    /// Ends its link in place, and with it what is under way as it is called (spec 15.21): gives up
+    /// its link's start under way and awaits it, closes each of its connections with a CLOSE of
+    /// 1001, then stops its adapter, which sends those CLOSEs before it ends the link, so its broker
+    /// publishes no will of a link it held; a connect awaiting its link or its answer fails, stopped
+    /// as it connected, and a reconnection, its own or a client's, ends at once, the stop its cause.
+    /// Once it settled, its start, a server's start over it, or a client's connect or reconnection
+    /// over it links it anew as another incarnation, its transports kept, and resets each peer whose
+    /// CLOSE its broker did not take. A stop called again before its next link's start settles with
+    /// the first, and tells nothing; a participant no longer in use is disposed.
     /// </summary>
     public Task Stop()
     {
+        BrokerStopRecord record;
         TaskCompletionSource ending;
 
         lock (_gate)
         {
+            // * a stop under way, or one settled with no link started since: this one settles with it
             if (_stopped is not null)
             {
                 return _stopped;
             }
 
-            _isStopped = true;
+            record = _current;
+            record.Mark();
+
+            if (!_isDisposed)
+            {
+                _isStopping = true;
+            }
+
+            // ! a start shared no more, and its link down at once: a link up before the stop is the
+            // next start's to make anew
+            _starting = null;
+            _live.TrySetCanceled();
+            _live = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             ending = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             _stopped = ending.Task;
         }
 
-        // * outside its gate: no callback of its start's token runs under it
-        _ = Ending(ending);
+        // * outside its gate: no callback of its signals runs under it
+        _ = Ending((ending, record));
 
         return ending.Task;
     }
 
-    // its stop's body: its start under way given up, its connections closed, its link ended; its
-    // end settled whatever the turn did, so that no later stop waits for ever
-    private async Task Ending(TaskCompletionSource ending)
+    // its stop's body: its signals cancelled right after its mark, its start under way given up, its
+    // connections closed, its link ended; its record renewed, unless it is disposed, then its end
+    // settled whatever the turn did, so that no later stop waits for ever and a start made as it
+    // settles links anew
+    private async Task Ending((TaskCompletionSource Ended, BrokerStopRecord Record) stop)
     {
+        var (ended, record) = stop;
+
         try
         {
-            await _stopping.CancelAsync();
+            await record.Cancel();
             await Unlinking();
-            ending.SetResult();
+            Renew();
+            ended.SetResult();
         }
         catch (Exception reason)
         {
-            ending.SetException(reason);
+            Renew();
+            ended.SetException(reason);
         }
     }
 
-    // in its turn: its connections closed with 1001, its connects failed, its adapter's start under
-    // way awaited, then its adapter stopped once
+    // its stop settled: a record of its own for the next, unless it is disposed
+    private void Renew()
+    {
+        lock (_gate)
+        {
+            if (!_isDisposed)
+            {
+                _isStopping = false;
+                _current = new BrokerStopRecord();
+            }
+        }
+    }
+
+    // in its turn: its connections closed with 1001, each CLOSE handed to its adapter before its
+    // stop, its connects failed, its adapter's start under way awaited, then its adapter stopped
+    // once; each peer whose CLOSE its broker did not take kept for its next link, and its server
+    // transports kept, their names held no more
     private Task Unlinking()
     {
         return _scheduler.Run(async () =>
         {
             _linkEpoch += 1;
-            // ! unlinked first: what its connections' ends set going — a name served again among
-            // them — finds no link to subscribe on
-            lock (_gate)
-            {
-                _live = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            }
 
             var ended = IsDebugging ? _connections.Values.Select((connection) => { return connection.Ordinal; }).ToArray() : null;
+            var closing = new List<(string PeerId, (ulong Opener, ulong Acceptor) Pair, Task<BrokerPublished> Published)>();
+
             foreach (var connection in _connections.Values.ToList())
             {
-                connection.Close((1001, false));
+                if (connection.Close((1001, false)) is { } published)
+                {
+                    closing.Add((connection.PeerId, connection.Pair, published));
+                }
             }
 
             foreach (var pending in _connects.Values.ToList())
             {
-                pending.Down($"the participant {Id} stopped as it connected");
+                pending.Down(StoppedAsItConnected().Message);
             }
 
             _connects.Clear();
@@ -650,11 +732,41 @@ public sealed class BrokerParticipant : IAsyncDisposable
                 await started.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing | ConfigureAwaitOptions.ContinueOnCapturedContext);
             }
 
+            // * its stop sends what it was handed before it, each CLOSE among it, within a bound of
+            // its own, and fails what has not gone by then (spec 15.24)
             await _adapter.Stop();
+
+            foreach (var (peerId, pair, published) in closing)
+            {
+                await ((Task)published).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing | ConfigureAwaitOptions.ContinueOnCapturedContext);
+
+                if (!published.IsCompletedSuccessfully || published.Result != BrokerPublished.Taken)
+                {
+                    _unreset.Add((peerId, pair));
+                }
+            }
+
+            // ! an OPEN its link took as it ended, after its CLOSEs went, holds a connection on a link
+            // ended: dropped, unclean
+            foreach (var connection in _connections.Values.ToList())
+            {
+                connection.Drop();
+            }
+
+            List<BrokerTransportServer> servers;
+
             lock (_gate)
             {
                 _heldNames.Clear();
+                servers = [.. _servers];
             }
+
+            // * its server transports kept, their names wanted and held no more
+            foreach (var server in servers)
+            {
+                server.Unlinked();
+            }
+
             if (!_isTakenOver)
             {
                 Transition("stopped", ended);
@@ -662,10 +774,52 @@ public sealed class BrokerParticipant : IAsyncDisposable
         });
     }
 
-    /// <summary>As <see cref="Stop"/>.</summary>
+    /// <summary>
+    /// Stops it, then ends it for good (spec 15.21; decision 0003): its listeners on its adapter let
+    /// go of, its adapter the application's to dispose. Its start, and a client's connect or
+    /// reconnection or a server's start over it, made after it, is its application's misuse, an
+    /// <see cref="ObjectDisposedException"/>, refused before anything moves; a stop or a dispose
+    /// after it settles with it.
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
-        await Stop();
+        var disposing = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        BrokerStopRecord? record = null;
+        Task disposed;
+
+        lock (_gate)
+        {
+            if (_disposed is null)
+            {
+                _disposed = disposing.Task;
+                _isDisposed = true;
+
+                // ! what is under way as it is called ends with it, though a stop settled before it
+                record = _current;
+                record.Mark();
+            }
+
+            disposed = _disposed;
+        }
+
+        if (record is not null)
+        {
+            try
+            {
+                await record.Cancel();
+                await Stop();
+                _adapter.Message -= _hearMessage;
+                _adapter.Down -= _hearDown;
+                record.Dispose();
+                disposing.SetResult();
+            }
+            catch (Exception reason)
+            {
+                disposing.SetException(reason);
+            }
+        }
+
+        await disposed;
     }
 
     /// <summary>A participant's inbox: its root, <c>i</c> and its id (spec 15.16).</summary>
@@ -693,36 +847,51 @@ public sealed class BrokerParticipant : IAsyncDisposable
     }
 
     /// <summary>
-    /// Settles once its link is up, started or connected again; a cancel ends the wait. Stopped, it
-    /// fails at once with a <see cref="ConnectException"/>, the connect overtaken by its stop; its
-    /// link taken over, with one naming it: a connect never lifts the fence, which its application's
-    /// start alone does. What its link's start fails with fails the connect: its adapter's misuse a
+    /// Settles once its link is up, started, connected again, or linked anew once its stop settled;
+    /// a cancel ends the wait. The stop <paramref name="captured"/> names, the one current as its
+    /// connect was called, fails it at once with a <see cref="ConnectException"/>, stopped as it
+    /// connected, whether it awaits its link or its start, before its takeover is read; its link
+    /// taken over, with one naming it: a connect never lifts the fence, which its application's start
+    /// alone does. What its link's start fails with fails the connect: its adapter's misuse a
     /// <see cref="ConnectException"/> with it inside, which another attempt may mend (spec 15.21).
     /// </summary>
-    internal async Task WhenLinked(CancellationToken cancellationToken)
+    internal async Task WhenLinked(BrokerStopRecord captured, CancellationToken cancellationToken)
     {
+        // ! the stop first: a connect it overtook fails as one, never the takeover's words
+        if (captured.IsMarked)
+        {
+            throw StoppedAsItConnected();
+        }
+
         lock (_gate)
         {
-            // ! the stop first: a connect it overtook fails as one, never the takeover's words
-            if (_isStopped)
-            {
-                throw new ConnectException($"the participant {Id} stopped as it connected");
-            }
-
             if (_isTakenOver)
             {
                 throw new ConnectException($"{TakenOver}, and connects no more until it is started again");
             }
         }
 
+        // * its stop at once, its link's own end awaited by the stop alone (spec 15.21)
+        using var waiting = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, captured.Ending);
+
         try
         {
-            await Start().WaitAsync(cancellationToken);
+            await Starting(captured).WaitAsync(waiting.Token);
+
+            Task live;
+
+            lock (_gate)
+            {
+                live = _live.Task;
+            }
+
+            await live.WaitAsync(waiting.Token);
         }
-        catch (Exception reason) when (IsStopped)
+        catch (Exception reason) when (captured.IsMarked)
         {
-            // * the stop's refusal, racing its check, never comes through: a connect it overtook
-            throw new ConnectException($"the participant {Id} stopped as it connected", reason);
+            // * its stop met as it linked, the stop's own refusal racing this check among it: a
+            // connect it overtook, what its link failed with inside
+            throw StoppedAsItConnected(reason);
         }
         catch (Exception reason) when (reason is (InvalidOperationException and not ObjectDisposedException) or ArgumentException)
         {
@@ -730,15 +899,6 @@ public sealed class BrokerParticipant : IAsyncDisposable
             // disposed object's never one of its link's
             throw new ConnectException(reason.Message, reason);
         }
-
-        Task live;
-
-        lock (_gate)
-        {
-            live = _live.Task;
-        }
-
-        await live.WaitAsync(cancellationToken);
     }
 
     /// <summary>A half drawn from a cryptographic source, never all zero, none it holds already (spec 15.17).</summary>
@@ -866,8 +1026,9 @@ public sealed class BrokerParticipant : IAsyncDisposable
     internal async Task Subscribe((string Name, bool IsInGroup) name)
     {
         var epoch = _linkEpoch;
+        var record = Captured();
         await _adapter.Subscribe(NameOf(name.Name), new BrokerSubscription { Group = name.IsInGroup ? name.Name : null });
-        if (epoch != _linkEpoch || _isStopped)
+        if (epoch != _linkEpoch || record.IsMarked)
         {
             return;
         }
@@ -950,13 +1111,15 @@ public sealed class BrokerParticipant : IAsyncDisposable
     }
 
     // in its turn: its link connected, a new incarnation, its inbox and its names subscribed before
-    // anything goes; then each peer of a former incarnation reset
-    private async Task Link()
+    // anything goes, then each peer whose CLOSE its broker did not take as it last stopped reset; the
+    // stop `record` names, which the operation that links it captured, met as it connects fails it,
+    // stopped as it started, nothing of it going on
+    private async Task Link(BrokerStopRecord record)
     {
         // ! stopped between its caller's check and this turn: nothing of it goes
-        if (IsStopped)
+        if (record.IsMarked)
         {
-            throw new IOException($"the participant {Id} stopped as it started");
+            throw StoppedAsItStarted();
         }
 
         _isDownAsItLinks = false;
@@ -979,26 +1142,26 @@ public sealed class BrokerParticipant : IAsyncDisposable
         {
             // * its stop's token to its start alone: a SUBSCRIBE given up by a token retires its link
             // with no DISCONNECT, so its will would go; its adapter's stop ends that one cleanly
-            var started = _adapter.Start(new BrokerStart { Will = will, CancellationToken = _stopping.Token });
+            var started = _adapter.Start(new BrokerStart { Will = will, CancellationToken = record.Starting });
 
             _adapterStart = started;
             await started;
 
-            if (!IsStopped)
+            if (!record.IsMarked)
             {
                 await _adapter.Subscribe(InboxOf(Id));
             }
         }
-        catch (Exception reason) when (IsStopped)
+        catch (Exception reason) when (record.IsMarked)
         {
-            throw new IOException($"the participant {Id} stopped as it started", reason);
+            throw StoppedAsItStarted(reason);
         }
 
         // ! stopped as it started: its inbox never subscribed, no name, no up; its stop ends what
         // this start brought up
-        if (IsStopped)
+        if (record.IsMarked)
         {
-            throw new IOException($"the participant {Id} stopped as it started");
+            throw StoppedAsItStarted();
         }
 
         List<BrokerTransportServer> servers;
@@ -1022,15 +1185,24 @@ public sealed class BrokerParticipant : IAsyncDisposable
 
         lock (_gate)
         {
-            // ! stopped as it started: what its stop let go of stays let go, and it links no more
-            if (_isStopped)
+            // ! stopped as it started: what its stop let go of stays let go, and this link goes no further
+            if (record.IsMarked)
             {
-                throw new IOException($"the participant {Id} stopped as it started");
+                throw StoppedAsItStarted();
             }
 
             _live.TrySetResult();
         }
         Transition("up");
+
+        // * each peer whose CLOSE its broker did not take as it last stopped, reset once its names
+        // are subscribed again (spec 15.21): one that let its pair go drops it in silence
+        foreach (var peer in _unreset)
+        {
+            Reset(peer);
+        }
+
+        _unreset.Clear();
     }
 
     // in its turn: its link lost: each connection closed, unclean, each connect to send its OPEN
@@ -1038,12 +1210,18 @@ public sealed class BrokerParticipant : IAsyncDisposable
     // a connection with reset; or taken over: each connection closed alike, reported, and fenced
     private void LinkDown(BrokerDown down)
     {
+        BrokerStopRecord record;
+
         lock (_gate)
         {
-            if (_isStopped)
+            // * a stop under way, or its dispose, ends the link itself
+            if (_isStopping || _isDisposed)
             {
                 return;
             }
+
+            // ! the stop current as it went down, which its reconnection captures
+            record = _current;
 
             if (!_live.Task.IsCompleted)
             {
@@ -1124,7 +1302,7 @@ public sealed class BrokerParticipant : IAsyncDisposable
             return;
         }
 
-        _scheduler.Cover(Relinking(peers));
+        _scheduler.Cover(Relinking((peers, record)));
     }
 
     // under its gate: its link taken over, reported once, its reconnection under way given up and
@@ -1146,15 +1324,18 @@ public sealed class BrokerParticipant : IAsyncDisposable
     }
 
     // its link connected again, as its reconnection says, without end unless its application bounds
-    // it; ended, reported, what ended it inside, and, unless it stopped, its next start or connect
-    // links it anew
-    private async Task Relinking(List<(string PeerId, (ulong Opener, ulong Acceptor) Pair)> peers)
+    // it; ended, reported, what ended it inside, and its next start or connect links it anew. The
+    // stop `record` names ends it at once, in a wait or once its attempt under way failed, no wait
+    // told after it, the stop its cause (spec 15.21)
+    private async Task Relinking((List<(string PeerId, (ulong Opener, ulong Acceptor) Pair)> Peers, BrokerStopRecord Record) relinked)
     {
+        var (peers, record) = relinked;
         var reconnect = _options.Reconnect ?? new TransportClientReconnectOptions();
         using var fenced = new CancellationTokenSource();
-        // cancelled by an attempt that found it stopped, so that none follows it
+        // cancelled by an attempt that failed with its stop come, so that none follows it
         using var stopping = new CancellationTokenSource();
-        using var relinking = CancellationTokenSource.CreateLinkedTokenSource(reconnect.CancellationToken, fenced.Token, stopping.Token);
+        // * ended by its application's token, by a takeover, or at once by its stop
+        using var relinking = CancellationTokenSource.CreateLinkedTokenSource([reconnect.CancellationToken, fenced.Token, stopping.Token, record.Ending]);
         // the attempts made, which its end's words count
         var attempts = 0;
 
@@ -1172,14 +1353,18 @@ public sealed class BrokerParticipant : IAsyncDisposable
 
                     try
                     {
-                        await _scheduler.Run(Link);
+                        await _scheduler.Run(() =>
+                        {
+                            return Link(record);
+                        });
                     }
-                    catch (Exception reason) when (IsStopped)
+                    catch (Exception reason) when (record.IsMarked)
                     {
-                        // * stopped: it ends here, no attempt after it, in the other sides' words
+                        // ! its stop is marked before its signal is cancelled: an attempt that failed
+                        // with its stop come ends it itself, so no wait is told after it
                         await stopping.CancelAsync();
 
-                        throw new OperationCanceledException(reason.Message, reason, stopping.Token);
+                        throw new OperationCanceledException(TransportReconnection.Cancelled, reason, stopping.Token);
                     }
                     catch (ArgumentException reason)
                     {
@@ -1189,9 +1374,13 @@ public sealed class BrokerParticipant : IAsyncDisposable
                 },
                 (reconnect with { CancellationToken = relinking.Token, MaximumAttempts = reconnect.MaximumAttempts ?? int.MaxValue }, _clock));
         }
-        catch (OperationCanceledException reason) when (stopping.IsCancellationRequested)
+        catch (Exception) when (record.IsMarked)
         {
-            Ended(new IOException($"the link of {Id} went down, and its reconnection ended: the participant {Id} is stopped", reason));
+            // * ended by its stop, which let go of its start already: the stop its cause, in the
+            // other sides' words (spec 15.21)
+            Report(new IOException(
+                $"the link of {Id} went down, and its reconnection ended: {TransportReconnection.Cancelled}",
+                new OperationCanceledException(TransportReconnection.Cancelled, BrokerStopRecord.CauseOf(Id))));
 
             return;
         }
@@ -1235,38 +1424,70 @@ public sealed class BrokerParticipant : IAsyncDisposable
         });
     }
 
-    /// <summary>Whether it was stopped: it links no more (spec 15.21).</summary>
-    internal bool IsStopped
+    /// <summary>Whether it is disposed: a call made since is its application's misuse (spec 15.21).</summary>
+    internal bool IsDisposed
     {
         get
         {
             lock (_gate)
             {
-                return _isStopped;
+                return _isDisposed;
             }
         }
     }
 
-    /// <summary>What its stop cancels: a client's reconnection under way ends as it does (spec 15.15, 15.21).</summary>
-    internal CancellationToken Stopping
+    /// <summary>
+    /// The current stop's record, which an operation that links it as it needs, a client's connect
+    /// or reconnection, captures at its call: a stop called from then on stops what it links, never
+    /// settles with the last one, so that what is under way as a stop is called ends with it, though
+    /// its link has not started yet.
+    /// </summary>
+    internal BrokerStopRecord Linking()
     {
-        get
+        lock (_gate)
         {
-            return _stopping.Token;
+            if (!_isStopping && !_isDisposed && !_isTakenOver)
+            {
+                _stopped = null;
+            }
+
+            return _current;
+        }
+    }
+
+    // the current stop's record, read under its gate
+    private BrokerStopRecord Captured()
+    {
+        lock (_gate)
+        {
+            return _current;
         }
     }
 
     /// <summary>
-    /// What a call made after its stop is refused with, its application's misuse (spec 15.21): an
-    /// <see cref="ObjectDisposedException"/>, the side's own words alone.
+    /// What a call made after its dispose is refused with, its application's misuse (spec 15.21):
+    /// an <see cref="ObjectDisposedException"/>, the side's own words alone.
     /// </summary>
-    internal ObjectDisposedException StoppedRefusal()
+    internal ObjectDisposedException DisposedRefusal()
     {
-        return new ObjectDisposedException(null, $"the participant {Id} is stopped");
+        return new ObjectDisposedException(null, $"the participant {Id} is disposed");
     }
 
-    // its reconnection ended: it stays down, said so, and, unless it stopped, the next start or
-    // connect links it anew
+    /// <summary>A connect its stop met before that stop settled, awaiting its link or its answer: a failure of that connect's, never the misuse a call made once disposed is.</summary>
+    internal ConnectException StoppedAsItConnected(Exception? reason = null)
+    {
+        var words = $"the participant {Id} stopped as it connected";
+
+        return reason is null ? new ConnectException(words) : new ConnectException(words, reason);
+    }
+
+    // a link its stop met as it connected: a failure of that link's, what its adapter failed with inside
+    private IOException StoppedAsItStarted(Exception? reason = null)
+    {
+        return new IOException($"the participant {Id} stopped as it started", reason);
+    }
+
+    // its reconnection ended: it stays down, said so, and the next start or connect links it anew
     private void Ended(IOException report)
     {
         lock (_gate)

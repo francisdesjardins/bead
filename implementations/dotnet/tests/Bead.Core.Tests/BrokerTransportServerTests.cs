@@ -502,17 +502,17 @@ public sealed class BrokerTransportServerTests
 
     // spec 15.21
     [Fact]
-    public async Task Refuses_its_start_once_its_participant_stopped_its_state_kept()
+    public async Task Refuses_its_start_once_its_participant_is_disposed_its_state_kept()
     {
         var broker = new MemoryBroker();
         var calling = new CallingAdapter(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "ada" }));
         await using var participant = new BrokerParticipant(calling);
         await using var server = participant.Server(new BrokerTransportServerOptions { Names = ["interop"] });
 
-        await participant.Stop();
+        await participant.DisposeAsync();
 
         // * its application's misuse, refused before anything moves
-        Assert.Equal("the participant ada is stopped", (await Assert.ThrowsAsync<ObjectDisposedException>(() =>
+        Assert.Equal("the participant ada is disposed", (await Assert.ThrowsAsync<ObjectDisposedException>(() =>
         {
             return server.Start();
         })).Message);
@@ -652,5 +652,31 @@ public sealed class BrokerTransportServerTests
         {
             return inner.Stop();
         }
+    }
+
+    // decision 0003
+    [Fact]
+    public async Task Refuses_a_start_once_disposed_its_state_kept_and_disposes_once_stopping_it_first()
+    {
+        var broker = new MemoryBroker();
+        var calling = new CallingAdapter(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "ada" }));
+        await using var participant = new BrokerParticipant(calling);
+        var server = participant.Server(new BrokerTransportServerOptions { Names = ["interop"] });
+
+        await server.Start();
+
+        // * two disposes: its name let go once, its participant's link kept
+        await Task.WhenAll(server.DisposeAsync().AsTask(), server.DisposeAsync().AsTask());
+        Assert.Equal(ReadyState.Closed, server.ReadyState);
+        Assert.Equal(["start", "subscribe bead/i/ada", "subscribe bead/s/interop", "unsubscribe bead/s/interop"], calling.Calls);
+        Assert.True(participant.IsLinked);
+
+        // * a start after it: its application's misuse, its state kept, nothing asked of its adapter
+        Assert.Equal("the transport server is disposed", (await Assert.ThrowsAsync<ObjectDisposedException>(() =>
+        {
+            return server.Start();
+        })).Message);
+        Assert.Equal(ReadyState.Closed, server.ReadyState);
+        Assert.Equal(4, calling.Calls.Count);
     }
 }

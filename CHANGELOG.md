@@ -165,12 +165,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A reconnection of a delay of 0 waits a later task of the platform between two attempts, on the
   TypeScript side `setImmediate`'s, which fake timers installed on the globals hold, as they hold
   its timers: a test that installs them moves its clock to let the next attempt go.
-- A call made after a broker participant's stop is its application's misuse, refused before
-  anything moves, on every side: its start, a client's connect or reconnect over it and its server
-  transport's start. On the TypeScript side it is a `ProgrammerError`, where it was a
-  `GenericError`; on the C# side an `ObjectDisposedException`, still an
-  `InvalidOperationException`. A client or a server so refused keeps its state, where it went Closed
-  and kept its target (spec 15.21; decision 0007).
+- A broker participant's stop ends its link in place on every side: it closes each connection with
+  1001 and ends its link so that no will goes, what is under way as it is called ending with it,
+  and its next start, a server's start over it, or a client's connect or reconnection over it links
+  it anew as another incarnation, its transports and their routers kept; where it was, its stop was
+  final, and a start after it was refused. Its dispose is final, and a call made after it is its
+  application's misuse, refused before anything moves: its start, a client's connect or reconnect
+  over it, and its server transport's start. On the TypeScript side that misuse is a
+  `ProgrammerError`, where it was a `GenericError`; on the C# side an `ObjectDisposedException`,
+  still an `InvalidOperationException`. A client or a server so refused keeps its state, where it
+  went Closed and kept its target. On the TypeScript side its DevTools announcement is withdrawn as
+  it is disposed, where it was withdrawn as it stopped: a participant no longer in use is disposed
+  (spec 15.21; decisions 0003, 0007, 0015).
+- A server transport's dispose, and on the C# side a broker adapter's, is final: it stops it, and a
+  start after it is its application's misuse, refused, its state kept, where it stopped it and a
+  later start ran it again; on the TypeScript side a `ProgrammerError`, on the C# side an
+  `ObjectDisposedException` (decision 0003).
 - A broker client's connect that its adapter refuses as a misuse fails as a connect, a
   `ConnectError` or a `ConnectException` with the misuse as its cause, and its reconnection tries
   again, as the participant's own does: on the TypeScript side it ended at once, and on the C# side
@@ -237,6 +247,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A client's reconnection over a broker participant ends as the participant stops, cancelled, at
   once in a wait or once its attempt under way failed, no wait told after it, where it spent all its
   attempts on both sides (spec 15.21).
+- A broker participant's stop sends each connection's CLOSE of 1001 before it ends its link, past
+  its broker's Receive Maximum or link credit: an MQTT 5 or AMQP 1.0 adapter's stop sends what waits
+  on them first, within its connectTimeout, where it failed it unsent, its peer then told nothing
+  until its heartbeat; and the participant's next link sends a RESET to each peer whose CLOSE its
+  broker did not take (spec 15.21, 15.24).
+- A client's connect over a broker participant that waits for its link fails at once as the
+  participant stops, stopped as it connected, on every side. On the C# and Rust sides it waited out
+  its timeout; on the TypeScript side it waited out the participant's reconnection's delay and
+  failed in that reconnection's words, and a connect awaiting the participant's first start failed
+  as a `GenericError` (spec 15.21).
+- A broker participant's own reconnection ends at once as it stops, in a wait, where it waited out
+  its delay; its report says its reconnection was cancelled, the stop its cause, where it said the
+  participant was stopped, and on the C# side named a start the stop met (spec 15.21).
+- On the C# side, a client's reconnection over a broker participant that stops ends with the stop
+  inside its `OperationCanceledException`, where it held the wait's `TaskCanceledException`.
 
 ### Security
 

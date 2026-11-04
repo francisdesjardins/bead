@@ -26,7 +26,8 @@ first layer of a transport → router → service stack, which is why they sit t
 
 Each end — client or server — has a shared half and a transport. The shared half owns the events and the guards
 around the life of the connection — `reconnect` and the drop behind `await using` for a client, `start` and `stop`
-and the connection registry for a server. The transport supplies what only it knows: how to open,
+and the connection registry for a server, whose dispose, behind `await using`, stops it for good, a
+start after it a misuse (decision 0003). The transport supplies what only it knows: how to open,
 close and send on the wire. WebSocket, HTTP, a Web Worker, memory and a broker each supply theirs —
 see [HTTP](#http), [In memory](#in-memory-and-a-servers-transports-joined) and
 [Over a broker](#over-a-broker); another transport supplies its own.
@@ -1239,7 +1240,8 @@ turn; a server that stops closes each and takes no connect.
 several (spec 15.14), so one server — one router, one admission, one session manager, each service
 offered once — takes its connections from all of them. Each handle stays the one its transport drew,
 and its flags, sends and closes go to that transport; each transport's events are told on with
-their handles, each listener within its guard; its stop stops each, and its gauges are their sum.
+their handles, each listener within its guard; its stop stops each, its dispose disposes each for
+good, and its gauges are their sum.
 Two transports of one type, whose handles might be one, are refused as the join is built: one
 transport binds both addresses. The join starts nothing: each transport is started where it
 listens, and one port for two still comes from a proxy in front.
@@ -1300,15 +1302,22 @@ is reported, and connects no more until its application starts it again — its 
 `start()` or a server transport's — so that two holders of one id never take each other over
 without end; any other link lost connects anew, as its `reconnect` says, a transport client's
 reconnection options, its attempts without end unless it bounds them, or stays down where
-`reconnects` is false. Its reconnection ends by its attempts, its signal or its stop, reported on
-`error`, what ended it the `cause`, and, unless it stopped, its next start or connect links it
-anew. A participant stopped links no more: its `start()`, or a connect, reconnect or server's start
-over it, made after its stop, is refused as a misuse, a `ProgrammerError`, before anything moves. A
-server's transport starts once its broker holds each name it serves, failing on one refused, and
-stops once it let each go, its gauge `names` counting a name from its subscription's acknowledgement
-to its release's. Where the adapter offers a message's life, an OPEN lives in its broker its
-connect's time left, and a DATA that carries a credential twice `heartbeat`; nothing else has a
-life.
+`reconnects` is false. Its reconnection ends by its attempts, its signal or its stop, at once in a
+wait, reported on `error`, what ended it the `cause`, and its next start or connect links it anew.
+Its `stop()` ends its link in place, and with it what is under way: each connection closed with
+1001, its CLOSE sent before the link ends so that no will goes, a connect awaiting its link or its
+answer failed at once, stopped as it connected, a reconnection ended, cancelled, the stop its cause.
+A start while that stop is under way is a misuse; once it settled, its start, a server's start or a
+client's connect or reconnect over it links it anew as another incarnation, its transports, their
+routers and its listeners kept, and a RESET goes to each peer whose CLOSE its broker did not take.
+Its `[Symbol.asyncDispose]()` stops it and ends it for good, its adapter's listeners and its DevTools
+announcement let go: its `start()`, or a connect, reconnect or server's start over it, made after it,
+is refused as a misuse, a `ProgrammerError`, before anything moves. A participant no longer in use is
+disposed, by `await using` or that call. A server's transport starts once its broker holds each
+name it serves, failing on one refused, and stops once it let each go, its gauge `names` counting a
+name from its subscription's acknowledgement to its release's. Where the adapter offers a message's
+life, an OPEN lives in its broker its connect's time left, and a DATA that carries a credential
+twice `heartbeat`; nothing else has a life.
 
 #### MQTT 5
 
@@ -1344,9 +1353,10 @@ later answer serving nothing; what it throws fails it, its cause. Its CONNECT sa
 of 65,535, a Topic Alias Maximum of 0, its `maximumPacketSize`, 16,777,216 bytes by default, and its
 `keepAlive`, 30 s by default; its start waits `connectTimeout`, 30 s by default, for its password,
 where it asks its provider, and a CONNACK of Reason Code 0x00 whose Maximum QoS is not 0. Its will
-is the participant's GONE, QoS 1, RETAIN 0, a Will Delay Interval of 0; its stop sends a DISCONNECT
-of 0x00, so that none goes; a DISCONNECT of 0x8E from its broker is its link taken over. MQTT.js
-reconnects nothing, subscribes nothing again and holds nothing while down: what is asked of a link
+is the participant's GONE, QoS 1, RETAIN 0, a Will Delay Interval of 0; its stop takes no publication,
+sends what waits on its Receive Maximum and awaits each PUBACK within `connectTimeout`, fails what has
+not gone by then, and sends a DISCONNECT of 0x00, so that none goes; a DISCONNECT of 0x8E from its
+broker is its link taken over. MQTT.js reconnects nothing, subscribes nothing again and holds nothing while down: what is asked of a link
 that is down is refused at once.
 
 A name in a group is the shared subscription `$share/<name>/bead/s/<name>`, every subscription of
@@ -1403,9 +1413,11 @@ it serves, one sends to inboxes and one to names, each sender to the anonymous t
 what its broker's channel-max leaves is refused. Its inbox is a queue `<root>.i.<id>` declared
 exclusive, classic and not durable through RabbitMQ's management on that connection
 (`amqp-management`), then bound to its root's topic exchange by its name, so that it ends with the
-connection; a second link of its id is refused it while the first holds it. rhea reconnects nothing,
-recovers nothing and holds nothing while down: what is asked of a link that is down is refused at
-once.
+connection; a second link of its id is refused it while the first holds it. Its stop takes no
+publication, sends what waits on its senders' credit and awaits each outcome within
+`connectTimeout`, fails what has not gone by then, then detaches its receivers and closes its
+connection with no error. rhea reconnects nothing, recovers nothing and holds nothing while down:
+what is asked of a link that is down is refused at once.
 
 A name is its queue `<root>.s.<name>`, which the deployment provisions and every participant serving
 it consumes, the queue its group. Each receiver is unsettled, first, of no max-message-size, its

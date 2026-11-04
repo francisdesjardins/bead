@@ -152,9 +152,9 @@ export interface IBrokerParticipantOptions {
    * default, a fixed one held as it is built whatever `reconnects`; `maximumAttempts` without end by
    * default; `signal` read before each attempt and during each wait, an attempt under way not cut
    * short; `tap` told each wait. A delay of 0 waits a later task of the platform, which fake timers
-   * on the globals hold, as they hold its timers. A stop ends it at its next attempt, and at once
-   * during one. Once it ends it is reported on `error`, what ended it the `cause`, and, unless it
-   * stopped, the next start or connect links it anew.
+   * on the globals hold, as they hold its timers. A stop ends it at once, in a wait or during an
+   * attempt, the stop its cause. Once it ends it is reported on `error`, what ended it the `cause`,
+   * and the next start or connect links it anew.
    */
   reconnect?: ITransportClientReconnectOptions | undefined;
   /**
@@ -204,20 +204,32 @@ export interface IBrokerParticipant {
   /** Each parcel's verdict, its link's transitions, its names and its reports. */
   on(event: 'debug', listener: (event: IParticipantDebugEvent) => void): this;
   /**
-   * Starts its link, once: its incarnation drawn, its inbox subscribed; a {@link ProgrammerError}
-   * once stopped: a stopped participant links no more (spec 15.21).
+   * Starts its link: its incarnation drawn, its inbox and its servers' names subscribed; settles
+   * at once while it is up, and links anew once it is down, its stop settled among it, as another
+   * incarnation. A {@link ProgrammerError} while its stop is under way, or once disposed (spec
+   * 15.21).
    */
   start(options?: { signal?: AbortSignal | undefined }): Promise<void>;
   /**
-   * Gives up its link's start under way and awaits it, closes each of its connections with 1001,
-   * then ends its link cleanly, so its broker publishes no will of a link it held; a later stop
-   * settles with the first.
+   * Ends its link in place, and with it what is under way: gives up its link's start under way and
+   * awaits it, fails each connect and ends each reconnection, closes each of its connections with
+   * 1001, then stops its adapter, which sends those CLOSEs before it ends the link, so its broker
+   * publishes no will. Its transports, their routers and its listeners are kept, and its next start,
+   * a server's start or a client's connect over it links it anew, resetting each peer whose CLOSE
+   * its broker did not take. A stop called again settles with the first; a participant no longer in
+   * use is disposed (spec 15.21).
    */
   stop(): Promise<void>;
   /** A client's transport over it, one connection at a time through a server's name. */
   transportClient(options?: IBrokerTransportClientOptions): BrokerTransportClient;
   /** A server's transport over it, serving the names it is given. */
   transportServer(options: IBrokerTransportServerOptions): BrokerTransportServer;
+  /**
+   * Stops it, then ends it for good: its adapter's listeners let go, its DevTools announcement
+   * withdrawn. A start, and a client's connect or reconnect or a server's start over it, made
+   * after it, is a {@link ProgrammerError}; a stop or a dispose after it settles with it (spec
+   * 15.21).
+   */
   [Symbol.asyncDispose](): Promise<void>;
 }
 
@@ -290,11 +302,15 @@ export interface IBrokerParticipantPort {
   readonly id: string;
   /** Its own leg, as an OPEN or an ACCEPT marks it. */
   readonly isSecure: boolean;
-  /** Whether it stopped: a call over it since is its application's misuse (spec 15.21). */
-  readonly isStopped: boolean;
+  /** Whether it was disposed: a call over it since is its application's misuse (spec 15.21). */
+  readonly isDisposed: boolean;
   /** The names it holds a subscription to. */
   readonly names: ReadonlySet<string>;
-  /** Aborted as it stops, apart from its adapter's start's signal: a client's reconnection ends by it. */
+  /**
+   * The signal of its stop to come, or of the stop under way, read at each call: aborted as that
+   * stop is called, apart from its adapter's start's signal; a client's connect and reconnection
+   * end by the one they read, the stop its reason, and one read once that stop settled is the next.
+   */
   readonly stopped: AbortSignal;
   /** Waits for answers naming `opener`'s half, until the returned function lets it go. */
   awaitAnswers(opener: Uint8Array, answers: IBrokerAnswers): () => void;
@@ -314,10 +330,11 @@ export interface IBrokerParticipantPort {
   /** A half, 8 bytes from a cryptographic source, never all zero, none it holds. */
   drawHalf(): Uint8Array;
   /**
-   * Resolves once its link is up, starting it the first time; `isStart`, its application's start,
-   * links anew a participant whose link was taken over, which nothing else does. Once stopped, a
-   * start is refused as a misuse and a connect fails, stopped as it connected; a connect's misuse
-   * its adapter meets fails it as a {@link ConnectError}, which another attempt may mend.
+   * Resolves once its link is up, linking it while it is down; `isStart`, its application's start,
+   * links anew a participant whose link was taken over, which nothing else does. While its stop is
+   * under way a start is refused as a misuse, and a connect fails, stopped as it connected, as it
+   * does at once once a stop overtakes it; once disposed, either is a misuse. A connect's misuse its
+   * adapter meets fails it as a {@link ConnectError}, which another attempt may mend.
    */
   linked(options?: {
     isStart?: boolean | undefined;
@@ -345,6 +362,16 @@ export interface IBrokerParticipantPort {
     name: string,
     { group, isWanted }: { group?: string | undefined; isWanted: boolean }
   ): Promise<void>;
+}
+
+// one stop of a participant: marked as it is called, its adapter's start's signal then its clients'
+// aborted; its successor drawn as it settles
+interface IStopRecord {
+  isMarked: boolean;
+  /** Its clients' connects and reconnections, and its own reconnection, end by it. */
+  readonly ending: AbortController;
+  /** Its adapter's start under way gives up on it. */
+  readonly stopping: AbortController;
 }
 
 // constants
@@ -382,6 +409,11 @@ const isSame = (one: Uint8Array, other: Uint8Array): boolean => {
   return one.length === other.length && keyOf(one) === keyOf(other);
 };
 
+// a stop to come, unmarked
+const stopRecordOf = (): IStopRecord => {
+  return { ending: new AbortController(), isMarked: false, stopping: new AbortController() };
+};
+
 // bytes drawn from a cryptographic source
 const drawn = (length: number): Uint8Array => {
   return globalThis.crypto.getRandomValues(new Uint8Array(length));
@@ -411,7 +443,8 @@ export const portOf = (participant: IBrokerParticipant): IBrokerParticipantPort 
  * an OPEN to a name by the server's transport serving it, or refused 503 when none does; a GONE by
  * the connections bound to the incarnation it names. A message that is no parcel is dropped and
  * reported; a retained one dropped in silence. As its link goes down it closes each connection,
- * unclean, connects anew, and resets each peer it held a connection with.
+ * unclean, connects anew, and resets each peer it held a connection with. Its stop ends its link in
+ * place, its next link another incarnation; its dispose ends it for good (spec 15.21).
  *
  * @example
  * const participant = createBrokerParticipant({ adapter: broker.adapter({ id: 'server' }) });
@@ -519,7 +552,8 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
   // its reconnection under way, which its fence gives up
   let relinking: AbortController | undefined;
   let isLinked = false;
-  let isStopped = false;
+  // ! disposed: final, a call since is its application's misuse
+  let isDisposed = false;
   // ! taken over by another link of its id: it connects no more until its application starts it
   let isTakenOver = false;
   // a link under way, and each down heard as one connects: that attempt fails
@@ -527,14 +561,17 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
   let downsAsItLinks = 0;
   // each link and each down its own, so that what a former link asked does nothing on the next
   let epoch = 0;
-  // * what its stop aborts: its adapter's start under way gives up on it
-  const stopping = new AbortController();
-  // what its stop aborts for its clients' reconnections, apart from its adapter's start's
-  const ending = new AbortController();
+  // * the record of its stop to come, renewed as that stop settles: each operation reads the one
+  // current at its call, so that what a stop ended is told as its, though a start follows at once
+  let current = stopRecordOf();
   // its adapter's start under way, which its stop awaits before it stops its adapter
   let starting: Promise<void> | undefined;
-  // its stop's end, which every later stop shares
+  // its last stop's end, which every later stop shares until its next link starts
   let stopped: Promise<void> | undefined;
+  // its dispose, which every later stop and dispose shares
+  let disposed: Promise<void> | undefined;
+  // * the pairs whose CLOSE its broker did not take as it stopped: its next link resets each
+  const unclosed: { acceptor: Uint8Array; opener: Uint8Array; peer: string }[] = [];
 
   const isDebugging = (): boolean => {
     return emitter.listenerCount('debug') > 0;
@@ -716,6 +753,8 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
     readonly connection: IBrokerConnection;
     /** Its peer's id and incarnation, which a GONE names. */
     readonly peer: IBrokerPeer;
+    /** Closed with a CLOSE of `code`, as its connection's `close`: whether its broker took it. */
+    closeWith(code: number): Promise<boolean>;
     /** Dropped as its link went down: unclean, unreported, nothing sent. */
     drop(): void;
     take(parcel: IParcel, bytes: number, options?: { flags?: number | undefined }): void;
@@ -772,16 +811,17 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
       }
     };
 
-    // a parcel of this connection, numbered unless it is a RESET, held to what may wait for its broker
-    const sendParcel = (
+    // a parcel of this connection, numbered unless it is a RESET, held to what may wait for its
+    // broker: what its broker said of it, none where it did not go
+    const published = (
       fields: Omit<ParcelFields, 'acceptor' | 'opener' | 'sequence'>,
       options?: { expiresAfter?: number | undefined }
-    ): void => {
+    ): Promise<BrokerPublished | undefined> | undefined => {
       const isReset = fields.kind === ParcelKind.RESET;
 
       // * its peer's CLOSE came, held behind what it holds: nothing goes after a CLOSE
       if (closing !== undefined) {
-        return;
+        return undefined;
       }
 
       const parcel: IParcel = {
@@ -802,7 +842,7 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
           reason: `what waits for its broker would pass maximumUnsentBytes, ${String(maximumUnsentBytes)} bytes`,
         });
 
-        return;
+        return undefined;
       }
 
       if (!isReset) {
@@ -810,26 +850,47 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
       }
 
       unsentBytes += bytes.length;
-      void publish(peerInbox, bytes, isDebugging() ? { ...options, parcel, record } : options).then(
-        (published) => {
-          unsentBytes -= bytes.length;
 
-          // a parcel its broker refused, or no subscriber took: its peer's inbox is gone, as a
-          // dropped socket's peer
-          if (published !== BROKER_PUBLISHED.TAKEN) {
-            end(false);
-          }
-        }
+      const publishing = publish(
+        peerInbox,
+        bytes,
+        isDebugging() ? { ...options, parcel, record } : options
       );
+
+      void publishing.then((outcome) => {
+        unsentBytes -= bytes.length;
+
+        // a parcel its broker refused, or no subscriber took: its peer's inbox is gone, as a
+        // dropped socket's peer
+        if (outcome !== BROKER_PUBLISHED.TAKEN) {
+          end(false);
+        }
+      });
+
+      return publishing;
+    };
+    const sendParcel = (
+      fields: Omit<ParcelFields, 'acceptor' | 'opener' | 'sequence'>,
+      options?: { expiresAfter?: number | undefined }
+    ): void => {
+      void published(fields, options);
     };
 
-    const closeWith = (code: number): void => {
+    // closed with a CLOSE of `code`: whether its broker took it, or none went
+    const closeWith = (code: number): Promise<boolean> => {
       if (isEnded) {
-        return;
+        return Promise.resolve(true);
       }
 
-      sendParcel({ code, kind: ParcelKind.CLOSE });
+      const sent = published({ code, kind: ParcelKind.CLOSE });
+
       end(code === CloseCode.NORMAL);
+
+      return (
+        sent?.then((outcome) => {
+          return outcome === BROKER_PUBLISHED.TAKEN;
+        }) ?? Promise.resolve(true)
+      );
     };
 
     // * lost of its own: its peer told by a CLOSE, the loss reported, its end unclean
@@ -865,7 +926,7 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
           ? undefined
           : createSilenceHeartbeat(heartbeat, {
               drop: () => {
-                closeWith(CloseCode.UNANSWERED);
+                void closeWith(CloseCode.UNANSWERED);
               },
               ping: () => {
                 sendParcel({ kind: ParcelKind.PING });
@@ -1040,6 +1101,7 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
         },
       },
       peer,
+      closeWith,
       drop: () => {
         end(false);
       },
@@ -1449,13 +1511,39 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
       cause === undefined ? undefined : { cause }
     );
   };
-  // read afresh at each call: its stop may come at any await of a link
-  const hasStopped = (): boolean => {
-    return isStopped;
+  // a connect its stop overtook, what it awaited failing with as its cause
+  const stoppedAsItConnected = (cause?: unknown): ConnectError => {
+    return new ConnectError(
+      `the participant ${id} stopped as it connected`,
+      cause === undefined ? undefined : { cause }
+    );
   };
 
-  // starts a link, a new incarnation, its inbox and its names subscribed before anything goes
+  // read afresh at each call: its stop may come at any await of a link
+  const isMarked = (record: IStopRecord): boolean => {
+    return record.isMarked;
+  };
+
+  // a RESET to each peer of `pairs`, whose connection it ended unheard
+  const resetEach = (pairs: { acceptor: Uint8Array; opener: Uint8Array; peer: string }[]): void => {
+    for (const { acceptor, opener, peer } of pairs) {
+      const parcel = {
+        acceptor,
+        kind: ParcelKind.RESET,
+        layout: PARCEL_LAYOUT,
+        flags: 0,
+        opener,
+        sequence: 0,
+      };
+      void publish(topicOf('i', peer), writeParcel(parcel), isDebugging() ? { parcel } : undefined);
+    }
+  };
+
+  // starts a link, a new incarnation, its inbox and its names subscribed before anything goes, then
+  // a RESET to each peer whose CLOSE its last stop's broker did not take
   const link = async (signal?: AbortSignal): Promise<void> => {
+    // ! the stop current as it starts, read after each await: a later one is not this link's
+    const record = current;
     const drawnIncarnation = drawn(INCARNATION_BYTES);
     const will =
       adapter.capabilities.will === true
@@ -1474,29 +1562,34 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
 
     const downsBefore = downsAsItLinks;
 
+    // * a stop called from here stops this link, and none before it is shared any more
+    stopped = undefined;
     isLinking = true;
 
     try {
       // * its stop's signal to its start alone: a SUBSCRIBE given up by a signal retires its link
       // with no DISCONNECT, so its will would go; its adapter's stop ends that one cleanly
       starting = adapter.start({
-        signal: signal === undefined ? stopping.signal : AbortSignal.any([signal, stopping.signal]),
+        signal:
+          signal === undefined
+            ? record.stopping.signal
+            : AbortSignal.any([signal, record.stopping.signal]),
         will,
       });
       await starting;
 
-      if (!hasStopped()) {
+      if (!isMarked(record)) {
         await adapter.subscribe(inbox, { signal });
       }
     } catch (reason) {
-      throw hasStopped() ? stoppedAsItStarted(reason) : reason;
+      throw isMarked(record) ? stoppedAsItStarted(reason) : reason;
     } finally {
       isLinking = false;
     }
 
     // ! stopped as it started: nothing of this link goes on, and its stop ends it once its start
     // settled
-    if (hasStopped()) {
+    if (isMarked(record)) {
       throw stoppedAsItStarted();
     }
 
@@ -1521,10 +1614,11 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
         }
       })
     );
-    if (hasStopped()) {
+    if (isMarked(record)) {
       throw stoppedAsItStarted();
     }
     if (epoch === linkedEpoch) {
+      resetEach(unclosed.splice(0));
       transition('up');
     }
   };
@@ -1534,13 +1628,17 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
     signal?: AbortSignal | undefined;
   }): Promise<void> => {
     const isStart = linkOptions?.isStart === true;
+    // ! the stop current at its call, which alone it answers to
+    const record = current;
 
-    // ! the stop first: a start since is a misuse; a connect reaches here only as the stop overtook it
-    if (isStopped) {
+    if (isDisposed) {
+      return Promise.reject(new ProgrammerError(`the participant ${id} is disposed`));
+    }
+
+    // * while a stop is under way, a start is a misuse; a connect fails, as one it overtook does
+    if (record.isMarked) {
       return Promise.reject(
-        isStart
-          ? new ProgrammerError(`the participant ${id} is stopped`)
-          : new ConnectError(`the participant ${id} stopped as it connected`)
+        isStart ? new ProgrammerError(`the participant ${id} is stopping`) : stoppedAsItConnected()
       );
     }
 
@@ -1558,31 +1656,65 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
       return Promise.resolve();
     }
 
-    // * one attempt shared, the first start's or a reconnection's; one that fails is let go, so
-    // the next call starts another
-    linking ??= link(linkOptions?.signal).catch((reason: unknown) => {
-      linking = undefined;
+    // * one attempt shared, the first start's or a reconnection's; one that fails is let go by
+    // itself alone, so the next call starts another and a former one lets go of none after it
+    if (linking === undefined) {
+      const attempt: Promise<void> = link(linkOptions?.signal).catch((reason: unknown) => {
+        if (linking === attempt) {
+          linking = undefined;
+        }
 
-      throw toError(reason);
+        throw toError(reason);
+      });
+
+      linking = attempt;
+    }
+
+    const shared = linking;
+
+    if (isStart) {
+      return shared;
+    }
+
+    // * a connect fails at once as a stop overtakes it, though the link it awaits ends later; an
+    // adapter's misuse fails it as a connect, which another attempt may mend, as its own
+    // reconnection takes it, and the start its application called meets it as it is
+    return new Promise<void>((resolve, reject) => {
+      const overtaken = (): void => {
+        reject(stoppedAsItConnected());
+      };
+
+      record.ending.signal.addEventListener('abort', overtaken, { once: true });
+      shared.then(
+        () => {
+          record.ending.signal.removeEventListener('abort', overtaken);
+          resolve();
+        },
+        (reason: unknown) => {
+          record.ending.signal.removeEventListener('abort', overtaken);
+          reject(
+            record.isMarked
+              ? stoppedAsItConnected(reason)
+              : reason instanceof ProgrammerError
+                ? wrapReason(ConnectError, reason)
+                : toError(reason)
+          );
+        }
+      );
     });
-
-    // * an adapter's misuse fails a connect, which another attempt may mend, as its own reconnection
-    // takes it; the start its application called meets it as it is
-    return isStart
-      ? linking
-      : linking.catch((reason: unknown) => {
-          throw reason instanceof ProgrammerError ? wrapReason(ConnectError, reason) : reason;
-        });
   };
 
   // * its link lost: each connection closed, unclean, unreported; a new incarnation connected by
-  // its own reconnection, without end unless its application bounds it; then a RESET to each peer
-  // it held a connection with
+  // its own reconnection, without end unless its application bounds it, ended at once by its stop;
+  // then a RESET to each peer it held a connection with
   const relink = async (
     former: { acceptor: Uint8Array; opener: Uint8Array; peer: string }[],
     fenced: AbortSignal
   ): Promise<void> => {
     const { delay = 1_000, maximumAttempts = Infinity, signal, tap } = reconnect;
+    // ! the stop current as its link went down: its signal ends it, in a wait or once an attempt
+    // failed, the stop the cause of its cancel
+    const { ending } = current;
     // the attempts made, which its end's words count
     let attempts = 0;
 
@@ -1591,18 +1723,8 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
         async () => {
           attempts += 1;
 
-          // ! a misuse to the loop, so it ends at once, in the other sides' words
-          if (isStopped) {
-            throw new ProgrammerError(`the participant ${id} is stopped`);
-          }
-
           // * every failure of a link another attempt may mend, an adapter's misuse among them
           await link().catch((reason: unknown) => {
-            // ! stopped as it linked: a misuse to the loop, so it ends at once, no wait told after it
-            if (isStopped) {
-              throw new ProgrammerError(`the participant ${id} is stopped`, { cause: reason });
-            }
-
             throw wrapReason(ConnectError, reason);
           });
         },
@@ -1610,7 +1732,9 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
           clock,
           delay,
           maximumAttempts,
-          signal: signal === undefined ? fenced : AbortSignal.any([signal, fenced]),
+          signal: AbortSignal.any(
+            signal === undefined ? [ending.signal, fenced] : [ending.signal, signal, fenced]
+          ),
           tap,
         }
       );
@@ -1625,17 +1749,7 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
       );
     }
 
-    for (const { acceptor, opener, peer } of former) {
-      const parcel = {
-        acceptor,
-        kind: ParcelKind.RESET,
-        layout: PARCEL_LAYOUT,
-        flags: 0,
-        opener,
-        sequence: 0,
-      };
-      void publish(topicOf('i', peer), writeParcel(parcel), isDebugging() ? { parcel } : undefined);
-    }
+    resetEach(former);
   };
 
   // a connect awaiting its answer fails: what it opened toward is the former link's
@@ -1719,7 +1833,7 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
     relinking = fencing;
 
     const relinked = relink(former, fencing.signal).catch((reason: unknown) => {
-      // * ended: it stays down, and, unless it stopped, the next start or connect links it anew
+      // * ended: it stays down, and the next start or connect links it anew
       if (linking === relinked) {
         linking = undefined;
       }
@@ -1736,6 +1850,75 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
     linking.catch(noop);
   };
 
+  // * its link ended in place with what is under way, its adapter stopped once its start under way
+  // settled, which sends each CLOSE first; shared until its next link starts (spec 15.21)
+  const stopInPlace = (): Promise<void> => {
+    stopped ??= (async () => {
+      const record = current;
+      const ended = isDebugging()
+        ? [...connections.values()].map((each) => {
+            return each.ordinal;
+          })
+        : undefined;
+
+      // ! a link up before it is shared by no later call, which links anew
+      linking = undefined;
+      relinking = undefined;
+
+      // * each CLOSE handed to its adapter before its stop: each pair its broker does not take is
+      // reset at its next link
+      const closes = [...connections.values()].map((each) => {
+        const { connection, peer } = each;
+        const pair = { acceptor: connection.acceptor, opener: connection.opener, peer: peer.id };
+
+        return each.closeWith(CloseCode.GOING_AWAY).then((isTaken) => {
+          return isTaken ? undefined : pair;
+        });
+      });
+
+      failAwaiting(`the participant ${id} stopped as it connected`);
+      record.isMarked = true;
+      epoch += 1;
+      isLinked = false;
+      // * its adapter's start under way, given up, settles before its stop: the two never overlap,
+      // and what that start brought up after the stop ends with it
+      record.stopping.abort(stoppedAsItStarted());
+      record.ending.abort(new GenericError(`the participant ${id} stopped`));
+
+      try {
+        await starting?.catch(noop);
+        await adapter.stop();
+      } finally {
+        // ! an OPEN its link took as it ended, after its CLOSEs went, holds a connection on a link
+        // ended: dropped, unclean
+        for (const each of connections.values()) {
+          each.drop();
+        }
+
+        for (const pair of await Promise.all(closes)) {
+          if (pair !== undefined) {
+            unclosed.push(pair);
+          }
+        }
+
+        for (const entry of names.values()) {
+          entry.isHeld = false;
+        }
+
+        departures.clear();
+
+        if (!isTakenOver) {
+          transition('stopped', ended);
+        }
+
+        // ! renewed as it settles, never at the next start: a call made since reads a fresh one
+        current = stopRecordOf();
+      }
+    })();
+
+    return stopped;
+  };
+
   adapter.on('message', take);
   adapter.on('down', down);
 
@@ -1744,8 +1927,8 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
     clock,
     id,
     isSecure: adapter.isSecure,
-    get isStopped() {
-      return isStopped;
+    get isDisposed() {
+      return isDisposed;
     },
     get names() {
       return new Set(
@@ -1758,7 +1941,9 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
           })
       );
     },
-    stopped: ending.signal,
+    get stopped() {
+      return current.ending.signal;
+    },
     awaitAnswers: (opener, answers) => {
       const key = keyOf(opener);
 
@@ -1902,38 +2087,9 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
     start: async (startOptions) => {
       await linked({ isStart: true, signal: startOptions?.signal });
     },
+    // * once disposed, a stop settles with its dispose
     stop: () => {
-      stopped ??= (async () => {
-        const ended = isDebugging()
-          ? [...connections.values()].map((record) => {
-              return record.ordinal;
-            })
-          : undefined;
-        for (const record of connections.values()) {
-          record.connection.close(CloseCode.GOING_AWAY);
-        }
-
-        failAwaiting(`the participant ${id} stopped as it connected`);
-        isStopped = true;
-        epoch += 1;
-        isLinked = false;
-        // * its adapter's start under way, given up, settles before its stop: the two never overlap,
-        // and what that start brought up after the stop ends with it
-        stopping.abort(stoppedAsItStarted());
-        ending.abort(new GenericError(`the participant ${id} stopped`));
-        await starting?.catch(noop);
-        await adapter.stop();
-        for (const entry of names.values()) {
-          entry.isHeld = false;
-        }
-        departures.clear();
-        if (!isTakenOver) {
-          transition('stopped', ended);
-        }
-        withdraw();
-      })();
-
-      return stopped;
+      return disposed ?? stopInPlace();
     },
     transportClient: (clientOptions) => {
       return createBrokerTransportClient(participant, clientOptions);
@@ -1942,8 +2098,17 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
       return createBrokerTransportServer(participant, serverOptions);
     },
     [PARTICIPANT_PORT]: port,
+    // ! final: stopped first, then its adapter's listeners and its announcement let go, once
     [Symbol.asyncDispose]: () => {
-      return participant.stop();
+      disposed ??= (async () => {
+        isDisposed = true;
+        await stopInPlace();
+        withdraw();
+        adapter.off('message', take);
+        adapter.off('down', down);
+      })();
+
+      return disposed;
     },
   };
 

@@ -632,6 +632,93 @@ test.describe('createMqttBrokerAdapter', () => {
     await adapter.stop();
   });
 
+  // spec 15.24, 15.28
+  test('sends what waits on its broker’s Receive Maximum before its stop’s DISCONNECT, within its connectTimeout, and fails what has not gone by then', async () => {
+    const adapter = adapterOf(script, { connectTimeout: 1_000 });
+    const { downs } = heardOf(adapter);
+    const link = await linkUp({ adapter, script }, { properties: { receiveMaximum: 1 } });
+    const sent = (): IPublishPacket[] => {
+      return link.packets.filter(({ cmd }) => {
+        return cmd === 'publish';
+      }) as IPublishPacket[];
+    };
+    const publishing = [1, 2, 3].map((index) => {
+      return adapter.publish({ payload: Uint8Array.of(index), topic: INBOX });
+    });
+
+    await until(() => {
+      return sent().length === 1;
+    });
+
+    // * its stop takes no publication, and sends what waits first, one PUBACK at a time
+    const stopping = adapter.stop();
+    const refused = await failureOf(adapter.publish({ payload: Uint8Array.of(4), topic: INBOX }));
+
+    expect(refused, 'none taken once it stops').toMatchObject({
+      message: 'the link of ada is not up',
+    });
+
+    for (const index of [0, 1, 2]) {
+      await until(() => {
+        return sent().length === index + 1;
+      });
+      expect(sent(), 'one at a time').toHaveLength(index + 1);
+      link.send({ cmd: 'puback', messageId: sent()[index]?.messageId ?? 0, reasonCode: 0 });
+    }
+
+    await stopping;
+    expect(await Promise.all(publishing), 'each taken').toEqual([
+      BROKER_PUBLISHED.TAKEN,
+      BROKER_PUBLISHED.TAKEN,
+      BROKER_PUBLISHED.TAKEN,
+    ]);
+
+    const disconnect = await link.next('disconnect');
+
+    expect((disconnect as { reasonCode?: number }).reasonCode ?? 0, 'no will').toBe(0);
+    expect(
+      link.packets
+        .filter(({ cmd }) => {
+          return cmd === 'publish' || cmd === 'disconnect';
+        })
+        .map((packet) => {
+          return packet.cmd === 'publish'
+            ? new Uint8Array(packet.payload as Buffer)[0]
+            : packet.cmd;
+        }),
+      'each sent before its DISCONNECT'
+    ).toEqual([1, 2, 3, 'disconnect']);
+
+    // * its broker answers none: past its connectTimeout, what has not gone fails, and its
+    // DISCONNECT goes
+    const silent = await linkUp({ adapter, script }, { properties: { receiveMaximum: 1 } });
+    const unanswered = [5, 6].map((index) => {
+      return failureOf(adapter.publish({ payload: Uint8Array.of(index), topic: INBOX }));
+    });
+
+    await silent.next('publish');
+
+    const startedAt = Date.now();
+
+    await adapter.stop();
+    expect(Date.now() - startedAt, 'its connectTimeout waited').toBeGreaterThanOrEqual(900);
+    expect(await Promise.all(unanswered), 'each failed').toEqual([
+      expect.objectContaining({ message: 'the link of ada stopped' }),
+      expect.objectContaining({ message: 'the link of ada stopped' }),
+    ]);
+    expect(
+      ((await silent.next('disconnect')) as { reasonCode?: number }).reasonCode ?? 0,
+      'its DISCONNECT, no will'
+    ).toBe(0);
+    expect(
+      silent.packets.filter(({ cmd }) => {
+        return cmd === 'publish';
+      }),
+      'the second never sent'
+    ).toHaveLength(1);
+    expect(downs, 'no loss told').toEqual([]);
+  });
+
   test('reads a PUBACK of 0x10 as no subscriber, under 0x80 as taken, and 0x80 or more as refused (spec 15.28)', async () => {
     const adapter = adapterOf(script);
     const link = await linkUp({ adapter, script });

@@ -56,7 +56,7 @@ export const serverOverMqtt = (reach: IMqttReach, options: IServerOptions) => {
     server,
     [Symbol.asyncDispose]: async () => {
       await server[Symbol.asyncDispose]();
-      await participant.stop();
+      await participant[Symbol.asyncDispose]();
     },
   };
 };
@@ -86,7 +86,7 @@ export const clientOverMqtt = (
     name: DEMO_NAME,
     [Symbol.asyncDispose]: async () => {
       await client[Symbol.asyncDispose]();
-      await participant.stop();
+      await participant[Symbol.asyncDispose]();
     },
   };
 };

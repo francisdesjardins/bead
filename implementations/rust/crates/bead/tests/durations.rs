@@ -1013,7 +1013,7 @@ fn memory_of(
 fn refused_of(error: TransportError) -> Result<ProgrammerError, String> {
     match error {
         TransportError::Refused(refused) => Ok(refused),
-        other @ (TransportError::Cancelled(_)
+        other @ (TransportError::Cancelled { .. }
         | TransportError::TimedOut(_)
         | TransportError::Connect(_)
         | TransportError::ReadyState(_)

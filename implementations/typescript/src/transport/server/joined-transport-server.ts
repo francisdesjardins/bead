@@ -135,6 +135,8 @@ export const joinTransports = <const Transports extends readonly IJoinableTransp
   }
 
   const clock = clockOf(transports);
+  // its dispose, which every later one shares
+  let disposed: Promise<void> | undefined;
   const emitter = createEmitter<TransportServerEventMap>();
   // each transport's gauges: its own, or, for one that counts nothing, its connections as its
   // events told them
@@ -238,8 +240,26 @@ export const joinTransports = <const Transports extends readonly IJoinableTransp
         }
       }
     },
+    // * it starts nothing: its dispose disposes every transport it joined, final for each, and a
+    // later dispose settles with the first
     [Symbol.asyncDispose]: () => {
-      return joined.stop();
+      disposed ??= (async () => {
+        const outcomes = await Promise.allSettled(
+          transports.map((transport) => {
+            return Symbol.asyncDispose in transport
+              ? (transport as AsyncDisposable)[Symbol.asyncDispose]()
+              : transport.stop();
+          })
+        );
+
+        for (const outcome of outcomes) {
+          if (outcome.status === 'rejected') {
+            throw outcome.reason;
+          }
+        }
+      })();
+
+      return disposed;
     },
   };
 

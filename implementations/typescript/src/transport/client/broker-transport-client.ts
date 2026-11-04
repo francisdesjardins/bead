@@ -124,9 +124,11 @@ const refusedOf = (refusal: BrokerRefusedError): ConnectError => {
  * secure while its participant's leg and its server's are; a reconnection opens a new connection
  * through the same name, possibly to another participant. Paused by its router, whole, a pause that
  * outlasts its connection, its participant holds what comes on it, in order, to
- * `maximumHeldEnvelopeBytes`, and never pauses its link (spec 15.12, 15.23). Once its participant
- * stopped, a connect or a reconnect is a {@link ProgrammerError}, its state and its target kept, and
- * a reconnection under way ends as it stops, cancelled (spec 15.21).
+ * `maximumHeldEnvelopeBytes`, and never pauses its link (spec 15.12, 15.23). As its participant
+ * stops, a connect under way fails at once, stopped as it connected, and a reconnection under way
+ * ends, cancelled, the stop its cause; once that stop settled, a connect or a reconnect links it
+ * anew. Once its participant is disposed, a connect or a reconnect is a {@link ProgrammerError}, its
+ * state and its target kept (spec 15.21).
  *
  * @example
  * const client = participant.transportClient();
@@ -230,7 +232,7 @@ export const createBrokerTransportClient = (
           return port.isSecure && isPeerSecure;
         },
 
-        // ! its participant outranks it: once stopped, a connect or a reconnect over it is a misuse,
+        // ! its participant outranks it: once disposed, a connect or a reconnect over it is a misuse,
         // refused before its state moves or its target is kept (spec 15.21)
         assertConnect: ({ server }) => {
           if (typeof server !== 'string' || !isToken(server)) {
@@ -239,13 +241,16 @@ export const createBrokerTransportClient = (
             );
           }
 
-          if (port.isStopped) {
-            throw new ProgrammerError(`the participant ${port.id} is stopped`);
+          if (port.isDisposed) {
+            throw new ProgrammerError(`the participant ${port.id} is disposed`);
           }
         },
         carries: isFieldValue,
-        // a reconnection under way ends as its participant stops, cancelled
-        lifetime: port.stopped,
+        // * read as a reconnection is called: one under way, or called while its participant's stop
+        // is, ends as that stop is called, cancelled; one called once it settled reads the next
+        get lifetime() {
+          return port.stopped;
+        },
 
         connect: async ({ server, signal, timeout = CONNECT_DEFAULTS.timeout }) => {
           const attempt: IAttempt = {
@@ -260,12 +265,19 @@ export const createBrokerTransportClient = (
             setReadyStateConnecting(client);
           }
 
-          // * its time from its start: its OPEN lives in its broker what is left of it (spec 15.18)
+          // * its participant's stop current at its call: one called before it settled fails it at
+          // once, whether it awaits its participant's link or its answer (spec 15.21)
+          const { stopped } = port;
+          // its time from its start: its OPEN lives in its broker what is left of it (spec 15.18)
           const startedAt = port.clock.performance.now();
           const timeLeft = (): number | undefined => {
             const left = timeout - (port.clock.performance.now() - startedAt);
 
             return Number.isFinite(left) ? Math.max(1, Math.ceil(left)) : undefined;
+          };
+
+          const overtaken = (): void => {
+            giveUp?.(new ConnectError(`the participant ${port.id} stopped as it connected`));
           };
 
           try {
@@ -276,6 +288,8 @@ export const createBrokerTransportClient = (
                   attempt.isEnded = true;
                   reject(reason);
                 };
+
+                stopped.addEventListener('abort', overtaken, { once: true });
 
                 // * its link up first, within its time (spec 15.15); then its OPEN, its half drawn
                 // anew, and the first answer naming that half
@@ -352,6 +366,7 @@ export const createBrokerTransportClient = (
 
             throw toError(reason);
           } finally {
+            stopped.removeEventListener('abort', overtaken);
             giveUp = undefined;
           }
 

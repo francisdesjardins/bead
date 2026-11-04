@@ -245,7 +245,11 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
             return IsAttachOf(frame, NameQueue);
         };
 
-        await using var adapter = AdapterOf();
+        await using var adapter = AdapterOf((options) =>
+        {
+            // * its stop's drain bounded short: what has not gone by then fails (spec 15.24)
+            return options with { ConnectTimeout = TimeSpan.FromMilliseconds(300) };
+        });
         var (_, downs) = HeardOf(adapter);
         var connection = await LinkUp((adapter, _script));
         Assert.Equal(BrokerPublished.Taken, await adapter.Publish(new BrokerPublication { Payload = (byte[])[1], Topic = Inbox }));
@@ -304,7 +308,11 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
             return (frame.Performative is AmqpTransfer && !IsRequestOf(frame, "PUT") && !IsRequestOf(frame, "POST")) || IsAttachOf(frame, NameQueue);
         };
 
-        await using var adapter = AdapterOf();
+        await using var adapter = AdapterOf((options) =>
+        {
+            // * its stop's drain bounded short: what has not gone by then fails (spec 15.24)
+            return options with { ConnectTimeout = TimeSpan.FromMilliseconds(300) };
+        });
         var (_, downs) = HeardOf(adapter);
         var connection = await LinkUp((adapter, _script));
         var sent = adapter.Publish(new BrokerPublication { Payload = (byte[])[1], Topic = Inbox });
@@ -3203,5 +3211,104 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
         Assert.Equal(BrokerPublished.NoSubscriber, await caller.Publish(new BrokerPublication { Topic = ["bead", "i", "bob"], Payload = new byte[] { 4 } }).WaitAsync(Patience, Cancelled));
         await first.Stop();
         await caller.Stop();
+    }
+
+    // spec 15.24
+    [Fact]
+    public async Task Sends_what_waits_on_its_link_credit_before_its_stop_s_close_within_its_connectTimeout_and_fails_what_has_not_gone_by_then()
+    {
+        _script.SenderCredit = 1;
+
+        await using var adapter = AdapterOf();
+        var connection = await LinkUp((adapter, _script));
+        var published = Enumerable.Range(1, 3).Select((each) =>
+        {
+            return adapter.Publish(new BrokerPublication { Topic = PeerInbox, Payload = new byte[] { (byte)each } });
+        }).ToList();
+
+        await Until(() =>
+        {
+            return TransfersTo((connection, "/exchanges/bead/bead.i.peer")).Count > 0;
+        });
+
+        var mark = connection.Frames.Count;
+        var stopping = adapter.Stop();
+
+        // * its stop waits for what it was handed, its credit given late, then ends its link
+        await Task.Delay(200, Cancelled);
+        Assert.False(stopping.IsCompleted);
+        Assert.Single(TransfersTo((connection, "/exchanges/bead/bead.i.peer")));
+        Assert.Empty(connection.Of<AmqpClose>());
+
+        var parcels = connection.Links.First((link) =>
+        {
+            return link.Name.StartsWith("parcels", StringComparison.Ordinal);
+        });
+
+        await connection.Credit((parcels, 2));
+        await stopping.WaitAsync(Patience, Cancelled);
+        await connection.Closed.WaitAsync(Patience, Cancelled);
+        Assert.Equal(Enumerable.Repeat(BrokerPublished.Taken, 3), await Task.WhenAll(published).WaitAsync(Patience, Cancelled));
+        Assert.Equal(
+            ["01", "02", "03"],
+            TransfersTo((connection, "/exchanges/bead/bead.i.peer")).Select((transfer) =>
+            {
+                return Convert.ToHexString((byte[])transfer.Message.Body);
+            }));
+
+        // * each transfer before any end its stop sent
+        var frames = connection.Frames.Skip(mark).ToList();
+        var lastTransfer = frames.FindLastIndex((frame) =>
+        {
+            return frame.Performative is AmqpTransfer && !IsRequestOf(frame, "PUT") && !IsRequestOf(frame, "POST") && !IsRequestOf(frame, "DELETE");
+        });
+
+        Assert.True(lastTransfer < frames.FindIndex((frame) =>
+        {
+            return frame.Performative is global::Amqp.Framing.Detach or AmqpEnd or AmqpClose;
+        }));
+
+        // * past its connectTimeout, what has not gone fails, and its link ends with no error all the
+        // same
+        await using var bounded = AdapterOf((options) =>
+        {
+            return options with { ConnectTimeout = TimeSpan.FromMilliseconds(300) };
+        });
+        var held = await LinkUp((bounded, _script));
+        var sent = bounded.Publish(new BrokerPublication { Topic = PeerInbox, Payload = (byte[])[4] });
+
+        await sent.WaitAsync(Patience, Cancelled);
+
+        var waiting = bounded.Publish(new BrokerPublication { Topic = PeerInbox, Payload = (byte[])[5] });
+
+        await bounded.Stop().WaitAsync(Patience, Cancelled);
+        Assert.Equal("the link of ada stopped", Assert.IsType<IOException>(await FailureOf(() =>
+        {
+            return waiting;
+        })).Message);
+        await held.Closed.WaitAsync(Patience, Cancelled);
+        Assert.Null(Assert.Single(held.Of<AmqpClose>()).Error);
+        Assert.Single(TransfersTo((held, "/exchanges/bead/bead.i.peer")));
+    }
+
+    // decision 0003
+    [Fact]
+    public async Task Refuses_a_start_once_disposed_its_state_kept_and_disposes_once_stopping_it_first()
+    {
+        var adapter = AdapterOf();
+        var connection = await LinkUp((adapter, _script));
+
+        // * two disposes: one stop, one CLOSE
+        await Task.WhenAll(adapter.DisposeAsync().AsTask(), adapter.DisposeAsync().AsTask()).WaitAsync(Patience, Cancelled);
+        await connection.Closed.WaitAsync(Patience, Cancelled);
+        Assert.Single(connection.Of<AmqpClose>());
+        Assert.False(adapter.IsLinked);
+
+        // * a start after it: its application's misuse, refused before anything goes
+        Assert.Equal("the adapter of ada is disposed", (await Assert.ThrowsAsync<ObjectDisposedException>(() =>
+        {
+            return adapter.Start();
+        })).Message);
+        Assert.False(adapter.IsLinked);
     }
 }

@@ -832,8 +832,9 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
     }
 
     /// <summary>
-    /// Listens, and gives where. Refused with an <see cref="InvalidOperationException"/> unless
-    /// Uninitialized or Closed; one that fails ends Closed, ready to start again.
+    /// Listens, and gives where. Refused with an <see cref="ObjectDisposedException"/> once disposed,
+    /// its state kept; then with an <see cref="InvalidOperationException"/> unless Uninitialized or
+    /// Closed; one that fails ends Closed, ready to start again.
     /// </summary>
     public Task<TransportServerAddress> Start(HttpTransportStartOptions? options = null, CancellationToken cancellationToken = default)
     {
@@ -1074,10 +1075,14 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
         return answered?.Written.Task ?? Task.CompletedTask;
     }
 
-    /// <summary>As <see cref="Stop"/>.</summary>
+    /// <summary>
+    /// Stops it, as <see cref="Stop"/>, then ends it for good (decision 0003): a start after it is
+    /// its application's misuse, an <see cref="ObjectDisposedException"/>, its state kept; a later
+    /// dispose settles with the first.
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
-        await Stop();
+        await _life.Dispose(Stopping);
     }
 
     // a whole number above 0

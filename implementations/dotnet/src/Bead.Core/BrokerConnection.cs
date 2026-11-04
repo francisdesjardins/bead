@@ -466,7 +466,7 @@ internal sealed class BrokerConnection
 
         foreach (var part in parts)
         {
-            Publish((part, part.Credential is null ? null : life));
+            _ = Publish((part, part.Credential is null ? null : life));
         }
     }
 
@@ -478,18 +478,21 @@ internal sealed class BrokerConnection
     /// </summary>
     public void Publish(BrokerParcel parcel)
     {
-        Publish((parcel, null));
+        _ = Publish((parcel, null));
     }
 
-    /// <summary>As <see cref="Publish(BrokerParcel)"/>, living in its broker as long as given, where its adapter offers a message's life.</summary>
-    public void Publish((BrokerParcel Parcel, TimeSpan? ExpiresAfter) publication)
+    /// <summary>
+    /// As <see cref="Publish(BrokerParcel)"/>, living in its broker as long as given, where its
+    /// adapter offers a message's life; what its broker says of it, none when nothing went.
+    /// </summary>
+    public Task<BrokerPublished>? Publish((BrokerParcel Parcel, TimeSpan? ExpiresAfter) publication)
     {
         var (parcel, expiresAfter) = publication;
 
         // its peer's CLOSE came, held behind what it holds: nothing goes after a CLOSE
         if (State == BrokerConnectionState.Closed || _closing is not null)
         {
-            return;
+            return null;
         }
 
         var isReset = parcel.Kind == BrokerParcelKinds.Reset;
@@ -502,7 +505,7 @@ internal sealed class BrokerConnection
         {
             Lose((4000, string.Create(CultureInfo.InvariantCulture, $"what waits for its broker would pass maximumUnsentBytes, {_setup.MaximumUnsentBytes} bytes")));
 
-            return;
+            return null;
         }
 
         if (!isReset)
@@ -532,22 +535,27 @@ internal sealed class BrokerConnection
             CancellationToken.None,
             TaskContinuationOptions.ExecuteSynchronously,
             TaskScheduler.Default);
+
+        return published;
     }
 
     /// <summary>
-    /// Closes it of this end's own: a CLOSE of <paramref name="close"/>'s code sent, its other end
-    /// told, a half-open one's among them, which its client holds open; this end's owner told as it
-    /// says.
+    /// Closes it of this end's own: a CLOSE of <paramref name="close"/>'s code handed to its adapter
+    /// in this turn, its other end told, a half-open one's among them, which its client holds open;
+    /// this end's owner told as it says. What its broker says of that CLOSE, none when none went.
     /// </summary>
-    public void Close((int Code, bool IsClean) close)
+    public Task<BrokerPublished>? Close((int Code, bool IsClean) close)
     {
         if (State == BrokerConnectionState.Closed)
         {
-            return;
+            return null;
         }
 
-        Publish(new BrokerParcel { Kind = BrokerParcelKinds.Close, Code = close.Code });
+        var published = Publish((new BrokerParcel { Kind = BrokerParcelKinds.Close, Code = close.Code }, null));
+
         Ended((close.IsClean, null));
+
+        return published;
     }
 
     /// <summary>Lets go of it at once, sending nothing, unclean: its link lost, its peer gone, or a half-open one forgotten.</summary>

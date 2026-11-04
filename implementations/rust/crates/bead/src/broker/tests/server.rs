@@ -868,7 +868,7 @@ async fn rejects_a_stop_while_starting() {
 
 // spec 15.21
 #[tokio::test]
-async fn refuses_its_start_once_its_participant_stopped_its_state_kept() {
+async fn refuses_its_start_once_its_participant_is_disposed_its_state_kept() {
     let broker = broker();
     let participant = participant_of(
         &adapter_of(&broker, "ada"),
@@ -879,7 +879,7 @@ async fn refuses_its_start_once_its_participant_stopped_its_state_kept() {
         .expect("a server");
 
     participant.start().await.expect("started");
-    participant.stop().await;
+    participant.dispose().await;
 
     // * a misuse, refused before anything moves: its state kept
     let refused = server.start().await.expect_err("refused");
@@ -893,7 +893,7 @@ async fn refuses_its_start_once_its_participant_stopped_its_state_kept() {
     );
     assert_eq!(
         refused.to_string(),
-        "the participant ada is stopped",
+        "the participant ada is disposed",
         "its words"
     );
     assert_eq!(

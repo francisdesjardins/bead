@@ -18707,6 +18707,357 @@
       ]
     },
     {
+      "name": "a participant that stops closes each connection with 1001 and serves no name, and at its next link serves it as another incarnation, resetting no peer",
+      "clauses": [
+        "15.21"
+      ],
+      "transport": "broker",
+      "steps": [
+        {
+          "publish": [
+            {
+              "parcel": {
+                "kind": 1,
+                "opener": "A1 00 00 00 00 00 00 01",
+                "acceptor": "00 00 00 00 00 00 00 00",
+                "sequence": 1,
+                "flags": 4,
+                "id": "peer",
+                "incarnation": "C0 C1 C2 C3 C4 C5 C6 C7 C8 C9 CA CB CC CD CE CF",
+                "bound": 65536
+              }
+            }
+          ],
+          "from": "peer",
+          "to": "name"
+        },
+        {
+          "expect": {
+            "parcel": {
+              "kind": 2,
+              "opener": "A1 00 00 00 00 00 00 01",
+              "acceptor": {
+                "capture": "first",
+                "shape": "half"
+              },
+              "sequence": 1,
+              "flags": 4,
+              "id": "server",
+              "incarnation": {
+                "capture": "incarnation",
+                "shape": "incarnation"
+              },
+              "bound": 4294967295
+            }
+          },
+          "on": "peer"
+        },
+        {
+          "publish": [
+            {
+              "parcel": {
+                "kind": 5,
+                "opener": "A1 00 00 00 00 00 00 01",
+                "acceptor": "{first}",
+                "sequence": 2,
+                "flags": 0
+              }
+            }
+          ],
+          "from": "peer",
+          "to": "inbox"
+        },
+        {
+          "expect": {
+            "parcel": {
+              "kind": 6,
+              "opener": "A1 00 00 00 00 00 00 01",
+              "acceptor": "{first}",
+              "sequence": 2,
+              "flags": 0,
+              "answers": 2
+            }
+          },
+          "on": "peer"
+        },
+        {
+          "participant": "stop"
+        },
+        {
+          "expect": {
+            "closed": {
+              "clean": false
+            }
+          },
+          "on": "peer"
+        },
+        {
+          "expect": {
+            "parcel": {
+              "kind": 7,
+              "opener": "A1 00 00 00 00 00 00 01",
+              "acceptor": "{first}",
+              "sequence": 3,
+              "flags": 0,
+              "code": 1001
+            }
+          },
+          "on": "peer"
+        },
+        {
+          "until": {
+            "gauge": "names",
+            "is": 0
+          }
+        },
+        {
+          "publish": [
+            {
+              "parcel": {
+                "kind": 1,
+                "opener": "A2 00 00 00 00 00 00 02",
+                "acceptor": "00 00 00 00 00 00 00 00",
+                "sequence": 1,
+                "flags": 4,
+                "id": "peer",
+                "incarnation": "C0 C1 C2 C3 C4 C5 C6 C7 C8 C9 CA CB CC CD CE CF",
+                "bound": 65536
+              }
+            }
+          ],
+          "from": "peer",
+          "to": "name",
+          "refused": "no-subscriber"
+        },
+        {
+          "participant": "start"
+        },
+        {
+          "until": {
+            "gauge": "names",
+            "is": 1
+          }
+        },
+        {
+          "publish": [
+            {
+              "parcel": {
+                "kind": 1,
+                "opener": "A3 00 00 00 00 00 00 03",
+                "acceptor": "00 00 00 00 00 00 00 00",
+                "sequence": 1,
+                "flags": 4,
+                "id": "peer",
+                "incarnation": "C0 C1 C2 C3 C4 C5 C6 C7 C8 C9 CA CB CC CD CE CF",
+                "bound": 65536
+              }
+            }
+          ],
+          "from": "peer",
+          "to": "name"
+        },
+        {
+          "expect": {
+            "parcel": {
+              "kind": 2,
+              "opener": "A3 00 00 00 00 00 00 03",
+              "acceptor": {
+                "capture": "third",
+                "shape": "half"
+              },
+              "sequence": 1,
+              "flags": 4,
+              "id": "server",
+              "incarnation": {
+                "capture": "anew",
+                "shape": "incarnation",
+                "unlike": "incarnation"
+              },
+              "bound": 4294967295
+            }
+          },
+          "on": "peer"
+        }
+      ]
+    },
+    {
+      "name": "a client whose participant stops closes its connection with 1001 and leaves no will, and its next connect links the participant anew as another incarnation",
+      "clauses": [
+        "15.21"
+      ],
+      "transport": "broker",
+      "role": "client",
+      "steps": [
+        {
+          "connect": "interop"
+        },
+        {
+          "expect": {
+            "parcel": {
+              "kind": 1,
+              "opener": {
+                "capture": "first",
+                "shape": "half"
+              },
+              "acceptor": "00 00 00 00 00 00 00 00",
+              "sequence": 1,
+              "flags": 4,
+              "id": "client",
+              "incarnation": {
+                "capture": "incarnation",
+                "shape": "incarnation"
+              },
+              "bound": 4294967295
+            }
+          },
+          "on": "peer"
+        },
+        {
+          "publish": [
+            {
+              "parcel": {
+                "kind": 2,
+                "opener": "{first}",
+                "acceptor": "A1 00 00 00 00 00 00 01",
+                "sequence": 1,
+                "flags": 4,
+                "id": "peer",
+                "incarnation": "C0 C1 C2 C3 C4 C5 C6 C7 C8 C9 CA CB CC CD CE CF",
+                "bound": 65536
+              }
+            }
+          ],
+          "from": "peer",
+          "to": "inbox"
+        },
+        {
+          "expect": {
+            "opened": true
+          }
+        },
+        {
+          "expect": {
+            "parcel": {
+              "kind": 5,
+              "opener": "{first}",
+              "acceptor": "A1 00 00 00 00 00 00 01",
+              "sequence": 2,
+              "flags": 0
+            }
+          },
+          "on": "peer"
+        },
+        {
+          "participant": "stop"
+        },
+        {
+          "expect": {
+            "parcel": {
+              "kind": 7,
+              "opener": "{first}",
+              "acceptor": "A1 00 00 00 00 00 00 01",
+              "sequence": 3,
+              "flags": 0,
+              "code": 1001
+            }
+          },
+          "on": "peer"
+        },
+        {
+          "expect": {
+            "closed": {
+              "clean": false
+            }
+          }
+        },
+        {
+          "connect": "interop"
+        },
+        {
+          "expect": {
+            "parcel": {
+              "kind": 1,
+              "opener": {
+                "capture": "second",
+                "shape": "half"
+              },
+              "acceptor": "00 00 00 00 00 00 00 00",
+              "sequence": 1,
+              "flags": 4,
+              "id": "client",
+              "incarnation": {
+                "capture": "anew",
+                "shape": "incarnation",
+                "unlike": "incarnation"
+              },
+              "bound": 4294967295
+            }
+          },
+          "on": "peer"
+        },
+        {
+          "publish": [
+            {
+              "parcel": {
+                "kind": 2,
+                "opener": "{second}",
+                "acceptor": "A2 00 00 00 00 00 00 02",
+                "sequence": 1,
+                "flags": 4,
+                "id": "peer",
+                "incarnation": "C0 C1 C2 C3 C4 C5 C6 C7 C8 C9 CA CB CC CD CE CF",
+                "bound": 65536
+              }
+            }
+          ],
+          "from": "peer",
+          "to": "inbox"
+        },
+        {
+          "expect": {
+            "opened": true
+          }
+        },
+        {
+          "expect": {
+            "parcel": {
+              "kind": 5,
+              "opener": "{second}",
+              "acceptor": "A2 00 00 00 00 00 00 02",
+              "sequence": 2,
+              "flags": 0
+            }
+          },
+          "on": "peer"
+        },
+        {
+          "lose": "client"
+        },
+        {
+          "expect": {
+            "parcel": {
+              "kind": 9,
+              "opener": "00 00 00 00 00 00 00 00",
+              "acceptor": "00 00 00 00 00 00 00 00",
+              "sequence": 0,
+              "flags": 0,
+              "incarnation": "{anew}",
+              "id": "client"
+            }
+          },
+          "on": "peer",
+          "at": "departure"
+        },
+        {
+          "expect": {
+            "closed": {
+              "clean": false
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "an OPEN to the server's name is accepted on the opener's inbox: an ACCEPT of sequence 1 naming the opener's half and its own, the server's id, incarnation and receive bound, marked secure",
       "clauses": [
         "15.16",
@@ -25605,6 +25956,363 @@
       ]
     },
     {
+      "name": "a participant that stops closes each connection with 1001 and serves no name, and at its next link serves it as another incarnation, resetting no peer",
+      "clauses": [
+        "15.21",
+        "15.26",
+        "15.30",
+        "15.30.1"
+      ],
+      "transport": "mqtt",
+      "steps": [
+        {
+          "publish": [
+            {
+              "parcel": {
+                "kind": 1,
+                "opener": "A1 00 00 00 00 00 00 01",
+                "acceptor": "00 00 00 00 00 00 00 00",
+                "sequence": 1,
+                "flags": 4,
+                "id": "peer",
+                "incarnation": "C0 C1 C2 C3 C4 C5 C6 C7 C8 C9 CA CB CC CD CE CF",
+                "bound": 65536
+              }
+            }
+          ],
+          "from": "peer",
+          "to": "name"
+        },
+        {
+          "expect": {
+            "parcel": {
+              "kind": 2,
+              "opener": "A1 00 00 00 00 00 00 01",
+              "acceptor": {
+                "capture": "first",
+                "shape": "half"
+              },
+              "sequence": 1,
+              "flags": 4,
+              "id": "server",
+              "incarnation": {
+                "capture": "incarnation",
+                "shape": "incarnation"
+              },
+              "bound": 16777188
+            }
+          },
+          "on": "peer"
+        },
+        {
+          "publish": [
+            {
+              "parcel": {
+                "kind": 5,
+                "opener": "A1 00 00 00 00 00 00 01",
+                "acceptor": "{first}",
+                "sequence": 2,
+                "flags": 0
+              }
+            }
+          ],
+          "from": "peer",
+          "to": "inbox"
+        },
+        {
+          "expect": {
+            "parcel": {
+              "kind": 6,
+              "opener": "A1 00 00 00 00 00 00 01",
+              "acceptor": "{first}",
+              "sequence": 2,
+              "flags": 0,
+              "answers": 2
+            }
+          },
+          "on": "peer"
+        },
+        {
+          "participant": "stop"
+        },
+        {
+          "expect": {
+            "closed": {
+              "clean": false
+            }
+          },
+          "on": "peer"
+        },
+        {
+          "expect": {
+            "parcel": {
+              "kind": 7,
+              "opener": "A1 00 00 00 00 00 00 01",
+              "acceptor": "{first}",
+              "sequence": 3,
+              "flags": 0,
+              "code": 1001
+            }
+          },
+          "on": "peer"
+        },
+        {
+          "until": {
+            "gauge": "names",
+            "is": 0
+          }
+        },
+        {
+          "publish": [
+            {
+              "parcel": {
+                "kind": 1,
+                "opener": "A2 00 00 00 00 00 00 02",
+                "acceptor": "00 00 00 00 00 00 00 00",
+                "sequence": 1,
+                "flags": 4,
+                "id": "peer",
+                "incarnation": "C0 C1 C2 C3 C4 C5 C6 C7 C8 C9 CA CB CC CD CE CF",
+                "bound": 65536
+              }
+            }
+          ],
+          "from": "peer",
+          "to": "name",
+          "refused": "no-subscriber"
+        },
+        {
+          "participant": "start"
+        },
+        {
+          "until": {
+            "gauge": "names",
+            "is": 1
+          }
+        },
+        {
+          "publish": [
+            {
+              "parcel": {
+                "kind": 1,
+                "opener": "A3 00 00 00 00 00 00 03",
+                "acceptor": "00 00 00 00 00 00 00 00",
+                "sequence": 1,
+                "flags": 4,
+                "id": "peer",
+                "incarnation": "C0 C1 C2 C3 C4 C5 C6 C7 C8 C9 CA CB CC CD CE CF",
+                "bound": 65536
+              }
+            }
+          ],
+          "from": "peer",
+          "to": "name"
+        },
+        {
+          "expect": {
+            "parcel": {
+              "kind": 2,
+              "opener": "A3 00 00 00 00 00 00 03",
+              "acceptor": {
+                "capture": "third",
+                "shape": "half"
+              },
+              "sequence": 1,
+              "flags": 4,
+              "id": "server",
+              "incarnation": {
+                "capture": "anew",
+                "shape": "incarnation",
+                "unlike": "incarnation"
+              },
+              "bound": 16777188
+            }
+          },
+          "on": "peer"
+        }
+      ]
+    },
+    {
+      "name": "a client whose participant stops closes its connection with 1001 and leaves no will, and its next connect links the participant anew as another incarnation",
+      "clauses": [
+        "15.21",
+        "15.26",
+        "15.30",
+        "15.30.1"
+      ],
+      "transport": "mqtt",
+      "role": "client",
+      "steps": [
+        {
+          "connect": "interop"
+        },
+        {
+          "expect": {
+            "parcel": {
+              "kind": 1,
+              "opener": {
+                "capture": "first",
+                "shape": "half"
+              },
+              "acceptor": "00 00 00 00 00 00 00 00",
+              "sequence": 1,
+              "flags": 4,
+              "id": "client",
+              "incarnation": {
+                "capture": "incarnation",
+                "shape": "incarnation"
+              },
+              "bound": 16777188
+            }
+          },
+          "on": "peer"
+        },
+        {
+          "publish": [
+            {
+              "parcel": {
+                "kind": 2,
+                "opener": "{first}",
+                "acceptor": "A1 00 00 00 00 00 00 01",
+                "sequence": 1,
+                "flags": 4,
+                "id": "peer",
+                "incarnation": "C0 C1 C2 C3 C4 C5 C6 C7 C8 C9 CA CB CC CD CE CF",
+                "bound": 65536
+              }
+            }
+          ],
+          "from": "peer",
+          "to": "inbox"
+        },
+        {
+          "expect": {
+            "opened": true
+          }
+        },
+        {
+          "expect": {
+            "parcel": {
+              "kind": 5,
+              "opener": "{first}",
+              "acceptor": "A1 00 00 00 00 00 00 01",
+              "sequence": 2,
+              "flags": 0
+            }
+          },
+          "on": "peer"
+        },
+        {
+          "participant": "stop"
+        },
+        {
+          "expect": {
+            "parcel": {
+              "kind": 7,
+              "opener": "{first}",
+              "acceptor": "A1 00 00 00 00 00 00 01",
+              "sequence": 3,
+              "flags": 0,
+              "code": 1001
+            }
+          },
+          "on": "peer"
+        },
+        {
+          "expect": {
+            "closed": {
+              "clean": false
+            }
+          }
+        },
+        {
+          "connect": "interop"
+        },
+        {
+          "expect": {
+            "parcel": {
+              "kind": 1,
+              "opener": {
+                "capture": "second",
+                "shape": "half"
+              },
+              "acceptor": "00 00 00 00 00 00 00 00",
+              "sequence": 1,
+              "flags": 4,
+              "id": "client",
+              "incarnation": {
+                "capture": "anew",
+                "shape": "incarnation",
+                "unlike": "incarnation"
+              },
+              "bound": 16777188
+            }
+          },
+          "on": "peer"
+        },
+        {
+          "publish": [
+            {
+              "parcel": {
+                "kind": 2,
+                "opener": "{second}",
+                "acceptor": "A2 00 00 00 00 00 00 02",
+                "sequence": 1,
+                "flags": 4,
+                "id": "peer",
+                "incarnation": "C0 C1 C2 C3 C4 C5 C6 C7 C8 C9 CA CB CC CD CE CF",
+                "bound": 65536
+              }
+            }
+          ],
+          "from": "peer",
+          "to": "inbox"
+        },
+        {
+          "expect": {
+            "opened": true
+          }
+        },
+        {
+          "expect": {
+            "parcel": {
+              "kind": 5,
+              "opener": "{second}",
+              "acceptor": "A2 00 00 00 00 00 00 02",
+              "sequence": 2,
+              "flags": 0
+            }
+          },
+          "on": "peer"
+        },
+        {
+          "lose": "client"
+        },
+        {
+          "expect": {
+            "parcel": {
+              "kind": 9,
+              "opener": "00 00 00 00 00 00 00 00",
+              "acceptor": "00 00 00 00 00 00 00 00",
+              "sequence": 0,
+              "flags": 0,
+              "incarnation": "{anew}",
+              "id": "client"
+            }
+          },
+          "on": "peer",
+          "at": "departure"
+        },
+        {
+          "expect": {
+            "closed": {
+              "clean": false
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "an OPEN to the server's name is accepted on the opener's inbox: an ACCEPT of sequence 1 naming the opener's half and its own, the server's id, incarnation and receive bound, marked secure",
       "clauses": [
         "15.16",
@@ -31925,6 +32633,165 @@
           ],
           "from": "peer",
           "to": "name"
+        },
+        {
+          "expect": {
+            "parcel": {
+              "kind": 2,
+              "opener": "A2 00 00 00 00 00 00 02",
+              "acceptor": {
+                "capture": "second",
+                "shape": "half"
+              },
+              "sequence": 1,
+              "flags": 4,
+              "id": "server",
+              "incarnation": {
+                "capture": "anew",
+                "shape": "incarnation",
+                "unlike": "incarnation"
+              },
+              "bound": 16777156
+            }
+          },
+          "on": "peer"
+        }
+      ]
+    },
+    {
+      "name": "a participant that stops closes each connection with 1001 and serves no name, and at its next link serves it as another incarnation, resetting no peer",
+      "clauses": [
+        "15.21",
+        "15.33",
+        "15.38",
+        "15.37",
+        "15.37.1"
+      ],
+      "transport": "amqp",
+      "steps": [
+        {
+          "publish": [
+            {
+              "parcel": {
+                "kind": 1,
+                "opener": "A1 00 00 00 00 00 00 01",
+                "acceptor": "00 00 00 00 00 00 00 00",
+                "sequence": 1,
+                "flags": 4,
+                "id": "peer",
+                "incarnation": "C0 C1 C2 C3 C4 C5 C6 C7 C8 C9 CA CB CC CD CE CF",
+                "bound": 65536
+              }
+            }
+          ],
+          "from": "peer",
+          "to": "name"
+        },
+        {
+          "expect": {
+            "parcel": {
+              "kind": 2,
+              "opener": "A1 00 00 00 00 00 00 01",
+              "acceptor": {
+                "capture": "first",
+                "shape": "half"
+              },
+              "sequence": 1,
+              "flags": 4,
+              "id": "server",
+              "incarnation": {
+                "capture": "incarnation",
+                "shape": "incarnation"
+              },
+              "bound": 16777156
+            }
+          },
+          "on": "peer"
+        },
+        {
+          "publish": [
+            {
+              "parcel": {
+                "kind": 5,
+                "opener": "A1 00 00 00 00 00 00 01",
+                "acceptor": "{first}",
+                "sequence": 2,
+                "flags": 0
+              }
+            }
+          ],
+          "from": "peer",
+          "to": "inbox"
+        },
+        {
+          "expect": {
+            "parcel": {
+              "kind": 6,
+              "opener": "A1 00 00 00 00 00 00 01",
+              "acceptor": "{first}",
+              "sequence": 2,
+              "flags": 0,
+              "answers": 2
+            }
+          },
+          "on": "peer"
+        },
+        {
+          "participant": "stop"
+        },
+        {
+          "expect": {
+            "closed": {
+              "clean": false
+            }
+          },
+          "on": "peer"
+        },
+        {
+          "expect": {
+            "parcel": {
+              "kind": 7,
+              "opener": "A1 00 00 00 00 00 00 01",
+              "acceptor": "{first}",
+              "sequence": 3,
+              "flags": 0,
+              "code": 1001
+            }
+          },
+          "on": "peer"
+        },
+        {
+          "until": {
+            "gauge": "names",
+            "is": 0
+          }
+        },
+        {
+          "publish": [
+            {
+              "parcel": {
+                "kind": 1,
+                "opener": "A2 00 00 00 00 00 00 02",
+                "acceptor": "00 00 00 00 00 00 00 00",
+                "sequence": 1,
+                "flags": 4,
+                "id": "peer",
+                "incarnation": "C0 C1 C2 C3 C4 C5 C6 C7 C8 C9 CA CB CC CD CE CF",
+                "bound": 65536
+              }
+            }
+          ],
+          "from": "peer",
+          "to": "name"
+        },
+        {
+          "participant": "start"
+        },
+        {
+          "until": {
+            "gauge": "names",
+            "is": 1
+          }
         },
         {
           "expect": {

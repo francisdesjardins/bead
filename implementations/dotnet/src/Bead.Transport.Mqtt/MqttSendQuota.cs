@@ -6,7 +6,7 @@ namespace Bead.Transport.Mqtt;
 /// replenishing it, later ones waiting in their order and sent as it frees; no other packet waits
 /// for it. MQTTnet keeps none of its own (the round's T1), so the adapter keeps it. A publication
 /// that waits and is given up leaves the queue, nothing sent; the incarnation's end fails every one
-/// that waits.
+/// that waits; its stop awaits it drained first (spec 15.24).
 /// </summary>
 internal sealed class MqttSendQuota
 {
@@ -15,6 +15,8 @@ internal sealed class MqttSendQuota
     private readonly int _receiveMaximum;
     private int _inFlight;
     private Exception? _ended;
+    // what its stop awaits: nothing waiting, nothing unacknowledged; set while one waits for it
+    private TaskCompletionSource? _drained;
 
     /// <summary>A quota of <paramref name="receiveMaximum"/> PUBLISH packets unacknowledged: 65,535 where the CONNACK names none.</summary>
     public MqttSendQuota(int receiveMaximum)
@@ -45,6 +47,26 @@ internal sealed class MqttSendQuota
             {
                 return _waiting.Count;
             }
+        }
+    }
+
+    /// <summary>
+    /// Settles once nothing waits and nothing sent is unacknowledged, or once it ended: what its
+    /// link's stop awaits before its DISCONNECT, so that what it was handed goes first (spec 15.24,
+    /// RFC 9293 §3.6).
+    /// </summary>
+    public Task Drained()
+    {
+        lock (_gate)
+        {
+            if (_ended is not null || (_waiting.Count == 0 && _inFlight == 0))
+            {
+                return Task.CompletedTask;
+            }
+
+            _drained ??= new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            return _drained.Task;
         }
     }
 
@@ -97,6 +119,7 @@ internal sealed class MqttSendQuota
             }
 
             waiting.Sent.TrySetCanceled(token);
+            Settle();
         });
 
         _ = waiting.Sent.Task.ContinueWith(
@@ -139,6 +162,8 @@ internal sealed class MqttSendQuota
         {
             waiting.Sent.TrySetResult();
         }
+
+        Settle();
     }
 
     /// <summary>The incarnation ended: every publication that waits fails with <paramref name="reason"/>, and none goes after it.</summary>
@@ -162,6 +187,27 @@ internal sealed class MqttSendQuota
         {
             waiting.Sent.TrySetException(reason);
         }
+
+        Settle();
+    }
+
+    // its drain told, once nothing waits and nothing is unacknowledged, or once it ended
+    private void Settle()
+    {
+        TaskCompletionSource? drained;
+
+        lock (_gate)
+        {
+            if (_drained is null || (_ended is null && (_waiting.Count > 0 || _inFlight > 0)))
+            {
+                return;
+            }
+
+            drained = _drained;
+            _drained = null;
+        }
+
+        drained.TrySetResult();
     }
 
     // a publication that waits for room: what sends it, and what settles once it went

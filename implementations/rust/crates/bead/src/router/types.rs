@@ -700,7 +700,19 @@ impl fmt::Display for RouterError {
     }
 }
 
-impl Error for RouterError {}
+// * transparent, as each error enum is: its inner error's words displayed, its inner error's sources
+// walked, so a walk from a participant's report reaches its cause once
+impl Error for RouterError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Failure(failure) => failure.source(),
+            Self::Other(error) => {
+                let source: &(dyn Error + 'static) = error.as_ref();
+                source.source()
+            }
+        }
+    }
+}
 
 /// What a part holds right now, for diagnosis: its counts and ceilings, the connections it keeps
 /// anything for, and what it found that should never be.

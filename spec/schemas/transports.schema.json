@@ -713,7 +713,7 @@
       }
     },
     "brokerStep": {
-      "description": "Over a broker, what the test does — publish, stop, wait, lose, takeover, leave, and in the client role connect and transportSend — or what the side under test does next — expect, reported — or a gauge or a timer waited for, or time moved: one of them.",
+      "description": "Over a broker, what the test does — publish, stop, wait, lose, takeover, leave, participant, and in the client role connect and transportSend — or what the side under test does next — expect, reported — or a gauge or a timer waited for, or time moved: one of them.",
       "type": "object",
       "additionalProperties": false,
       "oneOf": [
@@ -728,7 +728,8 @@
         { "required": ["transportSend"] },
         { "required": ["lose"] },
         { "required": ["takeover"] },
-        { "required": ["leave"] }
+        { "required": ["leave"] },
+        { "required": ["participant"] }
       ],
       "dependentRequired": {
         "from": ["publish"],
@@ -762,6 +763,10 @@
         "leave": {
           "description": "A peer that lets its inbox go, its unsubscription settled.",
           "$ref": "#/$defs/participant"
+        },
+        "participant": {
+          "description": "The participant under test stopped in place, or started again: its stop and its start settled.",
+          "enum": ["stop", "start"]
         },
         "within": {
           "description": "How long an expect waits, in milliseconds, where not a patience of its own.",

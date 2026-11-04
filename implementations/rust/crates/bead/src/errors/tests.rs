@@ -5,6 +5,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use super::{CallError, ConnectError, ProgrammerError, ResolverError, TransportError};
+use crate::router::types::RouterError;
 
 #[test]
 fn timeout_error_keeps_the_milliseconds_waited_and_says_them_or_the_words_it_is_given() {
@@ -85,6 +86,21 @@ fn each_error_enum_displays_its_cause_once_and_keeps_its_sources() {
     assert_eq!(
         chain(&TransportError::Connect(connect)),
         ["connect", "context", "leaf"]
+    );
+    assert_eq!(
+        chain(&TransportError::cancelled_by(
+            "cancelled",
+            Arc::new(Context(Leaf))
+        )),
+        ["cancelled", "context", "leaf"]
+    );
+    assert_eq!(
+        chain(&TransportError::cancelled("cancelled")),
+        ["cancelled"]
+    );
+    assert_eq!(
+        chain(&RouterError::Other(Arc::new(Context(Leaf)))),
+        ["context", "leaf"]
     );
 
     let refusal = ProgrammerError::new("refused");

@@ -481,6 +481,39 @@ test.describe('joinTransports', () => {
     expect(settled).toEqual(new Error('a stop that fails'));
   });
 
+  // decision 0003
+  test('refuses a start once disposed, its state kept, and disposes once, stopping it first', async () => {
+    const memory = createMemoryTransportServer();
+    // what cannot be disposed: stopped alone
+    const http = createFake('HTTP', { flags: {} });
+    const joined = joinTransports([memory, http.transport]);
+    await using client = createMemoryTransportClient();
+
+    await memory.start();
+    await client.connect({ server: memory });
+
+    // * two disposes: each transport it joined disposed once, stopped first, which both settle with
+    await Promise.all([joined[Symbol.asyncDispose](), joined[Symbol.asyncDispose]()]);
+    await turn();
+    expect([memory.isClosed(), client.isClosed(), http.asked], 'each stopped, once').toEqual([
+      true,
+      true,
+      [['stop']],
+    ]);
+
+    // * a start of a transport it joined, once disposed: its application's misuse, refused, its
+    // state kept
+    const refused = memory.start();
+
+    await expect(refused, 'a misuse').rejects.toBeInstanceOf(ProgrammerError);
+    await expect(refused, 'its words').rejects.toThrow('the transport server is disposed');
+    expect(memory.isClosed(), 'its state kept').toBe(true);
+
+    // * a later dispose settles with the first, nothing asked again
+    await joined[Symbol.asyncDispose]();
+    expect(http.asked, 'nothing asked again').toEqual([['stop']]);
+  });
+
   // spec 15.12.17, 15.14
   test('a joined transport pauses the connection on the transport that drew it', async () => {
     const webSocket = createFake('WS', { flags: {} });

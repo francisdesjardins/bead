@@ -9,17 +9,28 @@ namespace Bead.Tests;
 /// it returns when given; its first <see cref="Refuses"/> starts refused as a misuse, as an adapter
 /// whose link is up already refuses one, when given; each start waiting for its stop's token, then
 /// failing, where <see cref="GivesUp"/> says so; each start after its first
-/// <see cref="HoldsStart"/> held, heeding no token, until the test releases it, when given; and each
+/// <see cref="HoldsStart"/> held, heeding no token, until the test releases it, when given, and each
+/// one while <see cref="HoldingStarts"/> holds; and each
 /// start refused as a misuse while <see cref="Refusing"/> holds, as its broker would refuse one while
-/// a link of its id is up, decided before its participant hears a loss, so no thread races it.
+/// a link of its id is up, decided before its participant hears a loss, so no thread races it; each
+/// stop held, until the test releases it, where <see cref="HoldsStops"/> says so.
 /// </summary>
 internal sealed class CallingAdapter(MemoryBrokerAdapter inner) : IBrokerAdapter
 {
     // the starts it holds, unreleased, the first asked first
     private readonly ConcurrentQueue<TaskCompletionSource> _held = new();
 
+    // the stops it holds, unreleased, the first asked first
+    private readonly ConcurrentQueue<TaskCompletionSource> _stops = new();
+
     // whether a start is refused as a misuse, set by the test from its own thread
     private volatile bool _refusing;
+
+    // whether each start is held, set by the test from its own thread
+    private volatile bool _holdingStarts;
+
+    // the listeners its participant holds on it, counted as they come and go
+    private int _listening;
 
     public long? Room { get; init; }
 
@@ -33,6 +44,26 @@ internal sealed class CallingAdapter(MemoryBrokerAdapter inner) : IBrokerAdapter
 
     public int? HoldsStart { get; init; }
 
+    public bool HoldsStops { get; init; }
+
+    /// <summary>The stops it holds, unreleased.</summary>
+    public int Stopping
+    {
+        get
+        {
+            return _stops.Count;
+        }
+    }
+
+    /// <summary>The listeners its participant holds on it, of its messages and of its link's loss.</summary>
+    public int Listening
+    {
+        get
+        {
+            return Volatile.Read(ref _listening);
+        }
+    }
+
     /// <summary>Whether each start is refused as a misuse, as a link of its id up already is.</summary>
     public bool Refusing
     {
@@ -44,6 +75,20 @@ internal sealed class CallingAdapter(MemoryBrokerAdapter inner) : IBrokerAdapter
         set
         {
             _refusing = value;
+        }
+    }
+
+    /// <summary>Whether each start is held, heeding no token, until the test releases it.</summary>
+    public bool HoldingStarts
+    {
+        get
+        {
+            return _holdingStarts;
+        }
+
+        set
+        {
+            _holdingStarts = value;
         }
     }
 
@@ -60,11 +105,13 @@ internal sealed class CallingAdapter(MemoryBrokerAdapter inner) : IBrokerAdapter
     {
         add
         {
+            Interlocked.Increment(ref _listening);
             inner.Message += value;
         }
 
         remove
         {
+            Interlocked.Decrement(ref _listening);
             inner.Message -= value;
         }
     }
@@ -73,11 +120,13 @@ internal sealed class CallingAdapter(MemoryBrokerAdapter inner) : IBrokerAdapter
     {
         add
         {
+            Interlocked.Increment(ref _listening);
             inner.Down += value;
         }
 
         remove
         {
+            Interlocked.Decrement(ref _listening);
             inner.Down -= value;
         }
     }
@@ -154,7 +203,7 @@ internal sealed class CallingAdapter(MemoryBrokerAdapter inner) : IBrokerAdapter
             return GivingUp(start);
         }
 
-        if (HoldsStart is { } holds && started > holds)
+        if ((HoldsStart is { } holds && started > holds) || _holdingStarts)
         {
             return Held(start);
         }
@@ -166,6 +215,12 @@ internal sealed class CallingAdapter(MemoryBrokerAdapter inner) : IBrokerAdapter
     public bool Release()
     {
         return _held.TryDequeue(out var release) && release.TrySetResult();
+    }
+
+    /// <summary>Releases the stop its participant asked first of those it holds.</summary>
+    public bool ReleaseStop()
+    {
+        return _stops.TryDequeue(out var release) && release.TrySetResult();
     }
 
     // * it waits for its stop's token, then fails, saying so
@@ -218,6 +273,16 @@ internal sealed class CallingAdapter(MemoryBrokerAdapter inner) : IBrokerAdapter
     {
         Calls.Enqueue("stop");
 
-        return inner.Stop();
+        return HoldsStops ? HeldStop() : inner.Stop();
+    }
+
+    // * held as it is asked: it goes on once the test releases it
+    private async Task HeldStop()
+    {
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        _stops.Enqueue(release);
+        await release.Task;
+        await inner.Stop();
     }
 }
