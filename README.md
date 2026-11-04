@@ -1,6 +1,9 @@
 # Bead
 
 [![CI](https://github.com/francisdesjardins/bead/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/francisdesjardins/bead/actions/workflows/ci.yml?query=branch%3Amain)
+[![Fuzz](https://github.com/francisdesjardins/bead/actions/workflows/fuzz.yml/badge.svg)](https://github.com/francisdesjardins/bead/actions/workflows/fuzz.yml)
+[![Release](https://img.shields.io/github/v/tag/francisdesjardins/bead?filter=v*&sort=semver&label=release)](CHANGELOG.md)
+[![Spec](https://img.shields.io/github/v/tag/francisdesjardins/bead?filter=spec-v*&sort=semver&label=)](spec/spec.md)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 Bead is an exploration: how far one `.proto` file, a generator and a hybrid binary protocol can go —
