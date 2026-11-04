@@ -1,5 +1,8 @@
 //! A relay's two legs over the memory transport: answers, refusals and cancellations.
 
+mod lifecycle;
+mod timers;
+
 use core::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
