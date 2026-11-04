@@ -2256,7 +2256,7 @@ pub(crate) fn gauges(state: &ServerState) -> Result<Gauges, ProgrammerError> {
         .connection_handles
         .extend(state.kept.keys().cloned());
 
-    Gauges::merged(vec![
+    Gauges::merge(vec![
         own,
         state.core.gauges()?,
         places,

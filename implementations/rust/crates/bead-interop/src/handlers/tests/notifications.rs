@@ -8,12 +8,12 @@ use bead::{
     DebugDirection, EnvelopeHeader, Failure, JsonCodec, Notification, NotificationCallback,
     NotificationDependencies, NotificationHeader, PacingLimitsOptions, ProtocolCode,
     RegistrationOptions, RequestDependencies, RequestOptions, Sent, ServerOptions, ServerTransport,
-    ServiceServer, TransportMessage,
+    TransportMessage,
 };
 use serde_json::{Value, json};
 use tokio::sync::oneshot;
 
-use crate::{InteropProcedures, interop_procedures, offer_interop};
+use crate::{InteropProcedures, OfferedInterop, interop_procedures, offer_interop};
 
 type News = Notification<JsonCodec, JsonCodec, JsonCodec>;
 
@@ -24,7 +24,7 @@ fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 struct Fixture {
     pair: Pair,
     procedures: InteropProcedures,
-    _offered: ServiceServer,
+    _offered: OfferedInterop,
     sent: Arc<Mutex<Vec<EnvelopeHeader>>>,
 }
 

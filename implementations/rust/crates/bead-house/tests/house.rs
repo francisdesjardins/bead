@@ -1,14 +1,26 @@
 //! The house's checks over the Rust side, and over the cases of each verdict: every function's
 //! parameters, every options struct's shape, each library crate's surface against its list and
-//! without a tuple, every doc comment's opening, and every member's lints.
+//! without a tuple, the tuples of three elements or more its functions take against their pins,
+//! every doc comment's opening, and every member's lints.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use bead_house::{
     Finding, crate_tuples_of, futures_of, members_of, options_of, parameters_of, surface_of,
-    tags_of, tuples_of,
+    tags_of, tuples_of, wide_tuples_of,
 };
+
+// ! the tuples of three elements or more the functions of each member take, by its folder, a member
+// not named taking none: each pin may only fall, lowered with the count, so a site leaves it by a
+// record of the call and none joins it (decision 0044)
+const WIDE_TUPLES: [(&str, usize); 4] = [
+    ("benches", 2),
+    ("crates/bead", 76),
+    ("crates/bead-house", 2),
+    ("crates/bead-interop", 3),
+];
 
 #[test]
 fn every_public_future_of_a_result_documents_its_errors() {
@@ -242,6 +254,73 @@ fn takes_and_gives_no_tuple_on_the_public_surface() {
     );
 }
 
+// the member a source belongs to: its crate's folder, or the bench's, or the fuzz targets'
+fn member_of(path: &Path) -> String {
+    let relative = path.strip_prefix(root()).unwrap_or(path);
+    let parts: Vec<String> = relative
+        .components()
+        .map(|part| part.as_os_str().to_string_lossy().into_owned())
+        .collect();
+
+    match parts.as_slice() {
+        [crates, member, ..] if crates == "crates" => format!("crates/{member}"),
+        [member, ..] => member.clone(),
+        [] => String::new(),
+    }
+}
+
+#[test]
+fn takes_no_more_tuples_of_three_elements_or_more_than_each_member_s_pin() {
+    let mut counted: BTreeMap<String, Vec<String>> = BTreeMap::new();
+
+    for path in sources() {
+        let file = syn::parse_file(&read(&path).expect("its source read"))
+            .unwrap_or_else(|error| panic!("{} parsed: {error}", path.display()));
+
+        counted
+            .entry(member_of(&path))
+            .or_default()
+            .extend(said(&path, &wide_tuples_of(&file)));
+    }
+
+    let pins: BTreeMap<String, usize> = WIDE_TUPLES
+        .iter()
+        .map(|(member, pin)| ((*member).to_owned(), *pin))
+        .collect();
+    let mut members: Vec<&String> = counted.keys().chain(pins.keys()).collect();
+
+    members.sort();
+    members.dedup();
+
+    let moved: Vec<String> = members
+        .into_iter()
+        .filter_map(|member| {
+            let found = counted.get(member).map_or(&[][..], Vec::as_slice);
+            let pin = pins.get(member).copied().unwrap_or(0);
+
+            (found.len() != pin).then(|| {
+                let said = if found.len() > pin {
+                    "joined its count, a record of the call in its place"
+                } else {
+                    "fell below its pin, the pin to lower with it"
+                };
+
+                format!(
+                    "{member}: {} counted, its pin {pin}: {said}\n{}",
+                    found.len(),
+                    found.join("\n")
+                )
+            })
+        })
+        .collect();
+
+    assert!(
+        moved.is_empty(),
+        "the tuples of three elements or more leave their pins:\n{}",
+        moved.join("\n")
+    );
+}
+
 // a list, its line endings as git may have checked them out
 fn read_list(path: &Path) -> Result<String, String> {
     read(path).map(|list| list.replace("\r\n", "\n"))
@@ -295,6 +374,7 @@ fn refuses_exactly_the_lines_its_cases_mark() {
     let options = read(&cases.join("options.rs")).expect("the options cases read");
     let tags = read(&cases.join("tags.rs")).expect("the tag cases read");
     let tuples = read(&cases.join("tuples.rs")).expect("the tuple cases read");
+    let wide = read(&cases.join("wide.rs")).expect("the wide tuple cases read");
     let file = syn::parse_file(&parameters).expect("the parameter cases parsed");
 
     assert_eq!(
@@ -320,5 +400,12 @@ fn refuses_exactly_the_lines_its_cases_mark() {
         )),
         marked(&tuples),
         "the tuple cases"
+    );
+    assert_eq!(
+        lines_of(&wide_tuples_of(
+            &syn::parse_file(&wide).expect("the wide tuple cases parsed")
+        )),
+        marked(&wide),
+        "the wide tuple cases"
     );
 }

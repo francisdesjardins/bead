@@ -49,6 +49,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The TypeScript side exports `IGauges`, the type its server transports' `gauges()` give,
   `ISessionChange`, a session manager's change, and `INotifier`, the type of a service server's
   `notify` members.
+- On the Rust side `REQUEST_DEFAULTS`, `RECONNECT_DEFAULTS` and `METRICS_REGISTRY_DEFAULTS`, the
+  defaults Bead declares, as on the TypeScript side; each a `const` of its options struct.
 
 ### Changed
 

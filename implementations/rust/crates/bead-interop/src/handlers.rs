@@ -358,6 +358,17 @@ fn failed(error: ProgrammerError) -> ResolverError {
     ResolverError::other(error)
 }
 
+/// The interop service as it is offered: its server, and the descriptors that server holds, the
+/// same ones its handles answer to.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct OfferedInterop {
+    /// The service's server.
+    pub service: ServiceServer,
+    /// The descriptors it was built of.
+    pub procedures: Arc<InteropProcedures>,
+}
+
 /// The interop service, offered on `server`.
 ///
 /// # Errors
@@ -367,7 +378,7 @@ fn failed(error: ProgrammerError) -> ResolverError {
     clippy::too_many_lines,
     reason = "one resolver per procedure, as the service states them"
 )]
-pub fn offer_interop(server: &Server) -> Result<ServiceServer, ProgrammerError> {
+pub fn offer_interop(server: &Server) -> Result<OfferedInterop, ProgrammerError> {
     // its rules judge every value: none fails to judge
     let validate: Validate<Value> =
         Arc::new(|request, options| Ok(judge_checked(request, options)));
@@ -570,14 +581,12 @@ pub fn offer_interop(server: &Server) -> Result<ServiceServer, ProgrammerError> 
     // that session it was the last for answer, before it does
     {
         let kept = Arc::clone(&kept);
-        let interop_of = interop.clone();
-        let ticks = procedures_of.ticks.clone();
+        let ticks = interop.notifier_of(&procedures_of.ticks)?;
 
         interop.on(
             &procedures_of.tick,
             callback_of(move |request, response| {
                 let kept = Arc::clone(&kept);
-                let interop = interop_of.clone();
                 let ticks = ticks.clone();
 
                 Box::pin(async move {
@@ -603,7 +612,7 @@ pub fn offer_interop(server: &Server) -> Result<ServiceServer, ProgrammerError> 
                     }));
                     options.key = key.map(bead::NotificationKey::Text);
 
-                    interop.notify(&ticks, value, &options).await;
+                    ticks.notify(value, &options).await;
 
                     let due: Vec<Hold> = {
                         let mut holds = locked(&kept.holds);
@@ -711,13 +720,11 @@ pub fn offer_interop(server: &Server) -> Result<ServiceServer, ProgrammerError> 
 
     // the server asks its client back, by a command, before it answers
     {
-        let interop_of = interop.clone();
-        let clock = procedures_of.clock.clone();
+        let clock = interop.command_of(&procedures_of.clock)?;
 
         interop.on(
             &procedures_of.ask,
             callback_of(move |request, response| {
-                let interop = interop_of.clone();
                 let clock = clock.clone();
 
                 Box::pin(async move {
@@ -725,9 +732,7 @@ pub fn offer_interop(server: &Server) -> Result<ServiceServer, ProgrammerError> 
 
                     options.timeout = Some(Duration::from_millis(CLOCK_MILLISECONDS));
 
-                    let time = interop
-                        .command(&clock)
-                        .map_err(failed)?
+                    let time = clock
                         .call(Value::String(QUESTION.to_owned()), &options)
                         .map_err(failed)?
                         .await
@@ -898,5 +903,8 @@ pub fn offer_interop(server: &Server) -> Result<ServiceServer, ProgrammerError> 
 
     interop.offer(server)?;
 
-    Ok(interop)
+    Ok(OfferedInterop {
+        service: interop,
+        procedures,
+    })
 }

@@ -32,7 +32,6 @@ crate
   use broker::participant::BrokerRefusal
   use broker::participant::BrokerRefusedError
   use broker::participant::HEARTBEAT
-  use broker::participant::HELD_BYTES_BUDGET
   use broker::participant::MAXIMUM_ENVELOPE_PARTS_BYTES
   use broker::participant::MINIMUM_BODY_BYTES_PER_SECOND
   use broker::participant::ParticipantErrorListener
@@ -58,7 +57,6 @@ crate
   use constants::FailureScope
   use constants::ProcedureKind
   use constants::ProtocolCode
-  use constants::RESERVATION
   use constants::RouterSide
   use constants::SERVER_CONNECTION_HANDLE
   use constants::SESSION_TOKEN_BYTES
@@ -66,7 +64,6 @@ crate
   use credentials::ElsewhereSession
   use credentials::ElsewhereVerdict
   use credentials::ElsewhereVerifier
-  use credentials::JWT_LIMIT_BYTES
   use credentials::JwtKeySet
   use credentials::JwtSetKey
   use credentials::KeySetAnswer
@@ -118,7 +115,6 @@ crate
   use identity::IdentityRefusal
   use identity::Procedure
   use joined::JoinedServerTransport
-  use jwt_verifier::JWT_LEEWAY
   use jwt_verifier::JwtAgainst
   use jwt_verifier::JwtAlgorithm
   use jwt_verifier::JwtKey
@@ -132,7 +128,6 @@ crate
   use managers::service::CloseConnection
   use managers::service::Command
   use managers::service::CommandOptions
-  use managers::service::DEFAULT_TIMEOUT
   use managers::service::DebugEvent
   use managers::service::DebugListener
   use managers::service::DeprecatedListener
@@ -145,6 +140,7 @@ crate
   use managers::service::NotificationResolverOf
   use managers::service::Notifier
   use managers::service::NotifyOptions
+  use managers::service::REQUEST_DEFAULTS
   use managers::service::RegistrationOptions
   use managers::service::Request
   use managers::service::RequestDefaults
@@ -180,8 +176,8 @@ crate
   use memory::MemoryTransportServerOptions
   use memory::TRANSPORT_MEMORY
   use metrics::CallEnding
-  use metrics::MAXIMUM_PROCEDURES
   use metrics::METRICS_CONTENT_TYPE
+  use metrics::METRICS_REGISTRY_DEFAULTS
   use metrics::MetricsExposition
   use metrics::MetricsRegistry
   use metrics::MetricsRegistryOptions
@@ -286,8 +282,7 @@ crate
   use transport::ClientListener
   use transport::Connect
   use transport::ListenerId
-  use transport::RECONNECT_ATTEMPTS
-  use transport::RECONNECT_DELAY
+  use transport::RECONNECT_DEFAULTS
   use transport::ReadyState
   use transport::RouterClientTransport
   use transport::Sent
@@ -447,7 +442,6 @@ crate::broker::memory
     derives Clone
 crate::broker::participant
   const HEARTBEAT: Duration
-  const HELD_BYTES_BUDGET: u64
   const MAXIMUM_ENVELOPE_PARTS_BYTES: u64
   const BODY_GRACE_PERIOD: Duration
   const MINIMUM_BODY_BYTES_PER_SECOND: u64
@@ -648,13 +642,10 @@ crate::constants
   enum RouterSide #[non_exhaustive]
     Client
     Server
-    fn peer(self) -> Self
     fn as_str(self) -> &'static str
-    fn of_call_id(call_id: u32) -> Option<Self>
     implements Display
     derives Clone, Copy, Debug, Eq, Hash, PartialEq
   const SESSION_TOKEN_BYTES: usize
-  const RESERVATION: Duration
   const SERVER_CONNECTION_HANDLE: &str
 crate::credentials
   const JWT_LIMIT_BYTES: u64
@@ -1109,7 +1100,6 @@ crate::jwt_verifier
     Holds { claims: Map<String, Value>, end: i64, identifier: JwtSessionIdentifier }
     Refused(JwtRefusal)
     derives Clone, Debug, PartialEq
-  const JWT_LEEWAY: Duration
   struct JwtAgainst<'keys>
     pub audiences: &'keys [String]
     pub keys: &'keys [JwtKey]
@@ -1166,7 +1156,7 @@ crate::managers::service
     Server(RouterServer)
     Client(RouterClient)
     derives Clone, Debug
-  const DEFAULT_TIMEOUT: Duration
+  const REQUEST_DEFAULTS: RequestDefaults
   struct RequestDefaults #[non_exhaustive]
     pub close_on_timeout: Option<bool>
     pub timeout: Option<Duration>
@@ -1389,7 +1379,7 @@ crate::memory
     derives Clone
 crate::metrics
   const METRICS_CONTENT_TYPE: &str
-  const MAXIMUM_PROCEDURES: usize
+  const METRICS_REGISTRY_DEFAULTS: MetricsRegistryOptions
   enum CallEnding #[non_exhaustive]
     Result
     Timeout
@@ -1792,7 +1782,6 @@ crate::router::types
     pub connection_handles: BTreeSet<ConnectionHandle>
     pub anomalies: Vec<String>
     fn new<Handles: IntoIterator<Item = ConnectionHandle>>(counts: BTreeMap<&'static str, u64>, connection_handles: Handles) -> Self
-    fn merged(parts: Vec<Self>) -> Result<Self, ProgrammerError>
     derives Clone, Debug, Default, Eq, PartialEq
 crate::server
   type SessionListener = Arc<dyn Fn(&SessionEvent) + Send + Sync>
@@ -1931,8 +1920,8 @@ crate::service
     fn on<Req, Res>(&self, descriptor: &Descriptor<Req, Res>, callback: ResolverCallback<Req, Res>) -> Result<(), ProgrammerError> where Req: PayloadCodec + Clone, Res: PayloadCodec + Clone, Req::Value: Clone + fmt::Debug + Sync, Res::Value: Clone + fmt::Debug + Sync,
     fn on_notifying<Req, Res, Not>(&self, descriptor: &NotifyingDescriptor<Req, Res, Not>, callback: ResolverCallback<Req, Res>) -> Result<(), ProgrammerError> where Req: PayloadCodec + Clone, Res: PayloadCodec + Clone, Not: PayloadCodec + Clone, Req::Value: Clone + fmt::Debug + Sync, Res::Value: Clone + fmt::Debug + Sync, Not::Value: Clone + fmt::Debug + Sync,
     fn offer(&self, server: &Server) -> Result<(), ProgrammerError>
-    fn command<Req, Res>(&self, descriptor: &Descriptor<Req, Res>) -> Result<Command<Req, Res>, ProgrammerError> where Req: PayloadCodec, Res: PayloadCodec,
-    fn notify<Req, Res, Not>(&self, descriptor: &NotifyingDescriptor<Req, Res, Not>, notification: Not::Value, options: &NotifyOptions) -> BoxFuture<()> where Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec, Not::Value: Clone + fmt::Debug + Sync,
+    fn command_of<Req, Res>(&self, descriptor: &Descriptor<Req, Res>) -> Result<Command<Req, Res>, ProgrammerError> where Req: PayloadCodec, Res: PayloadCodec,
+    fn notifier_of<Req, Res, Not>(&self, descriptor: &NotifyingDescriptor<Req, Res, Not>) -> Result<Notifier<Not>, ProgrammerError> where Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec,
     fn procedures_without_resolver(&self) -> Vec<Procedure>
     implements Debug
     derives Clone
@@ -2028,8 +2017,7 @@ crate::transport
     implements Debug
     derives Clone
   const CONNECT_TIMEOUT: Duration
-  const RECONNECT_DELAY: Duration
-  const RECONNECT_ATTEMPTS: u32
+  const RECONNECT_DEFAULTS: TransportClientReconnectOptions
   struct TransportClientReconnectOptions #[non_exhaustive]
     pub delay: Option<TransportClientReconnectDelay>
     pub maximum_attempts: Option<u32>
@@ -2073,6 +2061,7 @@ crate::violations
   fn words_of(violation: &Violation) -> Option<String>
   fn violations_of(failure: &Failure) -> ReadViolations
 crate::internal
+  use crate::credentials::JWT_LIMIT_BYTES
   use crate::duration::hold
   use crate::duration::hold_finite
   use crate::envelope::Envelope
