@@ -20,6 +20,7 @@ mod answer_race;
 mod arrival;
 mod declarations;
 mod notification_endings;
+mod notification_rest;
 mod notification_unit;
 mod notifications;
 mod notifier;

@@ -240,6 +240,73 @@ async fn the_last_registration_taken_away_cancels_the_subscription_and_a_late_no
 }
 
 #[tokio::test]
+async fn a_trigger_never_registered_is_an_invalid_operation_a_payload_that_does_not_decode_a_failure_reported()
+ {
+    use std::error::Error;
+
+    let fixture = Fixture::new().await;
+    let ticks = fixture.ticks(None);
+    let heard = Arc::new(Mutex::new(Vec::new()));
+    let early = ticks.as_like().trigger(b"1".as_slice().into());
+    assert!(matches!(early, Err(bead::RouterError::Other(error)) if
+        error.downcast_ref::<bead::ProgrammerError>().is_some()));
+    let failures = Arc::new(Mutex::new(Vec::new()));
+    let hearing = Arc::clone(&failures);
+    fixture
+        .pair
+        .client
+        .router()
+        .on_error(Arc::new(move |error| {
+            locked(&hearing).push(error.clone());
+        }));
+    let registration = ticks
+        .register(
+            Value::Null,
+            callback(&heard),
+            &RegistrationOptions::default(),
+        )
+        .await
+        .expect("registered");
+    let call_id = fixture.subscriptions()[0].call_id;
+    let bytes = write_envelope(
+        &Envelope::Notification {
+            header: NotificationHeader { call_id },
+            payload: b"{not json".as_slice().into(),
+        },
+        1_024,
+    )
+    .expect("the notification encoded");
+    let mut message = TransportMessage::default();
+    message.data = bytes;
+    if let Sent::Later(sent) = fixture
+        .pair
+        .memory
+        .send(message, &fixture.pair.connection_handle)
+        .expect("the notification handed over")
+    {
+        sent.await.expect("the notification sent");
+    }
+    fixture.pair.settle().await;
+
+    let errors = locked(&failures).clone();
+    let [bead::RouterError::Failure(failure)] = errors.as_slice() else {
+        panic!("one notification read failure is reported");
+    };
+    assert_eq!(failure.code(), ProtocolCode::PAYLOAD_UNDECODABLE.get());
+    assert_eq!(failure.origin(), bead::FailureOrigin::Local);
+    assert_eq!(failure.side(), Some(bead::RouterSide::Client));
+    assert_eq!(
+        failure.procedure(),
+        Some(fixture.procedures.ticks.descriptor().procedure().address())
+    );
+    assert!(failure.header().is_none());
+    assert!(failure.source().is_some());
+    assert_eq!(*locked(&heard), Vec::<i64>::new());
+    registration.unregister().await.expect("removed");
+    fixture.dispose().await;
+}
+
+#[tokio::test]
 async fn a_subscription_the_server_ends_is_dropped_and_told_with_its_failure() {
     let fixture = Fixture::new().await;
     let ticks = fixture.ticks(Some(1));
