@@ -679,19 +679,19 @@ test.describe('createBrokerTransportServer', () => {
   });
 
   // spec 15.21
-  test('refuses its start once its participant stopped, its state kept', async () => {
+  test('refuses its start once its participant is disposed, its state kept', async () => {
     const broker = createMemoryBroker();
     const participant = createBrokerParticipant({ adapter: broker.adapter({ id: 'ada' }) });
     const server = participant.transportServer({ names: ['interop'] });
 
     await participant.start();
-    await participant.stop();
+    await participant[Symbol.asyncDispose]();
 
     // * a misuse, refused before anything moves: its state kept
     const refused = server.start();
 
     await expect(refused, 'a misuse').rejects.toBeInstanceOf(ProgrammerError);
-    await expect(refused, 'its words').rejects.toThrow('the participant ada is stopped');
+    await expect(refused, 'its words').rejects.toThrow('the participant ada is disposed');
     expect(server.isUninitialized(), 'its state kept').toBe(true);
   });
 });

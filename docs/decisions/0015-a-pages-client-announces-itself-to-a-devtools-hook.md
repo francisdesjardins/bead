@@ -50,7 +50,7 @@ offers `exposition` and `watch`, the latter given `IDevtoolsListeners`, `call` a
 It exposes no exposition; optional `inspect` reads its levels, and the optional `participant`
 listener carries debugging 13's events. A client imports no broker capability and no transport is
 mutated. An extension passing only call and envelope listeners attaches nothing to a participant.
-Stopping the participant withdraws its source.
+Disposing the participant withdraws its source; its stop keeps it.
 
 **Announcing costs one read of the key, and attaches nothing.** A source listens only between a
 `watch` and its stop, and the extension watches only while its panel is open: until then the router

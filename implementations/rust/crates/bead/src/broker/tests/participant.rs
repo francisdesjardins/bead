@@ -32,7 +32,7 @@ use crate::broker::memory::{
 };
 use crate::broker::parcel::{Parcel, encode_parcel, flags, kinds, write_parcel};
 use crate::broker::participant::{BrokerParticipant, BrokerParticipantOptions};
-use crate::broker::server::BrokerTransportServerOptions;
+use crate::broker::server::{BrokerTransportServer, BrokerTransportServerOptions};
 use crate::clock::SharedClock;
 use crate::debug::participant::ParticipantDebugEvent;
 use crate::duration::{DurationRefusal, NEVER};
@@ -96,6 +96,19 @@ fn hearing(participant: &BrokerParticipant) -> Arc<Mutex<Vec<RouterError>>> {
     }));
 
     reported
+}
+
+// the words of each source a walk from a report reaches, in order
+fn sources_of(error: &RouterError) -> Vec<String> {
+    let mut sources = Vec::new();
+    let mut source = std::error::Error::source(error);
+
+    while let Some(cause) = source {
+        sources.push(cause.to_string());
+        source = cause.source();
+    }
+
+    sources
 }
 
 // the misuse a report's sources carry, the first of them
@@ -1063,8 +1076,7 @@ async fn is_refused_as_built_with_a_root_that_is_no_token_and_names_each_topic_b
 }
 
 #[tokio::test]
-async fn lets_a_listener_go_fails_a_connect_awaiting_its_answer_as_it_stops_refuses_a_start_once_stopped_and_stops_once()
- {
+async fn lets_a_listener_go_fails_a_connect_awaiting_its_answer_as_it_stops_and_stops_once() {
     let broker = broker();
     let participant = participant_of(
         &adapter_of(&broker, "ada"),
@@ -1117,37 +1129,11 @@ async fn lets_a_listener_go_fails_a_connect_awaiting_its_answer_as_it_stops_refu
 
     participant.stop().await;
 
-    // * the connect fails as its participant stops; a start since is a misuse, refused, a second
-    // stop does nothing
+    // * the connect fails as its participant stops, and a second stop does nothing
     assert_eq!(
         error_of(pending.await.expect("joined")),
         "the participant ada stopped as it connected",
         "the connect fails"
-    );
-
-    let refused = participant.start().await.expect_err("refused");
-
-    assert!(matches!(refused, BrokerError::Refused(_)), "a misuse");
-    assert_eq!(
-        refused.to_string(),
-        "the participant ada is stopped",
-        "a start refused"
-    );
-
-    let connected = participant
-        .client(&BrokerTransportClientOptions::default())
-        .expect("a client")
-        .connect(&BrokerTransportClientConnectOptions::new("interop"))
-        .await;
-
-    assert!(
-        matches!(connected, Err(TransportError::Refused(_))),
-        "a misuse"
-    );
-    assert_eq!(
-        error_of(connected),
-        "the participant ada is stopped",
-        "a connect refused"
     );
     participant.stop().await;
     assert!(!participant.is_linked(), "down");
@@ -1157,7 +1143,7 @@ async fn lets_a_listener_go_fails_a_connect_awaiting_its_answer_as_it_stops_refu
         "heard once"
     );
 
-    // * taken over, then stopped: a connect is the stop's misuse, never the takeover's words
+    // * taken over, then stopped: a stop leaves the fence, so a connect reads the takeover's words
     let cat = adapter_of(&broker, "cat");
     let fenced = participant_of(
         &cat,
@@ -1180,14 +1166,15 @@ async fn lets_a_listener_go_fails_a_connect_awaiting_its_answer_as_it_stops_refu
         .await;
 
     assert!(
-        matches!(connected, Err(TransportError::Refused(_))),
-        "a misuse"
+        matches!(connected, Err(TransportError::Connect(_))),
+        "a connect's failure"
     );
     assert_eq!(
         error_of(connected),
-        "the participant cat is stopped",
-        "the stop's words"
+        "the link of cat was taken over by another link of its id, and connects no more until it is started again",
+        "the takeover's words"
     );
+    fenced.dispose().await;
 }
 
 // spec 15.21
@@ -1705,39 +1692,134 @@ async fn reconnects_without_end_when_given_a_delay_alone() {
 
 // spec 15.21
 #[tokio::test]
-async fn ends_its_reconnection_once_it_is_stopped_told_so_and_links_no_more() {
+async fn ends_its_reconnection_at_once_as_it_is_stopped_in_a_wait_or_in_an_attempt_told_so_the_stop_its_cause()
+ {
+    // in a wait: on the test's clock, a delay of 10 s never advanced, its first attempt refused
+    let clock = SteppingClock::new(SystemTime::UNIX_EPOCH);
+    let shared: SharedClock = Arc::<SteppingClock>::clone(&clock);
     let broker = broker();
     let adapter = adapter_of(&broker, "ada");
-    let (participant, recording) = calling_of(
-        &adapter,
-        &TransportClientReconnectOptions {
-            delay: Some(TransportClientReconnectDelay::Fixed(Duration::from_millis(
-                10,
-            ))),
-            ..TransportClientReconnectOptions::default()
+    let recording = Arc::new(Calling::of(adapter.clone()));
+    let tapped: Arc<Mutex<Vec<Duration>>> = Arc::default();
+    let tapping = Arc::clone(&tapped);
+    let participant = BrokerParticipant::new(
+        Arc::<Calling>::clone(&recording),
+        &BrokerParticipantOptions {
+            clock: Some(Arc::clone(&shared)),
+            reconnect: Some(TransportClientReconnectOptions {
+                delay: Some(TransportClientReconnectDelay::Fixed(Duration::from_secs(
+                    10,
+                ))),
+                tap: Some(Arc::new(move |delay, _attempt| {
+                    locked(&tapping).push(delay);
+                })),
+                ..TransportClientReconnectOptions::default()
+            }),
+            ..BrokerParticipantOptions::default()
         },
-    );
-    let reported = reporting(&participant);
+    )
+    .expect("a participant");
+    let reported = hearing(&participant);
 
     participant.start().await.expect("started");
     lost_and_held(&adapter).await;
-    until(|| starts_of(&recording) > 2, "its attempts refused").await;
+    until(|| locked(&tapped).len() == 1, "its first wait told").await;
+
+    let before = shared.monotonic();
 
     // * its stop ends its link, the test's own among it: its broker would let it through now
     participant.stop().await;
-
-    let stopped = starts_of(&recording);
-
     until(|| !locked(&reported).is_empty(), "its reconnection ended").await;
-    crate::testing::rest(Duration::from_millis(50)).await;
+    settle().await;
+
+    // * ended at once, told once, the stop its cause, which a walk from its report reaches once
+    let reports = locked(&reported).clone();
+
     assert_eq!(
-        *locked(&reported),
-        ["the link of ada went down, and its reconnection ended: the participant ada is stopped"],
+        reports.iter().map(ToString::to_string).collect::<Vec<_>>(),
+        ["the link of ada went down, and its reconnection ended: the reconnection was cancelled"],
         "told so, once"
     );
-    assert_eq!(starts_of(&recording), stopped, "no attempt after its stop");
+    assert_eq!(
+        reports.first().map(sources_of),
+        Some(vec![
+            "the reconnection was cancelled".to_owned(),
+            "the participant ada stopped".to_owned()
+        ]),
+        "the stop its cause"
+    );
+    assert_eq!(shared.monotonic(), before, "the clock not moved");
+    assert_eq!(
+        *locked(&tapped),
+        [Duration::from_secs(10)],
+        "no wait told after its stop"
+    );
+    assert_eq!(starts_of(&recording), 2, "no attempt after its stop");
     assert!(
         !participant.is_linked() && !adapter.is_linked(),
+        "linked no more"
+    );
+
+    // in an attempt: its attempt's start held, then its stop
+    let bob = adapter_of(&broker, "bob");
+    let holding = Arc::new(Calling {
+        holds: Some(1),
+        ..Calling::of(bob.clone())
+    });
+    let tapped: Arc<Mutex<Vec<Duration>>> = Arc::default();
+    let tapping = Arc::clone(&tapped);
+    let participant = BrokerParticipant::new(
+        Arc::<Calling>::clone(&holding),
+        &BrokerParticipantOptions {
+            clock: Some(Arc::clone(&shared)),
+            reconnect: Some(TransportClientReconnectOptions {
+                delay: Some(TransportClientReconnectDelay::Fixed(Duration::from_secs(
+                    10,
+                ))),
+                tap: Some(Arc::new(move |delay, _attempt| {
+                    locked(&tapping).push(delay);
+                })),
+                ..TransportClientReconnectOptions::default()
+            }),
+            ..BrokerParticipantOptions::default()
+        },
+    )
+    .expect("a participant");
+    let reported = hearing(&participant);
+
+    participant.start().await.expect("started");
+    bob.lose();
+    until(|| holding.holding() == 1, "its attempt's start held").await;
+
+    let stopping = crate::testing::spawn(participant.stop());
+
+    settle().await;
+    assert!(holding.release(), "released");
+    stopping.await.expect("joined");
+    until(|| !locked(&reported).is_empty(), "its reconnection ended").await;
+    settle().await;
+
+    // * its attempt fails, and its reconnection ends at once, no wait told after it, the stop its
+    // cause
+    let reports = locked(&reported).clone();
+
+    assert_eq!(
+        reports.iter().map(ToString::to_string).collect::<Vec<_>>(),
+        ["the link of bob went down, and its reconnection ended: the reconnection was cancelled"],
+        "told so, once"
+    );
+    assert_eq!(
+        reports.first().map(sources_of),
+        Some(vec![
+            "the reconnection was cancelled".to_owned(),
+            "the participant bob stopped".to_owned()
+        ]),
+        "the stop its cause"
+    );
+    assert!(locked(&tapped).is_empty(), "no wait told");
+    assert_eq!(shared.monotonic(), before, "the clock not moved");
+    assert!(
+        !participant.is_linked() && !bob.is_linked(),
         "linked no more"
     );
 }
@@ -2083,7 +2165,7 @@ async fn fails_a_link_its_stop_meets_as_it_connects_at_its_start_or_as_it_links_
     // * its attempt fails, and its reconnection ends at once, no wait told after it
     assert_eq!(
         *locked(&reported),
-        ["the link of bob went down, and its reconnection ended: the participant bob is stopped"],
+        ["the link of bob went down, and its reconnection ended: the reconnection was cancelled"],
         "told so, once"
     );
     assert!(locked(&tapped).is_empty(), "no wait told");
@@ -2479,4 +2561,472 @@ async fn fails_a_link_that_goes_down_as_it_connects_at_its_start_or_as_it_links_
         "a connect refused"
     );
     participant.stop().await;
+}
+
+// ── A stop in place, its next link, and a dispose (spec 15.21) ────────────────────────────────
+
+// a server's transport serving `interop` over `broker`, started, and its participant
+async fn serving(broker: &MemoryBroker) -> (BrokerParticipant, BrokerTransportServer) {
+    let participant = participant_of(
+        &adapter_of(broker, "server"),
+        &BrokerParticipantOptions::default(),
+    );
+    let server = participant
+        .server(&BrokerTransportServerOptions::new(["interop"]))
+        .expect("a server");
+
+    server.start().await.expect("started");
+
+    (participant, server)
+}
+
+// stops `participant`, whose adapter `holding` holds each stop, once that stop is held
+async fn stopped(participant: &BrokerParticipant, holding: &Calling) {
+    let stopping = crate::testing::spawn(participant.stop());
+
+    until(|| holding.stopping() == 1, "its adapter's stop held").await;
+    assert!(holding.release_stop(), "released");
+    stopping.await.expect("joined");
+}
+
+// spec 15.21
+#[tokio::test]
+async fn stops_in_place_and_starts_again_as_another_incarnation_its_server_transports_names_served_again_and_its_listeners_kept_no_will_gone()
+ {
+    let pair = BrokerPair::of(&BrokerPairOptions::default()).await;
+    let (_watching, departed) =
+        peer_of(&pair.broker, ("watching", &[&["bead", "d", "server"]])).await;
+    let client = pair.connect().await;
+    let told = Arc::new(ClientTold::default());
+    let links = linking(&pair.server_participant);
+    let reported = reporting(&pair.server_participant);
+    let former = pair.server_participant.incarnation();
+    let names = || {
+        pair.server
+            .gauges()
+            .and_then(|gauges| gauges.counts.get("names").copied())
+    };
+
+    client.listen(Arc::new(AtClient(Arc::clone(&told))));
+    pair.server_participant.stop().await;
+
+    // * each connection closed with a CLOSE of 1001, unclean at both ends, its link ended, its name
+    // held no more, its server's transport kept
+    until(
+        || locked(&told.closes).len() == 1,
+        "its client told its close",
+    )
+    .await;
+    assert_eq!(*locked(&told.closes), [(false, false)], "closed with 1001");
+    assert_eq!(
+        locked(&pair.told.closed)
+            .iter()
+            .map(|(is_clean, _)| *is_clean)
+            .collect::<Vec<_>>(),
+        [false],
+        "its server's end told closed, unclean"
+    );
+    assert!(
+        !pair.server_participant.is_linked() && !pair.server_adapter.is_linked(),
+        "its link ended"
+    );
+    assert_eq!(names(), Some(0), "its name held no more");
+    assert!(pair.server_participant.names().is_empty(), "none held");
+    assert_eq!(
+        pair.server.ready_state(),
+        ReadyState::Open,
+        "its server's transport kept"
+    );
+
+    // * its next start: another incarnation, its name served again, each listener kept
+    pair.server_participant.start().await.expect("started");
+    assert!(pair.server_participant.is_linked(), "linked anew");
+    assert_ne!(
+        pair.server_participant.incarnation(),
+        former,
+        "another incarnation"
+    );
+    until(|| names() == Some(1), "its name served again").await;
+
+    let again = pair.connect().await;
+
+    assert_eq!(again.ready_state(), ReadyState::Open, "served anew");
+    assert_eq!(*locked(&links), ["stopped", "up"], "its trace heard on");
+    assert!(locked(&reported).is_empty(), "nothing reported");
+    settle().await;
+    assert!(departed.parcels().is_empty(), "no will gone");
+    pair.stop().await;
+}
+
+// spec 15.21
+#[tokio::test]
+async fn refuses_a_start_while_its_stop_is_under_way_and_links_anew_at_a_start_a_connect_or_a_server_s_start_once_that_stop_settled()
+ {
+    let broker = broker();
+    let (serving, _server) = serving(&broker).await;
+    let ada = adapter_of(&broker, "ada");
+    let holding = Arc::new(Calling {
+        holds_stops: true,
+        ..Calling::of(ada.clone())
+    });
+    let participant = BrokerParticipant::new(
+        Arc::<Calling>::clone(&holding),
+        &BrokerParticipantOptions::default(),
+    )
+    .expect("a participant");
+
+    participant.start().await.expect("started");
+
+    let mut incarnations = vec![participant.incarnation()];
+
+    // * a start while its stop is under way: its application's misuse, refused
+    let stopping = crate::testing::spawn(participant.stop());
+
+    until(|| holding.stopping() == 1, "its adapter's stop held").await;
+
+    let refused = participant.start().await.expect_err("refused");
+
+    assert!(matches!(refused, BrokerError::Refused(_)), "a misuse");
+    assert_eq!(
+        refused.to_string(),
+        "the participant ada is stopping",
+        "its words"
+    );
+    assert!(holding.release_stop(), "released");
+    stopping.await.expect("joined");
+    assert!(!participant.is_linked(), "down");
+
+    // * a connect once that stop settled, then a stop with no turn between them: that stop ends
+    // what the connect would link
+    let connecting = crate::testing::spawn(
+        participant
+            .client(&BrokerTransportClientOptions::default())
+            .expect("a client")
+            .connect(&BrokerTransportClientConnectOptions::new("interop")),
+    );
+
+    stopped(&participant, &holding).await;
+    assert_eq!(
+        error_of(connecting.await.expect("joined")),
+        "the participant ada stopped as it connected",
+        "the connect fails"
+    );
+    settle().await;
+    assert!(!participant.is_linked(), "linked by none");
+
+    // * once that stop settled, a start links it anew
+    participant.start().await.expect("started");
+    assert!(participant.is_linked(), "linked anew by a start");
+    incarnations.push(participant.incarnation());
+
+    // * so does a client's connect over it
+    stopped(&participant, &holding).await;
+    participant
+        .client(&BrokerTransportClientOptions::default())
+        .expect("a client")
+        .connect(&BrokerTransportClientConnectOptions::new("interop"))
+        .await
+        .expect("connected");
+    assert!(participant.is_linked(), "linked anew by a connect");
+    incarnations.push(participant.incarnation());
+
+    // * and a server's start over it
+    stopped(&participant, &holding).await;
+
+    let own = participant
+        .server(&BrokerTransportServerOptions::new(["own"]))
+        .expect("a server");
+
+    own.start().await.expect("started");
+    assert!(participant.is_linked(), "linked anew by a server's start");
+    assert_eq!(
+        participant.names(),
+        std::iter::once("own".to_owned()).collect(),
+        "its name served"
+    );
+    incarnations.push(participant.incarnation());
+    assert_eq!(
+        incarnations.iter().collect::<HashSet<_>>().len(),
+        4,
+        "each link another incarnation"
+    );
+    stopped(&participant, &holding).await;
+    serving.stop().await;
+}
+
+// spec 15.21
+#[tokio::test]
+async fn refuses_a_start_once_disposed_lets_its_adapter_go_and_disposes_once_stopping_it_first() {
+    let broker = broker();
+    let ada = adapter_of(&broker, "ada");
+    let recording = Arc::new(Calling::of(ada.clone()));
+    let participant = BrokerParticipant::new(
+        Arc::<Calling>::clone(&recording),
+        &BrokerParticipantOptions::default(),
+    )
+    .expect("a participant");
+    let links = linking(&participant);
+
+    participant.start().await.expect("started");
+    assert_eq!(recording.listening(), 1, "its adapter heard");
+
+    // * two disposes: one stop of its adapter, then its listener let go of, once
+    let disposing = [
+        crate::testing::spawn(participant.dispose()),
+        crate::testing::spawn(participant.dispose()),
+    ];
+
+    for disposed in disposing {
+        disposed.await.expect("joined");
+    }
+
+    assert_eq!(
+        recording.calls(),
+        ["start", "subscribe bead/i/ada", "stop", "unlisten"],
+        "stopped first, then let go of, once"
+    );
+    assert_eq!(recording.listening(), 0, "its adapter heard no more");
+    assert!(
+        !participant.is_linked() && !ada.is_linked(),
+        "neither linked"
+    );
+
+    // * a start once disposed: its application's misuse, refused before anything moves
+    let refused = participant.start().await.expect_err("refused");
+
+    assert!(matches!(refused, BrokerError::Refused(_)), "a misuse");
+    assert_eq!(
+        refused.to_string(),
+        "the participant ada is disposed",
+        "its words"
+    );
+
+    // * a stop or a dispose after it settles with it, nothing asked of its adapter, nothing told
+    participant.stop().await;
+    participant.dispose().await;
+    settle().await;
+    assert_eq!(recording.calls().len(), 4, "nothing more asked");
+    assert_eq!(*locked(&links), ["up", "stopped"], "its stop told once");
+}
+
+// spec 15.21
+#[tokio::test]
+async fn attributes_to_its_stop_what_that_stop_ended_though_a_start_follows_it_at_once_and_lets_the_next_link_stand()
+ {
+    let broker = broker();
+    let (serving, _server) = serving(&broker).await;
+    let ada = adapter_of(&broker, "ada");
+    let holding = Arc::new(Calling {
+        holds: Some(1),
+        ..Calling::of(ada.clone())
+    });
+    let participant = BrokerParticipant::new(
+        Arc::<Calling>::clone(&holding),
+        &BrokerParticipantOptions {
+            reconnects: Some(false),
+            ..BrokerParticipantOptions::default()
+        },
+    )
+    .expect("a participant");
+    let reported = hearing(&participant);
+    let waiting = participant
+        .client(&BrokerTransportClientOptions::default())
+        .expect("a client");
+    let again = participant
+        .client(&BrokerTransportClientOptions::default())
+        .expect("a client");
+
+    again
+        .connect(&BrokerTransportClientConnectOptions::new("interop"))
+        .await
+        .expect("connected");
+    ada.lose();
+    until(|| !locked(&reported).is_empty(), "its link down").await;
+    until(
+        || again.ready_state() == ReadyState::Closed,
+        "closed as its link goes down",
+    )
+    .await;
+
+    // a link's start, a connect awaiting it and a client's reconnection in flight, its start held
+    let starting = crate::testing::spawn(participant.start());
+
+    until(|| holding.holding() == 1, "its start held").await;
+
+    let connecting = crate::testing::spawn(
+        waiting.connect(&BrokerTransportClientConnectOptions::new("interop")),
+    );
+    let reconnecting = crate::testing::spawn(
+        again
+            .reconnect(&TransportClientReconnectOptions {
+                delay: Some(TransportClientReconnectDelay::Fixed(Duration::from_secs(
+                    60,
+                ))),
+                ..TransportClientReconnectOptions::default()
+            })
+            .expect("reconnecting"),
+    );
+
+    settle().await;
+
+    let stopping = crate::testing::spawn(participant.stop());
+
+    // * the connect and the reconnection end at once, its start held still
+    until(
+        || connecting.is_finished() && reconnecting.is_finished(),
+        "each ended",
+    )
+    .await;
+    assert!(holding.release(), "released");
+    stopping.await.expect("joined");
+
+    // ! a start, with no turn between it and the stop's end
+    let restarting = crate::testing::spawn(participant.start());
+
+    until(|| holding.holding() == 1, "its next start held").await;
+    assert!(holding.release(), "released");
+    restarting.await.expect("joined").expect("started");
+
+    // * each told as the stop's, though a start followed it at once
+    assert_eq!(
+        starting
+            .await
+            .expect("joined")
+            .expect_err("failed")
+            .to_string(),
+        "the participant ada stopped as it started",
+        "its start"
+    );
+    assert_eq!(
+        error_of(connecting.await.expect("joined")),
+        "the participant ada stopped as it connected",
+        "the connect"
+    );
+
+    let reconnected = reconnecting.await.expect("joined");
+
+    assert!(
+        matches!(&reconnected, Err(TransportError::Cancelled { message, .. }) if message == "the reconnection was cancelled"),
+        "the reconnection cancelled: {reconnected:?}"
+    );
+    assert_eq!(
+        reconnected
+            .as_ref()
+            .err()
+            .and_then(std::error::Error::source)
+            .map(ToString::to_string)
+            .as_deref(),
+        Some("the participant ada stopped"),
+        "its stop its source"
+    );
+
+    // * the next link stands: linked, and a connect goes through it
+    settle().await;
+    assert!(participant.is_linked(), "linked");
+    waiting
+        .connect(&BrokerTransportClientConnectOptions::new("interop"))
+        .await
+        .expect("connected");
+    assert_eq!(waiting.ready_state(), ReadyState::Open, "open");
+    assert_eq!(
+        locked(&reported)
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>(),
+        ["the link of ada went down"],
+        "its loss alone reported"
+    );
+    participant.dispose().await;
+    serving.stop().await;
+}
+
+// spec 15.21
+#[tokio::test]
+async fn resets_at_its_next_link_each_peer_whose_close_its_broker_did_not_take_as_it_stopped() {
+    let broker = broker();
+    let (serving, server) = serving(&broker).await;
+    let told = Arc::new(ServerTold::default());
+    let (_spy, heard) = peer_of(&broker, ("spy", &[&["bead", "i", "server"]])).await;
+    let dropping = Arc::new(Calling::of(adapter_of(&broker, "ada")));
+    let participant = BrokerParticipant::new(
+        Arc::<Calling>::clone(&dropping),
+        &BrokerParticipantOptions::default(),
+    )
+    .expect("a participant");
+    let clients = [
+        participant
+            .client(&BrokerTransportClientOptions::default())
+            .expect("a client"),
+        participant
+            .client(&BrokerTransportClientOptions::default())
+            .expect("a client"),
+    ];
+
+    server.listen(Arc::new(AtServer(Arc::clone(&told))));
+
+    for client in &clients {
+        client
+            .connect(&BrokerTransportClientConnectOptions::new("interop"))
+            .await
+            .expect("connected");
+    }
+
+    until(|| locked(&told.opened).len() == 2, "each told open").await;
+
+    let pairs: Vec<_> = clients
+        .iter()
+        .map(|client| client.pair().expect("a pair"))
+        .collect();
+    let (dropped, taken) = (pairs[0], pairs[1]);
+
+    // * the CLOSE of the first its broker does not take; the second's goes
+    *locked(&dropping.drops_close) = Some(dropped.0);
+    locked(&heard.messages).clear();
+    participant.stop().await;
+    until(|| locked(&told.closed).len() == 1, "one told closed").await;
+    settle().await;
+
+    let closes: Vec<_> = heard
+        .parcels()
+        .into_iter()
+        .filter(|parcel| parcel.kind == kinds::CLOSE)
+        .map(|parcel| (parcel.opener, parcel.acceptor))
+        .collect();
+
+    assert_eq!(closes, [taken], "the second's CLOSE alone reached its peer");
+    assert_eq!(locked(&told.closed).len(), 1, "the first held still");
+
+    // * its next link resets the first, whose CLOSE did not go, and no other
+    locked(&heard.messages).clear();
+    participant.start().await.expect("started");
+    until(|| locked(&told.closed).len() == 2, "the first reset").await;
+    settle().await;
+
+    let resets: Vec<_> = heard
+        .parcels()
+        .into_iter()
+        .filter(|parcel| parcel.kind == kinds::RESET)
+        .map(|parcel| (parcel.opener, parcel.acceptor))
+        .collect();
+
+    assert_eq!(resets, [dropped], "a RESET of the first alone");
+    assert!(
+        locked(&told.closed).iter().all(|(is_clean, _)| !is_clean),
+        "each closed, unclean"
+    );
+
+    // * a stop and a start again: none left to reset
+    participant.stop().await;
+    locked(&heard.messages).clear();
+    participant.start().await.expect("started");
+    settle().await;
+    assert!(
+        heard
+            .parcels()
+            .iter()
+            .all(|parcel| parcel.kind != kinds::RESET),
+        "no RESET again"
+    );
+    participant.dispose().await;
+    serving.stop().await;
 }

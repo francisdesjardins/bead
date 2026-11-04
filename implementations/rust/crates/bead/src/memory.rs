@@ -189,9 +189,7 @@ impl ServerInner {
         self.later(move || {
             // a connect its client gave up on draws no connection
             if given_up.is_cancelled() {
-                drop(reply.send(Err(TransportError::Cancelled(
-                    "the connect was cancelled".to_owned(),
-                ))));
+                drop(reply.send(Err(TransportError::cancelled("the connect was cancelled"))));
 
                 return;
             }
@@ -852,9 +850,9 @@ impl ClientInner {
                 ))),
                 // its signal cancelled in the turn its server drew it, before it settled: the
                 // cancel holds, and what was drawn is closed at once, unclean
-                Ok(_) if attempt.given_up.is_cancelled() => Err(TransportError::Cancelled(
-                    "the connect was cancelled".to_owned(),
-                )),
+                Ok(_) if attempt.given_up.is_cancelled() => {
+                    Err(TransportError::cancelled("the connect was cancelled"))
+                }
                 outcome => outcome,
             };
 
@@ -1055,9 +1053,7 @@ impl MemoryTransportClient {
                 .as_ref()
                 .is_some_and(CancellationToken::is_cancelled)
             {
-                return Err(TransportError::Cancelled(
-                    "the connect was cancelled".to_owned(),
-                ));
+                return Err(TransportError::cancelled("the connect was cancelled"));
             }
 
             if state.ready != ReadyState::Reconnecting {
@@ -1123,9 +1119,7 @@ impl MemoryTransportClient {
                 if is_cancelled && let Some(client) = client.upgrade() {
                     client.settle((
                         &attempt,
-                        Err(TransportError::Cancelled(
-                            "the connect was cancelled".to_owned(),
-                        )),
+                        Err(TransportError::cancelled("the connect was cancelled")),
                     ));
                 }
             });
@@ -1295,7 +1289,7 @@ impl MemoryTransportClient {
             .as_ref()
             .is_some_and(CancellationToken::is_cancelled)
         {
-            return Err(TransportError::Cancelled(RECONNECTION_CANCELLED.to_owned()));
+            return Err(TransportError::cancelled(RECONNECTION_CANCELLED));
         }
 
         inner.tell(|listener: &dyn ClientListener| listener.on_reconnect());
@@ -1323,9 +1317,9 @@ impl MemoryTransportClient {
         });
 
         Ok(Box::pin(async move {
-            outcome.await.unwrap_or_else(|_dropped| {
-                Err(TransportError::Cancelled(RECONNECTION_CANCELLED.to_owned()))
-            })
+            outcome
+                .await
+                .unwrap_or_else(|_dropped| Err(TransportError::cancelled(RECONNECTION_CANCELLED)))
         }))
     }
 
@@ -1359,7 +1353,7 @@ impl MemoryTransportClient {
         {
             drop(self.disconnect(&TransportClientDisconnectOptions::default()));
 
-            return Err(TransportError::Cancelled(RECONNECTION_CANCELLED.to_owned()));
+            return Err(TransportError::cancelled(RECONNECTION_CANCELLED));
         }
 
         Ok(())

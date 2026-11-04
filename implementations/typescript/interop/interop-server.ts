@@ -129,7 +129,7 @@ process.stdin.on('end', () => {
     .then(() => {
       return Promise.all(
         participants.map((participant) => {
-          return participant.stop();
+          return participant[Symbol.asyncDispose]();
         })
       );
     })

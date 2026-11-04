@@ -1232,7 +1232,7 @@ async fn refuses_a_reconnect_never_connected_and_a_connect_unless_closed_nothing
         .expect_err("cancelled already");
 
     assert!(
-        matches!(refused, TransportError::Cancelled(_)),
+        matches!(refused, TransportError::Cancelled { .. }),
         "cancelled: {refused:?}"
     );
     assert_eq!(client.ready_state(), ReadyState::Uninitialized, "as it was");
@@ -1282,7 +1282,7 @@ async fn refuses_a_reconnect_never_connected_and_a_connect_unless_closed_nothing
                     ..TransportClientReconnectOptions::default()
                 })
                 .err(),
-            Some(TransportError::Cancelled(_))
+            Some(TransportError::Cancelled { .. })
         ),
         "a reconnection cancelled already refused"
     );
@@ -1570,7 +1570,7 @@ async fn cancels_a_reconnection_before_its_first_attempt_when_its_start_listener
     ends.clock.settle().await;
 
     assert!(
-        matches!(cancelled, TransportError::Cancelled(_)),
+        matches!(cancelled, TransportError::Cancelled { .. }),
         "cancelled: {cancelled:?}"
     );
     assert_eq!(
@@ -1814,7 +1814,7 @@ async fn draws_no_connection_for_a_connect_cancelled_as_it_held_it_and_reports_w
     ends.clock.settle().await;
 
     assert!(
-        matches!(refused, TransportError::Cancelled(_)),
+        matches!(refused, TransportError::Cancelled { .. }),
         "cancelled: {refused:?}"
     );
     assert!(ends.server_told().is_empty(), "none drawn");

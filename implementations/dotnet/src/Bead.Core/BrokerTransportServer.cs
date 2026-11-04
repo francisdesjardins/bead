@@ -255,19 +255,21 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
     }
 
     /// <summary>
-    /// Starts its participant where it was not, or links it anew where its link was taken over, and
-    /// serves its names, each subscribed, in its group where it serves in one; settles once its
-    /// broker holds each, giving its participant's id and port 0, and fails on a name its broker
-    /// refused. Refused with an <see cref="ObjectDisposedException"/> once its participant stopped, its
-    /// state kept, before anything else (spec 15.21); then with an
-    /// <see cref="InvalidOperationException"/> unless Uninitialized or Closed.
+    /// Starts its participant where it was not, or links it anew where its link was taken over or
+    /// its stop settled, and serves its names, each subscribed, in its group where it serves in one;
+    /// settles once its broker holds each, giving its participant's id and port 0, and fails on a
+    /// name its broker refused, or as its participant's start fails, a start while its stop is under
+    /// way among them. Refused with an <see cref="ObjectDisposedException"/> once its participant is
+    /// disposed, its state kept, before anything else (spec 15.21), then once it is disposed itself
+    /// (decision 0003); then with an <see cref="InvalidOperationException"/> unless Uninitialized or
+    /// Closed.
     /// </summary>
     public Task<TransportServerAddress> Start()
     {
-        // ! its participant stopped: its application's misuse, its state kept (spec 15.21)
-        if (_participant.IsStopped)
+        // ! its participant disposed: its application's misuse, its state kept (spec 15.21)
+        if (_participant.IsDisposed)
         {
-            return Task.FromException<TransportServerAddress>(_participant.StoppedRefusal());
+            return Task.FromException<TransportServerAddress>(_participant.DisposedRefusal());
         }
 
         return _life.Start(async () =>
@@ -319,7 +321,7 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
 
             foreach (var connection in _held.ToList())
             {
-                connection.Close((1001, false));
+                _ = connection.Close((1001, false));
             }
 
             // * all let go at once, a name counted until its UNSUBACK came: its broker's word, not

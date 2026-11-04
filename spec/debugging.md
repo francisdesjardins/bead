@@ -602,10 +602,11 @@ judgment, never as a preliminary reading and another event after it.
 (spec 15.21, 0041) or `stopped`. It names its `incarnation`, the one drawn on `up`, and on a
 `down`, `taken-over` or `stopped` the ordinals of the connections it ends, `ended`. Its names
 are cleared and those connections dropped first. A takeover tells no later transition until
-the application starts the participant again. A stop tells none after its `stopped`: a link it
-met as it connected is never told `up`. A `names` event tells a name held or let go once
-the broker acknowledges it: `name`, `isHeld`, `group` when any. It covers a name let go at
-`maximumConnections` and taken again below it (spec 15.18).
+the application starts the participant again. A stop tells none after its `stopped` until the
+participant's next link, told `up`; a link the stop met as it connected is never told `up`, a stop
+after a stop with no link between tells nothing, and a dispose tells none after it. A `names`
+event tells a name held or let go once the broker acknowledges it: `name`, `isHeld`, `group` when
+any. It covers a name let go at `maximumConnections` and taken again below it (spec 15.18).
 
 13.6. A `report` event tells what the participant or one of its transports reports through its
 error event while watched, in its own words, `report` (spec 15.1, 15.19 to 15.23). It names the

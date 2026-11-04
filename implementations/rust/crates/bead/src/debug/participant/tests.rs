@@ -621,6 +621,62 @@ async fn tells_a_takeover_once_after_clearing_names_and_connections_and_tells_no
     pair.stop().await;
 }
 
+// debugging 13.5
+#[tokio::test]
+async fn tells_a_stop_once_then_its_next_link_s_up_as_another_incarnation_and_nothing_after_a_dispose()
+ {
+    let pair = TracePair::of().await;
+    let participant = &pair.client_participant;
+
+    // * a stop, then another with no link between, which tells nothing
+    participant.stop().await;
+    participant.stop().await;
+    settle(&pair.clock, &pair.server_clock).await;
+
+    // * its next link, then its dispose, then nothing more: a stop, a dispose, a start refused
+    participant.start().await.expect("started");
+    settle(&pair.clock, &pair.server_clock).await;
+    participant.dispose().await;
+    participant.stop().await;
+    participant.dispose().await;
+    assert!(participant.start().await.is_err(), "a start refused");
+    settle(&pair.clock, &pair.server_clock).await;
+
+    let links: Vec<ParticipantDebugEvent> = locked(&pair.events)
+        .iter()
+        .filter(|event| event.event == "link")
+        .cloned()
+        .collect();
+    let incarnation_of = |at: usize| links.get(at).and_then(|event| event.incarnation.clone());
+
+    assert_eq!(
+        links.iter().map(|event| event.state).collect::<Vec<_>>(),
+        [Some("up"), Some("stopped"), Some("up"), Some("stopped")],
+        "each stop told once, its next link's up between them, and nothing after its dispose"
+    );
+    assert_eq!(
+        links.get(1).and_then(|event| event.ended.clone()),
+        Some(vec![1]),
+        "the connection its stop ended"
+    );
+    assert_eq!(
+        incarnation_of(0),
+        incarnation_of(1),
+        "its stop names the link it ended"
+    );
+    assert_ne!(
+        incarnation_of(1),
+        incarnation_of(2),
+        "its next link another incarnation"
+    );
+    assert_eq!(
+        incarnation_of(2),
+        incarnation_of(3),
+        "its dispose stops that link"
+    );
+    pair.stop().await;
+}
+
 // debugging 13.6, 13.9
 #[tokio::test]
 async fn reports_a_debug_listener_s_throw_and_calls_later_listeners_while_the_participant_carries_on()

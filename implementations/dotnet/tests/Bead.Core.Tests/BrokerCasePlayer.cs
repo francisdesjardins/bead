@@ -592,6 +592,25 @@ internal sealed class BrokerCasePlayer : IAsyncDisposable
             await NothingMore();
             await _broker.TakeOver(takeover.GetString()!);
         }
+        else if (step.TryGetProperty("participant", out var act))
+        {
+            await NothingMore();
+
+            // * the participant under test stopped in place, or started again, each settled (spec 15.21)
+            switch (act.GetString())
+            {
+                case "stop":
+                    await _participant.Stop();
+
+                    break;
+                case "start":
+                    await _participant.Start();
+
+                    break;
+                default:
+                    throw new ArgumentException($"a participant's step no test plays: {Describe(step)}", nameof(step));
+            }
+        }
         else if (step.TryGetProperty("leave", out var leave))
         {
             var id = leave.GetString()!;

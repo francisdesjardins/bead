@@ -1,10 +1,12 @@
 // dependencies
 
 import { expect, test } from '@playwright/test';
+import type { Packet } from 'mqtt-packet';
 import { hexadecimalOf } from '../../../router/server/__tests__/expected-envelope';
 import {
   encodeParcel,
   type IParcel,
+  KIND_NAMES,
   ParcelFlag,
   ParcelKind,
   readParcel,
@@ -15,16 +17,18 @@ import {
   BROKER_PUBLISHED,
   createBrokerParticipant,
 } from '../broker-participant';
-import { GenericError, ProgrammerError } from '../errors';
+import { CancelError, GenericError, ProgrammerError } from '../errors';
 import {
   createMemoryBroker,
   type IMemoryBroker,
   type IMemoryBrokerAdapter,
   MEMORY_BROKER_FAULTS,
 } from '../memory-broker';
+import { createMqttBrokerAdapter } from '../mqtt-broker-adapter';
 import { noop } from '../noop';
 import type { BrokerTopic, IBrokerAdapter } from '../types';
 import { createTestClock } from './fixtures';
+import { createMqttScript, type IScriptedLink } from './mqtt-script';
 
 // interfaces
 
@@ -286,6 +290,232 @@ const heldConnections = async (
   }
 
   return { connections, participant, peer, reported };
+};
+
+/**
+ * An adapter whose every stop waits for the test to release it, as a broker slow to take a
+ * DISCONNECT: its participant's stop under way meanwhile.
+ */
+const stopsHeldOf = (adapter: IBrokerAdapter) => {
+  const releases: (() => void)[] = [];
+  const held = Object.assign(Object.create(adapter) as IBrokerAdapter, {
+    stop: () => {
+      return new Promise<void>((resolve, reject) => {
+        releases.push(() => {
+          adapter.stop().then(resolve, reject);
+        });
+      });
+    },
+  });
+
+  return { held, releases };
+};
+
+/** Stops `participant`, whose adapter `holding` holds each stop, once that stop is held. */
+const stoppedOf = async (
+  participant: ReturnType<typeof createBrokerParticipant>,
+  holding: ReturnType<typeof stopsHeldOf>
+): Promise<void> => {
+  const stopping = participant.stop();
+
+  await until(() => {
+    return holding.releases.length === 1;
+  }, "its adapter's stop held");
+  holding.releases.shift()?.();
+  await stopping;
+};
+
+/** An adapter that logs each listener its participant hooks or lets go, and its stops, into `log`. */
+const listenedOf = (adapter: IBrokerAdapter, log: string[]): IBrokerAdapter => {
+  const listened = Object.create(adapter) as IBrokerAdapter;
+  const each = (verb: 'off' | 'on') => {
+    return (event: 'down' | 'message', listener: never): unknown => {
+      log.push(`${verb} ${event}`);
+
+      return adapter[verb](event as 'message', listener);
+    };
+  };
+
+  return Object.assign(listened, {
+    off: each('off'),
+    on: each('on'),
+    stop: () => {
+      log.push('stop');
+
+      return adapter.stop();
+    },
+  });
+};
+
+/**
+ * A participant `srv` over the MQTT 5 adapter, linked to a scripted broker of a Receive Maximum of
+ * 1, whose server transport holds `count` connections, each of a peer `c1`, `c2`… the script plays:
+ * what the broker read, in its order, from each SUBSCRIBE to its DISCONNECT, each PUBLISH answered
+ * while `acknowledging` says so, and its next link once its participant starts again.
+ */
+const scriptedServerOf = async ({
+  connectTimeout,
+  count,
+}: {
+  connectTimeout: number;
+  count: number;
+}) => {
+  const script = await createMqttScript();
+  const adapter = createMqttBrokerAdapter({
+    connectTimeout,
+    id: 'srv',
+    password: 'secret',
+    url: script.url,
+  });
+  const participant = createBrokerParticipant({ adapter, devtools: false, heartbeat: Infinity });
+  const server = participant.transportServer({ names: ['interop'] });
+  const seen: string[] = [];
+  // * each PUBLISH answered while it acknowledges, or while it has answers left; held otherwise
+  const acknowledging = { answers: 0, isAcknowledging: true };
+  const held: { link: IScriptedLink; messageId: number }[] = [];
+  const accepts = new Map<string, Uint8Array>();
+  let opened = 0;
+
+  server.on('connection', () => {
+    opened += 1;
+  });
+
+  const pump = async (link: IScriptedLink): Promise<void> => {
+    while (!link.isClosed) {
+      let packet: Packet;
+
+      try {
+        packet = await link.next(undefined, { within: 100 });
+      } catch {
+        continue;
+      }
+
+      if (packet.cmd === 'subscribe') {
+        seen.push(`SUBSCRIBE ${packet.subscriptions[0]?.topic ?? ''}`);
+        link.send({
+          cmd: 'suback',
+          granted: [1],
+          messageId: packet.messageId ?? 0,
+          properties: {},
+        });
+      } else if (packet.cmd === 'publish') {
+        const read = readParcel(new Uint8Array(packet.payload as Buffer));
+        const parcel = 'parcel' in read ? read.parcel : undefined;
+        const code = parcel?.code === undefined ? '' : ` ${String(parcel.code)}`;
+
+        seen.push(
+          `PUBLISH ${packet.topic} ${parcel === undefined ? 'none' : (KIND_NAMES[parcel.kind] ?? '')}${code}`
+        );
+
+        if (parcel?.kind === ParcelKind.ACCEPT) {
+          accepts.set(packet.topic, parcel.acceptor);
+        }
+
+        if (acknowledging.isAcknowledging || acknowledging.answers > 0) {
+          acknowledging.answers = Math.max(0, acknowledging.answers - 1);
+          link.send({ cmd: 'puback', messageId: packet.messageId ?? 0, reasonCode: 0 });
+        } else {
+          held.push({ link, messageId: packet.messageId ?? 0 });
+        }
+      } else if (packet.cmd === 'disconnect') {
+        seen.push(`DISCONNECT 0x${(packet.reasonCode ?? 0).toString(16).padStart(2, '0')}`);
+      }
+    }
+  };
+  // its next link, once `starting` asks it: a CONNACK of a Receive Maximum of 1
+  const linked = async (starting: Promise<unknown>): Promise<IScriptedLink> => {
+    const link = await script.link();
+
+    link.send({
+      cmd: 'connack',
+      properties: { receiveMaximum: 1 },
+      reasonCode: 0,
+      sessionPresent: false,
+    });
+    void pump(link);
+    await starting;
+
+    return link;
+  };
+  const first = await linked(server.start());
+  let messageId = 100;
+
+  // * each peer's OPEN to the name, then its third leg once its ACCEPT came
+  for (let index = 1; index <= count; index += 1) {
+    const id = `c${String(index)}`;
+    const opener = Uint8Array.of(0, 0, 0, 0, 0, 0, 0, index);
+
+    messageId += 1;
+    first.send({
+      cmd: 'publish',
+      dup: false,
+      messageId,
+      payload: Buffer.from(
+        writeParcel({
+          acceptor: new Uint8Array(8),
+          bound: 65_536,
+          flags: 0,
+          id,
+          incarnation: INCARNATION,
+          kind: ParcelKind.OPEN,
+          opener,
+          sequence: 1,
+        })
+      ),
+      qos: 1,
+      retain: false,
+      topic: 'bead/s/interop',
+    });
+    await until(() => {
+      return accepts.has(`bead/i/${id}`);
+    }, `the ACCEPT of ${id}`);
+    messageId += 1;
+    first.send({
+      cmd: 'publish',
+      dup: false,
+      messageId,
+      payload: Buffer.from(
+        writeParcel({
+          acceptor: accepts.get(`bead/i/${id}`) ?? new Uint8Array(8),
+          kind: ParcelKind.PING,
+          opener,
+          sequence: 2,
+        })
+      ),
+      qos: 1,
+      retain: false,
+      topic: 'bead/i/srv',
+    });
+  }
+
+  // * each open, its PONG answered: nothing waits on the quota
+  await until(() => {
+    return (
+      opened === count &&
+      seen.filter((line) => {
+        return line.endsWith(' PONG');
+      }).length === count
+    );
+  }, 'each connection open');
+  await settled();
+
+  return {
+    acknowledging,
+    participant,
+    seen,
+    acknowledgeHeld: () => {
+      for (const each of held.splice(0)) {
+        each.link.send({ cmd: 'puback', messageId: each.messageId, reasonCode: 0 });
+      }
+    },
+    relinked: async () => {
+      await linked(participant.start());
+    },
+    [Symbol.asyncDispose]: async () => {
+      await participant[Symbol.asyncDispose]();
+      await script[Symbol.asyncDispose]();
+    },
+  };
 };
 
 /** An envelope of `length` bytes, each `byte`, in one DATA. */
@@ -1149,7 +1379,7 @@ test.describe('broker participant', () => {
     await participant.stop();
   });
 
-  test('lets a listener go, fails a connect awaiting its answer as it stops, refuses a start once stopped, and stops once', async () => {
+  test('lets a listener go, fails a connect awaiting its answer as it stops, and stops once', async () => {
     const broker = createMemoryBroker();
     const silent = await peerOf(broker, { id: 'silent', isServing: true });
     const participant = createBrokerParticipant({ adapter: broker.adapter({ id: 'ada' }) });
@@ -1186,30 +1416,19 @@ test.describe('broker participant', () => {
 
     await participant.stop();
 
-    // * the connect fails as its participant stops; a start since is a misuse, refused, a second
-    // stop does nothing
+    // * the connect fails as its participant stops, and a second stop does nothing
     expect(await pending).toMatchObject({
       message: 'the participant ada stopped as it connected',
       name: 'ConnectError',
     });
-
-    const started = participant.start();
-
-    await expect(started, 'a misuse').rejects.toBeInstanceOf(ProgrammerError);
-    await expect(started).rejects.toThrow('the participant ada is stopped');
-
-    const connected = participant.transportClient().connect({ server: 'interop' });
-
-    await expect(connected, 'a misuse').rejects.toBeInstanceOf(ProgrammerError);
-    await expect(connected).rejects.toThrow('the participant ada is stopped');
-    await participant[Symbol.asyncDispose]();
+    await participant.stop();
 
     expect([participant.isLinked, reported]).toEqual([
       false,
       ["a message to the inbox of ada is no parcel: 1 bytes, under a parcel's 28"],
     ]);
 
-    // * taken over, then stopped: a connect is the stop's misuse, never the takeover's words
+    // * taken over, then stopped: a stop leaves the fence, so a connect reads the takeover's words
     const cat = broker.adapter({ id: 'cat' });
     const fenced = createBrokerParticipant({ adapter: cat, reconnects: false });
     const fencing = hearing(fenced);
@@ -1223,8 +1442,12 @@ test.describe('broker participant', () => {
 
     const refused = fenced.transportClient().connect({ server: 'interop' });
 
-    await expect(refused, 'a misuse').rejects.toBeInstanceOf(ProgrammerError);
-    await expect(refused, "the stop's words").rejects.toThrow('the participant cat is stopped');
+    await expect(refused, 'not a misuse').rejects.not.toBeInstanceOf(ProgrammerError);
+    await expect(refused, "the takeover's words").rejects.toThrow(
+      'the link of cat was taken over by another link of its id, and connects no more until it is started again'
+    );
+    await fenced[Symbol.asyncDispose]();
+    await participant[Symbol.asyncDispose]();
   });
 
   test('fails a start its stop overtakes, what its adapter’s start failed with as its cause', async () => {
@@ -1718,13 +1941,22 @@ test.describe('broker participant', () => {
   });
 
   // spec 15.21
-  test('ends its reconnection once it is stopped, told so, and links no more', async () => {
-    const broker = createMemoryBroker();
+  test('ends its reconnection at once as it is stopped, in a wait or in an attempt, told so, the stop its cause', async () => {
+    // in a wait: on the test's clock, a delay of 10 s never advanced, its first attempt refused
+    const clock = createTestClock();
+    const broker = createMemoryBroker({ clock });
     const adapter = broker.adapter({ id: 'ada' });
     const log: string[] = [];
+    const tapped: number[] = [];
     const participant = createBrokerParticipant({
       adapter: loggedOf(adapter, log),
-      reconnect: { delay: 10 },
+      clock,
+      reconnect: {
+        delay: 10_000,
+        tap: (delay) => {
+          tapped.push(delay);
+        },
+      },
     });
     const reported = hearing(participant);
 
@@ -1732,26 +1964,77 @@ test.describe('broker participant', () => {
     adapter.lose();
     await adapter.start();
     await until(() => {
-      return startsIn(log) > 2;
-    }, 'its attempts refused');
+      return tapped.length === 1;
+    }, 'its first wait told');
+
+    const before = clock.now;
 
     // * its stop ends its link, the test's own among it: its broker would let it through now
     await participant.stop();
-
-    const stopped = startsIn(log);
-
     await until(() => {
       return reported.length > 0;
     }, 'its reconnection ended');
-    await new Promise((resolve) => {
-      setTimeout(resolve, 50);
-    });
+    await settled();
 
+    // * ended at once, told once, the stop its cause
     expect(wordsOf(reported), 'told so, once').toEqual([
-      'the link of ada went down, and its reconnection ended: the participant ada is stopped',
+      'the link of ada went down, and its reconnection ended: the reconnection was cancelled',
     ]);
-    expect(startsIn(log), 'no attempt after its stop').toBe(stopped);
+    expect(reported[0]?.cause, 'cancelled').toBeInstanceOf(CancelError);
+    expect(reported[0]?.cause, 'the stop its cause').toMatchObject({
+      cause: { message: 'the participant ada stopped' },
+      message: 'the reconnection was cancelled',
+    });
+    expect(clock.now, 'the clock not moved').toBe(before);
+    expect(tapped, 'no wait told after its stop').toEqual([10_000]);
+    expect(startsIn(log), 'no attempt after its stop').toBe(2);
     expect([participant.isLinked, adapter.isLinked], 'linked no more').toEqual([false, false]);
+
+    // in an attempt: its attempt's start held, then its stop
+    const bob = broker.adapter({ id: 'bob' });
+    const holding = heldOf(bob);
+    const taps: number[] = [];
+    const linking = createBrokerParticipant({
+      adapter: holding.held,
+      clock,
+      reconnect: {
+        delay: 10_000,
+        tap: (delay) => {
+          taps.push(delay);
+        },
+      },
+    });
+    const told = hearing(linking);
+
+    holding.holding.isHolding = false;
+    await linking.start();
+    holding.holding.isHolding = true;
+    bob.lose();
+    await until(() => {
+      return holding.releases.length > 0;
+    }, "its attempt's start held");
+
+    const stopping = linking.stop();
+
+    holding.releases.shift()?.();
+    await stopping;
+    await until(() => {
+      return told.length > 0;
+    }, 'its reconnection ended');
+    await settled();
+
+    // * its attempt fails, and its reconnection ends at once, no wait told after it, the stop its
+    // cause
+    expect(wordsOf(told), 'told so, once').toEqual([
+      'the link of bob went down, and its reconnection ended: the reconnection was cancelled',
+    ]);
+    expect(told[0]?.cause, 'the stop its cause').toMatchObject({
+      cause: { message: 'the participant bob stopped' },
+      message: 'the reconnection was cancelled',
+    });
+    expect(taps, 'no wait told').toEqual([]);
+    expect(clock.now, 'the clock not moved').toBe(before);
+    expect([linking.isLinked, bob.isLinked], 'linked no more').toEqual([false, false]);
   });
 
   // spec 15.21
@@ -2009,7 +2292,7 @@ test.describe('broker participant', () => {
     }, 'its reconnection ended');
     await settled();
     expect(wordsOf(reported), 'told so, once').toEqual([
-      'the link of bob went down, and its reconnection ended: the participant bob is stopped',
+      'the link of bob went down, and its reconnection ended: the reconnection was cancelled',
     ]);
     expect(
       [taps, linking.isLinked, bob.isLinked],
@@ -2264,5 +2547,357 @@ test.describe('broker participant', () => {
       hexadecimalOf(former ?? new Uint8Array())
     );
     await participant.stop();
+  });
+
+  // ── a stop in place, its next link, and a dispose (spec 15.21) ──
+
+  test('stops in place and starts again as another incarnation, its server transports’ names served again and its listeners kept, no will gone (spec 15.21)', async () => {
+    const broker = createMemoryBroker();
+    const watching = await peerOf(broker, { id: 'watching' });
+    const adapter = broker.adapter({ id: 'server' });
+    const participant = createBrokerParticipant({ adapter });
+    const transport = participant.transportServer({ names: ['interop'] });
+    const ada = createBrokerParticipant({ adapter: broker.adapter({ id: 'ada' }) });
+    const client = ada.transportClient();
+    const closes = { client: [] as boolean[], server: [] as boolean[] };
+
+    await watching.adapter.subscribe(['bead', 'd', 'server']);
+    transport.on('close', (wasClean) => {
+      closes.server.push(wasClean);
+    });
+    client.on('close', (wasClean) => {
+      closes.client.push(wasClean);
+    });
+    await transport.start();
+    await client.connect({ server: 'interop' });
+    await until(() => {
+      return transport.clients.length === 1;
+    }, 'its server told it open');
+
+    const links = linkStatesOf(participant);
+    const reported = hearing(participant);
+    const former = participant.incarnation;
+
+    await participant.stop();
+
+    // * each connection closed with a CLOSE of 1001, unclean at both ends, its link ended, its name
+    // held no more, its server's transport kept
+    await until(() => {
+      return closes.client.length === 1;
+    }, 'its client told its close');
+    expect(closes, 'closed with 1001').toEqual({ client: [false], server: [false] });
+    expect([participant.isLinked, adapter.isLinked], 'its link ended').toEqual([false, false]);
+    expect(transport.gauges().counts['names'], 'its name held no more').toBe(0);
+    expect(participant.names.size, 'none held').toBe(0);
+    expect(transport.isOpen(), "its server's transport kept").toBe(true);
+
+    // * its next start: another incarnation, its name served again, each listener kept
+    await participant.start();
+    expect(participant.isLinked, 'linked anew').toBe(true);
+    expect(
+      hexadecimalOf(participant.incarnation ?? new Uint8Array()),
+      'another incarnation'
+    ).not.toBe(hexadecimalOf(former ?? new Uint8Array()));
+    await until(() => {
+      return transport.gauges().counts['names'] === 1;
+    }, 'its name served again');
+
+    const again = ada.transportClient();
+
+    await again.connect({ server: 'interop' });
+    expect(again.isOpen(), 'served anew').toBe(true);
+    expect(links, 'its trace heard on').toEqual(['stopped', 'up']);
+    expect(wordsOf(reported), 'nothing reported').toEqual([]);
+    await settled();
+    expect(
+      watching.heard.filter(({ topic }) => {
+        return topic === 'bead/d/server';
+      }),
+      'no will gone'
+    ).toEqual([]);
+    await again.disconnect();
+    await ada[Symbol.asyncDispose]();
+    await participant[Symbol.asyncDispose]();
+  });
+
+  test('refuses a start while its stop is under way, and links anew at a start, a connect or a server’s start once that stop settled (spec 15.21)', async () => {
+    const broker = createMemoryBroker();
+    const serving = createBrokerParticipant({ adapter: broker.adapter({ id: 'server' }) });
+
+    await serving.transportServer({ names: ['interop'] }).start();
+
+    const holding = stopsHeldOf(broker.adapter({ id: 'ada' }));
+    const participant = createBrokerParticipant({ adapter: holding.held });
+
+    await participant.start();
+
+    const incarnations = [hexadecimalOf(participant.incarnation ?? new Uint8Array())];
+
+    // * a start while its stop is under way: its application's misuse, refused
+    const stopping = participant.stop();
+
+    await until(() => {
+      return holding.releases.length === 1;
+    }, "its adapter's stop held");
+
+    const refused = participant.start();
+
+    await expect(refused, 'a misuse').rejects.toBeInstanceOf(ProgrammerError);
+    await expect(refused, 'its words').rejects.toThrow('the participant ada is stopping');
+    holding.releases.shift()?.();
+    await stopping;
+    expect(participant.isLinked, 'down').toBe(false);
+
+    // * a connect once that stop settled, then a stop with no turn between them: that stop ends
+    // what the connect would link
+    const connecting = participant
+      .transportClient()
+      .connect({ server: 'interop' })
+      .catch((reason: unknown) => {
+        return reason;
+      });
+
+    await stoppedOf(participant, holding);
+    expect(await connecting, 'the connect fails').toMatchObject({
+      message: 'the participant ada stopped as it connected',
+      name: 'ConnectError',
+    });
+    await settled();
+    expect(participant.isLinked, 'linked by none').toBe(false);
+
+    // * once that stop settled, a start links it anew
+    await participant.start();
+    expect(participant.isLinked, 'linked anew by a start').toBe(true);
+    incarnations.push(hexadecimalOf(participant.incarnation ?? new Uint8Array()));
+
+    // * so does a client's connect over it
+    await stoppedOf(participant, holding);
+    await participant.transportClient().connect({ server: 'interop' });
+    expect(participant.isLinked, 'linked anew by a connect').toBe(true);
+    incarnations.push(hexadecimalOf(participant.incarnation ?? new Uint8Array()));
+
+    // * and a server's start over it
+    await stoppedOf(participant, holding);
+    await participant.transportServer({ names: ['own'] }).start();
+    expect(participant.isLinked, "linked anew by a server's start").toBe(true);
+    expect([...participant.names], 'its name served').toEqual(['own']);
+    incarnations.push(hexadecimalOf(participant.incarnation ?? new Uint8Array()));
+    expect(new Set(incarnations).size, 'each link another incarnation').toBe(4);
+    await stoppedOf(participant, holding);
+    await participant[Symbol.asyncDispose]();
+    await serving[Symbol.asyncDispose]();
+  });
+
+  test('refuses a start once disposed, lets its adapter go, and disposes once, stopping it first (spec 15.21)', async () => {
+    const broker = createMemoryBroker();
+    const ada = broker.adapter({ id: 'ada' });
+    const log: string[] = [];
+    const participant = createBrokerParticipant({ adapter: listenedOf(loggedOf(ada, log), log) });
+    const links = linkStatesOf(participant);
+
+    await participant.start();
+    expect(log, 'its adapter heard').toEqual([
+      'on message',
+      'on down',
+      'start, its will to bead/d/ada',
+      'subscribe bead/i/ada',
+    ]);
+
+    // * two disposes: one stop of its adapter, then its listeners let go of, once
+    await Promise.all([participant[Symbol.asyncDispose](), participant[Symbol.asyncDispose]()]);
+    expect(log.slice(4), 'stopped first, then let go of, once').toEqual([
+      'stop',
+      'off message',
+      'off down',
+    ]);
+    expect([participant.isLinked, ada.isLinked], 'neither linked').toEqual([false, false]);
+
+    // * a start once disposed: its application's misuse, refused before anything moves
+    const refused = participant.start();
+
+    await expect(refused, 'a misuse').rejects.toBeInstanceOf(ProgrammerError);
+    await expect(refused, 'its words').rejects.toThrow('the participant ada is disposed');
+
+    // * a stop or a dispose after it settles with it, nothing asked of its adapter, nothing told
+    await participant.stop();
+    await participant[Symbol.asyncDispose]();
+    await settled();
+    expect(log, 'nothing more asked').toHaveLength(7);
+    expect(links, 'its stop told once').toEqual(['up', 'stopped']);
+  });
+
+  test('attributes to its stop what that stop ended, though a start follows it at once, and lets the next link stand (spec 15.21)', async () => {
+    const broker = createMemoryBroker();
+    const serving = createBrokerParticipant({ adapter: broker.adapter({ id: 'server' }) });
+
+    await serving.transportServer({ names: ['interop'] }).start();
+
+    const ada = broker.adapter({ id: 'ada' });
+    const holding = heldOf(ada);
+    const participant = createBrokerParticipant({ adapter: holding.held, reconnects: false });
+    const reported = hearing(participant);
+    const waiting = participant.transportClient();
+    const again = participant.transportClient();
+
+    holding.holding.isHolding = false;
+    await again.connect({ server: 'interop' });
+    ada.lose();
+    await until(() => {
+      return reported.length > 0 && again.isClosed();
+    }, 'its link down, its client closed');
+    holding.holding.isHolding = true;
+
+    // a link's start, a connect awaiting it and a client's reconnection in flight, its start held
+    const caught = (pending: Promise<unknown>): Promise<unknown> => {
+      return pending.catch((reason: unknown) => {
+        return reason;
+      });
+    };
+    const starting = caught(participant.start());
+
+    await until(() => {
+      return holding.releases.length === 1;
+    }, 'its start held');
+
+    const ended: string[] = [];
+    const connecting = caught(waiting.connect({ server: 'interop' })).finally(() => {
+      ended.push('connect');
+    });
+    const reconnecting = caught(again.reconnect({ delay: 60_000 })).finally(() => {
+      ended.push('reconnection');
+    });
+
+    await settled();
+
+    const stopping = participant.stop();
+
+    // * the connect and the reconnection end at once, its start held still
+    await until(() => {
+      return ended.length === 2;
+    }, 'each ended');
+    holding.releases.shift()?.();
+    await stopping;
+
+    // ! a start, with no turn between it and the stop's end
+    const restarting = participant.start();
+
+    await until(() => {
+      return holding.releases.length === 1;
+    }, 'its next start held');
+    holding.releases.shift()?.();
+    await restarting;
+
+    // * each told as the stop's, though a start followed it at once
+    expect(await starting, 'its start').toMatchObject({
+      message: 'the participant ada stopped as it started',
+    });
+    expect(await connecting, 'the connect').toMatchObject({
+      message: 'the participant ada stopped as it connected',
+      name: 'ConnectError',
+    });
+
+    const reconnected = await reconnecting;
+
+    expect(reconnected, 'the reconnection cancelled').toBeInstanceOf(CancelError);
+    expect(reconnected, 'its stop its cause').toMatchObject({
+      cause: { message: 'the participant ada stopped' },
+      message: 'the reconnection was cancelled',
+    });
+
+    // * the next link stands: linked, and a connect goes through it
+    await settled();
+    expect(participant.isLinked, 'linked').toBe(true);
+    await waiting.connect({ server: 'interop' });
+    expect(waiting.isOpen(), 'open').toBe(true);
+    expect(wordsOf(reported), 'its loss alone reported').toEqual(['the link of ada went down']);
+    await participant[Symbol.asyncDispose]();
+    await serving[Symbol.asyncDispose]();
+  });
+
+  test('sends each connection’s CLOSE of 1001 before its adapter’s DISCONNECT, past its broker’s Receive Maximum (spec 15.21)', async () => {
+    await using scripted = await scriptedServerOf({ connectTimeout: 5_000, count: 3 });
+
+    // * its broker holds its PUBACKs as the stop begins, as one a round trip away does, then gives
+    // them: each CLOSE goes before the DISCONNECT, one at a time at a Receive Maximum of 1
+    scripted.acknowledging.isAcknowledging = false;
+
+    const from = scripted.seen.length;
+    const stopping = scripted.participant.stop();
+
+    await new Promise((resolve) => {
+      setTimeout(resolve, 100);
+    });
+    expect(scripted.seen.slice(from), 'one CLOSE alone, its PUBACK held').toEqual([
+      'PUBLISH bead/i/c1 CLOSE 1001',
+    ]);
+    scripted.acknowledging.isAcknowledging = true;
+    scripted.acknowledgeHeld();
+    await stopping;
+    await until(() => {
+      return scripted.seen.at(-1) === 'DISCONNECT 0x00';
+    }, 'its DISCONNECT read');
+    expect(scripted.seen.slice(from), 'each CLOSE, then the DISCONNECT').toEqual([
+      'PUBLISH bead/i/c1 CLOSE 1001',
+      'PUBLISH bead/i/c2 CLOSE 1001',
+      'PUBLISH bead/i/c3 CLOSE 1001',
+      'DISCONNECT 0x00',
+    ]);
+    await scripted.participant[Symbol.asyncDispose]();
+  });
+
+  test('resets at its next link each peer whose CLOSE its broker did not take as it stopped (spec 15.21)', async () => {
+    await using scripted = await scriptedServerOf({ connectTimeout: 500, count: 2 });
+
+    // * the CLOSE of the first its broker takes; the second's it never answers, past the stop's
+    // connectTimeout
+    scripted.acknowledging.isAcknowledging = false;
+    scripted.acknowledging.answers = 1;
+
+    const from = scripted.seen.length;
+
+    await scripted.participant.stop();
+    expect(scripted.seen.slice(from), 'each CLOSE, the second unanswered').toEqual([
+      'PUBLISH bead/i/c1 CLOSE 1001',
+      'PUBLISH bead/i/c2 CLOSE 1001',
+      'DISCONNECT 0x00',
+    ]);
+
+    // * its next link resets the second, whose CLOSE did not go, and no other, once its inbox and
+    // its name are subscribed again
+    scripted.acknowledging.isAcknowledging = true;
+
+    const next = scripted.seen.length;
+
+    await scripted.relinked();
+    await until(() => {
+      return scripted.seen.some((line, index) => {
+        return index >= next && line.includes('RESET');
+      });
+    }, 'a RESET read');
+    await new Promise((resolve) => {
+      setTimeout(resolve, 100);
+    });
+    expect(scripted.seen.slice(next), 'its link, then a RESET of the second alone').toEqual([
+      'SUBSCRIBE bead/i/srv',
+      'SUBSCRIBE bead/s/interop',
+      'PUBLISH bead/i/c2 RESET',
+    ]);
+
+    // * a stop and a start again: none left to reset
+    await scripted.participant.stop();
+
+    const last = scripted.seen.length;
+
+    await scripted.relinked();
+    await new Promise((resolve) => {
+      setTimeout(resolve, 100);
+    });
+    expect(
+      scripted.seen.slice(last).filter((line) => {
+        return line.includes('RESET');
+      }),
+      'no RESET again'
+    ).toEqual([]);
+    await scripted.participant[Symbol.asyncDispose]();
   });
 });

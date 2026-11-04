@@ -165,10 +165,17 @@ participant again, or a server's transport over it: two holders of one id never 
 over without end. Any other link lost connects anew as its `Reconnect` says, a transport client's
 `TransportClientReconnectOptions`, its attempts without end unless it bounds them, or stays down
 where `Reconnects` is false; a fixed delay out of bounds is refused as it is built. Its
-reconnection ends by its attempts, its token or its stop, reported through `Error`, what ended it
-the inner exception, and, unless it stopped, its next start or connect links it anew. A participant
-stopped links no more: its start, or a connect, reconnect or server's start over it, made after its
-stop, is refused as a misuse, an `ObjectDisposedException`, before anything moves. An OPEN lives in
+reconnection ends by its attempts, its token or, at once, its stop, reported through `Error`, what
+ended it the inner exception, the stop inside where it was the stop, and its next start or connect
+links it anew. A participant's `Stop` ends its link in place: each connection closed with a CLOSE
+of 1001, which its adapter's stop sends before its link ends, so no will goes, and what is under way
+ends with it, a connect stopped as it connected, a reconnection cancelled; once it settled, its
+start, a server's start over it, or a connect or reconnect over it links it anew as another
+incarnation, its transports kept, each peer whose CLOSE its broker did not take reset. A start
+while it stops is an `InvalidOperationException`. Its `DisposeAsync` is final: its start, or a
+connect, reconnect or server's start over it, made after it, is refused as a misuse, an
+`ObjectDisposedException`, before anything moves; a server transport's and an adapter's dispose is
+final alike, a start after it an `ObjectDisposedException`. An OPEN lives in
 its broker its connect's time left, and a DATA that carries a credential twice the heartbeat, where
 the adapter offers a message's life. A server's transport
 starts once its broker holds each name it serves and stops once it let each go, its gauge `names`

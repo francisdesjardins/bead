@@ -502,17 +502,17 @@ public sealed class BrokerTransportServerTests
 
     // spec 15.21
     [Fact]
-    public async Task Refuses_its_start_once_its_participant_stopped_its_state_kept()
+    public async Task Refuses_its_start_once_its_participant_is_disposed_its_state_kept()
     {
         var broker = new MemoryBroker();
         var calling = new CallingAdapter(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "ada" }));
         await using var participant = new BrokerParticipant(calling);
         await using var server = participant.Server(new BrokerTransportServerOptions { Names = ["interop"] });
 
-        await participant.Stop();
+        await participant.DisposeAsync();
 
         // * its application's misuse, refused before anything moves
-        Assert.Equal("the participant ada is stopped", (await Assert.ThrowsAsync<ObjectDisposedException>(() =>
+        Assert.Equal("the participant ada is disposed", (await Assert.ThrowsAsync<ObjectDisposedException>(() =>
         {
             return server.Start();
         })).Message);

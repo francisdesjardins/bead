@@ -60,7 +60,7 @@ const callOverMqtt = async (target: IMqttPageTarget): Promise<IMqttPageReport> =
     return { failure: String(error) };
   } finally {
     await client[Symbol.asyncDispose]();
-    await participant.stop();
+    await participant[Symbol.asyncDispose]();
   }
 };
 
