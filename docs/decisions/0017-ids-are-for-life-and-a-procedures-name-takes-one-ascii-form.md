@@ -264,11 +264,11 @@ code. The check is one function of the procedure alone, which holds nothing.
 **The service manager checks first where it refuses first.** Its one reason of its own comes as a
 notification is asked for again otherwise, another window among it
 ([0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md));
-`getNotification` and `GetNotification` run the router's check before it, so the order holds at that
-layer too. That refusal keeps its own type, a `ProgrammerError` and an `InvalidOperationException`,
-about the manager's state, and comes before the router's reasons of state and its registry's. A
-requester or a resolver the manager makes goes to the router with no reason of the manager's before
-it, and is checked there, once.
+`getNotification` runs the router's check before it, so the order holds at that layer too. That
+refusal keeps its own type, a `ProgrammerError` and an `InvalidOperationException`, about the
+manager's state, and comes before the router's reasons of state and its registry's. A requester or a
+resolver the manager makes goes to the router with no reason of the manager's before it, and is
+checked there, once.
 
 **A side that keeps no names.** A constrained profile built without the trace and the metrics
 (debugging 1.2) refuses `out of its range` alone; its names are a blueprint's, which `beadc check`

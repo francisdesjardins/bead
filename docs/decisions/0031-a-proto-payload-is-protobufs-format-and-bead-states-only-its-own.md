@@ -135,7 +135,8 @@ keeps, a known field at a wire type its type does not take among them, a row of 
 > one the procedure's definition names. What that format takes, refuses and writes is protobuf's, as
 > its [Encoding](https://protobuf.dev/programming-guides/encoding/) guide and its
 > [Language Guide](https://protobuf.dev/programming-guides/proto3/) state it; this section restates
-> none of it, and a side reads and writes through its stock protobuf library and the code its
+> none of it, and a side reads and writes through its stock protobuf library, the one it takes as
+> published, in whose place nothing of Bead's reads or writes the binary format, and the code its
 > generator writes for the message. What is Bead's:
 >
 > 1. Bytes that are no encoding of the message do not read (section 17.2).
@@ -156,7 +157,7 @@ keeps, a known field at a wire type its type does not take among them, a row of 
 >    protobuf's reference parsers skip it: one stock library reads such an entry apart, so every side
 >    refuses it.
 >
-> Where two stock libraries part on what protobuf states no rule of, the support matrix says what
+> Where the stock libraries part on what protobuf states no rule of, the support matrix says what
 > each does. The `proto` rows of `spec/codecs.json` read and write `Probe`, the message of
 > `spec/codecs.proto`.
 
@@ -167,7 +168,7 @@ does not declare, are
 items 7 and 8, a message that leaves a required field unset and a closed enum's undeclared number,
 are [0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)'s.
 
-**The runtime codec sets the bound, in both languages.** What a target writes of a `proto` binding
+**The runtime codec sets the bound, on every side.** What a target writes of a `proto` binding
 is the runtime's codec of its message's schema, which reads through the stock library with Bead's
 bound, the payload's records checked against its message before the library reads them
 ([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md))
@@ -180,6 +181,13 @@ request: protoCodecOf(SayHelloRequestSchema),
 ```csharp
 global::Bead.Protobuf.ProtoCodecs.Of<global::Hello.V1.SayHelloRequest>()
 ```
+
+```rust
+bead_protobuf::ProtoCodec::<SayHelloRequest>::new()
+```
+
+The Rust line names the message bare: beadc's Rust target, which is ahead, writes no module of it,
+and an application makes the codec itself.
 
 What the codec runs, laid out here over lines, its depth pass, its required walk, its check of what
 it wrote and its filter of a closed enum's record aside, which the paragraphs below and
@@ -233,7 +241,8 @@ global::Bead.PayloadCodecs.Of<global::Hello.V1.SayHelloRequest>(
 ```
 
 protobuf-es counts the top message, so its 101 is 17.9.3's 100 below it; Google.Protobuf reads the
-payload framed as a message field, whose read counts the top message too.
+payload framed as a message field, whose read counts the top message too. Buffa counts the messages
+below the top, so it takes the bound itself, `DecodeOptions::with_recursion_limit(100)`.
 
 **A writer refuses what its reader refuses for depth** (17.9.3, 17.2): a message nested more than
 100 deep below the top one, counted as the reader counts on the wire, a group, a map's entry and an
@@ -425,8 +434,8 @@ required walks have a twin each, bounded.
 
 ## Consequences
 
-**The tests of every side depend on a protobuf library**: on the TypeScript and C# sides each its
-platform's stock one, and on the Rust side Buffa 0.9.2, which meets the five criteria
+**The tests of every side depend on a protobuf library**: on every side its stock one (spec 17.9):
+protobuf-es, Google.Protobuf, and Buffa 0.9.2, which meets the five criteria
 [0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md) holds a library
 to. The TypeScript side's lockfile holds `@bufbuild/protobuf`, `@bufbuild/protoc-gen-es` and
 `@bufbuild/buf`, which carries a binary per platform and runs under the repository's Yarn with its

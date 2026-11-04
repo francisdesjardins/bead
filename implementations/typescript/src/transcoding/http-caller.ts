@@ -11,7 +11,7 @@ import { PAYLOAD_CODECS } from '../router/shared/payloads';
 import { ProgrammerError } from '../transport/shared/errors';
 import { isFieldValue } from '../transport/client/transport-client';
 import { isSecureUrl } from '../transport/shared/secure';
-import { base64Of, readProtoJson, typeRegistryOf, writeProtoJson } from './json-form';
+import { base64Of, createJsonForm } from './json-form';
 import type { HttpPayload, IHttpRouteInit } from './routes';
 
 /** Its fetch and default Authorization field. */
@@ -254,7 +254,7 @@ export const createHTTPCaller = (
       return typeof payload === 'object';
     });
   });
-  const registry = typeRegistryOf(schemas);
+  const form = createJsonForm(schemas);
   const fetcher = options.fetch ?? globalThis.fetch;
   const bounded = (payload: HttpPayload, value: unknown): unknown => {
     const bytes =
@@ -275,7 +275,7 @@ export const createHTTPCaller = (
         payload,
         typeof payload === 'string'
           ? PAYLOAD_CODECS[payload].decode(bytes)
-          : readProtoJson(payload, { bytes, registry })
+          : form.read(payload, bytes)
       );
     } catch (cause) {
       if (cause instanceof FailureError) {
@@ -422,9 +422,7 @@ export const createHTTPCaller = (
     const body =
       typeof route.request === 'string'
         ? bytes
-        : ENCODER.encode(
-            writeProtoJson(route.request, { message: fromBinary(route.request, bytes), registry })
-          );
+        : ENCODER.encode(form.write(route.request, fromBinary(route.request, bytes)));
     const response = await fetcher(target.href, {
       method: 'POST',
       body: body as Uint8Array<ArrayBuffer>,

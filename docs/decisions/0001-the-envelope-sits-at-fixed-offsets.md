@@ -67,12 +67,12 @@ codes from a procedure's.
 
 **A failure answered for an error of the side's own carries none of that error**: a resolver that
 throws, a verifier or an admission that fails, a result the side cannot send, an answer a relay's
-leg A cannot carry, a codec that throws other than a refusal. Its code says how far the call went,
-which is all its requester acts on; the error, an exception's message above all, is reported where
-the side runs, since its internals tell a peer nothing it can use and tell an attacker what to try
-next, as OWASP's Application Security Verification Standard returns a generic message to the
-consumer of an unexpected error (ASVS 5.0, 16.5.1). `PROCEDURE_FAILED` so answered carries no
-detail at all, the one form every language writes alike (spec 9.0).
+leg A cannot carry, an envelope's or a payload's codec that throws other than its refusal. Its code
+says how far the call went, which is all its requester acts on; the error, an exception's message
+above all, is reported where the side runs, since its internals tell a peer nothing it can use and
+tell an attacker what to try next, as OWASP's Application Security Verification Standard returns a
+generic message to the consumer of an unexpected error (ASVS 5.0, 16.5.1). `PROCEDURE_FAILED` so
+answered carries no detail at all, the one form every language writes alike (spec 9.0).
 
 **Every bit this layout does not define refuses the envelope as malformed**, and so do bytes after
 the header of a kind that carries no payload, a credit's or a cancel's, and a chunk that carries

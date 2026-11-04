@@ -22,26 +22,10 @@ export type {
   TemplateReading,
   VariablesReading,
 } from './templates';
-export { bindRequest } from './binding';
-export type { IBindingOptions } from './binding';
-export {
-  JsonFormError,
-  MAXIMUM_DEPTH,
-  readJsonText,
-  readMessage,
-  readProtoJson,
-  typeRegistryOf,
-  writeFieldJson,
-  writeProtoJson,
-} from './json-form';
-export type {
-  IJsonFormOptions,
-  IJsonPlace,
-  IJsonToken,
-  ITypeRegistry,
-  JsonNode,
-  RequestPlace,
-} from './json-form';
+export { createHTTPBinding } from './binding';
+export type { IBindingOptions, IHTTPBinding } from './binding';
+export { createJsonForm, JsonFormError, MAXIMUM_DEPTH } from './json-form';
+export type { IJsonForm, IJsonPlace, IJsonToken, RequestPlace } from './json-form';
 export {
   DEFAULT_CHALLENGE,
   PROBLEM_MEDIA_TYPE,
@@ -61,13 +45,7 @@ export type {
   IProblemRoute,
   OwnFailure,
 } from './problems';
-export {
-  createEventStream,
-  EVENT_STREAM_MEDIA_TYPE,
-  eventDataOf,
-  eventOf,
-  HEARTBEAT_COMMENT,
-} from './events';
+export { createEventStream, EVENT_STREAM_MEDIA_TYPE, eventOf, HEARTBEAT_COMMENT } from './events';
 export type { IEventSink, IEventStream, IEventStreamOptions, IServerSentEvent } from './events';
 export { createHTTPCaller, httpRequesterOf, httpSubscriberOf } from './http-caller';
 export type {

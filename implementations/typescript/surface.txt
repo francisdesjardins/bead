@@ -869,6 +869,7 @@
   IEventSink	src/transcoding/events.ts
   IEventStream	src/transcoding/events.ts
   IEventStreamOptions	src/transcoding/events.ts
+  IHTTPBinding	src/transcoding/binding.ts
   IHTTPCallOptions	src/transcoding/http-caller.ts
   IHTTPCaller	src/transcoding/http-caller.ts
   IHTTPCallerOptions	src/transcoding/http-caller.ts
@@ -876,7 +877,7 @@
   IHTTPSubscriber	src/transcoding/http-caller.ts
   IHttpRouteInit	src/transcoding/routes.ts
   IHttpRouteTemplate	src/transcoding/routes.ts
-  IJsonFormOptions	src/transcoding/json-form.ts
+  IJsonForm	src/transcoding/json-form.ts
   IJsonPlace	src/transcoding/json-form.ts
   IJsonToken	src/transcoding/json-form.ts
   IOwnProblemOptions	src/transcoding/problems.ts
@@ -886,10 +887,8 @@
   IRawPath	src/transcoding/templates.ts
   IServerSentEvent	src/transcoding/events.ts
   ITemplate	src/transcoding/templates.ts
-  ITypeRegistry	src/transcoding/json-form.ts
   IVariable	src/transcoding/templates.ts
   JsonFormError	src/transcoding/json-form.ts
-  JsonNode	src/transcoding/json-form.ts
   MAXIMUM_DEPTH	src/transcoding/json-form.ts
   OwnFailure	src/transcoding/problems.ts
   PROBLEM_MEDIA_TYPE	src/transcoding/problems.ts
@@ -899,10 +898,10 @@
   Segment	src/transcoding/templates.ts
   TemplateReading	src/transcoding/templates.ts
   VariablesReading	src/transcoding/templates.ts
-  bindRequest	src/transcoding/binding.ts
   createEventStream	src/transcoding/events.ts
+  createHTTPBinding	src/transcoding/binding.ts
   createHTTPCaller	src/transcoding/http-caller.ts
-  eventDataOf	src/transcoding/events.ts
+  createJsonForm	src/transcoding/json-form.ts
   eventOf	src/transcoding/events.ts
   httpRequesterOf	src/transcoding/http-caller.ts
   httpSubscriberOf	src/transcoding/http-caller.ts
@@ -913,16 +912,10 @@
   problemOfOwn	src/transcoding/problems.ts
   problemOfRefusal	src/transcoding/problems.ts
   rawPathOf	src/transcoding/templates.ts
-  readJsonText	src/transcoding/json-form.ts
-  readMessage	src/transcoding/json-form.ts
-  readProtoJson	src/transcoding/json-form.ts
   routeIndexOf	src/transcoding/templates.ts
   routeOf	src/transcoding/routes.ts
   templateOf	src/transcoding/templates.ts
-  typeRegistryOf	src/transcoding/json-form.ts
   variablesOf	src/transcoding/templates.ts
-  writeFieldJson	src/transcoding/json-form.ts
-  writeProtoJson	src/transcoding/json-form.ts
 ./transport-client
   CLOSE_EVENT	src/transport/shared/constants.ts
   CancelError	src/transport/shared/errors.ts
@@ -2705,11 +2698,13 @@ src/transcoding/binding.ts IBindingOptions
     readonly body?: Uint8Array | undefined
     readonly isPatch?: boolean | undefined
     readonly query?: string | undefined
-    readonly registry: ITypeRegistry
     readonly routeBody?: string | undefined
     readonly variables: Readonly<Record<string, string>>
-src/transcoding/binding.ts bindRequest
-  const bindRequest(schema: DescMessage, options: IBindingOptions): Message
+src/transcoding/binding.ts IHTTPBinding
+  interface IHTTPBinding
+    readonly bind: <Desc extends DescMessage>(schema: Desc, options: IBindingOptions) => MessageShape<Desc>
+src/transcoding/binding.ts createHTTPBinding
+  const createHTTPBinding(schemas: readonly DescMessage[]): IHTTPBinding
 src/transcoding/events.ts EVENT_STREAM_MEDIA_TYPE
   const EVENT_STREAM_MEDIA_TYPE: "text/event-stream"
 src/transcoding/events.ts HEARTBEAT_COMMENT
@@ -2738,8 +2733,6 @@ src/transcoding/events.ts IServerSentEvent
     readonly name?: 'failure' | 'result' | undefined
 src/transcoding/events.ts createEventStream
   const createEventStream(sink: IEventSink, {clock, heartbeat}: IEventStreamOptions): IEventStream
-src/transcoding/events.ts eventDataOf
-  const eventDataOf(payload: {bytes: Uint8Array; encoding: 'raw'} | {encoding: 'text'; text: string}): string
 src/transcoding/events.ts eventOf
   const eventOf({data, id, name}: IServerSentEvent): string
 src/transcoding/http-caller.ts HTTPEvent
@@ -2824,9 +2817,12 @@ src/transcoding/http-gateway.ts WINDOW
   const WINDOW: 16
 src/transcoding/http-gateway.ts createHTTPGateway
   const createHTTPGateway(given: IHTTPGatewayOptions): IHTTPGateway
-src/transcoding/json-form.ts IJsonFormOptions
-  interface IJsonFormOptions
-    readonly registry: ITypeRegistry
+src/transcoding/json-form.ts IJsonForm
+  interface IJsonForm
+    readonly eventDataOf: (payload: HttpPayload, bytes: Uint8Array) => string
+    readonly read: <Desc extends DescMessage>(schema: Desc, body: Uint8Array) => MessageShape<Desc>
+    readonly write: <Desc extends DescMessage>(schema: Desc, message: MessageShape<Desc>) => string
+    readonly writeField: (field: DescField, message: Message) => string
 src/transcoding/json-form.ts IJsonPlace
   interface IJsonPlace
     readonly token?: IJsonToken | undefined
@@ -2835,9 +2831,6 @@ src/transcoding/json-form.ts IJsonToken
   interface IJsonToken
     readonly isGiven: boolean
     readonly text: string
-src/transcoding/json-form.ts ITypeRegistry
-  interface ITypeRegistry
-    readonly messageOf: (typeName: string) => DescMessage | undefined
 src/transcoding/json-form.ts JsonFormError
   class JsonFormError extends Error
     reason: string
@@ -2846,24 +2839,12 @@ src/transcoding/json-form.ts JsonFormError
     isUnset: boolean
     constructor(reason: string, {at, isUnset = false, place}: {at?: IJsonPlace | undefined; isUnset?: boolean | undefined; place?: RequestPlace | undefined} = {})
     pointer(): string | undefined
-src/transcoding/json-form.ts JsonNode
-  type JsonNode = | {readonly kind: 'array'; readonly items: readonly JsonNode[]} | {readonly kind: 'boolean'; readonly value: boolean} | {readonly kind: 'null'} | {readonly kind: 'number'; readonly text: string; readonly value: number} | {readonly kind: 'object'; readonly members: readonly (readonly [string, JsonNode])[]} | {readonly kind: 'string'; readonly value: string}
 src/transcoding/json-form.ts MAXIMUM_DEPTH
   const MAXIMUM_DEPTH: 100
 src/transcoding/json-form.ts RequestPlace
   type RequestPlace = {readonly parameter: string} | {readonly pointer: string}
-src/transcoding/json-form.ts readJsonText
-  const readJsonText(bytes: Uint8Array): JsonNode
-src/transcoding/json-form.ts readMessage
-  const readMessage(schema: DescMessage, options: IJsonFormOptions & {node: JsonNode}): Message
-src/transcoding/json-form.ts readProtoJson
-  const readProtoJson(schema: DescMessage, {bytes, registry}: IJsonFormOptions & {bytes: Uint8Array}): Message
-src/transcoding/json-form.ts typeRegistryOf
-  const typeRegistryOf(schemas: readonly DescMessage[]): ITypeRegistry
-src/transcoding/json-form.ts writeFieldJson
-  const writeFieldJson(schema: DescMessage, {message, name, registry}: IJsonFormOptions & {message: Message; name: string}): string
-src/transcoding/json-form.ts writeProtoJson
-  const writeProtoJson(schema: DescMessage, {message, registry}: IJsonFormOptions & {message: Message}): string
+src/transcoding/json-form.ts createJsonForm
+  const createJsonForm(schemas: readonly DescMessage[]): IJsonForm
 src/transcoding/problems.ts Arose
   type Arose = 'answer' | 'client' | 'gateway' | 'server'
 src/transcoding/problems.ts DEFAULT_CHALLENGE

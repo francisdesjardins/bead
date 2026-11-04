@@ -1,17 +1,21 @@
-import { fromBinary } from '@bufbuild/protobuf';
 import { expect, test } from '@playwright/test';
 import { createTestClock, delaysOn } from '../../transport/shared/__tests__/fixtures';
 import { ProgrammerError } from '../../transport/shared/errors';
 import {
   createEventStream,
-  eventDataOf,
   eventOf,
   HEARTBEAT,
   HEARTBEAT_COMMENT,
   type IEventSink,
 } from '../events';
-import { typeRegistryOf, writeProtoJson } from '../json-form';
+import { createJsonForm } from '../json-form';
 import { TickSchema } from './generated/transcoding_pb';
+
+// constants
+
+const FORM = createJsonForm([TickSchema]);
+
+const ENCODER = new TextEncoder();
 
 // helpers
 
@@ -75,8 +79,8 @@ test('writes the result, then each notification as a message, then the failure t
   );
   expect(stream.isEnded).toBe(true);
   expect(eventOf({ data: '1', id: 9 })).toBe('id: 9\ndata: 1\n\n');
-  expect(eventDataOf({ encoding: 'text', text: 'h\n\r' })).toBe('"h\\n\\r"');
-  expect(eventDataOf({ bytes: Uint8Array.of(0, 0xff, 0xfe), encoding: 'raw' })).toBe('"AP/+"');
+  expect(FORM.eventDataOf('text', ENCODER.encode('h\n\r'))).toBe('"h\\n\\r"');
+  expect(FORM.eventDataOf('raw', Uint8Array.of(0, 0xff, 0xfe))).toBe('"AP/+"');
 
   // a failure before the result is a problem, the notifications it held dropped
   const early = createSink();
@@ -212,19 +216,4 @@ test('settles a held notification whose event its response could not take, its c
   stream.result('{}');
   await expect(held).resolves.toBeUndefined();
   await expect(stream.notification('{"remaining":0}')).resolves.toBeUndefined();
-});
-
-test('writes each payload’s data as its encoding reads it', () => {
-  // * a proto one in Bead's proto JSON form, a text one a JSON string, a raw one its base64; a json
-  // one's bytes are its data as they are, which the TypeScript side's gateway hands on unread
-  expect(
-    writeProtoJson(TickSchema, {
-      message: fromBinary(TickSchema, Uint8Array.of(0x08, 0x01)),
-      registry: typeRegistryOf([TickSchema]),
-    })
-  ).toBe('{"remaining":1}');
-  expect(eventDataOf({ encoding: 'text', text: 'h"é' })).toBe('"h\\"é"');
-  expect(eventDataOf({ encoding: 'text', text: 'h\n\r' })).toBe('"h\\n\\r"');
-  expect(eventDataOf({ bytes: Uint8Array.of(0x01, 0x02, 0xff), encoding: 'raw' })).toBe('"AQL/"');
-  expect(eventDataOf({ bytes: Uint8Array.of(0, 0xff, 0xfe), encoding: 'raw' })).toBe('"AP/+"');
 });

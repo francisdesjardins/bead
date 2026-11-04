@@ -11,6 +11,7 @@ import {
   type DescField,
   type DescMessage,
   type Message,
+  type MessageShape,
   ScalarType,
 } from '@bufbuild/protobuf';
 import { FieldMaskSchema } from '@bufbuild/protobuf/wkt';
@@ -28,6 +29,7 @@ import {
   readJsonText,
   readMessage,
   type RequestPlace,
+  typeRegistryOf,
 } from './json-form';
 import { queryDecodeOf } from './templates';
 
@@ -41,11 +43,23 @@ export interface IBindingOptions {
   readonly isPatch?: boolean | undefined;
   /** Its query, raw, after the first `?`; none where its target has none. */
   readonly query?: string | undefined;
-  readonly registry: ITypeRegistry;
   /** Its route's body: `*`, a top-level field's proto name, or none. */
   readonly routeBody?: string | undefined;
   /** Each variable's value, decoded, by its field path of proto names. */
   readonly variables: Readonly<Record<string, string>>;
+}
+
+/** A request bound from its route, then read by Bead's mapping (transcoding 4). */
+export interface IHTTPBinding {
+  /**
+   * A request of `schema` bound from its route's variables, its query and its body, then read by
+   * Bead's mapping; a refusal is a {@link JsonFormError}, which a gateway answers 400
+   * `PAYLOAD_UNDECODABLE`.
+   */
+  readonly bind: <Desc extends DescMessage>(
+    schema: Desc,
+    options: IBindingOptions
+  ) => MessageShape<Desc>;
 }
 
 /** A JSON object as the binding builds it: its members in order, each to be read as the body's. */
@@ -413,9 +427,13 @@ const maskPathsOf = (
  * step 4 of 5.2, a required field unset. A field two of them set, a parameter no field path names,
  * one of a message, a map or a repeated message, or of a field its route binds otherwise, a field
  * named twice, or a query under a body of the request whole, is a {@link JsonFormError}, as is
- * every refusal of the reading: a gateway answers each 400 `PAYLOAD_UNDECODABLE`.
+ * every refusal of the reading: a gateway answers each 400 `PAYLOAD_UNDECODABLE`. Off the entry:
+ * {@link createHTTPBinding} hands it the registry it holds.
  */
-export const bindRequest = (schema: DescMessage, options: IBindingOptions): Message => {
+export const bindRequest = (
+  schema: DescMessage,
+  options: IBindingOptions & { readonly registry: ITypeRegistry }
+): Message => {
   const { body, isPatch = false, query, registry, routeBody, variables } = options;
   const bodyNode = body === undefined ? undefined : readJsonText(body);
   const bodyField =
@@ -579,4 +597,28 @@ export const bindRequest = (schema: DescMessage, options: IBindingOptions): Mess
       });
     }
   );
+};
+
+/**
+ * A binding made over `schemas` (transcoding 4): each request bound from its route, then read by
+ * Bead's mapping, an `Any` naming a message of the files they are declared in and of those files'
+ * imports, or a well-known type.
+ *
+ * @example
+ * import { createHTTPBinding } from '@francisdesjardins/bead/transcoding';
+ *
+ * const binding = createHTTPBinding([GetBookRequestSchema]);
+ * const request = binding.bind(GetBookRequestSchema, { variables: { name: 'shelves/1/books/2' } });
+ */
+export const createHTTPBinding = (schemas: readonly DescMessage[]): IHTTPBinding => {
+  const registry = typeRegistryOf(schemas);
+
+  return Object.freeze({
+    bind: <Desc extends DescMessage>(
+      schema: Desc,
+      options: IBindingOptions
+    ): MessageShape<Desc> => {
+      return bindRequest(schema, { ...options, registry }) as MessageShape<Desc>;
+    },
+  });
 };

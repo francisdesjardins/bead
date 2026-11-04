@@ -89,20 +89,9 @@ import type {
   IHTTPServerLike,
 } from '../transport/server/types';
 import { MAXIMUM_UNSENT_BYTES } from '../transport/server/ws-transport-server';
-import { bindRequest } from './binding';
-import {
-  createEventStream,
-  EVENT_STREAM_MEDIA_TYPE,
-  eventDataOf,
-  type IEventStream,
-} from './events';
-import {
-  JsonFormError,
-  type ITypeRegistry,
-  typeRegistryOf,
-  writeFieldJson,
-  writeProtoJson,
-} from './json-form';
+import { createHTTPBinding } from './binding';
+import { createEventStream, EVENT_STREAM_MEDIA_TYPE, type IEventStream } from './events';
+import { createJsonForm, JsonFormError, responseFieldOf } from './json-form';
 import {
   type Arose,
   type Encoding,
@@ -581,13 +570,13 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
       );
     }
   }
-  const registry: ITypeRegistry = typeRegistryOf(
-    routes.flatMap(({ notification, request, result }) => {
-      return [request, result, notification].filter((payload): payload is DescMessage => {
-        return typeof payload === 'object';
-      });
-    })
-  );
+  const schemas = routes.flatMap(({ notification, request, result }) => {
+    return [request, result, notification].filter((payload): payload is DescMessage => {
+      return typeof payload === 'object';
+    });
+  });
+  const form = createJsonForm(schemas);
+  const binding = createHTTPBinding(schemas);
   const documentBytes = document === undefined ? undefined : ENCODER.encode(document);
   const etag =
     documentBytes === undefined
@@ -1021,8 +1010,8 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     return {
       body:
         route.responseBody === undefined || isNotification
-          ? writeProtoJson(payload, { message, registry })
-          : writeFieldJson(payload, { message, name: route.responseBody, registry }),
+          ? form.write(payload, message)
+          : form.writeField(responseFieldOf(payload, route.responseBody), message),
     };
   };
 
@@ -1261,11 +1250,10 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
       }
 
       if (typeof init.request === 'object') {
-        const message = bindRequest(init.request, {
+        const message = binding.bind(init.request, {
           body,
           isPatch: route.method === 'PATCH',
           query,
-          registry,
           routeBody: route.body,
           variables: decoded.variables,
         });
@@ -1581,11 +1569,12 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
         return PAYLOAD_CODECS.text.decode(bytes);
       });
 
-      return eventDataOf({ encoding: 'text', text });
+      return JSON.stringify(text);
     }
 
-    if (payload === 'raw') {
-      return eventDataOf({ bytes, encoding: 'raw' });
+    // * a proto one never comes here: it is written as the result's body is
+    if (payload === 'json' || payload === 'raw') {
+      return form.eventDataOf(payload, bytes);
     }
 
     return DECODER.decode(bytes);

@@ -410,6 +410,29 @@ describe('the case rules and the renderings', () => {
       false
     );
   });
+
+  test('renders an error enum’s variant named as a participle, and no other', () => {
+    const cells = (typescript, csharp, rust) => {
+      return {
+        typescript: [{ name: typescript, kind: 'record' }],
+        csharp: csharp === null ? [] : [{ name: csharp, kind: 'record' }],
+        rust: [{ name: rust, kind: 'variant' }],
+      };
+    };
+
+    assert.equal(
+      RULES.error(cells('DisconnectError', 'DisconnectException', 'CallError::Disconnected')),
+      true
+    );
+    assert.equal(RULES.error(cells('CancelError', null, 'CallError::Cancelled')), true);
+    assert.equal(RULES.error(cells('TimeoutError', null, 'CallError::TimedOut')), true);
+    assert.equal(RULES.error(cells('TimeError', null, 'CallError::TimedOut')), false);
+    assert.equal(RULES.error(cells('CancError', null, 'CallError::Cancelled')), false);
+    assert.equal(
+      RULES.error(cells('FailureError', 'FailureException', 'CallError::Failure')),
+      true
+    );
+  });
 });
 
 describe('problemsOf', () => {
