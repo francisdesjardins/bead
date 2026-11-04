@@ -337,11 +337,13 @@ the case, and otherwise take the member optional and refuse its absence where th
 difference the support matrix keeps as work to do. A command's options are a record of their own,
 `CommandOptions`, on every side, its connection required, the request and notification makers and
 the command resolver a client's router's, and the command maker and the request and notification
-resolvers a server's, each refused on the other's as it is made, its side first. Options a side
-hands a callback are always given. An options object with a required member stays an options object,
-not a request type. Each language's rendering is its record's:
-[0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md) for the TypeScript and C#
-sides, [0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md) for
+resolvers a server's, each refused on the other's as it is made, its side first; a client's and a
+server's facades give their services typed by their side, with its makers alone:
+`IServiceManagerClient` and `IServiceManagerServer`, `ServiceManagerClient` and
+`ServiceManagerServer` on the Rust side. Options a side hands a callback are always given. An
+options object with a required member stays an options object, not a request type. Each language's
+rendering is its record's: [0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md) for
+the TypeScript and C# sides, [0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md) for
 the Rust side.
 
 **No tuple on the surface.** No public item takes or gives a tuple, on any side: no parameter,

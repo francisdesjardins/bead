@@ -92,8 +92,8 @@ interop/
                                 blueprint
     InteropHandlers.cs          its resolvers, written
     InteropCredentials.cs       its credentials: the key set and the verifier
-  BannedSymbols.txt             what the banned-API analyzer refuses there: the service manager,
-                                called through the generated server and client
+  BannedSymbols.txt             what the banned-API analyzer refuses there: the service manager and
+                                its two interfaces, called through the generated server and client
   Bead.Interop.Server/          its server, which the TypeScript side's interop and its page of
                                 another origin call
 tests/

@@ -2,16 +2,16 @@
 
 - **Status**: accepted
 - **Scope**: every runtime's public surface, the service layer's client half ahead in the Rust
-  side's core: a procedure's kind, checked by each router as it is declared; the payload codecs made
-  public; the admission vocabulary; the failure catalogue; the typed descriptors, and their
-  validator; the service layer that serves and calls them; the notify filter's argument; a
-  notification asked for again at another window; the bound call and its guard; the C# side's server
-  and client interfaces, and its routers' `Notify`; the TypeScript side's `./service` entry; the
-  constant of the contract with generated code. Spec section 16, whose 16.10 holds the reason
-  `against its kind` and whose 16.11 says what each way of declaring takes, with
-  `spec/identities.json`, its schema and its generator; the support matrix's rows of the layer;
-  [0003](0003-one-word-one-meaning.md)'s sentence on _kind_ and _type_. The `proto` encoding,
-  section 17.9, its file and its rows, is
+  side's core: a procedure's kind, checked by each router as it is declared; a side's services,
+  typed by its side; the payload codecs made public; the admission vocabulary; the failure
+  catalogue; the typed descriptors, and their validator; the service layer that serves and calls
+  them; the notify filter's argument; a notification asked for again at another window; the bound
+  call and its guard; the C# side's server and client interfaces, and its routers' `Notify`; the
+  TypeScript side's `./service` entry; the constant of the contract with generated code. Spec
+  section 16, whose 16.10 holds the reason `against its kind` and whose 16.11 says what each way of
+  declaring takes, with `spec/identities.json`, its schema and its generator; the support matrix's
+  rows of the layer; [0003](0003-one-word-one-meaning.md)'s sentence on _kind_ and _type_. The
+  `proto` encoding, section 17.9, its file and its rows, is
   [0031](0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)'s; the check of a
   `proto` payload's records before its library reads them, its levelings and protobuf's conformance
   suite are
@@ -36,7 +36,7 @@ descriptor. That layer needs eight things of each runtime, the same on every sid
   requests and answers commands, a server's the reverse" (`spec/debugging.md` 8.2), as the metrics
   registry types it; each of the service manager's makers belongs to one side, refused on the other
   as it is made, so the type it gives the trace is its router's side's, and both routers declare a
-  requester alike.
+  requester alike; a client and a server give it typed by their side.
 - **The codecs of section 17, public.** Generated code binds each payload to a codec by name, and
   makes a protobuf message's of its stock library's functions;
   [0016](0016-a-json-payload-has-one-form-whichever-side-writes-it.md) puts the codecs in the
@@ -110,11 +110,61 @@ Where it is checked:
   the router takes; it then checks the same way's three reasons, as 0017's paragraph "The service
   manager checks first where it refuses first" orders them.
 
-**Ahead:** a manager typed by its side, on every side, each type carrying its side's three makers, as
-[0004](0004-one-behaviour-in-every-language.md)'s rule for a requirement that depends on an
-instantiation asks of the C# and Rust sides where their types name the case: `IClient.Services` and
-`IBeadServer.Services`, `Client::services()` and `Server::services()`. The refusal as made stays for
-a manager built over an untyped router.
+**How a side's types say it.**
+
+- **One manager, the refusal as made alone**: no name and no break, the refusal holding its twins on
+  every side. But the facades are where nearly every application meets the manager, and a framework
+  that calls both ways holds the sides apart by type — ASP.NET Core SignalR's `Hub` on the server,
+  its `HubConnection` on the client — vscode-jsonrpc's `MessageConnection` aside, whose one
+  implementation fills both of JSON-RPC 2.0's roles, which 16.11 answers. Bead's own layers already
+  split by side: `RouterClient` and `RouterServer`, `RequestSerializerClient` and
+  `RequestSerializerServer`, `ServiceClient` and `ServiceServer`.
+- **The side as a type parameter**, `IServiceManager<Handle, Side>` as a conditional type: nothing
+  gives one, since the facade is `IClient`, always a client's, and the routers' types carry no side,
+  the fakes' `IRouterLike<string>` naming neither. It would be threaded through all of them for an
+  inference nothing needs, and maps onto no C# or Rust name.
+- **On the C# side, two sealed classes composing the manager**: no cross-cast, and nothing to
+  version but their own members, at six forwarders each and a public constructor per side. That
+  constructor takes an `IRouterLike`, since an `IClient` or an `IBeadServer` over a router of its
+  own needs one, and so needs a refusal at construction, with its twins on two sides. It is how the
+  C# side closes the open row of the matrix, a round of its own, as a wrapper object per side is the
+  TypeScript side's.
+- **A base interface for the shared members**, `IServiceManagerEvents`: a fourth name on three
+  sides, with a Rust trait to match; each type declares its shared members itself, as the Rust
+  structs must.
+- **On the Rust side, a phantom marker parameter**, `ServiceManager<S: ServiceSide = EitherSide>`,
+  with `pub type ServiceManagerClient = ServiceManager<ClientSide>;`, as std's
+  `HashMap<K, V, S = RandomState>` defines `new` on its default alone: each maker and shared member
+  written once, no forwarder and no doubled doc, `ServiceManager::new()` inferring the untyped
+  default. But six public names no other side has a counterpart for — three marker types,
+  `ServiceSide`, `MakesRequests`, `MakesCommands`, and a sealing module — each an `own:` row of
+  `tools/names.tsv` or an `alone` row against a pin that may only fall; a wrong maker that reads
+  E0599 "the method `get_command` exists for reference `&ServiceManager<ClientSide>`, but its trait
+  bounds were not satisfied", where the newtype, C# and TypeScript say the member does not exist
+  (E0599 "no method named", CS1061, TS2339); diagnostics and rustdoc that name the marker rather
+  than the alias; and bounds a newcomer to Rust reads hard.
+- **On the Rust side, traits**, `Client::services() -> &impl ServiceManagerClient`: every caller
+  imports the trait, the return type is opaque, the trait needs sealing (C-SEALED), and its generic
+  methods make it unusable as `dyn`.
+- **On the Rust side, the untyped `ServiceManager` dropped**, since `ServiceRouter` is closed: the
+  refusal as made would have no Rust twin, and `ServiceRouter`'s variant over a trait, which is
+  ahead, needs it.
+- **Typed by its side where the types name it. Chosen.** A client's services and a server's are each
+  a type of its own, carrying its side's three makers and the events its side emits. The case is
+  named by the facade's own type, `IClient` or `IServer`, not by a type parameter, so every side
+  gives it a type of its own, the TypeScript side included: `IServiceManagerClient` and
+  `IServiceManagerServer`, implemented by the one manager on the TypeScript and C# sides, and
+  newtypes over it, built by the crate alone, on the Rust side. The refusal as made stays for a
+  manager built over an untyped router, and past the types. A server's type carries `debug` and
+  `deprecated` and not `dropped`, which is emitted on a notification's path alone, on every side: a
+  server's manager makes no notification, and its listener would hear nothing forever, a quieter
+  trap than the maker the refusal as made catches. On the Rust side the newtype's trade is two names
+  that map name for name onto the other sides' interfaces, and fifteen forwarders, each one line
+  pointing to the manager's member, against a marker parameter's six public names, its diagnostics
+  and its bounds (C-NEWTYPE, "Newtypes provide static distinctions"). The names are the layer's and
+  its side, as the house names every layer's side ([0003](0003-one-word-one-meaning.md)):
+  `ServiceManagerClient`, `I`-prefixed where a side declares an interface, never
+  `ClientServiceManager` nor `ClientServices`, which take the facade's prefix.
 
 What each way takes, the procedure's `procedureKind` given:
 
@@ -456,9 +506,9 @@ declaration refused declares nothing. A resolver is checked before it is registe
 the registry; a requester before `declareRequester` hands it on; a notification before it is
 registered. The refusal is the router's, as 16.10's are on each side: a `ProgrammerError`, an
 `ArgumentException`, its sentence naming the procedure, its kind and what the way takes, the
-TypeScript one ending with `against its kind`. The service manager checks a procedure's identity
-alone, first; the kind is the routers', so a notification of a procedure whose kind is `request` is
-refused as it is registered with its router. `procedureOf` carries `procedureKind`, and a
+TypeScript one ending with `against its kind`. The service manager checks its maker's side first,
+then the same way's reasons, so a notification of a procedure whose kind is `request` is refused as
+it is asked for, before its router sees it. `procedureOf` carries `procedureKind`, and a
 notification asked for again with another `procedureKind` is asked for otherwise. A debug event
 never lays the procedure's kind out beside its `type`.
 
@@ -1056,7 +1106,7 @@ public interface IBeadServer<TData> : IAsyncDisposable
 {
     IServerTransport Transport { get; }
     RouterServer Router { get; }
-    ServiceManager Services { get; }
+    IServiceManagerServer Services { get; }
     SessionManager<TData> Sessions { get; }
     BeforeRequest RequireSession { get; }
     BeforeRequest RequireCredential { get; }
@@ -1069,7 +1119,7 @@ public interface IBeadServer<TData> : IAsyncDisposable
 public interface IClient : IAsyncDisposable
 {
     RouterClient Router { get; }
-    ServiceManager Services { get; }
+    IServiceManagerClient Services { get; }
     Task Disconnect(TransportClientDisconnectOptions? options = null);
     Task Reconnect(TransportClientReconnectOptions? options = null);
 }
@@ -1077,7 +1127,154 @@ public interface IClient : IAsyncDisposable
 
 `Server<TData>`, `WebSocketServer<TData>` and `HttpServer<TData>` implement the first, the last two
 holding `RequireCredential` and `ShareLegBSession` and giving their transport by an explicit
-implementation; `WebSocketClient` and `BeadHttpClient` the second. Both live in `Bead.Core`.
+implementation; `WebSocketClient` and `BeadHttpClient` the second. Both live in `Bead.Core`. Each
+gives its services by its side's interface, its own `Services` property too: `Server<TData>`,
+`WebSocketServer<TData>` and `HttpServer<TData>` an `IServiceManagerServer`, `WebSocketClient` and
+`BeadHttpClient` an `IServiceManagerClient`.
+
+**A side's services are typed by its side.** A client's carry the manager's `isDebugging`, its three
+events, `debug`, `deprecated` and `dropped`, and a client's three makers, `getRequest`,
+`getNotification` and `getCommandResolver`; a server's carry `isDebugging`, `debug` and
+`deprecated`, and a server's three makers, `getCommand`, `getRequestResolver` and
+`getNotificationResolver`. The other side's maker does not compile. The facades hand them out:
+`IClient.services`, `IClient.Services` and `Client::services()` a client's; `IServer.services`,
+`IBeadServer<TData>.Services`, `Server<TData>.Services` and `Server::services()` a server's. The
+untyped manager keeps all six makers and refuses the other side's as it is made:
+`createServiceManager(router)`, `new ServiceManager(IRouterLike)`,
+`ServiceManager::new(ServiceRouter)`, which the fakes, the fixtures and the conformance players
+build.
+
+```ts
+/**
+ * A client's services, on a client's router (spec 16.11): the requests and notifications it makes
+ * of its server, and the resolvers of the commands it answers; a server's makers are none of its own.
+ */
+export interface IServiceManagerClient<Handle extends string = ConnectionHandle> {
+  readonly isDebugging: boolean;
+  // emit, events, off, on, once and removeAllListeners, over SERVICE_MANAGER_EVENTS
+  // getNotification, getCommandResolver and getRequest
+}
+
+/**
+ * A server's services, on a server's router (spec 16.11): the commands it makes of a client, and the
+ * resolvers of the requests and notifications it answers; a client's makers are none of its own,
+ * and no notification of its own is dropped.
+ */
+export interface IServiceManagerServer<Handle extends string = ConnectionHandle> {
+  readonly isDebugging: boolean;
+  on<K extends Exclude<SERVICE_MANAGER_EVENTS, 'dropped'>>(
+    event: K,
+    listener: EmitterListener<ServiceManagerEventMap[K]>
+  ): this;
+  // emit, events, off, once and removeAllListeners alike
+  // getNotificationResolver, getCommand and getRequestResolver
+}
+
+/**
+ * The resolvers and requesters of the services on one router whose side its type does not name:
+ * both sides' makers, each refused on the other side's router as it is made.
+ */
+export interface IServiceManager<Handle extends string = ConnectionHandle>
+  extends IServiceManagerClient<Handle>, IServiceManagerServer<Handle> {
+  // the six event members again, over SERVICE_MANAGER_EVENTS: two bases whose `on` differ are TS2320
+}
+
+// IClient.services: IServiceManagerClient<RouterClientConnectionHandle>
+// IServer.services: IServiceManagerServer<TransportServerConnectionHandle>
+```
+
+The server's six event members take `Exclude<SERVICE_MANAGER_EVENTS, 'dropped'>` written inline: a
+named alias would be a public name no other side has. `createServiceManager` keeps its signature,
+and its result is assignable to either type, as `Array<T>` is to `ReadonlyArray<T>`; `on(…)` gives
+the narrowed type back. No factory per side: it would build the same object, which still carries six
+makers at run time, so a JavaScript caller, or a cast, meets the refusal as made in its words, never
+"is not a function".
+
+```csharp
+// ! the one manager implements both sides' interfaces, so a type test or a cast between them proves
+// no router's side; each maker's refusal as it is made holds past it
+/// <summary>A client's services, on a client's router (spec 16.11): what IClient.Services gives.</summary>
+public interface IServiceManagerClient
+{
+    event Action<Procedure, Failure?>? Dropped;
+    event Action<Exception?, DebugEvent>? Debug;
+    event Action<Procedure>? Deprecated;
+    bool IsDebugging { get; }
+    // GetNotification, GetRequest and GetCommandResolver, each as ServiceManager's
+
+    // ! internal, so the one manager alone implements this interface: no other assembly can, and a
+    // member the manager gains breaks no implementer
+    internal ServiceManager Manager { get; }
+}
+
+/// <summary>A server's services, on a server's router (spec 16.11): what IBeadServer.Services gives.</summary>
+public interface IServiceManagerServer
+{
+    event Action<Exception?, DebugEvent>? Debug;
+    event Action<Procedure>? Deprecated;
+    bool IsDebugging { get; }
+    // GetCommand, GetRequestResolver and GetNotificationResolver, each as ServiceManager's
+    internal ServiceManager Manager { get; }
+}
+
+public sealed partial class ServiceManager : IServiceManagerClient, IServiceManagerServer
+{
+    // its own surface unchanged; Manager explicit on both, returning this
+}
+```
+
+The interfaces are sealed by an internal member, as the Rust newtype holds its manager
+crate-private, so a member the manager gains breaks no implementer: a type of another
+assembly cannot implement it (CS9044, C# 8's interface member accessibility), which removes the
+Framework Design Guidelines' versioning cost of a public interface. It follows
+[0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md), interfaces and composition, and
+the BCL's `IReadOnlyList<T>` over `List<T>`. The service layer reaches the manager beneath through
+it, `client.Services.Manager` and `server.Services.Manager`, so `IDescribedProcedure`,
+`RequesterJudging` and `RequestJudge<TRequest>` read the bound and the side of the manager's own
+router at each judging, as the TypeScript and Rust sides do. An `IClient` or an `IBeadServer`
+written elsewhere — a test's fixture, the bench's `MemoryClient`, the interop's — builds
+`new ServiceManager(router)` and types its property by the interface.
+
+```rust
+/// A client's services, over a client's router (spec 16.11).
+#[derive(Debug, Clone)]
+pub struct ServiceManagerClient {
+    // ! the crate's alone: a test that hears both sides alike reaches the one manager beneath
+    pub(crate) manager: ServiceManager,
+}
+
+impl ServiceManagerClient {
+    // pub(crate) fn new(router: RouterClient, options: &ServiceManagerOptions)
+    //     -> Result<Self, ProgrammerError>, built by `Client` alone
+    // on_debug, on_deprecated, on_dropped, off and is_debugging, each forwarded
+    // get_request, get_notification and get_command_resolver, each forwarded
+}
+
+/// A server's services, over a server's router (spec 16.11).
+#[derive(Debug, Clone)]
+pub struct ServiceManagerServer {
+    pub(crate) manager: ServiceManager,
+}
+
+impl ServiceManagerServer {
+    // pub(crate) fn new(router: RouterServer, options: &ServiceManagerOptions)
+    //     -> Result<Self, ProgrammerError>, built by `Server` alone
+    // on_debug, on_deprecated, off and is_debugging, each forwarded
+    // get_command, get_request_resolver and get_notification_resolver, each forwarded
+}
+
+// Client::services(&self) -> &ServiceManagerClient, a const fn
+// Server::services(&self) -> &ServiceManagerServer
+```
+
+Each forwarder keeps the bounds and the `# Errors` of the manager's member, less the side's error,
+and its doc is one line that points to it. The constructors are the crate's: the router's type is
+the side, so no refusal at construction exists to write, and a public `new` would fix a signature
+now that `ServiceRouter`'s variant over a trait, which is ahead, may want to change. The server's
+options, `closeConnection` and `closeOnTimeout`, are members of neither type: they are given where
+the manager is built. `ServiceManager::router()` stays on the untyped manager alone. Each type's
+doc holds one example that compiles, `client.services().get_request(…)` and
+`server.services().get_command(…)`.
 
 **The TypeScript side's service layer is one entry**, `"./service": "./src/service/service.ts"` in
 `package.json`'s `exports`: `createServiceServer`, `createServiceClient`, `requestOf`, `commandOf`,
@@ -1127,19 +1324,30 @@ signature.
 test file each in `src/service/__tests__/`; the codecs stay in `router/shared/payloads.ts`, with
 `payloadCodecOf` beside them; `ProcedureKind` in `router/shared/constants.ts`; `ISubscriber`,
 `IBoundCall`, `IBoundCommand`, `IRegistrar`, `ICommand`, `ICommandOptions` and
-`IRegistrationOptions` in `router/shared/types.ts`; `checkProcedureKind` in
+`IRegistrationOptions` in `router/shared/types.ts`, with `IServiceManagerClient` and
+`IServiceManagerServer`, which `./service-manager` exports; `checkProcedureKind` in
 `router/shared/identity.ts`, run by each router. The C# side, in `Bead.Core`: `ServiceServer.cs`,
 `ServiceClient.cs`, `ServiceProcedures.cs` (the descriptors, `ProcedureBindings`, `AdmissionRule`,
 `AdmissionHook`), `FailureCatalogue.cs` (with `IApplicationFailure`, `NoFailure`,
 `AdmissionFailure`), `PayloadCodecs.cs` (public, over the internal `Payloads`), `GeneratedCode.cs`,
-`IBeadServer.cs`, `IClient.cs`; `ProcedureKind` in `RouterTypes.cs`, `Subscriber` and
-`NotifyRequest` beside `NotifyOptions`, the kind's check in `Identity.cs`, run by the core and each
-router.
+`IBeadServer.cs`, `IClient.cs`, `IServiceManagerClient.cs`, `IServiceManagerServer.cs`;
+`ProcedureKind` in `RouterTypes.cs`, `Subscriber` and `NotifyRequest` beside `NotifyOptions`, the
+kind's check in `Identity.cs`, run by the core and each router. The Rust side: the two newtypes in
+`managers/service.rs`. beadc gives a service named `ServiceManager` these Rust names; they join
+`RUNTIME_TYPES` with beadc's Rust target.
 
 **The rule has its gate** ([0006](0006-a-rule-has-its-gate.md)): `spec/identities.json`'s group of
 procedure kinds, played the six ways on every side; the test of `service-manager.test.ts` that holds
-a callable's members; the twin tests of the feature row "The service layer"; `yarn check` and
-`dotnet format`/`dotnet test` over the layer's code.
+a callable's members; the twin tests of the feature row "The service layer"; the twins that type a
+side's services, in `service-manager.test.ts`
+`types a client’s services and a server’s by their side, each without the other’s makers`, its C#
+and Rust twins named alike: the TypeScript one's seven
+`@ts-expect-error` lines and its key-set over the facades' own property types, the C# one's
+reflection over the two interfaces, their seal and the facades' property types, and the Rust one's
+consumer half, which compiles a consumer against the built library through
+`testing::surface::Consumer` and asserts each refusal by its code and its message; the interop's
+two banned types, `T:Bead.IServiceManagerClient` and `T:Bead.IServiceManagerServer`, beside
+`T:Bead.ServiceManager`; `yarn check` and `dotnet format`/`dotnet test` over the layer's code.
 
 ## Consequences
 
@@ -1159,6 +1367,15 @@ descriptor's `@deprecated` reaches each member mapped from it: a requester, a no
 window's key, a command's requester, a notifier and a resolver's key, each reported where it is used
 by `no-deprecated`, typescript-eslint's and oxlint's; a test of `service-client.test.ts` and one of
 `service-server.test.ts`, named alike, hold it.
+
+**A typed manager proves its router's side on the Rust side alone.** On the TypeScript and C#
+sides it narrows one object, as `ReadonlyArray<T>` and `IReadOnlyList<T>` do, so a cast, or an
+`IClient` an application writes over a manager of the other side, reaches the refusal as made; in
+C#, `services is IServiceManagerServer` holds for every manager. On the Rust side the newtype holds
+no other maker, and only the facade builds it. The difference is an open row of the matrix, "A
+manager typed by its side, as proof of its router's side", which a wrapper per side, refused at
+construction, closes on the TypeScript and C# sides, by a round of its own. A member joining the
+manager joins its side's type, or both where every side emits or uses it.
 
 **The Rust side** plays the `procedureKinds` group the six ways (`bead/tests/identities.rs`), and
 the `proto` rows as [0031](0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)
@@ -1236,3 +1453,24 @@ each, with the answer that holds:
 | The Rust side's `decoded()` folds a panic into a `CodecRefusal`, and so erases the one distinction its trait gives (O7)                                                                                                                                                                                                                                                                                         | Accepted: `decoded()` keeps the panic apart; the request's site answers a refusal `PAYLOAD_UNDECODABLE` and a panic `PROCEDURE_FAILED`, reported, and the other sites keep their outcomes                                                                                                                                                                                                                                                                                     |
 | `catch_unwind` is sound for the router, but covers neither a codec's own state nor `panic = "abort"`, the default of `wasm32-unknown-unknown`, which the core is checked for; a test gated on `panic = "unwind"` changes nothing, the harness requiring unwind (O8)                                                                                                                                             | Accepted: the matrix's row and [0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md) name that target's default, and no test is gated on `panic`                                                                                                                                                                                                                                                                                               |
 | No conformance file can script a codec's bug, the application's; the Rust test alone holds the answer, with no twin (O9)                                                                                                                                                                                                                                                                                        | Accepted: the twins land on every side, `a payload whose codec throws other than its refusal is answered PROCEDURE_FAILED, with no detail, and reported, never reaching the callback` and the C# side's, the Rust test renamed to its answer, and the citations move                                                                                                                                                                                                          |
+
+### On the manager typed by its side
+
+The change that types a client's services and a server's by their side, on every side, met one
+dissenter ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)) at xhigh effort, whose
+probes sealed the C# interfaces, compiled a marker parameter on the Rust side and forwarded a
+server's maker on a client's type to see what caught it. Each claim was verified before its answer,
+and each answer that changed the design was probed on all three sides. Its objections, each with
+its answer:
+
+| Objection                                                                                                                                                                                                                                                                                                                                    | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The Rust twin is weak: two `compile_fail` doc examples check one wrong maker of three on each side and no error code, and the house's own compile-twin kit, `testing::surface::Consumer`, which checks the code and the message on stable, is never weighed                                                                                  | Accepted: verified, `Consumer::refuses` asserts the code and the message, 26 test files use it, `a_server_does_not_subscribe_it_notifies` is the precedent, and a server's maker forwarded on the client's type leaves both `compile_fail` examples passing. The Rust twin's consumer half refuses the six wrong makers by E0599 and their names, the server's `on_dropped` likewise, and an outside `new` by E0624. Each type keeps one example that compiles, as documentation. [0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md) names the consumer twin, and the matrix cites it                                        |
+| The Rust named twin is not written, though the draft counts on it to keep the new forwarders above the coverage floor                                                                                                                                                                                                                        | Accepted: verified, no Rust file held it, and `llvm-cov` had not run. Its runtime half makes each side's makers on a connected pair and runs each of the fifteen forwarders; `cargo llvm-cov` over the workspace, CI's command, reads 94.0 % of lines and 94.0 % of regions against the floor's 93.4 and 93.4                                                                                                                                                                                                                                                                                                                                                  |
+| The C# interfaces open an extension point no record asked for, and the service layer's refactor made to cope with it departs from the other sides: `RequesterJudging` snapshots the bound and the side once, where the TypeScript and Rust sides read the manager's router at each judging; the split of `IDescribedProcedure` is not probed | Accepted: verified, an outside implementer is CS9044 under an internal member, the TypeScript and Rust sides read the bound at each judging (`service-requester.ts`, `managers/service.rs`), and the split compiled nulls where it said none. Each interface is sealed by `internal ServiceManager Manager { get; }`, implemented explicitly, the C# twin of the Rust newtype's crate-private field. The service layer reaches `Services.Manager`, and `RequesterJudging` and `IDescribedProcedure` stay as they are. The Framework Design Guidelines' versioning cost goes, since no other assembly implements either interface. The C# twin asserts the seal |
+| The TypeScript twin's form rests on a false reason: the house already puts `@ts-expect-error` over an absent member, and oxlint refuses only the call form                                                                                                                                                                                   | Accepted, with a correction: verified in `router-core.test.ts`, and `void client.services.getCommand;` passes `tsc` and oxlint. But over `{} as IClient` those lines read a member of an undefined `services` and throw once run, so the twin holds them over two real managers typed by side: seven directives, one per refusal the other sides make, the key-set over the facades' own property types beside them. No lint refusal is cited                                                                                                                                                                                                                  |
+| `dropped` stays on the server's type though no server can hear it, against the design's own criterion that a type states 16.11's partition and no more; the TypeScript cost is lower than stated                                                                                                                                             | Accepted: verified, `dropped` is emitted on the notification's path alone on every side, and every listener in the tree is a client's. The server's type carries `debug` and `deprecated` alone. On the TypeScript side its six event members take `Exclude<SERVICE_MANAGER_EVENTS, 'dropped'>` inline, and `IServiceManager` redeclares them over the whole map (TS2320); inline, since an exported alias would be a name no other side has. Each twin holds it                                                                                                                                                                                               |
+| The Rust side gets public typed constructors no other side has and nothing needs, the client's taking options no client reads, and fixing a signature the `ServiceRouter` variant over a trait may want to change                                                                                                                            | Accepted: verified, `client.rs` and `server.rs` are their only callers, and the players build the untyped `ServiceManager::new`. Both are `pub(crate)`. The surface gains the types and their members but no constructor, as on the other sides, and the consumer half refuses `ServiceManagerClient::new` from outside the crate (E0624)                                                                                                                                                                                                                                                                                                                      |
+| "No Differences row" is wrong: on the Rust side the type proves its router's side, on the TypeScript and C# sides it narrows one object that a cast, or a facade an application writes, reaches across                                                                                                                                       | Accepted: verified, `IServiceManagerClient s = new ServiceManager(serverRouter)` compiles, and its TypeScript form alike; the fixtures and the bench write their own `IClient`, and the C# twin asserts the cross-cast. The seal does not close it, since one class still implements both interfaces. A Differences row of kind `open` states it, naming the sealed classes and the wrapper object that would close it. The Consequences say the same, and a `// !` beside the C# interfaces warns that a type test between them proves no side                                                                                                                |
+| Two reasons do not hold: the marker form has a name, its alias, and a defaulted phantom parameter is no transition typestate; and the amendment of [0004](0004-one-behaviour-in-every-language.md)'s rule on options members widens it to every type that names its case                                                                     | Accepted in part: verified, the marker probe compiles clean with `ServiceManager::new()` inferring the default. Both reasons are withdrawn, and the amendment of 0004 is its makers sentence alone, the type-of-its-own reasoning this record's. The newtype stays, on its real trade: two names that map name for name onto the other sides' interfaces, against six public names with no counterpart, each an `own:` or `alone` row of `tools/names.tsv`, and a wrong maker that reads "exists … but its trait bounds were not satisfied" where every other side says the member does not exist. Item 1 records it                                           |
+| Two doc comments still state a single manager, and the new Rust runtime names are exactly those beadc gives a service named `ServiceManager`                                                                                                                                                                                                 | Accepted: verified, `IRouterLike`'s doc and `ServiceManager`'s summary, and `classNamesOf` with `CLASS_SUFFIXES`. Both doc comments say the untyped manager serves either side. "Where it lives" says the Rust names join `RUNTIME_TYPES` with beadc's Rust target                                                                                                                                                                                                                                                                                                                                                                                             |
