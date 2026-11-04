@@ -14,6 +14,74 @@ use crate::router::core::RequestResolverProps;
 use crate::router::types::{CallAddress, RouterAnswer, SignalReason};
 use crate::testing::pair::echo;
 
+// debugging 5.2: Rust's transport boundary carries bytes, with no string frame or TypeError.
+#[tokio::test]
+async fn read_traced_then_dispatched_what_does_not_read_is_reported_not_traced() {
+    use crate::constants::ProtocolCode;
+    use crate::debug::DebugDirection;
+    use crate::router::core as router_core;
+    use crate::router::types::{RouterError, TransportMessage};
+    use crate::testing::core_port::scripted_header;
+    use crate::testing::scripted;
+
+    let (peer, handed, admitted) = super::router_core_sessions::serving(None).await;
+    let seen = Arc::clone(&handed);
+    peer.owner
+        .run(move |state| {
+            state.on_trace = Some(Box::new(move |_, _| {
+                assert!(locked(&seen).is_empty(), "traced before dispatch");
+            }));
+            for (data, handle) in [
+                (Bytes::from_static(b"text"), "a"),
+                (Bytes::from_static(&[0x0a, 0xff]), "b"),
+                (
+                    scripted::bytes_of(&Envelope::Request {
+                        header: scripted_header(1),
+                        payload: Bytes::from_static(&[7]),
+                    }),
+                    "a",
+                ),
+            ] {
+                router_core::receive(
+                    state,
+                    (
+                        TransportMessage {
+                            data,
+                            ..TransportMessage::default()
+                        },
+                        &Arc::from(handle),
+                    ),
+                );
+            }
+            assert_eq!(state.reports.len(), 2);
+            for ((handle, error), expected) in state.reports.iter().zip(["a", "b"]) {
+                assert_eq!(handle.as_ref(), expected);
+                assert!(matches!(error, RouterError::Failure(failure)
+                    if failure.protocol_code() == Some(ProtocolCode::ENVELOPE_MALFORMED)));
+            }
+            assert_eq!(state.traces.len(), 1);
+            let (direction, traced) = &state.traces[0];
+            assert_eq!(*direction, DebugDirection::Rx);
+            assert_eq!(traced.connection_handle.as_ref(), "a");
+            assert_eq!(
+                traced.header,
+                crate::envelope::EnvelopeHeader::Request(scripted_header(1))
+            );
+        })
+        .await
+        .expect("the read and trace turn");
+    peer.settle().await;
+    let seen = locked(&handed);
+    assert_eq!(seen.len(), 1);
+    assert_eq!(seen[0].connection_handle.as_ref(), "a");
+    assert_eq!(seen[0].header, scripted_header(1));
+    assert!(seen[0].is_admitted);
+    assert_eq!(seen[0].payload, Bytes::from_static(&[7]));
+    assert!(!seen[0].signal.is_aborted());
+    drop(seen);
+    assert_eq!(locked(&admitted).len(), 1, "admitted once before dispatch");
+}
+
 // spec 9.0
 #[tokio::test]
 async fn answers_a_request_its_codec_throws_on_other_than_a_refusal_envelope_malformed_with_no_detail_and_reports_the_error_with_its_connection()

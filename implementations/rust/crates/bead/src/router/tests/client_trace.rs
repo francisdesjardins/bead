@@ -37,6 +37,52 @@ fn result(call_id: u32, text: &str) -> Envelope {
     }
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn tells_a_calls_tx_step_off_its_routers_scheduler() {
+    let scripted = Scripted::new();
+    let services = services(&scripted);
+    let (answered, answer) = std::sync::mpsc::channel();
+    scripted.router.on_debug(Arc::new(move |direction, event| {
+        if direction == DebugDirection::Rx && matches!(event.header, EnvelopeHeader::Result(_)) {
+            answered
+                .send(std::thread::current().id())
+                .expect("the listener waits");
+        }
+    }));
+    let answer = Arc::new(Mutex::new(answer));
+    let told = Arc::new(Mutex::new(Vec::new()));
+    let telling = Arc::clone(&told);
+    let transport = Arc::clone(&scripted.transport);
+    services.on_debug(Arc::new(move |_, step| {
+        if step.direction == DebugDirection::Tx
+            && let Some(call_id) = step.call_id
+        {
+            let here = std::thread::current().id();
+            transport.deliver(&result(call_id, "b"));
+            // A blocking listener leaves the router able to take its answer, as the source's wait does.
+            let received =
+                crate::testing::blocking(|| locked(&answer).recv_timeout(super::PATIENCE));
+            let is_answered = received.is_ok();
+            let is_same_thread = received.is_ok_and(|there| there == here);
+            locked(&telling).push((is_same_thread, is_answered));
+        }
+    }));
+    let waiting = services
+        .get_request(&echo(), RequestDependencies::new(TextCodec, TextCodec))
+        .expect("echo declared")
+        .call("a".to_owned(), &RequestOptions::default())
+        .expect("a call");
+    assert_eq!(
+        crate::testing::patience(super::PATIENCE, waiting)
+            .await
+            .expect("the listener and router progress")
+            .expect("answered"),
+        "b"
+    );
+    assert_eq!(*locked(&told), [(false, true)]);
+    assert_eq!(scripted.codes(), Vec::<String>::new());
+}
+
 #[tokio::test]
 #[expect(
     clippy::disallowed_methods,

@@ -19,6 +19,104 @@ use crate::router::types::RouterError;
 use crate::testing::pair::echo;
 use crate::testing::scripted::{Sending, handle_of};
 
+#[tokio::test]
+async fn a_request_is_answered_once_a_second_answer_is_a_programmer_error_and_sends_nothing() {
+    let fixture = Fixture::new();
+    let recording = Arc::new(Recording::default());
+    let second = Arc::new(Mutex::new(Vec::new()));
+    let hearing = Arc::clone(&second);
+    let resolver = crate::managers::service::Resolving {
+        manager: Arc::clone(&fixture.manager.inner),
+        admit: None,
+        procedure: echo(),
+        request: JsonCodec,
+        result: Arc::new(JsonCodec),
+        validate: None,
+        fail_fast: false,
+        callback: Arc::new(move |request, response| {
+            let hearing = Arc::clone(&hearing);
+            Box::pin(async move {
+                response.result(request.payload.clone()).await?;
+                let result = response
+                    .result(request.payload)
+                    .await
+                    .expect_err("a second result");
+                let failure = response
+                    .failure(&Failure::application(
+                        core::num::NonZeroU16::new(1).expect("an application code"),
+                        "",
+                    ))
+                    .await
+                    .expect_err("a second answer as a failure");
+                for error in [result, failure] {
+                    let ResolverError::Other(error) = error else {
+                        panic!("a programmer error");
+                    };
+                    locked(&hearing).push(error.is::<crate::errors::ProgrammerError>());
+                }
+                Ok(())
+            })
+        }),
+        call_type: DebugType::Request,
+        listed: None,
+    };
+    resolver
+        .resolve(props(&recording, br#"{"text":"hi"}"#))
+        .await
+        .expect("the first answer");
+    assert_eq!(
+        recording.answers(),
+        [crate::router::types::RouterAnswer::Result(
+            Bytes::from_static(br#"{"text":"hi"}"#)
+        )]
+    );
+    assert_eq!(*locked(&second), [true, true]);
+}
+
+#[tokio::test]
+async fn may_be_a_refusal_of_admission_of_the_routers_side_with_a_detail() {
+    let fixture = Fixture::new();
+    for (refusal, expected) in [
+        (
+            Failure::protocol(ProtocolCode::SESSION_REQUIRED, RouterSide::Server),
+            Failure::protocol(ProtocolCode::SESSION_REQUIRED, RouterSide::Server),
+        ),
+        (
+            Failure::protocol(ProtocolCode::ACCESS_DENIED, RouterSide::Server)
+                .saying("admins only"),
+            Failure::protocol(ProtocolCode::ACCESS_DENIED, RouterSide::Server)
+                .saying("admins only"),
+        ),
+        (
+            Failure::protocol(ProtocolCode::ACCESS_DENIED, RouterSide::Client),
+            Failure::protocol(ProtocolCode::PROCEDURE_FAILED, RouterSide::Server),
+        ),
+    ] {
+        let recording = Arc::new(Recording::default());
+        let wrong_side = refusal.side() == Some(RouterSide::Client);
+        let resolver = resolving(
+            &fixture,
+            Arc::new(move |_, response| response.failure(&refusal)),
+        );
+        let outcome = resolver.resolve(props(&recording, b"hi")).await;
+        if wrong_side {
+            let ResolverError::Other(error) = outcome.expect_err("a refusal from the other side")
+            else {
+                panic!("a programmer error");
+            };
+            assert!(error.is::<crate::errors::ProgrammerError>());
+        } else {
+            outcome.expect("the refusal answered");
+        }
+        assert_eq!(
+            recording.answers(),
+            [crate::router::types::RouterAnswer::Failure(
+                expected.record()
+            )]
+        );
+    }
+}
+
 fn command() -> Procedure {
     Procedure {
         procedure_kind: Some(ProcedureKind::Command),

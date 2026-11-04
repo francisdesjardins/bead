@@ -41,6 +41,8 @@ mod tests;
 pub mod validations;
 pub mod vectors;
 
+#[cfg(test)]
+pub(crate) use platform::blocking;
 pub use platform::{Instant, patience, rest, spawn, wall_now, yield_now};
 pub use reading_clock::ReadingClock;
 

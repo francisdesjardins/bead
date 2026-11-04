@@ -2017,7 +2017,7 @@ impl RouterServer {
     pub fn request(&self, payload: Bytes, request: RouterRequest) -> Result<Call, ProgrammerError> {
         #[cfg(test)]
         if let Some(probe) = self.requester_probe() {
-            (probe.called)(request.series.as_ref());
+            (probe.called)(&request);
         }
         // ! its handle's mark, read once, as its job is posted, a programmer's error first: one
         // made after its router's dispose fails unsent, whatever thread or turn it is made on; one

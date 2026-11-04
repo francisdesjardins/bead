@@ -38,6 +38,7 @@ pub(crate) type TokenHook =
     Box<dyn FnMut(&ConnectionHandle) -> Result<Option<SessionToken>, RouterError> + Send>;
 pub(crate) type SessionHook = Box<dyn FnMut(&SessionRequest, &Signal) -> Resolution + Send>;
 pub(crate) type ReadHook = Box<dyn FnOnce(&Bytes) -> Result<Option<Envelope>, Failure> + Send>;
+pub(crate) type TraceHook = Box<dyn FnMut(DebugDirection, &TracedEnvelope) + Send>;
 
 #[expect(
     clippy::struct_excessive_bools,
@@ -51,6 +52,7 @@ pub(crate) struct State {
     pub(crate) on_transmit: Option<TransmitHook>,
     pub(crate) session: Option<SessionHook>,
     pub(crate) reader: Option<ReadHook>,
+    pub(crate) on_trace: Option<TraceHook>,
     pub(crate) schemes: Vec<CredentialScheme>,
     pub(crate) destination: Option<Arc<Handler>>,
     pub(crate) held: Vec<u32>,
@@ -186,8 +188,11 @@ impl Side for State {
         direction: DebugDirection,
         (handle, header): (&ConnectionHandle, &EnvelopeHeader),
     ) {
-        self.traces
-            .push((direction, TracedEnvelope::new(handle, header)));
+        let traced = TracedEnvelope::new(handle, header);
+        if let Some(hear) = &mut self.on_trace {
+            hear(direction, &traced);
+        }
+        self.traces.push((direction, traced));
     }
 
     fn report(&mut self, error: RouterError, handle: &ConnectionHandle) {
@@ -305,6 +310,7 @@ impl Peer {
             on_transmit: None,
             session: None,
             reader: None,
+            on_trace: None,
             schemes: Vec::new(),
             destination: None,
             held: Vec::new(),

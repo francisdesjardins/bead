@@ -31,7 +31,7 @@ type DeclaredProbe = Arc<
     dyn Fn(&crate::identity::Procedure, Option<&crate::metrics::ProcedureSeries>) + Send + Sync,
 >;
 #[cfg(test)]
-type CalledProbe = Arc<dyn Fn(Option<&crate::metrics::ProcedureSeries>) + Send + Sync>;
+type CalledProbe = Arc<dyn Fn(&crate::router::types::RouterRequest) + Send + Sync>;
 
 #[cfg(test)]
 #[derive(Clone)]
