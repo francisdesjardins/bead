@@ -14,6 +14,7 @@ use crate::testing::hexadecimal;
 mod fuzz;
 mod redaction;
 mod twins;
+mod vectors;
 
 const TWO_TO_53: u64 = 1 << 53;
 
