@@ -180,18 +180,24 @@ const gatewayLinesOf = async (port) => {
 // ── Pairs ─────────────────────────────────────────────────────────────────────
 
 // the client's half of a pair, from the server's port to the client's end: what failed, whether
-// the server's end is told already, and what the client wrote to its standard error
+// the server's end is told already, whether it was called, and what the client wrote to its
+// standard error
 const callOn = async (serving, client) => {
   const line = await within(serving.firstLine);
 
   if (line === TIMED_OUT) {
-    return { failed: [`the server wrote no port in ${String(LIMIT_MS / 1000)} s`], stderr: '' };
+    return {
+      failed: [`the server wrote no port in ${String(LIMIT_MS / 1000)} s`],
+      called: false,
+      stderr: '',
+    };
   }
 
   if (line === undefined) {
     return {
       failed: [`the server ended before its port, ${endOf(await serving.ended)}`],
       told: true,
+      called: false,
       stderr: '',
     };
   }
@@ -201,6 +207,7 @@ const callOn = async (serving, client) => {
   if (port === undefined || gateway === undefined) {
     return {
       failed: [`the server's first line is ${JSON.stringify(line)}, not {"port":n,"gateway":m}`],
+      called: false,
       stderr: '',
     };
   }
@@ -239,14 +246,14 @@ const callOn = async (serving, client) => {
     failed.push('the client wrote to its standard error');
   }
 
-  return { failed, stderr: calling.stderr() };
+  return { failed, called: true, stderr: calling.stderr() };
 };
 
 // what `client` against `server` failed, none when the pair passes, and what each wrote to its
 // standard error
 const pair = async (server, client) => {
   const serving = start(server, ['serve']);
-  const { failed, told = false, stderr } = await callOn(serving, client);
+  const { failed, told = false, called, stderr } = await callOn(serving, client);
 
   serving.child.stdin.end();
 
@@ -260,7 +267,8 @@ const pair = async (server, client) => {
     failed.push(`the server's ${endOf(served)} once its input ended`);
   }
 
-  if (serving.stderr() !== GATEWAY_STDERR) {
+  // a server never called writes no gateway line: its failure is its port's, said above
+  if (called ? serving.stderr() !== GATEWAY_STDERR : serving.stderr() !== '') {
     failed.push(
       "the server wrote to its standard error other than its nameless gateway call's line"
     );
