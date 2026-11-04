@@ -1,5 +1,6 @@
 //! A relay's two legs over the memory transport: answers, refusals and cancellations.
 
+mod credentials;
 mod lifecycle;
 mod timers;
 
@@ -77,18 +78,26 @@ struct Relayed {
     device: Pair,
     aborted: Arc<Mutex<Vec<Option<SignalReason>>>>,
     sent: Arc<Mutex<Vec<EnvelopeKind>>>,
+    received: Arc<Mutex<Vec<(crate::envelope::RequestHeader, Bytes)>>>,
 }
 
 #[derive(Default)]
 struct RelayedOptions {
     relay: RelayOptions,
     device_limits: RouterLimitsOptions,
+    server: RouterServerOptions,
+    destination: DestinationOptions,
+    start: Option<std::time::SystemTime>,
 }
 
 impl Relayed {
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the fixture connects both relay legs, installs its three procedures and records their traffic"
+    )]
     async fn new(options: &RelayedOptions) -> Self {
         let device = Pair::connected(
-            super::january_first(),
+            options.start.unwrap_or_else(super::january_first),
             &PairOptions {
                 server: Some(ServerOptions {
                     limits: Some(options.device_limits.clone()),
@@ -103,13 +112,19 @@ impl Relayed {
         .await
         .expect("the device connected");
         let services = device.server.services();
+        let received = Arc::new(Mutex::new(Vec::new()));
+        let receiving = Arc::clone(&received);
         services
             .get_request_resolver(
                 &echo(),
                 RequestResolverDependencies::new(TextCodec, TextCodec),
             )
             .expect("echo resolved")
-            .on(Arc::new(|request, response: Response<TextCodec>| {
+            .on(Arc::new(move |request, response: Response<TextCodec>| {
+                locked(&receiving).push((
+                    request.header,
+                    Bytes::copy_from_slice(request.payload.as_bytes()),
+                ));
                 response.result(request.payload.to_uppercase())
             }))
             .expect("echo registered");
@@ -158,7 +173,7 @@ impl Relayed {
             (shared, Arc::clone(&device.clock)),
             &RouterServerOptions {
                 relay: Some(options.relay.clone()),
-                ..RouterServerOptions::default()
+                ..options.server.clone()
             },
         );
         served.transport.open(&first(), true);
@@ -169,7 +184,7 @@ impl Relayed {
                 &DestinationOptions {
                     destination_id: Some(7),
                     label: Some("the device".to_owned()),
-                    ..DestinationOptions::default()
+                    ..options.destination.clone()
                 },
             )
             .expect("the device registered");
@@ -179,6 +194,7 @@ impl Relayed {
             device,
             aborted,
             sent,
+            received,
         }
     }
 
@@ -291,6 +307,7 @@ async fn refuses_before_leg_b_the_routing_not_admitted_the_destination_unknown_a
             maximum_payload_bytes: Some(4),
             ..RouterLimitsOptions::default()
         },
+        ..RelayedOptions::default()
     })
     .await;
     relayed.deliver(&request((1, 7), (&echo(), "")));

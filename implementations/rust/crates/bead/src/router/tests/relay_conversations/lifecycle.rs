@@ -167,6 +167,7 @@ async fn holds_a_transfer_to_the_targets_limit_at_its_opening_and_relays_one_to_
             maximum_payload_bytes: Some(4_096),
             ..limits.clone()
         },
+        ..RelayedOptions::default()
     })
     .await;
     let admissions = Arc::new(AtomicUsize::new(0));
