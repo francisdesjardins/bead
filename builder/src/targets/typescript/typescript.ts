@@ -172,7 +172,7 @@ export const typescriptTarget: ITarget<ITypeScriptOptions> = Object.freeze({
           f.print(
             '// the contract with the runtime this file needs: an older runtime lacks the constant, and fails here'
           );
-          f.print('void ', f.import('GENERATED_CODE_SUPPORTS_VERSION_6', runtime), ';');
+          f.print('void ', f.import('GENERATED_CODE_SUPPORTS_VERSION_7', runtime), ';');
         }
 
         // * an output with http: true: its route table and the document, over every service

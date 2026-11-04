@@ -212,8 +212,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   bound call is a `BoundCommand<TResponse>` on the C# side (`IBoundCommand`), which `GetCommand`,
   `CommandOf` and a server class's `…Commands` give. The TypeScript side's
   `RequestOptionsParameters` goes and `IRequestOptions` takes no type parameter. C# generated code
-  names the contract 7, `GeneratedCode.SupportsVersion7`, which the runtime holds beside 5 and 6;
-  TypeScript generated code stays at 6.
+  names the contract 7, `GeneratedCode.SupportsVersion7`, which the runtime holds beside 5 and 6.
 - **Breaking:** each of a manager's makers belongs to one side. On a client's router these are the
   request and notification makers and the command resolver; on a server's, the command maker and
   the request and notification resolvers, and the notifier among what the last gives. On the other
@@ -282,6 +281,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `notifier_of(&descriptor)` and `command_of(&descriptor)` give them, where `notify(&descriptor,
   …)` sent and `command(&descriptor)` refused before the offer; each refuses a descriptor its
   service does not hold, and a command's call before the offer is refused, as on the other sides.
+- **Breaking:** on the TypeScript side `failuresOf(serviceId, codes)` takes two parameters, as
+  `failures_of` does, where it took `{ codes, serviceId }`; TypeScript generated code names
+  contract 7, `GENERATED_CODE_SUPPORTS_VERSION_7`, which the runtime holds beside 5 and 6, and code
+  an earlier beadc generated with failures is generated again.
 
 ### Removed
 
