@@ -109,7 +109,7 @@ async fn pair() -> Pair {
 async fn raises_deprecated_before_the_call_s_tx_step() {
     let pair = pair().await;
     serve_echo(&pair, None);
-    let manager = pair.client.services();
+    let manager = &pair.client.services().manager;
     let heard = Arc::new(Mutex::new(Vec::new()));
     let deprecations = Arc::clone(&heard);
     manager.on_deprecated(Arc::new(move |_| locked(&deprecations).push("deprecated")));
@@ -147,7 +147,7 @@ fn asking(manager: &ServiceManager) -> crate::managers::service::Request<JsonCod
 #[tokio::test]
 async fn is_on_only_while_someone_listens() {
     let pair = pair().await;
-    let manager = pair.client.services();
+    let manager = &pair.client.services().manager;
 
     assert!(!manager.is_debugging(), "off while nobody listens");
 
@@ -185,15 +185,21 @@ async fn reads_no_clock_for_a_call_once_its_last_debug_listener_went() {
 
     serve_echo(&pair, None);
 
-    let ask = asking(pair.client.services());
+    let ask = asking(&pair.client.services().manager);
     let unheard = readings_of(&pair, &ask).await;
-    let listening = [pair.client.services(), pair.server.services()]
-        .map(|manager| manager.on_debug(Arc::new(|_error, _event| {})));
+    let listening = [
+        &pair.client.services().manager,
+        &pair.server.services().manager,
+    ]
+    .map(|manager| manager.on_debug(Arc::new(|_error, _event| {})));
     let heard = readings_of(&pair, &ask).await;
 
-    for (manager, listener) in [pair.client.services(), pair.server.services()]
-        .into_iter()
-        .zip(listening)
+    for (manager, listener) in [
+        &pair.client.services().manager,
+        &pair.server.services().manager,
+    ]
+    .into_iter()
+    .zip(listening)
     {
         manager.off(listener);
     }
@@ -210,7 +216,7 @@ async fn reads_no_clock_for_a_call_once_its_last_debug_listener_went() {
 #[tokio::test]
 async fn tells_each_step_of_a_request_and_once_answered_its_duration() {
     let pair = pair().await;
-    let manager = pair.client.services();
+    let manager = &pair.client.services().manager;
     let heard = recorded(manager);
 
     serve_echo(&pair, Some(Duration::from_millis(30)));
@@ -294,8 +300,8 @@ async fn tells_a_call_made_and_its_answer_with_the_call_id_its_router_drew_and_t
         procedure_kind: None,
         ..echo()
     };
-    let seen = recorded(pair.client.services());
-    let commanded = recorded(pair.server.services());
+    let seen = recorded(&pair.client.services().manager);
+    let commanded = recorded(&pair.server.services().manager);
 
     serve_echo(&pair, None);
     pair.client
@@ -310,7 +316,7 @@ async fn tells_a_call_made_and_its_answer_with_the_call_id_its_router_drew_and_t
         }))
         .expect("a command registered");
 
-    let asked = asking(pair.client.services())
+    let asked = asking(&pair.client.services().manager)
         .call(json!({ "text": "a" }), &RequestOptions::default())
         .expect("a call");
 
@@ -375,10 +381,10 @@ async fn tells_a_call_made_and_its_answer_with_the_call_id_its_router_drew_and_t
 async fn tells_a_call_its_router_refuses_before_drawing_an_id_with_none_its_tx_step_then_its_rx_step()
  {
     let pair = pair().await;
-    let seen = recorded(pair.client.services());
+    let seen = recorded(&pair.client.services().manager);
 
     // OPAQUE with no session known: refused SESSION_REQUIRED once it started, no call id drawn
-    let refused = asking(pair.client.services())
+    let refused = asking(&pair.client.services().manager)
         .call(
             json!({ "text": "x" }),
             &RequestOptions {
@@ -423,11 +429,11 @@ async fn tells_a_call_its_router_refuses_before_drawing_an_id_with_none_its_tx_s
 async fn reads_its_router_s_clock_a_call_s_start_on_the_wall_clock_its_duration_on_the_monotonic_reading()
  {
     let pair = pair().await;
-    let seen = recorded(pair.client.services());
+    let seen = recorded(&pair.client.services().manager);
 
     serve_echo(&pair, Some(Duration::from_millis(250)));
 
-    let answering = asking(pair.client.services())
+    let answering = asking(&pair.client.services().manager)
         .call(json!({ "text": "hello" }), &RequestOptions::default())
         .expect("a call");
 
@@ -453,7 +459,7 @@ async fn reads_its_router_s_clock_a_call_s_start_on_the_wall_clock_its_duration_
 #[tokio::test]
 async fn tells_a_duration_in_whole_milliseconds_its_fraction_dropped() {
     let pair = pair().await;
-    let seen = recorded(pair.client.services());
+    let seen = recorded(&pair.client.services().manager);
     let (release, released) = oneshot::channel::<()>();
     let released = Arc::new(Mutex::new(Some(released)));
 
@@ -478,7 +484,7 @@ async fn tells_a_duration_in_whole_milliseconds_its_fraction_dropped() {
         .expect("echo registered");
 
     let before = pair.clock.monotonic();
-    let answering = asking(pair.client.services())
+    let answering = asking(&pair.client.services().manager)
         .call(json!({ "text": "hello" }), &RequestOptions::default())
         .expect("a call");
 
@@ -542,8 +548,8 @@ async fn a_notification_starts_as_it_is_heard_or_sent_and_a_failed_notify_tells_
  {
     let pair = pair().await;
     let start = milliseconds_of(january_first());
-    let notifying = pair.server.services();
-    let hearing = pair.client.services();
+    let notifying = &pair.server.services().manager;
+    let hearing = &pair.client.services().manager;
     let notifier = notifying
         .get_notification_resolver(
             &ticks(),
@@ -686,8 +692,8 @@ async fn reads_no_clock_for_a_call_made_a_request_answered_a_notification_sent_a
     }
 
     let pair = pair().await;
-    let (hearing, heard_clock) = clocked(pair.client.services());
-    let (notifying, sent_clock) = clocked(pair.server.services());
+    let (hearing, heard_clock) = clocked(&pair.client.services().manager);
+    let (notifying, sent_clock) = clocked(&pair.server.services().manager);
 
     notifying
         .get_request_resolver(
@@ -754,7 +760,7 @@ async fn reads_no_clock_for_a_call_made_a_request_answered_a_notification_sent_a
 async fn a_debug_listener_that_throws_on_the_answer_is_reported_through_the_router_and_the_call_resolves_with_its_result_each_step_told()
  {
     let pair = pair().await;
-    let manager = pair.client.services();
+    let manager = &pair.client.services().manager;
     let seen: Arc<Mutex<Vec<DebugDirection>>> = Arc::default();
     let heard: Arc<Mutex<Vec<DebugDirection>>> = Arc::default();
     let (seeing, hearing) = (Arc::clone(&seen), Arc::clone(&heard));
@@ -811,7 +817,7 @@ async fn a_request_is_answered_as_a_debug_listener_throws_on_its_rx_step_the_err
             assert!(event.direction != DebugDirection::Rx, "listener bug");
         }));
 
-    let call = asking(pair.client.services())
+    let call = asking(&pair.client.services().manager)
         .call(json!({ "text": "hi" }), &RequestOptions::default())
         .expect("a call");
 
@@ -837,11 +843,11 @@ async fn a_request_is_answered_as_a_debug_listener_throws_on_its_rx_step_the_err
 #[tokio::test]
 async fn hands_its_router_the_credential_a_call_presents_and_leaves_it_out_of_its_trace() {
     let pair = pair().await;
-    let seen = recorded(pair.client.services());
+    let seen = recorded(&pair.client.services().manager);
 
     serve_echo(&pair, None);
 
-    let call = asking(pair.client.services())
+    let call = asking(&pair.client.services().manager)
         .call(
             json!({ "text": "x" }),
             &RequestOptions {
@@ -871,10 +877,10 @@ async fn hands_its_router_the_credential_a_call_presents_and_leaves_it_out_of_it
 async fn rethrows_what_the_router_rejects_with_and_tells_debug_its_failure_and_only_a_failure_one()
 {
     let pair = pair().await;
-    let seen = recorded(pair.client.services());
+    let seen = recorded(&pair.client.services().manager);
 
     // no resolver: the server answers PROCEDURE_UNKNOWN
-    let unknown = asking(pair.client.services())
+    let unknown = asking(&pair.client.services().manager)
         .call(json!({ "text": "x" }), &RequestOptions::default())
         .expect("a call");
 
@@ -890,7 +896,7 @@ async fn rethrows_what_the_router_rejects_with_and_tells_debug_its_failure_and_o
     // a timeout: no failure's record to tell
     serve_echo(&pair, Some(Duration::from_secs(60)));
 
-    let late = asking(pair.client.services())
+    let late = asking(&pair.client.services().manager)
         .call(
             json!({ "text": "y" }),
             &RequestOptions {
@@ -969,8 +975,8 @@ async fn tells_a_notification_sent_or_heard_with_no_call_id() {
     pair.settle().await;
     registering.await.expect("subscribed");
 
-    let heard = recorded(pair.client.services());
-    let sent = recorded(pair.server.services());
+    let heard = recorded(&pair.client.services().manager);
+    let sent = recorded(&pair.server.services().manager);
 
     notifier.notify(json!(1), &NotifyOptions::default()).await;
     pair.settle().await;
@@ -1003,11 +1009,11 @@ async fn tells_a_notification_sent_or_heard_with_no_call_id() {
 async fn tells_the_request_it_received_and_the_answer_it_sent_with_that_request_s_call_id_and_connection()
  {
     let pair = pair().await;
-    let seen = recorded(pair.server.services());
+    let seen = recorded(&pair.server.services().manager);
 
     serve_echo(&pair, None);
 
-    let call = asking(pair.client.services())
+    let call = asking(&pair.client.services().manager)
         .call(json!({ "text": "x" }), &RequestOptions::default())
         .expect("a call");
 
@@ -1042,7 +1048,7 @@ async fn tells_the_request_it_received_and_the_answer_it_sent_with_that_request_
 async fn tells_a_callback_that_fails_before_it_answers_as_an_answer_that_did_not_go_with_why_beside_it_nothing_more_for_one_that_fails_once_it_answered_nor_for_an_admission_that_fails()
  {
     let pair = pair().await;
-    let seen = recorded(pair.server.services());
+    let seen = recorded(&pair.server.services().manager);
 
     pair.server
         .services()
@@ -1063,7 +1069,7 @@ async fn tells_a_callback_that_fails_before_it_answers_as_an_answer_that_did_not
         .expect("echo registered");
 
     for payload in ["before", "after"] {
-        let call = asking(pair.client.services())
+        let call = asking(&pair.client.services().manager)
             .call(json!(payload), &RequestOptions::default())
             .expect("a call");
 

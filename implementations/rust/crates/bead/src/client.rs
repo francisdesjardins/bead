@@ -8,7 +8,7 @@ use tokio::runtime::Handle;
 use crate::clock::SharedClock;
 use crate::credentials::Credentials;
 use crate::errors::ProgrammerError;
-use crate::managers::service::{ServiceManager, ServiceManagerOptions, ServiceRouter};
+use crate::managers::service::{ServiceManagerClient, ServiceManagerOptions};
 use crate::metrics::MetricsRegistry;
 use crate::router::client::{RouterClient, RouterClientOptions};
 use crate::router::types::{
@@ -48,7 +48,7 @@ impl fmt::Debug for ClientOptions {
 #[derive(Clone)]
 pub struct Client {
     router: RouterClient,
-    services: ServiceManager,
+    services: ServiceManagerClient,
     transport: Arc<dyn RouterClientTransport>,
 }
 
@@ -81,10 +81,8 @@ impl Client {
         };
 
         let router = RouterClient::new(Arc::clone(&transport), &router_options)?;
-        let services = ServiceManager::new(
-            ServiceRouter::Client(router.clone()),
-            &ServiceManagerOptions::default(),
-        )?;
+        let services =
+            ServiceManagerClient::new(router.clone(), &ServiceManagerOptions::default())?;
 
         Ok(Self {
             router,
@@ -101,7 +99,7 @@ impl Client {
 
     /// Its services.
     #[must_use]
-    pub const fn services(&self) -> &ServiceManager {
+    pub const fn services(&self) -> &ServiceManagerClient {
         &self.services
     }
 

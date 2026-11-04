@@ -854,6 +854,249 @@ impl ServiceManager {
     }
 }
 
+// ── The manager typed by its side ────────────────────────────────────────────────────────────
+
+/// A client's services, over a client's router (spec 16.11).
+///
+/// It makes requests and notifications of its server, and the resolvers of the commands it answers.
+/// A server's makers are none of its own, so asking a client's services for one does not compile;
+/// its own makers do:
+///
+/// ```
+/// # use bead::{Client, Procedure, RequestDependencies, TextCodec};
+/// # fn asked(client: &Client, procedure: &Procedure) {
+/// let _ = client.services().get_request(procedure, RequestDependencies::new(TextCodec, TextCodec));
+/// # }
+/// ```
+#[derive(Debug, Clone)]
+pub struct ServiceManagerClient {
+    // ! the crate's alone: a test that hears both sides alike reaches the one manager beneath
+    pub(crate) manager: ServiceManager,
+}
+
+impl ServiceManagerClient {
+    /// A client's services over `router`.
+    ///
+    /// # Errors
+    ///
+    /// A [`ProgrammerError`] for a clock given that differs from its router's, or a default timeout
+    /// spec 1.4 does not hold.
+    pub(crate) fn new(
+        router: RouterClient,
+        options: &ServiceManagerOptions,
+    ) -> Result<Self, ProgrammerError> {
+        Ok(Self {
+            manager: ServiceManager::new(ServiceRouter::Client(router), options)?,
+        })
+    }
+
+    /// Hears each step of each call from now on, as [`ServiceManager::on_debug`] does.
+    pub fn on_debug(&self, listener: DebugListener) -> ListenerId {
+        self.manager.on_debug(listener)
+    }
+
+    /// Hears each call of a procedure deprecated from now on, as
+    /// [`ServiceManager::on_deprecated`] does.
+    pub fn on_deprecated(&self, listener: DeprecatedListener) -> ListenerId {
+        self.manager.on_deprecated(listener)
+    }
+
+    /// Hears each subscription of a notification dropped from now on, as
+    /// [`ServiceManager::on_dropped`] does.
+    pub fn on_dropped(&self, listener: DroppedListener) -> ListenerId {
+        self.manager.on_dropped(listener)
+    }
+
+    /// Hears no more with the listener `listener` names, as [`ServiceManager::off`] does.
+    pub fn off(&self, listener: ListenerId) {
+        self.manager.off(listener);
+    }
+
+    /// Whether anyone listens to `debug`.
+    #[must_use]
+    pub fn is_debugging(&self) -> bool {
+        self.manager.is_debugging()
+    }
+
+    /// A requester of `procedure`, as [`ServiceManager::get_request`] makes one.
+    ///
+    /// # Errors
+    ///
+    /// A [`ProgrammerError`] for a procedure off spec section 16, or against its kind (spec
+    /// 16.11); then for a procedure its router refuses to declare.
+    pub fn get_request<Req, Res>(
+        &self,
+        procedure: &Procedure,
+        dependencies: RequestDependencies<Req, Res>,
+    ) -> Result<Request<Req, Res>, ProgrammerError>
+    where
+        Req: PayloadCodec,
+        Res: PayloadCodec,
+        Req::Value: Clone + fmt::Debug + Sync,
+        Res::Value: Clone + fmt::Debug + Sync,
+    {
+        self.manager.get_request(procedure, dependencies)
+    }
+
+    /// The notification of `procedure`, as [`ServiceManager::get_notification`] gives it.
+    ///
+    /// # Errors
+    ///
+    /// A [`ProgrammerError`] for a procedure off spec section 16, or against its kind (spec
+    /// 16.11); then for one known with another declaration or window, or a window of 0.
+    pub fn get_notification<Req, Res, Not>(
+        &self,
+        procedure: &Procedure,
+        dependencies: NotificationDependencies<Req, Res, Not>,
+    ) -> Result<Notification<Req, Res, Not>, ProgrammerError>
+    where
+        Req: PayloadCodec,
+        Res: PayloadCodec,
+        Not: PayloadCodec,
+        Req::Value: Clone + fmt::Debug + Sync,
+        Res::Value: Clone + fmt::Debug + Sync,
+        Not::Value: Clone + fmt::Debug + Sync,
+    {
+        self.manager.get_notification(procedure, dependencies)
+    }
+
+    /// A resolver of the command `procedure`, as [`ServiceManager::get_command_resolver`] gives
+    /// one.
+    ///
+    /// # Errors
+    ///
+    /// A [`ProgrammerError`] for a procedure off spec section 16, or against its kind (spec
+    /// 16.11); then for a refusal that is not an admission's.
+    pub fn get_command_resolver<Req, Res>(
+        &self,
+        procedure: &Procedure,
+        dependencies: RequestResolverDependencies<Req, Res>,
+    ) -> Result<ResolverOf<Req, Res>, ProgrammerError>
+    where
+        Req: PayloadCodec,
+        Res: PayloadCodec,
+    {
+        self.manager.get_command_resolver(procedure, dependencies)
+    }
+}
+
+/// A server's services, over a server's router (spec 16.11).
+///
+/// It makes commands of a client, and the resolvers of the requests and notifications it answers.
+/// A client's makers are none of its own, and no notification of its own is dropped, so asking a
+/// server's services for one, or to hear one dropped, does not compile; its own makers do:
+///
+/// ```
+/// # use bead::{Procedure, RequestDependencies, Server, TextCodec};
+/// # fn asked(server: &Server, procedure: &Procedure) {
+/// let _ = server.services().get_command(procedure, RequestDependencies::new(TextCodec, TextCodec));
+/// # }
+/// ```
+#[derive(Debug, Clone)]
+pub struct ServiceManagerServer {
+    // ! the crate's alone: a test that hears both sides alike reaches the one manager beneath
+    pub(crate) manager: ServiceManager,
+}
+
+impl ServiceManagerServer {
+    /// A server's services over `router`.
+    ///
+    /// # Errors
+    ///
+    /// A [`ProgrammerError`] for a clock given that differs from its router's, or a default timeout
+    /// spec 1.4 does not hold.
+    pub(crate) fn new(
+        router: RouterServer,
+        options: &ServiceManagerOptions,
+    ) -> Result<Self, ProgrammerError> {
+        Ok(Self {
+            manager: ServiceManager::new(ServiceRouter::Server(router), options)?,
+        })
+    }
+
+    /// Hears each step of each call from now on, as [`ServiceManager::on_debug`] does.
+    pub fn on_debug(&self, listener: DebugListener) -> ListenerId {
+        self.manager.on_debug(listener)
+    }
+
+    /// Hears each call of a procedure deprecated from now on, as
+    /// [`ServiceManager::on_deprecated`] does.
+    pub fn on_deprecated(&self, listener: DeprecatedListener) -> ListenerId {
+        self.manager.on_deprecated(listener)
+    }
+
+    /// Hears no more with the listener `listener` names, as [`ServiceManager::off`] does.
+    pub fn off(&self, listener: ListenerId) {
+        self.manager.off(listener);
+    }
+
+    /// Whether anyone listens to `debug`.
+    #[must_use]
+    pub fn is_debugging(&self) -> bool {
+        self.manager.is_debugging()
+    }
+
+    /// A requester of the command `procedure`, as [`ServiceManager::get_command`] makes one.
+    ///
+    /// # Errors
+    ///
+    /// A [`ProgrammerError`] for a procedure off spec section 16, or against its kind (spec
+    /// 16.11); then for a procedure its router refuses to declare.
+    pub fn get_command<Req, Res>(
+        &self,
+        procedure: &Procedure,
+        dependencies: RequestDependencies<Req, Res>,
+    ) -> Result<Command<Req, Res>, ProgrammerError>
+    where
+        Req: PayloadCodec,
+        Res: PayloadCodec,
+        Req::Value: Clone + fmt::Debug + Sync,
+        Res::Value: Clone + fmt::Debug + Sync,
+    {
+        self.manager.get_command(procedure, dependencies)
+    }
+
+    /// A resolver of the request `procedure`, as [`ServiceManager::get_request_resolver`] gives
+    /// one.
+    ///
+    /// # Errors
+    ///
+    /// A [`ProgrammerError`] for a procedure off spec section 16, or against its kind (spec
+    /// 16.11); then for a refusal that is not an admission's.
+    pub fn get_request_resolver<Req, Res>(
+        &self,
+        procedure: &Procedure,
+        dependencies: RequestResolverDependencies<Req, Res>,
+    ) -> Result<ResolverOf<Req, Res>, ProgrammerError>
+    where
+        Req: PayloadCodec,
+        Res: PayloadCodec,
+    {
+        self.manager.get_request_resolver(procedure, dependencies)
+    }
+
+    /// A resolver of `procedure` that notifies, as
+    /// [`ServiceManager::get_notification_resolver`] gives one.
+    ///
+    /// # Errors
+    ///
+    /// A [`ProgrammerError`] for a procedure off spec section 16, or against its kind (spec
+    /// 16.11); then for a refusal that is not an admission's.
+    pub fn get_notification_resolver<Req, Res, Not>(
+        &self,
+        procedure: &Procedure,
+        dependencies: NotificationResolverDependencies<Req, Res, Not>,
+    ) -> Result<NotificationResolverOf<Req, Res, Not>, ProgrammerError>
+    where
+        Req: PayloadCodec,
+        Res: PayloadCodec,
+        Not: PayloadCodec,
+    {
+        self.manager
+            .get_notification_resolver(procedure, dependencies)
+    }
+}
+
 // each of a manager's six makers, its router's side's alone (spec 16.11)
 #[derive(Debug, Clone, Copy)]
 enum Maker {

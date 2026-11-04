@@ -105,9 +105,9 @@ pub use managers::service::{
     NotificationDependencies, NotificationRegistration, NotificationResolverDependencies,
     NotificationResolverOf, Notifier, NotifyOptions, RegistrationOptions, Request, RequestDefaults,
     RequestDependencies, RequestOptions, RequestProps, RequestResolverDependencies,
-    ResolverCallback, ResolverOf, Response, ServiceCall, ServiceManager, ServiceManagerOptions,
-    ServiceRouter, Subscriber, SubscriberFilter, Traced, TracedError, TracedValue, Unsubscribe,
-    Validate, ValidateOptions,
+    ResolverCallback, ResolverOf, Response, ServiceCall, ServiceManager, ServiceManagerClient,
+    ServiceManagerOptions, ServiceManagerServer, ServiceRouter, Subscriber, SubscriberFilter,
+    Traced, TracedError, TracedValue, Unsubscribe, Validate, ValidateOptions,
 };
 pub use managers::sessions::{Session, SessionEvent, SessionManagerOptions};
 pub use memory::{

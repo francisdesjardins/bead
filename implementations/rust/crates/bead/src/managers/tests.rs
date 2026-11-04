@@ -101,7 +101,7 @@ impl PayloadCodec for Unwritable {
 #[tokio::test]
 async fn an_answer_that_does_not_decode_fails_the_call_here_with_its_header_and_its_call() {
     let (clock, transport, client) = scripted();
-    let manager = client.services();
+    let manager = &client.services().manager;
     let heard = recorded(manager);
     let options = RequestOptions {
         destination_id: Some(4),
@@ -186,7 +186,7 @@ async fn a_notification_that_does_not_decode_fails_here_for_the_router_to_report
             response.result(Value::Null)
         }))
         .expect("ticks registered");
-    let manager = pair.client.services();
+    let manager = &pair.client.services().manager;
     let heard: Arc<Mutex<Vec<Value>>> = Arc::default();
     let hearing = Arc::clone(&heard);
     let notification = manager
@@ -256,7 +256,7 @@ async fn a_notification_that_does_not_decode_fails_here_for_the_router_to_report
 async fn a_call_whose_value_does_not_write_fails_before_anything_goes_nothing_requested_traced_or_deprecated()
  {
     let pair = pair().await;
-    let manager = pair.client.services();
+    let manager = &pair.client.services().manager;
     let seen = recorded(manager);
     let deprecated: Arc<Mutex<Vec<Procedure>>> = Arc::default();
     let telling = Arc::clone(&deprecated);
@@ -349,7 +349,7 @@ async fn a_notification_whose_value_does_not_write_goes_to_its_router_in_its_pay
     pair.settle().await;
     registering.await.expect("subscribed");
 
-    let seen = recorded(pair.server.services());
+    let seen = recorded(&pair.server.services().manager);
 
     // resolves all the same
     crate::testing::patience(
@@ -510,7 +510,7 @@ async fn an_answer_whose_codec_panics_as_it_reads_fails_the_call_here_undecodabl
         }))
         .expect("echo registered");
 
-    let manager = pair.client.services();
+    let manager = &pair.client.services().manager;
     let call = manager
         .get_request(
             &echo(),
@@ -570,7 +570,7 @@ async fn an_answer_whose_codec_panics_as_it_reads_fails_the_call_here_undecodabl
 #[tokio::test]
 async fn a_call_whose_codec_panics_as_it_writes_fails_with_its_throw_and_nothing_goes() {
     let pair = pair().await;
-    let manager = pair.client.services();
+    let manager = &pair.client.services().manager;
     let heard = recorded(manager);
     let call = manager
         .get_request(
