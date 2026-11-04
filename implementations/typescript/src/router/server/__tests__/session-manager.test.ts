@@ -533,7 +533,7 @@ test.describe('createSessionManager', () => {
       expect(changed).toEqual([]);
     });
 
-    test('runs on the clock its options give, the system’s when none', () => {
+    test('runs on the clock its options give, the platform’s when none', () => {
       const clock = createTestClock(Date.UTC(2026, 0, 1));
       using given = createSessionManager<IUser>({ clock });
       using none = createSessionManager<IUser>();

@@ -70,7 +70,8 @@ const nameOf = (clock: IClock): string => {
  * The clock of a layer built on another: the one beneath it, unless it was given one — the one
  * given when there is none beneath, and the platform's when neither is. One given that differs is a
  * {@link ProgrammerError} naming both: `"a server runs on the clock of its transport, one of its
- * own, and was given another, the platform's"`.
+ * own, and was given another, the platform's"`. A layer is named in the singular, which the
+ * refusal's verbs agree with.
  */
 export const clockOf = (
   { beneath, given }: { beneath: IClock | undefined; given: IClock | undefined },
