@@ -73,3 +73,23 @@ fn reconnects_five_times_a_second_apart_by_default() {
         "nothing else by default"
     );
 }
+
+// a server transport's gauges are none unless it says otherwise: the trait's own, which a transport
+// that counts overrides
+#[test]
+fn a_transport_counts_nothing_unless_it_says_so() {
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+
+    use super::ServerTransport;
+    use crate::router::types::Gauges;
+    use crate::testing::SteppingClock;
+    use crate::testing::clockless::Clockless;
+    use crate::testing::scripted::ScriptedServer;
+
+    let counting = ScriptedServer::new(SteppingClock::new(crate::testing::instants::new_year()));
+    let counted = Gauges::new(BTreeMap::from([("held", 1)]), []);
+    counting.count_as(Some(counted.clone()));
+    assert_eq!(counting.gauges(), Some(counted));
+    assert_eq!(Clockless(Arc::clone(&counting)).gauges(), None);
+}

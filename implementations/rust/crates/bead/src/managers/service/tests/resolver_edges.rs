@@ -408,3 +408,98 @@ async fn a_payload_whose_codec_throws_other_than_its_refusal_is_answered_procedu
         )]
     );
 }
+
+// what the other sides' types refuse, this side refuses as it runs: a resolver answers a refusal of
+// admission of its router's side or a failure of its own, and a routing failure is a programmer
+// error, answered PROCEDURE_FAILED; a refusal of its admission that is no admission's is refused as
+// the resolver is made
+#[tokio::test]
+async fn are_typed_a_refusal_of_admission_or_the_procedures_own_and_no_other() {
+    let fixture = Fixture::new();
+    for (answered, expected) in [
+        (
+            Failure::protocol(ProtocolCode::SESSION_REQUIRED, RouterSide::Server),
+            Some(Failure::protocol(
+                ProtocolCode::SESSION_REQUIRED,
+                RouterSide::Server,
+            )),
+        ),
+        (
+            Failure::application(
+                core::num::NonZeroU16::new(21).expect("an application code"),
+                "",
+            ),
+            None,
+        ),
+        (
+            Failure::protocol(ProtocolCode::ACCESS_DENIED, RouterSide::Server)
+                .saying("admins only"),
+            Some(
+                Failure::protocol(ProtocolCode::ACCESS_DENIED, RouterSide::Server)
+                    .saying("admins only"),
+            ),
+        ),
+    ] {
+        let recording = Arc::new(Recording::default());
+        let failure = answered.clone();
+        let resolver = resolving(
+            &fixture,
+            Arc::new(move |_, response| response.failure(&failure)),
+        );
+        resolver
+            .resolve(props(&recording, b"hi"))
+            .await
+            .expect("answered as it is");
+        assert_eq!(
+            recording.answers(),
+            [crate::router::types::RouterAnswer::Failure(
+                expected.unwrap_or(answered).record()
+            )]
+        );
+    }
+
+    let recording = Arc::new(Recording::default());
+    let resolver = resolving(
+        &fixture,
+        Arc::new(|_, response| {
+            response.failure(&Failure::protocol(
+                ProtocolCode::SERVICE_UNKNOWN,
+                RouterSide::Server,
+            ))
+        }),
+    );
+    let ResolverError::Other(error) = resolver
+        .resolve(props(&recording, b"hi"))
+        .await
+        .expect_err("a routing failure is the router's to answer")
+    else {
+        panic!("a programmer error");
+    };
+    assert!(error.is::<crate::errors::ProgrammerError>());
+    assert_eq!(
+        recording.answers(),
+        [crate::router::types::RouterAnswer::Failure(
+            Failure::protocol(ProtocolCode::PROCEDURE_FAILED, RouterSide::Server).record()
+        )]
+    );
+
+    let mut dependencies = RequestResolverDependencies::new(TextCodec, TextCodec);
+    dependencies.before_request = Some(BeforeRequest::new(
+        |_| false,
+        Some(Failure::protocol(
+            ProtocolCode::PROCEDURE_UNKNOWN,
+            RouterSide::Server,
+        )),
+    ));
+    fixture
+        .manager
+        .get_request_resolver(
+            &Procedure {
+                procedure_id: 91,
+                ..echo()
+            },
+            dependencies,
+        )
+        .expect_err("a refusal is an admission failure");
+    fixture.router.dispose().await;
+}

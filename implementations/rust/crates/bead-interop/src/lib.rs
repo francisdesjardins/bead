@@ -16,4 +16,6 @@ pub use descriptors::{
     InteropDescriptor, InteropProcedures, ON_PURPOSE, REGISTERED_ALREADY, SERVICE_ID, SERVICE_NAME,
     SERVICE_REVISION, interop_failures, interop_procedures,
 };
-pub use handlers::{OfferedInterop, identifier_of, issuer_of, judge_checked, offer_interop};
+pub use handlers::{
+    OfferedInterop, identifier_of, issuer_of, judge_checked, offer_interop, offer_interop_client,
+};

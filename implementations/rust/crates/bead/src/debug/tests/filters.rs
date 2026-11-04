@@ -415,3 +415,32 @@ fn an_envelope_listener_refuses_a_first_filter_that_does_not_hold_and_keeps_the_
         .collect::<Vec<_>>();
     assert_eq!(heard, [17, 22, 22]);
 }
+
+// a filter's lists are vectors on this side: two of the same values are equal, whatever vectors
+// hold them, and a pattern included is not one left out
+#[test]
+fn two_filters_of_the_same_lists_are_equal_whatever_lists_hold_them() {
+    let mut directions = Vec::with_capacity(8);
+    directions.push(DebugDirection::Rx);
+    let filter = DebugFilter {
+        directions,
+        include: vec!["get*".to_owned()],
+        ..DebugFilter::default()
+    };
+    let alike = DebugFilter {
+        directions: vec![DebugDirection::Rx],
+        include: Vec::from(["get*".to_owned()]),
+        ..DebugFilter::default()
+    };
+    assert_eq!(filter, alike);
+    assert_ne!(
+        DebugFilter {
+            include: vec!["get*".to_owned()],
+            ..DebugFilter::default()
+        },
+        DebugFilter {
+            exclude: vec!["get*".to_owned()],
+            ..DebugFilter::default()
+        }
+    );
+}
