@@ -71,6 +71,27 @@ fn draws_a_destination_again_when_0_or_in_use() {
     assert_eq!(drawn.destination_id(), 263);
     assert_eq!(fills.remaining(), 0);
     assert_eq!(locked(&target.asked).len(), 0);
+
+    let relay = Relay::new(
+        (RouterSide::Server, crate::router::types::LIMIT_DEFAULTS),
+        &admitting(),
+    )
+    .expect("a relay with the system's random source");
+    let mut drawn = std::collections::BTreeSet::new();
+
+    for _ in 0..100 {
+        let registration =
+            relay::register(&relay, (target.as_target(), &DestinationOptions::default()))
+                .expect("a distinct destination");
+        let destination_id = registration.destination_id();
+
+        assert_ne!(destination_id, 0);
+        assert!(drawn.insert(destination_id));
+    }
+
+    assert_eq!(drawn.len(), 100);
+    assert_eq!(relay::destinations(&relay).len(), 100);
+    assert!(locked(&target.asked).is_empty());
 }
 
 async fn through_own(
