@@ -43,7 +43,7 @@ async fn counted() -> (Peer, MetricsRegistry) {
     (peer, registry)
 }
 
-fn dispatch((call_id, name, id): (u32, &str, u64)) -> Dispatch {
+fn dispatch((call_id, name): (u32, &str), id: u64) -> Dispatch {
     Dispatch {
         id,
         connection_handle: Arc::from(name),
@@ -76,15 +76,26 @@ async fn open(peer: &Peer, (call_id, name): (u32, &str)) -> Arc<Dispatch> {
                 })
                 .expect("the request opened")
                 .dispatched;
-            Arc::new(dispatch((call_id, &handle, id)))
+            Arc::new(dispatch((call_id, &handle), id))
         })
         .await
         .expect("the dispatch read")
 }
 
+// what a registry's call series hold: the calls started, each ending's count, and their seconds
+struct Counts<'a> {
+    started: u64,
+    endings: &'a [(&'a str, u64)],
+    seconds: &'a str,
+}
+
 fn assert_counts(
     registry: &MetricsRegistry,
-    (started, endings, seconds): (u64, &[(&str, u64)], &str),
+    &Counts {
+        started,
+        endings,
+        seconds,
+    }: &Counts<'_>,
 ) {
     let mut actual = registry
         .exposition()
@@ -129,20 +140,34 @@ fn assert_counts(
 async fn counts_no_ending_for_an_absent_call_or_a_stale_header_on_a_replacement_call() {
     let (peer, registry) = counted().await;
     peer.owner
-        .run(|state| end_answering(state, (&dispatch((1, "a", 0)), CallEnding::Result)))
+        .run(|state| end_answering(state, (&dispatch((1, "a"), 0), CallEnding::Result)))
         .await
         .expect("an absent call ends nothing");
-    assert_counts(&registry, (0, &[], "0"));
+    assert_counts(
+        &registry,
+        &Counts {
+            started: 0,
+            endings: &[],
+            seconds: "0",
+        },
+    );
     let first = open(&peer, (1, "a")).await;
     let ending = Arc::clone(&first);
     peer.owner
         .run(move |state| {
-            end_answering(state, (&dispatch((1, "b", ending.id)), CallEnding::Result));
-            end_answering(state, (&dispatch((1, "a", u64::MAX)), CallEnding::Result));
+            end_answering(state, (&dispatch((1, "b"), ending.id), CallEnding::Result));
+            end_answering(state, (&dispatch((1, "a"), u64::MAX), CallEnding::Result));
         })
         .await
         .expect("another connection and an undispatched header end nothing");
-    assert_counts(&registry, (1, &[], "0"));
+    assert_counts(
+        &registry,
+        &Counts {
+            started: 1,
+            endings: &[],
+            seconds: "0",
+        },
+    );
     peer.owner
         .run(|state| {
             take_answering(
@@ -166,7 +191,7 @@ async fn counts_no_ending_for_an_absent_call_or_a_stale_header_on_a_replacement_
     peer.owner
         .run(move |state| {
             end_answering(state, (&first, CallEnding::Result));
-            end_answering(state, (&dispatch((3, "a", 0)), CallEnding::Error));
+            end_answering(state, (&dispatch((3, "a"), 0), CallEnding::Error));
             let call = CallAddress {
                 call_id: 1,
                 connection_handle: Arc::from("a"),
@@ -182,7 +207,14 @@ async fn counts_no_ending_for_an_absent_call_or_a_stale_header_on_a_replacement_
         })
         .await
         .expect("stale and absent headers leave the replacement open");
-    assert_counts(&registry, (2, &[("cancelled", 1)], "0"));
+    assert_counts(
+        &registry,
+        &Counts {
+            started: 2,
+            endings: &[("cancelled", 1)],
+            seconds: "0",
+        },
+    );
     peer.owner
         .run(move |state| {
             end_answering(state, (&next, CallEnding::Result));
@@ -192,7 +224,14 @@ async fn counts_no_ending_for_an_absent_call_or_a_stale_header_on_a_replacement_
         })
         .await
         .expect("the replacement ends once");
-    assert_counts(&registry, (2, &[("cancelled", 1), ("result", 1)], "0"));
+    assert_counts(
+        &registry,
+        &Counts {
+            started: 2,
+            endings: &[("cancelled", 1), ("result", 1)],
+            seconds: "0",
+        },
+    );
     peer.owner.run(super::dispose).await.expect("disposed");
 }
 
@@ -204,7 +243,14 @@ async fn count_a_call_opened_with_a_series_once_as_its_end_says_else_cancelled_a
     let _taken = open(&peer, (3, "a")).await;
     let _closed = open(&peer, (5, "b")).await;
     let unanswered = open(&peer, (7, "a")).await;
-    assert_counts(&registry, (4, &[], "0"));
+    assert_counts(
+        &registry,
+        &Counts {
+            started: 4,
+            endings: &[],
+            seconds: "0",
+        },
+    );
     peer.clock.advance(Duration::from_millis(2)).await;
     peer.owner
         .run(move |state| {
@@ -214,7 +260,14 @@ async fn count_a_call_opened_with_a_series_once_as_its_end_says_else_cancelled_a
         })
         .await
         .expect("the answered call ends once");
-    assert_counts(&registry, (4, &[("result", 1)], "0.002"));
+    assert_counts(
+        &registry,
+        &Counts {
+            started: 4,
+            endings: &[("result", 1)],
+            seconds: "0.002",
+        },
+    );
     peer.owner
         .run(|state| {
             take_answering(
@@ -228,7 +281,14 @@ async fn count_a_call_opened_with_a_series_once_as_its_end_says_else_cancelled_a
         })
         .await
         .expect("the taken call counts as cancelled");
-    assert_counts(&registry, (4, &[("result", 1), ("cancelled", 1)], "0.004"));
+    assert_counts(
+        &registry,
+        &Counts {
+            started: 4,
+            endings: &[("result", 1), ("cancelled", 1)],
+            seconds: "0.004",
+        },
+    );
     peer.owner
         .run(|state| {
             reject_pending(state, ("b closed", Some(&Arc::from("b"))));
@@ -237,11 +297,11 @@ async fn count_a_call_opened_with_a_series_once_as_its_end_says_else_cancelled_a
         .expect("the connection's call counts as closed");
     assert_counts(
         &registry,
-        (
-            4,
-            &[("result", 1), ("cancelled", 1), ("closed", 1)],
-            "0.006",
-        ),
+        &Counts {
+            started: 4,
+            endings: &[("result", 1), ("cancelled", 1), ("closed", 1)],
+            seconds: "0.006",
+        },
     );
     peer.owner
         .run(move |state| {
@@ -252,11 +312,11 @@ async fn count_a_call_opened_with_a_series_once_as_its_end_says_else_cancelled_a
         .expect("the four endings counted");
     assert_counts(
         &registry,
-        (
-            4,
-            &[("result", 1), ("cancelled", 1), ("closed", 1), ("error", 1)],
-            "0.008",
-        ),
+        &Counts {
+            started: 4,
+            endings: &[("result", 1), ("cancelled", 1), ("closed", 1), ("error", 1)],
+            seconds: "0.008",
+        },
     );
     peer.owner.run(super::dispose).await.expect("disposed");
 }
