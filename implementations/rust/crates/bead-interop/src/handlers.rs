@@ -8,11 +8,11 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use bead::internal::{hold_finite, session_key_of};
 use bead::{
-    AdmissionHook, BoxFuture, CallSession, CommandOptions, ConnectionHandle, DestinationOptions,
-    DestinationRegistration, Failure, JsonCodec, Judged, NotifyOptions, ProgrammerError,
-    ProtocolCode, RelayTarget, RequestProps, ResolverCallback, ResolverError, Response, RouterSide,
-    Schedule, Server, ServiceServer, ServiceServerOptions, SessionIdentifier, Validate,
-    ValidateOptions, Violation, ViolationHolder,
+    AdmissionHook, BoxFuture, CallSession, Client, CommandOptions, ConnectionHandle,
+    DestinationOptions, DestinationRegistration, Failure, JsonCodec, Judged, NotifyOptions,
+    ProgrammerError, ProtocolCode, RelayTarget, RequestProps, RequestResolverDependencies,
+    ResolverCallback, ResolverError, Response, RouterSide, Schedule, Server, ServiceServer,
+    ServiceServerOptions, SessionIdentifier, Validate, ValidateOptions, Violation, ViolationHolder,
 };
 use serde_json::{Map, Value, json};
 use tokio::sync::oneshot;
@@ -907,4 +907,23 @@ pub fn offer_interop(server: &Server) -> Result<OfferedInterop, ProgrammerError>
         service: interop,
         procedures,
     })
+}
+
+/// What a client of the interop service answers its server: the `clock` command, `"noon"`.
+///
+/// # Errors
+///
+/// A [`ProgrammerError`] its services refuse the resolver with.
+pub fn offer_interop_client(client: &Client) -> Result<(), ProgrammerError> {
+    let procedures = interop_procedures(None)?;
+
+    client
+        .services()
+        .get_command_resolver(
+            procedures.clock.procedure(),
+            RequestResolverDependencies::new(JsonCodec, JsonCodec),
+        )?
+        .on(callback_of(|_request, response| {
+            response.result(Value::String("noon".to_owned()))
+        }))
 }
