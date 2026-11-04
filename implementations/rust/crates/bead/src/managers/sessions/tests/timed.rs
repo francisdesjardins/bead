@@ -92,6 +92,54 @@ impl Timed {
 }
 
 #[tokio::test]
+async fn delete_stops_a_connection_and_forgets_it_an_unknown_one_is_false() {
+    let fixture = Timed::new();
+    fixture
+        .set(Session {
+            session_inactivity_timeout: Some(milliseconds(20)),
+            ..Session::new(handle(FIRST), at(0))
+        })
+        .expect("a stored session with a timer");
+    assert_eq!(fixture.arming.clock.dues(), [milliseconds(20)]);
+    fixture.taken();
+    {
+        let mut state = locked(&fixture.state);
+        let mut told = locked(&fixture.arming.told);
+        assert!(state.delete(&handle(FIRST), &mut told));
+        assert!(!state.delete(&handle(FIRST), &mut told));
+        drop(told);
+        assert!(!state.has(&handle(FIRST)));
+        drop(state);
+    }
+    assert_eq!(fixture.arming.clock.dues(), []);
+    fixture.arming.clock.advance(milliseconds(20)).await;
+    assert_eq!(fixture.reached(), Vec::<&str>::new());
+}
+
+#[tokio::test]
+async fn dispose_stops_every_timer() {
+    let fixture = Timed::new();
+    fixture
+        .set(Session {
+            connection_inactivity_timeout: Some(milliseconds(20)),
+            ..Session::new(handle(FIRST), at(0))
+        })
+        .expect("the first connection's timer");
+    fixture
+        .set(Session {
+            session_inactivity_timeout: Some(milliseconds(20)),
+            ..Session::new(handle(SECOND), at(0))
+        })
+        .expect("the second connection's session timer");
+    assert_eq!(fixture.arming.clock.dues(), [milliseconds(20); 2]);
+    fixture.taken();
+    locked(&fixture.state).dispose();
+    assert_eq!(fixture.arming.clock.dues(), []);
+    fixture.arming.clock.advance(milliseconds(20)).await;
+    assert_eq!(fixture.reached(), Vec::<&str>::new());
+}
+
+#[tokio::test]
 async fn a_timeout_longer_than_a_timer_holds_is_refused_and_nothing_is_stored_the_longest_one_fires_at_its_due()
  {
     use crate::duration::{LONGEST_TIMER, NEVER};
