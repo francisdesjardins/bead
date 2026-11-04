@@ -97,7 +97,7 @@ async fn tells_the_admission_a_relay_or_a_procedure_refused_with_by_its_name_no_
         served.transport.open(&first(), true);
         served.transport.open(&second(), true);
         let guarded = crate::identity::Procedure {
-            procedure_id: 2,
+            procedure_id: 9,
             procedure_name: "guarded".to_owned(),
             ..echo()
         };
@@ -145,9 +145,15 @@ async fn tells_the_admission_a_relay_or_a_procedure_refused_with_by_its_name_no_
             },
             payload: Bytes::new(),
         };
-        served
-            .transport
-            .deliver_message(&message(&request, None), &first());
+        served.transport.deliver_message(
+            &TransportMessage {
+                data: bytes_of(&request),
+                address: Some("192.0.2.1".to_owned()),
+                port: Some(4_321),
+                ..TransportMessage::default()
+            },
+            &first(),
+        );
         served.settle().await;
         let code = if case == 0 || case == 4 {
             ProtocolCode::SESSION_REQUIRED
@@ -172,8 +178,8 @@ async fn tells_the_admission_a_relay_or_a_procedure_refused_with_by_its_name_no_
                 procedure_id: procedure.procedure_id,
                 destination_id: relayed.then_some(7),
                 connection_handle: first(),
-                address: Some("192.0.2.40".to_owned()),
-                port: Some(50_040),
+                address: Some("192.0.2.1".to_owned()),
+                port: Some(4_321),
             }]
         );
         let sent = served.transport.take();
