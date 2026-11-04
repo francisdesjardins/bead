@@ -10,6 +10,36 @@ use crate::errors::Refusal;
 use crate::testing::pair::echo;
 
 #[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test repeats its own string a bounded number of times"
+)]
+fn takes_ids_from_1_to_65535_and_a_revision_from_1_to_2_31_1_under_a_procedure_name() {
+    for procedure in [
+        echo(),
+        Procedure {
+            service_id: u16::MAX,
+            procedure_id: u16::MAX,
+            service_revision: (1 << 31) - 1,
+            ..echo()
+        },
+        Procedure {
+            procedure_name: "a".repeat(63),
+            ..echo()
+        },
+        Procedure {
+            procedure_name: "getHTTPStatus2".to_owned(),
+            ..echo()
+        },
+    ] {
+        assert!(
+            check_declaration(&procedure).is_ok(),
+            "{procedure:?} is taken"
+        );
+    }
+}
+
+#[test]
 fn refuses_an_id_or_a_revision_out_of_its_range_service_0_and_revision_0_among_them() {
     for procedure in [
         Procedure {
