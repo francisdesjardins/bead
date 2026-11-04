@@ -24,6 +24,13 @@ where
     tokio::spawn(future)
 }
 
+// A native blocking witness lends its executor worker back while it waits. The router's owner
+// still runs one job at a time: a listener called within that owner cannot take its answer.
+#[cfg(test)]
+pub(crate) fn blocking<F: FnOnce() -> R, R>(wait: F) -> R {
+    tokio::task::block_in_place(wait)
+}
+
 /// Hands the current task's turn back to its runtime, as `tokio::task::yield_now` does.
 pub async fn yield_now() {
     tokio::task::yield_now().await;
