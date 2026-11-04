@@ -1658,14 +1658,18 @@ export interface IServiceManager<Handle extends string = ConnectionHandle> {
    * window — unpaced and paced are two — is a {@link ProgrammerError}. A registration cancelled or
    * timed out once its request went out cancels its call, so the other end holds no subscription for
    * it. The serializer of the first ask is the one kept: one procedure's payloads are one
-   * procedure's. Asked for on a server's router, it is a {@link ProgrammerError} as it is made, after
-   * spec 16.10's reasons, before any of its own: a server notifies; it hears none.
+   * procedure's. Asked for on a server's router, which notifies, it is a {@link ProgrammerError} as
+   * it is made, before spec 16.10's reasons.
    */
   getNotification<RequestPayload, ResponsePayload, NotificationPayload>(
     procedure: IProcedure,
     dependencies: INotificationDependencies<RequestPayload, ResponsePayload, NotificationPayload>
   ): INotification<RequestPayload, NotificationPayload>;
-  /** As {@link IServiceManager.getRequestResolver}, with a `notify` on the resolver. */
+  /**
+   * As {@link IServiceManager.getRequestResolver}, with a `notify` on the resolver, on a server's
+   * router alone. Asked for on a client's router, which hears notifications, it is a
+   * {@link ProgrammerError} as it is made, before spec 16.10's reasons.
+   */
   getNotificationResolver<
     RequestPayload,
     ResponsePayload,
@@ -1686,15 +1690,18 @@ export interface IServiceManager<Handle extends string = ConnectionHandle> {
    * A command: a procedure the server asks one client to run, on a server's router alone — its
    * options name the connection it goes to, which the types require. The same as
    * {@link IServiceManager.getRequest} on the wire; told to `debug` as a `command`. Asked for on a
-   * client's router, it is a {@link ProgrammerError} as it is made, after spec 16.10's reasons.
+   * client's router, which makes requests, it is a {@link ProgrammerError} as it is made, before
+   * spec 16.10's reasons.
    */
   getCommand<RequestPayload, ResponsePayload>(
     procedure: IProcedure,
     dependencies: IRequestDependencies<RequestPayload, ResponsePayload>
   ): ICommand<RequestPayload, ResponsePayload, Handle>;
   /**
-   * What runs a command, on a client's router: the server's request, answered as
-   * {@link IServiceManager.getRequestResolver} answers one; told to `debug` as a `command`.
+   * What runs a command, on a client's router alone: the server's request, answered as
+   * {@link IServiceManager.getRequestResolver} answers one; told to `debug` as a `command`. Asked
+   * for on a server's router, which answers requests, it is a {@link ProgrammerError} as it is
+   * made, before spec 16.10's reasons.
    */
   getCommandResolver<
     RequestPayload,
@@ -1710,15 +1717,17 @@ export interface IServiceManager<Handle extends string = ConnectionHandle> {
    * A procedure to call, on a client's router alone; a deprecated one emits `deprecated` at each
    * call. A call whose value does not write fails before anything goes, and is neither traced nor
    * deprecated: no call is made. Asked for on a server's router, which makes commands, it is a
-   * {@link ProgrammerError} as it is made, after spec 16.10's reasons.
+   * {@link ProgrammerError} as it is made, before spec 16.10's reasons.
    */
   getRequest<RequestPayload, ResponsePayload>(
     procedure: IProcedure,
     dependencies: IRequestDependencies<RequestPayload, ResponsePayload>
   ): IRequest<RequestPayload, ResponsePayload>;
   /**
-   * A procedure to answer: given its callback, the resolver is made and registered in the router.
-   * A procedure off spec section 16 is a {@link ProgrammerError}, before any other reason. A request
+   * A procedure to answer, on a server's router alone: given its callback, the resolver is made and
+   * registered in the router. Asked for on a client's router, which answers commands, it is a
+   * {@link ProgrammerError} as it is made, before spec 16.10's reasons; then a procedure off spec
+   * section 16, or against its kind (16.11), is one, before any other reason. A request
    * `beforeRequest` refuses — before its payload is read — or whose payload does not decode, is
    * answered with a failure of the router's without reaching the callback: a codec that throws other
    * than its refusal, a `SyntaxError`, is answered `PROCEDURE_FAILED`, and why goes on to the router.

@@ -533,8 +533,9 @@ credential goes out `ACCESS_DENIED`, so its client keeps a credential that may h
 to keep it puts `refusal` on its own function.
 
 The server asks a client with a command, `getCommand`, whose options, `ICommandOptions`, name the
-connection, which the types require; a server's manager makes no request nor notification, and a
-client's no command, each refused as it is made. The client runs it with `getCommandResolver`, and
+connection, which the types require; a server's manager makes no request, notification nor command
+resolver, and a client's no command, request resolver nor notification resolver, each refused as it
+is made. The client runs it with `getCommandResolver`, and
 resolves the command's credential as a server does, by the `credentials` among its own options, the
 session it learned standing for its connection's. None of this package's server transports carries a
 credential beside an envelope it sends, so a command presenting `ELSEWHERE` fails before it goes,

@@ -582,6 +582,48 @@ test.describe('createServiceServer', () => {
     expect(heard).toEqual(['hi']);
   });
 
+  // spec 18.2
+  test('fails a command whose rule throws as it judges, with that throw, before anything goes', async () => {
+    await using connected = await connectWorker();
+    const broken = new Error('this rule fails to judge, on purpose first');
+    const procedures = Object.freeze({
+      shout: commandOf({
+        admission: 'none',
+        failures: {},
+        procedure: { procedureId: 3, procedureName: 'shout', serviceId: 8, serviceRevision: 1 },
+        request: PAYLOAD_CODECS.text,
+        result: PAYLOAD_CODECS.text,
+        validate: (request: unknown, options) => {
+          if (request === '') {
+            throw broken;
+          }
+
+          return notEmpty(request, options);
+        },
+      }),
+    });
+    const validating = createServiceServer(procedures, { validates: true });
+    const heard: unknown[] = [];
+    const client = createServiceClient(procedures, connected.client);
+
+    client.on('shout', (request, response) => {
+      heard.push(request.payload);
+
+      return response(request.payload.toUpperCase());
+    });
+    validating.offer(connected.server);
+
+    // * the rule's own throw, passed on as it is: no Bead failure, and its client heard nothing
+    await expect(
+      validating.command.shout('')({ connectionHandle: CONNECTION, timeout: 1_000 })
+    ).rejects.toBe(broken);
+    expect(heard).toEqual([]);
+    await expect(
+      validating.command.shout('hi')({ connectionHandle: CONNECTION, timeout: 1_000 })
+    ).resolves.toBe('HI');
+    expect(heard).toEqual(['hi']);
+  });
+
   // spec 17.2.5, 17.9.7
   test('answers PAYLOAD_UNDECODABLE to a request that leaves a required field unset, before its resolver', async () => {
     await using connected = await connectWorker();
