@@ -12,6 +12,7 @@ use crate::clock::SharedClock;
 use crate::constants::{CredentialScheme, ProtocolCode};
 use crate::credentials::{Credentials, ElsewhereSession};
 use crate::envelope::{Credential, Envelope, RequestHeader};
+use crate::failure::Failure;
 use crate::jwt_verifier::{JwtAlgorithm, JwtKey};
 use crate::managers::service::{RequestResolverDependencies, Response};
 use crate::payloads::TextCodec;
@@ -72,6 +73,117 @@ fn echoed(server: &Server) {
             response.result("ran".to_owned())
         }))
         .expect("echo registered");
+}
+
+#[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the source's five admissions keep their complete access events together"
+)]
+async fn tells_the_admission_a_relay_or_a_procedure_refused_with_by_its_name_no_before_route_for_a_relay_with_none_never_its_detail()
+ {
+    for case in 0..5 {
+        let served = Served::new(&RouterServerOptions {
+            relay: (case >= 2).then(|| RelayOptions {
+                before_route: match case {
+                    3 => Some(crate::require_credential()),
+                    4 => Some(crate::share_leg_b_session()),
+                    _ => None,
+                },
+                ..RelayOptions::default()
+            }),
+            ..RouterServerOptions::default()
+        });
+        served.transport.open(&first(), true);
+        served.transport.open(&second(), true);
+        let guarded = crate::identity::Procedure {
+            procedure_id: 2,
+            procedure_name: "guarded".to_owned(),
+            ..echo()
+        };
+        let mut dependencies = RequestResolverDependencies::new(TextCodec, TextCodec);
+        dependencies.before_request = Some(if case == 1 {
+            BeforeRequest::new(
+                |_| false,
+                Some(
+                    Failure::protocol(ProtocolCode::ACCESS_DENIED, crate::RouterSide::Server)
+                        .saying("the application’s own reason, which is told nowhere"),
+                ),
+            )
+        } else {
+            require_session()
+        });
+        served
+            .services
+            .get_request_resolver(&guarded, dependencies)
+            .expect("guarded defined")
+            .on(Arc::new(|_, _| {
+                panic!("the refused request never reaches its resolver")
+            }))
+            .expect("guarded registered");
+        served
+            .router
+            .register_destination(
+                RelayTarget::Connection(second()),
+                &DestinationOptions {
+                    destination_id: Some(7),
+                    ..DestinationOptions::default()
+                },
+            )
+            .expect("destination 7");
+        let refusals = Arc::new(Mutex::new(Vec::new()));
+        let hearing = Arc::clone(&refusals);
+        served.router.on_access_refused(Arc::new(move |event| {
+            locked(&hearing).push(event.clone());
+        }));
+        let relayed = case >= 2;
+        let procedure = if relayed { echo() } else { guarded };
+        let request = Envelope::Request {
+            header: RequestHeader {
+                destination_id: relayed.then_some(7),
+                ..header_of((1, &procedure))
+            },
+            payload: Bytes::new(),
+        };
+        served
+            .transport
+            .deliver_message(&message(&request, None), &first());
+        served.settle().await;
+        let code = if case == 0 || case == 4 {
+            ProtocolCode::SESSION_REQUIRED
+        } else {
+            ProtocolCode::ACCESS_DENIED
+        };
+        let reason = match case {
+            0 => Some("requireSession"),
+            1 => None,
+            2 => Some("no-before-route"),
+            3 => Some("requireCredential"),
+            _ => Some("shareLegBSession"),
+        };
+        assert_eq!(
+            *locked(&refusals),
+            [AccessRefusal {
+                stage: AccessRefusalStage::Admission,
+                code: code.get().get(),
+                credential_scheme: None,
+                reason: reason.map(str::to_owned),
+                service_id: 2,
+                procedure_id: procedure.procedure_id,
+                destination_id: relayed.then_some(7),
+                connection_handle: first(),
+                address: Some("192.0.2.40".to_owned()),
+                port: Some(50_040),
+            }]
+        );
+        let sent = served.transport.take();
+        assert_eq!(sent.len(), 1);
+        assert!(
+            matches!(&sent[0], (handle, Envelope::Failure { header, failure }) if *handle == first() && header.call_id == 1 && failure.code == code.get())
+        );
+        assert_eq!(served.reported(), Vec::<String>::new());
+        served.router.dispose().await;
+    }
 }
 
 #[derive(Deserialize)]

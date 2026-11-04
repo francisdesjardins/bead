@@ -140,6 +140,119 @@ fn credit(call_id: u32, credit_end: u64) -> Envelope {
 }
 
 #[tokio::test]
+async fn lets_a_queue_go_with_its_subscription_unsubscribed_cancelled_its_session_ended_its_connection_closed()
+ {
+    let paced = Paced::new(None);
+    let third = Arc::from("type=WS;ip=127.0.0.1;port=50003;ordinal=1");
+    paced.served.transport.open(&third, true);
+    for (handle, id, payload) in [
+        (first(), 3, ""),
+        (first(), 5, "other"),
+        (second(), 3, ""),
+        (Arc::clone(&third), 3, ""),
+    ] {
+        paced
+            .served
+            .transport
+            .deliver(&request((id, true, payload)), &handle);
+    }
+    paced.served.settle().await;
+    for payload in ["a", "b", "c"] {
+        paced.notify(payload, &NotifyOptions::default()).await;
+    }
+    assert_eq!(paced.queued().await, (3, 6));
+    assert!(
+        paced
+            .served
+            .router
+            .unsubscribe(crate::CallAddress {
+                call_id: 3,
+                connection_handle: first()
+            })
+            .await
+    );
+    assert_eq!(paced.queued().await, (2, 4));
+    paced.served.transport.deliver(&cancel_of(3), &second());
+    paced.served.settle().await;
+    assert_eq!(paced.queued().await, (1, 2));
+    paced
+        .served
+        .router
+        .drop_subscriptions(
+            Arc::clone(&third),
+            Failure::protocol(ProtocolCode::SESSION_REQUIRED, RouterSide::Server),
+        )
+        .await;
+    assert_eq!(paced.queued().await, (0, 0));
+    paced
+        .served
+        .transport
+        .deliver(&request((7, true, "")), &third);
+    paced.served.settle().await;
+    for payload in ["d", "e"] {
+        paced.notify(payload, &NotifyOptions::default()).await;
+    }
+    assert_eq!(paced.queued().await, (1, 1));
+    paced.served.transport.close_connection(&third);
+    paced.served.settle().await;
+    assert_eq!(paced.queued().await, (0, 0));
+    assert_eq!(paced.served.reported(), Vec::<String>::new());
+}
+
+#[tokio::test]
+async fn tells_in_its_gauges_what_its_fullest_queue_holds_at_the_bounds_its_options_give() {
+    let served = Served::new(&RouterServerOptions {
+        pacing: Some(PacingLimitsOptions {
+            maximum_queued_notification_bytes: Some(10),
+            maximum_queued_notifications: Some(4),
+        }),
+        ..RouterServerOptions::default()
+    });
+    served.transport.open(&first(), true);
+    let notifier = served
+        .services
+        .get_notification_resolver(
+            &news(),
+            NotificationResolverDependencies::new(
+                RequestResolverDependencies::new(TextCodec, TextCodec),
+                TextCodec,
+            ),
+        )
+        .expect("news defined")
+        .on(Arc::new(|_, response: Response<TextCodec>| {
+            response.result("ok".to_owned())
+        }))
+        .expect("news registered");
+    served.transport.deliver(&request((3, true, "")), &first());
+    served.settle().await;
+    for payload in ["a", "bb", "ccc"] {
+        notifier
+            .notify(payload.to_owned(), &NotifyOptions::default())
+            .await;
+    }
+    served.settle().await;
+    let gauges = served.router.gauges().await.expect("the queue's gauges");
+    assert_eq!(gauges.ceilings["largestQueuedNotificationBytes"], 10);
+    assert_eq!(gauges.ceilings["largestQueuedNotifications"], 4);
+    assert_eq!(gauges.counts["largestQueuedNotificationBytes"], 5);
+    assert_eq!(gauges.counts["largestQueuedNotifications"], 2);
+    assert_eq!(gauges.counts["queuedNotificationBytes"], 5);
+    let defaults = Served::new(&RouterServerOptions::default());
+    let gauges = defaults
+        .router
+        .gauges()
+        .await
+        .expect("the default ceilings");
+    assert_eq!(gauges.ceilings["largestQueuedNotificationBytes"], 1_048_576);
+    assert_eq!(gauges.ceilings["largestQueuedNotifications"], 64);
+    assert_eq!(
+        served.sent_since(),
+        ["first result 3 ok", "first notification 3 a"]
+    );
+    assert_eq!(served.reported(), Vec::<String>::new());
+}
+
+#[tokio::test]
 async fn sends_one_notification_per_credit_and_queues_the_others_the_latest_of_a_key_in_its_place()
 {
     let paced = Paced::new(None);

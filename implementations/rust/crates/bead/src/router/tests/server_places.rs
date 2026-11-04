@@ -90,6 +90,69 @@ async fn places(check: impl FnOnce(&mut ServerState) + Send + 'static) {
 }
 
 #[tokio::test]
+async fn subscribed_of_and_drop_give_each_subscription_answered_with_the_series_it_counts_into_the_waiting_among_them_never_one_in_flight()
+ {
+    places(|state| {
+        let registry = crate::metrics::MetricsRegistry::new(
+            &crate::metrics::MetricsRegistryOptions::default(),
+        )
+        .expect("a registry");
+        let role = registry.attach(crate::constants::RouterSide::Server);
+        let mut series = Vec::new();
+        for (id, name) in [(5, "held"), (6, "waiting"), (7, "established")] {
+            let procedure = crate::identity::Procedure {
+                procedure_id: id,
+                procedure_name: name.to_owned(),
+                ..crate::testing::pair::echo()
+            };
+            series.push(
+                role.declare_resolver(&procedure, true)
+                    .expect("declared")
+                    .notifying
+                    .expect("a notification series"),
+            );
+        }
+        let mut holder = call((3, first(), false));
+        holder.series = Some(series[0].clone());
+        subscribe_place(state, (&holder, news())).expect("the holder is in flight");
+        let mut waiting = call((5, first(), false));
+        waiting.series = Some(series[1].clone());
+        assert!(success(state, waiting).is_none());
+        let mut established = call((7, first(), false));
+        established.series = Some(series[2].clone());
+        assert!(settle_place(state, (established, (false, true, other()))).is_some());
+        let answered = super::subscribed_of(state, &first());
+        assert_eq!(
+            answered.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+            [7, 5]
+        );
+        for ((_, actual), expected) in answered.iter().zip([&series[2], &series[1]]) {
+            assert!(
+                actual
+                    .as_ref()
+                    .expect("the answer's series")
+                    .is_same(expected)
+            );
+        }
+        assert!(super::subscribed_of(state, &second()).is_empty());
+        let dropped = drop_places(state, (&first(), None));
+        assert_eq!(
+            dropped.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+            [7, 5]
+        );
+        for ((_, actual), expected) in dropped.iter().zip([&series[2], &series[1]]) {
+            assert!(
+                actual
+                    .as_ref()
+                    .expect("the dropped answer's series")
+                    .is_same(expected)
+            );
+        }
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn subscribe_puts_a_call_in_its_place_in_flight_and_gives_any_other_the_holders_call_id() {
     places(|state| {
         assert_eq!(

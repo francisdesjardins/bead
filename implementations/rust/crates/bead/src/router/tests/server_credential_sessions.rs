@@ -18,6 +18,168 @@ use crate::testing::{SteppingClock, instants};
 
 const NOW: i64 = 1_767_225_600_000;
 
+#[tokio::test]
+async fn forwards_a_subscriptions_metrics_series_until_it_is_removed() {
+    let kept = SessionManager::new().await;
+    kept.router
+        .owner()
+        .run(|state| {
+            let registry = crate::metrics::MetricsRegistry::new(
+                &crate::metrics::MetricsRegistryOptions::default(),
+            )
+            .expect("a registry");
+            let role = registry.attach(crate::constants::RouterSide::Server);
+            let procedure = crate::identity::Procedure {
+                procedure_id: 5,
+                procedure_name: "news".to_owned(),
+                service_revision: 1,
+                ..crate::testing::pair::echo()
+            };
+            let series = role
+                .declare_resolver(&procedure, true)
+                .expect("news counted")
+                .notifying
+                .expect("a notification series");
+            let address = procedure.address();
+            register_tracked(
+                state,
+                (
+                    address,
+                    &SubscribingCall {
+                        call_id: 1,
+                        connection_handle: first(),
+                        end: None,
+                        identifier: None,
+                        paced: false,
+                        series: Some(series.clone()),
+                    },
+                ),
+            )
+            .expect("subscribed");
+            assert_eq!(
+                state
+                    .notifications
+                    .subscriptions(None)
+                    .iter()
+                    .map(|sub| (
+                        Arc::clone(&sub.connection_handle),
+                        sub.call_id,
+                        sub.procedure
+                    ))
+                    .collect::<Vec<_>>(),
+                [(first(), 1, address)]
+            );
+            assert!(
+                state
+                    .notifications
+                    .series_of(1, &first())
+                    .expect("its series")
+                    .is_same(&series)
+            );
+            assert!(state.notifications.series_of(3, &first()).is_none());
+            assert!(state.notifications.series_of(1, &second()).is_none());
+            assert_eq!(unregister_tracked(state, (1, &first())), Some(1));
+            assert!(state.notifications.series_of(1, &first()).is_none());
+            assert_eq!(state.notifications.subscriptions(None), []);
+            assert_eq!(counts(state), (0, 0));
+        })
+        .await
+        .expect("series kept only while registered");
+    kept.router.dispose().await;
+}
+
+#[tokio::test]
+async fn ends_every_session_of_an_issuer_by_that_issuer_on_every_connection_sid_and_sub_alike_and_never_an_elsewheres()
+ {
+    let kept = SessionManager::new().await;
+    kept.router
+        .owner()
+        .run(|state| {
+            let end = Some(NOW + 3_660_000);
+            let one = SessionIdentifier::JwtSid {
+                issuer: "https://issuer.example".to_owned(),
+                sid: "one".to_owned(),
+            };
+            register(state, (1, first(), 5, end, Some(grace())));
+            register(state, (3, first(), 7, end, Some(one.clone())));
+            register(state, (1, second(), 5, end, Some(one)));
+            register(
+                state,
+                (
+                    3,
+                    second(),
+                    7,
+                    end,
+                    Some(SessionIdentifier::JwtSub {
+                        issuer: "https://other.example".to_owned(),
+                        sub: "grace".to_owned(),
+                    }),
+                ),
+            );
+            register(
+                state,
+                (
+                    5,
+                    second(),
+                    5,
+                    None,
+                    Some(SessionIdentifier::Elsewhere {
+                        id: "https://issuer.example".to_owned(),
+                    }),
+                ),
+            );
+            assert_eq!(counts(state), (5, 4));
+        })
+        .await
+        .expect("sid, sub and elsewhere held");
+    kept.router
+        .end_sessions_of("https://issuer.example".to_owned())
+        .await;
+    kept.clock.settle().await;
+    assert_eq!(kept.ended(), [(first(), 1), (first(), 3), (second(), 1)]);
+    assert_eq!(kept.clock.dues(), [Duration::from_mins(61)]);
+    kept.router
+        .end_sessions_of("https://issuer.example".to_owned())
+        .await;
+    kept.router
+        .end_sessions_of("https://unnamed.example".to_owned())
+        .await;
+    assert_eq!(kept.ended(), []);
+    kept.router
+        .owner()
+        .run(|state| {
+            assert_eq!(counts(state), (2, 1));
+            assert_eq!(
+                state
+                    .notifications
+                    .subscriptions(None)
+                    .into_iter()
+                    .map(|sub| (sub.connection_handle, sub.call_id, sub.identifier))
+                    .collect::<Vec<_>>(),
+                [
+                    (
+                        second(),
+                        3,
+                        Some(SessionIdentifier::JwtSub {
+                            issuer: "https://other.example".to_owned(),
+                            sub: "grace".to_owned()
+                        })
+                    ),
+                    (
+                        second(),
+                        5,
+                        Some(SessionIdentifier::Elsewhere {
+                            id: "https://issuer.example".to_owned()
+                        })
+                    ),
+                ]
+            );
+        })
+        .await
+        .expect("only the other issuer and elsewhere remain");
+    kept.router.dispose().await;
+}
+
 fn first() -> ConnectionHandle {
     handle_of(1)
 }

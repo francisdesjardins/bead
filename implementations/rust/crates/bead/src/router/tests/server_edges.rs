@@ -37,6 +37,95 @@ async fn subscribe(served: &Served) {
 }
 
 #[tokio::test]
+async fn counts_what_it_and_its_parts_hold_for_the_connections_it_follows_which_it_forgets_as_each_closes()
+ {
+    let served = opened(&RouterServerOptions {
+        relay: Some(crate::RelayOptions {
+            before_route: Some(crate::BeforeRequest::new(|_| true, None)),
+            ..crate::RelayOptions::default()
+        }),
+        ..RouterServerOptions::default()
+    });
+    served
+        .services
+        .get_request_resolver(
+            &echo(),
+            RequestResolverDependencies::new(TextCodec, TextCodec),
+        )
+        .expect("echo defined")
+        .on(Arc::new(|request, _| {
+            Box::pin(async move {
+                request.signal.token().cancelled().await;
+                Ok(())
+            })
+        }))
+        .expect("the resolver leaves its request unanswered");
+    let gauged = served
+        .router
+        .gauges()
+        .await
+        .expect("the connections' gauges");
+    assert_eq!(
+        gauged.connection_handles,
+        [first(), second()].into_iter().collect()
+    );
+    served
+        .transport
+        .deliver(&super::server::request_of((1, &echo(), "")), &first());
+    served
+        .router
+        .register_destination(
+            crate::RelayTarget::Connection(second()),
+            &crate::DestinationOptions {
+                destination_id: Some(5),
+                ..crate::DestinationOptions::default()
+            },
+        )
+        .expect("destination 5");
+    served.transport.close_connection(&second());
+    served.settle().await;
+    let gauged = served
+        .router
+        .gauges()
+        .await
+        .expect("the counts of every part");
+    assert_eq!(gauged.anomalies, Vec::<String>::new());
+    assert_eq!(
+        gauged.connection_handles,
+        std::iter::once(first()).collect()
+    );
+    for (name, expected) in [
+        ("answeringCalls", 1),
+        ("closedDestinations", 1),
+        ("connections", 1),
+        ("destinations", 1),
+        ("notifiedSubscriptions", 0),
+        ("pendingCalls", 0),
+        ("subscriptionsInFlight", 0),
+        ("subscriptionsWaiting", 0),
+    ] {
+        assert_eq!(gauged.counts[name], expected, "{name}");
+    }
+    served.transport.close_connection(&first());
+    served.settle().await;
+    let gauged = served
+        .router
+        .gauges()
+        .await
+        .expect("the closed connections forgotten");
+    assert_eq!(gauged.connection_handles, std::collections::BTreeSet::new());
+    for (name, expected) in [
+        ("answeringCalls", 0),
+        ("closedDestinations", 1),
+        ("connections", 0),
+        ("destinations", 1),
+    ] {
+        assert_eq!(gauged.counts[name], expected, "{name}");
+    }
+    assert_eq!(served.reported(), Vec::<String>::new());
+}
+
+#[tokio::test]
 async fn notify_reaches_each_subscriber_under_the_call_id_it_subscribed_with_and_announces_no_session()
  {
     let other = SessionToken::new([2; 16]).expect("another token");

@@ -621,6 +621,11 @@ fn drop_slot_of(failure: Option<(NonZeroU16, FailureScope)>) -> usize {
 }
 
 impl NotificationSeries {
+    #[cfg(test)]
+    pub(crate) fn is_same(&self, other: &Self) -> bool {
+        self.key == other.key && Arc::ptr_eq(&self.state, &other.state)
+    }
+
     fn with<F: FnOnce(&mut Entry)>(&self, change: F) {
         if let Some(entry) = locked(&self.state).entries.get_mut(&self.key) {
             change(entry);
