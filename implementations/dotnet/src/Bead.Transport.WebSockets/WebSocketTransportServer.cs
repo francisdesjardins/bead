@@ -203,6 +203,9 @@ public sealed record WebSocketTransportStartOptions
 
     /// <summary>Whether it takes any free port instead.</summary>
     public bool FindOpenPort { get; init; }
+
+    /// <summary>What gives up on the start.</summary>
+    public CancellationToken CancellationToken { get; init; }
 }
 
 /// <summary>
@@ -468,13 +471,13 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     /// Closed — a second start even while the first is under way; one that fails ends Closed, ready
     /// to start again.
     /// </summary>
-    public Task<TransportServerAddress> Start(WebSocketTransportStartOptions? options = null, CancellationToken cancellationToken = default)
+    public Task<TransportServerAddress> Start(WebSocketTransportStartOptions? options = null)
     {
         var start = options ?? new WebSocketTransportStartOptions();
 
         return _life.Start(() =>
         {
-            return Starting((start, cancellationToken));
+            return Starting((start, start.CancellationToken));
         });
     }
 
@@ -800,13 +803,15 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         if (refusal.Refusal is { } reason && Refusal is { } listeners)
         {
             var (authority, origin) = WebSocketHandshake.ToldOf(context.Request);
-            var told = new TransportServerRefusal(
-                AddressOf(context),
-                authority,
-                origin,
-                context.Connection.RemotePort,
-                reason,
-                refusal.Status);
+            var told = new TransportServerRefusal
+            {
+                Address = AddressOf(context),
+                Authority = authority,
+                Origin = origin,
+                Port = context.Connection.RemotePort,
+                Reason = reason,
+                Status = refusal.Status,
+            };
 
             _listeners.Tell(listeners, told);
         }
@@ -887,7 +892,7 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         var held = new Held
         {
             Arrival = arrival,
-            Client = new TransportServerClient(ip, connectionHandle, null, port, TransportTypes.WebSocket),
+            Client = new TransportServerClient { Address = ip, ConnectionHandle = connectionHandle, LastActivity = null, Port = port, Type = TransportTypes.WebSocket },
             Closed = closed.Task,
             Connection = connection,
         };

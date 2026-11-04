@@ -1,4 +1,4 @@
-# alone: typescript 333, csharp 71, rust 87
+# alone: typescript 327, csharp 67, rust 78
 # concept	typescript	csharp	rust	class
 ACCEPT_TIMEOUT	ACCEPT_TIMEOUT [constant]	-	ACCEPT_TIMEOUT [constant]	same
 AccessRefusal	IAccessRefusal [record]	AccessRefusal [record]	AccessRefusal [record]	same
@@ -18,7 +18,7 @@ BoundCall	IBoundCall [function type]	BoundCall [function type]	-	same
 BoundCommand	IBoundCommand [function type]	BoundCommand [function type]	-	same
 BoxFuture	-	-	BoxFuture [record]	own: the runtime seam, a future boxed (0044)
 BrokerAdapter	IBrokerAdapter [record]	IBrokerAdapter [record]	BrokerAdapter [record]	same
-BrokerCapabilities	IBrokerCapabilities [record]	BrokerCapabilities [choice]	BrokerCapabilities [choice]	differs: A broker's optional capabilities
+BrokerCapabilities	IBrokerCapabilities [record]	BrokerCapabilities [choice]	BrokerCapabilities [choice]	rendered: flags (0007, 0044)
 BrokerDelivery	BrokerDelivery [choice]	BrokerDelivery [choice]	BrokerDelivery [choice]	same
 BrokerDown	IBrokerDown [record]	BrokerDown [record]	BrokerDown [record]	same
 BrokerError	-	-	BrokerError [choice]	own: a Result's error, where the other sides throw (0044)
@@ -97,7 +97,10 @@ failuresOf	failuresOf [function]	-	failures_of [function]	same
 filterDebug	filterDebug [function]	DebugFilters.FilterDebug [function]	filter_debug [function]	rendered: of (0007, 0044)
 filterEnvelopeDebug	filterEnvelopeDebug [function]	DebugFilters.FilterEnvelopeDebug [function]	-	rendered: of (0007, 0044)
 FilterRefusal	-	-	FilterRefusal [choice]	own: a Result's error, where the other sides throw (0044)
-Gauges	-	Gauges [record]	Gauges [record]	same
+Gauges	IGauges [record]	Gauges [record]	Gauges [record]	same
+GENERATED_CODE_SUPPORTS_VERSION_5	GENERATED_CODE_SUPPORTS_VERSION_5 [constant]	-	-	own: the TypeScript runtime's counter of generated code, each runtime's its own (0018, 0022)
+GENERATED_CODE_SUPPORTS_VERSION_6	GENERATED_CODE_SUPPORTS_VERSION_6 [constant]	-	-	own: the TypeScript runtime's counter of generated code, each runtime's its own (0018, 0022)
+GENERATED_CODE_SUPPORTS_VERSION_7	GENERATED_CODE_SUPPORTS_VERSION_7 [constant]	-	-	own: the TypeScript runtime's counter of generated code, each runtime's its own (0018, 0022)
 Health	IHealth [record]	Health [record]	Health [record]	same
 HealthCheck	IHealthCheck [record]	HealthCheck [record]	HealthCheck [record]	same
 HealthStatus	HealthStatus [choice]	HealthStatus [choice]	HealthStatus [choice]	same
@@ -156,6 +159,7 @@ MemoryTransportClientOptions	IMemoryTransportClientOptions [record]	MemoryTransp
 MemoryTransportServer	MemoryTransportServer [record], createMemoryTransportServer [function]	MemoryTransportServer [record]	MemoryTransportServer [record]	same
 MemoryTransportServerOptions	IMemoryTransportServerOptions [record]	MemoryTransportServerOptions [record]	MemoryTransportServerOptions [record]	same
 METRICS_CONTENT_TYPE	METRICS_CONTENT_TYPE [constant]	-	METRICS_CONTENT_TYPE [constant]	same
+METRICS_REGISTRY_DEFAULTS	METRICS_REGISTRY_DEFAULTS [constant]	-	METRICS_REGISTRY_DEFAULTS [constant]	same
 MetricsExposition	IMetricsExposition [record]	MetricsExposition [record]	MetricsExposition [record]	same
 MetricsRegistry	IMetricsRegistry [record], createMetricsRegistry [function]	MetricsRegistry [record]	MetricsRegistry [record]	same
 MetricsRegistryOptions	IMetricsRegistryOptions [record]	MetricsRegistryOptions [record]	MetricsRegistryOptions [record]	same
@@ -175,6 +179,7 @@ NotificationResolverDependencies	INotificationResolverDependencies [record]	Noti
 NotificationResponse	INotificationResponse [record]	INotificationResponse [record]	-	same
 NotificationSerializerClient	INotificationSerializerClient [record]	INotificationSerializerClient [record]	-	same
 NotificationSerializerServer	INotificationSerializerServer [record]	INotificationSerializerServer [record]	-	same
+Notifier	INotifier [function type]	Notifier [function type]	Notifier [record]	rendered: callable (0044)
 NotifyOptions	INotifyOptions [record]	NotifyOptions [record]	NotifyOptions [record]	same
 NotifyRequest	INotifyRequest [record]	NotifyRequest [record]	NotifyRequest [record]	same
 OwnFailure	OwnFailure [choice]	OwnFailure [choice]	-	same
@@ -198,6 +203,7 @@ ProtocolCode	ProtocolCode [choice]	ProtocolCode [choice]	ProtocolCode [choice]	s
 ReadViolations	IReadViolations [record]	ReadViolations [record]	ReadViolations [record]	same
 ReadyState	ReadyState [choice]	ReadyState [choice]	ReadyState [choice]	same
 ReadyStateError	ReadyStateError [record]	-	ReadyStateError [record]	same
+RECONNECT_DEFAULTS	RECONNECT_DEFAULTS [constant]	-	RECONNECT_DEFAULTS [constant]	same
 ReconnectError	ReconnectError [record]	ReconnectException [record]	ReconnectError [record]	rendered: error (0007, 0044)
 RefusalListener	-	-	RefusalListener [function type]	own: a listener the Rust side registers for an event the other sides emit (0044)
 Registrar	IRegistrar [function type]	Registrar [function type]	-	same
@@ -205,6 +211,7 @@ RegistrationOptions	IRegistrationOptions [record]	RegistrationOptions [record]	R
 RelayOptions	IRelayOptions [record]	RelayOptions [record]	RelayOptions [record]	same
 RelayTarget	RelayTarget [choice]	-	RelayTarget [choice]	same
 Request	IRequest [record]	-	Request [record]	same
+REQUEST_DEFAULTS	REQUEST_DEFAULTS [constant]	-	REQUEST_DEFAULTS [constant]	same
 RequestCredential	RequestCredential [choice]	-	RequestCredential [choice]	same
 RequestDefaults	RequestDefaults [record]	RequestDefaults [record]	RequestDefaults [record]	same
 RequestDependencies	IRequestDependencies [record]	RequestDependencies [record]	RequestDependencies [record]	same
@@ -262,6 +269,7 @@ ServiceServer	IServiceServer [record], createServiceServer [function]	ServiceSer
 ServiceServerOptions	ServiceServerOptions [record]	ServiceServerOptions [record]	ServiceServerOptions [record]	same
 Session	ISession [record]	Session [record]	Session [record]	same
 SESSION_TOKEN_BYTES	SESSION_TOKEN_BYTES [constant]	SessionToken.Bytes [constant]	SESSION_TOKEN_BYTES [constant]	rendered: constant (0007)
+SessionChange	ISessionChange [record]	SessionChange [record]	-	same
 SessionIdentifier	SessionIdentifier [choice]	SessionIdentifier [record]	SessionIdentifier [choice]	same
 SessionListener	-	-	SessionListener [function type]	own: a listener the Rust side registers for an event the other sides emit (0044)
 SessionManager	ISessionManager [record], createSessionManager [function]	SessionManager [record]	SessionManager [record]	same
@@ -288,6 +296,7 @@ TransportError	-	-	TransportError [choice]	own: a Result's error, where the othe
 TransportMessage	ITransportMessage [record]	TransportMessage [record]	TransportMessage [record]	same
 TransportServerAddress	ITransportServerAddress [record]	TransportServerAddress [record]	-	same
 TransportServerClient	ITransportServerClient [record]	TransportServerClient [record]	TransportServerClient [record]	same
+TransportServerConnection	ITransportServerConnection [record]	-	-	own: what a connection's platform opened it with, which the other sides do not hand (0007)
 TransportServerRefusal	ITransportServerRefusal [record]	TransportServerRefusal [record]	TransportServerRefusal [record]	same
 UnregisterNotificationOptions	IUnregisterNotificationOptions [record]	-	UnregisterNotificationOptions [record]	same
 utf8Length	utf8Length [function]	Validators.Utf8Length [function]	-	rendered: of (0007, 0044)
@@ -298,18 +307,18 @@ violationsDetailOf	violationsDetailOf [function]	Violations.DetailOf [function]	
 ViolationSink	IViolationSink [record]	IViolationSink [record]	-	same
 violationsOf	violationsOf [function]	Violations.Of [function]	violations_of [function]	rendered: of (0007, 0044)
 WARNING_RATIO	WARNING_RATIO [constant]	Health.WarningRatio [constant]	WARNING_RATIO [constant]	rendered: constant (0007)
+WEBSOCKET_REFUSALS	WEBSOCKET_REFUSALS [constant]	WebSocketRefusals [constant]	-	same
+WebSocketClient	WebSocketClient [record], createWebSocketClient [function]	WebSocketClient [record]	-	same
+WebSocketClientOptions	IWebSocketClientOptions [record]	WebSocketClientOptions [record]	-	same
+WebSocketServer	WebSocketServer [record], createWebSocketServer [function]	WebSocketServer [record]	-	same
+WebSocketServerOptions	IWebSocketServerOptions [record]	WebSocketServerOptions [record]	-	same
+WebSocketTransportClient	WebSocketTransportClient [record], createWebSocketTransportClient [function]	WebSocketTransportClient [record]	-	same
+WebSocketTransportClientConnectOptions	IWebSocketTransportClientConnectOptions [record]	WebSocketTransportClientConnectOptions [record]	-	same
+WebSocketTransportClientOptions	IWebSocketTransportClientOptions [record]	WebSocketTransportClientOptions [record]	-	same
+WebSocketTransportServer	WebSocketTransportServer [record], createWebSocketTransportServer [function]	WebSocketTransportServer [record]	-	same
+WebSocketTransportServerOptions	IWebSocketTransportServerOptions [record]	WebSocketTransportServerOptions [record]	-	same
 WithdrawnListener	-	-	WithdrawnListener [function type]	own: a listener the Rust side registers for an event the other sides emit (0044)
 wordsOf	wordsOf [function]	Violations.WordsOf [function]	words_of [function]	rendered: of (0007, 0044)
-WS_REFUSALS	WS_REFUSALS [constant]	WebSocketRefusals [constant]	-	differs: The WebSocket transport's name
-WSClient	WSClient [record], createWSClient [function]	WebSocketClient [record]	-	differs: The WebSocket transport's name
-WSClientOptions	IWSClientOptions [record]	WebSocketClientOptions [record]	-	differs: The WebSocket transport's name
-WSServer	WSServer [record], createWSServer [function]	WebSocketServer [record]	-	differs: The WebSocket transport's name
-WSServerOptions	IWSServerOptions [record]	WebSocketServerOptions [record]	-	differs: The WebSocket transport's name
-WSTransportClient	WSTransportClient [record], createWSTransportClient [function]	WebSocketTransportClient [record]	-	differs: The WebSocket transport's name
-WSTransportClientConnectOptions	IWSTransportClientConnectOptions [record]	WebSocketTransportClientConnectOptions [record]	-	differs: The WebSocket transport's name
-WSTransportClientOptions	IWSTransportClientOptions [record]	WebSocketTransportClientOptions [record]	-	differs: The WebSocket transport's name
-WSTransportServer	WSTransportServer [record], createWSTransportServer [function]	WebSocketTransportServer [record]	-	differs: The WebSocket transport's name
-WSTransportServerOptions	IWSTransportServerOptions [record]	WebSocketTransportServerOptions [record]	-	differs: The WebSocket transport's name
 AdmissionRefusal	-	-	AdmissionRefusal [record]	alone
 AdmitFn	-	-	AdmitFn [function type]	alone
 AFTER_HEADER	AFTER_HEADER [constant]	-	-	alone
@@ -345,10 +354,6 @@ CallAsked	-	-	CallAsked [record]	alone
 CallEnding	-	-	CallEnding [choice]	alone
 CallFailure	ICallFailure [record]	-	-	alone
 CallId	CallId [scalar]	-	-	alone
-CallIds.FirstOf	-	CallIds.FirstOf [function]	-	alone
-CallIds.LastOf	-	CallIds.LastOf [function]	-	alone
-CallIds.PeerOf	-	CallIds.PeerOf [function]	-	alone
-CallIds.SideOf	-	CallIds.SideOf [function]	-	alone
 CapacityError	-	-	CapacityError [record]	alone
 check_records	-	-	check_records [function]	alone
 check_required	-	-	check_required [function]	alone
@@ -391,7 +396,6 @@ DATA_CHANGED_EVENT	DATA_CHANGED_EVENT [constant]	-	-	alone
 DEBUG_EVENT	DEBUG_EVENT [constant]	-	-	alone
 DeclarationWay	-	-	DeclarationWay [choice]	alone
 DEFAULT_CHALLENGE	DEFAULT_CHALLENGE [constant]	-	-	alone
-DEFAULT_TIMEOUT	-	-	DEFAULT_TIMEOUT [constant]	alone
 DefaultCredential	DefaultCredential [choice]	-	-	alone
 DEFAULTS	DEFAULTS [constant]	-	-	alone
 DELETED_EVENT	DELETED_EVENT [constant]	-	-	alone
@@ -439,8 +443,6 @@ FetchResponseLike	IFetchResponseLike [record]	-	-	alone
 FilterGiven	-	-	FilterGiven [record]	alone
 FilterKeeper	-	-	FilterKeeper [record]	alone
 GatewayAuthorization	-	GatewayAuthorization [choice]	-	alone
-GENERATED_CODE_SUPPORTS_VERSION_5	GENERATED_CODE_SUPPORTS_VERSION_5 [constant]	-	-	alone
-GENERATED_CODE_SUPPORTS_VERSION_6	GENERATED_CODE_SUPPORTS_VERSION_6 [constant]	-	-	alone
 GeneratedCode	-	GeneratedCode [constant]	-	alone
 generateHandle	generateHandle [function]	-	-	alone
 GenericError	GenericError [record]	-	-	alone
@@ -451,7 +453,6 @@ HandedCredential	HandedCredential [choice]	-	-	alone
 HandedRequestHeader	IHandedRequestHeader [record]	-	-	alone
 HEADERS_TIMEOUT	HEADERS_TIMEOUT [constant]	-	-	alone
 HEARTBEAT_COMMENT	HEARTBEAT_COMMENT [constant]	-	-	alone
-HELD_BYTES_BUDGET	-	-	HELD_BYTES_BUDGET [constant]	alone
 HookName	HookName [record]	-	-	alone
 HOST_REFUSAL	HOST_REFUSAL [constant]	-	-	alone
 HTTP_POLICY_MEMBERS	HTTP_POLICY_MEMBERS [constant]	-	-	alone
@@ -524,8 +525,6 @@ JsonValue	JsonValue [choice]	-	-	alone
 judgeRules	judgeRules [function]	-	-	alone
 JudgingOptions	IJudgingOptions [record]	-	-	alone
 Jwk	Jwk [record]	-	-	alone
-JWT_LEEWAY	-	-	JWT_LEEWAY [constant]	alone
-JWT_LIMIT_BYTES	-	-	JWT_LIMIT_BYTES [constant]	alone
 JwtAgainst	-	-	JwtAgainst [record]	alone
 JwtSessionIdentifier	-	-	JwtSessionIdentifier [choice]	alone
 JwtVerdict	-	-	JwtVerdict [choice]	alone
@@ -551,20 +550,17 @@ MAXIMUM_MESSAGE_BYTES	MAXIMUM_MESSAGE_BYTES [constant]	-	-	alone
 MAXIMUM_MESSAGE_SIZE	MAXIMUM_MESSAGE_SIZE [constant]	-	-	alone
 MAXIMUM_OUTBOX_BYTES	MAXIMUM_OUTBOX_BYTES [constant]	-	-	alone
 MAXIMUM_PACKET_SIZE	MAXIMUM_PACKET_SIZE [constant]	-	-	alone
-MAXIMUM_PROCEDURES	-	-	MAXIMUM_PROCEDURES [constant]	alone
 MAXIMUM_WAIT	MAXIMUM_WAIT [constant]	-	-	alone
 MAXIMUM_WAITING_EXCHANGES	MAXIMUM_WAITING_EXCHANGES [constant]	-	-	alone
 MEMORY_ADDRESS	-	-	MEMORY_ADDRESS [constant]	alone
 MEMORY_BROKER_FAULTS	MEMORY_BROKER_FAULTS [constant]	-	-	alone
 MemoryAcceptOptions	IMemoryAcceptOptions [record]	-	-	alone
-MemoryBrokerPublication	IMemoryBrokerPublication [record]	-	-	alone
 MemoryEndLike	IMemoryEndLike [record]	-	-	alone
 MemoryPeerLike	IMemoryPeerLike [record]	-	-	alone
 MemoryTransportServerLike	IMemoryTransportServerLike [record]	-	-	alone
 MESSAGE_EVENT	MESSAGE_EVENT [constant]	-	-	alone
 MessageEventLike	IMessageEventLike [record]	-	-	alone
 MessageRules	MessageRules [function type]	-	-	alone
-METRICS_REGISTRY_DEFAULTS	METRICS_REGISTRY_DEFAULTS [constant]	-	-	alone
 MINIMUM_SEND_BYTES_PER_SECOND	MINIMUM_SEND_BYTES_PER_SECOND [constant]	-	-	alone
 MqttBrokerTlsOptions	-	MqttBrokerTlsOptions [record]	-	alone
 NoFailure	-	NoFailure [record]	-	alone
@@ -575,7 +571,6 @@ NotificationManagerOptions	INotificationManagerOptions [record]	-	-	alone
 NotificationResolverOf	-	-	NotificationResolverOf [record]	alone
 Notifications	Notifications [record]	-	-	alone
 NotificationSeries	-	-	NotificationSeries [record]	alone
-Notifier	-	-	Notifier [record]	alone
 NotifyFilter	-	-	NotifyFilter [function type]	alone
 notifying_of	-	-	notifying_of [function]	alone
 NotifyingDescriptor	-	-	NotifyingDescriptor [record]	alone
@@ -622,9 +617,6 @@ RawPath	IRawPath [record]	-	-	alone
 rawPathOf	rawPathOf [function]	-	-	alone
 READY_STATE_NAMES	READY_STATE_NAMES [constant]	-	-	alone
 ReceivedFailure	IReceivedFailure [record]	-	-	alone
-RECONNECT_ATTEMPTS	-	-	RECONNECT_ATTEMPTS [constant]	alone
-RECONNECT_DEFAULTS	RECONNECT_DEFAULTS [constant]	-	-	alone
-RECONNECT_DELAY	-	-	RECONNECT_DELAY [constant]	alone
 RedactedHeader	RedactedHeader [record]	-	-	alone
 Refusal	-	-	Refusal [choice]	alone
 REFUSAL_EVENT	REFUSAL_EVENT [constant]	-	-	alone
@@ -632,14 +624,12 @@ REFUSAL_HEADER	REFUSAL_HEADER [constant]	-	-	alone
 REFUSALS	REFUSALS [constant]	-	-	alone
 RelayLeg	-	-	RelayLeg [record]	alone
 RelayRouter	-	-	RelayRouter [record]	alone
-REQUEST_DEFAULTS	REQUEST_DEFAULTS [constant]	-	-	alone
 RequestDescriptor	RequestDescriptor [record]	-	-	alone
 RequestHandler	-	IRequestHandler [record]	-	alone
 RequestInit	IRequestInit [record]	-	-	alone
 RequestProcedure<,,,,>	-	RequestProcedure<,,,,> [record]	-	alone
 RequestProcedure<,,,>	-	RequestProcedure<,,,> [record]	-	alone
 RequestValidator	-	RequestValidator [function type]	-	alone
-RESERVATION	-	-	RESERVATION [constant]	alone
 ResolverCallback	-	-	ResolverCallback [function type]	alone
 resolveRequestOptions	resolveRequestOptions [function]	-	-	alone
 ResolverFailure	ResolverFailure [choice]	-	-	alone
@@ -725,9 +715,9 @@ TRANSPORT_CLIENT_EVENTS	TRANSPORT_CLIENT_EVENTS [choice]	-	-	alone
 TRANSPORT_HTTP	TRANSPORT_HTTP [constant]	-	-	alone
 TRANSPORT_MQTT	TRANSPORT_MQTT [constant]	-	-	alone
 TRANSPORT_SERVER_EVENTS	TRANSPORT_SERVER_EVENTS [choice]	-	-	alone
+TRANSPORT_WEBSOCKET	TRANSPORT_WEBSOCKET [constant]	-	-	alone
 TRANSPORT_WEBSOCKET_BINARYTYPE	TRANSPORT_WEBSOCKET_BINARYTYPE [constant]	-	-	alone
 TRANSPORT_WORKER	TRANSPORT_WORKER [constant]	-	-	alone
-TRANSPORT_WS	TRANSPORT_WS [constant]	-	-	alone
 TransportClient	ITransportClient [record]	-	-	alone
 TransportClientAddressOptions	ITransportClientAddressOptions [record]	-	-	alone
 TransportClientConnectOptions	ITransportClientConnectOptions [record]	-	-	alone

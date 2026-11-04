@@ -23,6 +23,7 @@ import type {
 } from './types';
 
 export { ProgrammerError } from '../../transport/shared/errors';
+export type { IGauges } from '../../transport/shared/types';
 export { PACING_DEFAULTS } from './notification-pacing';
 export type {
   CallId,

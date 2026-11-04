@@ -48,8 +48,8 @@ for (let at = 0; at < args.length; at++) {
 
 const entry = `
   export { WebSocket, WebSocketServer } from 'ws';
-  export { createWSClient } from './src/client/ws-client.ts';
-  export { createWSServer } from './src/server/ws-server.ts';
+  export { createWebSocketClient } from './src/client/websocket-client.ts';
+  export { createWebSocketServer } from './src/server/websocket-server.ts';
   export { createHTTPClient } from './src/client/http-client.ts';
   export { createHTTPServer } from './src/server/http-server.ts';
   export { createClient } from './src/client/client.ts';
@@ -272,7 +272,7 @@ const connect = async (reader, transport, settings = {}) => {
           ? reader.createHTTPServer({ limits, transport: { createServer } })
           : transport === 'memory'
             ? reader.createServer({ transport: reader.createMemoryTransportServer() }, { limits })
-            : reader.createWSServer({
+            : reader.createWebSocketServer({
                 limits,
                 transport: { WebSocketServer: reader.WebSocketServer },
               });
@@ -284,7 +284,7 @@ const connect = async (reader, transport, settings = {}) => {
         ? reader.createHTTPClient({ limits })
         : transport === 'memory'
           ? memoryClientOf(reader, { limits })
-          : reader.createWSClient({ limits, transport: { WebSocket: reader.WebSocket } });
+          : reader.createWebSocketClient({ limits, transport: { WebSocket: reader.WebSocket } });
     await client.connect(
       transport === 'memory' ? { server: server.transport } : { host: '127.0.0.1', port }
     );

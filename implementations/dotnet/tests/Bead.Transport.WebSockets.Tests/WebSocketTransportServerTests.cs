@@ -117,7 +117,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             _connections.Writer.TryWrite(connectionHandle);
         };
         _server.Refusal += _refusals.Enqueue;
-        _port = (await _server.Start(start, Cancelled)).Port;
+        _port = (await _server.Start(start with { CancellationToken = Cancelled })).Port;
     }
 
     /// <summary>Whether this platform opens two sockets from one address and port.</summary>
@@ -598,7 +598,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             await using var bound = new WebSocketTransportServer(new WebSocketTransportServerOptions { Secure = secure });
 
             Assert.Equal((false, secure ?? false), (bound.CarriesCredential("any"), bound.IsSecure("any")));
-            await bound.Start(new WebSocketTransportStartOptions { Address = address, FindOpenPort = true }, Cancelled).WaitAsync(Patience, Cancelled);
+            await bound.Start(new WebSocketTransportStartOptions { Address = address, FindOpenPort = true, CancellationToken = Cancelled }).WaitAsync(Patience, Cancelled);
             Assert.Equal((false, expected), (bound.CarriesCredential("any"), bound.IsSecure("any")));
             Assert.Equal(ReadyState.Open, bound.ReadyState);
         }
@@ -614,7 +614,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             await using var bound = new WebSocketTransportServer(new WebSocketTransportServerOptions { Secure = secure });
             await using var unbound = new WebSocketTransportServer(new WebSocketTransportServerOptions { Secure = secure });
 
-            await bound.Start(Loopback, Cancelled);
+            await bound.Start(Loopback with { CancellationToken = Cancelled });
 
             return (bound.IsSecure("any"), unbound.IsSecure("any"));
         }
@@ -659,7 +659,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             var refused = await RefusalOf(request);
 
             Assert.Equal((status, reason), (refused.Status, refused.Reason));
-            expected.Add(new TransportServerRefusal("127.0.0.1", authority, origin, refused.Port, reason, status));
+            expected.Add(new TransportServerRefusal { Address = "127.0.0.1", Authority = authority, Origin = origin, Port = refused.Port, Reason = reason, Status = status });
         }
 
         // the HTTP parser's own refusals have no transport mark or event
@@ -700,7 +700,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             return _refusals.Count == expected.Count + 1;
         });
 
-        expected.Add(new TransportServerRefusal("127.0.0.1", own, null, busy.Value.Port, WebSocketRefusals.Busy, 503));
+        expected.Add(new TransportServerRefusal { Address = "127.0.0.1", Authority = own, Port = busy.Value.Port, Reason = WebSocketRefusals.Busy, Status = 503 });
         Assert.Equal(expected, _refusals);
     }
 
@@ -746,7 +746,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         {
             return !_refusals.IsEmpty;
         });
-        Assert.Equal([new TransportServerRefusal("127.0.0.1", own, "http://a.example\tb", tabbedPort, WebSocketRefusals.Origin, 403)], _refusals);
+        Assert.Equal([new TransportServerRefusal { Address = "127.0.0.1", Authority = own, Origin = "http://a.example\tb", Port = tabbedPort, Reason = WebSocketRefusals.Origin, Status = 403 }], _refusals);
         Assert.Empty(_server.Clients);
     }
 
@@ -797,7 +797,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     public async Task Listens_on_localhost_when_given_no_address_both_loopbacks_on_one_port_reached_by_127_0_0_1_by_the_IPv6_loopback_and_by_localhost_reports_localhost_and_is_secure_there()
     {
         await using var server = new WebSocketTransportServer();
-        var bound = await server.Start(new WebSocketTransportStartOptions { FindOpenPort = true }, Cancelled);
+        var bound = await server.Start(new WebSocketTransportStartOptions { FindOpenPort = true, CancellationToken = Cancelled });
         var connections = Channel.CreateUnbounded<string>();
 
         server.Connection += (handle) =>
@@ -821,7 +821,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
 
                 clients.Add(client);
 
-                await client.Connect(new WebSocketTransportClientConnectOptions { Host = host, Port = bound.Port }, Cancelled).WaitAsync(Patience, Cancelled);
+                await client.Connect(new WebSocketTransportClientConnectOptions { Host = host, Port = bound.Port, CancellationToken = Cancelled }).WaitAsync(Patience, Cancelled);
                 Assert.Equal((host, ReadyState.Open), (host, client.ReadyState));
 
                 var handle = await Next(connections);
@@ -878,7 +878,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
 
         await Assert.ThrowsAnyAsync<IOException>(() =>
         {
-            return server.Start(new WebSocketTransportStartOptions { Port = port }, Cancelled);
+            return server.Start(new WebSocketTransportStartOptions { Port = port, CancellationToken = Cancelled });
         });
         Assert.Equal(ReadyState.Closed, server.ReadyState);
 
@@ -916,7 +916,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
 
         server.Built += built.Add;
 
-        var bound = await server.Start(new WebSocketTransportStartOptions { FindOpenPort = true }, Cancelled);
+        var bound = await server.Start(new WebSocketTransportStartOptions { FindOpenPort = true, CancellationToken = Cancelled });
 
         Assert.Equal(("localhost", 2), (bound.Address, drawn.Count));
         Assert.Equal((held, drawn[1]), (drawn[0], bound.Port));
@@ -971,7 +971,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
 
             var failure = await Assert.ThrowsAnyAsync<IOException>(() =>
             {
-                return refused.Start(new WebSocketTransportStartOptions { FindOpenPort = findOpenPort, Port = held }, Cancelled);
+                return refused.Start(new WebSocketTransportStartOptions { FindOpenPort = findOpenPort, Port = held, CancellationToken = Cancelled });
             });
 
             Assert.True(Loopbacks.IsInUse(failure));
@@ -1007,7 +1007,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
                     },
                 },
             };
-            var bound = await server.Start(new WebSocketTransportStartOptions { FindOpenPort = true }, Cancelled);
+            var bound = await server.Start(new WebSocketTransportStartOptions { FindOpenPort = true, CancellationToken = Cancelled });
             string[] hosts = ["127.0.0.1"];
 
             Assert.Equal("127.0.0.1", bound.Address);
@@ -1017,7 +1017,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             {
                 await using var client = new WebSocketTransportClient();
 
-                await client.Connect(new WebSocketTransportClientConnectOptions { Host = host, Port = bound.Port }, Cancelled).WaitAsync(Patience, Cancelled);
+                await client.Connect(new WebSocketTransportClientConnectOptions { Host = host, Port = bound.Port, CancellationToken = Cancelled }).WaitAsync(Patience, Cancelled);
                 Assert.Equal((host, ReadyState.Open), (host, client.ReadyState));
             }
 
@@ -1037,7 +1037,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             await using var server = new WebSocketTransportServer();
             var refused = await Assert.ThrowsAsync<ArgumentException>(() =>
             {
-                return server.Start(new WebSocketTransportStartOptions { Address = address, FindOpenPort = true }, Cancelled);
+                return server.Start(new WebSocketTransportStartOptions { Address = address, FindOpenPort = true, CancellationToken = Cancelled });
             });
 
             Assert.Equal((address, nameof(WebSocketTransportStartOptions.Address), ReadyState.Closed), (address, refused.ParamName, server.ReadyState));
@@ -1049,7 +1049,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         {
             await using var server = new WebSocketTransportServer();
 
-            Assert.Equal(Addresses.HasIPv6Loopback() ? address : "127.0.0.1", (await server.Start(new WebSocketTransportStartOptions { Address = address, FindOpenPort = true }, Cancelled)).Address);
+            Assert.Equal(Addresses.HasIPv6Loopback() ? address : "127.0.0.1", (await server.Start(new WebSocketTransportStartOptions { Address = address, FindOpenPort = true, CancellationToken = Cancelled })).Address);
             await server.Stop();
         }
 
@@ -1060,7 +1060,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         {
             await using var server = new WebSocketTransportServer();
 
-            Assert.Equal(address, (await server.Start(new WebSocketTransportStartOptions { Address = address, FindOpenPort = true }, Cancelled)).Address);
+            Assert.Equal(address, (await server.Start(new WebSocketTransportStartOptions { Address = address, FindOpenPort = true, CancellationToken = Cancelled })).Address);
             await server.Stop();
         }
     }
@@ -1078,7 +1078,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         {
             await using var server = new WebSocketTransportServer();
 
-            await server.Start(new WebSocketTransportStartOptions { Address = address, FindOpenPort = true }, Cancelled);
+            await server.Start(new WebSocketTransportStartOptions { Address = address, FindOpenPort = true, CancellationToken = Cancelled });
             secured.Add((address, server.IsSecure("any")));
             await server.Stop();
         }
@@ -2174,10 +2174,10 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         // pong waited as long
         var accepted = Channel.CreateUnbounded<WebSocket>();
         await using var server = Keeping(accepted);
-        var bound = await server.Start(new WebSocketTransportStartOptions { FindOpenPort = true }, Cancelled);
+        var bound = await server.Start(new WebSocketTransportStartOptions { FindOpenPort = true, CancellationToken = Cancelled });
         await using var client = new WebSocketTransportClient();
 
-        await client.Connect(new WebSocketTransportClientConnectOptions { Host = "127.0.0.1", Port = bound.Port }, Cancelled).WaitAsync(Patience, Cancelled);
+        await client.Connect(new WebSocketTransportClientConnectOptions { Host = "127.0.0.1", Port = bound.Port, CancellationToken = Cancelled }).WaitAsync(Patience, Cancelled);
 
         // where the IPv6 loopback is absent, the IPv4 one alone, reported as it is
         Assert.Equal(Addresses.HasIPv6Loopback() ? "localhost" : "127.0.0.1", bound.Address);
@@ -2191,7 +2191,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
 
         Assert.Equal(ReadyState.Uninitialized, server.ReadyState);
 
-        var address = await server.Start(Loopback, Cancelled);
+        var address = await server.Start(Loopback with { CancellationToken = Cancelled });
 
         Assert.Equal(ReadyState.Open, server.ReadyState);
         Assert.Equal("127.0.0.1", address.Address);
@@ -2203,7 +2203,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     {
         Assert.Equal("the transport server is already open", (await Assert.ThrowsAsync<InvalidOperationException>(() =>
         {
-            return _server.Start(Loopback, Cancelled);
+            return _server.Start(Loopback with { CancellationToken = Cancelled });
         })).Message);
         Assert.Equal(ReadyState.Open, _server.ReadyState);
 
@@ -2236,13 +2236,13 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
 
         var starting = Task.Run(() =>
         {
-            return server.Start(Loopback, Cancelled);
+            return server.Start(Loopback with { CancellationToken = Cancelled });
         }, Cancelled);
 
         await building.Task.WaitAsync(Patience, Cancelled);
         Assert.Equal("the transport server is already connecting", (await Assert.ThrowsAsync<InvalidOperationException>(() =>
         {
-            return server.Start(Loopback, Cancelled);
+            return server.Start(Loopback with { CancellationToken = Cancelled });
         })).Message);
         Assert.Equal(ReadyState.Connecting, server.ReadyState);
         gate.Set();
@@ -2271,7 +2271,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
 
         var starting = Task.Run(() =>
         {
-            return server.Start(Loopback, Cancelled);
+            return server.Start(Loopback with { CancellationToken = Cancelled });
         }, Cancelled);
 
         await building.Task.WaitAsync(Patience, Cancelled);
@@ -2297,17 +2297,17 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
 
         await Assert.ThrowsAnyAsync<IOException>(() =>
         {
-            return other.Start(new WebSocketTransportStartOptions { Address = "127.0.0.1", Port = _port }, Cancelled);
+            return other.Start(new WebSocketTransportStartOptions { Address = "127.0.0.1", Port = _port, CancellationToken = Cancelled });
         });
         Assert.Equal(ReadyState.Closed, other.ReadyState);
 
-        var address = await other.Start(Loopback, Cancelled);
+        var address = await other.Start(Loopback with { CancellationToken = Cancelled });
 
         Assert.NotEqual(_port, address.Port);
         Assert.Equal(ReadyState.Open, other.ReadyState);
 
         await other.Stop().WaitAsync(Patience, Cancelled);
-        await other.Start(Loopback, Cancelled);
+        await other.Start(Loopback with { CancellationToken = Cancelled });
 
         Assert.Equal(ReadyState.Open, other.ReadyState);
     }
@@ -2325,7 +2325,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
 
         await Assert.ThrowsAnyAsync<IOException>(() =>
         {
-            return other.Start(new WebSocketTransportStartOptions { Address = "127.0.0.1", Port = _port }, Cancelled);
+            return other.Start(new WebSocketTransportStartOptions { Address = "127.0.0.1", Port = _port, CancellationToken = Cancelled });
         });
         Assert.NotNull(built);
         Assert.Throws<ObjectDisposedException>(() =>
@@ -2349,7 +2349,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
         {
-            return other.Start(Loopback, source.Token);
+            return other.Start(Loopback with { CancellationToken = source.Token });
         });
         Assert.Equal(ReadyState.Closed, other.ReadyState);
         Assert.NotNull(built);
@@ -2358,7 +2358,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             return built.Services.GetService(typeof(IServer));
         });
 
-        var address = await other.Start(Loopback, Cancelled);
+        var address = await other.Start(Loopback with { CancellationToken = Cancelled });
 
         Assert.NotEqual(0, address.Port);
     }
@@ -2375,7 +2375,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         await _server.Stop().WaitAsync(Patience, Cancelled);
         Assert.Same(Task.CompletedTask, _server.Stop());
         Assert.Equal(ReadyState.Closed, _server.ReadyState);
-        _port = (await _server.Start(Loopback, Cancelled)).Port;
+        _port = (await _server.Start(Loopback with { CancellationToken = Cancelled })).Port;
 
         var (client, connectionHandle) = await Connect();
 
@@ -2400,7 +2400,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         var port = ((IPEndPoint)first.Client.LocalEndPoint!).Port;
         var clients = _server.Clients;
 
-        Assert.Equal([new TransportServerClient("127.0.0.1", firstHandle, null, port, TransportTypes.WebSocket)], clients);
+        Assert.Equal([new TransportServerClient { Address = "127.0.0.1", ConnectionHandle = firstHandle, LastActivity = null, Port = port, Type = TransportTypes.WebSocket }], clients);
 
         // in the order the connections came, whichever went in between — four, so a dictionary's
         // own order seldom passes for it; the copy taken before stays
@@ -2480,7 +2480,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             {
                 connected.TrySetResult();
             };
-            port = (await server.Start(Loopback, Cancelled)).Port;
+            port = (await server.Start(Loopback with { CancellationToken = Cancelled })).Port;
             await client.ConnectAsync(UriOf(port), Cancelled);
             await connected.Task.WaitAsync(Patience, Cancelled);
             answering = AnswerClose(client);
@@ -2588,7 +2588,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             throw new IOException("stop failed");
         };
 
-        var port = (await server.Start(Loopback, Cancelled)).Port;
+        var port = (await server.Start(Loopback with { CancellationToken = Cancelled })).Port;
 
         Assert.Equal("stop failed", (await Assert.ThrowsAsync<IOException>(() =>
         {
@@ -3124,8 +3124,8 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
 
             Assert.Equal(
                 [
-                    new TransportServerRefusal("198.51.100.7", "rebind.example", null, lines.Port, WebSocketRefusals.Host, 403),
-                    new TransportServerRefusal("127.0.0.1", "rebind.example", null, unknown.Port, WebSocketRefusals.Host, 403),
+                    new TransportServerRefusal { Address = "198.51.100.7", Authority = "rebind.example", Port = lines.Port, Reason = WebSocketRefusals.Host, Status = 403 },
+                    new TransportServerRefusal { Address = "127.0.0.1", Authority = "rebind.example", Port = unknown.Port, Reason = WebSocketRefusals.Host, Status = 403 },
                 ],
                 _refusals);
         }
@@ -3688,7 +3688,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     {
         var server = new WebSocketTransportServer();
 
-        await server.Start(Loopback, Cancelled);
+        await server.Start(Loopback with { CancellationToken = Cancelled });
 
         // * two disposes: one stop, shared
         await Task.WhenAll(server.DisposeAsync().AsTask(), server.DisposeAsync().AsTask());
@@ -3697,7 +3697,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         // * a start after it: its application's misuse, its state kept
         Assert.Equal("the transport server is disposed", (await Assert.ThrowsAsync<ObjectDisposedException>(() =>
         {
-            return server.Start(Loopback, Cancelled);
+            return server.Start(Loopback with { CancellationToken = Cancelled });
         })).Message);
         Assert.Equal(ReadyState.Closed, server.ReadyState);
     }

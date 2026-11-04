@@ -93,13 +93,13 @@
       "@francisdesjardins/bead/worker-transport-server": [
         "../../src/transport/server/worker-transport-server.ts"
       ],
-      "@francisdesjardins/bead/ws-client": ["../../src/client/ws-client.ts"],
-      "@francisdesjardins/bead/ws-server": ["../../src/server/ws-server.ts"],
-      "@francisdesjardins/bead/ws-transport-client": [
-        "../../src/transport/client/ws-transport-client.ts"
+      "@francisdesjardins/bead/websocket-client": ["../../src/client/websocket-client.ts"],
+      "@francisdesjardins/bead/websocket-server": ["../../src/server/websocket-server.ts"],
+      "@francisdesjardins/bead/websocket-transport-client": [
+        "../../src/transport/client/websocket-transport-client.ts"
       ],
-      "@francisdesjardins/bead/ws-transport-server": [
-        "../../src/transport/server/ws-transport-server.ts"
+      "@francisdesjardins/bead/websocket-transport-server": [
+        "../../src/transport/server/websocket-transport-server.ts"
       ]
     }
   },

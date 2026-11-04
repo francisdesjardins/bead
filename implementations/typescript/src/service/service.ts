@@ -24,12 +24,16 @@ export type {
 } from './descriptors';
 export { failuresOf } from './failures';
 export type { IFailureCatalogue, IListedFailure, IListedFailureError } from './failures';
-export { GENERATED_CODE_SUPPORTS_VERSION_6 } from './generated-code';
+export {
+  GENERATED_CODE_SUPPORTS_VERSION_6,
+  GENERATED_CODE_SUPPORTS_VERSION_7,
+} from './generated-code';
 export { createServiceClient } from './service-client';
 export type { IServiceClient, IServiceClientOptions } from './service-client';
 export { createServiceServer } from './service-server';
 export type {
   IJudgingOptions,
+  INotifier,
   IServiceResponse,
   IServiceServer,
   ServiceResolverCallback,

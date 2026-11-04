@@ -101,7 +101,9 @@ never once to a topic many read. The broker's own flow control is its link's, an
 parcel its adapter has not had taken that would pass it loses its connection, a CLOSE of 4000,
 reported naming the bound. **Nothing is retained**: a side subscribes so that its broker hands it
 nothing retained, MQTT's Retain Handling 2, and drops in silence a retained message that comes all
-the same.
+the same, which its adapter marks `isRetained`, `IsRetained` and `is_retained`, as MQTT 5's RETAIN
+flag reports it; on the TypeScript side, whose types hold nothing at run time, a message that holds
+`retained` instead is no parcel, dropped and reported on its participant's `error`.
 
 **The credential a request presents is carried in its DATA, toward the server alone** (spec 15.22):
 a client's transport carries any field value (15.5) on the first part of the DATA that carries the

@@ -362,23 +362,32 @@ impl fmt::Debug for TransportClientReconnectDelay {
 /// How long a connect waits for its server when it names no timeout.
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// The delay between two attempts when none is given.
-pub const RECONNECT_DELAY: Duration = Duration::from_secs(1);
+// the delay between two attempts when none is given
+const RECONNECT_DELAY: Duration = Duration::from_secs(1);
 
-/// The attempts a transport client's reconnection makes when none is given; a broker participant's
-/// goes without end.
-pub const RECONNECT_ATTEMPTS: u32 = 5;
+// the attempts a transport client's reconnection makes when none is given
+const RECONNECT_ATTEMPTS: u32 = 5;
+
+/// How a transport client reconnects when its options say nothing: 5 attempts at most, 1 s apart;
+/// a broker participant's link goes without end.
+pub const RECONNECT_DEFAULTS: TransportClientReconnectOptions = TransportClientReconnectOptions {
+    delay: Some(TransportClientReconnectDelay::Fixed(RECONNECT_DELAY)),
+    maximum_attempts: Some(RECONNECT_ATTEMPTS),
+    signal: None,
+    tap: None,
+};
 
 /// How a transport client reconnects, or a broker participant's link.
 #[derive(Clone, Default)]
 #[non_exhaustive]
 pub struct TransportClientReconnectOptions {
-    /// The delay between two attempts: [`RECONNECT_DELAY`] when none. A fixed one out of bounds is
-    /// refused where it is given (spec 1.4); a resolver's answer is held at each attempt. One of 0
-    /// arms no timer, its next attempt in a later turn of its tokio runtime.
+    /// The delay between two attempts: the one [`RECONNECT_DEFAULTS`] states when none. A fixed one
+    /// out of bounds is refused where it is given (spec 1.4); a resolver's answer is held at each
+    /// attempt. One of 0 arms no timer, its next attempt in a later turn of its tokio runtime.
     pub delay: Option<TransportClientReconnectDelay>,
-    /// The attempts it makes at most: its owner's default when none, [`RECONNECT_ATTEMPTS`] for a
-    /// transport client's reconnection, without end for a broker participant's.
+    /// The attempts it makes at most: its owner's default when none, the ones
+    /// [`RECONNECT_DEFAULTS`] states for a transport client's reconnection, without end for a broker
+    /// participant's.
     pub maximum_attempts: Option<u32>,
     /// What cancels it, read before each attempt and during each wait: a transport client's attempt
     /// under way is handed it, a broker participant's is not cut short.

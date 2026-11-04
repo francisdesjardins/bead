@@ -1316,7 +1316,7 @@ impl RouterClient {
                 u64::try_from(state.subscriptions.len()).unwrap_or(u64::MAX),
             );
 
-            Gauges::merged(vec![own, state.core.gauges()?])
+            Gauges::merge(vec![own, state.core.gauges()?])
         });
 
         Box::pin(async move { gauged.await.unwrap_or_else(|_| Ok(Gauges::default())) })

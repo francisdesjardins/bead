@@ -189,7 +189,7 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
                     return connection.Arrival;
                 }).Select((connection) =>
                 {
-                    return new TransportServerClient(connection.PeerId, connection.ConnectionHandle!, connection.LastActivity, 0, Type);
+                    return new TransportServerClient { Address = connection.PeerId, ConnectionHandle = connection.ConnectionHandle!, LastActivity = connection.LastActivity, Port = 0, Type = Type };
                 })];
             }
         }
@@ -677,7 +677,7 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
             Topic = _participant.InboxOf(id),
             Payload = BrokerParcels.Write(parcel),
         }, parcel);
-        _listeners.Tell(Refusal, new TransportServerRefusal(id, null, null, 0, reason, status));
+        _listeners.Tell(Refusal, new TransportServerRefusal { Address = id, Reason = reason, Status = status });
     }
 
     // in its participant's turn: its names subscribed, alone or in its group, all asked at once, each

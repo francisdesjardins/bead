@@ -88,7 +88,7 @@ public sealed class BeadHttpClientTests
     // connected: its connect, which waits for its answer, drawn
     private static async Task Connect(BeadHttpClient client, Fetch fetch)
     {
-        var connecting = client.Connect(new HttpTransportClientConnectOptions { Host = "localhost", Port = 8_080 }, Cancelled);
+        var connecting = client.Connect(new HttpTransportClientConnectOptions { Host = "localhost", Port = 8_080, CancellationToken = Cancelled });
 
         (await fetch.Next()).SetResult(Drawn());
         await connecting.WaitAsync(Patience, Cancelled);
@@ -175,7 +175,7 @@ public sealed class BeadHttpClientTests
             Transport = new HttpTransportClientOptions { Handler = fetch, IsListening = false },
         });
 
-        await client.Connect(new HttpTransportClientConnectOptions { Host = "localhost", Port = 8_080 }, Cancelled);
+        await client.Connect(new HttpTransportClientConnectOptions { Host = "localhost", Port = 8_080, CancellationToken = Cancelled });
 
         Assert.Equal("HI", await client.Services.GetRequest(Echo, Text)("hi")().WaitAsync(Patience, Cancelled));
 
@@ -244,7 +244,7 @@ public sealed class BeadHttpClientTests
             Limits = RouterLimits.Default with { MaximumEnvelopeBytes = 1_024 },
             Transport = new HttpTransportClientOptions { Handler = fetch, IsListening = false },
         });
-        var connecting = client.Connect(new HttpTransportClientConnectOptions { Host = "localhost", Port = 8_080 }, Cancelled);
+        var connecting = client.Connect(new HttpTransportClientConnectOptions { Host = "localhost", Port = 8_080, CancellationToken = Cancelled });
 
         (await fetch.Next()).SetResult(Drawn());
         await connecting.WaitAsync(Patience, Cancelled);
@@ -282,7 +282,7 @@ public sealed class BeadHttpClientTests
         {
             closes.Writer.TryWrite((wasClean, wasQuick));
         };
-        await client.Connect(new HttpTransportClientConnectOptions { Host = "localhost", Port = 8_080 }, Cancelled);
+        await client.Connect(new HttpTransportClientConnectOptions { Host = "localhost", Port = 8_080, CancellationToken = Cancelled });
         await client.Disconnect(new TransportClientDisconnectOptions { IsClean = false }).WaitAsync(Patience, Cancelled);
 
         Assert.Equal((false, false), await closes.Reader.ReadAsync(Cancelled).AsTask().WaitAsync(Patience, Cancelled));

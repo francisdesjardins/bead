@@ -49,7 +49,7 @@ import {
 } from '../http-transport-server';
 import type { ITransportServerRefusal, TransportServerConnectionHandle } from '../types';
 import type { IHeadBoundServerLike } from '../server-bounds';
-import { createWSTransportServer } from '../ws-transport-server';
+import { createWebSocketTransportServer } from '../websocket-transport-server';
 import {
   bindError,
   hasIPv6Loopback,
@@ -883,7 +883,7 @@ test.describe('createHTTPTransportServer', () => {
     server.on('connection', () => {
       throw thrown;
     });
-    server.on('connection', (...[, , connectionHandle]) => {
+    server.on('connection', (...[, connectionHandle]) => {
       told.push(connectionHandle);
     });
 
@@ -1459,7 +1459,7 @@ test.describe('createHTTPTransportServer, over TLS', () => {
     server.on('refusal', (refusal) => {
       refusals.push(refusal);
     });
-    server.on('connection', (...[, , connectionHandle]) => {
+    server.on('connection', (...[, connectionHandle]) => {
       connections.push(connectionHandle);
     });
 
@@ -4226,7 +4226,7 @@ test.describe('createHTTPTransportServer, its bounds', () => {
 
   test('answers 408 a head that does not come whole within headersTimeout, at its address and its WebSocket’s, past it and within 2 seconds of it', async () => {
     await using started = await startTransport({ headersTimeout: 500 });
-    const webSocket = createWSTransportServer({ headersTimeout: 500, WebSocketServer });
+    const webSocket = createWebSocketTransportServer({ headersTimeout: 500, WebSocketServer });
     const { port: webSocketPort } = await webSocket.start({ address: host, findOpenPort: true });
 
     try {

@@ -744,12 +744,8 @@ impl Gauges {
         }
     }
 
-    /// The gauges of several parts as one.
-    ///
-    /// # Errors
-    ///
-    /// A [`ProgrammerError`] when two parts name the same count.
-    pub fn merged(parts: Vec<Self>) -> Result<Self, ProgrammerError> {
+    // the gauges of several parts as one, refused where two parts name the same count
+    pub(crate) fn merge(parts: Vec<Self>) -> Result<Self, ProgrammerError> {
         let mut merged = Self::default();
 
         for part in parts {

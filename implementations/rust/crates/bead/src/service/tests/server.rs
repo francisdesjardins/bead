@@ -160,6 +160,7 @@ async fn accepts_a_cloned_descriptor_and_refuses_a_distinct_one_at_its_address_b
     let other_hello = request_of(init((1, "sayHello"), AdmissionRule::None)).expect("other hello");
     let other_news =
         notifying_of(init((2, "news"), AdmissionRule::None), TextCodec).expect("other news");
+    let other_clock = command_of(init((9, "clock"), AdmissionRule::None)).expect("other clock");
     for offered in [false, true] {
         if offered {
             service.offer(&pair.server).expect("offered");
@@ -170,6 +171,23 @@ async fn accepts_a_cloned_descriptor_and_refuses_a_distinct_one_at_its_address_b
         service
             .on_notifying(&other_news, answer())
             .expect_err("the foreign notification is not held");
+        assert_eq!(
+            service
+                .command_of(&other_clock)
+                .expect_err("the foreign command is not held")
+                .message(),
+            "clock is no procedure of this service"
+        );
+        assert_eq!(
+            service
+                .command_of(&greeter.hello)
+                .expect_err("a request held is no command")
+                .message(),
+            "sayHello is no command of this service"
+        );
+        service
+            .command_of(&greeter.clock.clone())
+            .expect("the same command descriptor");
     }
     service
         .on(&greeter.hello.clone(), answer())
@@ -250,7 +268,15 @@ async fn makes_each_command_s_requester_once_as_it_is_offered_and_refuses_one_ca
         )
         .expect("clock registered");
 
-    service.command(&greeter.clock).expect_err("not offered");
+    let given = service.command_of(&greeter.clock).expect("given early");
+    let options = CommandOptions::new(Arc::clone(&pair.connection_handle));
+    assert_eq!(
+        given
+            .call("early".to_owned(), &options)
+            .expect_err("called before the offer")
+            .message(),
+        "clock is a command made as its service is offered, not before"
+    );
     assert!(locked(&declared).is_empty());
     assert!(locked(&called).is_empty());
     service.offer(&pair.server).expect("offered");
@@ -261,16 +287,13 @@ async fn makes_each_command_s_requester_once_as_it_is_offered_and_refuses_one_ca
             greeter.guarded.procedure().clone()
         ]
     );
-    let requester = service.command(&greeter.clock).expect("clock requester");
+    let requester = service.command_of(&greeter.clock).expect("clock requester");
+    assert_eq!(given.procedure(), greeter.clock.procedure());
     assert_eq!(requester.procedure(), greeter.clock.procedure());
     assert!(locked(&called).is_empty(), "offering makes no call");
-    for asked in ["now", "again"] {
-        let requester = service.command(&greeter.clock).expect("the same requester");
+    for (asked, requester) in [("now", &given), ("again", &requester)] {
         let call = requester
-            .call(
-                asked.to_owned(),
-                &CommandOptions::new(Arc::clone(&pair.connection_handle)),
-            )
+            .call(asked.to_owned(), &options)
             .expect("clock called");
         assert_eq!(
             crate::testing::patience(core::time::Duration::from_secs(10), call)
@@ -563,12 +586,10 @@ async fn notifies_nothing_before_it_is_offered_and_resolves() {
     let greeter = Greeter::new();
     let service = greeter.service(loud());
     let heard = Arc::new(Mutex::new(Vec::new()));
-    service
-        .notify(
-            &greeter.news,
-            "before".to_owned(),
-            &NotifyOptions::default(),
-        )
+    let news = service
+        .notifier_of(&greeter.news)
+        .expect("given before the offer");
+    news.notify("before".to_owned(), &NotifyOptions::default())
         .await;
     service
         .on_notifying(
@@ -608,12 +629,60 @@ async fn notifies_nothing_before_it_is_offered_and_resolves() {
         )
         .await
         .expect("subscribed");
-    service
-        .notify(&greeter.news, "after".to_owned(), &NotifyOptions::default())
+    news.notify("after".to_owned(), &NotifyOptions::default())
         .await;
     pair.settle().await;
     assert_eq!(*locked(&heard), ["after"]);
     registration.unregister().await.expect("unregistered");
+}
+
+#[tokio::test]
+async fn gives_one_notifier_for_each_procedure_that_notifies_and_refuses_a_procedure_its_service_lacks()
+ {
+    let pair = pair().await;
+    let greeter = Greeter::new();
+    let service = greeter.service(loud());
+    let other_news =
+        notifying_of(init((2, "news"), AdmissionRule::None), TextCodec).expect("other news");
+    let absent =
+        notifying_of(init((11, "weather"), AdmissionRule::None), TextCodec).expect("absent");
+    let notifying: Vec<String> = greeter
+        .procedures()
+        .iter()
+        .filter(|described| described.procedure().procedure_kind == Some(ProcedureKind::Notifies))
+        .map(|described| described.procedure().procedure_name.clone())
+        .collect();
+    assert_eq!(
+        notifying,
+        ["news"],
+        "the greeter's one procedure that notifies"
+    );
+    for offered in [false, true] {
+        if offered {
+            service.offer(&pair.server).expect("offered");
+        }
+        let news = service
+            .notifier_of(&greeter.news.clone())
+            .expect("its notifier");
+        assert!(
+            format!("{news:?}").contains("news"),
+            "the notifier of its procedure"
+        );
+        assert_eq!(
+            service
+                .notifier_of(&other_news)
+                .expect_err("a distinct descriptor of the same name and types")
+                .message(),
+            "news is no procedure of this service"
+        );
+        assert_eq!(
+            service
+                .notifier_of(&absent)
+                .expect_err("a procedure the service lacks")
+                .message(),
+            "weather is no procedure of this service"
+        );
+    }
 }
 
 #[tokio::test]
@@ -834,7 +903,7 @@ async fn validates_a_command_before_it_goes_when_its_options_say_so() {
         )
         .expect("registered");
     service.offer(&pair.server).expect("offered");
-    let command = service.command(&descriptor).expect("made");
+    let command = service.command_of(&descriptor).expect("made");
     let options = || CommandOptions::new(Arc::clone(&pair.connection_handle));
     let CallError::Failure(failure) = command
         .call(String::new(), &options())
@@ -891,7 +960,7 @@ async fn judged_before_it_goes(
         .expect("registered");
     service.offer(&pair.server).expect("offered");
     let failed = service
-        .command(&descriptor)
+        .command_of(&descriptor)
         .expect("made")
         .call(
             "hi".to_owned(),

@@ -411,6 +411,60 @@ describe('the case rules and the renderings', () => {
     );
   });
 
+  test('renders a set of flags an implementer declares as a TypeScript object of booleans, and no other kind', () => {
+    const cells = (typescript, csharp, rust) => {
+      return { typescript, csharp, rust };
+    };
+    const capabilities = (kind) => {
+      return cells(
+        [{ name: 'IBrokerCapabilities', kind }],
+        [{ name: 'BrokerCapabilities', kind: 'choice' }],
+        [{ name: 'BrokerCapabilities', kind: 'choice' }]
+      );
+    };
+
+    assert.equal(RULES.flags(capabilities('record')), true);
+    assert.equal(RULES.flags(capabilities('choice')), true);
+    assert.equal(RULES.flags(capabilities('function type')), false);
+    assert.equal(
+      RULES.flags(
+        cells(
+          [{ name: 'IBrokerCapabilities', kind: 'record' }],
+          [{ name: 'BrokerCapability', kind: 'choice' }],
+          []
+        )
+      ),
+      false
+    );
+  });
+
+  test('renders a callable as a Rust struct where the others type a function, and no other kind', () => {
+    const cells = (typescript, csharp, rust) => {
+      return { typescript, csharp, rust };
+    };
+    const notifier = (rust) => {
+      return cells(
+        [{ name: 'INotifier', kind: 'function type' }],
+        [{ name: 'Notifier', kind: 'function type' }],
+        rust
+      );
+    };
+
+    assert.equal(RULES.callable(notifier([{ name: 'Notifier', kind: 'record' }])), true);
+    assert.equal(RULES.callable(notifier([{ name: 'Notifier', kind: 'function type' }])), false);
+    assert.equal(RULES.callable(notifier([])), false);
+    assert.equal(
+      RULES.callable(
+        cells(
+          [{ name: 'INotifier', kind: 'record' }],
+          [{ name: 'Notifier', kind: 'function type' }],
+          [{ name: 'Notifier', kind: 'record' }]
+        )
+      ),
+      false
+    );
+  });
+
   test('renders an error enum’s variant named as a participle, and no other', () => {
     const cells = (typescript, csharp, rust) => {
       return {
@@ -528,7 +582,7 @@ describe('problemsOf', () => {
     });
 
     assert.deepEqual(check(rows), [
-      'tools/names.tsv:7: no rendering named "exception": error, like, flags, constant, of, listener, keyword, platform',
+      'tools/names.tsv:7: no rendering named "exception": error, like, flags, constant, of, listener, keyword, callable, platform',
       'tools/names.tsv:8: the rendering constant names the records that state it, "rendered: constant (<record>)"',
       'tools/names.tsv:9: the rendering error does not give its names',
     ]);

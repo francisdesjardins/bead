@@ -642,7 +642,7 @@ impl<S: Side> Core<S> {
 
     /// Gauges of every part.
     pub(crate) fn gauges(&self) -> Result<Gauges, ProgrammerError> {
-        Gauges::merged(vec![
+        Gauges::merge(vec![
             self.pending.gauges(),
             self.answering.gauges(),
             self.sendings.gauges(),

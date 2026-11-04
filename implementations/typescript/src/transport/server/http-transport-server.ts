@@ -804,7 +804,10 @@ export const createHTTPTransportServer = (
         rest(connection);
 
         // a listener meets the connection registered, before its client has its token
-        tell(CONNECTION_EVENT, [shown, drawing, connectionHandle]);
+        tell(CONNECTION_EVENT, [
+          Object.freeze({ request: drawing, socket: shown }),
+          connectionHandle,
+        ]);
 
         // the listen taken, said back, so a client whose header something on the way dropped never
         // listens where it would be refused

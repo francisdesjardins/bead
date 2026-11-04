@@ -19,7 +19,7 @@ import {
   type BrokerPublished,
   type BrokerTopic,
   type IBrokerAdapter,
-  type IMemoryBrokerPublication,
+  type IBrokerPublication,
 } from '../../shared/memory-broker';
 
 // interfaces
@@ -86,9 +86,9 @@ export interface IBrokerPeers {
 
 // types
 
-/** A peer's adapter, as a case's broker gives it: one of the in-memory broker marks retained. */
+/** A peer's adapter, as a case's broker gives it: one of the in-memory broker publishes retained. */
 export type PeerAdapter = IBrokerAdapter & {
-  publish(publication: IMemoryBrokerPublication): Promise<BrokerPublished>;
+  publishRetained?(publication: IBrokerPublication): Promise<BrokerPublished>;
 };
 
 // constants
@@ -396,7 +396,15 @@ export const createBrokerPeers = async (
               ? parcelBytesOf(item.parcel, values)
               : fromHexadecimal(filledOf(item.bytes, values));
 
-          return adapter.publish({ payload, retained: retained === true, topic });
+          if (retained !== true) {
+            return adapter.publish({ payload, topic });
+          }
+
+          if (adapter.publishRetained === undefined) {
+            throw new Error(`the broker of ${from} publishes nothing retained`);
+          }
+
+          return adapter.publishRetained({ payload, topic });
         })
       );
     },

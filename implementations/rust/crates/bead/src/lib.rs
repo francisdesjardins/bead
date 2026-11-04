@@ -56,8 +56,8 @@ pub use broker::memory::{
 };
 pub use broker::participant::{
     BODY_GRACE_PERIOD, BrokerParticipant, BrokerParticipantOptions, BrokerRefusal,
-    BrokerRefusedError, HEARTBEAT, HELD_BYTES_BUDGET, MAXIMUM_ENVELOPE_PARTS_BYTES,
-    MINIMUM_BODY_BYTES_PER_SECOND, ParticipantErrorListener, ROOT,
+    BrokerRefusedError, HEARTBEAT, MAXIMUM_ENVELOPE_PARTS_BYTES, MINIMUM_BODY_BYTES_PER_SECOND,
+    ParticipantErrorListener, ROOT,
 };
 pub use broker::server::{
     ACCEPT_TIMEOUT, BrokerTransportServer, BrokerTransportServerOptions, MAXIMUM_CONNECTIONS,
@@ -69,11 +69,11 @@ pub use clock::{
 };
 pub use constants::{
     CredentialScheme, EnvelopeFlag, EnvelopeKind, EnvelopeLayout, FailureScope, ProcedureKind,
-    ProtocolCode, RESERVATION, RouterSide, SERVER_CONNECTION_HANDLE, SESSION_TOKEN_BYTES,
+    ProtocolCode, RouterSide, SERVER_CONNECTION_HANDLE, SESSION_TOKEN_BYTES,
 };
 pub use credentials::{
-    Credentials, ElsewhereSession, ElsewhereVerdict, ElsewhereVerifier, JWT_LIMIT_BYTES, JwtKeySet,
-    JwtSetKey, KeySetAnswer, KeySetAsk,
+    Credentials, ElsewhereSession, ElsewhereVerdict, ElsewhereVerifier, JwtKeySet, JwtSetKey,
+    KeySetAnswer, KeySetAsk,
 };
 pub use debug::participant::{ParcelVerdict, ParticipantDebugEvent, ParticipantDebugListener};
 pub use debug::{
@@ -94,16 +94,16 @@ pub use failure::{Failure, FailureOrigin, ProcedureAddress};
 pub use identity::{DeclarationWay, Deprecation, IdentityRefusal, Procedure};
 pub use joined::JoinedServerTransport;
 pub use jwt_verifier::{
-    JWT_LEEWAY, JwtAgainst, JwtAlgorithm, JwtKey, JwtRefusal, JwtSessionIdentifier, JwtVerdict,
+    JwtAgainst, JwtAlgorithm, JwtKey, JwtRefusal, JwtSessionIdentifier, JwtVerdict,
 };
 pub use managers::notification::{
     NotificationKey, PACING_DEFAULTS, PacingLimits, PacingLimitsOptions,
 };
 pub use managers::service::{
-    CloseConnection, Command, CommandOptions, DEFAULT_TIMEOUT, DebugEvent, DebugListener,
-    DeprecatedListener, DroppedListener, Notification, NotificationCallback,
-    NotificationDependencies, NotificationRegistration, NotificationResolverDependencies,
-    NotificationResolverOf, Notifier, NotifyOptions, RegistrationOptions, Request, RequestDefaults,
+    CloseConnection, Command, CommandOptions, DebugEvent, DebugListener, DeprecatedListener,
+    DroppedListener, Notification, NotificationCallback, NotificationDependencies,
+    NotificationRegistration, NotificationResolverDependencies, NotificationResolverOf, Notifier,
+    NotifyOptions, REQUEST_DEFAULTS, RegistrationOptions, Request, RequestDefaults,
     RequestDependencies, RequestOptions, RequestProps, RequestResolverDependencies,
     ResolverCallback, ResolverOf, Response, ServiceCall, ServiceManager, ServiceManagerClient,
     ServiceManagerOptions, ServiceManagerServer, ServiceRouter, Subscriber, SubscriberFilter,
@@ -116,8 +116,9 @@ pub use memory::{
     TRANSPORT_MEMORY,
 };
 pub use metrics::{
-    CallEnding, MAXIMUM_PROCEDURES, METRICS_CONTENT_TYPE, MetricsExposition, MetricsRegistry,
-    MetricsRegistryOptions, NotificationSeries, ProcedureSeries, ResolverSeries, RouterMetrics,
+    CallEnding, METRICS_CONTENT_TYPE, METRICS_REGISTRY_DEFAULTS, MetricsExposition,
+    MetricsRegistry, MetricsRegistryOptions, NotificationSeries, ProcedureSeries, ResolverSeries,
+    RouterMetrics,
 };
 pub use payloads::{CodecRefusal, JsonCodec, JsonOf, PayloadCodec, RawCodec, TextCodec};
 pub use router::admissions::{
@@ -156,11 +157,10 @@ pub use service::{
 };
 pub use session_token::{SessionToken, SessionTokenDrawError};
 pub use transport::{
-    CONNECT_TIMEOUT, ClientListener, Connect, ListenerId, RECONNECT_ATTEMPTS, RECONNECT_DELAY,
-    ReadyState, RouterClientTransport, Sent, ServerListener, ServerTransport,
-    TransportClientDisconnectOptions, TransportClientReconnectDelay,
-    TransportClientReconnectDelayResolver, TransportClientReconnectOptions, TransportServerClient,
-    TransportServerRefusal, is_field_value,
+    CONNECT_TIMEOUT, ClientListener, Connect, ListenerId, RECONNECT_DEFAULTS, ReadyState,
+    RouterClientTransport, Sent, ServerListener, ServerTransport, TransportClientDisconnectOptions,
+    TransportClientReconnectDelay, TransportClientReconnectDelayResolver,
+    TransportClientReconnectOptions, TransportServerClient, TransportServerRefusal, is_field_value,
 };
 pub use violations::{
     CLOSING_BYTES, Judged, ReadViolations, Violation, ViolationHolder, detail_bound_of,
@@ -173,6 +173,7 @@ pub use violations::{
 /// 0004), as the C# side's members reach theirs by `InternalsVisibleTo`.
 #[doc(hidden)]
 pub mod internal {
+    pub use crate::credentials::JWT_LIMIT_BYTES;
     pub use crate::duration::{hold, hold_finite};
     pub use crate::envelope::{
         Envelope, MAXIMUM_DETAIL_BYTES, Prefix, ReadEnvelopeOptions, ReadHeader, header_bytes_of,

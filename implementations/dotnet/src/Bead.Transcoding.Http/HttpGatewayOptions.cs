@@ -304,4 +304,7 @@ public sealed record HttpGatewayStartOptions
 
     /// <summary>Whether it takes any free port, the one it took given back.</summary>
     public bool FindOpenPort { get; init; }
+
+    /// <summary>What gives up on the start.</summary>
+    public CancellationToken CancellationToken { get; init; }
 }

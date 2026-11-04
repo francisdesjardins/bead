@@ -132,7 +132,10 @@ export const createWorkerTransportServer = ({
           }
         })
       );
-      tell(CONNECTION_EVENT, [port, undefined, connectionHandle]);
+      tell(CONNECTION_EVENT, [
+        Object.freeze({ request: undefined, socket: port }),
+        connectionHandle,
+      ]);
       port.postMessage(WORKER_MESSAGES.OPEN);
     };
 

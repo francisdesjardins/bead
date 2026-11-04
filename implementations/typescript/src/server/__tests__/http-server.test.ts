@@ -6,7 +6,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
 import { WebSocketServer } from 'ws';
 import { createHTTPClient, type HTTPClient } from '../../client/http-client';
-import { createWSClient } from '../../client/ws-client';
+import { createWebSocketClient } from '../../client/websocket-client';
 import { envelopeOf } from '../../router/shared/__tests__/fixtures';
 import { EnvelopeKind } from '../../router/shared/constants';
 import type { IProcedure } from '../../router/shared/types';
@@ -34,7 +34,7 @@ import {
   type HTTPServer,
   type IAccessRefusal,
 } from '../http-server';
-import { createWSServer } from '../ws-server';
+import { createWebSocketServer } from '../websocket-server';
 import { expectAtRest } from './fixtures';
 
 // helpers
@@ -327,8 +327,10 @@ test.describe('an HTTP server and client', () => {
     const { armed } = timersBy(clock, () => {
       server.transport.emit(
         'connection',
-        { ordinal: 1 },
-        { method: 'POST', remoteAddress: host, remotePort: 40_000, url: '/bead' },
+        {
+          request: { method: 'POST', remoteAddress: host, remotePort: 40_000, url: '/bead' },
+          socket: { ordinal: 1 },
+        },
         'type=HTTP;ip=127.0.0.1;ordinal=1'
       );
     });
@@ -432,13 +434,13 @@ test.describe('an HTTP server and client', () => {
   });
 
   test('relay a call from an HTTP requester to a target behind a WebSocket, once a session admits it', async () => {
-    const target = createWSServer({ transport: { WebSocketServer } });
+    const target = createWebSocketServer({ transport: { WebSocketServer } });
     const { port: targetPort } = await target.transport.start({
       address: host,
       findOpenPort: true,
     });
     const [, TrackedWebSocket] = IMPLEMENTATIONS[1];
-    const toTarget = createWSClient({ transport: { WebSocket: TrackedWebSocket } });
+    const toTarget = createWebSocketClient({ transport: { WebSocket: TrackedWebSocket } });
 
     target.services.getRequestResolver(echo, { serializer: text })((request, response) => {
       return response(request.payload.toUpperCase());

@@ -97,7 +97,7 @@ internal sealed class BrokerPair : IAsyncDisposable
         var before = Opened.Count;
         var client = ClientParticipant.Client();
 
-        await client.Connect(new BrokerTransportClientConnectOptions { Server = "interop" }, Cancelled);
+        await client.Connect(new BrokerTransportClientConnectOptions { Server = "interop", CancellationToken = Cancelled });
         await Until(
             () =>
             {

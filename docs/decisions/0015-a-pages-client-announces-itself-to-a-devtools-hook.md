@@ -40,7 +40,7 @@ script in the page's own world at `document_start`. A page loaded before the ext
 has no hook until it reloads.
 
 **`createClient` announces the client to it as it builds the client**, unless its options say
-`devtools: false`; `createWSClient`, `createHTTPClient` and `createWorkerClient` go through
+`devtools: false`; `createWebSocketClient`, `createHTTPClient` and `createWorkerClient` go through
 `createClient`, and a router built alone announces nothing. The client hands the hook a source and
 nothing more, never itself, its router or its credential. The hook's contract is a `register` that
 takes a source and returns its withdrawal. A source names its `protocol`, 1, and its `side`, and

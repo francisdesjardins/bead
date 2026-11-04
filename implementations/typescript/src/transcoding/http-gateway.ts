@@ -88,7 +88,7 @@ import type {
   IHTTPResponseLike,
   IHTTPServerLike,
 } from '../transport/server/types';
-import { MAXIMUM_UNSENT_BYTES } from '../transport/server/ws-transport-server';
+import { MAXIMUM_UNSENT_BYTES } from '../transport/server/websocket-transport-server';
 import { createHTTPBinding } from './binding';
 import { createEventStream, EVENT_STREAM_MEDIA_TYPE, type IEventStream } from './events';
 import { createJsonForm, JsonFormError, responseFieldOf } from './json-form';

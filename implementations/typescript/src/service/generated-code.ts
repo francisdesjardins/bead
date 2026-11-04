@@ -23,3 +23,14 @@
  * void GENERATED_CODE_SUPPORTS_VERSION_6;
  */
 export const GENERATED_CODE_SUPPORTS_VERSION_6 = true;
+
+/**
+ * Beside the contract 6, a service's catalogue made of its id and its codes by name, two
+ * parameters: `failuresOf(serviceId, codes)`.
+ *
+ * @example
+ * import { GENERATED_CODE_SUPPORTS_VERSION_7 } from '@francisdesjardins/bead/service';
+ *
+ * void GENERATED_CODE_SUPPORTS_VERSION_7;
+ */
+export const GENERATED_CODE_SUPPORTS_VERSION_7 = true;

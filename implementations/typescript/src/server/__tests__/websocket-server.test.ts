@@ -6,7 +6,7 @@ import {
   createServer as createNetServer,
 } from 'node:net';
 import { WebSocket, WebSocketServer } from 'ws';
-import { createWSClient } from '../../client/ws-client';
+import { createWebSocketClient } from '../../client/websocket-client';
 import { createRouterServer } from '../../router/server/router-server';
 import { createSessionManager } from '../../router/server/session-manager';
 import { createServiceManager } from '../../router/shared/service-manager';
@@ -25,14 +25,14 @@ import type { TransportServerConnectionHandle } from '../../transport/server/typ
 import { allClosed, host, IMPLEMENTATIONS } from '../../transport/shared/__tests__/fixtures';
 import {
   CancelError,
-  createWSServer,
+  createWebSocketServer,
   FailureError,
   type IRelayOptions,
   ProtocolCode,
   requireCredential,
   shareLegBSession,
   TimeoutError,
-} from '../ws-server';
+} from '../websocket-server';
 import { expectAtRest } from './fixtures';
 
 // helpers
@@ -88,12 +88,12 @@ const unsubscribe: IProcedure = {
 
 // definition
 
-test('createWSServer builds on a WebSocket transport server, not yet started, with the layers given', async () => {
+test('createWebSocketServer builds on a WebSocket transport server, not yet started, with the layers given', async () => {
   const sessions = createSessionManager();
   const built: string[] = [];
   const limits: unknown[] = [];
 
-  await using server = createWSServer({
+  await using server = createWebSocketServer({
     limits: { maximumPayloadBytes: 8 },
     router: (transport, options) => {
       built.push('router');
@@ -122,7 +122,7 @@ test('createWSServer builds on a WebSocket transport server, not yet started, wi
   expect(limits).toEqual([{ maximumPayloadBytes: 8 }]);
 });
 
-test('createWSServer takes a message of an envelope at most, more when the transport says so, and never less', async () => {
+test('createWebSocketServer takes a message of an envelope at most, more when the transport says so, and never less', async () => {
   // envelopes of 256 bytes
   const small = { chunkBytes: 128, maximumEnvelopeBytes: 256, windowBytes: 256 };
 
@@ -132,7 +132,7 @@ test('createWSServer takes a message of an envelope at most, more when the trans
     [small, 1_024, 1_024],
   ] as const) {
     const fake = createFakeWebSocketServer();
-    const server = createWSServer({
+    const server = createWebSocketServer({
       limits,
       transport: { maxPayload, WebSocketServer: fake.FakeWebSocketServer },
     });
@@ -151,13 +151,13 @@ test('createWSServer takes a message of an envelope at most, more when the trans
     [small, 255],
   ] as const) {
     expect(() => {
-      return createWSServer({ limits, transport: { maxPayload, WebSocketServer } });
+      return createWebSocketServer({ limits, transport: { maxPayload, WebSocketServer } });
     }).toThrow(`maxPayload is an envelope's limit at least`);
   }
 });
 
-test('createWSServer builds its router with the pacing its options give', async () => {
-  await using server = createWSServer({
+test('createWebSocketServer builds its router with the pacing its options give', async () => {
+  await using server = createWebSocketServer({
     pacing: { maximumQueuedNotificationBytes: 2_048, maximumQueuedNotifications: 3 },
     transport: { WebSocketServer },
   });
@@ -168,8 +168,8 @@ test('createWSServer builds its router with the pacing its options give', async 
   });
 });
 
-test('createWSServer closes with 1009 a connection that sends more than `maxPayload`', async () => {
-  const server = createWSServer({
+test('createWebSocketServer closes with 1009 a connection that sends more than `maxPayload`', async () => {
+  const server = createWebSocketServer({
     limits: { chunkBytes: 128, maximumEnvelopeBytes: 256, windowBytes: 256 },
     transport: { maxPayload: 256, WebSocketServer },
   });
@@ -192,11 +192,14 @@ test('createWSServer closes with 1009 a connection that sends more than `maxPayl
   }
 });
 
-test('createWSServer closes a client that lets a command go unanswered, when told to', async () => {
-  const server = createWSServer({ closeOnCommandTimeout: true, transport: { WebSocketServer } });
+test('createWebSocketServer closes a client that lets a command go unanswered, when told to', async () => {
+  const server = createWebSocketServer({
+    closeOnCommandTimeout: true,
+    transport: { WebSocketServer },
+  });
   const { port } = await server.transport.start({ address: host, findOpenPort: true });
   const [, TrackedWebSocket] = IMPLEMENTATIONS[1];
-  const client = createWSClient({ transport: { WebSocket: TrackedWebSocket } });
+  const client = createWebSocketClient({ transport: { WebSocket: TrackedWebSocket } });
   const opened = Promise.withResolvers<TransportServerConnectionHandle>();
 
   try {
@@ -256,10 +259,10 @@ test.describe('a WebSocket server and client, carrying transfers', () => {
     client: clientLimits,
     server: serverLimits,
   }: { client?: RouterLimitsOptions; server?: RouterLimitsOptions } = {}) => {
-    const server = createWSServer({ limits: serverLimits, transport: { WebSocketServer } });
+    const server = createWebSocketServer({ limits: serverLimits, transport: { WebSocketServer } });
     const { port } = await server.transport.start({ address: host, findOpenPort: true });
     const [, TrackedWebSocket] = IMPLEMENTATIONS[1];
-    const client = createWSClient({
+    const client = createWebSocketClient({
       limits: clientLimits,
       transport: { WebSocket: TrackedWebSocket },
     });
@@ -467,7 +470,7 @@ test.describe('a WebSocket relay, its leg B on a pipe to a device', () => {
     limits,
     relay,
   }: { limits?: RouterLimitsOptions; relay?: IRelayOptions } = {}) => {
-    const server = createWSServer({
+    const server = createWebSocketServer({
       limits,
       relay: relay ?? { beforeRoute: shareLegBSession },
       transport: { WebSocketServer },
@@ -477,7 +480,7 @@ test.describe('a WebSocket relay, its leg B on a pipe to a device', () => {
     const toDevice = createRouterClient(pipe.client, { limits });
     const deviceRouter = createRouterServer(pipe.server, { limits });
     const [, TrackedWebSocket] = IMPLEMENTATIONS[1];
-    const client = createWSClient({ limits, transport: { WebSocket: TrackedWebSocket } });
+    const client = createWebSocketClient({ limits, transport: { WebSocket: TrackedWebSocket } });
 
     pipe.open();
     server.router.registerDestination(toDevice, { destinationId: 7, label: 'the device' });
@@ -716,9 +719,9 @@ test.describe('a WebSocket relay, its leg B on a pipe to a device', () => {
 for (const [label, TrackedWebSocket] of IMPLEMENTATIONS) {
   test.describe(`a WebSocket server and client, the client on ${label}`, () => {
     test('open a session by a request, answer within it, command the client, and close a silent connection', async () => {
-      const server = createWSServer({ transport: { WebSocketServer } });
+      const server = createWebSocketServer({ transport: { WebSocketServer } });
       const { port } = await server.transport.start({ address: host, findOpenPort: true });
-      const client = createWSClient({ transport: { WebSocket: TrackedWebSocket } });
+      const client = createWebSocketClient({ transport: { WebSocket: TrackedWebSocket } });
       const opened = Promise.withResolvers<TransportServerConnectionHandle>();
 
       try {
@@ -794,9 +797,9 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS) {
     });
 
     test('subscribe, get the notification that doubles its result, and unsubscribe by call id', async () => {
-      const server = createWSServer({ transport: { WebSocketServer } });
+      const server = createWebSocketServer({ transport: { WebSocketServer } });
       const { port } = await server.transport.start({ address: host, findOpenPort: true });
-      const client = createWSClient({ transport: { WebSocket: TrackedWebSocket } });
+      const client = createWebSocketClient({ transport: { WebSocket: TrackedWebSocket } });
 
       try {
         const newsResolver = server.services.getNotificationResolver(news, {
@@ -854,9 +857,9 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS) {
     });
 
     test('a subscription let go of without an unsubscribe is cancelled, so subscribing again is heard', async () => {
-      const server = createWSServer({ transport: { WebSocketServer } });
+      const server = createWebSocketServer({ transport: { WebSocketServer } });
       const { port } = await server.transport.start({ address: host, findOpenPort: true });
-      const client = createWSClient({ transport: { WebSocket: TrackedWebSocket } });
+      const client = createWebSocketClient({ transport: { WebSocket: TrackedWebSocket } });
 
       try {
         const newsResolver = server.services.getNotificationResolver(news, {
@@ -901,9 +904,9 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS) {
     });
 
     test('a command whose timeout passes is cancelled, and the client’s resolver hears it', async () => {
-      const server = createWSServer({ transport: { WebSocketServer } });
+      const server = createWebSocketServer({ transport: { WebSocketServer } });
       const { port } = await server.transport.start({ address: host, findOpenPort: true });
-      const client = createWSClient({ transport: { WebSocket: TrackedWebSocket } });
+      const client = createWebSocketClient({ transport: { WebSocket: TrackedWebSocket } });
       const opened = Promise.withResolvers<TransportServerConnectionHandle>();
       const reasons: unknown[] = [];
 
@@ -949,9 +952,9 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS) {
     });
 
     test('a request whose timeout passes is cancelled, and the server’s resolver hears it', async () => {
-      const server = createWSServer({ transport: { WebSocketServer } });
+      const server = createWebSocketServer({ transport: { WebSocketServer } });
       const { port } = await server.transport.start({ address: host, findOpenPort: true });
-      const client = createWSClient({ transport: { WebSocket: TrackedWebSocket } });
+      const client = createWebSocketClient({ transport: { WebSocket: TrackedWebSocket } });
       const reasons: unknown[] = [];
       const errors: Error[] = [];
 
@@ -989,9 +992,9 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS) {
     });
 
     test('a session that ends ends the subscriptions it let the client have: the client drops them, and asks anew', async () => {
-      const server = createWSServer({ transport: { WebSocketServer } });
+      const server = createWebSocketServer({ transport: { WebSocketServer } });
       const { port } = await server.transport.start({ address: host, findOpenPort: true });
-      const client = createWSClient({ transport: { WebSocket: TrackedWebSocket } });
+      const client = createWebSocketClient({ transport: { WebSocket: TrackedWebSocket } });
 
       try {
         server.services.getRequestResolver(openSession, { serializer: text })(
@@ -1050,9 +1053,9 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS) {
     });
 
     test('an ordinary request to the procedure of a subscription held moves nothing: notify still reaches it', async () => {
-      const server = createWSServer({ transport: { WebSocketServer } });
+      const server = createWebSocketServer({ transport: { WebSocketServer } });
       const { port } = await server.transport.start({ address: host, findOpenPort: true });
-      const client = createWSClient({ transport: { WebSocket: TrackedWebSocket } });
+      const client = createWebSocketClient({ transport: { WebSocket: TrackedWebSocket } });
 
       try {
         const newsResolver = server.services.getNotificationResolver(news, {
@@ -1108,7 +1111,7 @@ test('keeps two sockets from one address and port, to two of its addresses, as t
   );
 
   // a server on every address, each socket bound to one address and port of the loopback
-  const server = createWSServer({ transport: { WebSocketServer } });
+  const server = createWebSocketServer({ transport: { WebSocketServer } });
   const { port } = await server.transport.start({ address: '0.0.0.0', findOpenPort: true });
   // a port the system gave a listener and took back, so no socket of another test holds it
   const free = createNetServer().listen(0, '127.0.0.1');
@@ -1136,8 +1139,8 @@ test('keeps two sockets from one address and port, to two of its addresses, as t
       return socket;
     },
   });
-  const alice = createWSClient({ transport: { WebSocket: BoundWebSocket } });
-  const other = createWSClient({ transport: { WebSocket: BoundWebSocket } });
+  const alice = createWebSocketClient({ transport: { WebSocket: BoundWebSocket } });
+  const other = createWebSocketClient({ transport: { WebSocket: BoundWebSocket } });
 
   // who opened a session on each connection, as its handle names it
   const names = new Map<TransportServerConnectionHandle, string>();
@@ -1198,7 +1201,7 @@ test('keeps two sockets from one address and port, to two of its addresses, as t
 
 test('answers leg A DESTINATION_LOST when its leg B over WebSocket is dropped behind its socket', async () => {
   // a relay that admits every call, whose sockets hold 64 KiB at most for a peer
-  const server = createWSServer({
+  const server = createWebSocketServer({
     relay: {
       beforeRoute: () => {
         return true;
@@ -1220,7 +1223,7 @@ test('answers leg A DESTINATION_LOST when its leg B over WebSocket is dropped be
 
   // a device behind its own socket, its leg B, which reads nothing once upgraded
   const connected = new Promise<TransportServerConnectionHandle>((resolve) => {
-    server.transport.once('connection', (...[, , connectionHandle]) => {
+    server.transport.once('connection', (...[, connectionHandle]) => {
       resolve(connectionHandle);
     });
   });
@@ -1243,7 +1246,7 @@ test('answers leg A DESTINATION_LOST when its leg B over WebSocket is dropped be
 
   server.router.registerDestination({ connectionHandle: legB }, { destinationId: 7 });
 
-  const client = createWSClient({ transport: { WebSocket } });
+  const client = createWebSocketClient({ transport: { WebSocket } });
 
   await client.connect({ host, port });
 

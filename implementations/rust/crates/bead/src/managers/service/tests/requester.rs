@@ -12,8 +12,8 @@ use crate::debug::{DebugDirection, DebugType};
 use crate::envelope::{Envelope, ResultHeader};
 use crate::identity::{Deprecation, Procedure};
 use crate::managers::service::{
-    CommandOptions, NotificationDependencies, RequestDefaults, RequestDependencies, RequestOptions,
-    ServiceManager, ServiceManagerOptions, ServiceRouter,
+    CommandOptions, NotificationDependencies, REQUEST_DEFAULTS, RequestDefaults,
+    RequestDependencies, RequestOptions, ServiceManager, ServiceManagerOptions, ServiceRouter,
 };
 use crate::payloads::{JsonCodec, TextCodec};
 use crate::router::types::RequestCredential;
@@ -219,7 +219,9 @@ async fn fills_what_the_options_leave_out_and_passes_a_destination_as_it_is() {
     let fixture = Fixture::new();
     fixture.transport.open(&handle_of(1), true);
     let defaults = &fixture.manager.inner;
-    assert_eq!(defaults.timeout, Duration::from_secs(5));
+    assert_eq!(REQUEST_DEFAULTS.timeout, Some(Duration::from_secs(5)));
+    assert_eq!(REQUEST_DEFAULTS.close_on_timeout, None);
+    assert_eq!(Some(defaults.timeout), REQUEST_DEFAULTS.timeout);
     for (default_close, own_close, destination, timeout, expected_close) in [
         (None, None, None, None, false),
         (None, None, Some(4), Some(Duration::from_millis(10)), false),

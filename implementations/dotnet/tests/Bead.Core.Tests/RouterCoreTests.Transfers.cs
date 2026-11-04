@@ -115,7 +115,7 @@ public sealed partial class RouterCoreTests
             }
         };
         await memory.Start();
-        await transport.Connect(new MemoryTransportClientConnectOptions { Server = memory }, TestContext.Current.CancellationToken);
+        await transport.Connect(new MemoryTransportClientConnectOptions { Server = memory, CancellationToken = TestContext.Current.CancellationToken });
 
         // * 300 bytes and their quotes, a transfer each way
         var payload = $"\"{new string('x', 300)}\"";

@@ -143,12 +143,14 @@ public sealed class MemoryTransportServer : IServerTransport, IAsyncDisposable
                 return connection.Arrival;
             }).Select((connection) =>
             {
-                return new TransportServerClient(
-                    connection.Address ?? Local,
-                    connection.ConnectionHandle,
-                    connection.LastActivity,
-                    connection.Port ?? 0,
-                    TransportTypes.Memory);
+                return new TransportServerClient
+                {
+                    Address = connection.Address ?? Local,
+                    ConnectionHandle = connection.ConnectionHandle,
+                    LastActivity = connection.LastActivity,
+                    Port = connection.Port ?? 0,
+                    Type = TransportTypes.Memory,
+                };
             })];
         }
     }

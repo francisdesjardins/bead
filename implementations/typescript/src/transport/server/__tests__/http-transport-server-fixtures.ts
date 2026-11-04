@@ -126,7 +126,7 @@ export const batchOf = (...envelopes: Uint8Array[]): number[] => {
 export const recordOf = (server: HTTPTransportServer) => {
   const events: [string, ...unknown[]][] = [];
 
-  server.on('connection', (...[shown, drawing, connectionHandle]) => {
+  server.on('connection', (...[{ request: drawing, socket: shown }, connectionHandle]) => {
     events.push(['connection', shown, drawing, connectionHandle]);
   });
   server.on('message', ({ data }, connectionHandle) => {

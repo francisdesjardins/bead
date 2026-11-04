@@ -19,7 +19,7 @@ const receivedOf = (code: number, serviceId: number): FailureError => {
 
 test.describe('failuresOf', () => {
   test('makes a failure of a name, its code and its detail', () => {
-    const catalogue = failuresOf({ codes: { NOBODY_TO_GREET: 1, TOO_LOUD: 2 }, serviceId: 7 });
+    const catalogue = failuresOf(7, { NOBODY_TO_GREET: 1, TOO_LOUD: 2 });
 
     expect(catalogue.of('TOO_LOUD', 'quieter')).toEqual({
       code: 2,
@@ -45,28 +45,28 @@ test.describe('failuresOf', () => {
   test('refuses a code outside 1 to 65535, and two names of one code', () => {
     for (const code of [0, 65_536, -1, 1.5, Number.NaN]) {
       expect(() => {
-        return failuresOf({ codes: { WRONG: code }, serviceId: 7 });
+        return failuresOf(7, { WRONG: code });
       }, String(code)).toThrow(ProgrammerError);
     }
 
     expect(() => {
-      return failuresOf({ codes: { FIRST: 3, SECOND: 3 }, serviceId: 7 });
+      return failuresOf(7, { FIRST: 3, SECOND: 3 });
     }).toThrow(ProgrammerError);
-    expect(failuresOf({ codes: { LAST: 65_535 }, serviceId: 7 }).codes.LAST).toBe(65_535);
+    expect(failuresOf(7, { LAST: 65_535 }).codes.LAST).toBe(65_535);
   });
 
   test('refuses a service outside 1 to 65535', () => {
     for (const serviceId of [0, 65_536, -1, 1.5, Number.NaN]) {
       expect(() => {
-        return failuresOf({ codes: { WRONG: 1 }, serviceId });
+        return failuresOf(serviceId, { WRONG: 1 });
       }, String(serviceId)).toThrow(ProgrammerError);
     }
 
-    expect(failuresOf({ codes: { LAST: 1 }, serviceId: 65_535 }).serviceId).toBe(65_535);
+    expect(failuresOf(65_535, { LAST: 1 }).serviceId).toBe(65_535);
   });
 
   test('tells a failure of its service by its name, and none of another service', () => {
-    const catalogue = failuresOf({ codes: { NOBODY_TO_GREET: 1, TOO_LOUD: 2 }, serviceId: 7 });
+    const catalogue = failuresOf(7, { NOBODY_TO_GREET: 1, TOO_LOUD: 2 });
 
     expect(catalogue.is(receivedOf(1, 7), 'NOBODY_TO_GREET')).toBe(true);
     expect(catalogue.is(receivedOf(1, 7), 'TOO_LOUD')).toBe(false);
@@ -92,7 +92,7 @@ test.describe('failuresOf', () => {
   });
 
   test('narrows to the failure of its name, and leaves a FailureError it is not one', () => {
-    const catalogue = failuresOf({ codes: { NOBODY_TO_GREET: 1, TOO_LOUD: 2 }, serviceId: 7 });
+    const catalogue = failuresOf(7, { NOBODY_TO_GREET: 1, TOO_LOUD: 2 });
     // a FailureError asked of one name, then of another, and read on each branch
     const told = (error: FailureError): string => {
       if (catalogue.is(error, 'NOBODY_TO_GREET')) {

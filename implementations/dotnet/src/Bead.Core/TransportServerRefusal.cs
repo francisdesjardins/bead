@@ -10,25 +10,38 @@ namespace Bead;
 /// no connection, since a refusal is a request's. Every string it carries is visible ASCII, SP and
 /// HTAB, as a server takes a field (spec 15.12).
 /// </summary>
-/// <param name="Address">
-/// The client's address, as <c>Clients</c> reports it (spec 15.12): the <c>X-Forwarded-For</c> entry
-/// reached past the proxies its <c>TrustedProxies</c> names, a WebSocket's from its upgrade's, else
-/// the socket's; in its one form, an IPv4 address an IPv6 socket carries mapped read as IPv4. None
-/// when the platform gives no socket's address.
-/// </param>
-/// <param name="Authority">
-/// The request's authority as it came, its port included (spec 15.12): an absolute-form target's,
-/// else its <c>Host</c>'s; empty for an empty <c>Host</c>, none when it names none. Its host, the port
-/// aside, is the name to add to a server's hosts.
-/// </param>
-/// <param name="Origin">
-/// The request's <c>Origin</c> as it came, its field lines joined by <c>", "</c> (RFC 9110 §5.3); none
-/// when it sends none. The page to add to a server's origins.
-/// </param>
-/// <param name="Port">
-/// The port of the socket the request came on, as <c>Clients</c> reports it: behind a proxy it
-/// trusts, the nearest proxy's connection's; 0 when it gave none.
-/// </param>
-/// <param name="Reason">The mark it was refused with, as its <c>bead-refusal</c> carries it.</param>
-/// <param name="Status">The status it was refused with.</param>
-public sealed record TransportServerRefusal(string? Address, string? Authority, string? Origin, int Port, string Reason, int Status);
+public sealed record TransportServerRefusal
+{
+    /// <summary>
+    /// The client's address, as <c>Clients</c> reports it (spec 15.12): the <c>X-Forwarded-For</c>
+    /// entry reached past the proxies its <c>TrustedProxies</c> names, a WebSocket's from its
+    /// upgrade's, else the socket's; in its one form, an IPv4 address an IPv6 socket carries mapped
+    /// read as IPv4. None when the platform gives no socket's address.
+    /// </summary>
+    public string? Address { get; init; }
+
+    /// <summary>
+    /// The request's authority as it came, its port included (spec 15.12): an absolute-form
+    /// target's, else its <c>Host</c>'s; empty for an empty <c>Host</c>, none when it names none. Its
+    /// host, the port aside, is the name to add to a server's hosts.
+    /// </summary>
+    public string? Authority { get; init; }
+
+    /// <summary>
+    /// The request's <c>Origin</c> as it came, its field lines joined by <c>", "</c> (RFC 9110 §5.3);
+    /// none when it sends none. The page to add to a server's origins.
+    /// </summary>
+    public string? Origin { get; init; }
+
+    /// <summary>
+    /// The port of the socket the request came on, as <c>Clients</c> reports it: behind a proxy it
+    /// trusts, the nearest proxy's connection's; 0 when it gave none.
+    /// </summary>
+    public int Port { get; init; }
+
+    /// <summary>The mark it was refused with, as its <c>bead-refusal</c> carries it.</summary>
+    public required string Reason { get; init; }
+
+    /// <summary>The status it was refused with.</summary>
+    public required int Status { get; init; }
+}

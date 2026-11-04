@@ -184,9 +184,10 @@ public sealed class HttpGateway : IAsyncDisposable
     /// Starts its own listener, as an HTTP transport builds its own, and gives where it listens: an IP
     /// literal, or <c>localhost</c>, both loopbacks.
     /// </summary>
-    public async Task<TransportServerAddress> Start(HttpGatewayStartOptions? options = null, CancellationToken cancellationToken = default)
+    public async Task<TransportServerAddress> Start(HttpGatewayStartOptions? options = null)
     {
         var start = options ?? new HttpGatewayStartOptions();
+        var cancellationToken = start.CancellationToken;
 
         HostsAndOrigins.AssertAddress(start.Address, nameof(HttpGatewayStartOptions.Address));
 
@@ -882,8 +883,7 @@ public sealed class HttpGateway : IAsyncDisposable
         try
         {
             await transport.Connect(
-                new MemoryTransportClientConnectOptions { Server = _options.Transport, Address = address, Port = context.Connection.RemotePort },
-                context.RequestAborted);
+                new MemoryTransportClientConnectOptions { Server = _options.Transport, Address = address, Port = context.Connection.RemotePort, CancellationToken = context.RequestAborted });
         }
         catch (Exception reason) when (reason is ConnectException or TimeoutException)
         {

@@ -217,7 +217,7 @@ test.describe('createBrokerTransportClient', () => {
     });
 
     for (const server of servers) {
-      server.on('connection', (...[, , connectionHandle]) => {
+      server.on('connection', (...[, connectionHandle]) => {
         heard.push(`${server.address} ${connectionHandle}`);
       });
       await server.start();

@@ -2,9 +2,9 @@ import { expect, test } from '@playwright/test';
 import {
   refusalOfHandshake,
   toldOfHandshake,
-  WS_REFUSALS,
+  WEBSOCKET_REFUSALS,
   type IHandshakeRequestLike,
-} from '../ws-handshake';
+} from '../websocket-handshake';
 
 // constants
 
@@ -56,18 +56,18 @@ const answerOf = (request: IHandshakeRequestLike) => {
 };
 
 const HOST = [400, undefined];
-const HOST_REFUSED = [403, WS_REFUSALS.HOST];
-const METHOD = [405, WS_REFUSALS.METHOD];
-const UPGRADE = [426, WS_REFUSALS.UPGRADE];
-const VERSION = [426, WS_REFUSALS.VERSION];
-const MALFORMED = [400, WS_REFUSALS.MALFORMED];
-const ORIGIN = [403, WS_REFUSALS.ORIGIN];
+const HOST_REFUSED = [403, WEBSOCKET_REFUSALS.HOST];
+const METHOD = [405, WEBSOCKET_REFUSALS.METHOD];
+const UPGRADE = [426, WEBSOCKET_REFUSALS.UPGRADE];
+const VERSION = [426, WEBSOCKET_REFUSALS.VERSION];
+const MALFORMED = [400, WEBSOCKET_REFUSALS.MALFORMED];
+const ORIGIN = [403, WEBSOCKET_REFUSALS.ORIGIN];
 
 // definition
 
 test.describe('refusalOfHandshake', () => {
   test('names each refusal of its own as spec 15.6 marks it', () => {
-    expect(WS_REFUSALS).toEqual({
+    expect(WEBSOCKET_REFUSALS).toEqual({
       BUSY: 'busy',
       HOST: 'host-refused',
       MALFORMED: 'malformed',
@@ -76,7 +76,7 @@ test.describe('refusalOfHandshake', () => {
       UPGRADE: 'upgrade-required',
       VERSION: 'version-refused',
     });
-    expect(Object.isFrozen(WS_REFUSALS)).toBe(true);
+    expect(Object.isFrozen(WEBSOCKET_REFUSALS)).toBe(true);
   });
 
   test('writes each answer whole: marked, never stored nor sniffed, empty, its connection closed, and HTTP’s own unmarked', () => {
@@ -206,7 +206,7 @@ test.describe('refusalOfHandshake', () => {
         hosts: ['*'],
         origins: [],
       })?.refusal
-    ).toBe(WS_REFUSALS.UPGRADE);
+    ).toBe(WEBSOCKET_REFUSALS.UPGRADE);
   });
 
   test('refuses first, unmarked, a field holding a control character but a tab or an octet past ASCII, or whose value starts or ends with a space or a tab, whatever else the request holds', () => {

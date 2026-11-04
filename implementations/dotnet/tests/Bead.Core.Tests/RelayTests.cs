@@ -506,7 +506,7 @@ public sealed class RelayTests
         relay.RegisterDestination(target, Seven with { Audience = "bead-interop" });
 
         await server.Start();
-        await transport.Connect(new MemoryTransportClientConnectOptions { Server = server }, Cancelled);
+        await transport.Connect(new MemoryTransportClientConnectOptions { Server = server, CancellationToken = Cancelled });
 
         var request = new RouterRequest(
             new Procedure { ProcedureId = 1, ProcedureName = "echo", ServiceId = 2, ServiceRevision = 3 },

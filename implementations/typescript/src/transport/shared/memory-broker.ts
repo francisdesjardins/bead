@@ -58,11 +58,6 @@ export interface IMemoryBrokerAdapterOptions {
   id: string;
 }
 
-/** A publication through the in-memory broker: as any, or handed on marked retained, as a test asks. */
-export interface IMemoryBrokerPublication extends IBrokerPublication {
-  readonly retained?: boolean | undefined;
-}
-
 /**
  * An adapter of the in-memory broker: an adapter as any, its link lost or taken over and its
  * acknowledgements counted.
@@ -74,7 +69,8 @@ export interface IMemoryBrokerAdapter extends IBrokerAdapter {
   readonly unsettled: number;
   /** Its link lost, as a test asks: its will published, its `down` told in a later turn. */
   lose(): void;
-  publish(publication: IMemoryBrokerPublication): Promise<BrokerPublished>;
+  /** As `publish`, handed on marked retained, as a broker hands a message it kept, as a test asks. */
+  publishRetained(publication: IBrokerPublication): Promise<BrokerPublished>;
   /**
    * Its link taken over, as a test asks, as by a second link of its id: its subscriptions dropped,
    * its will published, its `down` told taken over in a later turn.
@@ -101,9 +97,14 @@ export type MemoryBrokerFault = (typeof MEMORY_BROKER_FAULTS)[keyof typeof MEMOR
 // a message on its way to one link, copied as it was published
 interface IQueued {
   readonly expiresAt: number;
+  readonly isRetained: boolean;
   readonly payload: Uint8Array;
-  readonly retained: boolean;
   readonly topic: BrokerTopic;
+}
+
+// a publication as the broker takes it: as any, or handed on marked retained, as a test asks
+interface IPublishing extends IBrokerPublication {
+  readonly isRetained: boolean;
 }
 
 // one adapter's link to the broker, while it is up
@@ -260,19 +261,16 @@ export const createMemoryBroker = (options?: IMemoryBrokerOptions): IMemoryBroke
     return index === -1 ? undefined : faults.splice(index, 1)[0]?.fault;
   };
 
-  const publishFrom = (
-    link: ILink | undefined,
-    publication: IMemoryBrokerPublication
-  ): BrokerPublished => {
-    const { expiresAfter, payload, retained = false, topic } = publication;
+  const publishFrom = (link: ILink | undefined, publication: IPublishing): BrokerPublished => {
+    const { expiresAfter, isRetained, payload, topic } = publication;
     const key = keyOf(topic);
     const fault = faultOf(key);
     const recipients = recipientsOf(key, { again: fault === MEMORY_BROKER_FAULTS.REDELIVER });
     const to = recipients.flat();
     const message: IQueued = {
       expiresAt: expiresAfter === undefined ? Infinity : clock.performance.now() + expiresAfter,
+      isRetained,
       payload: payload.slice(),
-      retained,
       topic: [...topic],
     };
 
@@ -335,6 +333,25 @@ export const createMemoryBroker = (options?: IMemoryBrokerOptions): IMemoryBroke
         return link;
       };
       const offered = Object.freeze({ ...capabilities });
+      const publishing = (publication: IPublishing): Promise<BrokerPublished> => {
+        try {
+          const link = linkOf();
+
+          if (publication.payload.length > maximumMessageBytes) {
+            throw new GenericError(
+              `a payload of ${String(publication.payload.length)} bytes, past the broker's maximumMessageBytes, ${String(maximumMessageBytes)} bytes`
+            );
+          }
+
+          if (publication.signal?.aborted === true) {
+            throw new GenericError('the publication was given up on');
+          }
+
+          return Promise.resolve(publishFrom(link, publication));
+        } catch (reason) {
+          return Promise.reject(toError(reason));
+        }
+      };
       // * its link ended without a clean end: what it held dropped, its will published, its `down`
       // told in a later turn
       const end = (down: IBrokerDown): void => {
@@ -348,7 +365,7 @@ export const createMemoryBroker = (options?: IMemoryBrokerOptions): IMemoryBroke
         unsettled = 0;
 
         if (link.will !== undefined) {
-          publishFrom(undefined, link.will);
+          publishFrom(undefined, { ...link.will, isRetained: false });
         }
 
         queueMicrotask(() => {
@@ -389,23 +406,10 @@ export const createMemoryBroker = (options?: IMemoryBrokerOptions): IMemoryBroke
           emitter.on(event, listener as never);
         },
         publish: (publication) => {
-          try {
-            const link = linkOf();
-
-            if (publication.payload.length > maximumMessageBytes) {
-              throw new GenericError(
-                `a payload of ${String(publication.payload.length)} bytes, past the broker's maximumMessageBytes, ${String(maximumMessageBytes)} bytes`
-              );
-            }
-
-            if (publication.signal?.aborted === true) {
-              throw new GenericError('the publication was given up on');
-            }
-
-            return Promise.resolve(publishFrom(link, publication));
-          } catch (reason) {
-            return Promise.reject(toError(reason));
-          }
+          return publishing({ ...publication, isRetained: false });
+        },
+        publishRetained: (publication) => {
+          return publishing({ ...publication, isRetained: true });
         },
         // it has no packet: every message's payload is its own, whatever its topic
         receiveBound: () => {
@@ -423,7 +427,7 @@ export const createMemoryBroker = (options?: IMemoryBrokerOptions): IMemoryBroke
           const link: ILink = {
             adapter,
             // * counted until acknowledged, once, while it delivers at least once
-            deliver: ({ payload, retained, topic }) => {
+            deliver: ({ isRetained, payload, topic }) => {
               let isSettled = delivery === BROKER_DELIVERIES.AT_MOST_ONCE;
 
               if (!isSettled) {
@@ -431,8 +435,8 @@ export const createMemoryBroker = (options?: IMemoryBrokerOptions): IMemoryBroke
               }
 
               emitter.emit('message', {
+                isRetained,
                 payload: payload.slice(),
-                retained,
                 settle: () => {
                   if (!isSettled && links.get(adapter) === link) {
                     unsettled -= 1;

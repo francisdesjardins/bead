@@ -35,6 +35,7 @@
   IBrokerServing	src/transport/shared/broker-participant.ts
   IBrokerStart	src/transport/shared/types.ts
   IBrokerSubscription	src/transport/shared/types.ts
+  IGauges	src/transport/shared/types.ts
   IParticipantDebugEvent	src/transport/shared/participant-debug.ts
   MAXIMUM_ENVELOPE_PARTS_BYTES	src/transport/shared/broker-participant.ts
   MINIMUM_BODY_BYTES_PER_SECOND	src/transport/shared/broker-participant.ts
@@ -190,6 +191,7 @@
   IDestination	src/router/server/types.ts
   IDestinationOptions	src/router/server/types.ts
   IDestinationRegistration	src/router/server/types.ts
+  IGauges	src/transport/shared/types.ts
   IHTTPServerLike	src/transport/server/types.ts
   IHTTPServerOptions	src/server/http-server.ts
   IHTTPTransportServerOptions	src/transport/server/types.ts
@@ -212,6 +214,7 @@
   ISession	src/router/server/types.ts
   ISessionManager	src/router/server/types.ts
   ISessionRequest	src/router/shared/types.ts
+  ITransportServerConnection	src/transport/server/types.ts
   IntakeLimitsOptions	src/router/shared/types.ts
   LIMIT_DEFAULTS	src/router/shared/constants.ts
   LONGEST_TIMER	src/transport/shared/clock.ts
@@ -311,6 +314,7 @@
   createHTTPTransportServer	src/transport/server/http-transport-server.ts
   httpPolicyOf	src/transport/server/http-policy.ts
 ./joined-transport-server
+  IGauges	src/transport/shared/types.ts
   IJoinableTransportServer	src/transport/server/types.ts
   IJoinedTransportServer	src/transport/server/types.ts
   joinTransports	src/transport/server/joined-transport-server.ts
@@ -331,7 +335,6 @@
   IMemoryBrokerAdapter	src/transport/shared/memory-broker.ts
   IMemoryBrokerAdapterOptions	src/transport/shared/memory-broker.ts
   IMemoryBrokerOptions	src/transport/shared/memory-broker.ts
-  IMemoryBrokerPublication	src/transport/shared/memory-broker.ts
   MEMORY_BROKER_FAULTS	src/transport/shared/memory-broker.ts
   MemoryBrokerFault	src/transport/shared/memory-broker.ts
   TRANSPORT_BROKER	src/transport/shared/constants.ts
@@ -373,6 +376,7 @@
   createMqttBrokerAdapter	src/transport/shared/mqtt-broker-adapter.ts
 ./notification-manager
   CallId	src/router/shared/types.ts
+  IGauges	src/transport/shared/types.ts
   INotificationManager	src/router/server/types.ts
   INotificationManagerOptions	src/router/server/types.ts
   IPacing	src/router/server/types.ts
@@ -524,6 +528,7 @@
   IElsewhereSession	src/router/shared/types.ts
   IFailure	src/router/shared/types.ts
   IFailureHeader	src/router/shared/types.ts
+  IGauges	src/transport/shared/types.ts
   IHandedRequestHeader	src/router/shared/types.ts
   IIntakeLimits	src/router/shared/types.ts
   IJwtKey	src/router/shared/jwt-verifier.ts
@@ -548,6 +553,7 @@
   IRouterServerOptions	src/router/server/types.ts
   IRouterServerTransportLike	src/router/server/types.ts
   ISessionRequest	src/router/shared/types.ts
+  ITransportServerConnection	src/transport/server/types.ts
   IntakeLimitsOptions	src/router/shared/types.ts
   Jwk	src/router/shared/jwt-verifier.ts
   JwtAlgorithm	src/router/shared/jwt-verifier.ts
@@ -592,6 +598,7 @@
   FailureError	src/router/shared/errors.ts
   FailureNameOf	src/service/descriptors.ts
   GENERATED_CODE_SUPPORTS_VERSION_6	src/service/generated-code.ts
+  GENERATED_CODE_SUPPORTS_VERSION_7	src/service/generated-code.ts
   GivenOf	src/service/descriptors.ts
   HookName	src/service/descriptors.ts
   IAdmissionHook	src/service/descriptors.ts
@@ -610,6 +617,7 @@
   IListedFailureError	src/service/failures.ts
   INotification	src/router/shared/types.ts
   INotificationRegistration	src/router/shared/types.ts
+  INotifier	src/service/service-server.ts
   INotifyOptions	src/router/shared/types.ts
   IPayloadCodec	src/router/shared/payloads.ts
   IProcedure	src/router/shared/types.ts
@@ -768,7 +776,9 @@
   GenericError	src/transport/shared/errors.ts
   IClock	src/transport/shared/clock.ts
   IEventIteratorOptions	src/transport/shared/types.ts
+  IGauges	src/transport/shared/types.ts
   ISession	src/router/server/types.ts
+  ISessionChange	src/router/server/types.ts
   ISessionManager	src/router/server/types.ts
   ISessionManagerOptions	src/router/server/types.ts
   ISessionManagerTimers	src/router/server/types.ts
@@ -810,6 +820,7 @@
   IDestination	src/router/server/types.ts
   IDestinationOptions	src/router/server/types.ts
   IDestinationRegistration	src/router/server/types.ts
+  IGauges	src/transport/shared/types.ts
   IHealth	src/server/health.ts
   IHealthCheck	src/server/health.ts
   IIntakeLimits	src/router/shared/types.ts
@@ -829,6 +840,7 @@
   ISession	src/router/server/types.ts
   ISessionManager	src/router/server/types.ts
   ISessionRequest	src/router/shared/types.ts
+  ITransportServerConnection	src/transport/server/types.ts
   IntakeLimitsOptions	src/router/shared/types.ts
   LIMIT_DEFAULTS	src/router/shared/constants.ts
   LONGEST_TIMER	src/transport/shared/clock.ts
@@ -986,12 +998,14 @@
   GenericError	src/transport/shared/errors.ts
   IClock	src/transport/shared/clock.ts
   IEventIteratorOptions	src/transport/shared/types.ts
+  IGauges	src/transport/shared/types.ts
   ITransportMessage	src/transport/shared/types.ts
   ITransportServer	src/transport/server/types.ts
   ITransportServerAddress	src/transport/server/types.ts
   ITransportServerBound	src/transport/server/transport-server.ts
   ITransportServerClient	src/transport/server/types.ts
   ITransportServerClientAware	src/transport/server/types.ts
+  ITransportServerConnection	src/transport/server/types.ts
   ITransportServerDefineOptions	src/transport/server/types.ts
   ITransportServerHandleInfo	src/transport/server/types.ts
   ITransportServerImplementation	src/transport/server/types.ts
@@ -1013,7 +1027,7 @@
   TRANSPORTS	src/transport/shared/constants.ts
   TRANSPORT_HTTP	src/transport/shared/constants.ts
   TRANSPORT_SERVER_EVENTS	src/transport/server/types.ts
-  TRANSPORT_WS	src/transport/shared/constants.ts
+  TRANSPORT_WEBSOCKET	src/transport/shared/constants.ts
   TimeoutError	src/transport/shared/errors.ts
   TimeoutId	src/transport/shared/clock.ts
   TransportServerConnectionHandle	src/transport/server/types.ts
@@ -1042,6 +1056,163 @@
   setReadyStateOpen	src/transport/shared/ready-state.ts
   setReadyStateReconnecting	src/transport/shared/ready-state.ts
   setReadyStateUninitialized	src/transport/shared/ready-state.ts
+./websocket-client
+  CLIENT_FAILURES	src/router/shared/constants.ts
+  CancelError	src/transport/shared/errors.ts
+  ConnectError	src/transport/shared/errors.ts
+  CredentialScheme	src/router/shared/constants.ts
+  DEVTOOLS_HOOK_KEY	src/client/devtools-hook.ts
+  DisconnectError	src/router/shared/errors.ts
+  FailureError	src/router/shared/errors.ts
+  FailureScope	src/router/shared/constants.ts
+  GenericError	src/transport/shared/errors.ts
+  ICallSession	src/router/shared/types.ts
+  IClient	src/client/types.ts
+  IClientLayers	src/client/types.ts
+  IClientOptions	src/client/types.ts
+  IClientTransportLike	src/client/types.ts
+  IClock	src/transport/shared/clock.ts
+  IDevtoolsHook	src/client/devtools-hook.ts
+  IDevtoolsListeners	src/client/devtools-hook.ts
+  IDevtoolsSource	src/client/devtools-hook.ts
+  IIntakeLimits	src/router/shared/types.ts
+  IMetricsExposition	src/router/shared/metrics-registry.ts
+  IMetricsRegistry	src/router/shared/metrics-registry.ts
+  IMetricsRegistryOptions	src/router/shared/metrics-registry.ts
+  INTAKE_DEFAULTS	src/router/shared/constants.ts
+  IRouterClientOptions	src/router/client/types.ts
+  IRouterLimits	src/router/shared/types.ts
+  IWebSocketClientOptions	src/client/websocket-client.ts
+  IntakeLimitsOptions	src/router/shared/types.ts
+  LIMIT_DEFAULTS	src/router/shared/constants.ts
+  LONGEST_TIMER	src/transport/shared/clock.ts
+  METRICS_CONTENT_TYPE	src/router/shared/metrics-registry.ts
+  METRICS_REGISTRY_DEFAULTS	src/router/shared/metrics-registry.ts
+  PLATFORM_CLOCK	src/transport/shared/clock.ts
+  ProgrammerError	src/transport/shared/errors.ts
+  ProtocolCode	src/router/shared/constants.ts
+  ReadyStateError	src/transport/shared/errors.ts
+  ReconnectError	src/transport/shared/errors.ts
+  RequestCredential	src/router/shared/types.ts
+  RouterLimitsOptions	src/router/shared/types.ts
+  SERVER_FAILURES	src/router/shared/constants.ts
+  TimeoutError	src/transport/shared/errors.ts
+  TimeoutId	src/transport/shared/clock.ts
+  WebSocketClient	src/client/websocket-client.ts
+  createClient	src/client/client.ts
+  createMetricsRegistry	src/router/shared/metrics-registry.ts
+  createWebSocketClient	src/client/websocket-client.ts
+./websocket-server
+  AccessRefusalStage	src/router/shared/types.ts
+  AdmissionFailure	src/router/shared/types.ts
+  CLIENT_FAILURES	src/router/shared/constants.ts
+  CancelError	src/transport/shared/errors.ts
+  CredentialScheme	src/router/shared/constants.ts
+  DisconnectError	src/router/shared/errors.ts
+  FailureError	src/router/shared/errors.ts
+  FailureScope	src/router/shared/constants.ts
+  GenericError	src/transport/shared/errors.ts
+  HealthStatus	src/server/health.ts
+  IAccessRefusal	src/router/shared/types.ts
+  IAdmissionRequest	src/router/shared/types.ts
+  IBeforeRequest	src/router/shared/types.ts
+  ICallSession	src/router/shared/types.ts
+  IClock	src/transport/shared/clock.ts
+  IConnectionTarget	src/router/server/types.ts
+  ICredentials	src/router/shared/types.ts
+  IDestination	src/router/server/types.ts
+  IDestinationOptions	src/router/server/types.ts
+  IDestinationRegistration	src/router/server/types.ts
+  IGauges	src/transport/shared/types.ts
+  IHealth	src/server/health.ts
+  IHealthCheck	src/server/health.ts
+  IIntakeLimits	src/router/shared/types.ts
+  ILayerGauges	src/server/health.ts
+  IMetricsExposition	src/router/shared/metrics-registry.ts
+  IMetricsRegistry	src/router/shared/metrics-registry.ts
+  IMetricsRegistryOptions	src/router/shared/metrics-registry.ts
+  INTAKE_DEFAULTS	src/router/shared/constants.ts
+  IPacingLimits	src/router/server/types.ts
+  IRelayOptions	src/router/server/types.ts
+  IRouterLimits	src/router/shared/types.ts
+  IRouterServerOptions	src/router/server/types.ts
+  IServer	src/server/types.ts
+  IServerLayers	src/server/types.ts
+  IServerOptions	src/server/types.ts
+  IServerTransportLike	src/server/types.ts
+  ISession	src/router/server/types.ts
+  ISessionManager	src/router/server/types.ts
+  ISessionRequest	src/router/shared/types.ts
+  ITransportServerConnection	src/transport/server/types.ts
+  IWebSocketServerOptions	src/server/websocket-server.ts
+  IntakeLimitsOptions	src/router/shared/types.ts
+  LIMIT_DEFAULTS	src/router/shared/constants.ts
+  LONGEST_TIMER	src/transport/shared/clock.ts
+  METRICS_CONTENT_TYPE	src/router/shared/metrics-registry.ts
+  METRICS_REGISTRY_DEFAULTS	src/router/shared/metrics-registry.ts
+  NotificationKey	src/router/shared/types.ts
+  PACING_DEFAULTS	src/router/server/notification-pacing.ts
+  PLATFORM_CLOCK	src/transport/shared/clock.ts
+  PacingLimitsOptions	src/router/server/types.ts
+  ProgrammerError	src/transport/shared/errors.ts
+  ProtocolCode	src/router/shared/constants.ts
+  RelayTarget	src/router/server/types.ts
+  RequestCredential	src/router/shared/types.ts
+  RouterLimitsOptions	src/router/shared/types.ts
+  SERVER_FAILURES	src/router/shared/constants.ts
+  ServerGauges	src/server/health.ts
+  SessionIdentifier	src/router/shared/types.ts
+  SessionOf	src/router/shared/types.ts
+  TimeoutError	src/transport/shared/errors.ts
+  TimeoutId	src/transport/shared/clock.ts
+  TransportServerConnectionHandle	src/transport/server/types.ts
+  WARNING_RATIO	src/server/health.ts
+  WebSocketServer	src/server/websocket-server.ts
+  createMetricsRegistry	src/router/shared/metrics-registry.ts
+  createServer	src/server/server.ts
+  createWebSocketServer	src/server/websocket-server.ts
+  requireCredential	src/router/server/admissions.ts
+  requireSession	src/router/server/admissions.ts
+  shareLegBSession	src/router/server/admissions.ts
+./websocket-transport-client
+  CLOSE_TIMEOUT	src/transport/shared/constants.ts
+  CONNECT_DEFAULTS	src/transport/client/websocket-transport-client.ts
+  HEARTBEAT	src/transport/shared/heartbeat.ts
+  ICloseEventLike	src/transport/client/types.ts
+  IMessageEventLike	src/transport/client/types.ts
+  IUpgradeResponseLike	src/transport/client/types.ts
+  IWebSocketConstructor	src/transport/client/types.ts
+  IWebSocketLike	src/transport/client/types.ts
+  IWebSocketTransportClientConnectOptions	src/transport/client/types.ts
+  IWebSocketTransportClientOptions	src/transport/client/types.ts
+  MAXIMUM_MESSAGE_BYTES	src/transport/client/websocket-transport-client.ts
+  TRANSPORT_WEBSOCKET_BINARYTYPE	src/transport/shared/constants.ts
+  WebSocketTransportClient	src/transport/client/types.ts
+  createWebSocketTransportClient	src/transport/client/websocket-transport-client.ts
+./websocket-transport-server
+  CLOSE_TIMEOUT	src/transport/shared/constants.ts
+  HEADERS_TIMEOUT	src/transport/server/server-bounds.ts
+  HEARTBEAT	src/transport/shared/heartbeat.ts
+  HOST_REFUSAL	src/transport/server/hosts-and-origins.ts
+  IDrawingRequest	src/transport/server/types.ts
+  IIncomingMessageLike	src/transport/server/types.ts
+  IServerSocketLike	src/transport/server/types.ts
+  IUpgradeSocketLike	src/transport/server/types.ts
+  IWebSocketServerConstructor	src/transport/server/types.ts
+  IWebSocketServerLike	src/transport/server/types.ts
+  IWebSocketTransportServerOptions	src/transport/server/types.ts
+  MAXIMUM_CONNECTIONS	src/transport/server/server-bounds.ts
+  MAXIMUM_CONNECTIONS_PER_ADDRESS	src/transport/server/server-bounds.ts
+  MAXIMUM_MESSAGE_BYTES	src/transport/server/websocket-transport-server.ts
+  MAXIMUM_UNSENT_BYTES	src/transport/server/websocket-transport-server.ts
+  MINIMUM_SEND_BYTES_PER_SECOND	src/transport/server/server-bounds.ts
+  ORIGIN_REFUSAL	src/transport/server/hosts-and-origins.ts
+  SEND_GRACE_PERIOD	src/transport/server/server-bounds.ts
+  START_DEFAULTS	src/transport/server/websocket-transport-server.ts
+  TRANSPORT_WEBSOCKET_BINARYTYPE	src/transport/shared/constants.ts
+  WEBSOCKET_REFUSALS	src/transport/server/websocket-handshake.ts
+  WebSocketTransportServer	src/transport/server/types.ts
+  createWebSocketTransportServer	src/transport/server/websocket-transport-server.ts
 ./worker-client
   CLIENT_FAILURES	src/router/shared/constants.ts
   CancelError	src/transport/shared/errors.ts
@@ -1109,6 +1280,7 @@
   IDestination	src/router/server/types.ts
   IDestinationOptions	src/router/server/types.ts
   IDestinationRegistration	src/router/server/types.ts
+  IGauges	src/transport/shared/types.ts
   IHealth	src/server/health.ts
   IHealthCheck	src/server/health.ts
   IIntakeLimits	src/router/shared/types.ts
@@ -1128,6 +1300,7 @@
   ISession	src/router/server/types.ts
   ISessionManager	src/router/server/types.ts
   ISessionRequest	src/router/shared/types.ts
+  ITransportServerConnection	src/transport/server/types.ts
   IWorkerServerOptions	src/server/worker-server.ts
   IntakeLimitsOptions	src/router/shared/types.ts
   LIMIT_DEFAULTS	src/router/shared/constants.ts
@@ -1180,161 +1353,6 @@
   WORKER_MESSAGES	src/transport/shared/constants.ts
   WorkerTransportServer	src/transport/server/types.ts
   createWorkerTransportServer	src/transport/server/worker-transport-server.ts
-./ws-client
-  CLIENT_FAILURES	src/router/shared/constants.ts
-  CancelError	src/transport/shared/errors.ts
-  ConnectError	src/transport/shared/errors.ts
-  CredentialScheme	src/router/shared/constants.ts
-  DEVTOOLS_HOOK_KEY	src/client/devtools-hook.ts
-  DisconnectError	src/router/shared/errors.ts
-  FailureError	src/router/shared/errors.ts
-  FailureScope	src/router/shared/constants.ts
-  GenericError	src/transport/shared/errors.ts
-  ICallSession	src/router/shared/types.ts
-  IClient	src/client/types.ts
-  IClientLayers	src/client/types.ts
-  IClientOptions	src/client/types.ts
-  IClientTransportLike	src/client/types.ts
-  IClock	src/transport/shared/clock.ts
-  IDevtoolsHook	src/client/devtools-hook.ts
-  IDevtoolsListeners	src/client/devtools-hook.ts
-  IDevtoolsSource	src/client/devtools-hook.ts
-  IIntakeLimits	src/router/shared/types.ts
-  IMetricsExposition	src/router/shared/metrics-registry.ts
-  IMetricsRegistry	src/router/shared/metrics-registry.ts
-  IMetricsRegistryOptions	src/router/shared/metrics-registry.ts
-  INTAKE_DEFAULTS	src/router/shared/constants.ts
-  IRouterClientOptions	src/router/client/types.ts
-  IRouterLimits	src/router/shared/types.ts
-  IWSClientOptions	src/client/ws-client.ts
-  IntakeLimitsOptions	src/router/shared/types.ts
-  LIMIT_DEFAULTS	src/router/shared/constants.ts
-  LONGEST_TIMER	src/transport/shared/clock.ts
-  METRICS_CONTENT_TYPE	src/router/shared/metrics-registry.ts
-  METRICS_REGISTRY_DEFAULTS	src/router/shared/metrics-registry.ts
-  PLATFORM_CLOCK	src/transport/shared/clock.ts
-  ProgrammerError	src/transport/shared/errors.ts
-  ProtocolCode	src/router/shared/constants.ts
-  ReadyStateError	src/transport/shared/errors.ts
-  ReconnectError	src/transport/shared/errors.ts
-  RequestCredential	src/router/shared/types.ts
-  RouterLimitsOptions	src/router/shared/types.ts
-  SERVER_FAILURES	src/router/shared/constants.ts
-  TimeoutError	src/transport/shared/errors.ts
-  TimeoutId	src/transport/shared/clock.ts
-  WSClient	src/client/ws-client.ts
-  createClient	src/client/client.ts
-  createMetricsRegistry	src/router/shared/metrics-registry.ts
-  createWSClient	src/client/ws-client.ts
-./ws-server
-  AccessRefusalStage	src/router/shared/types.ts
-  AdmissionFailure	src/router/shared/types.ts
-  CLIENT_FAILURES	src/router/shared/constants.ts
-  CancelError	src/transport/shared/errors.ts
-  CredentialScheme	src/router/shared/constants.ts
-  DisconnectError	src/router/shared/errors.ts
-  FailureError	src/router/shared/errors.ts
-  FailureScope	src/router/shared/constants.ts
-  GenericError	src/transport/shared/errors.ts
-  HealthStatus	src/server/health.ts
-  IAccessRefusal	src/router/shared/types.ts
-  IAdmissionRequest	src/router/shared/types.ts
-  IBeforeRequest	src/router/shared/types.ts
-  ICallSession	src/router/shared/types.ts
-  IClock	src/transport/shared/clock.ts
-  IConnectionTarget	src/router/server/types.ts
-  ICredentials	src/router/shared/types.ts
-  IDestination	src/router/server/types.ts
-  IDestinationOptions	src/router/server/types.ts
-  IDestinationRegistration	src/router/server/types.ts
-  IHealth	src/server/health.ts
-  IHealthCheck	src/server/health.ts
-  IIntakeLimits	src/router/shared/types.ts
-  ILayerGauges	src/server/health.ts
-  IMetricsExposition	src/router/shared/metrics-registry.ts
-  IMetricsRegistry	src/router/shared/metrics-registry.ts
-  IMetricsRegistryOptions	src/router/shared/metrics-registry.ts
-  INTAKE_DEFAULTS	src/router/shared/constants.ts
-  IPacingLimits	src/router/server/types.ts
-  IRelayOptions	src/router/server/types.ts
-  IRouterLimits	src/router/shared/types.ts
-  IRouterServerOptions	src/router/server/types.ts
-  IServer	src/server/types.ts
-  IServerLayers	src/server/types.ts
-  IServerOptions	src/server/types.ts
-  IServerTransportLike	src/server/types.ts
-  ISession	src/router/server/types.ts
-  ISessionManager	src/router/server/types.ts
-  ISessionRequest	src/router/shared/types.ts
-  IWSServerOptions	src/server/ws-server.ts
-  IntakeLimitsOptions	src/router/shared/types.ts
-  LIMIT_DEFAULTS	src/router/shared/constants.ts
-  LONGEST_TIMER	src/transport/shared/clock.ts
-  METRICS_CONTENT_TYPE	src/router/shared/metrics-registry.ts
-  METRICS_REGISTRY_DEFAULTS	src/router/shared/metrics-registry.ts
-  NotificationKey	src/router/shared/types.ts
-  PACING_DEFAULTS	src/router/server/notification-pacing.ts
-  PLATFORM_CLOCK	src/transport/shared/clock.ts
-  PacingLimitsOptions	src/router/server/types.ts
-  ProgrammerError	src/transport/shared/errors.ts
-  ProtocolCode	src/router/shared/constants.ts
-  RelayTarget	src/router/server/types.ts
-  RequestCredential	src/router/shared/types.ts
-  RouterLimitsOptions	src/router/shared/types.ts
-  SERVER_FAILURES	src/router/shared/constants.ts
-  ServerGauges	src/server/health.ts
-  SessionIdentifier	src/router/shared/types.ts
-  SessionOf	src/router/shared/types.ts
-  TimeoutError	src/transport/shared/errors.ts
-  TimeoutId	src/transport/shared/clock.ts
-  TransportServerConnectionHandle	src/transport/server/types.ts
-  WARNING_RATIO	src/server/health.ts
-  WSServer	src/server/ws-server.ts
-  createMetricsRegistry	src/router/shared/metrics-registry.ts
-  createServer	src/server/server.ts
-  createWSServer	src/server/ws-server.ts
-  requireCredential	src/router/server/admissions.ts
-  requireSession	src/router/server/admissions.ts
-  shareLegBSession	src/router/server/admissions.ts
-./ws-transport-client
-  CLOSE_TIMEOUT	src/transport/shared/constants.ts
-  CONNECT_DEFAULTS	src/transport/client/ws-transport-client.ts
-  HEARTBEAT	src/transport/shared/heartbeat.ts
-  ICloseEventLike	src/transport/client/types.ts
-  IMessageEventLike	src/transport/client/types.ts
-  IUpgradeResponseLike	src/transport/client/types.ts
-  IWSTransportClientConnectOptions	src/transport/client/types.ts
-  IWSTransportClientOptions	src/transport/client/types.ts
-  IWebSocketConstructor	src/transport/client/types.ts
-  IWebSocketLike	src/transport/client/types.ts
-  MAXIMUM_MESSAGE_BYTES	src/transport/client/ws-transport-client.ts
-  TRANSPORT_WEBSOCKET_BINARYTYPE	src/transport/shared/constants.ts
-  WSTransportClient	src/transport/client/types.ts
-  createWSTransportClient	src/transport/client/ws-transport-client.ts
-./ws-transport-server
-  CLOSE_TIMEOUT	src/transport/shared/constants.ts
-  HEADERS_TIMEOUT	src/transport/server/server-bounds.ts
-  HEARTBEAT	src/transport/shared/heartbeat.ts
-  HOST_REFUSAL	src/transport/server/hosts-and-origins.ts
-  IDrawingRequest	src/transport/server/types.ts
-  IIncomingMessageLike	src/transport/server/types.ts
-  IServerSocketLike	src/transport/server/types.ts
-  IUpgradeSocketLike	src/transport/server/types.ts
-  IWSTransportServerOptions	src/transport/server/types.ts
-  IWebSocketServerConstructor	src/transport/server/types.ts
-  IWebSocketServerLike	src/transport/server/types.ts
-  MAXIMUM_CONNECTIONS	src/transport/server/server-bounds.ts
-  MAXIMUM_CONNECTIONS_PER_ADDRESS	src/transport/server/server-bounds.ts
-  MAXIMUM_MESSAGE_BYTES	src/transport/server/ws-transport-server.ts
-  MAXIMUM_UNSENT_BYTES	src/transport/server/ws-transport-server.ts
-  MINIMUM_SEND_BYTES_PER_SECOND	src/transport/server/server-bounds.ts
-  ORIGIN_REFUSAL	src/transport/server/hosts-and-origins.ts
-  SEND_GRACE_PERIOD	src/transport/server/server-bounds.ts
-  START_DEFAULTS	src/transport/server/ws-transport-server.ts
-  TRANSPORT_WEBSOCKET_BINARYTYPE	src/transport/shared/constants.ts
-  WSTransportServer	src/transport/server/types.ts
-  WS_REFUSALS	src/transport/server/ws-handshake.ts
-  createWSTransportServer	src/transport/server/ws-transport-server.ts
 
 src/client/client.ts createClient
   const createClient<Transport extends IClientTransportLike>({router: createRouter = createRouterClient, services: createServices = createServiceManager, transport}: IClientLayers<Transport>, options?: IClientOptions): IClient<Transport>
@@ -1410,6 +1428,21 @@ src/client/types.ts IClientTransportLike
     pause(): void
     resume(): void
     send(message: ITransportMessage): Promise<void>
+src/client/websocket-client.ts IWebSocketClientOptions
+  interface IWebSocketClientOptions extends Omit<IClientLayers<WebSocketTransportClient>, 'transport'>, IClientOptions
+    transport?: | (Omit<IWebSocketTransportClientOptions, 'binaryType'> & {binaryType?: 'arraybuffer' | 'nodebuffer' | undefined}) | undefined
+    router?: | ((transport: Transport, options: IRouterClientOptions) => IRouterClient<Transport>) | undefined
+    services?: | ((router: IRouterClient<Transport>) => IServiceManagerClient<RouterClientConnectionHandle>) | undefined
+    credential?: DefaultCredential | undefined
+    credentials?: ICredentials | undefined
+    devtools?: boolean | undefined
+    intake?: IntakeLimitsOptions | undefined
+    limits?: RouterLimitsOptions | undefined
+    metricsRegistry?: IMetricsRegistry | undefined
+src/client/websocket-client.ts WebSocketClient
+  type WebSocketClient = IClient<WebSocketTransportClient>
+src/client/websocket-client.ts createWebSocketClient
+  const createWebSocketClient(options?: IWebSocketClientOptions): WebSocketClient
 src/client/worker-client.ts IWorkerClientOptions
   interface IWorkerClientOptions extends Omit<IClientLayers<WorkerTransportClient>, 'transport'>, IClientOptions
     transport: IWorkerTransportClientOptions
@@ -1425,21 +1458,6 @@ src/client/worker-client.ts WorkerClient
   type WorkerClient = IClient<WorkerTransportClient>
 src/client/worker-client.ts createWorkerClient
   const createWorkerClient(options: IWorkerClientOptions): WorkerClient
-src/client/ws-client.ts IWSClientOptions
-  interface IWSClientOptions extends Omit<IClientLayers<WSTransportClient>, 'transport'>, IClientOptions
-    transport?: | (Omit<IWSTransportClientOptions, 'binaryType'> & {binaryType?: 'arraybuffer' | 'nodebuffer' | undefined}) | undefined
-    router?: | ((transport: Transport, options: IRouterClientOptions) => IRouterClient<Transport>) | undefined
-    services?: | ((router: IRouterClient<Transport>) => IServiceManagerClient<RouterClientConnectionHandle>) | undefined
-    credential?: DefaultCredential | undefined
-    credentials?: ICredentials | undefined
-    devtools?: boolean | undefined
-    intake?: IntakeLimitsOptions | undefined
-    limits?: RouterLimitsOptions | undefined
-    metricsRegistry?: IMetricsRegistry | undefined
-src/client/ws-client.ts WSClient
-  type WSClient = IClient<WSTransportClient>
-src/client/ws-client.ts createWSClient
-  const createWSClient(options?: IWSClientOptions): WSClient
 src/proto/codec.ts protoCodecOf
   const protoCodecOf<Desc extends DescMessage>(schema: Desc): IPayloadCodec<MessageShape<Desc>, MessageInitShape<Desc>>
 src/proto/pattern.ts IPatternTable
@@ -1652,7 +1670,7 @@ src/router/server/types.ts IRouterServer
     readonly notifications: INotificationManager
     readonly transport: Transport
     destinations(): IDestination[]
-    dropSubscriptions(connection: {connectionHandle: TransportServerConnectionHandle; failure: IFailure}): Promise<void>
+    dropSubscriptions(connectionHandle: TransportServerConnectionHandle, failure: IFailure): Promise<void>
     endSession(identifier: SessionIdentifier): Promise<void>
     endSessionsOf(issuer: string): Promise<void>
     emit<K extends ROUTER_SERVER_EVENTS>(event: K, ...params: RouterServerEventMap[K]): boolean
@@ -1698,10 +1716,10 @@ src/router/server/types.ts IRouterServerTransportLike
   interface IRouterServerTransportLike
     readonly clock?: IClock | undefined
     off(event: 'close', listener: EmitterListener<[wasClean: boolean, connectionHandle: TransportServerConnectionHandle]>): unknown
-    off(event: 'connection', listener: EmitterListener<[socket: unknown, request: unknown, connectionHandle: TransportServerConnectionHandle]>): unknown
+    off(event: 'connection', listener: EmitterListener<[connection: ITransportServerConnection, connectionHandle: TransportServerConnectionHandle]>): unknown
     off(event: 'message', listener: EmitterListener<[message: ITransportMessage, connectionHandle: TransportServerConnectionHandle]>): unknown
     on(event: 'close', listener: EmitterListener<[wasClean: boolean, connectionHandle: TransportServerConnectionHandle]>): unknown
-    on(event: 'connection', listener: EmitterListener<[socket: unknown, request: unknown, connectionHandle: TransportServerConnectionHandle]>): unknown
+    on(event: 'connection', listener: EmitterListener<[connection: ITransportServerConnection, connectionHandle: TransportServerConnectionHandle]>): unknown
     on(event: 'message', listener: EmitterListener<[message: ITransportMessage, connectionHandle: TransportServerConnectionHandle]>): unknown
     carriesCredential?(connectionHandle: TransportServerConnectionHandle): boolean
     isSecure?(connectionHandle: TransportServerConnectionHandle): boolean
@@ -1717,6 +1735,11 @@ src/router/server/types.ts ISession
     lastActivity: number
     sessionInactivityTimeout?: number | undefined
     sessionToken: SessionToken | undefined
+src/router/server/types.ts ISessionChange
+  interface ISessionChange<Data, Value>
+    readonly newValue: Value
+    readonly oldValue: Value
+    readonly session: ISession<Data>
 src/router/server/types.ts ISessionManager
   interface ISessionManager<Data>
     readonly clock: IClock
@@ -1796,7 +1819,7 @@ src/router/server/types.ts RouterServerEventMap
 src/router/server/types.ts SESSION_MANAGER_EVENTS
   type SESSION_MANAGER_EVENTS = keyof SessionManagerEventMap
 src/router/server/types.ts SessionManagerEventMap
-  type SessionManagerEventMap<Data = unknown> = {connectionInactivityTimeoutChanged: [session: ISession<Data>, newValue: number, oldValue: number]; connectionInactivityTimeoutReached: [session: ISession<Data>]; created: [session: ISession<Data>]; dataChanged: [session: ISession<Data>, newValue: Data | undefined, oldValue: Data | undefined]; deleted: [session: ISession<Data>]; lastActivityChanged: [session: ISession<Data>, newValue: number, oldValue: number]; sessionInactivityTimeoutChanged: [session: ISession<Data>, newValue: number, oldValue: number]; sessionInactivityTimeoutReached: [session: ISession<Data>]; updated: [session: ISession<Data>]}
+  type SessionManagerEventMap<Data = unknown> = {connectionInactivityTimeoutChanged: [change: ISessionChange<Data, number>]; connectionInactivityTimeoutReached: [session: ISession<Data>]; created: [session: ISession<Data>]; dataChanged: [change: ISessionChange<Data, Data | undefined>]; deleted: [session: ISession<Data>]; lastActivityChanged: [change: ISessionChange<Data, number>]; sessionInactivityTimeoutChanged: [change: ISessionChange<Data, number>]; sessionInactivityTimeoutReached: [session: ISession<Data>]; updated: [session: ISession<Data>]}
 src/router/server/types.ts SessionManagerOnInactivityTimeoutCallback
   type SessionManagerOnInactivityTimeoutCallback<Data = unknown> = EmitterListener<SessionManagerEventMap<Data>[| CONNECTION_INACTIVITY_TIMEOUT_REACHED_EVENT | SESSION_INACTIVITY_TIMEOUT_REACHED_EVENT]>
 src/router/server/types.ts SessionManagerOnSessionCallback
@@ -2543,13 +2566,13 @@ src/server/types.ts IServerTransportLike
     close(connectionHandle: TransportServerConnectionHandle): Promise<boolean>
     gauges?(): IGauges<TransportServerConnectionHandle>
     off(event: 'close', listener: EmitterListener<[wasClean: boolean, connectionHandle: TransportServerConnectionHandle]>): unknown
-    off(event: 'connection', listener: EmitterListener<[socket: unknown, request: unknown, connectionHandle: TransportServerConnectionHandle]>): unknown
+    off(event: 'connection', listener: EmitterListener<[connection: ITransportServerConnection, connectionHandle: TransportServerConnectionHandle]>): unknown
     off(event: 'error', listener: EmitterListener<[error: Error, connectionHandle: TransportServerConnectionHandle | '']>): unknown
     off(event: 'listen', listener: EmitterListener<[isHeld: boolean, connectionHandle: TransportServerConnectionHandle]>): unknown
     off(event: 'message', listener: EmitterListener<[message: ITransportMessage, connectionHandle: TransportServerConnectionHandle]>): unknown
     off(event: 'refusal', listener: EmitterListener<[refusal: ITransportServerRefusal]>): unknown
     on(event: 'close', listener: EmitterListener<[wasClean: boolean, connectionHandle: TransportServerConnectionHandle]>): unknown
-    on(event: 'connection', listener: EmitterListener<[socket: unknown, request: unknown, connectionHandle: TransportServerConnectionHandle]>): unknown
+    on(event: 'connection', listener: EmitterListener<[connection: ITransportServerConnection, connectionHandle: TransportServerConnectionHandle]>): unknown
     on(event: 'error', listener: EmitterListener<[error: Error, connectionHandle: TransportServerConnectionHandle | '']>): unknown
     on(event: 'listen', listener: EmitterListener<[isHeld: boolean, connectionHandle: TransportServerConnectionHandle]>): unknown
     on(event: 'message', listener: EmitterListener<[message: ITransportMessage, connectionHandle: TransportServerConnectionHandle]>): unknown
@@ -2562,6 +2585,24 @@ src/server/types.ts IServerTransportLike
     pause(connectionHandle: TransportServerConnectionHandle): void
     resume(connectionHandle: TransportServerConnectionHandle): void
     send(message: ITransportMessage, connectionHandle: TransportServerConnectionHandle): Promise<void>
+src/server/websocket-server.ts IWebSocketServerOptions
+  interface IWebSocketServerOptions<Data = unknown> extends Omit<IServerLayers<WebSocketTransportServer, Data>, 'transport'>, Omit<IServerOptions, 'clock'>
+    transport: Omit<IWebSocketTransportServerOptions, 'binaryType'> & {binaryType?: 'arraybuffer' | 'nodebuffer' | undefined}
+    router?: | ((transport: Transport, options: IRouterServerOptions) => IRouterServer<Transport>) | undefined
+    services?: | ((router: IRouterServer<Transport>, options: IServiceManagerOptions<TransportServerConnectionHandle>) => IServiceManagerServer<TransportServerConnectionHandle>) | undefined
+    sessions?: ((options: {clock: IClock}) => ISessionManager<Data>) | undefined
+    credentials?: ICredentials | undefined
+    intake?: IntakeLimitsOptions | undefined
+    limits?: RouterLimitsOptions | undefined
+    connectionInactivityTimeout?: number | undefined
+    closeOnCommandTimeout?: boolean | undefined
+    metricsRegistry?: IMetricsRegistry | undefined
+    pacing?: PacingLimitsOptions | undefined
+    relay?: IRelayOptions | undefined
+src/server/websocket-server.ts WebSocketServer
+  type WebSocketServer<Data = unknown> = IServer<WebSocketTransportServer, Data>
+src/server/websocket-server.ts createWebSocketServer
+  const createWebSocketServer<Data = unknown>(options: IWebSocketServerOptions<Data>): WebSocketServer<Data>
 src/server/worker-server.ts IWorkerServerOptions
   interface IWorkerServerOptions<Data = unknown> extends Omit<IServerLayers<WorkerTransportServer, Data>, 'transport'>, Omit<IServerOptions, 'clock'>
     transport: IWorkerTransportServerOptions
@@ -2580,24 +2621,6 @@ src/server/worker-server.ts WorkerServer
   type WorkerServer<Data = unknown> = IServer<WorkerTransportServer, Data>
 src/server/worker-server.ts createWorkerServer
   const createWorkerServer<Data = unknown>(options: IWorkerServerOptions<Data>): WorkerServer<Data>
-src/server/ws-server.ts IWSServerOptions
-  interface IWSServerOptions<Data = unknown> extends Omit<IServerLayers<WSTransportServer, Data>, 'transport'>, Omit<IServerOptions, 'clock'>
-    transport: Omit<IWSTransportServerOptions, 'binaryType'> & {binaryType?: 'arraybuffer' | 'nodebuffer' | undefined}
-    router?: | ((transport: Transport, options: IRouterServerOptions) => IRouterServer<Transport>) | undefined
-    services?: | ((router: IRouterServer<Transport>, options: IServiceManagerOptions<TransportServerConnectionHandle>) => IServiceManagerServer<TransportServerConnectionHandle>) | undefined
-    sessions?: ((options: {clock: IClock}) => ISessionManager<Data>) | undefined
-    credentials?: ICredentials | undefined
-    intake?: IntakeLimitsOptions | undefined
-    limits?: RouterLimitsOptions | undefined
-    connectionInactivityTimeout?: number | undefined
-    closeOnCommandTimeout?: boolean | undefined
-    metricsRegistry?: IMetricsRegistry | undefined
-    pacing?: PacingLimitsOptions | undefined
-    relay?: IRelayOptions | undefined
-src/server/ws-server.ts WSServer
-  type WSServer<Data = unknown> = IServer<WSTransportServer, Data>
-src/server/ws-server.ts createWSServer
-  const createWSServer<Data = unknown>(options: IWSServerOptions<Data>): WSServer<Data>
 src/service/descriptors.ts AdmissionRule
   type AdmissionRule<Hook extends string = string> = | 'none' | 'session' | {readonly hook: Hook}
 src/service/descriptors.ts AnsweredName
@@ -2683,9 +2706,11 @@ src/service/failures.ts IListedFailureError
     public isApplication(codes?: number | readonly number[]): boolean {return (this.scope === FailureScope.APPLICATION && (codes === undefined || (typeof codes === 'number' ? [codes] : codes).includes(this.code)))}
     public isProtocol(codes: ProtocolCode | readonly ProtocolCode[], side?: RouterSide): boolean {return (this.scope === FailureScope.PROTOCOL && (typeof codes === 'number' ? [codes] : codes).includes(this.code as ProtocolCode) && (side === undefined || side === this.side))}
 src/service/failures.ts failuresOf
-  const failuresOf<const Name extends string>(catalogue: {codes: Readonly<Record<Name, number>>; serviceId: ServiceId}): IFailureCatalogue<Name>
+  const failuresOf<const Name extends string>(serviceId: ServiceId, codes: Readonly<Record<Name, number>>): IFailureCatalogue<Name>
 src/service/generated-code.ts GENERATED_CODE_SUPPORTS_VERSION_6
   const GENERATED_CODE_SUPPORTS_VERSION_6: true
+src/service/generated-code.ts GENERATED_CODE_SUPPORTS_VERSION_7
+  const GENERATED_CODE_SUPPORTS_VERSION_7: true
 src/service/service-client.ts IServiceClient
   interface IServiceClient<S extends ServiceProcedures>
     readonly notifications: {readonly [Name in keyof S as Name extends NotifyingName<S> ? Name : never]: INotification<GivenOf<S[Name]['request']>, ValueOf<NonNullable<S[Name]['notification']>>>}
@@ -2702,12 +2727,14 @@ src/service/service-server.ts IJudgingOptions
   interface IJudgingOptions
     readonly failFast?: boolean | undefined
     readonly validates?: boolean | undefined
+src/service/service-server.ts INotifier
+  type INotifier<Notification, Handle extends string = TransportServerConnectionHandle> = (notification: Notification, options?: INotifyOptions<Handle>) => Promise<void>
 src/service/service-server.ts IServiceResponse
   type IServiceResponse<Descriptor extends IServiceDescriptor> = Descriptor extends {readonly procedure: {readonly procedureKind: typeof ProcedureKind.NOTIFIES}} ? INotificationResponse<GivenOf<Descriptor['result']>, ServiceFailureOf<Descriptor>> : IResponse<GivenOf<Descriptor['result']>, ServiceFailureOf<Descriptor>>
 src/service/service-server.ts IServiceServer
   interface IServiceServer<S extends ServiceProcedures, Data = unknown>
     readonly command: {readonly [Name in keyof S as Name extends CommandName<S> ? Name : never]: ICommand<GivenOf<S[Name]['request']>, ValueOf<S[Name]['result']>, TransportServerConnectionHandle>}
-    readonly notify: {readonly [Name in keyof S as Name extends NotifyingName<S> ? Name : never]: (notification: GivenOf<NonNullable<S[Name]['notification']>>, options?: INotifyOptions<TransportServerConnectionHandle>) => Promise<void>}
+    readonly notify: {readonly [Name in keyof S as Name extends NotifyingName<S> ? Name : never]: INotifier<GivenOf<NonNullable<S[Name]['notification']>>>}
     offer: (server: IServer<IServerTransportLike, Data>) => void
     on: <Name extends AnsweredName<S>>(name: Name, callback: ServiceResolverCallback<S[Name]>) => void
     proceduresWithoutResolver: () => readonly IProcedure[]
@@ -3201,25 +3228,6 @@ src/transport/client/types.ts IUpgradeResponseLike
     readonly headers: Readonly<Record<string, string | string[] | undefined>>
     readonly statusCode?: number | undefined
     resume?(): unknown
-src/transport/client/types.ts IWSTransportClientConnectOptions
-  interface IWSTransportClientConnectOptions extends ITransportClientAddressOptions
-    credential?: string | undefined
-    credentialProvider?: ((options: {signal: AbortSignal}) => string | Promise<string>) | undefined
-    pathname?: string | undefined
-    protocols?: string[] | undefined
-    secured?: boolean | undefined
-    signal?: AbortSignal | undefined
-    timeout?: number | undefined
-    host: string
-    port: number
-src/transport/client/types.ts IWSTransportClientOptions
-  interface IWSTransportClientOptions extends ITransportClientOptions
-    binaryType?: 'arraybuffer' | 'blob' | 'nodebuffer' | undefined
-    closeTimeout?: number | undefined
-    heartbeat?: number | undefined
-    maxPayload?: number | undefined
-    WebSocket?: IWebSocketConstructor | undefined
-    clock?: IClock | undefined
 src/transport/client/types.ts IWebSocketConstructor
   interface IWebSocketConstructor
     new (url: string, protocols?: string | string[], options?: {closeTimeout?: number; headers?: Record<string, string>; maxPayload?: number; perMessageDeflate?: false}): IWebSocketLike
@@ -3241,6 +3249,25 @@ src/transport/client/types.ts IWebSocketLike
     resume?(): void
     send(data: Data): void
     terminate?(): void
+src/transport/client/types.ts IWebSocketTransportClientConnectOptions
+  interface IWebSocketTransportClientConnectOptions extends ITransportClientAddressOptions
+    credential?: string | undefined
+    credentialProvider?: ((options: {signal: AbortSignal}) => string | Promise<string>) | undefined
+    pathname?: string | undefined
+    protocols?: string[] | undefined
+    secured?: boolean | undefined
+    signal?: AbortSignal | undefined
+    timeout?: number | undefined
+    host: string
+    port: number
+src/transport/client/types.ts IWebSocketTransportClientOptions
+  interface IWebSocketTransportClientOptions extends ITransportClientOptions
+    binaryType?: 'arraybuffer' | 'blob' | 'nodebuffer' | undefined
+    closeTimeout?: number | undefined
+    heartbeat?: number | undefined
+    maxPayload?: number | undefined
+    WebSocket?: IWebSocketConstructor | undefined
+    clock?: IClock | undefined
 src/transport/client/types.ts IWorkerChannelLike
   interface IWorkerChannelLike
     readonly port1: IWorkerPortLike
@@ -3281,20 +3308,20 @@ src/transport/client/types.ts TransportClientReconnectTapCallback
   type TransportClientReconnectTapCallback = (nextDelay: number, attempt: number) => void
 src/transport/client/types.ts TransportClientToldEvent
   type TransportClientToldEvent = CLOSE_EVENT | MESSAGE_EVENT
-src/transport/client/types.ts WSTransportClient
-  type WSTransportClient = ITransportClient<IWebSocketLike, IWSTransportClientConnectOptions>
+src/transport/client/types.ts WebSocketTransportClient
+  type WebSocketTransportClient = ITransportClient<IWebSocketLike, IWebSocketTransportClientConnectOptions>
 src/transport/client/types.ts WorkerTransportClient
   type WorkerTransportClient = ITransportClient<IWorkerPortLike, ITransportClientConnectOptions>
+src/transport/client/websocket-transport-client.ts CONNECT_DEFAULTS
+  const CONNECT_DEFAULTS: Readonly<{host: string; pathname: string; port: number; secured: false; timeout: number}>
+src/transport/client/websocket-transport-client.ts MAXIMUM_MESSAGE_BYTES
+  const MAXIMUM_MESSAGE_BYTES: 16778240
+src/transport/client/websocket-transport-client.ts createWebSocketTransportClient
+  const createWebSocketTransportClient(options?: IWebSocketTransportClientOptions): WebSocketTransportClient
 src/transport/client/worker-transport-client.ts CONNECT_DEFAULTS
   const CONNECT_DEFAULTS: Readonly<{timeout: number}>
 src/transport/client/worker-transport-client.ts createWorkerTransportClient
   const createWorkerTransportClient({clock, MessageChannel: Channel = globalThis.MessageChannel, worker}: IWorkerTransportClientOptions): WorkerTransportClient
-src/transport/client/ws-transport-client.ts CONNECT_DEFAULTS
-  const CONNECT_DEFAULTS: Readonly<{host: string; pathname: string; port: number; secured: false; timeout: number}>
-src/transport/client/ws-transport-client.ts MAXIMUM_MESSAGE_BYTES
-  const MAXIMUM_MESSAGE_BYTES: 16778240
-src/transport/client/ws-transport-client.ts createWSTransportClient
-  const createWSTransportClient(options?: IWSTransportClientOptions): WSTransportClient
 src/transport/server/broker-transport-server.ts ACCEPT_TIMEOUT
   const ACCEPT_TIMEOUT: 30000
 src/transport/server/broker-transport-server.ts MAXIMUM_UNSENT_BYTES
@@ -3603,6 +3630,10 @@ src/transport/server/types.ts ITransportServerClientAware
     lastActivity: number | undefined
     port: number
     type: TRANSPORTS
+src/transport/server/types.ts ITransportServerConnection
+  interface ITransportServerConnection<Socket = unknown, Request = unknown>
+    readonly request: Request
+    readonly socket: Socket
 src/transport/server/types.ts ITransportServerDefineOptions
   interface ITransportServerDefineOptions<Socket = unknown, Request = unknown>
     readonly isHeard: (event: TransportServerToldEvent) => boolean
@@ -3651,8 +3682,19 @@ src/transport/server/types.ts IUpgradeSocketLike
     end(data: string): unknown
     on(event: 'error', listener: () => void): unknown
     once(event: 'finish', listener: () => void): unknown
-src/transport/server/types.ts IWSTransportServerOptions
-  interface IWSTransportServerOptions extends ITransportServerOptions
+src/transport/server/types.ts IWebSocketServerConstructor
+  interface IWebSocketServerConstructor
+    new (options: {closeTimeout?: number | undefined; maxPayload?: number | undefined; server: Server}): IWebSocketServerLike
+src/transport/server/types.ts IWebSocketServerLike
+  interface IWebSocketServerLike
+    address(): {address: string; port: number} | string | null
+    close(callback?: (error?: Error) => void): void
+    on(event: 'connection', listener: (socket: IServerSocketLike, request: IIncomingMessageLike) => void): unknown
+    on(event: 'error', listener: (error: Error) => void): unknown
+    on(event: 'listening', listener: () => void): unknown
+    on(event: 'wsClientError', listener: (error: Error, socket: IUpgradeSocketLike, request: IIncomingMessageLike) => void): unknown
+src/transport/server/types.ts IWebSocketTransportServerOptions
+  interface IWebSocketTransportServerOptions extends ITransportServerOptions
     binaryType?: 'arraybuffer' | 'blob' | 'nodebuffer' | undefined
     closeTimeout?: number | undefined
     headersTimeout?: number | undefined
@@ -3670,17 +3712,6 @@ src/transport/server/types.ts IWSTransportServerOptions
     unnamedProxies?: number | undefined
     WebSocketServer: IWebSocketServerConstructor
     clock?: IClock | undefined
-src/transport/server/types.ts IWebSocketServerConstructor
-  interface IWebSocketServerConstructor
-    new (options: {closeTimeout?: number | undefined; maxPayload?: number | undefined; server: Server}): IWebSocketServerLike
-src/transport/server/types.ts IWebSocketServerLike
-  interface IWebSocketServerLike
-    address(): {address: string; port: number} | string | null
-    close(callback?: (error?: Error) => void): void
-    on(event: 'connection', listener: (socket: IServerSocketLike, request: IIncomingMessageLike) => void): unknown
-    on(event: 'error', listener: (error: Error) => void): unknown
-    on(event: 'listening', listener: () => void): unknown
-    on(event: 'wsClientError', listener: (error: Error, socket: IUpgradeSocketLike, request: IIncomingMessageLike) => void): unknown
 src/transport/server/types.ts IWorkerScopeLike
   interface IWorkerScopeLike
     addEventListener(type: 'message', listener: (event: IWorkerMessageEventLike) => void): void
@@ -3698,7 +3729,7 @@ src/transport/server/types.ts TransportServerConnectionHandle
 src/transport/server/types.ts TransportServerConnections
   type TransportServerConnections<Socket> = Map<TransportServerConnectionHandle, ITransportServerClientAware<Socket>>
 src/transport/server/types.ts TransportServerEventMap
-  type TransportServerEventMap<Socket = unknown, Request = unknown> = {close: [wasClean: boolean, connectionHandle: TransportServerConnectionHandle]; connection: [socket: Socket, request: Request, connectionHandle: TransportServerConnectionHandle]; error: [error: Error, connectionHandle: TransportServerConnectionHandle | '']; listen: [isHeld: boolean, connectionHandle: TransportServerConnectionHandle]; message: [message: ITransportMessage, connectionHandle: TransportServerConnectionHandle]; refusal: [refusal: ITransportServerRefusal]}
+  type TransportServerEventMap<Socket = unknown, Request = unknown> = {close: [wasClean: boolean, connectionHandle: TransportServerConnectionHandle]; connection: [connection: ITransportServerConnection<Socket, Request>, connectionHandle: TransportServerConnectionHandle]; error: [error: Error, connectionHandle: TransportServerConnectionHandle | '']; listen: [isHeld: boolean, connectionHandle: TransportServerConnectionHandle]; message: [message: ITransportMessage, connectionHandle: TransportServerConnectionHandle]; refusal: [refusal: ITransportServerRefusal]}
 src/transport/server/types.ts TransportServerOnCloseCallback
   type TransportServerOnCloseCallback = EmitterListener<TransportServerEventMap[CLOSE_EVENT]>
 src/transport/server/types.ts TransportServerOnConnectionCallback
@@ -3713,24 +3744,24 @@ src/transport/server/types.ts TransportServerResolvedStartOptions
   type TransportServerResolvedStartOptions = Readonly<{address: string; findOpenPort: boolean; port: number}>
 src/transport/server/types.ts TransportServerToldEvent
   type TransportServerToldEvent = Exclude<TRANSPORT_SERVER_EVENTS, ERROR_EVENT>
-src/transport/server/types.ts WSTransportServer
-  type WSTransportServer = ITransportServer<IServerSocketLike, IDrawingRequest>
+src/transport/server/types.ts WebSocketTransportServer
+  type WebSocketTransportServer = ITransportServer<IServerSocketLike, IDrawingRequest>
 src/transport/server/types.ts WorkerTransportServer
   type WorkerTransportServer = ITransportServer<IWorkerPortLike, undefined>
+src/transport/server/websocket-handshake.ts WEBSOCKET_REFUSALS
+  const WEBSOCKET_REFUSALS: Readonly<{BUSY: "busy"; HOST: "host-refused"; MALFORMED: "malformed"; METHOD: "method-refused"; ORIGIN: "origin-refused"; UPGRADE: "upgrade-required"; VERSION: "version-refused"}>
+src/transport/server/websocket-transport-server.ts MAXIMUM_MESSAGE_BYTES
+  const MAXIMUM_MESSAGE_BYTES: 16778240
+src/transport/server/websocket-transport-server.ts MAXIMUM_UNSENT_BYTES
+  const MAXIMUM_UNSENT_BYTES: 184551424
+src/transport/server/websocket-transport-server.ts START_DEFAULTS
+  const START_DEFAULTS: Readonly<{address: string; findOpenPort: false; port: number}>
+src/transport/server/websocket-transport-server.ts createWebSocketTransportServer
+  const createWebSocketTransportServer(options: IWebSocketTransportServerOptions): WebSocketTransportServer
 src/transport/server/worker-transport-server.ts START_DEFAULTS
   const START_DEFAULTS: Readonly<{address: string; findOpenPort: false; port: number}>
 src/transport/server/worker-transport-server.ts createWorkerTransportServer
   const createWorkerTransportServer({clock, scope}: IWorkerTransportServerOptions): WorkerTransportServer
-src/transport/server/ws-handshake.ts WS_REFUSALS
-  const WS_REFUSALS: Readonly<{BUSY: "busy"; HOST: "host-refused"; MALFORMED: "malformed"; METHOD: "method-refused"; ORIGIN: "origin-refused"; UPGRADE: "upgrade-required"; VERSION: "version-refused"}>
-src/transport/server/ws-transport-server.ts MAXIMUM_MESSAGE_BYTES
-  const MAXIMUM_MESSAGE_BYTES: 16778240
-src/transport/server/ws-transport-server.ts MAXIMUM_UNSENT_BYTES
-  const MAXIMUM_UNSENT_BYTES: 184551424
-src/transport/server/ws-transport-server.ts START_DEFAULTS
-  const START_DEFAULTS: Readonly<{address: string; findOpenPort: false; port: number}>
-src/transport/server/ws-transport-server.ts createWSTransportServer
-  const createWSTransportServer(options: IWSTransportServerOptions): WSTransportServer
 src/transport/shared/amqp-broker-adapter.ts CONNECT_TIMEOUT
   const CONNECT_TIMEOUT: 30000
 src/transport/shared/amqp-broker-adapter.ts IAmqpBrokerAdapter
@@ -3922,7 +3953,7 @@ src/transport/shared/constants.ts REFUSAL_HEADER
 src/transport/shared/constants.ts SEQUENCE_HEADER
   const SEQUENCE_HEADER: "bead-sequence"
 src/transport/shared/constants.ts TRANSPORTS
-  type TRANSPORTS = | TRANSPORT_AMQP | TRANSPORT_BROKER | TRANSPORT_HTTP | TRANSPORT_MEMORY | TRANSPORT_MQTT | TRANSPORT_WORKER | TRANSPORT_WS
+  type TRANSPORTS = | TRANSPORT_AMQP | TRANSPORT_BROKER | TRANSPORT_HTTP | TRANSPORT_MEMORY | TRANSPORT_MQTT | TRANSPORT_WEBSOCKET | TRANSPORT_WORKER
 src/transport/shared/constants.ts TRANSPORT_AMQP
   const TRANSPORT_AMQP: "AMQP"
 src/transport/shared/constants.ts TRANSPORT_BROKER
@@ -3933,12 +3964,12 @@ src/transport/shared/constants.ts TRANSPORT_MEMORY
   const TRANSPORT_MEMORY: "MEMORY"
 src/transport/shared/constants.ts TRANSPORT_MQTT
   const TRANSPORT_MQTT: "MQTT"
+src/transport/shared/constants.ts TRANSPORT_WEBSOCKET
+  const TRANSPORT_WEBSOCKET: "WS"
 src/transport/shared/constants.ts TRANSPORT_WEBSOCKET_BINARYTYPE
   const TRANSPORT_WEBSOCKET_BINARYTYPE: "arraybuffer"
 src/transport/shared/constants.ts TRANSPORT_WORKER
   const TRANSPORT_WORKER: "WORKER"
-src/transport/shared/constants.ts TRANSPORT_WS
-  const TRANSPORT_WS: "WS"
 src/transport/shared/constants.ts WAIT_HEADER
   const WAIT_HEADER: "bead-wait"
 src/transport/shared/constants.ts WORKER_MESSAGES
@@ -3980,7 +4011,7 @@ src/transport/shared/memory-broker.ts IMemoryBrokerAdapter
     readonly isLinked: boolean
     readonly unsettled: number
     lose(): void
-    publish(publication: IMemoryBrokerPublication): Promise<BrokerPublished>
+    publishRetained(publication: IBrokerPublication): Promise<BrokerPublished>
     takeOver(): void
     readonly capabilities: IBrokerCapabilities
     readonly delivery: BrokerDelivery
@@ -3992,6 +4023,7 @@ src/transport/shared/memory-broker.ts IMemoryBrokerAdapter
     off(event: 'message', listener: (message: IBrokerMessage) => void): unknown
     on(event: 'down', listener: (down: IBrokerDown) => void): unknown
     on(event: 'message', listener: (message: IBrokerMessage) => void): unknown
+    publish(publication: IBrokerPublication): Promise<BrokerPublished>
     receiveBound(topic: BrokerTopic): number
     start(options?: IBrokerStart): Promise<void>
     stop(): Promise<void>
@@ -4008,13 +4040,6 @@ src/transport/shared/memory-broker.ts IMemoryBrokerOptions
     delivery?: BrokerDelivery | undefined
     maximumMessageBytes?: number | undefined
     maximumQueuedMessages?: number | undefined
-src/transport/shared/memory-broker.ts IMemoryBrokerPublication
-  interface IMemoryBrokerPublication extends IBrokerPublication
-    readonly retained?: boolean | undefined
-    readonly expiresAfter?: number | undefined
-    readonly payload: Uint8Array
-    readonly signal?: AbortSignal | undefined
-    readonly topic: BrokerTopic
 src/transport/shared/memory-broker.ts MEMORY_BROKER_FAULTS
   const MEMORY_BROKER_FAULTS: Readonly<{COPY: "copy"; DROP: "drop"; HOLD: "hold"; REDELIVER: "redeliver"}>
 src/transport/shared/memory-broker.ts MemoryBrokerFault
@@ -4164,8 +4189,8 @@ src/transport/shared/types.ts IBrokerDown
     readonly isTakenOver: boolean
 src/transport/shared/types.ts IBrokerMessage
   interface IBrokerMessage
+    readonly isRetained?: boolean | undefined
     readonly payload: Uint8Array
-    readonly retained?: boolean | undefined
     readonly topic: BrokerTopic
     settle(): void
 src/transport/shared/types.ts IBrokerPeer
@@ -4191,6 +4216,12 @@ src/transport/shared/types.ts IBrokerSubscription
 src/transport/shared/types.ts IEventIteratorOptions
   interface IEventIteratorOptions
     signal?: AbortSignal | undefined
+src/transport/shared/types.ts IGauges
+  interface IGauges<Handle extends string = string>
+    readonly anomalies: readonly string[]
+    readonly ceilings: Readonly<Record<string, number>>
+    readonly connectionHandles: ReadonlySet<Handle>
+    readonly counts: Readonly<Record<string, number>>
 src/transport/shared/types.ts IMemoryAcceptOptions
   interface IMemoryAcceptOptions
     readonly signal?: AbortSignal | undefined

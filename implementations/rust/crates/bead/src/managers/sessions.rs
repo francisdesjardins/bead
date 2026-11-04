@@ -788,7 +788,7 @@ impl SessionState {
             u64::try_from(self.timers.len()).unwrap_or(u64::MAX),
         );
 
-        Gauges::merged(vec![own, timed])
+        Gauges::merge(vec![own, timed])
     }
 
     /// Lets go of every session and stops every timer: what is stored after is refused.

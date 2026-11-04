@@ -4,7 +4,7 @@
 /* eslint-disable */
 
 import type { IServiceClient, IServiceClientOptions, IServiceServer, ServiceResolverCallback, ServiceResolvers, ServiceServerOptions } from "@francisdesjardins/bead/service";
-import { commandOf, createServiceClient, createServiceServer, failuresOf, GENERATED_CODE_SUPPORTS_VERSION_6, PAYLOAD_CODECS, requestOf } from "@francisdesjardins/bead/service";
+import { commandOf, createServiceClient, createServiceServer, failuresOf, GENERATED_CODE_SUPPORTS_VERSION_7, PAYLOAD_CODECS, requestOf } from "@francisdesjardins/bead/service";
 import { protoCodecOf } from "@francisdesjardins/bead/proto";
 import { Farewell_ReplySchema, FarewellSchema, Greeting_ReplySchema, GreetingSchema } from "./messages_pb.ts";
 import { TimestampSchema } from "@bufbuild/protobuf/wkt";
@@ -66,7 +66,7 @@ export const GreeterProcedures = Object.freeze({
 /**
  * The failures of `bead.messages.v1.GreeterService`, by name: service 3's catalogue.
  */
-export const GreeterFailures = failuresOf({ codes: { NOBODY: 1 }, serviceId: 3 });
+export const GreeterFailures = failuresOf(3, { NOBODY: 1 });
 
 /**
  * Each procedure's resolver, by its name: for resolvers written in a module of their own.
@@ -188,4 +188,4 @@ export class GreeterClient {
 }
 
 // the contract with the runtime this file needs: an older runtime lacks the constant, and fails here
-void GENERATED_CODE_SUPPORTS_VERSION_6;
+void GENERATED_CODE_SUPPORTS_VERSION_7;

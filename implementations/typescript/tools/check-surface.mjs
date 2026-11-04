@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // ── The package's surface, pinned to its list, its options and tuples judged ─
 // Reads each entry of `package.json`'s `exports` through TypeScript 7's checker (its
-// `unstable/sync` API, at the version the lockfile pins) and holds three things (decisions 0004 and
+// `unstable/sync` API, at the version the lockfile pins) and holds four things (decisions 0004 and
 // 0006):
 //
 // - the surface: each entry's exports, then each declaration they name, with its members — a
@@ -15,15 +15,20 @@
 //   `undefined` aside, is named `…Options`, or holds one in an intersection; a rest is judged by the
 //   last element of its tuple, a conditional one by each of its arms, never by a tuple's array
 //   members; options typed by a type parameter are judged where an instantiation is exported;
+// - the record rule: no exported function or method takes a parameter typed as an inline object
+//   that is not its options — the last parameter when it is optional or follows another, or one
+//   named `options`: two things are two parameters, and a third a record of the call, named. A
+//   literal of index signatures alone is a map, one value, never judged;
 // - the tuple rule: no export takes or gives a tuple, at any depth of a parameter's, a return's, a
 //   member's, an alias's or a constant's type, written or inferred, an alias of ours judged by what
 //   it names; nor takes an array apart in a parameter. A parameter list stays: a rest's own tuple,
 //   and at depth one whose every element is labeled, an event map's; a non-rest parameter's or a
 //   return's own type is never one. A conditional type's `[X] extends [Y]` is no value, skipped.
 //
-// What the tuple rule waives is `WAIVED_TUPLES`, each with its reason; the options rule waives
-// nothing. `bead/options-last` judges what syntax shows of the options rule; this judges what only
-// the checker knows, a named type's members.
+// What the tuple rule waives is `WAIVED_TUPLES`, and the record rule `WAIVED_INLINE_OBJECTS`, each
+// with its reason; the options rule waives nothing. `bead/options-last` judges what syntax shows of
+// the options rule; this judges what only the checker knows, a named type's members and what the
+// package exports, which a module's own `export` does not tell.
 //
 // Usage, from the package's folder; `yarn check` runs it as `yarn surface:check`:
 //   node tools/check-surface.mjs           the surface against `surface.txt`, and the rules
@@ -63,6 +68,17 @@ const WAIVED_TUPLES = Object.freeze({
   'src/proto/validate.ts entriesByKey': "a map's entries as ECMA-262's Object.entries gives them",
   'src/transport/server/http-policy.ts HTTP_POLICY_MEMBERS':
     'a frozen list of names, which as const types as a tuple',
+});
+
+/**
+ * The record rule's waivers, by the declaration's file and its `owner.member(parameter)`, each with
+ * its reason. ! The list only shrinks: a new one is two parameters, or a record of the call, named.
+ */
+const WAIVED_INLINE_OBJECTS = Object.freeze({
+  'src/transport/shared/broker-participant.ts IBrokerConnectionOwner.envelope(message)':
+    'one value, an envelope and the credential it came with, on a type the TypeScript side alone exports: named, or off the surface, as the reading of the names one side alone holds places it',
+  'src/transport/shared/broker-participant.ts IBrokerParticipantPort.connect(pair)':
+    "a connection's two halves and its peer, on a type the TypeScript side alone exports: named, or off the surface, as the reading of the names one side alone holds places it",
 });
 
 /** An options type's name, its generic arguments aside. */
@@ -374,7 +390,79 @@ function judgeCallable({ type, where }, scope) {
       }
       scope.faults.set(`${where}\t${fault}`, placeOf(options.node));
     }
+    judgeRecords({ signature, where }, scope);
   }
+}
+
+// ── The record rule ──────────────────────────────────────────────────────────
+
+/**
+ * Whether a type, as written, is an inline record: a type literal holding a member that is no index
+ * signature, under the wrappers, or an intersection or a union holding one.
+ */
+function isInlineRecord(node) {
+  if (node === undefined) {
+    return false;
+  }
+  if (is.isTypeLiteralNode(node)) {
+    return node.members.some((member) => {
+      return !is.isIndexSignatureDeclaration(member);
+    });
+  }
+  if (is.isTypeReferenceNode(node)) {
+    return WRAPPERS.has(node.typeName.getText()) && isInlineRecord(node.typeArguments?.[0]);
+  }
+  if (is.isIntersectionTypeNode(node) || is.isUnionTypeNode(node)) {
+    return node.types.some(isInlineRecord);
+  }
+  return false;
+}
+
+/** The names of the declarations around a parameter, outermost first: `IOwner.member`. */
+function ownerOf(parameter) {
+  const names = [];
+  for (let at = parameter.parent; at !== undefined && !is.isSourceFile(at); at = at.parent) {
+    const name = at.name?.getText();
+    if (name !== undefined) {
+      names.unshift(name);
+    }
+  }
+  return names.join('.');
+}
+
+/**
+ * Judges the parameters of `signature`, called as `where`: each typed as an inline record is
+ * refused, but the options — the last parameter when it is optional or follows another, or one
+ * named `options` — and those `WAIVED_INLINE_OBJECTS` names. Each is judged once, however many
+ * exports reach it.
+ */
+function judgeRecords({ signature, where }, scope) {
+  const parameters = signature.getParameters();
+  parameters.forEach((parameter, index) => {
+    const node = parameter.valueDeclaration?.resolve();
+    if (node === undefined || node.dotDotDotToken !== undefined || !isInlineRecord(node.type)) {
+      return;
+    }
+    const name = node.name.getText();
+    const isOptional =
+      node.questionToken !== undefined ||
+      node.initializer !== undefined ||
+      (parameter.flags & SymbolFlags.Optional) !== 0;
+    const isLast = index === parameters.length - 1;
+    if (name === 'options' || (isLast && (isOptional || index > 0))) {
+      return;
+    }
+    const place = placeOf(node);
+    const key = `${place.file} ${ownerOf(node)}(${name})`;
+    if (Object.hasOwn(WAIVED_INLINE_OBJECTS, key) || scope.recorded.has(key)) {
+      return;
+    }
+    scope.recorded.add(key);
+    scope.faults.set(
+      `${where}\tan inline object, ${name}: two things are two parameters, a third a record of the call, named`,
+      place
+    );
+  });
 }
 
 /**
@@ -698,7 +786,14 @@ function entriesOf() {
  */
 function walk(project, { entries, isCases }) {
   const { checker, program } = project;
-  const scope = { checker, faults: new Map(), isCases, judged: new Set(), tupled: new Set() };
+  const scope = {
+    checker,
+    faults: new Map(),
+    isCases,
+    judged: new Set(),
+    recorded: new Set(),
+    tupled: new Set(),
+  };
   const failures = [];
   const listed = [];
   const declarations = new Map();
@@ -864,7 +959,7 @@ try {
         failures.push(`${CASES}:${String(line)} — refused, and not marked: ${fault}`);
       }
     }
-    summary = `the options and tuple rules refuse the ${String(marked.size)} lines their cases mark, and no other`;
+    summary = `the options, record and tuple rules refuse the ${String(marked.size)} lines their cases mark, and no other`;
   } else {
     for (const [fault, place] of walked.faults) {
       failures.push(`${place.file}:${String(place.line)} — ${fault.replace('\t', ': ')}`);
@@ -899,7 +994,7 @@ try {
           })
         );
       }
-      summary = `${String(walked.names)} names over ${String(entries.length)} entries are ${SURFACE}, their options hold the rule, and none takes or gives a tuple`;
+      summary = `${String(walked.names)} names over ${String(entries.length)} entries are ${SURFACE}, their options hold the rule, none takes an inline record, and none takes or gives a tuple`;
     }
   }
 } finally {

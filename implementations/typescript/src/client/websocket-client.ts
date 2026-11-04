@@ -3,10 +3,10 @@
 // dependencies
 
 import {
-  createWSTransportClient,
-  type IWSTransportClientOptions,
-  type WSTransportClient,
-} from '../transport/client/ws-transport-client';
+  createWebSocketTransportClient,
+  type IWebSocketTransportClientOptions,
+  type WebSocketTransportClient,
+} from '../transport/client/websocket-transport-client';
 import { LIMIT_DEFAULTS } from '../router/shared/constants';
 import { ProgrammerError } from '../transport/shared/errors';
 import { createClient } from './client';
@@ -20,8 +20,8 @@ export * from './client';
  * A WebSocket client's layers and options: the transport's options, and the router, the services
  * and the limits as a client takes them.
  */
-export interface IWSClientOptions
-  extends Omit<IClientLayers<WSTransportClient>, 'transport'>, IClientOptions {
+export interface IWebSocketClientOptions
+  extends Omit<IClientLayers<WebSocketTransportClient>, 'transport'>, IClientOptions {
   /**
    * The transport's options; binary comes as frames, so as `'arraybuffer'` or `'nodebuffer'`. A
    * message is an envelope at most — the limits' `maximumEnvelopeBytes` — unless `maxPayload` says
@@ -30,7 +30,7 @@ export interface IWSClientOptions
    * off envelopes the router takes. The clock is every layer's.
    */
   transport?:
-    | (Omit<IWSTransportClientOptions, 'binaryType'> & {
+    | (Omit<IWebSocketTransportClientOptions, 'binaryType'> & {
         binaryType?: 'arraybuffer' | 'nodebuffer' | undefined;
       })
     | undefined;
@@ -38,7 +38,7 @@ export interface IWSClientOptions
 
 // types
 
-export type WSClient = IClient<WSTransportClient>;
+export type WebSocketClient = IClient<WebSocketTransportClient>;
 
 // definition
 
@@ -46,13 +46,13 @@ export type WSClient = IClient<WSTransportClient>;
  * A client over WebSocket: {@link createClient} with a WebSocket transport as its bottom layer.
  *
  * @example
- * import { createWSClient } from '@francisdesjardins/bead/ws-client';
+ * import { createWebSocketClient } from '@francisdesjardins/bead/websocket-client';
  *
- * const client = createWSClient();
+ * const client = createWebSocketClient();
  *
  * void client.connect({ host, port, pathname: '/api' });
  */
-export const createWSClient = (options?: IWSClientOptions): WSClient => {
+export const createWebSocketClient = (options?: IWebSocketClientOptions): WebSocketClient => {
   const maximumEnvelopeBytes =
     options?.limits?.maximumEnvelopeBytes ?? LIMIT_DEFAULTS.maximumEnvelopeBytes;
   const maxPayload = options?.transport?.maxPayload ?? maximumEnvelopeBytes;
@@ -67,7 +67,7 @@ export const createWSClient = (options?: IWSClientOptions): WSClient => {
     {
       router: options?.router,
       services: options?.services,
-      transport: createWSTransportClient({ ...options?.transport, maxPayload }),
+      transport: createWebSocketTransportClient({ ...options?.transport, maxPayload }),
     },
     {
       credential: options?.credential,

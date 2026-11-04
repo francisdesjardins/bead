@@ -1,4 +1,4 @@
-const webSocket = createWSTransportServer({ WebSocketServer });
+const webSocket = createWebSocketTransportServer({ WebSocketServer });
 const memory = createMemoryTransportServer();
 const server = createServer({ transport: joinTransports([webSocket, memory]) });
 

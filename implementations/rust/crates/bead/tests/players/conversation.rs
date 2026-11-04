@@ -20,7 +20,7 @@ use bead::{
     MemoryTransportClientOptions, MemoryTransportServer, MemoryTransportServerOptions,
     MetricsRegistry, NEVER, PacingLimitsOptions, RelayOptions, RouterClientTransport, RouterError,
     RouterLimitsOptions, RouterSide, Sent, Server, ServerListener, ServerOptions, ServerTransport,
-    ServiceServer, SharedClock, TracedEnvelope, TransportClientDisconnectOptions, TransportMessage,
+    SharedClock, TracedEnvelope, TransportClientDisconnectOptions, TransportMessage,
     require_credential, require_session, share_leg_b_session,
 };
 use bytes::Bytes;
@@ -915,12 +915,11 @@ fn listener_of(conversation: &Value) -> Result<Option<(String, String)>, String>
 // connection, and once, a call of its command on that connection, with the clock's question, its
 // answer let go (spec 9.0)
 fn listen(
-    (server, interop): (&Server, &ServiceServer),
+    (server, interop): (&Server, &bead_interop::OfferedInterop),
     (telling, command): (&str, &str),
 ) -> Result<(), String> {
-    let procedures = bead_interop::interop_procedures(None).map_err(|error| error.to_string())?;
     let descriptor = match command {
-        "clock" => procedures.clock,
+        "clock" => &interop.procedures.clock,
         other => {
             return Err(format!(
                 "a conversation's listener calls a command no test reads: {other}"
@@ -928,7 +927,8 @@ fn listen(
         }
     };
     let asking = interop
-        .command(&descriptor)
+        .service
+        .command_of(descriptor)
         .map_err(|error| error.to_string())?;
     let told: Mutex<HashSet<ConnectionHandle>> = Mutex::default();
     // * a call made from within the telling, its future dropped: it goes as it is made, whatever

@@ -1,11 +1,12 @@
-// ── The cases of `check-surface.mjs`'s options and tuple rules ───────────────
+// ── The cases of `check-surface.mjs`'s options, record and tuple rules ───────
 // A line for each verdict: a line a rule refuses follows a comment of its own, `// refused:` and
 // why, and every other line is one it accepts. `check-surface.mjs --cases` reads this file alone,
 // through `surface.cases.tsconfig.json`, and fails unless the lines refused are exactly the ones
 // marked: an exported function's or method's options parameter is required exactly when a member
-// of its type is, a conditional one by each arm, at most two required; and no export takes or
-// gives a tuple, at any depth, but a parameter list, every element labeled, or a rest's own. The
-// package's own lint and `tsconfig` leave it out.
+// of its type is, a conditional one by each arm, at most two required; no exported function or
+// method takes an inline object that is not its options; and no export takes or gives a tuple, at
+// any depth, but a parameter list, every element labeled, or a rest's own. The package's own lint
+// and `tsconfig` leave it out.
 
 export interface IAllOptionalOptions {
   a?: number;
@@ -159,6 +160,39 @@ export const createClient = () => {
       return options.a ?? 0;
     },
   };
+};
+
+// ── An inline object taken, and the options ──────────────────────────────────
+
+export const dropAll = (
+  // refused: two things in one inline object, where two parameters are
+  connection: { failure: string; handle: string }
+): number => {
+  return connection.handle.length + connection.failure.length;
+};
+
+export interface IDropper {
+  drop(
+    // refused: a method's record of the call, inline and unnamed
+    call: { failure: string; handle: string },
+    reason: string
+  ): void;
+}
+
+export const detailOf = (judged: string, { maximumBytes }: { maximumBytes: number }): number => {
+  return judged.length + maximumBytes;
+};
+
+export const optionalLast = (settings?: { a?: number }): number => {
+  return settings?.a ?? 0;
+};
+
+export const namedOptions = (options: { a: number }): number => {
+  return options.a;
+};
+
+export const byKey = (map: { readonly [key: string]: number }): number => {
+  return Object.keys(map).length;
 };
 
 // ── A tuple taken or given, and a parameter list ─────────────────────────────

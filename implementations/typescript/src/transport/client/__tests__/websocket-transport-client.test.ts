@@ -45,14 +45,14 @@ import {
 } from '../../shared/__tests__/fixtures';
 import {
   CLOSE_TIMEOUT,
-  createWSTransportClient,
+  createWebSocketTransportClient,
   HEARTBEAT,
   MAXIMUM_MESSAGE_BYTES,
   TRANSPORT_WEBSOCKET_BINARYTYPE,
   type IWebSocketConstructor,
-  type WSTransportClient,
-} from '../ws-transport-client';
-import { createWSTransportServer } from '../../server/ws-transport-server';
+  type WebSocketTransportClient,
+} from '../websocket-transport-client';
+import { createWebSocketTransportServer } from '../../server/websocket-transport-server';
 import { hasIPv6Loopback } from '../../server/__tests__/addresses';
 import { createFakeWebSocket } from './fake-websocket';
 
@@ -66,7 +66,7 @@ const drop = (client: ITransportClient<object, never>): void => {
  * judgement made from the URL it was given, its socket refused.
  */
 const judgedOf = async (target: { host: string; secured?: boolean; port?: number }) => {
-  const client = createWSTransportClient({
+  const client = createWebSocketTransportClient({
     // no constructor at all: the socket it would open is refused as it is made
     WebSocket: (() => {
       return undefined;
@@ -87,7 +87,10 @@ const RECONNECTION_CANCELLED = Object.freeze({
 // a bearer credential, as RFC 6750 §2.1 writes one
 const BEARER = 'Bearer mF_9.B5f-4.1JqM';
 
-const nextEvent = <K extends TRANSPORT_CLIENT_EVENTS>(client: WSTransportClient, event: K) => {
+const nextEvent = <K extends TRANSPORT_CLIENT_EVENTS>(
+  client: WebSocketTransportClient,
+  event: K
+) => {
   return new Promise<TransportClientEventMap[K]>((resolve) => {
     client.once(event, (...params) => {
       resolve(params);
@@ -113,7 +116,7 @@ const nextMessage = (server: WebSocketServer) => {
   });
 };
 
-test('@francisdesjardins/bead/ws-transport-client re-exports the WebSocket binary type', () => {
+test('@francisdesjardins/bead/websocket-transport-client re-exports the WebSocket binary type', () => {
   expect(TRANSPORT_WEBSOCKET_BINARYTYPE).toBe(constants.TRANSPORT_WEBSOCKET_BINARYTYPE);
 });
 
@@ -124,12 +127,12 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
   test.describe(`on ${label}`, () => {
     let server: WebSocketServer;
     let port: number;
-    let client: WSTransportClient;
+    let client: WebSocketTransportClient;
 
     test.beforeEach(async () => {
       server = await startServer();
       port = portOf(server);
-      client = createWSTransportClient({ WebSocket: TrackedWebSocket });
+      client = createWebSocketTransportClient({ WebSocket: TrackedWebSocket });
     });
 
     test.afterEach(async () => {
@@ -227,7 +230,7 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
       expect(closedAtServer).toHaveLength(2);
     });
 
-    test.describe('WSTransportClient #connect', () => {
+    test.describe('WebSocketTransportClient #connect', () => {
       // spec 15.15
       test('resolves when connecting to a valid endpoint', async () => {
         await client.connect({ host, port });
@@ -375,7 +378,7 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
         });
         // its timeout on the test clock, which alone moves it
         const clock = createTestClock();
-        const timed = createWSTransportClient({ clock, WebSocket: TrackedWebSocket });
+        const timed = createWebSocketTransportClient({ clock, WebSocket: TrackedWebSocket });
 
         try {
           const connecting = timed.connect({ host, port: portOf(gatedServer), timeout: 100 });
@@ -411,7 +414,7 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
           },
         });
         const clock = createTestClock();
-        const waiting = createWSTransportClient({ clock, WebSocket: TrackedWebSocket });
+        const waiting = createWebSocketTransportClient({ clock, WebSocket: TrackedWebSocket });
 
         try {
           const controller = new AbortController();
@@ -568,7 +571,7 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
       });
     });
 
-    test.describe('WSTransportClient #send', () => {
+    test.describe('WebSocketTransportClient #send', () => {
       const payloads: [string, () => Data][] = [
         [
           'string',
@@ -652,7 +655,7 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
       });
     });
 
-    test.describe('WSTransportClient "message" event', () => {
+    test.describe('WebSocketTransportClient "message" event', () => {
       test('emits what the server sends — text as a string, binary as an ArrayBuffer', async () => {
         server.once('connection', (socket) => {
           socket.send('text');
@@ -678,7 +681,10 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
       });
 
       test('an undefined binaryType still delivers an ArrayBuffer', async () => {
-        client = createWSTransportClient({ WebSocket: TrackedWebSocket, binaryType: undefined });
+        client = createWebSocketTransportClient({
+          WebSocket: TrackedWebSocket,
+          binaryType: undefined,
+        });
         server.once('connection', (socket) => {
           socket.send(Buffer.from('binary'));
         });
@@ -691,7 +697,10 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
       });
 
       test('delivers binary as a Blob with binaryType "blob"', async () => {
-        client = createWSTransportClient({ WebSocket: TrackedWebSocket, binaryType: 'blob' });
+        client = createWebSocketTransportClient({
+          WebSocket: TrackedWebSocket,
+          binaryType: 'blob',
+        });
         server.once('connection', (socket) => {
           socket.send(Buffer.from('binary'));
         });
@@ -778,7 +787,7 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
       });
     });
 
-    test.describe('WSTransportClient #disconnect', () => {
+    test.describe('WebSocketTransportClient #disconnect', () => {
       test('resolves when disconnecting', async () => {
         await client.connect({ host, port });
         await client.disconnect();
@@ -886,7 +895,7 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
       });
     });
 
-    test.describe('WSTransportClient #reconnect', () => {
+    test.describe('WebSocketTransportClient #reconnect', () => {
       test('reconnects after a disconnect', async () => {
         await client.connect({ host, port });
         await client.disconnect();
@@ -988,7 +997,7 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
       });
     });
 
-    test.describe('WSTransportClient ReadyState', () => {
+    test.describe('WebSocketTransportClient ReadyState', () => {
       test('only one ready state is true at a time', async () => {
         const states = () => {
           return {
@@ -1029,10 +1038,10 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
   });
 }
 
-test.describe('WSTransportClient, with a scripted WebSocket', () => {
+test.describe('WebSocketTransportClient, with a scripted WebSocket', () => {
   test('keeps the cause an error event carries, and names the close by its reason', async () => {
     const { FakeWebSocket, sockets } = createFakeWebSocket();
-    const client = createWSTransportClient({ WebSocket: FakeWebSocket });
+    const client = createWebSocketTransportClient({ WebSocket: FakeWebSocket });
     const cause = new Error('ECONNREFUSED');
 
     const connecting = client.connect({ host: 'h', port: 1 });
@@ -1048,7 +1057,7 @@ test.describe('WSTransportClient, with a scripted WebSocket', () => {
 
   test('an error event that carries nothing leaves the ConnectError without a cause', async () => {
     const { FakeWebSocket, sockets } = createFakeWebSocket();
-    const client = createWSTransportClient({ WebSocket: FakeWebSocket });
+    const client = createWebSocketTransportClient({ WebSocket: FakeWebSocket });
 
     for (const event of [undefined, 'error', {}]) {
       const connecting = client.connect({ host: 'h', port: 1 });
@@ -1074,7 +1083,7 @@ test.describe('WSTransportClient, with a scripted WebSocket', () => {
 
   test('a close that throws on disconnect drops the socket, ends CLOSED, and rejects with a ProgrammerError', async () => {
     const { FakeWebSocket, sockets } = createFakeWebSocket();
-    const client = createWSTransportClient({ WebSocket: FakeWebSocket });
+    const client = createWebSocketTransportClient({ WebSocket: FakeWebSocket });
     const closes: unknown[] = [];
 
     client.on('close', (...params) => {
@@ -1106,7 +1115,7 @@ test.describe('WSTransportClient, with a scripted WebSocket', () => {
 
   test('a second disconnect, rejected, leaves the first for dispose to settle, with no close', async () => {
     const { FakeWebSocket, sockets } = createFakeWebSocket();
-    const client = createWSTransportClient({ WebSocket: FakeWebSocket });
+    const client = createWebSocketTransportClient({ WebSocket: FakeWebSocket });
     const closes: unknown[] = [];
 
     client.on('close', (...params) => {
@@ -1144,7 +1153,7 @@ test.describe('WSTransportClient, with a scripted WebSocket', () => {
 
   test('a dispose or a close between the open and the end of connect is not undone', async () => {
     const { FakeWebSocket, sockets } = createFakeWebSocket();
-    const client = createWSTransportClient({ WebSocket: FakeWebSocket });
+    const client = createWebSocketTransportClient({ WebSocket: FakeWebSocket });
     const closes: unknown[] = [];
 
     client.on('close', (...params) => {
@@ -1183,7 +1192,7 @@ test.describe('WSTransportClient, with a scripted WebSocket', () => {
       },
       { CONNECTING: 0, OPEN: 1 }
     ) as unknown as typeof FakeWebSocket;
-    const client = createWSTransportClient({ WebSocket: Recording });
+    const client = createWebSocketTransportClient({ WebSocket: Recording });
 
     for (const host of ['::1', '[::1]', '127.0.0.1', 'example.test']) {
       const connecting = client.connect({ host, port: 8080 });
@@ -1206,7 +1215,7 @@ test.describe('WSTransportClient, with a scripted WebSocket', () => {
       }
 
       const server = await startServer({ host: address });
-      const real = createWSTransportClient({ WebSocket: IMPLEMENTATIONS[1][1] });
+      const real = createWebSocketTransportClient({ WebSocket: IMPLEMENTATIONS[1][1] });
 
       try {
         for (const host of address === '::1' ? ['::1', '[::1]'] : ['127.0.0.1', 'localhost']) {
@@ -1223,7 +1232,7 @@ test.describe('WSTransportClient, with a scripted WebSocket', () => {
 
   test('dispose drops a connecting socket even when its close throws', async () => {
     const { FakeWebSocket, sockets } = createFakeWebSocket();
-    const client = createWSTransportClient({ WebSocket: FakeWebSocket });
+    const client = createWebSocketTransportClient({ WebSocket: FakeWebSocket });
 
     const connecting = client.connect({ host: 'h', port: 1 });
 
@@ -1240,7 +1249,7 @@ test.describe('WSTransportClient, with a scripted WebSocket', () => {
   });
 });
 
-test.describe('WSTransportClient, what it carries', () => {
+test.describe('WebSocketTransportClient, what it carries', () => {
   const [[, TrackedGlobal], [, TrackedWs]] = IMPLEMENTATIONS;
   const Ws = TrackedWs as unknown as IWebSocketConstructor;
 
@@ -1267,7 +1276,7 @@ test.describe('WSTransportClient, what it carries', () => {
       await once(listener, 'listening');
       const accepted = once(listener, 'connection');
       const cancelling = new AbortController();
-      await using client = createWSTransportClient({ clock, WebSocket: Ws });
+      await using client = createWebSocketTransportClient({ clock, WebSocket: Ws });
       const outcome = client
         .connect({
           host,
@@ -1308,7 +1317,7 @@ test.describe('WSTransportClient, what it carries', () => {
   test('finishes a connect whose provider completion callback throws', async () => {
     using trapped = trapUncaught();
     const server = await startServer();
-    await using client = createWSTransportClient({ WebSocket: Ws });
+    await using client = createWebSocketTransportClient({ WebSocket: Ws });
     const callback = Promise.withResolvers<void>();
     const reason = new Error('provider callback failed');
     let connected = false;
@@ -1345,7 +1354,7 @@ test.describe('WSTransportClient, what it carries', () => {
   // spec 15.15
   test('defers its credential provider until after connect returns', async () => {
     const server = await startServer();
-    await using client = createWSTransportClient({ WebSocket: Ws });
+    await using client = createWebSocketTransportClient({ WebSocket: Ws });
     let called = false;
     try {
       const connecting = client.connect({
@@ -1371,7 +1380,7 @@ test.describe('WSTransportClient, what it carries', () => {
   // spec 15.15
   test('writes no credential that settles in the turn its client is disposed', async () => {
     const server = await startServer();
-    await using client = createWSTransportClient({ WebSocket: Ws });
+    await using client = createWebSocketTransportClient({ WebSocket: Ws });
     let upgrades = 0;
     const messages: unknown[] = [];
     server.on('connection', () => {
@@ -1396,7 +1405,7 @@ test.describe('WSTransportClient, what it carries', () => {
       });
       expect(client.socket).toBeNull();
       // a round trip lets an upgrade built in the ending turn reach the server
-      await using probe = createWSTransportClient({ WebSocket: Ws });
+      await using probe = createWebSocketTransportClient({ WebSocket: Ws });
       await probe.connect({ host, port: portOf(server) });
       await probe.disconnect({ isQuick: true });
       await allClosed();
@@ -1427,7 +1436,7 @@ test.describe('WSTransportClient, what it carries', () => {
           constructed += 1;
         }
       }
-      await using client = createWSTransportClient({ clock, WebSocket: Counting });
+      await using client = createWebSocketTransportClient({ clock, WebSocket: Counting });
       const before = sockets.size;
       const outcome = client
         .connect({
@@ -1472,7 +1481,7 @@ test.describe('WSTransportClient, what it carries', () => {
         const entered = Promise.withResolvers<AbortSignal>();
         const answer = Promise.withResolvers<string>();
         const cancelling = new AbortController();
-        await using client = createWSTransportClient({ clock, WebSocket: Ws });
+        await using client = createWebSocketTransportClient({ clock, WebSocket: Ws });
         const before = sockets.size;
         const outcome = client
           .connect({
@@ -1529,7 +1538,7 @@ test.describe('WSTransportClient, what it carries', () => {
     for (const late of ['value', 'failure']) {
       const server = await startServer();
       const clock = createTestClock();
-      await using client = createWSTransportClient({ clock, WebSocket: Ws });
+      await using client = createWebSocketTransportClient({ clock, WebSocket: Ws });
       const entered = Promise.withResolvers<void>();
       const answer = Promise.withResolvers<string>();
       const cancelling = new AbortController();
@@ -1600,7 +1609,7 @@ test.describe('WSTransportClient, what it carries', () => {
     for (const late of ['value', 'failure']) {
       for (const next of ['value', 'failure']) {
         const server = await startServer();
-        await using client = createWSTransportClient({ WebSocket: Ws });
+        await using client = createWebSocketTransportClient({ WebSocket: Ws });
         const answer = Promise.withResolvers<string>();
         const renewed = Promise.withResolvers<string>();
         const entered = Promise.withResolvers<AbortSignal>();
@@ -1705,7 +1714,7 @@ test.describe('WSTransportClient, what it carries', () => {
       for (const late of ['value', 'failure']) {
         const server = await startServer();
         const clock = createTestClock();
-        await using client = createWSTransportClient({ clock, WebSocket: Ws });
+        await using client = createWebSocketTransportClient({ clock, WebSocket: Ws });
         const answer = Promise.withResolvers<string>();
         const entered = Promise.withResolvers<void>();
         const aborted = Promise.withResolvers<void>();
@@ -1803,7 +1812,7 @@ test.describe('WSTransportClient, what it carries', () => {
     const callback = Promise.withResolvers<void>();
     const answer = Promise.withResolvers<string>();
     const reason = new Error('provider callback failed');
-    await using client = createWSTransportClient({ clock, WebSocket: Ws });
+    await using client = createWebSocketTransportClient({ clock, WebSocket: Ws });
     const outcome = client
       .connect({
         host,
@@ -1837,7 +1846,7 @@ test.describe('WSTransportClient, what it carries', () => {
 
   test('treats a provider own cancellation as its failure while the attempt stays live', async () => {
     const reason = new DOMException('provider cancelled', 'AbortError');
-    await using client = createWSTransportClient({ WebSocket: Ws });
+    await using client = createWebSocketTransportClient({ WebSocket: Ws });
     await expect(
       client.connect({
         host,
@@ -1851,7 +1860,7 @@ test.describe('WSTransportClient, what it carries', () => {
   });
 
   test('carries no credential its upgrade did not carry, and is secure under wss or to a loopback host, judged by the URL it was given', async () => {
-    const unstarted = createWSTransportClient();
+    const unstarted = createWebSocketTransportClient();
 
     expect([unstarted.carries(BEARER), unstarted.isSecure]).toEqual([false, false]);
     expect(
@@ -1879,7 +1888,7 @@ test.describe('WSTransportClient, what it carries', () => {
     ]);
 
     const server = await startServer();
-    const connected = createWSTransportClient({ WebSocket: IMPLEMENTATIONS[1][1] });
+    const connected = createWebSocketTransportClient({ WebSocket: IMPLEMENTATIONS[1][1] });
 
     try {
       await connected.connect({ host, port: portOf(server) });
@@ -1895,7 +1904,7 @@ test.describe('WSTransportClient, what it carries', () => {
   test('writes the credential it is given on its upgrade, and carries those bytes alone', async () => {
     await using hearing = await startRefusing();
     const heard = upgradesOf(hearing);
-    const client = createWSTransportClient({ WebSocket: Ws });
+    const client = createWebSocketTransportClient({ WebSocket: Ws });
 
     // none before its first connect
     expect(client.carries(BEARER)).toBe(false);
@@ -1935,7 +1944,7 @@ test.describe('WSTransportClient, what it carries', () => {
     expect([client.carries(''), client.carries(BEARER)]).toEqual([false, false]);
     await client.disconnect();
     for (const given of [undefined, '']) {
-      const bare = createWSTransportClient({ WebSocket: Ws });
+      const bare = createWebSocketTransportClient({ WebSocket: Ws });
 
       await bare.connect({ credential: given, host, port: hearing.port });
       expect([bare.carries(''), bare.carries(BEARER)]).toEqual([false, false]);
@@ -1953,7 +1962,7 @@ test.describe('WSTransportClient, what it carries', () => {
     const signals: AbortSignal[] = [];
     const away = new Error('the token store is away');
     let handed = 0;
-    const client = createWSTransportClient({ WebSocket: Ws });
+    const client = createWebSocketTransportClient({ WebSocket: Ws });
 
     await client.connect({
       credentialProvider: ({ signal }) => {
@@ -2011,7 +2020,7 @@ test.describe('WSTransportClient, what it carries', () => {
     await client.disconnect();
 
     // a provider's throw fails the connect, its cause
-    const failing = createWSTransportClient({ WebSocket: Ws });
+    const failing = createWebSocketTransportClient({ WebSocket: Ws });
     const reason: unknown = await failing
       .connect({
         credentialProvider: () => {
@@ -2032,7 +2041,7 @@ test.describe('WSTransportClient, what it carries', () => {
   test('refuses a credential that is no field value, a space or a tab first or last among them, or over a URL in the clear off the loopback, before its upgrade goes', async () => {
     await using hearing = await startRefusing();
     const heard = upgradesOf(hearing);
-    const client = createWSTransportClient({ WebSocket: Ws });
+    const client = createWebSocketTransportClient({ WebSocket: Ws });
     const target = { host, port: hearing.port };
 
     for (const credential of [
@@ -2080,7 +2089,7 @@ test.describe('WSTransportClient, what it carries', () => {
     // a provider's value, held alike once handed: the connect fails, and a reconnection does not
     // try again what no attempt would mend
     let handed = BEARER;
-    const provided = createWSTransportClient({ WebSocket: Ws });
+    const provided = createWebSocketTransportClient({ WebSocket: Ws });
 
     await provided.connect({
       ...target,
@@ -2110,7 +2119,7 @@ test.describe('WSTransportClient, what it carries', () => {
     const errors: Error[] = [];
     const closes: boolean[][] = [];
     const before = sockets.size;
-    await using client = createWSTransportClient({ WebSocket: Ws });
+    await using client = createWebSocketTransportClient({ WebSocket: Ws });
 
     client.on('error', (error) => {
       errors.push(error);
@@ -2165,7 +2174,7 @@ test.describe('WSTransportClient, what it carries', () => {
   });
 
   test('refuses a credential and a credential provider given together', async () => {
-    const client = createWSTransportClient({ WebSocket: Ws });
+    const client = createWebSocketTransportClient({ WebSocket: Ws });
 
     await expect(
       client.connect({
@@ -2199,7 +2208,7 @@ test.describe('WSTransportClient, what it carries', () => {
       Subclass as unknown as IWebSocketConstructor,
       Object.assign(Wrapper, { CONNECTING: 0, OPEN: 1 }),
     ]) {
-      const client = createWSTransportClient({ WebSocket: Constructor });
+      const client = createWebSocketTransportClient({ WebSocket: Constructor });
 
       for (const given of [
         { credential: BEARER },
@@ -2220,7 +2229,7 @@ test.describe('WSTransportClient, what it carries', () => {
     }
 
     // given none, the global connects as ever
-    const plain = createWSTransportClient({ WebSocket: TrackedGlobal });
+    const plain = createWebSocketTransportClient({ WebSocket: TrackedGlobal });
 
     await plain.connect({ host, port: hearing.port });
     await plain.disconnect();
@@ -2240,7 +2249,7 @@ test.describe('WSTransportClient, what it carries', () => {
       [Ws, 'the server refused the upgrade: 302'],
       [TrackedGlobal, '1006'],
     ] as const) {
-      const client = createWSTransportClient({ WebSocket: Constructor });
+      const client = createWebSocketTransportClient({ WebSocket: Constructor });
       const reason: unknown = await client
         .connect({
           credential: Constructor === Ws ? BEARER : undefined,
@@ -2262,11 +2271,11 @@ test.describe('WSTransportClient, what it carries', () => {
   });
 });
 
-test.describe('WSTransportClient, its message limit', () => {
+test.describe('WebSocketTransportClient, its message limit', () => {
   test('closes with 1009 a message past an envelope’s limit, 16,778,240 bytes, over `ws` when told no bound', async () => {
     const server = await startServer();
     const [, TrackedWsWebSocket] = IMPLEMENTATIONS[1];
-    const client = createWSTransportClient({ WebSocket: TrackedWsWebSocket });
+    const client = createWebSocketTransportClient({ WebSocket: TrackedWsWebSocket });
     const connection = nextConnection(server);
     const delivered: number[] = [];
 
@@ -2390,7 +2399,7 @@ const startRaw = async () => {
 };
 
 // what a client tells once open, in order: each error's message, then its close
-const toldBy = (client: WSTransportClient): unknown[][] => {
+const toldBy = (client: WebSocketTransportClient): unknown[][] => {
   const told: unknown[][] = [];
 
   client.on('error', (error) => {
@@ -2404,7 +2413,7 @@ const toldBy = (client: WSTransportClient): unknown[][] => {
 };
 
 // spec 15.1
-test.describe('WSTransportClient, what its error tells', () => {
+test.describe('WebSocketTransportClient, what its error tells', () => {
   const [[, TrackedGlobal], [, TrackedWs]] = IMPLEMENTATIONS;
 
   test('tells a server that drops without its closing handshake, by a FIN or a reset, by its unclean close alone, no error', async () => {
@@ -2420,7 +2429,7 @@ test.describe('WSTransportClient, what its error tells', () => {
     ];
 
     for (const drop of drops) {
-      const client = createWSTransportClient({ WebSocket: TrackedWs });
+      const client = createWebSocketTransportClient({ WebSocket: TrackedWs });
       const told = toldBy(client);
       const upgraded = raw.next();
 
@@ -2437,7 +2446,7 @@ test.describe('WSTransportClient, what its error tells', () => {
 
   test('tells a protocol error on its connection once, then its unclean close', async () => {
     await using raw = await startRaw();
-    const client = createWSTransportClient({ WebSocket: TrackedWs });
+    const client = createWebSocketTransportClient({ WebSocket: TrackedWs });
     const told: unknown[][] = [];
     const upgraded = raw.next();
 
@@ -2467,7 +2476,7 @@ test.describe('WSTransportClient, what its error tells', () => {
 
   test('fails with 1009 a message past its bound, telling one error that names maximumMessageBytes, then an unclean close, even when its server answers its close', async () => {
     await using raw = await startRaw();
-    const client = createWSTransportClient({ maxPayload: 1_024, WebSocket: TrackedWs });
+    const client = createWebSocketTransportClient({ maxPayload: 1_024, WebSocket: TrackedWs });
     const told = toldBy(client);
     const causes: unknown[] = [];
     const sent: (number | undefined)[] = [];
@@ -2505,7 +2514,7 @@ test.describe('WSTransportClient, what its error tells', () => {
 
   test('fails with 1009 a message past its bound for a server that never answers, telling one error, then an unclean close once its close timeout passed', async () => {
     await using raw = await startRaw();
-    const client = createWSTransportClient({
+    const client = createWebSocketTransportClient({
       closeTimeout: 200,
       maxPayload: 1_024,
       WebSocket: TrackedWs,
@@ -2536,7 +2545,7 @@ test.describe('WSTransportClient, what its error tells', () => {
   test('fails its connection on a protocol error whose error listener throws, telling its close all the same', async () => {
     using uncaught = trapUncaught();
     await using raw = await startRaw();
-    const client = createWSTransportClient({ WebSocket: TrackedWs });
+    const client = createWebSocketTransportClient({ WebSocket: TrackedWs });
     const closes: unknown[][] = [];
     const upgraded = raw.next();
 
@@ -2583,7 +2592,7 @@ test.describe('WSTransportClient, what its error tells', () => {
     ];
 
     for (const drop of drops) {
-      const client = createWSTransportClient({ WebSocket: TrackedGlobal });
+      const client = createWebSocketTransportClient({ WebSocket: TrackedGlobal });
       const told = toldBy(client);
       const upgraded = raw.next();
 
@@ -2600,12 +2609,12 @@ test.describe('WSTransportClient, what its error tells', () => {
 });
 
 // spec 15.3
-test.describe('WSTransportClient, its close timeout', () => {
+test.describe('WebSocketTransportClient, its close timeout', () => {
   const [, [, TrackedWs]] = IMPLEMENTATIONS;
 
   test('hands `maxPayload` and its close timeout to ws, an envelope’s limit and CLOSE_TIMEOUT when not given', async () => {
     const given: unknown[] = [];
-    const client = createWSTransportClient({
+    const client = createWebSocketTransportClient({
       // no socket at all, refused as it is made: what the constructor is handed is all it reads
       WebSocket: function (_url: string, _protocols: unknown, options: { closeTimeout?: number }) {
         given.push(options);
@@ -2625,8 +2634,8 @@ test.describe('WSTransportClient, its close timeout', () => {
   test('holds its close timeout to a whole number of milliseconds, rounded, refusing zero, and runs on the clock it is given', async () => {
     const clock = createTestClock();
 
-    expect(createWSTransportClient({ clock }).clock).toBe(clock);
-    expect(createWSTransportClient().clock).toBe(PLATFORM_CLOCK);
+    expect(createWebSocketTransportClient({ clock }).clock).toBe(clock);
+    expect(createWebSocketTransportClient().clock).toBe(PLATFORM_CLOCK);
 
     // a WebSocket's close timeout, its client's way, which the durations' harness plays by its
     // refusal; this loop holds, besides, what `ws` is handed
@@ -2646,8 +2655,8 @@ test.describe('WSTransportClient, its close timeout', () => {
 
       const duration = givenOf(input);
       const given: unknown[] = [];
-      const building = (): WSTransportClient => {
-        return createWSTransportClient({
+      const building = (): WebSocketTransportClient => {
+        return createWebSocketTransportClient({
           closeTimeout: duration,
           WebSocket: function (
             _url: string,
@@ -2682,7 +2691,7 @@ test.describe('WSTransportClient, its close timeout', () => {
 
   test('drops a server that never answers its disconnect once its close timeout passed, telling no error, its close as the disconnect said', async () => {
     await using raw = await startRaw();
-    const client = createWSTransportClient({ closeTimeout: 200, WebSocket: TrackedWs });
+    const client = createWebSocketTransportClient({ closeTimeout: 200, WebSocket: TrackedWs });
     const told = toldBy(client);
     const sent: number[] = [];
     const upgraded = raw.next();
@@ -2712,7 +2721,7 @@ test.describe('WSTransportClient, its close timeout', () => {
   test('waits on its server without end for a close timeout of Infinity, closing once it answers', async () => {
     await using raw = await startRaw();
     // ! `ws` is handed the longest a timer holds, 2³¹ − 1 ms, which it arms on every close
-    const client = createWSTransportClient({ closeTimeout: Infinity, WebSocket: TrackedWs });
+    const client = createWebSocketTransportClient({ closeTimeout: Infinity, WebSocket: TrackedWs });
     const told = toldBy(client);
     const sent: number[] = [];
     const upgraded = raw.next();
@@ -2750,10 +2759,10 @@ test.describe('WSTransportClient, its close timeout', () => {
   });
 });
 
-test.describe('WSTransportClient, heartbeat', () => {
+test.describe('WebSocketTransportClient, heartbeat', () => {
   test('pings its server every heartbeat over a socket that can, and closes at the beat after a ping it left unanswered', async () => {
     const { FakeWebSocket, sockets: made } = createFakeWebSocket({ canPing: true });
-    const client = createWSTransportClient({ heartbeat: 20, WebSocket: FakeWebSocket });
+    const client = createWebSocketTransportClient({ heartbeat: 20, WebSocket: FakeWebSocket });
     const connecting = client.connect({ host, port: 80 });
     const socket = made[0];
     const closed = nextEvent(client, 'close');
@@ -2775,7 +2784,7 @@ test.describe('WSTransportClient, heartbeat', () => {
   test('beats every HEARTBEAT when told nothing', async () => {
     using timers = spyIntervals();
     const { FakeWebSocket, sockets: made } = createFakeWebSocket({ canPing: true });
-    const client = createWSTransportClient({ WebSocket: FakeWebSocket });
+    const client = createWebSocketTransportClient({ WebSocket: FakeWebSocket });
     const connecting = client.connect({ host, port: 80 });
 
     made[0]?.fireOpen();
@@ -2794,8 +2803,8 @@ test.describe('WSTransportClient, heartbeat', () => {
     const browser = createFakeWebSocket();
     const pinging = createFakeWebSocket({ canPing: true });
     const clients = [
-      createWSTransportClient({ heartbeat: 20, WebSocket: browser.FakeWebSocket }),
-      createWSTransportClient({ heartbeat: Infinity, WebSocket: pinging.FakeWebSocket }),
+      createWebSocketTransportClient({ heartbeat: 20, WebSocket: browser.FakeWebSocket }),
+      createWebSocketTransportClient({ heartbeat: Infinity, WebSocket: pinging.FakeWebSocket }),
     ];
 
     for (const [index, client] of clients.entries()) {
@@ -2819,10 +2828,13 @@ test.describe('WSTransportClient, heartbeat', () => {
 
   test('stops beating once disconnected, dropped or closed by its server, and pings no socket that is closing', async () => {
     const { FakeWebSocket, sockets: made } = createFakeWebSocket({ canPing: true });
-    const disconnected = createWSTransportClient({ heartbeat: 20, WebSocket: FakeWebSocket });
-    const dropped = createWSTransportClient({ heartbeat: 20, WebSocket: FakeWebSocket });
-    const closing = createWSTransportClient({ heartbeat: 20, WebSocket: FakeWebSocket });
-    const closed = createWSTransportClient({ heartbeat: 20, WebSocket: FakeWebSocket });
+    const disconnected = createWebSocketTransportClient({
+      heartbeat: 20,
+      WebSocket: FakeWebSocket,
+    });
+    const dropped = createWebSocketTransportClient({ heartbeat: 20, WebSocket: FakeWebSocket });
+    const closing = createWebSocketTransportClient({ heartbeat: 20, WebSocket: FakeWebSocket });
+    const closed = createWebSocketTransportClient({ heartbeat: 20, WebSocket: FakeWebSocket });
 
     for (const [index, client] of [disconnected, dropped, closing, closed].entries()) {
       const connecting = client.connect({ host, port: 80 });
@@ -2860,7 +2872,7 @@ test.describe('WSTransportClient, heartbeat', () => {
   test('closes when its server leaves its pings unanswered, telling no error', async () => {
     const server = await startServer({ autoPong: false });
     const [, TrackedWsWebSocket] = IMPLEMENTATIONS[1];
-    const client = createWSTransportClient({
+    const client = createWebSocketTransportClient({
       heartbeat: 40,
       WebSocket: TrackedWsWebSocket as unknown as IWebSocketConstructor,
     });
@@ -2930,7 +2942,7 @@ const startRefusing = async (refusal?: string) => {
   };
 };
 
-test.describe('WSTransportClient, an upgrade refused', () => {
+test.describe('WebSocketTransportClient, an upgrade refused', () => {
   const [[, TrackedGlobal], [, TrackedWs]] = IMPLEMENTATIONS;
 
   test('names the status and the reason of an upgrade refused', async () => {
@@ -2939,7 +2951,7 @@ test.describe('WSTransportClient, an upgrade refused', () => {
       [BAD_GATEWAY, 'the server refused the upgrade: 502'],
     ] as const) {
       await using refusing = await startRefusing(refusal);
-      const client = createWSTransportClient({
+      const client = createWebSocketTransportClient({
         WebSocket: TrackedWs as unknown as IWebSocketConstructor,
       });
       const reason: unknown = await client
@@ -2958,7 +2970,7 @@ test.describe('WSTransportClient, an upgrade refused', () => {
 
   test('names nothing of an upgrade refused but its close, over the global WebSocket', async () => {
     await using refusing = await startRefusing(FORBIDDEN);
-    const client = createWSTransportClient({ WebSocket: TrackedGlobal });
+    const client = createWebSocketTransportClient({ WebSocket: TrackedGlobal });
 
     const reason: unknown = await client
       .connect({ host, port: refusing.port })
@@ -2976,7 +2988,7 @@ test.describe('WSTransportClient, an upgrade refused', () => {
 
   test('carries the last failure of a reconnect, an upgrade refused unmarked named by its status, over ws', async () => {
     await using refusing = await startRefusing();
-    const client = createWSTransportClient({
+    const client = createWebSocketTransportClient({
       WebSocket: TrackedWs as unknown as IWebSocketConstructor,
     });
     const reconnectOutcome = new Promise<unknown>((resolve) => {
@@ -3002,15 +3014,15 @@ test.describe('WSTransportClient, an upgrade refused', () => {
   });
 });
 
-test.describe('WSTransportClient, by a name', () => {
+test.describe('WebSocketTransportClient, by a name', () => {
   test('connects by a name to a server that listens on one loopback family alone, whichever it is', async () => {
     for (const address of await reachedByLocalhost()) {
-      const server = createWSTransportServer({ WebSocketServer });
+      const server = createWebSocketTransportServer({ WebSocketServer });
       const { port } = await server.start({ address, findOpenPort: true });
 
       try {
         for (const [label, Tracked] of IMPLEMENTATIONS) {
-          const client = createWSTransportClient({
+          const client = createWebSocketTransportClient({
             WebSocket: Tracked as unknown as IWebSocketConstructor,
           });
           const began = performance.now();
@@ -3034,13 +3046,13 @@ test.describe('WSTransportClient, by a name', () => {
   });
 });
 
-test.describe('WSTransportClient, paused by its router', () => {
+test.describe('WebSocketTransportClient, paused by its router', () => {
   const [, [, TrackedWs]] = IMPLEMENTATIONS;
 
   // spec 15.12.17; RFC 6455 §7.1.1
   test('a paused connection closes cleanly', async () => {
     const server = await startServer();
-    const client = createWSTransportClient({ closeTimeout: 2_000, WebSocket: TrackedWs });
+    const client = createWebSocketTransportClient({ closeTimeout: 2_000, WebSocket: TrackedWs });
     const connection = nextConnection(server);
     const heard: unknown[] = [];
 

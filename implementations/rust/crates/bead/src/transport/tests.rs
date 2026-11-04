@@ -1,7 +1,7 @@
 //! The transports' shared parts: what a credential beside an envelope may be, where a transport
 //! stands, and how a reconnection waits by default.
 
-use super::{RECONNECT_ATTEMPTS, RECONNECT_DELAY, ReadyState, is_field_value};
+use super::{RECONNECT_DEFAULTS, ReadyState, TransportClientReconnectDelay, is_field_value};
 
 mod reconnection;
 
@@ -56,8 +56,20 @@ fn names_where_it_stands_as_the_other_sides_do() {
 #[test]
 fn reconnects_five_times_a_second_apart_by_default() {
     assert_eq!(
-        (RECONNECT_ATTEMPTS, RECONNECT_DELAY),
-        (5, core::time::Duration::from_secs(1)),
-        "its defaults"
+        RECONNECT_DEFAULTS.maximum_attempts,
+        Some(5),
+        "its attempts by default"
+    );
+    assert!(
+        matches!(
+            RECONNECT_DEFAULTS.delay,
+            Some(TransportClientReconnectDelay::Fixed(delay))
+                if delay == core::time::Duration::from_secs(1)
+        ),
+        "its delay by default"
+    );
+    assert!(
+        RECONNECT_DEFAULTS.signal.is_none() && RECONNECT_DEFAULTS.tap.is_none(),
+        "nothing else by default"
     );
 }

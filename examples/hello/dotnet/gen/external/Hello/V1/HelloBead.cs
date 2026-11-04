@@ -117,7 +117,7 @@ public sealed class HelloCommands
 public sealed class HelloNotifiers
 {
     /// <summary>Notifies the subscribers of <c>countDown</c>.</summary>
-    public required global::System.Func<global::Hello.V1.Tick, global::Bead.NotifyOptions?, global::System.Threading.Tasks.Task> CountDown { get; init; }
+    public required global::Bead.Notifier<global::Hello.V1.Tick> CountDown { get; init; }
 }
 
 /// <summary>The window each procedure of <c>hello.v1.HelloService</c> that notifies is asked for; none, unpaced.</summary>

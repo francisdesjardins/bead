@@ -426,9 +426,9 @@ export const filterDebug = (
  *
  * @example
  * import { createRouterClient, filterEnvelopeDebug } from '@francisdesjardins/bead/router-client';
- * import { createWSTransportClient } from '@francisdesjardins/bead/ws-transport-client';
+ * import { createWebSocketTransportClient } from '@francisdesjardins/bead/websocket-transport-client';
  *
- * createRouterClient(createWSTransportClient()).on(
+ * createRouterClient(createWebSocketTransportClient()).on(
  *   'debug',
  *   filterEnvelopeDebug(
  *     ({ direction, header }) => {

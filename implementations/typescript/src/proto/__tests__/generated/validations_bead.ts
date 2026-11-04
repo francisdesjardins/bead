@@ -8,7 +8,7 @@ import type { Bytes, Enums, Floats, Inner, Maps, Nested, Numbers, Oneofs, Order,
 import { BytesSchema, EnumsSchema, FloatsSchema, MapsSchema, NestedSchema, NumbersSchema, OneofsSchema, OrderSchema, PairSchema, PatternsSchema, PresenceSchema, RepeatedSchema, StringsSchema, TakenSchema, WrappersSchema } from "./validations_pb";
 import { isFieldSet } from "@bufbuild/protobuf";
 import type { IServiceClient, IServiceClientOptions, IServiceServer, ServiceResolvers, ServiceServerOptions } from "../../../service/service";
-import { createServiceClient, createServiceServer, failuresOf, GENERATED_CODE_SUPPORTS_VERSION_6, requestOf } from "../../../service/service";
+import { createServiceClient, createServiceServer, failuresOf, GENERATED_CODE_SUPPORTS_VERSION_7, requestOf } from "../../../service/service";
 
 
 // * each request's rules, judged before its resolver, every rule a site of its own (spec 18, decision 0035)
@@ -2084,7 +2084,7 @@ export const ValidationsProcedures = Object.freeze({
 /**
  * The failures of `bead.validations.v1.ValidationsService`, by name: service 1's catalogue.
  */
-export const ValidationsFailures = failuresOf({ codes: {  }, serviceId: 1 });
+export const ValidationsFailures = failuresOf(1, {  });
 
 /**
  * Each procedure's resolver, by its name: for resolvers written in a module of their own.
@@ -2240,4 +2240,4 @@ export class ValidationsClient {
 }
 
 // the contract with the runtime this file needs: an older runtime lacks the constant, and fails here
-void GENERATED_CODE_SUPPORTS_VERSION_6;
+void GENERATED_CODE_SUPPORTS_VERSION_7;

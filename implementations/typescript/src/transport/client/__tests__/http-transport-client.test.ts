@@ -80,7 +80,7 @@ const startServer = async () => {
   const closes: [boolean, TransportServerConnectionHandle][] = [];
   const connections: TransportServerConnectionHandle[] = [];
 
-  server.on('connection', (...[, , connectionHandle]) => {
+  server.on('connection', (...[, connectionHandle]) => {
     connections.push(connectionHandle);
   });
 

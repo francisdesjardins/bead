@@ -39,7 +39,11 @@ own: `ClientOptions`, `ClientLayers`, `ClientListener`.
 **No abbreviations.** A name is spelled out: `maximumEnvelopeBytes`, `transferInactivityTimeout`,
 `connectionHandle`, `MaximumAttempts`. A word a standard or a platform owns is that owner's, and is
 not an abbreviation of ours: `HTTP`, `id`, `ws`, the scheme RFC 6455 gives WebSocket and the Node
-package named after it, whose own options keep their names (`maxPayload`).
+package named after it, whose own options keep their names (`maxPayload`). Bead's own transport
+over it is `WebSocket` on every side, the word whole, as RFC 6455's `websocket` token and the WHATWG
+interface write it: `createWebSocketTransportClient`, `WebSocketTransportClient`, the TypeScript
+side's entries `./websocket-*`; one compound alone, its server, meets `ws`'s class of that name,
+which a file importing both aliases.
 
 **A name that the platform gives every application of Bead's kind, or that the application using
 Bead declares, is not available to Bead.** The C# side's HTTP client is `BeadHttpClient`, since

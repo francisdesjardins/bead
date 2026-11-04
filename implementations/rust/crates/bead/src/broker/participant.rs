@@ -62,7 +62,7 @@ use crate::transport::{
 pub const HEARTBEAT: Duration = Duration::from_secs(30);
 
 /// What a participant holds in parts by default, across its connections (spec 15.23).
-pub const HELD_BYTES_BUDGET: u64 = 268_435_456;
+pub(crate) const HELD_BYTES_BUDGET: u64 = 268_435_456;
 
 /// One envelope's parts together, at most, by default: the default envelope's limit (spec 15.23).
 pub const MAXIMUM_ENVELOPE_PARTS_BYTES: u64 = 16_778_240;
@@ -126,7 +126,7 @@ pub struct BrokerParticipantOptions {
     /// How long a connection is silent before it is pinged, and a ping unanswered before it is
     /// closed with 4001 (spec 15.21): [`HEARTBEAT`] when none, or [`NEVER`].
     pub heartbeat: Option<Duration>,
-    /// What it holds in parts across its connections (spec 15.23): [`HELD_BYTES_BUDGET`] when none.
+    /// What it holds in parts across its connections (spec 15.23): 256 MiB when none.
     pub held_bytes_budget: Option<u64>,
     /// One envelope's parts together (spec 15.23): [`MAXIMUM_ENVELOPE_PARTS_BYTES`] when none.
     pub maximum_envelope_parts_bytes: Option<u64>,

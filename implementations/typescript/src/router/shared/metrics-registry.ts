@@ -542,11 +542,11 @@ const maximumOf = (given: number | undefined): number => {
  *
  * @example
  * import { createMetricsRegistry, createServer } from '@francisdesjardins/bead/server';
- * import { createWSTransportServer } from '@francisdesjardins/bead/ws-transport-server';
+ * import { createWebSocketTransportServer } from '@francisdesjardins/bead/websocket-transport-server';
  *
  * const metricsRegistry = createMetricsRegistry();
  * const server = createServer(
- *   { transport: createWSTransportServer({ WebSocketServer }) },
+ *   { transport: createWebSocketTransportServer({ WebSocketServer }) },
  *   { metricsRegistry }
  * );
  * const { contentType, text } = metricsRegistry.exposition();

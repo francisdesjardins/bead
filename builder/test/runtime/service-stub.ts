@@ -6,7 +6,7 @@
 
 // definition
 
-export const GENERATED_CODE_SUPPORTS_VERSION_6 = true;
+export const GENERATED_CODE_SUPPORTS_VERSION_7 = true;
 
 export const PAYLOAD_CODECS = Object.freeze({ raw: {}, text: {}, json: {} });
 
@@ -18,8 +18,8 @@ export const commandOf = <Init>(init: Init): Init => {
   return init;
 };
 
-export const failuresOf = <Init>(init: Init): Init => {
-  return init;
+export const failuresOf = <Codes>(_serviceId: number, codes: Codes): Codes => {
+  return codes;
 };
 
 export const createServiceServer = (): object => {

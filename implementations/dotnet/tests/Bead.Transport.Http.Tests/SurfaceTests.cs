@@ -15,11 +15,15 @@ namespace Bead.Transport.Http.Tests;
 /// <c>init</c> properties, at most two of them <c>required</c>, a setting it cannot be built
 /// without; and a parameter that takes one is required exactly when one of its members is. No
 /// public member takes or gives a tuple, at any depth of its type: what a caller passes or reads is
-/// named. What the rules read the compiler writes into the assembly: <c>RequiredMemberAttribute</c>,
-/// the <c>IsExternalInit</c> modifier, a parameter's default and a tuple's own type. The TypeScript
-/// side's twin is
-/// <c>tools/check-surface.mjs</c>; the members each side exposes are pinned apart, the C# side's in
-/// each project's <c>PublicAPI.Shipped.txt</c> and <c>PublicAPI.Unshipped.txt</c>.
+/// named. Each public or protected function takes at most two parameters, then at most one options
+/// record, last; each public event carries at most two values; and the functions of each assembly,
+/// its internal and private ones among them, take no more tuples of three elements or more than
+/// its pin. What the rules read the compiler writes into the assembly:
+/// <c>RequiredMemberAttribute</c>, the <c>IsExternalInit</c> modifier, a parameter's default and a
+/// tuple's own type. The TypeScript side's twins are <c>tools/check-surface.mjs</c> and the rule
+/// <c>bead/options-last</c>; the Rust side's, <c>bead-house</c>. The members each side exposes are
+/// pinned apart, the C# side's in each project's <c>PublicAPI.Shipped.txt</c> and
+/// <c>PublicAPI.Unshipped.txt</c>.
 /// </summary>
 public sealed class SurfaceTests
 {
@@ -32,6 +36,31 @@ public sealed class SurfaceTests
     private const string RequiredMember = "System.Runtime.CompilerServices.RequiredMemberAttribute";
 
     private const string ExternalInit = "System.Runtime.CompilerServices.IsExternalInit";
+
+    // every function of a type, whatever its access
+    private const BindingFlags Everything = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly;
+
+    // ! the functions past the parameter rule, each with its reason: the list may only shrink, a
+    // function leaving it as it meets the rule
+    private static readonly Dictionary<string, string> PastTheParameterRule = new()
+    {
+        ["Bead.Transcoding.HttpVariable..ctor(FieldPath, Start, End)"] =
+            "one concept with the TypeScript side's IVariable, on two rows of its own: its family, the transcoding entry's templates, variables, segments and readings, moves once, its name, members and construction together (0004)",
+    };
+
+    // ! the tuples of three elements or more the functions of each assembly take, its internal and
+    // private ones among them, by its name, an assembly not named taking none: each pin may only
+    // fall, lowered with the count, so a site leaves it by a record of the call and none joins it
+    // (decisions 0006 and 0007), as bead-house holds the Rust side's crates
+    private static readonly Dictionary<string, int> WideTuples = new()
+    {
+        ["Bead.Core"] = 35,
+        ["Bead.Protobuf"] = 2,
+        ["Bead.Transcoding"] = 14,
+        ["Bead.Transcoding.Http"] = 9,
+        ["Bead.Transport.Amqp"] = 4,
+        ["Bead.Transport.Http"] = 6,
+    };
 
     // the eight assemblies an application calls, each by a type of its own
     private static readonly Assembly[] Assemblies =
@@ -221,6 +250,155 @@ public sealed class SurfaceTests
         }
     }
 
+    // whether a caller outside its assembly reaches a function: public, or protected
+    private static bool IsReached(MethodBase method)
+    {
+        return method.IsPublic || method.IsFamily || method.IsFamilyOrAssembly;
+    }
+
+    // the functions of a public type the parameter rule reads: each method and constructor a
+    // programmer calls, a positional record's primary constructor among them, never what the
+    // compiler writes of a record; of a delegate, its Invoke alone, which says its call
+    private static IEnumerable<MethodBase> FunctionsOf(Type type)
+    {
+        if (typeof(Delegate).IsAssignableFrom(type))
+        {
+            return type.GetMethod("Invoke") is { } invoke ? [invoke] : [];
+        }
+
+        return type.GetMembers(Everything)
+            .OfType<MethodBase>()
+            .Where((method) =>
+            {
+                return IsReached(method) && IsCalled(method) && method.Name != "Deconstruct";
+            });
+    }
+
+    // what is off the parameter rule in one function, or none: at most two parameters that are no
+    // options record, then at most one options record, and nothing after it
+    private static string? ParametersJudged(MethodBase method)
+    {
+        var parameters = method.GetParameters();
+        var names = parameters.Select((parameter) =>
+        {
+            return parameter.Name;
+        });
+        var name = $"{method.DeclaringType!.FullName}.{method.Name}({string.Join(", ", names)})";
+        var options = parameters
+            .Where((parameter) =>
+            {
+                return IsOptions(Nullable.GetUnderlyingType(parameter.ParameterType) ?? parameter.ParameterType);
+            })
+            .ToList();
+        var things = parameters.Length - options.Count;
+
+        if (options.Count > 1)
+        {
+            return $"{name}: {options.Count} options records";
+        }
+
+        if (options is [{ } only] && only.Position != parameters.Length - 1)
+        {
+            return $"{name}: something after its options";
+        }
+
+        return things > 2 ? $"{name}: {things} parameters besides its options" : null;
+    }
+
+    // the elements of the tuple a parameter's own type is, by reference or not; none for one an
+    // array, a nullable or a generic's argument holds, which is no tuple taken
+    private static int ElementsOf(Type type)
+    {
+        var own = type.IsByRef ? type.GetElementType()! : type;
+
+        if (!own.IsGenericType)
+        {
+            return 0;
+        }
+
+        var definition = own.GetGenericTypeDefinition().FullName ?? "";
+        var isTuple = definition.StartsWith("System.ValueTuple`", StringComparison.Ordinal) || definition.StartsWith("System.Tuple`", StringComparison.Ordinal);
+
+        return isTuple ? own.GetGenericArguments().Length : 0;
+    }
+
+    // the methods a type implements an interface's with: counted where the interface declares them
+    private static HashSet<MethodInfo> ImplementingOf(Type type)
+    {
+        var implementing = new HashSet<MethodInfo>();
+
+        if (type.IsInterface)
+        {
+            return implementing;
+        }
+
+        foreach (var contract in type.GetInterfaces())
+        {
+            implementing.UnionWith(type.GetInterfaceMap(contract).TargetMethods.Where((method) =>
+            {
+                return method.DeclaringType == type;
+            }));
+        }
+
+        return implementing;
+    }
+
+    // whether the ratchet reads a method: one a programmer wrote, a local function among them,
+    // never a lambda, nor what the compiler writes of a record, a state machine or a property; an
+    // override or an interface's member is counted where it is declared, never where implemented
+    private static bool IsWritten(MethodBase method, HashSet<MethodInfo> implementing)
+    {
+        // * a local function's name, as the compiler writes it: <Outer>g__Name|…
+        var isLocal = method.Name.Contains(">g__", StringComparison.Ordinal);
+
+        if (method.IsDefined(typeof(CompilerGeneratedAttribute)) && !isLocal)
+        {
+            return false;
+        }
+
+        if (method is MethodInfo info)
+        {
+            var isAccessor = info.IsSpecialName && !info.Name.StartsWith("op_", StringComparison.Ordinal);
+            var isImplementing = info.GetBaseDefinition() != info || implementing.Contains(info);
+            var isDelegateMachinery = typeof(Delegate).IsAssignableFrom(info.DeclaringType) && info.Name != "Invoke";
+
+            if (isAccessor || isImplementing || isDelegateMachinery)
+            {
+                return false;
+            }
+        }
+
+        return isLocal || !method.DeclaringType!.IsDefined(typeof(CompilerGeneratedAttribute));
+    }
+
+    // each parameter of an assembly's functions that takes a tuple of three elements or more
+    private static IEnumerable<string> WideTuplesOf(Assembly assembly)
+    {
+        return assembly.GetTypes().SelectMany((type) =>
+        {
+            var implementing = ImplementingOf(type);
+
+            return type.GetMembers(Everything)
+                .OfType<MethodBase>()
+                .Where((method) =>
+                {
+                    return IsWritten(method, implementing);
+                })
+                .SelectMany((method) =>
+                {
+                    return method.GetParameters()
+                        .Where((parameter) =>
+                        {
+                            return ElementsOf(parameter.ParameterType) >= 3;
+                        })
+                        .Select((parameter) =>
+                        {
+                            return $"{type.FullName}.{method.Name}({parameter.Name})";
+                        });
+                });
+        });
+    }
+
     // tests
 
     [Fact]
@@ -316,5 +494,75 @@ public sealed class SurfaceTests
             return RequiredOf(type).Any();
         });
         Assert.Empty(off);
+    }
+
+    [Fact]
+    public void Takes_two_parameters_at_most_then_one_options_record_last()
+    {
+        var functions = PublicTypes().SelectMany(FunctionsOf).ToList();
+        var judged = functions.Select(ParametersJudged).OfType<string>().ToList();
+        var off = judged.Where((verdict) =>
+        {
+            return !PastTheParameterRule.Keys.Any((listed) =>
+            {
+                return verdict.StartsWith($"{listed}:", StringComparison.Ordinal);
+            });
+        });
+
+        // * a function listed that meets the rule leaves the list
+        var met = PastTheParameterRule.Keys.Where((listed) =>
+        {
+            return !judged.Any((verdict) =>
+            {
+                return verdict.StartsWith($"{listed}:", StringComparison.Ordinal);
+            });
+        });
+
+        Assert.NotEmpty(functions);
+        Assert.Empty(off);
+        Assert.Empty(met);
+    }
+
+    [Fact]
+    public void Holds_every_public_event_to_two_values_at_most()
+    {
+        var events = PublicTypes()
+            .SelectMany((type) =>
+            {
+                return type.GetEvents(Declared);
+            })
+            .ToList();
+        var off = events
+            .Where((told) =>
+            {
+                return told.EventHandlerType!.GetMethod("Invoke")!.GetParameters().Length > 2;
+            })
+            .Select((told) =>
+            {
+                return $"{told.DeclaringType!.FullName}.{told.Name}";
+            });
+
+        Assert.NotEmpty(events);
+        Assert.Empty(off);
+    }
+
+    [Fact]
+    public void Takes_no_more_tuples_of_three_elements_or_more_than_each_member_s_pin()
+    {
+        var moved = Assemblies
+            .Select((assembly) =>
+            {
+                var name = assembly.GetName().Name!;
+                var found = WideTuplesOf(assembly).Order(StringComparer.Ordinal).ToList();
+                var pin = WideTuples.GetValueOrDefault(name);
+                var said = found.Count > pin ? "joined its count, a record of the call in its place" : "fell below its pin, the pin to lower with it";
+
+                return found.Count == pin ? null : $"{name}: {found.Count} counted, its pin {pin}: {said}{Environment.NewLine}{string.Join(Environment.NewLine, found)}";
+            })
+            .OfType<string>()
+            .ToList();
+
+        // * each site named, so the one that joined is found, or the pin lowered with what left
+        Assert.True(moved.Count == 0, $"the tuples of three elements or more leave their pins:{Environment.NewLine}{string.Join(Environment.NewLine, moved)}");
     }
 }

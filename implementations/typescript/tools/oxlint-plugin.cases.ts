@@ -232,11 +232,13 @@ export interface IDoorEventMap {
   opened: [door: string, by: string, at: number];
 }
 
-// listed, each to go with the decision on events of three values
+// a change is one record, its session, its new value and its old, never three values
 export type SessionManagerEventMap = {
-  // refused: an event of three values, not listed
+  // refused: an event of three values
   created: [session: string, by: string, at: number];
+  // refused: an event of three values
   dataChanged: [session: string, newValue: number, oldValue: number];
+  lastActivityChanged: [change: { newValue: number; oldValue: number; session: string }];
 };
 
 // a rest of an event's values is judged at its map

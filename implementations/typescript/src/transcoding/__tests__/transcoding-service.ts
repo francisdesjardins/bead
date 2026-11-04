@@ -125,9 +125,10 @@ export const startTranscoding = async (
     }
 
     // * the subscription ends with the service's own failure, on its call id
-    await server.router.dropSubscriptions({
-      connectionHandle,
-      failure: { code: 2, detail: '', scope: FailureScope.APPLICATION },
+    await server.router.dropSubscriptions(connectionHandle, {
+      code: 2,
+      detail: '',
+      scope: FailureScope.APPLICATION,
     });
   });
   service.on('watch', (_request, response) => {

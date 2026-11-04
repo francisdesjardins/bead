@@ -322,7 +322,7 @@ public sealed class TransportsTests
             Server = server,
             Start = async () =>
             {
-                return (await transport.Start(Loopback, Cancelled)).Port;
+                return (await transport.Start(Loopback with { CancellationToken = Cancelled })).Port;
             },
             Transport = transport,
             Stop = () =>
@@ -364,7 +364,7 @@ public sealed class TransportsTests
             Server = server,
             Start = async () =>
             {
-                return (await transport.Start(WebSocketLoopback, Cancelled)).Port;
+                return (await transport.Start(WebSocketLoopback with { CancellationToken = Cancelled })).Port;
             },
             Transport = transport,
             Stop = () =>
@@ -1230,13 +1230,15 @@ public sealed class TransportsTests
                 return;
             }
 
-            var expected = TellingOf(new TransportServerRefusal(
-                told.GetProperty("address").GetString(),
-                Filled(told.GetProperty("authority").GetString()),
-                Filled(told.GetProperty("origin").GetString()),
-                told.GetProperty("port").GetString() == "{port}" ? exchange.Port : -1,
-                told.GetProperty("reason").GetString()!,
-                told.GetProperty("status").GetInt32()));
+            var expected = TellingOf(new TransportServerRefusal
+            {
+                Address = told.GetProperty("address").GetString(),
+                Authority = Filled(told.GetProperty("authority").GetString()),
+                Origin = Filled(told.GetProperty("origin").GetString()),
+                Port = told.GetProperty("port").GetString() == "{port}" ? exchange.Port : -1,
+                Reason = told.GetProperty("reason").GetString()!,
+                Status = told.GetProperty("status").GetInt32(),
+            });
             var watch = Stopwatch.StartNew();
 
             while (_refusals.IsEmpty && watch.Elapsed < Patience)

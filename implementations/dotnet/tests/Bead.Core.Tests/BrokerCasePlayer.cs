@@ -572,7 +572,7 @@ internal sealed class BrokerCasePlayer : IAsyncDisposable
         else if (step.TryGetProperty("connect", out var connect))
         {
             await NothingMore();
-            _connecting = _client!.Connect(new BrokerTransportClientConnectOptions { Server = connect.GetString()!, Timeout = _connectTimeout }, Cancelled);
+            _connecting = _client!.Connect(new BrokerTransportClientConnectOptions { Server = connect.GetString()!, Timeout = _connectTimeout, CancellationToken = Cancelled });
         }
         else if (step.TryGetProperty("transportSend", out var send))
         {
