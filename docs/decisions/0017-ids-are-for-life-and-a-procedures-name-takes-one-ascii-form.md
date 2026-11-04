@@ -261,14 +261,17 @@ A declaration refused declares nothing. The refusal is a `ProgrammerError` on th
 and an `ArgumentException` on the C# side, whose sentences are each side's own; a C side reports a
 code. The check is one function of the procedure alone, which holds nothing.
 
-**The service manager checks first where it refuses first.** Its one reason of its own comes as a
-notification is asked for again otherwise, another window among it
-([0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md));
-`getNotification` runs the router's check before it, so the order holds at that layer too. That
-refusal keeps its own type, a `ProgrammerError` and an `InvalidOperationException`, about the
-manager's state, and comes before the router's reasons of state and its registry's. A requester or a
-resolver the manager makes goes to the router with no reason of the manager's before it, and is
-checked there, once.
+**The service manager checks first where it refuses first.** A requester, a notification or a
+resolver the manager makes is checked as it is made. First comes the side its maker belongs to,
+since a maker that is not its router's way declares nothing. Then come spec 16.10's three reasons
+for that way. Then come the manager's own: a notification asked for again otherwise, another window
+among it
+([0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)),
+and, on the TypeScript and Rust sides, a refusal that is not an admission's, which the C# side
+refuses as the admission is built, before any maker, a difference the support matrix keeps. The
+side's refusal and a notification's keep their own type, a `ProgrammerError` and an
+`InvalidOperationException`, about the manager's state, and come before the router's reasons of
+state and its registry's. The router checks 16.10's three again for whoever calls it directly.
 
 **A side that keeps no names.** A constrained profile built without the trace and the metrics
 (debugging 1.2) refuses `out of its range` alone; its names are a blueprint's, which `beadc check`
