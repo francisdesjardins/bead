@@ -16,6 +16,9 @@ use crate::router::types::{
 };
 use crate::transport::RouterClientTransport;
 
+#[cfg(test)]
+mod tests;
+
 /// How a client is built, beyond its transport.
 #[derive(Clone, Default)]
 #[non_exhaustive]
