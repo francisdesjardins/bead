@@ -2534,6 +2534,10 @@ fn receive_request_chunk<S: Side>(
 /// them as it is asked, and its owner, which finds them.
 pub(crate) type Resolvers = Arc<Mutex<BTreeMap<(u16, u16), Registered>>>;
 
+#[cfg(test)]
+#[path = "tests/answering_accounting.rs"]
+mod answering_accounting_tests;
+
 /// Registers a handler for a procedure in `resolvers`, declared to the router's `metrics`.
 pub(crate) fn register_resolver(
     resolvers: &Resolvers,
