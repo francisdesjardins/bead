@@ -494,6 +494,7 @@ crate::broker::participant
     fn client(&self, options: &BrokerTransportClientOptions) -> Result<BrokerTransportClient, ProgrammerError>
     fn start(&self) -> BoxFuture<Result<(), BrokerError>>
     fn stop(&self) -> BoxFuture<()>
+    fn dispose(&self) -> BoxFuture<()>
     fn incarnation(&self) -> u128
     implements Debug
     derives Clone
@@ -950,11 +951,13 @@ crate::errors
     derives Clone, Copy, Debug, Eq, PartialEq
   enum TransportError #[non_exhaustive]
     Refused(ProgrammerError)
-    Cancelled(String)
+    Cancelled { message: String, source: Option<Arc<dyn Error + Send + Sync>> } #[non_exhaustive]
     TimedOut(Duration)
     Connect(ConnectError)
     ReadyState(ReadyStateError)
     Reconnect(ReconnectError)
+    fn cancelled<M: Into<String>>(message: M) -> Self
+    fn cancelled_by<M: Into<String>>(message: M, source: Arc<dyn Error + Send + Sync>) -> Self
     implements Display, Error, From
     derives Clone, Debug
 crate::failure

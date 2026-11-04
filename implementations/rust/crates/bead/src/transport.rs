@@ -689,6 +689,30 @@ pub(crate) async fn first_of<A: Future, B: Future>((first, second): (A, B)) -> b
     .await
 }
 
+/// A signal cancelled once `first` or `second` is: a child of `first`, and what watches `second`,
+/// for its caller to cover. The watch ends once either is cancelled, or once the joined signal is,
+/// which its holder cancels as it is done with it.
+pub(crate) fn joined(
+    first: &CancellationToken,
+    second: Option<CancellationToken>,
+) -> (
+    CancellationToken,
+    Option<impl Future<Output = ()> + Send + 'static>,
+) {
+    let joined = first.child_token();
+    let watching = second.map(|second| {
+        let joining = joined.clone();
+
+        async move {
+            if first_of((second.cancelled(), joining.cancelled())).await {
+                joining.cancel();
+            }
+        }
+    });
+
+    (joined, watching)
+}
+
 /// A reconnection's attempts, on `clock`, as `options` says: the first at once, each next one after
 /// its delay, at a delay of 0 in a later turn of its runtime, never within the one its last failed
 /// in, each made by `attempt`, given the reconnection's signal, which is read before each. It
@@ -720,7 +744,7 @@ where
     loop {
         // * read before each attempt, the first included: an attempt under way is not cut short
         if is_cancelled() {
-            return Err(TransportError::Cancelled(RECONNECTION_CANCELLED.to_owned()));
+            return Err(TransportError::cancelled(RECONNECTION_CANCELLED));
         }
 
         number = number.saturating_add(1);
@@ -729,7 +753,7 @@ where
             Ok(()) => return Ok(()),
             Err(reason) => {
                 if is_cancelled() {
-                    return Err(TransportError::Cancelled(RECONNECTION_CANCELLED.to_owned()));
+                    return Err(TransportError::cancelled(RECONNECTION_CANCELLED));
                 }
 
                 // a misuse an attempt met, the next would meet again
@@ -805,7 +829,7 @@ where
         if !is_woken {
             timer.cancel();
 
-            return Err(TransportError::Cancelled(RECONNECTION_CANCELLED.to_owned()));
+            return Err(TransportError::cancelled(RECONNECTION_CANCELLED));
         }
     }
 }

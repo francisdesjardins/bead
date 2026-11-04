@@ -1956,26 +1956,37 @@ participant draws an incarnation, 16 bytes from a cryptographic source; each con
 to its peer's. A participant whose link goes down closes each of its connections, unclean, and
 connects anew as another incarnation, its inbox and its names subscribed again before anything
 goes, then sends a RESET to each peer it held a connection with. Its reconnection is its
-application's to bound, by its attempts, by a signal, or not at all, and ends when the participant
-stops; once it ends, the participant reports it, and, unless it stopped, its next start or connect
-links it anew. A participant that stops as its link connects, at its start or at an attempt of its
-reconnection, fails that link, stopped as it started, and ends its reconnection with no wait after
-it: it gives up its adapter's start under way and ends its link once that start settled, never
-while it runs, so that nothing that start linked or subscribed outlives the stop, nor meets its
-id's next link; a stop called again settles with the first. A participant stopped links no more:
-its stop ends what it holds once, its link, its incarnation and its signal to its adapter's start,
-and a start after it would meet that stop under way. Its start, and a client's connect or
-reconnection or a server's start over it, made after its stop, is its application's misuse,
-refused before anything of the participant, the client or the server moves. A client's connect
-made before the stop that meets it fails, stopped as it connected; a client's reconnection under
-way ends as its own signal ends it (section 15.15), at once, in a wait or once its attempt under
-way failed, no wait told after it. A failure an adapter's start or subscription meets as a client's
-connect links its participant, its adapter's misuse among them, fails that connect, which another
-attempt may mend. A participant whose link its broker ends for another link of its id, a takeover,
-closes each of its
-connections, unclean, reports it, and connects no more until its application starts it again: its
-server's transports take no OPEN and its clients' connects fail, naming it, so that two holders of
-one id never take each other over without end; the later link keeps the id. A participant whose
+application's to bound, by its attempts, by a signal, or not at all, and ends at once when the
+participant stops, in a wait or once its attempt under way failed, no wait told after it, the stop
+its cause; once it ends, the participant reports it, and its next start or connect links it anew.
+A participant's stop ends its link in place, and with it what is under way as it is called: it
+closes each of its connections with a CLOSE of 1001, then stops its adapter, which sends those
+CLOSEs before it ends the link so that its broker publishes no will (section 15.24), its
+incarnation ending with the link. A participant that stops as its link connects, at its start or
+at an attempt of its reconnection, fails that link, stopped as it started: it gives up its
+adapter's start under way and ends its link once that start settled, never while it runs, so that
+nothing that start linked or subscribed outlives the stop, nor meets its id's next link. A stop
+called again settles with the first, and a start made while a stop is under way is its
+application's misuse. A client's connect made before its participant's stop settles fails at once,
+stopped as it connected, whether it awaits its answer or its participant's link; a client's
+reconnection under way, or called, before the stop settles ends as its own signal ends it (section
+15.15), at once, in a wait or once its attempt under way failed, no wait told after it, the stop
+its cause. What a stop ended is told as that stop's, though a start follows it at once. Once its
+stop settled, a participant is as one whose reconnection ended: its start, a server's start over
+it, or a client's connect or reconnection over it links it anew as another incarnation, its inbox
+and the names its servers' transports serve subscribed again before anything goes, then sends a
+RESET to each peer whose CLOSE its broker did not take as it stopped; its transports and their
+routers are kept, and an OPEN that a name's queue holds through the stop is served at that link
+within its life (section 15.38). A participant's dispose stops it and is final: its start, and a
+client's connect or reconnection or a server's start over it, made after its dispose, is its
+application's misuse, refused before anything of the participant, the client or the server moves;
+a stop or a dispose after it settles with it. A failure an adapter's start or subscription meets
+as a client's connect links its participant, its adapter's misuse among them, fails that connect,
+which another attempt may mend. A participant whose link its broker ends for another link of its
+id, a takeover, closes each of its connections, unclean, reports it, and connects no more until its
+application starts it again, a stop leaving that fence: its server's transports take no OPEN and
+its clients' connects fail, naming it, so that two holders of one id never take each other over
+without end; the later link keeps the id. A participant whose
 adapter leaves
 a will has its broker publish, once it loses the link without a clean end, a GONE of its
 incarnation to its departure; it subscribes the departure of each peer it holds a connection with
@@ -2025,21 +2036,21 @@ name:
 `heartbeat` may be without end; `acceptTimeout` never is.
 
 15.24. An adapter brings one broker's client, and offers its participant: the identity its broker
-authenticates its link by; to start a link that keeps no broker session, which a signal gives up;
-to publish a payload to a
-topic, said taken or refused by its broker; to subscribe a topic, said held by its broker; each
+authenticates its link by; to start a link that keeps no broker session, which a signal gives up,
+and to end it so that no will goes, what it was handed to publish before its end sent first within a
+bound of its own, what has not gone by then failed, a later start a new link; to publish a payload
+to a topic, said taken or refused by its broker; to subscribe a topic, said held by its broker; each
 message it receives, with the topic it came to, and its acknowledgement; its link lost, and whether
 another link of its identity took it over; the largest payload a message to a topic carries, its
-inbox among them; the delivery it gives, at least once or at
-most once; whether its leg is secure. It may offer besides a subscription in a group, its broker
-handing each message to one member; a will; a publication refused when no subscriber takes it; a
-message's life in its broker. A name served by several participants needs groups. Each side's core
-holds an in-memory broker that offers each of these: each message copied as it is published and
-handed on whole in a later turn than its publish, in the order its publisher published it to that
-topic, once, or, as a test asks, again, behind the next, never, or to another member of its group;
-a queue per subscriber bounded as it is given, past which a message is dropped; a link lost or
-taken over, its will published. Its handles' type is `BROKER`, and it never leaves the process, so
-it is secure.
+inbox among them; the delivery it gives, at least once or at most once; whether its leg is secure.
+It may offer besides a subscription in a group, its broker handing each message to one member; a
+will; a publication refused when no subscriber takes it; a message's life in its broker. A name
+served by several participants needs groups. Each side's core holds an in-memory broker that offers
+each of these: each message copied as it is published and handed on whole in a later turn than its
+publish, in the order its publisher published it to that topic, once, or, as a test asks, again,
+behind the next, never, or to another member of its group; a queue per subscriber bounded as it is
+given, past which a message is dropped; a link lost or taken over, its will published. Its handles'
+type is `BROKER`, and it never leaves the process, so it is secure.
 
 ### MQTT 5
 

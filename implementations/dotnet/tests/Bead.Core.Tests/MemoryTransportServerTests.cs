@@ -549,4 +549,39 @@ public sealed class MemoryTransportServerTests
         Assert.Equal([1, 2, 3, 4, 5, 6], atServer);
         Assert.Empty(server.Clients);
     }
+
+    // decision 0003
+    [Fact]
+    public async Task Refuses_a_start_once_disposed_its_state_kept_and_disposes_once_stopping_it_first()
+    {
+        var server = new MemoryTransportServer();
+        var closed = 0;
+
+        await server.Start();
+        await using var client = new MemoryTransportClient(new MemoryTransportClientOptions());
+
+        await client.Connect(new MemoryTransportClientConnectOptions { Server = server }, TestContext.Current.CancellationToken);
+        server.Close += (_, _) =>
+        {
+            Interlocked.Increment(ref closed);
+        };
+
+        // * two disposes: one stop, its connection closed once
+        await Task.WhenAll(server.DisposeAsync().AsTask(), server.DisposeAsync().AsTask());
+        await BrokerPair.Until(
+            () =>
+            {
+                return Volatile.Read(ref closed) == 1;
+            },
+            "its connection closed");
+        Assert.Equal(ReadyState.Closed, server.ReadyState);
+
+        // * a start after it: its application's misuse, its state kept
+        Assert.Equal("the transport server is disposed", (await Assert.ThrowsAsync<ObjectDisposedException>(() =>
+        {
+            return server.Start();
+        })).Message);
+        Assert.Equal(ReadyState.Closed, server.ReadyState);
+        Assert.Equal(1, Volatile.Read(ref closed));
+    }
 }

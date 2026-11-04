@@ -351,8 +351,15 @@ impl Error for Disposed {}
 pub enum TransportError {
     /// Refused as it was made: its options, or a state it cannot start from.
     Refused(ProgrammerError),
-    /// Cancelled by its signal.
-    Cancelled(String),
+    /// Cancelled by its signal, saying so, and why where Bead knows it: a cancel it makes for a
+    /// participant's stop carries that stop (spec 15.21).
+    #[non_exhaustive]
+    Cancelled {
+        /// What it says.
+        message: String,
+        /// Why it was cancelled, where Bead knows it.
+        source: Option<Arc<dyn Error + Send + Sync>>,
+    },
     /// Not open within its timeout.
     TimedOut(Duration),
     /// The connection could not be opened.
@@ -361,6 +368,26 @@ pub enum TransportError {
     ReadyState(ReadyStateError),
     /// The reconnection ran out of attempts.
     Reconnect(ReconnectError),
+}
+
+impl TransportError {
+    /// A cancel, saying `message`.
+    #[must_use]
+    pub fn cancelled<M: Into<String>>(message: M) -> Self {
+        Self::Cancelled {
+            message: message.into(),
+            source: None,
+        }
+    }
+
+    /// A cancel, saying `message`, made for `source`.
+    #[must_use]
+    pub fn cancelled_by<M: Into<String>>(message: M, source: Arc<dyn Error + Send + Sync>) -> Self {
+        Self::Cancelled {
+            message: message.into(),
+            source: Some(source),
+        }
+    }
 }
 
 impl From<ProgrammerError> for TransportError {
@@ -385,7 +412,7 @@ impl fmt::Display for TransportError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Refused(error) => write!(formatter, "{error}"),
-            Self::Cancelled(reason) => formatter.write_str(reason),
+            Self::Cancelled { message, .. } => formatter.write_str(message),
             Self::TimedOut(timeout) => {
                 write!(formatter, "timed out after {}ms", timeout.as_millis())
             }
@@ -403,7 +430,10 @@ impl Error for TransportError {
             Self::Connect(error) => error.source(),
             Self::ReadyState(error) => error.source(),
             Self::Reconnect(error) => error.source(),
-            Self::Cancelled(_) | Self::TimedOut(_) => None,
+            Self::Cancelled { source, .. } => source
+                .as_ref()
+                .map(|source| -> &(dyn Error + 'static) { source.as_ref() }),
+            Self::TimedOut(_) => None,
         }
     }
 }

@@ -724,4 +724,32 @@ public sealed class JoinedServerTransportTests
             return Task.CompletedTask;
         }
     }
+
+    // decision 0003
+    [Fact]
+    public async Task Refuses_a_start_once_disposed_its_state_kept_and_disposes_once_stopping_it_first()
+    {
+        var memory = new MemoryTransportServer();
+        await using var participant = new BrokerParticipant(new MemoryBroker().Adapter(new MemoryBrokerAdapterOptions { Id = "ada" }));
+        var broker = participant.Server(new BrokerTransportServerOptions { Names = ["interop"] });
+        var joined = new JoinedServerTransport([memory, broker]);
+
+        await memory.Start();
+        await broker.Start();
+
+        // * two disposes: each transport it joined disposed, its dispose final
+        await Task.WhenAll(joined.DisposeAsync().AsTask(), joined.DisposeAsync().AsTask());
+        Assert.Equal((ReadyState.Closed, ReadyState.Closed), (memory.ReadyState, broker.ReadyState));
+
+        // * a start of a transport it joined, after it: its application's misuse, its state kept
+        Assert.Equal("the transport server is disposed", (await Assert.ThrowsAsync<ObjectDisposedException>(() =>
+        {
+            return memory.Start();
+        })).Message);
+        Assert.Equal("the transport server is disposed", (await Assert.ThrowsAsync<ObjectDisposedException>(() =>
+        {
+            return broker.Start();
+        })).Message);
+        Assert.Equal((ReadyState.Closed, ReadyState.Closed), (memory.ReadyState, broker.ReadyState));
+    }
 }

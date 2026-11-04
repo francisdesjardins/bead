@@ -50,6 +50,30 @@ public sealed class TransportServerLifeTests
         Assert.False(life.IsStopping);
     }
 
+    // decision 0003
+    [Fact]
+    public async Task Refuses_a_start_once_disposed_its_state_kept_and_disposes_once_stopping_it_first()
+    {
+        var calls = new List<string>();
+        var life = new TransportServerLife();
+
+        await life.Start(Starting(calls));
+
+        // * two disposes: one stop, shared
+        await Task.WhenAll(life.Dispose(Stopping(calls)), life.Dispose(Stopping(calls)));
+        Assert.Equal(["start", "stop"], calls);
+        Assert.Equal(ReadyState.Closed, life.ReadyState);
+        Assert.True(life.IsDisposed);
+
+        // * a start after it: its application's misuse, refused before the transport is reached
+        Assert.Equal("the transport server is disposed", (await Assert.ThrowsAsync<ObjectDisposedException>(() =>
+        {
+            return life.Start(Starting(calls));
+        })).Message);
+        Assert.Equal(["start", "stop"], calls);
+        Assert.Equal(ReadyState.Closed, life.ReadyState);
+    }
+
     [Fact]
     public async Task Rejects_a_second_start_with_an_InvalidOperationException_without_reaching_the_transport()
     {

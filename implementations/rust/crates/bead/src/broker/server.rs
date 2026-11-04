@@ -971,15 +971,15 @@ impl ServerTransport for BrokerTransportServer {
         false
     }
 
-    // its participant started where it was not, or linked anew where its link was taken over, and
-    // its names served, each subscribed; settles once its broker holds each, failing on a name its
-    // broker refused. Its participant stopped, it is refused first, its state kept: a stopped
-    // participant links no more (spec 15.21)
+    // its participant started where it was not, linked anew where its link was taken over or its
+    // stop settled, and its names served, each subscribed; settles once its broker holds each,
+    // failing on a name its broker refused. Its participant disposed, it is refused first, its state
+    // kept (spec 15.21)
     fn start(&self) -> BoxFuture<Result<(), RouterError>> {
-        if self.inner.participant.is_stopped() {
-            let stopped = self.inner.participant.config().stopped();
+        if self.inner.participant.is_disposed() {
+            let disposed = self.inner.participant.config().disposed_refusal();
 
-            return Box::pin(async move { Err(RouterError::Other(Arc::new(stopped))) });
+            return Box::pin(async move { Err(RouterError::Other(Arc::new(disposed))) });
         }
 
         let refused = {

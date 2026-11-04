@@ -304,7 +304,7 @@ export const createTransportClient = <
       }
 
       // * its target held again as it is called, before anything moves: what its transport's owner
-      // refuses since, as a participant stopped, is a misuse
+      // refuses since, as a participant disposed, is a misuse
       implementation.assertConnect?.(lastConnectOptions);
 
       // * held as it is called, before anything moves: a fixed delay out of bounds among it
@@ -319,9 +319,10 @@ export const createTransportClient = <
             ? lifetime
             : AbortSignal.any([signal, lifetime]);
 
-      // before the dispose below, so an already aborted signal leaves an open connection alone
-      if (ending?.aborted) {
-        throw reconnectionCancelOf(ending);
+      // before the dispose below, so its own signal aborted already leaves an open connection alone,
+      // told nothing; a lifetime ended already ends it once told, before any attempt, cancelled
+      if (signal?.aborted) {
+        throw reconnectionCancelOf(signal);
       }
 
       const target = lastConnectOptions;

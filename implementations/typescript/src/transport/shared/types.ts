@@ -269,7 +269,11 @@ export interface IBrokerAdapter {
   receiveBound(topic: BrokerTopic): number;
   /** Connects a link that keeps no broker session, its will set where it takes one. */
   start(options?: IBrokerStart): Promise<void>;
-  /** Ends its link cleanly, so no will goes. */
+  /**
+   * Ends its link cleanly, so no will goes: what it was handed to publish before it sent first,
+   * within a bound of its own, and what has not gone by then failed; a later start a new link
+   * (spec 15.24).
+   */
   stop(): Promise<void>;
   /** Holds a subscription, settling once its broker holds it. */
   subscribe(topic: BrokerTopic, options?: IBrokerSubscription): Promise<void>;

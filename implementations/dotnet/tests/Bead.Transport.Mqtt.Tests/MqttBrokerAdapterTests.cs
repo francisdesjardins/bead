@@ -1614,4 +1614,220 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
             return MqttFixture.IsGiven;
         }
     }
+
+    // ── Its stop's drain, its dispose, and a participant's stop in place over it ─────────────────
+
+    // a CONNACK that holds its publications to a Receive Maximum
+    private static MqttConnAckPacket ConnAckOf(ushort receiveMaximum)
+    {
+        var answer = ScriptedLink.ConnAck();
+
+        answer.ReceiveMaximum = receiveMaximum;
+
+        return answer;
+    }
+
+    // the participant's link, its server's start serving interop: its CONNACK the one given, its
+    // inbox's SUBSCRIBE and its name's granted
+    private async Task<ScriptedLink> ServedUp((BrokerTransportServer Server, MqttConnAckPacket ConnAck) serving)
+    {
+        var starting = serving.Server.Start();
+        var link = await _script.Link();
+
+        await link.Send(serving.ConnAck);
+        await SubAckOf((link, 1));
+        await SubAckOf((link, 1));
+        await starting.WaitAsync(Patience, Cancelled);
+
+        return link;
+    }
+
+    // an OPEN of bob's to interop for each opener given, each ACCEPT its participant answers
+    // acknowledged: a connection half-open of each
+    private static async Task HalfOpened((ScriptedLink Link, ushort Openers) opened)
+    {
+        for (ushort opener = 1; opener <= opened.Openers; opener++)
+        {
+            var open = BrokerParcels.Write(new BrokerParcel { Kind = BrokerParcelKinds.Open, Opener = opener, Sequence = 1, Id = "bob", Incarnation = 0xB0B, Bound = 65_536 });
+
+            await opened.Link.Send(PublishOf(("bead/s/interop", open, opener)));
+
+            var accept = await opened.Link.Next<MqttPublishPacket>();
+
+            Assert.Equal("bead/i/bob", accept.Topic);
+            await PubAckOf((opened.Link, accept.PacketIdentifier, 0));
+        }
+    }
+
+    // the parcel a PUBLISH carries
+    private static BrokerParcel ParcelOf(MqttPublishPacket publish)
+    {
+        return BrokerParcels.Read(publish.Payload.ToArray()).Parcel!;
+    }
+
+    // spec 15.24
+    [Fact]
+    public async Task Sends_what_waits_on_its_broker_s_Receive_Maximum_before_its_stop_s_DISCONNECT_within_its_connectTimeout_and_fails_what_has_not_gone_by_then()
+    {
+        await using var adapter = AdapterOf();
+        var link = await LinkUp((adapter, _script), (ConnAckOf(1), null));
+        var publishing = Enumerable.Range(1, 3).Select((index) =>
+        {
+            return adapter.Publish(new BrokerPublication { Topic = Inbox, Payload = (byte[])[(byte)index] });
+        }).ToList();
+        var first = await link.Next<MqttPublishPacket>();
+        var stopping = adapter.Stop();
+
+        // * its stop waits for what it was handed, each PUBACK given late, then its DISCONNECT
+        await Task.Delay(100, Cancelled);
+        Assert.False(stopping.IsCompleted);
+        await PubAckOf((link, first.PacketIdentifier, 0));
+
+        foreach (var _ in new[] { 2, 3 })
+        {
+            var next = await link.Next<MqttPublishPacket>();
+
+            await Task.Delay(50, Cancelled);
+            await PubAckOf((link, next.PacketIdentifier, 0));
+        }
+
+        var disconnect = await link.Next<MqttDisconnectPacket>();
+
+        await stopping.WaitAsync(Patience, Cancelled);
+        Assert.Equal(MqttDisconnectReasonCode.NormalDisconnection, disconnect.ReasonCode);
+        Assert.Equal(Enumerable.Repeat(BrokerPublished.Taken, 3), await Task.WhenAll(publishing).WaitAsync(Patience, Cancelled));
+        Assert.Equal([1, 2, 3], link.PacketsOf<MqttPublishPacket>().Select((publish) =>
+        {
+            return (int)publish.Payload.FirstSpan[0];
+        }));
+
+        // * past its connectTimeout, what has not gone fails, and its DISCONNECT goes all the same
+        await using var bounded = AdapterOf((options) =>
+        {
+            return options with { ConnectTimeout = TimeSpan.FromMilliseconds(300) };
+        });
+        var held = await LinkUp((bounded, _script), (ConnAckOf(1), null));
+        var unanswered = bounded.Publish(new BrokerPublication { Topic = Inbox, Payload = (byte[])[4] });
+        var waiting = bounded.Publish(new BrokerPublication { Topic = Inbox, Payload = (byte[])[5] });
+
+        await held.Next<MqttPublishPacket>();
+        await bounded.Stop().WaitAsync(Patience, Cancelled);
+
+        foreach (var pending in new[] { unanswered, waiting })
+        {
+            Assert.Equal("the link of ada stopped", Assert.IsType<IOException>(await FailureOf(() =>
+            {
+                return pending;
+            })).Message);
+        }
+
+        Assert.Equal(MqttDisconnectReasonCode.NormalDisconnection, (await held.Next<MqttDisconnectPacket>()).ReasonCode);
+        Assert.Single(held.PacketsOf<MqttPublishPacket>());
+    }
+
+    // decision 0003
+    [Fact]
+    public async Task Refuses_a_start_once_disposed_its_state_kept_and_disposes_once_stopping_it_first()
+    {
+        var adapter = AdapterOf();
+        var link = await LinkUp((adapter, _script));
+
+        // * two disposes: one stop, one DISCONNECT of 0x00
+        await Task.WhenAll(adapter.DisposeAsync().AsTask(), adapter.DisposeAsync().AsTask()).WaitAsync(Patience, Cancelled);
+        await link.Closed.WaitAsync(Patience, Cancelled);
+        Assert.Single(link.PacketsOf<MqttDisconnectPacket>());
+        Assert.False(adapter.IsLinked);
+
+        // * a start after it: its application's misuse, refused before anything goes
+        Assert.Equal("the adapter of ada is disposed", (await Assert.ThrowsAsync<ObjectDisposedException>(() =>
+        {
+            return adapter.Start();
+        })).Message);
+        Assert.False(adapter.IsLinked);
+    }
+
+    [Fact]
+    public async Task Sends_each_connection_s_CLOSE_of_1001_before_its_adapter_s_DISCONNECT_past_its_broker_s_Receive_Maximum_spec_15_21()
+    {
+        await using var participant = new BrokerParticipant(AdapterOf());
+        await using var server = participant.Server(new BrokerTransportServerOptions { Names = ["interop"] });
+        var link = await ServedUp((server, ConnAckOf(1)));
+
+        await HalfOpened((link, 3));
+
+        var stopping = participant.Stop();
+
+        // * one CLOSE at a time, its PUBACK given late, each before its adapter's DISCONNECT
+        var closes = new List<BrokerParcel>();
+
+        foreach (var _ in new[] { 1, 2, 3 })
+        {
+            var close = await link.Next<MqttPublishPacket>();
+
+            closes.Add(ParcelOf(close));
+            Assert.Equal("bead/i/bob", close.Topic);
+            await Task.Delay(50, Cancelled);
+            Assert.False(stopping.IsCompleted);
+            await PubAckOf((link, close.PacketIdentifier, 0));
+        }
+
+        var disconnect = await link.Next<MqttDisconnectPacket>();
+
+        await stopping.WaitAsync(Patience, Cancelled);
+        Assert.Equal(MqttDisconnectReasonCode.NormalDisconnection, disconnect.ReasonCode);
+        Assert.All(closes, (close) =>
+        {
+            Assert.Equal((BrokerParcelKinds.Close, 1001), (close.Kind, close.Code));
+        });
+        Assert.Equal([1UL, 2UL, 3UL], closes.Select((close) =>
+        {
+            return close.Opener;
+        }).Order());
+    }
+
+    [Fact]
+    public async Task Resets_at_its_next_link_each_peer_whose_CLOSE_its_broker_did_not_take_as_it_stopped_spec_15_21()
+    {
+        await using var participant = new BrokerParticipant(AdapterOf((options) =>
+        {
+            return options with { ConnectTimeout = TimeSpan.FromMilliseconds(500) };
+        }));
+        await using var server = participant.Server(new BrokerTransportServerOptions { Names = ["interop"] });
+        var link = await ServedUp((server, ConnAckOf(1)));
+
+        await HalfOpened((link, 2));
+
+        // * the first CLOSE taken, the second's PUBACK held past its connectTimeout: unanswered as
+        // its DISCONNECT went
+        var stopping = participant.Stop();
+        var taken = await link.Next<MqttPublishPacket>();
+
+        await PubAckOf((link, taken.PacketIdentifier, 0));
+
+        var untaken = await link.Next<MqttPublishPacket>();
+
+        await link.Next<MqttDisconnectPacket>(TimeSpan.FromSeconds(3));
+        await stopping.WaitAsync(Patience, Cancelled);
+        Assert.Equal(BrokerParcelKinds.Close, ParcelOf(untaken).Kind);
+
+        // * its next link resets the second, whose CLOSE its broker did not take, and no other
+        var starting = participant.Start();
+        var next = await _script.Link();
+
+        await next.Send(ConnAckOf(1));
+        await SubAckOf((next, 1));
+        await SubAckOf((next, 1));
+        await starting.WaitAsync(Patience, Cancelled);
+
+        var reset = await next.Next<MqttPublishPacket>();
+
+        await PubAckOf((next, reset.PacketIdentifier, 0));
+        Assert.Equal("bead/i/bob", reset.Topic);
+        Assert.Equal((BrokerParcelKinds.Reset, ParcelOf(untaken).Opener, ParcelOf(untaken).Acceptor), (ParcelOf(reset).Kind, ParcelOf(reset).Opener, ParcelOf(reset).Acceptor));
+        await Task.Delay(200, Cancelled);
+        Assert.Single(next.PacketsOf<MqttPublishPacket>());
+
+        // its link ended before its server's names are let go, which no UNSUBACK would answer
+        await participant.DisposeAsync();
+    }
 }

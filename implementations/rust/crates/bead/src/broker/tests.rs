@@ -3,6 +3,7 @@
 //! over it; what of a broker no case of `spec/transports.json` reaches, by the other sides'
 //! sentences.
 
+use core::sync::atomic::{AtomicUsize, Ordering};
 use core::time::Duration;
 use std::error::Error;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -194,8 +195,11 @@ pub(super) async fn peer_of(
 /// participant makes of it, in order, and the life each publication asked, by what it carries: what
 /// it publishes to a topic bounded by `room` when given, its leg secure as `secure` says when given;
 /// each start after its first `starts` refused as it returns, when given; each start after its
-/// first `holds` held, heeding no signal, until a test releases it, when given; and, when `grants`
-/// is, the subscription to its inbox held until a test grants it.
+/// first `holds` held, heeding no signal, until a test releases it, when given; when `grants` is,
+/// the subscription to its inbox held until a test grants it; when `holds_stops` is, each stop held
+/// until a test releases it; and the CLOSE of the opener `drops_close` names, when it names one,
+/// answered no subscriber and never handed on, as its broker would leave one it did not take. It
+/// writes down each listener it is asked to let go of, and counts those it holds.
 #[derive(Debug)]
 pub(super) struct Calling {
     pub(super) inner: MemoryBrokerAdapter,
@@ -208,10 +212,14 @@ pub(super) struct Calling {
     // its start awaits its signal, then fails: a start its stop overtakes
     pub(super) gives_up: bool,
     pub(super) grants: bool,
+    pub(super) holds_stops: bool,
+    pub(super) drops_close: Mutex<Option<u64>>,
     pub(super) calls: Mutex<Vec<String>>,
     pub(super) lives: Mutex<Vec<(&'static str, Option<Duration>)>>,
     pub(super) held: Mutex<Vec<tokio::sync::oneshot::Sender<()>>>,
     pub(super) inbox: Mutex<Vec<tokio::sync::oneshot::Sender<()>>>,
+    pub(super) stops: Mutex<Vec<tokio::sync::oneshot::Sender<()>>>,
+    pub(super) listening: AtomicUsize,
 }
 
 impl Calling {
@@ -225,11 +233,36 @@ impl Calling {
             refuses: None,
             gives_up: false,
             grants: false,
+            holds_stops: false,
+            drops_close: Mutex::new(None),
             calls: Mutex::default(),
             lives: Mutex::default(),
             held: Mutex::default(),
             inbox: Mutex::default(),
+            stops: Mutex::default(),
+            listening: AtomicUsize::new(0),
         }
+    }
+
+    /// Releases the stop its participant asked first of those it holds.
+    pub(super) fn release_stop(&self) -> bool {
+        let release = {
+            let mut stops = locked(&self.stops);
+
+            (!stops.is_empty()).then(|| stops.remove(0))
+        };
+
+        release.is_some_and(|release| release.send(()).is_ok())
+    }
+
+    /// The stops it holds, unreleased.
+    pub(super) fn stopping(&self) -> usize {
+        locked(&self.stops).len()
+    }
+
+    /// The listeners it holds.
+    pub(super) fn listening(&self) -> usize {
+        self.listening.load(Ordering::SeqCst)
     }
 
     /// Releases the start its participant asked first of those it holds.
@@ -299,10 +332,13 @@ impl BrokerAdapter for Calling {
     }
 
     fn listen(&self, listener: Arc<dyn BrokerListener>) {
+        self.listening.fetch_add(1, Ordering::SeqCst);
         self.inner.listen(listener);
     }
 
     fn unlisten(&self, listener: &Arc<dyn BrokerListener>) {
+        locked(&self.calls).push("unlisten".to_owned());
+        self.listening.fetch_sub(1, Ordering::SeqCst);
         self.inner.unlisten(listener);
     }
 
@@ -413,11 +449,34 @@ impl BrokerAdapter for Calling {
         locked(&self.calls).push(format!("publish {}", publication.topic.join("/")));
         locked(&self.lives).push((kind, publication.expires_after));
 
+        let is_dropped = parcel_of(&publication.payload).is_some_and(|parcel| {
+            parcel.kind == super::parcel::kinds::CLOSE
+                && *locked(&self.drops_close) == Some(parcel.opener)
+        });
+
+        // * a CLOSE its broker did not take: answered, never handed on
+        if is_dropped {
+            return Box::pin(async { Ok(super::adapter::BrokerPublished::NoSubscriber) });
+        }
+
         self.inner.publish(publication)
     }
 
     fn stop(&self) -> crate::router::types::BoxFuture<()> {
         locked(&self.calls).push("stop".to_owned());
+
+        if self.holds_stops {
+            let (release, released) = tokio::sync::oneshot::channel();
+            let inner = self.inner.clone();
+
+            locked(&self.stops).push(release);
+
+            // * held as it is asked: it goes on once the test releases it
+            return Box::pin(async move {
+                released.await.ok();
+                inner.stop().await;
+            });
+        }
 
         self.inner.stop()
     }

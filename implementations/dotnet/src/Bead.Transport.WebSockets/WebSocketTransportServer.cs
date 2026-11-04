@@ -463,9 +463,10 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     }
 
     /// <summary>
-    /// Listens, and gives where. Refused with an <see cref="InvalidOperationException"/> unless
-    /// Uninitialized or Closed — a second start even while the first is under way; one that fails
-    /// ends Closed, ready to start again.
+    /// Listens, and gives where. Refused with an <see cref="ObjectDisposedException"/> once disposed,
+    /// its state kept; then with an <see cref="InvalidOperationException"/> unless Uninitialized or
+    /// Closed — a second start even while the first is under way; one that fails ends Closed, ready
+    /// to start again.
     /// </summary>
     public Task<TransportServerAddress> Start(WebSocketTransportStartOptions? options = null, CancellationToken cancellationToken = default)
     {
@@ -658,10 +659,14 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
             : Task.CompletedTask;
     }
 
-    /// <summary>As <see cref="Stop"/>.</summary>
+    /// <summary>
+    /// Stops it, as <see cref="Stop"/>, then ends it for good (decision 0003): a start after it is
+    /// its application's misuse, an <see cref="ObjectDisposedException"/>, its state kept; a later
+    /// dispose settles with the first.
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
-        await Stop();
+        await _life.Dispose(Stopping);
     }
 
     // closes a connection, and settles once the server told its end, as the TypeScript side's close

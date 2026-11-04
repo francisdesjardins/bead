@@ -733,10 +733,15 @@ test.describe('createTransportClient #reconnect', () => {
       new ProgrammerError('its owner forbids it')
     );
 
-    // its lifetime over, its target taken: cancelled before any attempt, nothing moved
+    // its lifetime over, its target taken: told, then cancelled before any attempt, its reason the
+    // cause, closed still
     isRefusing = false;
-    await expect(client.reconnect({ delay: 0 })).rejects.toMatchObject(RECONNECTION_CANCELLED);
-    expect([calls, reconnects, client.isClosed()]).toEqual([['connect:1', 'connect:1'], 0, true]);
+
+    const ended = client.reconnect({ delay: 0 });
+
+    await expect(ended).rejects.toMatchObject(RECONNECTION_CANCELLED);
+    await expect(ended).rejects.toHaveProperty('cause', 'ended');
+    expect([calls, reconnects, client.isClosed()]).toEqual([['connect:1', 'connect:1'], 1, true]);
     expect(asserted, 'its connect, then each reconnect and its attempt').toEqual([1, 1, 1, 1, 1]);
   });
 });

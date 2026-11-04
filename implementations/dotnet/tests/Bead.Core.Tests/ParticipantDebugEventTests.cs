@@ -87,6 +87,34 @@ public sealed class ParticipantDebugEventTests
         Assert.Equal([2L], stopped.Ended);
     }
 
+    // debugging 13.5
+    [Fact]
+    public async Task Tells_a_stop_once_then_its_next_link_s_up_as_another_incarnation_and_nothing_after_a_dispose()
+    {
+        await using var pair = await TracePair.Of();
+        var participant = pair.ClientParticipant;
+
+        // * a stop, then another with no link between, which tells nothing
+        await participant.Stop();
+        await participant.Stop();
+        await pair.Scheduler.WhenIdle();
+
+        // * its next link, then its dispose, then nothing more: a stop, a dispose, a start refused
+        await participant.Start();
+        await pair.Scheduler.WhenIdle();
+        await participant.DisposeAsync();
+        await participant.Stop();
+        await participant.DisposeAsync();
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => { return participant.Start(); });
+        await pair.Scheduler.WhenIdle();
+        var links = pair.Events.Where((item) => { return item.Event == "link"; }).ToArray();
+        Assert.Equal(["up", "stopped", "up", "stopped"], links.Select((item) => { return item.State; }));
+        Assert.Equal([1L], links[1].Ended);
+        Assert.Equal(links[0].Incarnation, links[1].Incarnation);
+        Assert.NotEqual(links[1].Incarnation, links[2].Incarnation);
+        Assert.Equal(links[2].Incarnation, links[3].Incarnation);
+    }
+
     [Fact]
     public async Task Tells_a_takeover_once_after_clearing_names_and_connections_and_tells_no_later_link_transition()
     {

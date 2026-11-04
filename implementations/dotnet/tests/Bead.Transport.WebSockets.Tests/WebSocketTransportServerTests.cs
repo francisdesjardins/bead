@@ -3681,4 +3681,24 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             Assert.True(_messages.Reader.Count == 0);
         }
     }
+
+    // decision 0003
+    [Fact]
+    public async Task Refuses_a_start_once_disposed_its_state_kept_and_disposes_once_stopping_it_first()
+    {
+        var server = new WebSocketTransportServer();
+
+        await server.Start(Loopback, Cancelled);
+
+        // * two disposes: one stop, shared
+        await Task.WhenAll(server.DisposeAsync().AsTask(), server.DisposeAsync().AsTask());
+        Assert.Equal(ReadyState.Closed, server.ReadyState);
+
+        // * a start after it: its application's misuse, its state kept
+        Assert.Equal("the transport server is disposed", (await Assert.ThrowsAsync<ObjectDisposedException>(() =>
+        {
+            return server.Start(Loopback, Cancelled);
+        })).Message);
+        Assert.Equal(ReadyState.Closed, server.ReadyState);
+    }
 }

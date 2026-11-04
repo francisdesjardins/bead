@@ -4,7 +4,7 @@ import { createBrokerParticipant } from '../broker-participant';
 import { createMemoryBroker } from '../memory-broker';
 import type { IParticipantDebugEvent } from '../participant-debug';
 
-test('announces the participant once at protocol 1, watches independently, and withdraws when stopped', async () => {
+test('announces the participant once at protocol 1, watches independently, keeps it across a stop, and withdraws when disposed', async () => {
   const sources: IDevtoolsSource[] = [];
   let withdrawals = 0;
   const previous = Object.getOwnPropertyDescriptor(globalThis, DEVTOOLS_HOOK_KEY);
@@ -69,9 +69,14 @@ test('announces the participant once at protocol 1, watches independently, and w
     stopOld();
     await participant.stop();
     await participant.stop();
-    expect(withdrawals).toBe(1);
+    expect(withdrawals, 'kept across its stop').toBe(0);
     expect(first).toHaveLength(1);
     expect(second).toHaveLength(2);
+    await participant.start();
+    expect(second, 'its next link told').toHaveLength(3);
+    await participant[Symbol.asyncDispose]();
+    await participant[Symbol.asyncDispose]();
+    expect(withdrawals, 'withdrawn once disposed').toBe(1);
     stopSecond();
     expect(participant.isDebugging).toBe(false);
     const hidden = createBrokerParticipant({
@@ -79,7 +84,7 @@ test('announces the participant once at protocol 1, watches independently, and w
       devtools: false,
     });
     expect(sources).toHaveLength(1);
-    await hidden.stop();
+    await hidden[Symbol.asyncDispose]();
   } finally {
     if (previous === undefined) {
       Reflect.deleteProperty(globalThis, DEVTOOLS_HOOK_KEY);

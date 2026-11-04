@@ -11,6 +11,8 @@ internal sealed class TransportServerLife
     private readonly Lock _gate = new();
     private volatile ReadyState _readyState = ReadyState.Uninitialized;
     private Task? _stopping;
+    // its dispose, which every later one shares: a start after it is refused
+    private Task? _disposed;
 
     /// <summary>Where it is in its life: Uninitialized until its first start.</summary>
     public ReadyState ReadyState
@@ -30,15 +32,34 @@ internal sealed class TransportServerLife
         }
     }
 
+    /// <summary>Whether it was disposed: a start since is its application's misuse.</summary>
+    public bool IsDisposed
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _disposed is not null;
+            }
+        }
+    }
+
     /// <summary>
     /// Starts, as <paramref name="starting"/> does, and gives where it listens. Refused with an
-    /// <see cref="InvalidOperationException"/> unless Uninitialized or Closed — a second start even
-    /// while the first is under way; one that fails ends Closed, ready to start again.
+    /// <see cref="ObjectDisposedException"/> once disposed, its state kept, before anything else
+    /// (decision 0003); then with an <see cref="InvalidOperationException"/> unless Uninitialized or
+    /// Closed — a second start even while the first is under way; one that fails ends Closed, ready
+    /// to start again.
     /// </summary>
     public async Task<TransportServerAddress> Start(Func<Task<TransportServerAddress>> starting)
     {
         lock (_gate)
         {
+            if (_disposed is not null)
+            {
+                throw Disposed();
+            }
+
             if (_readyState is not (ReadyState.Uninitialized or ReadyState.Closed))
             {
                 throw new InvalidOperationException($"the transport server is already {NameOf(_readyState)}");
@@ -94,6 +115,50 @@ internal sealed class TransportServerLife
             _stopping = Stopping(stopping);
 
             return _stopping;
+        }
+    }
+
+    /// <summary>
+    /// Stops it, as <see cref="Stop"/> does with <paramref name="stopping"/>, then ends it for good:
+    /// a start after it is its application's misuse (decision 0003). A later dispose settles with
+    /// the first.
+    /// </summary>
+    public Task Dispose(Func<Task> stopping)
+    {
+        var disposing = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        lock (_gate)
+        {
+            if (_disposed is { } shared)
+            {
+                return shared;
+            }
+
+            _disposed = disposing.Task;
+        }
+
+        _ = Disposing((disposing, stopping));
+
+        return disposing.Task;
+    }
+
+    /// <summary>What a start after its dispose is refused with: its application's misuse.</summary>
+    public static ObjectDisposedException Disposed()
+    {
+        return new ObjectDisposedException(null, "the transport server is disposed");
+    }
+
+    // its dispose's body, outside its gate: its stop, its end settled whatever the stop did
+    private async Task Disposing((TaskCompletionSource Disposed, Func<Task> Stopping) dispose)
+    {
+        try
+        {
+            await Stop(dispose.Stopping);
+            dispose.Disposed.SetResult();
+        }
+        catch (Exception reason)
+        {
+            dispose.Disposed.SetException(reason);
         }
     }
 

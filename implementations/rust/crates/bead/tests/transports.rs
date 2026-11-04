@@ -67,7 +67,7 @@ const CASE_KEYS: [&str; 10] = [
     "transport",
 ];
 
-const STEP_KEYS: [&str; 19] = [
+const STEP_KEYS: [&str; 20] = [
     "advance",
     "at",
     "connect",
@@ -76,6 +76,7 @@ const STEP_KEYS: [&str; 19] = [
     "leave",
     "lose",
     "on",
+    "participant",
     "publish",
     "refused",
     "reported",
@@ -1050,7 +1051,8 @@ impl Case {
             client.close();
         }
 
-        self.participant.stop().await;
+        // * its case ends: done with for good
+        self.participant.dispose().await;
 
         stopped
     }
@@ -1218,6 +1220,19 @@ async fn play_steps(case: &mut Case, steps: &[Value]) -> Result<(), String> {
                 .get(id)
                 .ok_or_else(|| format!("{at}: no participant {id}"))?
                 .take_over();
+        }
+
+        // * the participant under test stopped in place, or started again, each settled (spec 15.21)
+        if let Some(act) = step.get("participant") {
+            match act.as_str() {
+                Some("stop") => case.participant.stop().await,
+                Some("start") => case
+                    .participant
+                    .start()
+                    .await
+                    .map_err(|error| format!("{at}: its start failed: {error}"))?,
+                _ => return Err(format!("{at}: the participant {act}")),
+            }
         }
 
         if let Some(id) = step.get("leave").and_then(Value::as_str) {

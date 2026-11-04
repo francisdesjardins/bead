@@ -607,6 +607,49 @@ test.describe('createTransportServer', () => {
     expect(started.isClosed()).toBe(true);
   });
 
+  // decision 0003
+  test('refuses a start once disposed, its state kept, and disposes once, stopping it first', async () => {
+    const gate = Promise.withResolvers<void>();
+    const { calls, server } = createStubServer({
+      onStop: () => {
+        return gate.promise;
+      },
+    });
+
+    await server.start();
+
+    // * two disposes: one stop, which both settle with
+    const disposes = [server[Symbol.asyncDispose](), server[Symbol.asyncDispose]()];
+    const settledDisposes: number[] = [];
+
+    for (const [index, disposing] of disposes.entries()) {
+      void disposing.then(() => {
+        settledDisposes.push(index);
+      });
+    }
+
+    await Promise.resolve();
+    expect([server.isClosing(), settledDisposes], 'stopping, neither settled').toEqual([true, []]);
+    gate.resolve();
+    await Promise.all(disposes);
+    expect([calls, server.isClosed()], 'stopped first, once').toEqual([['start', 'stop'], true]);
+
+    // * a start once disposed: its application's misuse, refused before anything moves
+    const refused = server.start();
+
+    await expect(refused, 'a misuse').rejects.toBeInstanceOf(ProgrammerError);
+    await expect(refused, 'its words').rejects.toThrow('the transport server is disposed');
+    expect([server.isClosed(), calls], 'its state kept, its transport never reached').toEqual([
+      true,
+      ['start', 'stop'],
+    ]);
+
+    // * a stop or a dispose after it settles at once, nothing asked of its transport
+    await server.stop();
+    await server[Symbol.asyncDispose]();
+    expect(calls, 'nothing more asked').toEqual(['start', 'stop']);
+  });
+
   test('"stop" forgets every connection', async () => {
     const { register, server } = createStubServer();
 

@@ -213,8 +213,9 @@ export interface ITransportServer<
     connectionHandle: TransportServerConnectionHandle
   ): Promise<void>;
   /**
-   * Listens. Rejects with a {@link ProgrammerError} unless UNINITIALIZED or CLOSED, a
-   * {@link CancelError}, or the system's own error — `EADDRINUSE` for a port taken — ending CLOSED.
+   * Listens. Rejects with a {@link ProgrammerError} unless UNINITIALIZED or CLOSED, or once
+   * disposed, its state kept; a {@link CancelError}, or the system's own error — `EADDRINUSE` for a
+   * port taken — ending CLOSED.
    */
   start(options?: ITransportServerStartOptions): Promise<ITransportServerAddress>;
   /**
@@ -223,7 +224,11 @@ export interface ITransportServer<
    * {@link ProgrammerError} while starting.
    */
   stop(): Promise<void>;
-  /** What `await using` calls: {@link ITransportServer.stop}. */
+  /**
+   * What `await using` calls: {@link ITransportServer.stop}, then final, a start after it a
+   * {@link ProgrammerError}, its state kept; a later dispose settles with the first (decision
+   * 0003).
+   */
   [Symbol.asyncDispose](): Promise<void>;
 }
 
@@ -1006,7 +1011,11 @@ export interface IJoinedTransportServer<
    * rejected, in their order, once the others settled.
    */
   stop(): Promise<void>;
-  /** What `await using` calls: {@link IJoinedTransportServer.stop}. */
+  /**
+   * What `await using` calls: disposes every transport it joins, each final, or stops one that
+   * cannot be disposed, and settles as {@link IJoinedTransportServer.stop} does; a later dispose
+   * settles with the first (decision 0003).
+   */
   [Symbol.asyncDispose](): Promise<void>;
 }
 

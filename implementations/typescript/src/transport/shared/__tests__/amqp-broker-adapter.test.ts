@@ -370,7 +370,8 @@ test.describe('createAmqpBrokerAdapter', () => {
   test('fails its queued publications and pending name subscription when stopped and lets none reach its next link', async () => {
     script.policy.credit = 1;
 
-    const adapter = adapterOf(script);
+    // * a short connectTimeout, past which its stop fails what waits on its credit
+    const adapter = adapterOf(script, { connectTimeout: 500 });
     const { downs } = heardOf(adapter);
     const link = await inboxUp({ adapter, script });
     expect(await adapter.publish({ payload: Uint8Array.of(1), topic: INBOX })).toBe(
@@ -426,7 +427,8 @@ test.describe('createAmqpBrokerAdapter', () => {
       return 'hold';
     };
 
-    const adapter = adapterOf(script);
+    // * a short connectTimeout, past which its stop fails what has no outcome yet
+    const adapter = adapterOf(script, { connectTimeout: 500 });
     const { downs } = heardOf(adapter);
     const link = await inboxUp({ adapter, script });
     const sent = settledOf(adapter.publish({ payload: Uint8Array.of(1), topic: INBOX }));
@@ -1672,6 +1674,83 @@ test.describe('createAmqpBrokerAdapter', () => {
       })
     ).toEqual([[1], [2], [3], [4], [5]]);
     await adapter.stop();
+  });
+
+  // spec 15.24, 15.35
+  test('sends what waits on its link credit before its stop’s close, within its connectTimeout, and fails what has not gone by then', async () => {
+    script.policy.credit = 1;
+
+    const adapter = adapterOf(script, { connectTimeout: 1_000 });
+    const { downs } = heardOf(adapter);
+    const link = await inboxUp({ adapter, script });
+    const publishing = [1, 2, 3].map((index) => {
+      return adapter.publish({ payload: Uint8Array.of(index), topic: INBOX });
+    });
+
+    await link.until(() => {
+      return link.deliveries.length === 1;
+    });
+
+    // * its stop takes no publication, and sends what waits first, as credit comes
+    const stopping = adapter.stop();
+    const refused = await settledOf(adapter.publish({ payload: Uint8Array.of(4), topic: INBOX }));
+
+    expect(refused, 'none taken once it stops').toMatchObject({
+      message: 'the link of ada is not up',
+    });
+
+    const receiver = link.deliveries[0]?.receiver as Receiver;
+
+    for (const expected of [2, 3]) {
+      expect(link.closeFrame, 'not closed while one waits').toBeUndefined();
+      receiver.add_credit(1);
+      await link.until(() => {
+        return link.deliveries.length === expected;
+      });
+    }
+
+    await stopping;
+    expect(await Promise.all(publishing), 'each taken').toEqual([
+      BROKER_PUBLISHED.TAKEN,
+      BROKER_PUBLISHED.TAKEN,
+      BROKER_PUBLISHED.TAKEN,
+    ]);
+    await link.closed;
+    expect(
+      link.deliveries.map(({ message }) => {
+        return [...(message.body as { content: Buffer }).content];
+      }),
+      'each sent before its close'
+    ).toEqual([[1], [2], [3]]);
+    expect(link.closeFrame, 'its close').toBeDefined();
+    expect(link.closeFrame?.error ?? null, 'of no error').toBeNull();
+
+    // * its broker grants no credit and settles nothing: past its connectTimeout, what has not gone
+    // fails, and its close goes
+    script.policy.settle = () => {
+      return 'hold';
+    };
+
+    const silent = await inboxUp({ adapter, script });
+    const unanswered = [5, 6].map((index) => {
+      return settledOf(adapter.publish({ payload: Uint8Array.of(index), topic: INBOX }));
+    });
+
+    await silent.until(() => {
+      return silent.deliveries.length === 1;
+    });
+
+    const startedAt = Date.now();
+
+    await adapter.stop();
+    expect(Date.now() - startedAt, 'its connectTimeout waited').toBeGreaterThanOrEqual(900);
+    expect(await Promise.all(unanswered), 'each failed').toEqual([
+      expect.objectContaining({ message: 'the link of ada stopped' }),
+      expect.objectContaining({ message: 'the link of ada stopped' }),
+    ]);
+    await silent.closed;
+    expect(silent.deliveries, 'the second never sent').toHaveLength(1);
+    expect(downs, 'no loss told').toEqual([]);
   });
 
   test('reads accepted as taken, released as no subscriber, and rejected or any other outcome as refused (spec 15.35)', async () => {

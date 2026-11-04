@@ -238,6 +238,7 @@ interface IBrokerStep extends Partial<IPublication> {
   leave?: string;
   lose?: string;
   on?: string;
+  participant?: 'start' | 'stop';
   reported?: string[];
   stop?: true | { crossing: IPublication };
   takeover?: 'client' | 'server';
@@ -349,6 +350,7 @@ const BROKER_STEP_KEYS: ReadonlySet<string> = new Set([
   'leave',
   'lose',
   'on',
+  'participant',
   'publish',
   'refused',
   'reported',
@@ -1385,7 +1387,7 @@ const placedOf = async (
  * transport alone over the participant `client`, with no reconnection; its adapter wrapped to note
  * the lives it asks; the test's peers and twin publishing parcels and reading their inboxes. Its
  * `maximumEnvelopePartsBytes` is its router's `maximumEnvelopeBytes` unless the case sets it. Every
- * participant is stopped before the next case, whose own a link left up would take over.
+ * participant is disposed before the next case, whose own a link left up would take over.
  */
 const playBrokerCase = async (
   testCase: ICase,
@@ -1599,6 +1601,13 @@ const playBrokerCase = async (
         await peers.leave(step.leave);
       }
 
+      // * the participant under test stopped in place, or started again, settled (spec 15.21)
+      if (step.participant === 'stop') {
+        await participant.stop();
+      } else if (step.participant === 'start') {
+        await participant.start();
+      }
+
       if (step.connect !== undefined && client !== undefined) {
         connecting = settlingOf(
           client.connect({
@@ -1798,7 +1807,7 @@ const playBrokerCase = async (
     await twin?.[Symbol.asyncDispose]();
     await server?.[Symbol.asyncDispose]();
     await client?.[Symbol.asyncDispose]();
-    await participant?.stop();
+    await participant?.[Symbol.asyncDispose]();
     await world[Symbol.asyncDispose]();
   }
 };

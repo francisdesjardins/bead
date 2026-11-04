@@ -41,6 +41,12 @@ platform's rule would take a word away from the spec, the spec's word stays and 
 overruled where it stands: byte 2 is the flags, so the C# enum is `EnvelopeFlags`, against the
 analyzer that refuses a name ending in `Flags` (CA1711).
 
+**A stop may be followed by a start; a dispose is final.** On every object that starts and stops
+— a server's transport, a broker's adapter, a broker participant — `stop` ends what it runs and a
+later `start` runs it again, and its dispose stops it for good: a call after it is its application's
+misuse, as the Framework Design Guidelines' Dispose pattern and TC39's `Symbol.asyncDispose` say. A
+router's dispose is final alike.
+
 ## Consequences
 
 The rename is the cheap half. The expensive half is noticing: a word that means two things is found

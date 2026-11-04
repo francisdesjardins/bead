@@ -3813,7 +3813,7 @@ src/transport/shared/broker-participant.ts IBrokerParticipantPort
     readonly clock: IClock
     readonly id: string
     readonly isSecure: boolean
-    readonly isStopped: boolean
+    readonly isDisposed: boolean
     readonly names: ReadonlySet<string>
     readonly stopped: AbortSignal
     awaitAnswers(opener: Uint8Array, answers: IBrokerAnswers): () => void
