@@ -7,9 +7,10 @@ use bytes::Bytes;
 use super::{request, result};
 use crate::constants::{FailureScope, ProtocolCode, RouterSide};
 use crate::envelope::{
-    CancelHeader, Credential, CreditHeader, Envelope, EnvelopeHeader, FailureHeader, FailureRecord,
-    NotificationHeader, ReadEnvelopeOptions, RequestHeader, ResultHeader, header_bytes_of,
-    read_envelope, read_failure, read_header, write_envelope, write_header,
+    CancelHeader, ChunkHeader, Credential, CreditHeader, Envelope, EnvelopeHeader, FailureHeader,
+    FailureRecord, NotificationHeader, Prefix, ReadEnvelopeOptions, RequestHeader, ResultHeader,
+    header_bytes_of, read_envelope, read_failure, read_header, read_prefix, write_envelope,
+    write_header,
 };
 use crate::failure::FailureOrigin;
 use crate::session_token::SessionToken;
@@ -349,5 +350,172 @@ fn cuts_a_long_detail_at_the_default_limit_back_to_the_start_of_the_character_cu
                 .detail,
             expected
         );
+    }
+}
+
+#[test]
+fn read_an_envelope_where_a_pooled_buffer_holds_it_at_its_own_offset() {
+    let bytes_of_request =
+        hexadecimal::bytes_of("A1 10 00 03 00 00 00 03 00 02 00 01 68 69").expect("hexadecimal");
+    let mut pool = vec![0xff_u8; bytes_of_request.len() + 5];
+    pool.get_mut(5..)
+        .expect("the pool's room")
+        .copy_from_slice(&bytes_of_request);
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the envelope starts 5 bytes into its pool"
+    )]
+    let held = Bytes::from(pool.clone()).slice(5..);
+    let expected = request(None);
+
+    for bytes in [pool.get(5..).expect("the pool's tail"), &*held] {
+        assert_eq!(
+            read_prefix(bytes, RouterSide::Server).expect("a prefix"),
+            Prefix {
+                layout: 0xa1,
+                kind: 0x10,
+                call_id: 3,
+            }
+        );
+        assert_eq!(
+            read_header(bytes, RouterSide::Server)
+                .expect("read")
+                .expect("known kind")
+                .header,
+            EnvelopeHeader::Request(expected.clone())
+        );
+    }
+    assert_eq!(
+        read_envelope(&held, RouterSide::Server, &ReadEnvelopeOptions::default())
+            .expect("read")
+            .expect("known kind"),
+        Envelope::Request {
+            header: expected,
+            payload: Bytes::from_static(b"hi"),
+        }
+    );
+}
+
+// a u32 and a u16 hold nothing past their range, nor a fraction, a negative or NaN: 0 is what is
+// left to refuse, and each range's last is written as it is
+// spec 4.10
+#[test]
+fn refuses_a_field_out_of_its_range_naming_it_before_writing_anything() {
+    for (header, words) in [
+        (
+            EnvelopeHeader::Result(ResultHeader {
+                call_id: 0,
+                ..result(None)
+            }),
+            "callId is an integer from 1 to 4294967295, got 0",
+        ),
+        (
+            EnvelopeHeader::Request(RequestHeader {
+                service_id: 0,
+                ..request(None)
+            }),
+            "serviceId is an integer from 1 to 65535, got 0",
+        ),
+        (
+            EnvelopeHeader::Request(RequestHeader {
+                procedure_id: 0,
+                ..request(None)
+            }),
+            "procedureId is an integer from 1 to 65535, got 0",
+        ),
+        (
+            EnvelopeHeader::Request(RequestHeader {
+                destination_id: Some(0),
+                ..request(None)
+            }),
+            "destinationId is an integer from 1 to 4294967295, got 0",
+        ),
+    ] {
+        let mut bytes = Vec::new();
+        assert_eq!(
+            write_header(&header, &mut bytes)
+                .expect_err(words)
+                .message(),
+            words
+        );
+        assert!(bytes.is_empty(), "{words}: nothing written");
+    }
+
+    // 0x1000 is a service and a procedure like any other
+    assert_eq!(
+        written(&EnvelopeHeader::Request(RequestHeader {
+            call_id: 1,
+            service_id: 0x1000,
+            procedure_id: 0x1000,
+            ..request(None)
+        }))
+        .get(8..12),
+        Some(&[0x10, 0x00, 0x10, 0x00][..])
+    );
+
+    // the last of each range, and 2^31, are written as they are
+    assert_eq!(
+        written(&EnvelopeHeader::Request(RequestHeader {
+            call_id: u32::MAX,
+            service_id: u16::MAX,
+            procedure_id: u16::MAX,
+            destination_id: Some(u32::MAX),
+            ..request(None)
+        })),
+        hexadecimal::bytes_of("A1 10 02 04 FF FF FF FF FF FF FF FF FF FF FF FF")
+            .expect("hexadecimal")
+    );
+    assert_eq!(
+        written(&EnvelopeHeader::Request(RequestHeader {
+            call_id: 1 << 31,
+            service_id: 1,
+            procedure_id: 1,
+            destination_id: Some(1 << 31),
+            ..request(None)
+        })),
+        hexadecimal::bytes_of("A1 10 02 04 80 00 00 00 00 01 00 01 80 00 00 00")
+            .expect("hexadecimal")
+    );
+}
+
+// a u64 holds no negative, no fraction and no NaN: what is left to refuse is 2⁵³ and past it
+#[test]
+fn refuses_an_offset_an_end_or_a_total_that_is_not_a_whole_number_from_0_to_2_53_1() {
+    for value in [1 << 53, u64::MAX] {
+        for (header, field) in [
+            (
+                EnvelopeHeader::Chunk(ChunkHeader {
+                    call_id: 1,
+                    offset: value,
+                    is_last: true,
+                }),
+                "offset",
+            ),
+            (
+                EnvelopeHeader::Credit(CreditHeader {
+                    call_id: 1,
+                    credit_end: value,
+                    paced: false,
+                }),
+                "creditEnd",
+            ),
+            (
+                EnvelopeHeader::Result(ResultHeader {
+                    call_id: 1,
+                    total: Some(value),
+                    credential: None,
+                }),
+                "total",
+            ),
+        ] {
+            let mut bytes = Vec::new();
+            assert_eq!(
+                write_header(&header, &mut bytes)
+                    .expect_err(field)
+                    .message(),
+                format!("{field} is a whole number from 0 to 2⁵³ − 1, got {value}")
+            );
+            assert!(bytes.is_empty(), "{field}: nothing written");
+        }
     }
 }

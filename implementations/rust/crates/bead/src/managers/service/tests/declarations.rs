@@ -15,7 +15,7 @@ use crate::managers::service::{
 };
 use crate::payloads::{JsonCodec, TextCodec};
 use crate::router::admissions::BeforeRequest;
-use crate::router::core::{AdmissionRequest, Carried};
+use crate::router::core::{AdmissionRequest, Carried, Side};
 use crate::router::types::{CallSession, RouterError};
 use crate::testing::pair::echo;
 use crate::testing::scripted::handle_of;
@@ -63,7 +63,7 @@ async fn refuses_a_resolver_off_section_16_as_it_is_asked_for_before_its_callbac
     fixture
         .router
         .owner()
-        .run(|state| assert!(locked(&state.core.resolvers).is_empty()))
+        .run(|state| assert!(locked(&state.core().resolvers).is_empty()))
         .await
         .expect("no callback is registered");
     assert_eq!(fixture.transport.take(), []);
@@ -181,13 +181,39 @@ async fn makes_the_resolvers_of_requests_and_notifications_on_a_server_router_al
             .map_err(told),
         Err(by_side(ANSWERS_COMMANDS))
     );
-    // * nothing registered: its own maker registers at the same address
     client
+        .router
+        .owner()
+        .run(|state| assert!(locked(&state.core().resolvers).is_empty()))
+        .await
+        .expect("the whole client matrix registers nothing");
+    let define_command = client
         .manager
         .get_command_resolver(&of_kind(Some(ProcedureKind::Command)), resolving())
-        .expect("a command resolver, on a client's router")
+        .expect("a command resolver, on a client's router");
+    client
+        .router
+        .owner()
+        .run(|state| assert!(locked(&state.core().resolvers).is_empty()))
+        .await
+        .expect("the command factory waits for its callback");
+    define_command
         .on(Arc::clone(&answered))
-        .expect("registered, nothing before it");
+        .expect("the command registered");
+    client
+        .router
+        .owner()
+        .run(|state| {
+            assert_eq!(
+                locked(&state.core().resolvers)
+                    .keys()
+                    .copied()
+                    .collect::<Vec<_>>(),
+                [(2, 1)]
+            );
+        })
+        .await
+        .expect("only the command is registered");
     client.router.dispose().await;
 
     // on a server's router
@@ -239,17 +265,15 @@ async fn makes_the_resolvers_of_requests_and_notifications_on_a_server_router_al
     server
         .router
         .owner()
-        .run(|state| assert!(locked(&state.core.resolvers).is_empty()))
+        .run(|state| assert!(locked(&state.core().resolvers).is_empty()))
         .await
         .expect("no callback is registered");
     // each maker of its side makes, and registers once it is given its callback
-    server
+    let define_request = server
         .manager
-        .get_request_resolver(&of_kind(None), resolving())
-        .expect("a request resolver, on a server's router")
-        .on(Arc::clone(&answered))
-        .expect("registered");
-    server
+        .get_request_resolver(&of_kind(Some(ProcedureKind::Request)), resolving())
+        .expect("a request resolver, on a server's router");
+    let define_notification = server
         .manager
         .get_notification_resolver(
             &crate::identity::Procedure {
@@ -260,13 +284,32 @@ async fn makes_the_resolvers_of_requests_and_notifications_on_a_server_router_al
             },
             notifying(),
         )
-        .expect("a notification resolver, on a server's router")
-        .on(answered)
-        .expect("registered");
+        .expect("a notification resolver, on a server's router");
     server
         .router
         .owner()
-        .run(|state| assert_eq!(locked(&state.core.resolvers).len(), 2))
+        .run(|state| assert!(locked(&state.core().resolvers).is_empty()))
+        .await
+        .expect("both server factories wait for their callbacks");
+    define_request
+        .on(Arc::clone(&answered))
+        .expect("the request registered");
+    define_notification
+        .on(answered)
+        .expect("the notification registered");
+    server
+        .router
+        .owner()
+        .run(|state| {
+            let registered = locked(&state.core().resolvers);
+            assert_eq!(
+                registered.keys().copied().collect::<Vec<_>>(),
+                [(2, 1), (2, 2)]
+            );
+            assert!(!registered[&(2, 1)].handler.notifies);
+            assert!(registered[&(2, 2)].handler.notifies);
+            drop(registered);
+        })
         .await
         .expect("both registered");
     assert_eq!(server.transport.take(), []);
@@ -429,7 +472,7 @@ async fn a_refusal_that_is_not_an_admission_of_the_routers_side_is_a_programmer_
     fixture
         .router
         .owner()
-        .run(|state| assert!(locked(&state.core.resolvers).is_empty()))
+        .run(|state| assert!(locked(&state.core().resolvers).is_empty()))
         .await
         .expect("no callback is registered");
     fixture.router.dispose().await;

@@ -129,3 +129,36 @@ async fn a_layer_runs_on_the_clock_of_the_one_beneath_it_unless_given_one_and_re
         );
     }
 }
+
+// no globals to install on this side: the test kit's clock is a clock of its own, which moves as
+// it is advanced alone, never the platform's
+#[tokio::test]
+async fn a_fake_one_never_installed_is_one_its_timers_fire_and_its_readings_move_as_it_is_advanced_the_globals_never()
+ {
+    let stepping = SteppingClock::new(instants::new_year());
+    let clock: SharedClock = Arc::<SteppingClock>::clone(&stepping);
+    let fired = Arc::new(Mutex::new(Vec::new()));
+    let (reading, firing) = (Arc::clone(&clock), Arc::clone(&fired));
+    let started_at = (clock.monotonic(), clock.wall());
+    let _timer = clock
+        .arm(
+            Schedule::Once(Duration::from_millis(250)),
+            Box::new(move || {
+                firing.lock().expect("the readings").push(reading.wall());
+            }),
+        )
+        .expect("a held timer");
+
+    stepping.advance(Duration::from_millis(249)).await;
+    assert_eq!(*fired.lock().expect("the readings"), []);
+
+    stepping.advance(Duration::from_millis(1)).await;
+    assert_eq!(
+        *fired.lock().expect("the readings"),
+        [started_at.1 + Duration::from_millis(250)]
+    );
+    assert_eq!(
+        clock.monotonic().checked_sub(started_at.0),
+        Some(Duration::from_millis(250))
+    );
+}

@@ -33,7 +33,9 @@ use crate::transport::{
     TransportClientReconnectOptions, TransportServerClient,
 };
 
+mod lifecycle;
 mod reconnection;
+mod server_connections;
 
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)

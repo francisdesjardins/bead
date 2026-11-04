@@ -272,6 +272,48 @@ fn refuses_limits_that_do_not_hold_together_each_by_its_own_rule() {
     }
 }
 
+// a u64 holds no fraction, no negative and no NaN, and holds 2⁵³ exactly: what is left to refuse is
+// 0, where a limit is above it
+#[test]
+fn refuse_a_limit_that_is_not_a_whole_number_or_not_above_0_where_0_means_nothing() {
+    for (limits, words) in [
+        (
+            RouterLimitsOptions {
+                window_bytes: Some(0),
+                ..RouterLimitsOptions::default()
+            },
+            "windowBytes is a whole number above 0, not 0",
+        ),
+        (
+            RouterLimitsOptions {
+                chunk_bytes: Some(0),
+                ..RouterLimitsOptions::default()
+            },
+            "chunkBytes is a whole number above 0, not 0",
+        ),
+        (
+            RouterLimitsOptions {
+                maximum_payload_bytes: Some(0),
+                ..RouterLimitsOptions::default()
+            },
+            "maximumPayloadBytes is a whole number above 0, not 0",
+        ),
+    ] {
+        assert_eq!(refusal_of(&limits), words, "{limits:?}");
+    }
+
+    // 0 means nothing for the transfers and the detail: no transfer, and no detail sent
+    assert_eq!(
+        refusal_of(&RouterLimitsOptions {
+            chunk_bytes: None,
+            maximum_detail_bytes: Some(0),
+            maximum_transfers: Some(0),
+            ..RouterLimitsOptions::default()
+        }),
+        ""
+    );
+}
+
 // a u64 holds no negative, no fraction, no NaN: 0 alone is refused by its words
 // spec 9.2
 #[test]

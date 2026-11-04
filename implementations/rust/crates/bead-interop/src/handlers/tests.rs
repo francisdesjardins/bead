@@ -76,3 +76,68 @@ fn the_interop_services_end_sessions_of_takes_an_issuer_alone_a_string_and_throw
     }
     // JavaScript's undefined has no serde_json::Value; null is the file's explicit absent value.
 }
+
+// the procedures a registry holds a resolver's series of, by name: those its side answers, each
+// series of a call answered named `bead_server_call_…` on either side
+fn answered_in(exposition: &str) -> Vec<String> {
+    let mut names: Vec<String> = exposition
+        .lines()
+        .filter_map(|line| {
+            line.strip_prefix("bead_server_call_handled_total{service=\"1\",procedure=\"")
+        })
+        .filter_map(|rest| rest.split('"').next())
+        .map(str::to_owned)
+        .collect();
+    names.sort_unstable();
+    names.dedup();
+    names
+}
+
+// every procedure answered by the side its kind names: a command by the client, any other by the
+// server, as the registries each side declares to tell
+#[tokio::test]
+async fn every_procedure_of_the_interop_services_api_is_offered_on_the_side_its_kind_names() {
+    use bead::testing::pair::{Pair, PairOptions};
+    use bead::{
+        ClientOptions, MetricsRegistry, MetricsRegistryOptions, ProcedureKind, ServerOptions,
+    };
+
+    let server_registry =
+        MetricsRegistry::new(&MetricsRegistryOptions::default()).expect("a registry");
+    let client_registry =
+        MetricsRegistry::new(&MetricsRegistryOptions::default()).expect("a registry");
+    let mut options = PairOptions::default();
+    let mut server = ServerOptions::default();
+    server.metrics_registry = Some(server_registry.clone());
+    options.server = Some(server);
+    let mut client = ClientOptions::default();
+    client.metrics_registry = Some(client_registry.clone());
+    options.client = Some(client);
+    let pair = Pair::connected(bead::testing::instants::new_year(), &options)
+        .await
+        .expect("a pair connected");
+
+    let interop = crate::offer_interop(&pair.server).expect("the interop offered");
+    crate::offer_interop_client(&pair.client).expect("its client half offered");
+
+    let names_of = |is_command: bool| {
+        let mut names: Vec<String> = interop
+            .procedures
+            .all()
+            .iter()
+            .map(bead::ServiceProcedure::procedure)
+            .filter(|procedure| {
+                (procedure.procedure_kind == Some(ProcedureKind::Command)) == is_command
+            })
+            .map(|procedure| procedure.procedure_name.clone())
+            .collect();
+        names.sort_unstable();
+        names
+    };
+    assert_eq!(interop.service.procedures_without_resolver(), []);
+    let server_text = server_registry.exposition().text;
+    let client_text = client_registry.exposition().text;
+    assert_eq!(answered_in(&server_text), names_of(false), "{server_text}");
+    assert_eq!(answered_in(&client_text), names_of(true), "{client_text}");
+    pair.client.dispose().await;
+}

@@ -859,3 +859,40 @@ async fn a_client_request_resolves_no_close_on_timeout() {
     );
     fixture.router.dispose().await;
 }
+
+// what the other sides' types hold, this side's types hold too: a request's options and a
+// registration's name no connection, so none to close; a registration presents no credential
+#[test]
+fn a_clients_calls_and_a_notifications_take_no_close_on_timeout_they_name_no_connection() {
+    let consumer = crate::testing::surface::Consumer::new();
+    consumer.accepts("pub fn check() { let mut options = bead::RequestOptions::default(); options.credential = None; options.timeout = None; let _ = options; }");
+    for (options, field) in [
+        ("RequestOptions", "close_on_timeout = Some(true)"),
+        ("RegistrationOptions", "close_on_timeout = Some(true)"),
+        (
+            "RequestOptions",
+            "connection_handle = std::sync::Arc::from(\"server\")",
+        ),
+        ("RegistrationOptions", "credential = None"),
+    ] {
+        consumer.refuses(
+            &format!("pub fn check() {{ let mut options = bead::{options}::default(); options.{field}; let _ = options; }}"),
+            ("E0609", "no field"),
+        );
+    }
+}
+
+// a command's options are made of the connection it goes to, and have no default without one
+#[test]
+fn a_command_names_the_connection_it_goes_to_as_the_types_require() {
+    let consumer = crate::testing::surface::Consumer::new();
+    consumer.accepts("pub fn check(handle: bead::ConnectionHandle) -> bead::CommandOptions { let mut options = bead::CommandOptions::new(handle); options.timeout = Some(core::time::Duration::from_millis(10)); options }");
+    consumer.refuses(
+        "pub fn check() -> bead::CommandOptions { bead::CommandOptions::default() }",
+        ("E0599", "named `default`"),
+    );
+    consumer.refuses(
+        "pub fn check() -> bead::CommandOptions { bead::CommandOptions::new() }",
+        ("E0061", "takes 1 argument"),
+    );
+}
