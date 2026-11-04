@@ -643,14 +643,22 @@ export const RULES = Object.freeze({
       return /^I[A-Z].*Like$/.test(name) ? stemOf(keyOf(name, kind), 'like') : [];
     });
   },
-  // a `[Flags]` enum is plural on the C# side (0007)
+  // a set of flags: a `[Flags]` enum on the C# side, its name plural, as the others name the set
+  // or one of its flags; a bit set of associated constants on the Rust side; on the TypeScript side
+  // a frozen object of its bits where the wire carries the set, and an object of optional booleans
+  // where an implementer declares it, the wire carrying none (0007, 0044)
   flags: (cells) => {
     return agree(cells, (side, { name, kind }) => {
-      if (side !== 'csharp') {
-        return [keyOf(name, kind)];
+      const key = keyOf(name, kind);
+
+      if (side === 'csharp') {
+        return kind === 'choice' && key.endsWith('s') ? [key, ...stemOf(key, 's')] : [];
+      }
+      if (side === 'rust') {
+        return kind === 'choice' ? [key] : [];
       }
 
-      return kind === 'choice' ? stemOf(keyOf(name, kind), 's') : [];
+      return kind === 'choice' || kind === 'record' ? [key] : [];
     });
   },
   // a constant `HOLDER_NAME` is C#'s `Holder.Name` (0007)
@@ -694,11 +702,25 @@ export const RULES = Object.freeze({
       return side === 'rust' ? stemOf(key, 'type') : [key, ...stemOf(key, 'type')];
     });
   },
+  // a callable that holds what it calls through: a Rust struct with its call, where the
+  // TypeScript and C# sides type a function, as `Notifier` is (0044)
+  callable: (cells) => {
+    if (cells.rust.length === 0) {
+      return false;
+    }
+
+    return agree(cells, (side, { name, kind }) => {
+      return kind === (side === 'rust' ? 'record' : 'function type') ? [keyOf(name, kind)] : [];
+    });
+  },
   // a platform's own type, as `IClock` is `TimeProvider` (0011): its record alone holds it
   platform: () => {
     return true;
   },
 });
+
+// the renderings that hold each side's kind themselves, past the kind table
+const KINDED_BY_RULE = new Set(['flags', 'callable', 'platform']);
 
 // ── The rows ───────────────────────────────────────────────────────────────────
 
@@ -857,8 +879,9 @@ const classProblemsOf = (row) => {
         return [`the rendering ${written.reason} does not give its names`];
       }
 
-      // ! a platform's own type is held by its record alone, its kind with it
-      return renders || written.reason === 'platform' ? [] : [unkinded(row)];
+      // ! a platform's own type is held by its record alone, its kind with it; a set of flags and a
+      // callable, by their rule, which reads each side's kind itself
+      return renders || KINDED_BY_RULE.has(written.reason) ? [] : [unkinded(row)];
     }
     case 'own': {
       const problems = sides.length === 1 ? [] : ['an `own` row names one side alone'];
