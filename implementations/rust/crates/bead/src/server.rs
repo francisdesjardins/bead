@@ -1237,7 +1237,7 @@ impl Server {
             clock: clock_of(&LayeredClocks {
                 beneath: Some(&clock),
                 given: sessions_options.clock.as_ref(),
-                layer: "a server's sessions",
+                layer: "a server's session manager",
                 below: "its server",
             })?,
             ..sessions_options

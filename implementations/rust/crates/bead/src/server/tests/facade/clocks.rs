@@ -29,7 +29,7 @@ fn refusal_of(transport: &Arc<ScriptedServer>, options: &ServerOptions) -> Strin
 }
 
 #[tokio::test]
-async fn runs_every_layer_on_its_transports_clock_the_sessions_are_built_with_it_and_a_layer_on_another_is_refused_leaving_nothing_on_its_transport()
+async fn runs_every_layer_on_its_transport_s_clock_the_sessions_are_built_with_it_and_a_layer_on_another_is_refused_leaving_nothing_on_its_transport()
  {
     let fixture = Fixture::new(&ServerOptions {
         sessions: Some(SessionManagerOptions {
@@ -56,6 +56,20 @@ async fn runs_every_layer_on_its_transports_clock_the_sessions_are_built_with_it
     fixture.advance(1).await;
     assert!(!sessions.has(Arc::clone(&fixture.first)).await, "20 ms");
 
+    // the transport's own clock, given, is the one it runs on
+    let own = ScriptedServer::new(Arc::clone(&clock));
+    let wire: Arc<dyn ServerTransport> = Arc::<ScriptedServer>::clone(&own);
+    let given = Server::new(
+        wire,
+        &ServerOptions {
+            clock: Some(Arc::clone(&clock)),
+            ..ServerOptions::default()
+        },
+    )
+    .expect("the clock of its transport");
+    assert!(Arc::ptr_eq(&given.router().clock(), &clock));
+    given.dispose().await.expect("disposed");
+
     let listening = fixture.transport.listener_count();
     assert_eq!(
         refusal_of(
@@ -67,7 +81,7 @@ async fn runs_every_layer_on_its_transports_clock_the_sessions_are_built_with_it
         ),
         "a server runs on the clock of its transport, one of its own, and was given another, one of its own"
     );
-    assert!(
+    assert_eq!(
         refusal_of(
             &fixture.transport,
             &ServerOptions {
@@ -77,68 +91,25 @@ async fn runs_every_layer_on_its_transports_clock_the_sessions_are_built_with_it
                 }),
                 ..ServerOptions::default()
             }
-        )
-        .ends_with(
-            "runs on the clock of its server, one of its own, and was given another, the platform's"
-        )
+        ),
+        "a server's session manager runs on the clock of its server, one of its own, and was given another, the platform's"
     );
-
-    // the server built on it is the one listening: the refused ones let go
-    assert_eq!(fixture.transport.listener_count(), listening);
-    fixture.server.dispose().await.expect("disposed");
-}
-
-#[tokio::test]
-async fn runs_every_layer_on_its_transport_s_clock_and_refuses_another_which_leaves_nothing_on_its_transport()
- {
-    let clock = stepping();
-    let transport = ScriptedServer::new(Arc::clone(&clock));
-    let wire: Arc<dyn ServerTransport> = Arc::<ScriptedServer>::clone(&transport);
-    let server = Server::new(
-        wire,
-        &ServerOptions {
-            clock: Some(Arc::clone(&clock)),
-            ..ServerOptions::default()
-        },
-    )
-    .expect("the clock of its transport");
-    let listening = transport.listener_count();
-    assert!(Arc::ptr_eq(&server.router().clock(), &clock));
-
-    let other = stepping();
+    let elsewhere = ScriptedServer::new(stepping());
     assert_eq!(
         refusal_of(
-            &transport,
+            &elsewhere,
             &ServerOptions {
-                clock: Some(Arc::clone(&other)),
+                clock: Some(clock),
                 ..ServerOptions::default()
             }
         ),
         "a server runs on the clock of its transport, one of its own, and was given another, one of its own"
     );
-    refusal_of(
-        &transport,
-        &ServerOptions {
-            sessions: Some(SessionManagerOptions {
-                clock: Some(other),
-                ..SessionManagerOptions::default()
-            }),
-            ..ServerOptions::default()
-        },
-    );
-    let elsewhere = ScriptedServer::new(stepping());
-    refusal_of(
-        &elsewhere,
-        &ServerOptions {
-            clock: Some(clock),
-            ..ServerOptions::default()
-        },
-    );
 
-    // what the server started with is all it holds
-    assert_eq!(transport.listener_count(), listening);
+    // the server built on it is the one listening: the refused ones let go
+    assert_eq!(fixture.transport.listener_count(), listening);
     assert_eq!(elsewhere.listener_count(), 0);
-    server.dispose().await.expect("disposed");
+    fixture.server.dispose().await.expect("disposed");
 }
 
 #[tokio::test]

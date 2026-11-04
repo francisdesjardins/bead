@@ -213,7 +213,8 @@ pub(crate) struct LayeredClocks<'clocks> {
     pub(crate) beneath: Option<&'clocks SharedClock>,
     /// The clock the layer was given, when it was.
     pub(crate) given: Option<&'clocks SharedClock>,
-    /// The layer's name, as a refusal names it.
+    /// The layer's name, as a refusal names it: in the singular, which the refusal's verbs agree
+    /// with.
     pub(crate) layer: &'clocks str,
     /// The layer beneath's name, as a refusal names it.
     pub(crate) below: &'clocks str,
