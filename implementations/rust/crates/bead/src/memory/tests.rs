@@ -33,6 +33,7 @@ use crate::transport::{
     TransportClientReconnectOptions, TransportServerClient,
 };
 
+mod lifecycle;
 mod reconnection;
 mod server_connections;
 
