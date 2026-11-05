@@ -711,7 +711,7 @@ per unchanged measure and 70–90% detection at a +35% change. These rates depen
 measurement's distribution; 112 measures can give about one false flag per side, with noisier
 tails. The threshold and p test screen findings, each read and judged. CI's `dotnet` job builds the
 C# bench in Release on every push, so that a release's measure finds it whole, and measures
-nothing; `bench.yml` measures, and fails on no regression.
+nothing; `bench.yml` measures, and no regression fails it.
 
 `--tree` builds and runs a checkout of the baseline, alternating the trees process by process in
 ABBA order, baseline then candidate, then candidate then baseline, so that both meet the same
