@@ -1,3 +1,1 @@
 #nullable enable
-*REMOVED*Bead.Transport.Mqtt.MqttBrokerAdapterOptions.PasswordProvider.get -> System.Func<System.Threading.CancellationToken, System.Threading.Tasks.Task<string!>!>?
-Bead.Transport.Mqtt.MqttBrokerAdapterOptions.PasswordProvider.get -> System.Func<System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<string!>>?

@@ -1,12 +1,12 @@
 #nullable enable
 Bead.Transport.Http.BeadHttpClient
 Bead.Transport.Http.BeadHttpClient.BeadHttpClient(Bead.Transport.Http.BeadHttpClientOptions? options = null) -> void
-Bead.Transport.Http.BeadHttpClient.Connect(Bead.Transport.Http.HttpConnectOptions! options, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
-Bead.Transport.Http.BeadHttpClient.Disconnect(Bead.TransportDisconnectOptions? options = null) -> System.Threading.Tasks.Task!
+Bead.Transport.Http.BeadHttpClient.Connect(Bead.Transport.Http.HttpTransportClientConnectOptions! options) -> System.Threading.Tasks.Task!
+Bead.Transport.Http.BeadHttpClient.Disconnect(Bead.TransportClientDisconnectOptions? options = null) -> System.Threading.Tasks.Task!
 Bead.Transport.Http.BeadHttpClient.DisposeAsync() -> System.Threading.Tasks.ValueTask
-Bead.Transport.Http.BeadHttpClient.Reconnect(Bead.TransportReconnectOptions? options = null) -> System.Threading.Tasks.Task!
+Bead.Transport.Http.BeadHttpClient.Reconnect(Bead.TransportClientReconnectOptions? options = null) -> System.Threading.Tasks.Task!
 Bead.Transport.Http.BeadHttpClient.Router.get -> Bead.RouterClient!
-Bead.Transport.Http.BeadHttpClient.Services.get -> Bead.ServiceManager!
+Bead.Transport.Http.BeadHttpClient.Services.get -> Bead.IServiceManagerClient!
 Bead.Transport.Http.BeadHttpClient.Transport.get -> Bead.Transport.Http.HttpTransportClient!
 Bead.Transport.Http.BeadHttpClientOptions
 Bead.Transport.Http.BeadHttpClientOptions.<Clone>$() -> Bead.Transport.Http.BeadHttpClientOptions!
@@ -16,26 +16,14 @@ Bead.Transport.Http.BeadHttpClientOptions.Credential.init -> void
 Bead.Transport.Http.BeadHttpClientOptions.Credentials.get -> Bead.Credentials?
 Bead.Transport.Http.BeadHttpClientOptions.Credentials.init -> void
 Bead.Transport.Http.BeadHttpClientOptions.Equals(Bead.Transport.Http.BeadHttpClientOptions? other) -> bool
+Bead.Transport.Http.BeadHttpClientOptions.Intake.get -> Bead.IntakeLimits?
+Bead.Transport.Http.BeadHttpClientOptions.Intake.init -> void
 Bead.Transport.Http.BeadHttpClientOptions.Limits.get -> Bead.RouterLimits?
 Bead.Transport.Http.BeadHttpClientOptions.Limits.init -> void
 Bead.Transport.Http.BeadHttpClientOptions.MetricsRegistry.get -> Bead.MetricsRegistry?
 Bead.Transport.Http.BeadHttpClientOptions.MetricsRegistry.init -> void
 Bead.Transport.Http.BeadHttpClientOptions.Transport.get -> Bead.Transport.Http.HttpTransportClientOptions?
 Bead.Transport.Http.BeadHttpClientOptions.Transport.init -> void
-Bead.Transport.Http.HttpConnectOptions
-Bead.Transport.Http.HttpConnectOptions.<Clone>$() -> Bead.Transport.Http.HttpConnectOptions!
-Bead.Transport.Http.HttpConnectOptions.Equals(Bead.Transport.Http.HttpConnectOptions? other) -> bool
-Bead.Transport.Http.HttpConnectOptions.Host.get -> string!
-Bead.Transport.Http.HttpConnectOptions.Host.init -> void
-Bead.Transport.Http.HttpConnectOptions.HttpConnectOptions() -> void
-Bead.Transport.Http.HttpConnectOptions.Pathname.get -> string!
-Bead.Transport.Http.HttpConnectOptions.Pathname.init -> void
-Bead.Transport.Http.HttpConnectOptions.Port.get -> int
-Bead.Transport.Http.HttpConnectOptions.Port.init -> void
-Bead.Transport.Http.HttpConnectOptions.Secured.get -> bool
-Bead.Transport.Http.HttpConnectOptions.Secured.init -> void
-Bead.Transport.Http.HttpConnectOptions.Timeout.get -> System.TimeSpan
-Bead.Transport.Http.HttpConnectOptions.Timeout.init -> void
 Bead.Transport.Http.HttpRefusals
 Bead.Transport.Http.HttpServer<TData>
 Bead.Transport.Http.HttpServer<TData>.DisposeAsync() -> System.Threading.Tasks.ValueTask
@@ -45,7 +33,7 @@ Bead.Transport.Http.HttpServer<TData>.HttpServer(Bead.Transport.Http.HttpServerO
 Bead.Transport.Http.HttpServer<TData>.RequireCredential.get -> Bead.BeforeRequest!
 Bead.Transport.Http.HttpServer<TData>.RequireSession.get -> Bead.BeforeRequest!
 Bead.Transport.Http.HttpServer<TData>.Router.get -> Bead.RouterServer!
-Bead.Transport.Http.HttpServer<TData>.Services.get -> Bead.ServiceManager!
+Bead.Transport.Http.HttpServer<TData>.Services.get -> Bead.IServiceManagerServer!
 Bead.Transport.Http.HttpServer<TData>.Sessions.get -> Bead.SessionManager<TData>!
 Bead.Transport.Http.HttpServer<TData>.ShareLegBSession.get -> Bead.BeforeRequest!
 Bead.Transport.Http.HttpServer<TData>.Transport.get -> Bead.Transport.Http.HttpTransportServer!
@@ -62,22 +50,42 @@ Bead.Transport.Http.HttpTransportClient
 Bead.Transport.Http.HttpTransportClient.Carries(string! credential) -> bool
 Bead.Transport.Http.HttpTransportClient.Clock.get -> System.TimeProvider!
 Bead.Transport.Http.HttpTransportClient.Close -> System.Action<bool, bool>?
-Bead.Transport.Http.HttpTransportClient.CloseConnection(Bead.TransportDisconnectOptions? options = null) -> System.Threading.Tasks.Task!
-Bead.Transport.Http.HttpTransportClient.Connect(Bead.Transport.Http.HttpConnectOptions! options, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+Bead.Transport.Http.HttpTransportClient.CloseConnection(Bead.TransportClientDisconnectOptions? options = null) -> System.Threading.Tasks.Task!
+Bead.Transport.Http.HttpTransportClient.Connect(Bead.Transport.Http.HttpTransportClientConnectOptions! options) -> System.Threading.Tasks.Task!
 Bead.Transport.Http.HttpTransportClient.DisposeAsync() -> System.Threading.Tasks.ValueTask
 Bead.Transport.Http.HttpTransportClient.Error -> System.Action<System.Exception!>?
 Bead.Transport.Http.HttpTransportClient.HttpTransportClient(Bead.Transport.Http.HttpTransportClientOptions? options = null) -> void
 Bead.Transport.Http.HttpTransportClient.IsListening.get -> bool
 Bead.Transport.Http.HttpTransportClient.IsSecure.get -> bool
 Bead.Transport.Http.HttpTransportClient.Message -> System.Action<Bead.TransportMessage>?
+Bead.Transport.Http.HttpTransportClient.Pause() -> void
 Bead.Transport.Http.HttpTransportClient.ReadyState.get -> Bead.ReadyState
-Bead.Transport.Http.HttpTransportClient.Reconnect(Bead.TransportReconnectOptions? options = null) -> System.Threading.Tasks.Task!
+Bead.Transport.Http.HttpTransportClient.Reconnect(Bead.TransportClientReconnectOptions? options = null) -> System.Threading.Tasks.Task!
+Bead.Transport.Http.HttpTransportClient.Resume() -> void
 Bead.Transport.Http.HttpTransportClient.Send(Bead.TransportMessage message) -> System.Threading.Tasks.Task!
+Bead.Transport.Http.HttpTransportClientConnectOptions
+Bead.Transport.Http.HttpTransportClientConnectOptions.<Clone>$() -> Bead.Transport.Http.HttpTransportClientConnectOptions!
+Bead.Transport.Http.HttpTransportClientConnectOptions.CancellationToken.get -> System.Threading.CancellationToken
+Bead.Transport.Http.HttpTransportClientConnectOptions.CancellationToken.init -> void
+Bead.Transport.Http.HttpTransportClientConnectOptions.Equals(Bead.Transport.Http.HttpTransportClientConnectOptions? other) -> bool
+Bead.Transport.Http.HttpTransportClientConnectOptions.Host.get -> string!
+Bead.Transport.Http.HttpTransportClientConnectOptions.Host.init -> void
+Bead.Transport.Http.HttpTransportClientConnectOptions.HttpTransportClientConnectOptions() -> void
+Bead.Transport.Http.HttpTransportClientConnectOptions.Pathname.get -> string!
+Bead.Transport.Http.HttpTransportClientConnectOptions.Pathname.init -> void
+Bead.Transport.Http.HttpTransportClientConnectOptions.Port.get -> int
+Bead.Transport.Http.HttpTransportClientConnectOptions.Port.init -> void
+Bead.Transport.Http.HttpTransportClientConnectOptions.Secured.get -> bool
+Bead.Transport.Http.HttpTransportClientConnectOptions.Secured.init -> void
+Bead.Transport.Http.HttpTransportClientConnectOptions.Timeout.get -> System.TimeSpan
+Bead.Transport.Http.HttpTransportClientConnectOptions.Timeout.init -> void
 Bead.Transport.Http.HttpTransportClientOptions
 Bead.Transport.Http.HttpTransportClientOptions.<Clone>$() -> Bead.Transport.Http.HttpTransportClientOptions!
 Bead.Transport.Http.HttpTransportClientOptions.Clock.get -> System.TimeProvider?
 Bead.Transport.Http.HttpTransportClientOptions.Clock.init -> void
 Bead.Transport.Http.HttpTransportClientOptions.Equals(Bead.Transport.Http.HttpTransportClientOptions? other) -> bool
+Bead.Transport.Http.HttpTransportClientOptions.ExchangeTimeout.get -> System.TimeSpan
+Bead.Transport.Http.HttpTransportClientOptions.ExchangeTimeout.init -> void
 Bead.Transport.Http.HttpTransportClientOptions.Handler.get -> System.Net.Http.HttpMessageHandler?
 Bead.Transport.Http.HttpTransportClientOptions.Handler.init -> void
 Bead.Transport.Http.HttpTransportClientOptions.HttpTransportClientOptions() -> void
@@ -108,11 +116,13 @@ Bead.Transport.Http.HttpTransportServer.IsSecure(string! connectionHandle) -> bo
 Bead.Transport.Http.HttpTransportServer.IsTwoWay(string! connectionHandle) -> bool
 Bead.Transport.Http.HttpTransportServer.Listen -> System.Action<bool, string!>?
 Bead.Transport.Http.HttpTransportServer.Message -> System.Action<Bead.TransportMessage, string!>?
+Bead.Transport.Http.HttpTransportServer.Pause(string! connectionHandle) -> void
 Bead.Transport.Http.HttpTransportServer.ReadyState.get -> Bead.ReadyState
 Bead.Transport.Http.HttpTransportServer.Refusal -> System.Action<Bead.TransportServerRefusal!>?
+Bead.Transport.Http.HttpTransportServer.Resume(string! connectionHandle) -> void
 Bead.Transport.Http.HttpTransportServer.Send(Bead.TransportMessage message, string! connectionHandle) -> System.Threading.Tasks.Task!
 Bead.Transport.Http.HttpTransportServer.Shutdown() -> System.Threading.Tasks.Task!
-Bead.Transport.Http.HttpTransportServer.Start(Bead.Transport.Http.HttpTransportStartOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Bead.TransportServerAddress>!
+Bead.Transport.Http.HttpTransportServer.Start(Bead.Transport.Http.HttpTransportStartOptions? options = null) -> System.Threading.Tasks.Task<Bead.TransportServerAddress>!
 Bead.Transport.Http.HttpTransportServer.Stop() -> System.Threading.Tasks.Task!
 Bead.Transport.Http.HttpTransportServer.Type.get -> string!
 Bead.Transport.Http.HttpTransportServerOptions
@@ -169,6 +179,8 @@ Bead.Transport.Http.HttpTransportStartOptions
 Bead.Transport.Http.HttpTransportStartOptions.<Clone>$() -> Bead.Transport.Http.HttpTransportStartOptions!
 Bead.Transport.Http.HttpTransportStartOptions.Address.get -> string!
 Bead.Transport.Http.HttpTransportStartOptions.Address.init -> void
+Bead.Transport.Http.HttpTransportStartOptions.CancellationToken.get -> System.Threading.CancellationToken
+Bead.Transport.Http.HttpTransportStartOptions.CancellationToken.init -> void
 Bead.Transport.Http.HttpTransportStartOptions.Equals(Bead.Transport.Http.HttpTransportStartOptions? other) -> bool
 Bead.Transport.Http.HttpTransportStartOptions.FindOpenPort.get -> bool
 Bead.Transport.Http.HttpTransportStartOptions.FindOpenPort.init -> void
@@ -199,12 +211,12 @@ const Bead.Transport.Http.HttpTransport.WaitHeader = "bead-wait" -> string!
 override Bead.Transport.Http.BeadHttpClientOptions.Equals(object? obj) -> bool
 override Bead.Transport.Http.BeadHttpClientOptions.GetHashCode() -> int
 override Bead.Transport.Http.BeadHttpClientOptions.ToString() -> string!
-override Bead.Transport.Http.HttpConnectOptions.Equals(object? obj) -> bool
-override Bead.Transport.Http.HttpConnectOptions.GetHashCode() -> int
-override Bead.Transport.Http.HttpConnectOptions.ToString() -> string!
 override Bead.Transport.Http.HttpServerOptions.Equals(object? obj) -> bool
 override Bead.Transport.Http.HttpServerOptions.GetHashCode() -> int
 override Bead.Transport.Http.HttpServerOptions.ToString() -> string!
+override Bead.Transport.Http.HttpTransportClientConnectOptions.Equals(object? obj) -> bool
+override Bead.Transport.Http.HttpTransportClientConnectOptions.GetHashCode() -> int
+override Bead.Transport.Http.HttpTransportClientConnectOptions.ToString() -> string!
 override Bead.Transport.Http.HttpTransportClientOptions.Equals(object? obj) -> bool
 override Bead.Transport.Http.HttpTransportClientOptions.GetHashCode() -> int
 override Bead.Transport.Http.HttpTransportClientOptions.ToString() -> string!
@@ -216,11 +228,11 @@ override Bead.Transport.Http.HttpTransportStartOptions.GetHashCode() -> int
 override Bead.Transport.Http.HttpTransportStartOptions.ToString() -> string!
 static Bead.Transport.Http.BeadHttpClientOptions.operator !=(Bead.Transport.Http.BeadHttpClientOptions? left, Bead.Transport.Http.BeadHttpClientOptions? right) -> bool
 static Bead.Transport.Http.BeadHttpClientOptions.operator ==(Bead.Transport.Http.BeadHttpClientOptions? left, Bead.Transport.Http.BeadHttpClientOptions? right) -> bool
-static Bead.Transport.Http.HttpConnectOptions.operator !=(Bead.Transport.Http.HttpConnectOptions? left, Bead.Transport.Http.HttpConnectOptions? right) -> bool
-static Bead.Transport.Http.HttpConnectOptions.operator ==(Bead.Transport.Http.HttpConnectOptions? left, Bead.Transport.Http.HttpConnectOptions? right) -> bool
 static Bead.Transport.Http.HttpServerOptions.ConnectionInactivityTimeoutDefault.get -> System.TimeSpan
 static Bead.Transport.Http.HttpServerOptions.operator !=(Bead.Transport.Http.HttpServerOptions? left, Bead.Transport.Http.HttpServerOptions? right) -> bool
 static Bead.Transport.Http.HttpServerOptions.operator ==(Bead.Transport.Http.HttpServerOptions? left, Bead.Transport.Http.HttpServerOptions? right) -> bool
+static Bead.Transport.Http.HttpTransportClientConnectOptions.operator !=(Bead.Transport.Http.HttpTransportClientConnectOptions? left, Bead.Transport.Http.HttpTransportClientConnectOptions? right) -> bool
+static Bead.Transport.Http.HttpTransportClientConnectOptions.operator ==(Bead.Transport.Http.HttpTransportClientConnectOptions? left, Bead.Transport.Http.HttpTransportClientConnectOptions? right) -> bool
 static Bead.Transport.Http.HttpTransportClientOptions.operator !=(Bead.Transport.Http.HttpTransportClientOptions? left, Bead.Transport.Http.HttpTransportClientOptions? right) -> bool
 static Bead.Transport.Http.HttpTransportClientOptions.operator ==(Bead.Transport.Http.HttpTransportClientOptions? left, Bead.Transport.Http.HttpTransportClientOptions? right) -> bool
 static Bead.Transport.Http.HttpTransportServerOptions.operator !=(Bead.Transport.Http.HttpTransportServerOptions? left, Bead.Transport.Http.HttpTransportServerOptions? right) -> bool

@@ -7,7 +7,7 @@ Bead.Transcoding.Http.HttpGateway.Answer(Microsoft.AspNetCore.Http.HttpContext! 
 Bead.Transcoding.Http.HttpGateway.DisposeAsync() -> System.Threading.Tasks.ValueTask
 Bead.Transcoding.Http.HttpGateway.Error -> System.Action<System.Exception!>?
 Bead.Transcoding.Http.HttpGateway.HttpGateway(Bead.Transcoding.Http.HttpGatewayOptions! options) -> void
-Bead.Transcoding.Http.HttpGateway.Start(Bead.Transcoding.Http.HttpGatewayStartOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Bead.TransportServerAddress>!
+Bead.Transcoding.Http.HttpGateway.Start(Bead.Transcoding.Http.HttpGatewayStartOptions? options = null) -> System.Threading.Tasks.Task<Bead.TransportServerAddress>!
 Bead.Transcoding.Http.HttpGateway.Stop() -> System.Threading.Tasks.Task!
 Bead.Transcoding.Http.HttpGatewayEndpoints
 Bead.Transcoding.Http.HttpGatewayOptions
@@ -72,6 +72,8 @@ Bead.Transcoding.Http.HttpGatewayStartOptions
 Bead.Transcoding.Http.HttpGatewayStartOptions.<Clone>$() -> Bead.Transcoding.Http.HttpGatewayStartOptions!
 Bead.Transcoding.Http.HttpGatewayStartOptions.Address.get -> string!
 Bead.Transcoding.Http.HttpGatewayStartOptions.Address.init -> void
+Bead.Transcoding.Http.HttpGatewayStartOptions.CancellationToken.get -> System.Threading.CancellationToken
+Bead.Transcoding.Http.HttpGatewayStartOptions.CancellationToken.init -> void
 Bead.Transcoding.Http.HttpGatewayStartOptions.Equals(Bead.Transcoding.Http.HttpGatewayStartOptions? other) -> bool
 Bead.Transcoding.Http.HttpGatewayStartOptions.FindOpenPort.get -> bool
 Bead.Transcoding.Http.HttpGatewayStartOptions.FindOpenPort.init -> void

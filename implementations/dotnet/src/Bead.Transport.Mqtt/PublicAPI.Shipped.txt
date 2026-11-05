@@ -36,7 +36,7 @@ Bead.Transport.Mqtt.MqttBrokerAdapterOptions.MaximumPacketSize.init -> void
 Bead.Transport.Mqtt.MqttBrokerAdapterOptions.MqttBrokerAdapterOptions() -> void
 Bead.Transport.Mqtt.MqttBrokerAdapterOptions.Password.get -> string?
 Bead.Transport.Mqtt.MqttBrokerAdapterOptions.Password.init -> void
-Bead.Transport.Mqtt.MqttBrokerAdapterOptions.PasswordProvider.get -> System.Func<System.Threading.CancellationToken, System.Threading.Tasks.Task<string!>!>?
+Bead.Transport.Mqtt.MqttBrokerAdapterOptions.PasswordProvider.get -> System.Func<System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<string!>>?
 Bead.Transport.Mqtt.MqttBrokerAdapterOptions.PasswordProvider.init -> void
 Bead.Transport.Mqtt.MqttBrokerAdapterOptions.Tls.get -> Bead.Transport.Mqtt.MqttBrokerTlsOptions?
 Bead.Transport.Mqtt.MqttBrokerAdapterOptions.Tls.init -> void
