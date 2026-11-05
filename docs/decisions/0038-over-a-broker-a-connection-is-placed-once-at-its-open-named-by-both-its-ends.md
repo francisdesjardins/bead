@@ -165,9 +165,21 @@ takes no signal of the stop: one given up by a signal retires its link with no D
 would leave its will to go, so the adapter's own stop ends it, cleanly (MQTT 5.0 §3.14.4). A stop
 called again settles with the first, as a dispose called again does.
 
-**A participant's stop ends its link in place, and its dispose ends the participant.** Its stop
-closes each connection with 1001 and stops its adapter, and what is under way as it is called ends
-with it: a link's start, stopped as it started; a client's connect awaiting its answer or its
+**A participant's stop ends its link in place, and its dispose ends the participant.** In its
+turn, its stop hands its adapter an unsubscription of each name its broker holds or was asked to
+hold on the link, each kept wanted for its next link, then closes each connection with 1001, then
+marks itself stopped; it then awaits its broker's word on each name, within its adapter's bound, its
+adapter still up, refusing 503 `busy` an OPEN its broker hands it meanwhile, and only then stops its
+adapter. A name is its listening socket and its connections what it holds: it takes nothing new and
+ends the old in place, as
+[0023](0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md)
+has a server's stop do, and as a TCP server closes its listening socket so that a SYN is refused at
+once ([RFC 9293 §3.10.7.1](https://www.rfc-editor.org/rfc/rfc9293#section-3.10.7.1)); its broker
+adds no message of a name to it once it read the UNSUBSCRIBE ([MQTT-3.10.4-2]), and what it handed
+before that word is answered, never acknowledged by an adapter that takes no publication and lost.
+A name its broker refuses to let go, or does not let go within that bound, is reported unless its
+link was lost meanwhile, a down its adapter tells during the stop noted for it, and stays held until
+the link ends. What is under way as the stop is called ends with it: a link's start, stopped as it started; a client's connect awaiting its answer or its
 participant's link, stopped as it connected, at once; the participant's own reconnection and a
 client's, at once, cancelled, as a client's dispose ends one, the stop their cause. Each operation
 reads the stop it met, never a later one, so what a stop ended is told as that stop's though a start
@@ -212,7 +224,8 @@ once, whatever its order
 who read the acceptor's half can send one. A parcel of a pair its receiver does not hold is dropped
 in silence, as a cancel for no call is (10.2), but an ACCEPT, which is reset. A server's transport
 that stops unsubscribes its names, refuses 503 an OPEN that comes, and closes each connection with
-1001; its participant then ends its link cleanly, MQTT's DISCONNECT of reason 0, so no will goes.
+1001, its unsubscriptions handed first, in its turn, and settles once its broker let each go; its
+participant's link is kept.
 
 ## Consequences
 
@@ -247,7 +260,8 @@ reconnect, a new pair, possibly to another member. A will makes a crashed partic
 at once where its broker leaves one; elsewhere the heartbeat finds it.
 
 **A participant's stop ends its link in place**: its peers told 1001 before the link ends and no
-will gone, and its next link, at its application's word, keeps its transports, its routers and
+will gone; a stop loses no OPEN its broker sent it before it let the name go, its CLOSEs still at its
+call, and settles a round trip later where it refuses OPENs during the let-go; and its next link, at its application's word, keeps its transports, its routers and
 their sessions; its clients reconnect after it, a new pair. Its dispose is final.
 
 **Who may accept is the broker's access control** on subscribing a server's name, as a DNS name and
@@ -257,11 +271,15 @@ its certificate place a socket's server. An acceptor that proves itself to its o
 third leg, a half-open connection past `acceptTimeout`, each refusal and what it tells, an OPEN
 copied, a second acceptor's ACCEPT reset and one past its connect, a RESET, a GONE of each
 incarnation, a stop, a participant's stop in place and its next link in both roles, a group at its
-bound — played by every side's players over each side's in-memory broker; the place
+bound, a participant's stop that refuses 503 an OPEN crossing it — played by every side's players over each side's in-memory broker; the place
 `brokerTransportServer.acceptTimeout` of `spec/durations.json`; and what no case plays, a
 participant's link lost and its incarnation anew, a turn between two attempts at a delay of 0, a
-stop that meets its link as it connects, a stop in place, its next link and a dispose, an adapter's
-stop that sends what waits on its broker's quota or credit, and a call after a participant's
+stop that meets its link as it connects, a stop in place, its next link and a dispose, a stop that
+lets each name go and closes each connection at its call, then stops its adapter once its broker let
+each go, an OPEN refused 503 during that let-go, a name under way let go, a name refused reported and
+kept held, a name its link lost told nothing, a server's transport's stop that hands its
+unsubscriptions before its CLOSEs, an adapter's stop that sends what waits on its broker's quota or
+credit, and a call after a participant's
 dispose, by twins named by one sentence on every side ([`docs/support.md`](../support.md)).
 
 ## The Tenth Man

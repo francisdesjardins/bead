@@ -1431,10 +1431,10 @@ def take_over(participant):
     return {'takeover': participant}
 
 
-def participant(act):
+def participant(act, *, crossing=None):
     """The participant under test stopped in place, or started again, its stop or its start settled
-    (spec 15.21)."""
-    return {'participant': act}
+    (spec 15.21); crossing, what a peer publishes in the turn its stop begins, before it."""
+    return {'participant': {act: {'crossing': crossing}} if crossing else act}
 
 
 def leave(peer):
@@ -2318,6 +2318,24 @@ def a_link_taken_over(transport):
 def a_participant_stopped_in_place(transport):
     captures = Captures(transport)
     first, second = Connection('first', opener=half(1)), Connection('second', opener=half(2))
+    third = Connection('third', opener=half(3))
+
+    if transport == IN_MEMORY:
+        # ! the OPEN is published in the turn the stop begins, before it, so it crosses the stop: its
+        # broker hands it on before it lets the name go, and the participant, its adapter still up,
+        # refuses it 503 busy, its connection closed with 1001 at the call (spec 15.18, 15.21, 15.24);
+        # over two links an OPEN races the UNSUBSCRIBE, so memory alone plays it. Each peer is read
+        # in its own order: the REFUSE before the CLOSE, though the CLOSE went first
+        late = Connection('late', 'late', opener=half(4))
+        steps = [*opened(captures, first), participant('stop', crossing=publish('late', 'name', open_of(late))),
+                 refused_open(late, 503), closed(False, on=PEER), closes(first, GOING_AWAY), until('names', 0),
+                 publish(PEER, 'inbox', first.by_peer(Kind.PING), refused='no-subscriber'),
+                 publish(PEER, 'name', open_of(second), refused='no-subscriber')]
+        anew = captures('anew', 'incarnation', unlike='incarnation')
+        return ('a participant that stops refuses 503 an OPEN that crosses its stop, closes each connection with 1001, lets its name go, and at its next link serves it as another incarnation, resetting no peer',
+                ['15.18', '15.21', '15.24'], {'peers': [PEER, 'late']}, [
+                    *steps, participant('start'), until('names', 1), *accepted(captures, third, incarnation=anew)])
+
     name = 'a participant that stops closes each connection with 1001 and serves no name, and at its next link serves it as another incarnation, resetting no peer'
     # ! the stop settled once its broker let go of each subscription of its link (spec 15.24), so a
     # parcel to its inbox, read strictly at once, finds no subscriber, on every binding
@@ -2338,7 +2356,6 @@ def a_participant_stopped_in_place(transport):
     # ! the stop let the name go, so an OPEN finds no subscriber, as the inbox did; the next start
     # serves it again, and the next parcel the peer reads after the CLOSE is the ACCEPT of another
     # incarnation, so a RESET would fail the case
-    third = Connection('third', opener=half(3))
     return (name, ['15.21', '15.24'], {}, [
                 *steps, publish(PEER, 'name', open_of(second), refused='no-subscriber'),
                 participant('start'), until('names', 1), *accepted(captures, third, incarnation=anew)])
@@ -2558,7 +2575,7 @@ document = {
         'publish is what a peer, from, publishes in one turn, each in its order, none awaited before the next: to the server\'s name, to the inbox of the participant under test, or to its own departure, as its broker publishes its will; each a parcel by its fields, which its peer\'s codec writes, or bytes, for what no writer writes, in hexadecimal, a captured half put in by its {name}. retained true hands it on marked retained, as a broker hands a message it kept; refused no-subscriber is the broker\'s word on it, no subscriber taking it, the in-memory broker\'s refusal, MQTT 5\'s PUBACK of 0x10 or AMQP 1.0\'s released, where every other publication is taken. A case copies a parcel by publishing it twice, and reorders by publishing out of its sequence. A parcel\'s fields are vectors.json\'s, its envelope or its part what a DATA carries: envelope, as a send of conversations.json writes one, or, read, as conversations.json expects one; part, in hexadecimal. A half is its 8 bytes, a captured half\'s {name}, or, read, {"capture", "shape"}; an incarnation alike. A field a parcel is read without is one it does not have: a DATA read without credential carries none.',
         "expect parcel reads the next parcel a peer receives, on its inbox or, in the client role, on the server's name, each field its value; told, beside a REFUSE, is what the server tells of the refusal, its status, its reason and its address, the id the OPEN claims, its authority, its origin and its port none (spec 15.1, 15.18). at departure, in the client role, reads the departure of the client under test instead of the peer's inbox. A captured value's unlike names one captured before, which it is not. In the server role, expect closed reads the next close the server's transport tells of a connection of the peer named on, clean or not. reported reads the next error the transport under test reports of its own (spec 15.1), its message naming each of the words given, with the connection of the peer named on, or, where on is absent, with none, or of the client's one connection. Before each publish and stop, and at the end, the transport under test reported nothing, and told no refusal, that a case does not expect.",
         'In the client role, connect starts the connect of the client under test to the server of that name; transportSend sends an envelope, in hexadecimal, through its transport, with the credential given, a field value; and expect reads what its transport does next: opened, its connect opened; failed, its connect failed, naming the status and the reason of the REFUSE it read, and the layouts of a 426, or the reason no-subscriber, its broker saying nothing serves the name; closed, its connection closed, clean or not; received, the envelope it hands its router, as conversations.json expects one; secure, whether it says it is secure.',
-        "Over a broker, until names a gauge of the transport under test: connections, those its router was told; halfOpen, those answered by an ACCEPT whose third leg has not come; partsBytes, what its participant holds in parts; names, the names its broker holds a subscription to, from its SUBACK to its UNSUBACK over MQTT 5, from its receiver's ATTACH to its DETACH over AMQP 1.0; departures, the peers' departures its participant subscribes; or unsettled, the messages its adapter handed its participant and it has not acknowledged. stop stops the server's transport under test, its participant's link kept, crossing a publish where it gives one: published in the turn the stop begins, before it. wait waits that many milliseconds on the real clock, in a case marked realTime. options, over a broker, are also those of section 15.23 by their names, heartbeat its participant's, in either role; timeout, in the client role, its connect's time (spec 15.15); twin, a participant beside the peers that serves the server's names in their group, reading every OPEN its broker hands it and answering none; wills true, each peer's link leaving a will, the GONE of its id and of the incarnation its OPENs name; and maximumQueuedMessages, the messages the in-memory broker holds for each subscriber, published to it and not yet handed on, past which it drops one, as a broker whose queue is full does.",
+        "Over a broker, until names a gauge of the transport under test: connections, those its router was told; halfOpen, those answered by an ACCEPT whose third leg has not come; partsBytes, what its participant holds in parts; names, the names its broker holds a subscription to, from its SUBACK to its UNSUBACK over MQTT 5, from its receiver's ATTACH to its DETACH over AMQP 1.0; departures, the peers' departures its participant subscribes; or unsettled, the messages its adapter handed its participant and it has not acknowledged. stop stops the server's transport under test, its participant's link kept, crossing a publish where it gives one: published in the turn the stop begins, before it. participant stops the participant under test in place, or starts it again, its stop or its start settled, crossing a publish where its stop gives one: published in the turn its stop begins, before it. wait waits that many milliseconds on the real clock, in a case marked realTime. options, over a broker, are also those of section 15.23 by their names, heartbeat its participant's, in either role; timeout, in the client role, its connect's time (spec 15.15); twin, a participant beside the peers that serves the server's names in their group, reading every OPEN its broker hands it and answering none; wills true, each peer's link leaving a will, the GONE of its id and of the incarnation its OPENs name; and maximumQueuedMessages, the messages the in-memory broker holds for each subscriber, published to it and not yet handed on, past which it drops one, as a broker whose queue is full does.",
         "lose loses the link of that participant, the one under test or a peer, without a clean end: in memory its adapter's lose, over MQTT 5 and AMQP 1.0 its relay cut, its broker publishing its will where it leaves one. takeover takes the link of the participant under test over by another link of its id: in memory its adapter's takeOver, its subscriptions dropped and its will published; over MQTT 5 a link of the player's own under its id, which subscribes nothing, stopped clean once the case ends; no case over AMQP 1.0 asks one. leave has a peer let its inbox go, its unsubscription settled, over AMQP 1.0 its inbox deleted through its broker's management, so that the next parcel to it finds no subscriber. expect placed reads that each OPEN of the openers given, their halves, reached the server under test or the participant with, its twin, never both and never neither: the server's ACCEPT read on the opener's inbox, the twin's OPEN read on the name. expect lives reads what the side under test asked its adapter of each publication's life, by an adapter the player wraps around the side's, in milliseconds on the clock given, exactly: open, an OPEN's; credential, a DATA's that carries a credential; other, every other parcel's, null for none.",
         'clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8.',
     ],

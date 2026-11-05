@@ -1887,14 +1887,14 @@ answers it from its own inbox to the one the OPEN names, its sequence 1, judging
 OPEN of a layout to come is refused 426 `layout-refused`, naming the layouts it reads; one whose id
 is no token or whose receive bound is under 1,024, 400 `malformed`; past `maximumConnections`, or
 past `maximumConnectionsPerAddress` (section 15.12), counting the connections of the OPEN's id, or
-once its stop began, 503 `busy`. A refusal is told as section 15.1 tells one, the client's id its
-address and no port, and ends the connection at both ends. Any other OPEN it answers with an
-ACCEPT, naming its own half, id, incarnation and receive bound, marked `SECURE` when its own leg
-is: the connection is then half-open, takes its place in those bounds, and carries nothing else
-from it. An OPEN whose id and half name a connection it holds is a copy, dropped in silence. The
-client's connect takes the first ACCEPT or REFUSE naming its half, within its time (section
-15.15): on a REFUSE it fails naming its status and reason (section 15.6); on an ACCEPT it opens,
-its connection named by both halves, and its client sends at once a PING of sequence 2 naming
+once its stop or its participant's began, 503 `busy`. A refusal is told as section 15.1 tells one,
+the client's id its address and no port, and ends the connection at both ends. Any other OPEN it
+answers with an ACCEPT, naming its own half, id, incarnation and receive bound, marked `SECURE` when
+its own leg is: the connection is then half-open, takes its place in those bounds, and carries
+nothing else from it. An OPEN whose id and half name a connection it holds is a copy, dropped in
+silence. The client's connect takes the first ACCEPT or REFUSE naming its half, within its time
+(section 15.15): on a REFUSE it fails naming its status and reason (section 15.6); on an ACCEPT it
+opens, its connection named by both halves, and its client sends at once a PING of sequence 2 naming
 them. A broker that says nothing serves the name fails it at once. Where its adapter offers a
 message's life, the OPEN lives in its broker its connect's time left (section 15.15), none when its
 time is without end, so that one no participant took in time is deleted there rather than taken
@@ -1960,13 +1960,20 @@ application's to bound, by its attempts, by a signal, or not at all, and ends at
 participant stops, in a wait or once its attempt under way failed, no wait told after it, the stop
 its cause; once it ends, the participant reports it, and its next start or connect links it anew.
 A participant's stop ends its link in place, and with it what is under way as it is called: it
-closes each of its connections with a CLOSE of 1001, then stops its adapter, which sends those
-CLOSEs, then has its broker let go of each subscription of the link, before it ends the link so
-that its broker publishes no will (section 15.24), its incarnation ending with the link. A
-participant that stops as its link connects, at its start or
-at an attempt of its reconnection, fails that link, stopped as it started: it gives up its
-adapter's start under way and ends its link once that start settled, never while it runs, so that
-nothing that start linked or subscribed outlives the stop, nor meets its id's next link. A stop
+lets go of each name its broker holds or was asked to hold on the link, each kept wanted for its
+next link, and closes each of its connections with a CLOSE of 1001, its names' unsubscriptions
+handed first. It then awaits its broker's word on each name, within its adapter's bound (section
+15.24), refusing 503 `busy` an OPEN its broker hands it meanwhile (section 15.18), then stops its
+adapter, which sends what it was handed, those CLOSEs among it, then has its broker let go of each
+subscription of the link, before it ends the link so that its broker publishes no will (section
+15.24), its incarnation ending with the link. Once its broker let a name go, an OPEN to it reaches
+another participant serving it, waits in its queue (section 15.38), or finds no subscriber. A name
+its broker refuses to let go, or does not let go within that bound, is reported unless its link
+was lost meanwhile, and stays held until the link ends. A participant that stops as its link
+connects, at its start or at an attempt of its reconnection, fails that link, stopped as it
+started: it gives up its adapter's start under way and ends its link once that start settled, never
+while it runs, so that nothing that start linked or subscribed outlives the stop, nor meets its id's
+next link. A stop
 called again settles with the first, and a start made while a stop is under way is its
 application's misuse. A client's connect made before its participant's stop settles fails at once,
 stopped as it connected, whether it awaits its answer or its participant's link; a client's
@@ -1996,8 +2003,9 @@ a will has its broker publish, once it loses the link without a clean end, a GON
 incarnation to its departure; it subscribes the departure of each peer it holds a connection with
 while it holds one, and closes, unclean, each connection bound to the id and incarnation a GONE
 names, never another. A server's transport that stops takes no OPEN, a REFUSE 503 answering one
-that comes, and closes each connection with a CLOSE of 1001; its participant then ends its link so
-that its broker publishes no will.
+that comes, lets go of each of its names and closes each connection with a CLOSE of 1001, its
+names' unsubscriptions handed first, and settles once its broker let each go; its participant's
+link is kept.
 
 15.22. A client's transport over a broker carries the credential a request presents, any field
 value (section 15.5), on the first part of the DATA that carries the request, toward its server
@@ -2045,17 +2053,19 @@ and to end it so that no will goes, what it was handed to publish before its end
 bound of its own, what has not gone by then failed, its end settled once its broker let go of each
 subscription of its link, as its unsubscription lets one go, a later start a new link; to publish a
 payload to a topic, said taken or refused by its broker; to subscribe a topic, said held by its
-broker, and to let it go, said let go by its broker; each
-message it receives, with the topic it came to, and its acknowledgement; its link lost, and whether
-another link of its identity took it over; the largest payload a message to a topic carries, its
-inbox among them; the delivery it gives, at least once or at most once; whether its leg is secure.
+broker, and to let it go, said let go by its broker within a bound of its own, each message its
+broker sent of it before then handed on first; each message it receives, with the topic it came
+to, and its acknowledgement; its link lost, and whether another link of its identity took it over;
+the largest payload a message to a topic carries, its inbox among them; the delivery it gives, at
+least once or at most once; whether its leg is secure.
 It may offer besides a subscription in a group, its broker handing each message to one member; a
 will; a publication refused when no subscriber takes it; a message's life in its broker. A name
 served by several participants needs groups. Each side's core holds an in-memory broker that offers
 each of these: each message copied as it is published and handed on whole in a later turn than its
 publish, in the order its publisher published it to that topic, once, or, as a test asks, again,
-behind the next, never, or to another member of its group; a queue per subscriber bounded as it is
-given, past which a message is dropped; a link lost or taken over, its will published. Its handles'
+behind the next, never, or to another member of its group; a subscription let go once what it
+queued to it before was handed on; a queue per subscriber bounded as it is given, past which a
+message is dropped; a link lost or taken over, its will published. Its handles'
 type is `BROKER`, and it never leaves the process, so it is secure.
 
 ### MQTT 5
@@ -2120,7 +2130,9 @@ SUBSCRIBE named, whether or not its SUBACK came: its broker, reading a link's pa
 order, removes it all the same
 ([MQTT 5.0 §3.10.4](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html)). A
 subscription is let go once its UNSUBACK came with a Reason Code of 0x00 or 0x11, No subscription
-existed, and refused on any other.
+existed, and refused on any other; one whose UNSUBACK has not come within `connectTimeout` of its
+UNSUBSCRIBE fails, its link kept so that no will goes, and its filter kept for its stop (section
+15.26).
 
 15.28. A participant publishes each parcel in a PUBLISH of QoS 1 where its adapter delivers at least
 once, of QoS 0 where at most once, never of QoS 2; of RETAIN 0; with no Topic Alias, Response Topic,
@@ -2154,11 +2166,11 @@ CONNACK's, or within 268,435,460 bytes where its CONNACK names none. Under its d
 `maximumPacketSize`, an inbox `bead/i/server` takes a payload of 16,777,188 bytes; under a Maximum
 Packet Size of 4,096, a message to `bead/i/peer` carries 4,072.
 
-| Bound               | By default | Bounds                                                                                                                                                                  |
-| ------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `maximumPacketSize` | 16,777,216 | its CONNECT's Maximum Packet Size, the largest packet its broker sends it                                                                                               |
-| `keepAlive`         | 30 s       | its CONNECT's Keep Alive, 1 to 65,535 seconds: its broker counts its link lost silent for half again as long                                                            |
-| `connectTimeout`    | 30 s       | how long its start waits for its password, where it asks its provider, and its CONNACK; and its stop, for what it was handed and its UNSUBACKs, then for its DISCONNECT |
+| Bound               | By default | Bounds                                                                                                                                                                                                           |
+| ------------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `maximumPacketSize` | 16,777,216 | its CONNECT's Maximum Packet Size, the largest packet its broker sends it                                                                                                                                        |
+| `keepAlive`         | 30 s       | its CONNECT's Keep Alive, 1 to 65,535 seconds: its broker counts its link lost silent for half again as long                                                                                                     |
+| `connectTimeout`    | 30 s       | how long its start waits for its password, where it asks its provider, and its CONNACK; a subscription let go, for its UNSUBACK; and its stop, for what it was handed and its UNSUBACKs, then for its DISCONNECT |
 
 Neither `keepAlive` nor `connectTimeout` is ever without end or 0, and a `keepAlive` past 65,535
 seconds is refused.
@@ -2176,7 +2188,10 @@ taken all the same, its PUBACK 0x00, so a connect to a name no participant may r
 (section 15.15). A server's participant's queues in its broker are lifted, or hold
 `maximumConnections` × `maximumUnsentBytes` at least: a queue that overruns drops, and loses
 connections by their gaps (section 15.19). Its receive maximum toward a server's participant bounds
-what that participant publishes a round trip (section 15.28), and is sized for it. No participant
+what that participant publishes a round trip (section 15.28), and is sized for it. It keeps in
+flight toward a server's participant up to the Receive Maximum that participant sends (section
+15.26), so that each OPEN it matched to a name before the participant let it go reaches the
+participant before its UNSUBACK (section 15.21). No participant
 writes a retained message and none reaches one: one left on a Bead topic is the deployment's to
 clear, and a broker that serves Bead alone MAY refuse them. A broker that persists what it holds may
 keep at rest, for its life, a credential a DATA carries (section 15.22).
