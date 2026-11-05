@@ -1034,6 +1034,11 @@ OSV-Scanner over every lockfile, and Semgrep's community rules for TypeScript, C
 and secrets, each scanner at its digest).
 `ci-ok` needs them all, so one check stands for every job.
 
+Dependabot, by [`dependabot.yml`](.github/dependabot.yml), brings the dependency updates each week to
+`develop` as grouped pull requests, which CI judges as any other, each release waiting out its first
+days, three for a patch, a week for a minor and two for a major; each Yarn project's
+`npmMinimalAgeGate` refuses at install a version younger than three days.
+
 ## How Bead is made
 
 The ideas, the protocol's design and the TypeScript side are mine. TypeScript is where my expertise

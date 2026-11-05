@@ -28,7 +28,7 @@
   "dependencies": {
     "@bufbuild/protobuf": "2.16.0",
     "@francisdesjardins/bead": "portal:../../../implementations/typescript",
-    "ws": "^8.22.0"
+    "ws": "^8.22.1"
   },
   "devDependencies": {
     "@bufbuild/buf": "1.75.0",
