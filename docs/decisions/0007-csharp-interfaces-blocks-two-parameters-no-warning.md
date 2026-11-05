@@ -1,15 +1,16 @@
 # 0007 — The C# side composes interfaces, writes every body as a block, takes two parameters and an options record, and builds without a warning
 
 - **Status**: accepted
-- **Scope**: the C# side, `implementations/dotnet`; its layout and its modules are its
+- **Scope**: the C# side, `implementations/dotnet`, and its rendering, with the TypeScript side's,
+  of the public surface [0047](0047-every-side-shows-one-public-surface.md) shapes; its layout and its modules are its
   [README](../../implementations/dotnet/README.md)'s
 
 ## Context
 
-Both sides share one surface, almost name for name
-([0004](0004-one-behaviour-in-every-language.md)), and one house style, which says things C# cannot
-say the way JavaScript does: functions bound to constants rather than classes, a block for every
-body, two parameters and an options object, frozen tables rather than enums. .NET has conventions of
+The C# side shares one surface with every other, almost name for name
+([0047](0047-every-side-shows-one-public-surface.md)), and one house style with the TypeScript
+side, which says things C# cannot say the way JavaScript does: functions bound to constants rather
+than classes, a block for every body, two parameters and an options object, frozen tables rather than enums. .NET has conventions of
 its own, and analyzers that hold them. Taking .NET's defaults alone, with expression bodies, base
 classes and positional optional parameters, makes the two sides read as two designs; carrying
 JavaScript's idioms over word for word fights the platform at every line.
@@ -41,7 +42,7 @@ them at most one options record, always last:
 options parameter then without `?` or a default, and one required in some instantiations alone a
 conditional parameter type, as `ConnectParameters` is. The count is Deno's, and Bead holds it
 for every function, not only the public ones; inside a side a tuple counts as one parameter, and on
-the surface none is taken or given ([0004](0004-one-behaviour-in-every-language.md)). The tuples
+the surface none is taken or given ([0047](0047-every-side-shows-one-public-surface.md)). The tuples
 of three elements or more a function takes, its parameters' own types alone read, are counted
 against a pin that may only fall, so a site leaves the count by a record of the call and none joins
 it ([0006](0006-a-rule-has-its-gate.md)). The options record is a sealed record of `init`
@@ -52,7 +53,7 @@ with none, the record is optional,
 `TOptions? options = null`, or an overload without it where a platform rule asks for one (CA1032's
 exception constructors) or where a member is required in some instantiations alone (a service with
 no hook); a callback's options, which Bead hands, are always given
-([0004](0004-one-behaviour-in-every-language.md)). An optional parameter goes in the options; one
+([0047](0047-every-side-shows-one-public-surface.md)). An optional parameter goes in the options; one
 alone may stay positional where no second could come, as `Fail(failure, string detail = "")`. A
 third essential thing is a design to revisit — a record of the call, `…Request`, as `RouterRequest`
 and `NotifyRequest` are, or a type that holds two of the things — and never a third positional parameter. A `CancellationToken` goes in the options record
@@ -112,7 +113,7 @@ waiting on a call of its own, a relay's leg B, hears its caller gone before its 
 `ConditionalWeakTable`. A union is an interface its sealed records implement: `IEnvelopeHeader`, and
 a record per kind. A value or the failure that refuses it, a transfer opened or refused, is a tuple
 of the two inside the side, the one given and the other none, and on its surface a record
-([0004](0004-one-behaviour-in-every-language.md)); an outcome that may be a refusal says so among its own
+([0047](0047-every-side-shows-one-public-surface.md)); an outcome that may be a refusal says so among its own
 values, as `ChunkOutcome.Refused` does. A send on a connection not open throws a
 `DisconnectException`; an error's `cause` is its `InnerException`; a programmer's error is an
 `ArgumentException`, or an `InvalidOperationException` where the state, not an argument, is wrong,
@@ -127,7 +128,7 @@ both name the field `credential`, `Credential`, on a request and on an answer al
 ([0010](0010-a-request-presents-a-credential-of-a-scheme.md)). A TypeScript union an option carries
 is one member, a sealed record holding one of its arms, as `Credential` holds its scheme's and
 `TransportClientReconnectOptions.Delay`, a `TransportClientReconnectDelay`, a wait or a
-`TransportClientReconnectDelayResolver` ([0004](0004-one-behaviour-in-every-language.md)). A secret
+`TransportClientReconnectDelayResolver` ([0047](0047-every-side-shows-one-public-surface.md)). A secret
 given or asked at each attempt is two members of one name on every side, by
 [0032](0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md):
 a WebSocket client's `Credential` and `CredentialProvider`, a broker adapter's `Password` and
@@ -156,7 +157,7 @@ side, as `EnvelopeFlag` is. A TypeScript `…Error` is C#'s `…Exception`. A Ty
 meets by its shape, which the other sides hold as a type of their own, is named `I…Like`:
 `IServerTransportLike` is C#'s `IServerTransport`. Where every side writes the word, as
 `INotificationLike`, `NotificationLike`, it is the concept's own. `tools/names.tsv` holds each
-public name's rendering ([0004](0004-one-behaviour-in-every-language.md)). A time in milliseconds is a
+public name's rendering ([0047](0047-every-side-shows-one-public-surface.md)). A time in milliseconds is a
 `TimeSpan`, and the clock a layer takes and exposes, the TypeScript side's `IClock`, is a
 `TimeProvider`, named `Clock` ([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)),
 so a test moves it itself. A synchronous question of a router's state is a `Task`, since the state
@@ -186,7 +187,7 @@ held to the side's floor, then the interop ([0006](0006-a-rule-has-its-gate.md))
   `HasDefaultValue` — and holds every public options record a sealed record of `init` properties,
   taken required exactly when one of its members is `required`, a callback's argument and an
   overload's optional form apart, with two required members at most
-  ([0004](0004-one-behaviour-in-every-language.md)). Its
+  ([0047](0047-every-side-shows-one-public-surface.md)). Its
   `Takes_two_parameters_at_most_then_one_options_record_last` holds each public or protected method,
   constructor, a positional record's primary one among them, and delegate's `Invoke` to at most two
   parameters that are not an options record, then at most one options record, and nothing after

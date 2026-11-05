@@ -45,8 +45,9 @@ refused token's `iss` and `sub`: they are the requester's text, and personal dat
 ## Decision
 
 **A server's router tells each access it refuses**, `accessRefused` on the TypeScript side
-(`RouterServerEventMap`), `AccessRefused` on the C# side (`RouterServer`), its record
-`IAccessRefusal`, `AccessRefusal`, named alike (spec 13.12):
+(`RouterServerEventMap`), `AccessRefused` on the C# side (`RouterServer`), `on_access_refused` on
+the Rust side (`RouterServer`), its record `IAccessRefusal`, `AccessRefusal` on the C# and Rust
+sides, named alike (spec 13.12):
 
 | Member                                      | What it holds                                                                                                                              |
 | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -86,8 +87,8 @@ an issuer, `CAPACITY_EXCEEDED` (spec 13.9): nothing was refused there. A client'
 **The transport hands the address.** Each envelope a server's transport hands on carries, beside
 what it carried of a credential, the address and port of what brought it — over HTTP its exchange's,
 read as 15.12 reads it, whichever socket or proxy brought its connect; over a WebSocket its
-connection's; none over a Web Worker — on the TypeScript side's `ITransportMessage` and the C#
-side's `TransportMessage` alike, and 15.1 says so.
+connection's; none over a Web Worker — on the TypeScript side's `ITransportMessage` and the C# and
+Rust sides' `TransportMessage` alike, and 15.1 says so.
 
 ## Consequences
 

@@ -303,7 +303,7 @@ async fn fills_what_the_options_leave_out_and_passes_a_destination_as_it_is() {
     fixture.router.dispose().await;
 }
 
-// decision 0004: a command's connection is required by its type, `CommandOptions::new`'s; the
+// decision 0047: a command's connection is required by its type, `CommandOptions::new`'s; the
 // router refuses one that names none, for whoever calls it directly
 #[tokio::test]
 async fn a_command_names_the_connection_it_goes_to() {
@@ -599,7 +599,7 @@ async fn tells_debug_the_close_on_timeout_that_applies_the_calls_or_else_the_man
     fixture.router.dispose().await;
 }
 
-// decision 0004: a command's options are a request's and its own, its connection and its close; the
+// decision 0047: a command's options are a request's and its own, its connection and its close; the
 // four of a request's are written out on both records, so this build is what holds them equal
 #[test]
 fn a_command_options_carry_every_option_of_a_request() {

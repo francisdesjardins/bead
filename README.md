@@ -133,7 +133,7 @@ envelopes.
 - **Next**: Rust's service client in its core; then Rust's transports over sockets with the interop
   both ways, its broker bindings, its gateway and beadc's Rust target, each a record of its own
   ([0044](docs/decisions/0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)),
-  each a row of the [support matrix](docs/support.md#differences) until it lands.
+  each a row of the [support matrix](docs/support.md#differences) ahead.
 - **Then**: a payload's rules written in CEL, a total subset beadc compiles into each side beside
   the rules it compiles already
   ([0035](docs/decisions/0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md));
@@ -142,11 +142,10 @@ envelopes.
   a subscription, which a page across a broker needs
   ([0019](docs/decisions/0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)).
 - **Further**: one corpus read alike by every side's parsers, held as a gate as
-  `tools/protobuf-conformance.mjs differential` holds a `proto` payload, and a short run of the
-  targets of [Fuzzing](#fuzzing) in CI; the transports' client part of the conformance over HTTP and a
-  WebSocket, a relay across languages in the interop, the core in a page and in a worker, the
-  DevTools extension on Firefox, a counted call's cost measured against an uncounted one, a
-  constrained C side and publication, each bound by the records that
+  `tools/protobuf-conformance.mjs differential` holds a `proto` payload; the transports' client part
+  of the conformance over HTTP and a WebSocket, a relay across languages in the interop, the core in
+  a page and in a worker, the DevTools extension on Firefox, a counted call's cost measured against
+  an uncounted one, a constrained C side and publication, each bound by the records that
   [the index](docs/decisions/README.md#where-bead-goes) names, with what else is ahead.
 
 ## Layout
@@ -175,7 +174,9 @@ tools/                        repository checks, the release, the coverage repor
   protobuf-conformance/       runner.json, the pin of protobuf's conformance runner and its floor, and the testees' service.proto
   protovalidate-differential/ pin.json, the pin of protovalidate-es and the packages it needs
 .githooks/                    the repository checks before each commit, opt-in
-.github/workflows/ci.yml      the CI
+.github/
+  workflows/                  ci.yml, the CI; fuzz.yml, the weekly fuzzing campaign; bench.yml, each side's bench against the last release
+  dependabot.yml              the dependencies' updates, every week, grouped
 CLAUDE.md, .claude/workflows/ the standing instructions for Claude sessions, and their workflows
 ```
 
@@ -310,9 +311,9 @@ Clippy's `pedantic`, `nursery` and `cargo` groups and chosen restriction lints a
 `.cargo/config.toml`
 ([0044](docs/decisions/0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)).
 `bead-house`'s tests, among `cargo test`'s, hold what no lint holds: the parameter rule, each
-options struct's shape, and each library crate's public items, their members included, to its list
-under `crates/bead-house/surfaces/`, which `BEAD_HOUSE_WRITE=1` writes anew. Its
-[README](implementations/rust/README.md) describes its crates and its modules.
+options struct's shape, each library crate's public items, their members included, to its list
+under `crates/bead-house/surfaces/`, which `BEAD_HOUSE_WRITE=1` writes anew, and no tuple on them.
+Its [README](implementations/rust/README.md) describes its crates and its modules.
 
 ```sh
 cd implementations/rust

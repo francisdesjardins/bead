@@ -1,5 +1,5 @@
 //! Bead's interop service on the Rust side: its API `spec/interop-blueprint.json`, its descriptors
-//! written by hand until beadc's Rust target generates them, and its behaviour
+//! written by hand, which beadc's Rust target, ahead, generates, and its behaviour
 //! `spec/interop-service.json`, as Bead's Rust side answers it: what a client of any side calls, and
 //! what `spec/conversations.json` plays against.
 #![expect(

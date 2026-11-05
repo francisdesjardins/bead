@@ -470,7 +470,7 @@ fn refuses_a_hook_the_options_lack_one_no_procedure_names_and_one_that_is_no_hoo
     );
 }
 
-// decision 0004: the hooks are required exactly when a procedure names one, refused as the
+// decision 0047: the hooks are required exactly when a procedure names one, refused as the
 // service is built where the TypeScript side's types refuse them
 #[test]
 fn refuses_options_without_admissions_where_a_procedure_names_a_hook() {

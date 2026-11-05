@@ -23,12 +23,12 @@ that hold what of them a test can. The why of each rule is in the decisions:
   names it reads (1.2, 6.10, 7.3, 8.3);
 - [0033](../docs/decisions/0033-a-side-bounds-what-a-peer-holds-of-it.md): a call past those its
   connection has it answer, and a requester's call past its bounds (9.4, 9.6);
-- [0038](../docs/decisions/0038-over-a-broker-a-connection-is-placed-once-at-its-open-named-by-both-its-ends.md):
-  a connection's capability absent from its trace (13.7);
 - [0035](../docs/decisions/0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md):
-  a request its rules refuse, traced and counted (4.3, 4.4, 9.4, 9.6).
+  a request its rules refuse, traced and counted (4.3, 4.4, 9.4, 9.6);
+- [0038](../docs/decisions/0038-over-a-broker-a-connection-is-placed-once-at-its-open-named-by-both-its-ends.md):
+  a connection's capability absent from its trace (13.7).
 
-**Version: 0.5.0**. Each of its conformance files repeats it as its `debuggingVersion`, and follows
+**Version: 0.6.0**. Each of its conformance files repeats it as its `debuggingVersion`, and follows
 its schema in [`schemas/`](schemas/). It moves by `spec.md`'s rule, under a version of its own
 ([0008](../docs/decisions/0008-three-version-axes-and-names-qualified-by-their-owner.md)): the minor
 when an implementation that conforms to its last version must change to conform to this one, the

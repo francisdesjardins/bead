@@ -2,8 +2,9 @@
 
 Bead is a binary wire protocol: the envelopes of a request, its result or failure, the notifications
 of a subscription and the commands a server sends back, written at fixed offsets. This solution is
-its C# implementation, at parity with the TypeScript side: the same behaviour, played from the same
-conformance files in [`spec/`](../../spec/), and proven against the other side in the interop. The
+its C# implementation, at behavioural parity with the TypeScript side: the same behaviour, played
+from the same conformance files in [`spec/`](../../spec/), which the Rust side plays as far as its
+core reaches, and proven against the TypeScript side in the interop. The
 rules its code keeps — interfaces and composition, every body a block, two parameters then an
 options record, every warning an error, one serial scheduler a router, and how the surface maps in
 .NET's terms — are [decision

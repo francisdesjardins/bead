@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-05
+
 ### Added
 
 - The page francisdesjardins.ca serves at `/bead/`, in `site/`: Bead presented in English and in
@@ -59,6 +61,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The spec moves to 0.11.0 (`spec-v0.11.0`), its companion, `spec/debugging.md`, to 0.6.0
+  (`debugging-v0.6.0`), and the transcoding's companion, `spec/transcoding.md`, to 0.2.2
+  (`transcoding-v0.2.2`).
 - The gates every side shares hold the Rust side: `tools/check-details.mjs` reads its sources, the
   differential reads one corpus through every side's testee, a release reads each side's bench
   comparison in CI, the Rust side's included, and the Rust broker trial plays every case but those
@@ -309,6 +314,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   in flight toward a server's participant up to its Receive Maximum. The companion's 13.5 tells a
   `names` event for each name a stop lets go, before `stopped` (spec 15.18, 15.21, 15.24, 15.27,
   15.30, 15.31; debugging 13.5; decisions 0038, 0040, 0041, 0043).
+- The documents are brought to 0.10.0: the records, the spec and its companion in form, the
+  READMEs, the support matrix and `CLAUDE.md` state what holds and where Bead goes. Decision 0047,
+  "Every side shows one public surface", is split out of 0004, which keeps the conformance files
+  and the interop.
 
 ### Removed
 
@@ -2491,7 +2500,8 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
   workflows.
 - The licence, Apache-2.0.
 
-[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.9.0...develop
+[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.10.0...develop
+[0.10.0]: https://github.com/francisdesjardins/bead/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/francisdesjardins/bead/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/francisdesjardins/bead/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/francisdesjardins/bead/compare/v0.6.0...v0.7.0

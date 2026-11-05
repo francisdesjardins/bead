@@ -198,7 +198,7 @@ test.describe('createWorkerTransportClient', () => {
       ]);
   });
 
-  // decision 0004: options of which every member is optional are optional
+  // decision 0047: options of which every member is optional are optional
   test('connects with no options', async () => {
     await using started = await startWorker();
     const client = createWorkerTransportClient({ worker: started.worker });

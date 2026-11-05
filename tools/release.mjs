@@ -161,7 +161,7 @@ export const withLockRanges = (text, version) => {
   return { text: moved, count };
 };
 
-// a C# project's public surface, as PublicApiAnalyzers reads it (decisions 0004 and 0006): what
+// a C# project's public surface, as PublicApiAnalyzers reads it (decisions 0047 and 0006): what
 // the last release shipped, and beside it what changed since, a `*REMOVED*` line taking a symbol
 // away
 export const UNSHIPPED_API = /(?:^|\/)PublicAPI\.Unshipped\.txt$/;

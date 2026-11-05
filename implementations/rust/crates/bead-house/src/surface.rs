@@ -1,4 +1,4 @@
-//! Each library crate's public surface, pinned to its list (decision 0004, as 0044 holds it): every
+//! Each library crate's public surface, pinned to its list (decision 0047, as 0044 holds it): every
 //! item written `pub` — each one reachable, since the workspace denies `unreachable_pub` — with its
 //! declaration, a function's signature, a struct's `pub` fields with their types, an enum's
 //! variants, a trait's items, a constant's type, each inherent `impl`'s `pub` functions, and the

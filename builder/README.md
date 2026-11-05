@@ -53,10 +53,11 @@ node src/cli.ts blueprint --check ../spec/interop-blueprint.json
 `@types/node` take the descriptors `implementations/typescript/package.json` writes, and
 `yarn.lock` locks each package the two projects share at the version the TypeScript side's lock
 holds; `@bufbuild/protoplugin`, which the target is written on, takes the version protoc-gen-es
-depends on. Where a caret would resolve higher here, `yarn set resolution` locks it, as for oxlint:
+depends on. Where a caret would resolve higher here, `yarn set resolution` locks it to the
+TypeScript side's version, oxlint's, say:
 
 ```sh
-yarn set resolution oxlint@npm:^1.89.0 npm:1.89.0
+yarn set resolution oxlint@npm:^1.90.0 npm:1.90.0
 yarn install --immutable
 ```
 

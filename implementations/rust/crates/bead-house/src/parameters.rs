@@ -1,4 +1,4 @@
-//! The parameter rule (decision 0044, as 0007 holds it on the other sides, and 0004 on every side):
+//! The parameter rule (decision 0044, as 0007 holds it on the other sides, and 0047 on every side):
 //! beside its receiver, a function takes at most two parameters, then at most one options struct,
 //! always last, its type named `…Options`, taken by `&`: never by value, by `&mut` or in an
 //! `Option`, since `&…Options::default()` stands for none. The count binds every function: inside

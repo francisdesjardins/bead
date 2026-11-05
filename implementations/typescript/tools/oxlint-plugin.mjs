@@ -1,6 +1,6 @@
 // The lint's own rules, an oxlint JS plugin named `bead`, which `.oxlintrc.base.json` loads.
 //
-// `bead/options-last` holds the parameter rule (decisions 0004 and 0007): a function takes at most
+// `bead/options-last` holds the parameter rule (decisions 0047 and 0007): a function takes at most
 // two parameters, then at most one options object, always last, optional when every member is and
 // required when one is; an event carries at most two values. `max-params` counts the parameters
 // written; this judges what a third may be, and counts where `max-params` does not read: a rest

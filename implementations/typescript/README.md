@@ -1222,8 +1222,9 @@ script did not catch, or a script that failed to load — fails a connect under 
 its message and where it was thrown, then its close, unclean at both ends. A worker terminated
 without a word is not heard.
 `createWorkerServer({ transport: { scope: self } })` in the worker and `createWorkerClient({
-transport: { worker } })` in the page are the facades. This one is a page's own: a server in C# has
-no counterpart to mirror.
+transport: { worker } })` in the page are the facades. This one is a page's own, which the C# and
+Rust sides come to with their core in a page, ahead
+([`docs/support.md`](../../docs/support.md#differences)).
 
 ### In memory, and a server's transports joined
 

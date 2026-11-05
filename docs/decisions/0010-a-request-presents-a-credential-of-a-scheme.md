@@ -108,7 +108,8 @@ identifier is a record of its credential scheme and its claim: a `JWT`'s, `{ iss
 scheme, their claim's name and their values are equal, octet for octet. A call's session carries the
 data of the credential it presented, never another call's under the same identifier: for a `JWT`,
 its claims set as each side's JSON reader gives it, a frozen object on the TypeScript side, a
-`JsonElement` on the C# side; for an `ELSEWHERE`, what its verifier gave. A credential's session is
+`JsonElement` on the C# side, a `serde_json::Value` on the Rust side; for an `ELSEWHERE`, what its
+verifier gave. A credential's session is
 kept, and its end timed, only while it bounds a subscription: what a side keeps, per connection and
 identifier, is its end, the later of those resolved, and the subscriptions it bounds. A call that
 resolves to one not kept runs with its own end, and keeps it once it subscribes.
@@ -146,15 +147,15 @@ that may hold.
 
 **Resolution may wait.** A `JWT` verified by Web Crypto, a key set asked for a `kid` not yet seen, a
 session service asked whether a token holds: a verifier settles later, a `PromiseLike` on the
-TypeScript side, a `ValueTask` on the C# side. While it does, its request holds its call id (step 2
-of section 9.2 refuses another on it); a cancel ends it, answered by nothing, and tells its verifier
-by its signal (section 10.2), as its connection closing does; a transfer's opening gets no credit
-until resolution and admission settle (section 12.3); and the call runs in the session it resolved
-to, whatever befell its connection's meanwhile. A request that presents none or `OPAQUE` resolves in
-the turn it came; one that presents `JWT` or `ELSEWHERE` resolves in a later turn, on every side,
-whether its verifier waits or not, or a relay forwards it unverified, resolving it to no session. A
-resolution that settles once its call ended, cancelled or its connection closed, opens no session,
-moves no end, and is dropped.
+TypeScript side, a `ValueTask` on the C# side, a `BoxFuture` on the Rust side. While it does, its
+request holds its call id (step 2 of section 9.2 refuses another on it); a cancel ends it, answered
+by nothing, and tells its verifier by its signal (section 10.2), as its connection closing does; a
+transfer's opening gets no credit until resolution and admission settle (section 12.3); and the call
+runs in the session it resolved to, whatever befell its connection's meanwhile. A request that
+presents none or `OPAQUE` resolves in the turn it came; one that presents `JWT` or `ELSEWHERE`
+resolves in a later turn, on every side, whether its verifier waits or not, or a relay forwards it
+unverified, resolving it to no session. A resolution that settles once its call ended, cancelled or
+its connection closed, opens no session, moves no end, and is dropped.
 
 **A credential that does not hold is refused, whatever the procedure requires**, with
 `SESSION_REQUIRED`, as a bearer token found invalid is answered 401 (RFC 6750 §3.1); `ACCESS_DENIED`
@@ -516,9 +517,11 @@ verifier does not: a call presenting none, sent after one presenting a `JWT`, ma
 on every side alike, and a conversation awaits a `JWT` call's answer before it sends anything that
 could overtake it. The order of section 9.2, a cancel during resolution and a transfer's first
 credit are stated, and played by a conversation whose verifier settles late, on the server's clock.
-Verifying a `JWT` costs no dependency: Web Crypto on the TypeScript side, in Node and in a browser
-alike; `ECDsa` and `HMACSHA256` on the C# side; a key imported from its JWK, JSON and base64url on
-both; and a key set is the application's to fetch.
+Verifying a `JWT` costs the TypeScript and C# sides no dependency: Web Crypto on the TypeScript
+side, in Node and in a browser alike; `ECDsa` and `HMACSHA256` on the C# side; a key imported from
+its JWK, JSON and base64url on both. The Rust side verifies on RustCrypto, `p256`, `hmac` and
+`sha2` ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)). A
+key set is the application's to fetch.
 
 **The relays' table plays in the conversations, and `Authorization` in the transports' file**
 ([0004](0004-one-behaviour-in-every-language.md)): a conversation carries a relay across its
@@ -726,8 +729,8 @@ transport carried beside a request presenting `ELSEWHERE`, and a `JWT`'s token, 
 verifier and a relay alone, the call keeping them only when its request names a destination, and a
 registered resolver's header made at reception with its `JWT`'s scheme alone; the C# side's router
 core internal, as the TypeScript side's is
-([0004](0004-one-behaviour-in-every-language.md)); `transportCredential` out of every public type,
-and `forwardsCredentials` a destination's handler's alone. One rule holds for both bearer
+([0047](0047-every-side-shows-one-public-surface.md)); `transportCredential` out of every public
+type, and `forwardsCredentials` a destination's handler's alone. One rule holds for both bearer
 credentials, applied at the reception. Refused: a line drawn by where a credential travels, the
 transport's bytes withheld from a procedure and a `JWT`'s token kept in its header, since least
 privilege draws no such line. No standard settles whether a procedure is handed its call's bearer
@@ -743,7 +746,7 @@ Its objections, each with the answer that holds:
 | The new sentence belongs in 13.1, stated positively, not in 15.1, the transport's contract; it named `beforeRequest`, which the spec never names, and carved out the relay's check, itself an admission                                                                   | Accepted: 13.1's last sentence states it. A relayed call takes 14.3's steps in place of 9.2's steps 4 to 8, so the relay's check of 14.3 step 5 is no admission of 13.1's, and needs no carve-out                                                                                                                                                                                                                                                                       |
 | Withholding the transport's credential and keeping a `JWT`'s answers one question with two principles: no standard or practice draws a line by where a credential travels, and one procedure would hold a page's caller's bearer bytes and not a backend's                | Accepted in part: one question, drawn by risk. A `JWT`'s token and the transport's credential are both bearer credentials (RFC 6750 §1.2); an `OPAQUE`'s resolves on its own connection alone (13.2) and stays in its header. The choice between the in-process practice and the gateway's was the user's, who took the gateway; the handed header's TypeScript type is `IHandedRequestHeader`; RFC 8693 waits for one opt-in for both schemes, a decision of its own   |
 | A simpler design was passed over: the bytes are needed only in the turn the request arrives, so the call keeps them only when its request names a destination, and the sites that hand a request on stay as they are                                                      | Accepted: the reception is the one site, and the made header joins it. The C# `BeforeRequest` strips all the same, since a relay's `BeforeRoute` is handed its request by the relay's handler, which keeps the bytes on purpose                                                                                                                                                                                                                                         |
-| The change moves the public surface on both sides with nothing to hold it, where 0006 wants every rule to name what fails                                                                                                                                                 | Accepted: `@ts-expect-error` reads in the TypeScript twin, which `yarn type-check` runs; a C# twin by reflection over the five core types and the two members, the first piece of 0007's owed test over the built assemblies. A gate over each package's whole public surface is a round of its own                                                                                                                                                                     |
+| The change moves the public surface on both sides with nothing to hold it, where 0006 wants every rule to name what fails                                                                                                                                                 | Accepted: `@ts-expect-error` reads in the TypeScript twin, which `yarn type-check` runs; a C# twin by reflection over the five core types and the two members, the first piece of 0007's owed test over the built assemblies. A gate over each package's whole public surface is a decision of its own, [0047](0047-every-side-shows-one-public-surface.md)'s                                                                                                           |
 | Moving `forwardsCredentials` to a destination's handler is right, but "a procedure forwards nothing" is false of a `JWT`: a procedure that sets the flag holds a token it never verified, minted perhaps for another audience; and the behaviour it removes goes unstated | Accepted: the move stands on 9.2 step 6 and 14.3, a relay alone holding a `JWT`'s `aud` to its destination's audience (RFC 7519 §4.1.3, RFC 8707), and the CHANGELOG says a procedure no longer takes a credential unverified to pass on. A resolver that still sets the flag is ignored in silence on both sides and refused on neither, since a TypeScript-only refusal would diverge and a C# one would need the public member the move removes: its cost, kept here |
 | The moves of the public types and of the flag read as independent of the core's visibility, but on the C# side both require it: an internal return type on a public port is CS0050, and an internal `SessionRequest` member starves a hand-built port                     | Accepted: on the C# side the public types' and the flag's moves need the core internal                                                                                                                                                                                                                                                                                                                                                                                  |
 | A record's `Equals` and `with` carry an internal member, so the C# side's hand-off was observable; and an internal `SessionRequest.TransportCredential` written by a custom `PrintMembers` is the same broken promise                                                     | Accepted: no procedure's value carries the member, `PrintMembers` goes, and the session request's test asserts the member and its credential absent from its string, as `docs/support.md` says                                                                                                                                                                                                                                                                          |

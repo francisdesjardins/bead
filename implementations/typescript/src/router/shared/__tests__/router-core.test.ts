@@ -2128,7 +2128,7 @@ test.describe('createRouterCore', () => {
       expect(sent).toEqual([]);
     });
 
-    // spec 13.1 and decision 0004: the TypeScript side's surface, by its entry points and its
+    // spec 13.1 and decision 0047: the TypeScript side's surface, by its entry points and its
     // types, which the C# side's twin holds by reflection: the envelope's codec is internal on
     // every side
     test('keeps the router core, the envelope codec and the transport’s credential out of the public surface', () => {

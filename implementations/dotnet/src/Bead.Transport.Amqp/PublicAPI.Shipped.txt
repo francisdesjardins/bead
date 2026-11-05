@@ -36,7 +36,7 @@ Bead.Transport.Amqp.AmqpBrokerAdapterOptions.MaximumMessageSize.get -> long
 Bead.Transport.Amqp.AmqpBrokerAdapterOptions.MaximumMessageSize.init -> void
 Bead.Transport.Amqp.AmqpBrokerAdapterOptions.Password.get -> string?
 Bead.Transport.Amqp.AmqpBrokerAdapterOptions.Password.init -> void
-Bead.Transport.Amqp.AmqpBrokerAdapterOptions.PasswordProvider.get -> System.Func<System.Threading.CancellationToken, System.Threading.Tasks.Task<string!>!>?
+Bead.Transport.Amqp.AmqpBrokerAdapterOptions.PasswordProvider.get -> System.Func<System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<string!>>?
 Bead.Transport.Amqp.AmqpBrokerAdapterOptions.PasswordProvider.init -> void
 Bead.Transport.Amqp.AmqpBrokerAdapterOptions.Tls.get -> Bead.Transport.Amqp.AmqpBrokerTlsOptions?
 Bead.Transport.Amqp.AmqpBrokerAdapterOptions.Tls.init -> void

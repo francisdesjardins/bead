@@ -85,9 +85,15 @@ to one meaning of `advance`. The why of each rule is in the decisions:
   a `proto` message that leaves a required field unset, and a closed enum's undeclared number,
   section 17.9;
 - [0043](../docs/decisions/0043-over-amqp-1-0-a-participant-is-one-connection-whose-exclusive-inbox-ends-with-it-and-a-parcel-one-message-of-one-profile-each-counted-to-its-byte.md):
-  AMQP 1.0's binding of a broker, on RabbitMQ 4, section 15.
+  AMQP 1.0's binding of a broker, on RabbitMQ 4, section 15;
+- [0045](../docs/decisions/0045-a-router-takes-what-its-application-makes-in-one-queue-behind-the-turn-that-tells-it.md):
+  what an application makes from within a telling, a call made before a dispose and one made after,
+  and a publisher's order in the in-memory broker, sections 9.0, 9.1 and 15.24;
+- [0046](../docs/decisions/0046-a-router-paces-each-connections-reads-by-what-it-has-not-taken.md):
+  a connection's reads paced by what its router has not taken, sections 15.5 to 15.7, 15.12, 15.19
+  and 15.23.
 
-**Version: 0.10.0**, of layout `0xA1`, its broker parcels of layout `0xB1`. Each of its
+**Version: 0.11.0**, of layout `0xA1`, its broker parcels of layout `0xB1`. Each of its
 conformance files repeats it as its `specVersion`, and follows its schema in
 [`schemas/`](schemas/). The interop's blueprint,
 [`interop-blueprint.json`](interop-blueprint.json), and what its service does,

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // ── The package's surface, pinned to its list, its options and tuples judged ─
 // Reads each entry of `package.json`'s `exports` through TypeScript 7's checker (its
-// `unstable/sync` API, at the version the lockfile pins) and holds four things (decisions 0004 and
+// `unstable/sync` API, at the version the lockfile pins) and holds four things (decisions 0047 and
 // 0006):
 //
 // - the surface: each entry's exports, then each declaration they name, with its members — a

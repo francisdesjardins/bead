@@ -165,7 +165,7 @@ are never kept alike in silence; one origin for `/bead` and `/api/…` comes fro
   `PATCH`'s absent `update_mask` filled from the keys its body holds, as grpc-gateway's
   `allow_patch_feature` fills one, so a caller clears a field by sending it.
 - **The JSON form is Bead's own mapping** (5), one reader and one writer a runtime, one object made
-  over the messages an `Any` may name, `JsonForm` on every side: it reads a body by its message's
+  over the messages an `Any` may name, `JsonForm` on the TypeScript and C# sides, the Rust side's coming with its gateway, ahead: it reads a body by its message's
   descriptor and writes a message, a field of one or an event's data, each call of two parameters
   at most, the schema a parameter where a message carries none. It reads and writes over its
   descriptors and its library's reflection, the binary payload still its stock library's alone, as
@@ -220,7 +220,7 @@ are never kept alike in silence; one origin for `/bead` and `/api/…` comes fro
   play
   ([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)).
 - **A typed client of the default routes** (12), written by each output with `http: true` beside its
-  table, under the route table's contract 5, which stays beside a service file's 6 since a route
+  table, under the route table's contract 5, which stays beside a service file's 7, since a route
   table calls no codec ([0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)),
   ([0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)),
   `<Service>HttpClient` over `fetch` or `HttpClient`, its surface name for name on both sides. It

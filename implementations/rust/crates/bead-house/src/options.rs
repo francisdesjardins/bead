@@ -1,4 +1,4 @@
-//! The options struct's shape (decision 0044, the rule 0004 states for every side): each public
+//! The options struct's shape (decision 0044, the rule 0047 states for every side): each public
 //! struct named `…Options` is `#[non_exhaustive]`, never `Copy`, its fields public, each an
 //! `Option` but a setting it cannot be built without, at most two of them, which its constructor
 //! of the required members sets: an associated function of its own `impl`, `new` (C-CTOR), that

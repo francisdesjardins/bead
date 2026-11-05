@@ -897,7 +897,7 @@ jobs:
         run: node site/check.mjs
       # Each side's public names, read from its committed surface list, are one on every side or a
       # row of tools/names.tsv says how they render, why one is a side's own, or which row of the
-      # support matrix's Differences holds it; the names no reading placed only fall (decision 0004).
+      # support matrix's Differences holds it; the names no reading placed only fall (decision 0047).
       - name: Check the names
         run: node tools/check-names.mjs
       # Every duration an application gives a side through its surface is a place and a way of

@@ -11,7 +11,7 @@ namespace Bead.Transport.Http.Tests;
 
 /// <summary>
 /// The options rule over this side's public surface, by reflection over the eight assemblies an
-/// application calls (decisions 0004 and 0007): an options record is a sealed record of
+/// application calls (decisions 0047 and 0007): an options record is a sealed record of
 /// <c>init</c> properties, at most two of them <c>required</c>, a setting it cannot be built
 /// without; and a parameter that takes one is required exactly when one of its members is. No
 /// public member takes or gives a tuple, at any depth of its type: what a caller passes or reads is
@@ -45,7 +45,7 @@ public sealed class SurfaceTests
     private static readonly Dictionary<string, string> PastTheParameterRule = new()
     {
         ["Bead.Transcoding.HttpVariable..ctor(FieldPath, Start, End)"] =
-            "one concept with the TypeScript side's IVariable, on two rows of its own: its family, the transcoding entry's templates, variables, segments and readings, moves once, its name, members and construction together (0004)",
+            "one concept with the TypeScript side's IVariable, on two rows of its own: its family, the transcoding entry's templates, variables, segments and readings, moves once, its name, members and construction together (0047)",
     };
 
     // ! the tuples of three elements or more the functions of each assembly take, its internal and
