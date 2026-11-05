@@ -143,8 +143,7 @@ envelopes.
   ([0019](docs/decisions/0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)).
 - **Further**: one corpus read alike by every side's parsers, held as a gate as
   `tools/protobuf-conformance.mjs differential` holds a `proto` payload, and a short run of the
-  targets of [Fuzzing](#fuzzing) in CI; a guard in CI against a gross regression of the benches
-  ([Measurement](#measurement)); the transports' client part of the conformance over HTTP and a
+  targets of [Fuzzing](#fuzzing) in CI; the transports' client part of the conformance over HTTP and a
   WebSocket, a relay across languages in the interop, the core in a page and in a worker, the
   DevTools extension on Firefox, a counted call's cost measured against an uncounted one, a
   constrained C side and publication, each bound by the records that
@@ -548,8 +547,8 @@ node ../../tools/coverage-report.mjs coverage/rust.json --under implementations/
 ## Measurement
 
 The TypeScript and C# sides measure the same seven layers on the loopback, and the Rust side its
-in-memory calls and exchanges (below). Run one comparison at a time on a quiet machine, with Node,
-the TypeScript dependencies and .NET installed. The TypeScript and C# benches each start the other
+in-memory calls and exchanges (below). A comparison runs alone on its machine, with Node, the
+TypeScript dependencies and .NET installed. The TypeScript and C# benches each start the other
 side's interop server as the interop tests do: `interop/serve.ts` for TypeScript, and
 `dotnet run -c Release --no-build --project interop/Bead.Interop.Server` for C#, after one build. The server reports its
 WebSocket, HTTP and gateway ports and serves until its standard input closes. A launch failure
@@ -563,23 +562,24 @@ its built binary and Rust by `cargo run` over its release build, by its lock, wi
 the measurement processes. The TypeScript bench's C# interop server is built once, then launched
 with `--no-build`.
 
-From the root, screen each side against the last release's stored report:
+CI's [`bench.yml`](.github/workflows/bench.yml) measures each side on every push to a release or
+hotfix branch, and by hand against a tag it is given: a runner of its own a side checks out the
+newest `v*` tag by semver beside the candidate, measures both trees in turn by `--tree`, at the
+defaults above, and compares them at 25%. For one side, from the candidate's root:
 
 ```sh
-node tools/bench-release.mjs typescript --output .bench/candidate-typescript.json
-node tools/bench-release.mjs csharp --output .bench/candidate-csharp.json
-node tools/bench-compare.mjs .bench/baseline-typescript.json .bench/candidate-typescript.json --threshold 25%
-node tools/bench-compare.mjs .bench/baseline-csharp.json .bench/candidate-csharp.json --threshold 25%
-node tools/bench-release.mjs rust --output .bench/candidate-rust.json
-node tools/bench-compare.mjs .bench/baseline-rust.json .bench/candidate-rust.json --threshold 25%
+git worktree add --detach ../bench-baseline v0.9.0
+# Install the TypeScript dependencies in each tree's implementations/typescript.
+node tools/bench-release.mjs typescript --tree ../bench-baseline --baseline-output baseline.json --output candidate.json
+node tools/bench-compare.mjs baseline.json candidate.json --threshold 25%
 ```
 
 `--processes` requires an integer of at least 5; `--runs` and `--seconds` require positive integers.
 `--seconds` defaults to 3 and bounds each timed phase of each run. Each codec also warms for 5,000
 round trips, each call payload for 500 calls, and each large echo for one call. A full bench costs
 about 75 minutes per side at N=5 on the TypeScript and C# sides, and about ten on the Rust side,
-depending on the machine; a full baseline/candidate interleave costs twice that. Run the sides
-sequentially. `--transcoding` runs only the four transcoding measures and starts no interop server;
+depending on the machine; a full baseline/candidate interleave costs twice that. On one machine,
+the sides run one after the other; CI gives each its own runner. `--transcoding` runs only the four transcoding measures and starts no interop server;
 the Rust bench refuses it. `--filter <id-or-name>` on the orchestrator and on each bench selects an
 exact measurement ID or name. Shared phases, such as the three percentiles of one latency run, run
 once and report only the selected rows. An unmatched filter fails the run.
@@ -709,34 +709,27 @@ Exit 1 means at least one `regression` and is advisory; `inconclusive` alone exi
 requires review. At N=5, simulations on the transcoding measurements give roughly 1% false flags
 per unchanged measure and 70–90% detection at a +35% change. These rates depend on the
 measurement's distribution; 112 measures can give about one false flag per side, with noisier
-tails. The threshold and p test screen findings; confirmation settles them. CI has no performance
-guard: its `dotnet` job builds the C# bench in Release, so that a release's measure finds it whole,
-and measures nothing.
+tails. The threshold and p test screen findings, each read and judged. CI's `dotnet` job builds the
+C# bench in Release on every push, so that a release's measure finds it whole, and measures
+nothing; `bench.yml` measures, and fails on no regression.
 
-Confirm every `regression` and `inconclusive` on a quiet machine against a checkout of the previous
-tag. `--tree` builds and runs that baseline, alternating the trees process by process in ABBA order,
-baseline then candidate, then candidate then baseline. For the TypeScript and C# sides, both trees
-need their TypeScript dependencies installed. `--filter` reaches the benches only when both take it;
-when one has none, both run whole and their reports are selected by the same ID or name, so that a
-measure meets the same phases before it, and the same warm-up, in each tree. The C# side's in-memory
-call throughput settles each process in one of a few modes, from one version to the next alike; its
-confirmation takes eight processes or more a tree. For example, from the candidate tree:
+`--tree` builds and runs a checkout of the baseline, alternating the trees process by process in
+ABBA order, baseline then candidate, then candidate then baseline, so that both meet the same
+machine and neither always runs second. For the TypeScript and C# sides, both trees need their
+TypeScript dependencies installed. `--filter` reaches the benches only when both take it; when one
+has none, both run whole and their reports are selected by the same ID or name, so that a measure
+meets the same phases before it, and the same warm-up, in each tree. The C# side's in-memory call
+throughput settles each process in one of a few modes, from one version to the next alike: at five
+processes a tree it may flag where nothing changed, and eight or more settle it.
 
-```sh
-git worktree add --detach ../bench-baseline v0.7.0
-# Install the TypeScript dependencies in ../bench-baseline/implementations/typescript.
-node tools/bench-release.mjs typescript --tree ../bench-baseline --baseline-output .bench/confirm-baseline-typescript.json --output .bench/confirm-candidate-typescript.json --filter call.p99
-node tools/bench-compare.mjs .bench/confirm-baseline-typescript.json .bench/confirm-candidate-typescript.json --threshold 25%
-node tools/bench-release.mjs csharp --tree ../bench-baseline --baseline-output .bench/confirm-baseline-csharp.json --output .bench/confirm-candidate-csharp.json --filter call.p99
-node tools/bench-compare.mjs .bench/confirm-baseline-csharp.json .bench/confirm-candidate-csharp.json --threshold 25%
-```
-
-For a full interleave, omit `--filter`. Each release keeps a full report of each side's bench,
-`.bench/v<version>-<side>.json`, which git ignores, compared with the last release's on the machine
-that made it, or with the last tag's checkout by `--tree` where that machine keeps none; a side whose
-bench the last tag lacks keeps its first, compared with none. A `regression` or `inconclusive` is
-read before the finish, confirmed, then explained in the release's notes or fixed. A stored baseline
-from another session can include machine drift; the interleave reduces that drift's effect.
+Each release reads the run of `bench.yml` on its branch's commit before the finish: each side's
+comparison in the run's summary, and its two reports and the comparison in the artifact
+`bench-<side>`. A side whose bench source the baseline tag lacks is measured alone, with no
+baseline. A regression shows as a warning on the run, which stays green; a comparison refused, a
+measure of the baseline the candidate no longer takes among them, or a failed measure fails its job.
+A `regression` or `inconclusive` is read once and judged, then explained in the release's notes or
+fixed, never chased by a rerun: the interleave on one runner already holds both trees to one
+machine.
 
 ## Fuzzing
 
@@ -955,8 +948,9 @@ image in `ci.yml`, each to its tag's current digest; CI then builds and tests th
 tells a document's new version and its tag, the spec's or a companion's; each of
 [0006](docs/decisions/0006-a-rule-has-its-gate.md)'s gates owed that names the release, whose rule
 moves to that record's table; the documents brought to the release by the
-`bead-release-documents` workflow ([`.claude/workflows/`](.claude/workflows/README.md)); and both
-benches' reports, kept and compared with the last release's, as [Measurement](#measurement) says.
+`bead-release-documents` workflow ([`.claude/workflows/`](.claude/workflows/README.md)); the run of
+`bench.yml` on the release's branch, each side's comparison with the last release read, as
+[Measurement](#measurement) says; and the last run of `fuzz.yml`, its findings read.
 
 A waiver of CI's `beadc breaking` step, an `--except`, holds until the release that carries its
 change is the one the step compares against: the release's own commit is still compared with the

@@ -712,7 +712,7 @@ in-memory bench, each fresh process writing
 `bead-bench/1`, which `tools/bench-release.mjs rust` merges into `bead-bench/2` for
 `tools/bench-compare.mjs`. The gates every side shares hold it too: `tools/check-details.mjs` reads
 its sources, `tools/check-names.mjs` and `tools/check-durations.mjs` its surface lists, the
-differential its testee, a release keeps its bench's report, and its broker trial
+differential its testee, a release reads its bench's comparison in CI, and its broker trial
 plays every case no row of the matrix excuses it from ([0006](0006-a-rule-has-its-gate.md)).
 
 ## Consequences

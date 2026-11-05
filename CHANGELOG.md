@@ -60,9 +60,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Changed
 
 - The gates every side shares hold the Rust side: `tools/check-details.mjs` reads its sources, the
-  differential reads one corpus through every side's testee, a release keeps each side's bench
-  report, the Rust side's included, and the Rust broker trial plays every case but those a row of
-  the matrix excuses it from.
+  differential reads one corpus through every side's testee, a release reads each side's bench
+  comparison in CI, the Rust side's included, and the Rust broker trial plays every case but those
+  a row of the matrix excuses it from.
 - **Breaking:** `bead::testing::Difference`, with `is_excused` and `LANGUAGE` beside it, in place of
   `bead::testing::durations::Difference`.
 - **Breaking:** every side drops a singular closed enum's undeclared number before its library

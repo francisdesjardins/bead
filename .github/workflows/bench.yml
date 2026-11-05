@@ -1,0 +1,206 @@
+name: Bench
+
+# Each side's bench against the last release, on every push to a release or hotfix branch and by
+# hand, never a gate (README.md, "Measurement"): one runner a side measures the candidate and the
+# baseline tag's checkout in turn, process by process in ABBA order, by tools/bench-release.mjs
+# --tree, so that both meet the same machine; then tools/bench-compare.mjs judges each measure at
+# the README's 25%. A regression is advisory: a warning on the run, its report in the summary and
+# the artifact, read once and judged, never chased by a rerun. Only a refused comparison or a
+# failed measure fails a job. `tools/release.mjs prepare` owes its reading to every release.
+on:
+  push:
+    branches: ['release/**', 'hotfix/**']
+  workflow_dispatch:
+    inputs:
+      baseline:
+        description: The tag to measure against; the newest v* by semver when empty
+        required: false
+        default: ''
+        type: string
+
+concurrency:
+  group: bench
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  # CI's Node, by its line
+  NODE_VERSION: '26'
+  # The release's method, as the README states it: five fresh processes a tree, each a warm-up and
+  # two recorded runs, 3 s a timed phase; a measure flagged past 25% at p <= .05. At five processes,
+  # the C# side's in-memory call throughput, which settles each process in one of a few modes, may
+  # flag where nothing changed: it is read as such, never rerun.
+  BENCH_PROCESSES: 5
+  BENCH_RUNS: 2
+  BENCH_SECONDS: 3
+  BENCH_THRESHOLD: 25%
+  # The TypeScript installs read no browser
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ── Bench ────────────────────────────────────────────────────────────────────
+  # One job a side, each on a runner of its own. The TypeScript and C# benches each start the other
+  # side's interop server, so both of their jobs install Node, .NET and the TypeScript side in each
+  # tree; the Rust bench runs in memory alone. A full TypeScript or C# interleave takes about 150
+  # minutes, the Rust one about 20; their timeouts leave twice that, under the runner's six hours.
+  # Nothing is cached: one run a release, its builds minutes against its hours of measure.
+  bench:
+    name: Bench (${{ matrix.side }})
+    runs-on: ubuntu-26.04
+    timeout-minutes: ${{ matrix.timeout }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - side: typescript
+            timeout: 330
+          - side: csharp
+            timeout: 330
+          - side: rust
+            timeout: 60
+    defaults:
+      run:
+        shell: bash
+    env:
+      SIDE: ${{ matrix.side }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      # The tag named, or the newest v* by semver, a pre-release before its release, checked out
+      # beside the candidate as a worktree. ! A tag that holds no bench source of the side gives no
+      # baseline: the candidate is measured alone, and says so. The source is read from
+      # tools/bench-release.mjs's SOURCES, its one place in this workflow.
+      - name: The baseline
+        id: baseline
+        env:
+          REQUESTED: ${{ inputs.baseline }}
+        run: |
+          if [ -n "$REQUESTED" ]; then
+            git fetch --no-tags --depth=1 origin "+refs/tags/$REQUESTED:refs/tags/$REQUESTED"
+            tag="$REQUESTED"
+          else
+            git fetch --no-tags --depth=1 origin '+refs/tags/v*:refs/tags/v*'
+            tag="$(git -c versionsort.suffix=- tag --list 'v*' --sort=-version:refname | sed -n 1p)"
+          fi
+          source="$(node --input-type=module -e "import { SOURCES } from './tools/bench-release.mjs'; process.stdout.write(SOURCES[process.env.SIDE]);")"
+          tree="$RUNNER_TEMP/baseline"
+          found=false
+          if [ -n "$tag" ] && git cat-file -e "$tag:$source" 2>/dev/null; then
+            git worktree add --detach "$tree" "$tag"
+            found=true
+          fi
+          {
+            echo "tag=$tag"
+            echo "source=$source"
+            echo "tree=$tree"
+            echo "found=$found"
+          } >> "$GITHUB_OUTPUT"
+      # Each tree's SDK by its own global.json, the candidate's and the baseline's side by side
+      - if: matrix.side != 'rust'
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: implementations/dotnet/global.json
+      - if: matrix.side != 'rust' && steps.baseline.outputs.found == 'true'
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: ${{ steps.baseline.outputs.tree }}/implementations/dotnet/global.json
+      # Each tree's TypeScript side, by its own vendored Yarn and its own lock: the interop server
+      # the C# bench starts, and the TypeScript bench itself
+      - if: matrix.side != 'rust'
+        name: The TypeScript installs
+        env:
+          TREE: ${{ steps.baseline.outputs.tree }}
+          FOUND: ${{ steps.baseline.outputs.found }}
+        run: |
+          trees=("$GITHUB_WORKSPACE")
+          if [ "$FOUND" = true ]; then
+            trees+=("$TREE")
+          fi
+          for tree in "${trees[@]}"; do
+            (cd "$tree/implementations/typescript" && node .yarn/releases/yarn-*.cjs install --immutable)
+          done
+      # Each tree's toolchain, as its rust-toolchain.toml names it
+      - if: matrix.side == 'rust'
+        name: The Rust toolchains
+        env:
+          TREE: ${{ steps.baseline.outputs.tree }}
+          FOUND: ${{ steps.baseline.outputs.found }}
+        run: |
+          (cd implementations/rust && rustup toolchain install)
+          if [ "$FOUND" = true ]; then
+            (cd "$TREE/implementations/rust" && rustup toolchain install)
+          fi
+      # ! the build of each tree runs before the measure and outside it; any process that fails
+      # fails the collection, and no report is written
+      - name: Measure
+        env:
+          TREE: ${{ steps.baseline.outputs.tree }}
+          FOUND: ${{ steps.baseline.outputs.found }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/bench"
+          set -- "$SIDE" --output "$RUNNER_TEMP/bench/candidate.json" \
+            --processes "$BENCH_PROCESSES" --runs "$BENCH_RUNS" --seconds "$BENCH_SECONDS"
+          if [ "$FOUND" = true ]; then
+            set -- "$@" --tree "$TREE" --baseline-output "$RUNNER_TEMP/bench/baseline.json"
+          fi
+          node tools/bench-release.mjs "$@"
+      # Exit 1, a regression, is advisory: a warning, and the job stays green. Exit 2 fails it: a
+      # report refused, or a measure of the baseline the candidate no longer takes.
+      - if: steps.baseline.outputs.found == 'true'
+        name: Compare
+        env:
+          TAG: ${{ steps.baseline.outputs.tag }}
+        run: |
+          reports="$RUNNER_TEMP/bench"
+          status=0
+          node tools/bench-compare.mjs "$reports/baseline.json" "$reports/candidate.json" \
+            --threshold "$BENCH_THRESHOLD" > "$reports/comparison.md" || status=$?
+          if [ "$status" -eq 2 ]; then
+            echo "::error title=Bench ($SIDE)::the comparison with $TAG refused its reports; the reason is in this step's log"
+            exit 2
+          fi
+          cat "$reports/comparison.md"
+          {
+            echo "## Bench ($SIDE), against $TAG"
+            echo
+            awk '/^\|/ { exit } { print }' "$reports/comparison.md"
+            echo
+            grep '^|' "$reports/comparison.md" || true
+            echo
+            echo '<details><summary>The median of each process</summary>'
+            echo
+            echo '```'
+            awk 'seen && !/^\|/ { print } /^\|/ { seen = 1 }' "$reports/comparison.md"
+            echo '```'
+            echo
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+          regressions="$(grep -c '| regression |$' "$reports/comparison.md" || true)"
+          inconclusive="$(grep -c '| inconclusive |$' "$reports/comparison.md" || true)"
+          if [ "$status" -eq 1 ]; then
+            echo "::warning title=Bench ($SIDE)::regressions past $BENCH_THRESHOLD against $TAG: $regressions; each read in the summary and judged, never by a rerun"
+          fi
+          if [ "$inconclusive" -gt 0 ]; then
+            echo "::notice title=Bench ($SIDE)::inconclusive past $BENCH_THRESHOLD against $TAG: $inconclusive; each read in the summary"
+          fi
+      - if: steps.baseline.outputs.found != 'true'
+        name: No baseline
+        env:
+          TAG: ${{ steps.baseline.outputs.tag }}
+          SOURCE: ${{ steps.baseline.outputs.source }}
+        run: |
+          message="${TAG:-no v* tag} holds no $SOURCE: the candidate is measured alone, with no baseline"
+          echo "::notice title=Bench ($SIDE)::$message"
+          printf '## Bench (%s)\n\n%s.\n' "$SIDE" "$message" >> "$GITHUB_STEP_SUMMARY"
+      # the reports and their comparison, kept with the run whatever it found
+      - if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bench-${{ matrix.side }}
+          path: ${{ runner.temp }}/bench/
+          retention-days: 90
