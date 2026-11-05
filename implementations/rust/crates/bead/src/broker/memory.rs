@@ -3,9 +3,10 @@
 //! subscriber takes them, a message's life — and hands each message on copied as it is published,
 //! whole, in a later turn than its publish, in the order its publisher published it to that topic,
 //! once; or, as a test asks, again, behind the next, never, or to another member of its group. It
-//! holds a queue for each subscriber, bounded as it is given, past which it drops a message, and
-//! publishes a link's will as the link is lost or taken over, never at a stop. Its handles' type is
-//! `BROKER`, and it never leaves the process, so its legs are secure.
+//! lets a subscription go once what it queued to it before was handed on. It holds a queue for each
+//! subscriber, bounded as it is given, past which it drops a message, and publishes a link's will
+//! as the link is lost or taken over, never at a stop. Its handles' type is `BROKER`, and it never
+//! leaves the process, so its legs are secure.
 
 use core::fmt;
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -782,17 +783,37 @@ impl BrokerAdapter for MemoryBrokerAdapter {
         })
     }
 
-    // what was routed to it before is handed on all the same
+    // routed nothing from its turn on; what was routed to it before is handed on all the same, and
+    // it settles once that was, so that its subscriber read each message of it first (spec 15.24)
     fn unsubscribe(&self, topic: &[String]) -> BoxFuture<Result<(), BrokerError>> {
         let index = self.inner.index;
         let key = key_of(topic);
-
-        self.inner.turn(move |state| {
-            if let Some(link) = state.links.get_mut(index) {
+        let (settle, settled) = tokio::sync::oneshot::channel::<()>();
+        let letting = self.inner.broker.owner.run(move |state: &mut BrokerState| {
+            let is_queued = state.links.get_mut(index).is_some_and(|link| {
                 link.subscriptions.remove(&key);
-            }
 
-            Ok(())
+                !link.queue.is_empty()
+            });
+
+            // ! each message queued posted its hand-on as it was queued: a job posted now comes
+            // behind every one of them, in the owner's order
+            if is_queued {
+                state.owner.offer(Box::new(move |_state: &mut BrokerState| {
+                    settle.send(()).ok();
+                }));
+            } else {
+                settle.send(()).ok();
+            }
+        });
+
+        Box::pin(async move {
+            letting
+                .await
+                .map_err(|_gone| BrokerError::failed("the in-memory broker is gone"))?;
+            settled
+                .await
+                .map_err(|_gone| BrokerError::failed("the in-memory broker is gone"))
         })
     }
 

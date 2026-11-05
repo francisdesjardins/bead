@@ -10,7 +10,9 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use bytes::Bytes;
 
-use super::adapter::{BrokerAdapter, BrokerCapabilities, BrokerListener, BrokerMessage};
+use super::adapter::{
+    BrokerAdapter, BrokerCapabilities, BrokerError, BrokerListener, BrokerMessage,
+};
 use super::client::{
     BrokerTransportClient, BrokerTransportClientConnectOptions, BrokerTransportClientOptions,
 };
@@ -196,11 +198,18 @@ pub(super) async fn peer_of(
 /// it publishes to a topic bounded by `room` when given, its leg secure as `secure` says when given;
 /// each start after its first `starts` refused as it returns, when given; each start after its
 /// first `holds` held, heeding no signal, until a test releases it, when given; when `grants` is,
-/// the subscription to its inbox held until a test grants it; when `holds_stops` is, each stop held
-/// until a test releases it; and the CLOSE of the opener `drops_close` names, when it names one,
-/// answered no subscriber and never handed on, as its broker would leave one it did not take. It
-/// writes down each listener it is asked to let go of, and counts those it holds.
+/// the subscription to its inbox held until a test grants it; when `holds_names` is, each
+/// subscription to a server's name made at once, its broker's word held until a test grants it;
+/// when `holds_unsubscribes` is, each unsubscription of a server's name held, unmade, until a test
+/// settles it, made then or failed as it says; when `holds_stops` is, each stop held until a test
+/// releases it; and the CLOSE of the opener `drops_close` names, when it names one, answered no
+/// subscriber and never handed on, as its broker would leave one it did not take. It writes down
+/// each listener it is asked to let go of, and counts those it holds.
 #[derive(Debug)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "a test's adapter: each flag one behaviour a test asks of it, alone or with others"
+)]
 pub(super) struct Calling {
     pub(super) inner: MemoryBrokerAdapter,
     pub(super) room: Option<u64>,
@@ -212,6 +221,8 @@ pub(super) struct Calling {
     // its start awaits its signal, then fails: a start its stop overtakes
     pub(super) gives_up: bool,
     pub(super) grants: bool,
+    pub(super) holds_names: bool,
+    pub(super) holds_unsubscribes: bool,
     pub(super) holds_stops: bool,
     pub(super) drops_close: Mutex<Option<u64>>,
     pub(super) calls: Mutex<Vec<String>>,
@@ -219,6 +230,8 @@ pub(super) struct Calling {
     pub(super) held: Mutex<Vec<tokio::sync::oneshot::Sender<()>>>,
     pub(super) inbox: Mutex<Vec<tokio::sync::oneshot::Sender<()>>>,
     pub(super) stops: Mutex<Vec<tokio::sync::oneshot::Sender<()>>>,
+    pub(super) names: Mutex<Vec<tokio::sync::oneshot::Sender<()>>>,
+    pub(super) unsubscribing: Mutex<Vec<tokio::sync::oneshot::Sender<Result<(), BrokerError>>>>,
     pub(super) listening: AtomicUsize,
 }
 
@@ -233,6 +246,8 @@ impl Calling {
             refuses: None,
             gives_up: false,
             grants: false,
+            holds_names: false,
+            holds_unsubscribes: false,
             holds_stops: false,
             drops_close: Mutex::new(None),
             calls: Mutex::default(),
@@ -240,6 +255,8 @@ impl Calling {
             held: Mutex::default(),
             inbox: Mutex::default(),
             stops: Mutex::default(),
+            names: Mutex::default(),
+            unsubscribing: Mutex::default(),
             listening: AtomicUsize::new(0),
         }
     }
@@ -299,6 +316,39 @@ impl Calling {
     pub(super) fn asked(&self) -> usize {
         locked(&self.inbox).len()
     }
+
+    /// Grants the subscription to a server's name its participant asked first, its broker's word.
+    pub(super) fn grant_name(&self) -> bool {
+        let grant = {
+            let mut names = locked(&self.names);
+
+            (!names.is_empty()).then(|| names.remove(0))
+        };
+
+        grant.is_some_and(|grant| grant.send(()).is_ok())
+    }
+
+    /// The subscriptions to a server's name it holds, ungranted.
+    pub(super) fn naming(&self) -> usize {
+        locked(&self.names).len()
+    }
+
+    /// Settles the unsubscription its participant asked first of those it holds: made then, or
+    /// failed as `outcome` says.
+    pub(super) fn settle_unsubscribe(&self, outcome: Result<(), BrokerError>) -> bool {
+        let settle = {
+            let mut unsubscribing = locked(&self.unsubscribing);
+
+            (!unsubscribing.is_empty()).then(|| unsubscribing.remove(0))
+        };
+
+        settle.is_some_and(|settle| settle.send(outcome).is_ok())
+    }
+
+    /// The unsubscriptions it holds, unsettled.
+    pub(super) fn unsubscribing(&self) -> usize {
+        locked(&self.unsubscribing).len()
+    }
 }
 
 impl BrokerAdapter for Calling {
@@ -345,7 +395,7 @@ impl BrokerAdapter for Calling {
     fn start(
         &self,
         options: super::adapter::BrokerStart,
-    ) -> crate::router::types::BoxFuture<Result<(), super::adapter::BrokerError>> {
+    ) -> crate::router::types::BoxFuture<Result<(), BrokerError>> {
         let started = {
             let mut calls = locked(&self.calls);
 
@@ -354,13 +404,13 @@ impl BrokerAdapter for Calling {
         };
 
         if self.starts.is_some_and(|starts| started > starts) {
-            return Box::pin(async { Err(super::adapter::BrokerError::failed("refused at once")) });
+            return Box::pin(async { Err(BrokerError::failed("refused at once")) });
         }
 
         if self.refuses.is_some_and(|refuses| started <= refuses) {
             let refused = ProgrammerError::new(format!("the link of {} is up already", self.id()));
 
-            return Box::pin(async move { Err(super::adapter::BrokerError::from(refused)) });
+            return Box::pin(async move { Err(BrokerError::from(refused)) });
         }
 
         if self.gives_up {
@@ -370,9 +420,7 @@ impl BrokerAdapter for Calling {
             return Box::pin(async move {
                 signal.cancelled().await;
 
-                Err(super::adapter::BrokerError::failed(
-                    "the adapter gave up its start",
-                ))
+                Err(BrokerError::failed("the adapter gave up its start"))
             });
         }
 
@@ -396,7 +444,7 @@ impl BrokerAdapter for Calling {
         &self,
         topic: &[String],
         options: super::adapter::BrokerSubscription,
-    ) -> crate::router::types::BoxFuture<Result<(), super::adapter::BrokerError>> {
+    ) -> crate::router::types::BoxFuture<Result<(), BrokerError>> {
         locked(&self.calls).push(format!("subscribe {}", topic.join("/")));
 
         if self.grants && topic.get(1).is_some_and(|place| place == "i") {
@@ -418,14 +466,43 @@ impl BrokerAdapter for Calling {
             });
         }
 
+        if self.holds_names && topic.get(1).is_some_and(|place| place == "s") {
+            let (grant, granted) = tokio::sync::oneshot::channel();
+            let subscribing = self.inner.subscribe(topic, options);
+
+            locked(&self.names).push(grant);
+
+            // * made as it is asked: its broker's word held until the test grants it
+            return Box::pin(async move {
+                granted.await.ok();
+                subscribing.await
+            });
+        }
+
         self.inner.subscribe(topic, options)
     }
 
     fn unsubscribe(
         &self,
         topic: &[String],
-    ) -> crate::router::types::BoxFuture<Result<(), super::adapter::BrokerError>> {
+    ) -> crate::router::types::BoxFuture<Result<(), BrokerError>> {
         locked(&self.calls).push(format!("unsubscribe {}", topic.join("/")));
+
+        if self.holds_unsubscribes && topic.get(1).is_some_and(|place| place == "s") {
+            let (settle, settled) = tokio::sync::oneshot::channel();
+            let inner = self.inner.clone();
+            let topic = topic.to_vec();
+
+            locked(&self.unsubscribing).push(settle);
+
+            // * unread by its broker until the test settles it: made then, or failed as it says
+            return Box::pin(async move {
+                settled
+                    .await
+                    .unwrap_or_else(|_dropped| Err(BrokerError::failed("let go")))?;
+                inner.unsubscribe(&topic).await
+            });
+        }
 
         self.inner.unsubscribe(topic)
     }
@@ -433,9 +510,7 @@ impl BrokerAdapter for Calling {
     fn publish(
         &self,
         publication: super::adapter::BrokerPublication,
-    ) -> crate::router::types::BoxFuture<
-        Result<super::adapter::BrokerPublished, super::adapter::BrokerError>,
-    > {
+    ) -> crate::router::types::BoxFuture<Result<super::adapter::BrokerPublished, BrokerError>> {
         let kind = match parcel_of(&publication.payload) {
             Some(parcel) if parcel.kind == super::parcel::kinds::OPEN => "open",
             Some(parcel)

@@ -968,6 +968,15 @@ impl Case {
         &self,
         (step, values): (&Value, &HashMap<String, String>),
     ) -> Result<Vec<BrokerPublished>, String> {
+        published(self.publishing((step, values))?).await
+    }
+
+    // what a peer publishes in one turn, each publication made as it is called, in its order:
+    // what crosses a stop is made before that stop's call
+    fn publishing(
+        &self,
+        (step, values): (&Value, &HashMap<String, String>),
+    ) -> Result<Vec<BoxFuture<Result<BrokerPublished, BrokerError>>>, String> {
         let from = step.get("from").and_then(Value::as_str).unwrap_or("peer");
         let peer = self.peer(from)?;
         let topic = match step.get("to").and_then(Value::as_str) {
@@ -1014,13 +1023,7 @@ impl Case {
             });
         }
 
-        let mut published = Vec::new();
-
-        for each in publishing {
-            published.push(each.await.map_err(|error| error.to_string())?);
-        }
-
-        Ok(published)
+        Ok(publishing)
     }
 
     fn gauge(&self, name: &str) -> Option<u64> {
@@ -1059,6 +1062,19 @@ impl Case {
 }
 
 // the server's ACCEPT, or the twin's OPEN, naming an opener's half, placed with it
+// what a peer published, each awaited in its order
+async fn published(
+    publishing: Vec<BoxFuture<Result<BrokerPublished, BrokerError>>>,
+) -> Result<Vec<BrokerPublished>, String> {
+    let mut published = Vec::new();
+
+    for each in publishing {
+        published.push(each.await.map_err(|error| error.to_string())?);
+    }
+
+    Ok(published)
+}
+
 fn take_placed(
     placed: &mut [(String, Vec<&'static str>)],
     (message, kind, where_): (Option<Bytes>, u8, &'static str),
@@ -1192,11 +1208,12 @@ async fn play_steps(case: &mut Case, steps: &[Value]) -> Result<(), String> {
             // * what crosses the stop is published in the turn it begins, before it
             let crossing = stop
                 .get("crossing")
-                .map(|crossing| case.publish((crossing, &values)));
+                .map(|crossing| case.publishing((crossing, &values)))
+                .transpose()?;
             let stopping = case.server.as_ref().map(|(_, transport)| transport.stop());
 
             if let Some(crossing) = crossing {
-                crossing.await?;
+                published(crossing).await?;
             }
 
             if let Some(stopping) = stopping {
@@ -1222,11 +1239,21 @@ async fn play_steps(case: &mut Case, steps: &[Value]) -> Result<(), String> {
                 .take_over();
         }
 
-        // * the participant under test stopped in place, or started again, each settled (spec 15.21)
+        // * the participant under test stopped in place, or started again, each settled (spec 15.21);
+        // what crosses its stop is published in the turn it begins, before it
         if let Some(act) = step.get("participant") {
-            match act.as_str() {
-                Some("stop") => case.participant.stop().await,
-                Some("start") => case
+            let crossing = act.get("stop").map(|stop| stop.get("crossing"));
+
+            match (act.as_str(), crossing) {
+                (Some("stop"), None) => case.participant.stop().await,
+                (None, Some(Some(crossing))) => {
+                    let crossing = case.publishing((crossing, &values))?;
+                    let stopping = case.participant.stop();
+
+                    published(crossing).await?;
+                    stopping.await;
+                }
+                (Some("start"), None) => case
                     .participant
                     .start()
                     .await

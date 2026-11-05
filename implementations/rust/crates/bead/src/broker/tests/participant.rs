@@ -3030,3 +3030,368 @@ async fn resets_at_its_next_link_each_peer_whose_close_its_broker_did_not_take_a
     participant.dispose().await;
     serving.stop().await;
 }
+
+// ── A stop that lets each name go first (spec 15.18, 15.21) ───────────────────────────────────
+
+// a participant of the id `server` over `calling`, serving `interop`, started, what its server's
+// transport tells written down; and a client of `client`'s, connected, its close written down
+async fn letting(
+    (broker, calling): (&MemoryBroker, &Arc<Calling>),
+) -> (
+    BrokerParticipant,
+    BrokerTransportServer,
+    Arc<ServerTold>,
+    Arc<ClientTold>,
+) {
+    let participant = BrokerParticipant::new(
+        Arc::<Calling>::clone(calling),
+        &BrokerParticipantOptions::default(),
+    )
+    .expect("a participant");
+    let server = participant
+        .server(&BrokerTransportServerOptions::new(["interop"]))
+        .expect("a server");
+    let told = Arc::new(ServerTold::default());
+    let clients = participant_of(
+        &adapter_of(broker, "client"),
+        &BrokerParticipantOptions::default(),
+    );
+    let client = clients
+        .client(&BrokerTransportClientOptions::default())
+        .expect("a client");
+    let client_told = Arc::new(ClientTold::default());
+
+    server.listen(Arc::new(AtServer(Arc::clone(&told))));
+    server.start().await.expect("started");
+    client.listen(Arc::new(AtClient(Arc::clone(&client_told))));
+    client
+        .connect(&BrokerTransportClientConnectOptions::new("interop"))
+        .await
+        .expect("connected");
+    until(|| locked(&told.opened).len() == 1, "told open").await;
+
+    (participant, server, told, client_told)
+}
+
+// the `names` events its trace tells, each its name and whether held (debugging 13.5)
+fn naming(participant: &BrokerParticipant) -> Arc<Mutex<Vec<(String, bool)>>> {
+    let told: Arc<Mutex<Vec<(String, bool)>>> = Arc::default();
+    let hearing = Arc::clone(&told);
+
+    participant.on_debug(Arc::new(move |event: &ParticipantDebugEvent| {
+        if event.event == "names"
+            && let (Some(name), Some(is_held)) = (&event.name, event.is_held)
+        {
+            locked(&hearing).push((name.clone(), is_held));
+        }
+    }));
+
+    told
+}
+
+fn gauge_of(server: &BrokerTransportServer, name: &str) -> Option<u64> {
+    server
+        .gauges()
+        .and_then(|gauges| gauges.counts.get(name).copied())
+}
+
+// what it asked of its adapter since `before` but its peers' departures, which each connection's
+// end lets go
+fn calls_since(calling: &Calling, before: usize) -> Vec<String> {
+    calling
+        .calls()
+        .get(before..)
+        .unwrap_or_default()
+        .iter()
+        .filter(|call| !call.contains("bead/d/"))
+        .cloned()
+        .collect()
+}
+
+// spec 15.21
+#[tokio::test]
+async fn a_participant_s_stop_lets_each_name_go_and_closes_each_connection_with_1001_at_its_call_then_stops_its_adapter_once_its_broker_let_each_go_each_served_again_at_its_next_link()
+ {
+    let broker = broker();
+    let calling = Arc::new(Calling {
+        holds_unsubscribes: true,
+        ..Calling::of(adapter_of(&broker, "server"))
+    });
+    let (participant, server, told, client_told) = letting((&broker, &calling)).await;
+    let before = calling.calls().len();
+    let stopping = crate::testing::spawn(participant.stop());
+
+    // * in its turn, its name's unsubscription, then its CLOSE: its link down, its connection
+    // forgotten, nothing handed on after its call, its adapter up
+    until(|| calling.unsubscribing() == 1, "its name let go of").await;
+    until(
+        || locked(&client_told.closes).len() == 1,
+        "its client told its close",
+    )
+    .await;
+    assert_eq!(
+        calls_since(&calling, before),
+        ["unsubscribe bead/s/interop", "publish bead/i/client"],
+        "its name's unsubscription, then its CLOSE"
+    );
+    assert_eq!(*locked(&client_told.closes), [(false, false)], "with 1001");
+    assert!(!participant.is_linked(), "down from its call");
+    assert_eq!(
+        gauge_of(&server, "connections"),
+        Some(0),
+        "its connection forgotten"
+    );
+    assert!(locked(&told.messages).is_empty(), "nothing handed on");
+    settle().await;
+    assert!(!stopping.is_finished(), "awaiting its broker's word");
+
+    // * its adapter stopped once its broker let its name go
+    assert!(calling.settle_unsubscribe(Ok(())), "let go");
+    stopping.await.expect("joined");
+    assert_eq!(
+        calls_since(&calling, before),
+        [
+            "unsubscribe bead/s/interop",
+            "publish bead/i/client",
+            "stop"
+        ],
+        "then its adapter's stop"
+    );
+    assert!(participant.names().is_empty(), "none held");
+
+    // * served again at its next link
+    participant.start().await.expect("started");
+    until(|| gauge_of(&server, "names") == Some(1), "served again").await;
+
+    let disposing = crate::testing::spawn(participant.dispose());
+
+    until(|| calling.unsubscribing() == 1, "let go of again").await;
+    assert!(calling.settle_unsubscribe(Ok(())), "let go");
+    disposing.await.expect("joined");
+}
+
+// spec 15.18, 15.21
+#[tokio::test]
+async fn refuses_503_an_open_that_comes_while_its_stop_lets_its_names_go_its_adapter_up() {
+    let broker = broker();
+    let calling = Arc::new(Calling {
+        holds_unsubscribes: true,
+        ..Calling::of(adapter_of(&broker, "server"))
+    });
+    let (participant, _server, told, _client_told) = letting((&broker, &calling)).await;
+    let (late, heard) = peer_of(&broker, ("late", &[])).await;
+    let stopping = crate::testing::spawn(participant.stop());
+
+    until(|| calling.unsubscribing() == 1, "its name let go of").await;
+
+    // * its broker holds its name still: the OPEN reaches it, and is refused 503, its adapter up
+    let open = write_parcel(&Parcel {
+        opener: 0xA400_0000_0000_0004,
+        sequence: 1,
+        id: Some("late".to_owned()),
+        incarnation: Some(0xC0),
+        bound: Some(65_536),
+        ..Parcel::of(kinds::OPEN)
+    })
+    .expect("written")
+    .to_vec();
+
+    assert_eq!(
+        publish_to(&late, (["bead", "s", "interop"], open)).await,
+        BrokerPublished::Taken,
+        "its broker holds its name"
+    );
+    until(|| !heard.parcels().is_empty(), "the OPEN answered").await;
+    assert_eq!(
+        heard
+            .parcels()
+            .iter()
+            .map(|parcel| (parcel.kind, parcel.opener, parcel.status))
+            .collect::<Vec<_>>(),
+        [(kinds::REFUSE, 0xA400_0000_0000_0004, Some(503))],
+        "refused 503"
+    );
+    assert_eq!(
+        locked(&told.refusals)
+            .iter()
+            .map(|refusal| (
+                refusal.status,
+                refusal.reason.clone(),
+                refusal.address.clone()
+            ))
+            .collect::<Vec<_>>(),
+        [(503, "busy".to_owned(), Some("late".to_owned()))],
+        "told"
+    );
+    assert_eq!(locked(&told.opened).len(), 1, "no connection told");
+    assert!(calling.settle_unsubscribe(Ok(())), "let go");
+    stopping.await.expect("joined");
+    participant.dispose().await;
+}
+
+// spec 15.21
+#[tokio::test]
+async fn lets_go_at_its_stop_a_name_whose_subscription_is_under_way() {
+    let broker = broker();
+    let calling = Arc::new(Calling {
+        holds_names: true,
+        holds_stops: true,
+        ..Calling::of(adapter_of(&broker, "server"))
+    });
+    let participant = BrokerParticipant::new(
+        Arc::<Calling>::clone(&calling),
+        &BrokerParticipantOptions::default(),
+    )
+    .expect("a participant");
+    let names = naming(&participant);
+    let (asking, _heard) = peer_of(&broker, ("asking", &[])).await;
+
+    participant.start().await.expect("started");
+
+    let server = participant
+        .server(&BrokerTransportServerOptions::new(["interop"]))
+        .expect("a server");
+    let starting = crate::testing::spawn(server.start());
+
+    until(|| calling.naming() == 1, "its name asked of its broker").await;
+
+    // * asked, unanswered: its stop lets it go all the same, its broker's word on it coming after
+    let stopping = crate::testing::spawn(participant.stop());
+
+    until(
+        || {
+            calling
+                .calls()
+                .contains(&"unsubscribe bead/s/interop".to_owned())
+        },
+        "its name let go of",
+    )
+    .await;
+    assert!(calling.grant_name(), "its broker's word on it");
+    until(|| calling.stopping() == 1, "its adapter's stop held").await;
+    assert_eq!(
+        publish_to(&asking, (["bead", "s", "interop"], vec![0])).await,
+        BrokerPublished::NoSubscriber,
+        "let go before its adapter's stop"
+    );
+    assert!(participant.names().is_empty(), "never held");
+    assert!(
+        !locked(&names).iter().any(|(_, is_held)| *is_held),
+        "never told held"
+    );
+    assert!(calling.release_stop(), "released");
+    stopping.await.expect("joined");
+    starting.await.expect("joined").ok();
+    participant.dispose().await;
+}
+
+// spec 15.21
+#[tokio::test]
+async fn reports_a_name_its_broker_refuses_to_let_go_at_its_stop_keeps_it_held_and_stops_all_the_same()
+ {
+    let broker = broker();
+    let calling = Arc::new(Calling {
+        holds_unsubscribes: true,
+        holds_stops: true,
+        ..Calling::of(adapter_of(&broker, "server"))
+    });
+    let (participant, server, _told, _client_told) = letting((&broker, &calling)).await;
+    let reported = reporting(&participant);
+    let names = naming(&participant);
+    let stopping = crate::testing::spawn(participant.stop());
+
+    until(|| calling.unsubscribing() == 1, "its name let go of").await;
+    assert!(
+        calling.settle_unsubscribe(Err(BrokerError::failed(
+            "its broker refused to let bead/s/interop go: 0x80"
+        ))),
+        "refused"
+    );
+
+    // * reported, held still, and its adapter stopped all the same
+    until(|| calling.stopping() == 1, "its adapter's stop held").await;
+    assert_eq!(
+        *locked(&reported),
+        ["its broker refused to let bead/s/interop go: 0x80"],
+        "reported"
+    );
+    assert_eq!(
+        participant.names(),
+        std::iter::once("interop".to_owned()).collect(),
+        "held still"
+    );
+    assert_eq!(gauge_of(&server, "names"), Some(1), "counted");
+    assert!(locked(&names).is_empty(), "told nothing");
+    assert!(calling.release_stop(), "released");
+    stopping.await.expect("joined");
+
+    // * its stopped clears it
+    assert!(participant.names().is_empty(), "none held once stopped");
+    assert_eq!(gauge_of(&server, "names"), Some(0), "none counted");
+    participant.dispose().await;
+}
+
+// spec 15.21
+#[tokio::test]
+async fn tells_nothing_of_a_name_its_link_lost_as_it_stopped() {
+    let broker = broker();
+    let calling = Arc::new(Calling {
+        holds_unsubscribes: true,
+        holds_stops: true,
+        ..Calling::of(adapter_of(&broker, "server"))
+    });
+    let (participant, _server, _told, _client_told) = letting((&broker, &calling)).await;
+    let reported = reporting(&participant);
+    let names = naming(&participant);
+    let stopping = crate::testing::spawn(participant.stop());
+
+    until(|| calling.unsubscribing() == 1, "its name let go of").await;
+
+    // * its link lost as it lets its name go: what fails then is that loss, reported by none
+    calling.inner.lose();
+    until(|| !calling.inner.is_linked(), "its link lost").await;
+    settle().await;
+    assert!(
+        calling.settle_unsubscribe(Err(BrokerError::failed("the link of server is not up"))),
+        "failed"
+    );
+    until(|| calling.stopping() == 1, "its adapter's stop held").await;
+    assert!(locked(&reported).is_empty(), "nothing reported");
+    assert!(locked(&names).is_empty(), "told nothing");
+    assert!(calling.release_stop(), "released");
+    stopping.await.expect("joined");
+    assert!(participant.names().is_empty(), "none held once stopped");
+    assert!(
+        locked(&reported).is_empty(),
+        "nothing reported once stopped"
+    );
+
+    // * its link lost as it lets its name go, its broker letting it go after: told nothing all the
+    // same, and held until its stop settles
+    participant.start().await.expect("started");
+    until(
+        || participant.names().len() == 1,
+        "its name held at its next link",
+    )
+    .await;
+    locked(&names).clear();
+
+    let restopping = crate::testing::spawn(participant.stop());
+
+    until(|| calling.unsubscribing() == 1, "its name let go of again").await;
+    calling.inner.lose();
+    until(|| !calling.inner.is_linked(), "its link lost again").await;
+    settle().await;
+    assert!(calling.settle_unsubscribe(Ok(())), "let go");
+    until(|| calling.stopping() == 1, "its adapter's stop held again").await;
+    assert!(locked(&names).is_empty(), "told nothing, let go");
+    assert_eq!(participant.names().len(), 1, "held until its stop settles");
+    assert!(calling.release_stop(), "released again");
+    restopping.await.expect("joined");
+    assert!(
+        participant.names().is_empty(),
+        "none held once stopped again"
+    );
+    assert!(locked(&reported).is_empty(), "nothing reported, let go");
+    participant.dispose().await;
+}

@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::oneshot;
 
 use super::{
-    AtServer, BrokerPair, BrokerPairOptions, ServerTold, adapter_of, broker, locked,
+    AtServer, BrokerPair, BrokerPairOptions, Calling, ServerTold, adapter_of, broker, locked,
     participant_of, peer_of, publish_to, until,
 };
 use crate::broker::adapter::{
@@ -755,7 +755,8 @@ async fn starts_once_its_broker_holds_each_name_it_serves_fails_its_start_on_a_n
     until(|| names_of(&server) == Some(1), "the first name let go").await;
     assert!(!stopping.is_finished(), "not stopped");
 
-    // * one its broker refuses to let go is reported, and its stop settles all the same
+    // * one its broker refuses to let go is reported, and held still, and its stop settles all the
+    // same
     Holding::settle(
         &holding.unsubscribing,
         Err(BrokerError::failed(
@@ -765,8 +766,8 @@ async fn starts_once_its_broker_holds_each_name_it_serves_fails_its_start_on_a_n
     stopping.await.expect("joined").expect("stopped");
     assert_eq!(
         (server.ready_state(), names_of(&server)),
-        (ReadyState::Closed, Some(0)),
-        "stopped"
+        (ReadyState::Closed, Some(1)),
+        "stopped, the name its broker refused to let go held still"
     );
     assert_eq!(
         locked(&told.errors)
@@ -777,12 +778,13 @@ async fn starts_once_its_broker_holds_each_name_it_serves_fails_its_start_on_a_n
         "reported"
     );
 
-    // * a name its broker refuses fails its start as it is refused, and is counted none
+    // * a name its broker refuses fails its start as it is refused, and is counted none; the one
+    // its broker holds still is asked nothing
     let refusing = crate::testing::spawn(server.start());
 
     until(
-        || locked(&holding.subscribing).len() == 2,
-        "each name asked anew",
+        || locked(&holding.subscribing).len() == 1,
+        "the name let go asked anew",
     )
     .await;
     Holding::settle(
@@ -798,17 +800,25 @@ async fn starts_once_its_broker_holds_each_name_it_serves_fails_its_start_on_a_n
         "its broker refused bead/s/interop",
         "its start fails"
     );
-    let settling = locked(&holding.subscribing).pop_front();
-
-    if let Some(settling) = settling {
-        settling
-            .send(Err(BrokerError::failed("its broker refused bead/s/echo")))
-            .ok();
-    }
     super::settle().await;
-    assert_eq!(names_of(&server), Some(0), "none held");
+    assert!(
+        locked(&holding.subscribing).is_empty(),
+        "nothing more asked"
+    );
+    assert_eq!(names_of(&server), Some(1), "the one held still");
     assert_eq!(locked(&told.errors).len(), 1, "nothing more reported");
-    participant.stop().await;
+
+    // its participant's stop lets go of the name its broker holds still
+    let stopping = crate::testing::spawn(participant.stop());
+
+    until(
+        || locked(&holding.unsubscribing).len() == 1,
+        "the name held let go of",
+    )
+    .await;
+    Holding::settle(&holding.unsubscribing, Ok(()));
+    stopping.await.expect("joined");
+    assert_eq!(names_of(&server), Some(0), "none held");
 }
 
 // spec 15.1: a stop while it starts is refused, as the other sides' transport server life refuses
@@ -863,6 +873,89 @@ async fn rejects_a_stop_while_starting() {
         .expect("joined")
         .expect("stopped once it opened");
     assert_eq!(server.ready_state(), ReadyState::Closed, "closed");
+    participant.stop().await;
+}
+
+// spec 15.21
+#[tokio::test]
+async fn a_server_s_transport_that_stops_hands_each_name_s_unsubscription_before_each_close_of_1001_and_settles_once_its_broker_let_each_go()
+ {
+    let broker = broker();
+    let calling = Arc::new(Calling {
+        holds_unsubscribes: true,
+        ..Calling::of(adapter_of(&broker, "server"))
+    });
+    let participant = BrokerParticipant::new(
+        Arc::<Calling>::clone(&calling),
+        &BrokerParticipantOptions::default(),
+    )
+    .expect("a participant");
+    let server = participant
+        .server(&BrokerTransportServerOptions::new(["interop", "echo"]))
+        .expect("a server");
+    let told = Arc::new(ServerTold::default());
+    let clients = participant_of(
+        &adapter_of(&broker, "client"),
+        &BrokerParticipantOptions::default(),
+    );
+
+    server.listen(Arc::new(AtServer(Arc::clone(&told))));
+    server.start().await.expect("started");
+    clients
+        .client(&BrokerTransportClientOptions::default())
+        .expect("a client")
+        .connect(&BrokerTransportClientConnectOptions::new("interop"))
+        .await
+        .expect("connected");
+    until(|| locked(&told.opened).len() == 1, "told open").await;
+
+    let before = calling.calls().len();
+    let stopping = crate::testing::spawn(server.stop());
+
+    // * in one turn, each name's unsubscription, then each CLOSE of 1001, its close told unclean
+    until(|| calling.unsubscribing() == 2, "each name let go of").await;
+    until(|| locked(&told.closed).len() == 1, "its close told").await;
+    assert_eq!(
+        calling
+            .calls()
+            .get(before..)
+            .unwrap_or_default()
+            .iter()
+            .filter(|call| !call.contains("bead/d/"))
+            .cloned()
+            .collect::<Vec<_>>(),
+        [
+            "unsubscribe bead/s/echo",
+            "unsubscribe bead/s/interop",
+            "publish bead/i/client"
+        ],
+        "each unsubscription, then its CLOSE"
+    );
+    assert_eq!(
+        locked(&told.closed)
+            .iter()
+            .map(|(is_clean, _)| *is_clean)
+            .collect::<Vec<_>>(),
+        [false],
+        "unclean"
+    );
+
+    // * settled once its broker let each go, its participant's link kept
+    super::settle().await;
+    assert!(!stopping.is_finished(), "awaiting its broker's word");
+    assert_eq!(names_of(&server), Some(2), "both held");
+    assert!(calling.settle_unsubscribe(Ok(())), "the first let go");
+    until(|| names_of(&server) == Some(1), "the first let go").await;
+    assert!(!stopping.is_finished(), "awaiting its broker's word");
+    assert!(calling.settle_unsubscribe(Ok(())), "the second let go");
+    stopping.await.expect("joined").expect("stopped");
+    assert_eq!(
+        (server.ready_state(), names_of(&server)),
+        (ReadyState::Closed, Some(0)),
+        "stopped"
+    );
+    assert!(participant.is_linked(), "its participant's link kept");
+    clients.stop().await;
     participant.stop().await;
 }
 
@@ -975,7 +1068,8 @@ async fn serves_its_name_again_in_its_group_once_a_connection_closes_as_its_brok
     Holding::settle(&holding.subscribing, Ok(()));
     until(|| names_of(&server) == Some(1), "its name served again").await;
 
-    // * one its broker refuses to let go is reported
+    // * one its broker refuses to let go is reported, and held still: nothing is asked of it once
+    // it holds fewer
     let second = clients
         .client(&BrokerTransportClientOptions::default())
         .expect("a client");
@@ -996,9 +1090,31 @@ async fn serves_its_name_again_in_its_group_once_a_connection_closes_as_its_brok
         )),
     );
     until(|| !reported().is_empty(), "the refusal reported").await;
+    assert_eq!(names_of(&server), Some(1), "held still");
+    second
+        .disconnect(&TransportClientDisconnectOptions::default())
+        .expect("closed");
+    until(|| locked(&told.closed).len() == 2, "the connection closed").await;
+    super::settle().await;
+    assert!(locked(&holding.subscribing).is_empty(), "nothing asked");
 
     // and one its broker refuses to serve again is reported, and left unheld
-    second
+    let third = clients
+        .client(&BrokerTransportClientOptions::default())
+        .expect("a client");
+
+    third
+        .connect(&BrokerTransportClientConnectOptions::new("interop"))
+        .await
+        .expect("connected");
+    until(
+        || locked(&holding.unsubscribing).len() == 1,
+        "its name let go of as it is full a third time",
+    )
+    .await;
+    Holding::settle(&holding.unsubscribing, Ok(()));
+    until(|| names_of(&server) == Some(0), "its name let go").await;
+    third
         .disconnect(&TransportClientDisconnectOptions::default())
         .expect("closed");
     until(

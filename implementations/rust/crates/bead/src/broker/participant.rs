@@ -453,10 +453,19 @@ struct Status {
     is_taken_over: bool,
     // its link went down as it connected: that attempt fails, rather than call it linked
     is_down_as_it_links: bool,
+    // its link went down as it stopped: a let-go that fails then is that loss, never reported
+    is_down_as_it_stops: bool,
     starting: Option<Arc<Starting>>,
     // what gives up the reconnection under way, as its link is taken over or it stops; let go by
     // that reconnection alone while it holds it
     relinking: Option<Arc<CancellationToken>>,
+}
+
+impl Status {
+    // its stop under way, from its mark to its settle, or disposed
+    fn is_stopping(&self) -> bool {
+        self.phase != Phase::Running || self.record.is_marked()
+    }
 }
 
 /// What a participant keeps beside its owner: what it was built with, and what any thread reads.
@@ -614,6 +623,44 @@ impl Config {
     /// Whether its link is up: started, and not lost since, or connected again.
     pub(crate) fn is_linked(&self) -> bool {
         *self.live.borrow()
+    }
+
+    /// Whether its stop is under way, from its call to its settle (spec 15.21): an OPEN that comes
+    /// then is refused 503 `busy`.
+    pub(crate) fn is_stopping(&self) -> bool {
+        locked(&self.status).is_stopping()
+    }
+
+    /// Whether a let-go that failed, `left`, is reported (spec 15.21): a refusal of its broker's,
+    /// unless its link was lost meanwhile — read as its stop runs by the down it noted, since its
+    /// link reads down from its stop's turn — and never an adapter's refusal of a misuse.
+    pub(crate) fn is_let_go_reported(&self, left: &BrokerError) -> bool {
+        if matches!(left, BrokerError::Refused(_)) {
+            return false;
+        }
+
+        let status = locked(&self.status);
+
+        if status.is_stopping() {
+            return !status.is_down_as_it_stops;
+        }
+
+        drop(status);
+
+        self.is_linked() && !self.is_down_as_it_links()
+    }
+
+    /// Whether its link was lost as its stop runs (spec 15.21): a name its broker let go since is
+    /// told nothing, its link having let it go of its own, and held until its stop settles.
+    pub(crate) fn is_lost_as_it_stops(&self) -> bool {
+        let status = locked(&self.status);
+
+        status.is_stopping() && status.is_down_as_it_stops
+    }
+
+    /// The current stop's record, which an operation captures at its call.
+    pub(crate) fn current_record(&self) -> Arc<StopRecord> {
+        Arc::clone(&locked(&self.status).record)
     }
 
     /// The peers' departures it holds a subscription to.
@@ -806,6 +853,8 @@ impl Drop for Ended {
     fn drop(&mut self) {
         {
             let mut status = locked(&self.config.status);
+
+            status.is_down_as_it_stops = false;
 
             if status.phase == Phase::Stopping {
                 status.phase = Phase::Running;
@@ -1907,8 +1956,15 @@ impl ParticipantState {
         let record = {
             let mut status = locked(&config.status);
 
-            // * a stop under way ends the link itself
-            if status.phase != Phase::Running || status.is_taken_over {
+            // * a stop under way ends the link itself: its loss noted, so that what it lets go of
+            // and fails then is told apart from a refusal (spec 15.21)
+            if status.phase != Phase::Running {
+                status.is_down_as_it_stops = true;
+
+                return;
+            }
+
+            if status.is_taken_over {
                 return;
             }
 
@@ -2488,6 +2544,7 @@ impl BrokerParticipant {
                 disposed: None,
                 is_taken_over: false,
                 is_down_as_it_links: false,
+                is_down_as_it_stops: false,
                 starting: None,
                 relinking: None,
             }),
@@ -2858,15 +2915,20 @@ impl BrokerParticipant {
         .await
     }
 
-    /// Ends its link in place, and with it what is under way as it is called (spec 15.21): gives up
-    /// its link's start under way and awaits it, closes each connection with a CLOSE of 1001, then
-    /// stops its adapter, which sends those CLOSEs before it ends the link, so its broker publishes
-    /// no will of a link it held; a connect awaiting its link or its answer fails, stopped as it
-    /// connected, and a reconnection, its own or a client's, ends at once, the stop its cause. Once
-    /// it settled, its start, a server's start over it, or a client's connect or reconnection over
-    /// it links it anew as another incarnation, its transports kept, and resets each peer whose
-    /// CLOSE its broker did not take. A stop called again before its next link's start settles
-    /// with the first, and tells nothing; a participant no longer in use is disposed.
+    /// Ends its link in place, and with it what is under way as it is called (spec 15.21): in its
+    /// turn, lets go of each name its broker holds or was asked to hold on the link, each kept
+    /// wanted for its next link, then closes each connection with a CLOSE of 1001, its link reading
+    /// down from then on; gives up its link's start under way and awaits it, then awaits its
+    /// broker's word on each name, within its adapter's bound, refusing 503 `busy` an OPEN its
+    /// broker hands it meanwhile, a `names` event told for each name let go; then stops its
+    /// adapter, which sends those CLOSEs before it ends the link, so its broker publishes no will
+    /// of a link it held. A name its broker refuses to let go is reported, unless its link was lost
+    /// meanwhile, and stays held until it stopped. A connect awaiting its link or its answer fails,
+    /// stopped as it connected, and a reconnection, its own or a client's, ends at once, the stop
+    /// its cause. Once it settled, its start, a server's start over it, or a client's connect or
+    /// reconnection over it links it anew as another incarnation, its transports kept, and resets
+    /// each peer whose CLOSE its broker did not take. A stop called again before its next link's
+    /// start settles with the first, and tells nothing; a participant no longer in use is disposed.
     pub fn stop(&self) -> BoxFuture<()> {
         let config = &self.inner.config;
         let (record, told, relinking) = {
@@ -2912,9 +2974,23 @@ impl BrokerParticipant {
         let mut under_way = config.under_way.subscribe();
         let closing = self.inner.owner.run(|state| {
             let ended = state.ordinals();
+            // ! its names first, in this turn: each unsubscription taking effect as it is made, so
+            // its broker reads it before each CLOSE, and once it let a name go an OPEN to it goes
+            // elsewhere; a link not up lets go of nothing here, its adapter's stop ending what its
+            // start brought up (spec 15.21)
+            let letting: Vec<BoxFuture<()>> = if state.config.is_linked() {
+                state
+                    .config
+                    .servers()
+                    .iter()
+                    .map(ServerInner::let_go)
+                    .collect()
+            } else {
+                Vec::new()
+            };
             let closing = state.stopping();
 
-            (ended, closing)
+            (ended, closing, letting)
         });
         let adapter = Arc::clone(&config.adapter);
         let inner = Arc::clone(&self.inner);
@@ -2924,11 +3000,19 @@ impl BrokerParticipant {
         };
 
         self.inner.owner.cover(async move {
-            let (ended, closing) = closing.await.unwrap_or_default();
+            let (ended, closing, letting) = closing.await.unwrap_or_default();
 
             // * its adapter's start under way, given up, settles before its stop: the two never
             // overlap, and what that start brought up after the stop ends with it
             under_way.wait_for(|count| *count == 0).await.ok();
+
+            // * its broker's word on each name, within its adapter's bound, its adapter still up:
+            // an OPEN its broker hands it meanwhile is refused 503, its REFUSE published (spec
+            // 15.18, 15.24)
+            for left in letting {
+                left.await;
+            }
+
             // * its stop sends what it was handed before it, each CLOSE among it, within a bound of
             // its own, and fails what has not gone by then (spec 15.24)
             adapter.stop().await;

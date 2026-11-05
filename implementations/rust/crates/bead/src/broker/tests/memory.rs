@@ -158,6 +158,116 @@ async fn hands_each_message_on_once_in_a_later_turn_in_the_order_its_publisher_p
     assert_eq!(taken(&heard), ["05"], "the one taken");
 }
 
+// what a subscriber hears, each message with whether its unsubscription had settled as it came,
+// read within the broker's turn that hands it on
+struct Letting {
+    heard: Heard,
+    letting: Mutex<Option<crate::router::types::BoxFuture<Result<(), BrokerError>>>>,
+}
+
+impl BrokerListener for Letting {
+    fn on_message(&self, message: &BrokerMessage) {
+        let mut letting = locked(&self.letting);
+        let is_settled = letting.as_mut().is_none_or(|future| {
+            future
+                .as_mut()
+                .poll(&mut core::task::Context::from_waker(
+                    core::task::Waker::noop(),
+                ))
+                .is_ready()
+        });
+
+        if is_settled {
+            *letting = None;
+        }
+
+        drop(letting);
+
+        let payload = message.payload().first().copied().unwrap_or_default();
+
+        locked(&self.heard).push(format!(
+            "{payload:02X} {}",
+            if is_settled { "let go" } else { "held" }
+        ));
+        message.settle();
+    }
+
+    fn on_down(&self, _down: BrokerDown) {}
+}
+
+// spec 15.24
+#[tokio::test]
+async fn hands_on_what_it_queued_to_a_subscription_before_it_lets_it_go_then_routes_it_nothing() {
+    let (broker, clock) = broker_on(&MemoryBrokerOptions::default());
+    let (publisher, _) = linked_of((&broker, "ada")).await;
+    let subscriber = broker
+        .adapter(&MemoryBrokerAdapterOptions::new("bob"))
+        .expect("an adapter");
+    let listener = Arc::new(Letting {
+        heard: Heard::default(),
+        letting: Mutex::default(),
+    });
+
+    subscriber.listen(Arc::<Letting>::clone(&listener));
+    subscriber
+        .start(BrokerStart::default())
+        .await
+        .expect("started");
+    subscriber
+        .subscribe(&topic(), BrokerSubscription::default())
+        .await
+        .expect("subscribed");
+
+    // * each queued before the unsubscription is made, none handed on yet: the unsubscription
+    // settles once each was
+    let publishing = [1, 2, 3].map(|payload| publisher.publish(publication_of(payload)));
+
+    *locked(&listener.letting) = Some(subscriber.unsubscribe(&topic()));
+    assert!(locked(&listener.heard).is_empty(), "nothing handed on yet");
+
+    for each in publishing {
+        assert_eq!(
+            each.await.expect("published"),
+            BrokerPublished::Taken,
+            "taken"
+        );
+    }
+
+    clock.settle().await;
+
+    let letting = locked(&listener.letting).take();
+
+    if let Some(letting) = letting {
+        letting.await.expect("let go");
+    }
+
+    assert_eq!(
+        taken(&listener.heard),
+        ["01 held", "02 held", "03 held"],
+        "each handed on before it settled"
+    );
+
+    // and from then on, it is routed nothing
+    assert_eq!(
+        publisher
+            .publish(publication_of(4))
+            .await
+            .expect("published"),
+        BrokerPublished::NoSubscriber,
+        "no subscriber"
+    );
+    clock.settle().await;
+    assert!(taken(&listener.heard).is_empty(), "nothing more");
+
+    // * one let go with nothing queued settles as its turn runs
+    subscriber
+        .subscribe(&topic(), BrokerSubscription::default())
+        .await
+        .expect("subscribed");
+    subscriber.unsubscribe(&topic()).await.expect("let go");
+    assert!(taken(&listener.heard).is_empty(), "nothing handed on");
+}
+
 // what a publisher's application does as it hears "go" within the broker's turn: it says so, waits
 // until its own publish made from another thread is queued, then publishes again, still within that
 // turn
