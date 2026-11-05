@@ -375,6 +375,8 @@ pub trait BrokerAdapter: Send + Sync + fmt::Debug {
         publication: BrokerPublication,
     ) -> BoxFuture<Result<BrokerPublished, BrokerError>>;
 
-    /// Ends its link cleanly, so its broker publishes no will.
+    /// Ends its link cleanly, so its broker publishes no will; settles once its broker let go of
+    /// each subscription of its link, as its unsubscription lets one go, so that its broker hands
+    /// it nothing more.
     fn stop(&self) -> BoxFuture<()>;
 }
