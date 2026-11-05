@@ -2319,24 +2319,27 @@ def a_participant_stopped_in_place(transport):
     captures = Captures(transport)
     first, second = Connection('first', opener=half(1)), Connection('second', opener=half(2))
     name = 'a participant that stops closes each connection with 1001 and serves no name, and at its next link serves it as another incarnation, resetting no peer'
+    # ! the stop settled once its broker let go of each subscription of its link (spec 15.24), so a
+    # parcel to its inbox, read strictly at once, finds no subscriber, on every binding
     steps = [*opened(captures, first), participant('stop'), closed(False, on=PEER),
-             closes(first, GOING_AWAY), until('names', 0)]
+             closes(first, GOING_AWAY), until('names', 0),
+             publish(PEER, 'inbox', first.by_peer(Kind.PING), refused='no-subscriber')]
     anew = captures('anew', 'incarnation', unlike='incarnation')
 
     if transport == AMQP:
         # ! an OPEN published while the participant is stopped waits in the name's queue, which its
-        # deployment provisioned, and is served at its next link within its life (spec 15.38): its
-        # ACCEPT, the new incarnation's, is the next parcel its peer reads after the CLOSE, so a
-        # RESET would fail the case
+        # deployment provisioned, and is served at its next link within its life (spec 15.38), where
+        # its inbox, deleted at the stop, took nothing: its ACCEPT, the new incarnation's, is the next
+        # parcel its peer reads after the CLOSE, so a RESET would fail the case
         waiting, answered = accepted(captures, second, incarnation=anew)
-        return (name, ['15.21'], {}, [
+        return (name, ['15.21', '15.24'], {}, [
                     *steps, waiting, participant('start'), until('names', 1), answered])
 
-    # ! the stop let the name go, so an OPEN finds no subscriber; the next start serves it again, and
-    # the next parcel the peer reads after the CLOSE is the ACCEPT of another incarnation, so a RESET
-    # would fail the case
+    # ! the stop let the name go, so an OPEN finds no subscriber, as the inbox did; the next start
+    # serves it again, and the next parcel the peer reads after the CLOSE is the ACCEPT of another
+    # incarnation, so a RESET would fail the case
     third = Connection('third', opener=half(3))
-    return (name, ['15.21'], {}, [
+    return (name, ['15.21', '15.24'], {}, [
                 *steps, publish(PEER, 'name', open_of(second), refused='no-subscriber'),
                 participant('start'), until('names', 1), *accepted(captures, third, incarnation=anew)])
 

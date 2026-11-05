@@ -3874,7 +3874,7 @@
     },
     {
       "id": "mqttBrokerAdapter.connectTimeout",
-      "name": "how long an MQTT 5 adapter's start waits for its password, where it asks its provider, and its CONNACK",
+      "name": "how long an MQTT 5 adapter waits: its start, for its password, where it asks its provider, and its CONNACK; and its stop, for what it was handed and its UNSUBACKs, then for its DISCONNECT",
       "clauses": [
         "1.4",
         "15.30"

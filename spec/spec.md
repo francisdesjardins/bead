@@ -1961,8 +1961,9 @@ participant stops, in a wait or once its attempt under way failed, no wait told 
 its cause; once it ends, the participant reports it, and its next start or connect links it anew.
 A participant's stop ends its link in place, and with it what is under way as it is called: it
 closes each of its connections with a CLOSE of 1001, then stops its adapter, which sends those
-CLOSEs before it ends the link so that its broker publishes no will (section 15.24), its
-incarnation ending with the link. A participant that stops as its link connects, at its start or
+CLOSEs, then has its broker let go of each subscription of the link, before it ends the link so
+that its broker publishes no will (section 15.24), its incarnation ending with the link. A
+participant that stops as its link connects, at its start or
 at an attempt of its reconnection, fails that link, stopped as it started: it gives up its
 adapter's start under way and ends its link once that start settled, never while it runs, so that
 nothing that start linked or subscribed outlives the stop, nor meets its id's next link. A stop
@@ -1972,7 +1973,10 @@ stopped as it connected, whether it awaits its answer or its participant's link;
 reconnection under way, or called, before the stop settles ends as its own signal ends it (section
 15.15), at once, in a wait or once its attempt under way failed, no wait told after it, the stop
 its cause. What a stop ended is told as that stop's, though a start follows it at once. Once its
-stop settled, a participant is as one whose reconnection ended: its start, a server's start over
+stop settled, its broker hands the participant nothing: a parcel to its inbox, or to a name no other
+participant serves, finds no subscriber, except an OPEN a name's queue holds through the stop
+(section 15.38), by the word of the broker its link reached, whatever another node of a cluster
+still routes. It is then as one whose reconnection ended: its start, a server's start over
 it, or a client's connect or reconnection over it links it anew as another incarnation, its inbox
 and the names its servers' transports serve subscribed again before anything goes, then sends a
 RESET to each peer whose CLOSE its broker did not take as it stopped; its transports and their
@@ -2038,8 +2042,10 @@ name:
 15.24. An adapter brings one broker's client, and offers its participant: the identity its broker
 authenticates its link by; to start a link that keeps no broker session, which a signal gives up,
 and to end it so that no will goes, what it was handed to publish before its end sent first within a
-bound of its own, what has not gone by then failed, a later start a new link; to publish a payload
-to a topic, said taken or refused by its broker; to subscribe a topic, said held by its broker; each
+bound of its own, what has not gone by then failed, its end settled once its broker let go of each
+subscription of its link, as its unsubscription lets one go, a later start a new link; to publish a
+payload to a topic, said taken or refused by its broker; to subscribe a topic, said held by its
+broker, and to let it go, said let go by its broker; each
 message it receives, with the topic it came to, and its acknowledgement; its link lost, and whether
 another link of its identity took it over; the largest payload a message to a topic carries, its
 inbox among them; the delivery it gives, at least once or at most once; whether its leg is secure.
@@ -2093,18 +2099,28 @@ holding no NUL ([`docs/support.md`](../docs/support.md), "Leveled down"): its ad
 it is built given one that is not, a password and a provider both, or either beside a TLS client
 certificate, and its start fails on a provider's answer that is not. It sends a packet within each
 Keep Alive in force, the Server Keep Alive its CONNACK names where it names one. A
-participant's stop ends its link with a DISCONNECT of Reason Code 0x00, so that no will goes. A
-DISCONNECT its broker sends of Reason Code 0x8E is its link taken over (section 15.21); any other
-end of its network connection is its link lost. Nothing of a link reaches another: no library
-reconnects it, subscribes again for it, holds what it publishes while it is down, or keeps its
-aliases, and what is asked of a link that is down is refused at once.
+participant's stop takes no new publication; once what it was handed has gone, each PUBACK come, it
+sends an UNSUBSCRIBE for each filter its link asked or holds, its inbox, its names and its peers'
+departures, one whose SUBSCRIBE went with no SUBACK yet among them, all at once, and awaits their
+UNSUBACKs together, what it was handed and those UNSUBACKs within one `connectTimeout` of its call.
+It then ends its link with a DISCONNECT of Reason Code 0x00, within a `connectTimeout` of its own,
+so that no will goes, an UNSUBACK that refuses, or none within that time, ending it all the same.
+The stop of a link that is down sends nothing. A DISCONNECT its broker sends of Reason Code 0x8E
+is its link taken over (section 15.21); any other end of its network connection is its link lost.
+Nothing of a link reaches another: no library reconnects it, subscribes again for it, holds what it
+publishes while it is down, or keeps its aliases, and what is asked of a link that is down is
+refused at once.
 
 15.27. A participant subscribes each topic in a SUBSCRIBE of its own, at QoS 1, No Local 0, Retain
 As Published 0 and Retain Handling 2, with no Subscription Identifier. A subscription is held once
 its SUBACK grants QoS 1, and refused on any other code, QoS 0 granted among them. A SUBACK says a
 subscription is installed, never that its subscriber may read what it matches: its broker's access
-control decides what it delivers (section 15.31). An UNSUBSCRIBE names the filter its SUBSCRIBE
-named, and a subscription is let go once its UNSUBACK came.
+control decides what it delivers (section 15.31). An UNSUBSCRIBE names one filter, the one its
+SUBSCRIBE named, whether or not its SUBACK came: its broker, reading a link's packets in their
+order, removes it all the same
+([MQTT 5.0 §3.10.4](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html)). A
+subscription is let go once its UNSUBACK came with a Reason Code of 0x00 or 0x11, No subscription
+existed, and refused on any other.
 
 15.28. A participant publishes each parcel in a PUBLISH of QoS 1 where its adapter delivers at least
 once, of QoS 0 where at most once, never of QoS 2; of RETAIN 0; with no Topic Alias, Response Topic,
@@ -2138,11 +2154,11 @@ CONNACK's, or within 268,435,460 bytes where its CONNACK names none. Under its d
 `maximumPacketSize`, an inbox `bead/i/server` takes a payload of 16,777,188 bytes; under a Maximum
 Packet Size of 4,096, a message to `bead/i/peer` carries 4,072.
 
-| Bound               | By default | Bounds                                                                                                       |
-| ------------------- | ---------- | ------------------------------------------------------------------------------------------------------------ |
-| `maximumPacketSize` | 16,777,216 | its CONNECT's Maximum Packet Size, the largest packet its broker sends it                                    |
-| `keepAlive`         | 30 s       | its CONNECT's Keep Alive, 1 to 65,535 seconds: its broker counts its link lost silent for half again as long |
-| `connectTimeout`    | 30 s       | how long its start waits for its password, where it asks its provider, and its CONNACK                       |
+| Bound               | By default | Bounds                                                                                                                                                                  |
+| ------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `maximumPacketSize` | 16,777,216 | its CONNECT's Maximum Packet Size, the largest packet its broker sends it                                                                                               |
+| `keepAlive`         | 30 s       | its CONNECT's Keep Alive, 1 to 65,535 seconds: its broker counts its link lost silent for half again as long                                                            |
+| `connectTimeout`    | 30 s       | how long its start waits for its password, where it asks its provider, and its CONNACK; and its stop, for what it was handed and its UNSUBACKs, then for its DISCONNECT |
 
 Neither `keepAlive` nor `connectTimeout` is ever without end or 0, and a `keepAlive` past 65,535
 seconds is refused.
@@ -2214,10 +2230,13 @@ one, whose ATTACH is answered with no terminus of its own, no target to a sender
 receiver, is refused, its DETACH to follow, and nothing is sent on it (AMQP 1.0 §2.6.3,
 [attach](https://docs.oasis-open.org/amqp/core/v1.0/os/amqp-core-transport-v1.0-os.html#type-attach)):
 a sending link refused as it starts fails its start, and one begun later refuses each publication
-it held, its link kept. A participant's stop detaches its receivers and closes its connection with
-no error; each publication without an outcome, sent or waiting for credit, and each subscription
-awaiting its ATTACH fail with its stop, none of them a no subscriber, which `released` alone tells
-(section 15.35). No link of an id takes another over. Nothing of a link reaches
+it held, its link kept. A participant's stop, within one `connectTimeout` of its call, takes no new
+publication; once what it was handed has gone, each outcome come, it deletes its inbox through its
+broker's management, as its inbox is let go (section 15.34), so that a message to it finds no
+subscriber, then detaches its receivers and closes its connection with no error; each publication
+of its own without an outcome, sent or waiting for credit, and each subscription awaiting its
+ATTACH fail with its stop, none of them a no subscriber, which `released` alone tells (section
+15.35). No link of an id takes another over. Nothing of a link reaches
 another: no library reconnects it, recovers it, or holds what it publishes while it is down, and
 what is asked of a link that is down is refused at once.
 
