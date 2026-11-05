@@ -90,8 +90,7 @@ that meets the Tenth Man:
   them ([0015](0015-a-pages-client-announces-itself-to-a-devtools-hook.md));
 - **a counted call's cost, measured**: a call counted against one not counted, on each side, a
   measure beside those the benches take
-  ([0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)), and a guard in CI against a
-  gross regression of the benches ([the root README](../../README.md#measurement));
+  ([0013](0013-every-language-debugs-alike-at-no-cost-when-off.md));
 - **a constrained C side**, which builds debugging by its switches
   ([0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)), refuses a declaration out of
   its range alone ([0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md))

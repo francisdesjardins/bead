@@ -105,6 +105,14 @@ every side, each side ordering its seeds by their SHA-1 and asserting their coun
 among its seeds. A target passes what a row of the support matrix states of its side, and nothing
 more.
 
+**A release's benches run in CI, never as a gate.** `.github/workflows/bench.yml` measures each side
+on every push to a release or hotfix branch, and by hand, on a runner of its own: the candidate and
+the newest `v*` tag's checkout in turn, process by process, by `tools/bench-release.mjs --tree`,
+then `tools/bench-compare.mjs` at 25%. A regression is a warning on the run, which stays green; a
+refused comparison or a failed measure fails its job. `tools/release.mjs prepare` lists the run on
+the release's branch among what a release owes by hand, and a regression is read once and judged
+from its report, never chased by a rerun ([the root README](../../README.md#measurement)).
+
 **A gate guards itself against finding nothing.** A floor says what it must have found: the comment
 budget fails under 40 blocks in 10 files; Microsoft.Testing.Platform fails a run where no test ran,
 with exit code 8, and Playwright one that found no test; `BEAD_INTEROP_REQUIRED=1` turns an interop
