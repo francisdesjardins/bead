@@ -1,0 +1,13 @@
+sequenceDiagram
+  participant C as Client
+  participant R as Passerelle, le relais
+  participant A as Destination 7
+  C->>R: REQUEST · callId 3 · DESTINATION 7<br/>CREDENTIAL JWT
+  Note over R: admis par son schéma,<br/>7 inscrite, son audience<br/>nommée par aud,<br/>sous les deux limites
+  R->>A: REQUEST · callId 1 · la jambe B<br/>CREDENTIAL JWT : les mêmes octets
+  Note over A: vérifie le JWT :<br/>l'appel tourne<br/>dans sa session
+  A-->>R: RESULT · callId 1
+  R-->>C: RESULT · callId 3
+  C->>R: REQUEST · callId 5 · DESTINATION 8<br/>CREDENTIAL JWT
+  R-->>C: FAILURE · callId 5<br/>DESTINATION_UNREACHABLE
+  Note over C,A: 8 vérifie une autre audience :<br/>refusée à l'ouverture, rien ne part vers la destination

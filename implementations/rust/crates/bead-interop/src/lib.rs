@@ -1,7 +1,11 @@
 //! Bead's interop service on the Rust side: its API `spec/interop-blueprint.json`, its descriptors
-//! written by hand until beadc's Rust target generates them, and its behaviour
+//! written by hand, which beadc's Rust target, ahead, generates, and its behaviour
 //! `spec/interop-service.json`, as Bead's Rust side answers it: what a client of any side calls, and
 //! what `spec/conversations.json` plays against.
+#![expect(
+    clippy::disallowed_methods,
+    reason = "the interop's own turn, outside the core"
+)]
 
 mod credentials;
 mod descriptors;
@@ -12,4 +16,6 @@ pub use descriptors::{
     InteropDescriptor, InteropProcedures, ON_PURPOSE, REGISTERED_ALREADY, SERVICE_ID, SERVICE_NAME,
     SERVICE_REVISION, interop_failures, interop_procedures,
 };
-pub use handlers::{identifier_of, issuer_of, judge_checked, offer_interop};
+pub use handlers::{
+    OfferedInterop, identifier_of, issuer_of, judge_checked, offer_interop, offer_interop_client,
+};

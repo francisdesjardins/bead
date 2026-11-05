@@ -9,7 +9,8 @@ use crate::clock::SharedClock;
 use crate::constants::ProcedureKind;
 use crate::identity::Procedure;
 use crate::memory::{
-    MemoryClient, MemoryClientOptions, MemoryConnectOptions, MemoryServer, MemoryServerOptions,
+    MemoryTransportClient, MemoryTransportClientConnectOptions, MemoryTransportClientOptions,
+    MemoryTransportServer, MemoryTransportServerOptions,
 };
 use crate::router::types::{ConnectionHandle, RouterError};
 use crate::server::{Server, ServerOptions};
@@ -23,10 +24,10 @@ pub type ServerReports = Arc<Mutex<Vec<(RouterError, Option<ConnectionHandle>)>>
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub struct PairOptions {
-    /// The server's.
-    pub server: ServerOptions,
-    /// The client's.
-    pub client: ClientOptions,
+    /// The server's: its defaults when none.
+    pub server: Option<ServerOptions>,
+    /// The client's: its defaults when none.
+    pub client: Option<ClientOptions>,
 }
 
 // the handle the server drew last
@@ -49,11 +50,11 @@ pub struct Pair {
     /// The server.
     pub server: Server,
     /// The server's transport.
-    pub memory: MemoryServer,
+    pub memory: MemoryTransportServer,
     /// The client.
     pub client: Client,
     /// The client's transport.
-    pub transport: MemoryClient,
+    pub transport: MemoryTransportClient,
     /// The handle the server drew for the client's connection.
     pub connection_handle: ConnectionHandle,
     /// What the server's router reported, each with its connection.
@@ -67,10 +68,10 @@ pub struct Pair {
 pub fn echo() -> Procedure {
     Procedure {
         service_id: 2,
-        id: 1,
+        procedure_id: 1,
         service_revision: 3,
-        name: "echo".to_owned(),
-        kind: Some(ProcedureKind::Request),
+        procedure_name: "echo".to_owned(),
+        procedure_kind: Some(ProcedureKind::Request),
         maximum_payload_bytes: None,
         deprecation: None,
     }
@@ -82,10 +83,10 @@ impl Pair {
     /// # Errors
     ///
     /// What building, starting or connecting it refuses.
-    pub async fn connected((start, options): (SystemTime, PairOptions)) -> Result<Self, String> {
+    pub async fn connected(start: SystemTime, options: &PairOptions) -> Result<Self, String> {
         let clock = SteppingClock::new(start);
         let shared: SharedClock = Arc::<SteppingClock>::clone(&clock);
-        let memory = MemoryServer::new(&MemoryServerOptions {
+        let memory = MemoryTransportServer::new(&MemoryTransportServerOptions {
             clock: Some(Arc::clone(&shared)),
             runtime: None,
         })
@@ -96,19 +97,21 @@ impl Pair {
             last: Arc::clone(&drawn),
         }));
 
-        let mut server_options = options.server;
+        let mut server_options = options.server.clone().unwrap_or_default();
 
         server_options.clock = Some(Arc::clone(&shared));
 
         let server = Server::new(Arc::new(memory.clone()), &server_options)
             .map_err(|error| error.to_string())?;
-        let transport = MemoryClient::new(&MemoryClientOptions {
+        let transport = MemoryTransportClient::new(&MemoryTransportClientOptions {
             clock: Some(Arc::clone(&shared)),
-            server: memory.clone(),
         })
         .map_err(|error| error.to_string())?;
-        let client = Client::new(Arc::new(transport.clone()), &options.client)
-            .map_err(|error| error.to_string())?;
+        let client = Client::new(
+            Arc::new(transport.clone()),
+            &options.client.clone().unwrap_or_default(),
+        )
+        .map_err(|error| error.to_string())?;
         let server_reports: ServerReports = Arc::default();
         let client_reports: Arc<Mutex<Vec<RouterError>>> = Arc::default();
         let (to_server, to_client) = (Arc::clone(&server_reports), Arc::clone(&client_reports));
@@ -131,11 +134,10 @@ impl Pair {
             }));
         memory.start().await.map_err(|error| error.to_string())?;
         transport
-            .connect(MemoryConnectOptions {
+            .connect(&MemoryTransportClientConnectOptions {
                 address: Some("127.0.0.1".to_owned()),
                 port: Some(50_001),
-                signal: None,
-                timeout: None,
+                ..MemoryTransportClientConnectOptions::new(memory.clone())
             })
             .await
             .map_err(|error| error.to_string())?;

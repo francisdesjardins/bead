@@ -52,7 +52,7 @@ public sealed record WebSocketTransportClientOptions
 /// Where a client connects — <c>ws://host:port/pathname</c>, or <c>wss://</c> when secured — what
 /// it offers there, and how long it waits.
 /// </summary>
-public sealed record WebSocketConnectOptions
+public sealed record WebSocketTransportClientConnectOptions
 {
     /// <summary>The server's host.</summary>
     public required string Host { get; init; }
@@ -103,6 +103,13 @@ public sealed record WebSocketConnectOptions
     /// The provider's own cancellation is its failure while the attempt's token stays live.
     /// </summary>
     public Func<CancellationToken, ValueTask<string>>? CredentialProvider { get; init; }
+
+    /// <summary>
+    /// What gives the connect up: one cancelled already refuses it before anything moves, one
+    /// cancelled after ends it Closed, each an <see cref="OperationCanceledException"/>. Its own
+    /// connect's alone: a reconnection replays the rest of these options, never this token.
+    /// </summary>
+    public CancellationToken CancellationToken { get; init; }
 }
 
 /// <summary>
@@ -137,7 +144,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
     private readonly Lock _gate = new();
     private volatile ReadyState _readyState = ReadyState.Uninitialized;
     // the options of the last connect its guard let through, which a reconnection connects with
-    private WebSocketConnectOptions? _lastConnectOptions;
+    private WebSocketTransportClientConnectOptions? _lastConnectOptions;
     // the socket of a connect under way, taken before anything is awaited: a dispose aborts it
     private ClientWebSocket? _connecting;
     // what ends a connect when its client is disposed
@@ -152,6 +159,8 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
     // the close handshake under way on the open connection, told whether a dispose dropped it
     private (WebSocketConnection Connection, TaskCompletionSource<bool> Closed)? _disconnecting;
     private Action? _reconnect;
+    // * paused whole by its router, a pause outlasting its connection; under the lock (spec 15.12)
+    private bool _isPaused;
     // how its events are told: what a listener throws is reported through Error
     private readonly ListenerGuard _listeners;
 
@@ -275,8 +284,8 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
     /// <summary>
     /// Connects to the server; settles once the connection is open. Refused with an
     /// <see cref="ArgumentOutOfRangeException"/> for a timeout
-    /// <see cref="WebSocketConnectOptions.Timeout"/> does not take, zero among them, and with an
-    /// <see cref="ArgumentException"/> for a credential <see cref="WebSocketConnectOptions.Credential"/>
+    /// <see cref="WebSocketTransportClientConnectOptions.Timeout"/> does not take, zero among them, and with an
+    /// <see cref="ArgumentException"/> for a credential <see cref="WebSocketTransportClientConnectOptions.Credential"/>
     /// does not take, each of which leaves the state, and the target a reconnection replays, as they
     /// were; with an <see cref="InvalidOperationException"/> unless
     /// Uninitialized or Closed; and with an <see cref="OperationCanceledException"/>, nothing
@@ -285,9 +294,10 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
     /// <see cref="WebSocketException"/> its socket throws, a dispose under way included, ending
     /// Closed.
     /// </summary>
-    public Task Connect(WebSocketConnectOptions options, CancellationToken cancellationToken = default)
+    public Task Connect(WebSocketTransportClientConnectOptions options)
     {
-        return Connecting(options, (cancellationToken, false));
+        // none refused where the connect refuses it, in its task
+        return Connecting(options, (options?.CancellationToken ?? CancellationToken.None, false));
     }
 
     /// <summary>
@@ -335,6 +345,41 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
     }
 
     /// <summary>
+    /// Pauses it whole (spec 15.12): its socket read no more, a message partway read to its end and
+    /// held, one at most, so TCP's window paces its server (RFC 9293 §3.8.6); a pause outlasts its
+    /// connection, until a resume, and one this side closes reads on to its peer's Close.
+    /// </summary>
+    public void Pause()
+    {
+        WebSocketConnection? connection;
+
+        // ! its own lock, never held as it delivers, then the connection's
+        lock (_gate)
+        {
+            _isPaused = true;
+            connection = _connection;
+        }
+
+        connection?.Pause();
+    }
+
+    /// <summary>
+    /// Resumes it: what it held delivered, then each message as it comes, from its read's own step.
+    /// </summary>
+    public void Resume()
+    {
+        WebSocketConnection? connection;
+
+        lock (_gate)
+        {
+            _isPaused = false;
+            connection = _connection;
+        }
+
+        connection?.Resume();
+    }
+
+    /// <summary>
     /// Hands the bytes of <paramref name="message"/> to the connection, as binary; refused with a
     /// <see cref="DisconnectException"/> unless Open, as the TypeScript side's ReadyStateError. Its
     /// credential is not sent beside it: the connection carries its upgrade's alone, as its router
@@ -358,13 +403,13 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
 
     /// <summary>
     /// Closes the connection and raises its close, which says it was clean as
-    /// <see cref="TransportDisconnectOptions.IsClean"/> does: with 1000, settling once the server
-    /// answered or its close timeout passed; or, <see cref="TransportDisconnectOptions.IsQuick"/>,
+    /// <see cref="TransportClientDisconnectOptions.IsClean"/> does: with 1000, settling once the server
+    /// answered or its close timeout passed; or, <see cref="TransportClientDisconnectOptions.IsQuick"/>,
     /// at once, the socket dropped, its close going out going away, 1001, unwaited. Refused with a
     /// <see cref="DisconnectException"/> unless Open, as the TypeScript side's ReadyStateError. A
     /// dispose meanwhile drops the socket, and no close is raised. It ends Closed.
     /// </summary>
-    public async Task CloseConnection(TransportDisconnectOptions? options = null)
+    public async Task CloseConnection(TransportClientDisconnectOptions? options = null)
     {
         var isClean = options?.IsClean ?? true;
         var isQuick = options?.IsQuick ?? false;
@@ -422,18 +467,20 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
     /// Connects again with the options of the last connect its guard let through, replacing an open
     /// connection without a close, and raises <see cref="IRouterClientTransport.Reconnect"/> as it
     /// starts. The first attempt goes at once, each next one after its
-    /// <see cref="TransportReconnectOptions.Delay"/>. Attempts that run out end Closed without a
+    /// <see cref="TransportClientReconnectOptions.Delay"/>. Attempts that run out end Closed without a
     /// close, with a <see cref="ReconnectException"/>; a cancel stops them with an
     /// <see cref="OperationCanceledException"/>, ending Closed, and one after a success disconnects,
     /// which raises a close. A reconnection under way, never connected, connecting or closing is an
-    /// <see cref="InvalidOperationException"/>, and so is a delay that throws, ending Closed; a misuse
-    /// or a token cancelled already leaves the state as it was. What its tap throws passes through.
+    /// <see cref="InvalidOperationException"/>, and so is a delay that throws, ending Closed; a fixed
+    /// delay out of bounds is an <see cref="ArgumentOutOfRangeException"/> as it is called, after
+    /// those and before the token; a misuse, such a delay or a token cancelled already leaves the
+    /// state as it was. What its tap throws passes through.
     /// </summary>
-    public async Task Reconnect(TransportReconnectOptions? options = null)
+    public async Task Reconnect(TransportClientReconnectOptions? options = null)
     {
-        var reconnect = options ?? new TransportReconnectOptions();
+        var reconnect = options ?? new TransportClientReconnectOptions();
         var token = reconnect.CancellationToken;
-        WebSocketConnectOptions target;
+        WebSocketTransportClientConnectOptions target;
         WebSocketConnection? replaced;
         Action? starting;
 
@@ -453,6 +500,10 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
             {
                 throw new InvalidOperationException($"the transport client cannot reconnect while {NameOf(_readyState)}");
             }
+
+            // * a fixed delay held as it is called, after the state's guards and before its token,
+            // so a refused one moves nothing (spec 1.4)
+            TransportReconnection.Held(reconnect);
 
             // before the drop below, so a token cancelled already leaves an open connection alone
             if (token.IsCancellationRequested)
@@ -552,7 +603,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
 
     // ws://host:port/pathname, or wss://; an IPv6 literal bracketed, or its colons would read as the
     // port's
-    private static Uri UriOf(WebSocketConnectOptions options)
+    private static Uri UriOf(WebSocketTransportClientConnectOptions options)
     {
         var host = options.Host.Contains(':') && !options.Host.StartsWith('[') ? $"[{options.Host}]" : options.Host;
         var path = options.Pathname.StartsWith('/') ? options.Pathname : $"/{options.Pathname}";
@@ -586,7 +637,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
     // the credential a connect is given, refused before anything moves: one a field cannot carry as
     // it is, one beside a provider, and one its upgrade would carry off the machine in the clear
     // (spec 13.4), the upgrade being where it would cross
-    private static void AssertCredential(WebSocketConnectOptions options)
+    private static void AssertCredential(WebSocketTransportClientConnectOptions options)
     {
         if (options.Credential is not null && options.CredentialProvider is not null)
         {
@@ -618,7 +669,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
 
     // the credential an attempt's upgrade carries: the one given, or one pending provider call's
     // outcome within this attempt's bound; its failure as cause, none for an empty credential
-    private async ValueTask<string?> CredentialOf(WebSocketConnectOptions options, (CancellationToken Wait, CancellationToken Provider) tokens)
+    private async ValueTask<string?> CredentialOf(WebSocketTransportClientConnectOptions options, (CancellationToken Wait, CancellationToken Provider) tokens)
     {
         var credential = options.Credential;
 
@@ -716,7 +767,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
 
     // a connect, or a reconnection's attempt, which its guard alone tells apart: an attempt passes
     // only while the client reconnects, and leaves the state to its reconnection when it fails
-    private async Task Connecting(WebSocketConnectOptions given, (CancellationToken Token, bool IsAttempt) call)
+    private async Task Connecting(WebSocketTransportClientConnectOptions given, (CancellationToken Token, bool IsAttempt) call)
     {
         ArgumentNullException.ThrowIfNull(given);
         AssertCredential(given);
@@ -724,7 +775,11 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
         // held before anything moves or is kept, so a reconnection connects again with it held
         var options = given with
         {
-            Timeout = Clocks.AssertHeld(("a connect's timeout", nameof(WebSocketConnectOptions.Timeout)), given.Timeout),
+            Timeout = Clocks.AssertHeld(("a connect's timeout", nameof(WebSocketTransportClientConnectOptions.Timeout)), given.Timeout),
+
+            // ! its own connect's, which its call carries: a reconnection replays the rest, never
+            // a token a connect gave
+            CancellationToken = CancellationToken.None,
         };
         var (token, isAttempt) = call;
         ClientWebSocket socket;
@@ -822,6 +877,13 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
                 _connecting = null;
                 _connectDisposed = null;
                 _connection = connection = new WebSocketConnection(socket, (MaximumMessageBytes, CloseTimeout));
+
+                // a pause outlasts the connection it was made on
+                if (_isPaused)
+                {
+                    connection.Pause();
+                }
+
                 _carried = credential is null ? null : (connection, credential);
                 _readyState = ReadyState.Open;
             }

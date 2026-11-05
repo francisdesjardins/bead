@@ -35,7 +35,8 @@ internal static class Vectors
     {
         var path = Path.Combine(AppContext.BaseDirectory, "vectors.json");
 
-        using var document = JsonDocument.Parse(File.ReadAllText(path));
+        // ! past the default depth of 64: a JWT's claims set nests 64 deep below the file's own levels
+        using var document = JsonDocument.Parse(File.ReadAllText(path), new JsonDocumentOptions { MaxDepth = 128 });
 
         return document.RootElement.Clone();
     }

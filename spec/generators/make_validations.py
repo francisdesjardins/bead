@@ -22,6 +22,8 @@ import os
 import re
 import struct
 import tempfile
+import time
+import urllib.error
 import urllib.request
 
 import re2
@@ -41,6 +43,20 @@ with open(os.path.join(HERE, 'ucd.json'), encoding='utf-8') as file:
     UCD = json.load(file)
 
 
+def fetched(url):
+    """A URL's bytes, asked up to three times: unicode.org answers a 5xx now and then, which a moment
+    later it does not."""
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(url, timeout=60) as response:
+                return response.read()
+        except (urllib.error.URLError, TimeoutError):
+            if attempt == 2:
+                raise
+            time.sleep(5 * 3 ** attempt)
+    raise AssertionError('unreachable')
+
+
 def ucd_text(name):
     """A file of the UCD, as ucd.json pins it: read from the cache it was fetched to, or fetched once
     and held there, its sha256 checked before a line of it is read."""
@@ -51,8 +67,7 @@ def ucd_text(name):
     if not os.path.exists(path):
         os.makedirs(cache, exist_ok=True)
 
-        with urllib.request.urlopen(pinned['url'], timeout=60) as response:
-            data = response.read()
+        data = fetched(pinned['url'])
 
         if hashlib.sha256(data).hexdigest() != pinned['sha256']:
             raise SystemExit(f'{pinned["url"]}: its sha256 is not the one spec/generators/ucd.json pins')

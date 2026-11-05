@@ -112,8 +112,12 @@ test('propagates a bind failure whose platform errors name no absent loopback or
 
 type StubDefineOptions = ITransportServerDefineOptions<{ id: string }, undefined>;
 
-/** A transport with no socket: it records its calls, and `start` waits on `gate` when one is set. */
+/**
+ * A transport with no socket: it records its calls, `start` waits on `gate` when one is set, and
+ * `assertStart`, when given, refuses a start first.
+ */
 const createStubServer = (options?: {
+  assertStart?: () => void;
   gate?: Promise<ITransportServerAddress>;
   startError?: Error;
   onStop?: () => Promise<void>;
@@ -141,12 +145,15 @@ const createStubServer = (options?: {
       return {
         defaults: { address: '0.0.0.0', findOpenPort: false, port: 80 },
         type: 'WS',
+        ...(options?.assertStart === undefined ? {} : { assertStart: options.assertStart }),
         close: ({ connectionHandle }) => {
           calls.push(`close:${connectionHandle}`);
           connections.delete(connectionHandle);
           end.emit('close', true, connectionHandle);
           return Promise.resolve();
         },
+        pause: noop,
+        resume: noop,
         send: (_, { connectionHandle }) => {
           calls.push(`send:${connectionHandle}`);
           return Promise.resolve();
@@ -190,7 +197,7 @@ test.describe('@francisdesjardins/bead/transport-server', () => {
       'MESSAGE_EVENT',
       'REFUSAL_EVENT',
       'TRANSPORT_HTTP',
-      'TRANSPORT_WS',
+      'TRANSPORT_WEBSOCKET',
     ] as const) {
       expect(entry[name]).toBe(constants[name]);
     }
@@ -238,6 +245,8 @@ test.describe('@francisdesjardins/bead/transport-server', () => {
       close: () => {
         return Promise.resolve();
       },
+      pause: noop,
+      resume: noop,
       send: () => {
         return Promise.resolve();
       },
@@ -271,6 +280,8 @@ test.describe('@francisdesjardins/bead/transport-server', () => {
           close: () => {
             return Promise.resolve();
           },
+          pause: noop,
+          resume: noop,
           send: () => {
             return Promise.resolve();
           },
@@ -357,6 +368,28 @@ test.describe('createTransportServer', () => {
     await server.start();
     await expect(server.start()).rejects.toThrow('the transport server is already open');
     expect(calls).toEqual(['start']);
+  });
+
+  test('refuses a start its implementation’s assertStart refuses, its state kept', async () => {
+    let isRefusing = true;
+    const { calls, server } = createStubServer({
+      assertStart: () => {
+        if (isRefusing) {
+          throw new ProgrammerError('its owner forbids it');
+        }
+      },
+    });
+
+    // * refused before anything moves: its state kept, its transport never reached
+    await expect(server.start()).rejects.toThrow(new ProgrammerError('its owner forbids it'));
+    expect([server.isUninitialized(), calls]).toEqual([true, []]);
+
+    // ! asked before its state's own guard: an open server refused alike, open still
+    isRefusing = false;
+    await server.start();
+    isRefusing = true;
+    await expect(server.start()).rejects.toThrow(new ProgrammerError('its owner forbids it'));
+    expect([server.isOpen(), calls]).toEqual([true, ['start']]);
   });
 
   test('ends CLOSED when the transport cannot start, and can start again', async () => {
@@ -574,6 +607,49 @@ test.describe('createTransportServer', () => {
     expect(started.isClosed()).toBe(true);
   });
 
+  // decision 0003
+  test('refuses a start once disposed, its state kept, and disposes once, stopping it first', async () => {
+    const gate = Promise.withResolvers<void>();
+    const { calls, server } = createStubServer({
+      onStop: () => {
+        return gate.promise;
+      },
+    });
+
+    await server.start();
+
+    // * two disposes: one stop, which both settle with
+    const disposes = [server[Symbol.asyncDispose](), server[Symbol.asyncDispose]()];
+    const settledDisposes: number[] = [];
+
+    for (const [index, disposing] of disposes.entries()) {
+      void disposing.then(() => {
+        settledDisposes.push(index);
+      });
+    }
+
+    await Promise.resolve();
+    expect([server.isClosing(), settledDisposes], 'stopping, neither settled').toEqual([true, []]);
+    gate.resolve();
+    await Promise.all(disposes);
+    expect([calls, server.isClosed()], 'stopped first, once').toEqual([['start', 'stop'], true]);
+
+    // * a start once disposed: its application's misuse, refused before anything moves
+    const refused = server.start();
+
+    await expect(refused, 'a misuse').rejects.toBeInstanceOf(ProgrammerError);
+    await expect(refused, 'its words').rejects.toThrow('the transport server is disposed');
+    expect([server.isClosed(), calls], 'its state kept, its transport never reached').toEqual([
+      true,
+      ['start', 'stop'],
+    ]);
+
+    // * a stop or a dispose after it settles at once, nothing asked of its transport
+    await server.stop();
+    await server[Symbol.asyncDispose]();
+    expect(calls, 'nothing more asked').toEqual(['start', 'stop']);
+  });
+
   test('"stop" forgets every connection', async () => {
     const { register, server } = createStubServer();
 
@@ -618,7 +694,7 @@ test.describe('createTransportServer', () => {
     server.on('connection', () => {
       throw thrown;
     });
-    server.on('connection', (...[, , connectionHandle]) => {
+    server.on('connection', (...[, connectionHandle]) => {
       lifecycle.push(['connection', connectionHandle]);
     });
     server.on('close', () => {
@@ -628,7 +704,9 @@ test.describe('createTransportServer', () => {
       lifecycle.push(['close', clean, connectionHandle]);
     });
 
-    expect(defineOptions.tell('connection', [{ id: handle }, undefined, handle])).toBe(true);
+    expect(
+      defineOptions.tell('connection', [{ request: undefined, socket: { id: handle } }, handle])
+    ).toBe(true);
     expect(defineOptions.tell('close', [false, handle])).toBe(true);
     expect(lifecycle).toEqual([
       ['connection', handle],

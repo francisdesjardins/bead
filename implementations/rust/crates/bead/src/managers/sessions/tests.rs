@@ -2,28 +2,42 @@
 //! it tells as each changes, and its two timers kept in step with the timeouts it stores, armed
 //! through an arming that records them.
 
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use core::time::Duration;
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::SystemTime;
 
 use serde_json::{Value, json};
 
-use super::{Arming, Inactivity, Session, SessionEvent, SessionManager, SessionManagerOptions};
+use super::{Arming, Inactivity, Session, SessionEvent, SessionManagerOptions, SessionState};
 use crate::clock::{SharedClock, Timer};
 use crate::duration::{LONGEST_TIMER, NEVER};
-use crate::errors::CallError;
+use crate::errors::{CallError, ProgrammerError};
 use crate::router::types::ConnectionHandle;
 use crate::session_token::SessionToken;
 use crate::testing::SteppingClock;
 use crate::testing::pair::{Pair, PairOptions};
 
+mod copies;
+mod lifecycle;
+mod timed;
+
 const FIRST: &str = "type=WS;ip=127.0.0.1;port=50001;ordinal=1";
 const SECOND: &str = "type=WS;ip=127.0.0.1;port=50002;ordinal=1";
 const UNKNOWN: &str = "type=WS;ip=127.0.0.1;port=1;ordinal=1";
 
-// 2026-01-01T00:00:00Z, in milliseconds since the epoch
-const NEW_YEAR: i64 = 1_767_225_600_000;
+// 2026-01-01T00:00:00Z, moved by `milliseconds`, back when negative
+fn at(milliseconds: i64) -> SystemTime {
+    let new_year = crate::testing::instants::new_year();
+    let moved = Duration::from_millis(milliseconds.unsigned_abs());
+
+    if milliseconds < 0 {
+        new_year.checked_sub(moved).expect("an instant")
+    } else {
+        new_year.checked_add(moved).expect("an instant")
+    }
+}
 
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
@@ -72,7 +86,7 @@ impl Arming for Recorder {
         &self,
         due: Duration,
         (inactivity, connection_handle): (Inactivity, ConnectionHandle),
-    ) -> Arc<dyn Timer> {
+    ) -> Result<Arc<dyn Timer>, ProgrammerError> {
         let armed = Arc::new(Armed {
             due,
             inactivity,
@@ -82,7 +96,7 @@ impl Arming for Recorder {
 
         locked(&self.armed).push(Arc::clone(&armed));
 
-        armed
+        Ok(armed)
     }
 }
 
@@ -109,13 +123,13 @@ impl Recorder {
 }
 
 // a manager, what it arms, and what it tells
-struct Sessions {
-    manager: SessionManager,
+struct SessionManager {
+    manager: SessionState,
     arming: Recorder,
     told: Vec<SessionEvent>,
 }
 
-impl Sessions {
+impl SessionManager {
     fn new() -> Self {
         Self::of(&SessionManagerOptions::default())
     }
@@ -125,7 +139,7 @@ impl Sessions {
         let clock = options.clock.clone().unwrap_or_else(stepping);
 
         Self {
-            manager: SessionManager::new(&SessionManagerOptions {
+            manager: SessionState::new(&SessionManagerOptions {
                 clock: Some(clock),
                 ..options.clone()
             })
@@ -136,7 +150,7 @@ impl Sessions {
     }
 
     fn create(connection: &str) -> Session {
-        Session::new(handle(connection), NEW_YEAR)
+        Session::new(handle(connection), at(0))
     }
 
     fn set(&mut self, session: Session) -> Result<Session, CallError> {
@@ -174,9 +188,10 @@ impl Sessions {
             .expect("a session")
     }
 
-    fn touch(&mut self, (connection, now): (&str, i64)) -> Option<Session> {
+    fn touch(&mut self, (connection, now): (&str, SystemTime)) -> Option<Session> {
         self.manager
             .touch((&handle(connection), now), (&self.arming, &mut self.told))
+            .expect("held timers")
     }
 
     fn tokens_of_both(&self) -> [Option<SessionToken>; 2] {
@@ -193,8 +208,8 @@ impl Sessions {
 
 #[test]
 fn create_makes_a_session_without_storing_it_no_token_no_timeout_no_data() {
-    let sessions = Sessions::new();
-    let session = Sessions::create(FIRST);
+    let sessions = SessionManager::new();
+    let session = SessionManager::create(FIRST);
 
     assert_eq!(
         session,
@@ -202,7 +217,7 @@ fn create_makes_a_session_without_storing_it_no_token_no_timeout_no_data() {
             connection_handle: handle(FIRST),
             connection_inactivity_timeout: Some(NEVER),
             data: None,
-            last_activity: NEW_YEAR,
+            last_activity: at(0),
             session_inactivity_timeout: Some(NEVER),
             session_token: None,
         },
@@ -213,8 +228,8 @@ fn create_makes_a_session_without_storing_it_no_token_no_timeout_no_data() {
 
 #[test]
 fn set_draws_a_token_emits_created_and_leaves_the_session_it_was_given_alone() {
-    let mut sessions = Sessions::new();
-    let draft = Sessions::create(FIRST);
+    let mut sessions = SessionManager::new();
+    let draft = SessionManager::create(FIRST);
     let stored = sessions.stored(draft.clone());
 
     assert!(stored.session_token.is_some(), "a token drawn");
@@ -229,8 +244,8 @@ fn set_draws_a_token_emits_created_and_leaves_the_session_it_was_given_alone() {
 
 #[test]
 fn set_emits_updated_when_it_replaces_a_different_session_and_nothing_for_the_same() {
-    let mut sessions = Sessions::new();
-    let stored = sessions.stored(Sessions::create(FIRST));
+    let mut sessions = SessionManager::new();
+    let stored = sessions.stored(SessionManager::create(FIRST));
 
     sessions.taken();
     sessions.stored(stored.clone());
@@ -255,11 +270,11 @@ fn set_emits_updated_when_it_replaces_a_different_session_and_nothing_for_the_sa
 
 #[test]
 fn draws_tokens_the_wire_can_carry_each_its_own() {
-    let mut sessions = Sessions::new();
+    let mut sessions = SessionManager::new();
     let mut drawn = BTreeSet::new();
 
     for connection in 0..200 {
-        let stored = sessions.stored(Sessions::create(&format!(
+        let stored = sessions.stored(SessionManager::create(&format!(
             "type=WS;ip=127.0.0.1;port={connection};ordinal=1"
         )));
 
@@ -278,7 +293,7 @@ fn draws_tokens_the_wire_can_carry_each_its_own() {
 // a platform's shape: a SessionToken is one by its type, so what is no token is never given
 #[test]
 fn a_token_given_to_set_must_be_one_and_belong_to_no_other_connection_or_nothing_is_stored() {
-    let mut sessions = Sessions::new();
+    let mut sessions = SessionManager::new();
     let first = sessions.get_or_else_set(FIRST);
 
     assert!(
@@ -292,7 +307,7 @@ fn a_token_given_to_set_must_be_one_and_belong_to_no_other_connection_or_nothing
 
     let taken = sessions.set(Session {
         session_token: first.session_token,
-        ..Sessions::create(SECOND)
+        ..SessionManager::create(SECOND)
     });
 
     assert!(
@@ -321,7 +336,7 @@ fn a_token_given_to_set_must_be_one_and_belong_to_no_other_connection_or_nothing
         sessions
             .stored(Session {
                 session_token: Some(token_of(3)),
-                ..Sessions::create(SECOND)
+                ..SessionManager::create(SECOND)
             })
             .session_token,
         Some(token_of(3)),
@@ -331,7 +346,7 @@ fn a_token_given_to_set_must_be_one_and_belong_to_no_other_connection_or_nothing
 
 #[test]
 fn a_token_is_free_again_once_its_session_is_deleted_or_replaced() {
-    let mut sessions = Sessions::new();
+    let mut sessions = SessionManager::new();
     let deleted = sessions.get_or_else_set(FIRST);
     let mut told = Vec::new();
 
@@ -341,7 +356,7 @@ fn a_token_is_free_again_once_its_session_is_deleted_or_replaced() {
         sessions
             .stored(Session {
                 session_token: deleted.session_token,
-                ..Sessions::create(SECOND)
+                ..SessionManager::create(SECOND)
             })
             .session_token,
         deleted.session_token,
@@ -350,14 +365,14 @@ fn a_token_is_free_again_once_its_session_is_deleted_or_replaced() {
 
     let replaced = sessions.get_or_else_set(FIRST);
 
-    sessions.stored(Sessions::create(FIRST));
+    sessions.stored(SessionManager::create(FIRST));
     sessions.manager.delete(&handle(SECOND), &mut told);
 
     assert_eq!(
         sessions
             .stored(Session {
                 session_token: replaced.session_token,
-                ..Sessions::create(SECOND)
+                ..SessionManager::create(SECOND)
             })
             .session_token,
         replaced.session_token,
@@ -368,11 +383,11 @@ fn a_token_is_free_again_once_its_session_is_deleted_or_replaced() {
 // a platform's shape: an update is handed its connection and its value alone, never a token
 #[test]
 fn keeps_each_connection_to_its_token_through_every_change_and_no_update_changes_it() {
-    let mut sessions = Sessions::new();
+    let mut sessions = SessionManager::new();
 
     sessions.stored(Session {
         session_token: Some(token_of(1)),
-        ..Sessions::create(FIRST)
+        ..SessionManager::create(FIRST)
     });
     sessions.manager.update_data(
         (
@@ -383,7 +398,7 @@ fn keeps_each_connection_to_its_token_through_every_change_and_no_update_changes
     );
     sessions.connection_timeout((FIRST, Some(milliseconds(5_000))));
     sessions.session_timeout((FIRST, Some(milliseconds(5_000))));
-    sessions.touch((FIRST, NEW_YEAR + 5));
+    sessions.touch((FIRST, at(5)));
 
     assert_eq!(
         sessions.tokens_of_both(),
@@ -407,7 +422,7 @@ fn keeps_each_connection_to_its_token_through_every_change_and_no_update_changes
     // the token it let go of is free for another
     sessions.stored(Session {
         session_token: Some(token_of(1)),
-        ..Sessions::create(SECOND)
+        ..SessionManager::create(SECOND)
     });
 
     assert_eq!(
@@ -419,9 +434,12 @@ fn keeps_each_connection_to_its_token_through_every_change_and_no_update_changes
 
 #[tokio::test]
 async fn get_or_else_set_stores_a_session_once_then_returns_it() {
-    let pair = Pair::connected((crate::testing::instants::new_year(), PairOptions::default()))
-        .await
-        .expect("a pair connected");
+    let pair = Pair::connected(
+        crate::testing::instants::new_year(),
+        &PairOptions::default(),
+    )
+    .await
+    .expect("a pair connected");
     let sessions = pair.server.sessions();
     let created = Arc::new(Mutex::new(0_usize));
     let hearing = Arc::clone(&created);
@@ -450,7 +468,7 @@ async fn get_or_else_set_stores_a_session_once_then_returns_it() {
 
 #[test]
 fn get_all_connection_handles_and_has_list_what_is_stored() {
-    let mut sessions = Sessions::new();
+    let mut sessions = SessionManager::new();
 
     sessions.get_or_else_set(FIRST);
     sessions.get_or_else_set(SECOND);
@@ -476,7 +494,7 @@ fn get_all_connection_handles_and_has_list_what_is_stored() {
 
 #[test]
 fn every_update_of_a_connection_with_no_session_is_null() {
-    let mut sessions = Sessions::new();
+    let mut sessions = SessionManager::new();
     let first = handle(FIRST);
 
     assert_eq!(
@@ -494,7 +512,7 @@ fn every_update_of_a_connection_with_no_session_is_null() {
         None,
         "its data"
     );
-    assert_eq!(sessions.touch((FIRST, NEW_YEAR)), None, "its activity");
+    assert_eq!(sessions.touch((FIRST, at(0))), None, "its activity");
     assert_eq!(
         sessions.manager.update_session_inactivity_timeout(
             (&first, Some(milliseconds(1))),
@@ -508,13 +526,13 @@ fn every_update_of_a_connection_with_no_session_is_null() {
 
 #[test]
 fn gives_a_timeout_left_out_the_default() {
-    let mut sessions = Sessions::of(&SessionManagerOptions {
+    let mut sessions = SessionManager::of(&SessionManagerOptions {
         session_inactivity_timeout: Some(milliseconds(7_000)),
         ..SessionManagerOptions::default()
     });
     let session = sessions.stored(Session {
         session_inactivity_timeout: None,
-        ..Sessions::create(FIRST)
+        ..SessionManager::create(FIRST)
     });
 
     assert_eq!(
@@ -529,10 +547,10 @@ fn gives_a_timeout_left_out_the_default() {
 
 #[test]
 fn says_nothing_of_a_session_timeout_given_the_one_it_has() {
-    let mut sessions = Sessions::new();
+    let mut sessions = SessionManager::new();
     let session = sessions.stored(Session {
         session_inactivity_timeout: Some(milliseconds(2_000)),
-        ..Sessions::create(FIRST)
+        ..SessionManager::create(FIRST)
     });
 
     sessions.taken();
@@ -546,14 +564,14 @@ fn says_nothing_of_a_session_timeout_given_the_one_it_has() {
 }
 
 #[tokio::test]
-async fn runs_on_the_clock_its_options_give_the_system_s_when_none() {
+async fn runs_on_the_clock_its_options_give_the_platform_s_when_none() {
     let clock = stepping();
-    let given = SessionManager::new(&SessionManagerOptions {
+    let given = SessionState::new(&SessionManagerOptions {
         clock: Some(Arc::clone(&clock)),
         ..SessionManagerOptions::default()
     })
     .expect("a manager on the clock given");
-    let none = SessionManager::new(&SessionManagerOptions::default()).expect("a manager");
+    let none = SessionState::new(&SessionManagerOptions::default()).expect("a manager");
     let system = crate::testing::wall_now();
     let read = none.clock().wall();
     let apart = read
@@ -568,15 +586,15 @@ async fn runs_on_the_clock_its_options_give_the_system_s_when_none() {
     );
     assert_eq!(
         given.create(handle(FIRST)).last_activity,
-        NEW_YEAR,
+        at(0),
         "its activity read on the clock given"
     );
 }
 
 #[test]
 fn a_timeout_left_out_takes_the_default_the_manager_s_own_or_its_options() {
-    let mut sessions = Sessions::new();
-    let mut tuned = Sessions::of(&SessionManagerOptions {
+    let mut sessions = SessionManager::new();
+    let mut tuned = SessionManager::of(&SessionManagerOptions {
         connection_inactivity_timeout: Some(milliseconds(1_000)),
         session_inactivity_timeout: Some(milliseconds(2_000)),
         ..SessionManagerOptions::default()
@@ -617,10 +635,10 @@ fn a_timeout_left_out_takes_the_default_the_manager_s_own_or_its_options() {
 
 #[test]
 fn set_takes_the_default_for_a_timeout_left_out_never_which_arms_no_timer() {
-    let mut sessions = Sessions::new();
+    let mut sessions = SessionManager::new();
     let stored = sessions.stored(Session {
         connection_inactivity_timeout: None,
-        ..Sessions::create(FIRST)
+        ..SessionManager::create(FIRST)
     });
 
     assert_eq!(stored.connection_inactivity_timeout, Some(NEVER), "never");
@@ -629,13 +647,13 @@ fn set_takes_the_default_for_a_timeout_left_out_never_which_arms_no_timer() {
 
 #[test]
 fn a_session_built_without_naming_its_timeouts_holds_both_without_end_as_one_made_by_create_does() {
-    let mut sessions = Sessions::new();
+    let mut sessions = SessionManager::new();
     let built = sessions.stored(Session {
         connection_inactivity_timeout: None,
         session_inactivity_timeout: None,
-        ..Sessions::create(FIRST)
+        ..SessionManager::create(FIRST)
     });
-    let created = sessions.stored(Sessions::create(SECOND));
+    let created = sessions.stored(SessionManager::create(SECOND));
     let both = |session: &Session| {
         (
             session.connection_inactivity_timeout,
@@ -649,7 +667,7 @@ fn a_session_built_without_naming_its_timeouts_holds_both_without_end_as_one_mad
 
 #[test]
 fn the_session_a_timer_reaches_is_the_one_stored_when_it_fires() {
-    let mut sessions = Sessions::new();
+    let mut sessions = SessionManager::new();
 
     sessions.get_or_else_set(FIRST);
     sessions.session_timeout((FIRST, Some(milliseconds(30))));
@@ -683,7 +701,7 @@ fn the_session_a_timer_reaches_is_the_one_stored_when_it_fires() {
 
 #[test]
 fn infinite_stops_a_running_timer() {
-    let mut sessions = Sessions::new();
+    let mut sessions = SessionManager::new();
 
     sessions.get_or_else_set(FIRST);
     sessions.connection_timeout((FIRST, Some(milliseconds(20))));
@@ -695,7 +713,7 @@ fn infinite_stops_a_running_timer() {
 
 #[test]
 fn activity_within_the_same_millisecond_restarts_both_timers_and_emits_nothing() {
-    let mut sessions = Sessions::new();
+    let mut sessions = SessionManager::new();
 
     sessions.get_or_else_set(FIRST);
     sessions.connection_timeout((FIRST, Some(milliseconds(200))));
@@ -703,8 +721,8 @@ fn activity_within_the_same_millisecond_restarts_both_timers_and_emits_nothing()
     sessions.taken();
 
     // the clock held on one millisecond
-    sessions.touch((FIRST, NEW_YEAR + 1));
-    sessions.touch((FIRST, NEW_YEAR + 1));
+    sessions.touch((FIRST, at(1)));
+    sessions.touch((FIRST, at(1)));
 
     // each touch stopped the timer before it and set another going
     assert_eq!(
@@ -724,7 +742,7 @@ fn activity_within_the_same_millisecond_restarts_both_timers_and_emits_nothing()
         sessions
             .taken()
             .into_iter()
-            .filter(|event| matches!(event, SessionEvent::LastActivityChanged(..)))
+            .filter(|event| matches!(event, SessionEvent::LastActivityChanged { .. }))
             .count(),
         1,
         "told once"
@@ -735,16 +753,24 @@ fn activity_within_the_same_millisecond_restarts_both_timers_and_emits_nothing()
 async fn the_activity_it_reports_reads_the_wall_clock_which_a_clock_set_by_hand_moves_alone() {
     const DAY: i64 = 86_400_000;
 
-    let pair = Pair::connected((crate::testing::instants::new_year(), PairOptions::default()))
-        .await
-        .expect("a pair connected");
+    let pair = Pair::connected(
+        crate::testing::instants::new_year(),
+        &PairOptions::default(),
+    )
+    .await
+    .expect("a pair connected");
     let sessions = pair.server.sessions();
-    let told: Arc<Mutex<Vec<(i64, i64)>>> = Arc::default();
+    let told: Arc<Mutex<Vec<(SystemTime, SystemTime)>>> = Arc::default();
     let hearing = Arc::clone(&told);
 
     sessions.on(Arc::new(move |event: &SessionEvent| {
-        if let SessionEvent::LastActivityChanged(_, new, old) = event {
-            locked(&hearing).push((*new, *old));
+        if let SessionEvent::LastActivityChanged {
+            new_value,
+            old_value,
+            ..
+        } = event
+        {
+            locked(&hearing).push((*new_value, *old_value));
         }
     }));
 
@@ -764,7 +790,7 @@ async fn the_activity_it_reports_reads_the_wall_clock_which_a_clock_set_by_hand_
 
     assert_eq!(
         *locked(&told),
-        [(NEW_YEAR - DAY, NEW_YEAR)],
+        [(at(-DAY), at(0))],
         "the wall clock's reading"
     );
     assert!(
@@ -776,10 +802,10 @@ async fn the_activity_it_reports_reads_the_wall_clock_which_a_clock_set_by_hand_
 
 #[test]
 fn session_token_of_gives_the_token_the_router_announces_to_a_connection_none_without_a_session() {
-    let mut sessions = Sessions::new();
+    let mut sessions = SessionManager::new();
     let stored = sessions.stored(Session {
         session_token: Some(token_of(42)),
-        ..Sessions::create(FIRST)
+        ..SessionManager::create(FIRST)
     });
 
     assert_eq!(
@@ -797,11 +823,11 @@ fn session_token_of_gives_the_token_the_router_announces_to_a_connection_none_wi
 
 #[test]
 fn a_session_stored_with_a_token_of_its_own_gets_its_timers_all_the_same() {
-    let mut sessions = Sessions::new();
+    let mut sessions = SessionManager::new();
 
     sessions.stored(Session {
         session_token: Some(token_of(7)),
-        ..Sessions::create(SECOND)
+        ..SessionManager::create(SECOND)
     });
     sessions.connection_timeout((SECOND, Some(milliseconds(20))));
 
@@ -822,11 +848,11 @@ fn a_session_stored_with_a_token_of_its_own_gets_its_timers_all_the_same() {
 
 #[test]
 fn a_new_session_set_on_a_connection_stops_the_timers_of_the_one_it_replaces() {
-    let mut sessions = Sessions::new();
+    let mut sessions = SessionManager::new();
 
     sessions.get_or_else_set(FIRST);
     sessions.connection_timeout((FIRST, Some(milliseconds(20))));
-    sessions.stored(Sessions::create(FIRST));
+    sessions.stored(SessionManager::create(FIRST));
 
     assert_eq!(sessions.arming.dues(), [milliseconds(20)], "one armed");
     assert!(sessions.arming.live().is_empty(), "stopped");
@@ -834,7 +860,7 @@ fn a_new_session_set_on_a_connection_stops_the_timers_of_the_one_it_replaces() {
 
 #[test]
 fn set_keeps_the_timers_in_step_with_the_timeouts_it_stores() {
-    let mut sessions = Sessions::new();
+    let mut sessions = SessionManager::new();
 
     sessions.get_or_else_set(FIRST);
 
@@ -851,7 +877,7 @@ fn set_keeps_the_timers_in_step_with_the_timeouts_it_stores() {
     // a new session with a timeout of its own is armed with it
     let armed = sessions.stored(Session {
         connection_inactivity_timeout: Some(milliseconds(20)),
-        ..Sessions::create(SECOND)
+        ..SessionManager::create(SECOND)
     });
 
     // the timer stopped is gone: the one armed alone runs
@@ -871,13 +897,13 @@ fn set_keeps_the_timers_in_step_with_the_timeouts_it_stores() {
 
 #[test]
 fn a_new_session_with_the_timeout_of_the_one_it_replaces_is_armed_anew() {
-    let mut sessions = Sessions::new();
+    let mut sessions = SessionManager::new();
 
     sessions.get_or_else_set(FIRST);
     sessions.connection_timeout((FIRST, Some(milliseconds(30))));
     sessions.stored(Session {
         connection_inactivity_timeout: Some(milliseconds(30)),
-        ..Sessions::create(FIRST)
+        ..SessionManager::create(FIRST)
     });
 
     // its timer went with it, and another is armed for the one replacing it
@@ -895,7 +921,7 @@ fn a_new_session_with_the_timeout_of_the_one_it_replaces_is_armed_anew() {
 
 #[test]
 fn a_reset_for_a_connection_with_no_session_arms_nothing() {
-    let mut sessions = Sessions::new();
+    let mut sessions = SessionManager::new();
     let first = handle(FIRST);
 
     sessions
@@ -909,7 +935,13 @@ fn a_reset_for_a_connection_with_no_session_arms_nothing() {
 
     assert!(sessions.arming.dues().is_empty(), "nothing armed");
     assert_eq!(
-        sessions.manager.gauges().counts.get("sessions").copied(),
+        sessions
+            .manager
+            .gauges()
+            .expect("distinct session counts")
+            .counts
+            .get("sessions")
+            .copied(),
         Some(0),
         "no session"
     );
@@ -917,7 +949,7 @@ fn a_reset_for_a_connection_with_no_session_arms_nothing() {
 
 #[test]
 fn dispose_stops_every_timer_and_forgets_every_session_without_events() {
-    let mut sessions = Sessions::new();
+    let mut sessions = SessionManager::new();
 
     sessions.get_or_else_set(FIRST);
     sessions.session_timeout((FIRST, Some(milliseconds(20))));
@@ -941,11 +973,11 @@ fn dispose_stops_every_timer_and_forgets_every_session_without_events() {
 
 #[test]
 fn a_set_once_disposed_is_a_disconnect_error_and_stores_nothing() {
-    let mut sessions = Sessions::new();
+    let mut sessions = SessionManager::new();
 
     sessions.manager.dispose();
 
-    let refused = sessions.set(Sessions::create(FIRST));
+    let refused = sessions.set(SessionManager::create(FIRST));
 
     assert!(
         matches!(refused, Err(CallError::Disconnected(_))),
@@ -956,7 +988,7 @@ fn a_set_once_disposed_is_a_disconnect_error_and_stores_nothing() {
 
 #[test]
 fn delete_emits_deleted_and_stops_the_timers_an_unknown_connection_is_false() {
-    let mut sessions = Sessions::new();
+    let mut sessions = SessionManager::new();
 
     sessions.get_or_else_set(FIRST);
 
@@ -979,6 +1011,7 @@ fn delete_emits_deleted_and_stops_the_timers_an_unknown_connection_is_false() {
         sessions
             .manager
             .gauges()
+            .expect("distinct session counts")
             .counts
             .get("timedConnections")
             .copied(),
@@ -989,9 +1022,9 @@ fn delete_emits_deleted_and_stops_the_timers_an_unknown_connection_is_false() {
 
 #[test]
 fn a_new_session_on_a_connection_gets_a_token_of_its_own() {
-    let mut sessions = Sessions::new();
-    let before = sessions.stored(Sessions::create(FIRST));
-    let after = sessions.stored(Sessions::create(FIRST));
+    let mut sessions = SessionManager::new();
+    let before = sessions.stored(SessionManager::create(FIRST));
+    let after = sessions.stored(SessionManager::create(FIRST));
 
     // the one over it told as an update, not a session created
     assert_eq!(
@@ -1018,7 +1051,7 @@ fn a_new_session_on_a_connection_gets_a_token_of_its_own() {
 
 #[test]
 fn update_connection_inactivity_timeout_stores_the_timeout_emits_its_change_and_arms_the_timer() {
-    let mut sessions = Sessions::new();
+    let mut sessions = SessionManager::new();
     let session = sessions.get_or_else_set(FIRST);
 
     sessions.taken();
@@ -1029,11 +1062,11 @@ fn update_connection_inactivity_timeout_stores_the_timeout_emits_its_change_and_
 
     assert_eq!(
         sessions.taken(),
-        [SessionEvent::ConnectionInactivityTimeoutChanged(
-            stored.clone(),
-            milliseconds(30),
-            NEVER
-        )],
+        [SessionEvent::ConnectionInactivityTimeoutChanged {
+            session: stored.clone(),
+            new_value: milliseconds(30),
+            old_value: NEVER,
+        }],
         "its change told once"
     );
     assert_eq!(
@@ -1058,7 +1091,7 @@ fn update_connection_inactivity_timeout_stores_the_timeout_emits_its_change_and_
 
 #[test]
 fn update_session_inactivity_timeout_stores_the_timeout_emits_its_change_and_arms_the_timer() {
-    let mut sessions = Sessions::new();
+    let mut sessions = SessionManager::new();
     let session = sessions.get_or_else_set(FIRST);
 
     sessions.taken();
@@ -1067,11 +1100,11 @@ fn update_session_inactivity_timeout_stores_the_timeout_emits_its_change_and_arm
 
     assert_eq!(
         sessions.taken(),
-        [SessionEvent::SessionInactivityTimeoutChanged(
-            stored.clone(),
-            milliseconds(30),
-            NEVER
-        )],
+        [SessionEvent::SessionInactivityTimeoutChanged {
+            session: stored.clone(),
+            new_value: milliseconds(30),
+            old_value: NEVER,
+        }],
         "its change told"
     );
     assert_eq!(
@@ -1097,10 +1130,10 @@ fn update_session_inactivity_timeout_stores_the_timeout_emits_its_change_and_arm
 #[test]
 fn a_timeout_past_the_longest_a_timer_waits_is_refused_by_a_reset_a_store_an_update_and_a_default_and_nothing_changes()
  {
-    let mut sessions = Sessions::new();
+    let mut sessions = SessionManager::new();
     let session = sessions.stored(Session {
         session_inactivity_timeout: Some(milliseconds(1_000)),
-        ..Sessions::create(FIRST)
+        ..SessionManager::create(FIRST)
     });
     let first = handle(FIRST);
     let past = milliseconds(2_147_483_648);
@@ -1126,7 +1159,7 @@ fn a_timeout_past_the_longest_a_timer_waits_is_refused_by_a_reset_a_store_an_upd
         sessions
             .set(Session {
                 connection_inactivity_timeout: Some(past),
-                ..Sessions::create(SECOND)
+                ..SessionManager::create(SECOND)
             })
             .is_err(),
         "a store"
@@ -1164,7 +1197,7 @@ fn a_timeout_past_the_longest_a_timer_waits_is_refused_by_a_reset_a_store_an_upd
             ..SessionManagerOptions::default()
         },
     ] {
-        assert!(SessionManager::new(&options).is_err(), "a default");
+        assert!(SessionState::new(&options).is_err(), "a default");
     }
 
     // the timer running is left as it was, and nothing was stored
@@ -1199,7 +1232,7 @@ fn a_timeout_past_the_longest_a_timer_waits_is_refused_by_a_reset_a_store_an_upd
 
 #[test]
 fn activity_restarts_both_timers_on_its_clock_and_emits_last_activity_changed() {
-    let mut sessions = Sessions::new();
+    let mut sessions = SessionManager::new();
     let session = sessions.get_or_else_set(FIRST);
 
     sessions.connection_timeout((FIRST, Some(milliseconds(200))));
@@ -1207,24 +1240,111 @@ fn activity_restarts_both_timers_on_its_clock_and_emits_last_activity_changed() 
     sessions.taken();
 
     // a later millisecond, so the activity is a change
-    let stored = sessions.touch((FIRST, NEW_YEAR + 5)).expect("a session");
+    let stored = sessions.touch((FIRST, at(5))).expect("a session");
 
     assert_eq!(
         sessions.taken(),
-        [SessionEvent::LastActivityChanged(
-            stored.clone(),
-            NEW_YEAR + 5,
-            NEW_YEAR
-        )],
+        [SessionEvent::LastActivityChanged {
+            session: stored.clone(),
+            new_value: at(5),
+            old_value: at(0),
+        }],
         "its change told"
     );
-    assert_eq!(stored.last_activity, NEW_YEAR + 5, "stamped");
+    assert_eq!(stored.last_activity, at(5), "stamped");
     assert_eq!(
-        session.last_activity, NEW_YEAR,
+        session.last_activity,
+        at(0),
         "the one handed before left alone"
     );
 
     // the first two stopped, two more of the same delay going
     assert_eq!(sessions.arming.dues(), [milliseconds(200); 4], "four armed");
     assert_eq!(sessions.arming.live().len(), 2, "two going");
+}
+
+struct RefusingArming<'recorder> {
+    recorder: &'recorder Recorder,
+    refuse_at: usize,
+    calls: AtomicUsize,
+}
+
+impl Arming for RefusingArming<'_> {
+    fn arm(
+        &self,
+        due: Duration,
+        timer: (Inactivity, ConnectionHandle),
+    ) -> Result<Arc<dyn Timer>, ProgrammerError> {
+        if self.calls.fetch_add(1, Ordering::SeqCst) == self.refuse_at {
+            return Err(ProgrammerError::new("the clock refuses this timer"));
+        }
+        self.recorder.arm(due, timer)
+    }
+}
+
+#[test]
+fn a_timer_refusal_stores_no_session_and_cancels_every_timer_prepared_for_it() {
+    for refuse_at in 0..2 {
+        let mut sessions = SessionManager::new();
+        let arming = RefusingArming {
+            recorder: &sessions.arming,
+            refuse_at,
+            calls: AtomicUsize::new(0),
+        };
+        let outcome = sessions.manager.set(
+            Session {
+                connection_inactivity_timeout: Some(Duration::from_millis(10)),
+                session_inactivity_timeout: Some(Duration::from_millis(20)),
+                ..SessionManager::create(FIRST)
+            },
+            (&arming, &mut sessions.told),
+        );
+        assert_eq!(
+            outcome.expect_err("the timer refused").to_string(),
+            "the clock refuses this timer"
+        );
+        assert!(!sessions.manager.has(&handle(FIRST)), "no session stored");
+        assert_eq!(sessions.manager.all(), [], "no token held");
+        assert!(sessions.told.is_empty(), "nothing told");
+        assert_eq!(sessions.arming.live(), [], "prepared timers cancelled");
+    }
+}
+
+#[test]
+fn a_timer_refusal_keeps_a_stored_timeout_and_its_live_timer_and_tells_nothing() {
+    for inactivity in [Inactivity::Connection, Inactivity::Session] {
+        let mut sessions = SessionManager::new();
+        let stored = sessions.stored(Session {
+            connection_inactivity_timeout: Some(Duration::from_millis(10)),
+            session_inactivity_timeout: Some(Duration::from_millis(20)),
+            ..SessionManager::create(FIRST)
+        });
+        sessions.taken();
+        let live = sessions.arming.live();
+        let arming = RefusingArming {
+            recorder: &sessions.arming,
+            refuse_at: 0,
+            calls: AtomicUsize::new(0),
+        };
+        let update = match inactivity {
+            Inactivity::Connection => SessionState::update_connection_inactivity_timeout,
+            Inactivity::Session => SessionState::update_session_inactivity_timeout,
+        };
+        let refused = update(
+            &mut sessions.manager,
+            (&handle(FIRST), Some(Duration::from_millis(30))),
+            (&arming, &mut sessions.told),
+        );
+        assert_eq!(
+            refused.expect_err("the timer refused").message(),
+            "the clock refuses this timer"
+        );
+        assert_eq!(
+            sessions.manager.get(&handle(FIRST)),
+            Some(stored),
+            "the stored timeout held"
+        );
+        assert_eq!(sessions.arming.live(), live, "the live timers held");
+        assert!(sessions.told.is_empty(), "nothing told");
+    }
 }

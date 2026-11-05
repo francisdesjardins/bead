@@ -75,7 +75,7 @@ public sealed class ParticipantDebugEventTests
         Assert.Equal([1L], links[1].Ended);
         Assert.NotEqual(before, pair.ClientParticipant.Incarnation);
         Assert.Equal(0, pair.ClientParticipant.Gauges().Counts["connections"]);
-        await pair.Client.Connect(new BrokerConnectOptions { Server = "interop" }, TestContext.Current.CancellationToken);
+        await pair.Client.Connect(new BrokerTransportClientConnectOptions { Server = "interop", CancellationToken = TestContext.Current.CancellationToken });
         await pair.Scheduler.WhenIdle();
         Assert.Equal(2L, pair.Events.Last((item) => { return item.Kind == "PING" && item.Direction == "tx"; }).Connection);
         await pair.ClientParticipant.Stop();
@@ -85,6 +85,54 @@ public sealed class ParticipantDebugEventTests
         var stopped = pair.Events.Last((item) => { return item.Event == "link"; });
         Assert.Equal("stopped", stopped.State);
         Assert.Equal([2L], stopped.Ended);
+    }
+
+    // debugging 13.5
+    [Fact]
+    public async Task Tells_a_stop_once_then_its_next_link_s_up_as_another_incarnation_and_nothing_after_a_dispose()
+    {
+        await using var pair = await TracePair.Of();
+        var participant = pair.ClientParticipant;
+
+        // * a stop, then another with no link between, which tells nothing
+        await participant.Stop();
+        await participant.Stop();
+        await pair.Scheduler.WhenIdle();
+
+        // * its next link, then its dispose, then nothing more: a stop, a dispose, a start refused
+        await participant.Start();
+        await pair.Scheduler.WhenIdle();
+        await participant.DisposeAsync();
+        await participant.Stop();
+        await participant.DisposeAsync();
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => { return participant.Start(); });
+        await pair.Scheduler.WhenIdle();
+        var links = pair.Events.Where((item) => { return item.Event == "link"; }).ToArray();
+        Assert.Equal(["up", "stopped", "up", "stopped"], links.Select((item) => { return item.State; }));
+        Assert.Equal([1L], links[1].Ended);
+        Assert.Equal(links[0].Incarnation, links[1].Incarnation);
+        Assert.NotEqual(links[1].Incarnation, links[2].Incarnation);
+        Assert.Equal(links[2].Incarnation, links[3].Incarnation);
+    }
+
+    // debugging 13.5
+    [Fact]
+    public async Task Tells_each_name_its_stop_lets_go_once_its_broker_let_it_go_after_its_CLOSEs_and_before_its_stopped()
+    {
+        await using var pair = await TracePair.Of();
+        var from = pair.ServerEvents.Count;
+
+        await pair.ServerParticipant.Stop();
+
+        var told = pair.ServerEvents.Skip(from).ToList();
+        var close = told.FindIndex((item) => { return item.Kind == "CLOSE" && item.Direction == "tx"; });
+        var names = told.FindIndex((item) => { return item.Event == "names"; });
+        var stopped = told.FindIndex((item) => { return item.Event == "link" && item.State == "stopped"; });
+
+        // * its CLOSE, then its name let go, once, then its stopped
+        Assert.True(close >= 0 && close < names && names < stopped, $"its CLOSE at {close}, its name let go at {names}, its stopped at {stopped}");
+        Assert.Equal([("interop", (bool?)false, (string?)null)], told.Where((item) => { return item.Event == "names"; }).Select((item) => { return (item.Name, item.IsHeld, item.Group); }));
+        Assert.Empty(pair.ServerParticipant.Names);
     }
 
     [Fact]
@@ -311,7 +359,10 @@ public sealed class ParticipantDebugEventTests
         await pair.Scheduler.Run(() =>
         {
             var unheard = Allocated();
-            Assert.Equal(new long[] { 0, 2608 }, unheard);
+
+            // * what is sent, pinned up to its broker's turn, which their one scheduler queues behind
+            // this one and routes there (decision 0045)
+            Assert.Equal(new long[] { 0, 1736 }, unheard);
             pair.ClientParticipant.Debug += pair.Events.Enqueue;
             var heard = Allocated();
             Assert.True(heard[0] > unheard[0]);
@@ -339,7 +390,7 @@ public sealed class ParticipantDebugEventTests
                 Scheduler = Scheduler,
                 Clock = Clock,
                 Heartbeat = Timeout.InfiniteTimeSpan,
-                Reconnect = new TransportReconnectOptions { Delay = (_, _) => { return TimeSpan.Zero; } },
+                Reconnect = new TransportClientReconnectOptions { Delay = new TransportClientReconnectDelay(TimeSpan.Zero) },
             });
             ServerParticipant = new BrokerParticipant(ServerAdapter, new BrokerParticipantOptions { Scheduler = Scheduler, Heartbeat = Timeout.InfiniteTimeSpan });
             ClientParticipant.Debug += Events.Enqueue;
@@ -374,7 +425,7 @@ public sealed class ParticipantDebugEventTests
         {
             var pair = new TracePair();
             await pair.Server.Start();
-            await pair.Client.Connect(new BrokerConnectOptions { Server = "interop" }, TestContext.Current.CancellationToken);
+            await pair.Client.Connect(new BrokerTransportClientConnectOptions { Server = "interop", CancellationToken = TestContext.Current.CancellationToken });
             await pair.Scheduler.WhenIdle();
             Assert.NotNull(pair.Accept);
             Assert.NotEmpty(pair.Handle);

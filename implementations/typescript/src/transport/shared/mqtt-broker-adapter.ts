@@ -11,7 +11,7 @@ import mqtt, {
   type MqttClient,
   type Packet,
 } from 'mqtt';
-import { assertHeldFinite, LONGEST_TIMER, PLATFORM_CLOCK } from './clock';
+import { assertHeldFinite, assertHeldWithin, LONGEST_TIMER, PLATFORM_CLOCK } from './clock';
 import { BROKER_DELIVERIES, BROKER_PUBLISHED, TRANSPORT_MQTT } from './constants';
 import { createEmitter } from './emitter';
 import { GenericError, ProgrammerError, toCancelError, toError } from './errors';
@@ -43,7 +43,12 @@ export type { BrokerDelivery, BrokerPublished, BrokerTopic, IBrokerAdapter } fro
 // interfaces
 
 export interface IMqttBrokerAdapterOptions {
-  /** How long its start waits for its CONNACK, in milliseconds (spec 15.30). Defaults to {@link CONNECT_TIMEOUT}. */
+  /**
+   * How long it waits, in milliseconds: its start, for its password, where it asks its provider,
+   * and its CONNACK; a subscription let go, for its UNSUBACK; and its stop, for what it was handed
+   * and its UNSUBACKs, then for its DISCONNECT (spec 15.26, 15.27, 15.30). Defaults to
+   * {@link CONNECT_TIMEOUT}.
+   */
   connectTimeout?: number | undefined;
   /** At least once by default, each publication of QoS 1; at most once, of QoS 0 (spec 15.28). */
   delivery?: BrokerDelivery | undefined;
@@ -62,10 +67,21 @@ export interface IMqttBrokerAdapterOptions {
    */
   maximumPacketSize?: number | undefined;
   /**
-   * Its Password, under its id as User Name; or asked at each link's start, so that one that expires
-   * renews with each incarnation. None where its TLS client certificate authenticates it.
+   * Its Password, under its id as User Name, as given: UTF-8 text, never empty and holding no NUL
+   * (spec 15.26). Refused with a {@link ProgrammerError} as it is built when it is not, beside a
+   * `passwordProvider`, and beside `tls`. With neither, its CONNECT carries its User Name alone.
    */
-  password?: string | (() => Promise<string> | string) | undefined;
+  password?: string | undefined;
+  /**
+   * What hands its Password at each link's start, before its network connection opens, with a signal
+   * aborted as its start's own signal aborts, as its link is stopped, as its `connectTimeout` passes,
+   * and once its start ends, linked or not: so that one that expires renews with each incarnation.
+   * Refused as `password` is, and beside it. Its start fails as it outlives that `connectTimeout`,
+   * or as a stop meets it, whether or not it hears its signal, a later answer serving nothing; what it
+   * throws fails its start, its cause; an answer that is no password fails it with a
+   * {@link ProgrammerError} (spec 15.26).
+   */
+  passwordProvider?: ((options: { signal: AbortSignal }) => string | Promise<string>) | undefined;
   /**
    * Its TLS client certificate and key, which its broker ties to its id, over `mqtts` or `wss` in
    * Node, never in a page; and the authority its broker's own certificate is trusted by, where not
@@ -93,10 +109,18 @@ export interface IMqttBrokerAdapter extends IBrokerAdapter {
 // one network connection, from its CONNECT to its end: every callback of a former one does nothing
 interface IIncarnation {
   readonly client: MqttClient;
+  /** Told, while its stop drains it, each time a publication settles or it ends. */
+  drained: (() => void) | undefined;
+  /** Its stop under way, which a later stop shares. */
+  ending: Promise<void> | undefined;
   /** What its awaited operations are failed with as it ends. */
   readonly failures: Set<(error: Error) => void>;
-  /** The filter each topic was subscribed by, which its UNSUBSCRIBE names. */
-  readonly filters: Map<string, string>;
+  /**
+   * The filter each topic's SUBSCRIBE named, by its topic, from its SUBSCRIBE until its UNSUBACK:
+   * what its UNSUBSCRIBE names, and what its stop lets go. Each SUBSCRIBE's its own record, so that
+   * the UNSUBACK of a former one never forgets a later one.
+   */
+  readonly filters: Map<string, { readonly filter: string }>;
   /** Its QoS 1 publications sent and not acknowledged. */
   inFlight: number;
   /** Up, its CONNACK read, and not ended. */
@@ -118,7 +142,7 @@ interface IIncarnation {
 
 // constants
 
-/** How long a start waits for its CONNACK, by default: 30 seconds (spec 15.30). */
+/** How long a start waits for its password, where it asks its provider, and its CONNACK, and a stop for what it was handed and its UNSUBACKs, then for its DISCONNECT, by default: 30 seconds (spec 15.30). */
 export const CONNECT_TIMEOUT = 30_000;
 
 /** Its Keep Alive, by default: 30 seconds, its will inside two heartbeats (spec 15.30). */
@@ -167,17 +191,33 @@ const secondsOf = (milliseconds: number): number => {
   return Math.min(LONGEST_LIFE_SECONDS, Math.max(1, Math.ceil(milliseconds / 1_000)));
 };
 
-/** `keepAlive` held: a number of milliseconds from 1 to 65,535 seconds, never 0 nor without end. */
-const assertKeepAlive = (duration: unknown): number => {
-  if (typeof duration !== 'number' || !(duration >= 1 && duration <= LONGEST_KEEP_ALIVE)) {
-    const written = typeof duration === 'string' ? JSON.stringify(duration) : String(duration);
+// ! no refusal names the password it refuses: a word never carries the secret
+const NOT_A_PASSWORD = 'a password is a non-empty string holding no NUL';
 
+/** Whether `password` is one: UTF-8 text, never empty and holding no NUL (spec 15.26). */
+const isPassword = (password: unknown): password is string => {
+  return typeof password === 'string' && password.length > 0 && !password.includes('\0');
+};
+
+/** What its link authenticates by, held as it is built: a password, its provider, or `tls` alone. */
+const assertAuthentication = ({
+  password,
+  passwordProvider,
+  tls,
+}: Pick<IMqttBrokerAdapterOptions, 'password' | 'passwordProvider' | 'tls'>): void => {
+  if (password !== undefined && passwordProvider !== undefined) {
+    throw new ProgrammerError('a link takes a password or a password provider, not both');
+  }
+
+  if ((password !== undefined || passwordProvider !== undefined) && tls !== undefined) {
     throw new ProgrammerError(
-      `keepAlive is a number of milliseconds from 1 to ${String(LONGEST_KEEP_ALIVE)}, not ${written}`
+      'a link authenticates by its client certificate or by a password, not both'
     );
   }
 
-  return Math.round(duration);
+  if (password !== undefined && !isPassword(password)) {
+    throw new ProgrammerError(NOT_A_PASSWORD);
+  }
 };
 
 // definition
@@ -191,14 +231,19 @@ const assertKeepAlive = (duration: unknown): number => {
  * Interval of 0. Its library reconnects nothing, subscribes nothing again and holds nothing while
  * down. Each subscription is of QoS 1, No Local 0, Retain As Published 0 and Retain Handling 2, a
  * group's its shared subscription, held once its SUBACK grants QoS 1, and let go once its UNSUBACK
- * came under 0x80, one of 0x80 or more refusing it. Each publication is of QoS 1,
+ * came under 0x80, one of 0x80 or more refusing it, none within connectTimeout failing it, its link
+ * and its filter kept. Each publication is of QoS 1,
  * or 0 at most once, RETAIN 0, a life in whole seconds where asked and no other property, counted
  * to its byte and refused past its CONNACK's Maximum Packet Size, held to its CONNACK's Receive
  * Maximum, later ones waiting in their order; its PUBACK of 0x10 says no subscriber, of 0x80 or
  * more refuses it. Each message is handed on before its PUBACK, which goes once it is settled. A
- * DISCONNECT of 0x8E tells its link taken over; any other end, lost; its stop sends a DISCONNECT
- * of 0x00, so that no will goes. Its leg is secure under TLS or to the loopback. In a page, its
- * WebSocket sends no message past 16 KiB, which Chromium sends as one frame.
+ * DISCONNECT of 0x8E tells its link taken over; any other end, lost; its stop takes no publication,
+ * sends what waits on the quota and awaits each PUBACK, fails what has not gone by then, sends an
+ * UNSUBSCRIBE for each filter its link asked or holds, one filter a packet, all at once, and awaits
+ * their UNSUBACKs, all within one connectTimeout of its call, then sends a DISCONNECT of 0x00
+ * within a connectTimeout of its own, so that no will goes: once it settled, its broker hands
+ * it nothing. Its leg is secure under TLS or to the loopback. In a page, its WebSocket sends no
+ * message past 16 KiB, which Chromium sends as one frame.
  *
  * @example
  * const adapter = createMqttBrokerAdapter({ id: 'server', password, url: 'mqtts://broker:8883' });
@@ -211,10 +256,13 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
     id,
     maximumPacketSize = MAXIMUM_PACKET_SIZE,
     password,
+    passwordProvider,
     tls,
     url,
   } = options;
-  const keepAlive = assertKeepAlive(options.keepAlive ?? KEEP_ALIVE);
+  const keepAlive = assertHeldWithin('keepAlive', options.keepAlive ?? KEEP_ALIVE, {
+    ceiling: LONGEST_KEEP_ALIVE,
+  });
   const connectTimeout = assertHeldFinite(
     'connectTimeout',
     options.connectTimeout ?? CONNECT_TIMEOUT
@@ -258,6 +306,8 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
     throw new ProgrammerError(`a TLS client certificate is carried over mqtts or wss, not ${url}`);
   }
 
+  assertAuthentication({ password, passwordProvider, tls });
+
   const isAtMostOnce = delivery === BROKER_DELIVERIES.AT_MOST_ONCE;
   const emitter = createEmitter<{ down: [IBrokerDown]; message: [IBrokerMessage] }>();
   const capabilities = Object.freeze({
@@ -270,6 +320,8 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
   // each start and each stop its own, so that a stop as a start asks its password ends that start
   let starts = 0;
   let isStarting = false;
+  // the start under way's ask, its provider's signal, which its stop aborts
+  let asking: AbortController | undefined;
   // what its last link's CONNACK said, read while it is down
   let lastMaximumPacketSize = LARGEST_PACKET_SIZE;
   let unsettled = 0;
@@ -307,6 +359,7 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
     incarnation.failures.clear();
     incarnation.reasons.clear();
     incarnation.filters.clear();
+    incarnation.drained?.();
 
     // ! a client whose network connection never opened has no stream to end
     try {
@@ -389,6 +442,134 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
     ) {
       incarnation.waiting.shift()?.send();
     }
+
+    incarnation.drained?.();
+  };
+
+  // * what it was handed to publish before its stop, sent and answered first: settles once nothing
+  // waits on the quota and every PUBACK came, its link ended, or its connectTimeout passed
+  // (spec 15.24)
+  const drain = (incarnation: IIncarnation): Promise<void> => {
+    return new Promise<void>((resolve) => {
+      const done = (): void => {
+        PLATFORM_CLOCK.clearTimeout(timer);
+        incarnation.drained = undefined;
+        resolve();
+      };
+      const timer = PLATFORM_CLOCK.setTimeout(done, Math.min(connectTimeout, LONGEST_TIMER));
+
+      incarnation.drained = () => {
+        if (
+          incarnation.isRetired ||
+          (incarnation.waiting.length === 0 && incarnation.inFlight === 0)
+        ) {
+          done();
+        }
+      };
+      incarnation.drained();
+    });
+  };
+
+  // * each filter its link asked or holds let go, one UNSUBSCRIBE each, all sent at once: settles
+  // once every UNSUBACK came, 0x00 or 0x11 letting it go and any other code too, its link ended, or
+  // `within` passed (spec 15.26, 15.27)
+  const letGo = (incarnation: IIncarnation, within: number): Promise<void> => {
+    // ! one filter a packet: one UNSUBSCRIBE of them all may pass its CONNACK's Maximum Packet Size,
+    // which its broker ends the link for, its will published
+    const asked = [...incarnation.filters.values()].map(({ filter }) => {
+      return filter;
+    });
+    const answered = [...new Set(asked)].map((filter) => {
+      return new Promise<void>((resolve) => {
+        const done = (): void => {
+          incarnation.failures.delete(done);
+          resolve();
+        };
+
+        incarnation.failures.add(done);
+        // ! a callback after its bound, the purge's 'Message removed' among them, serves nothing
+        incarnation.client.unsubscribe(filter, done);
+      });
+    });
+
+    return new Promise<void>((resolve) => {
+      const timer = PLATFORM_CLOCK.setTimeout(resolve, Math.min(within, LONGEST_TIMER));
+
+      void Promise.all(answered).then(() => {
+        PLATFORM_CLOCK.clearTimeout(timer);
+        resolve();
+      });
+    });
+  };
+
+  // * its stop, once: no down told, a stop is no loss, and no publication taken from it; what it
+  // was handed sent first, what is left failed, each filter let go, then its DISCONNECT of 0x00 sent
+  const endOf = async (incarnation: IIncarnation): Promise<void> => {
+    // * one connectTimeout from its stop's call: what it was handed, then its UNSUBACKs
+    const deadline = PLATFORM_CLOCK.performance.now() + connectTimeout;
+
+    incarnation.isLinked = false;
+
+    // ! before any packet awaiting its answer is let go below, whose PUBACK it waits on: what it
+    // was handed goes first, so that its broker reads it before the DISCONNECT
+    await drain(incarnation);
+
+    const stopped = new GenericError(`the link of ${id} stopped`);
+
+    for (const fail of incarnation.failures) {
+      fail(stopped);
+    }
+
+    for (const { fail } of incarnation.waiting.splice(0)) {
+      fail(stopped);
+    }
+
+    // ! after the drain, so that no UNSUBSCRIBE overtakes a publication waiting on its broker's
+    // Receive Maximum; and before it retires, so that a message that comes meanwhile is still handed
+    // on and settled: MQTT.js reads no UNSUBACK behind a PUBLISH it holds unacknowledged
+    if (!incarnation.isRetired && incarnation.client.connected) {
+      await letGo(incarnation, Math.max(0, deadline - PLATFORM_CLOCK.performance.now()));
+    }
+
+    incarnation.isRetired = true;
+    incarnation.filters.clear();
+
+    if (current === incarnation) {
+      current = undefined;
+      unsettled = 0;
+    }
+
+    if (incarnation.client.connected) {
+      // ! MQTT.js's clean end waits for every packet it awaits an answer to, a SUBACK or an UNSUBACK
+      // that never comes among them: its DISCONNECT goes now, behind what was written
+      for (const messageId of Object.keys(incarnation.client.outgoing)) {
+        incarnation.client.removeOutgoingMessage(Number(messageId));
+      }
+
+      // * its DISCONNECT within a connectTimeout of its own, though the drain spent the first: then
+      // its network connection ended at once, its broker never answering
+      await new Promise<void>((resolve) => {
+        const timer = PLATFORM_CLOCK.setTimeout(
+          () => {
+            try {
+              incarnation.client.stream.destroy();
+            } catch {
+              // its stream ended
+            }
+
+            resolve();
+          },
+          Math.min(connectTimeout, LONGEST_TIMER)
+        );
+
+        incarnation.client.end(false, { reasonCode: 0 }, () => {
+          PLATFORM_CLOCK.clearTimeout(timer);
+          resolve();
+        });
+      });
+    } else {
+      incarnation.client.end(true);
+    }
   };
 
   // ! handed on inside MQTT.js's hook, which holds its packet pump: its PUBACK goes once settled,
@@ -404,8 +585,8 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
     }
 
     emitter.emit('message', {
+      isRetained: packet.retain,
       payload: new Uint8Array(packet.payload as Uint8Array),
-      retained: packet.retain,
       settle: () => {
         if (isSettled) {
           return;
@@ -423,16 +604,98 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
     });
   };
 
+  // * its password asked of its provider, raced against its start's own signal, its stop and its
+  // connectTimeout: whichever ends the ask aborts its provider's signal with that start's outcome,
+  // and a later answer serves nothing (spec 15.26)
+  const askPassword = (
+    provider: NonNullable<IMqttBrokerAdapterOptions['passwordProvider']>,
+    { ask, signal }: { ask: AbortController; signal: AbortSignal | undefined }
+  ): Promise<string> => {
+    return new Promise<string>((resolve, reject) => {
+      let isSettled = false;
+      const settle = (): boolean => {
+        if (isSettled) {
+          return false;
+        }
+
+        isSettled = true;
+        PLATFORM_CLOCK.clearTimeout(timer);
+        signal?.removeEventListener('abort', cancel);
+        ask.signal.removeEventListener('abort', giveUp);
+
+        return true;
+      };
+      const giveUp = (): void => {
+        if (settle()) {
+          reject(toError(ask.signal.reason));
+        }
+      };
+      const cancel = (): void => {
+        ask.abort(toCancelError(signal as AbortSignal));
+      };
+      const timer = PLATFORM_CLOCK.setTimeout(
+        () => {
+          ask.abort(
+            new GenericError(
+              `the link of ${id} had no password within ${String(connectTimeout)} ms, its connectTimeout`
+            )
+          );
+        },
+        Math.min(connectTimeout, LONGEST_TIMER)
+      );
+
+      ask.signal.addEventListener('abort', giveUp, { once: true });
+
+      if (signal?.aborted === true) {
+        cancel();
+
+        return;
+      }
+
+      signal?.addEventListener('abort', cancel, { once: true });
+      // * a throw as it is called fails its start as a rejection does
+      void Promise.resolve()
+        .then(() => {
+          return provider({ signal: ask.signal });
+        })
+        .then(
+          (answer: unknown) => {
+            if (!settle()) {
+              return;
+            }
+
+            if (isPassword(answer)) {
+              resolve(answer);
+            } else {
+              reject(new ProgrammerError(NOT_A_PASSWORD));
+            }
+          },
+          (reason: unknown) => {
+            if (settle()) {
+              reject(new GenericError('the password provider failed', { cause: reason }));
+            }
+          }
+        );
+    });
+  };
+
   const linkWith = async (
     will: IBrokerStart['will'],
-    signal: AbortSignal | undefined
+    { ask, signal }: { ask: AbortController; signal: AbortSignal | undefined }
   ): Promise<void> => {
     const asked = starts;
-    const secret = typeof password === 'function' ? await password() : password;
+    // * one connectTimeout from its start's call: its password's ask, then its CONNACK
+    const deadline = PLATFORM_CLOCK.performance.now() + connectTimeout;
+    const secret =
+      passwordProvider === undefined
+        ? password
+        : await askPassword(passwordProvider, { ask, signal });
 
     if (asked !== starts) {
       throw new GenericError(`the link of ${id} stopped as it started`);
     }
+
+    const left = Math.max(0, Math.min(deadline - PLATFORM_CLOCK.performance.now(), LONGEST_TIMER));
 
     // the incarnation its hook hands messages on in, once its client is built
     const hooked: { incarnation?: IIncarnation | undefined } = {};
@@ -441,7 +704,7 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
       autoUseTopicAlias: false,
       clean: true,
       clientId: id,
-      connectTimeout,
+      connectTimeout: Math.max(1, Math.ceil(left)),
       // ! in a page alone, each message one frame (spec 15.25): in Node, `ws` fragments none, and
       // its stream sends with a callback, which the sliced send would drop
       ...(isNode()
@@ -503,6 +766,8 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
     const client = mqtt.connect(url, clientOptions);
     const held: IIncarnation = {
       client,
+      drained: undefined,
+      ending: undefined,
       failures: new Set(),
       filters: new Map(),
       inFlight: 0,
@@ -541,16 +806,13 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
     try {
       await new Promise<void>((resolve, reject) => {
         let lastError: Error | undefined;
-        const timer = PLATFORM_CLOCK.setTimeout(
-          () => {
-            fail(
-              new GenericError(
-                `the link of ${id} had no CONNACK within ${String(connectTimeout)} ms`
-              )
-            );
-          },
-          Math.min(connectTimeout, LONGEST_TIMER)
-        );
+        const timer = PLATFORM_CLOCK.setTimeout(() => {
+          fail(
+            new GenericError(
+              `the link of ${id} had no CONNACK within ${String(connectTimeout)} ms, its connectTimeout`
+            )
+          );
+        }, left);
         const fail = (error: Error): void => {
           PLATFORM_CLOCK.clearTimeout(timer);
           signal?.removeEventListener('abort', abort);
@@ -761,6 +1023,7 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
           if (!isSent && index !== -1 && signal !== undefined) {
             incarnation.waiting.splice(index, 1);
             reject(toCancelError(signal));
+            incarnation.drained?.();
           }
         };
 
@@ -785,10 +1048,26 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
 
       isStarting = true;
 
+      const ask = new AbortController();
+
+      asking = ask;
+
       try {
-        await linkWith(startOptions?.will, startOptions?.signal);
+        await linkWith(startOptions?.will, { ask, signal: startOptions?.signal });
       } finally {
-        isStarting = false;
+        // * a start its stop ended no longer holds the next
+        if (asking === ask) {
+          asking = undefined;
+          isStarting = false;
+        }
+
+        // ! its provider's signal aborted once its start ended, linked or not, in a later turn,
+        // so that its listeners run outside the start's own stack
+        if (passwordProvider !== undefined) {
+          PLATFORM_CLOCK.setTimeout(() => {
+            ask.abort();
+          }, 0);
+        }
       }
     },
     stop: async () => {
@@ -796,42 +1075,20 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
 
       starts += 1;
 
+      // * a start that asks its password ends at once, whether or not its provider hears its
+      // signal, and the next start links and asks anew
+      if (asking !== undefined) {
+        asking.abort(new GenericError(`the link of ${id} stopped as it started`));
+        asking = undefined;
+        isStarting = false;
+      }
+
       if (incarnation === undefined) {
         return;
       }
 
-      // * no down told: a stop is no loss
-      incarnation.isLinked = false;
-
-      const stopped = new GenericError(`the link of ${id} stopped`);
-
-      for (const fail of incarnation.failures) {
-        fail(stopped);
-      }
-
-      for (const { fail } of incarnation.waiting.splice(0)) {
-        fail(stopped);
-      }
-
-      incarnation.isRetired = true;
-      current = undefined;
-      unsettled = 0;
-
-      if (incarnation.client.connected) {
-        // ! MQTT.js's clean end waits for every packet it awaits an answer to, a SUBACK that never
-        // comes among them: its DISCONNECT goes now, behind what was written
-        for (const messageId of Object.keys(incarnation.client.outgoing)) {
-          incarnation.client.removeOutgoingMessage(Number(messageId));
-        }
-
-        await new Promise<void>((resolve) => {
-          incarnation.client.end(false, { reasonCode: 0 }, () => {
-            resolve();
-          });
-        });
-      } else {
-        incarnation.client.end(true);
-      }
+      incarnation.ending ??= endOf(incarnation);
+      await incarnation.ending;
     },
     subscribe: (topic, subscription?: IBrokerSubscription) => {
       const group = subscription?.group;
@@ -851,10 +1108,16 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
         );
       }
 
-      const filter = group === undefined ? topicOf(topic) : groupFilterOf(group, topic);
+      const key = topicOf(topic);
+      const filter = group === undefined ? key : groupFilterOf(group, topic);
 
       return awaited<void>(incarnation, {
         begin: ({ reject, resolve }) => {
+          // * recorded as its SUBSCRIBE goes, so that a stop before its SUBACK lets it go: its
+          // broker, reading the link's packets in their order, installs it before that UNSUBSCRIBE
+          const record = { filter };
+
+          incarnation.filters.set(key, record);
           incarnation.client.subscribe(
             filter,
             { nl: false, qos: 1, rap: false, rh: 2 },
@@ -863,10 +1126,15 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
               const code = (suback?.granted as number[] | undefined)?.[0];
 
               if (code === 1) {
-                incarnation.filters.set(topicOf(topic), filter);
                 resolve();
 
                 return;
+              }
+
+              // ! kept where its broker may hold it, QoS 0 granted among them, which its stop lets
+              // go; a code of 0x80 or more installed nothing
+              if (code !== undefined && code >= 0x80 && incarnation.filters.get(key) === record) {
+                incarnation.filters.delete(key);
               }
 
               if (code === REASON.SHARED_SUBSCRIPTIONS_NOT_SUPPORTED) {
@@ -893,10 +1161,25 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
       }
 
       const key = topicOf(topic);
-      const filter = incarnation.filters.get(key) ?? key;
+      const record = incarnation.filters.get(key);
+      const filter = record?.filter ?? key;
+      let timer: ReturnType<typeof PLATFORM_CLOCK.setTimeout> | undefined;
 
       return awaited<void>(incarnation, {
         begin: ({ reject, resolve }) => {
+          // * its UNSUBACK awaited within connectTimeout, past which it fails, its link kept so that
+          // no will goes, and its filter kept, which its stop lets go (spec 15.27)
+          timer = PLATFORM_CLOCK.setTimeout(
+            () => {
+              reject(
+                new GenericError(
+                  `the subscription of ${id} to ${filter} had no UNSUBACK within ${String(connectTimeout)} ms, its connectTimeout`
+                )
+              );
+            },
+            Math.min(connectTimeout, LONGEST_TIMER)
+          );
+          // ! its request never given up: MQTT.js reads a late UNSUBACK, which drops its record
           incarnation.client.unsubscribe(filter, (error, unsuback) => {
             // * the UNSUBACK's own code: 0x00, or 0x11 where its broker held none, lets it go
             const code = (unsuback as { granted?: number[] } | undefined)?.granted?.[0] ?? 0;
@@ -910,11 +1193,17 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
                 )
               );
             } else {
-              incarnation.filters.delete(key);
+              // ! the record it let go alone: a SUBSCRIBE asked again meanwhile keeps its own
+              if (record !== undefined && incarnation.filters.get(key) === record) {
+                incarnation.filters.delete(key);
+              }
+
               resolve();
             }
           });
         },
+      }).finally(() => {
+        PLATFORM_CLOCK.clearTimeout(timer);
       });
     },
   };

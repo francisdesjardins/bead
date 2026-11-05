@@ -9,8 +9,9 @@ repr's shortest digits, its strings as JSON.stringify writes a well-formed one, 
 UTF-16 code units. A proto payload is read by a reader of Probe, spec/codecs.proto, written from
 protobuf's Encoding guide and 17.9.2 to 17.9.8, its packed records, its map's entries and its group
 among them, its required fields judged once the whole is read and a closed enum's undeclared number
-setting nothing, and a proto value written one field at a time, refused where it leaves a required
-field unset. A row that would be refused for two
+setting nothing, and a proto value written one field at a time or as a chain nested that deep,
+refused where it nests past 17.9.3's bound, then where it leaves a required field unset. A row that
+would be refused for two
 reasons fails here, as does a written form that does not read back to itself. A backslash is chr(92),
 so that no escape this file builds is read before it is built."""
 import json
@@ -34,7 +35,8 @@ DEPTH = 64
 
 BYTE_ORDER_MARK = bytes([0xEF, 0xBB, 0xBF])
 
-# the reasons, derived, which no harness reads: a refusal answers PAYLOAD_UNDECODABLE whatever its reason
+# the reasons, derived: a refusal's message is its reason, every harness checking it, and a request's
+# PAYLOAD_UNDECODABLE carries it as its detail (17.2)
 NOT_UTF8, A_BYTE_ORDER_MARK, NOT_JSON, A_NAME_TWICE = 'not UTF-8', 'a byte order mark', 'not JSON', 'a name twice'
 A_SURROGATE_ALONE, PAST_A_DOUBLE, NESTED_PAST = 'a surrogate alone', 'a number past a double', 'nested past 64'
 NOT_FINITE, NO_JSON_VALUE = 'not a finite number', 'no JSON value'
@@ -304,6 +306,7 @@ FIELDS = {
     12: ('children', 'map<string, Probe>', (LEN,)),
     13: ('delimited', 'Probe', (SGROUP,)),
     14: ('shade', 'Shade', (VARINT,)),
+    16: ('tallies', 'map<string, uint32>', (LEN,)),
 }
 
 # Needs' fields by number, each of LEGACY_REQUIRED presence (17.9.7), and the numbers Shade, a closed
@@ -311,12 +314,13 @@ FIELDS = {
 NEEDS = {1: ('must', 'uint32', (VARINT,)), 2: ('shade', 'Shade', (VARINT,))}
 SHADES = {0: 'SHADE_DARK', 1: 'SHADE_LIGHT'}
 
-# a map's entry, as it is on the wire: a message of its key at 1 and its value at 2 (Encoding, "Maps")
+# a map's entry, as it is on the wire: a message of its key at 1 and its value at 2 (Encoding, "Maps");
+# children's value a Probe, tallies' a uint32
 ENTRY = {1: ('key', 'string', (LEN,)), 2: ('value', 'Probe', (LEN,))}
+TALLY = {1: ('key', 'string', (LEN,)), 2: ('value', 'uint32', (VARINT,))}
 
-# the 64 bits a varint holds, and the 32 of them a uint32 keeps, truncated as protobuf reads one
+# the 32 bits of a varint's 64 that a uint32 keeps, truncated as protobuf reads one
 UINT32 = 0xFFFF_FFFF
-UINT64 = 0xFFFF_FFFF_FFFF_FFFF
 
 
 class NotItsMessage(Exception):
@@ -351,7 +355,7 @@ def declared_values(name):
 
 
 def proto_varint(data, at):
-    """The varint at `at` and where it ends: ten bytes at most, its bits past 64 dropped (Encoding, "Base
+    """The varint at `at` and where it ends: ten bytes at most, its value within 64 bits (Encoding, "Base
     128 Varints")."""
     value = 0
 
@@ -362,7 +366,11 @@ def proto_varint(data, at):
         value |= (data[at + index] & 0x7F) << (7 * index)
 
         if data[at + index] < 0x80:
-            return value & UINT64, at + index + 1
+            # * a 10th byte past 0x01 sets a bit past the 64th: no unsigned 64-bit integer, no encoding
+            if index == 9 and data[at + index] > 0x01:
+                raise NotItsMessage('a varint past 64 bits')
+
+            return value, at + index + 1
 
     raise NotItsMessage('a varint of more than ten bytes')
 
@@ -453,7 +461,7 @@ def probe_of():
     """A Probe with no field set: its defaults, its fields of messages not set, and its shade unset, its
     presence explicit."""
     return {'text': '', 'number': 0, 'child': None, 'needs': None, 'needs_items': [], 'counts': [], 'stamps': [],
-            'children': {}, 'delimited': None, 'shade': None}
+            'children': {}, 'delimited': None, 'shade': None, 'tallies': {}}
 
 
 def needs_of():
@@ -547,10 +555,11 @@ def message_at(probe, data, at, depth):
     return at
 
 
-def entry_at(data, at, depth):
-    """A map's entry, read as the message it is on the wire, `depth` messages below the top, its key, its
-    value and where its record ends: each at a wire type its type takes (17.9.5), and no other field
-    (17.9.6); a key or a value not given its default, a value given twice merged."""
+def entry_at(data, at, depth, shape=ENTRY):
+    """A map's entry of `shape`, read as the message it is on the wire, `depth` messages below the top,
+    its key, its value and where its record ends: each at a wire type its type takes (17.9.5), and no
+    other field (17.9.6); a key or a value not given its default, a Probe given twice merged, a uint32
+    given twice its last."""
     field, at = proto_length(data, at)
 
     if depth > PROTO_DEPTH:
@@ -561,19 +570,25 @@ def entry_at(data, at, depth):
     number, wire, within = next(fields)
 
     while number is not None:
-        if number not in ENTRY:
+        if number not in shape:
             raise NotItsMessage("a field a map's entry does not declare")
 
-        if wire not in ENTRY[number][2]:
+        if wire not in shape[number][2]:
             raise NotItsMessage('a field at a wire type its type does not take')
 
         if number == 1:
             key, within = text_at(field, within)
+        elif shape is TALLY:
+            value, within = proto_varint(field, within)
+            value &= UINT32
         else:
             value = value or probe_of()
             within = message_at(value, field, within, depth + 1)
 
         number, wire, within = fields.send(within)
+
+    if shape is TALLY:
+        return key, value or 0, at
 
     return key, value or probe_of(), at
 
@@ -618,6 +633,10 @@ def proto_read_into(probe, data, at, depth, group):
         elif name == 'children':
             key, value, at = entry_at(data, at, depth + 1)
             probe['children'][key] = value
+        elif name == 'tallies':
+            # * a scalar map's entry is a message on the wire too, and counts as one (17.9.3)
+            key, value, at = entry_at(data, at, depth + 1, TALLY)
+            probe['tallies'][key] = value
         elif name == 'needs':
             probe['needs'] = probe['needs'] or needs_of()
             at = needs_at(probe['needs'], data, at, depth + 1)
@@ -655,9 +674,10 @@ def text_of(units):
 
 
 def nested_below(probe):
-    """How deep messages nest below `probe`, at the deepest: through child and delimited, and through each
-    map's entry and its value, an entry counting as a message (17.9.3)."""
-    deepest = 0
+    """How deep messages nest below `probe`, at the deepest: through child and delimited, through each
+    entry of children and its value, and through each entry of tallies, an entry counting as a message
+    (17.9.3)."""
+    deepest = 1 if probe['tallies'] else 0
 
     for below in (probe['child'], probe['delimited']):
         if below is not None:
@@ -761,9 +781,12 @@ def needs_write(needs):
 
 
 def proto_write(probe):
-    """The bytes of a Probe given one field or none, its fields in their numbers' order: a scalar at its
-    default not written, its presence implicit, and child and needs written where they are set, an
-    empty message included."""
+    """The bytes of a Probe whose bytes protobuf fixes, its fields in their numbers' order: a scalar at
+    its default not written, its presence implicit; child, needs and delimited written where they are
+    set, an empty message included, delimited as a group; and each entry of tallies, its key and its
+    value each written, neither at its default. children is never given: a library may leave an entry's
+    key out at its default."""
+    assert not probe['children'], probe
     written = b''
 
     if probe['text']:
@@ -778,15 +801,31 @@ def proto_write(probe):
     if probe['needs'] is not None:
         written += proto_record(7, LEN, needs_write(probe['needs']))
 
+    if probe['delimited'] is not None:
+        written += proto_record(13, SGROUP, proto_write(probe['delimited']) + proto_varint_of(13 << 3 | EGROUP))
+
+    for key in sorted(probe['tallies']):
+        assert key and probe['tallies'][key], probe['tallies']
+        written += proto_record(16, LEN, proto_record(1, LEN, key.encode('utf-8'))
+                                + proto_record(2, VARINT, proto_varint_of(probe['tallies'][key])))
+
     return written
 
 
-def chain(below):
-    """A Probe with that many messages nested below it through child, each with no field set."""
-    probe = probe_of()
+# the ways a chain nests, each the field that holds the next Probe: child, a message field; children,
+# a map's entry under the key '', which counts as a message of its own; delimited, a group
+THROUGH = {'nested': 'child', 'entries': 'children', 'delimited': 'delimited'}
+
+
+def chain(below, through='nested', tallied=False):
+    """A Probe with that many Probes nested below it through child, children's entries or delimited,
+    each with no field set but the one that holds the next; the deepest holding tallies {'a': 1} where
+    it is tallied."""
+    probe = {**probe_of(), **({'tallies': {'a': 1}} if tallied else {})}
 
     for _ in range(below):
-        probe = {**probe_of(), 'child': probe}
+        held_by = THROUGH[through]
+        probe = {**probe_of(), held_by: {'': probe} if held_by == 'children' else probe}
 
     return probe
 
@@ -947,6 +986,10 @@ PAYLOADS = [
     ('a varint of 11 bytes', 'proto', ['17.9.1'], bytes.fromhex('10' + ' 80' * 10 + ' 01')),
     ('an unknown varint of 10 bytes', 'proto', ['17.9'], bytes.fromhex('48' + ' 80' * 9 + ' 00')),
     ('an unknown varint of 11 bytes', 'proto', ['17.9.1'], bytes.fromhex('48' + ' 80' * 10 + ' 00')),
+    # a varint encodes an unsigned 64-bit integer: a 10th byte past 0x01 is no encoding
+    ('a varint of 10 bytes past 64 bits', 'proto', ['17.9.1'], bytes.fromhex('10' + ' FF' * 9 + ' 02')),
+    ('an unknown varint of 10 bytes past 64 bits', 'proto', ['17.9.1'], bytes.fromhex('48' + ' 80' * 9 + ' 02')),
+    ('a packed uint32 of 10 bytes past 64 bits', 'proto', ['17.9.1'], bytes.fromhex('52 0A' + ' FF' * 9 + ' 02')),
     # * a message's records end where its length ends: one that runs on reads its parent's bytes
     ('an unknown record past the end of its message', 'proto', ['17.9.1'],
      bytes.fromhex('0A 01 61 1A 02 25 00 0A 01 62')),
@@ -1010,6 +1053,13 @@ PAYLOADS = [
      map_chain(PROTO_DEPTH // 2)),
     ('51 maps deep, 102 messages below the top, each entry counted', 'proto', ['17.9.3'],
      map_chain(PROTO_DEPTH // 2 + 1)),
+    # a group counts as a message, and so does a scalar map's entry, which holds no message of its own
+    ('100 groups below the top', 'proto', ['17.9.3'], proto_write(chain(PROTO_DEPTH, 'delimited'))),
+    ('101 groups below the top', 'proto', ['17.9.3'], proto_write(chain(PROTO_DEPTH + 1, 'delimited'))),
+    ("99 messages below the top, the last holding a scalar map's entry", 'proto', ['17.9.3'],
+     proto_write(chain(PROTO_DEPTH - 1, tallied=True))),
+    ("100 messages below the top, the last holding a scalar map's entry", 'proto', ['17.9.3'],
+     proto_write(chain(PROTO_DEPTH, tallied=True))),
     # a message that leaves a required field unset, at any depth, judged once the whole is read (17.9.7)
     ('a required field unset, one below the top', 'proto', ['17.9.7'], bytes.fromhex('3A 02 10 00')),
     ('required fields set at their defaults', 'proto', ['17.9.7'], bytes.fromhex('3A 04 08 00 10 00')),
@@ -1032,9 +1082,19 @@ PAYLOADS = [
      bytes.fromhex('3A 04 08 00 10 05')),
     ('a required closed enum given a declared number, then one it does not declare', 'proto', ['17.9.7'],
      bytes.fromhex('3A 06 08 00 10 01 10 05')),
+    # * an enum's number is its varint's low 32 bits, as protobuf reads an int32: past 32 bits, a
+    # number may be one its enum declares
+    ('a required closed enum given a number past 32 bits, whose low 32 bits it declares', 'proto', ['17.9.7'],
+     bytes.fromhex('3A 08 08 00 10 81 80 80 80 10')),
+    ('a required closed enum given a number past 32 bits, whose low 32 bits it does not declare', 'proto',
+     ['17.9.7'], bytes.fromhex('3A 08 08 00 10 85 80 80 80 10')),
     # a closed enum's undeclared number sets nothing on a singular field (17.9.8)
     ("a closed enum's number its enum does not declare, which sets nothing", 'proto', ['17.9.8'], bytes.fromhex('70 05')),
     ("a closed enum's declared number, then one it does not declare", 'proto', ['17.9.8'], bytes.fromhex('70 01 70 05')),
+    ("a closed enum's number past 32 bits, whose low 32 bits it declares", 'proto', ['17.9.8'],
+     bytes.fromhex('70 81 80 80 80 10')),
+    ("a closed enum's number past 32 bits, whose low 32 bits it does not declare", 'proto', ['17.9.8'],
+     bytes.fromhex('70 85 80 80 80 10')),
 ]
 
 # the payloads a stock library reads otherwise than 17.9 says, each by the rows it crosses and the
@@ -1165,6 +1225,18 @@ VALUES = [
     ('needs set at its defaults', 'proto', ['17.9.7'], {'probe': {'needs': {'must': 0, 'shade': 0}}}, ()),
     ('needs with a shade its enum does not declare', 'proto', ['17.9.7'], {'probe': {'needs': {'must': 0, 'shade': 5}}},
      ()),
+    # 17.9.3 of a writer: what nests past the bound a reader refuses is never written (17.2). A chain of
+    # maps' entries has no written row, since a library may leave an entry's key out at its default
+    ('100 messages below the top, written', 'proto', ['17.9.3'], {'probe': {'nested': PROTO_DEPTH}}, ()),
+    ('101 messages below the top', 'proto', ['17.9.3'], {'probe': {'nested': PROTO_DEPTH + 1}}, ()),
+    ('51 maps deep, 102 messages below the top, each entry counted', 'proto', ['17.9.3'],
+     {'probe': {'entries': PROTO_DEPTH // 2 + 1}}, ()),
+    ('100 groups below the top, written', 'proto', ['17.9.3'], {'probe': {'delimited': PROTO_DEPTH}}, ()),
+    ('101 groups below the top', 'proto', ['17.9.3'], {'probe': {'delimited': PROTO_DEPTH + 1}}, ()),
+    ("99 messages below the top, the last holding a scalar map's entry, written", 'proto', ['17.9.3'],
+     {'probe': {'nested': PROTO_DEPTH - 1, 'tallied': True}}, ()),
+    ("100 messages below the top, the last holding a scalar map's entry", 'proto', ['17.9.3'],
+     {'probe': {'nested': PROTO_DEPTH, 'tallied': True}}, ()),
 ]
 
 
@@ -1187,6 +1259,13 @@ def given(value):
 
     if 'probe' in value:
         given_probe = value['probe']
+        forms = [form for form in THROUGH if form in given_probe]
+
+        # a chain, that many Probes below the top through its form, the deepest tallied where it says so
+        if forms:
+            assert len(forms) == 1 and set(given_probe) <= {forms[0], 'tallied'}, given_probe
+            return chain(given_probe[forms[0]], forms[0], given_probe.get('tallied', False))
+
         assert len(given_probe) <= 1, given_probe
         return {**probe_of(), **({'text': text_of(given_probe['text'])} if 'text' in given_probe else {}),
                 **({'number': given_probe['number']} if 'number' in given_probe else {}),
@@ -1197,8 +1276,9 @@ def given(value):
 
 
 def value_outcome(encoding, value):
-    """The bytes written of a value, or the one reason it is refused for: a proto value, one field or
-    none, refused where it leaves a required field unset (17.9.7), as a reader refuses its bytes."""
+    """The bytes written of a value, or the one reason it is refused for: a proto value refused where it
+    nests past 17.9.3's bound, counted as a reader counts on the wire, then where it leaves a required
+    field unset (17.9.7), as a reader refuses its bytes."""
     if encoding == 'raw':
         return {'written': hexadecimal(value)}
 
@@ -1206,14 +1286,20 @@ def value_outcome(encoding, value):
         return {'refused': A_SURROGATE_ALONE} if has_surrogate(value) else {'written': hexadecimal(utf8(value))}
 
     if encoding == 'proto':
+        # * the depth first: a value nested past the bound is refused for it, whatever it leaves unset
+        if nested_below(value) > PROTO_DEPTH:
+            return {'refused': PROTO_NESTED_PAST}
+
         if leaves_unset(value):
             return {'refused': REQUIRED_UNSET}
 
         written = proto_write(value)
 
-        # what is written reads back to the value given: its text, its number, and its child's presence
+        # what is written reads back to the value given: its text, its number, how deep it nests, and
+        # what its delimited holds
         reasons, read = proto_read(written)
-        assert not reasons and read == held(value), written
+        assert not reasons and {name: read[name] for name in ('text', 'number', 'nested')} == held(value), written
+        assert ('delimited' in read) == (value['delimited'] is not None), written
 
         return {'written': hexadecimal(written)}
 
@@ -1258,7 +1344,7 @@ assert declared_values('Shade') == (SHADES, True), declared_values('Shade')
 payloads = [payload_entry(*entry) for entry in PAYLOADS]
 values = [value_entry(*entry) for entry in VALUES]
 
-assert len(payloads) == 148 and len(values) == 47
+assert len(payloads) == 159 and len(values) == 54
 
 
 
@@ -1283,7 +1369,10 @@ PROTO_RECORD = {
     'a message given twice': ('', 0, 2), 'a message field set to the empty message': ('', 0, 1),
     'field number 0': NOT_ITS_MESSAGE, 'a varint of 10 bytes': ('', 4_294_967_295, 0),
     'a varint of 11 bytes': NOT_ITS_MESSAGE, 'an unknown varint of 10 bytes': ('', 0, 0),
-    'an unknown varint of 11 bytes': NOT_ITS_MESSAGE, 'an unknown record past the end of its message': NOT_ITS_MESSAGE,
+    'an unknown varint of 11 bytes': NOT_ITS_MESSAGE, 'a varint of 10 bytes past 64 bits': NOT_ITS_MESSAGE,
+    'an unknown varint of 10 bytes past 64 bits': NOT_ITS_MESSAGE,
+    'a packed uint32 of 10 bytes past 64 bits': NOT_ITS_MESSAGE,
+    'an unknown record past the end of its message': NOT_ITS_MESSAGE,
     'a string past the end of its message': NOT_ITS_MESSAGE, 'a tag of 5 bytes within 32 bits': ('0062', 0, 0),
     'a tag of 6 bytes': NOT_ITS_MESSAGE, 'a tag of 9 bytes': NOT_ITS_MESSAGE,
     'a tag of 5 bytes past 32 bits': NOT_ITS_MESSAGE, 'a tag of 7 bytes past 32 bits': NOT_ITS_MESSAGE,
@@ -1309,6 +1398,10 @@ PROTO_RECORD = {
     "a group closed by another number's end group": NOT_ITS_MESSAGE, 'a group never closed': NOT_ITS_MESSAGE,
     '50 maps deep, 100 messages below the top, each entry counted': taken('', 0, 100, children={'': taken('', 0, 98)}),
     '51 maps deep, 102 messages below the top, each entry counted': PROTO_NESTED_PAST,
+    '100 groups below the top': taken('', 0, 100, delimited=taken('', 0, 99)),
+    '101 groups below the top': PROTO_NESTED_PAST,
+    "99 messages below the top, the last holding a scalar map's entry": ('', 0, 100),
+    "100 messages below the top, the last holding a scalar map's entry": PROTO_NESTED_PAST,
     'a required field unset, one below the top': REQUIRED_UNSET, 'required fields set at their defaults': ('', 0, 0),
     'required fields none of which is given': REQUIRED_UNSET,
     'a message given twice, its required fields in its first record': ('', 0, 0),
@@ -1321,8 +1414,12 @@ PROTO_RECORD = {
     'a group that leaves a required field unset': REQUIRED_UNSET, 'a child that leaves a required field unset': REQUIRED_UNSET,
     "a required closed enum's number its enum does not declare": REQUIRED_UNSET,
     'a required closed enum given a declared number, then one it does not declare': ('', 0, 0),
+    'a required closed enum given a number past 32 bits, whose low 32 bits it declares': ('', 0, 0),
+    'a required closed enum given a number past 32 bits, whose low 32 bits it does not declare': REQUIRED_UNSET,
     "a closed enum's number its enum does not declare, which sets nothing": ('', 0, 0),
     "a closed enum's declared number, then one it does not declare": taken('', 0, 0, shade=1),
+    "a closed enum's number past 32 bits, whose low 32 bits it declares": taken('', 0, 0, shade=1),
+    "a closed enum's number past 32 bits, whose low 32 bits it does not declare": ('', 0, 0),
 }
 PROTO_RECORD = {name: taken(*outcome) if isinstance(outcome, tuple) else outcome for name, outcome in PROTO_RECORD.items()}
 outcomes = {entry['name']: entry.get('refused') or entry['read'] for entry in payloads if entry['encoding'] == 'proto'}
@@ -1330,19 +1427,28 @@ outcomes = {entry['name']: entry.get('refused') or entry['read'] for entry in pa
 assert outcomes == PROTO_RECORD, {name: outcome for name, outcome in outcomes.items() if PROTO_RECORD.get(name) != outcome}
 assert [entry['bytes'][:8] for entry in payloads if entry['name'].endswith('messages below the top')] == [
     '1A E6 01', '1A E9 01', '1A EC 01']
+# * a deep value written is the bytes of the payload of its name, which a reader takes: 17.2 of a writer
+DEEP_WRITTEN = ('100 messages below the top, written', '100 groups below the top, written',
+                "99 messages below the top, the last holding a scalar map's entry, written")
+proto_bytes = {entry['name']: entry['bytes'] for entry in payloads if entry['encoding'] == 'proto'}
 assert {entry['name']: entry['written'] for entry in values if entry['encoding'] == 'proto' and 'written' in entry} == {
     'text set to a': '0A 01 61', 'number set to 7': '10 07', 'number set to 0, its default': '', 'no field set': '',
     'child set to the empty message': '1A 00', 'text set to a leading U+FEFF and a': '0A 04 EF BB BF 61',
-    'needs set at its defaults': '3A 04 08 00 10 00'}
+    'needs set at its defaults': '3A 04 08 00 10 00',
+    **{name: proto_bytes[name.removesuffix(', written')] for name in DEEP_WRITTEN}}
 assert {entry['name']: entry['refused'] for entry in values if entry['encoding'] == 'proto' and 'refused' in entry} == {
-    'needs set to no field': REQUIRED_UNSET, 'needs with a shade its enum does not declare': REQUIRED_UNSET}
+    'needs set to no field': REQUIRED_UNSET, 'needs with a shade its enum does not declare': REQUIRED_UNSET,
+    '101 messages below the top': PROTO_NESTED_PAST,
+    '51 maps deep, 102 messages below the top, each entry counted': PROTO_NESTED_PAST,
+    '101 groups below the top': PROTO_NESTED_PAST,
+    "100 messages below the top, the last holding a scalar map's entry": PROTO_NESTED_PAST}
 
 document = {
     '$schema': 'schemas/codecs.schema.json',
     '$comment': [
         "Bead's codecs: what each encoding of spec section 17 reads and writes, raw, text and json (decision 0016) and proto (decision 0031), which every implementation's harness plays through its side's codecs.",
         'payloads are bytes read, in an encoding: written is the bytes its writer writes back of the value its reader read, the same bytes where they are canonical already; read, of a proto payload, what its reader read of them; refused, the reason its reader refuses them for. A harness checks the refusal, or that the bytes written are those given and that the value read equals the value its reader reads of them, or that what it read is read.',
-        "proto: a Probe, the message of spec/codecs.proto, read and written through the code each side's stock generator writes for it over its stock library, as generated code reads one: its records checked against Probe's descriptor before the library reads them (decision 0028), the bound of 17.9.3 set in the call, a closed enum's record of a number it does not declare set aside before the library reads it where the library would take it (17.9.8), and each message it holds judged by its required fields once it is read (17.9.7, decision 0042), as the runtime's codec reads one. read is what was read of the top Probe: text, its string as UTF-16 code units in hexadecimal, four capital digits each and a space between; number; nested, how deep messages nest below it, through child, delimited and children, a map's entry counting as a message and its value as another; counts and stamps, where it holds any, their values in their order; children, where it holds any, each key, its code units as text gives them, to what was read of its value, its text, number and nested; delimited, where it is set, what was read of it, its text, number and nested; and shade, where a record set it, its number. A harness checks these and nothing else, since protobuf fixes no message's bytes whole: needs and needs_items, of Needs, whose fields protobuf requires, are judged and not read back.",
+        "proto: a Probe, the message of spec/codecs.proto, read and written through the code each side's stock generator writes for it over its stock library, as generated code reads one: its records checked against Probe's descriptor before the library reads them (decision 0028), the bound of 17.9.3 set in the call, a singular closed enum's record of a number it does not declare dropped before the library reads it (17.9.8), and each message it holds judged by its required fields once it is read (17.9.7, decision 0042), as the runtime's codec reads one. read is what was read of the top Probe: text, its string as UTF-16 code units in hexadecimal, four capital digits each and a space between; number; nested, how deep messages nest below it, through child, delimited, children and tallies, a map's entry counting as a message and a value of children as another; counts and stamps, where it holds any, their values in their order; children, where it holds any, each key, its code units as text gives them, to what was read of its value, its text, number and nested; delimited, where it is set, what was read of it, its text, number and nested; and shade, where a record set it, its number. A harness checks these and nothing else, since protobuf fixes no message's bytes whole: needs and needs_items, of Needs, whose fields protobuf requires, are judged and not read back.",
         'values are a value given to a writer, in an encoding: written is the bytes it writes; refused, the reason it refuses the value for. A value is given in one of eight forms.',
         'json: a JSON value, as the file holds it: on the TypeScript side JSON.parse of the file, so that a member named __proto__ is a member; on the C# side a JsonElement of the file; on the Rust side a serde_json::Value that Bead\'s own reader reads of the file\'s text.',
         'double: a double by its 64 bits, in hexadecimal: on the TypeScript side read through a DataView; on the C# side a JsonElement of JsonSerializer.SerializeToElement(BitConverter.Int64BitsToDouble(bits)), which holds no NaN and no infinity; on the Rust side f64::from_bits(bits) given through bead::json::to_value, which refuses a double that is not finite.',
@@ -1350,8 +1456,8 @@ document = {
         'text: a string, given to a text writer, a String on the Rust side. bytes: bytes in hexadecimal, given to a raw writer, a Vec<u8> on the Rust side.',
         'form: a value no JSON text holds. loneSurrogate is the string a, U+D800, b, which the C# side gives a json writer as a JsonElement of the bytes of its escape, and a text writer as a string; loneSurrogateName, an object whose one member is named so, its value 1; nameTwice, an object of two members both named a, 1 then 2, which the C# side parses with JsonElement.Parse\'s defaults and the TypeScript side cannot hold; undefined, JavaScript\'s undefined on the TypeScript side, default(JsonElement), of kind Undefined, on the C# side. The Rust side holds none of the four: a String holds no surrogate alone, a serde_json Map no name twice, and Rust has no undefined.',
         'nested: that many arrays, one in another, the innermost empty, which the C# side parses into a JsonElement with a MaxDepth as deep, since 64, its default, refuses a 65th, and the Rust side builds as a serde_json::Value.',
-        'probe: a Probe given to a proto writer, one field set or none, so that protobuf fixes the bytes it writes: text, its string as UTF-16 code units, as read gives one; number; child, set to the empty message, {}; or needs, set to a Needs of the fields it gives, must and shade, each a number, none of them set where it gives none.',
-        'A reason is derived, and held by the regeneration alone: not UTF-8, a byte order mark, not JSON, a name twice, a surrogate alone, a number past a double and nested past 64 of a reader; not its message, nested past 100 and a required field unset of a proto reader; a surrogate alone, a name twice, nested past 64, not a finite number and no JSON value of a writer, and a required field unset of a proto writer. No harness reads it: a refusal answers PAYLOAD_UNDECODABLE whatever its reason, and its words are each side\'s.',
+        'probe: a Probe given to a proto writer, so that protobuf fixes the bytes it writes: one field set or none, text, its string as UTF-16 code units, as read gives one; number; child, set to the empty message, {}; or needs, set to a Needs of the fields it gives, must and shade, each a number, none of them set where it gives none. Or a chain, that many Probes below the top, none with a field set but the one that holds the next, in one of three forms: nested, through child; entries, through children, each entry holding the next Probe under the key "", each entry counting as a message of its own; delimited, through the group; and beside one of them tallied, true where the deepest Probe holds tallies {"a": 1}, its key and its value each written.',
+        'A reason is derived: not UTF-8, a byte order mark, not JSON, a name twice, a surrogate alone, a number past a double and nested past 64 of a reader; not its message, nested past 100 and a required field unset of a proto reader; a surrogate alone, a name twice, nested past 64, not a finite number and no JSON value of a writer; and a required field unset and nested past 100 of a proto writer. Every harness checks it: a refusal\'s message is its reason, and a request\'s PAYLOAD_UNDECODABLE carries it as its detail (17.2).',
         "Each item of differs names a row of docs/support.md an entry crosses, which names this file and the entry, and the language it excuses: a value that language's type cannot hold, or a payload its stock protobuf library reads otherwise than 17.9 says. A harness plays every entry but those a differs excuses its language from.",
         'clauses are the units of spec.md an entry checks: a clause, 17.6; an item of its numbered list, 17.5.7.',
     ],
@@ -1360,10 +1466,12 @@ document = {
     'values': values,
 }
 
-with open(ROOT + 'codecs.json', 'w', encoding='utf-8', newline='\n') as file:
-    json.dump(document, file, ensure_ascii=False, indent=2)
-    file.write('\n')
+# * written when run, never when imported: make_conversations.py takes a request's reason from here
+if __name__ == '__main__':
+    with open(ROOT + 'codecs.json', 'w', encoding='utf-8', newline='\n') as file:
+        json.dump(document, file, ensure_ascii=False, indent=2)
+        file.write('\n')
 
-print(len(payloads), 'payloads,', sum(entry['encoding'] == 'json' for entry in payloads), 'of them json and',
-      sum(entry['encoding'] == 'proto' for entry in payloads), 'proto, and', len(values), 'values,',
-      sum(entry['encoding'] == 'proto' for entry in values), 'of them proto')
+    print(len(payloads), 'payloads,', sum(entry['encoding'] == 'json' for entry in payloads), 'of them json and',
+          sum(entry['encoding'] == 'proto' for entry in payloads), 'proto, and', len(values), 'values,',
+          sum(entry['encoding'] == 'proto' for entry in values), 'of them proto')

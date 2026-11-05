@@ -1,15 +1,15 @@
-//! One owner per router (decision 0044): a task of the application's runtime holds the router's
-//! state and runs its jobs one at a time, in the order they came. A job is synchronous, so a turn
-//! awaits nothing and no other job runs within it; what waits runs off the owner and posts its
-//! outcome as a job of its own. A job posted within a turn of the same owner goes as that turn
-//! ends, before any job queued after it: a call a listener makes. What a listener hands its router
-//! back from within the turn that told it — an envelope its transport carries, a connection let go,
-//! a dispose — goes behind every job queued, in a later turn, never within that one (spec 9.0).
-//! A job that panics, the last resort past the guards at the sites the spec lets throw, ends its
-//! owner at once: its state told, so what waits on it fails now with that panic for its reason, the
-//! jobs left unrun, never going on over a state half changed (decision 0044).
+//! One owner per router (decisions 0044 and 0045): a task of the application's runtime holds the
+//! router's state and runs its jobs one at a time, from one queue, in the order they were queued. A
+//! job is synchronous, so a turn awaits nothing and no other job runs within it; what waits runs
+//! off the owner and posts its outcome as a job of its own. What a turn defers of its own and what
+//! its application makes from within a telling — a call, a cancel, an envelope its transport
+//! carries, a connection let go, a dispose — join that queue's tail as they are made: behind what
+//! that turn sends, and among what it defers in the order deferred, never within that turn (spec
+//! 9.0). A job that panics, the last resort past the guards at the sites the spec lets throw, ends
+//! its owner at once: its queue closed, the jobs it held left unrun, its state told, so what waits
+//! on it fails now with that panic for its reason, never going on over a state half changed
+//! (decision 0044).
 
-use core::cell::Cell;
 use core::fmt;
 use core::future::Future;
 use core::pin::Pin;
@@ -18,12 +18,12 @@ use core::task::{Context, Poll};
 use core::time::Duration;
 use std::collections::VecDeque;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::{Arc, Mutex, PoisonError, Weak};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 
 use tokio::sync::{mpsc, oneshot};
 
 use crate::clock::{Clock, Schedule, SharedClock, Timer};
-use crate::errors::Disposed;
+use crate::errors::{Disposed, ProgrammerError};
 use crate::platform::{self, Handle, JoinHandle};
 
 #[cfg(test)]
@@ -38,28 +38,27 @@ pub(crate) trait Owned: Send + 'static {
     /// undo it; what waits on it is failed now, with that panic for its reason, before the state
     /// goes with its owner. Nothing, by default: what waits on it hears its owner gone.
     fn on_panic(&mut self, _panicked: &(dyn core::any::Any + Send)) {}
+
+    /// The next job it deferred as its owner ends, telling it of the panic or running what that
+    /// deferred, for that owner to run next, its queue closed by then: none, by default.
+    fn deferred(&mut self) -> Option<Job<Self>>
+    where
+        Self: Sized,
+    {
+        None
+    }
 }
 
-// each owner's own number, which a turn running marks on its thread
+// each owner's own number, which tells one from another in a debug view
 static OWNERS: AtomicUsize = AtomicUsize::new(1);
 
-thread_local! {
-    // the owner whose turn the current thread runs, 0 for none
-    #[cfg_attr(
-        all(windows, target_env = "gnu"),
-        expect(
-            clippy::missing_const_for_thread_local,
-            reason = "the initializer is const; clippy misreads thread_local!'s expansion on windows-gnu"
-        )
-    )]
-    static CURRENT: Cell<usize> = const { Cell::new(0) };
+fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 struct Shared<S> {
     id: usize,
     jobs: mpsc::UnboundedSender<Job<S>>,
-    // the jobs posted within a turn of this owner, which go as that turn ends
-    turn: Mutex<VecDeque<Job<S>>>,
     runtime: Handle,
     #[cfg(any(test, feature = "testing"))]
     activity: Option<Arc<crate::testing::Activity>>,
@@ -125,7 +124,6 @@ impl<S: Send + 'static> Owner<S> {
         let shared = Arc::new(Shared {
             id: OWNERS.fetch_add(1, Ordering::Relaxed),
             jobs,
-            turn: Mutex::new(VecDeque::new()),
             runtime: runtime.clone(),
             #[cfg(any(test, feature = "testing"))]
             activity: clock.activity(),
@@ -146,9 +144,10 @@ impl<S: Send + 'static> Owner<S> {
         }
     }
 
-    /// Posts `job`: within a turn of this owner's, as that turn ends; else after every job queued.
+    /// Posts `job` at its queue's tail, behind every job queued, from within a turn of this owner's
+    /// too: taken in a later turn, never within the one it was posted in (spec 9.0).
     pub(crate) fn post(&self, job: Job<S>) -> Result<(), Disposed> {
-        post(&self.shared, job)
+        queue(&self.shared, job)
     }
 
     /// Posts `job` as [`Owner::post`] does; an owner gone takes nothing, and the job goes with it.
@@ -156,33 +155,8 @@ impl<S: Send + 'static> Owner<S> {
         self.post(job).ok();
     }
 
-    /// Posts `job` behind every job queued, within a turn of this owner's too: what a listener
-    /// hands its router back is taken in a later turn, never within the one that told it (spec
-    /// 9.0); an owner gone takes nothing, and the job goes with it.
-    pub(crate) fn offer_behind(&self, job: Job<S>) {
-        queue(&self.shared, job).ok();
-    }
-
-    /// Runs `job` on the owner behind every job queued, as [`Owner::offer_behind`] posts it, and
-    /// gives what it gives.
-    pub(crate) fn run_behind<T: Send + 'static, J: FnOnce(&mut S) -> T + Send + 'static>(
-        &self,
-        job: J,
-    ) -> Pending<T> {
-        let (reply, answer) = oneshot::channel();
-        let posted = queue(
-            &self.shared,
-            Box::new(move |state| {
-                reply.send(job(state)).ok();
-            }),
-        );
-
-        Pending {
-            answer: posted.ok().map(|()| answer),
-        }
-    }
-
-    /// Runs `job` on the owner, after what came before it, and gives what it gives.
+    /// Runs `job` on the owner, behind every job queued as [`Owner::post`] posts it, and gives what
+    /// it gives.
     pub(crate) fn run<T: Send + 'static, J: FnOnce(&mut S) -> T + Send + 'static>(
         &self,
         job: J,
@@ -210,20 +184,13 @@ impl<S: Send + 'static> WeakOwner<S> {
         self.shared
             .upgrade()
             .ok_or(Disposed)
-            .and_then(|shared| post(&shared, job))
+            .and_then(|shared| queue(&shared, job))
     }
 
     /// Posts `job` as [`WeakOwner::post`] does; an owner gone takes nothing, and the job goes with
     /// it.
     pub(crate) fn offer(&self, job: Job<S>) {
         self.post(job).ok();
-    }
-
-    /// Posts `job` behind every job queued, as [`Owner::offer_behind`] does, to an owner not gone.
-    pub(crate) fn offer_behind(&self, job: Job<S>) {
-        if let Some(shared) = self.shared.upgrade() {
-            queue(&shared, job).ok();
-        }
     }
 
     /// Arms a timer on `clock` that runs `job` on the owner after `due`, behind what came before
@@ -234,7 +201,7 @@ impl<S: Send + 'static> WeakOwner<S> {
         &self,
         (clock, due): (&SharedClock, Duration),
         job: J,
-    ) -> Arc<dyn Timer> {
+    ) -> Result<Arc<dyn Timer>, ProgrammerError> {
         let owner = self.clone();
         let cancelled = Arc::new(AtomicBool::new(false));
         let is_cancelled = Arc::clone(&cancelled);
@@ -253,9 +220,9 @@ impl<S: Send + 'static> WeakOwner<S> {
                     }));
                 }
             }),
-        );
+        )?;
 
-        Arc::new(OwnedTimer { timer, cancelled })
+        Ok(Arc::new(OwnedTimer { timer, cancelled }))
     }
 
     /// Spawns `future`, as [`Owner::cover`] does, for an owner not gone.
@@ -285,6 +252,65 @@ impl<S: Send + 'static> WeakOwner<S> {
         }
 
         Some(platform::spawn(&shared.runtime, future))
+    }
+}
+
+/// What a state defers to a later turn of its owner's: posted at its queue's tail, as any job is;
+/// or, once its owner ends on a job that panicked and its queue is closed, held in the state's own
+/// buffer, which that owner runs next. Only the state's own steps defer through it, within its
+/// turns: what waits off the owner posts through [`WeakOwner`], and meets the closed queue.
+pub(crate) struct Deferral<S> {
+    owner: WeakOwner<S>,
+    // what is deferred once its owner ends, for that owner to run next; none while it runs as ever
+    ending: Arc<Mutex<Option<VecDeque<Job<S>>>>>,
+}
+
+impl<S> Clone for Deferral<S> {
+    fn clone(&self) -> Self {
+        Self {
+            owner: self.owner.clone(),
+            ending: Arc::clone(&self.ending),
+        }
+    }
+}
+
+impl<S> fmt::Debug for Deferral<S> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.debug_struct("Deferral").finish_non_exhaustive()
+    }
+}
+
+impl<S: Send + 'static> Deferral<S> {
+    /// What defers to `owner`.
+    pub(crate) fn of(owner: WeakOwner<S>) -> Self {
+        Self {
+            owner,
+            ending: Arc::default(),
+        }
+    }
+
+    /// Defers `job`: at its owner's queue's tail, or held for its owner to run next once it ends.
+    pub(crate) fn offer(&self, job: Job<S>) {
+        let mut ending = locked(&self.ending);
+
+        if let Some(held) = ending.as_mut() {
+            held.push_back(job);
+
+            return;
+        }
+
+        drop(ending);
+        self.owner.offer(job);
+    }
+
+    /// Its owner ends: what is deferred from now on is held, for that owner to run next.
+    pub(crate) fn end(&self) {
+        locked(&self.ending).get_or_insert_with(VecDeque::new);
+    }
+
+    /// The next job held as its owner ends.
+    pub(crate) fn next(&self) -> Option<Job<S>> {
+        locked(&self.ending).as_mut().and_then(VecDeque::pop_front)
     }
 }
 
@@ -322,27 +348,7 @@ pub(crate) fn spawn_counted<F: Future<Output = ()> + Send + 'static>(
     platform::spawn(runtime, future);
 }
 
-// within a turn of this owner's, the job goes as that turn ends; else after every job queued
-fn post<S>(shared: &Arc<Shared<S>>, job: Job<S>) -> Result<(), Disposed> {
-    if CURRENT.with(Cell::get) != shared.id {
-        return queue(shared, job);
-    }
-
-    #[cfg(any(test, feature = "testing"))]
-    if let Some(activity) = &shared.activity {
-        activity.begin();
-    }
-
-    shared
-        .turn
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .push_back(job);
-
-    Ok(())
-}
-
-// the job goes after every job queued, in a turn of its own
+// the job goes at the queue's tail, behind every job queued, in a turn of its own
 fn queue<S>(shared: &Arc<Shared<S>>, job: Job<S>) -> Result<(), Disposed> {
     #[cfg(any(test, feature = "testing"))]
     if let Some(activity) = &shared.activity {
@@ -373,26 +379,8 @@ fn cover<S, F: Future<Output = ()> + Send + 'static>(shared: &Arc<Shared<S>>, fu
     platform::spawn(&shared.runtime, future);
 }
 
-// the turn a thread runs, marked on it while the turn lasts: ! cleared as the turn ends, by a panic
-// too, so no later post from that thread is taken for one of a turn that is over
-struct Turn;
-
-impl Turn {
-    fn of(owner: usize) -> Self {
-        CURRENT.with(|current| current.set(owner));
-
-        Self
-    }
-}
-
-impl Drop for Turn {
-    fn drop(&mut self) {
-        CURRENT.with(|current| current.set(0));
-    }
-}
-
-// the owner's task: each job in its turn, then the jobs posted within it, until every handle is
-// gone, or a job panics
+// the owner's task: each job in its turn, in the order queued, until every handle is gone, or a
+// job panics
 async fn run<S: Owned>(
     mut state: S,
     (mut queue, shared): (mpsc::UnboundedReceiver<Job<S>>, Weak<Shared<S>>),
@@ -401,71 +389,37 @@ async fn run<S: Owned>(
         let Some(owner) = shared.upgrade() else {
             break;
         };
-        let turn = Turn::of(owner.id);
         // ! the last resort: a job that panics leaves its state half changed, with nothing to undo
         // it, so its owner ends here, never going on over it (decision 0044)
-        let mut panicked = catch_unwind(AssertUnwindSafe(|| job(&mut state))).err();
-        let mut ran = 1_usize;
+        let Err(panicked) = catch_unwind(AssertUnwindSafe(|| job(&mut state))) else {
+            ended(&owner, 1);
 
-        while panicked.is_none() {
-            let next = owner
-                .turn
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .pop_front();
-            let Some(next) = next else {
-                break;
-            };
+            continue;
+        };
 
-            panicked = catch_unwind(AssertUnwindSafe(|| next(&mut state))).err();
-            ran = ran.saturating_add(1);
+        // * its queue closed first: what it held goes unrun, and what is posted from now on, a
+        // listener's call as its state is told among it, is refused
+        queue.close();
+
+        let mut unrun = 0_usize;
+
+        while queue.try_recv().is_ok() {
+            unrun = unrun.saturating_add(1);
         }
 
-        if let Some(panicked) = panicked {
-            // what the turn posted before its panic goes unrun; its state is told, once, a panic of
-            // its own dropped; what telling it posted, the outcomes of what waited on it, goes
-            // within the turn, each within a guard; and nothing queued runs
-            let unrun = owner
-                .turn
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .drain(..)
-                .count();
+        // its state told, once, a panic of its own dropped; what telling it deferred, the outcomes
+        // of what waited on it, runs next, each within a guard
+        drop(catch_unwind(AssertUnwindSafe(|| {
+            state.on_panic(&*panicked);
+        })));
 
-            drop(catch_unwind(AssertUnwindSafe(|| {
-                state.on_panic(&*panicked);
-            })));
-
-            loop {
-                let next = owner
-                    .turn
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .pop_front();
-                let Some(next) = next else {
-                    break;
-                };
-
-                drop(catch_unwind(AssertUnwindSafe(|| next(&mut state))));
-                ran = ran.saturating_add(1);
-            }
-
-            queue.close();
-
-            let mut queued = 0_usize;
-
-            while queue.try_recv().is_ok() {
-                queued = queued.saturating_add(1);
-            }
-
-            drop(turn);
-            ended(&owner, ran.saturating_add(unrun).saturating_add(queued));
-
-            break;
+        while let Some(next) = state.deferred() {
+            drop(catch_unwind(AssertUnwindSafe(|| next(&mut state))));
         }
 
-        drop(turn);
-        ended(&owner, ran);
+        ended(&owner, unrun.saturating_add(1));
+
+        break;
     }
 }
 

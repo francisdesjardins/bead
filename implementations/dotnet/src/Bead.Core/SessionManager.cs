@@ -48,6 +48,25 @@ public sealed record Session<TData>
     }
 }
 
+/// <summary>
+/// A change of a session, as one of its manager's events carries it whole: the session as it is
+/// now, the value it holds now, and the one it held, as a storage event carries a key's new and old
+/// values.
+/// </summary>
+/// <typeparam name="TData">What the server keeps about the session.</typeparam>
+/// <typeparam name="TValue">What changed: its data, an instant or a timeout.</typeparam>
+public sealed record SessionChange<TData, TValue>
+{
+    /// <summary>The session, as it is now.</summary>
+    public required Session<TData> Session { get; init; }
+
+    /// <summary>The value it holds now.</summary>
+    public required TValue NewValue { get; init; }
+
+    /// <summary>The value it held.</summary>
+    public required TValue OldValue { get; init; }
+}
+
 /// <summary>How a session manager is built.</summary>
 public sealed record SessionManagerOptions
 {
@@ -64,8 +83,8 @@ public sealed record SessionManagerOptions
     public TimeSpan SessionInactivityTimeout { get; init; } = Timeout.InfiniteTimeSpan;
 
     /// <summary>
-    /// What its timers run on; the system's clock when none. A server's sessions run on the server's
-    /// clock, and one given that differs is an <see cref="ArgumentException"/>.
+    /// What its timers run on; the system's clock when none. A server's session manager runs on its
+    /// server's clock, and one given that differs is an <see cref="ArgumentException"/>.
     /// </summary>
     public TimeProvider? Clock { get; init; }
 
@@ -137,17 +156,17 @@ public sealed class SessionManager<TData> : IDisposable
     /// <summary>A session forgotten.</summary>
     public event Action<Session<TData>>? Deleted;
 
-    /// <summary>A session's data changed: the session, the new data, and the old.</summary>
-    public event Action<Session<TData>, TData?, TData?>? DataChanged;
+    /// <summary>A session's data changed: one change, its session, its new data and its old.</summary>
+    public event Action<SessionChange<TData, TData?>>? DataChanged;
 
-    /// <summary>A session's connection timeout changed: the session, the new timeout, and the old.</summary>
-    public event Action<Session<TData>, TimeSpan, TimeSpan>? ConnectionInactivityTimeoutChanged;
+    /// <summary>A session's connection timeout changed: one change, its session, its new timeout and its old.</summary>
+    public event Action<SessionChange<TData, TimeSpan>>? ConnectionInactivityTimeoutChanged;
 
-    /// <summary>A session's activity moved to a later millisecond: the session, the new instant, and the old.</summary>
-    public event Action<Session<TData>, DateTimeOffset, DateTimeOffset>? LastActivityChanged;
+    /// <summary>A session's activity moved to a later millisecond: one change, its session, its new instant and its old.</summary>
+    public event Action<SessionChange<TData, DateTimeOffset>>? LastActivityChanged;
 
-    /// <summary>A session's session timeout changed: the session, the new timeout, and the old.</summary>
-    public event Action<Session<TData>, TimeSpan, TimeSpan>? SessionInactivityTimeoutChanged;
+    /// <summary>A session's session timeout changed: one change, its session, its new timeout and its old.</summary>
+    public event Action<SessionChange<TData, TimeSpan>>? SessionInactivityTimeoutChanged;
 
     /// <summary>A session's connection went silent past its connection timeout.</summary>
     public event Action<Session<TData>>? ConnectionInactivityTimeoutReached;
@@ -434,7 +453,7 @@ public sealed class SessionManager<TData> : IDisposable
             }
         }
 
-        DataChanged?.Invoke(updated, updated.Data, old);
+        DataChanged?.Invoke(new SessionChange<TData, TData?> { Session = updated, NewValue = updated.Data, OldValue = old });
 
         return updated;
     }
@@ -474,7 +493,7 @@ public sealed class SessionManager<TData> : IDisposable
             ArmConnectionTimer(session.ConnectionHandle, held);
         }
 
-        ConnectionInactivityTimeoutChanged?.Invoke(updated, held, old);
+        ConnectionInactivityTimeoutChanged?.Invoke(new SessionChange<TData, TimeSpan> { Session = updated, NewValue = held, OldValue = old });
 
         return updated;
     }
@@ -519,7 +538,7 @@ public sealed class SessionManager<TData> : IDisposable
             ArmSessionTimer(session.ConnectionHandle, held);
         }
 
-        SessionInactivityTimeoutChanged?.Invoke(updated, held, old);
+        SessionInactivityTimeoutChanged?.Invoke(new SessionChange<TData, TimeSpan> { Session = updated, NewValue = held, OldValue = old });
 
         return updated;
     }
@@ -609,7 +628,7 @@ public sealed class SessionManager<TData> : IDisposable
             }
         }
 
-        LastActivityChanged?.Invoke(stamped, stamped.LastActivity, old);
+        LastActivityChanged?.Invoke(new SessionChange<TData, DateTimeOffset> { Session = stamped, NewValue = stamped.LastActivity, OldValue = old });
 
         return stamped;
     }

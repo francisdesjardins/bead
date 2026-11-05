@@ -45,7 +45,8 @@ internal sealed partial class RouterCore : IDisposable
 {
     // constants
 
-    private const string Disposed = "the router was disposed";
+    /// <summary>Why a call made once its router was disposed fails unsent.</summary>
+    internal const string Disposed = "the router was disposed";
 
     // what a relay that does not verify takes at step 1 of section 14.3: none and OPAQUE it resolves,
     // a JWT and an ELSEWHERE it forwards
@@ -75,7 +76,11 @@ internal sealed partial class RouterCore : IDisposable
     // what it counts through, at its gates: its router's; none when its router was given no registry
     private readonly RouterSeries? _metrics;
 
+    // ! two marks, never one (decision 0045): the handle's, set at once by its dispose, read where
+    // an operation enters from the application; the state's, set by the dispose's own job, read by
+    // what skips an answer, gates a send and sends a cancel, so the skip and the gate always agree
     private volatile bool _isDisposed;
+    private bool _isStateDisposed;
 
     /// <summary>A core for the side <paramref name="port"/> is, with its options.</summary>
     public RouterCore(IRouterCorePort port, RouterCoreOptions? options = null)
@@ -99,7 +104,7 @@ internal sealed partial class RouterCore : IDisposable
             Limits = Limits,
             IsDisposed = () =>
             {
-                return _isDisposed;
+                return _isStateDisposed;
             },
         });
 
@@ -163,7 +168,10 @@ internal sealed partial class RouterCore : IDisposable
         }
     }
 
-    /// <summary>Whether it was disposed: nothing more goes out, and nothing more waits.</summary>
+    /// <summary>
+    /// Whether it was disposed, from the dispose on: what is made after it fails unsent, and what it
+    /// holds is let go in the dispose's own job, behind what came before it.
+    /// </summary>
     public bool IsDisposed
     {
         get
@@ -261,13 +269,17 @@ internal sealed partial class RouterCore : IDisposable
             EnvelopeCodec.WriteFailure(written);
         }
 
-        // the call this answer is for, when this side dispatched its request
-        var answering = _answeringCalls.CallOf(header);
+        // ! the call this answer is for: an answer goes only to a request this side dispatched,
+        // found again by the very header it was handed, never a copy (spec 9.3, 9.4)
+        var answering = _answeringCalls.CallOf(header)
+            ?? throw new ArgumentException(
+                $"an answer goes only to a request this router dispatched, not to call {callId}",
+                nameof(target));
 
         // a call its requester cancelled, its connection took away, or whose call id another request
-        // opened since, is answered by nothing; once disposed, the answer goes on, to throw a
-        // DisconnectException
-        if (!_isDisposed && !_answeringCalls.IsAnswering(target))
+        // opened since, is answered by nothing; once its dispose's job ran, the answer goes on, to
+        // throw a DisconnectException at the writer's gate, which reads the same mark
+        if (!_isStateDisposed && !_answeringCalls.IsAnswering(target))
         {
             return;
         }
@@ -275,7 +287,8 @@ internal sealed partial class RouterCore : IDisposable
         // an answer names its call alone: never its procedure, never its destination
         var result = new ResultHeader { CallId = callId };
 
-        // the handler its request was routed to; a copy of a header finds its procedure's
+        // the handler its request was routed to; a request refused before it was routed finds its
+        // procedure's
         IRequestHandler? resolver = _handlers.TryGetValue(header, out var routed)
             ? routed
             : header.DestinationId is null && _resolvers.TryGetValue(new ProcedureAddress(header.ServiceId, header.ProcedureId), out var registered)
@@ -283,14 +296,14 @@ internal sealed partial class RouterCore : IDisposable
                 : null;
 
         var transfer = response.Failure is null
-            ? ResultTransferOf(response.Payload, (answering, result, _placement.PayloadLimitOf(resolver?.MaximumPayloadBytes), header))
+            ? ResultTransferOf(response.Payload, (result, _placement.PayloadLimitOf(resolver?.MaximumPayloadBytes), header))
             : null;
-        var undo = _port.BeforeAnswer(new AnswerInfo(target, response.Failure is not null, resolver) { Session = answering?.Session });
+        var undo = _port.BeforeAnswer(new AnswerInfo(target, response.Failure is not null, resolver) { Session = answering.Session });
 
         // its answer going out: a second goes nowhere, and this one closes the call once done
         _answeringCalls.Answer(target);
 
-        if (answering is not null && response.Failure is { } answeredWith)
+        if (response.Failure is { } answeredWith)
         {
             _failuresAnswered.AddOrUpdate(header, answeredWith);
         }
@@ -308,17 +321,14 @@ internal sealed partial class RouterCore : IDisposable
                     {
                         // * answered: its call ends as its answer is handed to its transport
                         // (spec/debugging.md 9.1), and its call id is the peer's to open again
-                        if (answering is not null)
-                        {
-                            EndAnswered(answering, response.Failure is { } failed ? (CallOutcome.Failure, failed) : (CallOutcome.Result, null));
-                            _answeringCalls.Close(call, answering);
-                        }
+                        EndAnswered(answering, response.Failure is { } failed ? (CallOutcome.Failure, failed) : (CallOutcome.Result, null));
+                        _answeringCalls.Close(call, answering);
                     }
                 ));
             }
             else
             {
-                await SendResult(transfer, (connectionHandle, answering!, result));
+                await SendResult(transfer, (connectionHandle, answering, result));
             }
         }
         catch
@@ -326,12 +336,8 @@ internal sealed partial class RouterCore : IDisposable
             // an answer that did not go out leaves nothing done for it behind, and its call closed,
             // ended with no answer handed to its transport
             undo?.Invoke();
-
-            if (answering is not null)
-            {
-                EndAnswered(answering, (CallOutcome.Error, null));
-                _answeringCalls.Close(call, answering);
-            }
+            EndAnswered(answering, (CallOutcome.Error, null));
+            _answeringCalls.Close(call, answering);
 
             throw;
         }
@@ -341,7 +347,7 @@ internal sealed partial class RouterCore : IDisposable
     // the call it answers, which it keeps open; it throws as Respond says
     private OutgoingTransfer? ResultTransferOf(
         ReadOnlyMemory<byte> payload,
-        (AnsweringCall? Answering, ResultHeader Header, int MaximumPayloadBytes, RequestHeader Request) going)
+        (ResultHeader Header, int MaximumPayloadBytes, RequestHeader Request) going)
     {
         var (outgoing, refusal) = _placement.TransferOf(payload, (going.Header, going.MaximumPayloadBytes));
 
@@ -362,13 +368,6 @@ internal sealed partial class RouterCore : IDisposable
                     ProtocolCode.PayloadTooLarge,
                     $"a subscription's result goes in one envelope, of {_placement.WholeBytes} bytes at most"),
                 (_side, going.Header));
-        }
-
-        if (going.Answering is null)
-        {
-            throw new ArgumentException(
-                $"a result goes as a transfer only on a call this router dispatched, not on call {going.Request.CallId}",
-                nameof(payload));
         }
 
         return outgoing;
@@ -861,7 +860,7 @@ internal sealed partial class RouterCore : IDisposable
     // closing or the router disposed ended it, and what its resolution brings is dropped
     private bool IsResolving(Arrival arrival)
     {
-        return !_isDisposed
+        return !_isStateDisposed
             && !arrival.Answering.IsAborted
             && ReferenceEquals(_answeringCalls.CallOf(arrival.Target.Header), arrival.Answering)
             && _answeringCalls.IsAnswering(arrival.Target);
@@ -1279,7 +1278,7 @@ internal sealed partial class RouterCore : IDisposable
 
             _port.Report(
                 // ! a detail of the side's own words: the codec's, for the side's report alone (spec 9.0)
-                new FailureException(ProtocolFailureOf(ProtocolCode.EnvelopeMalformed, reason.Message), (raised, reason)),
+                new FailureException(ProtocolFailureOf(ProtocolCode.EnvelopeMalformed, reason.Message), raised, new FailureExceptionOptions { Cause = reason }),
                 connectionHandle);
 
             return;
@@ -1327,9 +1326,9 @@ internal sealed partial class RouterCore : IDisposable
 
             _port.Report(
                 // ! a detail of the side's own words: the codec's, for the side's report alone (spec 9.0)
-                new FailureException(ProtocolFailureOf(ProtocolCode.EnvelopeMalformed, reason.Message), (raised, reason)),
+                new FailureException(ProtocolFailureOf(ProtocolCode.EnvelopeMalformed, reason.Message), raised, new FailureExceptionOptions { Cause = reason }),
                 connectionHandle);
-            Gate(new FailureException(ProtocolFailureOf(ProtocolCode.EnvelopeMalformed), (raised, reason)), (connectionHandle, prefix, true));
+            Gate(new FailureException(ProtocolFailureOf(ProtocolCode.EnvelopeMalformed), raised, new FailureExceptionOptions { Cause = reason }), (connectionHandle, prefix, true));
 
             return;
         }
@@ -1478,6 +1477,27 @@ internal sealed partial class RouterCore : IDisposable
     }
 
     /// <summary>
+    /// As <see cref="Receive(TransportMessage, string)"/>, with what its side runs once the job that
+    /// takes it returned or threw: the release of its intake's count (spec 15.12, decision 0046).
+    /// </summary>
+    internal void Receive(TransportMessage message, (string ConnectionHandle, Action Taken) received)
+    {
+        var (connectionHandle, taken) = received;
+
+        Post(() =>
+        {
+            try
+            {
+                ReceiveOnLoop(message, connectionHandle);
+            }
+            finally
+            {
+                taken();
+            }
+        });
+    }
+
+    /// <summary>
     /// Registers a resolver; a procedure out of its range, off its form or against its kind (spec
     /// 16.10), first, then a second one for its procedure, a payload's limit below 1, or a procedure
     /// its router's registry refuses to declare (spec/debugging.md 7.3), is an
@@ -1559,9 +1579,9 @@ internal sealed partial class RouterCore : IDisposable
     /// its connection, nothing goes out. A result too large for one envelope goes as a transfer, and
     /// the task settles once its last chunk went. A result past its limit, one that would need a
     /// transfer where this side sends none, or a subscription's that would need one, is a
-    /// <see cref="FailureException"/>, and nothing goes out; a failure of code 0, or a result that
-    /// would need a transfer on a call this side never dispatched, is an
-    /// <see cref="ArgumentException"/>.
+    /// <see cref="FailureException"/>, and nothing goes out; a failure of code 0, or an answer,
+    /// whole or a transfer, to a request this side never dispatched, is an
+    /// <see cref="ArgumentException"/>, and nothing goes out.
     /// </summary>
     public Task Respond(RouterAnswer response, AnswerTarget target)
     {
@@ -1600,10 +1620,22 @@ internal sealed partial class RouterCore : IDisposable
         return _failuresAnswered.TryGetValue(target.Header, out var failure) ? failure : null;
     }
 
-    /// <summary>Whether the call of a request is still to be answered; on the core's scheduler alone.</summary>
+    /// <summary>
+    /// Whether the call of a request is still to be answered; a request this side never dispatched
+    /// is open to none. On the core's scheduler alone.
+    /// </summary>
     internal bool IsAnswering(AnswerTarget target)
     {
         return _answeringCalls.IsAnswering(target);
+    }
+
+    /// <summary>
+    /// Whether this side dispatched a request, found again by the very header it was handed: a copy
+    /// was never dispatched. On the core's scheduler alone.
+    /// </summary>
+    internal bool IsDispatched(RequestHeader header)
+    {
+        return _answeringCalls.CallOf(header) is not null;
     }
 
     /// <summary>
@@ -1651,24 +1683,47 @@ internal sealed partial class RouterCore : IDisposable
     }
 
     /// <summary>
-    /// Rejects what still waits, cancels the signal of each call it still answers, and sends
-    /// nothing more: no cancel either.
+    /// Disposed in two steps (decision 0045): its mark at once, so what is made after fails unsent;
+    /// then, in a job of its own behind what came before it, the turn it was made in included, it
+    /// rejects what still waits, cancels the signal of each call it still answers, and sends nothing
+    /// more: no cancel either.
     /// </summary>
     public void Dispose()
     {
-        _isDisposed = true;
-        RejectPending($"{Disposed} before the answer");
+        MarkDisposed();
+        Post(() =>
+        {
+            DisposeOnLoop(null);
+        });
     }
 
-    // what the requester asks of the core it serves: the core's port, its scheduler, whether it was
-    // disposed, its reader of a chunk no transfer takes, and its report of what it raises itself
+    /// <summary>The dispose's first step, the handle's mark, set at once.</summary>
+    internal void MarkDisposed()
+    {
+        _isDisposed = true;
+    }
+
+    /// <summary>
+    /// The dispose's job, on the core's scheduler: the state's mark first, then what its router lets
+    /// go with it, then what waits rejected, application code last.
+    /// </summary>
+    internal void DisposeOnLoop(Action? alongside)
+    {
+        _isStateDisposed = true;
+        alongside?.Invoke();
+        RejectPendingOnLoop($"{Disposed} before the answer", null);
+    }
+
+    // what the requester asks of the core it serves: the core's port, its scheduler, whether its
+    // dispose's job ran, its reader of a chunk no transfer takes, and its report of what it raises
+    // itself
     private sealed class RequesterPort(RouterCore core) : IRouterRequesterPort
     {
         public bool IsDisposed
         {
             get
             {
-                return core._isDisposed;
+                return core._isStateDisposed;
             }
         }
 

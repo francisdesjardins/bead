@@ -6,15 +6,15 @@
   and its step 4, 5.6's sentence of an `Any`'s message, 7.4's place of a field left unset and its
   pointer, and the `required` of 11.4, 11.5 and 11.7; each side's runtime codec of a schema,
   `protoCodecOf` of `./proto`, `ProtoCodecs` of `Bead.Protobuf` and `ProtoCodec` and `DynamicCodec`
-  of `bead-protobuf`, its required walk, and on the C# side its filter of a closed enum's record and
+  of `bead-protobuf`, its required walk and its filter of a closed enum's record, and on the C# side
   `ProtoRequired.Check`; generated code's contract 6; `spec/codecs.proto`'s `Needs`, `Shade` and
   fields 7, 8 and 14, `spec/codecs.json`'s rows of 17.9.7 and 17.9.8 and the reason
   `a required field unset`; `spec/transcoding-required.proto`, `Requiring` and the procedures
   `require`, `getNeeds` and `updateNeeds` of `spec/transcoding.proto`, and their entries in
   `spec/transcoding.json`; the blueprint's `legacyRequired` under the feature `legacy-required`,
   beadc's document, and its rules `HTTP_REQUIRED_UNBOUND` and `HTTP_PATCH_REQUIRED`; the support
-  matrix's rows of an extension's required field given to a writer, a closed enum's echo, and a
-  repeated closed enum's leveling.
+  matrix's rows of an extension's required field given to a writer, and of a singular and a
+  repeated closed enum's levelings.
   What 17.9 restates of protobuf, and its items 1 to 4, are
   [0031](0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)'s; the check of a
   payload's records, 17.9.5 and 17.9.6,
@@ -99,40 +99,45 @@ parse, so a message given twice sets its required fields in either record, and i
 17.9.7's, by field number and depth first, a map's entries by 18.5's order of their keys.
 
 **A closed enum's undeclared number sets nothing on a singular field** (spec 17.9.8), as Enum
-Behavior has it: the field holds the last declared number its records give, or none. protobuf-es
-reads so already, and Buffa sets such a record aside itself; the C# side's runtime reader drops such
-a record before Google.Protobuf reads, which narrows what reads and never reads in the library's
-place
-([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)).
+Behavior has it: the field holds the last declared number its records give, or none. Every side's
+runtime reader drops such a record before its library reads, which narrows what reads and never
+reads in the library's place, where protobuf keeps it among the unknown fields: a row of "Leveled
+down" ([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md#on-the-corpus-that-writes-every-field-of-probe)).
 A repeated field's items and a map's values keep the number on every side, the Rust side's generator
-opening each such field of a closed enum: a row of "Leveled down". What each writes back of a
-singular field's number is a platform row.
+opening each such field of a closed enum: a row of "Leveled down".
 
 **One runtime codec of a schema on each side holds 17.9 once**: `protoCodecOf(schema)` of
 `@francisdesjardins/bead/proto` and `ProtoCodecs.Of<T>()` with `ProtoCodecs.Read(descriptor, bytes)`
 of `Bead.Protobuf`, and `ProtoCodec` and `DynamicCodec` of `bead-protobuf`
 ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)). Its read
-runs the records check, then, on the C# side, 17.9.8's filter, then the parse at 17.9.3's bound,
-then the walk; its write runs the walk, then the stock writer. On the Rust side both codecs walk
-before they write, and the typed one's walk never refuses, since a generated message's type leaves
-no required field unset, as the platform row "A proto value that leaves a required field unset or
-holds a closed enum's undeclared number, given to a typed writer" says. The TypeScript side throws a
-`SyntaxError` when it reads and a `TypeError` when it writes, as its other codecs do; the C# side a
-`FormatException` both ways, its codecs' type; the Rust side a `CodecRefusal` both ways; the words
-are the same, `a proto message leaves <full name> unset`, naming a field of the schema and never a
-key the peer sent. The walk is Bead's own on every side, its facts in the one shape per descriptor
+runs the records check, then 17.9.8's filter, then the parse at 17.9.3's bound,
+then the walk; its write runs 17.9.3's depth pass, then the walk, within 101 levels, then the stock
+writer, then the records check over what it wrote
+([0031](0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)). On the Rust side
+both codecs walk before they write, and the typed one's walk never refuses, since a generated
+message's type leaves no required field unset, as the platform row "A proto value that leaves a
+required field unset or holds a closed enum's undeclared number, given to a typed writer" says. The
+TypeScript side throws a `SyntaxError` when it reads and a `TypeError` when it writes, as its other
+codecs do; the C# side a `FormatException` both ways, its codecs' type; the Rust side a
+`CodecRefusal` both ways; the words are 17.2's, `a required field unset`, and the field's full name,
+of the schema and never a key the peer sent, and its path ride in the refusal's cause
+([0016](0016-a-json-payload-has-one-form-whichever-side-writes-it.md)). The public walks, the C#
+side's `ProtoRequired.Check` and the Rust side's `check_required`, refuse past 17.9.3's bound with
+the same refusal. The walk is Bead's own on every side, its facts in the one shape per descriptor
 `ProtoRecords` holds, weakly held as long as its descriptor is, the Rust side's in its
 `ProtoSchema`, read once from its pool: each message's required fields, the message fields that
-reach one, and on the C# side its singular closed enums. Reachability is one search over the
-descriptor's closure, cycles included, with no flag cached mid-search. Generated code, the gateway's
-result reader, `HttpEvents.DataOf`, an `Any`'s bytes on writing, both HTTP callers and every test
-codec read and write through it; an `Any`'s bytes are read with the records check, the bound and the
-filter, and no walk.
+reach one, and its singular closed enums, each with the numbers its enum declares. Reachability is
+one search over the descriptor's closure, cycles included, with no flag cached mid-search.
+Generated code, the gateway's result reader, `JsonForm.EventDataOf`, an `Any`'s bytes on writing,
+both HTTP callers and every test codec read and write through it; an `Any`'s bytes are read with the
+records check, the bound and the filter, and no walk.
 
 **Generated code's contract moves to 6.** A service's generated file calls the runtime codec, which
 a runtime without it lacks, so it names `GENERATED_CODE_SUPPORTS_VERSION_6` and
-`GeneratedCode.SupportsVersion6`. 4 goes from the TypeScript and C# runtimes, since code that names
-it checks no required field and no longer conforms through the runtime. 5, the route table's, stays:
+`GeneratedCode.SupportsVersion6`, or a later counter, 7
+([0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)).
+The TypeScript and C# runtimes hold no 4, since code that names
+it checks no required field and so does not conform through the runtime. 5, the route table's, stays:
 a route table holds descriptors and calls no codec, so code that names it still conforms, and by
 0028's rule before 1.0.0 it stays.
 
@@ -179,24 +184,23 @@ message holds one. buf's cardinality rules already judge a field made required o
 ## Consequences
 
 **Every file generated before contract 6 fails its build until it is regenerated**, on the
-TypeScript and C# sides, beadc's goldens, `examples/hello`'s and the demo's `gen/` among them; those
-sides and every gateway must change to conform.
+TypeScript and C# sides.
 
 **A PATCH of a message that holds a required field names that field on every call** whose mask is
 derived: a caller that would keep it unchanged sends its own `update_mask`, which beadc's
 `HTTP_PATCH_REQUIRED` tells a `.proto`'s author.
 
-**Two platform rows and a leveling.** An extension's message that leaves a required field unset,
+**A platform row and two levelings.** An extension's message that leaves a required field unset,
 given to a writer: refused on the TypeScript side, as protobuf-es's `toBinary` checks it, written on
 the C# side, since Google.Protobuf lists no extension a message holds, and on the Rust side, since
 Buffa's generated codec, given no registry, writes it back among the unknown fields; reading is at
-parity. A singular closed enum's undeclared number, echoed: protobuf-es and Buffa write it back
-among the unknown fields, the C# side has dropped it before its library read; what each reads is at
-parity. A repeated closed enum's item, or a map's value, of an undeclared number: kept on every
-side, the Rust side's generator opening such a field, where Enum Behavior moves it among the unknown
-fields, a row of "Leveled down" that lifts when the TypeScript side can move it to `$unknown`, the
-C# side can drop it in its filter and the Rust side's generator can leave such a field closed,
-together.
+parity. A singular closed enum's undeclared number, written back: dropped on every side before its
+library reads, where Enum Behavior keeps it, a row of "Leveled down" that lifts when Google.Protobuf
+keeps it among a message's unknown fields and protobuf-es keeps it wherever it reads it. A repeated
+closed enum's item, or a map's value, of an undeclared number: kept on every side, the Rust side's
+generator opening such a field, where Enum Behavior moves it among the unknown fields, a row of
+"Leveled down" that lifts when the TypeScript side can move it to `$unknown`, the C# side can drop
+it in its filter and the Rust side's generator can leave such a field closed, together.
 
 **The cost is the walk**, linear in the messages a payload holds that reach a required field, and
 one lookup for a message that reaches none; the floor of protobuf's conformance suite, 5,601 tests
@@ -206,7 +210,8 @@ and 48 skipped, stays, played through the runtime codecs.
 `spec/transcoding.json`'s readings, bindings, writings and exchanges of 5.2's step 4, 5.6, 7.4 and
 17.9.8, each player reading a writing's payload through its side's runtime reader; the twin tests
 of the codec, the service client and server, the gateway and the HTTP caller, one sentence each
-pair; beadc's tests of the blueprint, the document and the two rules.
+pair; beadc's tests of the blueprint, the document and the two rules; and the `protobuf-conformance`
+differential, whose corpus writes fields 7, 8 and 14.
 
 **Out of scope**: a pointer written by the name the body used, so that one resolves in a body that
 named a member by its proto name, which would change the TypeScript and C# sides' readers and the
@@ -238,7 +243,7 @@ the answer that holds:
 | PATCH (4.5) is never met, and the two sides place the derived mask apart                                | In part. Accepted: 4.5 states that a required field of the body's message is always among the derived paths, and that a caller keeps one only by an `update_mask` of its own (AIP-203). `HTTP_PATCH_REQUIRED` warns. The mask is placed once, before step 4, so a required `update_mask` binds; a binding case pins it. The `line_1` divergence is closed with its own binding case, so no matrix row is needed. Refused: its direction, that C# set the mask in the draft before the reading. 4.5 sets paths by proto names, and the draft's JSON round trip is what refuses `line_1`. So the TypeScript side keeps to C#'s way: the mask is set on the message after steps 2 and 3. With step 4 after the walk, that order is enough.                                                                                                                                                                                         |
 | The HTTP callers refuse in different layers, types and words; the walk throws a writer's type on a read | Accepted. C#'s `HttpCaller.Write` calls `ProtoRequired.Check` before `_form.Write`, as the TypeScript side encodes before it writes. The TypeScript codec throws a `SyntaxError` when reading and a `TypeError` when writing, as its other codecs do. The C# side throws a `FormatException` both ways, its own codecs' type. The twins assert the type and the words.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | The document promises what the gateway refuses, and refuses what it takes                               | In part. Accepted: a parameter is required where a variable holds its parent present; a body schema requires a message field that a variable binds into where it keeps a required field; `HTTP_REQUIRED_UNBOUND` is an error, since no call satisfies such a route (`HTTP_QUERY_UNBINDABLE` is a warning because some calls do); and the inline path keeps its rules, a fix. Refused: that `required: true` holds only where a parameter's JSON name is its proto name. The document already holds every body by JSON names alone under `additionalProperties: false` (11.7), and says a field's proto name in a description (11.9). A proxy that validates against it already refuses a body in proto names. The parameter keeps the same form: required by its JSON name, its proto name said in its description. Doing otherwise would leave a multi-word required field's requirement out of the machine-readable document. |
-| One runtime codec of a schema, not one call at every site                                               | Accepted. `protoCodecOf(schema)` in `./proto` and `ProtoCodecs.Of<T>()` with `ProtoCodecs.Read` in `Bead.Protobuf` hold 17.9 once. Generated code, the gateway's result reader, `HttpEvents.DataOf`, an `Any`'s bytes on writing, both callers and every test codec go through them. `DataOf` thereby gains 0028's check and 17.9.3's bound, a fix. The required fields, reachability and closed enums join `ProtoRecords`' weakly held shape, and its `ConcurrentDictionary` goes. The contract moves once, and the next item of 17.9 moves none.                                                                                                                                                                                                                                                                                                                                                                              |
+| One runtime codec of a schema, not one call at every site                                               | Accepted. `protoCodecOf(schema)` in `./proto` and `ProtoCodecs.Of<T>()` with `ProtoCodecs.Read` in `Bead.Protobuf` hold 17.9 once. Generated code, the gateway's result reader, `JsonForm.EventDataOf`, an `Any`'s bytes on writing, both callers and every test codec go through them. `EventDataOf` thereby gains 0028's check and 17.9.3's bound, a fix. The required fields, reachability and closed enums join `ProtoRecords`' weakly held shape, and its `ConcurrentDictionary` goes. The contract moves once, and the next item of 17.9 moves none.                                                                                                                                                                                                                                                                                                                                                                      |
 | Closed enums: a known divergence deferred, which breaks 5.6's one sequence of bytes                     | In part. Accepted: 17.9.8 states it, with codecs rows, transcoding writings, a twin, a platform row for the echo, and a row of "Leveled down". Corrected: clearing the field after the parse would not match. protobuf-es keeps the last declared number (`01` then `05` reads `1`), and Google.Protobuf holds `5`. So the C# reader drops such records before the parse, in `ProtoRecords`' walk, and reads what protobuf-es reads. Narrowed: protobuf-es moves the number aside for a singular field only. A repeated field's items and a map's values keep it on both sides (`from-binary.js:267-281`, `:306-309`), so that part is at parity. It is a row of "Leveled down" against Enum Behavior, not a difference.                                                                                                                                                                                                        |
 | 7.4 and 5.2's lead each carve one exception from a sentence already false                               | Accepted. 7.4 states its pointer once: JSON names, resolving where the body names each field so, and naming an unset field as the absent member. 5.2's lead orders the text, section 4's refusals, the walk of steps 2 and 3 in the draft's member order with the repeated scalars after, the derived mask, then step 4. With step 4 after the walk, the order between a member's refusal and an unset field no longer depends on member order. Two binding cases pin section 4's refusal (`?nope=1`) and a query scalar's (`?child.name=b&count=x`) before an unset field. Writing the pointer by the name the body used is left out of scope.                                                                                                                                                                                                                                                                                 |
 | `bead-blueprint/1` cannot take `legacyRequired` as drafted                                              | Accepted. The member comes under the feature `legacy-required`, named after the member and protobuf's term, which keeps it apart from protovalidate's and JSON Schema's `required`. It is coupled at the top as `validate` is. `fieldEntry` gains an `if`/`then`: `presence` `explicit`, no `label`, no `oneof`. The flag is kept rather than a third `presence` value.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |

@@ -94,7 +94,7 @@ pub struct BrokerPublication {
 impl BrokerPublication {
     /// A publication of `payload` to `topic`, living as long as its broker keeps it.
     #[must_use]
-    pub fn of<T: Into<String>, I: IntoIterator<Item = T>>(topic: I, payload: Bytes) -> Self {
+    pub fn new<T: Into<String>, I: IntoIterator<Item = T>>(topic: I, payload: Bytes) -> Self {
         Self {
             topic: topic.into_iter().map(Into::into).collect(),
             payload,
@@ -137,7 +137,7 @@ pub struct BrokerDown {
 impl BrokerDown {
     /// A link lost, or taken over when `is_taken_over`.
     #[must_use]
-    pub const fn of(is_taken_over: bool) -> Self {
+    pub const fn new(is_taken_over: bool) -> Self {
         Self { is_taken_over }
     }
 }
@@ -193,12 +193,12 @@ impl fmt::Debug for BrokerMessage {
 impl BrokerMessage {
     /// A message of `publication`'s topic and payload, and what acknowledges it to its broker.
     #[must_use]
-    pub fn new(publication: BrokerPublication, options: BrokerMessageOptions) -> Self {
+    pub fn new(publication: BrokerPublication, options: &BrokerMessageOptions) -> Self {
         Self {
             topic: publication.topic,
             payload: publication.payload,
             is_retained: options.is_retained.unwrap_or(false),
-            settle: options.settle,
+            settle: options.settle.clone(),
             is_settled: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -237,15 +237,33 @@ impl BrokerMessage {
 pub enum BrokerError {
     /// A misuse, refused as it was made.
     Refused(ProgrammerError),
-    /// What its broker or its link failed with, saying why.
-    Failed(String),
+    /// What its broker or its link failed with, saying why, and what caused it where it knows.
+    #[non_exhaustive]
+    Failed {
+        /// What it says.
+        message: String,
+        /// What caused it.
+        source: Option<Arc<dyn Error + Send + Sync>>,
+    },
 }
 
 impl BrokerError {
     /// A failure, saying `message`.
     #[must_use]
     pub fn failed<M: Into<String>>(message: M) -> Self {
-        Self::Failed(message.into())
+        Self::Failed {
+            message: message.into(),
+            source: None,
+        }
+    }
+
+    /// A failure, saying `message`, caused by `source`.
+    #[must_use]
+    pub fn caused<M: Into<String>>(message: M, source: Arc<dyn Error + Send + Sync>) -> Self {
+        Self::Failed {
+            message: message.into(),
+            source: Some(source),
+        }
     }
 }
 
@@ -259,7 +277,7 @@ impl fmt::Display for BrokerError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Refused(error) => write!(formatter, "{error}"),
-            Self::Failed(message) => formatter.write_str(message),
+            Self::Failed { message, .. } => formatter.write_str(message),
         }
     }
 }
@@ -268,7 +286,9 @@ impl Error for BrokerError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Refused(error) => Some(error),
-            Self::Failed(_) => None,
+            Self::Failed { source, .. } => source
+                .as_ref()
+                .map(|source| -> &(dyn Error + 'static) { source.as_ref() }),
         }
     }
 }
@@ -319,26 +339,47 @@ pub trait BrokerAdapter: Send + Sync + fmt::Debug {
 
     /// Connects a link that keeps no broker session, its will set where it offers one; settles once
     /// its broker took it.
+    ///
+    /// # Errors
+    ///
+    /// A [`BrokerError`] when the options are refused or the broker cannot open the link.
     fn start(&self, options: BrokerStart) -> BoxFuture<Result<(), BrokerError>>;
 
     /// Holds a subscription to `topic`, alone or in a group; settles once its broker holds it.
+    ///
+    /// # Errors
+    ///
+    /// A [`BrokerError`] for a refused subscription, an acknowledgement failure, or a lost link.
     fn subscribe(
         &self,
         topic: &[String],
         options: BrokerSubscription,
     ) -> BoxFuture<Result<(), BrokerError>>;
 
-    /// Lets the subscription to `topic` go.
+    /// Lets the subscription to `topic` go, taking effect as it is called; settles once its broker
+    /// let it go, within a bound of its own, each message its broker sent of it before then handed
+    /// on first (spec 15.24). A participant's stop asks it of each name it serves, before its stop.
+    ///
+    /// # Errors
+    ///
+    /// A [`BrokerError`] when the broker refuses the unsubscribe, does not let it go within that
+    /// bound, or the link is lost.
     fn unsubscribe(&self, topic: &[String]) -> BoxFuture<Result<(), BrokerError>>;
 
     /// Publishes a payload; settles once its broker took it, at least once, or as it goes, at most
     /// once, [`BrokerPublished::Taken`]; or [`BrokerPublished::NoSubscriber`] when no subscriber
     /// takes it, where its broker says so.
+    ///
+    /// # Errors
+    ///
+    /// A [`BrokerError`] for a refused publication, a failed acknowledgement, or a lost link.
     fn publish(
         &self,
         publication: BrokerPublication,
     ) -> BoxFuture<Result<BrokerPublished, BrokerError>>;
 
-    /// Ends its link cleanly, so its broker publishes no will.
+    /// Ends its link cleanly, so its broker publishes no will; settles once its broker let go of
+    /// each subscription of its link, as its unsubscription lets one go, so that its broker hands
+    /// it nothing more.
     fn stop(&self) -> BoxFuture<()>;
 }

@@ -4,7 +4,7 @@ namespace Bead;
 /// The call ids each side draws: odd from a client, even from a server, as HTTP/2 numbers its
 /// streams, so the two never draw the same one.
 /// </summary>
-public static class CallIds
+internal static class CallIds
 {
     /// <summary>The first call id <paramref name="side"/> draws.</summary>
     public static uint FirstOf(RouterSide side)

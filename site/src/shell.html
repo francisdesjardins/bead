@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en-CA">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{title}}</title>
+    <meta name="description" content="{{description}}" />
+    <link rel="alternate" hreflang="en" href="{{address}}" />
+    <link rel="alternate" hreflang="fr" href="{{address}}?lng=fr" />
+    <link rel="alternate" hreflang="x-default" href="{{address}}" />
+    <meta name="author" content="Francis Desjardins" />
+    <meta name="theme-color" content="#c13584" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="{{address}}" />
+    <meta property="og:title" content="{{title}}" />
+    <meta property="og:description" content="{{description}}" />
+    <meta property="og:site_name" content="Francis Desjardins" />
+    <meta name="twitter:card" content="summary" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preload" href="/fonts/geist.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/newsreader.woff2" as="font" type="font/woff2" crossorigin />
+    <script>
+{{head-script}}
+    </script>
+    <style>
+{{style}}
+    </style>
+  </head>
+  <body>
+    <div id="page" data-lang="en">
+{{page-en}}
+    </div>
+    <template id="page-other" data-lang="fr">
+{{page-fr}}
+    </template>
+    <script type="application/json" id="heads">{{heads}}</script>
+    <script>
+{{page-script}}
+    </script>
+  </body>
+</html>

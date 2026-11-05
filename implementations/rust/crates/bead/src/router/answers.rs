@@ -53,6 +53,19 @@ fn stop<S: Side>(state: &mut S, id: u64) -> Option<ResultSending<S>> {
     Some(sending)
 }
 
+/// Stops a result as its requester cancels, before another queued credit can send more.
+pub(crate) fn cancel<S: Side>(state: &mut S, call: &CallAddress) {
+    let Some(SendingFor::Result(id)) = state.core().sendings.purpose_of(call) else {
+        return;
+    };
+
+    if let Some(sending) = stop(state, id)
+        && let Some(done) = sending.done
+    {
+        done(state, Err(CallError::Cancelled(Some(call.call_id))));
+    }
+}
+
 // the call goes with it: its call id is the peer's to open again; what did not go out is undone
 fn fail<S: Side>(state: &mut S, (id, error): (u64, CallError)) {
     let Some(sending) = stop(state, id) else {
@@ -118,6 +131,13 @@ pub(crate) fn progress<S: Side>(state: &mut S, (_call, id): (&CallAddress, u64))
         );
     });
 
+    let timer = match timer {
+        Ok(timer) => timer,
+        Err(error) => {
+            fail(state, (id, CallError::Refused(error)));
+            return;
+        }
+    };
     if let Some(sending) = state.core().results.get_mut(&id) {
         cancel_timer(&mut sending.timer);
         sending.timer = Some(timer);
@@ -131,19 +151,8 @@ pub(crate) fn end_counted<S: Side>(state: &mut S, (dispatch, ending): (&Dispatch
     let call = call_of(dispatch);
     let core = state.core();
 
-    if let Some(answering) = core.answering.get_mut(&call)
-        && answering.dispatched == dispatch.id
-        && !answering.is_ended
-        && let Some(series) = answering.series.clone()
-    {
-        // * read only for a call counted (spec/debugging.md 3.1)
-        let now = core.clock.monotonic();
-
-        answering.is_ended = true;
-        series.end(
-            ending,
-            crate::router::core::microseconds_of(now.saturating_sub(answering.started_at)),
-        );
+    if let Some(answering) = core.answering.answering_of_mut((&call, dispatch.id)) {
+        answering.end(ending, || core.clock.monotonic());
     }
 }
 
@@ -221,6 +230,7 @@ pub(crate) fn send_result<S: Side>(
     // the call's signal ends it: a cancel, the connection gone
     if let Some(signal) = signal {
         let owner = core.owner.clone();
+        let call_id = call.call_id;
 
         core.owner.cover(async move {
             let token = signal.token().clone();
@@ -235,7 +245,7 @@ pub(crate) fn send_result<S: Side>(
             }
 
             let reason = match signal.reason() {
-                Some(SignalReason::Cancelled) | None => CallError::Cancelled,
+                Some(SignalReason::Cancelled) | None => CallError::Cancelled(Some(call_id)),
                 Some(SignalReason::Disconnected(reason)) => CallError::Disconnected(reason),
             };
             owner.offer(Box::new(move |state: &mut S| {

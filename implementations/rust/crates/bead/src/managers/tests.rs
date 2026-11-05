@@ -7,17 +7,18 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use bytes::Bytes;
 use serde_json::Value;
 
+use crate::NotificationResolverDependencies;
 use crate::constants::{FailureScope, ProcedureKind, ProtocolCode, RouterSide};
 use crate::debug::{DebugDirection, DebugType};
 use crate::errors::CallError;
 use crate::failure::FailureOrigin;
 use crate::identity::{Deprecation, Procedure};
 use crate::managers::service::{
-    DebugEvent, NotificationDependencies, NotifyOptions, RequestDependencies, RequestOptions,
-    ResolverDependencies, Response, ServiceManager, TracedError,
+    DebugEvent, NotificationDependencies, NotifyOptions, RegistrationOptions, RequestDependencies,
+    RequestOptions, RequestResolverDependencies, Response, ServiceManager, TracedError,
 };
 use crate::payloads::{CodecRefusal, JsonCodec, PayloadCodec, RawCodec};
-use crate::router::types::RouterError;
+use crate::router::types::{ConnectionHandle, RouterError};
 use crate::testing::pair::{Pair, PairOptions, echo};
 
 // what a manager's debug listener heard: whether the step went wrong and why, and the step
@@ -28,9 +29,12 @@ fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 async fn pair() -> Pair {
-    Pair::connected((crate::testing::instants::new_year(), PairOptions::default()))
-        .await
-        .expect("a pair connected")
+    Pair::connected(
+        crate::testing::instants::new_year(),
+        &PairOptions::default(),
+    )
+    .await
+    .expect("a pair connected")
 }
 
 // a client over the test kit's scripted transport, on a stepping clock: what it sends read, what it
@@ -43,7 +47,7 @@ fn scripted() -> (
     let clock = crate::testing::SteppingClock::new(crate::testing::instants::new_year());
     let shared: crate::clock::SharedClock = Arc::<crate::testing::SteppingClock>::clone(&clock);
     let transport = crate::testing::scripted::ScriptedClient::new(shared);
-    let carried: Arc<dyn crate::transport::ClientTransport> =
+    let carried: Arc<dyn crate::transport::RouterClientTransport> =
         Arc::<crate::testing::scripted::ScriptedClient>::clone(&transport);
     let client = crate::client::Client::new(carried, &crate::client::ClientOptions::default())
         .expect("a client built");
@@ -66,9 +70,9 @@ fn recorded(manager: &ServiceManager) -> Heard {
 
 fn ticks() -> Procedure {
     Procedure {
-        id: 2,
-        name: "ticks".to_owned(),
-        kind: Some(ProcedureKind::Notifies),
+        procedure_id: 2,
+        procedure_name: "ticks".to_owned(),
+        procedure_kind: Some(ProcedureKind::Notifies),
         ..echo()
     }
 }
@@ -97,16 +101,16 @@ impl PayloadCodec for Unwritable {
 #[tokio::test]
 async fn an_answer_that_does_not_decode_fails_the_call_here_with_its_header_and_its_call() {
     let (clock, transport, client) = scripted();
-    let manager = client.services();
+    let manager = &client.services().manager;
     let heard = recorded(manager);
     let options = RequestOptions {
         destination_id: Some(4),
         ..RequestOptions::default()
     };
     let call = manager
-        .get_request(&echo(), RequestDependencies::of(JsonCodec, JsonCodec))
+        .get_request(&echo(), RequestDependencies::new(JsonCodec, JsonCodec))
         .expect("echo asked")
-        .call(Value::from("x"), options)
+        .call(Value::from("x"), &options)
         .expect("echo called");
 
     clock.settle().await;
@@ -138,10 +142,11 @@ async fn an_answer_that_does_not_decode_fails_the_call_here_with_its_header_and_
     assert_eq!(failure.origin(), FailureOrigin::Local, "raised here");
     assert_eq!(failure.scope(), FailureScope::Protocol, "the protocol's");
     assert_eq!(failure.side(), Some(RouterSide::Client), "by the client");
+    assert_eq!(failure.detail(), "not JSON", "its codec's reason");
     assert_eq!(failure.procedure(), Some(echo().address()), "its call");
     assert_eq!(failure.destination_id(), Some(4), "its call's destination");
     assert!(
-        matches!(failure.header(), Some(crate::envelope::Header::Result(header)) if *header == answer),
+        matches!(failure.header(), Some(crate::envelope::EnvelopeHeader::Result(header)) if *header == answer),
         "its answer's header"
     );
     assert!(
@@ -171,32 +176,36 @@ async fn a_notification_that_does_not_decode_fails_here_for_the_router_to_report
         .services()
         .get_notification_resolver(
             &ticks(),
-            (ResolverDependencies::of(JsonCodec, JsonCodec), RawCodec),
+            NotificationResolverDependencies::new(
+                RequestResolverDependencies::new(JsonCodec, JsonCodec),
+                RawCodec,
+            ),
         )
         .expect("ticks resolved")
         .on(Arc::new(|_request, response: Response<JsonCodec>| {
             response.result(Value::Null)
         }))
         .expect("ticks registered");
-    let manager = pair.client.services();
+    let manager = &pair.client.services().manager;
     let heard: Arc<Mutex<Vec<Value>>> = Arc::default();
     let hearing = Arc::clone(&heard);
     let notification = manager
         .get_notification(
             &ticks(),
-            NotificationDependencies::of((JsonCodec, JsonCodec, JsonCodec)),
+            NotificationDependencies::new(
+                RequestDependencies::new(JsonCodec, JsonCodec),
+                JsonCodec,
+            ),
         )
         .expect("ticks heard");
-    let registering = notification.on(
-        (
-            Value::Null,
-            Arc::new(move |value: Value| {
-                locked(&hearing).push(value);
+    let registering = notification.register(
+        Value::Null,
+        Arc::new(move |value: Value| {
+            locked(&hearing).push(value);
 
-                Box::pin(async { Ok(()) })
-            }),
-        ),
-        RequestOptions::default(),
+            Box::pin(async { Ok(()) })
+        }),
+        &RegistrationOptions::default(),
     );
 
     pair.settle().await;
@@ -247,7 +256,7 @@ async fn a_notification_that_does_not_decode_fails_here_for_the_router_to_report
 async fn a_call_whose_value_does_not_write_fails_before_anything_goes_nothing_requested_traced_or_deprecated()
  {
     let pair = pair().await;
-    let manager = pair.client.services();
+    let manager = &pair.client.services().manager;
     let seen = recorded(manager);
     let deprecated: Arc<Mutex<Vec<Procedure>>> = Arc::default();
     let telling = Arc::clone(&deprecated);
@@ -256,7 +265,10 @@ async fn a_call_whose_value_does_not_write_fails_before_anything_goes_nothing_re
 
     pair.server
         .services()
-        .get_request_resolver(&echo(), ResolverDependencies::of(JsonCodec, JsonCodec))
+        .get_request_resolver(
+            &echo(),
+            RequestResolverDependencies::new(JsonCodec, JsonCodec),
+        )
         .expect("echo resolved")
         .on(Arc::new(move |request, response: Response<JsonCodec>| {
             *locked(&counting) += 1;
@@ -274,13 +286,13 @@ async fn a_call_whose_value_does_not_write_fails_before_anything_goes_nothing_re
                 deprecation: Some(Deprecation::default()),
                 ..echo()
             },
-            RequestDependencies::of(Unwritable, JsonCodec),
+            RequestDependencies::new(Unwritable, JsonCodec),
         )
         .expect("echo asked");
 
     // * written before its trace and its deprecation: no call is made (spec 17.2, item 4)
     let refused = requester
-        .call(Value::from("x"), RequestOptions::default())
+        .call(Value::from("x"), &RequestOptions::default())
         .expect("a call");
     let refused = crate::testing::patience(Duration::from_secs(10), refused)
         .await
@@ -307,7 +319,10 @@ async fn a_notification_whose_value_does_not_write_goes_to_its_router_in_its_pay
         .services()
         .get_notification_resolver(
             &ticks(),
-            (ResolverDependencies::of(JsonCodec, JsonCodec), Unwritable),
+            NotificationResolverDependencies::new(
+                RequestResolverDependencies::new(JsonCodec, JsonCodec),
+                Unwritable,
+            ),
         )
         .expect("ticks resolved")
         .on(Arc::new(|_request, response: Response<JsonCodec>| {
@@ -319,21 +334,22 @@ async fn a_notification_whose_value_does_not_write_goes_to_its_router_in_its_pay
         .services()
         .get_notification(
             &ticks(),
-            NotificationDependencies::of((JsonCodec, JsonCodec, JsonCodec)),
+            NotificationDependencies::new(
+                RequestDependencies::new(JsonCodec, JsonCodec),
+                JsonCodec,
+            ),
         )
         .expect("ticks heard");
-    let registering = notification.on(
-        (
-            Value::Null,
-            Arc::new(|_value: Value| Box::pin(async { Ok(()) })),
-        ),
-        RequestOptions::default(),
+    let registering = notification.register(
+        Value::Null,
+        Arc::new(|_value: Value| Box::pin(async { Ok(()) })),
+        &RegistrationOptions::default(),
     );
 
     pair.settle().await;
     registering.await.expect("subscribed");
 
-    let seen = recorded(pair.server.services());
+    let seen = recorded(&pair.server.services().manager);
 
     // resolves all the same
     crate::testing::patience(
@@ -405,11 +421,11 @@ impl PayloadCodec for Breaking {
     }
 }
 
-// decision 0044: a codec's panic is its throw, as both other sides answer any throw of a request's
-// decode PAYLOAD_UNDECODABLE: the twin of "a payload that does not decode is answered as
-// undecodable, with no detail, never reaching the callback", its codec panicking
+// spec 9.0, 17.2, decision 0044: a codec's panic is its throw other than its refusal, the one a
+// CodecRefusal leaves it: the twin of "a payload whose codec throws other than its refusal is
+// answered PROCEDURE_FAILED, with no detail, and reported, never reaching the callback"
 #[tokio::test]
-async fn a_request_whose_codec_panics_as_it_reads_is_answered_as_undecodable_with_no_detail_never_reaching_the_callback()
+async fn a_request_whose_codec_panics_as_it_reads_is_answered_procedure_failed_with_no_detail_and_reported_never_reaching_the_callback()
  {
     let pair = pair().await;
     let reached = Arc::new(Mutex::new(0_u32));
@@ -419,7 +435,7 @@ async fn a_request_whose_codec_panics_as_it_reads_is_answered_as_undecodable_wit
         .services()
         .get_request_resolver(
             &echo(),
-            ResolverDependencies::of(
+            RequestResolverDependencies::new(
                 Breaking {
                     reads: true,
                     writes: false,
@@ -438,9 +454,9 @@ async fn a_request_whose_codec_panics_as_it_reads_is_answered_as_undecodable_wit
     let call = pair
         .client
         .services()
-        .get_request(&echo(), RequestDependencies::of(JsonCodec, JsonCodec))
+        .get_request(&echo(), RequestDependencies::new(JsonCodec, JsonCodec))
         .expect("echo asked")
-        .call(Value::from("x"), RequestOptions::default())
+        .call(Value::from("x"), &RequestOptions::default())
         .expect("echo called");
 
     pair.settle().await;
@@ -454,13 +470,24 @@ async fn a_request_whose_codec_panics_as_it_reads_is_answered_as_undecodable_wit
 
     assert_eq!(
         (failure.protocol_code(), failure.detail()),
-        (Some(ProtocolCode::PAYLOAD_UNDECODABLE), ""),
-        "undecodable, with no detail"
+        (Some(ProtocolCode::PROCEDURE_FAILED), ""),
+        "PROCEDURE_FAILED, with no detail"
     );
     assert_eq!(*locked(&reached), 0, "never reaching the callback");
-    assert!(
-        locked(&pair.server_reports).is_empty(),
-        "nothing reported, as for a decode that refuses"
+
+    // * the panic reported once, with the request's connection
+    let reported: Vec<(String, Option<ConnectionHandle>)> = locked(&pair.server_reports)
+        .iter()
+        .map(|(error, handle)| (error.to_string(), handle.clone()))
+        .collect();
+
+    assert_eq!(
+        reported,
+        [(
+            "a codec panicked: this codec breaks as it reads, on purpose".to_owned(),
+            Some(Arc::clone(&pair.connection_handle))
+        )],
+        "its panic reported, with its connection"
     );
 }
 
@@ -473,18 +500,21 @@ async fn an_answer_whose_codec_panics_as_it_reads_fails_the_call_here_undecodabl
 
     pair.server
         .services()
-        .get_request_resolver(&echo(), ResolverDependencies::of(JsonCodec, JsonCodec))
+        .get_request_resolver(
+            &echo(),
+            RequestResolverDependencies::new(JsonCodec, JsonCodec),
+        )
         .expect("echo resolved")
         .on(Arc::new(|request, response: Response<JsonCodec>| {
             response.result(request.payload)
         }))
         .expect("echo registered");
 
-    let manager = pair.client.services();
+    let manager = &pair.client.services().manager;
     let call = manager
         .get_request(
             &echo(),
-            RequestDependencies::of(
+            RequestDependencies::new(
                 JsonCodec,
                 Breaking {
                     reads: true,
@@ -493,7 +523,7 @@ async fn an_answer_whose_codec_panics_as_it_reads_fails_the_call_here_undecodabl
             ),
         )
         .expect("echo asked")
-        .call(Value::from("x"), RequestOptions::default())
+        .call(Value::from("x"), &RequestOptions::default())
         .expect("echo called");
 
     pair.settle().await;
@@ -518,9 +548,9 @@ async fn an_answer_whose_codec_panics_as_it_reads_fails_the_call_here_undecodabl
     );
 
     let next = manager
-        .get_request(&echo(), RequestDependencies::of(JsonCodec, JsonCodec))
+        .get_request(&echo(), RequestDependencies::new(JsonCodec, JsonCodec))
         .expect("echo asked")
-        .call(Value::from("y"), RequestOptions::default())
+        .call(Value::from("y"), &RequestOptions::default())
         .expect("echo called");
 
     pair.settle().await;
@@ -540,12 +570,12 @@ async fn an_answer_whose_codec_panics_as_it_reads_fails_the_call_here_undecodabl
 #[tokio::test]
 async fn a_call_whose_codec_panics_as_it_writes_fails_with_its_throw_and_nothing_goes() {
     let pair = pair().await;
-    let manager = pair.client.services();
+    let manager = &pair.client.services().manager;
     let heard = recorded(manager);
     let call = manager
         .get_request(
             &echo(),
-            RequestDependencies::of(
+            RequestDependencies::new(
                 Breaking {
                     reads: false,
                     writes: true,
@@ -554,7 +584,7 @@ async fn a_call_whose_codec_panics_as_it_writes_fails_with_its_throw_and_nothing
             ),
         )
         .expect("echo asked")
-        .call(Value::from("x"), RequestOptions::default())
+        .call(Value::from("x"), &RequestOptions::default())
         .expect("a call made, its throw its outcome");
 
     pair.settle().await;

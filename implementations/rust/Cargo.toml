@@ -11,7 +11,7 @@ exclude = ["fuzz", "tools/protobuf-conformance"]
 [workspace.package]
 # the product's one version, which tools/release.mjs moves with the TypeScript manifest and the
 # C# side's Directory.Build.props
-version = "0.9.0"
+version = "0.10.0"
 edition = "2024"
 # the floor is the pin, rust-toolchain.toml's
 rust-version = "1.99.1"
@@ -38,6 +38,7 @@ ryu-js = { version = "1.0.3", default-features = false }
 p256 = { version = "0.14.0", default-features = false, features = ["ecdsa"] }
 hmac = { version = "0.13.0", default-features = false }
 sha2 = { version = "0.11.1", default-features = false }
+sha1 = { version = "0.11.0", default-features = false }
 getrandom = { version = "0.4.3", default-features = false }
 libtest-mimic = { version = "0.8.2" }
 syn = { version = "3.0.9", default-features = false, features = ["full", "parsing", "visit"] }

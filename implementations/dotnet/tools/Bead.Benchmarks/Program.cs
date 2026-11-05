@@ -319,19 +319,19 @@ internal static class Program
 
         public RouterClient Router { get; }
 
-        public ServiceManager Services { get; }
+        public IServiceManagerClient Services { get; }
 
         public Task Connect(MemoryTransportServer server)
         {
-            return Transport.Connect(new MemoryConnectOptions { Server = server, Address = "127.0.0.1", Port = 50_000 });
+            return Transport.Connect(new MemoryTransportClientConnectOptions { Server = server, Address = "127.0.0.1", Port = 50_000 });
         }
 
-        public Task Disconnect(TransportDisconnectOptions? options = null)
+        public Task Disconnect(TransportClientDisconnectOptions? options = null)
         {
             return Transport.CloseConnection(options);
         }
 
-        public Task Reconnect(TransportReconnectOptions? options = null)
+        public Task Reconnect(TransportClientReconnectOptions? options = null)
         {
             return Transport.Reconnect(options);
         }
@@ -398,13 +398,13 @@ internal static class Program
             {
                 var http = new BeadHttpClient(new BeadHttpClientOptions { Limits = limits });
                 client = http;
-                await http.Connect(new HttpConnectOptions { Host = "127.0.0.1", Port = port.Value });
+                await http.Connect(new HttpTransportClientConnectOptions { Host = "127.0.0.1", Port = port.Value });
             }
             else
             {
                 var ws = new WebSocketClient(new WebSocketClientOptions { Limits = limits });
                 client = ws;
-                await ws.Connect(new WebSocketConnectOptions { Host = "127.0.0.1", Port = port.Value });
+                await ws.Connect(new WebSocketTransportClientConnectOptions { Host = "127.0.0.1", Port = port.Value });
             }
 
             return new Connection(client, server);

@@ -88,6 +88,16 @@ export interface ITransportServerClientAware<Socket> extends ITransportServerCli
 }
 
 /**
+ * What a connection's platform opened it with, as its `connection` event tells it: the transport's
+ * own socket, and the request that opened it — over a WebSocket a frozen copy of its upgrade, its
+ * headers aside; over HTTP the drawing request; none where nothing opened it but a peer.
+ */
+export interface ITransportServerConnection<Socket = unknown, Request = unknown> {
+  readonly request: Request;
+  readonly socket: Socket;
+}
+
+/**
  * What names a connection a transport holds (spec 15.1): its type, who it came from, its peer's port
  * when it comes on a socket of its own, and the rank its transport took it at, which none shares.
  */
@@ -186,7 +196,20 @@ export interface ITransportServer<
     event: K,
     listener: EmitterListener<TransportServerEventMap<Socket, Request>[K]>
   ): this;
+  /**
+   * Pauses a connection, its router behind on it (spec 15.12, decision 0046): it emits no more
+   * `message` of it, and holds what it already received, in order, until `resume`; while it holds
+   * anything, what comes next waits behind it, paused or not. Idempotent, it emits nothing within
+   * it; an unknown handle is let be.
+   */
+  pause(connectionHandle: TransportServerConnectionHandle): void;
   removeAllListeners(event?: TRANSPORT_SERVER_EVENTS): this;
+  /**
+   * Resumes a connection: what it holds it emits, in order, from a later turn of its own, never
+   * within this call, asking before each whether it was paused again. Idempotent, it emits nothing
+   * within it; an unknown handle is let be.
+   */
+  resume(connectionHandle: TransportServerConnectionHandle): void;
   /**
    * Hands a message to one connection. A message for a connection that is gone, or not open, is
    * dropped and resolves: the loss shows as that connection's `close`. A socket carries any message.
@@ -200,8 +223,9 @@ export interface ITransportServer<
     connectionHandle: TransportServerConnectionHandle
   ): Promise<void>;
   /**
-   * Listens. Rejects with a {@link ProgrammerError} unless UNINITIALIZED or CLOSED, a
-   * {@link CancelError}, or the system's own error — `EADDRINUSE` for a port taken — ending CLOSED.
+   * Listens. Rejects with a {@link ProgrammerError} unless UNINITIALIZED or CLOSED, or once
+   * disposed, its state kept; a {@link CancelError}, or the system's own error — `EADDRINUSE` for a
+   * port taken — ending CLOSED.
    */
   start(options?: ITransportServerStartOptions): Promise<ITransportServerAddress>;
   /**
@@ -210,7 +234,11 @@ export interface ITransportServer<
    * {@link ProgrammerError} while starting.
    */
   stop(): Promise<void>;
-  /** What `await using` calls: {@link ITransportServer.stop}. */
+  /**
+   * What `await using` calls: {@link ITransportServer.stop}, then final, a start after it a
+   * {@link ProgrammerError}, its state kept; a later dispose settles with the first (decision
+   * 0003).
+   */
   [Symbol.asyncDispose](): Promise<void>;
 }
 
@@ -235,9 +263,21 @@ export interface ITransportServerImplementation<Socket = unknown> {
   readonly secure?: boolean | undefined;
   readonly defaults: TransportServerResolvedStartOptions;
   readonly type: TRANSPORTS;
+  /**
+   * Refuses, by throwing, a start its owner forbids, before anything else is held and before the
+   * state moves: as a stopped broker participant's server's.
+   */
+  assertStart?(): void;
   close(connection: ITransportServerClientAware<Socket>): Promise<void>;
   /** What the transport keeps of its connections besides the registry, counted; none, when nothing. */
   gauges?(): IGauges<TransportServerConnectionHandle>;
+  /**
+   * Pauses a connection it holds, as {@link ITransportServer.pause} says: required, so each
+   * transport states what it pauses; it takes no lock it holds as it tells a listener.
+   */
+  pause(connection: ITransportServerClientAware<Socket>): void;
+  /** Resumes a connection it holds, as {@link ITransportServer.resume} says. */
+  resume(connection: ITransportServerClientAware<Socket>): void;
   send(message: ITransportMessage, connection: ITransportServerClientAware<Socket>): Promise<void>;
   start(
     options: TransportServerResolvedStartOptions & { signal?: AbortSignal | undefined }
@@ -298,8 +338,11 @@ export type TransportServerResolvedStartOptions = Readonly<{
 export type TransportServerEventMap<Socket = unknown, Request = unknown> = {
   /** `wasClean` is whether the connection closed normally (1000). */
   close: [wasClean: boolean, connectionHandle: TransportServerConnectionHandle];
-  /** The connection's socket, the request that opened it, and its handle, once it is registered. */
-  connection: [socket: Socket, request: Request, connectionHandle: TransportServerConnectionHandle];
+  /** What its platform opened the connection with, then its handle, once it is registered. */
+  connection: [
+    connection: ITransportServerConnection<Socket, Request>,
+    connectionHandle: TransportServerConnectionHandle,
+  ];
   /**
    * What went wrong on a connection, or what a listener of its events threw, which changes nothing
    * the server does; when it ends the connection, its `close` follows. An empty handle is the
@@ -356,7 +399,11 @@ export interface IServerSocketLike {
   on(event: 'message', listener: (data: unknown, isBinary: boolean) => void): unknown;
   on(event: 'pong', listener: () => void): unknown;
   once(event: 'close', listener: () => void): unknown;
+  /** Stops reading its socket; what it parsed of the read under way it still emits. */
+  pause?(): void;
   ping(): void;
+  /** Reads its socket again. */
+  resume?(): void;
   send(data: Data): void;
   terminate(): void;
 }
@@ -421,7 +468,7 @@ export interface IWebSocketServerConstructor {
   }): IWebSocketServerLike;
 }
 
-export interface IWSTransportServerOptions extends ITransportServerOptions {
+export interface IWebSocketTransportServerOptions extends ITransportServerOptions {
   /** Defaults to {@link TRANSPORT_WEBSOCKET_BINARYTYPE}, for every connection. */
   binaryType?: 'arraybuffer' | 'blob' | 'nodebuffer' | undefined;
   /**
@@ -470,7 +517,7 @@ export interface IWSTransportServerOptions extends ITransportServerOptions {
    * fails a connection that sends a larger one with 1009, reported on `error` naming the bound, its
    * close unclean whatever the peer answers (spec 15.3). Defaults to {@link MAXIMUM_MESSAGE_BYTES},
    * the default envelope's limit: a router whose `maximumEnvelopeBytes` is raised needs it raised
-   * alike, as `createWSServer` does.
+   * alike, as `createWebSocketServer` does.
    */
   maxPayload?: number | undefined;
   /**
@@ -491,7 +538,7 @@ export interface IWSTransportServerOptions extends ITransportServerOptions {
    * The bytes that may wait for one connection's socket — handed to it and not yet taken: an
    * envelope that would take them past it drops the connection, reported on `error` naming it, its
    * close unclean (spec 15.12). A whole number above 0. Defaults to {@link MAXIMUM_UNSENT_BYTES};
-   * `createWSServer` derives it from its router's limits.
+   * `createWebSocketServer` derives it from its router's limits.
    */
   maximumUnsentBytes?: number | undefined;
   /**
@@ -569,7 +616,7 @@ export interface IWSTransportServerOptions extends ITransportServerOptions {
  * connect, headers aside: a frozen {@link IDrawingRequest}, never the platform's request, which
  * holds the credential the connection carries.
  */
-export type WSTransportServer = ITransportServer<IServerSocketLike, IDrawingRequest>;
+export type WebSocketTransportServer = ITransportServer<IServerSocketLike, IDrawingRequest>;
 
 // ── HTTP ──────────────────────────────────────────────────────────────────────
 
@@ -927,6 +974,8 @@ export interface IJoinableTransportServer {
     event: K,
     listener: EmitterListener<TransportServerEventMap[K]>
   ): unknown;
+  pause(connectionHandle: TransportServerConnectionHandle): void;
+  resume(connectionHandle: TransportServerConnectionHandle): void;
   send(
     message: ITransportMessage,
     connectionHandle: TransportServerConnectionHandle
@@ -961,6 +1010,10 @@ export interface IJoinedTransportServer<
   isSecure(connectionHandle: TransportServerConnectionHandle): boolean;
   /** As the transport that drew the handle says, two-way without it; `false` for one none drew. */
   isTwoWay(connectionHandle: TransportServerConnectionHandle): boolean;
+  /** Pauses one connection through its transport (spec 15.12); a handle none drew is let be. */
+  pause(connectionHandle: TransportServerConnectionHandle): void;
+  /** Resumes one connection through its transport; a handle none drew is let be. */
+  resume(connectionHandle: TransportServerConnectionHandle): void;
   /** Hands a message to one connection through its transport; dropped for a handle none drew. */
   send(
     message: ITransportMessage,
@@ -971,7 +1024,11 @@ export interface IJoinedTransportServer<
    * rejected, in their order, once the others settled.
    */
   stop(): Promise<void>;
-  /** What `await using` calls: {@link IJoinedTransportServer.stop}. */
+  /**
+   * What `await using` calls: disposes every transport it joins, each final, or stops one that
+   * cannot be disposed, and settles as {@link IJoinedTransportServer.stop} does; a later dispose
+   * settles with the first (decision 0003).
+   */
   [Symbol.asyncDispose](): Promise<void>;
 }
 

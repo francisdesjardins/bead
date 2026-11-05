@@ -5,6 +5,7 @@ import { describe, test } from 'node:test';
 
 import {
   canonicalProbe,
+  codecsSeedsOf,
   corpusOf,
   CORPUS_SIZE,
   DIFFERENTIAL_SIDES,
@@ -14,6 +15,7 @@ import {
   LEN,
   lengthDelimited,
   parting,
+  partingOfAll,
   pinDisagreement,
   readPin,
   recordsOf,
@@ -49,8 +51,22 @@ const PASSED_CSHARP = `CONFORMANCE TEST BEGIN ==================================
 const PASSED_TYPESCRIPT = `${summaryLine('PASSED', [5598, 48, 3, 0])}${TEXT_FORMAT}`;
 const FAILED = `${summaryLine('FAILED', [5598, 48, 2, 1])}${TEXT_FORMAT}`;
 
+// two sides, as a parting names them
+const TWO = Object.freeze(['TypeScript', 'C#']);
+
 const bytesOf = (...parts) => {
   return Uint8Array.from(parts.flat());
+};
+
+// the SHA-256 of payloads' lowercase hexadecimal, a line each
+const lineDigestOf = (payloads) => {
+  const hash = createHash('sha256');
+
+  for (const payload of payloads) {
+    hash.update(`${Buffer.from(payload).toString('hex')}\n`);
+  }
+
+  return hash.digest('hex');
 };
 
 // ── Pin ───────────────────────────────────────────────────────────────────────
@@ -106,7 +122,7 @@ describe('the pin', () => {
     assert.equal(SIDES.rust.folder, 'implementations/rust/tools/protobuf-conformance');
   });
 
-  test("gives the Rust side's testee the set of the suite's protos and Probe, and keeps the differential to the TypeScript and C# sides", () => {
+  test("gives the Rust side's testee the set of the suite's protos and Probe, and reads the differential through every side", () => {
     assert.equal(SIDES.rust.generated, 'generated');
     assert.deepEqual(RUST_SET_FILES, [
       'protobuf_test_messages/test_messages_edition2023.proto',
@@ -130,7 +146,7 @@ describe('the pin', () => {
       }),
       RUST_SET_FILES
     );
-    assert.deepEqual(DIFFERENTIAL_SIDES, ['typescript', 'csharp']);
+    assert.deepEqual(DIFFERENTIAL_SIDES, ['typescript', 'csharp', 'rust']);
   });
 });
 
@@ -241,6 +257,15 @@ describe('the exchange', () => {
       return verdictOf(responseOf(Uint8Array.from(lengthDelimited(5, [...Buffer.from('json')]))));
     }, /skipped/u);
   });
+
+  test("reads a writer's refusal of what its reader took as a reading, nothing written back", () => {
+    const unwritten = responseOf(
+      Uint8Array.from(lengthDelimited(6, [...Buffer.from('nested past 100')]))
+    );
+
+    assert.equal(unwritten.case, 'serialize_error');
+    assert.deepEqual(verdictOf(unwritten), { read: true, written: undefined });
+  });
 });
 
 // ── The comparison ────────────────────────────────────────────────────────────
@@ -262,7 +287,16 @@ describe('the comparison', () => {
       canonicalProbe(bytesOf(lengthDelimited(3, one))),
       canonicalProbe(bytesOf(lengthDelimited(3, other)))
     );
-    assert.equal(parting({ read: true, written: one }, { read: true, written: other }), undefined);
+    assert.equal(
+      parting(
+        [
+          { read: true, written: one },
+          { read: true, written: other },
+        ],
+        { names: TWO }
+      ),
+      undefined
+    );
   });
 
   test("reads a map's entry as its key and its value, an empty key written or left out", () => {
@@ -274,6 +308,186 @@ describe('the comparison', () => {
     assert.notEqual(
       canonicalProbe(bytesOf(lengthDelimited(12, [0x0a, 0x01, 0x61, 0x12, 0x00]))),
       canonicalProbe(bytesOf(lengthDelimited(12, [0x12, 0x00])))
+    );
+  });
+
+  test('reads a closed enum’s number by its low 32 bits, as an int32, declared or not, at every depth', () => {
+    // * 2³² + 1 reads 1, as protobuf's ValidDataScalar.ENUM tests read kInt64Min + 1
+    assert.equal(
+      canonicalProbe(bytesOf([0x70, 0x81, 0x80, 0x80, 0x80, 0x10])),
+      canonicalProbe(bytesOf([0x70, 0x01]))
+    );
+    assert.equal(
+      canonicalProbe(bytesOf([0x70, 0x81, 0x00])),
+      canonicalProbe(bytesOf([0x70, 0x01]))
+    );
+    assert.notEqual(canonicalProbe(bytesOf([0x70, 0x01])), canonicalProbe(bytesOf([0x70, 0x00])));
+    assert.notEqual(canonicalProbe(bytesOf([0x70, 0x00])), canonicalProbe(bytesOf()));
+
+    // * every side drops an undeclared number before its library reads (spec 17.9.8): a side that
+    // writes one back parts
+    assert.notEqual(canonicalProbe(bytesOf([0x70, 0x05])), canonicalProbe(bytesOf()));
+    assert.notEqual(
+      canonicalProbe(bytesOf([0x70, 0x01, 0x70, 0x05])),
+      canonicalProbe(bytesOf([0x70, 0x01]))
+    );
+
+    // * however wide: 2³² − 1 in five bytes, as Buffa writes the value read, and in ten, as
+    // protobuf-es writes the int32 it reads
+    assert.equal(
+      canonicalProbe(bytesOf([0x70, 0xff, 0xff, 0xff, 0xff, 0x0f])),
+      canonicalProbe(bytesOf([0x70, ...Array.from({ length: 9 }, () => 0xff), 0x01]))
+    );
+
+    // in a Needs, in needs_items, and through a child, a group and a map's value
+    const needs = (field, shade) => {
+      return lengthDelimited(field, [0x08, 0x07, 0x10, ...shade]);
+    };
+
+    for (const field of [7, 8]) {
+      assert.equal(
+        canonicalProbe(bytesOf(needs(field, [0x81, 0x80, 0x80, 0x80, 0x10]))),
+        canonicalProbe(bytesOf(needs(field, [0x01])))
+      );
+      assert.notEqual(
+        canonicalProbe(bytesOf(needs(field, [0x05]))),
+        canonicalProbe(bytesOf(lengthDelimited(field, [0x08, 0x07])))
+      );
+    }
+
+    for (const wrap of [
+      (inner) => {
+        return lengthDelimited(3, inner);
+      },
+      (inner) => {
+        return [...tag(13, SGROUP), ...inner, ...tag(13, 4)];
+      },
+      (inner) => {
+        return lengthDelimited(12, [...lengthDelimited(1, [0x61]), ...lengthDelimited(2, inner)]);
+      },
+    ]) {
+      assert.equal(
+        canonicalProbe(bytesOf(wrap([0x70, 0x81, 0x80, 0x80, 0x80, 0x10]))),
+        canonicalProbe(bytesOf(wrap([0x70, 0x01])))
+      );
+      assert.notEqual(
+        canonicalProbe(bytesOf(wrap([0x70, 0x01, 0x70, 0x05]))),
+        canonicalProbe(bytesOf(wrap([0x70, 0x01])))
+      );
+      assert.notEqual(
+        canonicalProbe(bytesOf(wrap(needs(7, [0x05])))),
+        canonicalProbe(bytesOf(wrap(lengthDelimited(7, [0x08, 0x07]))))
+      );
+    }
+  });
+
+  test('reads a Needs by its fields, its unknown fields in any order, and needs_items’ items in theirs', () => {
+    const item = (must) => {
+      return lengthDelimited(8, [0x08, must, 0x10, 0x01]);
+    };
+
+    assert.equal(
+      canonicalProbe(bytesOf(lengthDelimited(7, [0x08, 0x07, 0x10, 0x01, 0x20, 0x01, 0x18, 0x02]))),
+      canonicalProbe(bytesOf(lengthDelimited(7, [0x08, 0x07, 0x10, 0x01, 0x18, 0x02, 0x20, 0x01])))
+    );
+    assert.notEqual(
+      canonicalProbe(bytesOf(lengthDelimited(7, [0x08, 0x07, 0x10, 0x01]))),
+      canonicalProbe(bytesOf(lengthDelimited(7, [0x08, 0x08, 0x10, 0x01])))
+    );
+    assert.notEqual(
+      canonicalProbe(bytesOf(item(0x07), item(0x08))),
+      canonicalProbe(bytesOf(item(0x08), item(0x07)))
+    );
+  });
+
+  test('reads a tallies entry as its key and its value, either written at its default or left out', () => {
+    // * protobuf-es and Buffa write 82 01 04 0a 00 10 00 for "" to 0, Google.Protobuf 82 01 00
+    const tally = (...records) => {
+      return [...tag(16, LEN), ...varint(records.flat().length), ...records.flat()];
+    };
+
+    assert.equal(
+      canonicalProbe(bytesOf(tally([0x0a, 0x00, 0x10, 0x00]))),
+      canonicalProbe(bytesOf(tally()))
+    );
+    assert.equal(
+      canonicalProbe(bytesOf(tally(lengthDelimited(1, [0x61]), [0x10, 0x00]))),
+      canonicalProbe(bytesOf(tally(lengthDelimited(1, [0x61]))))
+    );
+    assert.equal(
+      canonicalProbe(
+        bytesOf(
+          tally(lengthDelimited(1, [0x62]), [0x10, 0x02]),
+          tally(lengthDelimited(1, [0x61]), [0x10, 0x01])
+        )
+      ),
+      canonicalProbe(
+        bytesOf(
+          tally(lengthDelimited(1, [0x61]), [0x10, 0x01]),
+          tally(lengthDelimited(1, [0x62]), [0x10, 0x02])
+        )
+      )
+    );
+    assert.notEqual(
+      canonicalProbe(bytesOf(tally(lengthDelimited(1, [0x61]), [0x10, 0x01]))),
+      canonicalProbe(bytesOf(tally(lengthDelimited(1, [0x61]), [0x10, 0x02])))
+    );
+  });
+
+  test('forgives a map’s entries in any order, and nothing else of a map', () => {
+    // an entry of `children`, a message its value, and one of `tallies`, a uint32 its value
+    const child = (key, value) => {
+      return lengthDelimited(12, [...lengthDelimited(1, [key]), ...lengthDelimited(2, value)]);
+    };
+    const tally = (key, ...value) => {
+      return lengthDelimited(16, [...lengthDelimited(1, [key]), ...value.flat()]);
+    };
+
+    for (const [a, b, other] of [
+      [child(0x61, [0x10, 0x01]), child(0x62, [0x10, 0x02]), child(0x61, [0x10, 0x02])],
+      [tally(0x61, [0x10, 0x01]), tally(0x62, [0x10, 0x02]), tally(0x61, [0x10, 0x02])],
+    ]) {
+      assert.equal(canonicalProbe(bytesOf(a, b)), canonicalProbe(bytesOf(b, a)));
+      // * a value, an entry left out, an entry written twice
+      assert.notEqual(canonicalProbe(bytesOf(a, b)), canonicalProbe(bytesOf(other, b)));
+      assert.notEqual(canonicalProbe(bytesOf(a, b)), canonicalProbe(bytesOf(a)));
+      assert.notEqual(canonicalProbe(bytesOf(a, b)), canonicalProbe(bytesOf(a, a, b)));
+    }
+
+    // * a key, an entry's unknown field, and a value of another wire type than its own
+    assert.notEqual(
+      canonicalProbe(bytesOf(tally(0x61, [0x10, 0x01]))),
+      canonicalProbe(bytesOf(tally(0x62, [0x10, 0x01])))
+    );
+    assert.notEqual(
+      canonicalProbe(bytesOf(tally(0x61, [0x10, 0x01], [0x18, 0x01]))),
+      canonicalProbe(bytesOf(tally(0x61, [0x10, 0x01])))
+    );
+    assert.notEqual(
+      canonicalProbe(bytesOf(tally(0x61, lengthDelimited(2, [])))),
+      canonicalProbe(bytesOf(tally(0x61)))
+    );
+    assert.notEqual(
+      canonicalProbe(bytesOf(lengthDelimited(12, [...lengthDelimited(1, [0x61]), 0x10, 0x00]))),
+      canonicalProbe(bytesOf(lengthDelimited(12, lengthDelimited(1, [0x61]))))
+    );
+  });
+
+  test('reads an unknown varint by its value, an overlong form kept or made minimal, and its tag by its number', () => {
+    // * protobuf-es writes back an unknown varint of 10 bytes as it read it, Google.Protobuf and
+    // Buffa its value in one
+    const overlong = bytesOf([0x48, ...Array.from({ length: 9 }, () => 0x80), 0x00]);
+
+    assert.equal(canonicalProbe(overlong), canonicalProbe(bytesOf([0x48, 0x00])));
+    assert.equal(
+      canonicalProbe(bytesOf([0xc8, 0x80, 0x00, 0x05])),
+      canonicalProbe(bytesOf([0x48, 0x05]))
+    );
+    assert.notEqual(canonicalProbe(overlong), canonicalProbe(bytesOf([0x48, 0x01])));
+    assert.notEqual(canonicalProbe(bytesOf([0x48, 0x01])), canonicalProbe(bytesOf([0x50, 0x01])));
+    assert.notEqual(
+      canonicalProbe(bytesOf(lengthDelimited(9, [0x61]))),
+      canonicalProbe(bytesOf(lengthDelimited(9, [0x62])))
     );
   });
 
@@ -289,14 +503,73 @@ describe('the comparison', () => {
       canonicalProbe(bytesOf([0x10, 0x01], lengthDelimited(1, [0x61])))
     );
     assert.match(
-      parting({ read: true, written: one }, { read: true, written: bytesOf([0x10, 0x02]) }) ?? '',
+      parting(
+        [
+          { read: true, written: one },
+          { read: true, written: bytesOf([0x10, 0x02]) },
+        ],
+        { names: TWO }
+      ) ?? '',
       /write back apart/u
     );
     assert.equal(
-      parting({ read: true, written: one }, { read: false }),
+      parting([{ read: true, written: one }, { read: false }], { names: TWO }),
       'TypeScript reads it, C# refuses it'
     );
-    assert.equal(parting({ read: false }, { read: false }), undefined);
+    assert.equal(parting([{ read: false }, { read: false }], { names: TWO }), undefined);
+  });
+
+  test('names the two sides that part, whichever pair it is', () => {
+    const read = { read: true, written: bytesOf([0x10, 0x01]) };
+    const apart = { read: true, written: bytesOf([0x10, 0x02]) };
+    const refused = { read: false };
+    const names = DIFFERENTIAL_SIDES.map((language) => {
+      return SIDES[language].name;
+    });
+
+    assert.deepEqual(names, ['TypeScript', 'C#', 'Rust']);
+    assert.equal(
+      parting([refused, read], { names: ['Rust', 'C#'] }),
+      'Rust refuses it, C# reads it'
+    );
+    assert.equal(
+      parting([read, apart], { names: ['C#', 'Rust'] }),
+      'both read it and write back apart: C# 1001, Rust 1002'
+    );
+    assert.equal(partingOfAll([read, read, read], { names }), undefined);
+    assert.equal(partingOfAll([refused, refused, refused], { names }), undefined);
+    assert.equal(
+      partingOfAll([read, read, refused], { names }),
+      'TypeScript reads it, writing back 1001; C# reads it, writing back 1001; Rust refuses it'
+    );
+    assert.equal(
+      partingOfAll([read, apart, read], { names }),
+      'TypeScript reads it, writing back 1001; C# reads it, writing back 1002; Rust reads it, writing back 1001'
+    );
+  });
+
+  test('parts a side that writes back what another refuses to write, and none where both refuse', () => {
+    const read = { read: true, written: bytesOf([0x10, 0x01]) };
+    const unwritten = { read: true, written: undefined };
+    const names = ['TypeScript', 'C#', 'Rust'];
+
+    assert.equal(parting([unwritten, unwritten], { names: TWO }), undefined);
+    assert.equal(
+      parting([unwritten, read], { names: TWO }),
+      'both read it, TypeScript refuses to write it back, C# writes 1001'
+    );
+    assert.equal(
+      parting([read, unwritten], { names: TWO }),
+      'both read it, TypeScript writes 1001, C# refuses to write it back'
+    );
+    assert.equal(
+      parting([unwritten, { read: false }], { names: TWO }),
+      'TypeScript reads it, C# refuses it'
+    );
+    assert.equal(
+      partingOfAll([unwritten, { read: false }, { read: false }], { names }),
+      'TypeScript reads it, refusing to write it back; C# refuses it; Rust refuses it'
+    );
   });
 });
 
@@ -330,11 +603,110 @@ describe('the corpus', () => {
     assert.ok(readable.length > CORPUS_SIZE / 4, `${String(readable.length)} read as records`);
     assert.ok(readable.length < CORPUS_SIZE, 'some do not read');
 
-    for (const field of [1, 2, 3, 10, 11, 12, 13]) {
+    for (const field of [1, 2, 3, 7, 8, 10, 11, 12, 13, 14, 16]) {
       assert.ok(
         readable.some((payload) => fieldsOf(payload).has(field)),
         `field ${String(field)} is reached`
       );
+    }
+  });
+
+  test('keeps its seed and its size: the same payloads, a line of hexadecimal each, digested', () => {
+    // * a change of this digest is a change of the gate
+    assert.equal(
+      lineDigestOf(corpusOf()),
+      'cc6551dd32a3b3b50dfd0198e93c93c178892f8dd7c45773bc1f5ee9e0005633'
+    );
+  });
+
+  test('seeds itself from codecs.json’s proto payloads, but those a differs excuses', () => {
+    const codecs = JSON.parse(
+      readFileSync(new URL('../../spec/codecs.json', import.meta.url), 'utf8')
+    );
+    const seeds = codecsSeedsOf(codecs);
+    const named = (name) => {
+      const entry = codecs.payloads.find((each) => {
+        return each.name === name;
+      });
+
+      return Uint8Array.from(Buffer.from(entry.bytes.replaceAll(/[\s|]/gu, ''), 'hex'));
+    };
+    const has = (bytes) => {
+      return seeds.some((seed) => {
+        return Buffer.from(seed).equals(Buffer.from(bytes));
+      });
+    };
+
+    assert.equal(seeds.length, 87);
+    assert.ok(has(named('an empty payload')));
+    assert.ok(has(named('100 groups below the top')));
+    assert.ok(has(named('a varint of 10 bytes')));
+    assert.ok(has(named('a required field unset, one below the top')));
+    assert.ok(has(named("a map's value whose message leaves a required field unset")));
+    assert.ok(has(named("a closed enum's declared number, then one it does not declare")));
+    assert.ok(
+      has(named("a closed enum's number past 32 bits, whose low 32 bits it does not declare"))
+    );
+    assert.ok(
+      has(
+        named(
+          'a required closed enum given a number past 32 bits, whose low 32 bits it does not declare'
+        )
+      )
+    );
+    assert.ok(!has(named("a string's leading U+FEFF")));
+  });
+
+  test('draws its seeds after its own payloads, each as it is and mutated', () => {
+    const seeds = [
+      bytesOf(lengthDelimited(1, [0x61]), [0x10, 0x07]),
+      bytesOf(lengthDelimited(3, [0x10, 0x01])),
+    ];
+    const corpus = corpusOf({ size: 50, seeds });
+
+    assert.deepEqual(corpus.slice(0, 50), corpusOf({ size: 50 }));
+    assert.equal(corpus.length, 50 + 5 * seeds.length);
+    assert.deepEqual(corpus[50], seeds[0]);
+    assert.deepEqual(corpus[55], seeds[1]);
+    assert.deepEqual(corpusOf({ size: 50, seeds }), corpus);
+  });
+
+  test('writes a Needs that leaves a required field unset, and a closed enum’s number of each kind, at the top and in a Needs', () => {
+    // every record of a field of `fields` a payload holds, through a child, a group and a Needs
+    const recordsAt = (bytes, fields) => {
+      return (recordsOf(bytes) ?? []).flatMap((record) => {
+        const below =
+          record.payload !== undefined && [3, 7, 8, 13].includes(record.field)
+            ? recordsAt(record.payload, record.field === 7 || record.field === 8 ? [2] : fields)
+            : [];
+
+        return [...(fields.includes(record.field) ? [record] : []), ...below];
+      });
+    };
+    const corpus = corpusOf();
+    const shades = new Set(
+      corpus.flatMap((payload) => {
+        return recordsAt(payload, [14]).map((record) => {
+          return Buffer.from(record.whole.subarray(1)).toString('hex');
+        });
+      })
+    );
+    const unset = corpus.some((payload) => {
+      return (recordsOf(payload) ?? []).some((record) => {
+        return (
+          record.field === 7 &&
+          record.payload !== undefined &&
+          !recordsOf(record.payload)?.some((each) => each.field === 1)
+        );
+      });
+    });
+
+    assert.ok(unset, 'a Needs without its must');
+
+    // * declared, undeclared, past 31 bits, past 32 bits declared by its low bits, ten bytes,
+    // overlong
+    for (const shade of ['01', '05', '8080808008', '8180808010', 'ffffffffffffffffff01', '8100']) {
+      assert.ok(shades.has(shade), `shade ${shade} is reached`);
     }
   });
 });

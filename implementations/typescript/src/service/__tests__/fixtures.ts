@@ -59,10 +59,7 @@ export const notEmpty = (request: unknown, options?: IValidateOptions): IJudged 
 };
 
 /** The greeter's failures: service 7's catalogue. */
-export const GreeterFailures = failuresOf({
-  codes: { NOBODY_TO_GREET: 1, TOO_LOUD: 2 },
-  serviceId: 7,
-});
+export const GreeterFailures = failuresOf(7, { NOBODY_TO_GREET: 1, TOO_LOUD: 2 });
 
 /**
  * The greeter: a request, one that notifies, one in a session, one behind a hook, one that opens a

@@ -28,7 +28,7 @@ public sealed partial class ServiceManagerTests
     public async Task Tells_each_step_of_a_request_and_once_answered_its_duration()
     {
         var time = new FakeTimeProvider(Started);
-        var router = new RecordingRouter { Clock = time };
+        var router = new RecordingRouter(RouterSide.Client) { Clock = time };
         var manager = new ServiceManager(router);
         var seen = RecordDebug(manager);
 
@@ -40,9 +40,11 @@ public sealed partial class ServiceManagerTests
         };
         await manager.GetRequest(Echo, Asked)(new Text("hello"))().WaitAsync(Patience, Cancelled);
 
+        // * a client's request, its connection the one a client's router names its peer by
         var sent = new DebugEvent
         {
             CallId = 7,
+            ConnectionHandle = RouterClient.ServerConnectionHandle,
             Direction = DebugDirection.Tx,
             Options = new ResolvedRequestOptions { Timeout = TimeoutDefault },
             ProcedureId = 1,
@@ -72,12 +74,12 @@ public sealed partial class ServiceManagerTests
     [Fact]
     public async Task Tells_each_step_with_its_payloads_as_they_are_the_call_s_own_and_no_copy()
     {
-        var manager = new ServiceManager(new RecordingRouter());
+        var manager = new ServiceManager(new RecordingRouter(RouterSide.Client));
         var seen = RecordDebug(manager);
         var asked = new Text("hello");
         var answer = new Text("hi!");
         Text? received = null;
-        var resolver = manager.GetRequestResolver(Echo, Answered())((request, response) =>
+        var resolver = manager.GetCommandResolver(Echo, Answered())((request, response) =>
         {
             received = request.Payload;
 
@@ -118,7 +120,7 @@ public sealed partial class ServiceManagerTests
         };
 
         await asking.GetRequest(Echo, Asked)(new Text("a"))().WaitAsync(Patience, Cancelled);
-        await commanding.GetCommand(Echo, Asked)(new Text("b"))(new RequestOptions { ConnectionHandle = Handle }).WaitAsync(Patience, Cancelled);
+        await commanding.GetCommand(Echo, Asked)(new Text("b"))(new CommandOptions { ConnectionHandle = Handle }).WaitAsync(Patience, Cancelled);
 
         Assert.Equal<(DebugDirection, uint?, string?)>(
             [
@@ -168,7 +170,7 @@ public sealed partial class ServiceManagerTests
     [Fact]
     public async Task Tells_a_call_made_over_a_router_that_draws_no_id_with_none_its_tx_step_then_its_rx_step()
     {
-        var manager = new ServiceManager(new RecordingRouter { CallId = null });
+        var manager = new ServiceManager(new RecordingRouter(RouterSide.Client) { CallId = null });
         var seen = RecordDebug(manager);
 
         Assert.Equal(new Text("x"), await manager.GetRequest(Echo, Asked)(new Text("x"))().WaitAsync(Patience, Cancelled));
@@ -183,7 +185,7 @@ public sealed partial class ServiceManagerTests
     [Fact]
     public async Task Raises_deprecated_before_the_call_s_tx_step()
     {
-        var manager = new ServiceManager(new RecordingRouter());
+        var manager = new ServiceManager(new RecordingRouter(RouterSide.Client));
         var heard = new List<string>();
 
         manager.Deprecated += (_) =>
@@ -206,7 +208,7 @@ public sealed partial class ServiceManagerTests
     public async Task Reads_its_router_s_clock_a_call_s_start_on_the_wall_clock_its_duration_on_the_monotonic_reading()
     {
         var clock = new SteppingClock(Started);
-        var router = new RecordingRouter { Clock = clock };
+        var router = new RecordingRouter(RouterSide.Client) { Clock = clock };
         var manager = new ServiceManager(router);
         var seen = RecordDebug(manager);
 
@@ -233,7 +235,7 @@ public sealed partial class ServiceManagerTests
     public async Task Tells_a_duration_in_whole_milliseconds_its_fraction_dropped()
     {
         var clock = new SteppingClock(Started);
-        var router = new RecordingRouter { Clock = clock };
+        var router = new RecordingRouter(RouterSide.Client) { Clock = clock };
         var manager = new ServiceManager(router);
         var seen = RecordDebug(manager);
         var before = clock.GetTimestamp();
@@ -375,7 +377,7 @@ public sealed partial class ServiceManagerTests
     [Fact]
     public async Task A_debug_listener_that_throws_on_the_answer_is_reported_through_the_router_and_the_call_resolves_with_its_result_each_step_told()
     {
-        var router = new RecordingRouter();
+        var router = new RecordingRouter(RouterSide.Client);
         var manager = new ServiceManager(router);
         var seen = new List<DebugDirection>();
         var heard = new List<DebugDirection>();
@@ -442,7 +444,7 @@ public sealed partial class ServiceManagerTests
     [Fact]
     public async Task Tells_a_call_s_tx_step_off_the_thread_its_router_hears_its_call_id_on()
     {
-        var router = new RecordingRouter { CallId = null };
+        var router = new RecordingRouter(RouterSide.Client) { CallId = null };
         var manager = new ServiceManager(router);
         var told = new List<(uint? CallId, bool IsAnswered)>();
 

@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { noop } from '../../transport/shared/noop';
 import { createEmitter } from '../../transport/shared/emitter';
 import type { ITransportMessage } from '../../transport/shared/types';
 import type { IRouterDebugInfo } from '../../router/client/types';
@@ -15,7 +16,7 @@ import {
 } from '../devtools-hook';
 import { createHTTPClient } from '../http-client';
 import { createWorkerClient } from '../worker-client';
-import { createWSClient } from '../ws-client';
+import { createWebSocketClient } from '../websocket-client';
 
 // helpers
 
@@ -57,6 +58,8 @@ const createEchoTransport = (): IClientTransportLike => {
     reconnect: () => {
       return Promise.resolve();
     },
+    pause: noop,
+    resume: noop,
     send: ({ data }) => {
       const request = readEnvelope(bytesOf(data), {
         failures: SERVER_FAILURES,
@@ -261,7 +264,7 @@ test.describe('announceToDevtools', () => {
 
     for (const client of [
       createClient({ transport: createEchoTransport() }, { devtools: false }),
-      createWSClient({ devtools: false }),
+      createWebSocketClient({ devtools: false }),
       createHTTPClient({ devtools: false }),
       createWorkerClient({ devtools: false, transport: { worker } }),
     ]) {
@@ -271,7 +274,7 @@ test.describe('announceToDevtools', () => {
     expect(sources).toEqual([]);
 
     for (const client of [
-      createWSClient(),
+      createWebSocketClient(),
       createHTTPClient(),
       createWorkerClient({ transport: { worker } }),
     ]) {

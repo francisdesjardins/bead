@@ -44,13 +44,17 @@ public sealed record BrokerTransportServerOptions
 /// <summary>
 /// A server's transport over a broker's participant (spec 15.18): it serves its names, judges each
 /// OPEN that comes to them in order — a layout to come refused 426, an id that is no token or a
-/// receive bound under 1,024 refused 400, past its bounds or once its stop began 503 — and answers
-/// any other with an ACCEPT, its connection then half-open, holding its place and telling nothing;
+/// receive bound under 1,024 refused 400, past its bounds or once its stop or its participant's
+/// began 503 — and answers any other with an ACCEPT, its connection then half-open, holding its
+/// place and telling nothing;
 /// it tells its router the connection, drawing its handle
 /// <c>type=…;participant=…;ordinal=…</c>, once the client's first parcel naming both halves proves
 /// it reads its inbox, and forgets one whose third leg did not come within its accept timeout. It
 /// hands its router each envelope with its peer participant's id as its address and no port, the
-/// credential its DATA carried beside it; it carries none toward its client.
+/// credential its DATA carried beside it; it carries none toward its client. A connection its
+/// router paused is held by its participant, in order, its CLOSE behind what it holds, to
+/// <c>maximumHeldEnvelopeBytes</c>, past which that connection alone is lost: nothing of a pause
+/// reaches its peer over a broker, whose link carries other connections (spec 15.12, 15.23).
 /// </summary>
 public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, IBrokerConnectionOwner
 {
@@ -71,6 +75,8 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
     private readonly Dictionary<BrokerConnection, ITimer> _accepting = [];
     // the names its broker holds a subscription to, from its SUBACK to its UNSUBACK
     private readonly HashSet<string> _subscribed = new(StringComparer.Ordinal);
+    // the names asked of its broker, from its SUBSCRIBE to its SUBACK or its refusal
+    private readonly HashSet<string> _joining = new(StringComparer.Ordinal);
     // whether it left its names while it holds its bound, served in a group
     private bool _isFull;
     private long _arrivals;
@@ -186,7 +192,7 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
                     return connection.Arrival;
                 }).Select((connection) =>
                 {
-                    return new TransportServerClient(connection.PeerId, connection.ConnectionHandle!, connection.LastActivity, 0, Type);
+                    return new TransportServerClient { Address = connection.PeerId, ConnectionHandle = connection.ConnectionHandle!, LastActivity = connection.LastActivity, Port = 0, Type = Type };
                 })];
             }
         }
@@ -252,13 +258,23 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
     }
 
     /// <summary>
-    /// Starts its participant where it was not, or links it anew where its link was taken over, and
-    /// serves its names, each subscribed, in its group where it serves in one; settles once its
-    /// broker holds each, giving its participant's id and port 0, and fails on a name its broker
-    /// refused. Refused with an <see cref="InvalidOperationException"/> unless Uninitialized or Closed.
+    /// Starts its participant where it was not, or links it anew where its link was taken over or
+    /// its stop settled, and serves its names, each subscribed, in its group where it serves in one;
+    /// settles once its broker holds each, giving its participant's id and port 0, and fails on a
+    /// name its broker refused, or as its participant's start fails, a start while its stop is under
+    /// way among them. Refused with an <see cref="ObjectDisposedException"/> once its participant is
+    /// disposed, its state kept, before anything else (spec 15.21), then once it is disposed itself
+    /// (decision 0003); then with an <see cref="InvalidOperationException"/> unless Uninitialized or
+    /// Closed.
     /// </summary>
     public Task<TransportServerAddress> Start()
     {
+        // ! its participant disposed: its application's misuse, its state kept (spec 15.21)
+        if (_participant.IsDisposed)
+        {
+            return Task.FromException<TransportServerAddress>(_participant.DisposedRefusal());
+        }
+
         return _life.Start(async () =>
         {
             await _participant.Start();
@@ -270,32 +286,13 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
 
     /// <summary>
     /// Takes no OPEN from now on, refusing 503 one that comes; lets its names go, and closes each
-    /// connection with a CLOSE of 1001, its close told unclean; its participant's link is kept (spec
-    /// 15.21). It settles once its broker let each name go, and ends Closed.
+    /// connection with a CLOSE of 1001, its close told unclean, its names' unsubscriptions handed
+    /// first; its participant's link is kept (spec 15.21). It settles once its broker let each name
+    /// go, a name its broker refuses to let go reported and held still, and ends Closed.
     /// </summary>
     public Task Stop()
     {
-        return _life.Stop(() =>
-        {
-            return _participant.Scheduler.Run(async () =>
-            {
-                List<string> names;
-
-                lock (_gate)
-                {
-                    names = [.. _subscribed];
-                }
-
-                foreach (var connection in _held.ToList())
-                {
-                    connection.Close((1001, false));
-                }
-
-                // * all let go at once, a name counted until its UNSUBACK came: its broker's word, not
-                // the request's
-                await Task.WhenAll(names.Select(LeaveOne));
-            });
-        });
+        return _life.Stop(Stopping);
     }
 
     /// <summary>As <see cref="Stop"/>: a server's facade stops its transport with it.</summary>
@@ -304,10 +301,33 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
         return Stop();
     }
 
-    /// <summary>As <see cref="Stop"/>.</summary>
+    /// <summary>
+    /// Stops it, as <see cref="Stop"/>, then ends it for good (decision 0003): a start after it is
+    /// its application's misuse, an <see cref="ObjectDisposedException"/>, its state kept; a later
+    /// dispose settles with the first. Its participant is its application's to dispose.
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
-        await Stop();
+        await _life.Dispose(Stopping);
+    }
+
+    // its stop's body, in its participant's turn: its names let go, then each connection closed
+    // with 1001
+    private Task Stopping()
+    {
+        return _participant.Scheduler.Run(async () =>
+        {
+            // * all let go at once, each unsubscription before its CLOSEs in this turn, a name
+            // counted until its UNSUBACK came: its broker's word, not the request's (spec 15.21)
+            var leaving = Leaving();
+
+            foreach (var connection in _held.ToList())
+            {
+                _ = connection.Close((1001, false));
+            }
+
+            await Task.WhenAll(leaving);
+        });
     }
 
     /// <summary>Closes a connection with a CLOSE of 1000, its close told clean; false when it held none by that handle.</summary>
@@ -369,6 +389,41 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
         });
 
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Pauses a connection: its participant holds what comes for it, in order, its CLOSE behind what
+    /// it holds, to <c>maximumHeldEnvelopeBytes</c>, past which that connection alone is lost; it
+    /// never pauses its link, which carries other connections, so nothing of a pause reaches its
+    /// peer (spec 15.12, 15.23). Nothing for a connection it does not hold.
+    /// </summary>
+    public void Pause(string connectionHandle)
+    {
+        // ! its own lock, never held as it tells, then the connection's flag
+        BrokerConnection? connection;
+
+        lock (_gate)
+        {
+            connection = _connections.GetValueOrDefault(connectionHandle);
+        }
+
+        connection?.Pause();
+    }
+
+    /// <summary>
+    /// Resumes a connection: what its participant held handed on, in order, in a turn of its
+    /// participant's, never within this call. Nothing for a connection it does not hold.
+    /// </summary>
+    public void Resume(string connectionHandle)
+    {
+        BrokerConnection? connection;
+
+        lock (_gate)
+        {
+            connection = _connections.GetValueOrDefault(connectionHandle);
+        }
+
+        connection?.Resume();
     }
 
     /// <summary>Nothing is carried toward a client (spec 15.22): a command presenting ELSEWHERE fails before it goes.</summary>
@@ -498,7 +553,9 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
             return;
         }
 
-        if (_life.ReadyState != ReadyState.Open || _held.Count >= _options.MaximumConnections || _held.Count((connection) =>
+        // * its participant's stop under way: what its broker hands it as it lets its names go is
+        // refused, its adapter still up (spec 15.18, 15.21)
+        if (_participant.IsStopping || _life.ReadyState != ReadyState.Open || _held.Count >= _options.MaximumConnections || _held.Count((connection) =>
         {
             return connection.PeerId == open.Id;
         }) >= _options.MaximumConnectionsPerAddress)
@@ -532,7 +589,18 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
         lock (_gate)
         {
             _subscribed.Clear();
+            _joining.Clear();
         }
+    }
+
+    /// <summary>
+    /// In its participant's turn, as it stops: each name its broker holds or was asked to hold let
+    /// go, its unsubscription made as it is called, its served state kept so that its participant's
+    /// next link serves it again; settles once its broker let each go (spec 15.21).
+    /// </summary>
+    internal Task LettingGo()
+    {
+        return Task.WhenAll(Leaving());
     }
 
     /// <summary>What its participant ends no connection for, reported with none.</summary>
@@ -622,7 +690,7 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
             Topic = _participant.InboxOf(id),
             Payload = BrokerParcels.Write(parcel),
         }, parcel);
-        _listeners.Tell(Refusal, new TransportServerRefusal(id, null, null, 0, reason, status));
+        _listeners.Tell(Refusal, new TransportServerRefusal { Address = id, Reason = reason, Status = status });
     }
 
     // in its participant's turn: its names subscribed, alone or in its group, all asked at once, each
@@ -666,17 +734,38 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
         }
     }
 
-    // in its participant's turn: one name subscribed, counted once its broker holds it
+    // in its participant's turn: one name subscribed, counted once its broker holds it, and asked
+    // until then, so that a stop lets it go; a SUBACK that comes once its participant's stop began,
+    // or its own, holds nothing, that stop letting it go
     private async Task JoinOne(string name)
     {
+        bool isHeld;
+
+        lock (_gate)
+        {
+            _joining.Add(name);
+        }
+
         try
         {
-            await _participant.Subscribe((name, _options.IsInGroup));
+            isHeld = await _participant.Subscribe((name, _options.IsInGroup));
         }
         catch (Exception reason) when (_life.ReadyState == ReadyState.Open && !_participant.IsDownAsItLinks)
         {
             Report(new IOException($"the name {name} is not served: its broker refused its subscription, {reason.Message}", reason));
 
+            return;
+        }
+        finally
+        {
+            lock (_gate)
+            {
+                _joining.Remove(name);
+            }
+        }
+
+        if (!isHeld || _life.ReadyState is ReadyState.Closing or ReadyState.Closed)
+        {
             return;
         }
 
@@ -686,30 +775,67 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
         }
     }
 
-    // in its participant's turn: one name let go as it stops, counted until its UNSUBACK came; one
-    // its broker refused to let go is reported, and its stop settles all the same
+    // in its participant's turn: each name its broker holds, or was asked to hold and has not
+    // answered yet, let go, each unsubscription made as it is called
+    private List<Task> Leaving()
+    {
+        List<string> names;
+
+        lock (_gate)
+        {
+            names = [.. _subscribed.Union(_joining, StringComparer.Ordinal)];
+        }
+
+        // ! a list made here: each unsubscription asked of its adapter in this turn, before what
+        // follows it
+        return [.. names.Select(LeaveOne)];
+    }
+
+    // in its participant's turn: one name let go as it stops, or as its participant does, its
+    // unsubscription made as it is called, counted until its UNSUBACK came; one its broker refused
+    // to let go is reported unless its link was lost meanwhile, and held still, its stop settling
+    // all the same, and one its link lost as its participant stopped told nothing (spec 15.21)
     private async Task LeaveOne(string name)
     {
         try
         {
             await _participant.Unsubscribe(name);
         }
-        catch (Exception reason) when (reason is InvalidOperationException || !_participant.IsLinked || _participant.IsDownAsItLinks)
-        {
-            // its link lost meanwhile, or down as it was asked: a link that keeps no session lets
-            // each name go with it
-        }
         catch (Exception reason)
         {
-            _participant.Report(reason);
-        }
-        finally
-        {
-            lock (_gate)
+            if (IsLetGoReported(reason))
             {
-                _subscribed.Remove(name);
+                _participant.Report(reason);
             }
+
+            return;
         }
+
+        // * its link lost as its participant stopped let it go of its own: held until that stop
+        // settles
+        if (_participant.IsLostAsItStops)
+        {
+            return;
+        }
+
+        lock (_gate)
+        {
+            _subscribed.Remove(name);
+        }
+    }
+
+    // whether a let-go that failed is reported (spec 15.21): a refusal of its broker's, unless its
+    // link was lost meanwhile — read as its participant stops by the down it noted, since its link
+    // reads down from its stop's call, and otherwise by its link — and never an adapter's refusal
+    // of a misuse
+    private bool IsLetGoReported(Exception reason)
+    {
+        if (reason is InvalidOperationException || _participant.IsDownAsItLinks)
+        {
+            return false;
+        }
+
+        return _participant.IsStopping ? !_participant.IsDownAsItStops : _participant.IsLinked;
     }
 
     // * served in a group: its names left while it holds its bound, so its capacity is its broker's
@@ -741,13 +867,18 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
     }
 
     // in its participant's turn: a name it left, held no more once its UNSUBACK came; one its broker
-    // refused to let go reported; and one served again meanwhile, which its rejoin found still held
-    // and asked nothing of, asked anew
+    // refused to let go reported, and held still; and one served again meanwhile, which its rejoin
+    // found still held and asked nothing of, asked anew
     private void Left((string Name, Task Unsubscribed) left)
     {
-        if (left.Unsubscribed.Exception?.InnerException is { } reason and not InvalidOperationException && _participant.IsLinked && !_participant.IsDownAsItLinks)
+        if (left.Unsubscribed.Exception?.InnerException is { } reason)
         {
-            _participant.Report(reason);
+            if (IsLetGoReported(reason))
+            {
+                _participant.Report(reason);
+            }
+
+            return;
         }
 
         lock (_gate)

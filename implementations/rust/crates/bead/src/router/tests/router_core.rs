@@ -10,7 +10,7 @@ use super::{Handed, answer, cancel_of, failures_of, keeping, locked};
 use crate::constants::{FailureScope, ProtocolCode};
 use crate::envelope::{Credential, Envelope, FailureRecord, RequestHeader};
 use crate::identity::Procedure;
-use crate::router::core::{Handler, ResolveFn, ResolverProps};
+use crate::router::core::{Handler, RequestResolverProps, ResolveFn};
 use crate::router::server::RouterServerOptions;
 use crate::router::types::{ConnectionHandle, RouterLimitsOptions, TransportMessage};
 use crate::testing::pair::echo;
@@ -82,7 +82,10 @@ fn call_ids_of(handed: &Handed) -> Vec<u32> {
 #[tokio::test]
 async fn refuses_a_request_for_a_destination_a_service_or_a_procedure_it_does_not_know_on_its_call_id_alone()
  {
-    let nine = Procedure { id: 9, ..echo() };
+    let nine = Procedure {
+        procedure_id: 9,
+        ..echo()
+    };
     let (served, _handed) = served_keeping((&RouterServerOptions::default(), &nine));
     let eight = Procedure {
         service_id: 8,
@@ -295,7 +298,7 @@ async fn answers_envelope_too_large_a_request_that_came_whole_past_chunk_bytes_a
     );
     assert_eq!(call_ids_of(&handed), [5], "the one of chunkBytes taken");
 
-    let gauges = served.router.gauges().await;
+    let gauges = served.router.gauges().await.expect("distinct counts");
 
     assert_eq!(
         (
@@ -441,10 +444,10 @@ async fn answers_an_envelope_larger_than_it_reads_on_its_call_id() {
 // a resolver that fails at once, as the TypeScript side's throws, or once it has waited, as its
 // rejects
 fn failing(waits: bool) -> ResolveFn {
-    Arc::new(move |_props: ResolverProps| {
+    Arc::new(move |_props: RequestResolverProps| {
         Box::pin(async move {
             if waits {
-                tokio::task::yield_now().await;
+                crate::testing::yield_now().await;
 
                 return Err(crate::errors::ResolverError::other(std::io::Error::other(
                     "rejected",
@@ -462,7 +465,10 @@ fn failing(waits: bool) -> ResolveFn {
 #[tokio::test]
 async fn reports_a_resolver_that_throws_or_rejects_with_its_connection() {
     let served = Served::new(&RouterServerOptions::default());
-    let two = Procedure { id: 2, ..echo() };
+    let two = Procedure {
+        procedure_id: 2,
+        ..echo()
+    };
 
     served.transport.open(&first(), true);
     served.transport.open(&second(), true);
@@ -493,6 +499,10 @@ async fn reports_a_resolver_that_throws_or_rejects_with_its_connection() {
 // type refuses here
 // spec 16.2
 #[tokio::test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test repeats its own string a bounded number of times"
+)]
 async fn refuses_a_second_resolver_for_one_procedure_and_an_address_a_revision_or_a_name_outside_section_16()
  {
     let served = Served::new(&RouterServerOptions::default());
@@ -506,7 +516,7 @@ async fn refuses_a_second_resolver_for_one_procedure_and_an_address_a_revision_o
 
     assert!(
         register(&Procedure {
-            name: "again".to_owned(),
+            procedure_name: "again".to_owned(),
             ..echo()
         })
         .is_err(),
@@ -514,7 +524,10 @@ async fn refuses_a_second_resolver_for_one_procedure_and_an_address_a_revision_o
     );
 
     for procedure in [
-        Procedure { id: 0, ..echo() },
+        Procedure {
+            procedure_id: 0,
+            ..echo()
+        },
         Procedure {
             service_id: 0,
             ..echo()
@@ -529,7 +542,7 @@ async fn refuses_a_second_resolver_for_one_procedure_and_an_address_a_revision_o
         },
     ] {
         let refusal = register(&Procedure {
-            id: if procedure.id == 0 { 0 } else { 2 },
+            procedure_id: if procedure.procedure_id == 0 { 0 } else { 2 },
             ..procedure
         })
         .map_or_else(|error| error.to_string(), |()| String::new());
@@ -542,8 +555,8 @@ async fn refuses_a_second_resolver_for_one_procedure_and_an_address_a_revision_o
 
     for name in ["Echo", "_OTHER", "echo\n", "get_thing", &"a".repeat(64)] {
         let refusal = register(&Procedure {
-            id: 2,
-            name: name.to_owned(),
+            procedure_id: 2,
+            procedure_name: name.to_owned(),
             ..echo()
         })
         .map_or_else(|error| error.to_string(), |()| String::new());
@@ -566,7 +579,11 @@ async fn refuses_a_second_resolver_for_one_procedure_and_an_address_a_revision_o
     };
 
     assert!(
-        limited(Procedure { id: 9, ..echo() }).is_err(),
+        limited(Procedure {
+            procedure_id: 9,
+            ..echo()
+        })
+        .is_err(),
         "a limit of 0"
     );
     assert!(
@@ -580,7 +597,7 @@ async fn refuses_a_second_resolver_for_one_procedure_and_an_address_a_revision_o
     );
 
     register(&Procedure {
-        id: 0xffff,
+        procedure_id: 0xffff,
         service_id: 0xffff,
         service_revision: (1 << 31) - 1,
         ..echo()
@@ -642,19 +659,33 @@ async fn forgets_a_call_its_requester_cancels_then_cancels_its_signal_nothing_an
 #[tokio::test]
 async fn takes_a_cancel_of_no_call_in_silence_offered_to_the_side_and_reports_one_of_its_own_parity()
  {
-    let served = Served::new(&RouterServerOptions::default());
-
-    served.transport.open(&first(), true);
-    // crossed its answer, say
-    served.transport.deliver(&cancel_of(7), &first());
-    // a call this side opened is not the peer's to cancel
-    served.transport.deliver(&cancel_of(2), &first());
-    served.settle().await;
-
-    assert_eq!(
-        served.reported(),
-        ["ENVELOPE_MALFORMED first"],
-        "its own parity reported"
+    let peer = crate::testing::core_port::Peer::new(
+        crate::RouterSide::Server,
+        &RouterLimitsOptions::default(),
     );
-    assert!(served.transport.take().is_empty(), "nothing sent");
+
+    peer.receive((cancel_of(7), first()));
+    peer.receive((cancel_of(2), first()));
+    peer.settle().await;
+    peer.owner
+        .run(|state| {
+            assert_eq!(
+                state.cancels,
+                [(7, first())],
+                "the peer's cancel offered, even without a call"
+            );
+            assert_eq!(state.reports.len(), 1, "its own parity reported once");
+            let (handle, crate::RouterError::Failure(failure)) = &state.reports[0] else {
+                panic!("a malformed envelope reported")
+            };
+            assert_eq!(handle, &first(), "the connection");
+            assert_eq!(
+                failure.protocol_code(),
+                Some(ProtocolCode::ENVELOPE_MALFORMED),
+                "its own parity refused"
+            );
+            assert!(state.sent.is_empty(), "nothing sent");
+        })
+        .await
+        .expect("the side's cancel observed");
 }

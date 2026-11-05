@@ -10,8 +10,10 @@ import {
   ProgrammerError,
   SERVER_FAILURES,
   type IBeforeRequest,
+  type IProcedure,
   type IProtocolFailure,
 } from '../service-manager';
+import { PAYLOAD_CODECS } from '../payloads';
 import { createServiceResolver, type IServiceResolverOptions } from '../service-resolver';
 import { createServiceTrace } from '../service-trace';
 import {
@@ -83,7 +85,7 @@ test.describe('createServiceManager', () => {
       manager.getRequestResolver(limited, { serializer: serverSerializer })(() => {
         return Promise.resolve();
       });
-      await manager.getRequest(limited, { serializer })({ text: 'hi' })();
+      await manager.getCommand(limited, { serializer })({ text: 'hi' })({ connectionHandle });
 
       expect([
         calls.registerResolver[0]?.maximumPayloadBytes,
@@ -94,6 +96,7 @@ test.describe('createServiceManager', () => {
 
     test('refuses a resolver off section 16 as it is asked for, before its callback is given', () => {
       const manager = createServiceManager(createFakeRouter().router);
+      const onClient = createServiceManager(createFakeRouter('client').router);
       const named = { ...echo, procedureName: 'Echo' };
       const ranged = { ...echo, serviceRevision: 0 };
 
@@ -101,11 +104,140 @@ test.describe('createServiceManager', () => {
         manager.getRequestResolver(named, { serializer: serverSerializer });
       }).toThrow(/ is off its form: /);
       expect(() => {
-        manager.getCommandResolver(named, { serializer: serverSerializer });
+        onClient.getCommandResolver(named, { serializer: serverSerializer });
       }).toThrow(/ is off its form: /);
       expect(() => {
         manager.getNotificationResolver(ranged, { serializer: serverSerializer });
       }).toThrow(/ is out of its range: /);
+    });
+
+    // spec 16.10, 16.11; debugging 4.1.2
+    test('makes the resolvers of requests and notifications on a server’s router alone and of commands on a client’s alone, refusing the other as it is made', () => {
+      const ANSWERS_COMMANDS = "a client's router answers commands: getCommandResolver";
+      const ANSWERS_REQUESTS = "a server's router answers requests: getRequestResolver";
+      const NOTIFIES = 'only a server notifies; a client hears notifications';
+      const ofKind = (procedureKind: NonNullable<IProcedure['procedureKind']>): IProcedure => {
+        return { ...echo, procedureKind };
+      };
+      const ranged = { ...echo, serviceId: 0 };
+      // every kind, none included, and a procedure out of its range
+      const every = [echo, ofKind('request'), ofKind('notifies'), ofKind('command'), ranged];
+      const answer = () => {
+        return Promise.resolve();
+      };
+      const refusalOf = (make: () => unknown): string => {
+        try {
+          make();
+        } catch (reason) {
+          expect(reason).toBeInstanceOf(ProgrammerError);
+
+          return (reason as Error).message;
+        }
+
+        throw new Error('made');
+      };
+      const makersOf = (manager: ReturnType<typeof createServiceManager>) => {
+        return {
+          command: (procedure: IProcedure): string => {
+            return refusalOf(() => {
+              return manager.getCommandResolver(procedure, { serializer: serverSerializer });
+            });
+          },
+          notification: (procedure: IProcedure): string => {
+            return refusalOf(() => {
+              return manager.getNotificationResolver(procedure, { serializer: serverSerializer });
+            });
+          },
+          request: (procedure: IProcedure): string => {
+            return refusalOf(() => {
+              return manager.getRequestResolver(procedure, { serializer: serverSerializer });
+            });
+          },
+        };
+      };
+
+      // on a client's router
+      const client = createFakeRouter('client');
+      const onClient = createServiceManager(client.router);
+      const clientMakers = makersOf(onClient);
+
+      // * the side first, whatever the procedure: a maker that is not its router's way declares
+      // nothing, so no reason of spec 16.10 is reached
+      for (const procedure of every) {
+        expect(clientMakers.request(procedure)).toBe(ANSWERS_COMMANDS);
+        expect(clientMakers.notification(procedure)).toBe(NOTIFIES);
+      }
+
+      for (const kind of ['request', 'notifies'] as const) {
+        expect(clientMakers.command(ofKind(kind))).toContain('is against its kind');
+      }
+
+      expect(clientMakers.command(ranged)).toContain('is out of its range');
+      // and a refusal that is not an admission's comes after the side
+      expect(
+        refusalOf(() => {
+          return onClient.getRequestResolver(echo, {
+            beforeRequest: Object.assign(
+              () => {
+                return false;
+              },
+              {
+                refusal:
+                  SERVER_FAILURES.procedureFailed as unknown as typeof SERVER_FAILURES.accessDenied,
+              }
+            ),
+            serializer: serverSerializer,
+          });
+        })
+      ).toBe(ANSWERS_COMMANDS);
+      expect(client.calls.registerResolver).toEqual([]);
+
+      const defineCommand = onClient.getCommandResolver(ofKind('command'), {
+        serializer: serverSerializer,
+      });
+
+      // * made as it is asked for, registered once it is given its callback
+      expect(client.calls.registerResolver).toEqual([]);
+
+      const command = defineCommand(answer);
+
+      expect(client.calls.registerResolver).toEqual([command]);
+
+      // on a server's router
+      const server = createFakeRouter();
+      const onServer = createServiceManager(server.router);
+      const serverMakers = makersOf(onServer);
+
+      for (const procedure of every) {
+        expect(serverMakers.command(procedure)).toBe(ANSWERS_REQUESTS);
+      }
+
+      for (const kind of ['notifies', 'command'] as const) {
+        expect(serverMakers.request(ofKind(kind))).toContain('is against its kind');
+      }
+
+      for (const kind of ['request', 'command'] as const) {
+        expect(serverMakers.notification(ofKind(kind))).toContain('is against its kind');
+      }
+
+      expect(serverMakers.request(ranged)).toContain('is out of its range');
+      expect(serverMakers.notification(ranged)).toContain('is out of its range');
+      expect(server.calls.registerResolver).toEqual([]);
+
+      const defineRequest = onServer.getRequestResolver(ofKind('request'), {
+        serializer: serverSerializer,
+      });
+      const defineNotification = onServer.getNotificationResolver(
+        { ...ofKind('notifies'), procedureId: 2 },
+        { serializer: serverSerializer }
+      );
+
+      expect(server.calls.registerResolver).toEqual([]);
+
+      const request = defineRequest(answer);
+      const notification = defineNotification(answer);
+
+      expect(server.calls.registerResolver).toEqual([request, notification]);
     });
 
     test('makes and registers the resolver only once it is given its callback', () => {
@@ -191,12 +323,20 @@ test.describe('createServiceManager', () => {
       });
     });
 
-    test('a payload that does not decode is answered as undecodable, with no detail, never reaching the callback', async () => {
+    // spec 17.2
+    test('a payload that does not decode is answered as undecodable, its reason as its detail, never reaching the callback', async () => {
       const { calls, router } = createFakeRouter();
       const manager = createServiceManager(router);
       let reached = false;
 
-      const resolver = manager.getRequestResolver(echo, { serializer: serverSerializer })(() => {
+      const resolver = manager.getRequestResolver(echo, {
+        serializer: {
+          ...serverSerializer,
+          decode: (bytes: Uint8Array) => {
+            return PAYLOAD_CODECS.json.decode(bytes) as unknown as IText;
+          },
+        },
+      })(() => {
         reached = true;
 
         return Promise.resolve();
@@ -208,7 +348,38 @@ test.describe('createServiceManager', () => {
       expect(calls.respond).toEqual([
         {
           request: { connectionHandle, header },
-          response: { failure: SERVER_FAILURES.payloadUndecodable },
+          response: { failure: { ...SERVER_FAILURES.payloadUndecodable, detail: 'not JSON' } },
+        },
+      ]);
+    });
+
+    // spec 9.0, 17.2
+    test('a payload whose codec throws other than its refusal is answered PROCEDURE_FAILED, with no detail, and reported, never reaching the callback', async () => {
+      const { calls, router } = createFakeRouter();
+      const manager = createServiceManager(router);
+      const broken = new RangeError('a codec that fails to read');
+      let reached = false;
+
+      const resolver = manager.getRequestResolver(echo, {
+        serializer: {
+          ...serverSerializer,
+          decode: () => {
+            throw broken;
+          },
+        },
+      })(() => {
+        reached = true;
+
+        return Promise.resolve();
+      });
+
+      // * the reason goes on for the router to report, with the request's connection
+      await expect(resolver(propsOf(encode({ text: 'hi' })))).rejects.toBe(broken);
+      expect(reached).toBe(false);
+      expect(calls.respond).toEqual([
+        {
+          request: { connectionHandle, header },
+          response: { failure: SERVER_FAILURES.procedureFailed },
         },
       ]);
     });
@@ -252,7 +423,7 @@ test.describe('createServiceManager', () => {
     test('on a client’s router, a refusal is the client’s', async () => {
       const { calls, router } = createFakeRouter('client');
       const manager = createServiceManager(router);
-      const resolver = manager.getRequestResolver(echo, {
+      const resolver = manager.getCommandResolver(echo, {
         beforeRequest: () => {
           return false;
         },

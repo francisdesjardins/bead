@@ -10,7 +10,7 @@
 //!   descriptors: Buffa follows protobuf's Enum Behavior, which sets such an item or value of a
 //!   number the enum does not declare among the unknown fields, where both other sides keep it as
 //!   the item or the value it is (the leveled row of `docs/support.md`). A singular field stays
-//!   closed, its undeclared number set aside (17.9.8).
+//!   closed, its undeclared number dropped before Buffa reads (17.9.8).
 //!
 //! ```no_run
 //! use std::path::Path;

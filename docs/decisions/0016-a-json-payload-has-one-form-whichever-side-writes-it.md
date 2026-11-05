@@ -1,9 +1,10 @@
 # 0016 — A JSON payload is read as I-JSON, its noncharacters aside, and written in RFC 8785's canonical form, the same bytes from every language
 
 - **Status**: accepted
-- **Scope**: spec section 17, and the lines that point to it; debugging 4.3 and 10.1;
-  `spec/codecs.json`, its gate, and nine conversations of `spec/conversations.json`; every
-  runtime's payload codecs, public
+- **Scope**: spec section 17, and the lines that point to it, a codec's refusal said in its reason
+  among them; debugging 4.3 and 10.1; `spec/codecs.json`, its gate, nine conversations of
+  `spec/conversations.json`, and the eight it answers `PAYLOAD_UNDECODABLE`, a reason their detail;
+  every runtime's payload codecs, public
   ([0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)),
   and the interop's serializers, which use them; both service managers, where a value does not
   write; the support matrix
@@ -285,11 +286,28 @@ written back of what was read, or `refused` and its reason; and `values`, a valu
 in a form a file can hold, a named form among them for what no JSON text holds, and either the bytes
 written, or `refused` and its reason.
 
-**A reason is derived, and held by the regeneration alone**, as a duration's is
-([0014](0014-every-place-that-takes-a-duration-is-a-row-of-one-file.md)): `not UTF-8`,
-`a byte order mark`, `not JSON`, `a name twice`, `a surrogate alone`, `a number past a double`,
-`nested past 64`, `not a finite number`, `no JSON value`. No harness reads it: a refusal answers
-`PAYLOAD_UNDECODABLE` whatever the reason, and its words are each side's.
+**A refusal says its reason, in one set of words on every side** (spec 17.2): `not UTF-8`,
+`a byte order mark`, `not JSON`, `a name twice`, `a surrogate alone`, `a number past a double` and
+`nested past 64` of a reader; `a surrogate alone`, `a name twice`, `nested past 64`,
+`not a finite number` and `no JSON value` of a writer; and the `proto` codec's, `not its message`,
+`nested past 100` and `a required field unset`
+([0031](0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)). Each is derived
+by the regeneration, as a duration's is
+([0014](0014-every-place-that-takes-a-duration-is-a-row-of-one-file.md)), and every harness checks
+it, payloads and values: a built-in codec's refusal's message is its reason, exactly. A request's
+payload that does not read is answered `PAYLOAD_UNDECODABLE` with that reason as its detail, eight
+conversations checking it; a result's and a notification's carry the same words locally; and the
+HTTP gateway's problem carries them as the failure's detail. RFC 9457 §3.1.4 asks a `detail` to be
+"a human-readable explanation specific to this occurrence of the problem", one that "ought to focus
+on helping the client correct the problem", and a consumer not to parse it: fixed words a person
+reads, the code being the type. The gateway already sends fixed words for its own reading,
+`nested past 100` among them, and
+[0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)
+sends a payload's violations in its detail, gated by cases. What more a side knows of a refusal —
+its library's own words, which differ by library and version, the record a check refused, a
+required field's full name and path — rides in the refusal's cause, for its reports and its trace,
+never on the wire. The refusal's types stay each side's, a row of the matrix; a codec an
+application writes refuses in words of its own.
 
 **Each side plays the file in one harness.** For a payload, its reader reads the bytes, and the
 harness checks the refusal, or that its writer writes back the bytes given and that the value read
@@ -316,7 +334,8 @@ another connection held.
 **Each runtime holds the codecs**, public under the names
 [0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)
 gives them: the TypeScript side's in `src/router/shared/payloads.ts`, the C# side's in
-`Bead.Core/Payloads.cs`. The interop's serializers delegate to them.
+`Bead.Core/Payloads.cs`, the Rust side's in `bead/src/payloads.rs`. The interop's serializers
+delegate to them.
 
 **The rule has its gate** ([0006](0006-a-rule-has-its-gate.md)): `spec/check.py` holds the file in
 the frame of every file of entries ([0004](0004-one-behaviour-in-every-language.md)), as its header says.
@@ -408,11 +427,18 @@ are played.
 
 ## The Tenth Man
 
-The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)),
-and the user chose where it asked: RFC 8785 whole, a noncharacter taken, 64 deep, the canonical
-form's value, what JSON has no value for refused, the codecs in the runtimes, sections 16 and 17 in
-one release of the spec, and a value that does not write settled alike. Its objections, each with
-the answer that holds:
+The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md))
+in two rounds. In the first, the user chose where it asked: RFC 8785 whole, a noncharacter taken,
+64 deep, the canonical form's value, what JSON has no value for refused, the codecs in the runtimes,
+sections 16 and 17 in one release of the spec, and a value that does not write settled alike. The
+second met a codec's refusal said in its reason, with a `proto` writer's depth, which
+[0031](0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md#the-tenth-man)
+keeps, and the parcel reader and the `proto` codecs fuzzed on every side, which
+[0006](0006-a-rule-has-its-gate.md#the-tenth-man) keeps: one dissenter at xhigh effort, each claim
+verified before its answer; its row on a codec's words is kept here. Their objections, each with the
+answer that holds:
+
+### On the canonical form
 
 | Objection                                                                                                                                                                                                                                                        | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -429,3 +455,9 @@ the answer that holds:
 | A canonical form can be five times its payload, so the C# reader's copy and second parse let a peer make it allocate several times the payload, and an echo can answer past `maximumPayloadBytes`                                                                | Accepted: both are in the Consequences; the C# reader hands on the document it read when its bytes are canonical already, as every conversation's are, and writes into an `ArrayBufferWriter<byte>`                                                                                                                                                                                                                                                                                                   |
 | No row holds a member named `__proto__`, which the faster sorted copy the draft names would lose                                                                                                                                                                 | Accepted: a payload row and a value row, played on both sides; the tuned writer copies into objects of a `null` prototype, which keep `__proto__` as a member, and is byte-equal to the hand writer on it                                                                                                                                                                                                                                                                                             |
 | The departures table leaves out RFC 7493 §4.1, which advises against a top-level value other than an object or an array                                                                                                                                          | Accepted: a row, any value taken and written at the top, since a payload's shape is its procedure's to choose                                                                                                                                                                                                                                                                                                                                                                                         |
+
+### On a codec's refusal said in its reason
+
+| Objection                                                                                                                                                                                                                                                                                                                                                                                                                                    | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A request's `PAYLOAD_UNDECODABLE` "with no detail" pins the wrong thing: it removes what RFC 9457 §3.1.4 asks a detail to do, contradicts the gateway's fixed words for the same bound and [0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)'s checked detail, and closes the cheap form of the words parting between sides; the detail should be the reason `spec/codecs.json` already derives | Accepted. Verified: the gateway's problem carries a failure's detail as its client read it, and its own reading refuses in fixed words; 0035's detail; the reasons the file derives; ASVS 16.5.1 concerns unexpected errors, and a refusal is none. A built-in codec's refusal says its reason, its message exactly the reason, what more the side knows in its cause; a request's `PAYLOAD_UNDECODABLE` carries it as its detail; every player checks `refused`, and eight conversations the detail. One set of words wherever they appear, so the matrix's "the words of a codec's refusal, each side's own" goes. The concern for the JWT reader, which shares the `json` reader's refusal, falls: no reason names an encoding. The spec moves a minor |

@@ -20,25 +20,28 @@ use crate::clock::SharedClock;
 use crate::constants::{ProtocolCode, RouterSide, SERVER_CONNECTION_HANDLE};
 use crate::debug::{DebugDirection, DebugType};
 use crate::duration::hold;
-use crate::envelope::{FailureRecord, RequestHeader};
+use crate::envelope::{EnvelopeHeader, FailureHeader, FailureRecord, RequestHeader};
 use crate::errors::{CallError, ProgrammerError, ResolverError};
 use crate::failure::Failure;
-use crate::identity::{Procedure, check_declaration};
+use crate::identity::{DeclarationWay, Procedure, check_declaration, check_procedure_kind};
 use crate::managers::notification::NotificationKey;
 use crate::metrics::ProcedureSeries;
-use crate::payloads::{PayloadCodec, decoded, encoded};
+use crate::payloads::{PayloadCodec, decoded, encoded, refusal_saying};
 use crate::router::admissions::BeforeRequest;
-use crate::router::client::{ClientRequest, NotificationLike, RouterClient};
-use crate::router::core::{Answerer, Handler, ResolverProps};
-use crate::router::server::{CallHooks, NotifyFilter, RouterServer, ServerRequest};
+use crate::router::client::{NotificationLike, RouterClient};
+use crate::router::core::{AdmissionRequest, AdmitFn, Answerer, Handler, RequestResolverProps};
+use crate::router::server::{NotifyFilter, RouterServer};
 use crate::router::types::{
-    BoxFuture, CallSession, ConnectionHandle, RequestCredential, ResolvedRequestOptions,
-    RouterAnswer, RouterError, RouterLimits, SessionIdentifier, Signal,
+    BoxFuture, CallSession, ConnectionHandle, NotifyRequest, RequestCredential,
+    ResolvedRequestOptions, RouterAnswer, RouterError, RouterLimits, RouterRequest,
+    SessionIdentifier, Signal,
 };
-use crate::transport::{Listened, ListenerId};
+use crate::transport::{Listened, ListenerId, caught};
 use crate::violations::{Judged, detail_bound_of, is_refused, violations_detail_of};
 
 mod notification;
+#[cfg(test)]
+pub(crate) mod tests;
 
 pub use notification::{
     Notification, NotificationCallback, NotificationDependencies, NotificationRegistration,
@@ -120,16 +123,6 @@ pub enum ServiceRouter {
     Client(RouterClient),
 }
 
-/// A call the manager asks of its router.
-pub(crate) struct RouterCall {
-    pub(crate) procedure: Procedure,
-    pub(crate) options: ResolvedRequestOptions,
-    pub(crate) series: Option<ProcedureSeries>,
-    pub(crate) refusal: Option<CallError>,
-    pub(crate) on_call_id: Option<Box<dyn FnOnce(u32) + Send>>,
-    pub(crate) subscribes: Option<Arc<dyn NotificationLike>>,
-}
-
 impl ServiceRouter {
     fn side(&self) -> RouterSide {
         match self {
@@ -182,41 +175,11 @@ impl ServiceRouter {
     fn request(
         &self,
         payload: Bytes,
-        call: RouterCall,
+        request: RouterRequest,
     ) -> Result<crate::router::server::Call, ProgrammerError> {
         match self {
-            Self::Server(router) => router.request(
-                payload,
-                (
-                    ServerRequest {
-                        procedure: call.procedure.address(),
-                        maximum_payload_bytes: call.procedure.maximum_payload_bytes,
-                        options: call.options,
-                        series: call.series,
-                        refusal: call.refusal,
-                    },
-                    CallHooks {
-                        on_call_id: call.on_call_id,
-                        on_sent: None,
-                    },
-                ),
-            ),
-            Self::Client(router) => router.request(
-                payload,
-                (
-                    ClientRequest {
-                        procedure: call.procedure,
-                        options: call.options,
-                        series: call.series,
-                        refusal: call.refusal,
-                        subscribes: call.subscribes,
-                    },
-                    CallHooks {
-                        on_call_id: call.on_call_id,
-                        on_sent: None,
-                    },
-                ),
-            ),
+            Self::Server(router) => router.request(payload, request),
+            Self::Client(router) => router.request(payload, request),
         }
     }
 
@@ -231,16 +194,22 @@ impl ServiceRouter {
 
 // ── Options ──────────────────────────────────────────────────────────────────────────────────
 
-/// The timeout a call takes when it gives none.
-pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
+// the timeout a call takes when it gives none, which the defaults' table states
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// What a manager's calls take when neither they nor its options say: a timeout of 5 s.
+pub const REQUEST_DEFAULTS: RequestDefaults = RequestDefaults {
+    close_on_timeout: None,
+    timeout: Some(DEFAULT_TIMEOUT),
+};
 
 /// What a manager's calls take when they give nothing.
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub struct RequestDefaults {
-    /// Whether a call unanswered past its timeout closes its connection.
+    /// Whether a command unanswered past its timeout closes the connection it went to.
     pub close_on_timeout: Option<bool>,
-    /// A call's timeout: [`DEFAULT_TIMEOUT`] when none.
+    /// A call's timeout: the one [`REQUEST_DEFAULTS`] states when none.
     pub timeout: Option<Duration>,
 }
 
@@ -265,7 +234,7 @@ impl fmt::Debug for ServiceManagerOptions {
     }
 }
 
-/// A call's own options.
+/// What every request takes, a command's among them, which takes them in [`CommandOptions`].
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub struct RequestOptions {
@@ -273,28 +242,72 @@ pub struct RequestOptions {
     pub timeout: Option<Duration>,
     /// What it is for behind the peer.
     pub destination_id: Option<u32>,
-    /// The connection it goes to, on a server.
-    pub connection_handle: Option<ConnectionHandle>,
     /// The credential it presents.
     pub credential: Option<RequestCredential>,
     /// What cancels it.
     pub signal: Option<CancellationToken>,
+}
+
+/// What a command takes: a request's options, the connection it goes to and its close on timeout.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct CommandOptions {
+    /// The connection the command goes to.
+    pub connection_handle: ConnectionHandle,
     /// Whether it closes its connection unanswered past its timeout: its manager's when none.
     pub close_on_timeout: Option<bool>,
+    /// Its timeout: its manager's default when none.
+    pub timeout: Option<Duration>,
+    /// What it is for behind the peer.
+    pub destination_id: Option<u32>,
+    /// The credential it presents.
+    pub credential: Option<RequestCredential>,
+    /// What cancels it.
+    pub signal: Option<CancellationToken>,
+}
+
+impl CommandOptions {
+    /// A command's options to `connection_handle`, every other option none.
+    #[must_use]
+    pub const fn new(connection_handle: ConnectionHandle) -> Self {
+        Self {
+            connection_handle,
+            close_on_timeout: None,
+            timeout: None,
+            destination_id: None,
+            credential: None,
+            signal: None,
+        }
+    }
+}
+
+/// What a notification's registration takes: its subscribing call presents no credential, its
+/// subscription the connection's.
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
+pub struct RegistrationOptions {
+    /// Its subscribing call's timeout: its manager's default when none.
+    pub timeout: Option<Duration>,
+    /// What it is for behind the peer.
+    pub destination_id: Option<u32>,
+    /// What cancels its subscribing call.
+    pub signal: Option<CancellationToken>,
 }
 
 /// How a manager judges a value by its rules (spec 18.2).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ValidateOptions {
-    /// Whether it stops at the first violation.
-    pub fail_fast: bool,
-    /// The bytes a refusal's detail holds at most.
-    pub maximum_bytes: usize,
+    /// Whether it stops at the first violation: `false` when none.
+    pub fail_fast: Option<bool>,
+    /// The bytes a refusal's detail holds at most: no bound when none.
+    pub maximum_bytes: Option<usize>,
 }
 
-/// The rules a value is judged by.
-pub type Validate<T> = Arc<dyn Fn(&T, ValidateOptions) -> Judged + Send + Sync>;
+/// The rules a value is judged by: its judgment, or the error of a rule that fails to judge,
+/// answered `PROCEDURE_FAILED` and reported in its own words (spec 18.2).
+pub type Validate<T> =
+    Arc<dyn Fn(&T, &ValidateOptions) -> Result<Judged, Box<dyn Error + Send + Sync>> + Send + Sync>;
 
 /// What a requester reads and writes by, and judges its request by.
 pub struct RequestDependencies<Req: PayloadCodec, Res: PayloadCodec> {
@@ -321,7 +334,7 @@ impl<Req: PayloadCodec, Res: PayloadCodec> fmt::Debug for RequestDependencies<Re
 impl<Req: PayloadCodec, Res: PayloadCodec> RequestDependencies<Req, Res> {
     /// A requester's codecs, judged by no rule.
     #[must_use]
-    pub fn of(request: Req, result: Res) -> Self {
+    pub fn new(request: Req, result: Res) -> Self {
         Self {
             request,
             result,
@@ -451,8 +464,8 @@ impl Inner {
             direction: step.direction,
             duration,
             options,
-            procedure_id: procedure.id,
-            procedure_name: procedure.name.clone(),
+            procedure_id: procedure.procedure_id,
+            procedure_name: procedure.procedure_name.clone(),
             rx: step.rx,
             service_id: procedure.service_id,
             service_revision: procedure.service_revision,
@@ -497,7 +510,7 @@ pub type CloseConnection = Arc<dyn Fn(&ConnectionHandle) + Send + Sync>;
 fn traced_failure_of(error: &CallError) -> Option<Traced> {
     match error {
         CallError::Failure(failure) => Some(Arc::new(failure.record())),
-        CallError::Cancelled
+        CallError::Cancelled(_)
         | CallError::Disconnected(_)
         | CallError::TimedOut(_)
         | CallError::Refused(_)
@@ -517,10 +530,12 @@ impl ServiceManager {
         options: &ServiceManagerOptions,
     ) -> Result<Self, ProgrammerError> {
         let below = router.clock();
-        let clock = crate::clock::clock_of(
-            (Some(&below), options.clock.as_ref()),
-            ("a service manager", "its router"),
-        )?
+        let clock = crate::clock::clock_of(&crate::clock::LayeredClocks {
+            beneath: Some(&below),
+            given: options.clock.as_ref(),
+            layer: "a service manager",
+            below: "its router",
+        })?
         .unwrap_or(below);
         let defaults = options.defaults.clone().unwrap_or_default();
         // held as the manager is built, rather than refused at each call it would time
@@ -573,13 +588,14 @@ impl ServiceManager {
         inner.dropped.off(listener);
     }
 
-    /// The notification of `procedure`, one per procedure: asked for again, the same is given.
+    /// The notification of `procedure`, a client's router's alone, one per procedure: asked for
+    /// again, the same is given.
     ///
     /// # Errors
     ///
-    /// A [`ProgrammerError`] for a procedure off spec section 16, one known with another
-    /// declaration or window, a window of 0, or a manager over a server's router, which hears no
-    /// notification.
+    /// A [`ProgrammerError`] for a manager over a server's router, which notifies; then for a
+    /// procedure off spec section 16, or against its kind (spec 16.11); then for one known with
+    /// another declaration or window, or a window of 0.
     pub fn get_notification<Req, Res, Not>(
         &self,
         procedure: &Procedure,
@@ -608,11 +624,14 @@ impl ServiceManager {
         &self.inner.router
     }
 
-    /// A requester of `procedure`, declared to its router as it is made.
+    /// A requester of `procedure`, a client's router's alone, declared to its router as it is
+    /// made.
     ///
     /// # Errors
     ///
-    /// A [`ProgrammerError`] for a procedure its router refuses to declare.
+    /// A [`ProgrammerError`] for a manager over a server's router, which makes commands; then for
+    /// a procedure off spec section 16, or against its kind (spec 16.11); then for a procedure its
+    /// router refuses to declare.
     pub fn get_request<Req, Res>(
         &self,
         procedure: &Procedure,
@@ -624,57 +643,98 @@ impl ServiceManager {
         Req::Value: Clone + fmt::Debug + Sync,
         Res::Value: Clone + fmt::Debug + Sync,
     {
-        self.requester_of(procedure, (dependencies, DebugType::Request))
+        self.client_router((procedure, Maker::Request))?;
+
+        Ok(Request {
+            shared: self.requester_of(procedure, (dependencies, DebugType::Request))?,
+        })
     }
 
-    /// A requester of the command `procedure`, declared to its router as it is made.
+    /// A requester of the command `procedure`, a server's router's alone, declared to its router
+    /// as it is made.
     ///
     /// # Errors
     ///
-    /// A [`ProgrammerError`] for a procedure its router refuses to declare.
+    /// A [`ProgrammerError`] for a manager over a client's router, which makes requests; then for
+    /// a procedure off spec section 16, or against its kind (spec 16.11); then for a procedure its
+    /// router refuses to declare.
     pub fn get_command<Req, Res>(
         &self,
         procedure: &Procedure,
         dependencies: RequestDependencies<Req, Res>,
-    ) -> Result<Request<Req, Res>, ProgrammerError>
+    ) -> Result<Command<Req, Res>, ProgrammerError>
     where
         Req: PayloadCodec,
         Res: PayloadCodec,
         Req::Value: Clone + fmt::Debug + Sync,
         Res::Value: Clone + fmt::Debug + Sync,
     {
-        self.requester_of(procedure, (dependencies, DebugType::Command))
+        self.server_router((procedure, Maker::Command))?;
+
+        Ok(Command {
+            made: Handle::Made(self.requester_of(procedure, (dependencies, DebugType::Command))?),
+        })
     }
 
+    // * the side first: a maker that is not its router's way declares nothing (spec 16.11); then
+    // spec 16.10's three reasons for its way, its router's once the side holds; then, by its
+    // maker, the maker's own. A maker refused declares nothing
+    fn server_router(
+        &self,
+        (procedure, maker): (&Procedure, Maker),
+    ) -> Result<&RouterServer, ProgrammerError> {
+        let ServiceRouter::Server(router) = &self.inner.router else {
+            return Err(ProgrammerError::new(maker.refusal()));
+        };
+
+        check_declaration(procedure)?;
+        check_procedure_kind(procedure, maker.way())?;
+
+        Ok(router)
+    }
+
+    // as `server_router`, for a maker of a client's router
+    fn client_router(
+        &self,
+        (procedure, maker): (&Procedure, Maker),
+    ) -> Result<&RouterClient, ProgrammerError> {
+        let ServiceRouter::Client(router) = &self.inner.router else {
+            return Err(ProgrammerError::new(maker.refusal()));
+        };
+
+        check_declaration(procedure)?;
+        check_procedure_kind(procedure, maker.way())?;
+
+        Ok(router)
+    }
+
+    // the requester's shared state, declared to its router; its maker checked its side
     fn requester_of<Req, Res>(
         &self,
         procedure: &Procedure,
         (dependencies, call_type): (RequestDependencies<Req, Res>, DebugType),
-    ) -> Result<Request<Req, Res>, ProgrammerError>
+    ) -> Result<Arc<RequestShared<Req, Res>>, ProgrammerError>
     where
         Req: PayloadCodec,
         Res: PayloadCodec,
     {
         let series = self.inner.router.declare_requester(procedure)?;
 
-        Ok(Request {
-            shared: Arc::new(RequestShared {
-                manager: Arc::clone(&self.inner),
-                procedure: procedure.clone(),
-                dependencies,
-                series,
-                call_type,
-            }),
-        })
+        Ok(Arc::new(RequestShared {
+            manager: Arc::clone(&self.inner),
+            procedure: procedure.clone(),
+            dependencies,
+            series,
+            call_type,
+        }))
     }
 
-    // a refusal is checked once, as the resolver is asked for, after the procedure's identity
+    // a refusal is checked once, as the resolver is asked for, after its maker's side and the
+    // procedure's identity
     fn assert_refusal(
         &self,
         (procedure, before_request): (&Procedure, Option<&BeforeRequest>),
     ) -> Result<(), ProgrammerError> {
-        check_declaration(procedure)?;
-
         let side = self.inner.router.side();
 
         if let Some(refusal) = before_request.and_then(BeforeRequest::refusal)
@@ -684,7 +744,7 @@ impl ServiceManager {
         {
             return Err(ProgrammerError::new(format!(
                 "{} refuses with a failure that is not an admission's of the {}'s table",
-                procedure.name,
+                procedure.procedure_name,
                 side.as_str()
             )));
         }
@@ -692,21 +752,24 @@ impl ServiceManager {
         Ok(())
     }
 
-    /// A resolver of `procedure`, to register with its callback.
+    /// A resolver of the request `procedure`, a server's router's alone, to register with its
+    /// callback.
     ///
     /// # Errors
     ///
-    /// A [`ProgrammerError`] for a procedure off spec section 16, or a refusal that is not an
-    /// admission's.
+    /// A [`ProgrammerError`] for a manager over a client's router, which answers commands; then for
+    /// a procedure off spec section 16, or against its kind (spec 16.11); then for a refusal that
+    /// is not an admission's.
     pub fn get_request_resolver<Req, Res>(
         &self,
         procedure: &Procedure,
-        dependencies: ResolverDependencies<Req, Res>,
+        dependencies: RequestResolverDependencies<Req, Res>,
     ) -> Result<ResolverOf<Req, Res>, ProgrammerError>
     where
         Req: PayloadCodec,
         Res: PayloadCodec,
     {
+        self.server_router((procedure, Maker::RequestResolver))?;
         self.assert_refusal((procedure, dependencies.before_request.as_ref()))?;
 
         Ok(ResolverOf {
@@ -717,21 +780,24 @@ impl ServiceManager {
         })
     }
 
-    /// A resolver of the command `procedure`, on a client, to register with its callback.
+    /// A resolver of the command `procedure`, a client's router's alone, to register with its
+    /// callback.
     ///
     /// # Errors
     ///
-    /// A [`ProgrammerError`] for a procedure off spec section 16, or a refusal that is not an
-    /// admission's.
+    /// A [`ProgrammerError`] for a manager over a server's router, which answers requests; then
+    /// for a procedure off spec section 16, or against its kind (spec 16.11); then for a refusal
+    /// that is not an admission's.
     pub fn get_command_resolver<Req, Res>(
         &self,
         procedure: &Procedure,
-        dependencies: ResolverDependencies<Req, Res>,
+        dependencies: RequestResolverDependencies<Req, Res>,
     ) -> Result<ResolverOf<Req, Res>, ProgrammerError>
     where
         Req: PayloadCodec,
         Res: PayloadCodec,
     {
+        self.client_router((procedure, Maker::CommandResolver))?;
         self.assert_refusal((procedure, dependencies.before_request.as_ref()))?;
 
         Ok(ResolverOf {
@@ -742,22 +808,43 @@ impl ServiceManager {
         })
     }
 
-    /// A resolver of `procedure` that notifies, to register with its callback.
+    /// A resolver of `procedure` that notifies, a server's router's alone, to register with its
+    /// callback: its registration gives the notifier.
     ///
     /// # Errors
     ///
-    /// A [`ProgrammerError`] for a procedure off spec section 16, or a refusal that is not an
-    /// admission's.
+    /// A [`ProgrammerError`] for a manager over a client's router, which hears notifications; then
+    /// for a procedure off spec section 16, or against its kind (spec 16.11); then for a refusal
+    /// that is not an admission's.
     pub fn get_notification_resolver<Req, Res, Not>(
         &self,
         procedure: &Procedure,
-        (dependencies, notification): (ResolverDependencies<Req, Res>, Not),
+        dependencies: NotificationResolverDependencies<Req, Res, Not>,
     ) -> Result<NotificationResolverOf<Req, Res, Not>, ProgrammerError>
     where
         Req: PayloadCodec,
         Res: PayloadCodec,
         Not: PayloadCodec,
     {
+        let router = self
+            .server_router((procedure, Maker::NotificationResolver))?
+            .clone();
+        let NotificationResolverDependencies {
+            request,
+            result,
+            notification,
+            before_request,
+            validate,
+            fail_fast,
+        } = dependencies;
+        let dependencies = RequestResolverDependencies {
+            request,
+            result,
+            before_request,
+            validate,
+            fail_fast,
+        };
+
         self.assert_refusal((procedure, dependencies.before_request.as_ref()))?;
 
         Ok(NotificationResolverOf {
@@ -767,8 +854,289 @@ impl ServiceManager {
                 dependencies,
                 call_type: DebugType::Request,
             },
+            router,
             notification,
         })
+    }
+}
+
+// ── The manager typed by its side ────────────────────────────────────────────────────────────
+
+/// A client's services, over a client's router (spec 16.11).
+///
+/// It makes requests and notifications of its server, and the resolvers of the commands it answers.
+/// A server's makers are none of its own, so asking a client's services for one does not compile;
+/// its own makers do:
+///
+/// ```
+/// # use bead::{Client, Procedure, RequestDependencies, TextCodec};
+/// # fn asked(client: &Client, procedure: &Procedure) {
+/// let _ = client.services().get_request(procedure, RequestDependencies::new(TextCodec, TextCodec));
+/// # }
+/// ```
+#[derive(Debug, Clone)]
+pub struct ServiceManagerClient {
+    // ! the crate's alone: a test that hears both sides alike reaches the one manager beneath
+    pub(crate) manager: ServiceManager,
+}
+
+impl ServiceManagerClient {
+    /// A client's services over `router`.
+    ///
+    /// # Errors
+    ///
+    /// A [`ProgrammerError`] for a clock given that differs from its router's, or a default timeout
+    /// spec 1.4 does not hold.
+    pub(crate) fn new(
+        router: RouterClient,
+        options: &ServiceManagerOptions,
+    ) -> Result<Self, ProgrammerError> {
+        Ok(Self {
+            manager: ServiceManager::new(ServiceRouter::Client(router), options)?,
+        })
+    }
+
+    /// Hears each step of each call from now on, as [`ServiceManager::on_debug`] does.
+    pub fn on_debug(&self, listener: DebugListener) -> ListenerId {
+        self.manager.on_debug(listener)
+    }
+
+    /// Hears each call of a procedure deprecated from now on, as
+    /// [`ServiceManager::on_deprecated`] does.
+    pub fn on_deprecated(&self, listener: DeprecatedListener) -> ListenerId {
+        self.manager.on_deprecated(listener)
+    }
+
+    /// Hears each subscription of a notification dropped from now on, as
+    /// [`ServiceManager::on_dropped`] does.
+    pub fn on_dropped(&self, listener: DroppedListener) -> ListenerId {
+        self.manager.on_dropped(listener)
+    }
+
+    /// Hears no more with the listener `listener` names, as [`ServiceManager::off`] does.
+    pub fn off(&self, listener: ListenerId) {
+        self.manager.off(listener);
+    }
+
+    /// Whether anyone listens to `debug`.
+    #[must_use]
+    pub fn is_debugging(&self) -> bool {
+        self.manager.is_debugging()
+    }
+
+    /// A requester of `procedure`, as [`ServiceManager::get_request`] makes one.
+    ///
+    /// # Errors
+    ///
+    /// A [`ProgrammerError`] for a procedure off spec section 16, or against its kind (spec
+    /// 16.11); then for a procedure its router refuses to declare.
+    pub fn get_request<Req, Res>(
+        &self,
+        procedure: &Procedure,
+        dependencies: RequestDependencies<Req, Res>,
+    ) -> Result<Request<Req, Res>, ProgrammerError>
+    where
+        Req: PayloadCodec,
+        Res: PayloadCodec,
+        Req::Value: Clone + fmt::Debug + Sync,
+        Res::Value: Clone + fmt::Debug + Sync,
+    {
+        self.manager.get_request(procedure, dependencies)
+    }
+
+    /// The notification of `procedure`, as [`ServiceManager::get_notification`] gives it.
+    ///
+    /// # Errors
+    ///
+    /// A [`ProgrammerError`] for a procedure off spec section 16, or against its kind (spec
+    /// 16.11); then for one known with another declaration or window, or a window of 0.
+    pub fn get_notification<Req, Res, Not>(
+        &self,
+        procedure: &Procedure,
+        dependencies: NotificationDependencies<Req, Res, Not>,
+    ) -> Result<Notification<Req, Res, Not>, ProgrammerError>
+    where
+        Req: PayloadCodec,
+        Res: PayloadCodec,
+        Not: PayloadCodec,
+        Req::Value: Clone + fmt::Debug + Sync,
+        Res::Value: Clone + fmt::Debug + Sync,
+        Not::Value: Clone + fmt::Debug + Sync,
+    {
+        self.manager.get_notification(procedure, dependencies)
+    }
+
+    /// A resolver of the command `procedure`, as [`ServiceManager::get_command_resolver`] gives
+    /// one.
+    ///
+    /// # Errors
+    ///
+    /// A [`ProgrammerError`] for a procedure off spec section 16, or against its kind (spec
+    /// 16.11); then for a refusal that is not an admission's.
+    pub fn get_command_resolver<Req, Res>(
+        &self,
+        procedure: &Procedure,
+        dependencies: RequestResolverDependencies<Req, Res>,
+    ) -> Result<ResolverOf<Req, Res>, ProgrammerError>
+    where
+        Req: PayloadCodec,
+        Res: PayloadCodec,
+    {
+        self.manager.get_command_resolver(procedure, dependencies)
+    }
+}
+
+/// A server's services, over a server's router (spec 16.11).
+///
+/// It makes commands of a client, and the resolvers of the requests and notifications it answers.
+/// A client's makers are none of its own, and no notification of its own is dropped, so asking a
+/// server's services for one, or to hear one dropped, does not compile; its own makers do:
+///
+/// ```
+/// # use bead::{Procedure, RequestDependencies, Server, TextCodec};
+/// # fn asked(server: &Server, procedure: &Procedure) {
+/// let _ = server.services().get_command(procedure, RequestDependencies::new(TextCodec, TextCodec));
+/// # }
+/// ```
+#[derive(Debug, Clone)]
+pub struct ServiceManagerServer {
+    // ! the crate's alone: a test that hears both sides alike reaches the one manager beneath
+    pub(crate) manager: ServiceManager,
+}
+
+impl ServiceManagerServer {
+    /// A server's services over `router`.
+    ///
+    /// # Errors
+    ///
+    /// A [`ProgrammerError`] for a clock given that differs from its router's, or a default timeout
+    /// spec 1.4 does not hold.
+    pub(crate) fn new(
+        router: RouterServer,
+        options: &ServiceManagerOptions,
+    ) -> Result<Self, ProgrammerError> {
+        Ok(Self {
+            manager: ServiceManager::new(ServiceRouter::Server(router), options)?,
+        })
+    }
+
+    /// Hears each step of each call from now on, as [`ServiceManager::on_debug`] does.
+    pub fn on_debug(&self, listener: DebugListener) -> ListenerId {
+        self.manager.on_debug(listener)
+    }
+
+    /// Hears each call of a procedure deprecated from now on, as
+    /// [`ServiceManager::on_deprecated`] does.
+    pub fn on_deprecated(&self, listener: DeprecatedListener) -> ListenerId {
+        self.manager.on_deprecated(listener)
+    }
+
+    /// Hears no more with the listener `listener` names, as [`ServiceManager::off`] does.
+    pub fn off(&self, listener: ListenerId) {
+        self.manager.off(listener);
+    }
+
+    /// Whether anyone listens to `debug`.
+    #[must_use]
+    pub fn is_debugging(&self) -> bool {
+        self.manager.is_debugging()
+    }
+
+    /// A requester of the command `procedure`, as [`ServiceManager::get_command`] makes one.
+    ///
+    /// # Errors
+    ///
+    /// A [`ProgrammerError`] for a procedure off spec section 16, or against its kind (spec
+    /// 16.11); then for a procedure its router refuses to declare.
+    pub fn get_command<Req, Res>(
+        &self,
+        procedure: &Procedure,
+        dependencies: RequestDependencies<Req, Res>,
+    ) -> Result<Command<Req, Res>, ProgrammerError>
+    where
+        Req: PayloadCodec,
+        Res: PayloadCodec,
+        Req::Value: Clone + fmt::Debug + Sync,
+        Res::Value: Clone + fmt::Debug + Sync,
+    {
+        self.manager.get_command(procedure, dependencies)
+    }
+
+    /// A resolver of the request `procedure`, as [`ServiceManager::get_request_resolver`] gives
+    /// one.
+    ///
+    /// # Errors
+    ///
+    /// A [`ProgrammerError`] for a procedure off spec section 16, or against its kind (spec
+    /// 16.11); then for a refusal that is not an admission's.
+    pub fn get_request_resolver<Req, Res>(
+        &self,
+        procedure: &Procedure,
+        dependencies: RequestResolverDependencies<Req, Res>,
+    ) -> Result<ResolverOf<Req, Res>, ProgrammerError>
+    where
+        Req: PayloadCodec,
+        Res: PayloadCodec,
+    {
+        self.manager.get_request_resolver(procedure, dependencies)
+    }
+
+    /// A resolver of `procedure` that notifies, as
+    /// [`ServiceManager::get_notification_resolver`] gives one.
+    ///
+    /// # Errors
+    ///
+    /// A [`ProgrammerError`] for a procedure off spec section 16, or against its kind (spec
+    /// 16.11); then for a refusal that is not an admission's.
+    pub fn get_notification_resolver<Req, Res, Not>(
+        &self,
+        procedure: &Procedure,
+        dependencies: NotificationResolverDependencies<Req, Res, Not>,
+    ) -> Result<NotificationResolverOf<Req, Res, Not>, ProgrammerError>
+    where
+        Req: PayloadCodec,
+        Res: PayloadCodec,
+        Not: PayloadCodec,
+    {
+        self.manager
+            .get_notification_resolver(procedure, dependencies)
+    }
+}
+
+// each of a manager's six makers, its router's side's alone (spec 16.11)
+#[derive(Debug, Clone, Copy)]
+enum Maker {
+    Request,
+    Notification,
+    Command,
+    RequestResolver,
+    CommandResolver,
+    NotificationResolver,
+}
+
+impl Maker {
+    // the way it declares in, its router's once the side holds (spec 16.11)
+    const fn way(self) -> DeclarationWay {
+        match self {
+            Self::Request | Self::Notification => DeclarationWay::ClientRequester,
+            Self::Command => DeclarationWay::ServerRequester,
+            Self::RequestResolver => DeclarationWay::ServerResolver,
+            Self::CommandResolver => DeclarationWay::ClientResolver,
+            Self::NotificationResolver => DeclarationWay::ServerNotificationResolver,
+        }
+    }
+
+    // ! the words every side refuses it with on the other side's router, its maker named in this
+    // side's case
+    const fn refusal(self) -> &'static str {
+        match self {
+            Self::Request => "a server's router makes commands: get_command",
+            Self::Notification => "only a client hears notifications; a server notifies them",
+            Self::Command => "a client's router makes requests: get_request",
+            Self::RequestResolver => "a client's router answers commands: get_command_resolver",
+            Self::CommandResolver => "a server's router answers requests: get_request_resolver",
+            Self::NotificationResolver => "only a server notifies; a client hears notifications",
+        }
     }
 }
 
@@ -782,7 +1150,7 @@ struct RequestShared<Req: PayloadCodec, Res: PayloadCodec> {
     call_type: DebugType,
 }
 
-/// A requester of one procedure.
+/// A requester of one procedure, on a client's router.
 pub struct Request<Req: PayloadCodec, Res: PayloadCodec> {
     shared: Arc<RequestShared<Req, Res>>,
 }
@@ -801,6 +1169,76 @@ impl<Req: PayloadCodec, Res: PayloadCodec> fmt::Debug for Request<Req, Res> {
             .debug_struct("Request")
             .field("procedure", &self.shared.procedure)
             .finish_non_exhaustive()
+    }
+}
+
+// ── A handle given before what it sends through is made ──────────────────────────────────────
+
+/// What a handle given before its sender is made reads at each use: the handle made since, or none
+/// yet. The service layer looks its own maps up behind it, so this module reads none of them.
+pub(crate) trait Lookup<Given>: Send + Sync {
+    /// The handle made since it was given, or none yet.
+    fn current(&self) -> Option<Given>;
+}
+
+// what a handle sends through: its sender, made, or a lookup of the handle made since it was given,
+// with its procedure, which it states before
+enum Handle<Made, Given> {
+    Made(Arc<Made>),
+    Looked {
+        procedure: Procedure,
+        lookup: Arc<dyn Lookup<Given>>,
+    },
+}
+
+impl<Made, Given> Clone for Handle<Made, Given> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Made(made) => Self::Made(Arc::clone(made)),
+            Self::Looked { procedure, lookup } => Self::Looked {
+                procedure: procedure.clone(),
+                lookup: Arc::clone(lookup),
+            },
+        }
+    }
+}
+
+/// A requester of one command, on a server's router: each call names the connection it goes to.
+pub struct Command<Req: PayloadCodec, Res: PayloadCodec> {
+    made: Handle<RequestShared<Req, Res>, Self>,
+}
+
+impl<Req: PayloadCodec, Res: PayloadCodec> Clone for Command<Req, Res> {
+    fn clone(&self) -> Self {
+        Self {
+            made: self.made.clone(),
+        }
+    }
+}
+
+impl<Req: PayloadCodec, Res: PayloadCodec> fmt::Debug for Command<Req, Res> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("Command")
+            .field("procedure", self.procedure_of())
+            .finish_non_exhaustive()
+    }
+}
+
+impl<Req: PayloadCodec, Res: PayloadCodec> Command<Req, Res> {
+    // the requester of `procedure` given before it is made: each call looks it up, and one made
+    // before it is refused
+    pub(crate) fn looked(procedure: Procedure, lookup: Arc<dyn Lookup<Self>>) -> Self {
+        Self {
+            made: Handle::Looked { procedure, lookup },
+        }
+    }
+
+    fn procedure_of(&self) -> &Procedure {
+        match &self.made {
+            Handle::Made(shared) => &shared.procedure,
+            Handle::Looked { procedure, .. } => procedure,
+        }
     }
 }
 
@@ -875,40 +1313,123 @@ where
     pub fn call(
         &self,
         payload: Req::Value,
-        options: RequestOptions,
+        options: &RequestOptions,
     ) -> Result<ServiceCall<Res::Value>, ProgrammerError> {
-        self.call_with(payload, (options, None))
+        // * a request names no connection, so it has none to close
+        let mut resolved = self.shared.resolved_of(options.timeout)?;
+
+        resolved.destination_id = options.destination_id;
+        resolved.credential.clone_from(&options.credential);
+        resolved.signal.clone_from(&options.signal);
+
+        self.shared.call_with(payload, (resolved, None))
     }
 
-    // a call, subscribing the notification `subscribes` names when it does
+    // a notification's subscribing call: it presents no credential, its subscription the
+    // connection's
+    pub(crate) fn subscribe_with(
+        &self,
+        payload: Req::Value,
+        (options, subscribes): (&RegistrationOptions, Arc<dyn NotificationLike>),
+    ) -> Result<ServiceCall<Res::Value>, ProgrammerError> {
+        let mut resolved = self.shared.resolved_of(options.timeout)?;
+
+        resolved.destination_id = options.destination_id;
+        resolved.signal.clone_from(&options.signal);
+
+        self.shared.call_with(payload, (resolved, Some(subscribes)))
+    }
+}
+
+impl<Req, Res> Command<Req, Res>
+where
+    Req: PayloadCodec,
+    Res: PayloadCodec,
+    Req::Value: Clone + fmt::Debug + Sync,
+    Res::Value: Clone + fmt::Debug + Sync,
+{
+    /// Its procedure.
+    #[must_use]
+    pub fn procedure(&self) -> &Procedure {
+        self.procedure_of()
+    }
+
+    /// Calls its procedure with `payload` on the connection `options` names, sent as it is made.
+    ///
+    /// # Errors
+    ///
+    /// A [`ProgrammerError`] for a call made before its service is offered, a timeout spec 1.4
+    /// does not hold, or a call its router refuses as it is made.
+    pub fn call(
+        &self,
+        payload: Req::Value,
+        options: &CommandOptions,
+    ) -> Result<ServiceCall<Res::Value>, ProgrammerError> {
+        let shared = match &self.made {
+            Handle::Made(shared) => shared,
+            Handle::Looked { procedure, lookup } => {
+                let made = lookup.current().ok_or_else(|| {
+                    ProgrammerError::new(format!(
+                        "{} is a command made as its service is offered, not before",
+                        procedure.procedure_name
+                    ))
+                })?;
+
+                return made.call(payload, options);
+            }
+        };
+        let manager = &shared.manager;
+        let mut resolved = shared.resolved_of(options.timeout)?;
+
+        resolved.destination_id = options.destination_id;
+        resolved.connection_handle = Some(Arc::clone(&options.connection_handle));
+        resolved.credential.clone_from(&options.credential);
+        resolved.signal.clone_from(&options.signal);
+        resolved.close_on_timeout = options.close_on_timeout.or(manager.close_on_timeout);
+
+        shared.call_with(payload, (resolved, None))
+    }
+}
+
+impl<Req, Res> RequestShared<Req, Res>
+where
+    Req: PayloadCodec,
+    Res: PayloadCodec,
+    Req::Value: Clone + fmt::Debug + Sync,
+    Res::Value: Clone + fmt::Debug + Sync,
+{
+    // a call's options of its timeout, or its manager's, held (spec 1.4)
+    fn resolved_of(
+        &self,
+        timeout: Option<Duration>,
+    ) -> Result<ResolvedRequestOptions, ProgrammerError> {
+        Ok(ResolvedRequestOptions::new(hold(
+            "a call's timeout",
+            timeout.unwrap_or(self.manager.timeout),
+        )?))
+    }
+
+    // a call of its options resolved, subscribing the notification `subscribes` names when it does
     #[expect(
         clippy::too_many_lines,
         reason = "a call made, then its steps told in their order, as the other sides tell them"
     )]
-    pub(crate) fn call_with(
-        &self,
+    fn call_with(
+        self: &Arc<Self>,
         payload: Req::Value,
-        (options, subscribes): (RequestOptions, Option<Arc<dyn NotificationLike>>),
+        (resolved, subscribes): (ResolvedRequestOptions, Option<Arc<dyn NotificationLike>>),
     ) -> Result<ServiceCall<Res::Value>, ProgrammerError> {
-        let shared = &self.shared;
+        let shared = self;
         let manager = &shared.manager;
         let procedure = &shared.procedure;
-        let resolved = ResolvedRequestOptions {
-            timeout: hold(
-                "a call's timeout",
-                options.timeout.unwrap_or(manager.timeout),
-            )?,
-            destination_id: options.destination_id,
-            connection_handle: options.connection_handle.clone(),
-            credential: options.credential,
-            signal: options.signal,
-            close_on_timeout: options
-                .close_on_timeout
-                .or(manager.close_on_timeout)
-                .unwrap_or(false),
+
+        // * judged before it is written: PAYLOAD_INVALID, its detail under this side's bound; a rule
+        // that fails to judge, or panics, fails the call before anything goes, as a value that
+        // does not write
+        let refusal = match refusal_of(shared, (&payload, resolved.destination_id)) {
+            Ok(refusal) => refusal,
+            Err(failed) => return Ok(ServiceCall::failed(CallError::Other(failed))),
         };
-        // * judged before it is written: PAYLOAD_INVALID, its detail under this side's bound
-        let refusal = refusal_of(shared, (&payload, resolved.destination_id));
         let encoded = match &refusal {
             Some(_) => Bytes::new(),
             None => match encoded(&shared.dependencies.request, &payload) {
@@ -923,7 +1444,7 @@ where
         // * the one check a call makes while nobody listens: no clock is read, no step is built
         let traced = manager.is_debugging().then(|| Step {
             call_id: None,
-            connection_handle: options.connection_handle.clone(),
+            connection_handle: resolved.connection_handle.clone(),
             direction: DebugDirection::Tx,
             error: None,
             is_answered: false,
@@ -939,30 +1460,28 @@ where
         }
 
         let (on_call_id, call_id) = oneshot::channel::<u32>();
-        let close_on_timeout = resolved.close_on_timeout;
+        let close_on_timeout = resolved.close_on_timeout.unwrap_or(false);
         let destination_id = resolved.destination_id;
-        let requested = manager.router.request(
-            encoded,
-            RouterCall {
-                procedure: procedure.clone(),
-                options: resolved,
-                series: shared.series.clone(),
-                refusal,
-                on_call_id: Some(Box::new(move |call_id: u32| {
-                    on_call_id.send(call_id).ok();
-                })),
-                subscribes,
-            },
-        )?;
+        let requested = manager.router.request(encoded, {
+            let mut request = RouterRequest::new(procedure.clone(), &resolved);
+
+            request.series.clone_from(&shared.series);
+            request.refusal = refusal;
+            request.on_call_id = Some(Box::new(move |call_id: u32| {
+                on_call_id.send(call_id).ok();
+            }));
+            request.subscribes = subscribes;
+            request
+        })?;
         let (reply, outcome) = oneshot::channel();
-        let shared = Arc::clone(&self.shared);
-        let connection_handle = options.connection_handle;
+        let shared = Arc::clone(self);
+        let connection_handle = resolved.connection_handle;
 
         manager.router.cover(async move {
             let manager = &shared.manager;
             let procedure = &shared.procedure;
             // the call's id, once its router drew it; none for a call refused first
-            let mut call_id = match traced {
+            let call_id = match traced {
                 Some(_) => call_id.await.ok(),
                 None => None,
             };
@@ -1007,17 +1526,20 @@ where
                     Err(reason)
                 }
                 Ok(result) => {
-                    call_id = Some(result.header.call_id);
-
-                    match decoded(&shared.dependencies.result, &result.payload) {
+                    // * a codec's panic fails the call as its refusal does (spec 17.2, item 2)
+                    match decoded(&shared.dependencies.result, &result.payload)
+                        .unwrap_or_else(|panicked| Err(refusal_saying(&panicked)))
+                    {
                         // an answer that does not decode fails here, with the result's header
                         Err(refused) => {
                             let failure = Failure::protocol(
                                 ProtocolCode::PAYLOAD_UNDECODABLE,
                                 manager.router.side(),
                             )
+                            // ! a detail of the side's own words: its codec's reason, in spec 17.2's
+                            // words; the rest in its cause
                             .saying(refused.reason().to_owned())
-                            .about(&crate::envelope::Header::Result(result.header.clone()))
+                            .about(&EnvelopeHeader::Result(result.header.clone()))
                             .of_call(Some(procedure.address()), destination_id)
                             .caused_by(Arc::new(refused));
                             let reason = CallError::Failure(failure);
@@ -1065,37 +1587,50 @@ where
     }
 }
 
+// the refusal its rules judge `payload` with, if any; or, apart, the error of a rule that fails to
+// judge, or its panic, named as a rule's
 fn refusal_of<Req: PayloadCodec, Res: PayloadCodec>(
     shared: &RequestShared<Req, Res>,
     (payload, destination_id): (&Req::Value, Option<u32>),
-) -> Option<CallError> {
-    let validate = shared.dependencies.validate.as_ref()?;
+) -> Result<Option<CallError>, TracedError> {
+    let Some(validate) = shared.dependencies.validate.as_ref() else {
+        return Ok(None);
+    };
     let limits = shared.manager.router.limits();
     let maximum_bytes = detail_bound_of(
         usize::try_from(limits.maximum_detail_bytes).unwrap_or(usize::MAX),
         usize::try_from(limits.maximum_envelope_bytes).unwrap_or(usize::MAX),
     );
-    let judged = validate(
-        payload,
-        ValidateOptions {
-            fail_fast: shared.dependencies.fail_fast,
-            maximum_bytes,
-        },
-    );
+    let options = ValidateOptions {
+        fail_fast: Some(shared.dependencies.fail_fast),
+        maximum_bytes: Some(maximum_bytes),
+    };
+    let judged = judged_by(validate, (payload, &options))?;
 
-    is_refused(&judged).then(|| {
+    Ok(is_refused(&judged).then(|| {
         CallError::Failure(
             Failure::protocol(ProtocolCode::PAYLOAD_INVALID, shared.manager.router.side())
                 .saying(violations_detail_of(&judged, maximum_bytes))
                 .of_call(Some(shared.procedure.address()), destination_id),
         )
-    })
+    }))
+}
+
+// what `validate` judges `value` with, within a guard: or the error of a rule that fails to judge,
+// in its own words, or its panic, its throw named as a rule's (spec 18.2, decision 0044)
+fn judged_by<T>(
+    validate: &Validate<T>,
+    (value, options): (&T, &ValidateOptions),
+) -> Result<Judged, TracedError> {
+    caught(("a rule", || validate(value, options)))
+        .map_err(|panicked| -> TracedError { Arc::new(panicked) })
+        .and_then(|judging| judging.map_err(TracedError::from))
 }
 
 // ── Resolvers ────────────────────────────────────────────────────────────────────────────────
 
 /// What a resolver reads and writes by, admits by, and judges a request by.
-pub struct ResolverDependencies<Req: PayloadCodec, Res: PayloadCodec> {
+pub struct RequestResolverDependencies<Req: PayloadCodec, Res: PayloadCodec> {
     /// The request's codec.
     pub request: Req,
     /// The result's codec.
@@ -1108,26 +1643,82 @@ pub struct ResolverDependencies<Req: PayloadCodec, Res: PayloadCodec> {
     pub fail_fast: bool,
 }
 
-impl<Req: PayloadCodec, Res: PayloadCodec> fmt::Debug for ResolverDependencies<Req, Res> {
+impl<Req: PayloadCodec, Res: PayloadCodec> fmt::Debug for RequestResolverDependencies<Req, Res> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("ResolverDependencies")
+            .debug_struct("RequestResolverDependencies")
             .field("request", &self.request)
             .field("result", &self.result)
             .finish_non_exhaustive()
     }
 }
 
-impl<Req: PayloadCodec, Res: PayloadCodec> ResolverDependencies<Req, Res> {
+impl<Req: PayloadCodec, Res: PayloadCodec> RequestResolverDependencies<Req, Res> {
     /// A resolver's codecs, admitting every request, judged by no rule.
     #[must_use]
-    pub fn of(request: Req, result: Res) -> Self {
+    pub fn new(request: Req, result: Res) -> Self {
         Self {
             request,
             result,
             before_request: None,
             validate: None,
             fail_fast: false,
+        }
+    }
+}
+
+/// What a resolver that notifies reads and writes by, admits by, and judges a request by: a
+/// request resolver's dependencies, and its notification's codec.
+pub struct NotificationResolverDependencies<Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec>
+{
+    /// The request's codec.
+    pub request: Req,
+    /// The result's codec.
+    pub result: Res,
+    /// The notification's codec.
+    pub notification: Not,
+    /// Whether a request may reach the callback, on its header and its call's session.
+    pub before_request: Option<BeforeRequest>,
+    /// The rules a request is judged by before the callback.
+    pub validate: Option<Validate<Req::Value>>,
+    /// Whether its rules stop at the first violation.
+    pub fail_fast: bool,
+}
+
+impl<Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec> fmt::Debug
+    for NotificationResolverDependencies<Req, Res, Not>
+{
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("NotificationResolverDependencies")
+            .field("request", &self.request)
+            .field("result", &self.result)
+            .field("notification", &self.notification)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec>
+    NotificationResolverDependencies<Req, Res, Not>
+{
+    /// A resolver's `dependencies`, and the codec of the notification it sends.
+    #[must_use]
+    pub fn new(dependencies: RequestResolverDependencies<Req, Res>, notification: Not) -> Self {
+        let RequestResolverDependencies {
+            request,
+            result,
+            before_request,
+            validate,
+            fail_fast,
+        } = dependencies;
+
+        Self {
+            request,
+            result,
+            notification,
+            before_request,
+            validate,
+            fail_fast,
         }
     }
 }
@@ -1142,8 +1733,8 @@ pub struct RequestProps<T> {
     pub header: RequestHeader,
     /// Its payload, decoded.
     pub payload: T,
-    /// Its call's session.
-    pub session: Option<CallSession>,
+    /// Its call's shared session, the same allocation its admission receives.
+    pub session: Option<Arc<CallSession>>,
     /// What tells its call ended before its answer.
     pub signal: Signal,
 }
@@ -1211,6 +1802,10 @@ where
     Res::Value: Clone + fmt::Debug + Sync,
 {
     /// Answers its request with `value`.
+    ///
+    /// # Errors
+    ///
+    /// A [`ResolverError`] when its codec refuses the value or the answer cannot go out.
     pub fn result(&self, value: Res::Value) -> BoxFuture<Result<(), ResolverError>> {
         let told = traced(value.clone());
         let encoded = encoded(&*self.shared.codec, &value)
@@ -1221,6 +1816,10 @@ where
     }
 
     /// Answers its request with `failure`: one of its own, or a refusal of admission.
+    ///
+    /// # Errors
+    ///
+    /// A [`ResolverError`] for a protocol failure outside admission, or an answer that cannot go out.
     pub fn failure(&self, failure: &Failure) -> BoxFuture<Result<(), ResolverError>> {
         let shared = &self.shared;
 
@@ -1232,7 +1831,7 @@ where
             shared.manager.router.report(
                 &RouterError::Other(Arc::new(ProgrammerError::new(format!(
                     "{} answers failure {}, which it does not list",
-                    shared.procedure.name,
+                    shared.procedure.procedure_name,
                     failure.code()
                 )))),
                 Some(&shared.connection_handle),
@@ -1258,7 +1857,7 @@ where
             if shared.is_answered.load(Ordering::Acquire) {
                 return Err(ResolverError::other(ProgrammerError::new(format!(
                     "{} has answered this request already",
-                    shared.procedure.name
+                    shared.procedure.procedure_name
                 ))));
             }
 
@@ -1282,10 +1881,14 @@ where
                     answered.as_ref().map_or_else(
                         || step.clone(),
                         |record| Step {
-                            error: Some(Arc::new(CallError::Failure(Failure::received(
-                                record,
-                                shared.manager.router.side(),
-                            )))),
+                            error: Some(Arc::new(CallError::Failure(
+                                Failure::answered(record, shared.manager.router.side()).about(
+                                    &EnvelopeHeader::Failure(FailureHeader {
+                                        call_id: shared.call_id,
+                                        credential: None,
+                                    }),
+                                ),
+                            ))),
                             ..step.clone()
                         },
                     ),
@@ -1325,11 +1928,15 @@ where
     }
 
     /// Subscribes its requester to its procedure, before it answers.
+    ///
+    /// # Errors
+    ///
+    /// A [`CallError`] when it answers first, its call opens no subscription, or the call or connection ends.
     pub fn register_notification(&self) -> BoxFuture<Result<u32, CallError>> {
         if self.shared.is_answered.load(Ordering::Acquire) {
             let error = ProgrammerError::new(format!(
                 "{} subscribes before it answers",
-                self.shared.procedure.name
+                self.shared.procedure.procedure_name
             ));
 
             return Box::pin(async move { Err(CallError::Refused(error)) });
@@ -1353,7 +1960,7 @@ pub type ResolverCallback<Req, Res> = Arc<
 pub struct ResolverOf<Req: PayloadCodec, Res: PayloadCodec> {
     manager: ServiceManager,
     procedure: Procedure,
-    dependencies: ResolverDependencies<Req, Res>,
+    dependencies: RequestResolverDependencies<Req, Res>,
     call_type: DebugType,
 }
 
@@ -1400,6 +2007,7 @@ where
             .map(|before_request| before_request.admission(side));
         let resolving = Arc::new(Resolving {
             manager: Arc::clone(&manager.inner),
+            admit: admit.clone(),
             procedure: procedure.clone(),
             request: dependencies.request,
             result: Arc::new(dependencies.result),
@@ -1410,7 +2018,7 @@ where
             listed,
         });
         let handler = Handler {
-            resolve: Arc::new(move |props: ResolverProps| {
+            resolve: Arc::new(move |props: RequestResolverProps| {
                 let resolving = Arc::clone(&resolving);
 
                 Box::pin(async move { resolving.resolve(props).await })
@@ -1430,6 +2038,7 @@ where
 
 struct Resolving<Req: PayloadCodec, Res: PayloadCodec> {
     manager: Arc<Inner>,
+    admit: Option<AdmitFn>,
     procedure: Procedure,
     request: Req,
     result: Arc<Res>,
@@ -1455,8 +2064,45 @@ where
         clippy::too_many_lines,
         reason = "a request decoded, judged, handed and answered, its steps told in their order"
     )]
-    async fn resolve(&self, props: ResolverProps) -> Result<(), ResolverError> {
-        let ResolverProps {
+    async fn resolve(&self, props: RequestResolverProps) -> Result<(), ResolverError> {
+        let manager = &self.manager;
+        // * the one check a request makes while nobody listens; traced, the call starts as it
+        // arrives, its admission and its decoding counting in its duration
+        let started = manager.is_debugging().then(|| manager.started_now());
+
+        if !props.is_admitted
+            && let Some(admit) = &self.admit
+        {
+            let request = AdmissionRequest {
+                connection_handle: Arc::clone(&props.connection_handle),
+                header: props.header.clone(),
+                session: props.session.clone(),
+                carried: props.carried.clone(),
+            };
+            match admit(&request) {
+                Ok(None) => {}
+                Ok(Some(refused)) => {
+                    return props
+                        .answerer
+                        .respond(RouterAnswer::Failure(refused.failure.record()))
+                        .await
+                        .map_err(ResolverError::other);
+                }
+                Err(error) => {
+                    drop(
+                        props
+                            .answerer
+                            .respond(RouterAnswer::Failure(
+                                self.failure(ProtocolCode::PROCEDURE_FAILED),
+                            ))
+                            .await,
+                    );
+                    return Err(error);
+                }
+            }
+        }
+
+        let RequestResolverProps {
             connection_handle,
             header,
             payload,
@@ -1465,18 +2111,38 @@ where
             answerer,
             ..
         } = props;
-        let manager = &self.manager;
-        // * the one check a request makes while nobody listens; traced, the call starts as it
-        // arrives, its decoding counting in its duration
-        let started = manager.is_debugging().then(|| manager.started_now());
-        // a payload that does not decode never reaches the callback
-        let Ok(value) = decoded(&self.request, &payload) else {
-            return answerer
-                .respond(RouterAnswer::Failure(
-                    self.failure(ProtocolCode::PAYLOAD_UNDECODABLE),
-                ))
-                .await
-                .map_err(ResolverError::other);
+        // a payload that does not decode never reaches the callback: its codec's refusal is the
+        // payload's, answered with its reason as its detail; its panic is its side's own error,
+        // answered as a resolver's that panics, and why goes on for the router to report (spec
+        // 9.0, 17.2)
+        let value = match decoded(&self.request, &payload) {
+            Ok(Ok(value)) => value,
+            Ok(Err(refused)) => {
+                return answerer
+                    .respond(RouterAnswer::Failure(
+                        Failure::protocol(
+                            ProtocolCode::PAYLOAD_UNDECODABLE,
+                            self.manager.router.side(),
+                        )
+                        // ! a detail of the side's own words: its codec's reason, in spec 17.2's
+                        // words; the rest of the refusal goes no further
+                        .saying(refused.reason())
+                        .record(),
+                    ))
+                    .await
+                    .map_err(ResolverError::other);
+            }
+            Err(panicked) => {
+                drop(
+                    answerer
+                        .respond(RouterAnswer::Failure(
+                            self.failure(ProtocolCode::PROCEDURE_FAILED),
+                        ))
+                        .await,
+                );
+
+                return Err(ResolverError::other(panicked));
+            }
         };
         let step = started.map(|started| Step {
             call_id: Some(header.call_id),
@@ -1502,21 +2168,14 @@ where
                 usize::try_from(limits.maximum_detail_bytes).unwrap_or(usize::MAX),
                 usize::try_from(limits.maximum_envelope_bytes).unwrap_or(usize::MAX),
             );
-            let judging = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                validate(
-                    &value,
-                    ValidateOptions {
-                        fail_fast: self.fail_fast,
-                        maximum_bytes,
-                    },
-                )
-            }));
-            let judged = match judging {
+            let options = ValidateOptions {
+                fail_fast: Some(self.fail_fast),
+                maximum_bytes: Some(maximum_bytes),
+            };
+            let judged = match judged_by(validate, (&value, &options)) {
                 Ok(judged) => judged,
                 // a rule that fails to judge is its side's own error, answered as a resolver's
-                Err(panicked) => {
-                    let error = crate::transport::panic_error(&*panicked);
-
+                Err(error) => {
                     if let Some(step) = &step
                         && !signal.is_aborted()
                     {
@@ -1524,7 +2183,7 @@ where
                             &self.procedure,
                             Step {
                                 direction: DebugDirection::Tx,
-                                error: Some(Arc::new(error.clone())),
+                                error: Some(Arc::clone(&error)),
                                 is_answered: true,
                                 ..step.clone()
                             },
@@ -1698,6 +2357,7 @@ fn filter_of(options: &NotifyOptions) -> Option<NotifyFilter> {
 /// A resolver that notifies, its callback to come.
 pub struct NotificationResolverOf<Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec> {
     resolver: ResolverOf<Req, Res>,
+    router: RouterServer,
     notification: Not,
 }
 
@@ -1743,40 +2403,58 @@ where
         self.resolver.register((callback, listed), true)?;
 
         Ok(Notifier {
-            shared: Arc::new(NotifierShared {
+            made: Handle::Made(Arc::new(NotifierShared {
                 manager,
+                router: self.router,
                 procedure,
                 codec: self.notification,
-            }),
+            })),
         })
     }
 }
 
 struct NotifierShared<Not: PayloadCodec> {
     manager: Arc<Inner>,
+    // the server's router its resolver was made on: only a server notifies
+    router: RouterServer,
     procedure: Procedure,
     codec: Not,
 }
 
 /// What notifies the subscriptions of one procedure.
 pub struct Notifier<Not: PayloadCodec> {
-    shared: Arc<NotifierShared<Not>>,
+    made: Handle<NotifierShared<Not>, Self>,
 }
 
 impl<Not: PayloadCodec> Clone for Notifier<Not> {
     fn clone(&self) -> Self {
         Self {
-            shared: Arc::clone(&self.shared),
+            made: self.made.clone(),
         }
     }
 }
 
 impl<Not: PayloadCodec> fmt::Debug for Notifier<Not> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let procedure = match &self.made {
+            Handle::Made(shared) => &shared.procedure,
+            Handle::Looked { procedure, .. } => procedure,
+        };
+
         formatter
             .debug_struct("Notifier")
-            .field("procedure", &self.shared.procedure)
+            .field("procedure", procedure)
             .finish_non_exhaustive()
+    }
+}
+
+impl<Not: PayloadCodec> Notifier<Not> {
+    // the notifier of `procedure` given before it is made: each notification looks it up, and one
+    // sent before it is made goes to nobody
+    pub(crate) fn looked(procedure: Procedure, lookup: Arc<dyn Lookup<Self>>) -> Self {
+        Self {
+            made: Handle::Looked { procedure, lookup },
+        }
     }
 }
 
@@ -1785,9 +2463,19 @@ where
     Not: PayloadCodec,
     Not::Value: Clone + fmt::Debug + Sync,
 {
-    /// Sends `notification` to each subscription `options` keeps, sent as it is called.
+    /// Sends `notification` to each subscription `options` keeps, sent as it is called; to none
+    /// while it was given before its service is offered and its resolver registered.
     pub fn notify(&self, notification: Not::Value, options: &NotifyOptions) -> BoxFuture<()> {
-        let shared = &self.shared;
+        let shared = match &self.made {
+            Handle::Made(shared) => shared,
+            // * nothing made holds no subscription to send to
+            Handle::Looked { lookup, .. } => {
+                return match lookup.current() {
+                    Some(made) => made.notify(notification, options),
+                    None => Box::pin(async {}),
+                };
+            }
+        };
         let manager = &shared.manager;
         // * the one check a notification makes while nobody listens
         let step = manager.is_debugging().then(|| Step {
@@ -1812,22 +2500,18 @@ where
         let payload = encoded(&shared.codec, &notification)
             .map_err(|refused| RouterError::Other(Arc::new(refused)));
         let failure = payload.as_ref().err().cloned();
-        let notified = match &manager.router {
-            ServiceRouter::Server(router) => router.notify(
-                payload,
-                (
-                    shared.procedure.address(),
-                    filter_of(options),
-                    options.key.clone(),
-                ),
-            ),
-            // * only a server notifies; a client asks with a request
-            ServiceRouter::Client(_) => Box::pin(async {}),
-        };
-        let shared = Arc::clone(&self.shared);
+        let notified = shared.router.notify(payload, {
+            let mut request = NotifyRequest::new(shared.procedure.address());
+
+            request.filter = filter_of(options);
+            request.key.clone_from(&options.key);
+            request
+        });
+        let shared = Arc::clone(shared);
 
         Box::pin(async move {
-            notified.await;
+            let outcome = notified.await;
+            let failure = failure.or_else(|| outcome.err());
 
             // what keeps it from going out is told at the start it was sent with
             if let (Some(failure), Some(step)) = (failure, step) {

@@ -29,6 +29,86 @@ fn call_of(call_id: u32, handle: &str) -> CallAddress {
     }
 }
 
+// spec 10.4
+#[tokio::test]
+async fn send_no_cancel_for_a_request_the_transport_never_had_though_given_up_at_once_and_reserve_nothing()
+ {
+    for side in [RouterSide::Client, RouterSide::Server] {
+        let peer = Peer::new(side, &RouterLimitsOptions::default());
+        let first_id = if side == RouterSide::Client { 1 } else { 2 };
+        peer.owner
+            .run(|state| {
+                state.sending.push_back(Err(error_of("refused")));
+            })
+            .await
+            .expect("the transport refuses outright");
+        assert_eq!(
+            completed(peer.request((Bytes::new(), request_of("a"))))
+                .await
+                .expect_err("the refusal is heard")
+                .to_string(),
+            "refused"
+        );
+
+        // * the port gives the call up in the send's turn, before returning its refusal, as the
+        // C# twin cancels in OnCallId and the TypeScript twin aborts before its microtask hears it.
+        peer.owner
+            .run(|state| {
+                state.sending.push_back(Err(error_of("refused")));
+                state.on_transmit = Some(Box::new(|state, envelope| {
+                    requester::cancel(state, (&call_of(envelope.call_id(), "a"), None));
+                }));
+            })
+            .await
+            .expect("the caller gives up before the refusal");
+        assert!(matches!(
+            completed(peer.request((Bytes::new(), request_of("a")))).await,
+            Err(CallError::Cancelled(_))
+        ));
+        peer.settle().await;
+        assert_eq!(
+            pieces(&peer)
+                .await
+                .iter()
+                .map(|(kind, id, _, _)| (*kind, *id))
+                .collect::<Vec<_>>(),
+            [
+                (EnvelopeKind::Request, first_id),
+                (EnvelopeKind::Request, first_id + 2)
+            ]
+        );
+        peer.owner
+            .run(|state| {
+                assert!(state.core.pending.reservations.is_empty());
+                assert_eq!(state.core.pending.count_on(&Arc::from("a")), 0);
+                state.on_transmit = None;
+            })
+            .await
+            .expect("nothing waits or is reserved");
+        assert_eq!(peer.clock.dues(), Vec::<Duration>::new());
+        quiet(&peer).await;
+
+        for call_id in [first_id, first_id + 2] {
+            peer.receive((result_of(call_id, None), Arc::from("a")));
+        }
+        peer.settle().await;
+        peer.owner
+            .run(|state| {
+                assert_eq!(state.reports.len(), 2);
+                for (handle, error) in &state.reports {
+                    assert_eq!(handle.as_ref(), "a");
+                    assert!(matches!(
+                        error,
+                        crate::router::types::RouterError::Failure(failure)
+                            if failure.code() == ProtocolCode::CALL_UNKNOWN.get()
+                    ));
+                }
+            })
+            .await
+            .expect("neither call id hides a late result");
+    }
+}
+
 async fn cancel(peer: &Peer, call_id: u32) {
     peer.owner
         .run(move |state| {
@@ -194,14 +274,18 @@ async fn draws_no_call_id_reserved_and_none_at_all_when_every_one_is() {
         let peer = Peer::new(RouterSide::Server, &RouterLimitsOptions::default());
         peer.owner
             .run(move |state| {
-                state.core.pending = PendingCalls::new(RouterSide::Server, Some(last));
+                state.core.pending =
+                    PendingCalls::bounded(RouterSide::Server, last).expect("a bound of its side");
             })
             .await
             .expect("the call id range set");
         let given = peer.request((Bytes::new(), request_of("a")));
         peer.settle().await;
         cancel(&peer, 2).await;
-        assert!(matches!(completed(given).await, Err(CallError::Cancelled)));
+        assert!(matches!(
+            completed(given).await,
+            Err(CallError::Cancelled(_))
+        ));
         if last == 4 {
             for _ in 0..2 {
                 let next = peer.request((Bytes::new(), request_of("a")));
@@ -314,7 +398,7 @@ async fn stops_a_request_the_peer_answers_or_its_caller_gives_up_and_sends_nothi
                 matches!(outcome, Err(CallError::Failure(failure)) if failure.code().get() == code && failure.origin() == crate::failure::FailureOrigin::Peer)
             );
         } else {
-            assert!(matches!(outcome, Err(CallError::Cancelled)));
+            assert!(matches!(outcome, Err(CallError::Cancelled(_))));
         }
         peer.receive((
             credit(call_id, u64::try_from(total).expect("a small payload")),
@@ -489,7 +573,7 @@ async fn stops_a_calls_timer_as_the_call_leaves_whichever_way_so_none_keeps_the_
     completed(result).await.expect("result received");
     assert!(matches!(
         completed(cancelled).await,
-        Err(CallError::Cancelled)
+        Err(CallError::Cancelled(_))
     ));
     assert!(
         matches!(completed(failure).await, Err(CallError::Failure(failure)) if failure.code().get() == 21)
@@ -541,7 +625,7 @@ async fn ends_a_result_it_receives_as_its_caller_ends_the_call_its_budget_and_pl
                 matches!(outcome, Err(CallError::TimedOut(delay)) if delay == Duration::from_millis(250))
             );
         } else {
-            assert!(matches!(outcome, Err(CallError::Cancelled)));
+            assert!(matches!(outcome, Err(CallError::Cancelled(_))));
         }
         peer.owner
             .run(|state| {
@@ -566,7 +650,10 @@ async fn ends_a_result_it_receives_as_its_caller_ends_the_call_its_budget_and_pl
         peer.receive((opening(4, (pattern(32), 200)), Arc::from("a")));
         peer.settle().await;
         cancel(&peer, 4).await;
-        assert!(matches!(completed(next).await, Err(CallError::Cancelled)));
+        assert!(matches!(
+            completed(next).await,
+            Err(CallError::Cancelled(_))
+        ));
         assert_eq!(
             pieces(&peer).await,
             [
@@ -658,7 +745,7 @@ async fn reserves_the_call_id_of_a_result_it_received_in_part_as_long_as_the_pee
                     matches!(outcome, Err(CallError::Failure(failure)) if failure.code().get() == code && failure.origin() == origin)
                 );
             }
-            _ => assert!(matches!(outcome, Err(CallError::Cancelled))),
+            _ => assert!(matches!(outcome, Err(CallError::Cancelled(_)))),
         }
         peer.settle().await;
         assert_eq!(
@@ -680,7 +767,8 @@ async fn reserves_the_call_id_of_a_result_it_received_in_part_as_long_as_the_pee
     client
         .owner
         .run(|state| {
-            state.core.pending = PendingCalls::new(RouterSide::Client, Some(3));
+            state.core.pending =
+                PendingCalls::bounded(RouterSide::Client, 3).expect("a bound of its side");
         })
         .await
         .expect("two call ids");
@@ -691,7 +779,10 @@ async fn reserves_the_call_id_of_a_result_it_received_in_part_as_long_as_the_pee
     client.receive((opening(1, (pattern(32), 300)), Arc::from("a")));
     client.settle().await;
     signal.cancel();
-    assert!(matches!(completed(asked).await, Err(CallError::Cancelled)));
+    assert!(matches!(
+        completed(asked).await,
+        Err(CallError::Cancelled(_))
+    ));
     client.clock.advance(Duration::from_millis(1_500)).await;
     client.receive((chunk(1, (pattern(48), 32, false)), Arc::from("a")));
     client.settle().await;

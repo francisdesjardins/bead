@@ -85,10 +85,6 @@ public sealed partial class DurationsTests
         {
             ["options"] = new(nameof(ServerOptions.ConnectionInactivityTimeout), ServerInactivityByOptions),
         }),
-        ["httpTransportServer.exchangeTimeout"] = (nameof(HttpTransportServerOptions.ExchangeTimeout), new()
-        {
-            ["options"] = new(nameof(HttpTransportServerOptions.ExchangeTimeout), ExchangeTimeoutByOptions),
-        }),
         ["httpTransportServer.maximumWait"] = (nameof(HttpTransportServerOptions.MaximumWait), new()
         {
             ["options"] = new(nameof(HttpTransportServerOptions.MaximumWait), MaximumWaitByOptions),
@@ -97,16 +93,24 @@ public sealed partial class DurationsTests
         {
             ["options"] = new(nameof(HttpTransportServerOptions.SendGracePeriod), SendGracePeriodByHttpOptions),
             ["gateway"] = new(nameof(HttpGatewayOptions.SendGracePeriod), SendGracePeriodByGateway),
+            ["policy"] = new(nameof(HttpPolicyOptions.SendGracePeriod), SendGracePeriodByPolicy),
         }),
         ["httpTransportServer.headersTimeout"] = (nameof(HttpTransportServerOptions.HeadersTimeout), new()
         {
             ["options"] = new(nameof(HttpTransportServerOptions.HeadersTimeout), HeadersTimeoutByHttpOptions),
             ["gateway"] = new(nameof(HttpGatewayOptions.HeadersTimeout), HeadersTimeoutByGateway),
+            ["policy"] = new(nameof(HttpPolicyOptions.HeadersTimeout), HeadersTimeoutByPolicy),
         }),
         ["httpTransportServer.bodyGracePeriod"] = (nameof(HttpTransportServerOptions.BodyGracePeriod), new()
         {
             ["options"] = new(nameof(HttpTransportServerOptions.BodyGracePeriod), BodyGracePeriodByOptions),
             ["gateway"] = new(nameof(HttpGatewayOptions.BodyGracePeriod), BodyGracePeriodByGateway),
+            ["policy"] = new(nameof(HttpPolicyOptions.BodyGracePeriod), BodyGracePeriodByPolicy),
+        }),
+        ["httpTransport.exchangeTimeout"] = (nameof(HttpTransportServerOptions.ExchangeTimeout), new()
+        {
+            ["client"] = new(nameof(HttpTransportClientOptions.ExchangeTimeout), ExchangeTimeoutByClient),
+            ["server"] = new(nameof(HttpTransportServerOptions.ExchangeTimeout), ExchangeTimeoutByServer),
         }),
         ["httpTransport.inactivityTimeout"] = (nameof(HttpTransportServerOptions.InactivityTimeout), new()
         {
@@ -133,14 +137,15 @@ public sealed partial class DurationsTests
         }),
         ["transportClient.connectTimeout"] = ("a connect's timeout", new()
         {
-            ["http"] = new(nameof(HttpConnectOptions.Timeout), ConnectTimeoutByHttp),
-            ["webSocket"] = new(nameof(WebSocketConnectOptions.Timeout), ConnectTimeoutByWebSocket),
-            ["memory"] = new(nameof(MemoryConnectOptions.Timeout), ConnectTimeoutByMemory),
-            ["broker"] = new(nameof(BrokerConnectOptions.Timeout), ConnectTimeoutByBroker),
+            ["http"] = new(nameof(HttpTransportClientConnectOptions.Timeout), ConnectTimeoutByHttp),
+            ["webSocket"] = new(nameof(WebSocketTransportClientConnectOptions.Timeout), ConnectTimeoutByWebSocket),
+            ["memory"] = new(nameof(MemoryTransportClientConnectOptions.Timeout), ConnectTimeoutByMemory),
+            ["broker"] = new(nameof(BrokerTransportClientConnectOptions.Timeout), ConnectTimeoutByBroker),
         }),
         ["transportClient.reconnectionDelay"] = ("a delay", new()
         {
-            ["function"] = new(nameof(TransportReconnectOptions.Delay), ReconnectionDelayByFunction),
+            ["function"] = new(nameof(TransportClientReconnectOptions.Delay), ReconnectionDelayByFunction),
+            ["number"] = new(nameof(TransportClientReconnectOptions.Delay), ReconnectionDelayByNumber),
         }),
         ["webSocketTransportServer.sendGracePeriod"] = (nameof(WebSocketTransportServerOptions.SendGracePeriod), new()
         {
@@ -161,6 +166,11 @@ public sealed partial class DurationsTests
         ["brokerParticipant.heartbeat"] = ("a heartbeat", new()
         {
             ["options"] = new(nameof(BrokerParticipantOptions.Heartbeat), BrokerHeartbeatByOptions),
+        }),
+        ["brokerParticipant.reconnectionDelay"] = ("a delay", new()
+        {
+            ["function"] = new(nameof(TransportClientReconnectOptions.Delay), ParticipantReconnectionDelayByFunction),
+            ["number"] = new(nameof(TransportClientReconnectOptions.Delay), ParticipantReconnectionDelayByNumber),
         }),
         ["brokerTransportServer.acceptTimeout"] = (nameof(BrokerTransportServerOptions.AcceptTimeout), new()
         {

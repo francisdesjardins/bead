@@ -9,20 +9,10 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::duration::NEVER;
-use crate::testing::files;
+use crate::testing::{Difference, files, is_excused};
 
-// the language a differs names to excuse this side
-const LANGUAGE: &str = "Rust";
-
-/// A row of the support matrix that excuses a side from an entry.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Difference {
-    /// The row.
-    pub row: String,
-    /// The side it excuses.
-    pub language: String,
-}
+#[cfg(test)]
+mod tests;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -172,14 +162,6 @@ pub struct DurationPlace {
     pub is_ahead: bool,
 }
 
-fn is_excused(differs: Option<&Vec<Difference>>) -> bool {
-    differs.is_some_and(|differs| {
-        differs
-            .iter()
-            .any(|difference| difference.language == LANGUAGE)
-    })
-}
-
 // an input as a Duration is given it: from_secs_f64 of its milliseconds over 1,000, or its seconds,
 // never as Duration::MAX; NaN, a value no number is, and one under zero, none
 fn given_of(input: &FileInput) -> Option<Duration> {
@@ -199,6 +181,25 @@ fn given_of(input: &FileInput) -> Option<Duration> {
     Duration::try_from_secs_f64(seconds).ok()
 }
 
+fn read_file() -> Result<File, String> {
+    files::read("durations.json")
+}
+
+fn input_of(input: &FileInput) -> Result<DurationInput, String> {
+    let given = given_of(input);
+    let is_excused = is_excused(input.differs.as_deref().unwrap_or_default());
+
+    if given.is_none() && !is_excused {
+        return Err(format!("{} has no Rust duration and no excuse", input.name));
+    }
+
+    Ok(DurationInput {
+        name: input.name.clone(),
+        given,
+        is_excused,
+    })
+}
+
 /// Bead's durations, read whole: its inputs and its places.
 #[derive(Debug, Clone)]
 pub struct Durations {
@@ -215,16 +216,12 @@ impl Durations {
     ///
     /// What reading it or its form refuses.
     pub fn read() -> Result<Self, String> {
-        let file: File = files::read("durations.json")?;
+        let file = read_file()?;
         let inputs = file
             .inputs
             .iter()
-            .map(|input| DurationInput {
-                name: input.name.clone(),
-                given: given_of(input),
-                is_excused: is_excused(input.differs.as_ref()),
-            })
-            .collect();
+            .map(input_of)
+            .collect::<Result<Vec<_>, String>>()?;
         let places = file
             .places
             .into_iter()
@@ -238,7 +235,7 @@ impl Durations {
                     .into_iter()
                     .map(|way| DurationWay {
                         is_required: way.required == Some(true),
-                        is_excused: is_excused(way.differs.as_ref()),
+                        is_excused: is_excused(way.differs.as_deref().unwrap_or_default()),
                         id: way.id,
                     })
                     .collect(),
@@ -251,7 +248,7 @@ impl Durations {
                     .outcomes
                     .into_iter()
                     .map(|outcome| PlaceOutcome {
-                        is_excused: is_excused(outcome.differs.as_ref()),
+                        is_excused: is_excused(outcome.differs.as_deref().unwrap_or_default()),
                         input: outcome.input,
                         outcome: outcome.outcome,
                         held: outcome.held.map(Duration::from_millis),
@@ -278,9 +275,7 @@ impl Durations {
             .iter()
             .cloned()
             .zip(place.outcomes.iter().cloned())
-            .filter(|(input, outcome)| {
-                !input.is_excused && !outcome.is_excused && input.given.is_some()
-            })
+            .filter(|(input, outcome)| !input.is_excused && !outcome.is_excused)
             .collect()
     }
 }

@@ -75,9 +75,12 @@ impl Heartbeat {
         });
 
         if heartbeat != NEVER {
-            let timer = arm((&inner, heartbeat));
-
-            locked(&inner.state).timer = Some(timer);
+            if let Ok(timer) = arm((&inner, heartbeat)) {
+                locked(&inner.state).timer = Some(timer);
+            } else {
+                locked(&inner.state).is_stopped = true;
+                (inner.hooks.drop)();
+            }
         }
 
         Self { inner }
@@ -107,7 +110,9 @@ impl Heartbeat {
 }
 
 // its timer, armed for `due`, a millisecond at least
-fn arm((inner, due): (&Arc<Inner>, Duration)) -> Arc<dyn Timer> {
+fn arm(
+    (inner, due): (&Arc<Inner>, Duration),
+) -> Result<Arc<dyn Timer>, crate::errors::ProgrammerError> {
     let beating: Weak<Inner> = Arc::downgrade(inner);
 
     inner.clock.arm(
@@ -155,9 +160,15 @@ fn beat(inner: &Arc<Inner>) {
         };
 
         // * armed before it acts, so a hook that stops it finds the timer to cancel
-        state.timer = next.map(|next| arm((inner, next)));
-
-        act
+        if let Ok(timer) = next.map(|next| arm((inner, next))).transpose() {
+            state.timer = timer;
+            drop(state);
+            act
+        } else {
+            state.is_stopped = true;
+            drop(state);
+            Some(Arc::clone(&inner.hooks.drop))
+        }
     };
 
     if let Some(act) = act {

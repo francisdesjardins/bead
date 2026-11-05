@@ -13,6 +13,7 @@ import { createBrokerParticipant } from '../../shared/broker-participant';
 import {
   CancelError,
   ConnectError,
+  GenericError,
   ProgrammerError,
   ReadyStateError,
   TimeoutError,
@@ -22,7 +23,8 @@ import {
   type IMemoryBroker,
   type IMemoryBrokerAdapter,
 } from '../../shared/memory-broker';
-import type { BrokerTopic } from '../../shared/types';
+import { noop } from '../../shared/noop';
+import type { BrokerTopic, IBrokerAdapter } from '../../shared/types';
 import { createTestClock } from '../../shared/__tests__/fixtures';
 import {
   BrokerRefusedError,
@@ -79,6 +81,115 @@ const acceptOf = (opener: Uint8Array): Uint8Array => {
   });
 };
 
+/** Waits, a millisecond at a time, until `condition` holds; past two seconds, fails naming `what`. */
+const until = async (condition: () => boolean, what: string): Promise<void> => {
+  for (let count = 0; count < 2_000 && !condition(); count += 1) {
+    await new Promise((resolve) => {
+      setTimeout(resolve, 1);
+    });
+  }
+
+  expect(condition(), what).toBe(true);
+};
+
+/** A participant `server` over `broker` whose server transport serves `interop`, started. */
+const servingOf = async (broker: IMemoryBroker) => {
+  const participant = createBrokerParticipant({ adapter: broker.adapter({ id: 'server' }) });
+  const server = participant.transportServer({ names: ['interop'] });
+
+  await server.start();
+
+  return { participant, server };
+};
+
+/** The waits a reconnection told, each as it told it, at a delay of 60 seconds. */
+const tapping = () => {
+  const tapped: number[] = [];
+  const options = {
+    delay: 60_000,
+    tap: (delay: number) => {
+      tapped.push(delay);
+    },
+  };
+
+  return { options, tapped };
+};
+
+/**
+ * An adapter whose every start, once `holding.isHolding`, waits for the test to release it, its
+ * signal unheard, as a CONNACK that comes after its participant's stop went.
+ */
+const heldOf = (adapter: IBrokerAdapter) => {
+  const releases: (() => void)[] = [];
+  const holding = { isHolding: false };
+  const held = Object.assign(Object.create(adapter) as IBrokerAdapter, {
+    start: (options?: Parameters<IBrokerAdapter['start']>[0]) => {
+      if (!holding.isHolding) {
+        return adapter.start(options);
+      }
+
+      return new Promise<void>((resolve, reject) => {
+        releases.push(() => {
+          adapter.start(options).then(resolve, reject);
+        });
+      });
+    },
+  });
+
+  return { held, holding, releases };
+};
+
+/** An adapter whose first `count` starts are refused as a misuse, a link of its id up already. */
+const refusingOf = (adapter: IBrokerAdapter, count: number): IBrokerAdapter => {
+  let refusals = count;
+
+  return Object.assign(Object.create(adapter) as IBrokerAdapter, {
+    start: (options?: Parameters<IBrokerAdapter['start']>[0]) => {
+      if (refusals > 0) {
+        refusals -= 1;
+
+        return Promise.reject(new ProgrammerError(`the link of ${adapter.id} is up already`));
+      }
+
+      return adapter.start(options);
+    },
+  });
+};
+
+/** An adapter whose starts after its first `count` are refused, a link of its id up already. */
+const refusingAfterOf = (adapter: IBrokerAdapter, count: number): IBrokerAdapter => {
+  let starts = 0;
+
+  return Object.assign(Object.create(adapter) as IBrokerAdapter, {
+    start: (options?: Parameters<IBrokerAdapter['start']>[0]) => {
+      starts += 1;
+
+      return starts > count
+        ? Promise.reject(new GenericError(`the link of ${adapter.id} is refused`))
+        : adapter.start(options);
+    },
+  });
+};
+
+/**
+ * An adapter whose every stop waits for the test to release it, as a broker slow to take a
+ * DISCONNECT: its participant's stop under way meanwhile.
+ */
+const stopsHeldOf = (adapter: IBrokerAdapter) => {
+  const releases: (() => void)[] = [];
+  const held = Object.assign(Object.create(adapter) as IBrokerAdapter, {
+    stop: () => {
+      return new Promise<void>((resolve, reject) => {
+        releases.push(() => {
+          adapter.stop().then(resolve, reject);
+        });
+      });
+    },
+  });
+
+  return { held, releases };
+};
+
 // definition
 
 test.describe('createBrokerTransportClient', () => {
@@ -106,7 +217,7 @@ test.describe('createBrokerTransportClient', () => {
     });
 
     for (const server of servers) {
-      server.on('connection', (...[, , connectionHandle]) => {
+      server.on('connection', (...[, connectionHandle]) => {
         heard.push(`${server.address} ${connectionHandle}`);
       });
       await server.start();
@@ -231,6 +342,59 @@ test.describe('createBrokerTransportClient', () => {
     await turn();
 
     expect(told).toEqual([[true, 'A1 16']]);
+
+    await client.disconnect();
+    await ada.stop();
+  });
+
+  // spec 15.12.17
+  test('paused before its connect opened, holds what its server sent, and hands it in order once resumed', async () => {
+    const broker = createMemoryBroker();
+    const ada = createBrokerParticipant({ adapter: broker.adapter({ id: 'ada' }) });
+    const peer = await peerOf(broker);
+    const client = ada.transportClient();
+    const told: string[] = [];
+
+    client.on('message', ({ data }) => {
+      told.push(hexadecimalOf(new Uint8Array(data as Uint8Array)));
+    });
+
+    // * a pause outlasts its connection: the connection it opens is paused as it is made
+    client.pause();
+
+    const connecting = client.connect({ server: 'interop' });
+
+    await turn();
+
+    const opener = peer.heard[0]?.opener ?? new Uint8Array(8);
+
+    await peer.adapter.publish({ payload: acceptOf(opener), topic: INBOX });
+    await connecting;
+
+    for (const [sequence, byte] of [
+      [2, 0x01],
+      [3, 0x02],
+    ] as const) {
+      await peer.adapter.publish({
+        payload: writeParcel({
+          acceptor: HALF,
+          carried: Uint8Array.of(0xa1, byte),
+          kind: ParcelKind.DATA,
+          opener,
+          sequence,
+        }),
+        topic: INBOX,
+      });
+    }
+
+    await turn();
+
+    expect([told, client.isOpen()]).toEqual([[], true]);
+
+    client.resume();
+    await turn();
+
+    expect(told).toEqual(['A1 01', 'A1 02']);
 
     await client.disconnect();
     await ada.stop();
@@ -488,6 +652,57 @@ test.describe('createBrokerTransportClient', () => {
     await ada.stop();
   });
 
+  // spec 1.4
+  test('refuses a fixed delay out of bounds as reconnect is called, nothing changed', async () => {
+    const broker = createMemoryBroker();
+    const participant = createBrokerParticipant({ adapter: broker.adapter({ id: 'server' }) });
+    const server = participant.transportServer({ names: ['interop'] });
+    const ada = createBrokerParticipant({ adapter: broker.adapter({ id: 'ada' }) });
+    const client = ada.transportClient();
+    const aborted = AbortSignal.abort();
+    const told: string[] = [];
+    const closed: string[] = [];
+
+    await server.start();
+    server.on('close', (_wasClean, connectionHandle) => {
+      closed.push(connectionHandle);
+    });
+    await client.connect({ server: 'interop' });
+    client.on('reconnect', () => {
+      told.push('reconnect');
+    });
+    client.on('close', () => {
+      told.push('close');
+    });
+
+    const before = client.socket;
+
+    // * refused as it is called: after its state's guards, before its signal
+    for (const [delay, written] of [
+      [0.4, '0.4'],
+      [2 ** 31, '2147483648'],
+      [Infinity, 'Infinity'],
+    ] as const) {
+      await expect(client.reconnect({ delay, signal: aborted }), written).rejects.toThrow(
+        new ProgrammerError(
+          `a delay is 0 for at once, or a number of milliseconds from 1 to 2147483647, not ${written}`
+        )
+      );
+    }
+
+    await turn();
+
+    // nothing changed: open on its pair, no reconnect told and no close, at either end
+    expect([client.isOpen(), client.socket === before, told, closed]).toEqual([true, true, [], []]);
+
+    // its state's guards first: a client never connected says so
+    await expect(ada.transportClient().reconnect({ delay: Infinity })).rejects.toThrow(
+      new ProgrammerError('the transport client was never connected')
+    );
+
+    await Promise.all([participant.stop(), ada.stop()]);
+  });
+
   test('refuses a reconnection never connected, under way, while it connects, or given up already, and ends closed once its attempts run out', async () => {
     const broker = createMemoryBroker();
     const participant = createBrokerParticipant({ adapter: broker.adapter({ id: 'server' }) });
@@ -529,7 +744,7 @@ test.describe('createBrokerTransportClient', () => {
     await turn();
 
     const reconnecting = client
-      .reconnect({ delay: 100, maxAttempts: 2 })
+      .reconnect({ delay: 100, maximumAttempts: 2 })
       .catch((reason: unknown) => {
         return reason;
       });
@@ -544,5 +759,310 @@ test.describe('createBrokerTransportClient', () => {
     expect(client.isClosed()).toBe(true);
 
     await Promise.all([participant.stop(), ada.stop()]);
+  });
+
+  // spec 15.21
+  test('refuses a connect or a reconnect once its participant is disposed, its state kept, no reconnect told', async () => {
+    const broker = createMemoryBroker();
+    const { participant, server } = await servingOf(broker);
+    const ada = createBrokerParticipant({ adapter: broker.adapter({ id: 'ada' }) });
+    const never = ada.transportClient();
+    const connected = ada.transportClient();
+    const { options, tapped } = tapping();
+    let reconnects = 0;
+
+    connected.on('reconnect', () => {
+      reconnects += 1;
+    });
+    await connected.connect({ server: 'interop' });
+    await ada[Symbol.asyncDispose]();
+    expect(connected.isClosed(), 'closed as its participant is disposed').toBe(true);
+
+    // * a client never connected: its connect a misuse, its state and its target kept
+    const refused = never.connect({ server: 'interop' });
+
+    await expect(refused, 'a misuse').rejects.toBeInstanceOf(ProgrammerError);
+    await expect(refused, 'its words').rejects.toThrow('the participant ada is disposed');
+    expect(never.isUninitialized(), 'its state kept').toBe(true);
+    await expect(never.reconnect(), 'no target kept').rejects.toThrow(
+      'the transport client was never connected'
+    );
+
+    // * a client its participant's dispose closed: its reconnect a misuse, no reconnect told
+    const reconnecting = connected.reconnect(options);
+
+    await expect(reconnecting, 'a misuse').rejects.toBeInstanceOf(ProgrammerError);
+    await expect(reconnecting, 'its words').rejects.toThrow('the participant ada is disposed');
+    await turn();
+    expect(
+      [connected.isClosed(), reconnects, tapped],
+      'closed still, no reconnect told, no wait told'
+    ).toEqual([true, 0, []]);
+
+    await server.stop();
+    await participant.stop();
+  });
+
+  // spec 15.15, 15.21
+  test('ends its reconnection as its participant stops, in a wait or in an attempt, no wait told after it', async () => {
+    // in a wait: on the test's clock, its first attempt refused, nothing serving the name
+    const clock = createTestClock();
+    const broker = createMemoryBroker({ clock });
+    const serving = await servingOf(broker);
+    const ada = createBrokerParticipant({ adapter: broker.adapter({ id: 'ada' }), clock });
+    const client = ada.transportClient();
+
+    await client.connect({ server: 'interop' });
+    await serving.server.stop();
+    await until(() => {
+      return client.isClosed();
+    }, 'closed as its server stops');
+
+    const waiting = tapping();
+    const reconnecting = client.reconnect(waiting.options).catch((reason: unknown) => {
+      return reason;
+    });
+
+    await until(() => {
+      return waiting.tapped.length === 1;
+    }, 'its first wait told');
+
+    const before = clock.now;
+
+    await ada.stop();
+
+    // * ended at once, cancelled, its wait not waited out
+    const ended = await reconnecting;
+
+    expect(ended, 'cancelled').toBeInstanceOf(CancelError);
+    expect(ended, 'the stop its cause').toMatchObject({
+      cause: { message: 'the participant ada stopped' },
+      message: 'the reconnection was cancelled',
+    });
+    expect(clock.now, 'the clock not moved').toBe(before);
+    expect(waiting.tapped, 'no wait told after its stop').toEqual([60_000]);
+    expect([client.isClosed(), ada.isLinked], 'closed, not linked').toEqual([true, false]);
+    await serving.participant.stop();
+
+    // in an attempt: its link's start held as it connects again, its participant's own
+    // reconnection off
+    const other = createMemoryBroker();
+    const otherServing = await servingOf(other);
+    const bob = other.adapter({ id: 'bob' });
+    const holding = heldOf(bob);
+    const participant = createBrokerParticipant({ adapter: holding.held, reconnects: false });
+    const attempting = participant.transportClient();
+
+    participant.on('error', noop);
+    await attempting.connect({ server: 'interop' });
+    bob.lose();
+    await until(() => {
+      return attempting.isClosed();
+    }, 'closed as its link goes down');
+
+    holding.holding.isHolding = true;
+
+    const attempt = tapping();
+    const held = attempting.reconnect(attempt.options).catch((reason: unknown) => {
+      return reason;
+    });
+
+    await until(() => {
+      return holding.releases.length === 1;
+    }, 'the link of its attempt held');
+
+    const stopping = participant.stop();
+
+    // * its attempt fails, and its reconnection ends, cancelled, no wait told after its stop
+    const failed = await held;
+
+    expect(failed, 'cancelled').toBeInstanceOf(CancelError);
+    expect(failed, 'the stop its cause').toMatchObject({
+      cause: { message: 'the participant bob stopped' },
+      message: 'the reconnection was cancelled',
+    });
+    holding.releases.shift()?.();
+    await stopping;
+    await turn();
+    expect(attempt.tapped, 'no wait told').toEqual([]);
+    expect(
+      [attempting.isClosed(), participant.isLinked, bob.isLinked],
+      'closed, neither linked'
+    ).toEqual([true, false, false]);
+    await otherServing.server.stop();
+    await otherServing.participant.stop();
+  });
+
+  // spec 15.21
+  test('retries its connect when its adapter refuses its link’s start, as its participant’s own reconnection does', async () => {
+    const broker = createMemoryBroker();
+    const { participant, server } = await servingOf(broker);
+    const fli = createBrokerParticipant({
+      adapter: refusingOf(broker.adapter({ id: 'fli' }), 2),
+    });
+    const client = fli.transportClient();
+
+    // * its connect fails as a connect, the adapter's misuse its cause
+    const failed = await client.connect({ server: 'interop' }).catch((reason: unknown) => {
+      return reason;
+    });
+
+    expect(failed, 'the failure of a connect').toBeInstanceOf(ConnectError);
+    expect((failed as Error).cause, 'its cause, a misuse').toBeInstanceOf(ProgrammerError);
+    expect(failed).toMatchObject({ cause: { message: 'the link of fli is up already' } });
+    expect(client.isClosed(), 'closed').toBe(true);
+
+    // * then its reconnection tries again, and connects after one wait
+    const tapped: number[] = [];
+
+    await client.reconnect({
+      delay: 0,
+      tap: (delay) => {
+        tapped.push(delay);
+      },
+    });
+    expect([tapped, client.isOpen()], 'open after one wait').toEqual([[0], true]);
+
+    await client.disconnect();
+    await fli.stop();
+    await server.stop();
+    await participant.stop();
+  });
+
+  // spec 15.21
+  test('fails a connect awaiting its participant’s link at once as the participant stops, at its start or as it links anew, stopped as it connected (spec 15.21)', async () => {
+    // at its start: its link's first start held, on the test's clock, its connect's time never
+    // passed
+    const clock = createTestClock();
+    const broker = createMemoryBroker({ clock });
+    const holding = heldOf(broker.adapter({ id: 'ada' }));
+    const participant = createBrokerParticipant({ adapter: holding.held, clock });
+    const client = participant.transportClient();
+
+    holding.holding.isHolding = true;
+
+    const connecting = client.connect({ server: 'interop' }).catch((reason: unknown) => {
+      return reason;
+    });
+
+    await until(() => {
+      return holding.releases.length === 1;
+    }, "its link's start held");
+
+    const before = clock.now;
+    const stopping = participant.stop();
+
+    // * it fails at once, its participant's start held still
+    const failed = await connecting;
+
+    expect(failed, "a connect's failure").toBeInstanceOf(ConnectError);
+    expect(failed, 'its words').toMatchObject({
+      message: 'the participant ada stopped as it connected',
+    });
+    expect(client.isClosed(), 'closed').toBe(true);
+    holding.releases.shift()?.();
+    await stopping;
+
+    // as it links anew: its link lost, each attempt of its own reconnection refused, and a wait of
+    // 60 s never passed on the test's clock
+    const bob = broker.adapter({ id: 'bob' });
+    const waits = tapping();
+    const relinking = createBrokerParticipant({
+      adapter: refusingAfterOf(bob, 1),
+      clock,
+      reconnect: waits.options,
+    });
+    const other = relinking.transportClient();
+
+    relinking.on('error', noop);
+    await relinking.start();
+    bob.lose();
+    await until(() => {
+      return waits.tapped.length === 1;
+    }, "its reconnection's wait told");
+
+    let isSettled = false;
+    const awaiting = other
+      .connect({ server: 'interop' })
+      .catch((reason: unknown) => {
+        return reason;
+      })
+      .finally(() => {
+        isSettled = true;
+      });
+
+    await turn();
+    expect(isSettled, 'its connect awaits its link').toBe(false);
+    await relinking.stop();
+
+    // * it fails at once, stopped as it connected, neither its time nor the wait passed
+    expect(await awaiting, 'its words').toMatchObject({
+      message: 'the participant bob stopped as it connected',
+      name: 'ConnectError',
+    });
+    expect(clock.now, 'the clock not moved').toBe(before);
+    expect([other.isClosed(), relinking.isLinked], 'closed, not linked').toEqual([true, false]);
+    await participant[Symbol.asyncDispose]();
+    await relinking[Symbol.asyncDispose]();
+  });
+
+  // spec 15.21
+  test('ends a reconnection called while its participant stops, and links its participant anew by one called once that stop settled (spec 15.21)', async () => {
+    const broker = createMemoryBroker();
+    const serving = await servingOf(broker);
+    const holding = stopsHeldOf(broker.adapter({ id: 'ada' }));
+    const participant = createBrokerParticipant({ adapter: holding.held });
+    const client = participant.transportClient();
+    let reconnects = 0;
+
+    client.on('reconnect', () => {
+      reconnects += 1;
+    });
+    await client.connect({ server: 'interop' });
+
+    const former = participant.incarnation;
+
+    // * called while its participant's stop is under way: it ends at once, cancelled, the stop its
+    // cause, no wait told
+    const stopping = participant.stop();
+
+    await until(() => {
+      return holding.releases.length === 1;
+    }, "its adapter's stop held");
+    expect(client.isClosed(), 'closed as its participant stops').toBe(true);
+
+    const { options, tapped } = tapping();
+    const ended = await client.reconnect(options).catch((reason: unknown) => {
+      return reason;
+    });
+
+    expect(ended, 'cancelled').toBeInstanceOf(CancelError);
+    expect(ended, 'cancelled by its stop').toMatchObject({
+      cause: { message: 'the participant ada stopped' },
+      message: 'the reconnection was cancelled',
+    });
+    expect([tapped, client.isClosed()], 'no wait told, closed').toEqual([[], true]);
+    holding.releases.shift()?.();
+    await stopping;
+
+    // * called once that stop settled: it links its participant anew, another incarnation
+    await client.reconnect(options);
+    expect(client.isOpen(), 'open').toBe(true);
+    expect(participant.isLinked, 'linked anew').toBe(true);
+    expect(
+      hexadecimalOf(participant.incarnation ?? new Uint8Array()),
+      'another incarnation'
+    ).not.toBe(hexadecimalOf(former ?? new Uint8Array()));
+    expect([tapped, reconnects], 'no wait told, each reconnect told').toEqual([[], 2]);
+
+    const disposing = participant[Symbol.asyncDispose]();
+
+    await until(() => {
+      return holding.releases.length === 1;
+    }, "its adapter's stop held");
+    holding.releases.shift()?.();
+    await disposing;
+    await serving.server.stop();
+    await serving.participant[Symbol.asyncDispose]();
   });
 });

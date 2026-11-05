@@ -29,16 +29,20 @@ transcoding.md names each .proto of spec/, and no other; the durations name each
 name, give every place an outcome for every input in their order, cite at each place only what it
 observes, and name, where they cross a row of docs/support.md, a row that names the file and them;
 each implementation plays them in one harness, which names every place, through one helper, which
-alone reads the file; what a side does not play yet, AHEAD, each part a row of docs/support.md's
+alone reads the file; tools/durations.tsv holds a place or a way ahead for a side exactly where AHEAD
+does, under its row, and the Rust harness's ahead_of AHEAD's ways of the places it plays; what a side does not play yet, AHEAD, each part a row of docs/support.md's
 differences, open, which its steps and stages delete as they land, never a part the side plays, each
 row of those differences holding as many cells as their header; and no file git lists outside spec/, the tests and the interop service names a
 published test key; each blueprint of spec/ is in its form, RFC 8785's member order and string escapes,
 integers alone, laid out two spaces with a final newline; and interop-service.json states the
 interop blueprint's procedures, by name and in their order, what each admits where its admission is not
 none and what it notifies where it notifies, and each code it names a failure of the blueprint's
-catalogue that its procedure lists; and every count the tables of files of docs/support.md and the
+catalogue that its procedure lists; a conversation's listener calls a command of that blueprint's;
+and every count the tables of files of docs/support.md and the
 README state is what the files it counts hold, protobuf's conformance suite's tests the floor of its
-runner, and no other number stands in a row of either, a unit cited and a code span aside.
+runner, and no other number stands in a row of either, a unit cited and a code span aside; and the spec
+and its companions name no language, no member in two sides' forms side by side, one name under
+tools/check-names.mjs's case rules spelled apart, and no side's own type of tools/names.tsv.
 Exit 1 on any of them.
 
   python spec/check.py --write-units [unit…]
@@ -529,6 +533,14 @@ rejection = documents['interop-service']['verifiers']['elsewhere']['rejection']
 if f'its error "{rejection}"' not in elsewhere.get('settles', ''):
     problems.append(f'interop-service.json: verifiers.elsewhere rejects with {rejection!r}, which is not the error '
                     'credentials.elsewhere.settles states')
+
+# the command a conversation's listener calls is a procedure of the interop blueprint's, of kind command
+commands = {entry['procedureName'] for entry in api if entry['procedureKind'] == 'command'}
+
+for conversation in documents['conversations']['conversations']:
+    if 'listener' in conversation and conversation['listener']['command'] not in commands:
+        problems.append(f'conversations: {conversation["name"]!r} has its listener call '
+                        f'{conversation["listener"]["command"]!r}, which is no command of interop-blueprint.json\'s')
 
 vectors = documents['vectors']
 groups = [group for group in vectors if group not in META]
@@ -1409,6 +1421,114 @@ for entry in named['exits']:
         for line in step.get('counted', ()):
             sample_of(line, f'exits: {entry["name"]!r}, step {number}')
 
+# ── The spec and its companions name no language ────────────────────────────────────────────────
+
+# a normative text states the rule, not each implementation's form (RFC 2119 §6, WHATWG Infra §2,
+# 0004): the spec and its companions name a member once, in its platform's form or case, and no
+# language, each side's own type left to docs/support.md
+SIDE_NAME = re.compile(r'(?<![\w#])(?:TypeScript|C#|Rust)(?![\w#])')
+
+# two backticked names side by side, `a`, `A`, `a` or `A`, `a` and `A`, a call's arguments aside
+NAME = r'`([A-Za-z_][A-Za-z0-9_:<>]*)(?:\([^`]*\))?`'
+PAIR = re.compile(rf'{NAME}(?:,|,? or|,? and) (?={NAME})')
+
+# a cell of tools/names.tsv, read as tools/check-names.mjs reads it: names split at ', ', each
+# `name [kind]`
+NAMES_CELL = re.compile(r'^(\S+) \[([a-z ]+)\]$')
+
+
+def name_key(name):
+    """A name's key under tools/check-names.mjs's case rules: a Rust path by its last segment, a C#
+    arity and an interface's I dropped, its underscores and its case, and a trailing Error,
+    Exception or Async, one member's three forms keying alike."""
+    name = re.sub(r'<,*>$', '', name.split('::')[-1])
+    name = re.sub(r'^I(?=[A-Z])', '', name).replace('_', '').lower()
+    return re.sub(r'(?<=.)(?:error|exception|async)$', '', name)
+
+
+def side_types():
+    """Each name tools/names.tsv holds in a side's cell of a row whose names are not one under the
+    case rules, its concept and its class beside it: a side's own form, or one rendered from
+    another's."""
+    types = {}
+
+    with open(os.path.join(ROOT, 'tools', 'names.tsv'), encoding='utf-8') as file:
+        for row in file.read().splitlines():
+            if row.startswith('#') or not row.strip():
+                continue
+
+            concept, *cells, row_class = row.split('\t')
+
+            if row_class == 'same':
+                continue
+
+            for cell in cells:
+                for part in cell.split(', ') if cell != '-' else ():
+                    found = NAMES_CELL.match(part)
+                    types[found.group(1) if found else part] = f'{concept}, {row_class.split(" (")[0]}'
+
+    return types
+
+
+def languages_named(text, types):
+    """Where a document names a language: each paragraph read with its white space folded, so a name
+    across a line break is read whole, and each finding at the line its name starts on: a side's
+    name, a member in two sides' forms side by side, or a side's type of tools/names.tsv."""
+    findings = []
+    lines = text.splitlines()
+    index = 0
+
+    while index < len(lines):
+        if not lines[index].strip():
+            index += 1
+            continue
+
+        starts, words = [], []
+
+        while index < len(lines) and lines[index].strip():
+            starts.append((sum(len(word) + 1 for word in words), index + 1))
+            words.append(' '.join(lines[index].split()))
+            index += 1
+
+        folded = ' '.join(words)
+
+        def line_at(offset):
+            return max(line for start, line in starts if start <= offset)
+
+        for found in SIDE_NAME.finditer(folded):
+            findings.append((line_at(found.start()), f'names {found.group(0)}, a language'))
+
+        for found in PAIR.finditer(folded):
+            first, second = found.group(1), found.group(2)
+
+            # a side's form moves the first letter's case, an underscore, an interface's I or an
+            # error's suffix: two names apart only in a later letter's case, `getHTTPStatus` and
+            # `getHttpStatus`, are one form, as spec.md section 16.6 sets them side by side
+            inner = first[0] == second[0] and first.lower() == second.lower()
+
+            if not inner and name_key(first) == name_key(second):
+                findings.append((line_at(found.start()), f'names `{first}` and `{second}`, one member in two '
+                                 'sides\' forms'))
+
+        for found in re.finditer(r'`([^`]+)`', folded):
+            name = re.sub(r'\(.*\)$', '', found.group(1))
+
+            if name in types:
+                findings.append((line_at(found.start()), f'names `{name}`, a side\'s own form in tools/names.tsv '
+                                 f'({types[name]})'))
+
+    return sorted(set(findings))
+
+
+named_types = side_types()
+
+for _, document, _ in LEDGERS.values():
+    with open(os.path.join(ROOT, document), encoding='utf-8') as file:
+        for line, finding in languages_named(file.read(), named_types):
+            problems.append(f'{document}:{line}: {finding}: the spec and its companions state a rule once, a '
+                            'member in its platform\'s form or case, and name no language; each side\'s type is '
+                            'docs/support.md\'s (0004)')
+
 # ── The published test keys stay in spec/ and the tests ─────────────────────────────────────────
 
 
@@ -1647,6 +1767,89 @@ for side, (folder, language, tests, group_pattern, file_pattern) in SIDES.items(
                                 'it out of AHEAD')
             elif place['id'] not in places_ahead(side) and not named_there:
                 problems.append(f'{side}: its harness, {harness}, plays no {place["id"]}')
+
+# ── The durations' members, ahead ───────────────────────────────────────────────────────────────
+
+# tools/durations.tsv names the member of each side's surface that takes each place by each way, or the
+# row that holds it ahead, which AHEAD owns: a cell is `- ahead: <title>` exactly where AHEAD holds the
+# place or the way for its side, under that title (0014). tools/check-durations.mjs holds the rest of
+# the table; the Rust harness's `ahead_of`, the ways ahead of the places it plays, is AHEAD's own
+MEMBERS = os.path.join(ROOT, 'tools', 'durations.tsv')
+MEMBER_COLUMNS = {'TypeScript': 2, 'C#': 3, 'Rust': 4}
+
+
+def ahead_title(side, place_id, way_id):
+    """The row of AHEAD that holds a place by a way ahead for a side: the row that holds the way, or else
+    the row that holds its place's owner; None where none does."""
+    rows = AHEAD.get(side, {})
+
+    for title, parts in rows.items():
+        if (place_id, way_id) in parts.get('ways', ()):
+            return title
+
+    for title, parts in rows.items():
+        if place_id.split('.')[0] in parts.get('places', ()):
+            return title
+
+    return None
+
+
+if not os.path.isfile(MEMBERS):
+    problems.append('tools/durations.tsv, the durations\' members, is missing')
+else:
+    with open(MEMBERS, encoding='utf-8') as file:
+        member_rows = [line.split('\t') for line in file.read().splitlines()
+                       if line and not line.startswith('#')]
+
+    held = {(fields[0], fields[1]): fields for fields in member_rows if len(fields) == 5}
+
+    for side, column in MEMBER_COLUMNS.items():
+        for place_id, way_id in sorted(place_ways):
+            fields = held.get((place_id, way_id))
+
+            if fields is None:
+                continue
+
+            cell = fields[column].strip()
+            written = cell[len('- ahead: '):].strip() if cell.startswith('- ahead: ') else None
+            title = ahead_title(side, place_id, way_id)
+
+            if written is not None and written != title:
+                problems.append(f'{side}: tools/durations.tsv holds {place_id} by {way_id} ahead under {written}, '
+                                f'which AHEAD does not' + (f': AHEAD holds it under {title}' if title else ''))
+            elif written is None and title is not None:
+                problems.append(f'{side}: AHEAD holds {place_id} by {way_id} ahead under {title}, which '
+                                'tools/durations.tsv does not')
+
+        for (place_id, way_id) in sorted(set(held) - place_ways):
+            if place_id != 'no place' and held[(place_id, way_id)][column].strip().startswith('- ahead: '):
+                problems.append(f'{side}: tools/durations.tsv holds {place_id} by {way_id} ahead, which '
+                                'spec/durations.json does not hold')
+
+# the Rust harness's ways ahead of the places it plays, by their quoted ids, are AHEAD's
+rust_harness = os.path.join(ROOT, DURATIONS_HARNESSES['Rust'][0])
+
+if os.path.isfile(rust_harness):
+    with open(rust_harness, encoding='utf-8') as file:
+        found = re.search(r'\nfn ahead_of\(.*?\n\}', file.read(), re.S)
+
+    if found is None:
+        problems.append(f'Rust: its harness, {DURATIONS_HARNESSES["Rust"][0]}, has no ahead_of')
+    else:
+        harness_ahead = {(place_id, way_id)
+                         for arm in re.finditer(r'((?:"[^"]+"\s*\|?\s*)+)=>\s*&\[([^\]]*)\]', found.group(0))
+                         for place_id in re.findall(r'"([^"]+)"', arm.group(1))
+                         for way_id in re.findall(r'"([^"]+)"', arm.group(2))}
+        ahead_ways = {(place_id, way_id) for place_id, way_id in ahead('Rust', 'ways')
+                      if place_id not in places_ahead('Rust')}
+
+        for place_id, way_id in sorted(harness_ahead - ahead_ways):
+            problems.append(f'Rust: its harness\'s ahead_of holds {place_id} by {way_id} ahead, which AHEAD does '
+                            'not')
+
+        for place_id, way_id in sorted(ahead_ways - harness_ahead):
+            problems.append(f'Rust: AHEAD holds {place_id} by {way_id} ahead, which its harness\'s ahead_of does '
+                            'not')
 
 # ── The counts the tables of files state ────────────────────────────────────────────────────────
 

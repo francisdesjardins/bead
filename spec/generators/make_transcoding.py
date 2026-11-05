@@ -3524,9 +3524,12 @@ FAILURES = [
              'parameter': 'revision'}),
     failure("a text the gateway's reading refuses, placed nowhere", ['7.4', '7.5', '7.5.1'],
             {'code': 50, 'arose': 'gateway', 'detail': 'not JSON'}),
+    # a server answers PAYLOAD_UNDECODABLE with its codec's reason as its detail (spec 17.2), which the
+    # problem carries as any failure's
     failure("a json request its server's codec refuses", ['7.5', '7.5.1'],
-            {'code': 50, 'arose': 'server', 'encoding': 'json'}),
-    failure("a proto request its server does not read", ['7.5', '7.5.4'], {'code': 50, 'arose': 'server', 'encoding': 'proto'}),
+            {'code': 50, 'arose': 'server', 'encoding': 'json', 'detail': 'not JSON'}),
+    failure("a proto request its server does not read", ['7.5', '7.5.4'],
+            {'code': 50, 'arose': 'server', 'encoding': 'proto', 'detail': 'not its message'}),
     failure("a result the gateway's client does not read", ['7.5', '7.5.2'], {'code': 50, 'arose': 'answer'}),
     failure('a transfer that stalled', [], {'code': 51, 'arose': 'client'}),
     failure("a payload its server's rules refuse, a pointer and a parameter", INVALID,
@@ -4152,7 +4155,10 @@ if __name__ == '__main__':
         file.write(required_proto_file())
 
     with open(ROOT + 'transcoding.json', 'w', encoding='utf-8', newline='\n') as file:
-        json.dump(DOCUMENT_JSON, file, ensure_ascii=False, indent=2)
+        # U+2028 and U+2029 escaped, as they only ever stand in a string: the same values, and no editor
+        # reads them as line ends
+        text = json.dumps(DOCUMENT_JSON, ensure_ascii=False, indent=2)
+        file.write(text.replace('\u2028', '\\u2028').replace('\u2029', '\\u2029'))
         file.write('\n')
 
     print(', '.join(f'{len(DOCUMENT_JSON[group])} {group}' for group in

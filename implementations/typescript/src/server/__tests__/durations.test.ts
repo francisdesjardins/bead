@@ -7,13 +7,19 @@
 // dependencies
 
 import { EventEmitter } from 'node:events';
+import { noop } from '../../transport/shared/noop';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { isDeepStrictEqual } from 'node:util';
 import { expect, test } from '@playwright/test';
 import { createRelay } from '../../router/server/relay';
 import { createSessionManager } from '../../router/server/session-manager';
 import type { RelayTarget } from '../../router/server/types';
-import { EnvelopeKind, LIMIT_DEFAULTS, SERVER_FAILURES } from '../../router/shared/constants';
+import {
+  CLIENT_FAILURES,
+  EnvelopeKind,
+  LIMIT_DEFAULTS,
+  SERVER_FAILURES,
+} from '../../router/shared/constants';
 import { PAYLOAD_CODECS } from '../../router/shared/payloads';
 import { createRouterCore } from '../../router/shared/router-core';
 import { createServiceManager } from '../../router/shared/service-manager';
@@ -27,16 +33,20 @@ import type {
 } from '../../router/shared/types';
 import { envelopeOf } from '../../router/shared/__tests__/fixtures';
 import { createHTTPTransportClient } from '../../transport/client/http-transport-client';
-import { createMemoryTransportClient } from '../../transport/client/memory-transport-client';
+import {
+  createMemoryTransportClient,
+  type IMemoryTransportServerLike,
+} from '../../transport/client/memory-transport-client';
 import {
   createTransportClient,
   dispose,
+  getReadyState,
   setReadyStateClosed,
   setReadyStateOpen,
   type ITransportClientAddressOptions,
 } from '../../transport/client/transport-client';
 import { createWorkerTransportClient } from '../../transport/client/worker-transport-client';
-import { createWSTransportClient } from '../../transport/client/ws-transport-client';
+import { createWebSocketTransportClient } from '../../transport/client/websocket-transport-client';
 import {
   ParcelFlag,
   ParcelKind,
@@ -57,12 +67,17 @@ import {
   BEAD_MEDIA_TYPE,
   CONNECTION_TOKEN_HEADER,
   createHTTPTransportServer,
+  httpPolicyOf,
   type IHTTPTransportServerOptions,
   LISTEN_HEADER,
+  REFUSAL_HEADER,
   WAIT_HEADER,
 } from '../../transport/server/http-transport-server';
-import type { TransportServerConnectionHandle } from '../../transport/server/types';
-import { createWSTransportServer } from '../../transport/server/ws-transport-server';
+import type {
+  ITransportServerConnection,
+  TransportServerConnectionHandle,
+} from '../../transport/server/types';
+import { createWebSocketTransportServer } from '../../transport/server/websocket-transport-server';
 import { createFakeHTTPServer } from '../../transport/server/__tests__/fake-http-server';
 import { createFakeWebSocketServer } from '../../transport/server/__tests__/fake-websocket-server';
 import { LONGEST_TIMER } from '../../transport/shared/clock';
@@ -70,6 +85,7 @@ import { createEmitter } from '../../transport/shared/emitter';
 import {
   CancelError,
   ConnectError,
+  GenericError,
   ProgrammerError,
   TimeoutError,
 } from '../../transport/shared/errors';
@@ -184,6 +200,15 @@ const REQUEST = envelopeOf({
   payload: new Uint8Array(0),
 });
 
+/** A cancel's envelope, as an HTTP client reads it: no request, so sent again when refused busy. */
+const CANCEL = Uint8Array.of(0xa1, EnvelopeKind.CANCEL, 0, 0, 0, 0, 0, 1);
+
+/** A refusal busy whose `Retry-After` asks longer than a timer holds, in whole seconds. */
+const BUSY = Object.freeze({
+  headers: { [REFUSAL_HEADER]: 'busy', 'retry-after': String(Math.ceil(LONGEST_TIMER / 1_000)) },
+  status: 429,
+});
+
 // helpers
 
 // a duration given as the option `name`, or none
@@ -289,12 +314,15 @@ const endedAt = async (clock: TestClock, isEnded: () => boolean): Promise<number
   return due;
 };
 
-/** A router that answers each request with its payload, and keeps the options each was handed. */
+/**
+ * A client's router, whose manager makes requests, that answers each request with its payload, and
+ * keeps the options each was handed.
+ */
 const createFakeRouter = () => {
   const handed: IResolvedRequestOptions[] = [];
   const router: IRouterLike = {
     clock: createTestClock(),
-    failures: SERVER_FAILURES,
+    failures: CLIENT_FAILURES,
     limits: LIMIT_DEFAULTS,
 
     answeredOf: () => {
@@ -400,6 +428,8 @@ const createPort = () => {
       return false;
     },
     report: () => {},
+    pause: noop,
+    resume: noop,
     send: ({ data }) => {
       sent.push(data);
 
@@ -709,7 +739,7 @@ const resetOf = (name: SessionTimeout): Way => {
 const createScriptedTransport = () => {
   const emitter = createEmitter<{
     close: [wasClean: boolean, connectionHandle: Handle];
-    connection: [socket: unknown, request: unknown, connectionHandle: Handle];
+    connection: [connection: ITransportServerConnection, connectionHandle: Handle];
     listen: [isHeld: boolean, connectionHandle: Handle];
     message: [message: ITransportMessage, connectionHandle: Handle];
   }>();
@@ -722,6 +752,8 @@ const createScriptedTransport = () => {
 
       return Promise.resolve(true);
     },
+    pause: noop,
+    resume: noop,
     send: () => {
       return Promise.resolve();
     },
@@ -759,7 +791,7 @@ const serverOfOptions: Way = async (given) => {
 
   await using _server = building.built;
 
-  emitter.emit('connection', {}, {}, first);
+  emitter.emit('connection', { request: {}, socket: {} }, first);
 
   return {
     held: await endedAt(clock, () => {
@@ -835,7 +867,7 @@ const heldByHTTPServer = async (
 };
 
 // an exchange handed on, waiting its answer, its connection's rest without end
-const exchangeOfOptions: Way = (given) => {
+const exchangeOfServer: Way = (given) => {
   return heldByHTTPServer(
     {
       drawn: (fake) => {
@@ -890,8 +922,9 @@ const maximumWaitOfOptions: Way = (given) => {
   );
 };
 
-// a POST declaring a body that has not come: its body's pace, armed at its head
-const bodyGraceOfOptions: Way = (given) => {
+// an HTTP server of `options` and a POST declaring a body that has not come: its body's pace,
+// armed at its head
+const bodyGraceOfServer = (options: Partial<IHTTPTransportServerOptions>): Promise<IReport> => {
   return heldByHTTPServer(
     {
       drawn: (fake) => {
@@ -907,12 +940,13 @@ const bodyGraceOfOptions: Way = (given) => {
         });
       },
     },
-    {
-      exchangeTimeout: Infinity,
-      inactivityTimeout: Infinity,
-      ...optionOf('bodyGracePeriod', given),
-    }
+    { exchangeTimeout: Infinity, inactivityTimeout: Infinity, ...options }
   );
+};
+
+// a POST declaring a body that has not come: its body's pace, armed at its head
+const bodyGraceOfOptions: Way = (given) => {
+  return bodyGraceOfServer(optionOf('bodyGracePeriod', given));
 };
 
 // an HTTP server's option `name`, on the real clock, as it is built
@@ -935,6 +969,40 @@ const ofHTTPServer = (name: 'headersTimeout' | 'sendGracePeriod'): Way => {
         : {}
     );
   };
+};
+
+// an HTTP policy's member `name`, as it is made
+const ofHTTPPolicy = (name: 'headersTimeout' | 'sendGracePeriod'): Way => {
+  return (given) => {
+    const making = attempt(() => {
+      return httpPolicyOf(optionOf(name, given));
+    });
+
+    return Promise.resolve('refusal' in making ? { moved: [], refusal: making.refusal } : {});
+  };
+};
+
+// a policy's body grace, as it is made: what it keeps, which an HTTP server built on it arms at a
+// POST's head as it is
+const bodyGraceOfPolicy: Way = async (given) => {
+  const making = attempt(() => {
+    return httpPolicyOf(optionOf('bodyGracePeriod', given));
+  });
+
+  if ('refusal' in making) {
+    return { moved: [], refusal: making.refusal };
+  }
+
+  const policy = making.built;
+  const armed = await bodyGraceOfServer({ policy });
+
+  // ! the policy keeps the held value: a server built on it holds it again, which would hide one
+  // kept as given
+  expect(armed, 'what the policy keeps, its server arms').toEqual({
+    held: policy.bodyGracePeriod,
+  });
+
+  return { held: policy.bodyGracePeriod };
 };
 
 /**
@@ -989,6 +1057,85 @@ const inactivityOfClient: Way = async (given) => {
   return { held };
 };
 
+/**
+ * An HTTP client's exchange timeout, its listens off so its pause is its one timer: a non-request
+ * refused busy, its `Retry-After` past the ceiling, pauses no longer than what is left of its time;
+ * at that due, a second busy loses its exchange where the timeout is held, and pauses again where
+ * it is never.
+ */
+const exchangeOfClient: Way = async (given) => {
+  const clock = createTestClock();
+  const fake = createFakeFetch();
+  const building = attempt(() => {
+    return createHTTPTransportClient({
+      clock,
+      fetch: fake.fetch,
+      isListening: false,
+      ...optionOf('exchangeTimeout', given),
+    });
+  });
+
+  if ('refusal' in building) {
+    return { moved: movedOf({ 'a fetch': fake.calls.length > 0 }), refusal: building.refusal };
+  }
+
+  const client = building.built;
+  const connecting = client.connect({ host, port: 8_080 });
+
+  fake.calls[0]?.answer({ headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22) }, status: 201 });
+  await connecting;
+
+  const sending = watched(client.send({ data: CANCEL }));
+
+  await turnsUntil(() => {
+    return fake.calls.length > 1;
+  });
+  fake.calls[1]?.answer(BUSY);
+  await turnsUntil(() => {
+    return delaysOn(clock).length > 0;
+  });
+
+  // ! a pause is armed whatever the timeout: none armed is never read as never here
+  const [due = 0] = delaysOn(clock);
+
+  expect(delaysOn(clock), 'one pause').toHaveLength(1);
+
+  await clock.tickAsync(due - 1);
+  await sleep(0);
+
+  expect(fake.calls, 'sent again before its pause').toHaveLength(2);
+
+  await clock.tickAsync(1);
+  await turnsUntil(() => {
+    return fake.calls.length > 2;
+  });
+  fake.calls[2]?.answer(BUSY);
+  await turnsUntil(() => {
+    return sending.isSettled() || delaysOn(clock).length > 0;
+  });
+
+  // held: refused, its exchange lost and its connection with it, and no pause again
+  if (sending.isSettled()) {
+    await turnsUntil(() => {
+      return !client.isOpen();
+    });
+
+    expect([await sending.settled, delaysOn(clock)]).toEqual([
+      new GenericError('the server refused the exchange: 429 busy'),
+      [],
+    ]);
+
+    return { held: due };
+  }
+
+  // never: each pause as long as a timer holds, and another after it
+  expect([due, delaysOn(clock)], 'paused again').toEqual([LONGEST_TIMER, [LONGEST_TIMER]]);
+
+  await client.disconnect({ isQuick: true });
+
+  return { held: Infinity };
+};
+
 // the wait its listen asks
 const waitOfOptions: Way = async (given) => {
   const listening = await listeningOf(optionOf('wait', given));
@@ -1041,11 +1188,11 @@ const pauseOfOptions: Way = async (given) => {
 };
 
 // a WebSocket client's option `name`, as it is built
-const ofWSClient = (name: 'closeTimeout' | 'heartbeat'): Way => {
+const ofWebSocketClient = (name: 'closeTimeout' | 'heartbeat'): Way => {
   return (given) => {
     const { FakeWebSocket, sockets } = createFakeWebSocket();
     const building = attempt(() => {
-      return createWSTransportClient({ WebSocket: FakeWebSocket, ...optionOf(name, given) });
+      return createWebSocketTransportClient({ WebSocket: FakeWebSocket, ...optionOf(name, given) });
     });
 
     return Promise.resolve(
@@ -1057,13 +1204,13 @@ const ofWSClient = (name: 'closeTimeout' | 'heartbeat'): Way => {
 };
 
 // a WebSocket server's option `name`, as it is built
-const ofWSServer = (
+const ofWebSocketServer = (
   name: 'closeTimeout' | 'headersTimeout' | 'heartbeat' | 'sendGracePeriod'
 ): Way => {
   return (given) => {
     const fake = createFakeWebSocketServer();
     const building = attempt(() => {
-      return createWSTransportServer({
+      return createWebSocketTransportServer({
         WebSocketServer: fake.FakeWebSocketServer,
         ...optionOf(name, given),
       });
@@ -1166,7 +1313,7 @@ const connectOfHTTP: Way = (given) => {
 const connectOfWebSocket: Way = (given) => {
   const clock = createTestClock();
   const { FakeWebSocket, sockets } = createFakeWebSocket();
-  const client = createWSTransportClient({ clock, WebSocket: FakeWebSocket });
+  const client = createWebSocketTransportClient({ clock, WebSocket: FakeWebSocket });
 
   return connectTimed(
     { client, clock },
@@ -1186,22 +1333,20 @@ const connectOfWebSocket: Way = (given) => {
 const connectOfMemory: Way = (given) => {
   const clock = createTestClock();
   const accepted: unknown[] = [];
-  const client = createMemoryTransportClient({
-    clock,
-    server: {
-      accept: (peer) => {
-        accepted.push(peer);
+  const client = createMemoryTransportClient({ clock });
+  const server: IMemoryTransportServerLike = {
+    accept: (peer) => {
+      accepted.push(peer);
 
-        return new Promise(() => {});
-      },
+      return new Promise(() => {});
     },
-  });
+  };
 
   return connectTimed(
     { client, clock },
     {
       connect: (options) => {
-        return client.connect(options);
+        return client.connect({ server, ...options });
       },
       given,
       hasMoved: () => {
@@ -1258,12 +1403,14 @@ const ofMqttAdapter = (name: 'connectTimeout' | 'keepAlive'): Way => {
   };
 };
 
-// an AMQP 1.0 adapter built with `name`: on its library's timers, so held to its refusal alone
+// an AMQP 1.0 adapter built with `name`: on its library's timers, so held to its refusal alone;
+// given a password, which an AMQP 1.0 link authenticates by where it holds no client certificate
 const ofAmqpAdapter = (name: 'connectTimeout' | 'idleTimeout'): Way => {
   return (given) => {
     const building = attempt(() => {
       return createAmqpBrokerAdapter({
         id: 'ada',
+        password: 'secret',
         url: 'amqp://127.0.0.1:5672',
         ...optionOf(name, given),
       });
@@ -1463,6 +1610,8 @@ const createFailingClient = (clock: TestClock) => {
 
         return Promise.resolve();
       },
+      pause: noop,
+      resume: noop,
       send: () => {
         return Promise.resolve();
       },
@@ -1473,16 +1622,22 @@ const createFailingClient = (clock: TestClock) => {
   return { client, connects };
 };
 
-// a reconnection's delay, a function's answer or a number: its tap hears it, its wait is due at it,
-// and the attempt comes then, not before; refused, nothing heard, no attempt more, and closed
+// a reconnection's delay: its tap hears it, its wait due at it, the attempt then; refused, a number
+// as reconnect is called, nothing moved, and a function's answer at its attempt, then closed
 const reconnectionOf = (as: 'function' | 'number'): Way => {
   return async (given) => {
     const clock = createTestClock();
     const { client, connects } = createFailingClient(clock);
     const taps: number[] = [];
     const duration = durationOf(given);
+    let told = 0;
 
     await expect(client.connect({ host, port: 1 })).rejects.toBeInstanceOf(ConnectError);
+    client.on('reconnect', () => {
+      told += 1;
+    });
+
+    const before = getReadyState(client);
 
     const reconnecting = watched(
       client.reconnect({
@@ -1504,10 +1659,19 @@ const reconnectionOf = (as: 'function' | 'number'): Way => {
 
     if (taps.length === 0) {
       return {
-        moved: movedOf({
-          'an attempt more': connects.length > 2,
-          'the client open': !client.isClosed(),
-        }),
+        moved: movedOf(
+          as === 'number'
+            ? {
+                'an attempt': connects.length > 1,
+                'a reconnect told': told > 0,
+                'the client moved': getReadyState(client) !== before,
+              }
+            : {
+                'an attempt more': connects.length > 2,
+                'a reconnect told but once': told !== 1,
+                'the client open': !client.isClosed(),
+              }
+        ),
         refusal: await reconnecting.settled,
       };
     }
@@ -1529,6 +1693,79 @@ const reconnectionOf = (as: 'function' | 'number'): Way => {
     expect([connects.length, taps]).toEqual([3, [held]]);
 
     return { held };
+  };
+};
+
+// a participant whose link went down, its first attempt refused: the delay its tap hears, armed at
+// its due; refused, a number as it is built, and a function's answer as the report's cause
+const reconnectionOfParticipant = (as: 'function' | 'number'): Way => {
+  return async (given) => {
+    const clock = createTestClock();
+    const adapter = createMemoryBroker({ clock }).adapter({ id: 'ada' });
+    const duration = durationOf(given);
+    const taps: number[] = [];
+    const reported: Error[] = [];
+    const building = attempt(() => {
+      return createBrokerParticipant({
+        adapter,
+        clock,
+        heartbeat: Infinity,
+        reconnect: {
+          delay:
+            as === 'number'
+              ? duration
+              : () => {
+                  return duration;
+                },
+          // ! bounded: at once, it would attempt without end
+          maximumAttempts: 2,
+          tap: (nextDelay) => {
+            taps.push(nextDelay);
+          },
+        },
+      });
+    });
+
+    if ('refusal' in building) {
+      return {
+        moved: movedOf({ 'its link started': adapter.isLinked }),
+        refusal: building.refusal,
+      };
+    }
+
+    const participant = building.built;
+
+    participant.on('error', (error) => {
+      reported.push(error);
+    });
+    await participant.start();
+    adapter.lose();
+    // its broker holds its id's link of another start already: its first attempt is refused
+    await adapter.start();
+    await turnsUntil(() => {
+      return taps.length > 0 || reported.length > 0;
+    });
+
+    const delays = delaysOn(clock);
+
+    await participant.stop();
+
+    if (taps.length > 0) {
+      const [held = 0] = taps;
+
+      // * on the clock it is given: a timer armed at the due its tap heard, none for at once
+      expect(delays, 'armed at its due').toEqual(held === 0 ? [] : [held]);
+
+      return { held };
+    }
+
+    expect(as, 'a number refused past its build').toBe('function');
+    expect(reported, 'reported once').toHaveLength(1);
+
+    return {
+      moved: movedOf({ 'its link up': participant.isLinked }),
+      refusal: reported[0]?.cause,
+    };
   };
 };
 
@@ -1746,25 +1983,29 @@ const PLAYED: Readonly<Record<string, IPlayed>> = Object.freeze({
     phrase: "a connection's inactivity timeout",
     ways: { options: serverOfOptions },
   },
-  'httpTransportServer.exchangeTimeout': {
-    phrase: 'exchangeTimeout',
-    ways: { options: exchangeOfOptions },
-  },
   'httpTransportServer.maximumWait': {
     phrase: 'maximumWait',
     ways: { options: maximumWaitOfOptions },
   },
   'httpTransportServer.sendGracePeriod': {
     phrase: 'sendGracePeriod',
-    ways: { gateway: ofGateway('sendGracePeriod'), options: ofHTTPServer('sendGracePeriod') },
+    ways: {
+      gateway: ofGateway('sendGracePeriod'),
+      options: ofHTTPServer('sendGracePeriod'),
+      policy: ofHTTPPolicy('sendGracePeriod'),
+    },
   },
   'httpTransportServer.headersTimeout': {
     phrase: 'headersTimeout',
-    ways: { gateway: ofGateway('headersTimeout'), options: ofHTTPServer('headersTimeout') },
+    ways: {
+      gateway: ofGateway('headersTimeout'),
+      options: ofHTTPServer('headersTimeout'),
+      policy: ofHTTPPolicy('headersTimeout'),
+    },
   },
   'httpTransportServer.bodyGracePeriod': {
     phrase: 'bodyGracePeriod',
-    ways: { gateway: bodyGraceOfGateway, options: bodyGraceOfOptions },
+    ways: { gateway: bodyGraceOfGateway, options: bodyGraceOfOptions, policy: bodyGraceOfPolicy },
   },
   'gateway.timeout': {
     phrase: 'timeout',
@@ -1773,6 +2014,10 @@ const PLAYED: Readonly<Record<string, IPlayed>> = Object.freeze({
   'gateway.heartbeat': {
     phrase: 'heartbeat',
     ways: { options: ofGateway('heartbeat') },
+  },
+  'httpTransport.exchangeTimeout': {
+    phrase: 'exchangeTimeout',
+    ways: { client: exchangeOfClient, server: exchangeOfServer },
   },
   'httpTransport.inactivityTimeout': {
     phrase: 'inactivityTimeout',
@@ -1788,11 +2033,11 @@ const PLAYED: Readonly<Record<string, IPlayed>> = Object.freeze({
   },
   'webSocketTransport.heartbeat': {
     phrase: 'a heartbeat',
-    ways: { client: ofWSClient('heartbeat'), server: ofWSServer('heartbeat') },
+    ways: { client: ofWebSocketClient('heartbeat'), server: ofWebSocketServer('heartbeat') },
   },
   'webSocketTransport.closeTimeout': {
     phrase: 'a close timeout',
-    ways: { client: ofWSClient('closeTimeout'), server: ofWSServer('closeTimeout') },
+    ways: { client: ofWebSocketClient('closeTimeout'), server: ofWebSocketServer('closeTimeout') },
   },
   'transportClient.connectTimeout': {
     phrase: "a connect's timeout",
@@ -1810,11 +2055,11 @@ const PLAYED: Readonly<Record<string, IPlayed>> = Object.freeze({
   },
   'webSocketTransportServer.sendGracePeriod': {
     phrase: 'sendGracePeriod',
-    ways: { options: ofWSServer('sendGracePeriod') },
+    ways: { options: ofWebSocketServer('sendGracePeriod') },
   },
   'webSocketTransportServer.headersTimeout': {
     phrase: 'headersTimeout',
-    ways: { options: ofWSServer('headersTimeout') },
+    ways: { options: ofWebSocketServer('headersTimeout') },
   },
   'brokerParticipant.heartbeat': {
     phrase: 'a heartbeat',
@@ -1827,6 +2072,13 @@ const PLAYED: Readonly<Record<string, IPlayed>> = Object.freeze({
   'brokerParticipant.bodyGracePeriod': {
     phrase: 'bodyGracePeriod',
     ways: { options: bodyGracePeriodOfParticipant },
+  },
+  'brokerParticipant.reconnectionDelay': {
+    phrase: 'a delay',
+    ways: {
+      function: reconnectionOfParticipant('function'),
+      number: reconnectionOfParticipant('number'),
+    },
   },
   // ! a Keep Alive is a Two Byte Integer of seconds: its ceiling 65,535 of them
   'mqttBrokerAdapter.keepAlive': {

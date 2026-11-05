@@ -15,6 +15,7 @@ import {
   resolveMove,
   tag,
   versionOf,
+  withApiShipped,
   withCargoLockMembers,
   withCargoVersion,
   withChangelogRelease,
@@ -126,6 +127,48 @@ describe('texts', () => {
       lock(3)
         .replaceAll('"[0.1.0, )"', '"[0.2.0, )"')
         .replace('"Other": "[0.2.0, )"', '"Other": "[0.1.0, )"')
+    );
+  });
+
+  test("a C# project's Unshipped moves into its Shipped: added, removed, and Shipped in ordinal order", () => {
+    const moved = withApiShipped({
+      shipped: '#nullable enable\nBead.A\nBead.C\nBead.Gone() -> void\n',
+      unshipped: '#nullable enable\nBead.b\n*REMOVED*Bead.Gone() -> void\nBead.B\n\n',
+    });
+    assert.deepEqual(moved, {
+      shipped: '#nullable enable\nBead.A\nBead.B\nBead.C\nBead.b\n',
+      unshipped: '#nullable enable\n',
+      count: 3,
+    });
+    // run again, nothing moves
+    assert.deepEqual(withApiShipped(moved), { ...moved, count: 0 });
+    // a symbol taken away and given again in one release ships once
+    assert.equal(
+      withApiShipped({
+        shipped: '#nullable enable\nBead.A\n',
+        unshipped: '#nullable enable\n*REMOVED*Bead.A\nBead.A\n',
+      }).shipped,
+      '#nullable enable\nBead.A\n'
+    );
+  });
+
+  test('a symbol removed that never shipped, one shipped twice, or a header on one file alone is refused', () => {
+    const shipped = '#nullable enable\nBead.A\n';
+    assert.throws(
+      () => withApiShipped({ shipped, unshipped: '#nullable enable\n*REMOVED*Bead.B\n' }),
+      /\*REMOVED\*Bead\.B: PublicAPI\.Shipped\.txt holds no such symbol/
+    );
+    assert.throws(
+      () => withApiShipped({ shipped, unshipped: '#nullable enable\nBead.A\n' }),
+      /Bead\.A: PublicAPI\.Shipped\.txt holds it already/
+    );
+    assert.throws(
+      () => withApiShipped({ shipped: `${shipped}Bead.A\n`, unshipped: '#nullable enable\n' }),
+      /PublicAPI\.Shipped\.txt lists a symbol twice/
+    );
+    assert.throws(
+      () => withApiShipped({ shipped, unshipped: 'Bead.B\n' }),
+      /#nullable enable heads one of PublicAPI\.Shipped\.txt and PublicAPI\.Unshipped\.txt alone/
     );
   });
 
@@ -687,6 +730,74 @@ describe('prepare', () => {
     assert.match(read(root, 'implementations/typescript/package.json'), /"version": "0\.1\.0"/);
   });
 
+  test("each C# project's PublicAPI.Unshipped.txt moves into its Shipped, then nothing a second time", () => {
+    const root = releasing();
+    const core = 'implementations/dotnet/src/Core';
+    const http = 'implementations/dotnet/src/Http';
+    write(root, {
+      [`${core}/PublicAPI.Shipped.txt`]: '#nullable enable\nBead.Codec\nBead.Router\n',
+      [`${core}/PublicAPI.Unshipped.txt`]:
+        '#nullable enable\nBead.Pause() -> void\n*REMOVED*Bead.Codec\n',
+      [`${http}/PublicAPI.Shipped.txt`]: '#nullable enable\nBead.Http\n',
+      [`${http}/PublicAPI.Unshipped.txt`]: '#nullable enable\n',
+    });
+    git(root, 'add', 'implementations/dotnet');
+    git(root, 'commit', '-qm', 'feat: a surface');
+
+    const { plan, logged } = prepared(root, { moves: { spec: 'minor' } });
+    assert.equal(
+      read(root, `${core}/PublicAPI.Shipped.txt`),
+      '#nullable enable\nBead.Pause() -> void\nBead.Router\n'
+    );
+    assert.equal(read(root, `${core}/PublicAPI.Unshipped.txt`), '#nullable enable\n');
+    assert.equal(read(root, `${http}/PublicAPI.Shipped.txt`), '#nullable enable\nBead.Http\n');
+    assert.ok(plan.written.includes(`${core}/PublicAPI.Shipped.txt`));
+    assert.ok(plan.written.includes(`${core}/PublicAPI.Unshipped.txt`));
+    assert.ok(
+      !plan.written.some((path) => {
+        return path.startsWith(`${http}/PublicAPI.`);
+      })
+    );
+    assert.ok(
+      logged.includes(
+        'shipped: 2 lines of PublicAPI.Unshipped.txt in 1 C# projects, each into its PublicAPI.Shipped.txt'
+      )
+    );
+
+    git(root, 'commit', '-qam', 'chore(release): 0.2.0');
+    const again = prepared(root);
+    assert.deepEqual(again.plan.written, []);
+    assert.ok(
+      !again.logged.some((line) => {
+        return line.startsWith('shipped:');
+      })
+    );
+  });
+
+  test('an Unshipped line that does not fit, or no Shipped beside it, is refused before anything is written', () => {
+    const root = releasing();
+    const core = 'implementations/dotnet/src/Core';
+    const unshipped = '#nullable enable\n*REMOVED*Bead.Codec\n';
+    write(root, {
+      [`${core}/PublicAPI.Shipped.txt`]: '#nullable enable\nBead.Router\n',
+      [`${core}/PublicAPI.Unshipped.txt`]: unshipped,
+    });
+    git(root, 'add', 'implementations/dotnet');
+    assert.throws(
+      () => prepared(root, { moves: { spec: 'minor' } }),
+      /implementations\/dotnet\/src\/Core\/PublicAPI\.Unshipped\.txt: \*REMOVED\*Bead\.Codec: PublicAPI\.Shipped\.txt holds no such symbol/
+    );
+    assert.match(read(root, 'implementations/typescript/package.json'), /"version": "0\.1\.0"/);
+
+    git(root, 'rm', '-q', '--cached', `${core}/PublicAPI.Shipped.txt`);
+    rmSync(join(root, `${core}/PublicAPI.Shipped.txt`));
+    assert.throws(
+      () => prepared(root, { moves: { spec: 'minor' } }),
+      /implementations\/dotnet\/src\/Core\/PublicAPI\.Shipped\.txt: no such file, beside implementations\/dotnet\/src\/Core\/PublicAPI\.Unshipped\.txt/
+    );
+    assert.equal(read(root, `${core}/PublicAPI.Unshipped.txt`), unshipped);
+  });
+
   test("a generated file's header moves, one outside the pattern stays, and the builder's goldens too", () => {
     const root = releasing();
     const header = (path, version) => {
@@ -887,16 +998,30 @@ console.log(localDay(new Date('2026-10-08T01:30:00Z')));`;
     assert.deepEqual(owing(releasing()), []);
   });
 
-  test("it owes both benches' reports where the tree keeps their comparison, compared with the last release's, and none where it does not", () => {
+  test('it owes the run of the benches on the release’s branch its reading where the tree keeps the workflow, and none where it does not', () => {
     const kept = releasing();
-    write(kept, { 'tools/bench-compare.mjs': '// compares two reports\n' });
+    write(kept, { '.github/workflows/bench.yml': 'name: Bench\n' });
     const owing = (root) => {
       return prepared(root, { moves: { spec: 'minor' } }).logged.filter((line) => {
-        return line.includes('benches');
+        return line.includes('bench.yml');
       });
     };
     assert.deepEqual(owing(kept), [
-      `owed by hand: both benches run through tools/bench-release.mjs, their reports kept as .bench/v0.2.0-typescript.json and -csharp.json, each compared with v0.1.0's on the machine that made them; regression and inconclusive measures confirmed by interleaving before the finish (README.md, "Measurement")`,
+      "owed by hand: the run of .github/workflows/bench.yml on release/0.2.0's commit, each side's comparison with the last release read and a regression judged from its report, never a gate, as `gh run list --workflow bench.yml --branch release/0.2.0 --limit 1` lists it",
+    ]);
+    assert.deepEqual(owing(releasing()), []);
+  });
+
+  test('it owes the last fuzzing campaign’s run its reading where the tree keeps the campaign, and none where it does not', () => {
+    const kept = releasing();
+    write(kept, { '.github/workflows/fuzz.yml': 'name: Fuzz\n' });
+    const owing = (root) => {
+      return prepared(root, { moves: { spec: 'minor' } }).logged.filter((line) => {
+        return line.includes('fuzz.yml');
+      });
+    };
+    assert.deepEqual(owing(kept), [
+      "owed by hand: the last run of .github/workflows/fuzz.yml, its findings read, each a case of its side's tests, as `gh run list --workflow fuzz.yml --limit 1` lists it",
     ]);
     assert.deepEqual(owing(releasing()), []);
   });

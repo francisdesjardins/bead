@@ -57,9 +57,6 @@ implementations/dotnet/tools/Bead.Fuzz/corpus/
 implementations/dotnet/tools/Bead.Fuzz/findings/
 implementations/dotnet/tools/Bead.Fuzz/.fuzzer/
 
-# The benches' reports a release keeps, each its machine's, compared with the next release's there
-/.bench/
-
 # What this clone keeps for itself and never commits: the working notes and plans of its sessions
 .claude/local/
 

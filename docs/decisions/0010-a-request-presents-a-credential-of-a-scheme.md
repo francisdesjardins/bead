@@ -76,8 +76,8 @@ access token of RFC 9068 in JWS Compact Serialization (RFC 7515), on a request a
 `ELSEWHERE`, 3, empty, the credential its transport carried with it, on a request alone. A scheme
 from 4 to 65,535 is read whole, then refused at admission, `CREDENTIAL_UNSUPPORTED`.
 
-**A header carries it as `credential`, `Credential`**, on a request, a result and a failure alike,
-one field of one type on both sides: `{ scheme, … }`, its credential scheme and its bytes.
+**A header carries it as `credential`**, on a request, a result and a failure alike, one field of
+one type on every side: `{ scheme, … }`, its credential scheme and its bytes.
 
 **The header holds 1,020 bytes**, the 255 words byte 3 counts, and a credential has what the rest
 leaves: 992 bytes on a request that names a destination and opens a transfer (28 bytes of prefix,
@@ -108,7 +108,8 @@ identifier is a record of its credential scheme and its claim: a `JWT`'s, `{ iss
 scheme, their claim's name and their values are equal, octet for octet. A call's session carries the
 data of the credential it presented, never another call's under the same identifier: for a `JWT`,
 its claims set as each side's JSON reader gives it, a frozen object on the TypeScript side, a
-`JsonElement` on the C# side; for an `ELSEWHERE`, what its verifier gave. A credential's session is
+`JsonElement` on the C# side, a `serde_json::Value` on the Rust side; for an `ELSEWHERE`, what its
+verifier gave. A credential's session is
 kept, and its end timed, only while it bounds a subscription: what a side keeps, per connection and
 identifier, is its end, the later of those resolved, and the subscriptions it bounds. A call that
 resolves to one not kept runs with its own end, and keeps it once it subscribes.
@@ -137,24 +138,24 @@ Within step 6 of section 9.2, in this order:
    withdraw a credential that holds;
 3. **its admission**, `beforeRequest`, synchronous, decides on the call's session.
 
-`requireSession`, `RequireSession`, tests the call's session, never the connection's: a call that
-presented a `JWT` is not in its connection's session, whatever that session holds. It refuses a call
-in none that presented no credential with `SESSION_REQUIRED`, and one that presented a credential it
-does not run in — a relay forwarding it without verifying — with `ACCESS_DENIED`: an admission never
-answers `SESSION_REQUIRED` to a call that presented a credential, which would have its client
-withdraw one that may hold.
+`requireSession` tests the call's session, never the connection's: a call that presented a `JWT` is
+not in its connection's session, whatever that session holds. It refuses a call in none that
+presented no credential with `SESSION_REQUIRED`, and one that presented a credential it does not run
+in — a relay forwarding it without verifying — with `ACCESS_DENIED`: an admission never answers
+`SESSION_REQUIRED` to a call that presented a credential, which would have its client withdraw one
+that may hold.
 
 **Resolution may wait.** A `JWT` verified by Web Crypto, a key set asked for a `kid` not yet seen, a
 session service asked whether a token holds: a verifier settles later, a `PromiseLike` on the
-TypeScript side, a `ValueTask` on the C# side. While it does, its request holds its call id (step 2
-of section 9.2 refuses another on it); a cancel ends it, answered by nothing, and tells its verifier
-by its signal (section 10.2), as its connection closing does; a transfer's opening gets no credit
-until resolution and admission settle (section 12.3); and the call runs in the session it resolved
-to, whatever befell its connection's meanwhile. A request that presents none or `OPAQUE` resolves in
-the turn it came; one that presents `JWT` or `ELSEWHERE` resolves in a later turn, on every side,
-whether its verifier waits or not, or a relay forwards it unverified, resolving it to no session. A
-resolution that settles once its call ended, cancelled or its connection closed, opens no session,
-moves no end, and is dropped.
+TypeScript side, a `ValueTask` on the C# side, a `BoxFuture` on the Rust side. While it does, its
+request holds its call id (step 2 of section 9.2 refuses another on it); a cancel ends it, answered
+by nothing, and tells its verifier by its signal (section 10.2), as its connection closing does; a
+transfer's opening gets no credit until resolution and admission settle (section 12.3); and the call
+runs in the session it resolved to, whatever befell its connection's meanwhile. A request that
+presents none or `OPAQUE` resolves in the turn it came; one that presents `JWT` or `ELSEWHERE`
+resolves in a later turn, on every side, whether its verifier waits or not, or a relay forwards it
+unverified, resolving it to no session. A resolution that settles once its call ended, cancelled or
+its connection closed, opens no session, moves no end, and is dropped.
 
 **A credential that does not hold is refused, whatever the procedure requires**, with
 `SESSION_REQUIRED`, as a bearer token found invalid is answered 401 (RFC 6750 §3.1); `ACCESS_DENIED`
@@ -247,8 +248,8 @@ constrained peer, takes a scheme to come.
 ([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)):
 
 - its end, _E_, is a whole number of milliseconds since the epoch: for a `JWT`, _X_ + 60,000, where
-  _X_ = ⌈`exp` × 1000⌉, the claim read as an IEEE 754 double, as both sides' JSON readers read it;
-  for an `ELSEWHERE`, the end its verifier gives, rounded up to a millisecond. `nbf` is held alike,
+  _X_ = ⌈`exp` × 1000⌉, the claim read as section 17.6 of the spec reads a number; for an
+  `ELSEWHERE`, the end its verifier gives, rounded up to a millisecond. `nbf` is held alike,
   _N_ = ⌈`nbf` × 1000⌉, and a claim that is not a JSON number, or whose milliseconds pass 2⁵³ − 1
   (section 1.2), does not hold;
 - the wall clock's reading, _W_, is a whole number of milliseconds since the epoch, a fraction
@@ -349,79 +350,76 @@ every side alike: `127.0.0.1.` is on it, and a host the parser fails on is not.
 | `ELSEWHERE`    | forwards it to a destination registered with an audience, over a leg B that carries one                     | `ELSEWHERE`, its credential moved to leg B's transport |
 
 A destination is registered with the audience it verifies, as a resource is named for a token (RFC
-8707). A server's relay admits by default only a credential it forwards, `requireCredential`,
-`RequireCredential`: a call whose header presents a `JWT`, or an `ELSEWHERE` its transport carried,
-read from the header's scheme; one that presents none or `OPAQUE`, in leg A's connection's session
-or in none, is refused `ACCESS_DENIED`, its detail `a relay admits by default only a credential it
-forwards`, since leg A's session opens nothing at the destination, and a relay that ran it in leg
-B's session would lend its own authority to whoever holds a session at the relay, the confused
-deputy (Hardy, 1988; CWE-441), as impersonation is a grant and never a default (RFC 8693 §1.1). A
-relay whose requesters log in at it writes a `beforeRoute` that checks the destination against the
-requester's session; `shareLegBSession`, `ShareLegBSession`, second, lends leg B's session to every
-session of leg A's, at every destination, reading none, and refuses a call in none that presented
-none `SESSION_REQUIRED`. A `beforeRoute` given as `requireSession` refuses every credential the
-relay forwards without verifying, `ACCESS_DENIED`.
-With `verifies`, the relay verifies what it forwards besides, with its side's `credentials`, at step
-1 of section 14.3, before `beforeRoute`: a `JWT` against the set of audiences its registrations
-hold. A credential that does not hold, or a `JWT` that names none of those audiences, is refused
-`SESSION_REQUIRED` there, and `beforeRoute` reads the credential's session. At step 1, a scheme the
-relay neither resolves nor forwards is refused `CREDENTIAL_UNSUPPORTED`, and an `ELSEWHERE` that
-carried nothing `SESSION_REQUIRED`. A call the relay cannot forward — to a destination of another
-audience or of none, over a leg B that cannot carry it, or in the clear off the machine — is
-refused `DESTINATION_UNREACHABLE`, at a step of its own, section 14.3's fifth, before the limits'
-step, the sixth: its credential may hold, and its route does not; with `verifies`, that step holds a
-verified `aud` to its destination's own audience. A call that presents a credential never runs in
-leg B's session in place of its own. Leg B's header counts its credential, call by call, against the
-smaller of the two legs' limits (section 14.3, step 6).
+8707). A server's relay admits by default only a credential it forwards, `requireCredential`: a call
+whose header presents a `JWT`, or an `ELSEWHERE` its transport carried, read from the header's
+scheme; one that presents none or `OPAQUE`, in leg A's connection's session or in none, is refused
+`ACCESS_DENIED`, its detail `a relay admits by default only a credential it forwards`, since leg A's
+session opens nothing at the destination, and a relay that ran it in leg B's session would lend its
+own authority to whoever holds a session at the relay, the confused deputy (Hardy, 1988; CWE-441),
+as impersonation is a grant and never a default (RFC 8693 §1.1). A relay whose requesters log in at
+it writes a `beforeRoute` that checks the destination against the requester's session;
+`shareLegBSession`, second, lends leg B's session to every session of leg A's, at every destination,
+reading none, and refuses a call in none that presented none `SESSION_REQUIRED`. A `beforeRoute`
+given as `requireSession` refuses every credential the relay forwards without verifying,
+`ACCESS_DENIED`. With `verifies`, the relay verifies what it forwards besides, with its side's
+`credentials`, at step 1 of section 14.3, before `beforeRoute`: a `JWT` against the set of audiences
+its registrations hold. A credential that does not hold, or a `JWT` that names none of those
+audiences, is refused `SESSION_REQUIRED` there, and `beforeRoute` reads the credential's session. At
+step 1, a scheme the relay neither resolves nor forwards is refused `CREDENTIAL_UNSUPPORTED`, and an
+`ELSEWHERE` that carried nothing `SESSION_REQUIRED`. A call the relay cannot forward — to a
+destination of another audience or of none, over a leg B that cannot carry it, or in the clear off
+the machine — is refused `DESTINATION_UNREACHABLE`, at a step of its own, section 14.3's fifth,
+before the limits' step, the sixth: its credential may hold, and its route does not; with
+`verifies`, that step holds a verified `aud` to its destination's own audience. A call that presents
+a credential never runs in leg B's session in place of its own. Leg B's header counts its
+credential, call by call, against the smaller of the two legs' limits (section 14.3, step 6).
 
 ### What a side reports, and the names
 
 **A credential stays out of everything a side reports**: no detail, event, trace or log carries its
-bytes, nor the transport's field; only its scheme, `credentialScheme`, `CredentialScheme`.
+bytes, nor the transport's field; only its scheme, `credentialScheme`.
 
-**The surface is named alike on both sides**, the TypeScript side's name before the C# side's:
+**The surface is named alike on every side**, each name in its side's case:
 
-- `credentials`, `Credentials`, among a server's options, and a client's for the commands it
-  receives: a `JWT`'s keys, each with its issuer and its algorithm, and its audience; the key set,
-  `keySet`, `KeySet`, given with the issuers it answers for, which the runtime asks for a `kid` no
-  key of the token's issuer names, with a signal its deadline aborts, which may wait, and whose
-  answer it holds ten minutes, and the calls that may wait for an issuer's deadline at once,
-  `maximumWaitingCalls`, `MaximumWaitingCalls`; and an `ELSEWHERE`'s verifier, `verify`, `Verify`,
-  given what the transport carried and its call's signal, which settles with a credential's session
-  — its identifier, its data, and its end, none for a session without one — or with none, when the
-  credential does not hold. The side builds its `JWT` verifier from them, as data, on the clock its
-  stack runs on, so no verifier brings a clock of its own;
-- the call's session, `session`, `Session`, on the request admission reads and on the request a
-  resolver receives, never a bearer credential its call came with, which reaches the verifier and a
-  relay alone: none when the call runs in none; its data; and, for a credential's session, its
+- `credentials`, among a server's options, and a client's for the commands it receives: a `JWT`'s
+  keys, each with its issuer and its algorithm, and its audience; the key set, `keySet`, given with
+  the issuers it answers for, which the runtime asks for a `kid` no key of the token's issuer names,
+  with a signal its deadline aborts, which may wait, and whose answer it holds ten minutes, and the
+  calls that may wait for an issuer's deadline at once, `maximumWaitingCalls`; and an `ELSEWHERE`'s
+  verifier, `verify`, given what the transport carried and its call's signal, which settles with a
+  credential's session — its identifier, its data, and its end, none for a session without one — or
+  with none, when the credential does not hold. The side builds its `JWT` verifier from them, as
+  data, on the clock its stack runs on, so no verifier brings a clock of its own;
+- the call's session, `session`, on the request admission reads and on the request a resolver
+  receives, never a bearer credential its call came with, which reaches the verifier and a relay
+  alone: none when the call runs in none; its data; and, for a credential's session, its
   identifier, the record above, and its end;
-- the header a procedure and its admission are handed: on the TypeScript side an
-  `IHandedRequestHeader`, its credential a `HandedCredential`, which says of a `JWT` its scheme
-  alone; on the C# side the `RequestHeader`, whose `Credential` carries no `Token` for a `JWT`;
-- `sessionOf`, `SessionOf`, the router's hook asked once per request, with its call's signal,
-  between holding its call id and the synchronous `beforeRequest`: it may wait, never for a request
-  that presents none or `OPAQUE`. `sessionTokenOf`, `SessionTokenOf`, stays beside it, asked per
-  answer and never waiting, for the announcement of section 13.3;
-- `requireSession`, `RequireSession`, tests the call's session;
-- `requireCredential`, `RequireCredential`, a server's relay's default admission: a call presenting
-  a credential the relay may forward, and no other, `ACCESS_DENIED` with its detail;
-- `shareLegBSession`, `ShareLegBSession`, an admission a relay is given, named for what it lends:
-  a call in any session of leg A's connection's, at every destination, runs in leg B's session, as
-  does one presenting a credential the relay may forward;
-- `endSession(id)`, `EndSession(id)`, ends a credential's session by its identifier, that record,
-  and the subscriptions it bounds; `endSessionsOf(issuer)`, `EndSessionsOf(issuer)`, every
-  credential's session of an issuer, on every connection that keeps one;
-- `verifies`, `Verifies`, among a relay's options, has it verify what it forwards besides, at step 1
-  of section 14.3;
-- `credential`, `Credential`, among a client's options for its default, and among a request's
-  options for that call alone: a call may present none whatever the default, and `OPAQUE` stands for
-  the session the client learned;
-- `credentialWithdrawn`, `CredentialWithdrawn`, the client's event that tells its application a
-  default credential was withdrawn; `isCredentialWithdrawn`, `IsCredentialWithdrawn`, whether it
-  stands withdrawn, the calls that would present it failing before they go;
-- the credential a transport carries travels with its envelope, as one argument: on the TypeScript
-  side, the message event's first argument and `send`'s are `{ data, credential }`; on the C# side,
-  `TransportMessage` has its `Credential`; each keeps its other parameter.
+- the header a procedure and its admission are handed, whose credential says of a `JWT` its scheme
+  alone, never its token;
+- `sessionOf`, the router's hook asked once per request, with its call's signal, between holding
+  its call id and the synchronous `beforeRequest`: it may wait, never for a request that presents
+  none or `OPAQUE`. `sessionTokenOf` stays beside it, asked per answer and never waiting, for the
+  announcement of section 13.3;
+- `requireSession` tests the call's session;
+- `requireCredential`, a server's relay's default admission: a call presenting a credential the
+  relay may forward, and no other, `ACCESS_DENIED` with its detail;
+- `shareLegBSession`, an admission a relay is given, named for what it lends: a call in any session
+  of leg A's connection's, at every destination, runs in leg B's session, as does one presenting a
+  credential the relay may forward;
+- `endSession(id)` ends a credential's session by its identifier, that record, and the
+  subscriptions it bounds; `endSessionsOf(issuer)`, every credential's session of an issuer, on
+  every connection that keeps one;
+- `verifies`, among a relay's options, has it verify what it forwards besides, at step 1 of section
+  14.3;
+- `credential`, among a client's options for its default, and among a request's options for that
+  call alone: a call may present none whatever the default, and `OPAQUE` stands for the session the
+  client learned;
+- `credentialWithdrawn`, the client's event that tells its application a default credential was
+  withdrawn; `isCredentialWithdrawn`, whether it stands withdrawn, the calls that would present it
+  failing before they go;
+- the credential a transport carries travels with its envelope, as one argument: what a transport
+  hands its router and what it sends hold the envelope's bytes and its `credential`; each keeps its
+  other parameter.
 
 **The builder binds to the call's session once resolved.** Its admission vocabulary maps to no
 `beforeRequest`, to `requireSession` over `session`, or to a named `beforeRequest`, synchronous,
@@ -514,14 +512,16 @@ credential resolves, a transfer's opening gets no credit, and its requester coun
 inactivity meanwhile (section 12.8): a verifier slower than 30 s, by default, ends the call at its
 requester.
 
-**Resolution waits on both sides**, a `JWT`'s and an `ELSEWHERE`'s in a later turn even when its
+**Resolution waits on every side**, a `JWT`'s and an `ELSEWHERE`'s in a later turn even when its
 verifier does not: a call presenting none, sent after one presenting a `JWT`, may be answered first,
 on every side alike, and a conversation awaits a `JWT` call's answer before it sends anything that
 could overtake it. The order of section 9.2, a cancel during resolution and a transfer's first
 credit are stated, and played by a conversation whose verifier settles late, on the server's clock.
-Verifying a `JWT` costs no dependency: Web Crypto on the TypeScript side, in Node and in a browser
-alike; `ECDsa` and `HMACSHA256` on the C# side; a key imported from its JWK, JSON and base64url on
-both; and a key set is the application's to fetch.
+Verifying a `JWT` costs the TypeScript and C# sides no dependency: Web Crypto on the TypeScript
+side, in Node and in a browser alike; `ECDsa` and `HMACSHA256` on the C# side; a key imported from
+its JWK, JSON and base64url on both. The Rust side verifies on RustCrypto, `p256`, `hmac` and
+`sha2` ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)). A
+key set is the application's to fetch.
 
 **The relays' table plays in the conversations, and `Authorization` in the transports' file**
 ([0004](0004-one-behaviour-in-every-language.md)): a conversation carries a relay across its
@@ -540,7 +540,7 @@ What carries `ELSEWHERE` over a broker met the round of the broker's core, which
 [0038](0038-over-a-broker-a-connection-is-placed-once-at-its-open-named-by-both-its-ends.md) keeps.
 
 The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)) in
-ten rounds, a later one answering an earlier one's answers, the seventh and the eighth also rounds
+twelve rounds, a later one answering an earlier one's answers, the seventh and the eighth also rounds
 of [0020](0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md)'s change; the round on a
 forwarded credential's turn and on a credential that leaves a transfer no room is kept in
 [0001](0001-the-envelope-sits-at-fixed-offsets.md), At the wire's edges, and the round on the
@@ -729,8 +729,8 @@ transport carried beside a request presenting `ELSEWHERE`, and a `JWT`'s token, 
 verifier and a relay alone, the call keeping them only when its request names a destination, and a
 registered resolver's header made at reception with its `JWT`'s scheme alone; the C# side's router
 core internal, as the TypeScript side's is
-([0004](0004-one-behaviour-in-every-language.md)); `transportCredential` out of every public type,
-and `forwardsCredentials` a destination's handler's alone. One rule holds for both bearer
+([0047](0047-every-side-shows-one-public-surface.md)); `transportCredential` out of every public
+type, and `forwardsCredentials` a destination's handler's alone. One rule holds for both bearer
 credentials, applied at the reception. Refused: a line drawn by where a credential travels, the
 transport's bytes withheld from a procedure and a `JWT`'s token kept in its header, since least
 privilege draws no such line. No standard settles whether a procedure is handed its call's bearer
@@ -746,7 +746,71 @@ Its objections, each with the answer that holds:
 | The new sentence belongs in 13.1, stated positively, not in 15.1, the transport's contract; it named `beforeRequest`, which the spec never names, and carved out the relay's check, itself an admission                                                                   | Accepted: 13.1's last sentence states it. A relayed call takes 14.3's steps in place of 9.2's steps 4 to 8, so the relay's check of 14.3 step 5 is no admission of 13.1's, and needs no carve-out                                                                                                                                                                                                                                                                       |
 | Withholding the transport's credential and keeping a `JWT`'s answers one question with two principles: no standard or practice draws a line by where a credential travels, and one procedure would hold a page's caller's bearer bytes and not a backend's                | Accepted in part: one question, drawn by risk. A `JWT`'s token and the transport's credential are both bearer credentials (RFC 6750 §1.2); an `OPAQUE`'s resolves on its own connection alone (13.2) and stays in its header. The choice between the in-process practice and the gateway's was the user's, who took the gateway; the handed header's TypeScript type is `IHandedRequestHeader`; RFC 8693 waits for one opt-in for both schemes, a decision of its own   |
 | A simpler design was passed over: the bytes are needed only in the turn the request arrives, so the call keeps them only when its request names a destination, and the sites that hand a request on stay as they are                                                      | Accepted: the reception is the one site, and the made header joins it. The C# `BeforeRequest` strips all the same, since a relay's `BeforeRoute` is handed its request by the relay's handler, which keeps the bytes on purpose                                                                                                                                                                                                                                         |
-| The change moves the public surface on both sides with nothing to hold it, where 0006 wants every rule to name what fails                                                                                                                                                 | Accepted: `@ts-expect-error` reads in the TypeScript twin, which `yarn type-check` runs; a C# twin by reflection over the five core types and the two members, the first piece of 0007's owed test over the built assemblies. A gate over each package's whole public surface is a round of its own                                                                                                                                                                     |
+| The change moves the public surface on both sides with nothing to hold it, where 0006 wants every rule to name what fails                                                                                                                                                 | Accepted: `@ts-expect-error` reads in the TypeScript twin, which `yarn type-check` runs; a C# twin by reflection over the five core types and the two members, the first piece of 0007's owed test over the built assemblies. A gate over each package's whole public surface is a decision of its own, [0047](0047-every-side-shows-one-public-surface.md)'s                                                                                                           |
 | Moving `forwardsCredentials` to a destination's handler is right, but "a procedure forwards nothing" is false of a `JWT`: a procedure that sets the flag holds a token it never verified, minted perhaps for another audience; and the behaviour it removes goes unstated | Accepted: the move stands on 9.2 step 6 and 14.3, a relay alone holding a `JWT`'s `aud` to its destination's audience (RFC 7519 §4.1.3, RFC 8707), and the CHANGELOG says a procedure no longer takes a credential unverified to pass on. A resolver that still sets the flag is ignored in silence on both sides and refused on neither, since a TypeScript-only refusal would diverge and a C# one would need the public member the move removes: its cost, kept here |
 | The moves of the public types and of the flag read as independent of the core's visibility, but on the C# side both require it: an internal return type on a public port is CS0050, and an internal `SessionRequest` member starves a hand-built port                     | Accepted: on the C# side the public types' and the flag's moves need the core internal                                                                                                                                                                                                                                                                                                                                                                                  |
 | A record's `Equals` and `with` carry an internal member, so the C# side's hand-off was observable; and an internal `SessionRequest.TransportCredential` written by a custom `PrintMembers` is the same broken promise                                                     | Accepted: no procedure's value carries the member, `PrintMembers` goes, and the session request's test asserts the member and its credential absent from its string, as `docs/support.md` says                                                                                                                                                                                                                                                                          |
+
+### On a token's parts bounded as a payload, and the spec's per-side forms
+
+The change that has every side read a `JWT`'s header and claims set as section 17.5 of the spec
+bounds a payload, and has the spec and its companion state each rule once for every side. The
+round met one dissenter, whose probes ran tokens signed under one key through each side's verifier.
+Its objections, each with the answer that holds:
+
+| Objection                                                                                                                                                                                                                                                                                           | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The sides do not read a claim alike: the Rust side holds a token's parts to 17.5's items 6 and 7 and refuses at `token` a number past a double or a nesting past 64, where the TypeScript and C# sides read an infinity and refuse at `exp` or `nbf`, or hold the token; no vector held either (O1) | Accepted, (B): every side reads a token's parts as 17.5 bounds a payload, refused at step 1, `token`, since the parse runs before the signature and an unauthenticated peer must not choose its depth; RFC 8259 §9 lets a parser bound depth and range, RFC 7493 §2.2 holds no number past a double. Step 1 names the bound, a claim is read as 17.6 reads a number, and `jwtVerdicts` holds three vectors of 13.8.1, a relay that does not verify a conversation of its own |
+| 17.9.8 says a repeated field's items and a map's values keep an undeclared number "as both stock libraries read them", and the paragraph after it names two libraries (O2)                                                                                                                          | Accepted: the items and values keep it on every side, a leveling the matrix keeps, and the paragraph names the stock libraries without a count                                                                                                                                                                                                                                                                                                                               |
+| Item 7's census of libraries leaves Buffa out, and the matrix's lift for a field at another wire type does not reach it, since Buffa refuses one (O3)                                                                                                                                               | Accepted: the census names Buffa, which reads such a message and writes the field's default; the matrix's row says Buffa refuses the field, and its lift has Buffa keep it as unknown                                                                                                                                                                                                                                                                                        |
+| The companion gives TypeScript and C# name pairs at six more places, four of which a Rust name does not meet (O4)                                                                                                                                                                                   | Accepted through O5: the pairs leave for the rule's form, and so do the two of the registry's option and its `declareRequester`, which the sweep found                                                                                                                                                                                                                                                                                                                       |
+| A normative document states the rule and leaves each side's form to its tests and the matrix (RFC 2119 §6; WHATWG Infra, Conformance; RFC 7942) (O5)                                                                                                                                                | Accepted: the spec and its companion name a member once, each in its platform's form or case, and no language; a platform's trap stays, named by its property, as 11.1's binary fraction                                                                                                                                                                                                                                                                                     |
+| 11.4 is a platform's rule, not a language's, and the Rust side already holds its twin; the matrix's cell is stale (O6)                                                                                                                                                                              | Accepted: 11.4 names a browser, not a language, and the matrix's Rust cell cites both its tests, the page ahead with its core                                                                                                                                                                                                                                                                                                                                                |
+| 11.1's Rust form, if forms stay, as its test names it (O7)                                                                                                                                                                                                                                          | Moot: the forms leave by O5                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| 12.5's and 13.9's Rust forms, if forms stay; 13.9's error event lacks the Rust name (O8)                                                                                                                                                                                                            | Moot: the forms leave by O5, and 13.9 says the participant's own turn, as an envelope is told in its router's                                                                                                                                                                                                                                                                                                                                                                |
+| `spec/transcoding.md`'s two-side passages name what the Rust side has ahead (O9)                                                                                                                                                                                                                    | Accepted: the document does not move; revised by [0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md#on-the-rust-sides-form-in-the-spec-its-companions-and-the-records)'s round on the Rust side's form in the spec, which states its rules once for every side                                                                                                                                                                              |
+| Decision 0010 is touched at one line of four that name two sides (O10)                                                                                                                                                                                                                              | Accepted in part: the line O1 changes moves; the others go to the sweep of the records, a pass of its own                                                                                                                                                                                                                                                                                                                                                                    |
+| The units and the versions: which units move, and which version moves (O11)                                                                                                                                                                                                                         | Accepted: each unit whose text moves is acknowledged; the versions move at the release, a minor of the spec since two sides' verdicts change, a patch of the companion                                                                                                                                                                                                                                                                                                       |
+
+### On a request handed to its resolver in a later turn
+
+Every side hands a request whose payload is whole to its resolver in a later turn than the one it
+came in, whether its resolver waits or not, as a `JWT` and an `ELSEWHERE` resolve in one: the C#
+side posts it to the scheduler its resolvers run on, the Rust side spawns it off its router's owner
+([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)), and the
+TypeScript side queues it as a microtask, on the queue where what it defers within a telling waits
+([0045](0045-a-router-takes-what-its-application-makes-in-one-queue-behind-the-turn-that-tells-it.md)),
+so it keeps its place among them. A later request's refusal, made in its own turn, so goes before an
+answer a resolver gives at once, on every side, over every transport that keeps its order (spec
+15.1), and the order of answers turns on a resolver no more than on a verifier. Admission and the
+credential stay in the turn the request came. A call cancelled, or gone with its connection, before
+the hand-off still reaches its resolver, its signal aborted, and is answered nothing. A router's
+intake counts an envelope as it reads it, not as it hands it on
+([0046](0046-a-router-paces-each-connections-reads-by-what-it-has-not-taken.md)).
+
+The spec states no order between a resolver's answer and the refusals of the requests behind it: a
+sentence that did would have to hold every answer a side queues behind its credit and its gate. The
+twins hold it, a row of the matrix's Features: `asks verify once per request with exactly what its
+transport carried and a live signal, never for none, OPAQUE or an ELSEWHERE that carried nothing`,
+under each side's name, plays one scenario on every side. Five requests on one connection come back
+to back: 1 presenting an `ELSEWHERE` its transport carried, 3 none, 5 an `OPAQUE` that does not
+hold, 9 a `JWT` the side does not take, and 7 an `ELSEWHERE` that carried nothing; the C# side posts
+them from one job of its scheduler, so no job of its router comes between two of them. Each twin
+asserts the set of answers and a partial order: 5 before 9, 9 before 3 and before 7, 3 and 7 before
+1, the pair 3 and 7 free. 9 before 3 guards the leveling; 3 before 1 and 7 before 1 are what each
+side's turns give, not an order the spec states. No total order is asserted: under its twin's
+scheduler, the TypeScript side gives 5, 9, 3, 7, 1, the C# and Rust sides 5, 9, 7, 3, 1, the Rust
+side's owner emptying its queue before any resolver's task runs, and where resolvers run on a pool
+of threads, 3 and 7 race. Refused: a row of the differences, since the TypeScript side can
+level, at the cost of 33 of its tests in 6 files each awaiting a turn, which does not outweigh
+parity; and a row of what is leveled down, which holds a platform's limit to lift, where the C# and
+Rust sides defer by design. Its objections, each with the answer that holds:
+
+| #   | Objection                                                                                                                                                                                                                | Answer                                                                                                                                                                                                                                                                                                                                        |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | The C# twin plays another scenario: it settles after request 1, its ids are swapped against the other sides', and one batch posted from the test's thread races a settled verifier's job, the two-request twin's as well | Accepted: the C# twin takes the TypeScript side's scenario and ids, its batch posted from one job of its scheduler, and the two-request twin posts its pair the same way                                                                                                                                                                      |
+| 2   | "Exactly what the spec orders" is false: refusal 7 is deferred on every side, so 7 before 1 and 3 before 1 count each side's hops                                                                                        | Accepted: each twin asserts the set and 5 before 9 before 7; 3 before 1 and 7 before 1 are kept, with a comment saying they are each side's turns, not the spec                                                                                                                                                                               |
+| 3   | The divergence is visible on the wire, and leaving each side its own order forks it against the Parity rule                                                                                                              | Accepted: the TypeScript side is leveled to a later turn by the Parity rule, as this record leveled the verifier, and the rule is a row of the matrix's Features. A row of the differences is refused: the TypeScript side can level, and its cost, 33 tests in 6 files, does not outweigh parity. Each twin's 9 before 3 guards the leveling |
+| 4   | A sentence in spec 9.2 is loose, false for the sides whose answers go through a queue, a gate and credit, and belongs in a record, since no conversation can test it                                                     | Accepted: no spec sentence; the reasoning is here                                                                                                                                                                                                                                                                                             |
+| 5   | 0045's scope is a listener's telling; this record holds the later-turn rule                                                                                                                                              | Accepted: this record                                                                                                                                                                                                                                                                                                                         |
+| 6   | Spec 15.5's "exchanges keep no order" is HTTP's alone                                                                                                                                                                    | Accepted: 15.1 is the clause that makes the difference visible                                                                                                                                                                                                                                                                                |

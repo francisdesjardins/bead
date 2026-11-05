@@ -30,7 +30,7 @@ import {
   queueAddressOf,
   topicOf,
 } from './amqp-messages';
-import { assertHeldFinite, LONGEST_TIMER, PLATFORM_CLOCK } from './clock';
+import { assertHeldFinite, assertHeldWithin, LONGEST_TIMER, PLATFORM_CLOCK } from './clock';
 import { BROKER_DELIVERIES, BROKER_PUBLISHED, TRANSPORT_AMQP } from './constants';
 import { createEmitter } from './emitter';
 import { GenericError, ProgrammerError, toCancelError, toError } from './errors';
@@ -54,11 +54,11 @@ export type { BrokerDelivery, BrokerPublished, BrokerTopic, IBrokerAdapter } fro
 
 export interface IAmqpBrokerAdapterOptions {
   /**
-   * How long its start waits for its broker's OPEN and its sessions, its inbox's subscription for
-   * its declaration, its binding and its receiver, and its inbox's deletion; how long a name's
-   * let-go waits for what it handed on to be settled and its DETACH answered, past which its link
-   * is lost; and its stop; in milliseconds (spec 15.34, 15.37). Defaults to
-   * {@link CONNECT_TIMEOUT}.
+   * How long its start waits for its password, where it asks its provider, its broker's OPEN and its
+   * sessions, its inbox's subscription for its declaration, its binding and its receiver, and its
+   * inbox's deletion; how long a name's let-go waits for what it handed on to be settled and its
+   * DETACH answered, past which its link is lost; and its stop; in milliseconds (spec 15.34, 15.37).
+   * Defaults to {@link CONNECT_TIMEOUT}.
    */
   connectTimeout?: number | undefined;
   /** At least once by default, each transfer unsettled; at most once, each settled (spec 15.35). */
@@ -82,10 +82,22 @@ export interface IAmqpBrokerAdapterOptions {
    */
   maximumMessageSize?: number | undefined;
   /**
-   * Its password, SASL PLAIN's under its id; or asked at each link's start, so that one that expires
-   * renews with each incarnation. None where its TLS client certificate authenticates it.
+   * Its password, SASL PLAIN's under its id, as given: UTF-8 text, never empty and holding no NUL
+   * (spec 15.33, RFC 4616 §2). Refused with a {@link ProgrammerError} as it is built when it is not,
+   * beside a `passwordProvider`, and beside `tls`; and so is its adapter given neither it, its
+   * provider nor `tls`, since its link never authenticates as ANONYMOUS.
    */
-  password?: string | (() => Promise<string> | string) | undefined;
+  password?: string | undefined;
+  /**
+   * What hands its password at each link's start, before its connection opens, with a signal
+   * aborted as its start's own signal aborts, as its link is stopped, as its `connectTimeout` passes,
+   * and once its start ends, linked or not: so that one that expires renews with each incarnation.
+   * Refused as `password` is, and beside it. Its start fails as it outlives that `connectTimeout`,
+   * or as a stop meets it, whether or not it hears its signal, a later answer serving nothing; what it
+   * throws fails its start, its cause; an answer that is no password fails it with a
+   * {@link ProgrammerError} (spec 15.33).
+   */
+  passwordProvider?: ((options: { signal: AbortSignal }) => string | Promise<string>) | undefined;
   /**
    * Its TLS client certificate and key, which its broker maps to its id by SASL EXTERNAL, over
    * `amqps`; and the authority its broker's own certificate is trusted by, where not the platform's.
@@ -152,6 +164,8 @@ interface IIncarnation {
   /** Its broker's OPEN's channel-max: its sessions number one more at most. */
   channelMax: number;
   readonly connection: Connection;
+  /** Told, while its stop drains it, each time a publication settles. */
+  drained: (() => void) | undefined;
   /** What its awaited operations are failed with as it ends. */
   readonly failures: Set<(error: Error) => void>;
   inbox: IReceiving | undefined;
@@ -173,13 +187,15 @@ interface IIncarnation {
   readonly reattached: Set<string>;
   /** Its two sending sessions: to inboxes, and to names. */
   readonly sending: { inboxes: ISending | undefined; names: ISending | undefined };
+  /** Its stop under way, which a later stop shares. */
+  stopping: Promise<void> | undefined;
 }
 
 type SendingKind = keyof IIncarnation['sending'];
 
 // constants
 
-/** How long a start waits for its broker's OPEN and its sessions, by default: 30 seconds (spec 15.37). */
+/** How long a start waits for its password, where it asks its provider, its broker's OPEN and its sessions, by default: 30 seconds (spec 15.37). */
 export const CONNECT_TIMEOUT = 30_000;
 
 /** Its idle-time-out, by default: 30 seconds, its link counted lost silent for twice it (spec 15.37). */
@@ -263,19 +279,6 @@ const boundOf = (named: unknown): number => {
   return typeof named === 'number' && named > 0 ? named : LARGEST_UINT;
 };
 
-/** `idleTimeout` held: a number of milliseconds from 1 to 1,073,741,823, never 0 nor without end. */
-const assertIdleTimeout = (duration: unknown): number => {
-  if (typeof duration !== 'number' || !(duration >= 1 && duration <= LONGEST_IDLE_TIMEOUT)) {
-    const written = typeof duration === 'string' ? JSON.stringify(duration) : String(duration);
-
-    throw new ProgrammerError(
-      `idleTimeout is a number of milliseconds from 1 to ${String(LONGEST_IDLE_TIMEOUT)}, not ${written}`
-    );
-  }
-
-  return Math.round(duration);
-};
-
 /** A count held: a whole number from 1 to `largest`. */
 const assertCount = (name: string, { largest, value }: { largest: number; value: unknown }) => {
   if (!Number.isSafeInteger(value) || (value as number) < 1 || (value as number) > largest) {
@@ -312,6 +315,42 @@ const abandon = (connection: Connection): void => {
   });
 };
 
+// ! no refusal names the password it refuses: a word never carries the secret
+const NOT_A_PASSWORD = 'a password is a non-empty string holding no NUL';
+
+/** Whether `password` is one: UTF-8 text, never empty and holding no NUL (RFC 4616 §2). */
+const isPassword = (password: unknown): password is string => {
+  return typeof password === 'string' && password.length > 0 && !password.includes('\0');
+};
+
+/** What its link authenticates by, held as it is built: a password, its provider, or `tls` alone. */
+const assertAuthentication = ({
+  password,
+  passwordProvider,
+  tls,
+}: Pick<IAmqpBrokerAdapterOptions, 'password' | 'passwordProvider' | 'tls'>): void => {
+  if (password !== undefined && passwordProvider !== undefined) {
+    throw new ProgrammerError('a link takes a password or a password provider, not both');
+  }
+
+  if ((password !== undefined || passwordProvider !== undefined) && tls !== undefined) {
+    throw new ProgrammerError(
+      'a link authenticates by its client certificate or by a password, not both'
+    );
+  }
+
+  // * PLAIN's password is one octet at least, and ANONYMOUS no mechanism of its link (spec 15.33)
+  if (password === undefined && passwordProvider === undefined && tls === undefined) {
+    throw new ProgrammerError(
+      'an AMQP link authenticates by a password or by its client certificate'
+    );
+  }
+
+  if (password !== undefined && !isPassword(password)) {
+    throw new ProgrammerError(NOT_A_PASSWORD);
+  }
+};
+
 // definition
 
 /**
@@ -325,13 +364,19 @@ const abandon = (connection: Connection): void => {
  * that it ends with it. Each receiver is unsettled, first, of no max-message-size, its credit its
  * own: its inbox's `linkCredit` and a name's 1 as it attaches, and one more as each message is
  * settled `accepted`, never released nor modified; a name is let go within `connectTimeout`, what
- * it handed on settled and its DETACH answered, or its link is lost. Each publication is one
- * message of the profile, counted to its byte and refused past its sender's max-message-size, held
- * to its sender's credit, later ones waiting in their order; `accepted` is taken, `released` no
+ * it handed on settled and its DETACH answered, or its let-go fails, then its link is lost, a
+ * microtask behind what its caller made as it awaited it, so that its caller reads that bound
+ * passed, never its link lost (spec 15.21). Each publication is one message of the profile, counted
+ * to its byte and refused past its sender's max-message-size, held to its sender's credit, later
+ * ones waiting in their order; `accepted` is taken, `released` no
  * subscriber, any other outcome refuses it. The end of its connection, of its inbox's session or
  * receiver, is its link lost; a name's receiver its broker ends is attached again once, on a
- * session of its own. No link of an id takes another over. Its leg is secure under TLS or to the
- * loopback; it runs in Node alone.
+ * session of its own. Its stop, within its connectTimeout, takes no publication, sends what waits on
+ * a sender's credit and awaits each outcome, fails what has not gone by then, deletes its inbox
+ * through its broker's management, detaches each receiver, ends each session and closes its
+ * connection with no error: once it settled, its broker hands it nothing, a name's queue holding
+ * what comes to the name. No link of an id takes another over. Its leg is secure under TLS or to
+ * the loopback; it runs in Node alone.
  *
  * @example
  * const adapter = createAmqpBrokerAdapter({ id: 'server', password, url: 'amqps://broker:5671' });
@@ -342,11 +387,14 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
     delivery = BROKER_DELIVERIES.AT_LEAST_ONCE,
     id,
     password,
+    passwordProvider,
     tls,
     url,
     virtualHost,
   } = options;
-  const idleTimeout = assertIdleTimeout(options.idleTimeout ?? IDLE_TIMEOUT);
+  const idleTimeout = assertHeldWithin('idleTimeout', options.idleTimeout ?? IDLE_TIMEOUT, {
+    ceiling: LONGEST_IDLE_TIMEOUT,
+  });
   const connectTimeout = assertHeldFinite(
     'connectTimeout',
     options.connectTimeout ?? CONNECT_TIMEOUT
@@ -395,6 +443,8 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
     throw new ProgrammerError(`a TLS client certificate is carried over amqps, not ${url}`);
   }
 
+  assertAuthentication({ password, passwordProvider, tls });
+
   const isAtMostOnce = delivery === BROKER_DELIVERIES.AT_MOST_ONCE;
   const isTls = parsed.protocol === 'amqps:';
   const host = parsed.hostname.replace(/^\[(.*)\]$/, '$1');
@@ -416,6 +466,8 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
   // each start and each stop its own, so that a stop as a start asks its password ends that start
   let starts = 0;
   let isStarting = false;
+  // the start under way's ask, its provider's signal, which its stop aborts
+  let asking: AbortController | undefined;
   // what its last link's senders' ATTACHes said, read while it is down
   const lastBounds: Record<SendingKind, number> = { inboxes: LARGEST_UINT, names: LARGEST_UINT };
   let unsettled = 0;
@@ -449,6 +501,146 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
     }
 
     sending.pending.clear();
+  };
+
+  // * what it was handed to publish before its stop, sent and its outcome come first: settles once
+  // nothing waits on a sender's credit or for its outcome (spec 15.24)
+  const drain = (incarnation: IIncarnation): Promise<void> => {
+    return new Promise<void>((resolve) => {
+      incarnation.drained = () => {
+        const isDrained = Object.values(incarnation.sending).every((sending) => {
+          return (
+            sending === undefined ||
+            sending.isEnded ||
+            (sending.waiting.length === 0 && sending.pending.size === 0)
+          );
+        });
+
+        if (isDrained) {
+          incarnation.drained = undefined;
+          resolve();
+        }
+      };
+      incarnation.drained();
+    });
+  };
+
+  // * its stop, once, within one bounded shutdown: no down told, a stop is no loss, and no
+  // publication taken from it; what it was handed sent first, then what is left failed, each
+  // receiver detached, each session ended and its CLOSE sent
+  const endOf = async (incarnation: IIncarnation): Promise<void> => {
+    incarnation.isLinked = false;
+    incarnation.isUp = false;
+
+    const { connection } = incarnation;
+    // * one bounded shutdown: what does not come within it is not waited for
+    const bounded = Promise.withResolvers<void>();
+    const timer = PLATFORM_CLOCK.setTimeout(
+      bounded.resolve,
+      Math.min(connectTimeout, LONGEST_TIMER)
+    );
+    const gone = new Promise<void>((resolve) => {
+      connection.once('connection_close', () => {
+        resolve();
+      });
+      connection.once('disconnected', () => {
+        resolve();
+      });
+    });
+
+    // ! before what waits is failed below: what it was handed goes first, its outcome awaited
+    await Promise.race([bounded.promise, gone, drain(incarnation)]);
+    incarnation.drained = undefined;
+    incarnation.isRetired = true;
+
+    if (current === incarnation) {
+      current = undefined;
+      unsettled = 0;
+    }
+
+    const stopped = new GenericError(`the link of ${id} stopped`);
+
+    for (const fail of incarnation.failures) {
+      fail(stopped);
+    }
+
+    incarnation.failures.clear();
+
+    for (const sending of Object.values(incarnation.sending)) {
+      if (sending !== undefined) {
+        endSending(sending, stopped);
+      }
+    }
+
+    const { inbox } = incarnation;
+
+    // ! its inbox deleted by its broker's management, as its unsubscription deletes it: an exclusive
+    // queue outlives its connection's CLOSE until its broker ends it, taking what comes meanwhile;
+    // after the drain, so that what waits on a sender's credit is never overtaken
+    if (inbox !== undefined && connection.is_open()) {
+      const given = new AbortController();
+
+      inbox.isDeleting = true;
+      await Promise.race([
+        bounded.promise,
+        gone,
+        deleteInbox(connection, { queue: topicOf(inbox.topic), signal: given.signal }).catch(() => {
+          // * refused or lost: its link ends all the same, the queue with it
+        }),
+      ]);
+      given.abort();
+    }
+
+    if (connection.is_open()) {
+      // * each receiver detached, its DETACH awaited, then each session ended
+      const receivings = [
+        ...(incarnation.inbox === undefined ? [] : [incarnation.inbox]),
+        ...incarnation.names.values(),
+      ];
+
+      await Promise.race([
+        bounded.promise,
+        gone,
+        Promise.all(
+          receivings.map(({ receiver }) => {
+            return new Promise<void>((resolve) => {
+              if (receiver === undefined || !receiver.is_open()) {
+                resolve();
+
+                return;
+              }
+
+              receiver.once('receiver_close', () => {
+                resolve();
+              });
+              close(receiver);
+            });
+          })
+        ),
+      ]);
+
+      for (const { session } of receivings) {
+        endSession(session);
+      }
+
+      endSession(incarnation.inboxSession);
+
+      for (const sending of Object.values(incarnation.sending)) {
+        endSession(sending?.session);
+      }
+
+      // * then its CLOSE, of no error, and its peer's awaited
+      try {
+        connection.close();
+      } catch {
+        // its socket ended
+      }
+
+      await Promise.race([bounded.promise, gone]);
+    }
+
+    PLATFORM_CLOCK.clearTimeout(timer);
+    abandon(connection);
   };
 
   // * an incarnation ended: what it awaits failed, what it holds let go, its connection abandoned;
@@ -1089,13 +1281,17 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
   };
 
   // * a name let go within one connectTimeout: its DETACH once what its receiver handed on was
-  // settled, then its session ended once its broker answered it; past that bound, its link lost
-  const letGo = (incarnation: IIncarnation, receiving: IReceiving): Promise<void> => {
+  // settled, then its session ended once its broker answered it; past that bound, its link lost,
+  // which `losing` holds for its caller to end once it failed
+  const letGo = (
+    incarnation: IIncarnation,
+    { losing, receiving }: { losing: { lost?: Error | undefined }; receiving: IReceiving }
+  ): Promise<void> => {
     const key = topicOf(receiving.topic);
     let timer: ReturnType<typeof PLATFORM_CLOCK.setTimeout> | undefined;
 
     return awaited<void>(incarnation, {
-      begin: ({ resolve }) => {
+      begin: ({ reject, resolve }) => {
         const { receiver, session } = receiving;
         const done = (): void => {
           endSession(session);
@@ -1120,12 +1316,10 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
         // answered anew, its pair gone
         timer = PLATFORM_CLOCK.setTimeout(
           () => {
-            retire(
-              incarnation,
-              new GenericError(
-                `the link of ${id} was lost: it let the name ${key} go within no ${String(connectTimeout)} ms, its connectTimeout`
-              )
+            losing.lost = new GenericError(
+              `the link of ${id} was lost: it let the name ${key} go within no ${String(connectTimeout)} ms, its connectTimeout`
             );
+            reject(losing.lost);
           },
           Math.min(connectTimeout, LONGEST_TIMER)
         );
@@ -1159,13 +1353,101 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
     };
   };
 
-  const linkWith = async (signal: AbortSignal | undefined): Promise<void> => {
+  // * its password asked of its provider, raced against its start's own signal, its stop and its
+  // connectTimeout: whichever ends the ask aborts its provider's signal with that start's outcome,
+  // and a later answer serves nothing (spec 15.33)
+  const askPassword = (
+    provider: NonNullable<IAmqpBrokerAdapterOptions['passwordProvider']>,
+    { ask, signal }: { ask: AbortController; signal: AbortSignal | undefined }
+  ): Promise<string> => {
+    return new Promise<string>((resolve, reject) => {
+      let isSettled = false;
+      const settle = (): boolean => {
+        if (isSettled) {
+          return false;
+        }
+
+        isSettled = true;
+        PLATFORM_CLOCK.clearTimeout(timer);
+        signal?.removeEventListener('abort', cancel);
+        ask.signal.removeEventListener('abort', giveUp);
+
+        return true;
+      };
+      const giveUp = (): void => {
+        if (settle()) {
+          reject(toError(ask.signal.reason));
+        }
+      };
+      const cancel = (): void => {
+        ask.abort(toCancelError(signal as AbortSignal));
+      };
+      const timer = PLATFORM_CLOCK.setTimeout(
+        () => {
+          ask.abort(
+            new GenericError(
+              `the link of ${id} had no password within ${String(connectTimeout)} ms, its connectTimeout`
+            )
+          );
+        },
+        Math.min(connectTimeout, LONGEST_TIMER)
+      );
+
+      ask.signal.addEventListener('abort', giveUp, { once: true });
+
+      if (signal?.aborted === true) {
+        cancel();
+
+        return;
+      }
+
+      signal?.addEventListener('abort', cancel, { once: true });
+      // * a throw as it is called fails its start as a rejection does
+      void Promise.resolve()
+        .then(() => {
+          return provider({ signal: ask.signal });
+        })
+        .then(
+          (answer: unknown) => {
+            if (!settle()) {
+              return;
+            }
+
+            if (isPassword(answer)) {
+              resolve(answer);
+            } else {
+              reject(new ProgrammerError(NOT_A_PASSWORD));
+            }
+          },
+          (reason: unknown) => {
+            if (settle()) {
+              reject(new GenericError('the password provider failed', { cause: reason }));
+            }
+          }
+        );
+    });
+  };
+
+  const linkWith = async ({
+    ask,
+    signal,
+  }: {
+    ask: AbortController;
+    signal: AbortSignal | undefined;
+  }): Promise<void> => {
     const asked = starts;
-    const secret = typeof password === 'function' ? await password() : password;
+    // * one connectTimeout from its start's call: its password's ask, then its OPEN and sessions
+    const deadline = PLATFORM_CLOCK.performance.now() + connectTimeout;
+    const secret =
+      passwordProvider === undefined
+        ? password
+        : await askPassword(passwordProvider, { ask, signal });
 
     if (asked !== starts) {
       throw new GenericError(`the link of ${id} stopped as it started`);
     }
+
+    const left = Math.max(0, Math.min(deadline - PLATFORM_CLOCK.performance.now(), LONGEST_TIMER));
 
     const connectionOptions: ConnectionOptions = {
       container_id: id,
@@ -1197,6 +1479,7 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
     const held: IIncarnation = {
       channelMax: 65_535,
       connection,
+      drained: undefined,
       failures: new Set(),
       inbox: undefined,
       inboxSession: undefined,
@@ -1207,6 +1490,7 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
       pending: new Map(),
       reattached: new Set(),
       sending: { inboxes: undefined, names: undefined },
+      stopping: undefined,
     };
 
     current = held;
@@ -1222,16 +1506,13 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
 
     try {
       await new Promise<void>((resolve, reject) => {
-        const timer = PLATFORM_CLOCK.setTimeout(
-          () => {
-            fail(
-              new GenericError(
-                `the link of ${id} had no OPEN and no sessions within ${String(connectTimeout)} ms`
-              )
-            );
-          },
-          Math.min(connectTimeout, LONGEST_TIMER)
-        );
+        const timer = PLATFORM_CLOCK.setTimeout(() => {
+          fail(
+            new GenericError(
+              `the link of ${id} had no OPEN and no sessions within ${String(connectTimeout)} ms, its connectTimeout`
+            )
+          );
+        }, left);
         let isSettled = false;
         const fail = (error: Error): void => {
           if (isSettled) {
@@ -1432,6 +1713,8 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
           } else {
             resolve(published ?? BROKER_PUBLISHED.TAKEN);
           }
+
+          incarnation.drained?.();
         };
         const entry = {
           fail: (error: Error) => {
@@ -1493,10 +1776,26 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
 
       isStarting = true;
 
+      const ask = new AbortController();
+
+      asking = ask;
+
       try {
-        await linkWith(startOptions?.signal);
+        await linkWith({ ask, signal: startOptions?.signal });
       } finally {
-        isStarting = false;
+        // * a start its stop ended no longer holds the next
+        if (asking === ask) {
+          asking = undefined;
+          isStarting = false;
+        }
+
+        // ! its provider's signal aborted once its start ended, linked or not, in a later turn,
+        // so that its listeners run outside the start's own stack
+        if (passwordProvider !== undefined) {
+          PLATFORM_CLOCK.setTimeout(() => {
+            ask.abort();
+          }, 0);
+        }
       }
     },
     stop: async () => {
@@ -1504,97 +1803,20 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
 
       starts += 1;
 
+      // * a start that asks its password ends at once, whether or not its provider hears its
+      // signal, and the next start links and asks anew
+      if (asking !== undefined) {
+        asking.abort(new GenericError(`the link of ${id} stopped as it started`));
+        asking = undefined;
+        isStarting = false;
+      }
+
       if (incarnation === undefined) {
         return;
       }
 
-      // * no down told: a stop is no loss
-      incarnation.isLinked = false;
-      incarnation.isRetired = true;
-      incarnation.isUp = false;
-      current = undefined;
-      unsettled = 0;
-
-      const stopped = new GenericError(`the link of ${id} stopped`);
-
-      for (const fail of incarnation.failures) {
-        fail(stopped);
-      }
-
-      incarnation.failures.clear();
-
-      for (const sending of Object.values(incarnation.sending)) {
-        if (sending !== undefined) {
-          endSending(sending, stopped);
-        }
-      }
-
-      const { connection } = incarnation;
-      // * one bounded shutdown: what does not come within it is not waited for
-      const bounded = Promise.withResolvers<void>();
-      const timer = PLATFORM_CLOCK.setTimeout(
-        bounded.resolve,
-        Math.min(connectTimeout, LONGEST_TIMER)
-      );
-      const gone = new Promise<void>((resolve) => {
-        connection.once('connection_close', () => {
-          resolve();
-        });
-        connection.once('disconnected', () => {
-          resolve();
-        });
-      });
-
-      if (connection.is_open()) {
-        // * each receiver detached, its DETACH awaited, then each session ended
-        const receivings = [
-          ...(incarnation.inbox === undefined ? [] : [incarnation.inbox]),
-          ...incarnation.names.values(),
-        ];
-
-        await Promise.race([
-          bounded.promise,
-          gone,
-          Promise.all(
-            receivings.map(({ receiver }) => {
-              return new Promise<void>((resolve) => {
-                if (receiver === undefined || !receiver.is_open()) {
-                  resolve();
-
-                  return;
-                }
-
-                receiver.once('receiver_close', () => {
-                  resolve();
-                });
-                close(receiver);
-              });
-            })
-          ),
-        ]);
-
-        for (const { session } of receivings) {
-          endSession(session);
-        }
-
-        endSession(incarnation.inboxSession);
-
-        for (const sending of Object.values(incarnation.sending)) {
-          endSession(sending?.session);
-        }
-
-        // * then its CLOSE, of no error, and its peer's awaited
-        try {
-          connection.close();
-        } catch {
-          // its socket ended
-        }
-
-        await Promise.race([bounded.promise, gone]);
-      }
-
-      PLATFORM_CLOCK.clearTimeout(timer);
-      abandon(connection);
+      incarnation.stopping ??= endOf(incarnation);
+      await incarnation.stopping;
     },
     subscribe: (topic, subscription?: IBrokerSubscription) => {
       const incarnation = live();
@@ -1675,31 +1897,42 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
       }
 
       const receiving = incarnation.names.get(key);
+      const pending = incarnation.pending.get(key);
+      const losing: { lost?: Error | undefined } = {};
+      let leaving: Promise<void>;
 
       if (receiving !== undefined) {
         receiving.isLeaving = true;
         incarnation.names.delete(key);
-
-        return letGo(incarnation, receiving);
-      }
-
-      const pending = incarnation.pending.get(key);
-
-      if (pending === undefined) {
+        leaving = letGo(incarnation, { losing, receiving });
+      } else if (pending === undefined) {
         return Promise.resolve();
+      } else {
+        // * a subscription under way, met: never held, and let go once its ATTACH is answered
+        pending.receiving.isLeaving = true;
+        leaving = pending.attached.then(
+          () => {
+            return letGo(incarnation, { losing, receiving: pending.receiving });
+          },
+          () => {
+            // refused or given up: nothing is held to let go
+          }
+        );
       }
 
-      // * a subscription under way, met: never held, and let go once its ATTACH is answered
-      pending.receiving.isLeaving = true;
+      // ! a let-go past its bound fails before its link is told lost: made first, this ends its link
+      // a microtask behind what its caller made as it awaited it
+      leaving.catch(() => {
+        const { lost } = losing;
 
-      return pending.attached.then(
-        () => {
-          return letGo(incarnation, pending.receiving);
-        },
-        () => {
-          // refused or given up: nothing is held to let go
+        if (lost !== undefined) {
+          queueMicrotask(() => {
+            retire(incarnation, lost);
+          });
         }
-      );
+      });
+
+      return leaving;
     },
   };
 

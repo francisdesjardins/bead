@@ -67,8 +67,10 @@ timer of the client's, never on a reading of its wall clock".
 and a router built alone take one — `clock` on the TypeScript side, `Clock` on the C# side, `clock`
 on the Rust side — and each layer exposes the clock it runs on. A layer built on another runs on
 that layer's clock, and refuses one that differs; a facade given a transport already built takes
-that transport's clock, and the builder of its sessions receives the clock to use. The code the
-builder generates adds none: it runs on its transport's clock.
+that transport's clock, and builds its sessions on it. On the TypeScript side their builder is
+given it, and a session manager it builds on another is disposed of, then refused; on the C# and
+Rust sides their options' clock must be it, and options on another are refused before any session
+manager is built. The code the builder generates adds none: it runs on its transport's clock.
 
 **The clock has each platform's shape.** On the C# side it is a `TimeProvider`. On the Rust side it
 is a `Clock` trait, its monotonic reading, its wall clock and a timer armed, `SystemClock` the
@@ -80,18 +82,18 @@ TypeScript side it is the part of the globals Bead calls — `setTimeout`, `clea
 so its timers keep the platform's handle, `unref` included where it has one. The pair is a row of
 each side's list of terms ([0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md)). The
 word is _clock_ ([0003](0003-one-word-one-meaning.md)): `clock`, `Clock`, `IClock`; a _timestamp_ is
-the monotonic reading alone, and the instants a side reports are `lastActivity`, `LastActivity`, and
-a trace's `startedAt`, `StartedAt`, beside its `duration`, `Duration` — the shape of an
-OpenTelemetry span: a start on the wall clock, a duration on the monotonic one.
+the monotonic reading alone, and the instants a side reports are `lastActivity`, and a trace's
+`startedAt`, beside its `duration` — the shape of an OpenTelemetry span: a start on the wall clock,
+a duration on the monotonic one.
 
-**One ceiling, JavaScript's: 2³¹ − 1 milliseconds**, which the C# side keeps for parity, though its
-timers reach twice as far. Every option and method that takes a timeout refuses a longer one — a
-session manager's reset and a server's connection timeout among them — and _never_ is `Infinity`,
-`Timeout.InfiniteTimeSpan` and `Duration::MAX`, which arm nothing. One constant a side, beside its
-clock. **And one floor: a millisecond, counted whole.** Bead arms no timer for less on the clock it
-is given, where Node waits a millisecond at least and .NET fires at once, nor for a fraction, which
-both drop. How a side holds a duration an application gives it, between that floor and that
-ceiling, is [0014](0014-every-place-that-takes-a-duration-is-a-row-of-one-file.md)'s.
+**One ceiling, JavaScript's: 2³¹ − 1 milliseconds**, which the C# and Rust sides keep for parity,
+though their timers reach further. Every option and method that takes a timeout refuses a longer one
+— a session manager's reset and a server's connection timeout among them — and _never_ is
+`Infinity`, `Timeout.InfiniteTimeSpan` and `Duration::MAX`, which arm nothing. One constant a side,
+beside its clock. **And one floor: a millisecond, counted whole.** Bead arms no timer for less on
+the clock it is given, where Node waits a millisecond at least and .NET fires at once, nor for a
+fraction, which both drop. How a side holds a duration an application gives it, between that floor
+and that ceiling, is [0014](0014-every-place-that-takes-a-duration-is-a-row-of-one-file.md)'s.
 
 **`advance` steps.** It settles the side; takes the earliest timer due by now plus its milliseconds;
 sets both readings to that due; fires it; settles; and so on, then sets the readings to now plus its
@@ -172,7 +174,7 @@ the round of the broker's core, which
 [0038](0038-over-a-broker-a-connection-is-placed-once-at-its-open-named-by-both-its-ends.md) keeps.
 
 The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)) in
-three rounds here, and in two more on durations, which
+four rounds here, and in two more on durations, which
 [0014](0014-every-place-that-takes-a-duration-is-a-row-of-one-file.md) holds. Its objections, each
 with the answer that holds:
 
@@ -213,3 +215,18 @@ with the answer that holds:
 | "When the call started" is false of a notification, whose steps each took a start of their own, a failed notify two                                                 | Accepted: one meaning for every step — a notification's is when it is sent or heard — and a failed notify tells its failure at its sent step's start, with a twin test. |
 | On the C# side, 0007 decides the types: a `DateTimeOffset` and a `TimeSpan`, the statistics with them, the truncation to whole milliseconds kept                    | Accepted: `StartedAt` and `Duration` in the platform's types, the truncation explicit, a twin test advancing 30.6 ms and telling 30.                                    |
 | The renaming leaves 0011, the changelog, the demo, an internal `event` and the matrix behind                                                                        | Accepted: the internal wall reading is `instant`, and the matrix's row names every instant a side reports.                                                              |
+
+### On the words of a layer's clock
+
+| Objection                                                                                                                                         | Answer                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| A clock is still named apart on the C# side, by its type or as "the system's", so twins that pin the whole refusal would pin two strings          | Accepted: every side names a clock "the platform's" or "one of its own"; a clock's type, if it is wanted, comes to every side at once, by a decision. The prose that calls `TimeProvider.System` the system's clock stays: it names the platform's in its platform's own word.                                                                                                                               |
+| One side alone pins the refusal: the Rust side asserts its end and the C# side its exception's type                                               | Accepted: each side's twin asserts the whole message.                                                                                                                                                                                                                                                                                                                                                        |
+| The twins' titles do not pair: the Rust side plays two versions of the refusal, and each other side lacks one of them                             | Accepted: one title on every side, the TypeScript side's, which names the sessions, its cases joined under it; the TypeScript side gains the twin of a server's sessions built with their own options.                                                                                                                                                                                                       |
+| The joined twin holds a case the TypeScript side alone can play, a router a builder made on another clock, and nothing says why                   | Accepted: a facade's layers built by the application are an open row of the support matrix's differences, which places the TypeScript side's `IServerLayers` and `IClientLayers`.                                                                                                                                                                                                                            |
+| No side is the reference, so "the TypeScript side's words" are no ground, and every sentence that states the rule says "sessions"                 | Accepted: the noun rests on a rule. One object holds the clock, the session manager, one concept on every side, which the family names as it names "a service manager" and "a server's router", and the template's verbs are singular. The sentences that state this refusal with the layer as subject take that noun; "sessions" stays where it names the member, the option, the gauges or the collection. |
+| A plural layer, "a server's sessions", is left unweighed                                                                                          | Accepted, and the plural refused: it asks the template for a number its verbs agree with, on every side and in every assertion of it, for one caller, and makes its subject the sessions, which hold no clock.                                                                                                                                                                                               |
+| Nothing tells a caller the layer is named in the singular, and a facade's other layer, its services, is plural on every side                      | Accepted: each side's documentation of a layer's name says it is named in the singular, which the refusal's verbs agree with.                                                                                                                                                                                                                                                                                |
+| The C# side changes two words, the layer and the one beneath, where the Rust side changes the layer alone                                         | Accepted: the change is stated as it is.                                                                                                                                                                                                                                                                                                                                                                     |
+| A message released on two sides changes, and the changelog says nothing                                                                           | Accepted: the changelog's fixes say it.                                                                                                                                                                                                                                                                                                                                                                      |
+| The record states a builder given the clock, the TypeScript side's mechanism, as every side's, though it is why the thing refused differs in kind | Accepted: the record states both, a session manager built then refused and disposed of on the TypeScript side, its options refused before any is built on the C# and Rust sides.                                                                                                                                                                                                                             |

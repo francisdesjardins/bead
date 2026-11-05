@@ -147,6 +147,69 @@ test.describe('createWorkerTransportClient', () => {
     expect(CONNECT_DEFAULTS.timeout).toBe(10_000);
   });
 
+  // spec 15.12.17
+  test('a Web Worker transport paused directly holds what its port brings, and hands it in order once resumed', async () => {
+    await using started = await startWorker();
+    const { server, serverEvents, worker } = started;
+    await using client = createWorkerTransportClient({ worker });
+    const heard: number[] = [];
+    const connectionHandle = 'type=WORKER;ip=local;ordinal=1';
+
+    client.on('message', ({ data }) => {
+      heard.push(...new Uint8Array(data as ArrayBuffer));
+    });
+    await client.connect({});
+
+    // * a port hands each message as its own task, so no count pauses it: paused directly, each end
+    client.pause();
+    server.pause(connectionHandle);
+
+    for (const byte of [1, 2, 3]) {
+      await server.send({ data: Uint8Array.of(byte) }, connectionHandle);
+      await client.send({ data: Uint8Array.of(10 + byte) });
+    }
+
+    await expect
+      .poll(() => {
+        return [client.socket !== null, heard.length, serverEvents.length];
+      })
+      .toEqual([true, 0, 0]);
+    // what its ports brought had time to come, and was held
+    await new Promise((resolve) => {
+      setTimeout(resolve, 50);
+    });
+
+    expect([heard, serverEvents]).toEqual([[], []]);
+
+    client.resume();
+    server.resume(connectionHandle);
+
+    await expect
+      .poll(() => {
+        return [heard, serverEvents];
+      })
+      .toEqual([
+        [1, 2, 3],
+        [
+          ['message', [11], undefined, connectionHandle],
+          ['message', [12], undefined, connectionHandle],
+          ['message', [13], undefined, connectionHandle],
+        ],
+      ]);
+  });
+
+  // decision 0047: options of which every member is optional are optional
+  test('connects with no options', async () => {
+    await using started = await startWorker();
+    const client = createWorkerTransportClient({ worker: started.worker });
+
+    await client.connect();
+
+    expect([client.isOpen(), started.server.clients.length]).toEqual([true, 1]);
+
+    await client.disconnect();
+  });
+
   test('says it carries no credential beside an envelope, and is secure, never leaving the machine, before any connect', async () => {
     await using started = await startWorker();
     const client = createWorkerTransportClient({ worker: started.worker });

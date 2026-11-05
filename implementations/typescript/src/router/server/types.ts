@@ -1,6 +1,9 @@
 // dependencies
 
-import type { TransportServerConnectionHandle } from '../../transport/server/types';
+import type {
+  ITransportServerConnection,
+  TransportServerConnectionHandle,
+} from '../../transport/server/types';
 import type { IClock, TimeoutId } from '../../transport/shared/clock';
 import type {
   EmitterListener,
@@ -9,11 +12,7 @@ import type {
   ITransportMessage,
 } from '../../transport/shared/types';
 import type { IRouterClient } from '../client/types';
-import type {
-  IMetricsRegistry,
-  INotifyingSeries,
-  IProcedureSeries,
-} from '../shared/metrics-registry';
+import type { IMetricsRegistry, INotifyingSeries } from '../shared/metrics-registry';
 import type {
   CallId,
   DebugDirection,
@@ -23,13 +22,12 @@ import type {
   ICallAddress,
   ICredentials,
   IFailure,
-  INotificationLike,
-  IProcedure,
   IProcedureAddress,
-  IResolvedRequestOptions,
+  IntakeLimitsOptions,
   IRouterResult,
   IRouterLike,
   IRouterLimits,
+  IRouterRequest,
   ISubscriber,
   NotificationKey,
   ProcedureId,
@@ -233,6 +231,16 @@ export interface ISession<Data> {
 }
 
 /**
+ * A change of one session, as its event tells it: the session as it is now, a copy, and the value
+ * that changed, new beside old.
+ */
+export interface ISessionChange<Data, Value> {
+  readonly newValue: Value;
+  readonly oldValue: Value;
+  readonly session: ISession<Data>;
+}
+
+/**
  * The sessions, by connection, with their inactivity timers. A connection with no session has no
  * timer.
  */
@@ -385,16 +393,16 @@ export interface ISessionTimeoutIds {
 
 // types
 
-/** Event name → the arguments its listeners receive; every session is a copy. */
+/** Event name → the arguments its listeners receive; every session is a copy, a change's among them. */
 export type SessionManagerEventMap<Data = unknown> = {
-  connectionInactivityTimeoutChanged: [session: ISession<Data>, newValue: number, oldValue: number];
+  connectionInactivityTimeoutChanged: [change: ISessionChange<Data, number>];
   /** The session as it is when its timer fires. */
   connectionInactivityTimeoutReached: [session: ISession<Data>];
   created: [session: ISession<Data>];
-  dataChanged: [session: ISession<Data>, newValue: Data | undefined, oldValue: Data | undefined];
+  dataChanged: [change: ISessionChange<Data, Data | undefined>];
   deleted: [session: ISession<Data>];
-  lastActivityChanged: [session: ISession<Data>, newValue: number, oldValue: number];
-  sessionInactivityTimeoutChanged: [session: ISession<Data>, newValue: number, oldValue: number];
+  lastActivityChanged: [change: ISessionChange<Data, number>];
+  sessionInactivityTimeoutChanged: [change: ISessionChange<Data, number>];
   /** The session as it is when its timer fires. */
   sessionInactivityTimeoutReached: [session: ISession<Data>];
   updated: [session: ISession<Data>];
@@ -445,12 +453,13 @@ export interface IRouterServer<
    * Ends each subscription `connectionHandle` holds, established by its answer, with `failure` on
    * its call id — SESSION_REQUIRED when its session ended, say, whose end the first failure
    * announces — then forgets it. A subscribing call still in flight is left to its own answer.
-   * Resolves once each failure was tried; one that cannot go out is reported to `error`.
+   * Resolves once each failure was tried; one that cannot go out is reported to `error`. A handle
+   * that is no string is a {@link ProgrammerError}, nothing moved.
    */
-  dropSubscriptions(connection: {
-    connectionHandle: TransportServerConnectionHandle;
-    failure: IFailure;
-  }): Promise<void>;
+  dropSubscriptions(
+    connectionHandle: TransportServerConnectionHandle,
+    failure: IFailure
+  ): Promise<void>;
   /**
    * Ends a credential's session by its identifier on every connection that keeps it, and nothing
    * else (spec 13.10): each subscription it bounds ends with SESSION_REQUIRED on its call id, a
@@ -523,34 +532,7 @@ export interface IRouterServer<
    * failure answered, a payload too large or every call id in use; a {@link TimeoutError}, a
    * {@link CancelError}, or what the transport's `send` throws.
    */
-  request(
-    payload: Uint8Array,
-    request: {
-      /**
-       * Hears the call's id once the router drew it, before the request goes; a call refused before
-       * it draws one is never heard.
-       */
-      onCallId?: ((callId: CallId) => void) | undefined;
-      /**
-       * Hears `true` as the request is handed to the transport, and `false` should the transport
-       * refuse it: before `true`, or after `false`, nothing of it was tried.
-       */
-      onSent?: ((isHanded: boolean) => void) | undefined;
-      options: IResolvedRequestOptions;
-      procedure: IProcedure;
-      /**
-       * What refuses the call once it started, before it goes, as its requester judged it: a value
-       * its rules refuse (spec 18.2). It draws no call id, and its payload goes nowhere.
-       */
-      refusal?: Error | undefined;
-      /**
-       * The series its requester's declaration gave, which a counted call counts into; `_OTHER`'s
-       * when none is given, as a relay's leg B.
-       */
-      series?: IProcedureSeries | undefined;
-      subscribes?: INotificationLike | undefined;
-    }
-  ): Promise<IRouterResult>;
+  request(payload: Uint8Array, request: IRouterRequest): Promise<IRouterResult>;
   /**
    * Takes a connection's subscription away, as its request to unsubscribe asks with the call id of
    * the request that subscribed it; whether it held that one.
@@ -603,6 +585,13 @@ export interface IRouterServerOptions {
    * nothing, and costs nothing.
    */
   metricsRegistry?: IMetricsRegistry | undefined;
+  /**
+   * What it holds untaken of each connection within one task, past which it pauses that
+   * connection's transport, resumed in the next (spec 15.12): {@link INTAKE_DEFAULTS}' where these
+   * say nothing, each 1 at least, or the router is a {@link ProgrammerError}. A side's own,
+   * announced to no one, beside `pacing`.
+   */
+  intake?: IntakeLimitsOptions | undefined;
   /** What a paced subscription queues at most: {@link PACING_DEFAULTS}' where it says nothing. */
   pacing?: PacingLimitsOptions | undefined;
   /** How the router relays a request that names a destination registered in it. */
@@ -727,7 +716,7 @@ export interface IRouterServerTransportLike {
   off(
     event: 'connection',
     listener: EmitterListener<
-      [socket: unknown, request: unknown, connectionHandle: TransportServerConnectionHandle]
+      [connection: ITransportServerConnection, connectionHandle: TransportServerConnectionHandle]
     >
   ): unknown;
   off(
@@ -745,7 +734,7 @@ export interface IRouterServerTransportLike {
   on(
     event: 'connection',
     listener: EmitterListener<
-      [socket: unknown, request: unknown, connectionHandle: TransportServerConnectionHandle]
+      [connection: ITransportServerConnection, connectionHandle: TransportServerConnectionHandle]
     >
   ): unknown;
   on(
@@ -774,6 +763,20 @@ export interface IRouterServerTransportLike {
    * it no request.
    */
   isTwoWay?(connectionHandle: TransportServerConnectionHandle): boolean;
+  /**
+   * Pauses a connection, its router behind on it (spec 15.12, decision 0046): it hands nothing more
+   * of it, and holds what it already received, whole or still arriving, in order, until `resume`;
+   * while it holds anything, what comes next waits behind it, paused or not, so nothing overtakes
+   * what is held. One whose peer is its application's own code holds without bound, and says so.
+   * Idempotent, it tells no listener within it; an unknown handle is let be.
+   */
+  pause(connectionHandle: TransportServerConnectionHandle): void;
+  /**
+   * Resumes a connection: what it holds it hands on, in order, from a later step of its own, never
+   * within this call, asking before each hand whether it was paused again. Idempotent, it tells no
+   * listener within it; an unknown handle is let be.
+   */
+  resume(connectionHandle: TransportServerConnectionHandle): void;
   send(
     message: ITransportMessage,
     connectionHandle: TransportServerConnectionHandle

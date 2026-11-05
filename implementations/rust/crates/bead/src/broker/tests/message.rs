@@ -8,7 +8,7 @@ use bytes::Bytes;
 use crate::broker::adapter::{BrokerMessage, BrokerMessageOptions, BrokerPublication};
 
 fn publication() -> BrokerPublication {
-    BrokerPublication::of(["bead", "i", "ada"], Bytes::from_static(&[0xB1]))
+    BrokerPublication::new(["bead", "i", "ada"], Bytes::from_static(&[0xB1]))
 }
 
 #[test]
@@ -17,7 +17,7 @@ fn acknowledges_its_broker_once_and_nothing_when_built_without_a_settle() {
     let counting = Arc::clone(&settled);
     let counted = BrokerMessage::new(
         publication(),
-        BrokerMessageOptions {
+        &BrokerMessageOptions {
             is_retained: Some(true),
             settle: Some(Arc::new(move || {
                 counting.fetch_add(1, Ordering::SeqCst);
@@ -38,7 +38,7 @@ fn acknowledges_its_broker_once_and_nothing_when_built_without_a_settle() {
     );
 
     // none given, as at most once: acknowledged to nothing, and not retained
-    let bare = BrokerMessage::new(publication(), BrokerMessageOptions::default());
+    let bare = BrokerMessage::new(publication(), &BrokerMessageOptions::default());
 
     bare.settle();
     assert_eq!(

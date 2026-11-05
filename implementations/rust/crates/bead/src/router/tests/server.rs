@@ -14,18 +14,19 @@ use crate::envelope::{Envelope, RequestHeader};
 use crate::errors::CallError;
 use crate::identity::Procedure;
 use crate::managers::service::{
-    DebugEvent, NotifyOptions, RequestDependencies, ResolverDependencies, Response, ServiceManager,
-    ServiceManagerOptions, ServiceRouter, TracedError,
+    DebugEvent, NotifyOptions, RequestDependencies, RequestResolverDependencies, Response,
+    ServiceManager, ServiceManagerOptions, ServiceRouter, TracedError,
 };
 use crate::metrics::{MetricsRegistry, MetricsRegistryOptions};
 use crate::payloads::{CodecRefusal, PayloadCodec, TextCodec};
 use crate::router::admissions::BeforeRequest;
 use crate::router::relay::{DestinationOptions, RelayOptions};
-use crate::router::server::{CallHooks, RouterServer, RouterServerOptions, ServerRequest};
+use crate::router::server::{RouterServer, RouterServerOptions};
 use crate::router::types::{ConnectionHandle, RouterActivity, RouterError, RouterLimitsOptions};
 use crate::testing::SteppingClock;
 use crate::testing::pair::{Pair, PairOptions, echo};
 use crate::testing::scripted::{ScriptedServer, Sending, handle_of};
+use crate::{NotificationResolverDependencies, RouterRequest};
 
 pub(super) fn first() -> ConnectionHandle {
     handle_of(1)
@@ -38,9 +39,9 @@ pub(super) fn second() -> ConnectionHandle {
 // the notifying procedure the tests subscribe to: procedure 5 of service 2
 pub(super) fn news() -> Procedure {
     Procedure {
-        id: 5,
-        name: "news".to_owned(),
-        kind: Some(ProcedureKind::Notifies),
+        procedure_id: 5,
+        procedure_name: "news".to_owned(),
+        procedure_kind: Some(ProcedureKind::Notifies),
         ..echo()
     }
 }
@@ -86,7 +87,7 @@ type Reports = Arc<Mutex<Vec<(RouterError, Option<ConnectionHandle>)>>>;
 pub(super) fn header_of((call_id, procedure): (u32, &Procedure)) -> RequestHeader {
     RequestHeader {
         service_id: procedure.service_id,
-        procedure_id: procedure.id,
+        procedure_id: procedure.procedure_id,
         ..request_header_of(call_id)
     }
 }
@@ -222,7 +223,10 @@ impl Served {
         self.services
             .get_notification_resolver(
                 &news(),
-                (ResolverDependencies::of(TextCodec, TextCodec), TextCodec),
+                NotificationResolverDependencies::new(
+                    RequestResolverDependencies::new(TextCodec, TextCodec),
+                    TextCodec,
+                ),
             )
             .expect("news resolved")
             .on(Arc::new(|_request, response: Response<TextCodec>| {
@@ -311,6 +315,10 @@ async fn a_connection_that_closes_is_no_longer_notified_and_one_that_cannot_take
 
 // debugging 9.2
 #[tokio::test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test repeats its own string a bounded number of times"
+)]
 async fn counts_a_notification_it_cannot_hand_to_its_transport_as_failed_and_one_its_transport_refuses_once_it_has_it_as_sent()
  {
     let registry = registry();
@@ -374,7 +382,10 @@ async fn counts_a_notification_whose_value_does_not_write_as_failed_for_each_sub
         .services
         .get_notification_resolver(
             &news(),
-            (ResolverDependencies::of(TextCodec, TextCodec), Unwritable),
+            NotificationResolverDependencies::new(
+                RequestResolverDependencies::new(TextCodec, TextCodec),
+                Unwritable,
+            ),
         )
         .expect("news resolved")
         .on(Arc::new(|_request, response: Response<TextCodec>| {
@@ -437,12 +448,12 @@ async fn counts_a_call_whose_admission_fails_procedure_failed_and_one_whose_subs
         .services
         .get_request_resolver(
             &echo(),
-            ResolverDependencies {
+            RequestResolverDependencies {
                 before_request: Some(BeforeRequest::new(
                     |_request| panic!("this admission fails, on purpose"),
                     None,
                 )),
-                ..ResolverDependencies::of(TextCodec, TextCodec)
+                ..RequestResolverDependencies::new(TextCodec, TextCodec)
             },
         )
         .expect("echo resolved")
@@ -496,13 +507,153 @@ async fn counts_a_call_whose_admission_fails_procedure_failed_and_one_whose_subs
     );
 }
 
+// a codec of text that panics as it reads, as an application's might: its throw other than its
+// refusal, the one a CodecRefusal leaves it
+#[derive(Debug)]
+struct Unreadable;
+
+impl PayloadCodec for Unreadable {
+    type Value = String;
+
+    fn decode(&self, _bytes: &Bytes) -> Result<String, CodecRefusal> {
+        panic!("this codec breaks as it reads, on purpose")
+    }
+
+    fn encode(&self, value: &String) -> Result<Bytes, CodecRefusal> {
+        TextCodec.encode(value)
+    }
+
+    fn encoding(&self) -> &'static str {
+        "text"
+    }
+}
+
+// echo served on the first connection through `dependencies`, a request delivered to it: what it
+// sent, what it reported and what the registry counted of it
+async fn counted_through<Req: PayloadCodec<Value = String>>(
+    dependencies: RequestResolverDependencies<Req, TextCodec>,
+) -> (Vec<String>, Vec<String>, Vec<String>) {
+    let registry = registry();
+    let served = Served::new(&counted_options(&registry));
+    let reached = Arc::new(Mutex::new(Vec::new()));
+    let reaching = Arc::clone(&reached);
+
+    served.transport.open(&first(), true);
+    served
+        .services
+        .get_request_resolver(&echo(), dependencies)
+        .expect("echo resolved")
+        .on(Arc::new(move |request, response: Response<TextCodec>| {
+            locked(&reaching).push(request.payload.clone());
+
+            response.result(request.payload)
+        }))
+        .expect("echo registered");
+    served
+        .transport
+        .deliver(&request_of((1, &echo(), "x")), &first());
+    served.settle().await;
+
+    assert!(locked(&reached).is_empty(), "never reaching the callback");
+
+    (
+        served.sent_since(),
+        served.reported(),
+        counted_of((&registry, "echo")),
+    )
+}
+
+// a request's call counted once, a failure under PROCEDURE_FAILED, never as its codec's refusal
+// nor as an error
+fn assert_counted_procedure_failed(counted: &[String]) {
+    assert_eq!(
+        counted,
+        [
+            "bead_server_call_duration_seconds_bucket{type=\"request\",le=\"0.0\"} 1",
+            "bead_server_call_duration_seconds_count{type=\"request\"} 1",
+            "bead_server_call_handled_total{type=\"request\",outcome=\"failure\",code=\"PROCEDURE_FAILED\"} 1",
+            "bead_server_call_started_total{type=\"request\"} 1",
+        ],
+        "one immediate failure, never PAYLOAD_UNDECODABLE or an error"
+    );
+}
+
+// debugging 9.4.14, spec 9.0, 17.2: the twin of "counts a request whose codec throws other than
+// its refusal as failure PROCEDURE_FAILED", a codec's panic its throw
+#[tokio::test]
+async fn counts_a_request_whose_codec_panics_as_it_reads_as_failure_procedure_failed() {
+    let (sent, reported, counted) =
+        counted_through(RequestResolverDependencies::new(Unreadable, TextCodec)).await;
+
+    assert_eq!(
+        sent,
+        ["first failure 1 PROCEDURE_FAILED"],
+        "answered PROCEDURE_FAILED"
+    );
+    assert_eq!(
+        reported,
+        ["a codec panicked: this codec breaks as it reads, on purpose first"],
+        "its panic reported once, with its connection"
+    );
+    assert_counted_procedure_failed(&counted);
+}
+
+// debugging 9.4.14, spec 18.2
+#[tokio::test]
+async fn counts_a_request_whose_rule_fails_to_judge_as_failure_procedure_failed() {
+    let (sent, reported, counted) = counted_through(RequestResolverDependencies {
+        validate: Some(Arc::new(|_value: &String, _options| {
+            Err("this rule fails to judge, on purpose".into())
+        })),
+        ..RequestResolverDependencies::new(TextCodec, TextCodec)
+    })
+    .await;
+
+    assert_eq!(
+        sent,
+        ["first failure 1 PROCEDURE_FAILED"],
+        "answered PROCEDURE_FAILED"
+    );
+    assert_eq!(
+        reported,
+        ["this rule fails to judge, on purpose first"],
+        "its failure reported once, in its own words, with its connection"
+    );
+    assert_counted_procedure_failed(&counted);
+}
+
+// debugging 9.4.14, spec 18.2, decision 0044: a rule's panic is its throw, named as a rule's
+#[tokio::test]
+async fn counts_a_request_whose_rule_panics_as_failure_procedure_failed_reported_as_a_rule_s_panic()
+{
+    let (sent, reported, counted) = counted_through(RequestResolverDependencies {
+        validate: Some(Arc::new(|_value: &String, _options| {
+            panic!("this rule panics as it judges, on purpose")
+        })),
+        ..RequestResolverDependencies::new(TextCodec, TextCodec)
+    })
+    .await;
+
+    assert_eq!(
+        sent,
+        ["first failure 1 PROCEDURE_FAILED"],
+        "answered PROCEDURE_FAILED"
+    );
+    assert_eq!(
+        reported,
+        ["a rule panicked: this rule panics as it judges, on purpose first"],
+        "its panic reported once, with its connection"
+    );
+    assert_counted_procedure_failed(&counted);
+}
+
 // debugging 9.7
 #[tokio::test]
 async fn counts_a_command_to_a_connection_not_open_as_started_and_closed_in_the_turn_it_started() {
     let registry = registry();
     let served = Served::new(&counted_options(&registry));
     let command = Procedure {
-        kind: Some(ProcedureKind::Command),
+        procedure_kind: Some(ProcedureKind::Command),
         ..echo()
     };
     let series = served
@@ -517,16 +668,15 @@ async fn counts_a_command_to_a_connection_not_open_as_started_and_closed_in_the_
         .router
         .request(
             Bytes::from_static(b"x"),
-            (
-                ServerRequest {
-                    procedure: command.address(),
-                    maximum_payload_bytes: None,
-                    options,
-                    series,
-                    refusal: None,
-                },
-                CallHooks::default(),
-            ),
+            RouterRequest {
+                procedure: command,
+                options,
+                series,
+                refusal: None,
+                subscribes: None,
+                on_call_id: None,
+                on_sent: None,
+            },
         )
         .expect("a command");
 
@@ -555,7 +705,10 @@ async fn a_router_refuses_a_resolver_its_registry_refuses_registering_nothing_an
     let resolve = |procedure: &Procedure, answer: &'static str| {
         served
             .services
-            .get_request_resolver(procedure, ResolverDependencies::of(TextCodec, TextCodec))
+            .get_request_resolver(
+                procedure,
+                RequestResolverDependencies::new(TextCodec, TextCodec),
+            )
             .and_then(|resolver| {
                 resolver.on(Arc::new(move |_request, response: Response<TextCodec>| {
                     response.result(answer.to_owned())
@@ -568,8 +721,8 @@ async fn a_router_refuses_a_resolver_its_registry_refuses_registering_nothing_an
     // the same procedure under its name, at another address, its case another: one name (spec 16.6)
     let renamed = resolve(
         &Procedure {
-            id: 2,
-            name: "eCHO".to_owned(),
+            procedure_id: 2,
+            procedure_name: "eCHO".to_owned(),
             ..echo()
         },
         "again",
@@ -585,8 +738,8 @@ async fn a_router_refuses_a_resolver_its_registry_refuses_registering_nothing_an
     // registered nothing: its address is free, for its own name
     resolve(
         &Procedure {
-            id: 2,
-            name: "twice".to_owned(),
+            procedure_id: 2,
+            procedure_name: "twice".to_owned(),
             ..echo()
         },
         "twice",
@@ -597,11 +750,11 @@ async fn a_router_refuses_a_resolver_its_registry_refuses_registering_nothing_an
         .services
         .get_command(
             &Procedure {
-                name: "clock".to_owned(),
-                kind: Some(ProcedureKind::Command),
+                procedure_name: "clock".to_owned(),
+                procedure_kind: Some(ProcedureKind::Command),
                 ..echo()
             },
-            RequestDependencies::of(TextCodec, TextCodec),
+            RequestDependencies::new(TextCodec, TextCodec),
         )
         .expect_err("another name at its address refused");
 
@@ -622,15 +775,18 @@ struct Relayed {
     _device: Pair,
 }
 
-async fn relayed(limits: Option<RouterLimitsOptions>) -> Relayed {
-    let device = Pair::connected((super::january_first(), PairOptions::default()))
+async fn relayed(limits: &RouterLimitsOptions) -> Relayed {
+    let device = Pair::connected(super::january_first(), &PairOptions::default())
         .await
         .expect("a device connected");
 
     device
         .server
         .services()
-        .get_request_resolver(&echo(), ResolverDependencies::of(TextCodec, TextCodec))
+        .get_request_resolver(
+            &echo(),
+            RequestResolverDependencies::new(TextCodec, TextCodec),
+        )
         .expect("echo resolved")
         .on(Arc::new(|request, response: Response<TextCodec>| {
             response.result(request.payload.to_uppercase())
@@ -641,7 +797,7 @@ async fn relayed(limits: Option<RouterLimitsOptions>) -> Relayed {
     let served = Served::on(
         (shared, Arc::clone(&device.clock)),
         &RouterServerOptions {
-            limits,
+            limits: Some(limits.clone()),
             relay: Some(RelayOptions {
                 before_route: Some(BeforeRequest::new(|_request| true, None)),
                 ..RelayOptions::default()
@@ -653,14 +809,14 @@ async fn relayed(limits: Option<RouterLimitsOptions>) -> Relayed {
     served.transport.open(&first(), true);
     served
         .router
-        .register_destination((
+        .register_destination(
             device.client.router().as_relay_target(),
-            DestinationOptions {
+            &DestinationOptions {
                 destination_id: Some(7),
                 label: Some("the device".to_owned()),
                 ..DestinationOptions::default()
             },
-        ))
+        )
         .expect("the device registered");
 
     Relayed {
@@ -684,7 +840,7 @@ fn to_device((call_id, payload): (u32, &str)) -> Envelope {
 #[tokio::test]
 async fn hands_leg_a_s_transport_the_relayed_result_once_answers_nothing_after_it_refuses_it_and_reports_why_with_leg_a_s_connection()
  {
-    let relayed = relayed(None).await;
+    let relayed = relayed(&RouterLimitsOptions::default()).await;
     let served = &relayed.served;
 
     served
@@ -704,16 +860,20 @@ async fn hands_leg_a_s_transport_the_relayed_result_once_answers_nothing_after_i
 
 // spec 14.5
 #[tokio::test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test repeats its own string a bounded number of times"
+)]
 async fn answers_a_relayed_result_past_leg_a_s_limit_procedure_failed_with_no_detail_and_reports_payload_too_large_with_leg_a_s_connection()
  {
     // 8 bytes of prefix, 20 of an announcement and 36 of payload fill leg A's chunk of 64; one more
     // would need a transfer, which this relay sends none of
-    let relayed = relayed(Some(RouterLimitsOptions {
+    let relayed = relayed(&RouterLimitsOptions {
         chunk_bytes: Some(64),
         window_bytes: Some(128),
         maximum_transfers: Some(0),
         ..RouterLimitsOptions::default()
-    }))
+    })
     .await;
     let served = &relayed.served;
 

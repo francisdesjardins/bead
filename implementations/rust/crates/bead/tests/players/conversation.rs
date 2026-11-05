@@ -1,24 +1,27 @@
 //! A conversation of `spec/conversations.json`, or an exit of `spec/metrics.json`, played against
 //! the Rust side's server of the interop service: what its clients send, what it sends back and
-//! reports, and, for an exit, what moved in its registry's exposition. The TypeScript and C# sides'
-//! players play the same files.
+//! reports, what its application does from within a telling where the conversation scripts it, and,
+//! for an exit, what moved in its registry's exposition. The TypeScript and C# sides' players play
+//! the same files.
 
 use core::time::Duration;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::SystemTime;
 
+use bead::internal::{Envelope, ReadEnvelopeOptions, read_envelope};
 use bead::testing::{SteppingClock, hexadecimal};
 use bead::{
-    BoxFuture, BrokerAdapter, BrokerClient, BrokerClientOptions, BrokerConnectOptions,
-    BrokerParticipant, BrokerParticipantOptions, BrokerServer, BrokerServerOptions, ClientListener,
-    ClientTransport, ConnectionHandle, Credential, CredentialScheme, DisconnectOptions, Envelope,
-    EnvelopeKind, MemoryBroker, MemoryBrokerAdapterOptions, MemoryBrokerOptions, MemoryClient,
-    MemoryClientOptions, MemoryConnectOptions, MemoryServer, MemoryServerOptions, MetricsRegistry,
-    NEVER, PacingLimitsOptions, ReadEnvelopeOptions, RelayOptions, RouterError,
+    BoxFuture, BrokerAdapter, BrokerParticipant, BrokerParticipantOptions, BrokerTransportClient,
+    BrokerTransportClientConnectOptions, BrokerTransportClientOptions, BrokerTransportServer,
+    BrokerTransportServerOptions, ClientListener, CommandOptions, ConnectionHandle, Credential,
+    CredentialScheme, DebugDirection, EnvelopeKind, MemoryBroker, MemoryBrokerAdapterOptions,
+    MemoryBrokerOptions, MemoryTransportClient, MemoryTransportClientConnectOptions,
+    MemoryTransportClientOptions, MemoryTransportServer, MemoryTransportServerOptions,
+    MetricsRegistry, NEVER, PacingLimitsOptions, RelayOptions, RouterClientTransport, RouterError,
     RouterLimitsOptions, RouterSide, Sent, Server, ServerListener, ServerOptions, ServerTransport,
-    SharedClock, TransportMessage, read_envelope, require_credential, require_session,
-    share_leg_b_session,
+    SharedClock, TracedEnvelope, TransportClientDisconnectOptions, TransportMessage,
+    require_credential, require_session, share_leg_b_session,
 };
 use bytes::Bytes;
 use serde_json::{Map, Value, json};
@@ -35,6 +38,9 @@ const STEP_KEYS: [&str; 15] = [
 
 // how many times an until settles the side and looks again for its timer
 const PATIENCE: usize = 1_000;
+
+// the clock's question, which a conversation's listener asks its command with
+const QUESTION: &str = "What time is it where you are?";
 
 fn locked<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
@@ -152,6 +158,11 @@ impl ServerTransport for Scripted {
         locked(&self.listeners).retain(|held| !Arc::ptr_eq(held, listener));
     }
 
+    // a pause holds nothing here: a conversation hands each envelope at the pace it scripts
+    fn pause(&self, _connection_handle: &ConnectionHandle) {}
+
+    fn resume(&self, _connection_handle: &ConnectionHandle) {}
+
     fn is_two_way(&self, connection_handle: &ConnectionHandle) -> bool {
         !locked(&self.script).one_way.contains(connection_handle)
     }
@@ -208,9 +219,9 @@ impl ServerListener for Drawing {
 /// The connections a conversation names over a real in-memory transport server, a client of it for
 /// each, from `127.0.0.1` and a port of its own, as the scripted transport names them.
 struct InMemory {
-    server: MemoryServer,
+    server: MemoryTransportServer,
     clock: SharedClock,
-    clients: HashMap<String, MemoryClient>,
+    clients: HashMap<String, MemoryTransportClient>,
     ports: HashMap<String, u16>,
     handles: HashMap<String, ConnectionHandle>,
     heard: Arc<Mutex<HashMap<String, VecDeque<SentEnvelope>>>>,
@@ -225,9 +236,9 @@ struct OverBroker {
     broker: MemoryBroker,
     clock: SharedClock,
     server: BrokerParticipant,
-    transport: BrokerServer,
+    transport: BrokerTransportServer,
     participants: HashMap<String, BrokerParticipant>,
-    clients: HashMap<String, BrokerClient>,
+    clients: HashMap<String, BrokerTransportClient>,
     handles: HashMap<String, ConnectionHandle>,
     heard: Arc<Mutex<HashMap<String, VecDeque<SentEnvelope>>>>,
     drawn: Arc<Mutex<Option<ConnectionHandle>>>,
@@ -252,13 +263,13 @@ impl OverBroker {
         let broker = MemoryBroker::new(&options).map_err(|error| error.to_string())?;
         let adapter: Arc<dyn BrokerAdapter> = Arc::new(
             broker
-                .adapter(&MemoryBrokerAdapterOptions::of("server"))
+                .adapter(&MemoryBrokerAdapterOptions::new("server"))
                 .map_err(|error| error.to_string())?,
         );
         let server = BrokerParticipant::new(adapter, &participant_options(clock))
             .map_err(|error| error.to_string())?;
         let transport = server
-            .server(&BrokerServerOptions::of(["interop"]))
+            .server(&BrokerTransportServerOptions::new(["interop"]))
             .map_err(|error| error.to_string())?;
         let drawn = Arc::new(Mutex::new(None));
 
@@ -285,13 +296,13 @@ impl OverBroker {
         if !self.clients.contains_key(name) {
             let adapter: Arc<dyn BrokerAdapter> = Arc::new(
                 self.broker
-                    .adapter(&MemoryBrokerAdapterOptions::of(name))
+                    .adapter(&MemoryBrokerAdapterOptions::new(name))
                     .map_err(|error| error.to_string())?,
             );
             let participant = BrokerParticipant::new(adapter, &participant_options(&self.clock))
                 .map_err(|error| error.to_string())?;
             let client = participant
-                .client(&BrokerClientOptions::default())
+                .client(&BrokerTransportClientOptions::default())
                 .map_err(|error| error.to_string())?;
 
             client.listen(Arc::new(Hearing {
@@ -308,7 +319,7 @@ impl OverBroker {
             .ok_or_else(|| format!("no client for {name}"))?;
 
         client
-            .connect(BrokerConnectOptions::of("interop"))
+            .connect(&BrokerTransportClientConnectOptions::new("interop"))
             .await
             .map_err(|error| format!("{name} did not connect: {error}"))?;
         clock.settle().await;
@@ -404,11 +415,12 @@ impl Connections {
                     .or_insert_with(|| 50_001_u16.saturating_add(next));
 
                 if !memory.clients.contains_key(name) {
-                    let mut options = MemoryClientOptions::of(memory.server.clone());
+                    let mut options = MemoryTransportClientOptions::default();
 
                     options.clock = Some(Arc::clone(&memory.clock));
 
-                    let client = MemoryClient::new(&options).map_err(|error| error.to_string())?;
+                    let client =
+                        MemoryTransportClient::new(&options).map_err(|error| error.to_string())?;
 
                     client.listen(Arc::new(Hearing {
                         name: name.to_owned(),
@@ -421,12 +433,12 @@ impl Connections {
                     .clients
                     .get(name)
                     .ok_or_else(|| format!("no client for {name}"))?;
-                let mut options = MemoryConnectOptions::default();
+                let mut options = MemoryTransportClientConnectOptions::new(memory.server.clone());
 
                 options.address = Some("127.0.0.1".to_owned());
                 options.port = Some(port);
                 client
-                    .connect(options)
+                    .connect(&options)
                     .await
                     .map_err(|error| format!("{name} did not connect: {error}"))?;
 
@@ -451,14 +463,11 @@ impl Connections {
                 let handle = locked(&scripted.script).handle_of(name);
 
                 scripted.tell(|listener| {
-                    listener.on_message(
-                        TransportMessage {
-                            data: data.clone(),
-                            credential: credential.clone(),
-                            ..TransportMessage::default()
-                        },
-                        &handle,
-                    );
+                    let mut message = TransportMessage::default();
+
+                    message.data = data.clone();
+                    message.credential.clone_from(&credential);
+                    listener.on_message(message, &handle);
                 });
 
                 Ok(())
@@ -469,12 +478,12 @@ impl Connections {
                     .get(name)
                     .ok_or_else(|| format!("no step opened {name}"))?;
 
+                let mut message = TransportMessage::default();
+
+                message.data = data;
+                message.credential = credential;
                 client
-                    .send(TransportMessage {
-                        data,
-                        credential,
-                        ..TransportMessage::default()
-                    })
+                    .send(message)
                     .map(drop)
                     .map_err(|error| error.to_string())
             }
@@ -484,12 +493,12 @@ impl Connections {
                     .get(name)
                     .ok_or_else(|| format!("no step opened {name}"))?;
 
+                let mut message = TransportMessage::default();
+
+                message.data = data;
+                message.credential = credential;
                 client
-                    .send(TransportMessage {
-                        data,
-                        credential,
-                        ..TransportMessage::default()
-                    })
+                    .send(message)
                     .map(drop)
                     .map_err(|error| error.to_string())
             }
@@ -517,12 +526,12 @@ impl Connections {
                     .clients
                     .get(name)
                     .ok_or_else(|| format!("no step opened {name}"))?;
-                let mut options = DisconnectOptions::default();
+                let mut options = TransportClientDisconnectOptions::default();
 
                 options.is_clean = Some(false);
 
                 client
-                    .disconnect(options)
+                    .disconnect(&options)
                     .map_err(|error| error.to_string())
             }
             // unclean, as the scripted connections close
@@ -531,12 +540,12 @@ impl Connections {
                     .clients
                     .get(name)
                     .ok_or_else(|| format!("no step opened {name}"))?;
-                let mut options = DisconnectOptions::default();
+                let mut options = TransportClientDisconnectOptions::default();
 
                 options.is_clean = Some(false);
 
                 client
-                    .disconnect(options)
+                    .disconnect(&options)
                     .map_err(|error| error.to_string())
             }
         }
@@ -659,6 +668,7 @@ fn announcement_of(credential: &Credential) -> Value {
         Credential::Opaque(_)
         | Credential::Jwt(_)
         | Credential::Elsewhere
+        | Credential::Redacted { .. }
         | Credential::ToCome { .. }
         | _ => {
             json!("OPAQUE")
@@ -682,7 +692,7 @@ fn presented_of(credential: &Credential) -> Value {
             "bytes": hexadecimal::text_of(bytes),
             "scheme": scheme.get(),
         }),
-        _ => Value::Null,
+        Credential::Redacted { .. } | _ => Value::Null,
     }
 }
 
@@ -856,10 +866,12 @@ fn relay_of(conversation: &Value) -> Result<Option<RelayOptions>, String> {
     };
     let mut relay = RelayOptions::default();
 
-    relay.verifies = given
-        .get("verifies")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
+    relay.verifies = Some(
+        given
+            .get("verifies")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    );
     relay.before_route = match given.get("beforeRoute").and_then(Value::as_str) {
         None => None,
         Some("requireCredential") => Some(require_credential()),
@@ -873,6 +885,83 @@ fn relay_of(conversation: &Value) -> Result<Option<RelayOptions>, String> {
     };
 
     Ok(Some(relay))
+}
+
+// what the server's application does from within a telling, the conversation's where it gives it:
+// the telling it acts on, report or read, and the command of the interop service's it calls
+fn listener_of(conversation: &Value) -> Result<Option<(String, String)>, String> {
+    let Some(given) = conversation.get("listener").and_then(Value::as_object) else {
+        return Ok(None);
+    };
+    let telling = given
+        .get("telling")
+        .and_then(Value::as_str)
+        .ok_or("a conversation's listener names its telling")?;
+    let command = given
+        .get("command")
+        .and_then(Value::as_str)
+        .ok_or("a conversation's listener names its command")?;
+
+    if !matches!(telling, "report" | "read") {
+        return Err(format!(
+            "a conversation's listener acts on a telling no test reads: {telling}"
+        ));
+    }
+
+    Ok(Some((telling.to_owned(), command.to_owned())))
+}
+
+// the conversation's listener attached to `server`: on the first telling of its kind on a
+// connection, and once, a call of its command on that connection, with the clock's question, its
+// answer let go (spec 9.0)
+fn listen(
+    (server, interop): (&Server, &bead_interop::OfferedInterop),
+    (telling, command): (&str, &str),
+) -> Result<(), String> {
+    let descriptor = match command {
+        "clock" => &interop.procedures.clock,
+        other => {
+            return Err(format!(
+                "a conversation's listener calls a command no test reads: {other}"
+            ));
+        }
+    };
+    let asking = interop
+        .service
+        .command_of(descriptor)
+        .map_err(|error| error.to_string())?;
+    let told: Mutex<HashSet<ConnectionHandle>> = Mutex::default();
+    // * a call made from within the telling, its future dropped: it goes as it is made, whatever
+    // becomes of its future
+    let ask = move |handle: &ConnectionHandle| {
+        if !locked(&told).insert(Arc::clone(handle)) {
+            return;
+        }
+
+        let options = CommandOptions::new(Arc::clone(handle));
+
+        drop(asking.call(Value::String(QUESTION.to_owned()), &options));
+    };
+
+    if telling == "report" {
+        server.router().on_error(Arc::new(
+            move |_error: &RouterError, handle: Option<&ConnectionHandle>| {
+                if let Some(handle) = handle {
+                    ask(handle);
+                }
+            },
+        ));
+    } else {
+        server.router().on_debug(Arc::new(
+            move |direction: DebugDirection, traced: &TracedEnvelope| {
+                if direction == DebugDirection::Rx {
+                    ask(&traced.connection_handle);
+                }
+            },
+        ));
+    }
+
+    Ok(())
 }
 
 /// Whether a pair of the in-memory transport stands for each connection `conversation` opens (spec
@@ -944,7 +1033,7 @@ fn hold<S: FnOnce() -> String>(holds: bool, said: S) -> Result<(), String> {
 
 /// Plays `conversation` against a server of the interop service, on a stepping clock only its
 /// steps move.
-pub(crate) async fn play(conversation: &Value, options: PlayOptions) -> Result<(), String> {
+pub(crate) async fn play(conversation: &Value, options: &PlayOptions) -> Result<(), String> {
     let steps = conversation
         .get("steps")
         .and_then(Value::as_array)
@@ -959,11 +1048,12 @@ pub(crate) async fn play(conversation: &Value, options: PlayOptions) -> Result<(
     let mut connections = if options.over_broker {
         Connections::OverBroker(Box::new(OverBroker::of(&shared)?))
     } else if options.in_memory {
-        let mut server_options = MemoryServerOptions::default();
+        let mut server_options = MemoryTransportServerOptions::default();
 
         server_options.clock = Some(Arc::clone(&shared));
 
-        let server = MemoryServer::new(&server_options).map_err(|error| error.to_string())?;
+        let server =
+            MemoryTransportServer::new(&server_options).map_err(|error| error.to_string())?;
         let drawn = Arc::new(Mutex::new(None));
 
         server.listen(Arc::new(Drawing {
@@ -988,7 +1078,7 @@ pub(crate) async fn play(conversation: &Value, options: PlayOptions) -> Result<(
     server_options.clock = Some(Arc::clone(&shared));
     // the interop service's, none of a JWT under limits that hold none
     server_options.credentials = Some(
-        bead_interop::interop_credentials_of(&shared, Some(&limits))
+        bead_interop::interop_credentials_of(&shared, &limits)
             .map_err(|error| error.to_string())?,
     );
     server_options.limits = Some(limits);
@@ -1014,7 +1104,11 @@ pub(crate) async fn play(conversation: &Value, options: PlayOptions) -> Result<(
         },
     ));
 
-    let _interop = bead_interop::offer_interop(&server).map_err(|error| error.to_string())?;
+    let interop = bead_interop::offer_interop(&server).map_err(|error| error.to_string())?;
+
+    if let Some((telling, command)) = listener_of(conversation)? {
+        listen((&server, &interop), (&telling, &command))?;
+    }
 
     transport.start().await.map_err(|error| error.to_string())?;
 

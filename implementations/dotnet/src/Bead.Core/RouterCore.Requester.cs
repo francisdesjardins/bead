@@ -7,7 +7,7 @@ internal sealed partial class RouterCore
     // what the requester asks of the core it serves
     private interface IRouterRequesterPort
     {
-        // whether the core is disposed, read at each call
+        // whether the core's dispose's job ran, its state's mark, read at each call
         bool IsDisposed { get; }
 
         // runs an action on the core's scheduler, after what came before it

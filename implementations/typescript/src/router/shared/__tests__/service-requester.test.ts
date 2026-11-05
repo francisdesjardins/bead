@@ -8,8 +8,11 @@ import {
   DisconnectError,
   FailureError,
   FailureScope,
+  ProgrammerError,
+  type ICommandOptions,
   type IProcedure,
   type IProcedureSeries,
+  type IRequestOptions,
   type IRouterLike,
 } from '../service-manager';
 import { REQUEST_DEFAULTS, resolveRequestOptions } from '../service-requester';
@@ -39,17 +42,20 @@ test.describe('resolveRequestOptions', () => {
       destinationId: 4,
       timeout: 10,
     });
-    // a close on timeout only where the call or the defaults have one
+    // a close on timeout a command's alone, and only where the call or the defaults have one: a
+    // request names no connection to close
     expect(resolveRequestOptions({ ...REQUEST_DEFAULTS, closeOnTimeout: true })).toEqual({
       ...REQUEST_DEFAULTS,
-      closeOnTimeout: true,
     });
+    expect(
+      resolveRequestOptions({ ...REQUEST_DEFAULTS, closeOnTimeout: true }, { connectionHandle })
+    ).toEqual({ ...REQUEST_DEFAULTS, closeOnTimeout: true, connectionHandle });
     expect(
       resolveRequestOptions(
         { ...REQUEST_DEFAULTS, closeOnTimeout: true },
-        { closeOnTimeout: false }
+        { closeOnTimeout: false, connectionHandle }
       )
-    ).toEqual({ ...REQUEST_DEFAULTS, closeOnTimeout: false });
+    ).toEqual({ ...REQUEST_DEFAULTS, closeOnTimeout: false, connectionHandle });
     // * and the options it is given are left as they are
     expect(options).toEqual({ connectionHandle, destinationId: undefined });
   });
@@ -58,7 +64,7 @@ test.describe('resolveRequestOptions', () => {
 test.describe('createServiceManager', () => {
   test.describe('getRequest', () => {
     test('is named after its procedure and carries it', () => {
-      const manager = createServiceManager(createFakeRouter().router);
+      const manager = createServiceManager(createFakeRouter('client').router);
       const request = manager.getRequest(echo, { serializer });
 
       expect(request.name).toBe('echo');
@@ -73,7 +79,7 @@ test.describe('createServiceManager', () => {
     });
 
     test('gives a bound call no promise is, so awaiting it with its options forgotten does not compile', async () => {
-      const manager = createServiceManager(createFakeRouter().router);
+      const manager = createServiceManager(createFakeRouter('client').router);
       const request = manager.getRequest(echo, { serializer });
       const forgotten = async (): Promise<unknown> => {
         // the very mistake the type refuses, which the lint's await-thenable sees too
@@ -86,7 +92,7 @@ test.describe('createServiceManager', () => {
     });
 
     test('sends the encoded payload with the resolved options, and decodes the answer', async () => {
-      const { calls, router } = createFakeRouter();
+      const { calls, router } = createFakeRouter('client');
       const manager = createServiceManager(router);
       const request = manager.getRequest(echo, { serializer });
 
@@ -106,7 +112,7 @@ test.describe('createServiceManager', () => {
     });
 
     test('takes the manager’s defaults where the call says nothing, and its signal as given', async () => {
-      const { calls, router } = createFakeRouter();
+      const { calls, router } = createFakeRouter('client');
       const manager = createServiceManager(router, { defaults: { timeout: 50 } });
       const request = manager.getRequest(echo, { serializer });
       const { signal } = new AbortController();
@@ -129,22 +135,9 @@ test.describe('createServiceManager', () => {
       ]);
     });
 
-    test('on a server’s router, names the connection it goes to, as the types require', async () => {
-      const { calls, router } = createFakeRouter();
-      const manager = createServiceManager(router as IRouterLike<TransportServerConnectionHandle>);
-      const request = manager.getRequest(echo, { serializer })({ text: 'a' });
-
-      await request({ connectionHandle });
-
-      // @ts-expect-error: a server's request names the connection it goes to
-      await request();
-
-      expect(calls.request[0]?.request.options.connectionHandle).toBe(connectionHandle);
-    });
-
     // debugging 4.1.7
     test('hands its router the credential a call presents and leaves it out of its trace', async () => {
-      const { calls, router } = createFakeRouter();
+      const { calls, router } = createFakeRouter('client');
       const manager = createServiceManager(router);
       const seen = recordDebug(manager);
       const jwt = { scheme: CredentialScheme.JWT, token: 'a.secret.token' } as const;
@@ -195,7 +188,7 @@ test.describe('createServiceManager', () => {
 
     // debugging 4.1.9
     test('rethrows what the router rejects with, and tells debug its failure, and only a failure’s', async () => {
-      const { control, router } = createFakeRouter();
+      const { control, router } = createFakeRouter('client');
       const manager = createServiceManager(router);
       const seen = recordDebug(manager);
       const failure = new FailureError({
@@ -246,7 +239,7 @@ test.describe('createServiceManager', () => {
 
     // spec 17.2.4; debugging 4.3
     test('a call whose value does not write fails before anything goes: nothing requested, traced or deprecated', async () => {
-      const { calls, router } = createFakeRouter();
+      const { calls, router } = createFakeRouter('client');
       const manager = createServiceManager(router);
       const seen = recordDebug(manager);
       const deprecated: IProcedure[] = [];
@@ -275,7 +268,7 @@ test.describe('createServiceManager', () => {
     });
 
     test('declares its requester to its router as it is made, and hands each of its calls the series it gave', async () => {
-      const { calls, control, router } = createFakeRouter();
+      const { calls, control, router } = createFakeRouter('client');
       const series: IProcedureSeries = {
         end: () => {
           return undefined;
@@ -304,7 +297,7 @@ test.describe('createServiceManager', () => {
     });
 
     test('a deprecated procedure raises "deprecated" at each call, and only a deprecated one', async () => {
-      const manager = createServiceManager(createFakeRouter().router);
+      const manager = createServiceManager(createFakeRouter('client').router);
       const seen: unknown[][] = [];
 
       manager.on('deprecated', (...params) => {
@@ -386,15 +379,6 @@ test.describe('createServiceManager', () => {
 
       expect(await call(unlessAsked, true)).toBe(late);
       expect(closed).toEqual([connectionHandle, connectionHandle]);
-
-      // a request that names no connection has none to close
-      const unnamed = createServiceManager(router, {
-        closeConnection,
-        defaults: { closeOnTimeout: true },
-      });
-
-      await expect(unnamed.getRequest(echo, { serializer })({ text: 'run' })()).rejects.toBe(late);
-      expect(closed).toHaveLength(2);
 
       // an answer, even a refusal, is not silence; nor is a connection gone, or a caller that gave up
       for (const other of [refused, new DisconnectError('gone'), new CancelError()]) {
@@ -480,6 +464,221 @@ test.describe('createServiceManager', () => {
         .catch(() => {
           return undefined;
         });
+      await manager
+        .getRequest(echo, { serializer })({ text: 'a' })(
+          // @ts-expect-error: a client's call names no connection
+          { connectionHandle: 'server' }
+        )
+        .catch(() => {
+          return undefined;
+        });
+      await manager
+        .getNotification(echo, { serializer })({ text: 'a' }, () => {
+          return undefined;
+        })(
+          // @ts-expect-error: a registration presents no credential: its subscription is the
+          // connection's
+          { credential: { scheme: CredentialScheme.OPAQUE } }
+        )
+        .catch(() => {
+          return undefined;
+        });
+    });
+
+    test('a client request resolves no close on timeout', async () => {
+      const { calls, router } = createFakeRouter('client');
+      const manager = createServiceManager(router as IRouterLike<'server'>, {
+        closeConnection: () => {
+          return undefined;
+        },
+        defaults: { closeOnTimeout: true },
+      });
+      const seen = recordDebug(manager);
+
+      await expect(manager.getRequest(echo, { serializer })({ text: 'run' })()).resolves.toEqual({
+        text: 'run',
+      });
+
+      // * a request names no connection, so it has none to close, whatever the defaults say
+      expect(calls.request[0]?.request.options).toEqual({ timeout: REQUEST_DEFAULTS.timeout });
+      expect(
+        seen
+          .filter(({ info }) => {
+            return info.direction === 'tx';
+          })
+          .map(({ info }) => {
+            return info.options;
+          })
+      ).toEqual([{ timeout: REQUEST_DEFAULTS.timeout }]);
+    });
+
+    test('a command names the connection it goes to, as the types require', async () => {
+      const { calls, router } = createFakeRouter();
+      const manager = createServiceManager(router as IRouterLike<TransportServerConnectionHandle>);
+      const command = manager.getCommand(echo, { serializer })({ text: 'a' });
+      // a router whose handle is any string requires it all the same
+      const anyHandle = createServiceManager(router).getCommand(echo, { serializer })({
+        text: 'b',
+      });
+
+      await command({ connectionHandle });
+      await anyHandle({ connectionHandle, timeout: 10 });
+      // past the types, a router refuses it at the call; this one echoes it
+      // @ts-expect-error: a command names the connection it goes to
+      await command();
+      // @ts-expect-error: its options name it
+      await command({ timeout: 10 });
+      // @ts-expect-error: on a router whose handle is any string too
+      await anyHandle({ destinationId: 4 });
+
+      expect(
+        calls.request.map(({ request }) => {
+          return request.options.connectionHandle;
+        })
+      ).toEqual([connectionHandle, connectionHandle, undefined, undefined, undefined]);
+    });
+
+    // decision 0047: a command's options are a request's and its own, its connection and its close
+    test('a command’s options carry every option of a request’s', () => {
+      const { signal } = new AbortController();
+      const credential = { scheme: CredentialScheme.OPAQUE } as const;
+      // * every member of a request's options, named: one a request's options gain fails this build
+      // until it is listed, and one a command's options lack fails it as well
+      const carried: {
+        [Key in keyof Required<IRequestOptions>]: IRequestOptions[Key] extends ICommandOptions[Key]
+          ? Key
+          : never;
+      } = {
+        credential: 'credential',
+        destinationId: 'destinationId',
+        signal: 'signal',
+        timeout: 'timeout',
+      };
+      const command: ICommandOptions = {
+        connectionHandle,
+        credential,
+        destinationId: 4,
+        signal,
+        timeout: 7,
+      };
+      // a command's options are a request's, and more
+      const request: IRequestOptions = command;
+
+      expect(Object.keys(carried).sort()).toEqual(
+        Object.keys(command)
+          .filter((key) => {
+            return key !== 'connectionHandle';
+          })
+          .sort()
+      );
+      expect(request).toBe(command);
+    });
+
+    // spec 16.10, 16.11
+    test('makes requests and notifications on a client’s router alone and commands on a server’s alone, refusing the other as it is made', () => {
+      const COMMANDS = "a server's router makes commands: getCommand";
+      const REQUESTS = "a client's router makes requests: getRequest";
+      const NOTIFIES = 'only a client hears notifications; a server notifies them';
+      const ofKind = (procedureKind: NonNullable<IProcedure['procedureKind']>): IProcedure => {
+        return { ...echo, procedureKind };
+      };
+      // every kind, none included, and a procedure out of its range
+      const every = [
+        echo,
+        ofKind('request'),
+        ofKind('notifies'),
+        ofKind('command'),
+        { ...echo, serviceId: 0 },
+      ];
+      const refusalOf = (make: () => unknown): string => {
+        try {
+          make();
+        } catch (reason) {
+          expect(reason).toBeInstanceOf(ProgrammerError);
+
+          return (reason as Error).message;
+        }
+
+        throw new Error('made');
+      };
+
+      // on a server's router
+      const server = createFakeRouter();
+      const onServer = createServiceManager(
+        server.router as IRouterLike<TransportServerConnectionHandle>
+      );
+      const request = (procedure: IProcedure): string => {
+        return refusalOf(() => {
+          return onServer.getRequest(procedure, { serializer });
+        });
+      };
+      const notification = (procedure: IProcedure): string => {
+        return refusalOf(() => {
+          return onServer.getNotification(procedure, { serializer });
+        });
+      };
+
+      // * the side first, whatever the procedure: a maker that is not its router's way declares
+      // nothing, so no reason of spec 16.10 is reached
+      for (const procedure of every) {
+        expect(request(procedure)).toBe(COMMANDS);
+        expect(notification(procedure)).toBe(NOTIFIES);
+      }
+
+      const command = (procedure: IProcedure): string => {
+        return refusalOf(() => {
+          return onServer.getCommand(procedure, { serializer });
+        });
+      };
+
+      for (const kind of ['request', 'notifies'] as const) {
+        expect(command(ofKind(kind))).toContain('is against its kind');
+      }
+
+      expect(command({ ...echo, serviceId: 0 })).toContain('is out of its range');
+      expect(server.calls.declareRequester).toEqual([]);
+      expect(server.calls.registerNotification).toEqual([]);
+      expect(onServer.getCommand(echo, { serializer }).name).toBe('echo');
+      expect(server.calls.declareRequester).toEqual(['echo']);
+
+      // on a client's router
+      const client = createFakeRouter('client');
+      const onClient = createServiceManager(client.router as IRouterLike<'server'>);
+      const commandOnClient = (procedure: IProcedure): string => {
+        return refusalOf(() => {
+          return onClient.getCommand(procedure, { serializer });
+        });
+      };
+      const requestOnClient = (procedure: IProcedure): string => {
+        return refusalOf(() => {
+          return onClient.getRequest(procedure, { serializer });
+        });
+      };
+      const notificationOnClient = (procedure: IProcedure): string => {
+        return refusalOf(() => {
+          return onClient.getNotification(procedure, { serializer });
+        });
+      };
+
+      for (const procedure of every) {
+        expect(commandOnClient(procedure)).toBe(REQUESTS);
+      }
+
+      for (const refused of [requestOnClient, notificationOnClient]) {
+        expect(refused(ofKind('command'))).toContain('is against its kind');
+        expect(refused({ ...echo, serviceId: 0 })).toContain('is out of its range');
+      }
+
+      expect(client.calls.declareRequester).toEqual([]);
+      expect(client.calls.registerNotification).toEqual([]);
+      expect(onClient.getRequest(echo, { serializer }).name).toBe('echo');
+      expect(
+        onClient.getNotification(
+          { ...echo, procedureId: 2, procedureKind: 'notifies' },
+          { serializer }
+        ).name
+      ).toBe('echo');
+      expect(client.calls.declareRequester).toEqual(['echo', 'echo']);
     });
   });
 });

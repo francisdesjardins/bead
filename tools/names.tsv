@@ -1,0 +1,787 @@
+# alone: typescript 318, csharp 67, rust 78
+# concept	typescript	csharp	rust	class
+ACCEPT_TIMEOUT	ACCEPT_TIMEOUT [constant]	-	ACCEPT_TIMEOUT [constant]	same
+AccessRefusal	IAccessRefusal [record]	AccessRefusal [record]	AccessRefusal [record]	same
+AccessRefusalStage	AccessRefusalStage [choice]	AccessRefusalStage [choice]	AccessRefusalStage [choice]	same
+ActivityListener	-	-	ActivityListener [function type]	own: a listener the Rust side registers for an event the other sides emit (0044)
+AdmissionFailure	AdmissionFailure [record]	AdmissionFailure [record]	-	same
+AdmissionHook	IAdmissionHook [record]	AdmissionHook [record]	AdmissionHook [record]	same
+AdmissionRequest	IAdmissionRequest [record]	AdmissionRequest [record]	AdmissionRequest [record]	same
+AdmissionRule	AdmissionRule [choice]	AdmissionRule [record]	AdmissionRule [choice]	same
+AmqpBrokerAdapter	IAmqpBrokerAdapter [record], createAmqpBrokerAdapter [function]	AmqpBrokerAdapter [record]	-	same
+AmqpBrokerAdapterOptions	IAmqpBrokerAdapterOptions [record]	AmqpBrokerAdapterOptions [record]	-	same
+ApplicationFailure	IApplicationFailure [record]	IApplicationFailure [record]	-	same
+BeforeRequest	IBeforeRequest [record]	BeforeRequest [record]	BeforeRequest [record]	same
+BindingOptions	IBindingOptions [record]	BindingOptions [record]	-	same
+BODY_GRACE_PERIOD	BODY_GRACE_PERIOD [constant]	-	BODY_GRACE_PERIOD [constant]	same
+BoundCall	IBoundCall [function type]	BoundCall [function type]	-	same
+BoundCommand	IBoundCommand [function type]	BoundCommand [function type]	-	same
+BoxFuture	-	-	BoxFuture [record]	own: the runtime seam, a future boxed (0044)
+BrokerAdapter	IBrokerAdapter [record]	IBrokerAdapter [record]	BrokerAdapter [record]	same
+BrokerCapabilities	IBrokerCapabilities [record]	BrokerCapabilities [choice]	BrokerCapabilities [choice]	rendered: flags (0007, 0044)
+BrokerDelivery	BrokerDelivery [choice]	BrokerDelivery [choice]	BrokerDelivery [choice]	same
+BrokerDown	IBrokerDown [record]	BrokerDown [record]	BrokerDown [record]	same
+BrokerError	-	-	BrokerError [choice]	own: a Result's error, where the other sides throw (0044)
+BrokerListener	-	-	BrokerListener [record]	own: a listener the Rust side registers for an event the other sides emit (0044)
+BrokerMessage	IBrokerMessage [record]	BrokerMessage [record]	BrokerMessage [record]	same
+BrokerMessageOptions	-	BrokerMessageOptions [record]	BrokerMessageOptions [record]	same
+BrokerParticipant	IBrokerParticipant [record], createBrokerParticipant [function]	BrokerParticipant [record]	BrokerParticipant [record]	same
+BrokerParticipantOptions	IBrokerParticipantOptions [record]	BrokerParticipantOptions [record]	BrokerParticipantOptions [record]	same
+BrokerPublication	IBrokerPublication [record]	BrokerPublication [record]	BrokerPublication [record]	same
+BrokerPublished	BrokerPublished [choice]	BrokerPublished [choice]	BrokerPublished [choice]	same
+BrokerRefusal	IBrokerRefusal [record]	BrokerRefusal [record]	BrokerRefusal [record]	same
+BrokerRefusedError	BrokerRefusedError [record]	BrokerRefusedException [record]	BrokerRefusedError [record]	rendered: error (0007, 0044)
+BrokerStart	IBrokerStart [record]	BrokerStart [record]	BrokerStart [record]	same
+BrokerSubscription	IBrokerSubscription [record]	BrokerSubscription [record]	BrokerSubscription [record]	same
+BrokerTransportClient	BrokerTransportClient [record], createBrokerTransportClient [function]	BrokerTransportClient [record]	BrokerTransportClient [record]	same
+BrokerTransportClientConnectOptions	IBrokerTransportClientConnectOptions [record]	BrokerTransportClientConnectOptions [record]	BrokerTransportClientConnectOptions [record]	same
+BrokerTransportClientOptions	IBrokerTransportClientOptions [record]	BrokerTransportClientOptions [record]	BrokerTransportClientOptions [record]	same
+BrokerTransportServer	BrokerTransportServer [record], createBrokerTransportServer [function]	BrokerTransportServer [record]	BrokerTransportServer [record]	same
+BrokerTransportServerOptions	IBrokerTransportServerOptions [record]	BrokerTransportServerOptions [record]	BrokerTransportServerOptions [record]	same
+CallAddress	-	CallAddress [record]	CallAddress [record]	same
+CallError	-	-	CallError [choice]	own: a Result's error, where the other sides throw (0044)
+CallSession	ICallSession [record]	CallSession [record]	CallSession [record]	same
+CancelError	CancelError [record]	-	CallError::Cancelled [variant]	rendered: error (0007, 0044)
+CancelHeader	ICancelHeader [record]	CancelHeader [record]	CancelHeader [record]	same
+ChunkHeader	IChunkHeader [record]	ChunkHeader [record]	ChunkHeader [record]	same
+Client	IClient [record], createClient [function]	IClient [record]	Client [record]	same
+ClientActivityListener	-	-	ClientActivityListener [function type]	own: a listener the Rust side registers for an event the other sides emit (0044)
+ClientEnvelopeListener	-	-	ClientEnvelopeListener [function type]	own: a listener the Rust side registers for an event the other sides emit (0044)
+ClientErrorListener	-	-	ClientErrorListener [function type]	own: a listener the Rust side registers for an event the other sides emit (0044)
+ClientLayers	IClientLayers [record]	-	-	differs: A facade's layers built by the application
+ClientListener	-	-	ClientListener [record]	own: a listener the Rust side registers for an event the other sides emit (0044)
+ClientOptions	IClientOptions [record]	-	ClientOptions [record]	same
+Clock	IClock [record]	-	Clock [record]	same
+CLOSING_BYTES	-	Violations.ClosingBytes [constant]	CLOSING_BYTES [constant]	rendered: constant (0007)
+CodecRefusal	-	-	CodecRefusal [record]	own: a Result's error, where the other sides throw (0044)
+codePointLength	codePointLength [function]	Validators.CodePointLength [function]	-	rendered: of (0007, 0044)
+Command	ICommand [record]	-	Command [record]	same
+commandOf	commandOf [function]	-	command_of [function]	same
+CommandOptions	ICommandOptions [record]	CommandOptions [record]	CommandOptions [record]	same
+CONNECT_TIMEOUT	CONNECT_TIMEOUT [constant]	-	CONNECT_TIMEOUT [constant]	same
+ConnectError	ConnectError [record]	ConnectException [record]	ConnectError [record]	rendered: error (0007, 0044)
+ConnectionHandle	ConnectionHandle [scalar]	-	ConnectionHandle [scalar]	same
+ConnectionTarget	IConnectionTarget [record]	ConnectionTarget [record]	-	same
+Credential	Credential [choice]	Credential [record]	Credential [choice]	same
+Credentials	ICredentials [record]	Credentials [record]	Credentials [record]	same
+CredentialScheme	CredentialScheme [choice]	CredentialScheme [choice]	CredentialScheme [choice]	same
+CreditHeader	ICreditHeader [record]	CreditHeader [record]	CreditHeader [record]	same
+DebugDirection	DebugDirection [choice]	DebugDirection [choice]	DebugDirection [choice]	same
+DebugEvent	IDebugEvent [record]	DebugEvent [record]	DebugEvent [record]	same
+DebugFilter	IDebugFilter [record]	DebugFilter [record]	DebugFilter [record]	same
+DebugFilterSource	DebugFilterSource [choice]	-	DebugFilterSource [choice]	same
+DebugListener	-	-	DebugListener [function type]	own: a listener the Rust side registers for an event the other sides emit (0044)
+DebugType	DebugType [choice]	DebugType [choice]	DebugType [choice]	same
+DeprecatedListener	-	-	DeprecatedListener [function type]	own: a listener the Rust side registers for an event the other sides emit (0044)
+DescriptorInit	IDescriptorInit [record]	-	DescriptorInit [record]	same
+Destination	IDestination [record]	Destination [record]	Destination [record]	same
+DestinationOptions	IDestinationOptions [record]	DestinationOptions [record]	DestinationOptions [record]	same
+DestinationRegistration	IDestinationRegistration [record]	DestinationRegistration [record]	DestinationRegistration [record]	same
+detailBoundOf	detailBoundOf [function]	-	detail_bound_of [function]	same
+DisconnectError	DisconnectError [record]	DisconnectException [record]	CallError::Disconnected [variant]	rendered: error (0007, 0044)
+DroppedListener	-	-	DroppedListener [function type]	own: a listener the Rust side registers for an event the other sides emit (0044)
+DurationRefusal	-	-	DurationRefusal [choice]	own: a Result's error, where the other sides throw (0044)
+ElsewhereSession	IElsewhereSession [record]	ElsewhereSession [record]	ElsewhereSession [record]	same
+EnvelopeFlag	-	EnvelopeFlags [choice]	EnvelopeFlag [choice]	rendered: flags (0007)
+EnvelopeHeader	EnvelopeHeader [choice]	IEnvelopeHeader [record]	EnvelopeHeader [choice]	same
+EnvelopeKind	EnvelopeKind [choice]	EnvelopeKind [choice]	EnvelopeKind [choice]	same
+EnvelopeLayout	-	EnvelopeLayout [choice]	EnvelopeLayout [choice]	same
+EnvelopeListener	-	-	EnvelopeListener [function type]	own: a listener the Rust side registers for an event the other sides emit (0044)
+ErrorListener	-	-	ErrorListener [function type]	own: a listener the Rust side registers for an event the other sides emit (0044)
+Failure	IFailure [record]	Failure [record]	Failure [record]	same
+FailureCatalogue	IFailureCatalogue [record]	FailureCatalogue [record]	FailureCatalogue [record]	same
+FailureError	FailureError [record]	FailureException [record]	CallError::Failure [variant]	rendered: error (0007, 0044)
+FailureHeader	IFailureHeader [record]	FailureHeader [record]	FailureHeader [record]	same
+FailureOrigin	FailureOrigin [choice]	FailureOrigin [choice]	FailureOrigin [choice]	same
+FailureScope	FailureScope [choice]	FailureScope [choice]	FailureScope [choice]	same
+failuresOf	failuresOf [function]	-	failures_of [function]	same
+filterDebug	filterDebug [function]	DebugFilters.FilterDebug [function]	filter_debug [function]	rendered: of (0007, 0044)
+filterEnvelopeDebug	filterEnvelopeDebug [function]	DebugFilters.FilterEnvelopeDebug [function]	-	rendered: of (0007, 0044)
+FilterRefusal	-	-	FilterRefusal [choice]	own: a Result's error, where the other sides throw (0044)
+Gauges	IGauges [record]	Gauges [record]	Gauges [record]	same
+GENERATED_CODE_SUPPORTS_VERSION_5	GENERATED_CODE_SUPPORTS_VERSION_5 [constant]	-	-	own: the TypeScript runtime's counter of generated code, each runtime's its own (0018, 0022)
+GENERATED_CODE_SUPPORTS_VERSION_6	GENERATED_CODE_SUPPORTS_VERSION_6 [constant]	-	-	own: the TypeScript runtime's counter of generated code, each runtime's its own (0018, 0022)
+GENERATED_CODE_SUPPORTS_VERSION_7	GENERATED_CODE_SUPPORTS_VERSION_7 [constant]	-	-	own: the TypeScript runtime's counter of generated code, each runtime's its own (0018, 0022)
+Health	IHealth [record]	Health [record]	Health [record]	same
+HealthCheck	IHealthCheck [record]	HealthCheck [record]	HealthCheck [record]	same
+HealthStatus	HealthStatus [choice]	HealthStatus [choice]	HealthStatus [choice]	same
+HEARTBEAT	HEARTBEAT [constant]	-	HEARTBEAT [constant]	same
+HTTPBinding	IHTTPBinding [record], createHTTPBinding [function]	HttpBinding [record]	-	same
+HTTPCaller	IHTTPCaller [record], createHTTPCaller [function]	HttpCaller [record]	-	same
+HTTPCallerOptions	IHTTPCallerOptions [record]	HttpCallerOptions [record]	-	same
+HTTPCallOptions	IHTTPCallOptions [record]	HttpCallOptions [record]	-	same
+HTTPEvent	HTTPEvent [choice]	HttpEvent [record]	-	same
+HTTPGateway	IHTTPGateway [record], createHTTPGateway [function]	HttpGateway [record]	-	same
+HTTPGatewayOptions	IHTTPGatewayOptions [record]	HttpGatewayOptions [record]	-	same
+HTTPGatewayStartOptions	IHTTPGatewayStartOptions [record]	HttpGatewayStartOptions [record]	-	same
+HttpPayload	HttpPayload [choice]	HttpPayload [record]	-	same
+HTTPPolicy	IHTTPPolicy [record]	HttpPolicy [record]	-	same
+HttpRouteTemplate	IHttpRouteTemplate [record]	HttpRouteTemplate [record]	-	same
+HTTPServer	HTTPServer [record], createHTTPServer [function]	HttpServer [record]	-	same
+HTTPServerOptions	IHTTPServerOptions [record]	HttpServerOptions [record]	-	same
+HTTPTransportClient	HTTPTransportClient [record], createHTTPTransportClient [function]	HttpTransportClient [record]	-	same
+HTTPTransportClientConnectOptions	IHTTPTransportClientConnectOptions [record]	HttpTransportClientConnectOptions [record]	-	same
+HTTPTransportClientOptions	IHTTPTransportClientOptions [record]	HttpTransportClientOptions [record]	-	same
+HTTPTransportServer	HTTPTransportServer [record], createHTTPTransportServer [function]	HttpTransportServer [record]	-	same
+HTTPTransportServerOptions	IHTTPTransportServerOptions [record]	HttpTransportServerOptions [record]	-	same
+IdentityRefusal	-	-	IdentityRefusal [choice]	own: a Result's error, where the other sides throw (0044)
+INTAKE_DEFAULTS	INTAKE_DEFAULTS [constant]	-	INTAKE_DEFAULTS [constant]	same
+IntakeLimits	IIntakeLimits [record]	IntakeLimits [record]	IntakeLimits [record]	same
+IntakeLimitsOptions	IntakeLimitsOptions [record]	-	IntakeLimitsOptions [record]	same
+isFieldValue	isFieldValue [function]	-	is_field_value [function]	same
+isUnique	isUnique [function]	Validators.IsUnique [function]	-	rendered: of (0007, 0044)
+JoinedServerTransport	-	JoinedServerTransport [record]	JoinedServerTransport [record]	same
+JsonForm	IJsonForm [record], createJsonForm [function]	JsonForm [record]	-	same
+JsonFormError	JsonFormError [record]	JsonFormException [record]	-	rendered: error (0007, 0044)
+JsonToken	IJsonToken [record]	JsonToken [record]	-	same
+Judged	IJudged [record]	Judged [record]	Judged [record]	same
+JwtAlgorithm	JwtAlgorithm [choice]	JwtAlgorithm [choice]	JwtAlgorithm [choice]	same
+JwtKey	IJwtKey [record]	JwtKey [record]	JwtKey [record]	same
+JwtKeySet	IJwtKeySet [record]	JwtKeySet [record]	JwtKeySet [record]	same
+JwtRefusal	-	-	JwtRefusal [choice]	own: a Result's error, where the other sides throw (0044)
+JwtSetKey	IJwtSetKey [record]	JwtSetKey [record]	JwtSetKey [record]	same
+LayerGauges	ILayerGauges [record]	LayerGauges [record]	LayerGauges [record]	same
+LIMIT_DEFAULTS	LIMIT_DEFAULTS [constant]	LimitDefaults [constant]	LIMIT_DEFAULTS [constant]	same
+ListedFailure	IListedFailure [record]	-	ListedFailure [record]	same
+LONGEST_TIMER	LONGEST_TIMER [constant]	-	LONGEST_TIMER [constant]	same
+MAXIMUM_CONNECTIONS	MAXIMUM_CONNECTIONS [constant]	-	MAXIMUM_CONNECTIONS [constant]	same
+MAXIMUM_CONNECTIONS_PER_ADDRESS	MAXIMUM_CONNECTIONS_PER_ADDRESS [constant]	-	MAXIMUM_CONNECTIONS_PER_ADDRESS [constant]	same
+MAXIMUM_ENVELOPE_PARTS_BYTES	MAXIMUM_ENVELOPE_PARTS_BYTES [constant]	-	MAXIMUM_ENVELOPE_PARTS_BYTES [constant]	same
+MAXIMUM_UNSENT_BYTES	MAXIMUM_UNSENT_BYTES [constant]	-	MAXIMUM_UNSENT_BYTES [constant]	same
+MemoryBroker	IMemoryBroker [record], createMemoryBroker [function]	MemoryBroker [record]	MemoryBroker [record]	same
+MemoryBrokerAdapter	IMemoryBrokerAdapter [record]	MemoryBrokerAdapter [record]	MemoryBrokerAdapter [record]	same
+MemoryBrokerAdapterOptions	IMemoryBrokerAdapterOptions [record]	MemoryBrokerAdapterOptions [record]	MemoryBrokerAdapterOptions [record]	same
+MemoryBrokerFault	MemoryBrokerFault [choice]	MemoryBrokerFault [choice]	MemoryBrokerFault [choice]	same
+MemoryBrokerFaultOptions	-	MemoryBrokerFaultOptions [record]	MemoryBrokerFaultOptions [record]	same
+MemoryBrokerOptions	IMemoryBrokerOptions [record]	MemoryBrokerOptions [record]	MemoryBrokerOptions [record]	same
+MemoryTransportClient	MemoryTransportClient [record], createMemoryTransportClient [function]	MemoryTransportClient [record]	MemoryTransportClient [record]	same
+MemoryTransportClientConnectOptions	IMemoryTransportClientConnectOptions [record]	MemoryTransportClientConnectOptions [record]	MemoryTransportClientConnectOptions [record]	same
+MemoryTransportClientOptions	IMemoryTransportClientOptions [record]	MemoryTransportClientOptions [record]	MemoryTransportClientOptions [record]	same
+MemoryTransportServer	MemoryTransportServer [record], createMemoryTransportServer [function]	MemoryTransportServer [record]	MemoryTransportServer [record]	same
+MemoryTransportServerOptions	IMemoryTransportServerOptions [record]	MemoryTransportServerOptions [record]	MemoryTransportServerOptions [record]	same
+METRICS_CONTENT_TYPE	METRICS_CONTENT_TYPE [constant]	-	METRICS_CONTENT_TYPE [constant]	same
+METRICS_REGISTRY_DEFAULTS	METRICS_REGISTRY_DEFAULTS [constant]	-	METRICS_REGISTRY_DEFAULTS [constant]	same
+MetricsExposition	IMetricsExposition [record]	MetricsExposition [record]	MetricsExposition [record]	same
+MetricsRegistry	IMetricsRegistry [record], createMetricsRegistry [function]	MetricsRegistry [record]	MetricsRegistry [record]	same
+MetricsRegistryOptions	IMetricsRegistryOptions [record]	MetricsRegistryOptions [record]	MetricsRegistryOptions [record]	same
+MINIMUM_BODY_BYTES_PER_SECOND	MINIMUM_BODY_BYTES_PER_SECOND [constant]	-	MINIMUM_BODY_BYTES_PER_SECOND [constant]	same
+MqttBrokerAdapter	IMqttBrokerAdapter [record], createMqttBrokerAdapter [function]	MqttBrokerAdapter [record]	-	same
+MqttBrokerAdapterOptions	IMqttBrokerAdapterOptions [record]	MqttBrokerAdapterOptions [record]	-	same
+NEVER	-	-	NEVER [constant]	own: never, which each other platform has of its own, Infinity and Timeout.InfiniteTimeSpan (0044)
+Notification	INotification [record]	INotification [record]	Notification [record]	same
+NotificationDependencies	INotificationDependencies [record]	NotificationDependencies [record]	NotificationDependencies [record]	same
+NotificationHeader	INotificationHeader [record]	NotificationHeader [record]	NotificationHeader [record]	same
+NotificationKey	NotificationKey [choice]	-	NotificationKey [choice]	same
+NotificationLike	INotificationLike [record]	INotificationLike [record]	NotificationLike [record]	same
+NotificationRegistration	INotificationRegistration [record]	INotificationRegistration [record]	NotificationRegistration [record]	same
+NotificationResolver	INotificationResolver [record]	INotificationResolver [record], INotificationResolver<> [record]	-	same
+NotificationResolverCallback	NotificationResolverCallback [function type]	NotificationResolverCallback [function type]	-	same
+NotificationResolverDependencies	INotificationResolverDependencies [record]	NotificationResolverDependencies [record]	NotificationResolverDependencies [record]	same
+NotificationResponse	INotificationResponse [record]	INotificationResponse [record]	-	same
+NotificationSerializerClient	INotificationSerializerClient [record]	INotificationSerializerClient [record]	-	same
+NotificationSerializerServer	INotificationSerializerServer [record]	INotificationSerializerServer [record]	-	same
+Notifier	INotifier [function type]	Notifier [function type]	Notifier [record]	rendered: callable (0044)
+NotifyOptions	INotifyOptions [record]	NotifyOptions [record]	NotifyOptions [record]	same
+NotifyRequest	INotifyRequest [record]	NotifyRequest [record]	NotifyRequest [record]	same
+OwnFailure	OwnFailure [choice]	OwnFailure [choice]	-	same
+OwnProblemOptions	IOwnProblemOptions [record]	OwnProblemOptions [record]	-	same
+PACING_DEFAULTS	PACING_DEFAULTS [constant]	-	PACING_DEFAULTS [constant]	same
+PacingLimits	IPacingLimits [record]	PacingLimits [record]	PacingLimits [record]	same
+PacingLimitsOptions	PacingLimitsOptions [record]	-	PacingLimitsOptions [record]	same
+ParcelVerdict	ParcelVerdict [choice]	ParcelVerdict [choice]	ParcelVerdict [choice]	same
+parseDebugFilter	parseDebugFilter [function]	-	parse_debug_filter [function]	same
+ParticipantDebugEvent	IParticipantDebugEvent [record]	ParticipantDebugEvent [record]	ParticipantDebugEvent [record]	same
+ParticipantDebugListener	-	-	ParticipantDebugListener [function type]	own: a listener the Rust side registers for an event the other sides emit (0044)
+ParticipantErrorListener	-	-	ParticipantErrorListener [function type]	own: a listener the Rust side registers for an event the other sides emit (0044)
+PatternTable	IPatternTable [record]	PatternTable [record]	-	same
+PayloadCodec	IPayloadCodec [record]	IPayloadCodec [record]	PayloadCodec [record]	same
+Procedure	IProcedure [record]	Procedure [record]	Procedure [record]	same
+ProcedureAddress	IProcedureAddress [record]	ProcedureAddress [record]	ProcedureAddress [record]	same
+ProcedureKind	ProcedureKind [choice]	ProcedureKind [choice]	ProcedureKind [choice]	same
+ProcedureSeries	IProcedureSeries [record]	ProcedureSeries [record]	ProcedureSeries [record]	same
+ProgrammerError	ProgrammerError [record]	-	ProgrammerError [record]	same
+ProtocolCode	ProtocolCode [choice]	ProtocolCode [choice]	ProtocolCode [choice]	same
+ReadViolations	IReadViolations [record]	ReadViolations [record]	ReadViolations [record]	same
+ReadyState	ReadyState [choice]	ReadyState [choice]	ReadyState [choice]	same
+ReadyStateError	ReadyStateError [record]	-	ReadyStateError [record]	same
+RECONNECT_DEFAULTS	RECONNECT_DEFAULTS [constant]	-	RECONNECT_DEFAULTS [constant]	same
+ReconnectError	ReconnectError [record]	ReconnectException [record]	ReconnectError [record]	rendered: error (0007, 0044)
+RefusalListener	-	-	RefusalListener [function type]	own: a listener the Rust side registers for an event the other sides emit (0044)
+Registrar	IRegistrar [function type]	Registrar [function type]	-	same
+RegistrationOptions	IRegistrationOptions [record]	RegistrationOptions [record]	RegistrationOptions [record]	same
+RelayOptions	IRelayOptions [record]	RelayOptions [record]	RelayOptions [record]	same
+RelayTarget	RelayTarget [choice]	-	RelayTarget [choice]	same
+Request	IRequest [record]	-	Request [record]	same
+REQUEST_DEFAULTS	REQUEST_DEFAULTS [constant]	-	REQUEST_DEFAULTS [constant]	same
+RequestCredential	RequestCredential [choice]	-	RequestCredential [choice]	same
+RequestDefaults	RequestDefaults [record]	RequestDefaults [record]	RequestDefaults [record]	same
+RequestDependencies	IRequestDependencies [record]	RequestDependencies [record]	RequestDependencies [record]	same
+RequestHeader	IRequestHeader [record]	RequestHeader [record]	RequestHeader [record]	same
+requestOf	requestOf [function]	-	request_of [function]	same
+RequestOptions	IRequestOptions [record]	RequestOptions [record]	RequestOptions [record]	same
+RequestPlace	RequestPlace [choice]	RequestPlace [record]	-	same
+RequestProps	IRequestProps [record]	RequestProps [record]	RequestProps [record]	same
+RequestResolver	IRequestResolver [record]	IRequestResolver [record]	-	same
+RequestResolverCallback	RequestResolverCallback [function type]	RequestResolverCallback [function type]	-	same
+RequestResolverDependencies	IRequestResolverDependencies [record]	RequestResolverDependencies [record]	RequestResolverDependencies [record]	same
+RequestResolverProps	IRequestResolverProps [record]	RequestResolverProps [record]	RequestResolverProps [record]	same
+RequestSerializerClient	IRequestSerializerClient [record]	IRequestSerializerClient [record]	-	same
+RequestSerializerServer	IRequestSerializerServer [record]	IRequestSerializerServer [record]	-	same
+requireCredential	requireCredential [function]	-	require_credential [function]	same
+requireSession	requireSession [function]	-	require_session [function]	same
+ResolvedRequestOptions	IResolvedRequestOptions [record]	ResolvedRequestOptions [record]	ResolvedRequestOptions [record]	same
+ResolverError	-	-	ResolverError [choice]	own: a Result's error, where the other sides throw (0044)
+Response	IResponse [record]	IResponse [record]	Response [record]	same
+ResultHeader	IResultHeader [record]	ResultHeader [record]	ResultHeader [record]	same
+ROOT	ROOT [constant]	-	ROOT [constant]	same
+RouterActivity	-	RouterActivity [choice]	RouterActivity [choice]	same
+RouterAnswer	RouterAnswer [choice]	RouterAnswer [record]	RouterAnswer [choice]	same
+RouterClient	IRouterClient [record], createRouterClient [function]	RouterClient [record]	RouterClient [record]	same
+RouterClientOptions	IRouterClientOptions [record]	RouterClientOptions [record]	RouterClientOptions [record]	same
+RouterClientTransportLike	IRouterClientTransportLike [record]	IRouterClientTransport [record]	RouterClientTransport [record]	rendered: like (0007)
+RouterError	-	-	RouterError [choice]	own: a Result's error, where the other sides throw (0044)
+RouterLike	IRouterLike [record]	IRouterLike [record]	-	same
+RouterLimits	IRouterLimits [record]	RouterLimits [record]	RouterLimits [record]	same
+RouterLimitsOptions	RouterLimitsOptions [record]	-	RouterLimitsOptions [record]	same
+RouterRequest	IRouterRequest [record]	RouterRequest [record]	RouterRequest [record]	same
+RouterResult	IRouterResult [record]	RouterResult [record]	RouterResult [record]	same
+RouterServer	IRouterServer [record], createRouterServer [function]	RouterServer [record]	RouterServer [record]	same
+RouterServerOptions	IRouterServerOptions [record]	RouterServerOptions [record]	RouterServerOptions [record]	same
+RouterServerTransportLike	IRouterServerTransportLike [record]	IRouterServerTransport [record]	-	rendered: like (0007)
+RouterSide	RouterSide [choice]	RouterSide [choice]	RouterSide [choice]	same
+Schedule	-	-	Schedule [choice]	own: the platform's clock and its timers, which the other sides take from their platform (0044, 0011)
+Server	IServer [record], createServer [function]	Server [record]	Server [record]	same
+SERVER_CONNECTION_HANDLE	SERVER_CONNECTION_HANDLE [constant]	RouterClient.ServerConnectionHandle [constant]	SERVER_CONNECTION_HANDLE [constant]	rendered: constant (0007)
+ServerGauges	ServerGauges [record]	ServerGauges [record]	ServerGauges [record]	same
+ServerLayers	IServerLayers [record]	-	-	differs: A facade's layers built by the application
+ServerListener	-	-	ServerListener [record]	own: a listener the Rust side registers for an event the other sides emit (0044)
+ServerOptions	IServerOptions [record]	ServerOptions [record]	ServerOptions [record]	same
+ServerSentEvent	IServerSentEvent [record]	ServerSentEvent [record]	-	same
+ServerTransportLike	IServerTransportLike [record]	IServerTransport [record]	ServerTransport [record]	rendered: like (0007)
+ServiceClient	IServiceClient [record], createServiceClient [function]	ServiceClient [record]	-	same
+ServiceClientOptions	IServiceClientOptions [record]	ServiceClientOptions [record]	-	same
+ServiceManager	IServiceManager [record], createServiceManager [function]	ServiceManager [record]	ServiceManager [record]	same
+ServiceManagerClient	IServiceManagerClient [record]	IServiceManagerClient [record]	ServiceManagerClient [record]	same
+ServiceManagerOptions	IServiceManagerOptions [record]	ServiceManagerOptions [record]	ServiceManagerOptions [record]	same
+ServiceManagerServer	IServiceManagerServer [record]	IServiceManagerServer [record]	ServiceManagerServer [record]	same
+ServiceProcedure	-	IServiceProcedure [record]	ServiceProcedure [record]	same
+ServiceResolverCallback	ServiceResolverCallback [function type]	ServiceResolverCallback [function type]	-	same
+ServiceResponse	IServiceResponse [record]	IServiceResponse [record]	-	same
+ServiceServer	IServiceServer [record], createServiceServer [function]	ServiceServer [record]	ServiceServer [record]	same
+ServiceServerOptions	ServiceServerOptions [record]	ServiceServerOptions [record]	ServiceServerOptions [record]	same
+Session	ISession [record]	Session [record]	Session [record]	same
+SESSION_TOKEN_BYTES	SESSION_TOKEN_BYTES [constant]	SessionToken.Bytes [constant]	SESSION_TOKEN_BYTES [constant]	rendered: constant (0007)
+SessionChange	ISessionChange [record]	SessionChange [record]	-	same
+SessionIdentifier	SessionIdentifier [choice]	SessionIdentifier [record]	SessionIdentifier [choice]	same
+SessionListener	-	-	SessionListener [function type]	own: a listener the Rust side registers for an event the other sides emit (0044)
+SessionManager	ISessionManager [record], createSessionManager [function]	SessionManager [record]	SessionManager [record]	same
+SessionManagerOptions	ISessionManagerOptions [record]	SessionManagerOptions [record]	SessionManagerOptions [record]	same
+SessionRequest	ISessionRequest [record]	SessionRequest [record]	SessionRequest [record]	same
+SessionToken	SessionToken [record]	SessionToken [record]	SessionToken [record]	same
+SessionTokenDrawError	-	-	SessionTokenDrawError [record]	own: a Result's error, where the other sides throw (0044)
+SharedClock	-	-	SharedClock [record]	own: the platform's clock and its timers, which the other sides take from their platform (0044, 0011)
+shareLegBSession	shareLegBSession [function]	-	share_leg_b_session [function]	same
+Subscriber	ISubscriber [record]	Subscriber [record]	Subscriber [record]	same
+SystemClock	-	-	SystemClock [record]	own: the platform's clock and its timers, which the other sides take from their platform (0044, 0011)
+SystemClockOptions	-	-	SystemClockOptions [record]	own: the platform's clock and its timers, which the other sides take from their platform (0044, 0011)
+TimeoutError	TimeoutError [record]	-	CallError::TimedOut [variant]	rendered: error (0007, 0044)
+Timer	-	-	Timer [record]	own: the platform's clock and its timers, which the other sides take from their platform (0044, 0011)
+TimerCallback	-	-	TimerCallback [function type]	own: the platform's clock and its timers, which the other sides take from their platform (0044, 0011)
+TracedEnvelope	-	TracedEnvelope [record]	TracedEnvelope [record]	same
+TRANSPORT_BROKER	TRANSPORT_BROKER [constant]	-	TRANSPORT_BROKER [constant]	same
+TRANSPORT_MEMORY	TRANSPORT_MEMORY [constant]	-	TRANSPORT_MEMORY [constant]	same
+TransportClientDisconnectOptions	ITransportClientDisconnectOptions [record]	TransportClientDisconnectOptions [record]	TransportClientDisconnectOptions [record]	same
+TransportClientReconnectDelay	TransportClientReconnectDelay [choice]	TransportClientReconnectDelay [record]	TransportClientReconnectDelay [choice]	same
+TransportClientReconnectDelayResolver	TransportClientReconnectDelayResolver [function type]	TransportClientReconnectDelayResolver [function type]	TransportClientReconnectDelayResolver [function type]	same
+TransportClientReconnectOptions	ITransportClientReconnectOptions [record]	TransportClientReconnectOptions [record]	TransportClientReconnectOptions [record]	same
+TransportError	-	-	TransportError [choice]	own: a Result's error, where the other sides throw (0044)
+TransportMessage	ITransportMessage [record]	TransportMessage [record]	TransportMessage [record]	same
+TransportServerAddress	ITransportServerAddress [record]	TransportServerAddress [record]	-	same
+TransportServerClient	ITransportServerClient [record]	TransportServerClient [record]	TransportServerClient [record]	same
+TransportServerConnection	ITransportServerConnection [record]	-	-	own: what a connection's platform opened it with, which the other sides do not hand (0007)
+TransportServerRefusal	ITransportServerRefusal [record]	TransportServerRefusal [record]	TransportServerRefusal [record]	same
+UnregisterNotificationOptions	IUnregisterNotificationOptions [record]	-	UnregisterNotificationOptions [record]	same
+utf8Length	utf8Length [function]	Validators.Utf8Length [function]	-	rendered: of (0007, 0044)
+ValidateOptions	IValidateOptions [record]	ValidateOptions [record]	ValidateOptions [record]	same
+Violation	IViolation [record]	Violation [record]	Violation [record]	same
+ViolationRule	IViolationRule [record]	ViolationRule [record]	-	same
+violationsDetailOf	violationsDetailOf [function]	Violations.DetailOf [function]	violations_detail_of [function]	rendered: of (0007, 0044)
+ViolationSink	IViolationSink [record]	IViolationSink [record]	-	same
+violationsOf	violationsOf [function]	Violations.Of [function]	violations_of [function]	rendered: of (0007, 0044)
+WARNING_RATIO	WARNING_RATIO [constant]	Health.WarningRatio [constant]	WARNING_RATIO [constant]	rendered: constant (0007)
+WEBSOCKET_REFUSALS	WEBSOCKET_REFUSALS [constant]	WebSocketRefusals [constant]	-	same
+WebSocketClient	WebSocketClient [record], createWebSocketClient [function]	WebSocketClient [record]	-	same
+WebSocketClientOptions	IWebSocketClientOptions [record]	WebSocketClientOptions [record]	-	same
+WebSocketServer	WebSocketServer [record], createWebSocketServer [function]	WebSocketServer [record]	-	same
+WebSocketServerOptions	IWebSocketServerOptions [record]	WebSocketServerOptions [record]	-	same
+WebSocketTransportClient	WebSocketTransportClient [record], createWebSocketTransportClient [function]	WebSocketTransportClient [record]	-	same
+WebSocketTransportClientConnectOptions	IWebSocketTransportClientConnectOptions [record]	WebSocketTransportClientConnectOptions [record]	-	same
+WebSocketTransportClientOptions	IWebSocketTransportClientOptions [record]	WebSocketTransportClientOptions [record]	-	same
+WebSocketTransportServer	WebSocketTransportServer [record], createWebSocketTransportServer [function]	WebSocketTransportServer [record]	-	same
+WebSocketTransportServerOptions	IWebSocketTransportServerOptions [record]	WebSocketTransportServerOptions [record]	-	same
+WithdrawnListener	-	-	WithdrawnListener [function type]	own: a listener the Rust side registers for an event the other sides emit (0044)
+wordsOf	wordsOf [function]	Violations.WordsOf [function]	words_of [function]	rendered: of (0007, 0044)
+AdmissionRefusal	-	-	AdmissionRefusal [record]	alone
+AdmitFn	-	-	AdmitFn [function type]	alone
+AFTER_HEADER	AFTER_HEADER [constant]	-	-	alone
+AmqpBrokerTlsOptions	-	AmqpBrokerTlsOptions [record]	-	alone
+Announcement	Announcement [choice]	-	-	alone
+AnsweredName	AnsweredName [record]	-	-	alone
+Answerer	-	-	Answerer [record]	alone
+AnswerTarget	-	AnswerTarget [record]	-	alone
+Arose	Arose [choice]	-	-	alone
+BEAD_BATCH_MEDIA_TYPE	BEAD_BATCH_MEDIA_TYPE [constant]	-	-	alone
+BEAD_MEDIA_TYPE	BEAD_MEDIA_TYPE [constant]	-	-	alone
+BeadHttpClient	-	BeadHttpClient [record]	-	alone
+BeadHttpClientOptions	-	BeadHttpClientOptions [record]	-	alone
+BeadServer	-	IBeadServer [record]	-	alone
+BODY_BYTES_BUDGET	BODY_BYTES_BUDGET [constant]	-	-	alone
+BROKER_DELIVERIES	BROKER_DELIVERIES [constant]	-	-	alone
+BROKER_PUBLISHED	BROKER_PUBLISHED [constant]	-	-	alone
+BrokerAnswers	IBrokerAnswers [record]	-	-	alone
+BrokerConnection	IBrokerConnection [record]	-	-	alone
+BrokerConnectionOwner	IBrokerConnectionOwner [record]	-	-	alone
+BrokerParticipantPort	IBrokerParticipantPort [record]	-	-	alone
+BrokerPeer	IBrokerPeer [record]	-	-	alone
+BrokerRefusal.NoSubscriber	-	BrokerRefusal.NoSubscriber [constant]	-	alone
+BrokerServing	IBrokerServing [record]	-	-	alone
+BrokerTopic	BrokerTopic [record]	-	-	alone
+BURIAL_MILLISECONDS	BURIAL_MILLISECONDS [constant]	-	-	alone
+bytesContain	bytesContain [function]	-	-	alone
+bytesEndWith	bytesEndWith [function]	-	-	alone
+bytesEqual	bytesEqual [function]	-	-	alone
+bytesStartWith	bytesStartWith [function]	-	-	alone
+Call	-	-	Call [record]	alone
+CallAsked	-	-	CallAsked [record]	alone
+CallEnding	-	-	CallEnding [choice]	alone
+CallFailure	ICallFailure [record]	-	-	alone
+CallId	CallId [scalar]	-	-	alone
+CapacityError	-	-	CapacityError [record]	alone
+check_records	-	-	check_records [function]	alone
+check_required	-	-	check_required [function]	alone
+checkProtoRecords	checkProtoRecords [function]	-	-	alone
+CLIENT_FAILURES	CLIENT_FAILURES [constant]	-	-	alone
+ClientTransportLike	IClientTransportLike [record]	-	-	alone
+Clocks	-	Clocks [constant]	-	alone
+CLOSE_EVENT	CLOSE_EVENT [constant]	-	-	alone
+CLOSE_TIMEOUT	CLOSE_TIMEOUT [constant]	-	-	alone
+CloseConnection	-	-	CloseConnection [function type]	alone
+CloseEventLike	ICloseEventLike [record]	-	-	alone
+CommandDescriptor	CommandDescriptor [record]	-	-	alone
+CommandName	CommandName [record]	-	-	alone
+CommandProcedure	-	CommandProcedure [record]	-	alone
+config_of	-	-	config_of [function]	alone
+Connect	-	-	Connect [record]	alone
+CONNECT_DEFAULTS	CONNECT_DEFAULTS [constant]	-	-	alone
+CONNECTION_EVENT	CONNECTION_EVENT [constant]	-	-	alone
+CONNECTION_INACTIVITY_TIMEOUT	CONNECTION_INACTIVITY_TIMEOUT [constant]	-	-	alone
+CONNECTION_INACTIVITY_TIMEOUT_CHANGED_EVENT	CONNECTION_INACTIVITY_TIMEOUT_CHANGED_EVENT [constant]	-	-	alone
+CONNECTION_INACTIVITY_TIMEOUT_REACHED_EVENT	CONNECTION_INACTIVITY_TIMEOUT_REACHED_EVENT [constant]	-	-	alone
+CONNECTION_TOKEN_HEADER	CONNECTION_TOKEN_HEADER [constant]	-	-	alone
+CONNECTION_UNKNOWN	CONNECTION_UNKNOWN [constant]	-	-	alone
+ConnectParameters	ConnectParameters [record]	-	-	alone
+CREATED_EVENT	CREATED_EVENT [constant]	-	-	alone
+createHTTPClient	createHTTPClient [function]	-	-	alone
+createNotificationManager	createNotificationManager [function]	-	-	alone
+createTimers	createTimers [function]	-	-	alone
+createTransportClient	createTransportClient [function]	-	-	alone
+createTransportServer	createTransportServer [function]	-	-	alone
+createWorkerClient	createWorkerClient [function]	-	-	alone
+createWorkerServer	createWorkerServer [function]	-	-	alone
+createWorkerTransportClient	createWorkerTransportClient [function]	-	-	alone
+createWorkerTransportServer	createWorkerTransportServer [function]	-	-	alone
+CredentialRefused	ICredentialRefused [record]	-	-	alone
+Data	Data [choice]	-	-	alone
+DATA_CHANGED_EVENT	DATA_CHANGED_EVENT [constant]	-	-	alone
+DEBUG_EVENT	DEBUG_EVENT [constant]	-	-	alone
+DeclarationWay	-	-	DeclarationWay [choice]	alone
+DEFAULT_CHALLENGE	DEFAULT_CHALLENGE [constant]	-	-	alone
+DefaultCredential	DefaultCredential [choice]	-	-	alone
+DEFAULTS	DEFAULTS [constant]	-	-	alone
+DELETED_EVENT	DELETED_EVENT [constant]	-	-	alone
+DEPRECATED_EVENT	DEPRECATED_EVENT [constant]	-	-	alone
+Deprecation	-	-	Deprecation [record]	alone
+Descriptor	-	-	Descriptor [record]	alone
+DestinationId	DestinationId [scalar]	-	-	alone
+DEVTOOLS_HOOK_KEY	DEVTOOLS_HOOK_KEY [constant]	-	-	alone
+DevtoolsHook	IDevtoolsHook [record]	-	-	alone
+DevtoolsListeners	IDevtoolsListeners [record]	-	-	alone
+DevtoolsSource	IDevtoolsSource [record]	-	-	alone
+DISCONNECT_DEFAULTS	DISCONNECT_DEFAULTS [constant]	-	-	alone
+DISCONNECT_TIMEOUT	DISCONNECT_TIMEOUT [constant]	-	-	alone
+dispose	dispose [constant]	-	-	alone
+Disposed	-	-	Disposed [record]	alone
+DOCUMENT_PATH	DOCUMENT_PATH [constant]	-	-	alone
+DrawingRequest	IDrawingRequest [record]	-	-	alone
+DrawnConnection	IDrawnConnection [record]	-	-	alone
+DROPPED_EVENT	DROPPED_EVENT [constant]	-	-	alone
+DynamicCodec	-	-	DynamicCodec [record]	alone
+ElsewhereVerdict	-	-	ElsewhereVerdict [record]	alone
+ElsewhereVerifier	-	-	ElsewhereVerifier [function type]	alone
+Encoding	Encoding [choice]	-	-	alone
+ENCODING	-	-	ENCODING [constant]	alone
+entriesByKey	entriesByKey [function]	-	-	alone
+ENVELOPE_KINDS	ENVELOPE_KINDS [constant]	-	-	alone
+ENVELOPE_PREFIX	ENVELOPE_PREFIX [constant]	-	-	alone
+EnvelopeAsked	-	-	EnvelopeAsked [record]	alone
+ERROR_EVENT	ERROR_EVENT [constant]	-	-	alone
+EventIteratorOptions	IEventIteratorOptions [record]	-	-	alone
+EXCHANGE_TIMEOUT	EXCHANGE_TIMEOUT [constant]	-	-	alone
+FailureArising	-	FailureArising [choice]	-	alone
+FailureException.Raised	-	FailureException.Raised [record]	-	alone
+FailureExceptionOptions	-	FailureExceptionOptions [record]	-	alone
+FailureNameOf	FailureNameOf [choice]	-	-	alone
+FailureRecord	-	-	FailureRecord [record]	alone
+FetchInit	IFetchInit [record]	-	-	alone
+FetchLike	FetchLike [function type]	-	-	alone
+FetchResponseLike	IFetchResponseLike [record]	-	-	alone
+FilterGiven	-	-	FilterGiven [record]	alone
+FilterKeeper	-	-	FilterKeeper [record]	alone
+GatewayAuthorization	-	GatewayAuthorization [choice]	-	alone
+GeneratedCode	-	GeneratedCode [constant]	-	alone
+generateHandle	generateHandle [function]	-	-	alone
+GenericError	GenericError [record]	-	-	alone
+getReadyState	getReadyState [function]	-	-	alone
+GivenFilter	-	-	GivenFilter [choice]	alone
+GivenOf	GivenOf [record]	-	-	alone
+HandedCredential	HandedCredential [choice]	-	-	alone
+HandedRequestHeader	IHandedRequestHeader [record]	-	-	alone
+HEADERS_TIMEOUT	HEADERS_TIMEOUT [constant]	-	-	alone
+HookName	HookName [record]	-	-	alone
+HOST_REFUSAL	HOST_REFUSAL [constant]	-	-	alone
+HTTP_POLICY_MEMBERS	HTTP_POLICY_MEMBERS [constant]	-	-	alone
+HTTPClient	HTTPClient [record]	-	-	alone
+HTTPClientConnection	IHTTPClientConnection [record]	-	-	alone
+HTTPClientOptions	IHTTPClientOptions [record]	-	-	alone
+HttpEncoding	-	HttpEncoding [choice]	-	alone
+HttpEvents	-	HttpEvents [record]	-	alone
+HttpGatewayEndpoints.MapBeadGateway	-	HttpGatewayEndpoints.MapBeadGateway [function]	-	alone
+HTTPGatewayEventMap	HTTPGatewayEventMap [record]	-	-	alone
+HttpMethod	HttpMethod [choice]	-	-	alone
+HttpPath	-	HttpPath [record]	-	alone
+HTTPPolicyInit	IHTTPPolicyInit [record]	-	-	alone
+httpPolicyOf	httpPolicyOf [function]	-	-	alone
+HTTPPolicyOption	IHTTPPolicyOption [record]	-	-	alone
+HttpPolicyOptions	-	HttpPolicyOptions [record]	-	alone
+HttpProblem	-	HttpProblem [record]	-	alone
+HttpProblems.MediaType	-	HttpProblems.MediaType [constant]	-	alone
+HttpProblems.Of	-	HttpProblems.Of [function]	-	alone
+HttpProblems.Own	-	HttpProblems.Own [function]	-	alone
+HttpProblems.PhraseOf	-	HttpProblems.PhraseOf [function]	-	alone
+HttpProblems.Refusal	-	HttpProblems.Refusal [function]	-	alone
+HttpProblems.StatusOf	-	HttpProblems.StatusOf [function]	-	alone
+HttpProblems.Tag	-	HttpProblems.Tag [constant]	-	alone
+HttpRefusals	-	HttpRefusals [constant]	-	alone
+HTTPRequester	IHTTPRequester [function type]	-	-	alone
+httpRequesterOf	httpRequesterOf [function]	-	-	alone
+HTTPRequestLike	IHTTPRequestLike [record]	-	-	alone
+HTTPRequestListener	HTTPRequestListener [function type]	-	-	alone
+HTTPResponseLike	IHTTPResponseLike [record]	-	-	alone
+HttpRoute	-	HttpRoute [record]	-	alone
+HttpRouteInit	IHttpRouteInit [record]	-	-	alone
+HttpSegment	-	HttpSegment [record]	-	alone
+HttpSegmentKind	-	HttpSegmentKind [choice]	-	alone
+HTTPServerLike	IHTTPServerLike [record]	-	-	alone
+HTTPSubscriber	IHTTPSubscriber [function type]	-	-	alone
+httpSubscriberOf	httpSubscriberOf [function]	-	-	alone
+HttpTemplate	-	HttpTemplate [record]	-	alone
+HttpTransport	-	HttpTransport [constant]	-	alone
+HttpTransportStartOptions	-	HttpTransportStartOptions [record]	-	alone
+HttpVariable	-	HttpVariable [record]	-	alone
+IDLE_TIMEOUT	IDLE_TIMEOUT [constant]	-	-	alone
+INACTIVITY_TIMEOUT	INACTIVITY_TIMEOUT [constant]	-	-	alone
+IncomingMessageLike	IIncomingMessageLike [record]	-	-	alone
+isReadyStateClosed	isReadyStateClosed [function]	-	-	alone
+isReadyStateClosing	isReadyStateClosing [function]	-	-	alone
+isReadyStateConnecting	isReadyStateConnecting [function]	-	-	alone
+isReadyStateOpen	isReadyStateOpen [function]	-	-	alone
+isReadyStateReconnecting	isReadyStateReconnecting [function]	-	-	alone
+isReadyStateUninitialized	isReadyStateUninitialized [function]	-	-	alone
+isTie	isTie [function]	-	-	alone
+JoinableTransportServer	IJoinableTransportServer [record]	-	-	alone
+JoinedTransportServer	IJoinedTransportServer [record]	-	-	alone
+joinTransports	joinTransports [function]	-	-	alone
+json::DEPTH	-	-	json::DEPTH [constant]	alone
+json::from_value	-	-	json::from_value [function]	alone
+json::JsonRefusal	-	-	json::JsonRefusal [choice]	alone
+json::LoneSurrogates	-	-	json::LoneSurrogates [choice]	alone
+json::read	-	-	json::read [function]	alone
+json::read_with	-	-	json::read_with [function]	alone
+json::ReadJsonOptions	-	-	json::ReadJsonOptions [record]	alone
+json::to_bytes	-	-	json::to_bytes [function]	alone
+json::to_value	-	-	json::to_value [function]	alone
+json::write	-	-	json::write [function]	alone
+JsonCodec	-	-	JsonCodec [record]	alone
+JsonFormExceptionOptions	-	JsonFormExceptionOptions [record]	-	alone
+JsonOf	-	-	JsonOf [record]	alone
+JsonPlace	IJsonPlace [record]	-	-	alone
+JsonValue	JsonValue [choice]	-	-	alone
+judgeRules	judgeRules [function]	-	-	alone
+JudgingOptions	IJudgingOptions [record]	-	-	alone
+Jwk	Jwk [record]	-	-	alone
+JwtAgainst	-	-	JwtAgainst [record]	alone
+JwtSessionIdentifier	-	-	JwtSessionIdentifier [choice]	alone
+JwtVerdict	-	-	JwtVerdict [choice]	alone
+KEEP_ALIVE	KEEP_ALIVE [constant]	-	-	alone
+KeySetAnswer	-	-	KeySetAnswer [record]	alone
+KeySetAsk	-	-	KeySetAsk [function type]	alone
+LAST_ACTIVITY_CHANGED_EVENT	LAST_ACTIVITY_CHANGED_EVENT [constant]	-	-	alone
+LINK_CREDIT	LINK_CREDIT [constant]	-	-	alone
+ListedFailureError	IListedFailureError [record]	-	-	alone
+LISTEN_EVENT	LISTEN_EVENT [constant]	-	-	alone
+LISTEN_HEADER	LISTEN_HEADER [constant]	-	-	alone
+ListenerId	-	-	ListenerId [record]	alone
+listenOn	listenOn [function]	-	-	alone
+LOCALHOST	LOCALHOST [constant]	-	-	alone
+LOCALHOST_DRAWS	LOCALHOST_DRAWS [constant]	-	-	alone
+matchesPattern	matchesPattern [function]	-	-	alone
+matchesTemplate	matchesTemplate [function]	-	-	alone
+MAXIMUM_BODY_BYTES	MAXIMUM_BODY_BYTES [constant]	-	-	alone
+MAXIMUM_DEPTH	MAXIMUM_DEPTH [constant]	-	-	alone
+MAXIMUM_EXCHANGES	MAXIMUM_EXCHANGES [constant]	-	-	alone
+MAXIMUM_EXCHANGES_PER_ADDRESS	MAXIMUM_EXCHANGES_PER_ADDRESS [constant]	-	-	alone
+MAXIMUM_MESSAGE_BYTES	MAXIMUM_MESSAGE_BYTES [constant]	-	-	alone
+MAXIMUM_MESSAGE_SIZE	MAXIMUM_MESSAGE_SIZE [constant]	-	-	alone
+MAXIMUM_OUTBOX_BYTES	MAXIMUM_OUTBOX_BYTES [constant]	-	-	alone
+MAXIMUM_PACKET_SIZE	MAXIMUM_PACKET_SIZE [constant]	-	-	alone
+MAXIMUM_WAIT	MAXIMUM_WAIT [constant]	-	-	alone
+MAXIMUM_WAITING_EXCHANGES	MAXIMUM_WAITING_EXCHANGES [constant]	-	-	alone
+MEMORY_ADDRESS	-	-	MEMORY_ADDRESS [constant]	alone
+MEMORY_BROKER_FAULTS	MEMORY_BROKER_FAULTS [constant]	-	-	alone
+MemoryAcceptOptions	IMemoryAcceptOptions [record]	-	-	alone
+MemoryEndLike	IMemoryEndLike [record]	-	-	alone
+MemoryPeerLike	IMemoryPeerLike [record]	-	-	alone
+MemoryTransportServerLike	IMemoryTransportServerLike [record]	-	-	alone
+MESSAGE_EVENT	MESSAGE_EVENT [constant]	-	-	alone
+MessageEventLike	IMessageEventLike [record]	-	-	alone
+MessageRules	MessageRules [function type]	-	-	alone
+MINIMUM_SEND_BYTES_PER_SECOND	MINIMUM_SEND_BYTES_PER_SECOND [constant]	-	-	alone
+MqttBrokerTlsOptions	-	MqttBrokerTlsOptions [record]	-	alone
+NoFailure	-	NoFailure [record]	-	alone
+NotificationCallback	-	-	NotificationCallback [function type]	alone
+NotificationCandidates	NotificationCandidates [record]	-	-	alone
+NotificationManager	INotificationManager [record]	-	-	alone
+NotificationManagerOptions	INotificationManagerOptions [record]	-	-	alone
+NotificationResolverOf	-	-	NotificationResolverOf [record]	alone
+Notifications	Notifications [record]	-	-	alone
+NotificationSeries	-	-	NotificationSeries [record]	alone
+NotifyFilter	-	-	NotifyFilter [function type]	alone
+notifying_of	-	-	notifying_of [function]	alone
+NotifyingDescriptor	-	-	NotifyingDescriptor [record]	alone
+NotifyingName	NotifyingName [record]	-	-	alone
+opened_of	-	-	opened_of [function]	alone
+ORIGIN_REFUSAL	ORIGIN_REFUSAL [constant]	-	-	alone
+Pacing	IPacing [record]	-	-	alone
+PARCEL_VERDICTS	PARCEL_VERDICTS [constant]	-	-	alone
+parseTemplate	parseTemplate [function]	-	-	alone
+PARTICIPANT_PORT	PARTICIPANT_PORT [constant]	-	-	alone
+PATHNAME	PATHNAME [constant]	-	-	alone
+Pattern.Matches	-	Pattern.Matches [function]	-	alone
+PAYLOAD_CODECS	PAYLOAD_CODECS [constant]	-	-	alone
+payloadCodecOf	payloadCodecOf [function]	-	-	alone
+PayloadCodecs.Json	-	PayloadCodecs.Json [constant]	-	alone
+PayloadCodecs.Of	-	PayloadCodecs.Of [function]	-	alone
+PayloadCodecs.Raw	-	PayloadCodecs.Raw [constant]	-	alone
+PayloadCodecs.Text	-	PayloadCodecs.Text [constant]	-	alone
+PLATFORM_CLOCK	PLATFORM_CLOCK [constant]	-	-	alone
+portOf	portOf [function]	-	-	alone
+Problem	IProblem [record]	-	-	alone
+PROBLEM_MEDIA_TYPE	PROBLEM_MEDIA_TYPE [constant]	-	-	alone
+ProblemContext	-	ProblemContext [record]	-	alone
+problemOfFailure	problemOfFailure [function]	-	-	alone
+problemOfOwn	problemOfOwn [function]	-	-	alone
+problemOfRefusal	problemOfRefusal [function]	-	-	alone
+ProblemOptions	IProblemOptions [record]	-	-	alone
+ProblemRoute	IProblemRoute [record]	-	-	alone
+ProcedureBindings<,,>	-	ProcedureBindings<,,> [record]	-	alone
+ProcedureBindings<,>	-	ProcedureBindings<,> [record]	-	alone
+ProcedureDeprecation	-	ProcedureDeprecation [record]	-	alone
+ProcedureId	ProcedureId [scalar]	-	-	alone
+ProtoCodec	-	-	ProtoCodec [record]	alone
+protoCodecOf	protoCodecOf [function]	-	-	alone
+ProtoCodecs.Of	-	ProtoCodecs.Of [function]	-	alone
+ProtoCodecs.Read	-	ProtoCodecs.Read [function]	-	alone
+PROTOCOL_TYPES	PROTOCOL_TYPES [constant]	-	-	alone
+ProtocolFailure	IProtocolFailure [record]	-	-	alone
+ProtoRecords.Check	-	ProtoRecords.Check [function]	-	alone
+ProtoRequired.Check	-	ProtoRequired.Check [function]	-	alone
+ProtoSchema	-	-	ProtoSchema [record]	alone
+RawCodec	-	-	RawCodec [record]	alone
+RawPath	IRawPath [record]	-	-	alone
+rawPathOf	rawPathOf [function]	-	-	alone
+READY_STATE_NAMES	READY_STATE_NAMES [constant]	-	-	alone
+ReceivedFailure	IReceivedFailure [record]	-	-	alone
+RedactedHeader	RedactedHeader [record]	-	-	alone
+Refusal	-	-	Refusal [choice]	alone
+REFUSAL_EVENT	REFUSAL_EVENT [constant]	-	-	alone
+REFUSAL_HEADER	REFUSAL_HEADER [constant]	-	-	alone
+REFUSALS	REFUSALS [constant]	-	-	alone
+RelayLeg	-	-	RelayLeg [record]	alone
+RelayRouter	-	-	RelayRouter [record]	alone
+RequestDescriptor	RequestDescriptor [record]	-	-	alone
+RequestHandler	-	IRequestHandler [record]	-	alone
+RequestInit	IRequestInit [record]	-	-	alone
+RequestProcedure<,,,,>	-	RequestProcedure<,,,,> [record]	-	alone
+RequestProcedure<,,,>	-	RequestProcedure<,,,> [record]	-	alone
+RequestValidator	-	RequestValidator [function type]	-	alone
+ResolverCallback	-	-	ResolverCallback [function type]	alone
+resolveRequestOptions	resolveRequestOptions [function]	-	-	alone
+ResolverFailure	ResolverFailure [choice]	-	-	alone
+ResolverOf	-	-	ResolverOf [record]	alone
+ResolverSeries	-	-	ResolverSeries [record]	alone
+RETRY_DELAYS	RETRY_DELAYS [constant]	-	-	alone
+retryAfterOf	retryAfterOf [function]	-	-	alone
+routeIndexOf	routeIndexOf [function]	-	-	alone
+routeOf	routeOf [function]	-	-	alone
+ROUTER_CLIENT_EVENTS	ROUTER_CLIENT_EVENTS [choice]	-	-	alone
+ROUTER_SERVER_EVENTS	ROUTER_SERVER_EVENTS [choice]	-	-	alone
+RouterClientActivity	RouterClientActivity [record]	-	-	alone
+RouterClientConnectionHandle	RouterClientConnectionHandle [scalar]	-	-	alone
+RouterClientEventMap	RouterClientEventMap [record]	-	-	alone
+RouterDebugInfo	IRouterDebugInfo [record]	-	-	alone
+RouterFailures	IRouterFailures [record]	-	-	alone
+RouterMetrics	-	-	RouterMetrics [record]	alone
+RouterServerActivity	RouterServerActivity [record]	-	-	alone
+RouterServerDebugInfo	IRouterServerDebugInfo [record]	-	-	alone
+RouterServerEventMap	RouterServerEventMap [record]	-	-	alone
+RouterTarget	-	IRouterTarget [record]	-	alone
+Segment	Segment [choice]	-	-	alone
+SEND_GRACE_PERIOD	SEND_GRACE_PERIOD [constant]	-	-	alone
+Sent	-	-	Sent [choice]	alone
+SEQUENCE_HEADER	SEQUENCE_HEADER [constant]	-	-	alone
+SERVER_FAILURES	SERVER_FAILURES [constant]	-	-	alone
+ServerConnectionHandle	ServerConnectionHandle [scalar]	-	-	alone
+ServerSocketLike	IServerSocketLike [record]	-	-	alone
+SERVICE_MANAGER_EVENTS	SERVICE_MANAGER_EVENTS [choice]	-	-	alone
+ServiceAdmissions	-	IServiceAdmissions [record]	-	alone
+ServiceCall	-	-	ServiceCall [record]	alone
+ServiceDescriptor	IServiceDescriptor [record]	-	-	alone
+ServiceId	ServiceId [scalar]	-	-	alone
+ServiceManagerEventMap	ServiceManagerEventMap [record]	-	-	alone
+ServiceManagerOnDebugCallback	ServiceManagerOnDebugCallback [record]	-	-	alone
+ServiceManagerOnDeprecatedCallback	ServiceManagerOnDeprecatedCallback [record]	-	-	alone
+ServiceManagerOnDroppedCallback	ServiceManagerOnDroppedCallback [record]	-	-	alone
+ServiceNotificationResolverCallback	-	ServiceNotificationResolverCallback [function type]	-	alone
+ServiceNotificationResponse	-	IServiceNotificationResponse [record]	-	alone
+ServiceProcedures	ServiceProcedures [record]	-	-	alone
+ServiceResolvers	ServiceResolvers [record]	-	-	alone
+ServiceRevision	ServiceRevision [scalar]	-	-	alone
+ServiceRouter	-	-	ServiceRouter [choice]	alone
+ServiceWindows	-	IServiceWindows [record]	-	alone
+SESSION_INACTIVITY_TIMEOUT_CHANGED_EVENT	SESSION_INACTIVITY_TIMEOUT_CHANGED_EVENT [constant]	-	-	alone
+SESSION_INACTIVITY_TIMEOUT_REACHED_EVENT	SESSION_INACTIVITY_TIMEOUT_REACHED_EVENT [constant]	-	-	alone
+SESSION_MANAGER_EVENTS	SESSION_MANAGER_EVENTS [choice]	-	-	alone
+SessionEvent	-	-	SessionEvent [choice]	alone
+SessionManagerEventMap	SessionManagerEventMap [record]	-	-	alone
+SessionManagerOnInactivityTimeoutCallback	SessionManagerOnInactivityTimeoutCallback [record]	-	-	alone
+SessionManagerOnSessionCallback	SessionManagerOnSessionCallback [record]	-	-	alone
+SessionManagerTimers	ISessionManagerTimers [record]	-	-	alone
+SessionOf	SessionOf [function type]	-	SessionOf [function type]	same
+SessionTimeoutIds	ISessionTimeoutIds [record]	-	-	alone
+SessionTokenProvider	-	-	SessionTokenProvider [function type]	alone
+setReadyStateClosed	setReadyStateClosed [function]	-	-	alone
+setReadyStateClosing	setReadyStateClosing [function]	-	-	alone
+setReadyStateConnecting	setReadyStateConnecting [function]	-	-	alone
+setReadyStateOpen	setReadyStateOpen [function]	-	-	alone
+setReadyStateReconnecting	setReadyStateReconnecting [function]	-	-	alone
+setReadyStateUninitialized	setReadyStateUninitialized [function]	-	-	alone
+Settle	-	-	Settle [function type]	alone
+Settled	-	-	Settled [record]	alone
+Signal	-	-	Signal [record]	alone
+SignalReason	-	-	SignalReason [choice]	alone
+START_DEFAULTS	START_DEFAULTS [constant]	-	-	alone
+STATUS_PHRASES	STATUS_PHRASES [constant]	-	-	alone
+SubscriberFilter	-	-	SubscriberFilter [function type]	alone
+SubscribingCall	ISubscribingCall [record]	-	-	alone
+Subscription	ISubscription [record]	-	-	alone
+Template	ITemplate [record]	-	-	alone
+templateOf	templateOf [function]	-	-	alone
+TemplateReading	TemplateReading [choice]	-	-	alone
+TextCodec	-	-	TextCodec [record]	alone
+TIMEOUT	TIMEOUT [constant]	-	-	alone
+TimeoutId	TimeoutId [choice]	-	-	alone
+Traced	-	-	Traced [record]	alone
+TracedError	-	-	TracedError [record]	alone
+TracedValue	-	-	TracedValue [record]	alone
+TRANSPORT_AMQP	TRANSPORT_AMQP [constant]	-	-	alone
+TRANSPORT_CLIENT_EVENTS	TRANSPORT_CLIENT_EVENTS [choice]	-	-	alone
+TRANSPORT_HTTP	TRANSPORT_HTTP [constant]	-	-	alone
+TRANSPORT_MQTT	TRANSPORT_MQTT [constant]	-	-	alone
+TRANSPORT_SERVER_EVENTS	TRANSPORT_SERVER_EVENTS [choice]	-	-	alone
+TRANSPORT_WEBSOCKET	TRANSPORT_WEBSOCKET [constant]	-	-	alone
+TRANSPORT_WEBSOCKET_BINARYTYPE	TRANSPORT_WEBSOCKET_BINARYTYPE [constant]	-	-	alone
+TRANSPORT_WORKER	TRANSPORT_WORKER [constant]	-	-	alone
+TransportClient	ITransportClient [record]	-	-	alone
+TransportClientAddressOptions	ITransportClientAddressOptions [record]	-	-	alone
+TransportClientConnectOptions	ITransportClientConnectOptions [record]	-	-	alone
+TransportClientDefineOptions	ITransportClientDefineOptions [record]	-	-	alone
+TransportClientEventMap	TransportClientEventMap [record]	-	-	alone
+TransportClientImplementation	ITransportClientImplementation [record]	-	-	alone
+TransportClientInternal	ITransportClientInternal [record]	-	-	alone
+TransportClientOnCloseCallback	TransportClientOnCloseCallback [record]	-	-	alone
+TransportClientOnErrorCallback	TransportClientOnErrorCallback [record]	-	-	alone
+TransportClientOnMessageCallback	TransportClientOnMessageCallback [record]	-	-	alone
+TransportClientOptions	ITransportClientOptions [record]	-	-	alone
+TransportClientReconnectTapCallback	TransportClientReconnectTapCallback [function type]	-	-	alone
+TransportClientToldEvent	TransportClientToldEvent [choice]	-	-	alone
+TRANSPORTS	TRANSPORTS [choice]	-	-	alone
+TransportServer	ITransportServer [record]	-	-	alone
+TransportServerBound	ITransportServerBound [record]	-	-	alone
+TransportServerClientAware	ITransportServerClientAware [record]	-	-	alone
+TransportServerConnectionHandle	TransportServerConnectionHandle [choice]	-	-	alone
+TransportServerConnections	TransportServerConnections [record]	-	-	alone
+TransportServerDefineOptions	ITransportServerDefineOptions [record]	-	-	alone
+TransportServerEventMap	TransportServerEventMap [record]	-	-	alone
+TransportServerHandleInfo	ITransportServerHandleInfo [record]	-	-	alone
+TransportServerImplementation	ITransportServerImplementation [record]	-	-	alone
+TransportServerOnCloseCallback	TransportServerOnCloseCallback [record]	-	-	alone
+TransportServerOnConnectionCallback	TransportServerOnConnectionCallback [record]	-	-	alone
+TransportServerOnErrorCallback	TransportServerOnErrorCallback [record]	-	-	alone
+TransportServerOnMessageCallback	TransportServerOnMessageCallback [record]	-	-	alone
+TransportServerOnRefusalCallback	TransportServerOnRefusalCallback [record]	-	-	alone
+TransportServerOptions	ITransportServerOptions [record]	-	-	alone
+TransportServerResolvedStartOptions	TransportServerResolvedStartOptions [record]	-	-	alone
+TransportServerStartOptions	ITransportServerStartOptions [record]	-	-	alone
+TransportServerToldEvent	TransportServerToldEvent [record]	-	-	alone
+TransportTypes	-	TransportTypes [constant]	-	alone
+Unsubscribe	-	-	Unsubscribe [function type]	alone
+UPDATED_EVENT	UPDATED_EVENT [constant]	-	-	alone
+UpgradeResponseLike	IUpgradeResponseLike [record]	-	-	alone
+UpgradeSocketLike	IUpgradeSocketLike [record]	-	-	alone
+Validate	-	-	Validate [function type]	alone
+Validator	Validator [function type]	-	-	alone
+validatorOf	validatorOf [function]	-	-	alone
+Validators.BoundsOf	-	Validators.BoundsOf [function]	-	alone
+Validators.ByKey	-	Validators.ByKey [function]	-	alone
+Validators.Of	-	Validators.Of [function]	-	alone
+ValueOf	ValueOf [record]	-	-	alone
+Variable	IVariable [record]	-	-	alone
+variablesOf	variablesOf [function]	-	-	alone
+VariablesReading	VariablesReading [choice]	-	-	alone
+ViolationHolder	-	-	ViolationHolder [record]	alone
+Violations.KeySubscriptOf	-	Violations.KeySubscriptOf [function]	-	alone
+Violations.LineBytesOf	-	Violations.LineBytesOf [function]	-	alone
+Violations.Read	-	Violations.Read [function]	-	alone
+WAIT	WAIT [constant]	-	-	alone
+WAIT_HEADER	WAIT_HEADER [constant]	-	-	alone
+WebSocketConstructor	IWebSocketConstructor [record]	-	-	alone
+WebSocketLike	IWebSocketLike [record]	-	-	alone
+WebSocketServerConstructor	IWebSocketServerConstructor [record]	-	-	alone
+WebSocketServerLike	IWebSocketServerLike [record]	-	-	alone
+WebSocketTransportStartOptions	-	WebSocketTransportStartOptions [record]	-	alone
+WINDOW	WINDOW [constant]	-	-	alone
+WORKER_MESSAGES	WORKER_MESSAGES [constant]	-	-	alone
+WorkerChannelLike	IWorkerChannelLike [record]	-	-	alone
+WorkerClient	WorkerClient [record]	-	-	alone
+WorkerClientOptions	IWorkerClientOptions [record]	-	-	alone
+WorkerErrorEventLike	IWorkerErrorEventLike [record]	-	-	alone
+WorkerLike	IWorkerLike [record]	-	-	alone
+WorkerMessageEventLike	IWorkerMessageEventLike [record]	-	-	alone
+WorkerPortLike	IWorkerPortLike [record]	-	-	alone
+WorkerScopeLike	IWorkerScopeLike [record]	-	-	alone
+WorkerServer	WorkerServer [record]	-	-	alone
+WorkerServerOptions	IWorkerServerOptions [record]	-	-	alone
+WorkerTransportClient	WorkerTransportClient [record]	-	-	alone
+WorkerTransportClientOptions	IWorkerTransportClientOptions [record]	-	-	alone
+WorkerTransportServer	WorkerTransportServer [record]	-	-	alone
+WorkerTransportServerOptions	IWorkerTransportServerOptions [record]	-	-	alone

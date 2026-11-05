@@ -107,7 +107,7 @@ public sealed class ListenerGuardTests
         });
         var thrown = new InvalidOperationException("a listener that throws");
         var told = new List<TransportServerRefusal>();
-        var refusal = new TransportServerRefusal("127.0.0.1", "rebind.example:8080", null, 50_000, "host-refused", 403);
+        var refusal = new TransportServerRefusal { Address = "127.0.0.1", Authority = "rebind.example:8080", Port = 50_000, Reason = "host-refused", Status = 403 };
         Action<TransportServerRefusal>? refused = null;
 
         // a refusal names no connection: its listener's throw is reported with none, which a

@@ -277,13 +277,16 @@ public sealed record ResolvedRequestOptions
     public bool? CloseOnTimeout { get; init; }
 
     /// <summary>
-    /// The credential the call presents, as <see cref="RequestOptions.Credential"/> says; none
-    /// presents none.
+    /// The credential the call presents, as <see cref="RequestOptions.Credential"/> and
+    /// <see cref="CommandOptions.Credential"/> say; none presents none.
     /// </summary>
     public Credential? Credential { get; init; }
 }
 
-/// <summary>The options of a request, as its caller gives them: what it leaves out is the manager's.</summary>
+/// <summary>
+/// What every request takes, as its caller gives it, a command's among them, which takes it in
+/// <see cref="CommandOptions"/>: what it leaves out is the manager's.
+/// </summary>
 public sealed record RequestOptions
 {
     /// <summary>
@@ -301,15 +304,6 @@ public sealed record RequestOptions
     /// <summary>What cancels the request.</summary>
     public CancellationToken CancellationToken { get; init; }
 
-    /// <summary>The connection the request goes to, which a server names.</summary>
-    public string? ConnectionHandle { get; init; }
-
-    /// <summary>
-    /// Whether a command unanswered in time closes the connection it went to: a server's manager
-    /// closes it; none takes the manager's default.
-    /// </summary>
-    public bool? CloseOnTimeout { get; init; }
-
     /// <summary>
     /// The credential this call alone presents; none presents none, never one by default.
     /// <see cref="Credential.Opaque()"/> stands for the connection's session as its side knows it —
@@ -321,6 +315,53 @@ public sealed record RequestOptions
     /// come are an <see cref="ArgumentException"/>, before the call starts (spec 13.4).
     /// </summary>
     public Credential? Credential { get; init; }
+}
+
+/// <summary>
+/// What a command takes, as the server that makes it gives it: a request's options, the connection
+/// it goes to, required, and its close on timeout. What it leaves out is the manager's.
+/// </summary>
+public sealed record CommandOptions
+{
+    /// <summary>The connection the command goes to: a server's names its client.</summary>
+    public required string ConnectionHandle { get; init; }
+
+    /// <summary>
+    /// Whether the command unanswered in time closes the connection it went to: a server's manager
+    /// closes it; none takes the manager's default.
+    /// </summary>
+    public bool? CloseOnTimeout { get; init; }
+
+    /// <summary>How long to wait for the answer, as <see cref="RequestOptions.Timeout"/> says.</summary>
+    public TimeSpan? Timeout { get; init; }
+
+    /// <summary>What the command is for behind the client; the client itself when none.</summary>
+    public uint? DestinationId { get; init; }
+
+    /// <summary>What cancels the command.</summary>
+    public CancellationToken CancellationToken { get; init; }
+
+    /// <summary>
+    /// The credential this command alone presents, as <see cref="RequestOptions.Credential"/> says;
+    /// none presents none, never one by default.
+    /// </summary>
+    public Credential? Credential { get; init; }
+}
+
+/// <summary>
+/// What a registration takes, the options of the request that subscribes: what it leaves out is the
+/// manager's. It names no credential: its subscription is the connection's.
+/// </summary>
+public sealed record RegistrationOptions
+{
+    /// <summary>How long to wait for the answer, as <see cref="RequestOptions.Timeout"/> says.</summary>
+    public TimeSpan? Timeout { get; init; }
+
+    /// <summary>What the request is for behind the peer; the peer itself when none.</summary>
+    public uint? DestinationId { get; init; }
+
+    /// <summary>What cancels the request.</summary>
+    public CancellationToken CancellationToken { get; init; }
 }
 
 /// <summary>That a procedure is on its way out, and what to use instead, when it says.</summary>

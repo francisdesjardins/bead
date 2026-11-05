@@ -25,13 +25,14 @@ public sealed class FailureException : Exception
     /// A failure raised here, with the side that raised it and what caused it — a payload's decoder
     /// that threw, say — as its <see cref="Exception.InnerException"/>, the TypeScript side's cause.
     /// </summary>
-    public FailureException(Failure failure, (FailureException.Raised Raised, Exception Cause) raising)
-        : base(null, raising.Cause)
+    public FailureException(Failure failure, FailureException.Raised raised, FailureExceptionOptions options)
+        : base(null, options?.Cause)
     {
         ArgumentNullException.ThrowIfNull(failure);
+        ArgumentNullException.ThrowIfNull(options);
         Failure = failure;
-        Origin = raising.Raised.Origin;
-        Side = raising.Raised.Side;
+        Origin = raised.Origin;
+        Side = raised.Side;
     }
 
     /// <summary>The failure, as it is sent.</summary>
@@ -160,7 +161,7 @@ public sealed class FailureException : Exception
     /// <summary>
     /// One of the protocol's failures, as a router of <paramref name="side"/> raises it here.
     /// </summary>
-    public static FailureException OfProtocol(ProtocolCode code, RouterSide side, string detail = "")
+    internal static FailureException OfProtocol(ProtocolCode code, RouterSide side, string detail = "")
     {
         return new FailureException(
             new Failure { Code = (ushort)code, Detail = detail, Scope = FailureScope.Protocol },
@@ -245,4 +246,14 @@ public sealed class FailureException : Exception
     /// <param name="Origin">Where it was raised.</param>
     /// <param name="Side">The side that raised it.</param>
     public readonly record struct Raised(FailureOrigin Origin, RouterSide? Side);
+}
+
+/// <summary>
+/// What a <see cref="FailureException"/> is raised with besides its failure and where: the TypeScript
+/// side's <c>IFailureErrorOptions</c>.
+/// </summary>
+public sealed record FailureExceptionOptions
+{
+    /// <summary>What caused it, its <see cref="Exception.InnerException"/>; none unless told.</summary>
+    public Exception? Cause { get; init; }
 }

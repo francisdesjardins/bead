@@ -105,6 +105,25 @@ public sealed class BrokerSequenceTests
     }
 
     [Fact]
+    public void Keeps_no_room_for_an_envelope_s_parts_once_its_envelope_is_whole_or_its_parts_let_go()
+    {
+        var bounds = BoundsOf((new SteppingClock(Epoch), 100));
+        var parts = new BrokerParts(bounds, () =>
+        {
+        });
+
+        // spec 15.23: what a connection holds is what its parts hold, not the largest it ever took
+        Assert.Equal(new BrokerPartTaking(null, null, null), parts.Take((new byte[40], true, null)));
+        Assert.True(parts.HeldCapacity >= 40);
+        Assert.Equal(60, parts.Take((new byte[20], false, null)).Envelope!.Length);
+        Assert.Equal((0, 0L), (parts.HeldCapacity, bounds.Budget.Held));
+
+        Assert.Equal(new BrokerPartTaking(null, null, null), parts.Take((new byte[30], true, null)));
+        parts.Stop();
+        Assert.Equal((0, 0L), (parts.HeldCapacity, bounds.Budget.Held));
+    }
+
+    [Fact]
     public void Cuts_an_envelope_in_parts_each_as_large_as_the_peer_s_bound_lets_it_the_credential_on_the_first_alone()
     {
         var envelope = Enumerable.Range(0, 100).Select((index) =>

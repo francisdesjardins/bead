@@ -12,7 +12,7 @@ use tokio_util::sync::CancellationToken;
 use crate::constants::{CredentialScheme, ProtocolCode};
 use crate::duration::{NEVER, hold};
 use crate::envelope::{
-    CancelHeader, ChunkHeader, Credential, Envelope, Header, RequestHeader, header_bytes_of,
+    CancelHeader, ChunkHeader, Credential, Envelope, EnvelopeHeader, RequestHeader, header_bytes_of,
 };
 use crate::errors::{CallError, ProgrammerError};
 use crate::failure::{Failure, ProcedureAddress};
@@ -32,10 +32,16 @@ use crate::router::types::{
 };
 use crate::transport::caught;
 
+/// A side's own step on its state as a call's id is drawn.
+pub(crate) type OnDrawn<S> = Box<dyn FnOnce(&mut S, u32) + Send>;
+
 /// A call this side makes, as its router hands it to its core.
-pub(crate) struct CoreRequest {
+pub(crate) struct CoreRequest<S> {
     pub(crate) connection_handle: ConnectionHandle,
     pub(crate) credential: Option<Credential>,
+    // its side's own step on its state as its call id is drawn, before the application hears it
+    // and before its request goes out: a subscription bound anew
+    pub(crate) on_drawn: Option<OnDrawn<S>>,
     pub(crate) on_call_id: Option<Box<dyn FnOnce(u32) + Send>>,
     pub(crate) on_sent: Option<OnSent>,
     pub(crate) opens_subscription: bool,
@@ -48,7 +54,7 @@ pub(crate) struct CoreRequest {
     pub(crate) transport_credential: Option<String>,
 }
 
-impl core::fmt::Debug for CoreRequest {
+impl<S> core::fmt::Debug for CoreRequest<S> {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         formatter
             .debug_struct("CoreRequest")
@@ -64,7 +70,7 @@ pub(crate) fn made_ending_of(outcome: &Result<RouterResult, CallError>) -> CallE
         Ok(_) => CallEnding::Result,
         Err(CallError::Failure(failure)) => CallEnding::of_failure(failure.code(), failure.scope()),
         Err(CallError::TimedOut(_)) => CallEnding::Timeout,
-        Err(CallError::Cancelled) => CallEnding::Cancelled,
+        Err(CallError::Cancelled(_)) => CallEnding::Cancelled,
         Err(CallError::Disconnected(_)) => CallEnding::Closed,
         Err(_) => CallEnding::Error,
     }
@@ -75,7 +81,7 @@ pub(crate) fn made_ending_of(outcome: &Result<RouterResult, CallError>) -> CallE
 /// # Errors
 ///
 /// A [`ProgrammerError`] for a header that would pass 1,020 bytes.
-pub(crate) fn assert_header_holds(request: &CoreRequest) -> Result<(), ProgrammerError> {
+pub(crate) fn assert_header_holds<S>(request: &CoreRequest<S>) -> Result<(), ProgrammerError> {
     let is_asked = request.credential.as_ref().is_some_and(|credential| {
         !matches!(
             credential.scheme(),
@@ -83,7 +89,7 @@ pub(crate) fn assert_header_holds(request: &CoreRequest) -> Result<(), Programme
         )
     });
 
-    header_bytes_of(&Header::Request(RequestHeader {
+    header_bytes_of(&EnvelopeHeader::Request(RequestHeader {
         call_id: 1,
         service_id: request.procedure.service_id.max(1),
         procedure_id: request.procedure.procedure_id.max(1),
@@ -142,7 +148,12 @@ pub(crate) fn reserve<S: Side>(state: &mut S, (call, timeout): (&CallAddress, Op
         state.core().pending.forget_reservation(&forgotten, id);
     });
 
-    core.pending
+    let Some(timer) = super::core::timer_of(state, (timer, &call.connection_handle)) else {
+        return;
+    };
+    state
+        .core()
+        .pending
         .reservations
         .entry(Arc::clone(&call.connection_handle))
         .or_default()
@@ -250,6 +261,13 @@ fn wait<S: Side>(state: &mut S, (delay, call, id): (Option<Duration>, &CallAddre
             })
         });
 
+    let timer = match timer.transpose() {
+        Ok(timer) => timer,
+        Err(error) => {
+            end_pending(state, (CallError::Refused(error), call, id));
+            return;
+        }
+    };
     if let Some(request) = state.core().pending.get_mut(call) {
         cancel_timer(&mut request.timer);
         request.timer = timer;
@@ -362,7 +380,7 @@ fn on_request_refused<S: Side>(state: &mut S, (call, id, error): (&CallAddress, 
 )]
 pub(crate) fn request<S: Side>(
     state: &mut S,
-    (payload, request, reply): (Bytes, CoreRequest, CallReply),
+    (payload, request, reply): (Bytes, CoreRequest<S>, CallReply),
 ) {
     let core = state.core();
     let procedure = request.procedure;
@@ -396,7 +414,7 @@ pub(crate) fn request<S: Side>(
         .as_ref()
         .is_some_and(CancellationToken::is_cancelled)
     {
-        return reply(Err(CallError::Cancelled));
+        return reply(Err(CallError::Cancelled(None)));
     }
 
     // the series it counts into, a requester's or _OTHER's; none while the router counts nothing
@@ -473,10 +491,13 @@ pub(crate) fn request<S: Side>(
         .payload_limit_of(request.maximum_payload_bytes);
     let placed = match core.placement.transfer_of(
         &payload,
-        (&Header::Request(header.clone()), maximum_payload_bytes),
+        (
+            &EnvelopeHeader::Request(header.clone()),
+            maximum_payload_bytes,
+        ),
     ) {
         Ok(placed) => placed,
-        Err(failure) => return reply(Err(fail(failure.about(&Header::Request(header))))),
+        Err(failure) => return reply(Err(fail(failure.about(&EnvelopeHeader::Request(header))))),
     };
     let id = core.draw_id();
     let call = CallAddress {
@@ -484,6 +505,7 @@ pub(crate) fn request<S: Side>(
         call_id,
     };
     let (ended, watched) = oneshot::channel::<()>();
+    let signal = request.options.signal.clone();
 
     core.pending.add(
         &call,
@@ -497,7 +519,15 @@ pub(crate) fn request<S: Side>(
             receiving: None,
             reply: Some(Box::new(move |outcome| {
                 drop(ended);
-                reply(outcome);
+                // ! cancellation settles the caller before its deferred cleanup; an answer read
+                // in that turn takes the pending call out, but cannot change that settlement
+                reply(
+                    if signal.as_ref().is_some_and(CancellationToken::is_cancelled) {
+                        Err(CallError::Cancelled(Some(call_id)))
+                    } else {
+                        outcome
+                    },
+                );
             })),
             sending: false,
             timeout: Some(timeout),
@@ -507,6 +537,12 @@ pub(crate) fn request<S: Side>(
 
     if let Some(signal) = request.options.signal.clone() {
         watch_signal(state, ((signal, watched), (call.clone(), id)));
+    }
+
+    // * its side's own step, within the turn: a subscription's call bound anew cancels the call
+    // bound before ahead of its own request, as the other sides' facades do (decision 0045)
+    if let Some(on_drawn) = request.on_drawn {
+        on_drawn(state, call_id);
     }
 
     // ! a hook that panics fails its own call, and nothing of it goes out, as one that throws
@@ -624,7 +660,7 @@ fn cancelled<S: Side>(state: &mut S, (call, id): (&CallAddress, u64)) {
         send_cancel(state, (call, reserved_for(&request, inactivity)));
     }
 
-    settle(&mut request, Err(CallError::Cancelled));
+    settle(&mut request, Err(CallError::Cancelled(Some(call.call_id))));
 }
 
 // a request as a transfer: its opening, then each chunk credited; the call waits on the transfer's
@@ -702,7 +738,7 @@ pub(crate) fn cancel<S: Side>(state: &mut S, (call, timeout): (&CallAddress, Opt
             }
 
             // heard after the cancel went out, so a call made again in its place goes out behind it
-            settle(&mut request, Err(CallError::Cancelled));
+            settle(&mut request, Err(CallError::Cancelled(Some(call.call_id))));
         }
     }
 }
@@ -793,8 +829,8 @@ pub(crate) fn receive_answer<S: Side>(
     (answer, handle, may_overtake): (Answer, &ConnectionHandle, bool),
 ) {
     let header = match &answer {
-        Answer::Result(header, _) => Header::Result(header.clone()),
-        Answer::Failure(header, _) => Header::Failure(header.clone()),
+        Answer::Result(header, _) => EnvelopeHeader::Result(header.clone()),
+        Answer::Failure(header, _) => EnvelopeHeader::Failure(header.clone()),
     };
     let call = CallAddress {
         connection_handle: Arc::clone(handle),
@@ -849,7 +885,7 @@ pub(crate) fn receive_answer<S: Side>(
                 let failure = Failure::received(&record, side)
                     .of_call(Some(procedure), destination_id)
                     .overtaking(may_overtake)
-                    .about(&Header::Failure(failure_header));
+                    .about(&EnvelopeHeader::Failure(failure_header));
 
                 settle(&mut request, Err(CallError::Failure(failure)));
                 state.activity(RouterActivity::Response, handle);
@@ -899,7 +935,7 @@ pub(crate) fn receive_answer<S: Side>(
                     let reason = CallError::Failure(
                         failure
                             .of_call(Some(procedure), destination_id)
-                            .about(&Header::Result(result_header)),
+                            .about(&EnvelopeHeader::Result(result_header)),
                     );
 
                     return end_pending(state, (reason, &call, id));

@@ -14,10 +14,12 @@ use buffa_descriptor::reflect::{
     DynamicMessage, MapKey, MapValue, ReflectMessage, ReflectMessageMut, Value,
 };
 
-use super::{Place, unset_of};
+use buffa::MessageField;
+
+use super::{Place, bounded, check_required, unset_of};
 use crate::records::ProtoSchema;
-use crate::testing::codecs::Probe;
-use crate::testing::test::{Requiring, RequiringView};
+use crate::testing::codecs::{self, Probe};
+use crate::testing::test::{Alone, Back, Edges, Leveled, Loop, Requiring, RequiringView};
 
 // the pool of the tests' messages, as their generated code embeds it
 fn pool() -> Arc<DescriptorPool> {
@@ -215,5 +217,101 @@ fn names_the_field_a_path_leaves_unset_by_its_full_name() {
         unset_of(&probe, &schema).map(|unset| unset.full_name()),
         Some("bead.codecs.v1.Needs.shade".to_owned()),
         "named by its full name"
+    );
+}
+
+// a Loop holding a Back holding a Loop, `levels` messages below the top Loop, no Must among them
+fn looped(levels: usize) -> Loop {
+    let deepest = if levels % 2 == 1 {
+        Loop {
+            back: MessageField::some(Back::default()),
+            ..Loop::default()
+        }
+    } else {
+        Loop::default()
+    };
+
+    (0..levels / 2).fold(deepest, |inner, _| Loop {
+        back: MessageField::some(Back {
+            r#loop: MessageField::some(inner),
+            ..Back::default()
+        }),
+        ..Loop::default()
+    })
+}
+
+#[test]
+fn check_required_stops_at_the_bound_and_refuses() {
+    // ! a walk 10,000 deep would overflow a thread of 2 MiB: it stops past 100, and the value is
+    // given back unread, since its drop would recurse as deep
+    #[expect(
+        clippy::mem_forget,
+        reason = "a value 10,000 deep, whose drop recurses as deep, never dropped"
+    )]
+    fn run() {
+        let schema = ProtoSchema::of::<Loop>();
+
+        assert_eq!(
+            check_required(&looped(100), &schema),
+            Ok(()),
+            "100 below the top"
+        );
+
+        for levels in [101, 10_000] {
+            let deep = looped(levels);
+            let refusal = check_required(&deep, &schema).expect_err("past the bound");
+
+            assert_eq!(
+                refusal.reason(),
+                "nested past 100",
+                "{levels} below the top"
+            );
+
+            core::mem::forget(deep);
+        }
+    }
+
+    std::thread::Builder::new()
+        .stack_size(2 << 20)
+        .spawn(run)
+        .expect("a thread")
+        .join()
+        .expect("run without a panic");
+}
+
+#[test]
+fn walks_nothing_of_a_message_whose_fields_cannot_nest_past_the_bound() {
+    // * Needs of spec/codecs.proto holds no message, Leveled a map of enums, one entry deep
+    for (schema, name) in [
+        (ProtoSchema::of::<codecs::Needs>(), "Needs"),
+        (ProtoSchema::of::<Leveled>(), "Leveled"),
+    ] {
+        assert!(!schema.root().nests_past, "{name} nests past nothing");
+    }
+
+    // a cycle nests past: through a child, a map's value, a Struct's Value
+    for (schema, name) in [
+        (ProtoSchema::of::<Probe>(), "Probe"),
+        (ProtoSchema::of::<Alone>(), "Alone"),
+        (ProtoSchema::of::<Edges>(), "Edges"),
+        (ProtoSchema::of::<Loop>(), "Loop"),
+    ] {
+        assert!(schema.root().nests_past, "{name} can nest past");
+    }
+
+    // an Alone 101 deep, judged by Needs's schema, which nests past nothing: not walked at all
+    let alone = (0..101).fold(message_of("bead.test.Alone", vec![]), |inner, _| {
+        message_of("bead.test.Alone", vec![("alone", Value::Message(inner))])
+    });
+
+    assert_eq!(
+        bounded(&alone, &ProtoSchema::of::<codecs::Needs>()),
+        Ok(()),
+        "walked not"
+    );
+    assert_eq!(
+        bounded(&alone, &ProtoSchema::of::<Alone>()).map_err(|refusal| refusal.reason().to_owned()),
+        Err("nested past 100".to_owned()),
+        "walked by its own"
     );
 }

@@ -18,7 +18,7 @@
     "An AMQP 1.0 message is section 15.35's profile: a message to the address to, its UTF-8 bytes, of payloadLength bytes each payloadByte, with a header whose ttl is ttl, in milliseconds, where ttl is given, and none where it is not; bytes is the whole message, which a side's writer writes to its every byte.",
     "An AMQP 1.0 publish bound is section 15.37's count with no broker: a message to address, its UTF-8 bytes, a life counted whatever the message; largestPayload, the largest payload whose message is within maximumMessageSize, at most 4,294,967,295, null where an empty one does not fit; and messageBytes, that message's every byte, null alike."
   ],
-  "specVersion": "0.10.0",
+  "specVersion": "0.11.0",
   "headers": [
     {
       "name": "a request",
@@ -3806,6 +3806,214 @@
       "verdict": {
         "holds": false,
         "reason": "token"
+      }
+    },
+    {
+      "name": "exp past the largest double",
+      "clauses": [
+        "13.8.1"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MWU0MDAsImlhdCI6MTc5MTAyODgwMCwianRpIjoiYXQtMDAwMiIsImNsaWVudF9pZCI6ImJlYWQtY2xpZW50In0.fctcp9T55P6T9ADyE8BaP-9zLy0CdjAGVivtFD8gDEQ",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "token"
+      }
+    },
+    {
+      "name": "a claim nested 65 deep, which no step reads",
+      "clauses": [
+        "13.8.1"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAyIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQiLCJkZWVwIjpbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXX0.isA9yP7PqBGnp6I0EoWKSFx78b0bM_tLWnIH0CfWLRs",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": false,
+        "reason": "token"
+      }
+    },
+    {
+      "name": "a claim nested 64 deep",
+      "clauses": [
+        "13.8",
+        "13.8.1"
+      ],
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL3RydXN0LmV4YW1wbGUiLCJzdWIiOiJib2IiLCJhdWQiOiJodHRwczovL2JlYWQuZXhhbXBsZSIsImV4cCI6MTc5MTAzMjQwMCwiaWF0IjoxNzkxMDI4ODAwLCJqdGkiOiJhdC0wMDAyIiwiY2xpZW50X2lkIjoiYmVhZC1jbGllbnQiLCJkZWVwIjpbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tdXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV19.-e1LEV57LV10TY342pgVaVXb5q9q-T8dCxZMkvMgXeE",
+      "keys": [
+        {
+          "issuer": "https://trust.example",
+          "algorithm": "HS256",
+          "jwk": {
+            "kty": "oct",
+            "k": "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow"
+          }
+        }
+      ],
+      "audience": "https://bead.example",
+      "now": "2026-10-03T12:01:00.000Z",
+      "verdict": {
+        "holds": true,
+        "identifier": {
+          "issuer": "https://trust.example",
+          "sub": "bob"
+        },
+        "claims": {
+          "iss": "https://trust.example",
+          "sub": "bob",
+          "aud": "https://bead.example",
+          "exp": 1791032400,
+          "iat": 1791028800,
+          "jti": "at-0002",
+          "client_id": "bead-client",
+          "deep": [
+            [
+              [
+                [
+                  [
+                    [
+                      [
+                        [
+                          [
+                            [
+                              [
+                                [
+                                  [
+                                    [
+                                      [
+                                        [
+                                          [
+                                            [
+                                              [
+                                                [
+                                                  [
+                                                    [
+                                                      [
+                                                        [
+                                                          [
+                                                            [
+                                                              [
+                                                                [
+                                                                  [
+                                                                    [
+                                                                      [
+                                                                        [
+                                                                          [
+                                                                            [
+                                                                              [
+                                                                                [
+                                                                                  [
+                                                                                    [
+                                                                                      [
+                                                                                        [
+                                                                                          [
+                                                                                            [
+                                                                                              [
+                                                                                                [
+                                                                                                  [
+                                                                                                    [
+                                                                                                      [
+                                                                                                        [
+                                                                                                          [
+                                                                                                            [
+                                                                                                              [
+                                                                                                                [
+                                                                                                                  [
+                                                                                                                    [
+                                                                                                                      [
+                                                                                                                        [
+                                                                                                                          [
+                                                                                                                            [
+                                                                                                                              [
+                                                                                                                                [
+                                                                                                                                  [
+                                                                                                                                    [
+                                                                                                                                      []
+                                                                                                                                    ]
+                                                                                                                                  ]
+                                                                                                                                ]
+                                                                                                                              ]
+                                                                                                                            ]
+                                                                                                                          ]
+                                                                                                                        ]
+                                                                                                                      ]
+                                                                                                                    ]
+                                                                                                                  ]
+                                                                                                                ]
+                                                                                                              ]
+                                                                                                            ]
+                                                                                                          ]
+                                                                                                        ]
+                                                                                                      ]
+                                                                                                    ]
+                                                                                                  ]
+                                                                                                ]
+                                                                                              ]
+                                                                                            ]
+                                                                                          ]
+                                                                                        ]
+                                                                                      ]
+                                                                                    ]
+                                                                                  ]
+                                                                                ]
+                                                                              ]
+                                                                            ]
+                                                                          ]
+                                                                        ]
+                                                                      ]
+                                                                    ]
+                                                                  ]
+                                                                ]
+                                                              ]
+                                                            ]
+                                                          ]
+                                                        ]
+                                                      ]
+                                                    ]
+                                                  ]
+                                                ]
+                                              ]
+                                            ]
+                                          ]
+                                        ]
+                                      ]
+                                    ]
+                                  ]
+                                ]
+                              ]
+                            ]
+                          ]
+                        ]
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ]
+        },
+        "end": 1791032460000
       }
     },
     {

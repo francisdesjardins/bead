@@ -92,6 +92,27 @@ internal sealed class SerialScheduler : TaskScheduler
     }
 
     /// <summary>
+    /// Runs <paramref name="function"/> on the scheduler, behind what came before it — never at once,
+    /// even on it — and every continuation of its own after it: what an application does with its
+    /// router from within a telling joins the one queue's tail, as a job of ECMA-262's does (spec
+    /// 9.0; decision 0045).
+    /// </summary>
+    public Task<T> RunBehind<T>(Func<Task<T>> function)
+    {
+        return Task.Factory
+            .StartNew(function, CancellationToken.None, TaskCreationOptions.DenyChildAttach, this)
+            .Unwrap();
+    }
+
+    /// <summary>As <see cref="RunBehind{T}(Func{Task{T}})"/>, for a task that gives nothing.</summary>
+    public Task RunBehind(Func<Task> function)
+    {
+        return Task.Factory
+            .StartNew(function, CancellationToken.None, TaskCreationOptions.DenyChildAttach, this)
+            .Unwrap();
+    }
+
+    /// <summary>
     /// Counts <paramref name="task"/> as work of the scheduler's own until it completes, for what runs
     /// elsewhere on its router's behalf and posts here: a signal's callbacks, off its scheduler.
     /// </summary>

@@ -1,0 +1,29 @@
+crate
+  use codec::DynamicCodec
+  use codec::ENCODING
+  use codec::ProtoCodec
+  use records::ProtoSchema
+  use records::check_records
+  use required::check_required
+crate::codec
+  const ENCODING: &str
+  struct ProtoCodec<M>
+    fn new() -> Self
+    fn schema(&self) -> &ProtoSchema
+    implements Clone, Debug, Default, PayloadCodec
+  struct DynamicCodec
+    fn new(pool: Arc<DescriptorPool>, message: MessageIndex) -> Self
+    fn schema(&self) -> &ProtoSchema
+    implements PayloadCodec
+    derives Clone, Debug
+crate::records
+  struct ProtoSchema
+    fn new(pool: Arc<DescriptorPool>, message: MessageIndex) -> Self
+    fn of<M: ReflectMessage + Default>() -> Self
+    fn pool(&self) -> &Arc<DescriptorPool>
+    fn message(&self) -> MessageIndex
+    implements Debug
+    derives Clone
+  fn check_records(bytes: &[u8], schema: &ProtoSchema) -> Result<(), CodecRefusal>
+crate::required
+  fn check_required(message: &dyn ReflectMessage, schema: &ProtoSchema) -> Result<(), CodecRefusal>

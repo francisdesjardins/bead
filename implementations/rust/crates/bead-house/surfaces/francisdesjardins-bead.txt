@@ -1,0 +1,2085 @@
+crate
+  mod json
+  use tokio::runtime::Handle
+  use tokio_util::sync::CancellationToken
+  use broker::adapter::BrokerAdapter
+  use broker::adapter::BrokerCapabilities
+  use broker::adapter::BrokerDelivery
+  use broker::adapter::BrokerDown
+  use broker::adapter::BrokerError
+  use broker::adapter::BrokerListener
+  use broker::adapter::BrokerMessage
+  use broker::adapter::BrokerMessageOptions
+  use broker::adapter::BrokerPublication
+  use broker::adapter::BrokerPublished
+  use broker::adapter::BrokerStart
+  use broker::adapter::BrokerSubscription
+  use broker::adapter::Settle
+  use broker::client::BrokerTransportClient
+  use broker::client::BrokerTransportClientConnectOptions
+  use broker::client::BrokerTransportClientOptions
+  use broker::client::MAXIMUM_UNSENT_BYTES
+  use broker::memory::MemoryBroker
+  use broker::memory::MemoryBrokerAdapter
+  use broker::memory::MemoryBrokerAdapterOptions
+  use broker::memory::MemoryBrokerFault
+  use broker::memory::MemoryBrokerFaultOptions
+  use broker::memory::MemoryBrokerOptions
+  use broker::memory::TRANSPORT_BROKER
+  use broker::participant::BODY_GRACE_PERIOD
+  use broker::participant::BrokerParticipant
+  use broker::participant::BrokerParticipantOptions
+  use broker::participant::BrokerRefusal
+  use broker::participant::BrokerRefusedError
+  use broker::participant::HEARTBEAT
+  use broker::participant::MAXIMUM_ENVELOPE_PARTS_BYTES
+  use broker::participant::MINIMUM_BODY_BYTES_PER_SECOND
+  use broker::participant::ParticipantErrorListener
+  use broker::participant::ROOT
+  use broker::server::ACCEPT_TIMEOUT
+  use broker::server::BrokerTransportServer
+  use broker::server::BrokerTransportServerOptions
+  use broker::server::MAXIMUM_CONNECTIONS
+  use broker::server::MAXIMUM_CONNECTIONS_PER_ADDRESS
+  use client::Client
+  use client::ClientOptions
+  use clock::Clock
+  use clock::Schedule
+  use clock::SharedClock
+  use clock::SystemClock
+  use clock::SystemClockOptions
+  use clock::Timer
+  use clock::TimerCallback
+  use constants::CredentialScheme
+  use constants::EnvelopeFlag
+  use constants::EnvelopeKind
+  use constants::EnvelopeLayout
+  use constants::FailureScope
+  use constants::ProcedureKind
+  use constants::ProtocolCode
+  use constants::RouterSide
+  use constants::SERVER_CONNECTION_HANDLE
+  use constants::SESSION_TOKEN_BYTES
+  use credentials::Credentials
+  use credentials::ElsewhereSession
+  use credentials::ElsewhereVerdict
+  use credentials::ElsewhereVerifier
+  use credentials::JwtKeySet
+  use credentials::JwtSetKey
+  use credentials::KeySetAnswer
+  use credentials::KeySetAsk
+  use debug::participant::ParcelVerdict
+  use debug::participant::ParticipantDebugEvent
+  use debug::participant::ParticipantDebugListener
+  use debug::CallAsked
+  use debug::DebugDirection
+  use debug::DebugFilter
+  use debug::DebugFilterSource
+  use debug::DebugType
+  use debug::EnvelopeAsked
+  use debug::FilterGiven
+  use debug::FilterKeeper
+  use debug::FilterRefusal
+  use debug::GivenFilter
+  use debug::TracedEnvelope
+  use debug::filter_debug
+  use debug::parse_debug_filter
+  use duration::DurationRefusal
+  use duration::LONGEST_TIMER
+  use duration::NEVER
+  use envelope::CancelHeader
+  use envelope::ChunkHeader
+  use envelope::Credential
+  use envelope::CreditHeader
+  use envelope::EnvelopeHeader
+  use envelope::FailureHeader
+  use envelope::FailureRecord
+  use envelope::NotificationHeader
+  use envelope::RequestHeader
+  use envelope::ResultHeader
+  use errors::CallError
+  use errors::CapacityError
+  use errors::ConnectError
+  use errors::Disposed
+  use errors::ProgrammerError
+  use errors::ReadyStateError
+  use errors::ReconnectError
+  use errors::Refusal
+  use errors::ResolverError
+  use errors::TransportError
+  use failure::Failure
+  use failure::FailureOrigin
+  use failure::ProcedureAddress
+  use identity::DeclarationWay
+  use identity::Deprecation
+  use identity::IdentityRefusal
+  use identity::Procedure
+  use joined::JoinedServerTransport
+  use jwt_verifier::JwtAgainst
+  use jwt_verifier::JwtAlgorithm
+  use jwt_verifier::JwtKey
+  use jwt_verifier::JwtRefusal
+  use jwt_verifier::JwtSessionIdentifier
+  use jwt_verifier::JwtVerdict
+  use managers::notification::NotificationKey
+  use managers::notification::PACING_DEFAULTS
+  use managers::notification::PacingLimits
+  use managers::notification::PacingLimitsOptions
+  use managers::service::CloseConnection
+  use managers::service::Command
+  use managers::service::CommandOptions
+  use managers::service::DebugEvent
+  use managers::service::DebugListener
+  use managers::service::DeprecatedListener
+  use managers::service::DroppedListener
+  use managers::service::Notification
+  use managers::service::NotificationCallback
+  use managers::service::NotificationDependencies
+  use managers::service::NotificationRegistration
+  use managers::service::NotificationResolverDependencies
+  use managers::service::NotificationResolverOf
+  use managers::service::Notifier
+  use managers::service::NotifyOptions
+  use managers::service::REQUEST_DEFAULTS
+  use managers::service::RegistrationOptions
+  use managers::service::Request
+  use managers::service::RequestDefaults
+  use managers::service::RequestDependencies
+  use managers::service::RequestOptions
+  use managers::service::RequestProps
+  use managers::service::RequestResolverDependencies
+  use managers::service::ResolverCallback
+  use managers::service::ResolverOf
+  use managers::service::Response
+  use managers::service::ServiceCall
+  use managers::service::ServiceManager
+  use managers::service::ServiceManagerClient
+  use managers::service::ServiceManagerOptions
+  use managers::service::ServiceManagerServer
+  use managers::service::ServiceRouter
+  use managers::service::Subscriber
+  use managers::service::SubscriberFilter
+  use managers::service::Traced
+  use managers::service::TracedError
+  use managers::service::TracedValue
+  use managers::service::Unsubscribe
+  use managers::service::Validate
+  use managers::service::ValidateOptions
+  use managers::sessions::Session
+  use managers::sessions::SessionEvent
+  use managers::sessions::SessionManagerOptions
+  use memory::MEMORY_ADDRESS
+  use memory::MemoryTransportClient
+  use memory::MemoryTransportClientConnectOptions
+  use memory::MemoryTransportClientOptions
+  use memory::MemoryTransportServer
+  use memory::MemoryTransportServerOptions
+  use memory::TRANSPORT_MEMORY
+  use metrics::CallEnding
+  use metrics::METRICS_CONTENT_TYPE
+  use metrics::METRICS_REGISTRY_DEFAULTS
+  use metrics::MetricsExposition
+  use metrics::MetricsRegistry
+  use metrics::MetricsRegistryOptions
+  use metrics::NotificationSeries
+  use metrics::ProcedureSeries
+  use metrics::ResolverSeries
+  use metrics::RouterMetrics
+  use payloads::CodecRefusal
+  use payloads::JsonCodec
+  use payloads::JsonOf
+  use payloads::PayloadCodec
+  use payloads::RawCodec
+  use payloads::TextCodec
+  use router::admissions::BeforeRequest
+  use router::admissions::require_credential
+  use router::admissions::require_session
+  use router::admissions::share_leg_b_session
+  use router::client::ClientActivityListener
+  use router::client::ClientEnvelopeListener
+  use router::client::ClientErrorListener
+  use router::client::NotificationLike
+  use router::client::RouterClient
+  use router::client::RouterClientOptions
+  use router::client::Settled
+  use router::client::UnregisterNotificationOptions
+  use router::client::WithdrawnListener
+  use router::core::AdmissionRefusal
+  use router::core::AdmissionRequest
+  use router::core::AdmitFn
+  use router::core::Answerer
+  use router::core::RequestResolverProps
+  use router::relay::Destination
+  use router::relay::DestinationOptions
+  use router::relay::DestinationRegistration
+  use router::relay::RelayLeg
+  use router::relay::RelayOptions
+  use router::relay::RelayRouter
+  use router::relay::RelayTarget
+  use router::server::ActivityListener
+  use router::server::Call
+  use router::server::EnvelopeListener
+  use router::server::ErrorListener
+  use router::server::NotifyFilter
+  use router::server::RefusalListener
+  use router::server::RouterServer
+  use router::server::RouterServerOptions
+  use router::server::SessionOf
+  use router::server::SessionRequest
+  use router::server::SessionTokenProvider
+  use router::types::AccessRefusal
+  use router::types::AccessRefusalStage
+  use router::types::BoxFuture
+  use router::types::CallAddress
+  use router::types::CallSession
+  use router::types::ConnectionHandle
+  use router::types::Gauges
+  use router::types::INTAKE_DEFAULTS
+  use router::types::IntakeLimits
+  use router::types::IntakeLimitsOptions
+  use router::types::LIMIT_DEFAULTS
+  use router::types::NotifyRequest
+  use router::types::RequestCredential
+  use router::types::ResolvedRequestOptions
+  use router::types::RouterActivity
+  use router::types::RouterAnswer
+  use router::types::RouterError
+  use router::types::RouterLimits
+  use router::types::RouterLimitsOptions
+  use router::types::RouterRequest
+  use router::types::RouterResult
+  use router::types::SessionIdentifier
+  use router::types::Signal
+  use router::types::SignalReason
+  use router::types::TransportMessage
+  use server::Health
+  use server::HealthCheck
+  use server::HealthStatus
+  use server::LayerGauges
+  use server::Server
+  use server::ServerGauges
+  use server::ServerOptions
+  use server::SessionListener
+  use server::SessionManager
+  use server::WARNING_RATIO
+  use service::AdmissionHook
+  use service::AdmissionRule
+  use service::Descriptor
+  use service::DescriptorInit
+  use service::FailureCatalogue
+  use service::ListedFailure
+  use service::NotifyingDescriptor
+  use service::ServiceProcedure
+  use service::ServiceServer
+  use service::ServiceServerOptions
+  use service::command_of
+  use service::failures_of
+  use service::notifying_of
+  use service::request_of
+  use session_token::SessionToken
+  use session_token::SessionTokenDrawError
+  use transport::CONNECT_TIMEOUT
+  use transport::ClientListener
+  use transport::Connect
+  use transport::ListenerId
+  use transport::RECONNECT_DEFAULTS
+  use transport::ReadyState
+  use transport::RouterClientTransport
+  use transport::Sent
+  use transport::ServerListener
+  use transport::ServerTransport
+  use transport::TransportClientDisconnectOptions
+  use transport::TransportClientReconnectDelay
+  use transport::TransportClientReconnectDelayResolver
+  use transport::TransportClientReconnectOptions
+  use transport::TransportServerClient
+  use transport::TransportServerRefusal
+  use transport::is_field_value
+  use violations::CLOSING_BYTES
+  use violations::Judged
+  use violations::ReadViolations
+  use violations::Violation
+  use violations::ViolationHolder
+  use violations::detail_bound_of
+  use violations::violations_detail_of
+  use violations::violations_of
+  use violations::words_of
+  mod internal #[doc(hidden)]
+crate::broker::adapter
+  enum BrokerDelivery #[non_exhaustive]
+    AtLeastOnce
+    AtMostOnce
+    derives Clone, Copy, Debug, Eq, PartialEq
+  enum BrokerPublished #[non_exhaustive]
+    Taken
+    NoSubscriber
+    derives Clone, Copy, Debug, Eq, PartialEq
+  struct BrokerCapabilities(u8);
+    const NONE: Self
+    const GROUPS: Self
+    const WILL: Self
+    const NO_SUBSCRIBER: Self
+    const EXPIRY: Self
+    const ALL: Self
+    const fn contains(self, other: Self) -> bool
+    implements BitOr
+    derives Clone, Copy, Debug, Default, Eq, Hash, PartialEq
+  struct BrokerPublication #[non_exhaustive]
+    pub topic: Vec<String>
+    pub payload: Bytes
+    pub expires_after: Option<Duration>
+    pub signal: Option<CancellationToken>
+    fn new<T: Into<String>, I: IntoIterator<Item = T>>(topic: I, payload: Bytes) -> Self
+    derives Clone, Debug
+  struct BrokerStart #[non_exhaustive]
+    pub will: Option<BrokerPublication>
+    pub signal: Option<CancellationToken>
+    derives Clone, Debug, Default
+  struct BrokerSubscription #[non_exhaustive]
+    pub group: Option<String>
+    pub signal: Option<CancellationToken>
+    derives Clone, Debug, Default
+  struct BrokerDown #[non_exhaustive]
+    pub is_taken_over: bool
+    const fn new(is_taken_over: bool) -> Self
+    derives Clone, Copy, Debug, Default, Eq, PartialEq
+  type Settle = Arc<dyn Fn() + Send + Sync>
+  struct BrokerMessageOptions #[non_exhaustive]
+    pub is_retained: Option<bool>
+    pub settle: Option<Settle>
+    implements Debug
+    derives Clone, Default
+  struct BrokerMessage
+    fn new(publication: BrokerPublication, options: &BrokerMessageOptions) -> Self
+    fn topic(&self) -> &[String]
+    fn payload(&self) -> &Bytes
+    const fn is_retained(&self) -> bool
+    fn settle(&self)
+    implements Debug
+    derives Clone
+  enum BrokerError #[non_exhaustive]
+    Refused(ProgrammerError)
+    Failed { message: String, source: Option<Arc<dyn Error + Send + Sync>> } #[non_exhaustive]
+    fn failed<M: Into<String>>(message: M) -> Self
+    fn caused<M: Into<String>>(message: M, source: Arc<dyn Error + Send + Sync>) -> Self
+    implements Display, Error, From
+    derives Clone, Debug
+  trait BrokerListener: Send + Sync
+    fn on_message(&self, _message: &BrokerMessage)
+    fn on_down(&self, _down: BrokerDown)
+  trait BrokerAdapter: Send + Sync + fmt::Debug
+    fn transport_type(&self) -> &str
+    fn id(&self) -> &str
+    fn capabilities(&self) -> BrokerCapabilities
+    fn delivery(&self) -> BrokerDelivery
+    fn is_secure(&self) -> bool
+    fn receive_bound(&self, topic: &[String]) -> u64
+    fn maximum_payload_bytes(&self, topic: &[String]) -> u64
+    fn listen(&self, listener: Arc<dyn BrokerListener>)
+    fn unlisten(&self, listener: &Arc<dyn BrokerListener>)
+    fn start(&self, options: BrokerStart) -> BoxFuture<Result<(), BrokerError>>
+    fn subscribe(&self, topic: &[String], options: BrokerSubscription) -> BoxFuture<Result<(), BrokerError>>
+    fn unsubscribe(&self, topic: &[String]) -> BoxFuture<Result<(), BrokerError>>
+    fn publish(&self, publication: BrokerPublication) -> BoxFuture<Result<BrokerPublished, BrokerError>>
+    fn stop(&self) -> BoxFuture<()>
+crate::broker::client
+  const MAXIMUM_UNSENT_BYTES: u64
+  struct BrokerTransportClientOptions #[non_exhaustive]
+    pub maximum_unsent_bytes: Option<u64>
+    derives Clone, Debug, Default
+  struct BrokerTransportClientConnectOptions #[non_exhaustive]
+    pub server: String
+    pub signal: Option<CancellationToken>
+    pub timeout: Option<Duration>
+    fn new<S: Into<String>>(server: S) -> Self
+    derives Clone, Debug
+  struct BrokerTransportClient
+    fn new(participant: &BrokerParticipant, options: &BrokerTransportClientOptions) -> Result<Self, ProgrammerError>
+    fn connect(&self, options: &BrokerTransportClientConnectOptions) -> Connect
+    fn disconnect(&self, options: &TransportClientDisconnectOptions) -> Result<(), TransportError>
+    fn dispose(&self)
+    fn close(&self)
+    fn reconnect(&self, options: &TransportClientReconnectOptions) -> Result<BoxFuture<Result<(), TransportError>>, TransportError>
+    implements Debug, RouterClientTransport
+    derives Clone
+crate::broker::memory
+  const TRANSPORT_BROKER: &str
+  struct MemoryBrokerOptions #[non_exhaustive]
+    pub clock: Option<SharedClock>
+    pub runtime: Option<Handle>
+    pub delivery: Option<BrokerDelivery>
+    pub maximum_message_bytes: Option<u64>
+    pub maximum_queued_messages: Option<u64>
+    derives Clone, Debug, Default
+  struct MemoryBrokerAdapterOptions #[non_exhaustive]
+    pub id: String
+    pub capabilities: Option<BrokerCapabilities>
+    pub delivery: Option<BrokerDelivery>
+    fn new<I: Into<String>>(id: I) -> Self
+    derives Clone, Debug
+  enum MemoryBrokerFault #[non_exhaustive]
+    Copy
+    Hold
+    Drop
+    Redeliver
+    derives Clone, Copy, Debug, Eq, PartialEq
+  struct MemoryBrokerFaultOptions #[non_exhaustive]
+    pub topic: Option<Vec<String>>
+    derives Clone, Debug, Default
+  struct MemoryBroker
+    fn new(options: &MemoryBrokerOptions) -> Result<Self, ProgrammerError>
+    fn adapter(&self, options: &MemoryBrokerAdapterOptions) -> Result<MemoryBrokerAdapter, ProgrammerError>
+    fn fault(&self, fault: MemoryBrokerFault, options: &MemoryBrokerFaultOptions)
+    implements Debug
+    derives Clone
+  struct MemoryBrokerAdapter
+    fn is_linked(&self) -> bool
+    fn unsettled(&self) -> u64
+    fn publish_retained(&self, publication: BrokerPublication) -> BoxFuture<Result<BrokerPublished, BrokerError>>
+    fn lose(&self)
+    fn take_over(&self)
+    implements BrokerAdapter, Debug
+    derives Clone
+crate::broker::participant
+  const HEARTBEAT: Duration
+  const MAXIMUM_ENVELOPE_PARTS_BYTES: u64
+  const BODY_GRACE_PERIOD: Duration
+  const MINIMUM_BODY_BYTES_PER_SECOND: u64
+  const ROOT: &str
+  type ParticipantErrorListener = Arc<dyn Fn(&RouterError) + Send + Sync>
+  struct BrokerParticipantOptions #[non_exhaustive]
+    pub root: Option<String>
+    pub clock: Option<SharedClock>
+    pub runtime: Option<Handle>
+    pub heartbeat: Option<Duration>
+    pub held_bytes_budget: Option<u64>
+    pub maximum_envelope_parts_bytes: Option<u64>
+    pub minimum_body_bytes_per_second: Option<u64>
+    pub body_grace_period: Option<Duration>
+    pub require_delivery: Option<BrokerDelivery>
+    pub reconnect: Option<TransportClientReconnectOptions>
+    pub reconnects: Option<bool>
+    pub maximum_held_envelope_bytes: Option<u64>
+    derives Clone, Debug, Default
+  struct BrokerRefusal #[non_exhaustive]
+    pub reason: String
+    pub status: Option<u16>
+    pub layouts: Option<Vec<u8>>
+    fn new<R: Into<String>>(reason: R) -> Self
+    derives Clone, Debug, Eq, PartialEq
+  struct BrokerRefusedError
+    const NO_SUBSCRIBER: &str
+    fn new(refusal: BrokerRefusal) -> Self
+    fn reason(&self) -> &str
+    const fn status(&self) -> Option<u16>
+    fn layouts(&self) -> Option<&[u8]>
+    implements Display, Error
+    derives Clone, Debug, Eq, PartialEq
+  struct BrokerParticipant
+    fn new(adapter: Arc<dyn BrokerAdapter>, options: &BrokerParticipantOptions) -> Result<Self, ProgrammerError>
+    fn id(&self) -> &str
+    fn root(&self) -> &str
+    fn adapter(&self) -> Arc<dyn BrokerAdapter>
+    fn clock(&self) -> SharedClock
+    fn is_linked(&self) -> bool
+    fn is_debugging(&self) -> bool
+    fn on_debug(&self, listener: ParticipantDebugListener) -> ListenerId
+    fn names(&self) -> BTreeSet<String>
+    fn inbox(&self) -> Vec<String>
+    fn on_error(&self, listener: ParticipantErrorListener) -> ListenerId
+    fn off(&self, listener: ListenerId)
+    fn gauges(&self) -> Gauges
+    fn server(&self, options: &BrokerTransportServerOptions) -> Result<BrokerTransportServer, ProgrammerError>
+    fn client(&self, options: &BrokerTransportClientOptions) -> Result<BrokerTransportClient, ProgrammerError>
+    fn start(&self) -> BoxFuture<Result<(), BrokerError>>
+    fn stop(&self) -> BoxFuture<()>
+    fn dispose(&self) -> BoxFuture<()>
+    fn incarnation(&self) -> u128
+    implements Debug
+    derives Clone
+crate::broker::server
+  const MAXIMUM_CONNECTIONS: u64
+  const MAXIMUM_CONNECTIONS_PER_ADDRESS: u64
+  const ACCEPT_TIMEOUT: Duration
+  struct BrokerTransportServerOptions #[non_exhaustive]
+    pub names: Vec<String>
+    pub is_in_group: Option<bool>
+    pub maximum_connections: Option<u64>
+    pub maximum_connections_per_address: Option<u64>
+    pub maximum_unsent_bytes: Option<u64>
+    pub accept_timeout: Option<Duration>
+    pub secure: Option<bool>
+    fn new<N: Into<String>, I: IntoIterator<Item = N>>(names: I) -> Self
+    derives Clone, Debug
+  struct BrokerTransportServer
+    fn new(participant: &BrokerParticipant, options: &BrokerTransportServerOptions) -> Result<Self, ProgrammerError>
+    fn names(&self) -> &[String]
+    fn ready_state(&self) -> ReadyState
+    fn clients(&self) -> Vec<TransportServerClient>
+    implements Debug, ServerTransport
+    derives Clone
+crate::client
+  struct ClientOptions #[non_exhaustive]
+    pub runtime: Option<Handle>
+    pub credential: Option<RequestCredential>
+    pub credentials: Option<Credentials>
+    pub limits: Option<RouterLimitsOptions>
+    pub metrics_registry: Option<MetricsRegistry>
+    pub intake: Option<IntakeLimitsOptions>
+    implements Debug
+    derives Clone, Default
+  struct Client
+    fn new(transport: Arc<dyn RouterClientTransport>, options: &ClientOptions) -> Result<Self, ProgrammerError>
+    const fn router(&self) -> &RouterClient
+    const fn services(&self) -> &ServiceManagerClient
+    fn transport(&self) -> Arc<dyn RouterClientTransport>
+    fn dispose(&self) -> BoxFuture<()>
+    implements Debug
+    derives Clone
+crate::clock
+  use native::SystemClock
+  struct SystemClockOptions #[non_exhaustive]
+    pub runtime: Option<Handle>
+    derives Clone, Debug, Default
+  enum Schedule #[non_exhaustive]
+    Once(Duration)
+    Every(Duration)
+    derives Clone, Copy, Debug, Eq, PartialEq
+  type TimerCallback = Box<dyn FnMut() + Send>
+  trait Timer: Send + Sync + fmt::Debug
+    fn cancel(&self)
+  trait Clock: Send + Sync + fmt::Debug
+    fn description(&self) -> &'static str
+    fn monotonic(&self) -> Duration
+    fn wall(&self) -> SystemTime
+    fn arm(&self, schedule: Schedule, callback: TimerCallback) -> Result<Arc<dyn Timer>, ProgrammerError>
+    fn activity(&self) -> Option<Arc<crate::testing::Activity>>
+  type SharedClock = Arc<dyn Clock>
+crate::clock::native
+  struct SystemClock
+    fn new(options: &SystemClockOptions) -> Result<Self, ProgrammerError>
+    fn current() -> Result<Self, ProgrammerError>
+    implements Clock
+    derives Clone, Debug
+crate::constants
+  enum EnvelopeLayout #[non_exhaustive]
+    First
+    fn byte(self) -> u8
+    derives Clone, Copy, Debug, Eq, Hash, PartialEq
+  enum EnvelopeKind #[non_exhaustive]
+    Request
+    Result
+    Failure
+    Notification
+    Chunk
+    Credit
+    Cancel
+    const ALL: [Self; 7]
+    fn byte(self) -> u8
+    implements TryFrom
+    derives Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd
+  struct EnvelopeFlag(u8);
+    const DESTINATION: Self
+    const TRANSFER: Self
+    const CREDENTIAL: Self
+    const SUBSCRIPTION: Self
+    const PACED: Self
+    const MORE: Self
+    fn bits(self) -> u8
+    derives Clone, Copy, Debug, Eq, Hash, PartialEq
+  struct CredentialScheme(u16);
+    const NONE: Self
+    const OPAQUE: Self
+    const JWT: Self
+    const ELSEWHERE: Self
+    fn new(number: u16) -> Self
+    fn get(self) -> u16
+    fn name(self) -> Option<&'static str>
+    implements Display, From
+    derives Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd
+  enum ProcedureKind #[non_exhaustive]
+    Command
+    Notifies
+    Request
+    fn as_str(self) -> &'static str
+    fn named(name: &str) -> Option<Self>
+    derives Clone, Copy, Debug, Eq, Hash, PartialEq
+  enum FailureScope #[non_exhaustive]
+    Protocol
+    Application
+    fn number(self) -> u8
+    derives Clone, Copy, Debug, Eq, Hash, PartialEq
+  struct ProtocolCode(NonZeroU16);
+    const ENVELOPE_MALFORMED: Self
+    const LAYOUT_UNSUPPORTED: Self
+    const KIND_UNSUPPORTED: Self
+    const ENVELOPE_TOO_LARGE: Self
+    const DESTINATION_UNKNOWN: Self
+    const DESTINATION_UNREACHABLE: Self
+    const SERVICE_UNKNOWN: Self
+    const PROCEDURE_UNKNOWN: Self
+    const CALL_UNKNOWN: Self
+    const SUBSCRIPTION_UNKNOWN: Self
+    const SUBSCRIPTION_UNSUPPORTED: Self
+    const SESSION_REQUIRED: Self
+    const ACCESS_DENIED: Self
+    const PAYLOAD_TOO_LARGE: Self
+    const CAPACITY_EXCEEDED: Self
+    const CREDENTIAL_UNSUPPORTED: Self
+    const CHUNK_INVALID: Self
+    const CREDIT_EXCEEDED: Self
+    const PAYLOAD_UNDECODABLE: Self
+    const TRANSFER_STALLED: Self
+    const PAYLOAD_INVALID: Self
+    const PROCEDURE_FAILED: Self
+    const DESTINATION_LOST: Self
+    fn new(number: NonZeroU16) -> Self
+    fn named() -> Vec<Self>
+    fn get(self) -> NonZeroU16
+    fn name(self) -> Option<&'static str>
+    implements Display, From
+    derives Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd
+  enum RouterSide #[non_exhaustive]
+    Client
+    Server
+    fn as_str(self) -> &'static str
+    implements Display
+    derives Clone, Copy, Debug, Eq, Hash, PartialEq
+  const SESSION_TOKEN_BYTES: usize
+  const SERVER_CONNECTION_HANDLE: &str
+crate::credentials
+  const JWT_LIMIT_BYTES: u64
+  struct JwtSetKey
+    pub algorithm: JwtAlgorithm
+    pub jwk: Map<String, Value>
+    implements Debug
+    derives Clone, Eq, PartialEq
+  type KeySetAnswer = Result<Vec<JwtSetKey>, Box<dyn Error + Send + Sync>>
+  type KeySetAsk = Arc<dyn Fn(String, CancellationToken) -> BoxFuture<KeySetAnswer> + Send + Sync>
+  struct JwtKeySet
+    pub ask: KeySetAsk
+    pub issuers: Vec<String>
+    pub maximum_waiting_calls: Option<u64>
+    implements Debug
+    derives Clone
+  struct ElsewhereSession
+    pub id: String
+    pub data: Option<Value>
+    pub end: Option<f64>
+    derives Clone, Debug, PartialEq
+  type ElsewhereVerdict = Result<Option<ElsewhereSession>, Box<dyn Error + Send + Sync>>
+  type ElsewhereVerifier = Arc<dyn Fn(String, CancellationToken) -> BoxFuture<ElsewhereVerdict> + Send + Sync>
+  struct Credentials #[non_exhaustive]
+    pub audience: Option<String>
+    pub keys: Vec<JwtKey>
+    pub key_set: Option<JwtKeySet>
+    pub verify: Option<ElsewhereVerifier>
+    implements Debug
+    derives Clone, Default
+crate::debug
+  fn filter_debug(listener: crate::managers::service::DebugListener, source: DebugFilterSource) -> Result<crate::managers::service::DebugListener, ProgrammerError>
+  enum DebugDirection #[non_exhaustive]
+    Rx
+    Tx
+    fn as_str(self) -> &'static str
+    derives Clone, Copy, Debug, Eq, Hash, PartialEq
+  struct TracedEnvelope #[non_exhaustive]
+    pub connection_handle: ConnectionHandle
+    pub header: EnvelopeHeader
+    pub credential_scheme: Option<CredentialScheme>
+    fn new(connection_handle: &ConnectionHandle, header: &EnvelopeHeader) -> Self
+    derives Clone, Debug, Eq, PartialEq
+  enum DebugType #[non_exhaustive]
+    Request
+    Command
+    Notification
+    fn as_str(self) -> &'static str
+    derives Clone, Copy, Debug, Eq, Hash, PartialEq
+  struct DebugFilter #[non_exhaustive]
+    pub directions: Vec<DebugDirection>
+    pub types: Vec<DebugType>
+    pub kinds: Vec<EnvelopeKind>
+    pub include: Vec<String>
+    pub exclude: Vec<String>
+    derives Clone, Debug, Default, Eq, PartialEq
+  enum FilterRefusal #[non_exhaustive]
+    SelectorEmpty
+    ValueEmpty
+    NamesNothing
+    HoldsAParenthesis
+    fn as_str(self) -> &'static str
+    implements Display, Error
+    derives Clone, Copy, Debug, Eq, Hash, PartialEq
+  fn parse_debug_filter(spec: &str) -> Result<DebugFilter, ProgrammerError>
+  struct CallAsked<'name>
+    pub direction: DebugDirection
+    pub call_type: DebugType
+    pub procedure_name: &'name str
+    derives Clone, Copy, Debug
+  struct EnvelopeAsked
+    pub direction: DebugDirection
+    pub kind: EnvelopeKind
+    derives Clone, Copy, Debug
+  enum GivenFilter #[non_exhaustive]
+    Spec(String)
+    Filter(DebugFilter)
+    derives Clone, Debug, Eq, PartialEq
+  type FilterGiven = Result<Option<GivenFilter>, Box<dyn std::error::Error + Send + Sync>>
+  enum DebugFilterSource #[non_exhaustive]
+    Given(GivenFilter)
+    Function(Arc<dyn Fn() -> FilterGiven + Send + Sync>)
+    implements Debug
+    derives Clone
+  struct FilterKeeper
+    fn new(source: DebugFilterSource) -> Result<Self, ProgrammerError>
+    fn keeps_call(&self, asked: &CallAsked<'_>) -> bool
+    fn keeps_envelope(&self, asked: EnvelopeAsked) -> bool
+    implements Debug
+crate::debug::participant
+  enum ParcelVerdict #[non_exhaustive]
+    Advisory
+    Copy
+    DoesNotRead
+    Loss
+    NoParcel
+    OffTopic
+    PairNotHeld
+    Retained
+    Taken
+    fn as_str(self) -> &'static str
+    derives Clone, Copy, Debug, Eq, PartialEq
+  struct ParticipantDebugEvent #[non_exhaustive]
+    pub event: &'static str
+    pub direction: Option<DebugDirection>
+    pub topic: Option<Vec<String>>
+    pub bytes: Option<usize>
+    pub layout: Option<u8>
+    pub kind: Option<String>
+    pub flags: Option<u8>
+    pub sequence: Option<u64>
+    pub opener: Option<String>
+    pub connection: Option<u64>
+    pub connection_handle: Option<ConnectionHandle>
+    pub id: Option<String>
+    pub incarnation: Option<String>
+    pub bound: Option<u64>
+    pub secure: Option<bool>
+    pub status: Option<u16>
+    pub carried_bytes: Option<usize>
+    pub more: Option<bool>
+    pub has_credential: Option<bool>
+    pub answers: Option<u64>
+    pub code: Option<u16>
+    pub verdict: Option<ParcelVerdict>
+    pub awaited: Option<u64>
+    pub came: Option<u64>
+    pub state: Option<&'static str>
+    pub ended: Option<Vec<u64>>
+    pub name: Option<String>
+    pub is_held: Option<bool>
+    pub group: Option<String>
+    pub report: Option<String>
+    derives Clone, Debug, Default, Eq, PartialEq
+  type ParticipantDebugListener = Arc<dyn Fn(&ParticipantDebugEvent) + Send + Sync>
+crate::duration
+  const LONGEST_TIMER: Duration
+  const NEVER: Duration
+  enum DurationRefusal #[non_exhaustive]
+    UnderTheFloor
+    PastTheCeiling
+    ZeroRefused
+    NeverRefused
+    NotANumber
+    fn as_str(self) -> &'static str
+    implements Display, Error
+    derives Clone, Copy, Debug, Eq, Hash, PartialEq
+  fn hold(name: &str, duration: Duration) -> Result<Duration, ProgrammerError>
+  fn hold_finite(name: &str, duration: Duration) -> Result<Duration, ProgrammerError>
+crate::envelope
+  const MAXIMUM_DETAIL_BYTES: usize
+  enum Credential #[non_exhaustive]
+    None
+    Opaque(SessionToken)
+    Jwt(Bytes)
+    Elsewhere
+    ToCome { scheme: CredentialScheme, bytes: Bytes }
+    Redacted { scheme: CredentialScheme }
+    fn scheme(&self) -> CredentialScheme
+    implements Debug
+    derives Clone, Eq, Hash, PartialEq
+  struct RequestHeader
+    pub call_id: u32
+    pub service_id: u16
+    pub procedure_id: u16
+    pub destination_id: Option<u32>
+    pub opens_subscription: bool
+    pub paced: bool
+    pub total: Option<u64>
+    pub credential: Option<Credential>
+    derives Clone, Debug, Eq, PartialEq
+  struct ResultHeader
+    pub call_id: u32
+    pub total: Option<u64>
+    pub credential: Option<Credential>
+    derives Clone, Debug, Eq, PartialEq
+  struct FailureHeader
+    pub call_id: u32
+    pub credential: Option<Credential>
+    derives Clone, Debug, Eq, PartialEq
+  struct NotificationHeader
+    pub call_id: u32
+    derives Clone, Debug, Eq, PartialEq
+  struct ChunkHeader
+    pub call_id: u32
+    pub offset: u64
+    pub is_last: bool
+    derives Clone, Debug, Eq, PartialEq
+  struct CreditHeader
+    pub call_id: u32
+    pub credit_end: u64
+    pub paced: bool
+    derives Clone, Debug, Eq, PartialEq
+  struct CancelHeader
+    pub call_id: u32
+    derives Clone, Debug, Eq, PartialEq
+  enum EnvelopeHeader #[non_exhaustive]
+    Request(RequestHeader)
+    Result(ResultHeader)
+    Failure(FailureHeader)
+    Notification(NotificationHeader)
+    Chunk(ChunkHeader)
+    Credit(CreditHeader)
+    Cancel(CancelHeader)
+    fn kind(&self) -> EnvelopeKind
+    fn call_id(&self) -> u32
+    fn credential(&self) -> Option<&Credential>
+    fn redacted(&self) -> Self
+    derives Clone, Debug, Eq, PartialEq
+  struct Prefix
+    pub layout: u8
+    pub kind: u8
+    pub call_id: u32
+    derives Clone, Copy, Debug, Eq, PartialEq
+  struct ReadHeader
+    pub header: EnvelopeHeader
+    pub header_bytes: usize
+    derives Clone, Debug, Eq, PartialEq
+  struct FailureRecord
+    pub code: NonZeroU16
+    pub scope: FailureScope
+    pub detail: String
+    pub relays: u8
+    derives Clone, Debug, Eq, PartialEq
+  enum Envelope #[non_exhaustive]
+    Request { header: RequestHeader, payload: Bytes }
+    Result { header: ResultHeader, payload: Bytes }
+    Failure { header: FailureHeader, failure: FailureRecord }
+    Notification { header: NotificationHeader, payload: Bytes }
+    Chunk { header: ChunkHeader, payload: Bytes }
+    Credit { header: CreditHeader }
+    Cancel { header: CancelHeader }
+    fn header(&self) -> EnvelopeHeader
+    fn kind(&self) -> EnvelopeKind
+    fn call_id(&self) -> u32
+    derives Clone, Debug, Eq, PartialEq
+  struct ReadEnvelopeOptions #[non_exhaustive]
+    pub maximum_envelope_bytes: Option<usize>
+    pub chunk_bytes: Option<usize>
+    pub maximum_detail_bytes: Option<usize>
+    derives Clone, Debug, Default
+  fn read_prefix(bytes: &[u8], side: RouterSide) -> Result<Prefix, Failure>
+  fn read_header(bytes: &[u8], side: RouterSide) -> Result<Option<ReadHeader>, Failure>
+  fn read_failure(payload: &[u8], side: RouterSide, options: &ReadEnvelopeOptions) -> Result<FailureRecord, Failure>
+  fn read_envelope(bytes: &Bytes, side: RouterSide, options: &ReadEnvelopeOptions) -> Result<Option<Envelope>, Failure>
+  fn header_bytes_of(header: &EnvelopeHeader) -> Result<usize, ProgrammerError>
+  fn write_header(header: &EnvelopeHeader, bytes: &mut Vec<u8>) -> Result<usize, ProgrammerError>
+  fn write_envelope(envelope: &Envelope, maximum_detail_bytes: usize) -> Result<Bytes, ProgrammerError>
+crate::errors
+  enum Refusal #[non_exhaustive]
+    Duration(DurationRefusal)
+    Identity(IdentityRefusal)
+    Filter(FilterRefusal)
+    derives Clone, Copy, Debug, Eq, Hash, PartialEq
+  struct ProgrammerError
+    fn new<M: Into<String>>(message: M) -> Self
+    fn refused<M: Into<String>>(reason: Refusal, message: M) -> Self
+    fn message(&self) -> &str
+    fn reason(&self) -> Option<Refusal>
+    implements Display, Error
+    derives Clone, Debug, Eq, PartialEq
+  enum CallError #[non_exhaustive]
+    Failure(Failure)
+    Cancelled(Option<u32>)
+    Disconnected(String)
+    TimedOut(Duration)
+    Refused(ProgrammerError)
+    Other(Arc<dyn Error + Send + Sync>)
+    implements Display, Error, From
+    derives Clone, Debug
+  struct ConnectError
+    fn new<M: Into<String>>(message: M) -> Self
+    fn caused<M: Into<String>>(message: M, source: Arc<dyn Error + Send + Sync>) -> Self
+    fn message(&self) -> &str
+    implements Display, Error
+    derives Clone, Debug
+  struct ReconnectError
+    fn new(attempts: u32, last: Option<Arc<dyn Error + Send + Sync>>) -> Self
+    fn attempts(&self) -> u32
+    implements Display, Error
+    derives Clone, Debug
+  struct CapacityError
+    fn new<M: Into<String>>(message: M) -> Self
+    fn message(&self) -> &str
+    implements Display, Error
+    derives Clone, Debug, Eq, PartialEq
+  struct ReadyStateError
+    fn new(got: &'static str, expected: &'static str) -> Self
+    implements Display, Error
+    derives Clone, Debug, Eq, PartialEq
+  enum ResolverError #[non_exhaustive]
+    Failure(Failure)
+    Other(Box<dyn Error + Send + Sync>)
+    fn other<E: Into<Box<dyn Error + Send + Sync>>>(error: E) -> Self
+    implements Display, Error, From
+    derives Debug
+  struct Disposed;
+    implements Display, Error
+    derives Clone, Copy, Debug, Eq, PartialEq
+  enum TransportError #[non_exhaustive]
+    Refused(ProgrammerError)
+    Cancelled { message: String, source: Option<Arc<dyn Error + Send + Sync>> } #[non_exhaustive]
+    TimedOut(Duration)
+    Connect(ConnectError)
+    ReadyState(ReadyStateError)
+    Reconnect(ReconnectError)
+    fn cancelled<M: Into<String>>(message: M) -> Self
+    fn cancelled_by<M: Into<String>>(message: M, source: Arc<dyn Error + Send + Sync>) -> Self
+    implements Display, Error, From
+    derives Clone, Debug
+crate::failure
+  enum FailureOrigin #[non_exhaustive]
+    Local
+    Peer
+    Relayed
+    derives Clone, Copy, Debug, Eq, Hash, PartialEq
+  struct ProcedureAddress
+    pub service_id: u16
+    pub procedure_id: u16
+    derives Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd
+  struct Failure
+    fn protocol(code: ProtocolCode, side: RouterSide) -> Self
+    fn application(code: NonZeroU16, detail: &str) -> Self
+    fn received(record: &FailureRecord, side: RouterSide) -> Self
+    fn saying<D: Into<String>>(mut self, detail: D) -> Self
+    fn about(mut self, header: &EnvelopeHeader) -> Self
+    fn of_call(mut self, procedure: Option<ProcedureAddress>, destination_id: Option<u32>) -> Self
+    fn overtaking(mut self, may_overtake: bool) -> Self
+    fn caused_by(mut self, source: Arc<dyn Error + Send + Sync>) -> Self
+    fn code(&self) -> NonZeroU16
+    fn scope(&self) -> FailureScope
+    fn detail(&self) -> &str
+    fn origin(&self) -> FailureOrigin
+    fn relays(&self) -> u8
+    fn side(&self) -> Option<RouterSide>
+    fn procedure(&self) -> Option<ProcedureAddress>
+    fn destination_id(&self) -> Option<u32>
+    fn may_overtake(&self) -> bool
+    fn header(&self) -> Option<&EnvelopeHeader>
+    fn is_protocol(&self) -> bool
+    fn is_protocol_code(&self, codes: &[ProtocolCode]) -> bool
+    fn is_protocol_code_from(&self, codes: &[ProtocolCode], side: RouterSide) -> bool
+    fn is_application(&self) -> bool
+    fn is_application_code(&self, codes: &[u16]) -> bool
+    fn protocol_code(&self) -> Option<ProtocolCode>
+    fn record(&self) -> FailureRecord
+    implements Display, Error
+    derives Clone, Debug
+crate::identity
+  enum IdentityRefusal #[non_exhaustive]
+    OutOfItsRange
+    OffItsForm
+    AgainstItsKind
+    fn as_str(self) -> &'static str
+    implements Display, Error
+    derives Clone, Copy, Debug, Eq, Hash, PartialEq
+  enum DeclarationWay #[non_exhaustive]
+    ClientResolver
+    ServerResolver
+    ServerNotificationResolver
+    ClientRequester
+    ServerRequester
+    ClientNotification
+    derives Clone, Copy, Debug, Eq, Hash, PartialEq
+  struct Procedure
+    pub service_id: u16
+    pub procedure_id: u16
+    pub service_revision: u32
+    pub procedure_name: String
+    pub procedure_kind: Option<ProcedureKind>
+    pub maximum_payload_bytes: Option<u64>
+    pub deprecation: Option<Deprecation>
+    fn address(&self) -> ProcedureAddress
+    derives Clone, Debug, Eq, PartialEq
+  struct Deprecation
+    pub message: Option<String>
+    derives Clone, Debug, Default, Eq, PartialEq
+  fn is_procedure_name(name: &str) -> bool
+  fn are_one_name(one: &str, other: &str) -> bool
+crate::joined
+  struct JoinedServerTransport
+    fn new(transports: Vec<Arc<dyn ServerTransport>>) -> Result<Self, ProgrammerError>
+    fn transports(&self) -> &[Arc<dyn ServerTransport>]
+    implements Debug, ServerTransport
+    derives Clone
+crate::json
+  use to_value::to_value
+  const DEPTH: usize
+  enum JsonRefusal #[non_exhaustive]
+    NotUtf8
+    ByteOrderMark
+    NotJson
+    NameTwice
+    SurrogateAlone
+    NumberPastADouble
+    NestedPast64
+    NotAFiniteNumber
+    NoJsonValue(String)
+    NotItsType(String)
+    fn reason(&self) -> &'static str
+    implements Display, Error
+    derives Clone, Debug, Eq, PartialEq
+  enum LoneSurrogates #[non_exhaustive]
+    Refuse
+    AsNull
+    derives Clone, Copy, Debug, Default, Eq, PartialEq
+  struct ReadJsonOptions #[non_exhaustive]
+    pub lone_surrogates: Option<LoneSurrogates>
+    derives Clone, Debug, Default
+  fn read(bytes: &[u8]) -> Result<Value, JsonRefusal>
+  fn read_with(bytes: &[u8], options: &ReadJsonOptions) -> Result<Value, JsonRefusal>
+  fn write(value: &Value) -> Result<Vec<u8>, JsonRefusal>
+  fn from_value<T: DeserializeOwned>(value: Value) -> Result<T, JsonRefusal>
+  fn to_bytes<T: Serialize + ?Sized>(value: &T) -> Result<Vec<u8>, JsonRefusal>
+crate::json::to_value
+  fn to_value<T: Serialize + ?Sized>(value: &T) -> Result<Value, JsonRefusal>
+crate::jwt_verifier
+  enum JwtAlgorithm #[non_exhaustive]
+    Es256
+    Hs256
+    fn as_str(self) -> &'static str
+    fn named(name: &str) -> Option<Self>
+    derives Clone, Copy, Debug, Eq, Hash, PartialEq
+  struct JwtKey
+    pub algorithm: JwtAlgorithm
+    pub issuer: String
+    pub jwk: Map<String, Value>
+    implements Debug
+    derives Clone, Eq, PartialEq
+  enum JwtRefusal #[non_exhaustive]
+    Token
+    Crit
+    Typ
+    Kid
+    Alg
+    Key
+    Signature
+    Iss
+    Exp
+    Nbf
+    Aud
+    Sid
+    Sub
+    fn as_str(self) -> &'static str
+    implements Display, Error
+    derives Clone, Copy, Debug, Eq, Hash, PartialEq
+  enum JwtSessionIdentifier #[non_exhaustive]
+    Sid { issuer: String, sid: String }
+    Sub { issuer: String, sub: String }
+    derives Clone, Debug, Eq, Hash, PartialEq
+  enum JwtVerdict #[non_exhaustive]
+    Holds { claims: Map<String, Value>, end: i64, identifier: JwtSessionIdentifier }
+    Refused(JwtRefusal)
+    derives Clone, Debug, PartialEq
+  struct JwtAgainst<'keys>
+    pub audiences: &'keys [String]
+    pub keys: &'keys [JwtKey]
+    pub now: &'keys(dyn Fn() -> SystemTime + Send + Sync)
+    implements Debug
+  struct ReadJwt #[non_exhaustive]
+    pub header: Map<String, Value>
+    pub claims: Map<String, Value>
+    derives Clone, Debug, Eq, PartialEq
+  fn read_jwt(token: &[u8]) -> Option<ReadJwt>
+  fn verify_jwt(token: &[u8], against: &JwtAgainst<'_>) -> Result<JwtVerdict, ProgrammerError>
+crate::managers::notification
+  struct PacingLimits #[non_exhaustive]
+    pub maximum_queued_notification_bytes: u64
+    pub maximum_queued_notifications: u64
+    derives Clone, Copy, Debug, Eq, PartialEq
+  const PACING_DEFAULTS: PacingLimits
+  struct PacingLimitsOptions #[non_exhaustive]
+    pub maximum_queued_notification_bytes: Option<u64>
+    pub maximum_queued_notifications: Option<u64>
+    derives Clone, Debug, Default, Eq, PartialEq
+  enum NotificationKey #[non_exhaustive]
+    Number(i64)
+    Text(String)
+    derives Clone, Debug, Eq, Hash, PartialEq
+crate::managers::service
+  use notification::Notification
+  use notification::NotificationCallback
+  use notification::NotificationDependencies
+  use notification::NotificationRegistration
+  use notification::Unsubscribe
+  trait TracedValue: Any + fmt::Debug + Send + Sync
+    fn as_any(&self) -> &dyn Any
+  type Traced = Arc<dyn TracedValue>
+  type TracedError = Arc<dyn Error + Send + Sync>
+  struct DebugEvent #[non_exhaustive]
+    pub call_id: Option<u32>
+    pub connection_handle: Option<ConnectionHandle>
+    pub direction: DebugDirection
+    pub duration: Option<u64>
+    pub options: Option<ResolvedRequestOptions>
+    pub procedure_id: u16
+    pub procedure_name: String
+    pub rx: Option<Traced>
+    pub service_id: u16
+    pub service_revision: u32
+    pub started_at: i64
+    pub tx: Option<Traced>
+    pub call_type: DebugType
+    derives Clone, Debug
+  type DebugListener = Arc<dyn Fn(Option<&TracedError>, &DebugEvent) + Send + Sync>
+  type DeprecatedListener = Arc<dyn Fn(&Procedure) + Send + Sync>
+  enum ServiceRouter #[non_exhaustive]
+    Server(RouterServer)
+    Client(RouterClient)
+    derives Clone, Debug
+  const REQUEST_DEFAULTS: RequestDefaults
+  struct RequestDefaults #[non_exhaustive]
+    pub close_on_timeout: Option<bool>
+    pub timeout: Option<Duration>
+    derives Clone, Debug, Default
+  struct ServiceManagerOptions #[non_exhaustive]
+    pub clock: Option<SharedClock>
+    pub close_connection: Option<CloseConnection>
+    pub defaults: Option<RequestDefaults>
+    implements Debug
+    derives Clone, Default
+  struct RequestOptions #[non_exhaustive]
+    pub timeout: Option<Duration>
+    pub destination_id: Option<u32>
+    pub credential: Option<RequestCredential>
+    pub signal: Option<CancellationToken>
+    derives Clone, Debug, Default
+  struct CommandOptions #[non_exhaustive]
+    pub connection_handle: ConnectionHandle
+    pub close_on_timeout: Option<bool>
+    pub timeout: Option<Duration>
+    pub destination_id: Option<u32>
+    pub credential: Option<RequestCredential>
+    pub signal: Option<CancellationToken>
+    const fn new(connection_handle: ConnectionHandle) -> Self
+    derives Clone, Debug
+  struct RegistrationOptions #[non_exhaustive]
+    pub timeout: Option<Duration>
+    pub destination_id: Option<u32>
+    pub signal: Option<CancellationToken>
+    derives Clone, Debug, Default
+  struct ValidateOptions #[non_exhaustive]
+    pub fail_fast: Option<bool>
+    pub maximum_bytes: Option<usize>
+    derives Clone, Debug, Default, Eq, PartialEq
+  type Validate<T> = Arc<dyn Fn(&T, &ValidateOptions) -> Result<Judged, Box<dyn Error + Send + Sync>> + Send + Sync>
+  struct RequestDependencies<Req: PayloadCodec, Res: PayloadCodec>
+    pub request: Req
+    pub result: Res
+    pub validate: Option<Validate<Req::Value>>
+    pub fail_fast: bool
+    fn new(request: Req, result: Res) -> Self
+    implements Debug
+  type DroppedListener = Arc<dyn Fn(&Procedure, Option<&Failure>) + Send + Sync>
+  struct ServiceManager
+    fn new(router: ServiceRouter, options: &ServiceManagerOptions) -> Result<Self, ProgrammerError>
+    fn on_debug(&self, listener: DebugListener) -> ListenerId
+    fn on_deprecated(&self, listener: DeprecatedListener) -> ListenerId
+    fn on_dropped(&self, listener: DroppedListener) -> ListenerId
+    fn off(&self, listener: ListenerId)
+    fn get_notification<Req, Res, Not>(&self, procedure: &Procedure, dependencies: NotificationDependencies<Req, Res, Not>) -> Result<Notification<Req, Res, Not>, ProgrammerError> where Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec, Req::Value: Clone + fmt::Debug + Sync, Res::Value: Clone + fmt::Debug + Sync, Not::Value: Clone + fmt::Debug + Sync,
+    fn is_debugging(&self) -> bool
+    fn router(&self) -> &ServiceRouter
+    fn get_request<Req, Res>(&self, procedure: &Procedure, dependencies: RequestDependencies<Req, Res>) -> Result<Request<Req, Res>, ProgrammerError> where Req: PayloadCodec, Res: PayloadCodec, Req::Value: Clone + fmt::Debug + Sync, Res::Value: Clone + fmt::Debug + Sync,
+    fn get_command<Req, Res>(&self, procedure: &Procedure, dependencies: RequestDependencies<Req, Res>) -> Result<Command<Req, Res>, ProgrammerError> where Req: PayloadCodec, Res: PayloadCodec, Req::Value: Clone + fmt::Debug + Sync, Res::Value: Clone + fmt::Debug + Sync,
+    fn get_request_resolver<Req, Res>(&self, procedure: &Procedure, dependencies: RequestResolverDependencies<Req, Res>) -> Result<ResolverOf<Req, Res>, ProgrammerError> where Req: PayloadCodec, Res: PayloadCodec,
+    fn get_command_resolver<Req, Res>(&self, procedure: &Procedure, dependencies: RequestResolverDependencies<Req, Res>) -> Result<ResolverOf<Req, Res>, ProgrammerError> where Req: PayloadCodec, Res: PayloadCodec,
+    fn get_notification_resolver<Req, Res, Not>(&self, procedure: &Procedure, dependencies: NotificationResolverDependencies<Req, Res, Not>) -> Result<NotificationResolverOf<Req, Res, Not>, ProgrammerError> where Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec,
+    implements Debug
+    derives Clone
+  type CloseConnection = Arc<dyn Fn(&ConnectionHandle) + Send + Sync>
+  struct ServiceManagerClient
+    fn on_debug(&self, listener: DebugListener) -> ListenerId
+    fn on_deprecated(&self, listener: DeprecatedListener) -> ListenerId
+    fn on_dropped(&self, listener: DroppedListener) -> ListenerId
+    fn off(&self, listener: ListenerId)
+    fn is_debugging(&self) -> bool
+    fn get_request<Req, Res>(&self, procedure: &Procedure, dependencies: RequestDependencies<Req, Res>) -> Result<Request<Req, Res>, ProgrammerError> where Req: PayloadCodec, Res: PayloadCodec, Req::Value: Clone + fmt::Debug + Sync, Res::Value: Clone + fmt::Debug + Sync,
+    fn get_notification<Req, Res, Not>(&self, procedure: &Procedure, dependencies: NotificationDependencies<Req, Res, Not>) -> Result<Notification<Req, Res, Not>, ProgrammerError> where Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec, Req::Value: Clone + fmt::Debug + Sync, Res::Value: Clone + fmt::Debug + Sync, Not::Value: Clone + fmt::Debug + Sync,
+    fn get_command_resolver<Req, Res>(&self, procedure: &Procedure, dependencies: RequestResolverDependencies<Req, Res>) -> Result<ResolverOf<Req, Res>, ProgrammerError> where Req: PayloadCodec, Res: PayloadCodec,
+    derives Clone, Debug
+  struct ServiceManagerServer
+    fn on_debug(&self, listener: DebugListener) -> ListenerId
+    fn on_deprecated(&self, listener: DeprecatedListener) -> ListenerId
+    fn off(&self, listener: ListenerId)
+    fn is_debugging(&self) -> bool
+    fn get_command<Req, Res>(&self, procedure: &Procedure, dependencies: RequestDependencies<Req, Res>) -> Result<Command<Req, Res>, ProgrammerError> where Req: PayloadCodec, Res: PayloadCodec, Req::Value: Clone + fmt::Debug + Sync, Res::Value: Clone + fmt::Debug + Sync,
+    fn get_request_resolver<Req, Res>(&self, procedure: &Procedure, dependencies: RequestResolverDependencies<Req, Res>) -> Result<ResolverOf<Req, Res>, ProgrammerError> where Req: PayloadCodec, Res: PayloadCodec,
+    fn get_notification_resolver<Req, Res, Not>(&self, procedure: &Procedure, dependencies: NotificationResolverDependencies<Req, Res, Not>) -> Result<NotificationResolverOf<Req, Res, Not>, ProgrammerError> where Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec,
+    derives Clone, Debug
+  struct Request<Req: PayloadCodec, Res: PayloadCodec>
+    fn procedure(&self) -> &Procedure
+    fn call(&self, payload: Req::Value, options: &RequestOptions) -> Result<ServiceCall<Res::Value>, ProgrammerError>
+    implements Clone, Debug
+  struct Command<Req: PayloadCodec, Res: PayloadCodec>
+    fn procedure(&self) -> &Procedure
+    fn call(&self, payload: Req::Value, options: &CommandOptions) -> Result<ServiceCall<Res::Value>, ProgrammerError>
+    implements Clone, Debug
+  struct ServiceCall<T>
+    implements Debug, Future
+  struct RequestResolverDependencies<Req: PayloadCodec, Res: PayloadCodec>
+    pub request: Req
+    pub result: Res
+    pub before_request: Option<BeforeRequest>
+    pub validate: Option<Validate<Req::Value>>
+    pub fail_fast: bool
+    fn new(request: Req, result: Res) -> Self
+    implements Debug
+  struct NotificationResolverDependencies<Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec>
+    pub request: Req
+    pub result: Res
+    pub notification: Not
+    pub before_request: Option<BeforeRequest>
+    pub validate: Option<Validate<Req::Value>>
+    pub fail_fast: bool
+    fn new(dependencies: RequestResolverDependencies<Req, Res>, notification: Not) -> Self
+    implements Debug
+  struct RequestProps<T> #[non_exhaustive]
+    pub connection_handle: ConnectionHandle
+    pub header: RequestHeader
+    pub payload: T
+    pub session: Option<Arc<CallSession>>
+    pub signal: Signal
+    derives Clone, Debug
+  struct Response<Res: PayloadCodec>
+    fn result(&self, value: Res::Value) -> BoxFuture<Result<(), ResolverError>>
+    fn failure(&self, failure: &Failure) -> BoxFuture<Result<(), ResolverError>>
+    fn register_notification(&self) -> BoxFuture<Result<u32, CallError>>
+    implements Clone, Debug
+  type ResolverCallback<Req, Res> = Arc<dyn Fn(RequestProps<<Req as PayloadCodec>::Value>, Response<Res>) -> BoxFuture<Result<(), ResolverError>> + Send + Sync,>
+  struct ResolverOf<Req: PayloadCodec, Res: PayloadCodec>
+    fn on(self, callback: ResolverCallback<Req, Res>) -> Result<(), ProgrammerError>
+    implements Debug
+  struct Subscriber #[non_exhaustive]
+    pub connection_handle: ConnectionHandle
+    pub identifier: Option<SessionIdentifier>
+    derives Clone, Debug, Eq, PartialEq
+  type SubscriberFilter = Arc<dyn Fn(&Subscriber) -> bool + Send + Sync>
+  struct NotifyOptions #[non_exhaustive]
+    pub exclude: Option<ConnectionHandle>
+    pub filter: Option<SubscriberFilter>
+    pub key: Option<NotificationKey>
+    implements Debug
+    derives Clone, Default
+  struct NotificationResolverOf<Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec>
+    fn on(self, callback: ResolverCallback<Req, Res>) -> Result<Notifier<Not>, ProgrammerError>
+    implements Debug
+  struct Notifier<Not: PayloadCodec>
+    fn notify(&self, notification: Not::Value, options: &NotifyOptions) -> BoxFuture<()>
+    implements Clone, Debug
+crate::managers::service::notification
+  type NotificationCallback<T> = Arc<dyn Fn(T) -> BoxFuture<Result<(), Arc<dyn Error + Send + Sync>>> + Send + Sync>
+  type Unsubscribe<T> = Arc<dyn Fn(u32, T) -> BoxFuture<Result<(), CallError>> + Send + Sync>
+  struct NotificationDependencies<Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec>
+    pub request: Req
+    pub result: Res
+    pub notification: Not
+    pub validate: Option<Validate<Req::Value>>
+    pub fail_fast: bool
+    pub unsubscribe: Option<Unsubscribe<Res::Value>>
+    pub window: Option<u64>
+    fn new(dependencies: RequestDependencies<Req, Res>, notification: Not) -> Self
+    implements Debug
+  struct NotificationRegistration
+    fn unregister(&self) -> BoxFuture<Result<(), CallError>>
+    implements Debug
+  struct Notification<Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec>
+    fn procedure(&self) -> &Procedure
+    fn as_like(&self) -> Arc<dyn NotificationLike>
+    fn register(&self, payload: Req::Value, callback: NotificationCallback<Not::Value>, options: &RegistrationOptions) -> BoxFuture<Result<NotificationRegistration, CallError>>
+    implements Clone, Debug
+crate::managers::sessions
+  struct Session #[non_exhaustive]
+    pub connection_handle: ConnectionHandle
+    pub connection_inactivity_timeout: Option<Duration>
+    pub data: Option<Value>
+    pub last_activity: SystemTime
+    pub session_inactivity_timeout: Option<Duration>
+    pub session_token: Option<SessionToken>
+    fn new(connection_handle: ConnectionHandle, now: SystemTime) -> Self
+    implements Debug
+    derives Clone, Eq, PartialEq
+  enum SessionEvent #[non_exhaustive]
+    Created(Session)
+    Updated(Session)
+    Deleted(Session)
+    DataChanged { session: Session, new_value: Option<Value>, old_value: Option<Value> }
+    LastActivityChanged { session: Session, new_value: SystemTime, old_value: SystemTime }
+    ConnectionInactivityTimeoutChanged { session: Session, new_value: Duration, old_value: Duration }
+    SessionInactivityTimeoutChanged { session: Session, new_value: Duration, old_value: Duration }
+    ConnectionInactivityTimeoutReached(Session)
+    SessionInactivityTimeoutReached(Session)
+    derives Clone, Debug, Eq, PartialEq
+  struct SessionManagerOptions #[non_exhaustive]
+    pub clock: Option<SharedClock>
+    pub connection_inactivity_timeout: Option<Duration>
+    pub session_inactivity_timeout: Option<Duration>
+    derives Clone, Debug, Default
+crate::memory
+  const TRANSPORT_MEMORY: &str
+  const MEMORY_ADDRESS: &str
+  struct MemoryTransportServerOptions #[non_exhaustive]
+    pub clock: Option<SharedClock>
+    pub runtime: Option<Handle>
+    derives Clone, Debug, Default
+  struct MemoryTransportServer
+    fn new(options: &MemoryTransportServerOptions) -> Result<Self, ProgrammerError>
+    fn ready_state(&self) -> ReadyState
+    fn clients(&self) -> Vec<TransportServerClient>
+    implements Debug, ServerTransport
+    derives Clone
+  struct MemoryTransportClientOptions #[non_exhaustive]
+    pub clock: Option<SharedClock>
+    derives Clone, Debug, Default
+  struct MemoryTransportClientConnectOptions #[non_exhaustive]
+    pub server: MemoryTransportServer
+    pub address: Option<String>
+    pub port: Option<u16>
+    pub signal: Option<CancellationToken>
+    pub timeout: Option<Duration>
+    const fn new(server: MemoryTransportServer) -> Self
+    derives Clone, Debug
+  struct MemoryTransportClient
+    fn new(options: &MemoryTransportClientOptions) -> Result<Self, ProgrammerError>
+    fn connect(&self, options: &MemoryTransportClientConnectOptions) -> Connect
+    fn disconnect(&self, options: &TransportClientDisconnectOptions) -> Result<(), TransportError>
+    fn dispose(&self)
+    fn close(&self)
+    fn reconnect(&self, options: &TransportClientReconnectOptions) -> Result<BoxFuture<Result<(), TransportError>>, TransportError>
+    implements Debug, RouterClientTransport
+    derives Clone
+crate::metrics
+  const METRICS_CONTENT_TYPE: &str
+  const METRICS_REGISTRY_DEFAULTS: MetricsRegistryOptions
+  enum CallEnding #[non_exhaustive]
+    Result
+    Timeout
+    Cancelled
+    Closed
+    Error
+    Application
+    Other
+    Failure(ProtocolCode)
+    fn of_failure(code: NonZeroU16, scope: FailureScope) -> Self
+    derives Clone, Copy, Debug, Eq, Hash, PartialEq
+  struct MetricsRegistryOptions #[non_exhaustive]
+    pub maximum_procedures: Option<usize>
+    derives Clone, Debug, Default
+  struct MetricsExposition #[non_exhaustive]
+    pub content_type: &'static str
+    pub text: String
+    derives Clone, Debug, Eq, PartialEq
+  struct MetricsRegistry
+    fn new(options: &MetricsRegistryOptions) -> Result<Self, ProgrammerError>
+    fn attach(&self, side: RouterSide) -> RouterMetrics
+    fn exposition(&self) -> MetricsExposition
+    implements Debug
+    derives Clone
+  struct ProcedureSeries
+    fn start(&self)
+    fn end(&self, ending: CallEnding, microseconds: u64)
+    implements Debug
+    derives Clone
+  struct NotificationSeries
+    fn dropped(&self, failure: Option<&Failure>)
+    fn sent(&self)
+    fn failed(&self)
+    fn heard(&self)
+    implements Debug
+    derives Clone
+  struct ResolverSeries #[non_exhaustive]
+    pub calls: ProcedureSeries
+    pub notifying: Option<NotificationSeries>
+    derives Clone, Debug
+  struct RouterMetrics
+    const fn other_client(&self) -> &ProcedureSeries
+    const fn other_server(&self) -> &ProcedureSeries
+    fn declare_requester(&self, procedure: &Procedure) -> Result<ProcedureSeries, ProgrammerError>
+    fn declare_resolver(&self, procedure: &Procedure, notifies: bool) -> Result<ResolverSeries, ProgrammerError>
+    fn declare_notification(&self, procedure: &Procedure) -> Result<NotificationSeries, ProgrammerError>
+    derives Clone, Debug
+crate::payloads
+  struct CodecRefusal
+    fn new<R: Into<String>>(reason: R) -> Self
+    fn caused_by(mut self, cause: Arc<dyn Error + Send + Sync>) -> Self
+    fn reason(&self) -> &str
+    implements Display, Eq, Error, From, PartialEq
+    derives Clone, Debug
+  trait PayloadCodec: Send + Sync + fmt::Debug + 'static
+    type Value: Send + 'static
+    fn decode(&self, bytes: &Bytes) -> Result<Self::Value, CodecRefusal>
+    fn encode(&self, value: &Self::Value) -> Result<Bytes, CodecRefusal>
+    fn encoding(&self) -> &'static str
+  struct RawCodec;
+    implements PayloadCodec
+    derives Clone, Copy, Debug, Default
+  struct TextCodec;
+    implements PayloadCodec
+    derives Clone, Copy, Debug, Default
+  struct JsonCodec;
+    implements PayloadCodec
+    derives Clone, Copy, Debug, Default
+  struct JsonOf<T>
+    fn new() -> Self
+    implements Clone, Debug, Default, PayloadCodec
+crate::router::admissions
+  struct BeforeRequest
+    fn new<A: Fn(&AdmissionRequest) -> bool + Send + Sync + 'static>(admits: A, refusal: Option<Failure>) -> Self
+    fn refusal(&self) -> Option<&Failure>
+    implements Debug
+    derives Clone
+  fn require_session() -> BeforeRequest
+  fn require_credential() -> BeforeRequest
+  fn share_leg_b_session() -> BeforeRequest
+crate::router::client
+  trait NotificationLike: Send + Sync + fmt::Debug
+    fn procedure(&self) -> &Procedure
+    fn window(&self) -> Option<u64>
+    fn drop_with(&self, _failure: Option<&Failure>)
+    fn trigger(&self, payload: Bytes) -> Result<BoxFuture<Settled>, RouterError>
+  type Settled = Vec<Result<(), Arc<dyn Error + Send + Sync>>>
+  type ClientErrorListener = Arc<dyn Fn(&RouterError) + Send + Sync>
+  type ClientEnvelopeListener = Arc<dyn Fn(DebugDirection, &TracedEnvelope) + Send + Sync>
+  type ClientActivityListener = Arc<dyn Fn(RouterActivity) + Send + Sync>
+  type WithdrawnListener = Arc<dyn Fn(CredentialScheme) + Send + Sync>
+  struct RouterClientOptions #[non_exhaustive]
+    pub clock: Option<SharedClock>
+    pub runtime: Option<Handle>
+    pub credential: Option<RequestCredential>
+    pub credentials: Option<Credentials>
+    pub limits: Option<RouterLimitsOptions>
+    pub last_call_id: Option<u32>
+    pub metrics_registry: Option<MetricsRegistry>
+    pub intake: Option<IntakeLimitsOptions>
+    implements Debug
+    derives Clone, Default
+  struct UnregisterNotificationOptions #[non_exhaustive]
+    pub cancel: Option<bool>
+    derives Clone, Debug, Default, Eq, PartialEq
+  struct RouterClient
+    fn new(transport: Arc<dyn RouterClientTransport>, options: &RouterClientOptions) -> Result<Self, ProgrammerError>
+    fn as_relay_target(&self) -> crate::router::relay::RelayTarget
+    fn clock(&self) -> SharedClock
+    fn limits(&self) -> RouterLimits
+    fn transport(&self) -> Arc<dyn RouterClientTransport>
+    fn credential(&self) -> Option<RequestCredential>
+    fn set_credential(&self, credential: Option<RequestCredential>) -> Result<(), ProgrammerError>
+    fn is_credential_withdrawn(&self) -> bool
+    fn session_token(&self) -> Option<SessionToken>
+    fn on_error(&self, listener: ClientErrorListener) -> ListenerId
+    fn on_debug(&self, listener: ClientEnvelopeListener) -> ListenerId
+    fn on_activity(&self, listener: ClientActivityListener) -> ListenerId
+    fn on_credential_withdrawn(&self, listener: WithdrawnListener) -> ListenerId
+    fn off(&self, listener: ListenerId)
+    fn report(&self, error: &RouterError)
+    fn declare_requester(&self, procedure: &Procedure) -> Result<Option<ProcedureSeries>, ProgrammerError>
+    fn has_notification(&self, notification: &Arc<dyn NotificationLike>) -> bool
+    fn register_notification(&self, notification: Arc<dyn NotificationLike>) -> Result<(), ProgrammerError>
+    fn unregister_notification(&self, notification: &Arc<dyn NotificationLike>, options: &UnregisterNotificationOptions) -> BoxFuture<()>
+    fn request(&self, payload: Bytes, request: RouterRequest) -> Result<Call, ProgrammerError>
+    fn gauges(&self) -> BoxFuture<Result<Gauges, ProgrammerError>>
+    fn dispose(&self) -> BoxFuture<()>
+    fn reserve(&self, call_id: u32, timeout: Option<Duration>) -> Result<BoxFuture<()>, ProgrammerError>
+    fn cancel(&self, call_id: u32, timeout: Option<Duration>) -> Result<BoxFuture<()>, ProgrammerError>
+    fn is_reserved(&self, call_id: u32) -> BoxFuture<bool>
+    async fn settle(&self)
+    implements Debug
+    derives Clone
+crate::router::core
+  struct AdmissionRequest #[non_exhaustive]
+    pub connection_handle: ConnectionHandle
+    pub header: RequestHeader
+    pub session: Option<Arc<CallSession>>
+    implements Debug
+    derives Clone
+  struct AdmissionRefusal #[non_exhaustive]
+    pub failure: Failure
+    pub by: Option<String>
+    fn new(failure: Failure) -> Self
+    derives Clone, Debug
+  type AdmitFn = Arc<dyn Fn(&AdmissionRequest) -> Result<Option<AdmissionRefusal>, ResolverError> + Send + Sync>
+  trait Answerer: sealed::Answerer + Send + Sync
+    fn respond(&self, answer: RouterAnswer) -> BoxFuture<Result<(), CallError>>
+    fn answered(&self) -> BoxFuture<Option<FailureRecord>>
+    fn subscribe(&self) -> BoxFuture<Result<u32, CallError>>
+  struct RequestResolverProps #[non_exhaustive]
+    pub is_admitted: bool
+    pub connection_handle: ConnectionHandle
+    pub header: RequestHeader
+    pub payload: Bytes
+    pub session: Option<Arc<CallSession>>
+    pub signal: Signal
+    pub answerer: Arc<dyn Answerer>
+    implements Debug
+    derives Clone
+crate::router::core::sealed
+  trait Answerer
+crate::router::relay
+  struct RelayOptions #[non_exhaustive]
+    pub before_route: Option<BeforeRequest>
+    pub timeout: Option<Duration>
+    pub verifies: Option<bool>
+    derives Clone, Debug, Default
+  struct DestinationOptions #[non_exhaustive]
+    pub audience: Option<String>
+    pub destination_id: Option<u32>
+    pub label: Option<String>
+    pub replaces: Option<DestinationRegistration>
+    pub timeout: Option<Duration>
+    derives Clone, Debug, Default
+  struct RelayLeg #[non_exhaustive]
+    pub procedure: Procedure
+    pub options: ResolvedRequestOptions
+    pub on_sent: Box<dyn FnMut(bool) + Send>
+    implements Debug
+  trait RelayRouter: Send + Sync + fmt::Debug
+    fn limits(&self) -> RouterLimits
+    fn request(&self, payload: Bytes, leg: RelayLeg) -> Result<Call, ProgrammerError>
+    fn carries(&self, _credential: &str) -> bool
+    fn is_secure(&self) -> bool
+  enum RelayTarget #[non_exhaustive]
+    Connection(ConnectionHandle)
+    Router(Arc<dyn RelayRouter>)
+    derives Clone, Debug
+  struct Destination #[non_exhaustive]
+    pub destination_id: u32
+    pub is_closed: bool
+    pub label: Option<String>
+    derives Clone, Debug, Eq, PartialEq
+  struct DestinationRegistration
+    const fn destination_id(&self) -> u32
+    fn label(&self) -> Option<&str>
+    fn is_closed(&self) -> bool
+    fn unregister(&self) -> bool
+    implements Debug
+    derives Clone
+crate::router::server
+  type ErrorListener = Arc<dyn Fn(&RouterError, Option<&ConnectionHandle>) + Send + Sync>
+  type EnvelopeListener = Arc<dyn Fn(DebugDirection, &TracedEnvelope) + Send + Sync>
+  type RefusalListener = Arc<dyn Fn(&AccessRefusal) + Send + Sync>
+  type ActivityListener = Arc<dyn Fn(RouterActivity, &ConnectionHandle) + Send + Sync>
+  type SessionTokenProvider = Arc<dyn Fn(&ConnectionHandle) -> Result<Option<SessionToken>, RouterError> + Send + Sync>
+  type SessionOf = Arc<dyn Fn(&SessionRequest<'_>, &Signal) -> Result<Option<CallSession>, RouterError> + Send + Sync,>
+  struct SessionRequest<'a> #[non_exhaustive]
+    pub connection_handle: &'a ConnectionHandle
+    pub header: &'a RequestHeader
+    derives Debug
+  struct RouterServerOptions #[non_exhaustive]
+    pub clock: Option<SharedClock>
+    pub runtime: Option<Handle>
+    pub limits: Option<RouterLimitsOptions>
+    pub last_call_id: Option<u32>
+    pub metrics_registry: Option<MetricsRegistry>
+    pub pacing: Option<PacingLimitsOptions>
+    pub intake: Option<IntakeLimitsOptions>
+    pub credentials: Option<Credentials>
+    pub session_of: Option<SessionOf>
+    pub session_token_of: Option<SessionTokenProvider>
+    pub relay: Option<crate::router::relay::RelayOptions>
+    implements Debug
+    derives Clone, Default
+  type NotifyFilter = Arc<dyn Fn(&ConnectionHandle, Option<&SessionIdentifier>) -> bool + Send + Sync>
+  struct Call
+    fn refused(error: CallError) -> Self
+    implements Future
+    derives Debug
+  struct RouterServer
+    fn new(transport: Arc<dyn ServerTransport>, options: &RouterServerOptions) -> Result<Self, ProgrammerError>
+    fn clock(&self) -> SharedClock
+    fn limits(&self) -> RouterLimits
+    fn transport(&self) -> Arc<dyn ServerTransport>
+    fn on_error(&self, listener: ErrorListener) -> ListenerId
+    fn on_debug(&self, listener: EnvelopeListener) -> ListenerId
+    fn on_access_refused(&self, listener: RefusalListener) -> ListenerId
+    fn on_activity(&self, listener: ActivityListener) -> ListenerId
+    fn off(&self, listener: ListenerId)
+    fn report(&self, error: &RouterError, connection_handle: Option<&ConnectionHandle>)
+    fn declare_requester(&self, procedure: &Procedure) -> Result<Option<ProcedureSeries>, ProgrammerError>
+    fn request(&self, payload: Bytes, request: RouterRequest) -> Result<Call, ProgrammerError>
+    fn notify(&self, payload: Result<Bytes, RouterError>, request: NotifyRequest) -> BoxFuture<Result<(), RouterError>>
+    fn end_session(&self, identifier: SessionIdentifier) -> BoxFuture<()>
+    fn end_sessions_of(&self, issuer: String) -> BoxFuture<()>
+    fn unsubscribe(&self, call: CallAddress) -> BoxFuture<bool>
+    fn drop_subscriptions(&self, connection_handle: ConnectionHandle, failure: Failure) -> BoxFuture<()>
+    fn register_destination(&self, target: crate::router::relay::RelayTarget, options: &crate::router::relay::DestinationOptions) -> Result<crate::router::relay::DestinationRegistration, ProgrammerError>
+    fn destinations(&self) -> Vec<crate::router::relay::Destination>
+    fn gauges(&self) -> BoxFuture<Result<Gauges, ProgrammerError>>
+    fn dispose(&self) -> BoxFuture<()>
+    async fn settle(&self)
+    implements Debug
+    derives Clone
+crate::router::types
+  type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>
+  type ConnectionHandle = Arc<str>
+  struct CallAddress
+    pub connection_handle: ConnectionHandle
+    pub call_id: u32
+    derives Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd
+  struct RouterLimits #[non_exhaustive]
+    pub buffered_bytes_budget: u64
+    pub chunk_bytes: u64
+    pub maximum_answering_calls: u64
+    pub maximum_chunk_runs: u64
+    pub maximum_detail_bytes: u64
+    pub maximum_envelope_bytes: u64
+    pub maximum_payload_bytes: u64
+    pub maximum_transfers: u64
+    pub transfer_inactivity_timeout: Duration
+    pub window_bytes: u64
+    derives Clone, Copy, Debug, Eq, PartialEq
+  struct RouterLimitsOptions #[non_exhaustive]
+    pub buffered_bytes_budget: Option<u64>
+    pub chunk_bytes: Option<u64>
+    pub maximum_answering_calls: Option<u64>
+    pub maximum_chunk_runs: Option<u64>
+    pub maximum_detail_bytes: Option<u64>
+    pub maximum_envelope_bytes: Option<u64>
+    pub maximum_payload_bytes: Option<u64>
+    pub maximum_transfers: Option<u64>
+    pub transfer_inactivity_timeout: Option<Duration>
+    pub window_bytes: Option<u64>
+    derives Clone, Debug, Default, Eq, PartialEq
+  const LIMIT_DEFAULTS: RouterLimits
+  fn limits_of(given: &RouterLimitsOptions) -> Result<RouterLimits, ProgrammerError>
+  struct IntakeLimits #[non_exhaustive]
+    pub maximum_untaken_envelopes: u64
+    pub maximum_untaken_bytes: u64
+    derives Clone, Copy, Debug, Eq, PartialEq
+  const INTAKE_DEFAULTS: IntakeLimits
+  struct IntakeLimitsOptions #[non_exhaustive]
+    pub maximum_untaken_envelopes: Option<u64>
+    pub maximum_untaken_bytes: Option<u64>
+    derives Clone, Debug, Default, Eq, PartialEq
+  enum SessionIdentifier #[non_exhaustive]
+    Elsewhere { id: String }
+    JwtSid { issuer: String, sid: String }
+    JwtSub { issuer: String, sub: String }
+    fn key(&self) -> String
+    derives Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd
+  fn session_key_of(identifier: Option<&SessionIdentifier>) -> String
+  struct CallSession #[non_exhaustive]
+    pub data: Option<Value>
+    pub end: Option<i64>
+    pub identifier: Option<SessionIdentifier>
+    derives Clone, Debug, Default, Eq, PartialEq
+  enum RequestCredential #[non_exhaustive]
+    None
+    Opaque
+    Jwt(String)
+    Elsewhere(String)
+    implements Debug
+    derives Clone, Eq, PartialEq
+  struct Signal
+    fn new() -> Self
+    fn abort(&self, reason: SignalReason)
+    fn is_aborted(&self) -> bool
+    fn reason(&self) -> Option<SignalReason>
+    fn token(&self) -> &CancellationToken
+    derives Clone, Debug, Default
+  enum SignalReason #[non_exhaustive]
+    Cancelled
+    Disconnected(String)
+    derives Clone, Debug, Eq, PartialEq
+  struct ResolvedRequestOptions #[non_exhaustive]
+    pub timeout: Duration
+    pub destination_id: Option<u32>
+    pub connection_handle: Option<ConnectionHandle>
+    pub credential: Option<RequestCredential>
+    pub signal: Option<CancellationToken>
+    pub close_on_timeout: Option<bool>
+    const fn new(timeout: Duration) -> Self
+    derives Clone, Debug
+  struct RouterRequest #[non_exhaustive]
+    pub procedure: Procedure
+    pub options: ResolvedRequestOptions
+    pub series: Option<ProcedureSeries>
+    pub refusal: Option<CallError>
+    pub subscribes: Option<Arc<dyn NotificationLike>>
+    pub on_call_id: Option<Box<dyn FnOnce(u32) + Send>>
+    pub on_sent: Option<Box<dyn FnMut(bool) + Send>>
+    fn new(procedure: Procedure, options: &ResolvedRequestOptions) -> Self
+    implements Debug
+  struct NotifyRequest #[non_exhaustive]
+    pub procedure: ProcedureAddress
+    pub filter: Option<NotifyFilter>
+    pub key: Option<NotificationKey>
+    const fn new(procedure: ProcedureAddress) -> Self
+    implements Debug
+  struct RouterResult #[non_exhaustive]
+    pub header: ResultHeader
+    pub payload: Bytes
+    derives Clone, Debug, Eq, PartialEq
+  enum RouterAnswer #[non_exhaustive]
+    Result(Bytes)
+    Failure(FailureRecord)
+    derives Clone, Debug, Eq, PartialEq
+  struct TransportMessage #[non_exhaustive]
+    pub data: Bytes
+    pub credential: Option<String>
+    pub address: Option<String>
+    pub port: Option<u16>
+    pub may_overtake: bool
+    implements Debug
+    derives Clone, Default, Eq, PartialEq
+  enum RouterActivity #[non_exhaustive]
+    Notification
+    Request
+    Response
+    derives Clone, Copy, Debug, Eq, PartialEq
+  enum AccessRefusalStage #[non_exhaustive]
+    Admission
+    Credential
+    derives Clone, Copy, Debug, Eq, PartialEq
+  struct AccessRefusal #[non_exhaustive]
+    pub stage: AccessRefusalStage
+    pub code: u16
+    pub reason: Option<String>
+    pub credential_scheme: Option<CredentialScheme>
+    pub service_id: u16
+    pub procedure_id: u16
+    pub destination_id: Option<u32>
+    pub connection_handle: ConnectionHandle
+    pub address: Option<String>
+    pub port: Option<u16>
+    derives Clone, Debug, Eq, PartialEq
+  enum RouterError #[non_exhaustive]
+    Failure(Failure)
+    Other(Arc<dyn Error + Send + Sync>)
+    implements Display, Error, From
+    derives Clone, Debug
+  struct Gauges #[non_exhaustive]
+    pub counts: BTreeMap<&'static str, u64>
+    pub ceilings: BTreeMap<&'static str, u64>
+    pub connection_handles: BTreeSet<ConnectionHandle>
+    pub anomalies: Vec<String>
+    fn new<Handles: IntoIterator<Item = ConnectionHandle>>(counts: BTreeMap<&'static str, u64>, connection_handles: Handles) -> Self
+    derives Clone, Debug, Default, Eq, PartialEq
+crate::server
+  type SessionListener = Arc<dyn Fn(&SessionEvent) + Send + Sync>
+  struct ServerOptions #[non_exhaustive]
+    pub clock: Option<SharedClock>
+    pub runtime: Option<Handle>
+    pub credentials: Option<Credentials>
+    pub limits: Option<RouterLimitsOptions>
+    pub connection_inactivity_timeout: Option<Duration>
+    pub close_on_command_timeout: Option<bool>
+    pub metrics_registry: Option<MetricsRegistry>
+    pub pacing: Option<PacingLimitsOptions>
+    pub intake: Option<IntakeLimitsOptions>
+    pub relay: Option<RelayOptions>
+    pub sessions: Option<SessionManagerOptions>
+    implements Debug
+    derives Clone, Default
+  const WARNING_RATIO: f64
+  struct LayerGauges #[non_exhaustive]
+    pub anomalies: Vec<String>
+    pub ceilings: BTreeMap<&'static str, u64>
+    pub counts: BTreeMap<&'static str, u64>
+    pub orphans: u64
+    derives Clone, Debug, Default, Eq, PartialEq
+  struct ServerGauges #[non_exhaustive]
+    pub router: LayerGauges
+    pub server: LayerGauges
+    pub sessions: LayerGauges
+    pub transport: LayerGauges
+    derives Clone, Debug, Default, Eq, PartialEq
+  enum HealthStatus #[non_exhaustive]
+    Pass
+    Warn
+    Fail
+    const fn as_str(self) -> &'static str
+    derives Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd
+  struct HealthCheck #[non_exhaustive]
+    pub observed_value: u64
+    pub output: Option<String>
+    pub status: HealthStatus
+    derives Clone, Debug, Eq, PartialEq
+  struct Health #[non_exhaustive]
+    pub checks: BTreeMap<String, Vec<HealthCheck>>
+    pub status: HealthStatus
+    derives Clone, Debug, Eq, PartialEq
+  struct SessionManager
+    fn create(&self, connection_handle: ConnectionHandle) -> Session
+    fn on(&self, listener: SessionListener) -> ListenerId
+    fn off(&self, listener: ListenerId)
+    fn get(&self, connection_handle: ConnectionHandle) -> BoxFuture<Option<Session>>
+    fn all(&self) -> BoxFuture<Vec<Session>>
+    fn connection_handles(&self) -> BoxFuture<Vec<ConnectionHandle>>
+    fn has(&self, connection_handle: ConnectionHandle) -> BoxFuture<bool>
+    fn session_token_of(&self, connection_handle: ConnectionHandle) -> BoxFuture<Option<SessionToken>>
+    fn set(&self, session: Session) -> Result<BoxFuture<Result<Session, CallError>>, ProgrammerError>
+    fn get_or_else_set(&self, connection_handle: ConnectionHandle) -> BoxFuture<Result<Session, CallError>>
+    fn delete(&self, connection_handle: ConnectionHandle) -> BoxFuture<bool>
+    fn touch(&self, connection_handle: ConnectionHandle) -> BoxFuture<Option<Session>>
+    fn update_data(&self, session: Session) -> BoxFuture<Option<Session>>
+    fn update_connection_inactivity_timeout(&self, session: Session) -> Result<BoxFuture<Option<Session>>, ProgrammerError>
+    fn update_session_inactivity_timeout(&self, session: Session) -> Result<BoxFuture<Option<Session>>, ProgrammerError>
+    fn reset_connection_inactivity_timeout(&self, connection_handle: ConnectionHandle, timeout: Duration) -> Result<BoxFuture<()>, ProgrammerError>
+    fn reset_session_inactivity_timeout(&self, connection_handle: ConnectionHandle, timeout: Duration) -> Result<BoxFuture<()>, ProgrammerError>
+    fn gauges(&self) -> BoxFuture<Result<Gauges, ProgrammerError>>
+    implements Debug
+    derives Clone
+  struct Server
+    fn new(transport: Arc<dyn ServerTransport>, options: &ServerOptions) -> Result<Self, ProgrammerError>
+    fn router(&self) -> &RouterServer
+    fn services(&self) -> &ServiceManagerServer
+    fn sessions(&self) -> &SessionManager
+    fn transport(&self) -> Arc<dyn ServerTransport>
+    fn gauges(&self) -> BoxFuture<Result<ServerGauges, ProgrammerError>>
+    fn health(&self) -> BoxFuture<Result<Health, ProgrammerError>>
+    fn dispose(&self) -> BoxFuture<Result<(), RouterError>>
+    fn report(&self, error: &RouterError, connection_handle: Option<&ConnectionHandle>)
+    implements Debug
+    derives Clone
+crate::service
+  struct ListedFailure
+    const fn new(name: &'static str, code: NonZeroU16) -> Self
+    const fn name(&self) -> &'static str
+    const fn code(&self) -> u16
+    fn of(&self, detail: &str) -> Failure
+    derives Clone, Copy, Debug, Eq, PartialEq
+  struct FailureCatalogue
+    const fn service_id(&self) -> u16
+    fn failures(&self) -> &[ListedFailure]
+    fn is(&self, error: &CallError, listed: &ListedFailure) -> bool
+    derives Clone, Debug, Eq, PartialEq
+  fn failures_of(service_id: u16, failures: &[ListedFailure]) -> Result<FailureCatalogue, ProgrammerError>
+  enum AdmissionRule #[non_exhaustive]
+    None
+    Session
+    Hook(&'static str)
+    derives Clone, Copy, Debug, Eq, PartialEq
+  struct DescriptorInit<Req: PayloadCodec, Res: PayloadCodec>
+    pub procedure: Procedure
+    pub admission: AdmissionRule
+    pub failures: Vec<ListedFailure>
+    pub request: Req
+    pub result: Res
+    pub validate: Option<Validate<Req::Value>>
+    implements Debug
+  struct Descriptor<Req: PayloadCodec, Res: PayloadCodec>
+    fn procedure(&self) -> &Procedure
+    fn admission(&self) -> AdmissionRule
+    fn failures(&self) -> &[ListedFailure]
+    fn request(&self) -> &Req
+    fn result(&self) -> &Res
+    fn validates(&self) -> bool
+    implements Clone, Debug
+  struct NotifyingDescriptor<Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec>
+    const fn descriptor(&self) -> &Descriptor<Req, Res>
+    fn notification(&self) -> &Not
+    implements Clone, Debug
+  fn request_of<Req: PayloadCodec, Res: PayloadCodec>(init: DescriptorInit<Req, Res>) -> Result<Descriptor<Req, Res>, ProgrammerError>
+  fn notifying_of<Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec>(init: DescriptorInit<Req, Res>, notification: Not) -> Result<NotifyingDescriptor<Req, Res, Not>, ProgrammerError>
+  fn command_of<Req: PayloadCodec, Res: PayloadCodec>(init: DescriptorInit<Req, Res>) -> Result<Descriptor<Req, Res>, ProgrammerError>
+  struct AdmissionHook
+    pub admits: Arc<dyn Fn(&AdmissionRequest) -> bool + Send + Sync>
+    pub detail: Option<String>
+    implements Debug
+    derives Clone
+  struct ServiceServerOptions #[non_exhaustive]
+    pub admissions: Option<BTreeMap<&'static str, AdmissionHook>>
+    pub fail_fast: Option<bool>
+    pub validates: Option<bool>
+    derives Clone, Debug, Default
+  struct ServiceProcedure
+    const fn procedure(&self) -> &Procedure
+    implements Debug, From
+    derives Clone
+  struct ServiceServer
+    fn new(procedures: Vec<ServiceProcedure>, options: &ServiceServerOptions) -> Result<Self, ProgrammerError>
+    fn on<Req, Res>(&self, descriptor: &Descriptor<Req, Res>, callback: ResolverCallback<Req, Res>) -> Result<(), ProgrammerError> where Req: PayloadCodec + Clone, Res: PayloadCodec + Clone, Req::Value: Clone + fmt::Debug + Sync, Res::Value: Clone + fmt::Debug + Sync,
+    fn on_notifying<Req, Res, Not>(&self, descriptor: &NotifyingDescriptor<Req, Res, Not>, callback: ResolverCallback<Req, Res>) -> Result<(), ProgrammerError> where Req: PayloadCodec + Clone, Res: PayloadCodec + Clone, Not: PayloadCodec + Clone, Req::Value: Clone + fmt::Debug + Sync, Res::Value: Clone + fmt::Debug + Sync, Not::Value: Clone + fmt::Debug + Sync,
+    fn offer(&self, server: &Server) -> Result<(), ProgrammerError>
+    fn command_of<Req, Res>(&self, descriptor: &Descriptor<Req, Res>) -> Result<Command<Req, Res>, ProgrammerError> where Req: PayloadCodec, Res: PayloadCodec,
+    fn notifier_of<Req, Res, Not>(&self, descriptor: &NotifyingDescriptor<Req, Res, Not>) -> Result<Notifier<Not>, ProgrammerError> where Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec,
+    fn procedures_without_resolver(&self) -> Vec<Procedure>
+    implements Debug
+    derives Clone
+crate::session_token
+  struct SessionTokenDrawError #[non_exhaustive]
+    implements Display, Error
+    derives Clone, Copy, Debug, Eq, PartialEq
+  struct SessionToken([u8; SESSION_TOKEN_BYTES]);
+    fn new(bytes: [u8; SESSION_TOKEN_BYTES]) -> Result<Self, ProgrammerError>
+    fn from_slice(bytes: &[u8]) -> Result<Self, ProgrammerError>
+    fn draw<F: Fn(&Self) -> bool>(is_in_use: F) -> Result<Self, SessionTokenDrawError>
+    fn bytes(&self) -> &[u8; SESSION_TOKEN_BYTES]
+    fn is(&self, presented: &Self) -> bool
+    implements Debug, Display, FromStr
+    derives Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd
+crate::transport
+  enum Sent #[non_exhaustive]
+    Done
+    Later(BoxFuture<Result<(), RouterError>>)
+    implements Debug
+  enum ReadyState #[non_exhaustive]
+    Connecting
+    Open
+    Closing
+    Closed
+    Uninitialized
+    Reconnecting
+    const fn name(self) -> &'static str
+    const fn said(self) -> &'static str
+    derives Clone, Copy, Debug, Eq, PartialEq
+  struct TransportServerRefusal #[non_exhaustive]
+    pub address: Option<String>
+    pub authority: Option<String>
+    pub origin: Option<String>
+    pub port: Option<u16>
+    pub reason: String
+    pub status: u16
+    fn new<R: Into<String>>(status: u16, reason: R) -> Self
+    derives Clone, Debug, Eq, PartialEq
+  struct TransportServerClient #[non_exhaustive]
+    pub connection_handle: ConnectionHandle
+    pub address: String
+    pub port: Option<u16>
+    pub last_activity: Option<SystemTime>
+    pub transport_type: &'static str
+    derives Clone, Debug, Eq, PartialEq
+  trait ServerListener: Send + Sync
+    fn on_connection(&self, _connection_handle: &ConnectionHandle)
+    fn on_message(&self, _message: TransportMessage, _connection_handle: &ConnectionHandle)
+    fn on_close(&self, _was_clean: bool, _connection_handle: &ConnectionHandle)
+    fn on_listen(&self, _is_held: bool, _connection_handle: &ConnectionHandle)
+    fn on_refusal(&self, _refusal: &TransportServerRefusal)
+    fn on_error(&self, _error: &RouterError, _connection_handle: Option<&ConnectionHandle>)
+  trait ServerTransport: Send + Sync + fmt::Debug
+    fn send(&self, message: TransportMessage, connection_handle: &ConnectionHandle) -> Result<Sent, RouterError>
+    fn close(&self, connection_handle: &ConnectionHandle) -> BoxFuture<bool>
+    fn listen(&self, listener: Arc<dyn ServerListener>)
+    fn unlisten(&self, listener: &Arc<dyn ServerListener>)
+    fn pause(&self, connection_handle: &ConnectionHandle)
+    fn resume(&self, connection_handle: &ConnectionHandle)
+    fn clock(&self) -> Option<SharedClock>
+    fn is_two_way(&self, _connection_handle: &ConnectionHandle) -> bool
+    fn is_secure(&self, _connection_handle: &ConnectionHandle) -> bool
+    fn carries_credential(&self, _connection_handle: &ConnectionHandle) -> bool
+    fn start(&self) -> BoxFuture<Result<(), RouterError>>
+    fn stop(&self) -> BoxFuture<Result<(), RouterError>>
+    fn gauges(&self) -> Option<Gauges>
+    fn transport_type(&self) -> Option<&str>
+  trait ClientListener: Send + Sync
+    fn on_message(&self, _message: TransportMessage)
+    fn on_close(&self, _was_clean: bool, _is_quick: bool)
+    fn on_reconnect(&self)
+    fn on_error(&self, _error: &RouterError)
+  trait RouterClientTransport: Send + Sync + fmt::Debug
+    fn send(&self, message: TransportMessage) -> Result<Sent, RouterError>
+    fn listen(&self, listener: Arc<dyn ClientListener>)
+    fn unlisten(&self, listener: &Arc<dyn ClientListener>)
+    fn pause(&self)
+    fn resume(&self)
+    fn clock(&self) -> Option<SharedClock>
+    fn is_secure(&self) -> bool
+    fn carries(&self, _credential: &str) -> bool
+    fn is_open(&self) -> bool
+    fn ready_state(&self) -> ReadyState
+  struct TransportClientDisconnectOptions #[non_exhaustive]
+    pub is_clean: Option<bool>
+    pub is_quick: Option<bool>
+    derives Clone, Debug, Default, Eq, PartialEq
+  type TransportClientReconnectDelayResolver = Arc<dyn Fn(Option<Duration>, u32) -> Duration + Send + Sync>
+  enum TransportClientReconnectDelay #[non_exhaustive]
+    Fixed(Duration)
+    Resolver(TransportClientReconnectDelayResolver)
+    implements Debug
+    derives Clone
+  const CONNECT_TIMEOUT: Duration
+  const RECONNECT_DEFAULTS: TransportClientReconnectOptions
+  struct TransportClientReconnectOptions #[non_exhaustive]
+    pub delay: Option<TransportClientReconnectDelay>
+    pub maximum_attempts: Option<u32>
+    pub signal: Option<CancellationToken>
+    pub tap: Option<Arc<dyn Fn(Duration, u32) + Send + Sync>>
+    implements Debug
+    derives Clone, Default
+  fn is_field_value(value: &str) -> bool
+  struct ListenerId(u64);
+    derives Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd
+  struct Connect
+    implements Future
+    derives Debug
+crate::violations
+  struct Violation
+    pub bounds: Option<Map<String, Value>>
+    pub field_path: Option<String>
+    pub for_key: bool
+    pub message: Option<String>
+    pub rule_id: String
+    pub value: Option<Value>
+    derives Clone, Debug, Default, Eq, PartialEq
+  struct Judged #[non_exhaustive]
+    pub violations: Vec<Violation>
+    pub more: u64
+    pub stopped: bool
+    derives Clone, Debug, Default, Eq, PartialEq
+  struct ReadViolations #[non_exhaustive]
+    pub violations: Vec<Violation>
+    pub more: Option<u64>
+    pub stopped: bool
+    derives Clone, Debug, Default, Eq, PartialEq
+  const CLOSING_BYTES: usize
+  fn detail_bound_of(maximum_detail_bytes: usize, maximum_envelope_bytes: usize) -> usize
+  struct ViolationHolder
+    fn new(maximum_bytes: usize) -> Self
+    fn hold(&mut self, violation: &Violation) -> bool
+    fn lines(&self) -> &[String]
+    derives Clone, Debug
+  fn violations_detail_of(judged: &Judged, maximum_bytes: usize) -> String
+  fn words_of(violation: &Violation) -> Option<String>
+  fn violations_of(failure: &Failure) -> ReadViolations
+crate::internal
+  use crate::credentials::JWT_LIMIT_BYTES
+  use crate::duration::hold
+  use crate::duration::hold_finite
+  use crate::envelope::Envelope
+  use crate::envelope::MAXIMUM_DETAIL_BYTES
+  use crate::envelope::Prefix
+  use crate::envelope::ReadEnvelopeOptions
+  use crate::envelope::ReadHeader
+  use crate::envelope::header_bytes_of
+  use crate::envelope::read_envelope
+  use crate::envelope::read_failure
+  use crate::envelope::read_header
+  use crate::envelope::read_prefix
+  use crate::envelope::write_envelope
+  use crate::envelope::write_header
+  use crate::identity::are_one_name
+  use crate::identity::is_procedure_name
+  use crate::jwt_verifier::ReadJwt
+  use crate::jwt_verifier::read_jwt
+  use crate::jwt_verifier::verify_jwt
+  use crate::router::types::limits_of
+  use crate::router::types::session_key_of

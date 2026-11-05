@@ -1,0 +1,16 @@
+<Project>
+  <!--
+    What an application calls: each project here is a part of Bead's public surface, pinned with its
+    members to its PublicAPI.Shipped.txt, the surface the last release shipped, and its
+    PublicAPI.Unshipped.txt, what changed since. PublicApiAnalyzers refuses a public symbol neither
+    lists (RS0016) and one listed that is gone (RS0017); `tools/release.mjs prepare` moves Unshipped
+    into Shipped. 0047 and 0006 are the decisions.
+  -->
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" PrivateAssets="all" />
+    <AdditionalFiles Include="PublicAPI.Shipped.txt" />
+    <AdditionalFiles Include="PublicAPI.Unshipped.txt" />
+  </ItemGroup>
+</Project>

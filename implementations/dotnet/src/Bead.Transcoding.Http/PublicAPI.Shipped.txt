@@ -1,0 +1,93 @@
+#nullable enable
+Bead.Transcoding.Http.GatewayAuthorization
+Bead.Transcoding.Http.GatewayAuthorization.BearerJwt = 1 -> Bead.Transcoding.Http.GatewayAuthorization
+Bead.Transcoding.Http.GatewayAuthorization.Elsewhere = 0 -> Bead.Transcoding.Http.GatewayAuthorization
+Bead.Transcoding.Http.HttpGateway
+Bead.Transcoding.Http.HttpGateway.Answer(Microsoft.AspNetCore.Http.HttpContext! context) -> System.Threading.Tasks.Task!
+Bead.Transcoding.Http.HttpGateway.DisposeAsync() -> System.Threading.Tasks.ValueTask
+Bead.Transcoding.Http.HttpGateway.Error -> System.Action<System.Exception!>?
+Bead.Transcoding.Http.HttpGateway.HttpGateway(Bead.Transcoding.Http.HttpGatewayOptions! options) -> void
+Bead.Transcoding.Http.HttpGateway.Start(Bead.Transcoding.Http.HttpGatewayStartOptions? options = null) -> System.Threading.Tasks.Task<Bead.TransportServerAddress>!
+Bead.Transcoding.Http.HttpGateway.Stop() -> System.Threading.Tasks.Task!
+Bead.Transcoding.Http.HttpGatewayEndpoints
+Bead.Transcoding.Http.HttpGatewayOptions
+Bead.Transcoding.Http.HttpGatewayOptions.<Clone>$() -> Bead.Transcoding.Http.HttpGatewayOptions!
+Bead.Transcoding.Http.HttpGatewayOptions.Authorization.get -> Bead.Transcoding.Http.GatewayAuthorization
+Bead.Transcoding.Http.HttpGatewayOptions.Authorization.init -> void
+Bead.Transcoding.Http.HttpGatewayOptions.BodyBytesBudget.get -> long
+Bead.Transcoding.Http.HttpGatewayOptions.BodyBytesBudget.init -> void
+Bead.Transcoding.Http.HttpGatewayOptions.BodyGracePeriod.get -> System.TimeSpan
+Bead.Transcoding.Http.HttpGatewayOptions.BodyGracePeriod.init -> void
+Bead.Transcoding.Http.HttpGatewayOptions.Challenge.get -> string!
+Bead.Transcoding.Http.HttpGatewayOptions.Challenge.init -> void
+Bead.Transcoding.Http.HttpGatewayOptions.Clock.get -> System.TimeProvider?
+Bead.Transcoding.Http.HttpGatewayOptions.Clock.init -> void
+Bead.Transcoding.Http.HttpGatewayOptions.Document.get -> System.ReadOnlyMemory<byte>?
+Bead.Transcoding.Http.HttpGatewayOptions.Document.init -> void
+Bead.Transcoding.Http.HttpGatewayOptions.Equals(Bead.Transcoding.Http.HttpGatewayOptions? other) -> bool
+Bead.Transcoding.Http.HttpGatewayOptions.HeadersTimeout.get -> System.TimeSpan
+Bead.Transcoding.Http.HttpGatewayOptions.HeadersTimeout.init -> void
+Bead.Transcoding.Http.HttpGatewayOptions.Heartbeat.get -> System.TimeSpan
+Bead.Transcoding.Http.HttpGatewayOptions.Heartbeat.init -> void
+Bead.Transcoding.Http.HttpGatewayOptions.Hosts.get -> System.Collections.Generic.IReadOnlyList<string!>?
+Bead.Transcoding.Http.HttpGatewayOptions.Hosts.init -> void
+Bead.Transcoding.Http.HttpGatewayOptions.HttpGatewayOptions() -> void
+Bead.Transcoding.Http.HttpGatewayOptions.MaximumBodyBytes.get -> int
+Bead.Transcoding.Http.HttpGatewayOptions.MaximumBodyBytes.init -> void
+Bead.Transcoding.Http.HttpGatewayOptions.MaximumConnections.get -> int
+Bead.Transcoding.Http.HttpGatewayOptions.MaximumConnections.init -> void
+Bead.Transcoding.Http.HttpGatewayOptions.MaximumConnectionsPerAddress.get -> int
+Bead.Transcoding.Http.HttpGatewayOptions.MaximumConnectionsPerAddress.init -> void
+Bead.Transcoding.Http.HttpGatewayOptions.MaximumExchanges.get -> int
+Bead.Transcoding.Http.HttpGatewayOptions.MaximumExchanges.init -> void
+Bead.Transcoding.Http.HttpGatewayOptions.MaximumExchangesPerAddress.get -> int
+Bead.Transcoding.Http.HttpGatewayOptions.MaximumExchangesPerAddress.init -> void
+Bead.Transcoding.Http.HttpGatewayOptions.MaximumUnsentBytes.get -> long
+Bead.Transcoding.Http.HttpGatewayOptions.MaximumUnsentBytes.init -> void
+Bead.Transcoding.Http.HttpGatewayOptions.MinimumBodyBytesPerSecond.get -> int
+Bead.Transcoding.Http.HttpGatewayOptions.MinimumBodyBytesPerSecond.init -> void
+Bead.Transcoding.Http.HttpGatewayOptions.MinimumSendBytesPerSecond.get -> int
+Bead.Transcoding.Http.HttpGatewayOptions.MinimumSendBytesPerSecond.init -> void
+Bead.Transcoding.Http.HttpGatewayOptions.Origins.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Bead.Transcoding.Http.HttpGatewayOptions.Origins.init -> void
+Bead.Transcoding.Http.HttpGatewayOptions.Policy.get -> Bead.HttpPolicy?
+Bead.Transcoding.Http.HttpGatewayOptions.Policy.init -> void
+Bead.Transcoding.Http.HttpGatewayOptions.ProblemTypes.get -> string?
+Bead.Transcoding.Http.HttpGatewayOptions.ProblemTypes.init -> void
+Bead.Transcoding.Http.HttpGatewayOptions.Routes.get -> System.Collections.Generic.IReadOnlyList<Bead.Transcoding.HttpRoute!>!
+Bead.Transcoding.Http.HttpGatewayOptions.Routes.init -> void
+Bead.Transcoding.Http.HttpGatewayOptions.SendGracePeriod.get -> System.TimeSpan
+Bead.Transcoding.Http.HttpGatewayOptions.SendGracePeriod.init -> void
+Bead.Transcoding.Http.HttpGatewayOptions.Timeout.get -> System.TimeSpan
+Bead.Transcoding.Http.HttpGatewayOptions.Timeout.init -> void
+Bead.Transcoding.Http.HttpGatewayOptions.Transport.get -> Bead.MemoryTransportServer!
+Bead.Transcoding.Http.HttpGatewayOptions.Transport.init -> void
+Bead.Transcoding.Http.HttpGatewayOptions.TrustedProxies.get -> System.Collections.Generic.IReadOnlyList<string!>?
+Bead.Transcoding.Http.HttpGatewayOptions.TrustedProxies.init -> void
+Bead.Transcoding.Http.HttpGatewayOptions.UnnamedProxies.get -> int
+Bead.Transcoding.Http.HttpGatewayOptions.UnnamedProxies.init -> void
+Bead.Transcoding.Http.HttpGatewayOptions.Window.get -> int
+Bead.Transcoding.Http.HttpGatewayOptions.Window.init -> void
+Bead.Transcoding.Http.HttpGatewayStartOptions
+Bead.Transcoding.Http.HttpGatewayStartOptions.<Clone>$() -> Bead.Transcoding.Http.HttpGatewayStartOptions!
+Bead.Transcoding.Http.HttpGatewayStartOptions.Address.get -> string!
+Bead.Transcoding.Http.HttpGatewayStartOptions.Address.init -> void
+Bead.Transcoding.Http.HttpGatewayStartOptions.CancellationToken.get -> System.Threading.CancellationToken
+Bead.Transcoding.Http.HttpGatewayStartOptions.CancellationToken.init -> void
+Bead.Transcoding.Http.HttpGatewayStartOptions.Equals(Bead.Transcoding.Http.HttpGatewayStartOptions? other) -> bool
+Bead.Transcoding.Http.HttpGatewayStartOptions.FindOpenPort.get -> bool
+Bead.Transcoding.Http.HttpGatewayStartOptions.FindOpenPort.init -> void
+Bead.Transcoding.Http.HttpGatewayStartOptions.HttpGatewayStartOptions() -> void
+Bead.Transcoding.Http.HttpGatewayStartOptions.Port.get -> int
+Bead.Transcoding.Http.HttpGatewayStartOptions.Port.init -> void
+override Bead.Transcoding.Http.HttpGatewayOptions.Equals(object? obj) -> bool
+override Bead.Transcoding.Http.HttpGatewayOptions.GetHashCode() -> int
+override Bead.Transcoding.Http.HttpGatewayOptions.ToString() -> string!
+override Bead.Transcoding.Http.HttpGatewayStartOptions.Equals(object? obj) -> bool
+override Bead.Transcoding.Http.HttpGatewayStartOptions.GetHashCode() -> int
+override Bead.Transcoding.Http.HttpGatewayStartOptions.ToString() -> string!
+static Bead.Transcoding.Http.HttpGatewayEndpoints.MapBeadGateway(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder! endpoints, Bead.Transcoding.Http.HttpGateway! gateway) -> Microsoft.AspNetCore.Builder.IEndpointConventionBuilder!
+static Bead.Transcoding.Http.HttpGatewayOptions.operator !=(Bead.Transcoding.Http.HttpGatewayOptions? left, Bead.Transcoding.Http.HttpGatewayOptions? right) -> bool
+static Bead.Transcoding.Http.HttpGatewayOptions.operator ==(Bead.Transcoding.Http.HttpGatewayOptions? left, Bead.Transcoding.Http.HttpGatewayOptions? right) -> bool
+static Bead.Transcoding.Http.HttpGatewayStartOptions.operator !=(Bead.Transcoding.Http.HttpGatewayStartOptions? left, Bead.Transcoding.Http.HttpGatewayStartOptions? right) -> bool
+static Bead.Transcoding.Http.HttpGatewayStartOptions.operator ==(Bead.Transcoding.Http.HttpGatewayStartOptions? left, Bead.Transcoding.Http.HttpGatewayStartOptions? right) -> bool

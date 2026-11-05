@@ -60,12 +60,26 @@ const FIXTURE_USER = 'fixture';
 
 // helpers
 
-/** An adapter of `ID` to `script`, its password `PASSWORD` unless told. */
+/** An adapter of `ID` to `script`, its password `PASSWORD` unless a provider or a certificate is told. */
 const adapterOf = (
   script: IAmqpScript,
   options?: Partial<IAmqpBrokerAdapterOptions>
 ): IAmqpBrokerAdapter => {
-  return createAmqpBrokerAdapter({ id: ID, password: PASSWORD, url: script.url, ...options });
+  const password =
+    options?.passwordProvider === undefined && options?.tls === undefined ? PASSWORD : undefined;
+
+  return createAmqpBrokerAdapter({ id: ID, password, url: script.url, ...options });
+};
+
+/** What `build` throws, or nothing. */
+const refusalOf = (build: () => unknown): unknown => {
+  try {
+    build();
+  } catch (error) {
+    return error;
+  }
+
+  return undefined;
 };
 
 /** `adapter` started, its link the script's next. */
@@ -223,11 +237,15 @@ const holdsQueue = async (url: string, name: string): Promise<boolean> => {
   }
 };
 
-/** A relay of the test's own in front of the broker at `url`. */
-const relayTo = (url: string): Promise<ILinkRelay> => {
+/** A relay of the test's own in front of the broker at `url`, each chunk held `delay` ms each way. */
+const relayTo = (url: string, options?: { delay?: number }): Promise<ILinkRelay> => {
   const parsed = new URL(url);
 
-  return createLinkRelay({ host: parsed.hostname, port: Number(parsed.port) });
+  return createLinkRelay({
+    delay: options?.delay ?? 0,
+    host: parsed.hostname,
+    port: Number(parsed.port),
+  });
 };
 
 /** The fixture's broker, or the skip that says none is given. */
@@ -257,7 +275,7 @@ test.describe('createAmqpBrokerAdapter', () => {
     let asked = 0;
     const adapter = adapterOf(script, {
       idleTimeout: 1_500,
-      password: () => {
+      passwordProvider: () => {
         asked += 1;
 
         return `${PASSWORD}-${String(asked)}`;
@@ -356,7 +374,8 @@ test.describe('createAmqpBrokerAdapter', () => {
   test('fails its queued publications and pending name subscription when stopped and lets none reach its next link', async () => {
     script.policy.credit = 1;
 
-    const adapter = adapterOf(script);
+    // * a short connectTimeout, past which its stop fails what waits on its credit
+    const adapter = adapterOf(script, { connectTimeout: 500 });
     const { downs } = heardOf(adapter);
     const link = await inboxUp({ adapter, script });
     expect(await adapter.publish({ payload: Uint8Array.of(1), topic: INBOX })).toBe(
@@ -412,7 +431,8 @@ test.describe('createAmqpBrokerAdapter', () => {
       return 'hold';
     };
 
-    const adapter = adapterOf(script);
+    // * a short connectTimeout, past which its stop fails what has no outcome yet
+    const adapter = adapterOf(script, { connectTimeout: 500 });
     const { downs } = heardOf(adapter);
     const link = await inboxUp({ adapter, script });
     const sent = settledOf(adapter.publish({ payload: Uint8Array.of(1), topic: INBOX }));
@@ -1293,26 +1313,41 @@ test.describe('createAmqpBrokerAdapter', () => {
   test('lets a name go within one connectTimeout, what it handed on settled and its DETACH answered, and tells its link lost past it (spec 15.34, 15.37)', async () => {
     const adapter = adapterOf(script, { connectTimeout: 300 });
     const { downs, messages } = heardOf(adapter);
+    const told: string[] = [];
+
+    adapter.on('down', () => {
+      told.push('down');
+    });
+
     const link = await inboxUp({ adapter, script });
     const lostWithin =
       'the link of ada was lost: it let the name bead.s.interop go within no 300 ms, its connectTimeout';
 
     await adapter.subscribe(NAME);
 
-    // * what it handed on not settled within it: no DETACH goes, and its link is lost
+    // * what it handed on not settled within it: no DETACH goes, and its link is lost, its let-go
+    // failed before its link is told lost, so that a stop that let it go reads that bound passed
+    // (spec 15.21)
     const sender = await senderOf(link, NAME_QUEUE);
     const delivery = sender.send(dataOf(Uint8Array.of(1)));
 
     await until(() => {
       return messages.length === 1;
     });
-    await expect(adapter.unsubscribe(NAME)).rejects.toThrow(lostWithin);
+
+    const leaving = adapter.unsubscribe(NAME);
+
+    leaving.catch(() => {
+      told.push('failed');
+    });
+    await expect(leaving).rejects.toThrow(lostWithin);
     await link.closed;
     expect([downs, adapter.isLinked, adapter.unsettled]).toEqual([
       [{ isTakenOver: false }],
       false,
       0,
     ]);
+    expect(told, 'its let-go failed, then its link told lost').toEqual(['failed', 'down']);
     expect(attachesOf(link, { address: NAME_QUEUE, role: 'receiver' })[0]).toBeDefined();
     expect(
       link.detached.map(({ address }) => {
@@ -1658,6 +1693,142 @@ test.describe('createAmqpBrokerAdapter', () => {
       })
     ).toEqual([[1], [2], [3], [4], [5]]);
     await adapter.stop();
+  });
+
+  // spec 15.24, 15.35
+  test('sends what waits on its link credit before its stop’s close, within its connectTimeout, and fails what has not gone by then', async () => {
+    script.policy.credit = 1;
+
+    const adapter = adapterOf(script, { connectTimeout: 1_000 });
+    const { downs } = heardOf(adapter);
+    const link = await inboxUp({ adapter, script });
+    const publishing = [1, 2, 3].map((index) => {
+      return adapter.publish({ payload: Uint8Array.of(index), topic: INBOX });
+    });
+
+    await link.until(() => {
+      return link.deliveries.length === 1;
+    });
+
+    // * its stop takes no publication, and sends what waits first, as credit comes
+    const stopping = adapter.stop();
+    const refused = await settledOf(adapter.publish({ payload: Uint8Array.of(4), topic: INBOX }));
+
+    expect(refused, 'none taken once it stops').toMatchObject({
+      message: 'the link of ada is not up',
+    });
+
+    const receiver = link.deliveries[0]?.receiver as Receiver;
+
+    for (const expected of [2, 3]) {
+      expect(link.closeFrame, 'not closed while one waits').toBeUndefined();
+      receiver.add_credit(1);
+      await link.until(() => {
+        return link.deliveries.length === expected;
+      });
+    }
+
+    await stopping;
+    expect(await Promise.all(publishing), 'each taken').toEqual([
+      BROKER_PUBLISHED.TAKEN,
+      BROKER_PUBLISHED.TAKEN,
+      BROKER_PUBLISHED.TAKEN,
+    ]);
+    await link.closed;
+    expect(
+      link.deliveries.map(({ message }) => {
+        return [...(message.body as { content: Buffer }).content];
+      }),
+      'each sent before its close'
+    ).toEqual([[1], [2], [3]]);
+    expect(link.closeFrame, 'its close').toBeDefined();
+    expect(link.closeFrame?.error ?? null, 'of no error').toBeNull();
+
+    // * its broker grants no credit and settles nothing: past its connectTimeout, what has not gone
+    // fails, and its close goes
+    script.policy.settle = () => {
+      return 'hold';
+    };
+
+    const silent = await inboxUp({ adapter, script });
+    const unanswered = [5, 6].map((index) => {
+      return settledOf(adapter.publish({ payload: Uint8Array.of(index), topic: INBOX }));
+    });
+
+    await silent.until(() => {
+      return silent.deliveries.length === 1;
+    });
+
+    const startedAt = Date.now();
+
+    await adapter.stop();
+    expect(Date.now() - startedAt, 'its connectTimeout waited').toBeGreaterThanOrEqual(900);
+    expect(await Promise.all(unanswered), 'each failed').toEqual([
+      expect.objectContaining({ message: 'the link of ada stopped' }),
+      expect.objectContaining({ message: 'the link of ada stopped' }),
+    ]);
+    await silent.closed;
+    expect(silent.deliveries, 'the second never sent').toHaveLength(1);
+    expect(downs, 'no loss told').toEqual([]);
+  });
+
+  test('deletes its inbox through its broker’s management at its stop, once what it was handed has its outcome and before it detaches its receivers and closes its connection (spec 15.33)', async () => {
+    const adapter = adapterOf(script);
+    const { downs } = heardOf(adapter);
+    const link = await inboxUp({ adapter, script });
+
+    await adapter.subscribe(NAME);
+    script.policy.settle = () => {
+      return 'hold';
+    };
+
+    const publishing = adapter.publish({ payload: Uint8Array.of(1), topic: ['bead', 'i', 'bob'] });
+
+    await link.until(() => {
+      return link.deliveries.length === 1;
+    });
+
+    const deletions = (): IAmqpScriptedLink['requests'] => {
+      return link.requests.filter(({ method }) => {
+        return method === 'DELETE';
+      });
+    };
+    const receivers = (): IScriptedAttach[] => {
+      return link.detached.filter(({ address }) => {
+        return address === INBOX_QUEUE || address === NAME_QUEUE;
+      });
+    };
+
+    script.policy.answer = () => {
+      return 'hold';
+    };
+
+    const stopping = adapter.stop();
+
+    await sleep(100);
+    expect(deletions(), 'none while what it was handed awaits its outcome').toEqual([]);
+    link.deliveries[0]?.delivery.accept();
+    expect(await publishing).toBe(BROKER_PUBLISHED.TAKEN);
+    await link.until(() => {
+      return deletions().length === 1;
+    });
+    expect(deletions()[0]?.path).toBe(INBOX_QUEUE);
+    await sleep(100);
+    expect(
+      [receivers(), link.closeFrame],
+      'none detached nor closed before its broker deleted it'
+    ).toEqual([[], undefined]);
+    deletions()[0]?.answer(200);
+    await stopping;
+    await link.closed;
+    expect(
+      receivers().map(({ address }) => {
+        return address;
+      }),
+      'its receivers detached, its inbox first'
+    ).toEqual([INBOX_QUEUE, NAME_QUEUE]);
+    expect(link.closeFrame?.error ?? null, 'its close, of no error').toBeNull();
+    expect(downs, 'no loss told').toEqual([]);
   });
 
   test('reads accepted as taken, released as no subscriber, and rejected or any other outcome as refused (spec 15.35)', async () => {
@@ -2025,7 +2196,7 @@ test.describe('createAmqpBrokerAdapter', () => {
     // a stop as it asks its password ends that start
     const asking = Promise.withResolvers<string>();
     const asked = adapterOf(script, {
-      password: () => {
+      passwordProvider: () => {
         return asking.promise;
       },
     });
@@ -2129,6 +2300,251 @@ test.describe('createAmqpBrokerAdapter', () => {
     expect([downs, adapter.isLinked]).toEqual([[], false]);
   });
 
+  test('fails its start once its password provider outlives its connect timeout, and takes no late answer', async () => {
+    const late = Promise.withResolvers<string>();
+    const adapter = adapterOf(script, {
+      connectTimeout: 200,
+      passwordProvider: () => {
+        return late.promise;
+      },
+    });
+    const { downs } = heardOf(adapter);
+    const error = await settledOf(adapter.start());
+
+    expect(error).toBeInstanceOf(GenericError);
+    expect((error as Error).message).toBe(
+      'the link of ada had no password within 200 ms, its connectTimeout'
+    );
+
+    // * its answer, come too late, opens no connection
+    late.resolve(PASSWORD);
+    await expect(script.link({ within: 300 })).rejects.toThrow('no link came');
+    expect([adapter.isLinked, downs]).toEqual([false, []]);
+
+    // * one connectTimeout from its start's call: its OPEN and sessions wait what its ask left of it
+    script.policy.attach = ({ address }) => {
+      return address === undefined ? 'hold' : 'take';
+    };
+
+    const slow = adapterOf(script, {
+      connectTimeout: 600,
+      passwordProvider: async () => {
+        await sleep(450);
+
+        return PASSWORD;
+      },
+    });
+    const began = performance.now();
+    const waiting = settledOf(slow.start());
+    const held = await script.link();
+
+    expect(String(await waiting)).toContain(
+      'the link of ada had no OPEN and no sessions within 600 ms, its connectTimeout'
+    );
+    expect(performance.now() - began).toBeLessThan(900);
+    await held.closed;
+  });
+
+  test('ends its start once stopped as its password is asked, and links at the next start, asked anew', async () => {
+    let asked = 0;
+    const adapter = adapterOf(script, {
+      passwordProvider: () => {
+        asked += 1;
+
+        // * the first ask never answers, nor hears its signal
+        return asked === 1
+          ? new Promise<string>(() => {
+              // it never settles
+            })
+          : `${PASSWORD}-${String(asked)}`;
+      },
+    });
+    const starting = settledOf(adapter.start());
+
+    await until(() => {
+      return asked === 1;
+    });
+    await adapter.stop();
+
+    const error = await starting;
+
+    expect(error).toBeInstanceOf(GenericError);
+    expect((error as Error).message).toBe('the link of ada stopped as it started');
+    await expect(script.link({ within: 200 })).rejects.toThrow('no link came');
+
+    const link = await linkUp({ adapter, script });
+
+    expect(link.plain).toEqual({ password: `${PASSWORD}-2`, username: ID });
+    expect(asked).toBe(2);
+    await adapter.stop();
+  });
+
+  test('ends its start at its own cancellation as its password is asked', async () => {
+    const signals: AbortSignal[] = [];
+    const adapter = adapterOf(script, {
+      passwordProvider: ({ signal }) => {
+        signals.push(signal);
+
+        return new Promise<string>(() => {
+          // it never settles
+        });
+      },
+    });
+    const given = new AbortController();
+    const starting = settledOf(adapter.start({ signal: given.signal }));
+
+    await until(() => {
+      return signals.length === 1;
+    });
+    expect(signals[0]?.aborted).toBe(false);
+    given.abort();
+    expect(await starting).toBeInstanceOf(CancelError);
+    // * its provider's signal aborted with it
+    expect(signals[0]?.aborted).toBe(true);
+    await expect(script.link({ within: 200 })).rejects.toThrow('no link came');
+
+    // and a signal aborted already asks nothing
+    expect(await settledOf(adapter.start({ signal: AbortSignal.abort() }))).toBeInstanceOf(
+      CancelError
+    );
+    expect(signals).toHaveLength(1);
+  });
+
+  test('fails its start when its password provider throws, its throw the cause', async () => {
+    const thrown = new Error('the vault is down');
+
+    // * as it is called, or as it answers
+    for (const passwordProvider of [
+      (): string => {
+        throw thrown;
+      },
+      (): Promise<string> => {
+        return Promise.reject(thrown);
+      },
+    ]) {
+      const adapter = adapterOf(script, { passwordProvider });
+      const error = await settledOf(adapter.start());
+
+      expect(error).toBeInstanceOf(GenericError);
+      expect(error).toMatchObject({ cause: thrown, message: 'the password provider failed' });
+      expect(adapter.isLinked).toBe(false);
+    }
+
+    await expect(script.link({ within: 200 })).rejects.toThrow('no link came');
+  });
+
+  test('refuses a password that is empty or holds a NUL, as built or as answered', async () => {
+    const refusal = 'a password is a non-empty string holding no NUL';
+
+    for (const password of ['', `${PASSWORD}\0`]) {
+      const built = refusalOf(() => {
+        return createAmqpBrokerAdapter({ id: ID, password, url: script.url });
+      });
+
+      expect(built).toBeInstanceOf(ProgrammerError);
+      expect((built as Error).message).toBe(refusal);
+
+      const answered = await settledOf(
+        adapterOf(script, {
+          passwordProvider: () => {
+            return password;
+          },
+        }).start()
+      );
+
+      expect(answered).toBeInstanceOf(ProgrammerError);
+      expect((answered as Error).message).toBe(refusal);
+    }
+
+    // * and an answer that is no string: none is never taken for no password, so never ANONYMOUS
+    const unanswered = await settledOf(
+      adapterOf(script, {
+        passwordProvider: () => {
+          return undefined as unknown as string;
+        },
+      }).start()
+    );
+
+    expect(unanswered).toBeInstanceOf(ProgrammerError);
+    expect((unanswered as Error).message).toBe(refusal);
+    await expect(script.link({ within: 200 })).rejects.toThrow('no link came');
+  });
+
+  test('aborts its password provider’s signal once its start ends, linked or not', async () => {
+    const signals: AbortSignal[] = [];
+    // whether its signal was live as it answered
+    const live: boolean[] = [];
+    const adapter = adapterOf(script, {
+      connectTimeout: 1_000,
+      passwordProvider: async ({ signal }) => {
+        signals.push(signal);
+        await sleep(20);
+        live.push(!signal.aborted);
+
+        return PASSWORD;
+      },
+    });
+
+    await linkUp({ adapter, script });
+    await until(() => {
+      return signals[0]?.aborted === true;
+    });
+    expect([signals[0]?.aborted, live]).toEqual([true, [true]]);
+    await adapter.stop();
+
+    // and a start that fails, its senders' ATTACHes held past its connectTimeout
+    script.policy.attach = ({ address }) => {
+      return address === undefined ? 'hold' : 'take';
+    };
+
+    const failing = settledOf(adapter.start());
+    const held = await script.link();
+
+    expect(String(await failing)).toContain('had no OPEN and no sessions within 1000 ms');
+    await until(() => {
+      return signals[1]?.aborted === true;
+    });
+    expect(
+      signals.map(({ aborted }) => {
+        return aborted;
+      })
+    ).toEqual([true, true]);
+    expect(live).toEqual([true, true]);
+    await held.closed;
+  });
+
+  test('refuses a password beside a client certificate, both a password and its provider, and neither', () => {
+    const secured = 'amqps://127.0.0.1:5671';
+    const provider = (): string => {
+      return PASSWORD;
+    };
+    const refusals = [
+      { password: PASSWORD, tls: TLS_FIXTURE },
+      { passwordProvider: provider, tls: TLS_FIXTURE },
+      { password: PASSWORD, passwordProvider: provider },
+      // * both, and a certificate: the first refusal, in one order on every side
+      { password: PASSWORD, passwordProvider: provider, tls: TLS_FIXTURE },
+      // * neither: PLAIN's password is one octet at least, and its link never ANONYMOUS
+      {},
+    ].map((given) => {
+      const refusal = refusalOf(() => {
+        return createAmqpBrokerAdapter({ id: ID, url: secured, ...given });
+      });
+
+      expect(refusal).toBeInstanceOf(ProgrammerError);
+
+      return (refusal as Error).message;
+    });
+
+    expect(refusals).toEqual([
+      'a link authenticates by its client certificate or by a password, not both',
+      'a link authenticates by its client certificate or by a password, not both',
+      'a link takes a password or a password provider, not both',
+      'a link takes a password or a password provider, not both',
+      'an AMQP link authenticates by a password or by its client certificate',
+    ]);
+  });
+
   test('refuses a departure, offering no will (spec 15.32)', async () => {
     const adapter = adapterOf(script);
 
@@ -2150,7 +2566,7 @@ test.describe('createAmqpBrokerAdapter', () => {
 
   test('is secure over amqps, and over amqp to the loopback alone', () => {
     const secureOf = (url: string): boolean => {
-      return createAmqpBrokerAdapter({ id: ID, url }).isSecure;
+      return createAmqpBrokerAdapter({ id: ID, password: PASSWORD, url }).isSecure;
     };
 
     expect(
@@ -2165,9 +2581,9 @@ test.describe('createAmqpBrokerAdapter', () => {
 
     // what is none of its two is refused as it is built, and so is an id that is none
     for (const refused of [
-      { id: ID, url: 'mqtt://broker.example' },
-      { id: ID, url: 'no url' },
-      { id: '', url: 'amqp://127.0.0.1' },
+      { id: ID, password: PASSWORD, url: 'mqtt://broker.example' },
+      { id: ID, password: PASSWORD, url: 'no url' },
+      { id: '', password: PASSWORD, url: 'amqp://127.0.0.1' },
     ]) {
       expect(() => {
         return createAmqpBrokerAdapter(refused);
@@ -2412,6 +2828,31 @@ test.describe('createAmqpBrokerAdapter, against a broker over AMQP 1.0', () => {
     expect([downs, adapter.isLinked]).toEqual([[], false]);
   });
 
+  test('finds no subscriber for a parcel to its inbox once its stop settled, its broker having deleted it (spec 15.21, 15.33)', async () => {
+    const url = brokerUrl();
+    const adapter = createAmqpBrokerAdapter({ id: 'other', password: AMQP_PASSWORD, url });
+    const caller = createAmqpBrokerAdapter({ id: 'coming', password: AMQP_PASSWORD, url });
+    const inbox = ['bead', 'i', 'other'];
+
+    try {
+      await caller.start();
+
+      // * at once after each stop, as the race the stop closes was
+      for (let round = 0; round < 5; round += 1) {
+        await adapter.start();
+        await adapter.subscribe(inbox);
+        await adapter.stop();
+        expect(
+          await caller.publish({ payload: Uint8Array.of(round), topic: inbox }),
+          `round ${String(round)}`
+        ).toBe(BROKER_PUBLISHED.NO_SUBSCRIBER);
+      }
+    } finally {
+      await adapter.stop();
+      await caller.stop();
+    }
+  });
+
   test('carries a link through RabbitMQ’s topic exchange, a name’s queue consumed by two in turn (spec 15.32)', async () => {
     const url = brokerUrl();
     const ids = ['ada', 'bob'];
@@ -2495,6 +2936,95 @@ test.describe('createAmqpBrokerAdapter, against a broker over AMQP 1.0', () => {
       for (const adapter of adapters) {
         await adapter.stop();
       }
+    }
+  });
+
+  test('an OPEN that comes during a participant’s stop waits in its name’s queue and is answered at its next link (spec 15.21, 15.38)', async () => {
+    const url = brokerUrl();
+    // * the stopping participant a round trip of 300 ms away, so that its broker hands it the OPEN
+    // before it read its DETACH
+    const relay = await relayTo(url, { delay: 150 });
+    const serving = createBrokerParticipant({
+      adapter: createAmqpBrokerAdapter({
+        id: 'other',
+        password: AMQP_PASSWORD,
+        url: `amqp://127.0.0.1:${String(relay.port)}`,
+      }),
+      devtools: false,
+    });
+    const calling = createBrokerParticipant({
+      adapter: createAmqpBrokerAdapter({ id: 'coming', password: AMQP_PASSWORD, url }),
+      devtools: false,
+    });
+    const fixture = await brokerConnectionOf(url, FIXTURE_USER);
+    const reported: string[] = [];
+
+    serving.on('error', ({ message }) => {
+      reported.push(message);
+    });
+
+    try {
+      // * what earlier runs left in the name's queue purged
+      await requestOf(fixture, { method: 'DELETE', path: '/queues/bead.s.interop/messages' });
+
+      const server = serving.transportServer({ names: ['interop'] });
+      let opened = 0;
+
+      server.on('connection', () => {
+        opened += 1;
+      });
+      await server.start();
+
+      // * a connection it holds, whose CLOSE its stop sends and awaits a round trip
+      const holding = calling.transportClient();
+      const closes: boolean[] = [];
+
+      holding.on('close', (wasClean) => {
+        closes.push(wasClean);
+      });
+      await holding.connect({ server: 'interop' });
+      await until(() => {
+        return opened === 1;
+      });
+
+      // * an OPEN published as its stop lets its name go: its receiver hands it nothing, and it
+      // goes back to its name's queue, where its connect waits
+      const stopping = serving.stop();
+      const client = calling.transportClient();
+      const outcome = { value: 'waiting' };
+      const connecting = client.connect({ server: 'interop', timeout: 15_000 }).then(
+        () => {
+          outcome.value = 'opened';
+        },
+        (error: unknown) => {
+          outcome.value = `failed: ${String(error)}`;
+        }
+      );
+
+      await stopping;
+      await sleep(500);
+      expect([outcome.value, opened], 'waiting in its name’s queue').toEqual(['waiting', 1]);
+      expect(closes, 'the connection it held closed with 1001').toEqual([false]);
+
+      // * its next link serves the name, and takes it, its third leg a round trip later
+      await serving.start();
+      await connecting;
+      await until(() => {
+        return opened === 2;
+      });
+      expect([outcome.value, opened], 'answered at its next link').toEqual(['opened', 2]);
+      expect(reported, 'nothing reported').toEqual([]);
+      await client.disconnect();
+    } finally {
+      await requestOf(fixture, { method: 'DELETE', path: '/queues/bead.s.interop/messages' }).catch(
+        () => {
+          return undefined;
+        }
+      );
+      fixture.close();
+      await calling[Symbol.asyncDispose]();
+      await serving[Symbol.asyncDispose]();
+      await relay[Symbol.asyncDispose]();
     }
   });
 });

@@ -139,7 +139,7 @@ async fn counts_a_call_it_makes_as_its_router_settles_it_timed_to_that_instant()
         signal.cancel();
         assert!(matches!(
             completed(cancelled).await,
-            Err(CallError::Cancelled)
+            Err(CallError::Cancelled(_))
         ));
         let closed = ask(NEVER, None);
         peer.owner

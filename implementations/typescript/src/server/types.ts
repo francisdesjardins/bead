@@ -11,11 +11,13 @@ import type {
   AdmissionFailure,
   IAdmissionRequest,
   ICredentials,
-  IServiceManager,
+  IntakeLimitsOptions,
+  IServiceManagerServer,
   IServiceManagerOptions,
   RouterLimitsOptions,
 } from '../router/shared/types';
 import type {
+  ITransportServerConnection,
   ITransportServerRefusal,
   TransportServerConnectionHandle,
 } from '../transport/server/types';
@@ -36,8 +38,11 @@ export interface IServer<
   Data = unknown,
 > {
   readonly router: IRouterServer<Transport>;
-  /** The requesters, commands and resolvers of the services, made on {@link IServer.router}. */
-  readonly services: IServiceManager<TransportServerConnectionHandle>;
+  /**
+   * A server's services, made on {@link IServer.router}: its commands, and its request and
+   * notification resolvers.
+   */
+  readonly services: IServiceManagerServer<TransportServerConnectionHandle>;
   /**
    * The connections' sessions. A session is made by a request — a resolver stores it with
    * `sessions.set` — and goes with its connection. Its connection timeout closes the connection;
@@ -118,7 +123,7 @@ export interface IServerLayers<Transport extends IServerTransportLike, Data = un
     | ((
         router: IRouterServer<Transport>,
         options: IServiceManagerOptions<TransportServerConnectionHandle>
-      ) => IServiceManager<TransportServerConnectionHandle>)
+      ) => IServiceManagerServer<TransportServerConnectionHandle>)
     | undefined;
   /**
    * Builds the sessions on the clock it is given, the transport's, which they must run on;
@@ -140,6 +145,12 @@ export interface IServerOptions {
    * CREDENTIAL_UNSUPPORTED.
    */
   credentials?: ICredentials | undefined;
+  /**
+   * What its router holds untaken of each connection within one task, past which it pauses that
+   * connection's transport (spec 15.12), which it is built with: `INTAKE_DEFAULTS`' where these say
+   * nothing, each 1 at least, or the server is a {@link ProgrammerError}.
+   */
+  intake?: IntakeLimitsOptions | undefined;
   /**
    * How much the router reads, writes and holds, which it is built with: {@link LIMIT_DEFAULTS}'
    * where these say nothing. They must hold together, or the server is a {@link ProgrammerError}.
@@ -203,7 +214,7 @@ export interface IServerTransportLike extends IRouterServerTransportLike {
   off(
     event: 'connection',
     listener: EmitterListener<
-      [socket: unknown, request: unknown, connectionHandle: TransportServerConnectionHandle]
+      [connection: ITransportServerConnection, connectionHandle: TransportServerConnectionHandle]
     >
   ): unknown;
   off(
@@ -232,7 +243,7 @@ export interface IServerTransportLike extends IRouterServerTransportLike {
   on(
     event: 'connection',
     listener: EmitterListener<
-      [socket: unknown, request: unknown, connectionHandle: TransportServerConnectionHandle]
+      [connection: ITransportServerConnection, connectionHandle: TransportServerConnectionHandle]
     >
   ): unknown;
   /**

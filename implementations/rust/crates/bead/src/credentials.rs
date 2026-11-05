@@ -20,8 +20,8 @@ use crate::constants::CredentialScheme;
 use crate::envelope::Credential;
 use crate::errors::{CapacityError, ProgrammerError};
 use crate::jwt_verifier::{
-    JwtAgainst, JwtAlgorithm, JwtKey, JwtRefusal, JwtSessionIdentifier, JwtVerdict, assert_jwt_key,
-    read_jwt, verify_jwt,
+    JwtAgainst, JwtAlgorithm, JwtKey, JwtRefusal, JwtSessionIdentifier, JwtVerdict, ReadJwt,
+    assert_jwt_key, read_jwt, verify_jwt,
 };
 use crate::router::core::{Resolved, Unresolved};
 use crate::router::types::{BoxFuture, CallSession, RouterLimits, SessionIdentifier};
@@ -92,14 +92,15 @@ impl fmt::Debug for JwtKeySet {
 }
 
 /// What an `ELSEWHERE`'s verifier settles with for a credential that holds (spec 13.11).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ElsewhereSession {
     /// Its id, which names its session with the scheme.
     pub id: String,
     /// Its data, which the call carries.
     pub data: Option<Value>,
-    /// Its end, in milliseconds since the epoch; none for a session without one.
-    pub end: Option<i64>,
+    /// Its end, in milliseconds since the epoch, rounded up as the verifier settles; none for a
+    /// session without one. A non-finite value or one beyond ±(2⁵³ − 1) fails its resolution.
+    pub end: Option<f64>,
 }
 
 /// What an `ELSEWHERE`'s verifier settles with: a session, none for a credential that does not
@@ -141,7 +142,7 @@ impl fmt::Debug for Credentials {
 /// # Errors
 ///
 /// A [`ProgrammerError`] for a chunk or an envelope under 1,024 bytes.
-pub fn assert_limits_hold_jwt(limits: &RouterLimits) -> Result<(), ProgrammerError> {
+pub(crate) fn assert_limits_hold_jwt(limits: &RouterLimits) -> Result<(), ProgrammerError> {
     if limits.chunk_bytes < JWT_LIMIT_BYTES || limits.maximum_envelope_bytes < JWT_LIMIT_BYTES {
         return Err(ProgrammerError::new(
             "the router's limits do not hold together: a side that takes or presents a JWT holds a chunk's envelope and an envelope of 1,024 bytes at least",
@@ -237,20 +238,39 @@ fn locked(inner: &Inner) -> MutexGuard<'_, KeySetState> {
 }
 
 fn failure_of(message: String) -> Unresolved {
-    Unresolved::Other(Arc::new(KeySetError(message)))
+    Unresolved::Other(Arc::new(KeySetError {
+        message,
+        source: None,
+    }))
 }
 
 /// A key set's failure, as the calls that waited on it are failed.
 #[derive(Debug, Clone)]
-struct KeySetError(String);
+struct KeySetError {
+    message: String,
+    source: Option<Arc<dyn Error + Send + Sync>>,
+}
 
 impl fmt::Display for KeySetError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.0)
+        formatter.write_str(&self.message)
     }
 }
 
-impl Error for KeySetError {}
+impl Error for KeySetError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        self.source
+            .as_ref()
+            .map(|source| -> &(dyn Error + 'static) { source.as_ref() })
+    }
+}
+
+fn ask_failed(issuer: &str, source: Arc<dyn Error + Send + Sync>) -> Unresolved {
+    Unresolved::Other(Arc::new(KeySetError {
+        message: format!("the key set's ask for {issuer} failed"),
+        source: Some(source),
+    }))
+}
 
 fn string_of<'a>(object: &'a Map<String, Value>, name: &str) -> Option<&'a str> {
     object.get(name).and_then(Value::as_str)
@@ -403,6 +423,11 @@ impl CredentialResolver {
             Credential::None | Credential::Opaque(_) | Credential::ToCome { .. } => {
                 Box::pin(async { Ok(Resolved::None) })
             }
+            Credential::Redacted { .. } => Box::pin(async {
+                Err(Unresolved::Other(Arc::new(ProgrammerError::new(
+                    "a redacted credential has no token to resolve",
+                ))))
+            }),
         }
     }
 }
@@ -535,6 +560,7 @@ fn ask_now(
     });
     entry.deadline = Some(now.saturating_add(KEY_SET_INTERVAL));
     arm(inner, entry);
+    entry.asking.as_ref()?;
 
     let weak = Arc::downgrade(inner);
     let issuer = issuer.to_owned();
@@ -580,17 +606,11 @@ fn answer(weak: &Weak<Inner>, (issuer, id, answered): (&str, u64, KeySetAnswer))
                 .collect();
 
             held.map_or_else(
-                |error| {
-                    AskOutcome::Failure(failure_of(format!(
-                        "the key set's ask for {issuer} failed: {error}"
-                    )))
-                },
+                |error| AskOutcome::Failure(ask_failed(issuer, Arc::new(error))),
                 AskOutcome::Keys,
             )
         }
-        Err(error) => AskOutcome::Failure(failure_of(format!(
-            "the key set's ask for {issuer} failed: {error}"
-        ))),
+        Err(error) => AskOutcome::Failure(ask_failed(issuer, Arc::from(error))),
     };
     let now = inner.clock.monotonic();
     let mut state = locked(&inner);
@@ -651,7 +671,7 @@ fn arm(inner: &Arc<Inner>, entry: &mut IssuerKeys) {
     let weak = Arc::downgrade(inner);
     let issuer = entry.issuer.clone();
 
-    entry.timer = Some(inner.clock.arm(
+    let timer = inner.clock.arm(
         Schedule::Once(delay),
         Box::new(move || {
             let Some(inner) = weak.upgrade() else {
@@ -677,7 +697,21 @@ fn arm(inner: &Arc<Inner>, entry: &mut IssuerKeys) {
 
             drop(state);
         }),
-    ));
+    );
+    match timer {
+        Ok(timer) => entry.timer = Some(timer),
+        Err(error) => {
+            let failure = ask_failed(&entry.issuer, Arc::new(error));
+            let signal = entry.asking.as_ref().map(|ask| ask.signal.clone());
+            settle(inner, (entry, AskOutcome::Failure(failure.clone())));
+            for mut waiter in core::mem::take(&mut entry.next) {
+                waiter.release(Err(failure.clone()));
+            }
+            if let Some(signal) = signal {
+                signal.cancel();
+            }
+        }
+    }
 }
 
 // a call that leaves its wait by its own signal reaches nothing: it frees its place
@@ -708,7 +742,7 @@ fn wait_of(
     inner: &Arc<Inner>,
     (token, judged, signal): (&[u8], &[JwtKey], &CancellationToken),
 ) -> Result<Option<Wait>, Unresolved> {
-    let Some((header, claims)) = read_jwt(token) else {
+    let Some(ReadJwt { header, claims }) = read_jwt(token) else {
         return Ok(None);
     };
     let Some(issuer) = string_of(&claims, "iss").map(str::to_owned) else {
@@ -882,8 +916,14 @@ async fn resolve_elsewhere(
         return Ok(Resolved::Refused("verifier".to_owned()));
     };
 
+    let end = session
+        .end
+        .map(rounded_end_of)
+        .transpose()
+        .map_err(|error| Unresolved::Other(Arc::new(error)))?;
+
     // the wall clock read as the verifier settles: a session whose end it reached does not hold
-    if let Some(end) = session.end
+    if let Some(end) = end
         && milliseconds_since_epoch(wall_now(inner)) >= end
     {
         return Ok(Resolved::Refused("end".to_owned()));
@@ -891,7 +931,15 @@ async fn resolve_elsewhere(
 
     Ok(Resolved::Session(CallSession {
         data: session.data,
-        end: session.end,
+        end,
         identifier: Some(SessionIdentifier::Elsewhere { id: session.id }),
     }))
+}
+
+fn rounded_end_of(end: f64) -> Result<i64, ProgrammerError> {
+    crate::json::integer_of(end.ceil())
+        .filter(|_| end.abs() <= 9_007_199_254_740_991.0)
+        .ok_or_else(|| ProgrammerError::new(
+            "an ELSEWHERE's verifier settles with a session whose end is a number of milliseconds within ±9007199254740991",
+        ))
 }

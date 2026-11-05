@@ -24,12 +24,12 @@ const INBOX: BrokerTopic = ['bead', 'i', 'ada'];
 const heardBy = (
   adapter: IMemoryBrokerAdapter,
   options?: { isSettling?: boolean }
-): { retained: boolean; text: string; topic: string }[] => {
-  const heard: { retained: boolean; text: string; topic: string }[] = [];
+): { isRetained: boolean; text: string; topic: string }[] => {
+  const heard: { isRetained: boolean; text: string; topic: string }[] = [];
 
-  adapter.on('message', ({ payload, retained, settle, topic }) => {
+  adapter.on('message', ({ isRetained, payload, settle, topic }) => {
     heard.push({
-      retained: retained === true,
+      isRetained: isRetained === true,
       text: new TextDecoder().decode(payload),
       topic: topic.join('/'),
     });
@@ -128,6 +128,118 @@ test.describe('memory broker', () => {
     expect(dan.unsettled).toBe(0);
   });
 
+  // spec 15.24; decision 0045: one queue of turns, the job queue, a publish made within the
+  // broker's turn at its tail, behind the one its publisher made before that turn
+  test('a publish a listener makes within the broker’s turn comes behind one its publisher made before it', async () => {
+    const broker = createMemoryBroker();
+    const [ada, bob, cid] = ['ada', 'bob', 'cid'].map((id) => {
+      return broker.adapter({ id });
+    }) as [IMemoryBrokerAdapter, IMemoryBrokerAdapter, IMemoryBrokerAdapter];
+
+    for (const adapter of [ada, bob, cid]) {
+      await adapter.start();
+    }
+
+    await ada.subscribe(INBOX);
+    await bob.subscribe(NAME);
+
+    const heard = heardBy(bob);
+
+    // what the publisher's application does as it hears "go" within the broker's turn
+    ada.on('message', ({ payload, settle }) => {
+      settle();
+
+      if (new TextDecoder().decode(payload) === 'go') {
+        void ada.publish({ payload: bytesOf('two'), topic: NAME });
+      }
+    });
+
+    // its "go" queued to reach the publisher within a turn of the broker's; meanwhile, before that
+    // turn, the publisher publishes
+    void cid.publish({ payload: bytesOf('go'), topic: INBOX });
+    void ada.publish({ payload: bytesOf('one'), topic: NAME });
+    await settled();
+
+    // in the order its publisher published, the one made within the turn behind
+    expect(
+      heard.map(({ text }) => {
+        return text;
+      })
+    ).toEqual(['one', 'two']);
+  });
+
+  test('hands on what it queued to a subscription before it lets it go, then routes it nothing (spec 15.24)', async () => {
+    const broker = createMemoryBroker();
+    const ada = broker.adapter({ id: 'ada' });
+    const bob = broker.adapter({ id: 'bob' });
+
+    await ada.start();
+    await bob.start();
+    await bob.subscribe(NAME);
+
+    // each message with whether its unsubscription had settled as it came
+    const heard: string[] = [];
+    const letting = { isSettled: true };
+
+    bob.on('message', ({ payload, settle }) => {
+      heard.push(`${new TextDecoder().decode(payload)} ${letting.isSettled ? 'let go' : 'held'}`);
+      settle();
+    });
+
+    // * each queued before the unsubscription is made, none handed on yet: it settles once each was
+    const published = ['one', 'two', 'three'].map((text) => {
+      return ada.publish({ payload: bytesOf(text), topic: NAME });
+    });
+
+    letting.isSettled = false;
+
+    const leaving = bob.unsubscribe(NAME).then(() => {
+      letting.isSettled = true;
+    });
+
+    expect(heard, 'nothing handed on yet').toEqual([]);
+    await expect(Promise.all(published)).resolves.toEqual([
+      BROKER_PUBLISHED.TAKEN,
+      BROKER_PUBLISHED.TAKEN,
+      BROKER_PUBLISHED.TAKEN,
+    ]);
+    await leaving;
+    expect(heard, 'each handed on before it settled').toEqual([
+      'one held',
+      'two held',
+      'three held',
+    ]);
+
+    // * and from then on, it is routed nothing
+    await expect(ada.publish({ payload: bytesOf('four'), topic: NAME })).resolves.toBe(
+      BROKER_PUBLISHED.NO_SUBSCRIBER
+    );
+    await settled();
+    expect(heard, 'nothing more').toHaveLength(3);
+
+    // * one let go with nothing queued settles at once
+    await bob.subscribe(NAME);
+    await bob.unsubscribe(NAME);
+    expect(heard, 'nothing handed on').toHaveLength(3);
+
+    // * one whose link is lost meanwhile settles once its down was told
+    const downs: string[] = [];
+
+    bob.on('down', () => {
+      downs.push('down');
+    });
+    await bob.subscribe(NAME);
+    void ada.publish({ payload: bytesOf('five'), topic: NAME });
+
+    const lost = bob.unsubscribe(NAME).then(() => {
+      return [...downs];
+    });
+
+    bob.lose();
+    await expect(lost, 'settled behind its down').resolves.toEqual(['down']);
+    expect(heard, 'what its lost link held dropped').toHaveLength(3);
+  });
+
   test('hands a group message to one member in turn, and again to another when a test asks (spec 15.24)', async () => {
     const broker = createMemoryBroker();
     const [one, two, alone, client] = ['one', 'two', 'alone', 'client'].map((id) => {
@@ -214,9 +326,9 @@ test.describe('memory broker', () => {
     expect(texts().slice(4)).toEqual(['1', '2']);
 
     // a retained message is handed on marked so
-    await bob.publish({ payload: bytesOf('kept'), retained: true, topic: INBOX });
+    await bob.publishRetained({ payload: bytesOf('kept'), topic: INBOX });
     await settled();
-    expect(heard.at(-1)).toEqual({ retained: true, text: 'kept', topic: 'bead/i/ada' });
+    expect(heard.at(-1)).toEqual({ isRetained: true, text: 'kept', topic: 'bead/i/ada' });
 
     // a link lost publishes its will, and tells its adapter in a later turn; a stop publishes none
     let downs = 0;
@@ -232,7 +344,7 @@ test.describe('memory broker', () => {
     await settled();
 
     expect(downs).toBe(1);
-    expect(heard.at(-1)).toEqual({ retained: false, text: 'gone', topic: 'bead/d/bob' });
+    expect(heard.at(-1)).toEqual({ isRetained: false, text: 'gone', topic: 'bead/d/bob' });
 
     await bob.start({ will: { payload: bytesOf('again'), topic: departure } });
     await bob.stop();
@@ -350,7 +462,7 @@ test.describe('memory broker', () => {
     await settled();
 
     expect(downs).toEqual([{ isTakenOver: true }]);
-    expect(heard).toEqual([{ retained: false, text: 'gone', topic: 'bead/d/bob' }]);
+    expect(heard).toEqual([{ isRetained: false, text: 'gone', topic: 'bead/d/bob' }]);
     // * no link of its id holds its inbox now
     expect(await ada.publish({ payload: bytesOf('x'), topic: ['bead', 'i', 'bob'] })).toBe(
       BROKER_PUBLISHED.NO_SUBSCRIBER

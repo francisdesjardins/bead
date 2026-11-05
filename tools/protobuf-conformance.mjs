@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Protobuf's conformance suite against each side's generated `proto` codec, and one corpus read by
-// both sides alike (decision 0028). The runner is `protobuf-conformance`, the npm distribution of
+// every side alike (decision 0028). The runner is `protobuf-conformance`, the npm distribution of
 // protobuf's `conformance_test_runner`, at the release both libraries pin: `protobuf-conformance/
 // runner.json` gives its tarball, its upstream release and npm's integrity, a sha512, and the floor
 // of tests a run holds. This fetches the tarball, checks its sha512 before it reads a byte of it,
@@ -11,8 +11,8 @@
 //   node tools/protobuf-conformance.mjs typescript     the suite through the TypeScript side's codec
 //   node tools/protobuf-conformance.mjs csharp         the suite through the C# side's codec
 //   node tools/protobuf-conformance.mjs rust           the suite through the Rust side's codec
-//   node tools/protobuf-conformance.mjs differential   one corpus of Probe through the TypeScript
-//                                                      and C# sides
+//   node tools/protobuf-conformance.mjs differential   one corpus of Probe through every side's
+//                                                      testee
 //
 // For a side, it ejects the suite's test protos from the pinned package into
 // `protobuf-conformance/.work/<side>/`, under `protobuf_test_messages/` rather than
@@ -49,18 +49,27 @@
 // The tool fails before anything when the pin's release and Google.Protobuf's in
 // implementations/dotnet/Directory.Packages.props differ, v36.2 against 3.36.2.
 //
-// The differential feeds both testees the same payloads of Probe, `CORPUS_SIZE` of them from
-// `CORPUS_SEED`: Probe's own records, mutated by cuts, lengths, wire types, tags and nesting, its
-// packed runs, its map's entries and its group among them. Each side reads or refuses each; where
-// both read, what each writes back is compared as what it reads, the choices protobuf leaves to a
-// writer aside, at every depth: the order of a message's unknown fields, which Google.Protobuf
-// writes by number and wire type (a platform row of docs/support.md), the order of a map's entries,
-// and an entry's key at its default, which protobuf-es writes and Google.Protobuf leaves out. Any
-// other parting fails.
+// The differential feeds every side's testee the same payloads of Probe, `CORPUS_SIZE` of them
+// from `CORPUS_SEED`: records of every field Probe declares, among them a Needs that leaves a field
+// it requires unset and a closed enum's number declared, undeclared, past 31 and 32 bits, of ten
+// bytes and overlong, mutated by cuts, lengths, wire types, tags and nesting, its packed runs, its
+// maps' entries and its group among them; then spec/codecs.json's `proto` payloads as seeds, but
+// those a `differs` of the file excuses a side from, each as it is and mutated by the same steps,
+// drawn after the others. Each side reads or refuses each, and writes back what it read or refuses
+// to, as its writer refuses what its reader would (spec 17.2); the sides are compared two by two;
+// where two write back, what each writes is compared as what it reads, at every depth, a closed
+// enum's number by its low 32 bits as protobuf reads an enum, declared or not, like any declared
+// field: every side drops an undeclared one before its library reads (spec 17.9.8), so a side that
+// writes one back parts. The choices protobuf leaves to a writer are aside, each a row of
+// docs/support.md: the order of a message's unknown fields, which Google.Protobuf writes by number
+// and wire type, and an unknown varint's form, which protobuf-es keeps as it read it; the order of
+// a map's entries, and an entry's key or scalar value at its default, which protobuf-es and Buffa
+// write and Google.Protobuf leaves out. Any other parting fails, one line a payload, every side's
+// verdict on it.
 //
 // The runner ships linux-x64 and darwin-x64 binaries alone, and asks glibc 2.38 or later, Debian 13's:
 // the suite runs in CI and, on Windows, in a Linux container that recent; the differential runs
-// wherever both testees do. From the repository's root,
+// wherever every testee does, the runner's protos alone needed, no runner. From the repository's root,
 // once implementations/typescript and builder/ are installed; protoc is `BEADC_PROTOC`, or the one
 // builder/tools/fetch-protoc.mjs fetches. Exit 1 on a failure, with its reason.
 
@@ -83,6 +92,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const HERE = join(ROOT, 'tools', 'protobuf-conformance');
 const PIN_FILE = join(HERE, 'runner.json');
+const CODECS = join(ROOT, 'spec', 'codecs.json');
 const RUNNER = join(HERE, '.runner');
 const WORK = join(HERE, '.work');
 const PACKAGES = join(ROOT, 'implementations', 'dotnet', 'Directory.Packages.props');
@@ -108,27 +118,31 @@ const TEST_MESSAGES = [
 ];
 const TEST_FOLDER = 'protobuf_test_messages';
 
-// * each side's testee: where beadc's output goes, its failure list, and how it is built and run
+// * each side's testee: its name in prose, where beadc's output goes, its failure list, and how it
+// is built and run
 export const SIDES = Object.freeze({
   typescript: Object.freeze({
     language: 'typescript',
+    name: 'TypeScript',
     folder: 'implementations/typescript/tools/protobuf-conformance',
     generated: 'generated',
   }),
   csharp: Object.freeze({
     language: 'csharp',
+    name: 'C#',
     folder: 'implementations/dotnet/tools/Bead.ProtobufConformance',
     generated: 'Generated',
   }),
   rust: Object.freeze({
     language: 'rust',
+    name: 'Rust',
     folder: 'implementations/rust/tools/protobuf-conformance',
     generated: 'generated',
   }),
 });
 
 // * the sides the differential reads one corpus through, compared two by two
-export const DIFFERENTIAL_SIDES = Object.freeze(['typescript', 'csharp']);
+export const DIFFERENTIAL_SIDES = Object.freeze(['typescript', 'csharp', 'rust']);
 
 // the files of the set the Rust side's testee generates its messages from, as its build script
 // names them
@@ -456,22 +470,59 @@ const skipOne = (bytes, at) => {
 
 // ── Probe, compared ───────────────────────────────────────────────────────────
 
-// Probe's fields (spec/codecs.proto): its messages, its map, and every number it declares
-const PROBE_MESSAGES = new Set([3, 13]);
-const PROBE_MAP = 12;
-const PROBE_FIELDS = new Set([1, 2, 3, 10, 11, 12, 13]);
+// what the form reads of each message of spec/codecs.proto: the numbers it declares; a message's
+// field, by that message's own; a map's, by its value's, a scalar's where none; and a closed
+// enum's, by its number
+const NEEDS = Object.freeze({
+  declared: new Set([1, 2]),
+  messages: new Map(),
+  maps: new Map(),
+  enums: new Set([2]),
+});
+const PROBE = Object.freeze({
+  declared: new Set([1, 2, 3, 7, 8, 10, 11, 12, 13, 14, 16]),
+  messages: new Map([
+    [7, NEEDS],
+    [8, NEEDS],
+  ]),
+  maps: new Map([[16, undefined]]),
+  enums: new Set([14]),
+});
+
+// * Probe holds itself: a child, a group and a map's value
+PROBE.messages.set(3, PROBE).set(13, PROBE);
+PROBE.maps.set(12, PROBE);
 
 const hexOf = (bytes) => {
   return Buffer.from(bytes).toString('hex');
 };
 
+// a record's body: a length-delimited record's or a group's payload, or what follows its tag
+const bodyOf = ({ whole, payload }) => {
+  // * a tag ends at its first byte under 0x80, however long its form
+  return payload ?? whole.subarray(whole.findIndex((byte) => byte < 0x80) + 1);
+};
+
+// an unknown field's record in that form: its number, its wire type, and its value, a varint's
+// read, so an overlong form kept as read, as protobuf-es keeps one, and the minimal form
+// Google.Protobuf and Buffa write give alike
+const canonicalUnknown = (record) => {
+  const body = bodyOf(record);
+  const value = record.wireType === VARINT ? String(readVarint(body, 0)?.value) : hexOf(body);
+
+  return `${String(record.field)}:${String(record.wireType)}:${value}`;
+};
+
 /**
- * A Probe's bytes in a form two writers that differ only where protobuf leaves the order to a
- * writer give alike: its declared records in their order, each message among them in this form;
- * its map's entries, then its unknown fields, each set sorted. Bytes that do not read as records
- * keep their own form.
+ * A message's bytes in a form two writers that differ only where protobuf leaves the form to a
+ * writer, or where a row of docs/support.md says each side writes its own, give alike: its
+ * declared records in their order, each message among them in this form, a closed enum's by the
+ * number an int32 reads of it, declared or not, at every depth, since every side drops an
+ * undeclared one before its library reads (spec 17.9.8); each map's entries, then its unknown
+ * fields, each set sorted, an unknown varint by its value. Bytes that do not read as records keep
+ * their own form.
  */
-export const canonicalProbe = (bytes) => {
+const canonicalOf = (bytes, shape) => {
   const records = recordsOf(bytes);
 
   if (records === undefined) {
@@ -483,13 +534,21 @@ export const canonicalProbe = (bytes) => {
   const unknown = [];
 
   for (const record of records) {
-    if (!PROBE_FIELDS.has(record.field)) {
-      unknown.push(hexOf(record.whole));
-    } else if (record.field === PROBE_MAP && record.wireType === LEN) {
-      entries.push(canonicalEntry(record.payload));
-    } else if (PROBE_MESSAGES.has(record.field) && record.payload !== undefined) {
+    const { field, wireType, payload } = record;
+
+    if (!shape.declared.has(field)) {
+      unknown.push(canonicalUnknown(record));
+    } else if (shape.enums.has(field) && wireType === VARINT) {
+      // * an enum's number is its varint's low 32 bits, as protobuf reads an int32; one its enum
+      // does not declare is compared as any other, a side that writes it back parting
+      const number = BigInt.asIntN(32, readVarint(bodyOf(record), 0)?.value ?? 0n);
+
+      declared.push(`${String(field)}=${String(number)}`);
+    } else if (shape.maps.has(field) && wireType === LEN) {
+      entries.push(`${String(field)}:${canonicalEntry(payload, shape.maps.get(field))}`);
+    } else if (shape.messages.has(field) && payload !== undefined) {
       declared.push(
-        `${String(record.field)}:${String(record.wireType)}{${canonicalProbe(record.payload)}}`
+        `${String(field)}:${String(wireType)}{${canonicalOf(payload, shape.messages.get(field))}}`
       );
     } else {
       declared.push(hexOf(record.whole));
@@ -499,27 +558,40 @@ export const canonicalProbe = (bytes) => {
   return `${declared.join(',')}|${entries.sort().join(',')}|${unknown.sort().join(',')}`;
 };
 
-// a map entry's bytes in that form: what it reads as, its key and its value, each its last record
-// or its default where the entry leaves it out, as a writer may: protobuf-es writes an empty key,
-// Google.Protobuf leaves it out
-const canonicalEntry = (bytes) => {
+/** A Probe's bytes in the form of `canonicalOf`. */
+export const canonicalProbe = (bytes) => {
+  return canonicalOf(bytes, PROBE);
+};
+
+// a map's entry's bytes in that form: what it reads as, its key and its value, each its last record
+// or its default where the entry leaves it out, as a writer may: protobuf-es and Buffa write a key
+// and a scalar value at their default, Google.Protobuf leaves them out; a message's value by
+// `value`, a scalar's, a uint32, by its varint's value
+const canonicalEntry = (bytes, value) => {
   const records = recordsOf(bytes);
 
   if (records === undefined) {
     return `raw:${hexOf(bytes)}`;
   }
 
-  const key = records.findLast((record) => {
+  const isKey = (record) => {
     return record.field === 1 && record.wireType === LEN;
-  });
-  const value = records.findLast((record) => {
-    return record.field === 2 && record.wireType === LEN;
-  });
+  };
+  const isValue = (record) => {
+    return record.field === 2 && record.wireType === (value === undefined ? VARINT : LEN);
+  };
+  const key = records.findLast(isKey);
+  const held = records.findLast(isValue);
+  // * a key's or a value's record of another wire type is kept as any other, not forgiven
   const others = records.filter((record) => {
-    return record.field !== 1 && record.field !== 2;
+    return !isKey(record) && !isValue(record);
   });
+  const read =
+    value === undefined
+      ? String(held === undefined ? 0n : readVarint(bodyOf(held), 0)?.value)
+      : `{${canonicalOf(held?.payload ?? new Uint8Array(), value)}}`;
 
-  return `${hexOf(key?.payload ?? [])}:{${canonicalProbe(value?.payload ?? new Uint8Array())}}${others
+  return `${hexOf(key?.payload ?? [])}:${read}${others
     .map((record) => {
       return `,${hexOf(record.whole)}`;
     })
@@ -530,7 +602,7 @@ const canonicalEntry = (bytes) => {
 
 /** The corpus's seed, and its size: a change of either is a change of the gate. */
 export const CORPUS_SEED = 0x0bead028;
-export const CORPUS_SIZE = 10_000;
+export const CORPUS_SIZE = 12_500;
 
 // Probe's nesting the corpus reaches around: 17.9.3's bound, 100 below the top
 const DEPTH_BOUND = 100;
@@ -669,6 +741,78 @@ const writerOf = (random) => {
       },
     ])();
   };
+  // a Shade's number as a writer may give one (spec 17.9.8): one its enum declares, one it does
+  // not, one past 31 bits, one past 32 bits whose low 32 bits it declares or not, one of ten
+  // bytes, or one in an overlong form
+  const shadeNumber = () => {
+    return pick([
+      () => {
+        return varint(pick([0, 1]));
+      },
+      () => {
+        return varint(pick([0, 1]));
+      },
+      () => {
+        return varint(pick([2, 5, 127, 128]));
+      },
+      () => {
+        return varint(pick([2 ** 31, 2 ** 32 - 1]));
+      },
+      () => {
+        return varint(pick([1n << 32n, (1n << 32n) + 1n, (1n << 32n) + 5n]));
+      },
+      () => {
+        return varint(pick([(1n << 64n) - 1n, (1n << 63n) + 1n]));
+      },
+      () => {
+        return [pick([0x80, 0x81, 0x85]), 0x00];
+      },
+    ])();
+  };
+  // a Needs (spec 17.9.7), its records in any order: each field it requires given, now and then
+  // twice, or left out; its `must` now and then past 32 bits; an unknown field now and then
+  const needs = (faults) => {
+    const parts = [];
+
+    for (const field of [1, 2]) {
+      const given = chance(0.95) ? 1 + Number(chance(0.2)) : 0;
+
+      for (let index = 0; index < given; index += 1) {
+        const value =
+          field === 2
+            ? chance(0.6)
+              ? varint(pick([0, 1]))
+              : shadeNumber()
+            : varint(chance(0.9) ? below(2 ** 32) : (1n << 32n) + BigInt(below(2 ** 32)));
+
+        parts.push(record(field, VARINT, value, faults));
+      }
+    }
+
+    if (chance(0.2)) {
+      parts.push(unknownField(faults));
+    }
+
+    // * in any order, shuffled by the corpus's own numbers (Fisher and Yates)
+    for (let index = parts.length - 1; index > 0; index -= 1) {
+      const other = below(index + 1);
+
+      [parts[index], parts[other]] = [parts[other], parts[index]];
+    }
+
+    return parts.flat();
+  };
+  // an entry of `tallies`, a map of scalars: its key and its value each now and then left out or
+  // at its default, its value now and then before its key, an unknown field in it now and then
+  const tally = (faults) => {
+    const key = chance(0.85) ? record(1, LEN, text(), faults) : [];
+    const value = chance(0.85)
+      ? record(2, VARINT, varint(chance(0.2) ? 0 : below(2 ** 32)), faults)
+      : [];
+    const entry = chance(0.3) ? [...value, ...key] : [...key, ...value];
+
+    return record(16, LEN, chance(0.1) ? [...entry, ...unknownField(0)] : entry, faults);
+  };
   // a Probe `depth` below the top, its records in any order, some repeated
   const probe = (depth, faults) => {
     const parts = [];
@@ -715,6 +859,20 @@ const writerOf = (random) => {
             return nested ? record(13, SGROUP, probe(depth + 1, faults), faults) : [];
           },
           () => {
+            return record(7, LEN, needs(faults), faults);
+          },
+          () => {
+            return Array.from({ length: 1 + below(3) }, () => {
+              return record(8, LEN, needs(faults), faults);
+            }).flat();
+          },
+          () => {
+            return record(14, VARINT, shadeNumber(), faults);
+          },
+          () => {
+            return tally(faults);
+          },
+          () => {
             return unknownField(faults);
           },
         ])()
@@ -723,33 +881,69 @@ const writerOf = (random) => {
 
     return parts.flat();
   };
-  // a Probe nested `levels` deep, each level a child, a map's value or a group
-  const deep = (levels) => {
-    let inner = probe(DEPTH_BOUND, 0);
+  // `bytes`' records written again, each now and then with a fault as `record` puts one in, its
+  // value kept; bytes that do not read as records, as they are
+  const refaulted = (bytes, faults) => {
+    const records = recordsOf(bytes);
+
+    if (records === undefined) {
+      return [...bytes];
+    }
+
+    return records.flatMap(({ field, wireType, whole, payload }) => {
+      // * a tag ends at its first byte under 0x80, however long its form
+      const value = payload ?? whole.subarray(whole.findIndex((byte) => byte < 0x80) + 1);
+
+      return record(field, wireType, [...value], faults);
+    });
+  };
+  // a Probe nested `levels` deep, each level a child, a map's value or a group, `inner` the
+  // innermost
+  const deep = (levels, inner = probe(DEPTH_BOUND, 0)) => {
+    let nested = [...inner];
 
     for (let level = 0; level < levels; level += 1) {
-      inner = pick([
+      nested = pick([
         () => {
-          return record(3, LEN, inner, 0);
+          return record(3, LEN, nested, 0);
         },
         () => {
           // * an entry and its value, two messages below the one that holds the map
-          return record(12, LEN, [...record(1, LEN, text(), 0), ...record(2, LEN, inner, 0)], 0);
+          return record(12, LEN, [...record(1, LEN, text(), 0), ...record(2, LEN, nested, 0)], 0);
         },
         () => {
-          return record(13, SGROUP, inner, 0);
+          return record(13, SGROUP, nested, 0);
         },
       ])();
     }
 
-    return inner;
+    return nested;
   };
 
-  return { below, chance, pick, probe, deep };
+  return { below, chance, pick, probe, refaulted, deep };
 };
 
-/** The corpus: `size` payloads of Probe from `seed`, each a byte array. */
-export const corpusOf = ({ seed = CORPUS_SEED, size = CORPUS_SIZE } = {}) => {
+/**
+ * The corpus's seeds from `spec/codecs.json`, parsed: the bytes of its `proto` payloads, but those
+ * a `differs` excuses a side from, which part by design.
+ */
+export const codecsSeedsOf = (codecs) => {
+  return codecs.payloads
+    .filter((entry) => {
+      return entry.encoding === 'proto' && entry.differs === undefined;
+    })
+    .map((entry) => {
+      return Uint8Array.from(Buffer.from(entry.bytes.replaceAll(/[\s|]/gu, ''), 'hex'));
+    });
+};
+
+/**
+ * The corpus: `size` payloads of Probe from `seed`, each a byte array; then each of `seeds` as it
+ * is and mutated by the same steps, drawn after them so the first `size` stay what the seed gives:
+ * its records written again with a fault now and then, cut short anywhere, a byte changed
+ * anywhere, and nested around the depth bound.
+ */
+export const corpusOf = ({ seed = CORPUS_SEED, size = CORPUS_SIZE, seeds = [] } = {}) => {
   const random = randomOf(seed);
   const writer = writerOf(random);
   const payloads = [];
@@ -782,6 +976,26 @@ export const corpusOf = ({ seed = CORPUS_SEED, size = CORPUS_SIZE } = {}) => {
     }
 
     payloads.push(Uint8Array.from(bytes));
+  }
+
+  for (const given of seeds) {
+    const changed = [...given];
+
+    if (changed.length > 0) {
+      changed[writer.below(changed.length)] = writer.below(256);
+    }
+
+    const mutated = [
+      given,
+      writer.refaulted(given, 0.08),
+      given.slice(0, writer.below(given.length + 1)),
+      changed,
+      writer.deep(DEPTH_BOUND / 2 - 5 + writer.below(DEPTH_BOUND / 2 + 10), given),
+    ].map((bytes) => {
+      return Uint8Array.from(bytes);
+    });
+
+    payloads.push(...mutated);
   }
 
   return payloads;
@@ -893,10 +1107,17 @@ const testeeOf = ({ command, args, cwd }) => {
   };
 };
 
-/** A side's verdict on one payload: `read` and the bytes written back, or `refused`. */
+/**
+ * A side's verdict on one payload: `read` and the bytes written back, `read` and its writing
+ * refused, as a writer refuses what its reader would (spec 17.2), or `refused`.
+ */
 export const verdictOf = (response) => {
   if (response.case === 'protobuf_payload') {
     return { read: true, written: response.value };
+  }
+
+  if (response.case === 'serialize_error') {
+    return { read: true, written: undefined };
   }
 
   if (response.case === 'parse_error') {
@@ -908,21 +1129,65 @@ export const verdictOf = (response) => {
   );
 };
 
-/** How two verdicts on one payload part, or nothing when they agree. */
-export const parting = (typescript, csharp) => {
-  if (typescript.read !== csharp.read) {
-    return typescript.read
-      ? 'TypeScript reads it, C# refuses it'
-      : 'C# reads it, TypeScript refuses it';
+/**
+ * How two sides' verdicts on one payload part, each side named by `names` in the same order, or
+ * nothing when they agree.
+ */
+export const parting = ([one, other], { names: [oneName, otherName] }) => {
+  if (one.read !== other.read) {
+    return one.read
+      ? `${oneName} reads it, ${otherName} refuses it`
+      : `${oneName} refuses it, ${otherName} reads it`;
   }
 
-  if (!typescript.read) {
+  if (!one.read) {
     return undefined;
   }
 
-  return canonicalProbe(typescript.written) === canonicalProbe(csharp.written)
+  if (one.written === undefined || other.written === undefined) {
+    if (one.written === other.written) {
+      return undefined;
+    }
+
+    return one.written === undefined
+      ? `both read it, ${oneName} refuses to write it back, ${otherName} writes ${hexOf(other.written)}`
+      : `both read it, ${oneName} writes ${hexOf(one.written)}, ${otherName} refuses to write it back`;
+  }
+
+  return canonicalProbe(one.written) === canonicalProbe(other.written)
     ? undefined
-    : `both read it and write back apart: TypeScript ${hexOf(typescript.written)}, C# ${hexOf(csharp.written)}`;
+    : `both read it and write back apart: ${oneName} ${hexOf(one.written)}, ${otherName} ${hexOf(other.written)}`;
+};
+
+/**
+ * Every side's verdict on one payload, read and its bytes, read and its writing refused, or
+ * refused, where any two of them part,
+ * or nothing when every pair agrees: one line, so two sides against one read as one parting.
+ */
+export const partingOfAll = (verdicts, { names }) => {
+  const parted = verdicts.some((one, index) => {
+    return verdicts.slice(index + 1).some((other, offset) => {
+      return (
+        parting([one, other], { names: [names[index], names[index + 1 + offset]] }) !== undefined
+      );
+    });
+  });
+
+  if (!parted) {
+    return undefined;
+  }
+
+  return verdicts
+    .map((verdict, index) => {
+      if (!verdict.read) {
+        return `${names[index]} refuses it`;
+      }
+
+      return verdict.written === undefined
+        ? `${names[index]} reads it, refusing to write it back`
+        : `${names[index]} reads it, writing back ${hexOf(verdict.written)}`;
+    })
+    .join('; ');
 };
 
 // ── Steps ─────────────────────────────────────────────────────────────────────
@@ -1133,35 +1398,43 @@ const suite = ({ side, runner, pin, protoc }) => {
   );
 };
 
-// the corpus through both testees, each payload's verdicts compared
+// the corpus through every side's testee, each payload's verdicts compared two by two
 const differential = async ({ runner, protoc }) => {
-  const testees = {};
-
-  for (const side of DIFFERENTIAL_SIDES.map((language) => {
+  const sides = DIFFERENTIAL_SIDES.map((language) => {
     return SIDES[language];
-  })) {
-    testees[side.language] = testeeOf(
-      testeeCommandOf({ side, work: generate({ side, runner, protoc }) })
-    );
-  }
-
+  });
+  const names = sides.map((side) => {
+    return side.name;
+  });
+  const testees = [];
   const partings = [];
-  const corpus = corpusOf();
+  const corpus = corpusOf({
+    seeds: codecsSeedsOf(JSON.parse(readFileSync(CODECS, 'utf8'))),
+  });
 
   try {
+    for (const side of sides) {
+      testees.push(testeeOf(testeeCommandOf({ side, work: generate({ side, runner, protoc }) })));
+    }
+
     for (const [index, payload] of corpus.entries()) {
       const request = requestOf(payload, 'bead.codecs.v1.Probe');
-      const typescript = verdictOf(responseOf(await testees.typescript.exchange(request)));
-      const csharp = verdictOf(responseOf(await testees.csharp.exchange(request)));
-      const parted = parting(typescript, csharp);
+      const verdicts = [];
+
+      for (const testee of testees) {
+        verdicts.push(verdictOf(responseOf(await testee.exchange(request))));
+      }
+
+      const parted = partingOfAll(verdicts, { names });
 
       if (parted !== undefined) {
         partings.push(`payload ${String(index)}, ${hexOf(payload)}: ${parted}`);
       }
     }
   } finally {
-    testees.typescript.close();
-    testees.csharp.close();
+    for (const testee of testees) {
+      testee.close();
+    }
   }
 
   if (partings.length > 0) {
@@ -1171,7 +1444,7 @@ const differential = async ({ runner, protoc }) => {
   }
 
   process.stdout.write(
-    `protobuf-conformance: both sides read ${String(corpus.length)} payloads alike\n`
+    `protobuf-conformance: every side reads ${String(corpus.length)} payloads alike\n`
   );
 };
 

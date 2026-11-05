@@ -1,8 +1,14 @@
 //! `spec/vectors.json` played: a trial per entry, named by its own name, its group its kind; every
 //! group but those ahead, each named by its read.
 
+use std::collections::BTreeMap;
 use std::process::ExitCode;
 
+use bead::internal::{
+    MAXIMUM_DETAIL_BYTES, ReadEnvelopeOptions, ReadHeader, header_bytes_of, read_envelope,
+    read_failure, read_header, read_prefix, verify_jwt, write_envelope, write_header,
+};
+use bead::json::JsonRefusal;
 use bead::testing::instants;
 use bead::testing::parcels::{self, ParcelReading, ParcelRefusalVector, ParcelVector};
 use bead::testing::vectors::{
@@ -11,17 +17,16 @@ use bead::testing::vectors::{
 };
 use bead::{
     Failure, FailureOrigin, FailureScope, JwtAgainst, JwtAlgorithm, JwtKey, JwtSessionIdentifier,
-    JwtVerdict, MAXIMUM_DETAIL_BYTES, ReadEnvelopeOptions, ReadHeader, RouterSide, header_bytes_of,
-    json, read_envelope, read_failure, read_header, read_prefix, verify_jwt, write_envelope,
-    write_header,
+    JwtVerdict, RouterSide, json,
 };
 use std::sync::Arc;
 
+use bead::internal::Envelope;
 use bead::testing::SteppingClock;
 use bead::{
     AccessRefusal, AccessRefusalStage, BoxFuture, ConnectionHandle, Credential, CredentialScheme,
-    Credentials, ElsewhereSession, ElsewhereVerdict, Envelope, JsonCodec, Procedure, RequestHeader,
-    ResolverDependencies, RouterError, Sent, Server, ServerListener, ServerOptions,
+    Credentials, ElsewhereSession, ElsewhereVerdict, JsonCodec, Procedure, RequestHeader,
+    RequestResolverDependencies, RouterError, Sent, Server, ServerListener, ServerOptions,
     ServerTransport, SessionToken, SharedClock, TransportMessage,
 };
 use bytes::Bytes;
@@ -58,13 +63,17 @@ fn hold<S: FnOnce() -> String>(holds: bool, said: S) -> Result<(), Failed> {
 }
 
 // a refusal of the protocol's, raised here by `side`, of `code`
-fn refused(failure: &Failure, (code, side): (u16, RouterSide)) -> Result<(), Failed> {
+fn refused(
+    failure: &Failure,
+    (code, side, detail): (u16, RouterSide, Option<&str>),
+) -> Result<(), Failed> {
     hold(
         failure.code().get() == code
             && failure.scope() == FailureScope::Protocol
             && failure.origin() == FailureOrigin::Local
-            && failure.side() == Some(side),
-        || format!("refused with {failure:?}, not code {code} of the {side}"),
+            && failure.side() == Some(side)
+            && detail.is_none_or(|detail| failure.detail() == detail),
+        || format!("refused with {failure:?}, not code {code} of the {side}, detail {detail:?}"),
     )
 }
 
@@ -161,7 +170,10 @@ fn prefixes() -> Result<Vec<Trial>, String> {
 
             match read_prefix(&bytes, RouterSide::Client) {
                 Ok(prefix) => Err(format!("read {prefix:?}").into()),
-                Err(failure) => refused(&failure, (vector.code, RouterSide::Client)),
+                Err(failure) => refused(
+                    &failure,
+                    (vector.code, RouterSide::Client, vector.detail.as_deref()),
+                ),
             }
         })
         .with_kind("prefixRefusals")
@@ -184,7 +196,10 @@ fn header_refusals() -> Result<Vec<Trial>, String> {
                 format!("a header's read refuses {}", vector.name),
                 move || match read_header(&vectors::bytes_of(&vector.bytes)?, RouterSide::Server) {
                     Ok(read) => Err(format!("read {read:?}").into()),
-                    Err(failure) => refused(&failure, (vector.code, RouterSide::Server)),
+                    Err(failure) => refused(
+                        &failure,
+                        (vector.code, RouterSide::Server, vector.detail.as_deref()),
+                    ),
                 },
             )
             .with_kind("headerRefusals")
@@ -231,7 +246,10 @@ fn envelopes() -> Result<Vec<Trial>, String> {
                 &options,
             ) {
                 Ok(read) => Err(format!("read {read:?}").into()),
-                Err(failure) => refused(&failure, (vector.code, RouterSide::Server)),
+                Err(failure) => refused(
+                    &failure,
+                    (vector.code, RouterSide::Server, vector.detail.as_deref()),
+                ),
             }
         })
         .with_kind("envelopeRefusals")
@@ -247,12 +265,14 @@ fn failures() -> Result<Vec<Trial>, String> {
         .into_iter()
         .map(|vector| {
             Trial::test(format!("reads {}", vector.name), move || {
+                let mut options = ReadEnvelopeOptions::default();
+
+                options.maximum_detail_bytes = vector.maximum_detail_bytes;
+
                 let record = read_failure(
                     &vectors::bytes_of(&vector.record)?,
-                    (
-                        RouterSide::Server,
-                        vector.maximum_detail_bytes.unwrap_or(MAXIMUM_DETAIL_BYTES),
-                    ),
+                    RouterSide::Server,
+                    &options,
                 )?;
                 let expected = vectors::record_of(&vector.failure)?;
 
@@ -267,10 +287,11 @@ fn failures() -> Result<Vec<Trial>, String> {
             format!("refuses {}", vector.name),
             move || match read_failure(
                 &vectors::bytes_of(&vector.record)?,
-                (RouterSide::Server, MAXIMUM_DETAIL_BYTES),
+                RouterSide::Server,
+                &ReadEnvelopeOptions::default(),
             ) {
                 Ok(read) => Err(format!("read {read:?}").into()),
-                Err(failure) => refused(&failure, (vector.code, RouterSide::Server)),
+                Err(failure) => refused(&failure, (vector.code, RouterSide::Server, None)),
             },
         )
         .with_kind("failureRefusals")
@@ -362,12 +383,30 @@ fn jwt_verdicts() -> Result<Vec<Trial>, String> {
                             now: &move || now,
                         },
                     )?;
-                    // * compared as their canonical forms, so a number is the double it stands for
-                    let got = json::write(&verdict_json(&verdict))?;
-                    let expected = json::write(&Value::Object(vector.verdict))?;
+                    // * compared member by member, each in its canonical form, so a number is the
+                    // double it stands for, and a claims set nested 64 deep, as a token's may be,
+                    // is written whole below no level of the verdict's own
+                    let canonical = |verdict: Map<String, Value>| {
+                        verdict
+                            .into_iter()
+                            .map(|(name, value)| Ok((name, json::write(&value)?)))
+                            .collect::<Result<BTreeMap<String, Vec<u8>>, JsonRefusal>>()
+                    };
+                    let Value::Object(given) = verdict_json(&verdict) else {
+                        return Err("a verdict is an object".into());
+                    };
+                    let got = canonical(given)?;
+                    let expected = canonical(vector.verdict)?;
 
                     hold(got == expected, || {
-                        format!("gave {}", String::from_utf8_lossy(&got))
+                        let written = got
+                            .iter()
+                            .map(|(name, value)| {
+                                format!("{name:?}: {}", String::from_utf8_lossy(value))
+                            })
+                            .collect::<Vec<String>>();
+
+                        format!("gave {{{}}}", written.join(", "))
                     })
                 },
             )
@@ -442,6 +481,11 @@ impl ServerTransport for Recording {
     fn unlisten(&self, listener: &Arc<dyn ServerListener>) {
         locked(&self.listeners).retain(|held| !Arc::ptr_eq(held, listener));
     }
+
+    // a pause holds nothing here: a vector hands a few envelopes, far under any bound
+    fn pause(&self, _connection_handle: &ConnectionHandle) {}
+
+    fn resume(&self, _connection_handle: &ConnectionHandle) {}
 
     fn is_secure(&self, _connection_handle: &ConnectionHandle) -> bool {
         true
@@ -526,7 +570,7 @@ async fn refused_credential(vector: &CredentialRefusalVector) -> Result<(), Fail
         let settled = (situation == "end-come").then(|| ElsewhereSession {
             id: "ada".to_owned(),
             data: Some(Value::String("ada".to_owned())),
-            end: Some(ended_at),
+            end: Value::from(ended_at).as_f64(),
         });
 
         credentials.verify = Some(Arc::new(
@@ -556,17 +600,20 @@ async fn refused_credential(vector: &CredentialRefusalVector) -> Result<(), Fail
 
     let echo = Procedure {
         service_id: 1,
-        id: 1,
+        procedure_id: 1,
         service_revision: 1,
-        name: "echo".to_owned(),
-        kind: Some(bead::ProcedureKind::Request),
+        procedure_name: "echo".to_owned(),
+        procedure_kind: Some(bead::ProcedureKind::Request),
         maximum_payload_bytes: None,
         deprecation: None,
     };
 
     server
         .services()
-        .get_request_resolver(&echo, ResolverDependencies::of(JsonCodec, JsonCodec))?
+        .get_request_resolver(
+            &echo,
+            RequestResolverDependencies::new(JsonCodec, JsonCodec),
+        )?
         .on(Arc::new(|request, response: bead::Response<JsonCodec>| {
             response.result(request.payload)
         }))?;
@@ -594,20 +641,22 @@ async fn refused_credential(vector: &CredentialRefusalVector) -> Result<(), Fail
             scheme,
             bytes: Bytes::new(),
         },
-        _ => Credential::Elsewhere,
+        "nothing-carried" | "no-verifier" | "verifier-makes-none" | "end-come" => {
+            Credential::Elsewhere
+        }
+        other => {
+            return Err(format!("{other} is no credential situation this player plays").into());
+        }
     };
     let carried = (situation != "nothing-carried").then(|| "Interop sub=ada".to_owned());
     let data = echo_presenting(credential)?;
 
     transport.tell(|listener| {
-        listener.on_message(
-            TransportMessage {
-                data: data.clone(),
-                credential: carried.clone(),
-                ..TransportMessage::default()
-            },
-            &first,
-        );
+        let mut message = TransportMessage::default();
+
+        message.data = data.clone();
+        message.credential.clone_from(&carried);
+        listener.on_message(message, &first);
     });
     clock.settle().await;
 

@@ -1,10 +1,13 @@
-//! `bead-bench`, the Rust side's in-memory bench (decision 0036): calls of the interop service's
-//! echo on one in-memory connection kept, and exchanges, each a client and its connection drawn,
-//! called once and closed, at each size, its latencies and its throughput, written as
-//! `bead-bench/1` for `tools/bench-compare.mjs`.
+//! `bead-bench`, the Rust side's in-memory bench (decision 0036): the envelope's codec, a request
+//! written and read back, and calls of the interop service's echo on one in-memory connection
+//! kept, and exchanges, each a client and its connection drawn, called once and closed, at each
+//! size, its latencies and its throughput, written as `bead-bench/1` for `tools/bench-compare.mjs`.
 //!
 //! `cargo run --release --locked --manifest-path benches/Cargo.toml -- [--runs 3] [--seconds 3]
 //! [--json] [--filter id-or-name]`
+//!
+//! `-- --scale` measures instead how a message's cost holds as the connections a server holds grow,
+//! and fails when it does not hold flat.
 
 #![expect(
     clippy::print_stdout,
@@ -22,13 +25,17 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use bead::internal::{Envelope, ReadEnvelopeOptions, read_envelope, write_envelope};
 use bead::{
-    Client, ClientOptions, MemoryClient, MemoryClientOptions, MemoryConnectOptions, MemoryServer,
-    MemoryServerOptions, Procedure, RequestDependencies, RequestOptions, Server, ServerOptions,
+    Client, ClientOptions, MemoryTransportClient, MemoryTransportClientConnectOptions,
+    MemoryTransportClientOptions, MemoryTransportServer, MemoryTransportServerOptions, Procedure,
+    RequestDependencies, RequestHeader, RequestOptions, RouterSide, Server, ServerOptions,
     ServerTransport,
 };
 use bead_interop::{interop_procedures, offer_interop};
 use serde_json::{Value, json};
+
+mod scale;
 
 // the calls a throughput keeps under way at once
 const CONCURRENCY: usize = 32;
@@ -42,9 +49,18 @@ const MEMORY_CALLS: u64 = 2_000;
 // the calls a measure warms up on
 const WARM_UP: usize = 500;
 
-/// How a run goes: its runs, the seconds of each measure, the report as JSON, and the measure it
-/// keeps to.
+// a codec's rounds of warm-up, and the rounds it times at once, as the other sides' benches take
+// them
+const CODEC_WARM_UP: u32 = 5_000;
+const CODEC_BATCH: u32 = 1_000;
+
+// the bytes of a failure's detail an envelope written keeps, as the other sides' benches write it
+const DETAIL_BYTES: usize = 1_024;
+
+/// How a run goes: its runs, the seconds of each measure, the report as JSON, the measure it keeps
+/// to, or the scale alone.
 struct Options {
+    scale: bool,
     runs: u32,
     seconds: u64,
     json: bool,
@@ -53,6 +69,7 @@ struct Options {
 
 fn options_of(arguments: &[String]) -> Result<Options, String> {
     let mut options = Options {
+        scale: false,
         runs: 3,
         seconds: 3,
         json: false,
@@ -63,6 +80,7 @@ fn options_of(arguments: &[String]) -> Result<Options, String> {
     while let Some(flag) = given.next() {
         match flag.as_str() {
             "--json" => options.json = true,
+            "--scale" => options.scale = true,
             "--runs" | "--seconds" => {
                 let value: u32 = given
                     .next()
@@ -100,9 +118,19 @@ fn options_of(arguments: &[String]) -> Result<Options, String> {
 /// One measure, by its identity, and its samples, one a run.
 struct Measure {
     name: String,
+    transport: &'static str,
     size_bytes: usize,
     unit: &'static str,
     samples: Vec<f64>,
+}
+
+// the transport of a measure named `name`: none for the codec's, the in-memory one for a call's
+fn transport_of(name: &str) -> &'static str {
+    if name.starts_with("codec.") {
+        "none"
+    } else {
+        "memory"
+    }
 }
 
 #[derive(Default)]
@@ -113,7 +141,7 @@ struct Measures {
 
 impl Measures {
     fn id_of((name, size_bytes): (&str, usize)) -> String {
-        format!("local.memory.{size_bytes}.{name}")
+        format!("local.{}.{size_bytes}.{name}", transport_of(name))
     }
 
     fn is_selected(&self, (name, size_bytes): (&str, usize)) -> bool {
@@ -131,6 +159,7 @@ impl Measures {
             .entry(Self::id_of((name, size_bytes)))
             .or_insert_with(|| Measure {
                 name: name.to_owned(),
+                transport: transport_of(name),
                 size_bytes,
                 unit,
                 samples: Vec::new(),
@@ -179,15 +208,15 @@ fn double_of(count: usize) -> f64 {
 
 /// The interop service on an in-memory server, and a client of it connected.
 struct Stand {
-    memory: MemoryServer,
+    memory: MemoryTransportServer,
     server: Server,
     client: Client,
     echo: Procedure,
 }
 
 async fn stand() -> Result<Stand, String> {
-    let memory =
-        MemoryServer::new(&MemoryServerOptions::default()).map_err(|error| error.to_string())?;
+    let memory = MemoryTransportServer::new(&MemoryTransportServerOptions::default())
+        .map_err(|error| error.to_string())?;
     let server = Server::new(Arc::new(memory.clone()), &ServerOptions::default())
         .map_err(|error| error.to_string())?;
 
@@ -210,14 +239,16 @@ async fn stand() -> Result<Stand, String> {
 }
 
 // a client of `memory`, connected, and its transport
-async fn connected(memory: &MemoryServer) -> Result<(Client, MemoryClient), String> {
-    let transport = MemoryClient::new(&MemoryClientOptions::of(memory.clone()))
+async fn connected(
+    memory: &MemoryTransportServer,
+) -> Result<(Client, MemoryTransportClient), String> {
+    let transport = MemoryTransportClient::new(&MemoryTransportClientOptions::default())
         .map_err(|error| error.to_string())?;
     let client = Client::new(Arc::new(transport.clone()), &ClientOptions::default())
         .map_err(|error| error.to_string())?;
 
     transport
-        .connect(MemoryConnectOptions::default())
+        .connect(&MemoryTransportClientConnectOptions::new(memory.clone()))
         .await
         .map_err(|error| error.to_string())?;
 
@@ -229,10 +260,10 @@ async fn echo_on(client: &Client, (echo, body): (&Procedure, &str)) -> Result<()
         .services()
         .get_request(
             echo,
-            RequestDependencies::of(bead::JsonCodec, bead::JsonCodec),
+            RequestDependencies::new(bead::JsonCodec, bead::JsonCodec),
         )
         .map_err(|error| error.to_string())?
-        .call(Value::from(body), RequestOptions::default())
+        .call(Value::from(body), &RequestOptions::default())
         .map_err(|error| error.to_string())?
         .await
         .map(drop)
@@ -253,6 +284,70 @@ async fn once(stand: &Stand, (body, is_exchange): (&str, bool)) -> Result<(), St
     transport.close();
 
     called
+}
+
+// ns a round of `once` takes, timed in batches over `seconds` after its warm-up, as the other
+// sides' benches time a codec
+fn codec<F: FnMut() -> Result<(), String>>(mut once: F, seconds: u64) -> Result<f64, String> {
+    for _ in 0..CODEC_WARM_UP {
+        once()?;
+    }
+
+    let span = Duration::from_secs(seconds);
+    let mut rounds = 0_u32;
+    let started = Instant::now();
+
+    while started.elapsed() < span {
+        for _ in 0..CODEC_BATCH {
+            once()?;
+        }
+
+        rounds = rounds.saturating_add(CODEC_BATCH);
+    }
+
+    Ok(started.elapsed().as_secs_f64() * 1_000_000_000.0 / f64::from(rounds.max(1)))
+}
+
+// the envelope's codec: a request of `size_bytes` written and read back, as a server reads it
+fn codecs((measures, size_bytes, seconds): (&mut Measures, usize, u64)) -> Result<(), String> {
+    if !measures.is_selected(("codec.roundTrip", size_bytes)) {
+        return Ok(());
+    }
+
+    let envelope = Envelope::Request {
+        header: RequestHeader {
+            call_id: 1,
+            service_id: 1,
+            procedure_id: 1,
+            destination_id: Some(1),
+            opens_subscription: false,
+            paced: false,
+            total: None,
+            credential: None,
+        },
+        payload: vec![0; size_bytes].into(),
+    };
+    let options = ReadEnvelopeOptions::default();
+
+    eprintln!("codec local/none/{size_bytes} codec.roundTrip");
+
+    let nanoseconds = codec(
+        || {
+            let written =
+                write_envelope(&envelope, DETAIL_BYTES).map_err(|error| error.to_string())?;
+            let read = read_envelope(&written, RouterSide::Server, &options)
+                .map_err(|failure| failure.to_string())?;
+
+            std::hint::black_box(read);
+
+            Ok(())
+        },
+        seconds,
+    )?;
+
+    measures.record(("codec.roundTrip", size_bytes), (nanoseconds, "ns"));
+
+    Ok(())
 }
 
 // one measure's latencies and its throughput, into `measures`
@@ -380,7 +475,7 @@ fn report_of((options, measures): (&Options, &Measures)) -> Result<Value, String
                 "id": id,
                 "name": row.name,
                 "scenario": "local",
-                "transport": "memory",
+                "transport": row.transport,
                 "sizeBytes": row.size_bytes,
                 "unit": row.unit,
                 "direction": if row.unit.ends_with("/s") { "higher" } else { "lower" },
@@ -433,6 +528,11 @@ fn report_of((options, measures): (&Options, &Measures)) -> Result<Value, String
 async fn main() -> Result<(), String> {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     let options = options_of(&arguments)?;
+
+    if options.scale {
+        return scale::scale().await;
+    }
+
     let stand = Arc::new(stand().await?);
     let mut measures = Measures {
         filter: options.filter.clone(),
@@ -443,6 +543,8 @@ async fn main() -> Result<(), String> {
         eprintln!("run {run}/{}", options.runs);
 
         for size_bytes in SIZES {
+            codecs((&mut measures, size_bytes, options.seconds))?;
+
             for is_exchange in [false, true] {
                 measure(
                     (&stand, &mut measures),

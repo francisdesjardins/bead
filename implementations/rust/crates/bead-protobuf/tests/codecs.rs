@@ -5,30 +5,26 @@
 //! dynamic codec always. `needs set to no field` and `needs with a shade its enum does not declare`
 //! no `Probe` holds, as the row `A proto value that leaves a required field unset or holds a closed
 //! enum's undeclared number, given to a typed writer` says: the dynamic codec alone is given them.
-//! The core's player, `bead/tests/codecs.rs`, plays the other encodings.
+//! A chain, `nested`, `entries` or `delimited`, is built from its deepest `Probe` up, in both forms.
+//! The core's player, `bead/tests/codecs.rs`, plays the other encodings. Every refusal is a
+//! [`CodecRefusal`], the codec trait's error, as the other sides' players hold theirs to its type,
+//! its reason the entry's, exactly (spec 17.2): a codec that panics refuses nothing, and fails its
+//! trial.
 
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use bead::PayloadCodec;
-use bead::testing::{files, hexadecimal};
+use bead::testing::{Difference, files, hexadecimal, is_excused};
+use bead::{CodecRefusal, PayloadCodec};
 use bead_protobuf::testing::codecs::descriptor_pool;
 use bead_protobuf::testing::codecs::{Needs, Probe, Shade};
 use bead_protobuf::{DynamicCodec, ProtoCodec};
 use buffa::{Enumeration, MessageField};
-use buffa_descriptor::reflect::{DynamicMessage, ReflectMessageMut, Value as Field};
+use buffa_descriptor::reflect::{DynamicMessage, MapKey, ReflectMessageMut, Value as Field};
 use bytes::Bytes;
 use libtest_mimic::{Arguments, Failed, Trial};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
-
-/// A row of `docs/support.md` an entry crosses, and the language it excuses.
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Differs {
-    row: String,
-    language: String,
-}
 
 /// Bytes read in an encoding, and what its reader makes of them.
 #[derive(Debug, Deserialize)]
@@ -43,7 +39,7 @@ struct Payload {
     _written: Option<String>,
     refused: Option<String>,
     read: Option<Value>,
-    differs: Option<Vec<Differs>>,
+    differs: Option<Vec<Difference>>,
 }
 
 /// A `Needs` given to a writer, each of its required fields where it is given.
@@ -54,7 +50,9 @@ struct NeedsGiven {
     shade: Option<i32>,
 }
 
-/// A `Probe` given to a writer, one field set or none: its text as UTF-16 code units.
+/// A `Probe` given to a writer, one field set or none, its text as UTF-16 code units; or a chain of
+/// that many `Probe`s below it, through `child`, `children` or `delimited`, the deepest tallied
+/// where it says so.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ProbeGiven {
@@ -62,6 +60,28 @@ struct ProbeGiven {
     number: Option<u32>,
     child: Option<Map<String, Value>>,
     needs: Option<NeedsGiven>,
+    nested: Option<usize>,
+    entries: Option<usize>,
+    delimited: Option<usize>,
+    tallied: Option<bool>,
+}
+
+/// How a chain holds the next `Probe`.
+#[derive(Debug, Clone, Copy)]
+enum Link {
+    Child,
+    Entry,
+    Group,
+}
+
+impl ProbeGiven {
+    // the chain it gives, how it links and how many below the top; none for a Probe of one field
+    fn chain(&self) -> Option<(Link, usize)> {
+        self.nested
+            .map(|count| (Link::Child, count))
+            .or_else(|| self.entries.map(|count| (Link::Entry, count)))
+            .or_else(|| self.delimited.map(|count| (Link::Group, count)))
+    }
 }
 
 /// A value given to a writer: a `Probe` alone is a `proto` one.
@@ -85,7 +105,7 @@ struct Written {
     value: Given,
     written: Option<String>,
     refused: Option<String>,
-    differs: Option<Vec<Differs>>,
+    differs: Option<Vec<Difference>>,
 }
 
 /// The file whole.
@@ -100,15 +120,6 @@ struct Codecs {
     _spec_version: String,
     payloads: Vec<Payload>,
     values: Vec<Written>,
-}
-
-// whether an entry's differs excuses the Rust side
-fn is_excused(differs: Option<&Vec<Differs>>) -> bool {
-    differs.is_some_and(|differs| {
-        differs
-            .iter()
-            .any(|differs| differs.language == "Rust" && !differs.row.is_empty())
-    })
 }
 
 fn bytes_of(text: &str) -> Result<Bytes, Failed> {
@@ -138,7 +149,8 @@ fn string_of(units: &str) -> Result<String, Failed> {
 
 // ── What was read, as the file writes it ──────────────────────────────────────
 
-// how deep messages nest below a Probe: a child and a group one each, a map's entry and its value two
+// how deep messages nest below a Probe: a child and a group one each, a map's entry and its value two,
+// a scalar map's entry one
 fn nested_of(probe: &Probe) -> u64 {
     let child = probe
         .child
@@ -153,10 +165,13 @@ fn nested_of(probe: &Probe) -> u64 {
         .values()
         .map(|value| nested_of(value).saturating_add(2));
 
+    let tallies = (!probe.tallies.is_empty()).then_some(1);
+
     child
         .into_iter()
         .chain(delimited)
         .chain(children)
+        .chain(tallies)
         .max()
         .unwrap_or(0)
 }
@@ -218,21 +233,17 @@ fn dynamic() -> Result<DynamicCodec, Failed> {
     Ok(DynamicCodec::new(Arc::clone(pool), index))
 }
 
-// what each codec reads of a payload, or why it refuses it: the dynamic message read as a Probe
-fn reads_of(bytes: &Bytes) -> Result<[Result<Value, String>; 2], Failed> {
-    let by_type = typed()
-        .decode(bytes)
-        .map(|probe| read_of(&probe))
-        .map_err(|refusal| refusal.to_string());
-    let by_descriptor = dynamic()?
-        .decode(bytes)
-        .map_err(|refusal| refusal.to_string())
-        .and_then(|message| {
-            message
+// what each codec reads of a payload, or its refusal: the dynamic message read as a Probe
+fn reads_of(bytes: &Bytes) -> Result<[Result<Value, CodecRefusal>; 2], Failed> {
+    let by_type = typed().decode(bytes).map(|probe| read_of(&probe));
+    let by_descriptor = match dynamic()?.decode(bytes) {
+        Ok(message) => Ok(read_of(
+            &message
                 .to_message::<Probe>()
-                .map(|probe| read_of(&probe))
-                .map_err(|error| error.to_string())
-        });
+                .map_err(|error| error.to_string())?,
+        )),
+        Err(refusal) => Err(refusal),
+    };
 
     Ok([by_type, by_descriptor])
 }
@@ -242,7 +253,14 @@ fn play_payload(payload: &Payload) -> Result<(), Failed> {
 
     for (codec, read) in ["typed", "dynamic"].into_iter().zip(reads_of(&bytes)?) {
         match (&payload.refused, &payload.read, read) {
-            (Some(_), _, Err(_)) => {}
+            // * a refusal, a CodecRefusal, its reason the entry's
+            (Some(reason), _, Err(refusal)) if refusal.reason() == reason => {}
+            (Some(reason), _, Err(refusal)) => {
+                return Err(format!(
+                    "the {codec} codec refused it, saying {refusal:?}, where it says {reason:?}"
+                )
+                .into());
+            }
             (Some(reason), _, Ok(read)) => {
                 return Err(format!(
                     "the {codec} codec read {read}, where it is refused: {reason}"
@@ -265,9 +283,38 @@ fn play_payload(payload: &Payload) -> Result<(), Failed> {
     Ok(())
 }
 
+// a chain's top Probe, `count` below it linked as `link` says, the deepest tallied where `tallied`
+fn typed_chain((link, count): (Link, usize), tallied: bool) -> Probe {
+    let mut probe = Probe::default();
+
+    if tallied {
+        probe.tallies.insert("a".to_owned(), 1);
+    }
+
+    for _ in 0..count {
+        let mut above = Probe::default();
+
+        match link {
+            Link::Child => above.child = MessageField::some(probe),
+            Link::Entry => {
+                above.children.insert(String::new(), probe);
+            }
+            Link::Group => above.delimited = MessageField::some(probe),
+        }
+
+        probe = above;
+    }
+
+    probe
+}
+
 // the Probe the typed form holds of a value, where it holds it: a Needs's every required field
 // given, and a shade its enum declares
 fn probe_of(given: &ProbeGiven) -> Result<Option<Probe>, Failed> {
+    if let Some(chain) = given.chain() {
+        return Ok(Some(typed_chain(chain, given.tallied.unwrap_or(false))));
+    }
+
     let mut probe = Probe::default();
 
     if let Some(text) = &given.text {
@@ -300,8 +347,55 @@ fn probe_of(given: &ProbeGiven) -> Result<Option<Probe>, Failed> {
     Ok(Some(probe))
 }
 
+// a chain's top Probe as a dynamic message, as typed_chain builds it
+fn dynamic_chain(
+    ((link, count), tallied): ((Link, usize), bool),
+    codec: &DynamicCodec,
+) -> Result<DynamicMessage, Failed> {
+    let pool = codec.schema().pool();
+    let probe = pool.message(codec.schema().message());
+    let field = |name: &str| {
+        probe
+            .field_by_name(name)
+            .ok_or_else(|| format!("no Probe.{name}"))
+    };
+    let empty = || DynamicMessage::new(Arc::clone(pool), codec.schema().message());
+    let mut message = empty();
+
+    if tallied {
+        message.set(
+            field("tallies")?,
+            Field::Map(core::iter::once((MapKey::String("a".to_owned()), Field::U32(1))).collect()),
+        );
+    }
+
+    for _ in 0..count {
+        let mut above = empty();
+
+        match link {
+            Link::Child => above.set(field("child")?, Field::Message(message)),
+            Link::Entry => above.set(
+                field("children")?,
+                Field::Map(
+                    core::iter::once((MapKey::String(String::new()), Field::Message(message)))
+                        .collect(),
+                ),
+            ),
+            Link::Group => above.set(field("delimited")?, Field::Message(message)),
+        }
+
+        message = above;
+    }
+
+    Ok(message)
+}
+
 // the dynamic message of a value, by Probe's descriptor: each field given set, and none other
 fn message_of(given: &ProbeGiven, codec: &DynamicCodec) -> Result<DynamicMessage, Failed> {
+    if let Some(chain) = given.chain() {
+        return dynamic_chain((chain, given.tallied.unwrap_or(false)), codec);
+    }
+
     let pool = codec.schema().pool();
     let probe = pool.message(codec.schema().message());
     let field = |name: &str| {
@@ -366,27 +460,25 @@ fn play_value(entry: &Written) -> Result<(), Failed> {
         .as_ref()
         .ok_or("a proto writer is given a Probe")?;
     let codec = dynamic()?;
-    let mut written = vec![(
-        "dynamic",
-        codec
-            .encode(&message_of(given, &codec)?)
-            .map_err(|refusal| refusal.to_string()),
-    )];
+    let mut written: Vec<(&str, Result<Bytes, CodecRefusal>)> =
+        vec![("dynamic", codec.encode(&message_of(given, &codec)?))];
 
     if let Some(probe) = probe_of(given)? {
-        written.push((
-            "typed",
-            typed()
-                .encode(&probe)
-                .map_err(|refusal| refusal.to_string()),
-        ));
+        written.push(("typed", typed().encode(&probe)));
     } else if entry.refused.is_none() {
         return Err("a value the typed form cannot hold, which is written".into());
     }
 
     for (codec, written) in written {
         match (&entry.refused, &entry.written, written) {
-            (Some(_), _, Err(_)) => {}
+            // * a refusal, a CodecRefusal, its reason the entry's
+            (Some(reason), _, Err(refusal)) if refusal.reason() == reason => {}
+            (Some(reason), _, Err(refusal)) => {
+                return Err(format!(
+                    "the {codec} codec refused it, saying {refusal:?}, where it says {reason:?}"
+                )
+                .into());
+            }
             (Some(reason), _, Ok(written)) => {
                 return Err(format!(
                     "the {codec} codec wrote {written:02X?}, where it is refused: {reason}"
@@ -411,19 +503,74 @@ fn play_value(entry: &Written) -> Result<(), Failed> {
 
 // ── Buffa's own forms, where Bead states no rule ──────────────────────────────
 
-// a matrix row: the empty key written, as the TypeScript side writes it, where Google.Protobuf
-// leaves it out as any field at its default
-fn a_proto_map_s_entry_its_key_at_its_default_as_buffa_writes_it() -> Result<(), Failed> {
-    let mut probe = Probe::default();
+// a matrix row: the empty key and the value 0 written, as the TypeScript side writes them, where
+// Google.Protobuf leaves each out as any field at its default
+fn a_proto_map_s_entry_its_key_or_its_value_at_its_default_as_buffa_writes_it() -> Result<(), Failed>
+{
+    let mut keyed = Probe::default();
+    let mut valued = Probe::default();
 
-    probe.children.insert(String::new(), Probe::default());
+    keyed.children.insert(String::new(), Probe::default());
+    valued.tallies.insert("a".to_owned(), 0);
 
+    for (probe, expected) in [
+        (keyed, "62 04 0A 00 12 00"),
+        (valued, "82 01 05 0A 01 61 10 00"),
+    ] {
+        let written = typed()
+            .encode(&probe)
+            .map_err(|refusal| refusal.to_string())?;
+
+        if written != bytes_of(expected)? {
+            return Err(format!("wrote {written:02X?}, where {expected} is Buffa's form").into());
+        }
+    }
+
+    Ok(())
+}
+
+// a matrix row: the entries read back, order aside, since hashbrown writes them in an order of its
+// own on each run, where the TypeScript side writes integer keys first and the C# side the order
+// read; each written entry one of those given, none twice
+fn a_proto_map_s_entries_in_the_order_its_library_writes_them() -> Result<(), Failed> {
+    // * tallies keyed b, 1, a, 0, in that order, each entry of 8 bytes
+    let entries = [
+        "82 01 05 0A 01 62 10 01",
+        "82 01 05 0A 01 31 10 02",
+        "82 01 05 0A 01 61 10 03",
+        "82 01 05 0A 01 30 10 04",
+    ];
+    let read = typed()
+        .decode(&bytes_of(&entries.join(" "))?)
+        .map_err(|refusal| refusal.to_string())?;
     let written = typed()
-        .encode(&probe)
+        .encode(&read)
+        .map_err(|refusal| refusal.to_string())?;
+    let mut left = entries
+        .iter()
+        .map(|entry| bytes_of(entry))
+        .collect::<Result<Vec<Bytes>, Failed>>()?;
+    let mut rest: &[u8] = &written;
+
+    while let Some((entry, after)) = rest.split_at_checked(8) {
+        let Some(at) = left.iter().position(|each| each.as_ref() == entry) else {
+            return Err(format!("wrote {written:02X?}, an entry not given among them").into());
+        };
+
+        left.remove(at);
+        rest = after;
+    }
+
+    if !rest.is_empty() || !left.is_empty() {
+        return Err(format!("wrote {written:02X?}, not the entries given").into());
+    }
+
+    let again = typed()
+        .decode(&written)
         .map_err(|refusal| refusal.to_string())?;
 
-    if written != bytes_of("62 04 0A 00 12 00")? {
-        return Err(format!("wrote {written:02X?}").into());
+    if again.tallies != read.tallies {
+        return Err("read back other entries".into());
     }
 
     Ok(())
@@ -432,13 +579,20 @@ fn a_proto_map_s_entry_its_key_at_its_default_as_buffa_writes_it() -> Result<(),
 fn trials() -> Result<Vec<Trial>, String> {
     // * read by Bead's own reader, as the core's player reads it
     let codecs: Codecs = files::read_by_bead("codecs.json")?;
-    let mut trials = vec![Trial::test(
-        "a_proto_map_s_entry_its_key_at_its_default_as_buffa_writes_it",
-        a_proto_map_s_entry_its_key_at_its_default_as_buffa_writes_it,
-    )];
+    let mut trials = vec![
+        Trial::test(
+            "a_proto_map_s_entry_its_key_or_its_value_at_its_default_as_buffa_writes_it",
+            a_proto_map_s_entry_its_key_or_its_value_at_its_default_as_buffa_writes_it,
+        ),
+        Trial::test(
+            "a_proto_map_s_entries_in_the_order_its_library_writes_them",
+            a_proto_map_s_entries_in_the_order_its_library_writes_them,
+        ),
+    ];
 
     for payload in codecs.payloads {
-        if payload.encoding != "proto" || is_excused(payload.differs.as_ref()) {
+        if payload.encoding != "proto" || is_excused(payload.differs.as_deref().unwrap_or_default())
+        {
             continue;
         }
 
@@ -448,7 +602,7 @@ fn trials() -> Result<Vec<Trial>, String> {
     }
 
     for entry in codecs.values {
-        if entry.encoding != "proto" || is_excused(entry.differs.as_ref()) {
+        if entry.encoding != "proto" || is_excused(entry.differs.as_deref().unwrap_or_default()) {
             continue;
         }
 

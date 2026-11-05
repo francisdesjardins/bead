@@ -17,8 +17,10 @@ import {
   ReconnectError,
   TimeoutError,
 } from '../../shared/errors';
+import { LONGEST_TIMER } from '../../shared/clock';
 import {
   createTestClock,
+  delaysOn,
   reachedByLocalhost,
   tcpSocketsClosed,
   timersUntil,
@@ -78,7 +80,7 @@ const startServer = async () => {
   const closes: [boolean, TransportServerConnectionHandle][] = [];
   const connections: TransportServerConnectionHandle[] = [];
 
-  server.on('connection', (...[, , connectionHandle]) => {
+  server.on('connection', (...[, connectionHandle]) => {
     connections.push(connectionHandle);
   });
 
@@ -430,7 +432,7 @@ test('cancels a reconnection whose last attempt closes before cancellation is ch
   };
 
   const cancelled: unknown = await client
-    .reconnect({ maxAttempts: 1, signal: cancelling.signal })
+    .reconnect({ maximumAttempts: 1, signal: cancelling.signal })
     .catch((error: unknown) => {
       return error;
     });
@@ -1305,7 +1307,7 @@ test.describe('createHTTPTransportClient', () => {
     await server.stop();
 
     // one attempt, for a port nothing listens on takes some systems two seconds to refuse
-    const reason = await client.reconnect({ maxAttempts: 1 }).catch((error: unknown) => {
+    const reason = await client.reconnect({ maximumAttempts: 1 }).catch((error: unknown) => {
       return error;
     });
 
@@ -2406,6 +2408,335 @@ const followingFetch: FetchLike = (url, init) => {
 const REDIRECTS = [301, 302, 303, 307, 308] as const;
 
 // spec 15.6
+test.describe('createHTTPTransportClient, a server busy or a router behind', () => {
+  // spec 15.6, 15.7, 15.12.8
+  test('a client sends again a non-request refused busy once its Retry-After passed', async () => {
+    const clock = createTestClock(Date.UTC(2026, 0, 1));
+    const fake = createFakeFetch();
+    const client = createHTTPTransportClient({
+      clock,
+      exchangeTimeout: 10_000,
+      fetch: fake.fetch,
+      isListening: false,
+    });
+    const connecting = client.connect({ host, port: 8_080 });
+    const posted = async (index: number) => {
+      await expect
+        .poll(() => {
+          return fake.calls.length;
+        })
+        .toBeGreaterThan(index);
+
+      return fake.calls[index];
+    };
+    const busy = (status: number, retryAfter: string) => {
+      return { headers: { [REFUSAL_HEADER]: 'busy', 'retry-after': retryAfter }, status };
+    };
+
+    (await posted(0))?.answer({
+      headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22) },
+      status: 201,
+    });
+    await connecting;
+
+    // * a cancel refused 429, then 503 with a date: sent again each time its Retry-After passed
+    const cancel = envelopeOf(ENVELOPE_KINDS.CANCEL, { callId: 1 });
+    let isSettled = false;
+    const sending = client.send({ data: cancel }).then(() => {
+      isSettled = true;
+    });
+
+    (await posted(1))?.answer(busy(429, '2'));
+    await clock.tickAsync(1_999);
+
+    expect([fake.calls.length, isSettled]).toEqual([2, false]);
+
+    await clock.tickAsync(1);
+    (await posted(2))?.answer(busy(503, new Date(clock.Date.now() + 3_000).toUTCString()));
+    await clock.tickAsync(3_000);
+    // * a date far off waits no longer than what is left of its exchange's time
+    (await posted(3))?.answer(busy(503, 'Thu, 01 Jan 2099 00:00:00 GMT'));
+    await clock.tickAsync(4_999);
+
+    expect([fake.calls.length, isSettled]).toEqual([4, false]);
+
+    await clock.tickAsync(1);
+    (await posted(4))?.answer({ status: 204 });
+    await sending;
+
+    expect(
+      fake.calls.slice(1).map(({ init }) => {
+        return [init.method, [...(init.body as Uint8Array)]];
+      })
+    ).toEqual([
+      ['POST', [...cancel]],
+      ['POST', [...cancel]],
+      ['POST', [...cancel]],
+      ['POST', [...cancel]],
+    ]);
+
+    // a request refused busy rejects its send at once: the application decides
+    const request = client
+      .send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 3 }) })
+      .catch((reason: unknown) => {
+        return reason;
+      });
+
+    (await posted(5))?.answer(busy(429, '1'));
+
+    expect(await request).toEqual(new GenericError('the server refused the exchange: 429 busy'));
+    await clock.tickAsync(5_000);
+
+    expect([fake.calls.length, client.isOpen()]).toEqual([6, true]);
+
+    // * still refused past its exchange timeout from its first send: its exchange lost, and the
+    // connection with it
+    const closed = nextEvent(client, 'close');
+    const lost = client
+      .send({ data: envelopeOf(ENVELOPE_KINDS.CANCEL, { callId: 5 }) })
+      .catch((reason: unknown) => {
+        return reason;
+      });
+
+    for (let index = 6; index < 17; index += 1) {
+      (await posted(index))?.answer(busy(429, '1'));
+      await clock.tickAsync(1_000);
+    }
+
+    expect(await lost).toEqual(new GenericError('the server refused the exchange: 429 busy'));
+    expect(await closed).toEqual([false, false]);
+    expect(fake.calls.at(-1)?.init.method).toBe('DELETE');
+  });
+
+  // spec 15.6, 15.7, 15.12
+  test('a client whose exchangeTimeout is never sends again a non-request refused busy past 2³¹ − 1 ms', async () => {
+    const clock = createTestClock(Date.UTC(2026, 0, 1));
+    const fake = createFakeFetch();
+    const client = createHTTPTransportClient({
+      clock,
+      exchangeTimeout: Infinity,
+      fetch: fake.fetch,
+      isListening: false,
+    });
+    const connecting = client.connect({ host, port: 8_080 });
+    const posted = async (index: number) => {
+      await expect
+        .poll(() => {
+          return fake.calls.length;
+        })
+        .toBeGreaterThan(index);
+
+      return fake.calls[index];
+    };
+
+    (await posted(0))?.answer({
+      headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22) },
+      status: 201,
+    });
+    await connecting;
+
+    // * a cancel refused busy, its Retry-After past what a timer holds: each wait the longest a
+    // timer holds, and sent again past it, its exchange never lost
+    const cancel = envelopeOf(ENVELOPE_KINDS.CANCEL, { callId: 1 });
+    let isSettled = false;
+    const sending = client.send({ data: cancel }).then(() => {
+      isSettled = true;
+    });
+
+    for (let index = 1; index < 3; index += 1) {
+      (await posted(index))?.answer({
+        headers: { [REFUSAL_HEADER]: 'busy', 'retry-after': '2147484' },
+        status: 429,
+      });
+      await expect
+        .poll(() => {
+          return delaysOn(clock);
+        })
+        .toEqual([LONGEST_TIMER]);
+      await clock.tickAsync(LONGEST_TIMER - 1);
+
+      expect([fake.calls.length, isSettled]).toEqual([index + 1, false]);
+
+      await clock.tickAsync(1);
+    }
+
+    (await posted(3))?.answer({ status: 204 });
+    await sending;
+
+    expect(client.isOpen()).toBe(true);
+    expect(
+      fake.calls.slice(1).map(({ init }) => {
+        return [init.method, [...(init.body as Uint8Array)]];
+      })
+    ).toEqual([
+      ['POST', [...cancel]],
+      ['POST', [...cancel]],
+      ['POST', [...cancel]],
+    ]);
+  });
+
+  // spec 15.12.17
+  test('a paused HTTP client asks no listen and holds the rest of a batch', async () => {
+    const { callOf, client, fake, heard } = await connectListening();
+    const envelopes = [1, 3, 5].map((callId) => {
+      return envelopeOf(ENVELOPE_KINDS.CANCEL, { callId });
+    });
+
+    // * a router at its bound pauses within the hand: the rest of the batch it read is held
+    client.on('message', () => {
+      if (heard.length === 1) {
+        client.pause();
+      }
+    });
+    (await callOf(1))?.answer(batch(1, ...envelopes));
+    await new Promise((resolve) => {
+      setTimeout(resolve, 50);
+    });
+
+    expect([heard, fake.calls.length]).toEqual([[[...envelopes[0]!]], 2]);
+
+    client.resume();
+
+    expect(heard).toHaveLength(1);
+
+    // what it held handed on in order, then its listen asked again, acknowledging the batch
+    const next = await callOf(2);
+
+    expect(heard).toEqual(
+      envelopes.map((envelope) => {
+        return [...envelope];
+      })
+    );
+    expect(next?.init.headers).toMatchObject({ [AFTER_HEADER]: '3' });
+    await client.disconnect({ isQuick: true });
+  });
+
+  // spec 15.6
+  test('reads whether what it sends is a request from its bytes, given as an ArrayBuffer too, and takes a Blob for one', async () => {
+    const clock = createTestClock(Date.UTC(2026, 0, 1));
+    const fake = createFakeFetch();
+    const client = createHTTPTransportClient({ clock, fetch: fake.fetch, isListening: false });
+    const connecting = client.connect({ host, port: 8_080 });
+    const posted = async (index: number) => {
+      await expect
+        .poll(() => {
+          return fake.calls.length;
+        })
+        .toBeGreaterThan(index);
+
+      return fake.calls[index];
+    };
+    const busy = { headers: { [REFUSAL_HEADER]: 'busy', 'retry-after': '2' }, status: 429 };
+
+    (await posted(0))?.answer({
+      headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22) },
+      status: 201,
+    });
+    await connecting;
+
+    // * a request refused busy rejects its send at once, whatever holds its bytes
+    const request = client
+      .send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }).slice().buffer })
+      .catch((reason: unknown) => {
+        return reason;
+      });
+
+    (await posted(1))?.answer(busy);
+
+    expect(await request).toEqual(new GenericError('the server refused the exchange: 429 busy'));
+
+    // and a cancel is sent again once its Retry-After passed
+    const cancel = client.send({
+      data: envelopeOf(ENVELOPE_KINDS.CANCEL, { callId: 1 }).slice().buffer,
+    });
+
+    (await posted(2))?.answer(busy);
+    await clock.tickAsync(2_000);
+    (await posted(3))?.answer({ status: 204 });
+
+    await expect(cancel).resolves.toBeUndefined();
+
+    // ! what holds bytes it does not read, a Blob, it takes for a request: refused busy, it rejects
+    const blob = client
+      .send({ data: new Blob([envelopeOf(ENVELOPE_KINDS.CANCEL, { callId: 1 }).slice()]) })
+      .catch((reason: unknown) => {
+        return reason;
+      });
+
+    (await posted(4))?.answer(busy);
+
+    expect(await blob).toEqual(new GenericError('the server refused the exchange: 429 busy'));
+    await client.disconnect({ isQuick: true });
+  });
+
+  // spec 15.6
+  test('a non-request waiting its Retry-After as its connection goes is sent no more', async () => {
+    const clock = createTestClock(Date.UTC(2026, 0, 1));
+    const fake = createFakeFetch();
+    const client = createHTTPTransportClient({ clock, fetch: fake.fetch, isListening: false });
+    const connecting = client.connect({ host, port: 8_080 });
+    const posted = async (index: number) => {
+      await expect
+        .poll(() => {
+          return fake.calls.length;
+        })
+        .toBeGreaterThan(index);
+
+      return fake.calls[index];
+    };
+    const busy = { headers: { [REFUSAL_HEADER]: 'busy', 'retry-after': '2' }, status: 429 };
+
+    (await posted(0))?.answer({
+      headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22) },
+      status: 201,
+    });
+    await connecting;
+
+    const cancel = client.send({ data: envelopeOf(ENVELOPE_KINDS.CANCEL, { callId: 1 }) });
+
+    (await posted(1))?.answer(busy);
+    await clock.tickAsync(1_000);
+
+    // * as any send whose connection drops: settled, and sent no more
+    await client.disconnect({ isQuick: true });
+    await clock.tickAsync(5_000);
+
+    await expect(cancel).resolves.toBeUndefined();
+    expect(
+      fake.calls.map(({ init }) => {
+        return init.method;
+      })
+    ).toEqual(['POST', 'POST', 'DELETE']);
+  });
+
+  // spec 15.12.17
+  test('a paused HTTP client whose connection goes while it holds a batch asks no listen after it', async () => {
+    const { callOf, client, fake, heard } = await connectListening();
+
+    client.pause();
+    (await callOf(1))?.answer(batch(1, envelopeOf(ENVELOPE_KINDS.CANCEL, { callId: 1 })));
+    await new Promise((resolve) => {
+      setTimeout(resolve, 50);
+    });
+
+    expect([heard, fake.calls.length]).toEqual([[], 2]);
+
+    // * its listen waits on its pause, and ends with its connection: its DELETE alone goes after
+    await client.disconnect({ isQuick: true });
+    client.resume();
+    await new Promise((resolve) => {
+      setTimeout(resolve, 50);
+    });
+
+    expect([
+      heard,
+      fake.calls.map(({ init }) => {
+        return init.method;
+      }),
+    ]).toEqual([[], ['POST', 'GET', 'DELETE']]);
+  });
+});
+
 test.describe('createHTTPTransportClient, redirects', () => {
   test.afterAll(async () => {
     await tcpSocketsClosed();

@@ -1,8 +1,9 @@
 // ── Proto records ─────────────────────────────────────────────────────────────
 
 // A `proto` payload's records, read against its message before protobuf-es reads them (decision
-// 0028): what protobuf refuses where the library reads on, and what spec 17.9.5 and 17.9.6 level.
-// Its shape comes from the descriptor the library holds, by type alone: no protobuf code loads here.
+// 0028): what protobuf refuses where the library reads on, what spec 17.9.5 and 17.9.6 level, and
+// a singular closed enum's undeclared number, dropped (17.9.8). Its shape is the descriptor's,
+// by type alone: no protobuf code loads here.
 
 // dependencies
 
@@ -13,6 +14,11 @@ import type { FeatureSet_FieldPresence } from '@bufbuild/protobuf/wkt';
 
 /** What one field's records take: its wire types, what a packed record of it holds, its message's shape. */
 interface IFieldShape {
+  /**
+   * The numbers its enum declares, where it is a singular field of a closed enum, whose record of
+   * any other sets nothing (spec 17.9.8); none otherwise, a list's and a map's value among them.
+   */
+  readonly declared: ReadonlySet<number> | undefined;
   /** The message a record of it holds, a map's entry's or a group's among them; none for a scalar. */
   readonly holds: IMessageShape | undefined;
   /** What a length-delimited record of it holds when packed: its values' fixed width, or varints. */
@@ -36,6 +42,11 @@ interface IMessageShape {
   readonly fields: Map<number, IFieldShape>;
   /** A map's entry takes its key and its value alone (spec 17.9.6). */
   readonly isClosed: boolean;
+  /**
+   * How deep its known fields can nest a message below it, as the wire nests them, at most 101
+   * (spec 17.9.3): set once its closure is searched.
+   */
+  nesting?: number;
   /** Its walk's facts once its closure is searched: `null` where it reaches no required field. */
   required?: IRequiredShape | null;
 }
@@ -48,6 +59,14 @@ interface IReader {
   end: number;
   /** The number of the group being read, whose end group closes it; 0 in a length-delimited message. */
   group: number;
+  /** Whether it met a singular closed enum's record of a number its enum does not declare. */
+  isUndeclared: boolean;
+}
+
+/** Where a rewrite writes: its bytes, sized to the payload, and how many it holds. */
+interface IOutput {
+  at: number;
+  readonly bytes: Uint8Array;
 }
 
 // constants
@@ -60,9 +79,13 @@ const SGROUP = 3;
 const EGROUP = 4;
 const I32 = 5;
 
-// how deep a message nests at most below the top one, a group and a map's entry each a message
-// (spec 17.9.3)
-const DEPTH = 100;
+/**
+ * How deep a message nests at most below the top one, a group and a map's entry each a message
+ * (spec 17.9.3).
+ */
+export const PROTO_DEPTH = 100;
+
+const DEPTH = PROTO_DEPTH;
 
 // a packed record not taken, and one of varints; any other is its values' fixed width
 const NOT_PACKED = 0;
@@ -80,6 +103,9 @@ const PLACES = Object.freeze(
     return 2 ** (7 * place);
   })
 );
+
+// the place of a varint's 10th byte, the last, which holds its 64th bit and no other
+const LAST_PLACE = PLACES.length - 1;
 
 /**
  * Each scalar type's wire type, by `descriptor.proto`'s type number, which protobuf-es's
@@ -103,27 +129,50 @@ const WIRE_OF_SCALAR: Readonly<Record<ScalarType, number>> = Object.freeze({
   18: VARINT,
 });
 
+/**
+ * The reasons a `proto` codec refuses with, in spec 17.2's words and no others: a refusal's message
+ * is its reason, exactly; what Bead found, the record refused or the field left unset, rides in its
+ * `cause`.
+ */
+export const PROTO_REASONS = Object.freeze({
+  nestedPast100: 'nested past 100',
+  notItsMessage: 'not its message',
+  requiredUnset: 'a required field unset',
+});
+
 // an unknown group's shape: any field, each skipped
 const ANY_FIELD: IMessageShape = Object.freeze({ fields: new Map(), isClosed: false });
+
+// the bytes of a varint that hold an int32's 32 bits, the last of them holding its top 4
+const INT32_PLACES = 5;
 
 // each message's shape, built once, at first use
 const SHAPES = new WeakMap<DescMessage, IMessageShape>();
 
 // helpers
 
-/** A refusal of the payload: not an encoding of its message, or one spec 17.9 refuses. */
-const refuse = (reason: string): never => {
-  throw new SyntaxError(`the proto payload ${reason}`);
+/**
+ * A refusal of the payload, `reason` one of {@link PROTO_REASONS}: what the check found, `found`,
+ * in its cause.
+ */
+const refuseFor = (reason: string, found: string): never => {
+  throw new SyntaxError(reason, { cause: new SyntaxError(`the proto payload ${found}`) });
+};
+
+/** A refusal of the payload as no encoding of its message, or one spec 17.9 refuses. */
+const refuse = (found: string): never => {
+  return refuseFor(PROTO_REASONS.notItsMessage, found);
 };
 
 /** What a field's records take at `wire`, a scalar's or an enum's: a repeated one's packed too. */
 const scalarShape = (wire: number, isRepeated: boolean): IFieldShape => {
   // * a repeated scalar of a numeric type takes its own wire type and a packed record, packed or not
   if (!isRepeated || wire === LEN) {
-    return { holds: undefined, packs: NOT_PACKED, takes: 1 << wire };
+    return { declared: undefined, holds: undefined, packs: NOT_PACKED, takes: 1 << wire };
   }
 
   return {
+    declared: undefined,
     holds: undefined,
     packs: wire === VARINT ? VARINTS : wire === I32 ? 4 : 8,
     takes: (1 << wire) | (1 << LEN),
@@ -132,7 +181,12 @@ const scalarShape = (wire: number, isRepeated: boolean): IFieldShape => {
 
 /** What a field of a message type's records take: a group's, or a length-delimited record. */
 const messageShape = (message: DescMessage, isDelimited: boolean): IFieldShape => {
-  return { holds: shapeOf(message), packs: NOT_PACKED, takes: 1 << (isDelimited ? SGROUP : LEN) };
+  return {
+    declared: undefined,
+    holds: shapeOf(message),
+    packs: NOT_PACKED,
+    takes: 1 << (isDelimited ? SGROUP : LEN),
+  };
 };
 
 /** A map's entry, as it is on the wire: a message of its key at 1 and its value at 2 (Encoding, "Maps"). */
@@ -166,11 +220,21 @@ const fieldShape = (field: DescField): IFieldShape => {
     case 'scalar':
       return scalarShape(WIRE_OF_SCALAR[field.scalar], false);
     case 'enum':
-      return scalarShape(VARINT, false);
+      // * spec 17.9.8: a singular field of a closed enum, as protobuf-es reads the field
+      return field.enum.open
+        ? scalarShape(VARINT, false)
+        : {
+            ...scalarShape(VARINT, false),
+            declared: new Set(
+              field.enum.values.map((value) => {
+                return value.number;
+              })
+            ),
+          };
     case 'message':
       return messageShape(field.message, field.delimitedEncoding);
     case 'map':
-      return { holds: entryShape(field), packs: NOT_PACKED, takes: 1 << LEN };
+      return { declared: undefined, holds: entryShape(field), packs: NOT_PACKED, takes: 1 << LEN };
     case 'list':
       switch (field.listKind) {
         case 'message':
@@ -297,7 +361,84 @@ const searchRequired = (root: DescMessage): void => {
   }
 };
 
-/** The varint at the reader, ten bytes at most and within its message; the reader moves past it. */
+/** How deep a field of a message nests below it, by `below`, the depth of the message it holds. */
+const nestingOf = (field: DescField, below: (held: DescMessage) => number): number => {
+  const held = heldOf(field);
+
+  // * a map's entry is a message on the wire, a map of scalars' among them; its message value one more
+  if (field.fieldKind === 'map') {
+    return held === undefined ? 1 : 2 + below(held);
+  }
+
+  return held === undefined ? 0 : 1 + below(held);
+};
+
+/**
+ * Searches the closure of `root` for how deep each message's known fields can nest below it, at
+ * most `DEPTH + 1`: from 0, grown until none grows, so a cycle stops at the cap. A message searched
+ * before is taken as it was judged.
+ */
+const searchNesting = (root: DescMessage): void => {
+  const closure: DescMessage[] = [];
+  const seen = new Set<DescMessage>();
+  const pending = [root];
+
+  for (let message = pending.pop(); message !== undefined; message = pending.pop()) {
+    if (seen.has(message) || shapeOf(message).nesting !== undefined) {
+      continue;
+    }
+
+    seen.add(message);
+    closure.push(message);
+
+    for (const field of message.fields) {
+      const held = heldOf(field);
+
+      if (held !== undefined) {
+        pending.push(held);
+      }
+    }
+  }
+
+  const deepest = new Map<DescMessage, number>(
+    closure.map((message) => {
+      return [message, 0];
+    })
+  );
+  const below = (held: DescMessage): number => {
+    return deepest.get(held) ?? shapeOf(held).nesting ?? 0;
+  };
+
+  for (let isGrown = true; isGrown;) {
+    isGrown = false;
+
+    for (const message of closure) {
+      const deep = Math.min(
+        DEPTH + 1,
+        Math.max(
+          0,
+          ...message.fields.map((field) => {
+            return nestingOf(field, below);
+          })
+        )
+      );
+
+      if (deep > (deepest.get(message) ?? 0)) {
+        deepest.set(message, deep);
+        isGrown = true;
+      }
+    }
+  }
+
+  for (const message of closure) {
+    shapeOf(message).nesting = deepest.get(message) ?? 0;
+  }
+};
+
+/**
+ * The varint at the reader, ten bytes at most, within 64 bits (Encoding, "Base 128 Varints") and
+ * within its message; the reader moves past it.
+ */
 const readVarint = (reader: IReader): number => {
   const { bytes, end } = reader;
   let value = 0;
@@ -314,11 +455,38 @@ const readVarint = (reader: IReader): number => {
     value += (byte & 0x7f) * (PLACES[place] ?? 0);
 
     if (byte < 0x80) {
+      // ! a 10th byte past 0x01 sets a bit past the 64th: no unsigned 64-bit integer, so no
+      // encoding, refused here before protobuf-es drops those bits
+      if (place === LAST_PLACE && byte > 0x01) {
+        refuse('holds a varint past 64 bits');
+      }
+
       return value;
     }
   }
 
   return refuse('holds a varint of more than 10 bytes');
+};
+
+/**
+ * The varint at `at` of `bytes`, which the walk took, as protobuf reads an int32: its low 32 bits
+ * (Language Guide, "Updating A Message Type"), exact where the varint passes 2^53.
+ */
+const int32At = (bytes: Uint8Array, at: number): number => {
+  let value = 0;
+
+  for (let place = 0; place < INT32_PLACES; place += 1) {
+    const byte = bytes[at + place] ?? 0;
+
+    // ! a shift is an int32's: the 5th byte's bits past the 32nd fall away
+    value |= (byte & 0x7f) << (7 * place);
+
+    if (byte < 0x80) {
+      break;
+    }
+  }
+
+  return value;
 };
 
 /** The tag at the reader: a uint32 varint, five bytes at most (Encoding, its reference card). */
@@ -377,7 +545,14 @@ const skipPacked = (reader: IReader, packs: number): void => {
 
   // * no value is read: each varint ends within ten bytes, and the last at the record's end
   for (let at = reader.at; at < end; at += 1) {
-    carried = (bytes[at] ?? 0) < 0x80 ? 0 : carried + 1;
+    const byte = bytes[at] ?? 0;
+
+    // ! the byte that ends a varint after nine carried ones is its 10th: past 0x01, past 64 bits
+    if (byte < 0x80 && carried === LAST_PLACE && byte > 0x01) {
+      refuse('holds a varint past 64 bits');
+    }
+
+    carried = byte < 0x80 ? 0 : carried + 1;
 
     if (carried === PLACES.length) {
       refuse('holds a varint of more than 10 bytes');
@@ -394,7 +569,10 @@ const skipPacked = (reader: IReader, packs: number): void => {
 /** One more message below the top, or the refusal of spec 17.9.3. */
 const deeper = (reader: IReader): number => {
   if (reader.depth >= DEPTH) {
-    refuse(`nests a message more than ${String(DEPTH)} deep below the top one`);
+    refuseFor(
+      PROTO_REASONS.nestedPast100,
+      `nests a message more than ${String(DEPTH)} deep below the top one`
+    );
   }
 
   return reader.depth + 1;
@@ -436,9 +614,17 @@ const walkRecords = (reader: IReader, shape: IMessageShape): void => {
     }
 
     switch (wire) {
-      case VARINT:
+      case VARINT: {
+        const start = reader.at;
+
         readVarint(reader);
+
+        // * spec 17.9.8: a record that sets nothing, which `filtered` drops
+        if (field?.declared !== undefined && !field.declared.has(int32At(reader.bytes, start))) {
+          reader.isUndeclared = true;
+        }
         break;
+      }
       case I64:
         skipFixed(reader, 8);
         break;
@@ -487,19 +673,134 @@ const walkRecords = (reader: IReader, shape: IMessageShape): void => {
   }
 };
 
+/** Writes `value` as a varint's shortest form at `at` of `bytes` (Encoding, "Base 128 Varints"). */
+const writeVarint = (bytes: Uint8Array, { at, value }: { at: number; value: number }): void => {
+  let rest = value;
+  let place = at;
+
+  while (rest >= 0x80) {
+    bytes[place] = (rest & 0x7f) | 0x80;
+    rest >>>= 7;
+    place += 1;
+  }
+
+  bytes[place] = rest;
+};
+
+/** How many bytes a length takes as a varint's shortest form. */
+const lengthSizeOf = (length: number): number => {
+  let size = 1;
+
+  for (let rest = length; rest >= 0x80; rest >>>= 7) {
+    size += 1;
+  }
+
+  return size;
+};
+
+/**
+ * Writes the records at the reader, which the walk took, to `output`, as `shape` reads them, but
+ * each singular closed enum's record of a number its enum does not declare, the length of each
+ * message that held one written again (spec 17.9.8): to the end of their message, or for a group
+ * through its own end group. What it writes is never longer than what it read, so it writes in
+ * place of what it read, in one array of the payload's size.
+ */
+const rewriteRecords = (
+  reader: IReader,
+  { output, shape }: { output: IOutput; shape: IMessageShape }
+): void => {
+  const { bytes } = reader;
+
+  while (reader.at < reader.end) {
+    const start = reader.at;
+    const tag = readTag(reader);
+    const field = shape.fields.get(tag >>> 3);
+
+    switch (tag & 7) {
+      case EGROUP:
+        output.bytes.set(bytes.subarray(start, reader.at), output.at);
+        output.at += reader.at - start;
+        return;
+      case VARINT: {
+        const value = reader.at;
+
+        readVarint(reader);
+
+        if (field?.declared !== undefined && !field.declared.has(int32At(bytes, value))) {
+          continue;
+        }
+        break;
+      }
+      case I64:
+        reader.at += 8;
+        break;
+      case I32:
+        reader.at += 4;
+        break;
+      case LEN: {
+        const tagEnd = reader.at;
+        const length = readLength(reader);
+
+        if (field?.holds === undefined) {
+          reader.at += length;
+          break;
+        }
+
+        // * the message's records written after room for its length as it came, then its new
+        // length, never longer, written in its place and the records moved up to it
+        const { end } = reader;
+        const lengthAt = output.at + tagEnd - start;
+        const room = reader.at - tagEnd;
+
+        output.bytes.set(bytes.subarray(start, tagEnd), output.at);
+        output.at = lengthAt + room;
+        reader.end = reader.at + length;
+        rewriteRecords(reader, { output, shape: field.holds });
+        reader.end = end;
+
+        const written = output.at - lengthAt - room;
+        const size = lengthSizeOf(written);
+
+        output.bytes.copyWithin(lengthAt + size, lengthAt + room, output.at);
+        writeVarint(output.bytes, { at: lengthAt, value: written });
+        output.at = lengthAt + size + written;
+        continue;
+      }
+      default:
+        // * a group: its tag, then its records through its end group
+        output.bytes.set(bytes.subarray(start, reader.at), output.at);
+        output.at += reader.at - start;
+        rewriteRecords(reader, { output, shape: field?.holds ?? ANY_FIELD });
+        continue;
+    }
+
+    output.bytes.set(bytes.subarray(start, reader.at), output.at);
+    output.at += reader.at - start;
+  }
+};
+
+/** A walk of `bytes` from their start, as `checkProtoRecords` begins one. */
+const readerOf = (bytes: Uint8Array): IReader => {
+  return { at: 0, bytes, depth: 0, end: bytes.length, group: NO_GROUP, isUndeclared: false };
+};
+
 // definition
 
 /**
  * Reads `bytes`' records against `message`, the descriptor its generated code holds, before
  * protobuf-es reads them, and throws a `SyntaxError` where they are no encoding of it or where
  * spec 17.9 refuses them: a record past the end of its message, at any depth, its field known or
- * not; a packed record whose values do not end at its length; a varint of more than 10 bytes; a
- * tag of more than 5 bytes or past 32 bits, field number 0, the wire types 6 and 7; a group not
- * closed by its own end group; a message nested more than 100 deep below the top one, a group and
- * a map's entry each counting (17.9.3); a field at a wire type its type does not take, in a map's
- * entry too (17.9.5); and a map's entry with a field other than its key and its value (17.9.6).
- * It reads nothing of the message and allocates nothing per record; each message's shape is built
- * once, from its descriptor. `protoCodecOf` runs it first, as generated code reads a payload.
+ * not; a packed record whose values do not end at its length; a varint of more than 10 bytes, or
+ * whose 10th byte sets a bit past the 64th, its field known or not, packed or not; a tag of more
+ * than 5 bytes or past 32 bits, field number 0, the wire types 6 and 7; a group not closed by its
+ * own end group; a message nested more than 100 deep below the top one, a group and a map's entry
+ * each counting (17.9.3); a field at a wire type its type does not take, in a map's entry too
+ * (17.9.5); and a map's entry with a field other than its key and its value (17.9.6).
+ * Its message is spec 17.2's reason, `nested past 100` for the depth and `not its message` for any
+ * other, the record refused in its `cause`. It reads nothing of the message and allocates nothing
+ * per record; each message's shape is built once, from its descriptor. `protoCodecOf` runs it
+ * first, through `filtered`, as generated code reads a payload, and again over what its writer
+ * wrote.
  *
  * @example
  * import { fromBinary } from '@bufbuild/protobuf';
@@ -510,7 +811,44 @@ const walkRecords = (reader: IReader, shape: IMessageShape): void => {
  * const request = fromBinary(SayHelloRequestSchema, bytes, { recursionLimit: 101 });
  */
 export const checkProtoRecords = (bytes: Uint8Array, message: DescMessage): void => {
-  walkRecords({ at: 0, bytes, depth: 0, end: bytes.length, group: NO_GROUP }, shapeOf(message));
+  walkRecords(readerOf(bytes), shapeOf(message));
+};
+
+/**
+ * `bytes`, checked as `checkProtoRecords` checks them, without each singular closed enum's record
+ * of a number its enum declares no value of, the length of each message that held one written
+ * again (spec 17.9.8): what protobuf keeps among the unknown fields, protobuf-es then never reads,
+ * as every side drops it; the field holds the last declared number its records give, or none.
+ * `bytes` themselves where they hold none, which costs nothing past the check.
+ */
+export const filtered = (bytes: Uint8Array, message: DescMessage): Uint8Array => {
+  const walked = readerOf(bytes);
+
+  walkRecords(walked, shapeOf(message));
+
+  if (!walked.isUndeclared) {
+    return bytes;
+  }
+
+  const output: IOutput = { at: 0, bytes: new Uint8Array(bytes.length) };
+
+  rewriteRecords(readerOf(bytes), { output, shape: shapeOf(message) });
+
+  return output.bytes.subarray(0, output.at);
+};
+
+/**
+ * Whether the known fields of `message` can nest a message more than 100 deep below it (spec
+ * 17.9.3): a cycle among them, or a path that deep, a map's entry counting as a message, a map of
+ * scalars' among them. Sound for keeping a walk of a value's fields within the bound, never for the
+ * bound itself: any message holds what a reading kept. Searched once, by its descriptor.
+ */
+export const nestsPastOf = (message: DescMessage): boolean => {
+  if (shapeOf(message).nesting === undefined) {
+    searchNesting(message);
+  }
+
+  return (shapeOf(message).nesting ?? 0) > DEPTH;
 };
 
 /**

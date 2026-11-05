@@ -53,20 +53,21 @@ node src/cli.ts blueprint --check ../spec/interop-blueprint.json
 `@types/node` take the descriptors `implementations/typescript/package.json` writes, and
 `yarn.lock` locks each package the two projects share at the version the TypeScript side's lock
 holds; `@bufbuild/protoplugin`, which the target is written on, takes the version protoc-gen-es
-depends on. Where a caret would resolve higher here, `yarn set resolution` locks it, as for oxlint:
+depends on. Where a caret would resolve higher here, `yarn set resolution` locks it to the
+TypeScript side's version, oxlint's, say:
 
 ```sh
-yarn set resolution oxlint@npm:^1.89.0 npm:1.89.0
+yarn set resolution oxlint@npm:^1.90.0 npm:1.90.0
 yarn install --immutable
 ```
 
 An upgrade moves both projects in one change: the descriptor in both `package.json`, then each
 lock, the builder's resolution set again to the TypeScript side's locked version.
 
-**The blueprint reader is fuzzed by hand**, guided by coverage, from
+**The blueprint reader is fuzzed by hand and every week**, guided by coverage, from
 [`tools/fuzz/`](tools/fuzz/blueprint.ts), a Yarn project of its own that `yarn install` there
-installs, so neither this project's install nor CI fetches Jazzer.js; the root's `tools/fuzz.mjs`
-seeds, bundles and runs it ([the root README](../README.md#fuzzing), Fuzzing).
+installs, so neither this project's install nor a pull request's CI fetches Jazzer.js; the root's
+`tools/fuzz.mjs` seeds, bundles and runs it ([the root README](../README.md#fuzzing), Fuzzing).
 
 **protoc is pinned by [`protoc.json`](protoc.json)**: its version, 36.2, the oldest Google.Protobuf
 the C# it writes runs on, 3.36.2, the runtime its release pairs it with, and each release archive's
@@ -417,7 +418,7 @@ then, above the services, a function of rules for each message its requests' rul
 `rulesOf<Message>(message, sink)`, which judges each rule in spec 18.5's order into the runtime's
 sink and returns true where the sink stops it, each rule's site, its id, its words and its bounds, a
 frozen constant, and each pattern's table a frozen constant of its classes and a `Uint16Array` of
-its cells; and, once, the contract with the runtime, `GENERATED_CODE_SUPPORTS_VERSION_6`
+its cells; and, once, the contract with the runtime, `GENERATED_CODE_SUPPORTS_VERSION_7`
 ([decision 0018](../docs/decisions/0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md),
 [decision 0035](../docs/decisions/0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)).
 Every doc comment is the description, then what the procedure admits, through protoplugin's `jsDoc`,
@@ -531,7 +532,8 @@ no type of the namespace takes a runtime type's place. A file holds, for each of
 - **`<Name>Admissions`** and **`<Name>Windows`**, the records of its hooks, each required, and of
   the windows of its procedures that notify, which the service layer's options take typed by the
   service; and **`<Name>Commands`**, **`<Name>Notifiers`** and **`<Name>Notifications`**, a member
-  a command, a procedure that notifies, and its notification;
+  a command, a procedure that notifies, and its notification, a command's call a `BoundCommand`,
+  whose options name its connection;
 - **`<Name>Server<TData>`**, where only resolvers are written: the layer's `Command`, `Notify`,
   `On`, `Offer` and `ProceduresWithoutResolver`, over the layer's options, `ServiceServerOptions`,
   given in its one constructor where a procedure names a hook, or by a second, beside one that takes
@@ -544,7 +546,7 @@ rules reach, its `Check(message, sink)` judging each rule in spec 18.5's order i
 `IViolationSink` and returning true where the sink stops it, each rule's site a static readonly
 `ViolationRule`, each pattern's table a `PatternTable` of its classes and a `ushort[]` of its
 cells, `file` keeping each class to its file; and, once, the contract with the runtime,
-`GeneratedCode.SupportsVersion6`. Every doc comment is the description, then what the procedure
+`GeneratedCode.SupportsVersion7`. Every doc comment is the description, then what the procedure
 admits, through one writer: one `///` a line, the text XML-escaped, a `<para>` a paragraph where
 there are two, and each character C# reads as a line's end besides LF, CR, NEL, LS and PS, written
 as its reference, `&#xD;`; a string literal writes them as escapes.

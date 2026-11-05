@@ -65,8 +65,9 @@ public sealed partial class ServiceManagerTests
     // x64, in the Debug build `dotnet test` makes, on Windows and on Linux alike. A runtime that
     // moves them is pinned anew, by hand: run the gate, take the bytes its failure prints, and name
     // the runtime, and why each step moved, in the commit. A call made holds the refusal its rules
-    // may judge it with, which its router's request carries (decision 0035)
-    private static readonly long[] AllocatedWhileNobodyListens = [1272, 984, 560, 768];
+    // may judge it with, which its router's request carries (decision 0035); a request answered, the
+    // refusal its payload's codec may give, whose reason its answer carries (spec 17.2)
+    private static readonly long[] AllocatedWhileNobodyListens = [1264, 992, 560, 768];
 
     // helpers
 
@@ -227,7 +228,7 @@ public sealed partial class ServiceManagerTests
 
         Assert.NotNull(new ServiceManager(router, new ServiceManagerOptions { Clock = time }));
         Assert.Equal(
-            "a service manager runs on the clock of its router, a FakeTimeProvider, and was given another, the system's",
+            "a service manager runs on the clock of its router, one of its own, and was given another, the platform's",
             Assert.Throws<ArgumentException>(() =>
             {
                 return new ServiceManager(router, new ServiceManagerOptions { Clock = TimeProvider.System });
@@ -437,7 +438,7 @@ public sealed partial class ServiceManagerTests
     [Fact]
     public async Task The_first_registration_requests_registers_and_then_hears_each_notification()
     {
-        var router = new RecordingRouter();
+        var router = new RecordingRouter(RouterSide.Client);
         var heard = new List<string>();
         var notification = new ServiceManager(router).GetNotification(Echo, Notified());
 
@@ -453,10 +454,10 @@ public sealed partial class ServiceManagerTests
     [Fact]
     public async Task Its_request_takes_the_destination_and_the_timeout_it_is_given_and_names_the_notification_it_subscribes()
     {
-        var router = new RecordingRouter();
+        var router = new RecordingRouter(RouterSide.Client);
         var notification = new ServiceManager(router).GetNotification(Echo, Notified());
 
-        await notification.Register(new Text("s"), Unheard)(new RequestOptions { DestinationId = 3, Timeout = TimeSpan.FromMilliseconds(50) })
+        await notification.Register(new Text("s"), Unheard)(new RegistrationOptions { DestinationId = 3, Timeout = TimeSpan.FromMilliseconds(50) })
             .WaitAsync(Patience, Cancelled);
 
         // its series, a requester's of the procedure, declared as the notification was made
@@ -472,7 +473,7 @@ public sealed partial class ServiceManagerTests
     [Fact]
     public async Task The_router_holds_it_before_its_request_goes_out_so_a_notification_right_behind_the_answer_is_heard()
     {
-        var router = new RecordingRouter();
+        var router = new RecordingRouter(RouterSide.Client);
         var heard = new List<string>();
 
         // the notification comes with the answer, before anything waiting on the answer runs
@@ -492,7 +493,7 @@ public sealed partial class ServiceManagerTests
     [Fact]
     public async Task Once_registered_another_callback_joins_without_a_request()
     {
-        var router = new RecordingRouter();
+        var router = new RecordingRouter(RouterSide.Client);
         var heard = new List<string>();
         var notification = new ServiceManager(router).GetNotification(Echo, Notified());
 
@@ -507,7 +508,7 @@ public sealed partial class ServiceManagerTests
     [Fact]
     public async Task Callbacks_registering_at_once_share_one_request_and_one_registration()
     {
-        var router = new RecordingRouter();
+        var router = new RecordingRouter(RouterSide.Client);
         var heard = new List<string>();
         var notification = new ServiceManager(router).GetNotification(Echo, Notified());
         var answered = new TaskCompletionSource<RouterResult>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -533,7 +534,7 @@ public sealed partial class ServiceManagerTests
     [Fact]
     public async Task A_failed_request_rejects_and_keeps_nothing_the_next_registration_asks_again()
     {
-        var router = new RecordingRouter();
+        var router = new RecordingRouter(RouterSide.Client);
         var heard = new List<string>();
         var notification = new ServiceManager(router).GetNotification(Echo, Notified());
         var failure = new IOException("refused");
@@ -562,7 +563,7 @@ public sealed partial class ServiceManagerTests
     [Fact]
     public async Task An_answer_to_its_subscription_that_does_not_decode_lets_go_of_it_the_router_cancelling_its_call()
     {
-        var router = new RecordingRouter();
+        var router = new RecordingRouter(RouterSide.Client);
         var notification = new ServiceManager(router).GetNotification(Echo, Notified());
 
         router.Answer = (_) =>
@@ -583,7 +584,7 @@ public sealed partial class ServiceManagerTests
     [Fact]
     public async Task The_last_callback_taken_away_unregisters_the_notification_taking_one_away_twice_does_nothing()
     {
-        var router = new RecordingRouter();
+        var router = new RecordingRouter(RouterSide.Client);
         var heard = new List<string>();
         var notification = new ServiceManager(router).GetNotification(Echo, Notified());
         var first = await notification.Register(new Text("s"), HeardBy(heard, "first"))().WaitAsync(Patience, Cancelled);
@@ -606,7 +607,7 @@ public sealed partial class ServiceManagerTests
     [Fact]
     public async Task The_last_callback_out_unsubscribes_with_the_call_id_and_the_answer_that_subscribed_before_the_router_lets_go_of_it()
     {
-        var router = new RecordingRouter();
+        var router = new RecordingRouter(RouterSide.Client);
         var told = new List<string>();
 
         router.Answer = (_) =>
@@ -638,7 +639,7 @@ public sealed partial class ServiceManagerTests
     [Fact]
     public async Task An_unsubscription_that_fails_rejects_the_last_unregister_once_the_router_let_go_all_the_same()
     {
-        var router = new RecordingRouter();
+        var router = new RecordingRouter(RouterSide.Client);
         var failure = new IOException("refused");
         var notification = new ServiceManager(router).GetNotification(Echo, Notified(unsubscribe: (_, _) =>
         {
@@ -664,7 +665,7 @@ public sealed partial class ServiceManagerTests
     [Fact]
     public async Task Dropped_with_its_connection_it_tells_dropped_hears_nothing_more_has_nothing_to_take_away_and_asks_anew()
     {
-        var router = new RecordingRouter();
+        var router = new RecordingRouter(RouterSide.Client);
         var manager = new ServiceManager(router);
         var heard = new List<string>();
         var dropped = new List<(Procedure Procedure, Failure? Failure)>();
@@ -744,7 +745,7 @@ public sealed partial class ServiceManagerTests
     [Fact]
     public async Task A_registration_under_way_when_its_notification_is_dropped_fails_with_a_disconnect_exception()
     {
-        var router = new RecordingRouter();
+        var router = new RecordingRouter(RouterSide.Client);
         var heard = new List<string>();
         var answered = new TaskCompletionSource<RouterResult>(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -771,7 +772,7 @@ public sealed partial class ServiceManagerTests
     [Fact]
     public async Task Await_using_takes_the_callback_away()
     {
-        var router = new RecordingRouter();
+        var router = new RecordingRouter(RouterSide.Client);
         var notification = new ServiceManager(router).GetNotification(Echo, Notified());
 
         await using (var registration = await notification.Register(new Text("s"), Unheard)().WaitAsync(Patience, Cancelled))
@@ -785,7 +786,7 @@ public sealed partial class ServiceManagerTests
     [Fact]
     public async Task A_registration_while_the_last_one_is_leaving_waits_for_it_then_registers_anew()
     {
-        var router = new RecordingRouter();
+        var router = new RecordingRouter(RouterSide.Client);
         var heard = new List<string>();
         var notification = new ServiceManager(router).GetNotification(Echo, Notified());
         var gate = new TaskCompletionSource();
@@ -808,7 +809,7 @@ public sealed partial class ServiceManagerTests
     [Fact]
     public async Task Taking_the_same_registration_away_twice_leaves_another_of_the_same_callback_alone()
     {
-        var router = new RecordingRouter();
+        var router = new RecordingRouter(RouterSide.Client);
         var heard = new List<string>();
         var notification = new ServiceManager(router).GetNotification(Echo, Notified());
         var callback = HeardBy(heard);
@@ -834,7 +835,7 @@ public sealed partial class ServiceManagerTests
     [Fact]
     public async Task A_registration_arriving_while_the_router_subscribes_waits_for_the_subscription()
     {
-        var router = new RecordingRouter();
+        var router = new RecordingRouter(RouterSide.Client);
         var notification = new ServiceManager(router).GetNotification(Echo, Notified());
         var gate = new TaskCompletionSource();
 
@@ -864,7 +865,7 @@ public sealed partial class ServiceManagerTests
     [Fact]
     public async Task A_subscription_that_fails_is_undone_so_the_next_registration_starts_over()
     {
-        var router = new RecordingRouter { SubscribeError = new IOException("refused by the broker") };
+        var router = new RecordingRouter(RouterSide.Client) { SubscribeError = new IOException("refused by the broker") };
         var heard = new List<string>();
         var notification = new ServiceManager(router).GetNotification(Echo, Notified());
 
@@ -889,7 +890,7 @@ public sealed partial class ServiceManagerTests
     [Fact]
     public async Task A_second_manager_on_the_same_router_cannot_take_its_procedure_over_nor_away()
     {
-        var router = new RecordingRouter();
+        var router = new RecordingRouter(RouterSide.Client);
         var heard = new List<string>();
 
         await using var registration = await new ServiceManager(router).GetNotification(Echo, Notified()).Register(new Text("s"), HeardBy(heard))()
@@ -908,7 +909,7 @@ public sealed partial class ServiceManagerTests
     [Fact]
     public async Task The_same_procedure_gives_the_same_notification_so_every_callback_is_heard()
     {
-        var router = new RecordingRouter();
+        var router = new RecordingRouter(RouterSide.Client);
         var manager = new ServiceManager(router);
         var heard = new List<string>();
         var first = manager.GetNotification(Echo, Notified());
@@ -926,7 +927,7 @@ public sealed partial class ServiceManagerTests
     [Fact]
     public void The_same_procedure_under_another_kind_name_revision_deprecation_or_limit_is_an_invalid_operation()
     {
-        var manager = new ServiceManager(new RecordingRouter());
+        var manager = new ServiceManager(new RecordingRouter(RouterSide.Client));
 
         manager.GetNotification(Echo, Notified());
 
@@ -964,7 +965,7 @@ public sealed partial class ServiceManagerTests
     [Fact]
     public void The_same_procedure_asked_for_with_payloads_of_other_types_is_an_invalid_operation()
     {
-        var manager = new ServiceManager(new RecordingRouter());
+        var manager = new ServiceManager(new RecordingRouter(RouterSide.Client));
 
         manager.GetNotification(Echo, Notified());
 
@@ -977,7 +978,7 @@ public sealed partial class ServiceManagerTests
     [Fact]
     public async Task A_trigger_the_router_never_registered_is_an_invalid_operation()
     {
-        var notification = new ServiceManager(new RecordingRouter()).GetNotification(Echo, Notified());
+        var notification = new ServiceManager(new RecordingRouter(RouterSide.Client)).GetNotification(Echo, Notified());
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
         {
@@ -1041,7 +1042,7 @@ public sealed partial class ServiceManagerTests
         Assert.Empty(heard);
         Assert.Equal([(DebugDirection.Rx, DebugType.Notification)], StepsOf(seen));
         Assert.Same(failure, Assert.Single(seen).Error);
-        Assert.IsType<JsonException>(failure.InnerException);
+        Assert.IsType<FormatException>(failure.InnerException);
     }
 
     [Fact]
@@ -1104,7 +1105,8 @@ public sealed partial class ServiceManagerTests
     // an answer as the router was handed it: its request, and its payload decoded, or its failure
     private sealed record Responded(AnswerTarget Target, Text? Payload, Failure? Failure);
 
-    // JSON, in UTF-8, either way and on either side; what is not JSON throws
+    // JSON, in UTF-8, either way and on either side; what is not JSON is refused, as every codec
+    // refuses, with a FormatException
     private sealed class JsonPayloads<T> : INotificationSerializerClient<T, T, T>, INotificationSerializerServer<T, T, T>
     {
         public ReadOnlyMemory<byte> Encode(T request)
@@ -1114,7 +1116,14 @@ public sealed partial class ServiceManagerTests
 
         public T Decode(ReadOnlyMemory<byte> response)
         {
-            return JsonSerializer.Deserialize<T>(response.Span, JsonOptions)!;
+            try
+            {
+                return JsonSerializer.Deserialize<T>(response.Span, JsonOptions)!;
+            }
+            catch (JsonException reason)
+            {
+                throw new FormatException("not JSON", reason);
+            }
         }
 
         public T DecodeNotification(ReadOnlyMemory<byte> notification)
@@ -1125,6 +1134,23 @@ public sealed partial class ServiceManagerTests
         public ReadOnlyMemory<byte> EncodeNotification(T notification)
         {
             return Encode(notification);
+        }
+    }
+
+    // a resolver's serializer whose request the json codec reads first, so that a refusal is the
+    // codec's, of its reason (spec 17.2)
+    private sealed class ReadByTheJsonCodec : IRequestSerializerServer<Text, Text>
+    {
+        public Text Decode(ReadOnlyMemory<byte> request)
+        {
+            PayloadCodecs.Json.Decode(request);
+
+            return Json.Decode(request);
+        }
+
+        public ReadOnlyMemory<byte> Encode(Text response)
+        {
+            return Json.Encode(response);
         }
     }
 
@@ -1139,6 +1165,20 @@ public sealed partial class ServiceManagerTests
         public ReadOnlyMemory<byte> Encode(Text response)
         {
             throw new FormatException("cannot encode");
+        }
+    }
+
+    // a resolver's serializer whose reader fails other than by its refusal, and writes its answer
+    private sealed class Unreadable(Exception broken) : IRequestSerializerServer<Text, Text>
+    {
+        public Text Decode(ReadOnlyMemory<byte> request)
+        {
+            throw broken;
+        }
+
+        public ReadOnlyMemory<byte> Encode(Text response)
+        {
+            return Json.Encode(response);
         }
     }
 

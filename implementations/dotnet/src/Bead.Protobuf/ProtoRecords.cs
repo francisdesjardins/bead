@@ -12,11 +12,15 @@ namespace Bead.Protobuf;
 /// refuses where a stock library reads on, and reads nothing in the library's place but one thing:
 /// a singular closed enum's record of a number its enum declares no value of, which protobuf keeps
 /// among the unknown fields and Google.Protobuf would read as the field's (17.9.8), is dropped
-/// before the library reads, through <see cref="ProtoCodecs"/>. It walks the payload once, by the
-/// message's own descriptor, and allocates nothing per record. Each message's shape holds what
-/// <see cref="ProtoRequired"/> walks too (17.9.7): its fields protobuf requires, and those that
-/// hold a message reaching one. The TypeScript side's twin is <c>checkProtoRecords</c>, of
-/// <c>@francisdesjardins/bead/proto</c>.
+/// before the library reads, as every side drops it, through <see cref="ProtoCodecs"/>. It walks
+/// the payload once, by the message's own descriptor, and allocates nothing per record. Each
+/// message's shape holds what <see cref="ProtoRequired"/> walks too (17.9.7): its fields protobuf
+/// requires, and those that hold a message reaching one; and how deep its known fields can nest,
+/// which a writer's depth pass takes (<see cref="ProtoDepth"/>, 17.9.3). A refusal is a
+/// <see cref="FormatException"/> of spec 17.2's reason, <c>nested past 100</c> for the depth and
+/// <c>not its message</c> for any other, the record refused in its inner exception;
+/// <see cref="ProtoCodecs"/> runs it again over what its writer wrote. The TypeScript side's twin
+/// is <c>checkProtoRecords</c>, of <c>@francisdesjardins/bead/proto</c>.
 /// </summary>
 public static class ProtoRecords
 {
@@ -24,7 +28,19 @@ public static class ProtoRecords
 
     // * spec 17.9.3: how deep a message nests below the top one, a group and a map's entry each
     // counting as a message
-    private const int Depth = 100;
+    internal const int Depth = 100;
+
+    // * the reasons a proto codec refuses with, in spec 17.2's words and no others: a refusal's
+    // message exactly, what Bead found in its inner exception
+
+    /// <summary>A reader's reason for bytes that are no encoding of its message.</summary>
+    internal const string NotItsMessage = "not its message";
+
+    /// <summary>A reader's and a writer's reason for a message nested more than 100 deep below the top one.</summary>
+    internal const string NestedPast100 = "nested past 100";
+
+    /// <summary>A reader's and a writer's reason for a message that leaves a required field unset.</summary>
+    internal const string RequiredUnset = "a required field unset";
 
     // the wire types of protobuf's Encoding guide
     private const int Varint = 0;
@@ -53,15 +69,16 @@ public static class ProtoRecords
     /// <summary>
     /// Checks <paramref name="bytes"/> against the records of <paramref name="message"/>, at every
     /// depth: refused, a tag of more than 5 bytes, past 32 bits or of field number 0; a varint of
-    /// more than 10 bytes; a length past the bytes that follow it; a record past the end of its
-    /// message; a packed record whose values do not end at its length; a group closed by another
-    /// number's end group or never closed, an end group that closes none, and the wire types 6 and
-    /// 7; a message nested more than 100 deep below the top one (17.9.3); a field the message
-    /// declares at a wire type its type does not take (17.9.5); and a map's entry with a field other
-    /// than its key and its value (17.9.6). An unknown length-delimited record is opaque, as
-    /// protobuf keeps it.
+    /// more than 10 bytes, or whose 10th byte sets a bit past the 64th, its field known or not,
+    /// packed or not; a length past the bytes that follow it; a record past the end of its message;
+    /// a packed record whose values do not end at its length; a group closed by another number's
+    /// end group or never closed, an end group that closes none, and the wire types 6 and 7; a
+    /// message nested more than 100 deep below the top one (17.9.3); a field the message declares
+    /// at a wire type its type does not take (17.9.5); and a map's entry with a field other than
+    /// its key and its value (17.9.6). An unknown length-delimited record is opaque, as protobuf
+    /// keeps it.
     /// </summary>
-    /// <exception cref="FormatException">The bytes are no encoding of the message, or nest too deep.</exception>
+    /// <exception cref="FormatException">The bytes are no encoding of the message, <c>not its message</c>, or nest too deep, <c>nested past 100</c>.</exception>
     public static void Check(ReadOnlySpan<byte> bytes, MessageDescriptor message)
     {
         ArgumentNullException.ThrowIfNull(message);
@@ -86,8 +103,9 @@ public static class ProtoRecords
     /// <summary>
     /// <paramref name="bytes"/>, which <see cref="Checked"/> took, without each singular closed
     /// enum's record of a number its enum declares no value of, the length of each record that held
-    /// one written again (17.9.8): what protobuf keeps among the unknown fields, Google.Protobuf then
-    /// never reads as the field's, which holds the last declared number its records give, or none.
+    /// one written again (17.9.8): what protobuf keeps among the unknown fields, Google.Protobuf
+    /// then never reads as the field's, as every side drops it, the field holding the last declared
+    /// number its records give, or none.
     /// </summary>
     internal static byte[] Filtered(ReadOnlySpan<byte> bytes, MessageDescriptor message)
     {
@@ -188,7 +206,8 @@ public static class ProtoRecords
     }
 
     // a message's fields by their number, each what its records take; its fields protobuf
-    // requires, and those that hold a message reaching one (17.9.7)
+    // requires, and those that hold a message reaching one (17.9.7); and how deep its known fields
+    // can nest (17.9.3)
     internal sealed class Shape
     {
         // an unknown group's: every field it holds unknown
@@ -199,6 +218,9 @@ public static class ProtoRecords
 
         // whether it reaches a required field: 0 until it is known, then 1 for none and 2 for one
         private int _reaches;
+
+        // how deep its known fields can nest a message below it, at most 101: -1 until it is known
+        private int _nesting = -1;
 
         // its fields that hold a message reaching one, once known
         private FieldDescriptor[]? _holding;
@@ -220,14 +242,20 @@ public static class ProtoRecords
             {
                 return field.IsRequired;
             })];
+            Nesting = [.. message.Fields.InFieldNumberOrder().Where((field) =>
+            {
+                return field.IsMap || field.FieldType is FieldType.Message or FieldType.Group;
+            })];
         }
 
         private Shape()
         {
             _fields = FrozenDictionary<int, FieldShape>.Empty;
             Required = [];
+            Nesting = [];
             _reaches = 1;
             _holding = [];
+            _nesting = 0;
         }
 
         /// <summary>Whether it is a map's entry, which holds its key and its value and no other field.</summary>
@@ -252,6 +280,34 @@ public static class ProtoRecords
                 }
 
                 return _reaches == 2;
+            }
+        }
+
+        /// <summary>
+        /// Its fields that nest on the wire, by their numbers: those that hold a message, a group and
+        /// a delimited field among them, and every map, whose entry is a message, a map of scalars'
+        /// too.
+        /// </summary>
+        public FieldDescriptor[] Nesting { get; }
+
+        /// <summary>
+        /// Whether its known fields can nest a message more than 100 deep below it (17.9.3): a cycle
+        /// among them, or a path that deep, a map's entry counting as a message, a map of scalars'
+        /// among them. Sound for keeping a walk of a value's fields within the bound, never for the
+        /// bound itself: any message holds what a reading kept. Known by one search over the
+        /// messages it reaches, and cached for each.
+        /// </summary>
+        public bool NestsPast
+        {
+            get
+            {
+                // ! a race searches twice, to the same answer
+                if (Volatile.Read(ref _nesting) < 0)
+                {
+                    SearchNesting(_message!);
+                }
+
+                return Volatile.Read(ref _nesting) > Depth;
             }
         }
 
@@ -290,6 +346,73 @@ public static class ProtoRecords
             }
 
             return field.FieldType is FieldType.Message or FieldType.Group ? field.MessageType : null;
+        }
+
+        // how deep each message `root` reaches can nest below it, at most 101: every message it
+        // reaches found first, one known before taken as it was judged, then each grown from 0 until
+        // none grows, so a cycle stops at the cap
+        private static void SearchNesting(MessageDescriptor root)
+        {
+            var found = new List<MessageDescriptor> { root };
+            var seen = new HashSet<MessageDescriptor> { root };
+
+            for (var index = 0; index < found.Count; index += 1)
+            {
+                foreach (var field in found[index].Fields.InFieldNumberOrder())
+                {
+                    if (HeldOf(field) is { } message && Volatile.Read(ref ShapeOf(message)._nesting) < 0 && seen.Add(message))
+                    {
+                        found.Add(message);
+                    }
+                }
+            }
+
+            var deepest = found.ToDictionary(
+                (message) =>
+                {
+                    return message;
+                },
+                (_) =>
+                {
+                    return 0;
+                });
+
+            // how deep a field nests below its message, by how deep the message it holds nests
+            int NestingOf(FieldDescriptor field)
+            {
+                var held = HeldOf(field);
+                var below = held is null ? 0 : deepest.GetValueOrDefault(held, Volatile.Read(ref ShapeOf(held)._nesting));
+
+                // * a map's entry is a message on the wire, a map of scalars' among them; its message
+                // value one more
+                if (field.IsMap)
+                {
+                    return held is null ? 1 : 2 + below;
+                }
+
+                return held is null ? 0 : 1 + below;
+            }
+
+            for (var isGrown = true; isGrown;)
+            {
+                isGrown = false;
+
+                foreach (var message in found)
+                {
+                    var deep = Math.Min(Depth + 1, message.Fields.InFieldNumberOrder().Select(NestingOf).DefaultIfEmpty(0).Max());
+
+                    if (deep > deepest[message])
+                    {
+                        deepest[message] = deep;
+                        isGrown = true;
+                    }
+                }
+            }
+
+            foreach (var message in found)
+            {
+                Volatile.Write(ref ShapeOf(message)._nesting, deepest[message]);
+            }
         }
 
         // whether `root` reaches a required field: every message it reaches found first, then those
@@ -411,9 +534,11 @@ public static class ProtoRecords
             }
         }
 
-        private static FormatException Refused(string reason)
+        // a refusal of the payload as no encoding of its message, what the walk found its inner
+        // exception
+        private static FormatException Refused(string found)
         {
-            return new FormatException($"a proto payload is not its message: {reason}");
+            return new FormatException(NotItsMessage, new FormatException($"a proto payload is not its message: {found}"));
         }
 
         // one record after its tag, of a field the message declares, or null
@@ -474,7 +599,7 @@ public static class ProtoRecords
         {
             if (frame.Depth >= Depth)
             {
-                throw new FormatException($"a proto payload nests a message more than {Depth} deep below the top one");
+                throw new FormatException(NestedPast100, new FormatException($"a proto payload nests a message more than {Depth} deep below the top one"));
             }
 
             return frame.Depth + 1;
@@ -525,6 +650,8 @@ public static class ProtoRecords
             return _at + (int)length;
         }
 
+        // a varint of 10 bytes at most, within 64 bits (Encoding, "Base 128 Varints"), within the
+        // message
         private ulong ReadVarint(int end)
         {
             var value = 0UL;
@@ -542,6 +669,13 @@ public static class ProtoRecords
 
                 if ((each & 0x80) == 0)
                 {
+                    // ! a 10th byte past 0x01 sets a bit past the 64th: no unsigned 64-bit integer, so
+                    // no encoding, refused here before Google.Protobuf drops those bits
+                    if (index == 9 && each > 0x01)
+                    {
+                        throw Refused("a varint past 64 bits");
+                    }
+
                     return value;
                 }
             }

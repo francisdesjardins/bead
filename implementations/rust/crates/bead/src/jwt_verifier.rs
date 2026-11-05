@@ -3,7 +3,6 @@
 //! reason; ES256 by `p256` and HS256 by `hmac`, pure Rust (decision 0044).
 
 use core::fmt;
-use core::time::Duration;
 use std::time::SystemTime;
 
 use hmac::{Hmac, KeyInit, Mac};
@@ -170,10 +169,9 @@ pub enum JwtVerdict {
     Refused(JwtRefusal),
 }
 
-/// The leeway for clock skew on `exp` and `nbf`: a constant on every side, never an option.
-pub const JWT_LEEWAY: Duration = Duration::from_secs(60);
-
-const LEEWAY_MILLISECONDS: i64 = 60_000;
+// the leeway for clock skew on `exp` and `nbf`, in milliseconds as a token's times are read: a
+// constant on every side, never an option
+const JWT_LEEWAY: i64 = 60_000;
 
 // the largest integer every side holds exactly
 const LARGEST_SAFE: i64 = 9_007_199_254_740_991;
@@ -205,8 +203,9 @@ fn string_of<'object>(object: &'object Map<String, Value>, name: &str) -> Option
     }
 }
 
-// a header or a claims set: a JSON object in UTF-8 that names each member once, a string holding a
-// surrogate alone read as a value that names nothing
+// a header or a claims set: a JSON object in UTF-8 that names each member once, bounded as spec
+// 17.5 bounds a payload, no number past a double and 64 deep at most, a string holding a surrogate
+// alone read as a value that names nothing
 fn object_of(part: &[u8]) -> Option<Map<String, Value>> {
     let bytes = base64url::decode(part)?;
     let options = ReadJsonOptions {
@@ -224,7 +223,7 @@ fn object_of(part: &[u8]) -> Option<Map<String, Value>> {
 /// # Errors
 ///
 /// A [`ProgrammerError`] naming the key's issuer.
-pub fn assert_jwt_key(key: &JwtKey) -> Result<(), ProgrammerError> {
+pub(crate) fn assert_jwt_key(key: &JwtKey) -> Result<(), ProgrammerError> {
     let fault = |what: &str| {
         ProgrammerError::new(format!(
             "a JWT's key {what}, for the issuer {:?}",
@@ -403,7 +402,7 @@ fn milliseconds_of(value: Option<&Value>) -> Option<i64> {
 /// The audiences a token's `aud` names (RFC 7519 §4.1.3): itself, a string; each of an array of
 /// strings; none for anything else.
 #[must_use]
-pub fn audiences_of(aud: Option<&Value>) -> Vec<String> {
+pub(crate) fn audiences_of(aud: Option<&Value>) -> Vec<String> {
     match aud {
         Some(Value::String(audience)) => vec![audience.clone()],
         Some(Value::Array(items)) => items
@@ -425,11 +424,11 @@ fn verdict_of(
     }
 
     let Some(expiry) = milliseconds_of(claims.get("exp"))
-        .filter(|&expiry| expiry <= LARGEST_SAFE.saturating_sub(LEEWAY_MILLISECONDS))
+        .filter(|&expiry| expiry <= LARGEST_SAFE.saturating_sub(JWT_LEEWAY))
     else {
         return JwtVerdict::Refused(JwtRefusal::Exp);
     };
-    let end = expiry.saturating_add(LEEWAY_MILLISECONDS);
+    let end = expiry.saturating_add(JWT_LEEWAY);
 
     if now >= end {
         return JwtVerdict::Refused(JwtRefusal::Exp);
@@ -438,7 +437,7 @@ fn verdict_of(
     if claims.contains_key("nbf") {
         let held = milliseconds_of(claims.get("nbf"));
 
-        if held.is_none_or(|start| now.saturating_add(LEEWAY_MILLISECONDS) < start) {
+        if held.is_none_or(|start| now.saturating_add(JWT_LEEWAY) < start) {
             return JwtVerdict::Refused(JwtRefusal::Nbf);
         }
     }
@@ -490,19 +489,29 @@ fn parts_of(token: &[u8]) -> Option<[&[u8]; 3]> {
         .then_some([header, claims, signature])
 }
 
+/// A token's header and claims set, read and not verified.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ReadJwt {
+    /// Its header.
+    pub header: Map<String, Value>,
+    /// Its claims set.
+    pub claims: Map<String, Value>,
+}
+
 /// A token's header and claims set as step 1 of section 13.8 reads them, verifying nothing.
 ///
 /// What a relay that does not verify reads its `aud` from, and a key set's ask its `kid` and its
 /// `iss`; none for a token that does not read.
 #[must_use]
-pub fn read_jwt(token: &[u8]) -> Option<(Map<String, Value>, Map<String, Value>)> {
+pub fn read_jwt(token: &[u8]) -> Option<ReadJwt> {
     let [header, claims, signature] = parts_of(token)?;
     let header = object_of(header)?;
     let claims = object_of(claims)?;
 
     base64url::decode(signature)?;
 
-    Some((header, claims))
+    Some(ReadJwt { header, claims })
 }
 
 // milliseconds since the epoch of a wall clock's reading
@@ -581,3 +590,5 @@ pub fn verify_jwt(token: &[u8], against: &JwtAgainst<'_>) -> Result<JwtVerdict, 
 
     Ok(verdict_of(claims, (against.audiences, key, now)))
 }
+
+impl std::error::Error for JwtRefusal {}

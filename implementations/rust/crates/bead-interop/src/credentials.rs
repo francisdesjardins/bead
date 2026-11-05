@@ -8,13 +8,18 @@ use core::sync::atomic::{AtomicU64, Ordering};
 use core::time::Duration;
 use std::sync::Arc;
 
+use bead::internal::JWT_LIMIT_BYTES;
 use bead::{
-    BoxFuture, Credentials, ElsewhereSession, ElsewhereVerdict, ElsewhereVerifier, JWT_LIMIT_BYTES,
-    JwtAlgorithm, JwtKey, JwtKeySet, JwtSetKey, KeySetAnswer, KeySetAsk, LIMIT_DEFAULTS,
-    ProgrammerError, RouterLimitsOptions, Schedule, SharedClock,
+    BoxFuture, Credentials, ElsewhereSession, ElsewhereVerdict, ElsewhereVerifier, JwtAlgorithm,
+    JwtKey, JwtKeySet, JwtSetKey, KeySetAnswer, KeySetAsk, LIMIT_DEFAULTS, ProgrammerError,
+    RouterLimitsOptions, Schedule, SharedClock,
 };
 use serde_json::{Map, Value};
 use tokio::sync::oneshot;
+
+#[cfg(test)]
+#[path = "credentials/tests.rs"]
+mod twin_tests;
 
 /// The interop service's behaviour, as every implementation's interop server reads it.
 pub const INTEROP_SERVICE: &str = include_str!("../../../../../spec/interop-service.json");
@@ -63,12 +68,12 @@ fn jwk_of(key: &Map<String, Value>) -> Result<Map<String, Value>, ProgrammerErro
 fn after_on<T: Send + 'static>(
     clock: &SharedClock,
     (milliseconds, value): (Option<u64>, T),
-) -> BoxFuture<T> {
+) -> BoxFuture<Result<T, ProgrammerError>> {
     let Some(milliseconds) = milliseconds else {
         return Box::pin(async move {
             tokio::task::yield_now().await;
 
-            value
+            Ok(value)
         });
     };
     let (woken, wait) = oneshot::channel::<()>();
@@ -83,11 +88,11 @@ fn after_on<T: Send + 'static>(
     );
 
     Box::pin(async move {
-        let _armed = timer;
+        let _armed = timer?;
 
         drop(wait.await);
 
-        value
+        Ok(value)
     })
 }
 
@@ -197,7 +202,7 @@ pub fn interop_verifier_of(clock: &SharedClock) -> ElsewhereVerifier {
                     let failed = after_on(&clock, (after, ()));
 
                     Box::pin(async move {
-                        failed.await;
+                        failed.await?;
 
                         Err("this verifier fails, on purpose".into())
                     })
@@ -206,11 +211,11 @@ pub fn interop_verifier_of(clock: &SharedClock) -> ElsewhereVerifier {
                     let session = ElsewhereSession {
                         id: sub.clone(),
                         data: Some(serde_json::json!({ "sub": sub })),
-                        end: end.and_then(|end| i64::try_from(end).ok()),
+                        end: end.and_then(|end| Value::from(end).as_f64()),
                     };
                     let held = after_on(&clock, (after, session));
 
-                    Box::pin(async move { Ok(Some(held.await)) })
+                    Box::pin(async move { Ok(Some(held.await?)) })
                 }
             }
         },
@@ -223,23 +228,17 @@ pub fn interop_verifier_of(clock: &SharedClock) -> ElsewhereVerifier {
 /// # Errors
 ///
 /// A [`ProgrammerError`] for a `spec/interop-service.json` that does not read.
-#[expect(
-    clippy::too_many_lines,
-    reason = "the interop service's keys, key set and verifier, read from its file in one place"
-)]
 pub fn interop_credentials_of(
     clock: &SharedClock,
-    limits: Option<&RouterLimitsOptions>,
+    limits: &RouterLimitsOptions,
 ) -> Result<Credentials, ProgrammerError> {
     let service = service()?;
     let jwt = object_at(&service, &["credentials", "jwt"]).ok_or_else(|| {
         ProgrammerError::new("spec/interop-service.json holds its JWT's credentials")
     })?;
-    let chunk_bytes = limits
-        .and_then(|limits| limits.chunk_bytes)
-        .unwrap_or(LIMIT_DEFAULTS.chunk_bytes);
+    let chunk_bytes = limits.chunk_bytes.unwrap_or(LIMIT_DEFAULTS.chunk_bytes);
     let maximum_envelope_bytes = limits
-        .and_then(|limits| limits.maximum_envelope_bytes)
+        .maximum_envelope_bytes
         .unwrap_or(LIMIT_DEFAULTS.maximum_envelope_bytes);
     let mut credentials = Credentials::default();
 
@@ -329,7 +328,7 @@ pub fn interop_credentials_of(
         };
         let answering = after_on(&asking, (Some(KEY_SET_MILLISECONDS), answered));
 
-        Box::pin(async move { Ok(answering.await) })
+        Box::pin(async move { Ok(answering.await?) })
     });
 
     credentials.audience = jwt

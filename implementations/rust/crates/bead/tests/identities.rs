@@ -5,20 +5,19 @@
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use bead::testing::files;
+use bead::NotificationResolverDependencies;
+use bead::internal::are_one_name;
+use bead::testing::{self, Difference, files};
 use bead::{
-    BoxFuture, ClientListener, ClientTransport, ConnectionHandle, IdentityRefusal, JsonCodec,
-    NotificationLike, Procedure, ProcedureKind, ProgrammerError, ReadyState, Refusal,
-    ResolverDependencies, Response, RouterClient, RouterClientOptions, RouterError, RouterServer,
+    BoxFuture, ClientListener, ConnectionHandle, IdentityRefusal, JsonCodec, NotificationLike,
+    Procedure, ProcedureKind, ProgrammerError, ReadyState, Refusal, RequestResolverDependencies,
+    Response, RouterClient, RouterClientOptions, RouterClientTransport, RouterError, RouterServer,
     RouterServerOptions, Sent, ServerListener, ServerTransport, ServiceManager,
-    ServiceManagerOptions, ServiceRouter, TransportMessage, are_one_name,
+    ServiceManagerOptions, ServiceRouter, TransportMessage,
 };
 use bytes::Bytes;
 use libtest_mimic::{Arguments, Failed, Trial};
 use serde_json::Value;
-
-// the language a differs names to excuse this side
-const LANGUAGE: &str = "Rust";
 
 // the ways the file names, each by its id
 const WAYS: [&str; 6] = [
@@ -34,7 +33,7 @@ const WAYS: [&str; 6] = [
 #[derive(Debug)]
 struct Unconnected;
 
-impl ClientTransport for Unconnected {
+impl RouterClientTransport for Unconnected {
     fn send(&self, _message: TransportMessage) -> Result<Sent, RouterError> {
         Ok(Sent::Done)
     }
@@ -42,6 +41,11 @@ impl ClientTransport for Unconnected {
     fn listen(&self, _listener: Arc<dyn ClientListener>) {}
 
     fn unlisten(&self, _listener: &Arc<dyn ClientListener>) {}
+
+    // a pause holds nothing here: it hands nothing
+    fn pause(&self) {}
+
+    fn resume(&self) {}
 
     fn ready_state(&self) -> ReadyState {
         ReadyState::Uninitialized
@@ -68,6 +72,11 @@ impl ServerTransport for Unconnecting {
     fn listen(&self, _listener: Arc<dyn ServerListener>) {}
 
     fn unlisten(&self, _listener: &Arc<dyn ServerListener>) {}
+
+    // a pause holds nothing here: it hands nothing
+    fn pause(&self, _connection_handle: &ConnectionHandle) {}
+
+    fn resume(&self, _connection_handle: &ConnectionHandle) {}
 
     fn start(&self) -> BoxFuture<Result<(), RouterError>> {
         Box::pin(async { Ok(()) })
@@ -131,17 +140,26 @@ fn declare(way: &str, (procedure, routers): (&Procedure, &Routers)) -> Result<()
     match way {
         "client-resolver" => routers
             .client_services
-            .get_command_resolver(procedure, ResolverDependencies::of(JsonCodec, JsonCodec))?
+            .get_command_resolver(
+                procedure,
+                RequestResolverDependencies::new(JsonCodec, JsonCodec),
+            )?
             .on(answering()),
         "server-resolver" => routers
             .server_services
-            .get_request_resolver(procedure, ResolverDependencies::of(JsonCodec, JsonCodec))?
+            .get_request_resolver(
+                procedure,
+                RequestResolverDependencies::new(JsonCodec, JsonCodec),
+            )?
             .on(answering()),
         "server-notification-resolver" => routers
             .server_services
             .get_notification_resolver(
                 procedure,
-                (ResolverDependencies::of(JsonCodec, JsonCodec), JsonCodec),
+                NotificationResolverDependencies::new(
+                    RequestResolverDependencies::new(JsonCodec, JsonCodec),
+                    JsonCodec,
+                ),
             )?
             .on(answering())
             .map(drop),
@@ -157,25 +175,30 @@ fn declare(way: &str, (procedure, routers): (&Procedure, &Routers)) -> Result<()
 fn echo() -> Procedure {
     Procedure {
         service_id: 1,
-        id: 1,
+        procedure_id: 1,
         service_revision: 1,
-        name: "echo".to_owned(),
-        kind: None,
+        procedure_name: "echo".to_owned(),
+        procedure_kind: None,
         maximum_payload_bytes: None,
         deprecation: None,
     }
 }
 
-// whether an entry's differs names this side
+// the rows of the support matrix an entry's differs lists, none where it lists none
+fn differs_of(entry: &Value) -> Result<Vec<Difference>, String> {
+    entry.get("differs").map_or_else(
+        || Ok(Vec::new()),
+        |differs| {
+            serde_json::from_value(differs.clone())
+                .map_err(|error| format!("{}'s differs: {error}", named(entry)))
+        },
+    )
+}
+
+// whether a row of the support matrix excuses this side from an entry, its differs read whole
+// before any trial is made
 fn is_excused(entry: &Value) -> bool {
-    entry
-        .get("differs")
-        .and_then(Value::as_array)
-        .is_some_and(|differs| {
-            differs.iter().any(|difference| {
-                difference.get("language").and_then(Value::as_str) == Some(LANGUAGE)
-            })
-        })
+    differs_of(entry).is_ok_and(|differs| testing::is_excused(&differs))
 }
 
 // the reason an entry is refused for at a way: at every way, or at those its refusedAt lists
@@ -289,6 +312,14 @@ fn trials() -> Result<Vec<Trial>, String> {
         .collect();
     let mut trials = Vec::new();
 
+    // ! a differs malformed fails the run, rather than play an entry a row may excuse
+    for entry in ["names", "ids", "procedureKinds", "folds"]
+        .into_iter()
+        .flat_map(&group)
+    {
+        differs_of(&entry)?;
+    }
+
     trials.push(Trial::test(
         "its table declares every way the file names and no other",
         move || {
@@ -343,7 +374,7 @@ fn trials() -> Result<Vec<Trial>, String> {
         trials.push(
             Trial::test(named(&entry), move || {
                 let procedure = Procedure {
-                    name: entry
+                    procedure_name: entry
                         .get("procedureName")
                         .and_then(Value::as_str)
                         .unwrap_or_default()
@@ -364,9 +395,9 @@ fn trials() -> Result<Vec<Trial>, String> {
                     ids_of(&entry).ok_or("ids a Rust type holds")?;
                 let procedure = Procedure {
                     service_id,
-                    id,
+                    procedure_id: id,
                     service_revision,
-                    name: entry
+                    procedure_name: entry
                         .get("procedureName")
                         .and_then(Value::as_str)
                         .unwrap_or("echo")
@@ -387,11 +418,11 @@ fn trials() -> Result<Vec<Trial>, String> {
         trials.push(
             Trial::test(named(&entry), move || {
                 let procedure = Procedure {
-                    kind: entry
+                    procedure_kind: entry
                         .get("procedureKind")
                         .and_then(Value::as_str)
                         .and_then(kind_of),
-                    name: entry
+                    procedure_name: entry
                         .get("procedureName")
                         .and_then(Value::as_str)
                         .unwrap_or("echo")

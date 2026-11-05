@@ -8,6 +8,7 @@ use bytes::Bytes;
 use tokio::sync::oneshot;
 
 use super::{Scripted, failure_of, locked, notification_of, result_of, token};
+use crate::UnregisterNotificationOptions;
 use crate::constants::{EnvelopeKind, ProtocolCode};
 use crate::envelope::{Credential, Envelope};
 use crate::failure::Failure;
@@ -25,6 +26,7 @@ pub(super) struct Notified {
     is_held: bool,
     failing: Mutex<Option<String>>,
     triggered: Mutex<Vec<u8>>,
+    payloads: Mutex<Vec<Bytes>>,
     held: Mutex<Vec<Option<oneshot::Sender<Settled>>>>,
     dropped: Mutex<Vec<Option<u16>>>,
 }
@@ -32,6 +34,12 @@ pub(super) struct Notified {
 impl Notified {
     pub(super) fn new(window: Option<u64>) -> Arc<Self> {
         Self::paced((super::notifying(), window))
+    }
+
+    pub(super) fn held(window: Option<u64>) -> Arc<Self> {
+        let mut notification = Self::new(window);
+        Arc::get_mut(&mut notification).expect("one owner").is_held = true;
+        notification
     }
 
     // a notification of `procedure`, heard at once
@@ -46,6 +54,7 @@ impl Notified {
             is_held: window.is_some(),
             failing: Mutex::default(),
             triggered: Mutex::default(),
+            payloads: Mutex::default(),
             held: Mutex::default(),
             dropped: Mutex::default(),
         })
@@ -63,6 +72,10 @@ impl Notified {
 
     pub(super) fn triggered(&self) -> Vec<u8> {
         locked(&self.triggered).clone()
+    }
+
+    pub(super) fn payloads(&self) -> Vec<Bytes> {
+        locked(&self.payloads).clone()
     }
 
     pub(super) fn dropped(&self) -> Vec<Option<u16>> {
@@ -92,6 +105,7 @@ impl NotificationLike for Notified {
 
     fn trigger(&self, payload: Bytes) -> Result<BoxFuture<Settled>, RouterError> {
         locked(&self.triggered).push(payload.first().copied().unwrap_or_default());
+        locked(&self.payloads).push(payload);
 
         let failing = locked(&self.failing).clone();
 
@@ -129,7 +143,10 @@ async fn keeps_the_call_id_of_a_subscription_let_go_of_a_while_silent_on_what_co
     super::answered(subscribing).await.expect("subscribed");
     scripted
         .router
-        .unregister_notification((&notification.like(), true))
+        .unregister_notification(
+            &notification.like(),
+            &UnregisterNotificationOptions::default(),
+        )
         .await;
 
     // on its way when it was let go of: dropped in silence, and so is the failure that ends it,
@@ -273,6 +290,42 @@ async fn a_failure_after_its_result_ends_the_subscription_no_call_unknown_the_no
         ["CALL_UNKNOWN"],
         "a failure under no call reported"
     );
+}
+
+// spec 11.7; decision 0045: a step on its router's state, never deferred, as the other sides'
+// facades call their core within the turn
+#[tokio::test]
+async fn a_subscription_s_call_cancels_the_one_bound_before_it_ahead_of_its_own_request() {
+    let scripted = Scripted::new();
+    let notification = Notified::new(None);
+
+    let first = scripted
+        .subscribe((&notification.like(), super::TIMEOUT))
+        .await;
+
+    scripted.transport.deliver(&result_of(1, None));
+    super::answered(first).await.expect("subscribed");
+
+    let second = scripted
+        .subscribe((&notification.like(), super::TIMEOUT))
+        .await;
+    let sent: Vec<(EnvelopeKind, u32)> = scripted
+        .transport
+        .envelopes()
+        .iter()
+        .map(|envelope| (envelope.kind(), envelope.call_id()))
+        .collect();
+
+    assert_eq!(
+        sent,
+        [
+            (EnvelopeKind::Request, 1),
+            (EnvelopeKind::Cancel, 1),
+            (EnvelopeKind::Request, 3)
+        ],
+        "the call bound before cancelled ahead of the request that binds anew"
+    );
+    drop(second);
 }
 
 // spec 11.7.3

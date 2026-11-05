@@ -14,8 +14,9 @@ namespace Bead.Transport.Mqtt.Tests;
 /// A scripted MQTT 5 peer on the loopback, which the adapter's tests play a broker with: each
 /// link's packets read as they come, decoded by MQTTnet's own decoder, each answer written by the
 /// test through its own encoder, so that a CONNACK, a PUBACK withheld or a DISCONNECT is the test's
-/// own and nothing a real broker does hides what the adapter sends. The TypeScript side's
-/// <c>mqtt-script</c> plays its tests alike.
+/// own and nothing a real broker does hides what the adapter sends; each UNSUBSCRIBE answered of
+/// 0x00 for each filter it names, as a broker that held them answers it, unless the test holds
+/// them. The TypeScript side's <c>mqtt-script</c> plays its tests alike.
 /// </summary>
 internal sealed class MqttScript : IAsyncDisposable
 {
@@ -36,6 +37,9 @@ internal sealed class MqttScript : IAsyncDisposable
 
     /// <summary>Where it listens: <c>mqtt://127.0.0.1:…</c>, or <c>mqtts://127.0.0.1:…</c> under a certificate.</summary>
     public Uri Uri { get; private set; } = new("mqtt://127.0.0.1");
+
+    /// <summary>Whether the script answers no UNSUBSCRIBE, the test answering each itself: false unless told.</summary>
+    public bool IsHoldingUnsubscribes { get; set; }
 
     /// <summary>A script on a port of its own, over TCP, or over TLS under <paramref name="certificate"/>.</summary>
     public static MqttScript Start(X509Certificate2? certificate = null)
@@ -129,7 +133,7 @@ internal sealed class MqttScript : IAsyncDisposable
                 stream = secured;
             }
 
-            var link = new ScriptedLink(socket, stream);
+            var link = new ScriptedLink(this, (socket, stream));
 
             lock (_links)
             {
@@ -158,6 +162,7 @@ internal sealed class ScriptedLink
 {
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(5);
 
+    private readonly MqttScript _script;
     private readonly Socket _socket;
     private readonly Stream _stream;
     private readonly List<MqttPacket> _packets = [];
@@ -169,10 +174,10 @@ internal sealed class ScriptedLink
     // the last write, which the next goes after
     private Task _written = Task.CompletedTask;
 
-    internal ScriptedLink(Socket socket, Stream stream)
+    internal ScriptedLink(MqttScript script, (Socket Socket, Stream Stream) carried)
     {
-        _socket = socket;
-        _stream = stream;
+        _script = script;
+        (_socket, _stream) = carried;
     }
 
     /// <summary>Its CONNECT, the first packet that came.</summary>
@@ -331,6 +336,20 @@ internal sealed class ScriptedLink
                         _unread.Add(packet);
                         _heard.TrySetResult();
                         _heard = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                    }
+
+                    // * let go as a broker that held each of its filters answers, unless the test
+                    // holds it
+                    if (packet is MqttUnsubscribePacket unsubscribe && !_script.IsHoldingUnsubscribes)
+                    {
+                        _ = Send(new MqttUnsubAckPacket
+                        {
+                            PacketIdentifier = unsubscribe.PacketIdentifier,
+                            ReasonCodes = [.. unsubscribe.TopicFilters.Select((_) =>
+                            {
+                                return MqttUnsubscribeReasonCode.Success;
+                            })],
+                        });
                     }
                 }
             }

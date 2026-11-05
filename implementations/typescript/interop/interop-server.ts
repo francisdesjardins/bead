@@ -19,7 +19,7 @@ import { createServer } from 'node:http';
 import { WebSocketServer } from 'ws';
 import { createHTTPServer } from '../src/server/http-server';
 import { createServer as createBeadServer } from '../src/server/server';
-import { createWSServer } from '../src/server/ws-server';
+import { createWebSocketServer } from '../src/server/websocket-server';
 import { createAmqpBrokerAdapter } from '../src/transport/shared/amqp-broker-adapter';
 import { createBrokerParticipant } from '../src/transport/shared/broker-participant';
 import { PLATFORM_CLOCK } from '../src/transport/shared/clock';
@@ -36,7 +36,10 @@ const origins = (process.env['BEAD_INTEROP_ORIGINS'] ?? '').split(' ').filter((o
 });
 // the interop service's credentials, on the clock both servers run on, the platform's
 const credentials = interopCredentialsOf(PLATFORM_CLOCK);
-const server = createWSServer<string>({ credentials, transport: { origins, WebSocketServer } });
+const server = createWebSocketServer<string>({
+  credentials,
+  transport: { origins, WebSocketServer },
+});
 const httpServer = createHTTPServer<string>({
   credentials,
   transport: {
@@ -129,7 +132,7 @@ process.stdin.on('end', () => {
     .then(() => {
       return Promise.all(
         participants.map((participant) => {
-          return participant.stop();
+          return participant[Symbol.asyncDispose]();
         })
       );
     })

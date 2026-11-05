@@ -1,0 +1,12 @@
+sequenceDiagram
+  participant C as Client
+  participant S as Serveur
+  C->>S: REQUEST · callId 1 · ouvrir une session
+  S-->>C: RESULT · callId 1 · CREDENTIAL OPAQUE : le jeton
+  C->>S: REQUEST · callId 3
+  S-->>C: RESULT · callId 3 · sans bloc : rien n'a changé
+  C->>S: REQUEST · callId 5 · s'abonner
+  S-->>C: RESULT · callId 5
+  Note over S: délai de session écoulé
+  S-->>C: FAILURE · callId 5 · SESSION_REQUIRED<br/>CREDENTIAL NONE : la session est finie
+  Note over C,S: la connexion reste, pour une autre session

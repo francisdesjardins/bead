@@ -352,7 +352,7 @@ test('draws one Bead connection per exchange, and closes it as its response ends
   const opened: string[] = [];
   const closed: string[] = [];
 
-  fixture.server.transport.on('connection', (...[, , connectionHandle]) => {
+  fixture.server.transport.on('connection', (...[, connectionHandle]) => {
     opened.push(connectionHandle);
   });
   fixture.server.transport.on('close', (_wasClean, connectionHandle) => {
@@ -542,7 +542,7 @@ test('answers a failed stream request as a problem before writing any event', as
   const drawn: string[] = [];
   const closed: string[] = [];
 
-  fixture.memory.on('connection', (...[, , handle]) => {
+  fixture.memory.on('connection', (...[, handle]) => {
     drawn.push(handle);
   });
   fixture.memory.on('close', (_wasClean, handle) => {
@@ -1502,7 +1502,7 @@ test('takes its hosts and proxies from its policy or beside it, and refuses one 
   for (const fixture of [fromPolicy, beside]) {
     const drawn: string[] = [];
 
-    fixture.server.transport.on('connection', (...[, , connectionHandle]) => {
+    fixture.server.transport.on('connection', (...[, connectionHandle]) => {
       drawn.push(connectionHandle);
     });
 
@@ -1697,7 +1697,7 @@ test('answers as the endpoint an application maps, and a caller of no address as
   await using fixture = await startTranscoding();
   const drawn: string[] = [];
 
-  fixture.server.transport.on('connection', (...[, , connectionHandle]) => {
+  fixture.server.transport.on('connection', (...[, connectionHandle]) => {
     drawn.push(connectionHandle);
   });
 
@@ -1983,7 +1983,7 @@ test('answers 502 to a result that leaves a required field unset, and reports it
     body: '{"code":50,"scope":"protocol","status":502,"title":"PAYLOAD_UNDECODABLE","type":"tag:francisdesjardins.ca,2026:bead/PAYLOAD_UNDECODABLE"}',
     status: 502,
   });
-  expect(reported).toEqual(['a proto message leaves bead.transcoding.v1.Needs.name unset']);
+  expect(reported).toEqual(['a required field unset']);
 });
 
 test('writes an event’s data through the runtime reader, its records checked', async () => {

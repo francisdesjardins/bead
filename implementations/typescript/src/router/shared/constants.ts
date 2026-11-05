@@ -1,6 +1,12 @@
 // dependencies
 
-import type { IRouterFailures, IRouterLimits, RouterSide, ServerConnectionHandle } from './types';
+import type {
+  IIntakeLimits,
+  IRouterFailures,
+  IRouterLimits,
+  RouterSide,
+  ServerConnectionHandle,
+} from './types';
 
 // constants
 
@@ -184,6 +190,15 @@ export const LIMIT_DEFAULTS: IRouterLimits = Object.freeze({
   maximumTransfers: 4,
   transferInactivityTimeout: 30_000,
   windowBytes: 4_194_304,
+});
+
+/**
+ * What a router holds of each connection untaken, when its options say nothing: the envelopes, and
+ * their bytes, fixed, as a pipe's thresholds are (spec 15.12).
+ */
+export const INTAKE_DEFAULTS: IIntakeLimits = Object.freeze({
+  maximumUntakenBytes: 1_048_576,
+  maximumUntakenEnvelopes: 64,
 });
 
 // definition

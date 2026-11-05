@@ -14,6 +14,7 @@ export {
   DisconnectError,
   FailureError,
   FailureScope,
+  INTAKE_DEFAULTS,
   LIMIT_DEFAULTS,
   ProtocolCode,
   SERVER_FAILURES,
@@ -44,6 +45,8 @@ export type {
 } from '../router/client/router-client';
 export type {
   ICallSession,
+  IIntakeLimits,
+  IntakeLimitsOptions,
   IRouterClientOptions,
   IRouterLimits,
   RequestCredential,
@@ -61,9 +64,9 @@ export type {
  *
  * @example
  * import { createClient } from '@francisdesjardins/bead/client';
- * import { createWSTransportClient } from '@francisdesjardins/bead/ws-transport-client';
+ * import { createWebSocketTransportClient } from '@francisdesjardins/bead/websocket-transport-client';
  *
- * const client = createClient({ transport: createWSTransportClient() });
+ * const client = createClient({ transport: createWebSocketTransportClient() });
  *
  * client.services.on('debug', (error, info) => {
  *   console.log(info.direction, info.procedureName, error);
@@ -83,6 +86,7 @@ export const createClient = <Transport extends IClientTransportLike>(
     clock,
     credential: options?.credential,
     credentials: options?.credentials,
+    intake: options?.intake,
     limits: options?.limits,
     metricsRegistry: options?.metricsRegistry,
   });
@@ -113,7 +117,7 @@ export const createClient = <Transport extends IClientTransportLike>(
     services,
     transport,
 
-    connect: (options) => {
+    connect: (...[options]) => {
       return transport.connect(options);
     },
     disconnect: (options) => {

@@ -163,6 +163,26 @@ public sealed partial class JsonForm
     }
 
     /// <summary>
+    /// An event's data (transcoding 8.4), one JSON text: a <c>proto</c> payload in this form, a
+    /// <c>json</c> one as it is, a <c>text</c> one as a JSON string, a <c>raw</c> one as a JSON string
+    /// of its bytes in standard base64, padded. A <c>proto</c> payload is read as spec 17.9 reads one,
+    /// through <see cref="ProtoCodecs"/>: one that does not read is a <see cref="FormatException"/>,
+    /// and one Bead's proto JSON form holds none of a <see cref="JsonFormException"/>.
+    /// </summary>
+    public ReadOnlyMemory<byte> EventDataOf(HttpPayload payload, ReadOnlyMemory<byte> bytes)
+    {
+        ArgumentNullException.ThrowIfNull(payload);
+
+        return payload.Encoding switch
+        {
+            HttpEncoding.Proto => Write(ProtoCodecs.Read(payload.Descriptor!, bytes)),
+            HttpEncoding.Json => bytes,
+            HttpEncoding.Text => Payloads.WriteJsonString(Payloads.ReadText(bytes)),
+            _ => Payloads.WriteJsonString(Convert.ToBase64String(bytes.Span)),
+        };
+    }
+
+    /// <summary>
     /// The JSON a request's message is read from, built by its binding: its node read as 5.2's steps
     /// 2 and 3, step 4 left to <see cref="Judge"/>, which the binding calls once its derived mask is set.
     /// </summary>
@@ -1532,12 +1552,12 @@ public sealed partial class JsonForm
         IMessage inner;
 
         // * read as spec 17.9 reads a payload, its records checked, a closed enum's undeclared number
-        // set aside, within the depth left below it, but for 17.9.7, which looks into no Any
+        // dropped, within the depth left below it, but for 17.9.7, which looks into no Any
         try
         {
             inner = ProtoCodecs.Unjudged(held, (any.Value.Memory, Depth + 1 - depth));
         }
-        catch (Exception reason) when (reason is FormatException or InvalidProtocolBufferException)
+        catch (FormatException reason)
         {
             throw new JsonFormException("an Any whose bytes do not read as its type", reason);
         }

@@ -370,6 +370,16 @@ public sealed class MetricsRegistryTests
     // a server's transport whose connections never open
     private sealed class Unconnected : IRouterServerTransport
     {
+        // its router paused and resumed it, which hands what it hands all the same: no test of
+        // this one's reaches a bound
+        public void Pause(string connectionHandle)
+        {
+        }
+
+        public void Resume(string connectionHandle)
+        {
+        }
+
         public TimeProvider Clock
         {
             get

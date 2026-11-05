@@ -21,6 +21,8 @@ import { checkDeclaration, checkProcedureKind } from '../shared/identity';
 import type { INotifyingSeries } from '../shared/metrics-registry';
 import { createProcedureMap } from '../shared/procedure-map';
 import { createRouterCore } from '../shared/router-core';
+import { DISPOSED } from '../shared/router-writer';
+import { createTelling, toldOf } from '../shared/telling';
 import type {
   ICallAddress,
   ICallSession,
@@ -48,6 +50,7 @@ export {
   CredentialScheme,
   EnvelopeKind,
   FailureScope,
+  INTAKE_DEFAULTS,
   LIMIT_DEFAULTS,
   ProtocolCode,
   SERVER_FAILURES,
@@ -75,7 +78,11 @@ export {
   ProgrammerError,
   TimeoutError,
 } from '../../transport/shared/errors';
-export type { TransportServerConnectionHandle } from '../../transport/server/types';
+export type {
+  ITransportServerConnection,
+  TransportServerConnectionHandle,
+} from '../../transport/server/types';
+export type { IGauges } from '../../transport/shared/types';
 export type {
   AccessRefusalStage,
   AdmissionFailure,
@@ -106,6 +113,8 @@ export type {
   INotificationHeader,
   IProtocolFailure,
   IHandedRequestHeader,
+  IIntakeLimits,
+  IntakeLimitsOptions,
   IRequestHeader,
   IResultHeader,
   IRouterResult,
@@ -190,9 +199,9 @@ const subscribingOf = (
  *
  * @example
  * import { createRouterServer } from '@francisdesjardins/bead/router-server';
- * import { createWSTransportServer } from '@francisdesjardins/bead/ws-transport-server';
+ * import { createWebSocketTransportServer } from '@francisdesjardins/bead/websocket-transport-server';
  *
- * const router = createRouterServer(createWSTransportServer({ WebSocketServer }));
+ * const router = createRouterServer(createWebSocketTransportServer({ WebSocketServer }));
  *
  * router.on('error', (error, connectionHandle) => {
  *   console.error(connectionHandle, error);
@@ -207,7 +216,10 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
     { beneath: transport.clock, given: options?.clock },
     { below: 'its transport', layer: "a server's router" }
   );
-  const emitter = createEmitter<RouterServerEventMap>();
+  // * what it tells its application, the core's and its own, runs within one telling: what that
+  // application does with it from within one is taken in a later turn (spec 9.0; decision 0045)
+  const telling = createTelling();
+  const emitter = toldOf(createEmitter<RouterServerEventMap>(), telling);
   // what it counts its calls and notifications through, attached to the registry it was given
   const metrics = options?.metricsRegistry?.attach('server');
   // the series of each notification's resolver, which its subscriptions count into
@@ -378,7 +390,15 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
           void sendNotification(payload, { callId, connectionHandle });
         }
       },
+      // ! called within the turn that counted the envelope: a transport's pair never tells a
+      // listener within it (decision 0046)
+      pause: (connectionHandle) => {
+        transport.pause(connectionHandle);
+      },
       report,
+      resume: (connectionHandle) => {
+        transport.resume(connectionHandle);
+      },
       send: (message, connectionHandle) => {
         return transport.send(message, connectionHandle);
       },
@@ -410,8 +430,11 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
         });
       },
     },
-    { clock, limits: options?.limits, metrics }
+    { clock, intake: options?.intake, limits: options?.limits, metrics, telling }
   );
+
+  // the handle's mark, set at once by its dispose: a call or an answer made after it fails unsent
+  let isDisposeMarked = false;
 
   // a router that takes a JWT holds its header: its limits hold 1,024 bytes at least
   if (credentials.takesJwt) {
@@ -520,7 +543,7 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
   };
 
   const onConnection = (
-    ...[, , connectionHandle]: TransportServerEventMap[CONNECTION_EVENT]
+    ...[, connectionHandle]: TransportServerEventMap[CONNECTION_EVENT]
   ): void => {
     connections.set(connectionHandle, connectionHandle);
   };
@@ -544,22 +567,37 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
     core.rejectPending('the connection closed before the answer', connectionHandle);
   };
 
-  // a request of the router's own, to the connection its options name — the relay's leg B, too
-  const request: IRouterServer<Transport>['request'] = (
-    payload,
-    { onCallId, onSent, options: requestOptions, procedure, refusal: judged, series, subscribes }
-  ) => {
-    // ! a programmer's error first, before the call starts, so it is never counted
+  // what a request of the router's own asks that no server does: a programmer's error
+  const misuseOf = ({
+    options: requestOptions,
+    subscribes,
+  }: Parameters<IRouterServer<Transport>['request']>[1]): ProgrammerError | undefined => {
     if (subscribes !== undefined) {
-      return Promise.reject(
-        new ProgrammerError('a server does not subscribe to notifications; it sends them')
-      );
+      return new ProgrammerError('a server does not subscribe to notifications; it sends them');
     }
 
     if (requestOptions.connectionHandle === undefined) {
-      return Promise.reject(
-        new ProgrammerError('a server request names the connection it goes to')
-      );
+      return new ProgrammerError('a server request names the connection it goes to');
+    }
+
+    return undefined;
+  };
+
+  // a request of the router's own, to the connection its options name — the relay's leg B, too
+  const request: IRouterServer<Transport>['request'] = (payload, requested) => {
+    const {
+      onCallId,
+      onSent,
+      options: requestOptions,
+      procedure,
+      refusal: judged,
+      series,
+    } = requested;
+    // ! a programmer's error first, before the call starts, so it is never counted
+    const misuse = misuseOf(requested);
+
+    if (misuse !== undefined) {
+      return Promise.reject(misuse);
     }
 
     const named = requestOptions.connectionHandle as TransportServerConnectionHandle;
@@ -644,6 +682,56 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
     },
   });
 
+  // a notification to each subscription its options keep
+  const notify: IRouterServer<Transport>['notify'] = async (
+    payload,
+    { filter, key, procedure: { procedureId, serviceId } }
+  ) => {
+    // who gets it is settled before any is sent: a filter that throws sends it to none
+    const targets = notifications
+      .candidates({ procedureId, serviceId })
+      .filter(({ connectionHandle, identifier }) => {
+        // * its subscriber alone, as the filter's type has it: the subscription's call stays here
+        return (
+          filter === undefined ||
+          filter(identifier === undefined ? { connectionHandle } : { connectionHandle, identifier })
+        );
+      });
+
+    // a value that does not write goes to none, never queued: each subscription it was for counts
+    // it failed, and why is reported once (spec 17.2, item 6)
+    if (payload instanceof Error) {
+      for (const { callId, connectionHandle } of targets) {
+        notifications.seriesOf(callId, connectionHandle)?.failed();
+      }
+
+      report(payload);
+
+      return;
+    }
+
+    // offered in order, each before the next: a paced subscription sends it, queues it, or ends
+    const sending = targets.map(({ callId, connectionHandle }) => {
+      const call = { callId, connectionHandle };
+      const pacing = notifications.pacingOf(callId, connectionHandle);
+
+      if (pacing === undefined) {
+        return sendNotification(payload, call);
+      }
+
+      switch (pacing.offer({ key, payload })) {
+        case 'exceeded':
+          return exceed(call, pacing);
+        case 'queued':
+          return Promise.resolve();
+        case 'send':
+          return sendNotification(payload, call);
+      }
+    });
+
+    await Promise.all(sending);
+  };
+
   const router: IRouterServer<Transport> = {
     ...createEventMethods(emitter, () => {
       return router;
@@ -677,11 +765,23 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
     destinations: () => {
       return relay.destinations();
     },
-    dropSubscriptions: ({ connectionHandle, failure }) => {
-      return endSession({ connectionHandle }, failure);
+    dropSubscriptions: (connectionHandle, failure) => {
+      if (typeof connectionHandle !== 'string') {
+        return Promise.reject(
+          new ProgrammerError(
+            `dropSubscriptions takes a connection's handle, a string, not ${String(connectionHandle)}`
+          )
+        );
+      }
+
+      return telling.later(() => {
+        return endSession({ connectionHandle }, failure);
+      });
     },
     endSession: (identifier) => {
-      return credentialSessions.end(identifier);
+      return telling.later(() => {
+        return credentialSessions.end(identifier);
+      });
     },
     endSessionsOf: (issuer) => {
       if (typeof issuer !== 'string') {
@@ -690,7 +790,9 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
         );
       }
 
-      return credentialSessions.endSessionsOf(issuer);
+      return telling.later(() => {
+        return credentialSessions.endSessionsOf(issuer);
+      });
     },
     gauges: () => {
       return mergeGauges([
@@ -708,52 +810,10 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
     hasNotification: () => {
       return false;
     },
-    notify: async (payload, { filter, key, procedure: { procedureId, serviceId } }) => {
-      // who gets it is settled before any is sent: a filter that throws sends it to none
-      const targets = notifications
-        .candidates({ procedureId, serviceId })
-        .filter(({ connectionHandle, identifier }) => {
-          // * its subscriber alone, as the filter's type has it: the subscription's call stays here
-          return (
-            filter === undefined ||
-            filter(
-              identifier === undefined ? { connectionHandle } : { connectionHandle, identifier }
-            )
-          );
-        });
-
-      // a value that does not write goes to none, never queued: each subscription it was for counts
-      // it failed, and why is reported once (spec 17.2, item 6)
-      if (payload instanceof Error) {
-        for (const { callId, connectionHandle } of targets) {
-          notifications.seriesOf(callId, connectionHandle)?.failed();
-        }
-
-        report(payload);
-
-        return;
-      }
-
-      // offered in order, each before the next: a paced subscription sends it, queues it, or ends
-      const sending = targets.map(({ callId, connectionHandle }) => {
-        const call = { callId, connectionHandle };
-        const pacing = notifications.pacingOf(callId, connectionHandle);
-
-        if (pacing === undefined) {
-          return sendNotification(payload, call);
-        }
-
-        switch (pacing.offer({ key, payload })) {
-          case 'exceeded':
-            return exceed(call, pacing);
-          case 'queued':
-            return Promise.resolve();
-          case 'send':
-            return sendNotification(payload, call);
-        }
+    notify: (payload, notified) => {
+      return telling.later(() => {
+        return notify(payload, notified);
       });
-
-      await Promise.all(sending);
     },
     registerNotification: () => {
       return Promise.reject(
@@ -781,9 +841,31 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
       }
     },
     report,
-    request,
-    respond: (response, request) => {
-      return core.respond(response, request);
+    request: (payload, requested) => {
+      const misuse = misuseOf(requested);
+
+      // ! a programmer's error first, then the handle's mark, both read at once: one made after
+      // the dispose fails unsent (spec 9.1)
+      if (misuse !== undefined) {
+        return Promise.reject(misuse);
+      }
+
+      if (isDisposeMarked) {
+        return Promise.reject(new DisconnectError(DISPOSED));
+      }
+
+      return telling.later(() => {
+        return request(payload, requested);
+      });
+    },
+    respond: (response, answered) => {
+      if (isDisposeMarked) {
+        return Promise.reject(new DisconnectError(DISPOSED));
+      }
+
+      return telling.later(() => {
+        return core.respond(response, answered);
+      });
     },
     subscribe: ({ connectionHandle, header, session }) => {
       const { callId, procedureId, serviceId } = header;
@@ -798,6 +880,13 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
       // one that closed would never be cleaned, nor would a call its requester cancelled
       if (!connections.has(connectionHandle)) {
         throw new DisconnectError(`${connectionHandle} is not an open connection`);
+      }
+
+      // ! the very header its request was dispatched with: a copy is tied to no call (spec 9.3)
+      if (!core.isDispatched(header)) {
+        throw new ProgrammerError(
+          `a subscription goes only to a request this router dispatched, not to call ${String(callId)}`
+        );
       }
 
       if (!core.isAnswering({ connectionHandle, header })) {
@@ -833,26 +922,32 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
       return places.unsubscribe(call);
     },
     [Symbol.dispose]: () => {
-      const followed = [...connections.values()];
-
-      // what each connection held, answered, is dropped with the router
-      for (const connectionHandle of followed) {
-        dropWith(connectionHandle);
-      }
-
+      // * in two steps (decision 0045): its handle's mark at once, and its transport heard no more;
+      // what it holds let go then, or — disposed within a telling — in a later turn, behind what
+      // that turn sends and what was made before it
+      isDisposeMarked = true;
       transport.off(CLOSE_EVENT, onClose);
       transport.off(CONNECTION_EVENT, onConnection);
       transport.off(MESSAGE_EVENT, onMessage);
-      // no connection is followed any more, before any call hears of it: none is asked, subscribed or
-      // notified again
-      connections.clear();
-      places.clear();
-      credentialSessions[Symbol.dispose]();
-      core[Symbol.dispose]();
+      telling.defer(() => {
+        const followed = [...connections.values()];
 
-      for (const connectionHandle of followed) {
-        notifications.clean(connectionHandle);
-      }
+        // what each connection held, answered, is dropped with the router
+        for (const connectionHandle of followed) {
+          dropWith(connectionHandle);
+        }
+
+        // no connection is followed any more, before any call hears of it: none is asked,
+        // subscribed or notified again
+        connections.clear();
+        places.clear();
+        credentialSessions[Symbol.dispose]();
+        core[Symbol.dispose]();
+
+        for (const connectionHandle of followed) {
+          notifications.clean(connectionHandle);
+        }
+      });
     },
   };
 

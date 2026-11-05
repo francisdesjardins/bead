@@ -11,16 +11,16 @@ use bytes::Bytes;
 use tokio::sync::Notify;
 
 use super::{
-    Inner, Request, RequestDependencies, RequestOptions, ServiceManager, ServiceRouter, Step,
+    Inner, Maker, RegistrationOptions, Request, RequestDependencies, ServiceManager, Step,
     Validate, traced,
 };
 use crate::constants::ProtocolCode;
 use crate::debug::{DebugDirection, DebugType};
 use crate::errors::{CallError, ProgrammerError};
 use crate::failure::Failure;
-use crate::identity::{Procedure, check_declaration};
+use crate::identity::Procedure;
 use crate::payloads::PayloadCodec;
-use crate::router::client::{NotificationLike, RouterClient};
+use crate::router::client::{NotificationLike, RouterClient, UnregisterNotificationOptions};
 use crate::router::types::{BoxFuture, RouterError};
 
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -67,15 +67,23 @@ impl<Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec> fmt::Debug
 impl<Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec>
     NotificationDependencies<Req, Res, Not>
 {
-    /// A notification's codecs, unpaced, judged by no rule, its subscription cancelled as it is left.
+    /// A requester's `dependencies`, and the codec of the notification it hears: unpaced, its
+    /// subscription cancelled as it is left.
     #[must_use]
-    pub fn of((request, result, notification): (Req, Res, Not)) -> Self {
+    pub fn new(dependencies: RequestDependencies<Req, Res>, notification: Not) -> Self {
+        let RequestDependencies {
+            request,
+            result,
+            validate,
+            fail_fast,
+        } = dependencies;
+
         Self {
             request,
             result,
             notification,
-            validate: None,
-            fail_fast: false,
+            validate,
+            fail_fast,
             unsubscribe: None,
             window: None,
         }
@@ -166,7 +174,7 @@ where
     // anything waiting on the answer runs
     async fn register(
         &self,
-        (payload, options): (Req::Value, RequestOptions),
+        (payload, options): (Req::Value, RegistrationOptions),
     ) -> Result<(), CallError> {
         let liked = self
             .liked()
@@ -176,17 +184,9 @@ where
                 .register_notification(Arc::clone(&liked))
                 .map_err(CallError::Refused)?;
 
-            // a notification's own request names no connection, whichever router it goes through
-            let asked = RequestOptions {
-                destination_id: options.destination_id,
-                signal: options.signal,
-                timeout: options.timeout,
-                ..RequestOptions::default()
-            };
-
             let (call_id, response) = self
                 .requester
-                .call_with(payload, (asked, Some(Arc::clone(&liked))))
+                .subscribe_with(payload, (&options, Arc::clone(&liked)))
                 .map_err(CallError::Refused)?
                 .with_call_id()
                 .await?;
@@ -199,7 +199,9 @@ where
 
         // a router may hold it when what follows fails, as a subscription can
         if registered.is_err() && self.router.has_notification(&liked) {
-            self.router.unregister_notification((&liked, true)).await;
+            self.router
+                .unregister_notification(&liked, &UnregisterNotificationOptions::default())
+                .await;
         }
 
         registered
@@ -221,9 +223,11 @@ where
         }
 
         if let Some(liked) = self.liked() {
-            self.router
-                .unregister_notification((&liked, !is_acknowledged))
-                .await;
+            let options = UnregisterNotificationOptions {
+                cancel: Some(!is_acknowledged),
+            };
+
+            self.router.unregister_notification(&liked, &options).await;
         }
 
         outcome
@@ -309,18 +313,23 @@ where
         {
             return Err(RouterError::Other(Arc::new(ProgrammerError::new(format!(
                 "{} should not have been triggered",
-                self.procedure.name
+                self.procedure.procedure_name
             )))));
         }
 
-        // a notification that does not decode fails here, for the router to report
-        let value = match crate::payloads::decoded(&self.codec, &payload) {
+        // a notification that does not decode fails here, for the router to report; its codec's
+        // panic fails it as its refusal does (spec 17.2, item 3)
+        let value = match crate::payloads::decoded(&self.codec, &payload)
+            .unwrap_or_else(|panicked| Err(crate::payloads::refusal_saying(&panicked)))
+        {
             Ok(value) => value,
             Err(refused) => {
                 let failure = Failure::protocol(
                     ProtocolCode::PAYLOAD_UNDECODABLE,
                     crate::constants::RouterSide::Client,
                 )
+                // ! a detail of the side's own words: its codec's reason, in spec 17.2's words;
+                // the rest in its cause
                 .saying(refused.reason().to_owned())
                 .of_call(Some(self.procedure.address()), None)
                 .caused_by(Arc::new(refused));
@@ -436,6 +445,10 @@ impl fmt::Debug for NotificationRegistration {
 
 impl NotificationRegistration {
     /// Takes its callback away; the last out leaves the subscription.
+    ///
+    /// # Errors
+    ///
+    /// A [`CallError`] when its router cannot end the subscription.
     pub fn unregister(&self) -> BoxFuture<Result<(), CallError>> {
         self.shared.unregister((self.id, self.own))
     }
@@ -493,10 +506,15 @@ where
 
     /// Registers `callback`, listening first: its subscribing call goes with `payload` when no
     /// subscription is held, and the registration waits for it.
-    pub fn on(
+    ///
+    /// # Errors
+    ///
+    /// A [`CallError`] when the subscribing call is refused, cancelled, disconnected or fails.
+    pub fn register(
         &self,
-        (payload, callback): (Req::Value, NotificationCallback<Not::Value>),
-        options: RequestOptions,
+        payload: Req::Value,
+        callback: NotificationCallback<Not::Value>,
+        options: &RegistrationOptions,
     ) -> BoxFuture<Result<NotificationRegistration, CallError>> {
         let shared = Arc::clone(&self.shared);
         let (id, own, unregistering) = {
@@ -509,6 +527,7 @@ where
 
             (id, state.generation, state.unregistering.clone())
         };
+        let options = options.clone();
 
         Box::pin(async move {
             if let Some(unregistering) = unregistering {
@@ -563,7 +582,7 @@ where
                 } else {
                     Err(CallError::Disconnected(format!(
                         "{} was dropped with its connection",
-                        shared.procedure.name
+                        shared.procedure.procedure_name
                     )))
                 }
             });
@@ -596,8 +615,11 @@ pub(super) struct Known {
 
 // what tells two declarations of one procedure apart
 fn difference_of(known: &Procedure, asked: &Procedure) -> Option<String> {
-    if known.kind != asked.kind {
-        return Some(format!("kind {:?}, not {:?}", known.kind, asked.kind));
+    if known.procedure_kind != asked.procedure_kind {
+        return Some(format!(
+            "kind {:?}, not {:?}",
+            known.procedure_kind, asked.procedure_kind
+        ));
     }
 
     if known.maximum_payload_bytes != asked.maximum_payload_bytes {
@@ -607,8 +629,11 @@ fn difference_of(known: &Procedure, asked: &Procedure) -> Option<String> {
         ));
     }
 
-    if known.name != asked.name {
-        return Some(format!("procedureName {}, not {}", known.name, asked.name));
+    if known.procedure_name != asked.procedure_name {
+        return Some(format!(
+            "procedureName {}, not {}",
+            known.procedure_name, asked.procedure_name
+        ));
     }
 
     if known.service_revision != asked.service_revision {
@@ -641,10 +666,9 @@ where
     Res::Value: Clone + fmt::Debug + Sync,
     Not::Value: Clone + fmt::Debug + Sync,
 {
-    // * the router's check before the manager's own reason, so spec 16.10's order holds here too
-    check_declaration(procedure)?;
-
-    let key = (procedure.service_id, procedure.id);
+    // * the side first, then spec 16.10's reasons for its way, before the manager's own reasons
+    let router = manager.client_router((procedure, Maker::Notification))?;
+    let key = (procedure.service_id, procedure.procedure_id);
     let known = locked(&manager.inner.notifications).get(&key).map(|known| {
         (
             known.procedure.clone(),
@@ -667,7 +691,7 @@ where
         if let Some(difference) = difference {
             return Err(ProgrammerError::new(format!(
                 "{}/{} is already a notification with {difference}",
-                procedure.service_id, procedure.id
+                procedure.service_id, procedure.procedure_id
             )));
         }
 
@@ -677,7 +701,7 @@ where
             .ok_or_else(|| {
                 ProgrammerError::new(format!(
                     "{}/{} is already a notification of other payloads",
-                    procedure.service_id, procedure.id
+                    procedure.service_id, procedure.procedure_id
                 ))
             });
     }
@@ -688,23 +712,20 @@ where
         ));
     }
 
-    let ServiceRouter::Client(router) = &manager.inner.router else {
-        return Err(ProgrammerError::new(
-            "only a client hears notifications; a server notifies them",
-        ));
+    let requester = Request {
+        shared: manager.requester_of(
+            procedure,
+            (
+                RequestDependencies {
+                    request: dependencies.request,
+                    result: dependencies.result,
+                    validate: dependencies.validate,
+                    fail_fast: dependencies.fail_fast,
+                },
+                DebugType::Request,
+            ),
+        )?,
     };
-    let requester = manager.requester_of(
-        procedure,
-        (
-            RequestDependencies {
-                request: dependencies.request,
-                result: dependencies.result,
-                validate: dependencies.validate,
-                fail_fast: dependencies.fail_fast,
-            },
-            DebugType::Request,
-        ),
-    )?;
     let shared = Arc::new(NotificationShared {
         manager: Arc::clone(&manager.inner),
         router: router.clone(),

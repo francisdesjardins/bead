@@ -2,16 +2,16 @@
 
 - **Status**: accepted
 - **Scope**: every runtime's public surface, the service layer's client half ahead in the Rust
-  side's core: a procedure's kind, checked by each router as it is declared; the payload codecs made
-  public; the admission vocabulary; the failure catalogue; the typed descriptors, and their
-  validator; the service layer that serves and calls them; the notify filter's argument; a
-  notification asked for again at another window; the bound call and its guard; the C# side's server
-  and client interfaces, and its routers' `Notify`; the TypeScript side's `./service` entry; the
-  constant of the contract with generated code. Spec section 16, whose 16.10 holds the reason
-  `against its kind` and whose 16.11 says what each way of declaring takes, with
-  `spec/identities.json`, its schema and its generator; the support matrix's rows of the layer;
-  [0003](0003-one-word-one-meaning.md)'s sentence on _kind_ and _type_. The `proto` encoding,
-  section 17.9, its file and its rows, is
+  side's core: a procedure's kind, checked by each router as it is declared; a side's services,
+  typed by its side; the payload codecs made public; the admission vocabulary; the failure
+  catalogue; the typed descriptors, and their validator; the service layer that serves and calls
+  them; the notify filter's argument; a notification asked for again at another window; the bound
+  call and its guard; the C# side's server and client interfaces, and its routers' `Notify`; the
+  TypeScript side's `./service` entry; the constant of the contract with generated code. Spec
+  section 16, whose 16.10 holds the reason `against its kind` and whose 16.11 says what each way of
+  declaring takes, with `spec/identities.json`, its schema and its generator; the support matrix's
+  rows of the layer; [0003](0003-one-word-one-meaning.md)'s sentence on _kind_ and _type_. The
+  `proto` encoding, section 17.9, its file and its rows, is
   [0031](0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)'s; the check of a
   `proto` payload's records before its library reads them, its levelings and protobuf's conformance
   suite are
@@ -34,8 +34,9 @@ descriptor. That layer needs eight things of each runtime, the same on every sid
   refuse neither a command's requester made for a request nor a subscription asked of a procedure
   that never notifies. Bead says what a call is by the router's side: "a client's router makes
   requests and answers commands, a server's the reverse" (`spec/debugging.md` 8.2), as the metrics
-  registry types it; the service manager's accessor names only pick the trace's type, and both
-  routers declare a requester alike.
+  registry types it; each of the service manager's makers belongs to one side, refused on the other
+  as it is made, so the type it gives the trace is its router's side's, and both routers declare a
+  requester alike; a client and a server give it typed by their side.
 - **The codecs of section 17, public.** Generated code binds each payload to a codec by name, and
   makes a protobuf message's of its stock library's functions;
   [0016](0016-a-json-payload-has-one-form-whichever-side-writes-it.md) puts the codecs in the
@@ -97,14 +98,73 @@ Where it is checked:
 - **The service manager, by the accessor's name**: `getRequest` on a server's manager, for a
   procedure of kind `request`, passes, yet its call goes to a client, and the registry counts it a
   command. The accessor does not say the side; the router does.
-- **Each router, at its declaration, by the way it is declared. Chosen.** A router knows its side,
-  and whether a resolver notifies before it registers it: `typeof resolver.notify === 'function'`,
-  `resolver is INotificationResolver`. A notification is registered on a client's router alone. The
-  ways are `spec/identities.json`'s own, six of them: `client-resolver`, `server-resolver`,
-  `server-notification-resolver`, `client-requester`, `server-requester`, `client-notification`. A
-  resolver that notifies is a way of its own, since a server's router takes another kind of it than
-  of a plain one. The manager adds no reason of its own, and 0017's paragraph "The service manager
-  checks first where it refuses first" stands as it is: it checks the procedure's identity, once.
+- **Each router, at its declaration, and the manager, as it makes. Chosen.** A router knows its
+  side, and whether a resolver notifies before it registers it:
+  `typeof resolver.notify === 'function'`, `resolver is INotificationResolver`. A notification is
+  registered on a client's router alone. The ways are `spec/identities.json`'s own, six of them:
+  `client-resolver`, `server-resolver`, `server-notification-resolver`, `client-requester`,
+  `server-requester`, `client-notification`. A resolver that notifies is a way of its own, since a
+  server's router takes another kind of it than of a plain one. The router checks by the way it is
+  declared, for a router called directly. The manager checks its maker's side first, since the
+  router alone cannot refuse a request resolver on a client's router, which is a `client-resolver`
+  the router takes; it then checks the same way's three reasons, as 0017's paragraph "The service
+  manager checks first where it refuses first" orders them.
+
+**How a side's types say it.**
+
+- **One manager, the refusal as made alone**: no name and no break, the refusal holding its twins on
+  every side. But the facades are where nearly every application meets the manager, and a framework
+  that calls both ways holds the sides apart by type — ASP.NET Core SignalR's `Hub` on the server,
+  its `HubConnection` on the client — vscode-jsonrpc's `MessageConnection` aside, whose one
+  implementation fills both of JSON-RPC 2.0's roles, which 16.11 answers. Bead's own layers already
+  split by side: `RouterClient` and `RouterServer`, `RequestSerializerClient` and
+  `RequestSerializerServer`, `ServiceClient` and `ServiceServer`.
+- **The side as a type parameter**, `IServiceManager<Handle, Side>` as a conditional type: nothing
+  gives one, since the facade is `IClient`, always a client's, and the routers' types carry no side,
+  the fakes' `IRouterLike<string>` naming neither. It would be threaded through all of them for an
+  inference nothing needs, and maps onto no C# or Rust name.
+- **On the C# side, two sealed classes composing the manager**: no cross-cast, and nothing to
+  version but their own members, at six forwarders each and a public constructor per side. That
+  constructor takes an `IRouterLike`, since an `IClient` or an `IBeadServer` over a router of its
+  own needs one, and so needs a refusal at construction, with its twins on two sides. It is how the
+  C# side closes the open row of the matrix, a round of its own, as a wrapper object per side is the
+  TypeScript side's.
+- **A base interface for the shared members**, `IServiceManagerEvents`: a fourth name on three
+  sides, with a Rust trait to match; each type declares its shared members itself, as the Rust
+  structs must.
+- **On the Rust side, a phantom marker parameter**, `ServiceManager<S: ServiceSide = EitherSide>`,
+  with `pub type ServiceManagerClient = ServiceManager<ClientSide>;`, as std's
+  `HashMap<K, V, S = RandomState>` defines `new` on its default alone: each maker and shared member
+  written once, no forwarder and no doubled doc, `ServiceManager::new()` inferring the untyped
+  default. But six public names no other side has a counterpart for — three marker types,
+  `ServiceSide`, `MakesRequests`, `MakesCommands`, and a sealing module — each an `own:` row of
+  `tools/names.tsv` or an `alone` row against a pin that may only fall; a wrong maker that reads
+  E0599 "the method `get_command` exists for reference `&ServiceManager<ClientSide>`, but its trait
+  bounds were not satisfied", where the newtype, C# and TypeScript say the member does not exist
+  (E0599 "no method named", CS1061, TS2339); diagnostics and rustdoc that name the marker rather
+  than the alias; and bounds a newcomer to Rust reads hard.
+- **On the Rust side, traits**, `Client::services() -> &impl ServiceManagerClient`: every caller
+  imports the trait, the return type is opaque, the trait needs sealing (C-SEALED), and its generic
+  methods make it unusable as `dyn`.
+- **On the Rust side, the untyped `ServiceManager` dropped**, since `ServiceRouter` is closed: the
+  refusal as made would have no Rust twin, and `ServiceRouter`'s variant over a trait, which is
+  ahead, needs it.
+- **Typed by its side where the types name it. Chosen.** A client's services and a server's are each
+  a type of its own, carrying its side's three makers and the events its side emits. The case is
+  named by the facade's own type, `IClient` or `IServer`, not by a type parameter, so every side
+  gives it a type of its own, the TypeScript side included: `IServiceManagerClient` and
+  `IServiceManagerServer`, implemented by the one manager on the TypeScript and C# sides, and
+  newtypes over it, built by the crate alone, on the Rust side. The refusal as made stays for a
+  manager built over an untyped router, and past the types. A server's type carries `debug` and
+  `deprecated` and not `dropped`, which is emitted on a notification's path alone, on every side: a
+  server's manager makes no notification, and its listener would hear nothing forever, a quieter
+  trap than the maker the refusal as made catches. On the Rust side the newtype's trade is two names
+  that map name for name onto the other sides' interfaces, and fifteen forwarders, each one line
+  pointing to the manager's member, against a marker parameter's six public names, its diagnostics
+  and its bounds (C-NEWTYPE, "Newtypes provide static distinctions"). The names are the layer's and
+  its side, as the house names every layer's side ([0003](0003-one-word-one-meaning.md)):
+  `ServiceManagerClient`, `I`-prefixed where a side declares an interface, never
+  `ClientServiceManager` nor `ClientServices`, which take the facade's prefix.
 
 What each way takes, the procedure's `procedureKind` given:
 
@@ -164,10 +224,11 @@ A protobuf message. Four ways:
   marshaller of two functions, and the code Grpc.Tools 2.84.0 generates passes each message's
   `Parser` to it. One function on each side, `payloadCodecOf` and `PayloadCodecs.Of`.
 
-The codec needs nothing more of the runtime: what does not decode throws, and the service manager
-answers any throw from a decoder `PAYLOAD_UNDECODABLE`. The check of a `proto` payload's records,
-which reads its library's descriptors, lives in a module of that second kind, `./proto` with an
-optional peer dependency and `Bead.Protobuf` referencing Google.Protobuf
+The codec needs nothing more of the runtime: what does not decode throws its refusal, which the
+service manager answers `PAYLOAD_UNDECODABLE`; anything else a decoder throws is the side's own
+error, answered `PROCEDURE_FAILED` and reported (spec 9.0, 17.2). The check of a `proto` payload's
+records, which reads its library's descriptors, lives in a module of that second kind, `./proto`
+with an optional peer dependency and `Bead.Protobuf` referencing Google.Protobuf
 ([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)):
 `Bead.Core` references no protobuf library, and a user of `raw`, `text` or `json` alone carries
 none. What a `proto` payload is, read through the codec, is
@@ -259,9 +320,19 @@ What the server side does: `on` registers a resolver, before or after `offer`; `
 resolver, now and later, to one Bead server, once; `command` gives a requester of each command, made
 as the service is offered; `notify` notifies each procedure's subscribers;
 `proceduresWithoutResolver` lists what no `on` answered, which the router answers
-`PROCEDURE_UNKNOWN` (spec 9.2, step 5). What the client side does: a requester of each procedure its
-server answers and a notification of each that notifies, made as the client side is built, at the
-windows its caller gives, unpaced by default
+`PROCEDURE_UNKNOWN` (spec 9.2, step 5). The server side gives one handle per procedure on every
+side, before its offer, as a generated server holds a field per procedure: the TypeScript side's
+`command[name]` and `notify[name]`, the C# side's `CommandOf(procedure)` and
+`NotifierOf(procedure)`, the Rust side's `command_of(&descriptor)` and `notifier_of(&descriptor)`.
+Each refuses a procedure its service does not hold, on the C# and Rust sides a descriptor that is
+not the same one, as `on` does; a command's handle refuses its call before the offer, and a
+notifier sends nothing and resolves until then. A notifier's type is the TypeScript side's
+`INotifier`, the C# side's delegate `Notifier<TNotification>`, whose options are optional, which a
+`Func` cannot say, and the Rust side's `Notifier`; the C# command handle stays a
+`Func<TRequest, BoundCommand<TResult>>`, its options given to the bound call, as the C# client's
+requesters are `Func<TRequest, BoundCall<TResult>>`. What the client side does: a requester of
+each procedure its server answers and a notification of each that notifies, made as the client
+side is built, at the windows its caller gives, unpaced by default
 ([0002](0002-a-subscription-goes-at-its-clients-pace.md)); and `on`, for the commands it answers.
 Each requester and resolver is declared once
 ([0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)).
@@ -351,16 +422,20 @@ _Conformance:_ none. _Matrix:_ none; `Connect` outside `IClient` is a type's sha
   `SupportPackageIsVersion9`: "The SupportPackageIsVersion variables are referenced from generated
   protocol buffer files to ensure compatibility with the gRPC version used. The latest support
   package version is 9. Older versions are kept for compatibility" (pkg.go.dev,
-  `google.golang.org/grpc`). `GENERATED_CODE_SUPPORTS_VERSION_6` on the TypeScript side, and
-  `GeneratedCode.SupportsVersion6` on the C# side, with no underscore, so CA1707 stands; 2 since the
+  `google.golang.org/grpc`). `GENERATED_CODE_SUPPORTS_VERSION_7` on the TypeScript side, and
+  `GeneratedCode.SupportsVersion7` on the C# side, with no underscore, so CA1707 stands, each
+  runtime's counter its own, as gRPC-Go's is its package's; 2 since the
   layer's options are typed by the service, which generated code names, 3 since it calls the
   check of a `proto` payload's records
   ([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)),
   4 since it generates the validators of a request's rules
   ([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)),
-  and 6 since its codec is the runtime's codec of a schema, which judges a message's required fields
-  ([0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md));
-  and 5 beside it, `GENERATED_CODE_SUPPORTS_VERSION_5` of `./transcoding` and
+  6 since its codec is the runtime's codec of a schema, which judges a message's required fields
+  ([0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)),
+  and 7 since a server class's commands are typed `BoundCommand` over `CommandOptions` and its
+  notifiers `Notifier<TNotification>` on the C# side, and a catalogue takes its service's id and its
+  codes as two parameters on the TypeScript side; and 5 beside it,
+  `GENERATED_CODE_SUPPORTS_VERSION_5` of `./transcoding` and
   `GeneratedCode.SupportsVersion5`, for an output that writes a route table, which names the
   transcoding layer's types
   ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)).
@@ -443,9 +518,9 @@ declaration refused declares nothing. A resolver is checked before it is registe
 the registry; a requester before `declareRequester` hands it on; a notification before it is
 registered. The refusal is the router's, as 16.10's are on each side: a `ProgrammerError`, an
 `ArgumentException`, its sentence naming the procedure, its kind and what the way takes, the
-TypeScript one ending with `against its kind`. The service manager checks a procedure's identity
-alone, first; the kind is the routers', so a notification of a procedure whose kind is `request` is
-refused as it is registered with its router. `procedureOf` carries `procedureKind`, and a
+TypeScript one ending with `against its kind`. The service manager checks its maker's side first,
+then the same way's reasons, so a notification of a procedure whose kind is `request` is refused as
+it is asked for, before its router sees it. `procedureOf` carries `procedureKind`, and a
 notification asked for again with another `procedureKind` is asked for otherwise. A debug event
 never lays the procedure's kind out beside its `type`.
 
@@ -581,10 +656,10 @@ export interface IFailureCatalogue<Name extends string> {
 }
 
 /** A catalogue; a code outside 1 to 65,535, or two names of one code, is a ProgrammerError. */
-export const failuresOf: <const Name extends string>(catalogue: {
-  codes: Readonly<Record<Name, number>>;
-  serviceId: ServiceId;
-}) => IFailureCatalogue<Name>;
+export const failuresOf: <const Name extends string>(
+  serviceId: ServiceId,
+  codes: Readonly<Record<Name, number>>
+) => IFailureCatalogue<Name>;
 ```
 
 ```csharp
@@ -709,11 +784,10 @@ which judges the decoded request before the resolver: a server's resolvers, and 
 resolvers. A request its rules refuse is answered `PAYLOAD_INVALID`, its violations in its detail,
 and its resolver never called; a validator that throws is answered `PROCEDURE_FAILED` and reported
 (spec 9.5, 18.2). The side that requests judges its value before the encode when its options say so,
-`validates` and `Validates`: a client's requests and subscribing requests, and a server's commands,
-whose server takes the option too. A refusal fails the call before anything goes with
-`PAYLOAD_INVALID` and the same detail, counted as a call refused before it goes. `failFast`,
-`FailFast` and `fail_fast`, in the options of the side that answers and of the side that requests,
-stops a judging at its first violation.
+`validates`: a client's requests and subscribing requests, and a server's commands, whose server
+takes the option too. A refusal fails the call before anything goes with `PAYLOAD_INVALID` and the
+same detail, counted as a call refused before it goes. `failFast`, in the options of the side that
+answers and of the side that requests, stops a judging at its first violation.
 
 **One layer serves and calls a service, in each runtime.**
 
@@ -722,7 +796,7 @@ stops a judging at its first violation.
 export interface IServiceServer<S extends ServiceProcedures, Data = unknown> {
   /** A requester of each command, made as the service is offered; one called before is a ProgrammerError. */
   readonly command: {
-    readonly [Name in CommandName<S>]: IRequest<
+    readonly [Name in CommandName<S>]: ICommand<
       GivenOf<S[Name]['request']>,
       ValueOf<S[Name]['result']>,
       TransportServerConnectionHandle
@@ -730,10 +804,10 @@ export interface IServiceServer<S extends ServiceProcedures, Data = unknown> {
   };
   /** Notifies each procedure's subscribers; before the service is offered, it sends nothing and resolves. */
   readonly notify: {
-    readonly [Name in NotifyingName<S>]: (
-      notification: GivenOf<S[Name]['notification']>,
-      options?: INotifyOptions<TransportServerConnectionHandle>
-    ) => Promise<void>;
+    readonly [Name in NotifyingName<S>]: INotifier<
+      GivenOf<S[Name]['notification']>,
+      TransportServerConnectionHandle
+    >;
   };
   /** Offers every resolver, now and later, on `server`; a second offer is a ProgrammerError. */
   offer: (server: IServer<IServerTransportLike, Data>) => void;
@@ -764,8 +838,7 @@ export interface IServiceClient<S extends ServiceProcedures> {
   readonly request: {
     readonly [Name in AnsweredName<S>]: IRequest<
       GivenOf<S[Name]['request']>,
-      ValueOf<S[Name]['result']>,
-      RouterClientConnectionHandle
+      ValueOf<S[Name]['result']>
     >;
   };
   /** Registers the resolver of a command it answers; twice for one command is a ProgrammerError. */
@@ -813,11 +886,11 @@ public sealed class ServiceServer<TService, TData>
 
     public void Offer(IBeadServer<TData> server);
 
-    public Func<TRequest, BoundCall<TResult>> CommandOf<TRequest, TResult, TFailure>(
+    public Func<TRequest, BoundCommand<TResult>> CommandOf<TRequest, TResult, TFailure>(
         CommandProcedure<TService, TRequest, TResult, TFailure> procedure)
         where TFailure : IApplicationFailure;
 
-    public Func<TNotification, NotifyOptions?, Task> NotifierOf<TRequest, TResult, TNotification, TFailure>(
+    public Notifier<TNotification> NotifierOf<TRequest, TResult, TNotification, TFailure>(
         RequestProcedure<TService, TRequest, TResult, TNotification, TFailure> procedure)
         where TFailure : IApplicationFailure;
 
@@ -936,31 +1009,47 @@ TypeScript and C# sides, and the guard sits on it alone:
 
 ```ts
 /** A call bound to its payload: called with its options, it goes. */
-export interface IBoundCall<Result, Options extends unknown[] = RequestOptionsParameters> {
+export interface IBoundCall<Result, Options extends unknown[] = [options?: IRequestOptions]> {
   (...options: Options): Promise<Result>;
   /** Never set: awaiting the bound call, its options' call forgotten, is TS1320. */
   readonly then?: (guard: never) => never;
 }
 
-export interface IRequest<
+/** A command bound to its payload: its options, which name its connection, are required. */
+export type IBoundCommand<Result, Handle extends string = ConnectionHandle> = IBoundCall<
+  Result,
+  [options: ICommandOptions<Handle>]
+>;
+
+/** A subscribing call bound to its payload and its callback: its options name no credential. */
+export type IRegistrar = IBoundCall<INotificationRegistration, [options?: IRegistrationOptions]>;
+
+export interface IRequest<RequestPayload, ResponsePayload> extends IProcedure {
+  (requestPayload: RequestPayload): IBoundCall<ResponsePayload>;
+}
+
+export interface ICommand<
   RequestPayload,
   ResponsePayload,
   Handle extends string = ConnectionHandle,
 > extends IProcedure {
-  (requestPayload: RequestPayload): IBoundCall<ResponsePayload, RequestOptionsParameters<Handle>>;
+  (requestPayload: RequestPayload): IBoundCommand<ResponsePayload, Handle>;
 }
-
-// INotification's call gives IRegistrar: an IBoundCall<INotificationRegistration, [options?: …]>
 ```
 
-On the C# side, the delegate is `BoundCall<TResponse>`, and `Registrar` keeps its name, since it
-names neither a registration nor a request; `IRegistrar` is its TypeScript twin. The spec's
+A request takes `IRequestOptions`; a command, a request a server makes (spec 16.11), takes
+`ICommandOptions`, which extends it with the connection it goes to, required, and its close on
+timeout. On the C# side, the delegates are `BoundCall<TResponse>`, over `RequestOptions?`, and
+`BoundCommand<TResponse>`, over `CommandOptions`, required, whose `ConnectionHandle` is `required`;
+`Registrar` takes `RegistrationOptions?` and keeps its name, since it names neither a registration
+nor a request; `IRegistrar` is its TypeScript twin. The spec's
 _requester_ is the party that makes a request ("as a requester is made, through the router's
 `declareRequester`", `spec/debugging.md`), which a delegate named `Requester<TResponse>` would give
 a second meaning; the bound call is named after the call it makes, the user's choice, though the
 object makes a call rather than being one. The Rust side binds no call: its `Request::call` takes
-the payload and the options at once and sends the call as it is made, its `ServiceCall` only waiting
-for the outcome
+the payload and `&RequestOptions` at once, and `Command::call` the payload and `&CommandOptions`,
+built by `CommandOptions::new(connection_handle)`; each sends the call as it is made, its
+`ServiceCall` only waiting for the outcome
 ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)).
 
 What the guard catches, under TypeScript 7.0.2: `await procedure(request)` and `await
@@ -1029,7 +1118,7 @@ public interface IBeadServer<TData> : IAsyncDisposable
 {
     IServerTransport Transport { get; }
     RouterServer Router { get; }
-    ServiceManager Services { get; }
+    IServiceManagerServer Services { get; }
     SessionManager<TData> Sessions { get; }
     BeforeRequest RequireSession { get; }
     BeforeRequest RequireCredential { get; }
@@ -1042,36 +1131,187 @@ public interface IBeadServer<TData> : IAsyncDisposable
 public interface IClient : IAsyncDisposable
 {
     RouterClient Router { get; }
-    ServiceManager Services { get; }
-    Task Disconnect(TransportDisconnectOptions? options = null);
-    Task Reconnect(TransportReconnectOptions? options = null);
+    IServiceManagerClient Services { get; }
+    Task Disconnect(TransportClientDisconnectOptions? options = null);
+    Task Reconnect(TransportClientReconnectOptions? options = null);
 }
 ```
 
 `Server<TData>`, `WebSocketServer<TData>` and `HttpServer<TData>` implement the first, the last two
 holding `RequireCredential` and `ShareLegBSession` and giving their transport by an explicit
-implementation; `WebSocketClient` and `BeadHttpClient` the second. Both live in `Bead.Core`.
+implementation; `WebSocketClient` and `BeadHttpClient` the second. Both live in `Bead.Core`. Each
+gives its services by its side's interface, its own `Services` property too: `Server<TData>`,
+`WebSocketServer<TData>` and `HttpServer<TData>` an `IServiceManagerServer`, `WebSocketClient` and
+`BeadHttpClient` an `IServiceManagerClient`.
+
+**A side's services are typed by its side.** A client's carry the manager's `isDebugging`, its three
+events, `debug`, `deprecated` and `dropped`, and a client's three makers, `getRequest`,
+`getNotification` and `getCommandResolver`; a server's carry `isDebugging`, `debug` and
+`deprecated`, and a server's three makers, `getCommand`, `getRequestResolver` and
+`getNotificationResolver`. The other side's maker does not compile. The facades hand them out:
+`IClient.services`, `IClient.Services` and `Client::services()` a client's; `IServer.services`,
+`IBeadServer<TData>.Services`, `Server<TData>.Services` and `Server::services()` a server's. The
+untyped manager keeps all six makers and refuses the other side's as it is made:
+`createServiceManager(router)`, `new ServiceManager(IRouterLike)`,
+`ServiceManager::new(ServiceRouter)`, which the fakes, the fixtures and the conformance players
+build.
+
+```ts
+/**
+ * A client's services, on a client's router (spec 16.11): the requests and notifications it makes
+ * of its server, and the resolvers of the commands it answers; a server's makers are none of its own.
+ */
+export interface IServiceManagerClient<Handle extends string = ConnectionHandle> {
+  readonly isDebugging: boolean;
+  // emit, events, off, on, once and removeAllListeners, over SERVICE_MANAGER_EVENTS
+  // getNotification, getCommandResolver and getRequest
+}
+
+/**
+ * A server's services, on a server's router (spec 16.11): the commands it makes of a client, and the
+ * resolvers of the requests and notifications it answers; a client's makers are none of its own,
+ * and no notification of its own is dropped.
+ */
+export interface IServiceManagerServer<Handle extends string = ConnectionHandle> {
+  readonly isDebugging: boolean;
+  on<K extends Exclude<SERVICE_MANAGER_EVENTS, 'dropped'>>(
+    event: K,
+    listener: EmitterListener<ServiceManagerEventMap[K]>
+  ): this;
+  // emit, events, off, once and removeAllListeners alike
+  // getNotificationResolver, getCommand and getRequestResolver
+}
+
+/**
+ * The resolvers and requesters of the services on one router whose side its type does not name:
+ * both sides' makers, each refused on the other side's router as it is made.
+ */
+export interface IServiceManager<Handle extends string = ConnectionHandle>
+  extends IServiceManagerClient<Handle>, IServiceManagerServer<Handle> {
+  // the six event members again, over SERVICE_MANAGER_EVENTS: two bases whose `on` differ are TS2320
+}
+
+// IClient.services: IServiceManagerClient<RouterClientConnectionHandle>
+// IServer.services: IServiceManagerServer<TransportServerConnectionHandle>
+```
+
+The server's six event members take `Exclude<SERVICE_MANAGER_EVENTS, 'dropped'>` written inline: a
+named alias would be a public name no other side has. `createServiceManager` keeps its signature,
+and its result is assignable to either type, as `Array<T>` is to `ReadonlyArray<T>`; `on(…)` gives
+the narrowed type back. No factory per side: it would build the same object, which still carries six
+makers at run time, so a JavaScript caller, or a cast, meets the refusal as made in its words, never
+"is not a function".
+
+```csharp
+// ! the one manager implements both sides' interfaces, so a type test or a cast between them proves
+// no router's side; each maker's refusal as it is made holds past it
+/// <summary>A client's services, on a client's router (spec 16.11): what IClient.Services gives.</summary>
+public interface IServiceManagerClient
+{
+    event Action<Procedure, Failure?>? Dropped;
+    event Action<Exception?, DebugEvent>? Debug;
+    event Action<Procedure>? Deprecated;
+    bool IsDebugging { get; }
+    // GetNotification, GetRequest and GetCommandResolver, each as ServiceManager's
+
+    // ! internal, so the one manager alone implements this interface: no other assembly can, and a
+    // member the manager gains breaks no implementer
+    internal ServiceManager Manager { get; }
+}
+
+/// <summary>A server's services, on a server's router (spec 16.11): what IBeadServer.Services gives.</summary>
+public interface IServiceManagerServer
+{
+    event Action<Exception?, DebugEvent>? Debug;
+    event Action<Procedure>? Deprecated;
+    bool IsDebugging { get; }
+    // GetCommand, GetRequestResolver and GetNotificationResolver, each as ServiceManager's
+    internal ServiceManager Manager { get; }
+}
+
+public sealed partial class ServiceManager : IServiceManagerClient, IServiceManagerServer
+{
+    // its own surface unchanged; Manager explicit on both, returning this
+}
+```
+
+The interfaces are sealed by an internal member, as the Rust newtype holds its manager
+crate-private, so a member the manager gains breaks no implementer: a type of another
+assembly cannot implement it (CS9044, C# 8's interface member accessibility), which removes the
+Framework Design Guidelines' versioning cost of a public interface. It follows
+[0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md), interfaces and composition, and
+the BCL's `IReadOnlyList<T>` over `List<T>`. The service layer reaches the manager beneath through
+it, `client.Services.Manager` and `server.Services.Manager`, so `IDescribedProcedure`,
+`RequesterJudging` and `RequestJudge<TRequest>` read the bound and the side of the manager's own
+router at each judging, as the TypeScript and Rust sides do. An `IClient` or an `IBeadServer`
+written elsewhere — a test's fixture, the bench's `MemoryClient`, the interop's — builds
+`new ServiceManager(router)` and types its property by the interface.
+
+```rust
+/// A client's services, over a client's router (spec 16.11).
+#[derive(Debug, Clone)]
+pub struct ServiceManagerClient {
+    // ! the crate's alone: a test that hears both sides alike reaches the one manager beneath
+    pub(crate) manager: ServiceManager,
+}
+
+impl ServiceManagerClient {
+    // pub(crate) fn new(router: RouterClient, options: &ServiceManagerOptions)
+    //     -> Result<Self, ProgrammerError>, built by `Client` alone
+    // on_debug, on_deprecated, on_dropped, off and is_debugging, each forwarded
+    // get_request, get_notification and get_command_resolver, each forwarded
+}
+
+/// A server's services, over a server's router (spec 16.11).
+#[derive(Debug, Clone)]
+pub struct ServiceManagerServer {
+    pub(crate) manager: ServiceManager,
+}
+
+impl ServiceManagerServer {
+    // pub(crate) fn new(router: RouterServer, options: &ServiceManagerOptions)
+    //     -> Result<Self, ProgrammerError>, built by `Server` alone
+    // on_debug, on_deprecated, off and is_debugging, each forwarded
+    // get_command, get_request_resolver and get_notification_resolver, each forwarded
+}
+
+// Client::services(&self) -> &ServiceManagerClient, a const fn
+// Server::services(&self) -> &ServiceManagerServer
+```
+
+Each forwarder keeps the bounds and the `# Errors` of the manager's member, less the side's error,
+and its doc is one line that points to it. The constructors are the crate's: the router's type is
+the side, so no refusal at construction exists to write, and a public `new` would fix a signature
+that `ServiceRouter`'s variant over a trait, which is ahead, may want to change. The server's
+options, `closeConnection` and `closeOnTimeout`, are members of neither type: they are given where
+the manager is built. `ServiceManager::router()` stays on the untyped manager alone. Each type's
+doc holds one example that compiles, `client.services().get_request(…)` and
+`server.services().get_command(…)`.
 
 **The TypeScript side's service layer is one entry**, `"./service": "./src/service/service.ts"` in
 `package.json`'s `exports`: `createServiceServer`, `createServiceClient`, `requestOf`, `commandOf`,
 `failuresOf`, `payloadCodecOf`, `PAYLOAD_CODECS`, `ProcedureKind`,
-`GENERATED_CODE_SUPPORTS_VERSION_6`, `FailureError`, `ProgrammerError`, and their types. A generated
+`GENERATED_CODE_SUPPORTS_VERSION_6` and `_7`, the violations' `violationsOf`,
+`violationsDetailOf`, `wordsOf` and `detailBoundOf`, `FailureError`, `ProgrammerError`, and their
+types. A generated
 service's file imports nothing else of Bead's but `./proto`'s codec and validators, where it binds
 `proto`
 ([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md));
 a route table, `bead_http.ts`, imports `./transcoding`
 ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)).
 
-**Generated code names the contract it needs.** `GENERATED_CODE_SUPPORTS_VERSION_6` in `./service`,
-`true`; `GeneratedCode.SupportsVersion6`, a `const bool` on a static class in `Bead.Core`; and, for
-a route table, `GENERATED_CODE_SUPPORTS_VERSION_5` in `./transcoding` (`src/transcoding/routes.ts`)
-and `GeneratedCode.SupportsVersion5` beside it. A generated file names the highest it needs:
-`void GENERATED_CODE_SUPPORTS_VERSION_6;`, and in C# a private constant of it. The counter moves
-only when generated code needs something the runtime did not have: 2 for the layer's options typed
-by the service, `IServiceClientOptions` and the client side's Bead client apart on the TypeScript
-side, `IServiceAdmissions<TService>`, `IServiceWindows<TService>`, `ServiceServerOptions<TService>`,
-`ServiceClientOptions<TService>` and the client side's three parameters on the C# side; 3 for the
-check of a `proto` payload's records, `checkProtoRecords` and `ProtoRecords.Check`
+**Generated code names the contract it needs.** `GENERATED_CODE_SUPPORTS_VERSION_7` in `./service`,
+`true`; `GeneratedCode.SupportsVersion7`, a `const bool` on a static class in `Bead.Core`, each
+runtime's counter its own, as gRPC-Go's is its package's; and, for a route table,
+`GENERATED_CODE_SUPPORTS_VERSION_5` in `./transcoding` (`src/transcoding/routes.ts`) and
+`GeneratedCode.SupportsVersion5` beside it. A generated file names the highest it needs,
+`void GENERATED_CODE_SUPPORTS_VERSION_7;`, and in C# a private constant of its runtime's. The
+counter moves only when generated code needs something the runtime did not have: 2 for the layer's
+options typed by the service, `IServiceClientOptions` and the client side's Bead client apart on the
+TypeScript side, `IServiceAdmissions<TService>`, `IServiceWindows<TService>`,
+`ServiceServerOptions<TService>`, `ServiceClientOptions<TService>` and the client side's three
+parameters on the C# side; 3 for the check of a `proto` payload's records, `checkProtoRecords` and
+`ProtoRecords.Check`
 ([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md));
 4 for the validators of a request's rules, `validatorOf` and `Validators.Of`
 ([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)); 5
@@ -1079,33 +1319,51 @@ for what a route table names, `routeOf` and the transcoding layer that reads it 
 side, `HttpRoute`, `HttpRouteTemplate` and `HttpPayload` on the C# side
 ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md));
 6 for the runtime codec of a schema, `protoCodecOf` and `ProtoCodecs.Of`
-([0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)).
-An older constant stays while the runtime still serves the code that names it: before 1.0.0, it goes
-once the code that names it no longer conforms through the runtime, and from 1.0.0 it stays for the
-whole major. The runtime holds 5 and 6, 5 for a route table, which calls no codec, and none
-older: code that names 4 judges no required field, code that names 3 judges no request by its
-rules, and code that names 2 reads a `proto` payload unchecked, none of which conforms through any
-runtime.
-A file of a later beadc, built against a runtime that lacks its constant, fails on the counter
-(TS2724, CS0117), not on a signature.
+([0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md));
+7 for what a server's handles and a catalogue are typed by: on the C# side a server class's commands,
+`BoundCommand` and `CommandOptions`, and its notifiers, `Notifier<TNotification>`; on the
+TypeScript side a catalogue of two parameters, `failuresOf(serviceId, codes)`. An older constant
+stays while the runtime still serves the code that names it: before 1.0.0, it goes once the code
+that names it no longer conforms through the runtime, and from 1.0.0 it stays for the whole major.
+The TypeScript and C# runtimes hold 5, 6 and 7: 5 for a route table, which calls no codec; 6 for a file that still
+conforms, on the C# side one whose `…Commands` class holds no command and whose `…Notifiers` class
+holds no notifier, and on the TypeScript side one that makes no catalogue, while one that does fails
+at its type, `BoundCall` against `BoundCommand`, a `Func` against `Notifier<TNotification>`, an
+object against two parameters; and none older: code that names 4 judges no required
+field, code that names 3 judges no request by its rules, and code that names 2 reads a `proto`
+payload unchecked, none of which conforms through any runtime. A file of a later beadc, built
+against a runtime that lacks its constant, fails on the counter (TS2724, CS0117), not on a
+signature.
 
 **Where it lives.** The TypeScript side: `src/service/` — `service.ts` the entry,
 `service-server.ts`, `service-client.ts`, `descriptors.ts`, `failures.ts`, `generated-code.ts`, a
 test file each in `src/service/__tests__/`; the codecs stay in `router/shared/payloads.ts`, with
 `payloadCodecOf` beside them; `ProcedureKind` in `router/shared/constants.ts`; `ISubscriber`,
-`IBoundCall` and `IRegistrar` in `router/shared/types.ts`; `checkProcedureKind` in
+`IBoundCall`, `IBoundCommand`, `IRegistrar`, `ICommand`, `ICommandOptions` and
+`IRegistrationOptions` in `router/shared/types.ts`, with `IServiceManagerClient` and
+`IServiceManagerServer`, which `./service-manager` exports; `checkProcedureKind` in
 `router/shared/identity.ts`, run by each router. The C# side, in `Bead.Core`: `ServiceServer.cs`,
 `ServiceClient.cs`, `ServiceProcedures.cs` (the descriptors, `ProcedureBindings`, `AdmissionRule`,
 `AdmissionHook`), `FailureCatalogue.cs` (with `IApplicationFailure`, `NoFailure`,
 `AdmissionFailure`), `PayloadCodecs.cs` (public, over the internal `Payloads`), `GeneratedCode.cs`,
-`IBeadServer.cs`, `IClient.cs`; `ProcedureKind` in `RouterTypes.cs`, `Subscriber` and
-`NotifyRequest` beside `NotifyOptions`, the kind's check in `Identity.cs`, run by the core and each
-router.
+`IBeadServer.cs`, `IClient.cs`, `IServiceManagerClient.cs`, `IServiceManagerServer.cs`;
+`ProcedureKind` in `RouterTypes.cs`, `Subscriber` and `NotifyRequest` beside `NotifyOptions`, the
+kind's check in `Identity.cs`, run by the core and each router. The Rust side: the two newtypes in
+`managers/service.rs`. beadc gives a service named `ServiceManager` these Rust names; they join
+`RUNTIME_TYPES` with beadc's Rust target.
 
 **The rule has its gate** ([0006](0006-a-rule-has-its-gate.md)): `spec/identities.json`'s group of
 procedure kinds, played the six ways on every side; the test of `service-manager.test.ts` that holds
-a callable's members; the twin tests of the feature row "The service layer"; `yarn check` and
-`dotnet format`/`dotnet test` over the layer's code.
+a callable's members; the twin tests of the feature row "The service layer"; the twins that type a
+side's services, in `service-manager.test.ts`
+`types a client’s services and a server’s by their side, each without the other’s makers`, its C#
+and Rust twins named alike: the TypeScript one's seven
+`@ts-expect-error` lines and its key-set over the facades' own property types, the C# one's
+reflection over the two interfaces, their seal and the facades' property types, and the Rust one's
+consumer half, which compiles a consumer against the built library through
+`testing::surface::Consumer` and asserts each refusal by its code and its message; the interop's
+two banned types, `T:Bead.IServiceManagerClient` and `T:Bead.IServiceManagerServer`, beside
+`T:Bead.ServiceManager`; `yarn check` and `dotnet format`/`dotnet test` over the layer's code.
 
 ## Consequences
 
@@ -1126,6 +1384,15 @@ window's key, a command's requester, a notifier and a resolver's key, each repor
 by `no-deprecated`, typescript-eslint's and oxlint's; a test of `service-client.test.ts` and one of
 `service-server.test.ts`, named alike, hold it.
 
+**A typed manager proves its router's side on the Rust side alone.** On the TypeScript and C#
+sides it narrows one object, as `ReadonlyArray<T>` and `IReadOnlyList<T>` do, so a cast, or an
+`IClient` an application writes over a manager of the other side, reaches the refusal as made; in
+C#, `services is IServiceManagerServer` holds for every manager. On the Rust side the newtype holds
+no other maker, and only the facade builds it. The difference is an open row of the matrix, "A
+manager typed by its side, as proof of its router's side", which a wrapper per side, refused at
+construction, closes on the TypeScript and C# sides, by a round of its own. A member joining the
+manager joins its side's type, or both where every side emits or uses it.
+
 **The Rust side** plays the `procedureKinds` group the six ways (`bead/tests/identities.rs`), and
 the `proto` rows as [0031](0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)
 says; **each language after it** plays them alike.
@@ -1143,7 +1410,7 @@ Its other objections, each with its answer:
 
 | Objection                                                                                                                                                                                                                                           | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| The service manager checks the type by the accessor's name, yet Bead types a call by the router's side, so `getRequest` on a server passes; the check belongs where 0017 put identity, at the router; "no peer sees it" is no reason against a file | Accepted: verified in `spec/debugging.md` 8.2, the metrics registry and both routers' `declareRequester`. Each router checks the procedure's kind at its declaration, by the ways of `spec/identities.json`, before registering anything; the manager adds no reason, and 0017's paragraph stands. The reason joins 16.10 and the file, the user's choice                                                                                                                                                                                                           |
+| The service manager checks the type by the accessor's name, yet Bead types a call by the router's side, so `getRequest` on a server passes; the check belongs where 0017 put identity, at the router; "no peer sees it" is no reason against a file | Accepted: verified in `spec/debugging.md` 8.2, the metrics registry and both routers' `declareRequester`. Each router checks the procedure's kind at its declaration, by the ways of `spec/identities.json`, before registering anything; the manager adds the side, before them, as 0017's paragraph orders it. The reason joins 16.10 and the file, the user's choice                                                                                                                                                                                             |
 | "The procedure's type is the trace's type" is false: the trace's `type` takes `notification` and types a step; two optional members bring back a state the builder's `oneof` made impossible, then refuse it at run time                            | Accepted: verified in `spec/debugging.md` 4.1, `DebugType` on both sides, the service manager's trace of a notification, and `IDebugEvent` laid out flat. One optional member, `procedureKind`, `request`, `notifies` or `command`: the `oneof`'s two members and the plain request it means unset, since an absent member on a hand-written procedure checks nothing. No state is refused. The blueprint follows                                                                                                                                                   |
 | `createAPIServer`, `ApiServer<TApi, TData>` and their peers bring an abbreviation into Bead's names, for a layer that serves one service, and take the word the builder leaves to a per-package aggregate                                           | Accepted: verified, no name under `implementations/*/src` holds _API_, and 0003 lists the words it owns. The layer is named after a service — `createServiceServer`, `ServiceServer<TService, TData>`, `IServiceProcedure<TService>`, `./service` — the user's choice against _API_ with 0003 amended                                                                                                                                                                                                                                                               |
 | The C# `Subscriber`, a positional record struct, breaks every filter that deconstructs it, matches it by position or constructs it the day a member joins, which is item 7's only reason; and `SubscriptionPlace` stays beside it                   | Accepted: the probe gives CS8129, CS8130 and CS7036; a `readonly record struct` of `init` properties builds clean under the repository's gates with a third member against the same filters. `Subscriber` replaces the internal `SubscriptionPlace`                                                                                                                                                                                                                                                                                                                 |
@@ -1171,14 +1438,55 @@ The service layer's options, typed by the service on both sides, met the Tenth M
 not on the choice to type them. Each claim was verified before its answer; the user chose where it
 asked, each way as the revised design recommended. Its objections, each with its answer:
 
-| Objection                                                                                                                                               | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| The server's options have a required member yet are taken as optional, which [0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md) forbids | Accepted: as 0007 maps a union, the layer takes `(procedures)` and `(procedures, options)`, the options required in the one that takes them, and so does a generated server whose procedures name no hook; a server whose procedures name one takes `(options)` alone                                                                                                                                                                 |
-| Typing the options moves the contract with generated code, which nothing says                                                                           | Accepted: generated code needs types the 0.2.0 runtime lacks, so the counter moves to 2 on both sides, `GENERATED_CODE_SUPPORTS_VERSION_2` and `GeneratedCode.SupportsVersion2`; 1 is dropped, since no runtime serves its code any longer and no released generator wrote it; an older constant stays while the runtime serves its code, and from 1.0.0 for the whole major. Refused: redefining 1, which a 0.2.0 runtime would pass |
-| Taking the client's Bead client apart reverses 0007's answer, and its cost is weighed against the wrong baseline                                        | Accepted: the asymmetry was put to the user, keeping the client in the options costing the TypeScript side nothing released, and the user took the client apart, a parameter of its own on both layers and both generated clients; 0007's answer is revised, for the runtime client's practice (Connect-ES's `createClient(service, transport)`) and options optional on both sides                                                   |
-| A nullable required record of hooks lets a missing record compile, and two differences go unlisted                                                      | Accepted: `Admissions` is required and not nullable, a record of hooks is generated for every service, empty when none is named, and the differences left are listed: a layer given no options for a service that names a hook compiles in C#, and a hookless service's options name its empty hooks                                                                                                                                  |
-| A service written without beadc pays more than stated, and is a .NET consumer's only path                                                               | Accepted in part: the C# sketch and the changelog say that such a service writes its records, as the tests' do. Refused, the user's choice: a public record by name, a type on the C# side alone; the records keyed by name go, and one typed form holds on both sides                                                                                                                                                                |
-| The generated code of the two sides shares no options name, and TypeScript can close the gap                                                            | Accepted: both sides generate `<Name>Admissions` and `<Name>Windows` for every service; TypeScript's `<Name>ServerOptions` and `<Name>ClientOptions` remain, which C# cannot alias                                                                                                                                                                                                                                                    |
-| `ByName` is a preposition, and a property that copies at each call                                                                                      | Accepted: `ToDictionary()`, a method named as the Framework Design Guidelines name a conversion; its explicit implementation keeps it off a record's surface                                                                                                                                                                                                                                                                          |
-| C#'s new refusal checks the hooks in another order than the TypeScript side                                                                             | Accepted: each hook given is checked in turn, first that a procedure names it and then that it admits by a function, on both sides, and the twins assert which hook is named                                                                                                                                                                                                                                                          |
-| The runtime's break is not the C# target's, and is a change of its own                                                                                  | Accepted, the user's choice: the runtime's break is a change apart from the C# target's, which keeps to the target                                                                                                                                                                                                                                                                                                                    |
+| Objection                                                                                                                                               | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The server's options have a required member yet are taken as optional, which [0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md) forbids | Accepted: as 0007 maps a union, the layer takes `(procedures)` and `(procedures, options)`, the options required in the one that takes them, and so does a generated server whose procedures name no hook; a server whose procedures name one takes `(options)` alone                                                                                                                                                                                          |
+| Typing the options moves the contract with generated code, which nothing says                                                                           | Accepted: generated code needs types a runtime of contract 1 lacks, so the counter moves to 2 on both sides, `GENERATED_CODE_SUPPORTS_VERSION_2` and `GeneratedCode.SupportsVersion2`; 1 is dropped, since no runtime serves its code and no released generator wrote it; an older constant stays while the runtime serves its code, and from 1.0.0 for the whole major. Refused: redefining 1, which a runtime of contract 1, lacking those types, would pass |
+| Taking the client's Bead client apart reverses 0007's answer, and its cost is weighed against the wrong baseline                                        | Accepted: the asymmetry was put to the user, keeping the client in the options costing the TypeScript side nothing released, and the user took the client apart, a parameter of its own on both layers and both generated clients; 0007's answer is revised, for the runtime client's practice (Connect-ES's `createClient(service, transport)`) and options optional on both sides                                                                            |
+| A nullable required record of hooks lets a missing record compile, and two differences go unlisted                                                      | Accepted: `Admissions` is required and not nullable, a record of hooks is generated for every service, empty when none is named, and the differences left are listed: a layer given no options for a service that names a hook compiles in C#, and a hookless service's options name its empty hooks                                                                                                                                                           |
+| A service written without beadc pays more than stated, and is a .NET consumer's only path                                                               | Accepted in part: the C# sketch and the changelog say that such a service writes its records, as the tests' do. Refused, the user's choice: a public record by name, a type on the C# side alone; the records keyed by name go, and one typed form holds on both sides                                                                                                                                                                                         |
+| The generated code of the two sides shares no options name, and TypeScript can close the gap                                                            | Accepted: both sides generate `<Name>Admissions` and `<Name>Windows` for every service; TypeScript's `<Name>ServerOptions` and `<Name>ClientOptions` remain, which C# cannot alias                                                                                                                                                                                                                                                                             |
+| `ByName` is a preposition, and a property that copies at each call                                                                                      | Accepted: `ToDictionary()`, a method named as the Framework Design Guidelines name a conversion; its explicit implementation keeps it off a record's surface                                                                                                                                                                                                                                                                                                   |
+| C#'s new refusal checks the hooks in another order than the TypeScript side                                                                             | Accepted: each hook given is checked in turn, first that a procedure names it and then that it admits by a function, on both sides, and the twins assert which hook is named                                                                                                                                                                                                                                                                                   |
+| The runtime's break is not the C# target's, and is a change of its own                                                                                  | Accepted, the user's choice: the runtime's break is a change apart from the C# target's, which keeps to the target                                                                                                                                                                                                                                                                                                                                             |
+
+### On a codec's refusal and its bug
+
+The change that has every side tell a codec's refusal, by its type, from its bug as it reads a
+request: the refusal answered `PAYLOAD_UNDECODABLE`, the bug `PROCEDURE_FAILED` and reported. The
+round met one dissenter, at xhigh effort, whose probes made a codec panic at every site of the Rust
+side, poisoned one, and read what protobuf-es and `JSON.parse` throw. Each objection was accepted;
+each, with the answer that holds:
+
+| Objection                                                                                                                                                                                                                                                                                                                                                                                                       | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The draft's baseline is stale: the Rust side catches a codec's panic at every site and folds it into a refusal, so a request's is answered `PAYLOAD_UNDECODABLE` and reported nowhere (O1)                                                                                                                                                                                                                      | Accepted: the round weighs what each side does, the Rust side's caught panic among it, and keeps no silent `PAYLOAD_UNDECODABLE` for a codec's bug                                                                                                                                                                                                                                                                                                                            |
+| Spec 9.0's "a codec that throws other than a refusal" is the rule on detail and reporting an envelope's codec rests on, by [0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md) and its twins; rewording it to a value that does not write leaves them citing a clause that no longer says what they do (O2)                                                                                  | Accepted: 9.0 keeps the clause and names both codecs, "an envelope's or a payload's codec that throws other than its refusal (sections 9.6 and 17.2)"                                                                                                                                                                                                                                                                                                                         |
+| A codec that fails as it reads a request is reported nowhere, on any side, where 9.0 has the error reported; a codec one panic poisons refuses every payload after it, and its application is told nothing (ASVS 5.0 §16.3.4, §16.5.4) (O3)                                                                                                                                                                     | Accepted: a codec that throws other than its refusal, or panics, as it reads a request is reported with the request's connection on every side, as a resolver's throw is; a refusal is not, so a peer's bytes reach no report                                                                                                                                                                                                                                                 |
+| Every side can tell a refusal from a bug: the TypeScript side's codecs refuse with a `SyntaxError` and the C# side's with a `FormatException` ([0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)), the Rust side's with a `CodecRefusal`; only Bead's own `proto` codecs let their library's other types through (O4) | Accepted: every side tells a refusal by its type, as ASP.NET Core's `MalformedInputExceptions` keeps a client's error to its formatter's own types; `readProtoBytes` and `ProtoCodecs.ReadInto` normalize what protobuf-es and Google.Protobuf throw on bytes that do not read, the `codecs.json` players assert the type on every refused row, `proto` included, `payloadCodecOf`, `PayloadCodecs.Of` and `PayloadCodec` state it, and a row of the matrix names each side's |
+| The parity clause cited for one answer everywhere goes on to bring the second behaviour to every side at once, and no platform here is unable (O5)                                                                                                                                                                                                                                                              | Accepted: the parity sentence leaves the reasoning                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `PAYLOAD_UNDECODABLE` sends a requester to change a payload that may read; the spec answers an application's function that fails at a stage `PROCEDURE_FAILED`, never the stage's refusal — a verifier (9.2, step 6.2), an admission (step 6.3), a rule (18.2) — as gRPC's INTERNAL, Connect and RFC 9110 §15.6.1 do (O6)                                                                                       | Accepted: a codec that throws other than its refusal, or panics, as it reads a request is answered `PROCEDURE_FAILED` with no detail and reported, its refusal `PAYLOAD_UNDECODABLE` with no detail and not reported, as 17.2 says after its items; items 2 to 6 keep their outcomes, and a gateway's `PAYLOAD_UNDECODABLE` rows read right, the server's `PROCEDURE_FAILED` its 500                                                                                          |
+| The Rust side's `decoded()` folds a panic into a `CodecRefusal`, and so erases the one distinction its trait gives (O7)                                                                                                                                                                                                                                                                                         | Accepted: `decoded()` keeps the panic apart; the request's site answers a refusal `PAYLOAD_UNDECODABLE` and a panic `PROCEDURE_FAILED`, reported, and the other sites keep their outcomes                                                                                                                                                                                                                                                                                     |
+| `catch_unwind` is sound for the router, but covers neither a codec's own state nor `panic = "abort"`, the default of `wasm32-unknown-unknown`, which the core is checked for; a test gated on `panic = "unwind"` changes nothing, the harness requiring unwind (O8)                                                                                                                                             | Accepted: the matrix's row and [0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md) name that target's default, and no test is gated on `panic`                                                                                                                                                                                                                                                                                               |
+| No conformance file can script a codec's bug, the application's; the Rust test alone holds the answer, with no twin (O9)                                                                                                                                                                                                                                                                                        | Accepted: the twins land on every side, `a payload whose codec throws other than its refusal is answered PROCEDURE_FAILED, with no detail, and reported, never reaching the callback` and the C# side's, the Rust test renamed to its answer, and the citations move                                                                                                                                                                                                          |
+
+### On the manager typed by its side
+
+The change that types a client's services and a server's by their side, on every side, met one
+dissenter ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)) at xhigh effort, whose
+probes sealed the C# interfaces, compiled a marker parameter on the Rust side and forwarded a
+server's maker on a client's type to see what caught it. Each claim was verified before its answer,
+and each answer that changed the design was probed on all three sides. Its objections, each with
+its answer:
+
+| Objection                                                                                                                                                                                                                                                                                                                                    | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The Rust twin is weak: two `compile_fail` doc examples check one wrong maker of three on each side and no error code, and the house's own compile-twin kit, `testing::surface::Consumer`, which checks the code and the message on stable, is never weighed                                                                                  | Accepted: verified, `Consumer::refuses` asserts the code and the message, 26 test files use it, `a_server_does_not_subscribe_it_notifies` is the precedent, and a server's maker forwarded on the client's type leaves both `compile_fail` examples passing. The Rust twin's consumer half refuses the six wrong makers by E0599 and their names, the server's `on_dropped` likewise, and an outside `new` by E0624. Each type keeps one example that compiles, as documentation. [0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md) names the consumer twin, and the matrix cites it                                        |
+| The Rust named twin is not written, though the draft counts on it to keep the new forwarders above the coverage floor                                                                                                                                                                                                                        | Accepted: verified, no Rust file held it, and `llvm-cov` had not run. Its runtime half makes each side's makers on a connected pair and runs each of the fifteen forwarders; `cargo llvm-cov` over the workspace, CI's command, reads 94.0 % of lines and 94.0 % of regions against the floor's 93.4 and 93.4                                                                                                                                                                                                                                                                                                                                                  |
+| The C# interfaces open an extension point no record asked for, and the service layer's refactor made to cope with it departs from the other sides: `RequesterJudging` snapshots the bound and the side once, where the TypeScript and Rust sides read the manager's router at each judging; the split of `IDescribedProcedure` is not probed | Accepted: verified, an outside implementer is CS9044 under an internal member, the TypeScript and Rust sides read the bound at each judging (`service-requester.ts`, `managers/service.rs`), and the split compiled nulls where it said none. Each interface is sealed by `internal ServiceManager Manager { get; }`, implemented explicitly, the C# twin of the Rust newtype's crate-private field. The service layer reaches `Services.Manager`, and `RequesterJudging` and `IDescribedProcedure` stay as they are. The Framework Design Guidelines' versioning cost goes, since no other assembly implements either interface. The C# twin asserts the seal |
+| The TypeScript twin's form rests on a false reason: the house already puts `@ts-expect-error` over an absent member, and oxlint refuses only the call form                                                                                                                                                                                   | Accepted, with a correction: verified in `router-core.test.ts`, and `void client.services.getCommand;` passes `tsc` and oxlint. But over `{} as IClient` those lines read a member of an undefined `services` and throw once run, so the twin holds them over two real managers typed by side: seven directives, one per refusal the other sides make, the key-set over the facades' own property types beside them. No lint refusal is cited                                                                                                                                                                                                                  |
+| `dropped` stays on the server's type though no server can hear it, against the design's own criterion that a type states 16.11's partition and no more; the TypeScript cost is lower than stated                                                                                                                                             | Accepted: verified, `dropped` is emitted on the notification's path alone on every side, and every listener in the tree is a client's. The server's type carries `debug` and `deprecated` alone. On the TypeScript side its six event members take `Exclude<SERVICE_MANAGER_EVENTS, 'dropped'>` inline, and `IServiceManager` redeclares them over the whole map (TS2320); inline, since an exported alias would be a name no other side has. Each twin holds it                                                                                                                                                                                               |
+| The Rust side gets public typed constructors no other side has and nothing needs, the client's taking options no client reads, and fixing a signature the `ServiceRouter` variant over a trait may want to change                                                                                                                            | Accepted: verified, `client.rs` and `server.rs` are their only callers, and the players build the untyped `ServiceManager::new`. Both are `pub(crate)`. The surface gains the types and their members but no constructor, as on the other sides, and the consumer half refuses `ServiceManagerClient::new` from outside the crate (E0624)                                                                                                                                                                                                                                                                                                                      |
+| "No Differences row" is wrong: on the Rust side the type proves its router's side, on the TypeScript and C# sides it narrows one object that a cast, or a facade an application writes, reaches across                                                                                                                                       | Accepted: verified, `IServiceManagerClient s = new ServiceManager(serverRouter)` compiles, and its TypeScript form alike; the fixtures and the bench write their own `IClient`, and the C# twin asserts the cross-cast. The seal does not close it, since one class still implements both interfaces. A Differences row of kind `open` states it, naming the sealed classes and the wrapper object that would close it. The Consequences say the same, and a `// !` beside the C# interfaces warns that a type test between them proves no side                                                                                                                |
+| Two reasons do not hold: the marker form has a name, its alias, and a defaulted phantom parameter is no transition typestate; and the amendment of [0047](0047-every-side-shows-one-public-surface.md)'s rule on options members widens it to every type that names its case                                                                 | Accepted in part: verified, the marker probe compiles clean with `ServiceManager::new()` inferring the default. Both reasons are withdrawn, and the amendment of 0047 is its makers sentence alone, the type-of-its-own reasoning this record's. The newtype stays, on its real trade: two names that map name for name onto the other sides' interfaces, against six public names with no counterpart, each an `own:` or `alone` row of `tools/names.tsv`, and a wrong maker that reads "exists … but its trait bounds were not satisfied" where every other side says the member does not exist. Item 1 records it                                           |
+| Two doc comments still state a single manager, and the new Rust runtime names are exactly those beadc gives a service named `ServiceManager`                                                                                                                                                                                                 | Accepted: verified, `IRouterLike`'s doc and `ServiceManager`'s summary, and `classNamesOf` with `CLASS_SUFFIXES`. Both doc comments say the untyped manager serves either side. "Where it lives" says the Rust names join `RUNTIME_TYPES` with beadc's Rust target                                                                                                                                                                                                                                                                                                                                                                                             |

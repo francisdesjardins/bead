@@ -1,26 +1,20 @@
 //! `spec/codecs.json` played against the Rust side's codecs: each payload read, and written back or
 //! refused, and each value written or refused, through its encoding's codec. The `proto` entries
 //! are `bead-protobuf`'s player's, `crates/bead-protobuf/tests/codecs.rs`, since the core never
-//! depends on protobuf; an entry whose `differs` excuses Rust is not played.
+//! depends on protobuf; an entry whose `differs` excuses Rust is not played. Every refusal is a
+//! [`CodecRefusal`], the codec trait's error, as the other sides' players hold theirs to its type,
+//! its reason the entry's, exactly (spec 17.2): a codec that panics refuses nothing, and fails its
+//! trial.
 
 use std::process::ExitCode;
 
 use bead::json::{self, JsonRefusal};
-use bead::testing::files;
-use bead::testing::hexadecimal;
-use bead::{JsonCodec, PayloadCodec, RawCodec, TextCodec};
+use bead::testing::{Difference, files, hexadecimal, is_excused};
+use bead::{CodecRefusal, JsonCodec, JsonOf, PayloadCodec, RawCodec, TextCodec};
 use bytes::Bytes;
 use libtest_mimic::{Arguments, Failed, Trial};
 use serde::Deserialize;
 use serde_json::Value;
-
-/// A row of `docs/support.md` an entry crosses, and the language it excuses.
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Differs {
-    row: String,
-    language: String,
-}
 
 /// Bytes read in an encoding, and what its reader makes of them.
 #[derive(Debug, Deserialize)]
@@ -35,7 +29,7 @@ struct Payload {
     refused: Option<String>,
     #[serde(rename = "read")]
     _read: Option<Value>,
-    differs: Option<Vec<Differs>>,
+    differs: Option<Vec<Difference>>,
 }
 
 /// A value given to a writer, in one of eight forms.
@@ -47,8 +41,7 @@ struct Given {
     number: Option<String>,
     text: Option<String>,
     bytes: Option<String>,
-    #[serde(rename = "form")]
-    _form: Option<String>,
+    form: Option<String>,
     nested: Option<usize>,
     #[serde(rename = "probe")]
     _probe: Option<Value>,
@@ -69,7 +62,7 @@ struct Written {
     value: Given,
     written: Option<String>,
     refused: Option<String>,
-    differs: Option<Vec<Differs>>,
+    differs: Option<Vec<Difference>>,
 }
 
 /// The file whole.
@@ -86,52 +79,28 @@ struct Codecs {
     values: Vec<Written>,
 }
 
-// whether an entry's differs excuses the Rust side
-fn is_excused(differs: Option<&Vec<Differs>>) -> bool {
-    differs.is_some_and(|differs| {
-        differs
-            .iter()
-            .any(|differs| differs.language == "Rust" && !differs.row.is_empty())
-    })
-}
-
 fn bytes_of(text: &str) -> Result<Bytes, Failed> {
     hexadecimal::bytes_of(text)
         .map(Bytes::from)
         .ok_or_else(|| format!("{text:?} is no hexadecimal").into())
 }
 
+// a payload read, then written back, through `codec`: what it writes, twice, or its refusal
+fn written_by<C: PayloadCodec>(codec: &C, bytes: &Bytes) -> Result<(Bytes, Bytes), CodecRefusal> {
+    let again = |bytes: &Bytes| codec.decode(bytes).and_then(|value| codec.encode(&value));
+
+    again(bytes).and_then(|written| again(&written).map(|twice| (written, twice)))
+}
+
 // a payload read, then written back, through its encoding's codec: what it writes, or its refusal
-fn round_trip(encoding: &str, bytes: &Bytes) -> Result<Result<(Bytes, Bytes), String>, Failed> {
-    let written = |again: &dyn Fn(&Bytes) -> Result<Bytes, String>| {
-        again(bytes).and_then(|written| again(&written).map(|twice| (written, twice)))
-    };
-
+fn round_trip(
+    encoding: &str,
+    bytes: &Bytes,
+) -> Result<Result<(Bytes, Bytes), CodecRefusal>, Failed> {
     Ok(match encoding {
-        "raw" => written(&|bytes| {
-            let codec = RawCodec;
-
-            codec
-                .decode(bytes)
-                .and_then(|value| codec.encode(&value))
-                .map_err(|refusal| refusal.to_string())
-        }),
-        "text" => written(&|bytes| {
-            let codec = TextCodec;
-
-            codec
-                .decode(bytes)
-                .and_then(|value| codec.encode(&value))
-                .map_err(|refusal| refusal.to_string())
-        }),
-        "json" => written(&|bytes| {
-            let codec = JsonCodec;
-
-            codec
-                .decode(bytes)
-                .and_then(|value| codec.encode(&value))
-                .map_err(|refusal| refusal.to_string())
-        }),
+        "raw" => written_by(&RawCodec, bytes),
+        "text" => written_by(&TextCodec, bytes),
+        "json" => written_by(&JsonCodec, bytes),
         other => return Err(format!("{other} is no encoding this player plays").into()),
     })
 }
@@ -141,7 +110,11 @@ fn play_payload(payload: &Payload) -> Result<(), Failed> {
     let outcome = round_trip(&payload.encoding, &bytes)?;
 
     match (&payload.refused, &payload.written, outcome) {
-        (Some(_), _, Err(_)) => Ok(()),
+        // * a refusal, a CodecRefusal, its reason the entry's (spec 17.2)
+        (Some(reason), _, Err(refusal)) if refusal.reason() == reason => Ok(()),
+        (Some(reason), _, Err(refusal)) => {
+            Err(format!("refused, saying {refusal:?}, where it says {reason:?}").into())
+        }
         (Some(reason), _, Ok((written, _))) => {
             Err(format!("read and wrote {written:02X?}, where it is refused: {reason}").into())
         }
@@ -178,33 +151,31 @@ fn nested_of(depth: usize) -> Value {
 
 fn play_value(entry: &Written) -> Result<(), Failed> {
     let given = &entry.value;
-    let written: Result<Bytes, String> = match entry.encoding.as_str() {
+    // * each value written through a codec: a double through a codec of the application's own type
+    let written: Result<Bytes, CodecRefusal> = match entry.encoding.as_str() {
         "json" => {
-            let value = if let Some(value) = &given.json {
-                Ok(value.clone())
-            } else if let Some(bits) = &given.double {
+            if let Some(bits) = &given.double {
                 let bits = u64::from_str_radix(bits, 16).map_err(|error| error.to_string())?;
 
-                json::to_value(&f64::from_bits(bits))
-            } else if let Some(digits) = &given.number {
-                number_of(digits)
-            } else if let Some(depth) = given.nested {
-                Ok(nested_of(depth))
+                JsonOf::<f64>::new().encode(&f64::from_bits(bits))
             } else {
-                return Err(format!("{given:?} is no form a json writer is given here").into());
-            };
+                let value = if let Some(value) = &given.json {
+                    value.clone()
+                } else if let Some(digits) = &given.number {
+                    number_of(digits).map_err(|refusal| refusal.to_string())?
+                } else if let Some(depth) = given.nested {
+                    nested_of(depth)
+                } else {
+                    return Err(format!("{given:?} is no form a json writer is given here").into());
+                };
 
-            value
-                .and_then(|value| json::write(&value))
-                .map(Bytes::from)
-                .map_err(|refusal| refusal.to_string())
+                JsonCodec.encode(&value)
+            }
         }
         "text" => {
             let text = given.text.clone().ok_or("a text writer is given a text")?;
 
-            TextCodec
-                .encode(&text)
-                .map_err(|refusal| refusal.to_string())
+            TextCodec.encode(&text)
         }
         "raw" => {
             let bytes = bytes_of(
@@ -214,15 +185,17 @@ fn play_value(entry: &Written) -> Result<(), Failed> {
                     .ok_or("a raw writer is given bytes")?,
             )?;
 
-            RawCodec
-                .encode(&bytes)
-                .map_err(|refusal| refusal.to_string())
+            RawCodec.encode(&bytes)
         }
         other => return Err(format!("{other} is no encoding this player plays").into()),
     };
 
     match (&entry.refused, &entry.written, written) {
-        (Some(_), _, Err(_)) => Ok(()),
+        // * a refusal, a CodecRefusal, its reason the entry's (spec 17.2)
+        (Some(reason), _, Err(refusal)) if refusal.reason() == reason => Ok(()),
+        (Some(reason), _, Err(refusal)) => {
+            Err(format!("refused, saying {refusal:?}, where it says {reason:?}").into())
+        }
         (Some(reason), _, Ok(written)) => {
             Err(format!("wrote {written:02X?}, where it is refused: {reason}").into())
         }
@@ -242,9 +215,70 @@ fn trials() -> Result<Vec<Trial>, String> {
     // * read by Bead's own reader, so a value's numbers keep the form the file writes them in
     let codecs: Codecs = files::read_by_bead("codecs.json")?;
     let mut trials = Vec::new();
+    let skipped: Vec<_> = codecs
+        .values
+        .iter()
+        .filter(|entry| is_excused(entry.differs.as_deref().unwrap_or_default()))
+        .map(|entry| {
+            let rows: Vec<_> = entry
+                .differs
+                .as_deref()
+                .unwrap_or_default()
+                .iter()
+                .filter(|difference| difference.language == "Rust")
+                .map(|difference| difference.row.clone())
+                .collect();
+            (
+                entry.name.clone(),
+                entry.encoding.clone(),
+                entry.value.form.clone(),
+                rows,
+            )
+        })
+        .collect();
+
+    trials.push(Trial::test(
+        "pins each value its type cannot hold and its reason",
+        move || {
+            let expected: Vec<_> = [
+                ("a surrogate alone", "json", "loneSurrogate"),
+                ("a surrogate alone in a name", "json", "loneSurrogateName"),
+                ("an object naming a member twice", "json", "nameTwice"),
+                ("undefined", "json", "undefined"),
+                ("a surrogate alone in a text", "text", "loneSurrogate"),
+            ]
+            .into_iter()
+            .map(|(name, encoding, form)| {
+                (
+                    name.to_owned(),
+                    encoding.to_owned(),
+                    Some(form.to_owned()),
+                    vec!["A value a side's type cannot hold".to_owned()],
+                )
+            })
+            .collect();
+
+            if skipped != expected {
+                return Err(format!("excused values: {skipped:?}, expected {expected:?}").into());
+            }
+
+            for text in [r#""\ud800""#, r#"{"\ud800":0}"#, "undefined"] {
+                if serde_json::from_str::<Value>(text).is_ok() {
+                    return Err(format!("{text} built as a JSON value").into());
+                }
+            }
+            let twice: Value = serde_json::from_str(r#"{"name":1,"name":2}"#)?;
+            if twice.as_object().map(serde_json::Map::len) != Some(1) {
+                return Err("a JSON object holds each name once".into());
+            }
+
+            Ok(())
+        },
+    ));
 
     for payload in codecs.payloads {
-        if payload.encoding == "proto" || is_excused(payload.differs.as_ref()) {
+        if payload.encoding == "proto" || is_excused(payload.differs.as_deref().unwrap_or_default())
+        {
             continue;
         }
 
@@ -254,7 +288,7 @@ fn trials() -> Result<Vec<Trial>, String> {
     }
 
     for entry in codecs.values {
-        if entry.encoding == "proto" || is_excused(entry.differs.as_ref()) {
+        if entry.encoding == "proto" || is_excused(entry.differs.as_deref().unwrap_or_default()) {
             continue;
         }
 

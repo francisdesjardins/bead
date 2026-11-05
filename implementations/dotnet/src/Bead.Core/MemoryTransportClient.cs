@@ -22,7 +22,7 @@ public sealed record MemoryTransportClientOptions
 /// Where an in-memory client connects — a server of the same process — who it says it is there,
 /// and how long it waits.
 /// </summary>
-public sealed record MemoryConnectOptions
+public sealed record MemoryTransportClientConnectOptions
 {
     /// <summary>The server it connects to.</summary>
     public required MemoryTransportServer Server { get; init; }
@@ -49,6 +49,13 @@ public sealed record MemoryConnectOptions
     /// refused.
     /// </summary>
     public TimeSpan Timeout { get; init; } = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    /// What gives the connect up: one cancelled already refuses it before anything moves, one
+    /// cancelled after ends it Closed, each an <see cref="OperationCanceledException"/>. Its own
+    /// connect's alone: a reconnection replays the rest of these options, never this token.
+    /// </summary>
+    public CancellationToken CancellationToken { get; init; }
 }
 
 /// <summary>
@@ -56,8 +63,9 @@ public sealed record MemoryConnectOptions
 /// process: each envelope copied as it is sent, and handed on whole, once and in order, in a later
 /// turn than its send, with the credential its router gives beside it, any field value, as
 /// <c>POST /bead</c> carries one; what comes back carries none. It never leaves the process, so it
-/// is secure (spec 13.4), and holds no bound, heartbeat or timeout of its own but its connect's. It
-/// goes from <see cref="ReadyState.Uninitialized"/> through Connecting and Open to Closing and
+/// is secure (spec 13.4), and holds no bound, heartbeat or timeout of its own but its connect's.
+/// Paused by its router, it holds what its server sends, in order, without bound, and hands it on
+/// once resumed (spec 15.12). It goes from <see cref="ReadyState.Uninitialized"/> through Connecting and Open to Closing and
 /// Closed, and connects again once Closed — or reconnects, with the options of its last connect.
 /// </summary>
 public sealed class MemoryTransportClient : IRouterClientTransport, IAsyncDisposable
@@ -69,12 +77,15 @@ public sealed class MemoryTransportClient : IRouterClientTransport, IAsyncDispos
     private readonly Lock _gate = new();
     private volatile ReadyState _readyState = ReadyState.Uninitialized;
     // the options of the last connect its guard let through, which a reconnection connects with
-    private MemoryConnectOptions? _lastConnectOptions;
+    private MemoryTransportClientConnectOptions? _lastConnectOptions;
     // what a dispose cancels the connect under way by
     private CancellationTokenSource? _connecting;
     // the open connection; one this side let go of is none, and its end tells nothing
     private volatile MemoryConnection? _connection;
     private Action? _reconnect;
+    // * what its router paused it for, held in order without bound, its peer its application's own
+    // code; what a connection holds goes with it, its pause outlasting it (spec 15.12, 15.13)
+    private readonly TransportHold<(MemoryConnection Connection, TransportMessage Message)> _hold = new();
     // how its events are told: what a listener throws is reported through Error
     private readonly ListenerGuard _listeners;
 
@@ -161,9 +172,9 @@ public sealed class MemoryTransportClient : IRouterClientTransport, IAsyncDispos
     /// <summary>
     /// Connects to its server; settles once its server drew the connection and told it, in a turn
     /// of the server's own. Refused with an <see cref="ArgumentOutOfRangeException"/> for a timeout
-    /// <see cref="MemoryConnectOptions.Timeout"/> does not take, zero among them, or a port past its
+    /// <see cref="MemoryTransportClientConnectOptions.Timeout"/> does not take, zero among them, or a port past its
     /// range, and with an <see cref="ArgumentException"/> for an address
-    /// <see cref="MemoryConnectOptions.Address"/> does not take, each of which leaves the state, and
+    /// <see cref="MemoryTransportClientConnectOptions.Address"/> does not take, each of which leaves the state, and
     /// the target a reconnection replays, as they were; with an
     /// <see cref="InvalidOperationException"/> unless Uninitialized or Closed; and with an
     /// <see cref="OperationCanceledException"/>, nothing changed, when its token is cancelled
@@ -171,9 +182,10 @@ public sealed class MemoryTransportClient : IRouterClientTransport, IAsyncDispos
     /// dispose gave up on it, a <see cref="TimeoutException"/> past its timeout, and an
     /// <see cref="OperationCanceledException"/> once its token is cancelled, ending Closed.
     /// </summary>
-    public Task Connect(MemoryConnectOptions options, CancellationToken cancellationToken = default)
+    public Task Connect(MemoryTransportClientConnectOptions options)
     {
-        return Connecting(options, (cancellationToken, false));
+        // none refused where the connect refuses it, in its task
+        return Connecting(options, (options?.CancellationToken ?? CancellationToken.None, false));
     }
 
     /// <summary>
@@ -185,6 +197,28 @@ public sealed class MemoryTransportClient : IRouterClientTransport, IAsyncDispos
         ArgumentNullException.ThrowIfNull(credential);
 
         return HostsAndOrigins.IsVisibleField(credential);
+    }
+
+    /// <summary>
+    /// Holds what its server sends from now on, in order, without bound: its peer is its
+    /// application's own code (spec 15.12, 15.13). A pause outlasts its connection, until a resume.
+    /// </summary>
+    public void Pause()
+    {
+        // ! the hold's own lock alone, never one held while it tells
+        _hold.Pause();
+    }
+
+    /// <summary>
+    /// Hands on what it holds, in order, in a turn of its own, never within this call, asking
+    /// before each whether it was paused again.
+    /// </summary>
+    public void Resume()
+    {
+        if (_hold.Resume())
+        {
+            _scheduler.Post(HandHeld);
+        }
     }
 
     /// <summary>
@@ -231,12 +265,12 @@ public sealed class MemoryTransportClient : IRouterClientTransport, IAsyncDispos
 
     /// <summary>
     /// Closes the connection and raises its close, which says it was clean as
-    /// <see cref="TransportDisconnectOptions.IsClean"/> does, and quick as
-    /// <see cref="TransportDisconnectOptions.IsQuick"/> does, both alike in memory, where no
+    /// <see cref="TransportClientDisconnectOptions.IsClean"/> does, and quick as
+    /// <see cref="TransportClientDisconnectOptions.IsQuick"/> does, both alike in memory, where no
     /// handshake waits; its server is told in a later turn, after what was sent before. Refused with
     /// a <see cref="DisconnectException"/> unless Open. It ends Closed.
     /// </summary>
-    public Task CloseConnection(TransportDisconnectOptions? options = null)
+    public Task CloseConnection(TransportClientDisconnectOptions? options = null)
     {
         var isClean = options?.IsClean ?? true;
         var isQuick = options?.IsQuick ?? false;
@@ -273,18 +307,20 @@ public sealed class MemoryTransportClient : IRouterClientTransport, IAsyncDispos
     /// Connects again with the options of the last connect its guard let through, replacing an open
     /// connection without a close, and raises <see cref="IRouterClientTransport.Reconnect"/> as it
     /// starts. The first attempt goes at once, each next one after its
-    /// <see cref="TransportReconnectOptions.Delay"/>. Attempts that run out end Closed without a
+    /// <see cref="TransportClientReconnectOptions.Delay"/>. Attempts that run out end Closed without a
     /// close, with a <see cref="ReconnectException"/>; a cancel stops them with an
     /// <see cref="OperationCanceledException"/>, ending Closed, and one after a success disconnects,
     /// which raises a close. A reconnection under way, never connected, connecting or closing is an
-    /// <see cref="InvalidOperationException"/>, and so is a delay that throws, ending Closed; a misuse
-    /// or a token cancelled already leaves the state as it was. What its tap throws passes through.
+    /// <see cref="InvalidOperationException"/>, and so is a delay that throws, ending Closed; a fixed
+    /// delay out of bounds is an <see cref="ArgumentOutOfRangeException"/> as it is called, after
+    /// those and before the token; a misuse, such a delay or a token cancelled already leaves the
+    /// state as it was. What its tap throws passes through.
     /// </summary>
-    public async Task Reconnect(TransportReconnectOptions? options = null)
+    public async Task Reconnect(TransportClientReconnectOptions? options = null)
     {
-        var reconnect = options ?? new TransportReconnectOptions();
+        var reconnect = options ?? new TransportClientReconnectOptions();
         var token = reconnect.CancellationToken;
-        MemoryConnectOptions target;
+        MemoryTransportClientConnectOptions target;
         MemoryConnection? replaced;
         Action? starting;
 
@@ -304,6 +340,10 @@ public sealed class MemoryTransportClient : IRouterClientTransport, IAsyncDispos
             {
                 throw new InvalidOperationException($"the transport client cannot reconnect while {NameOf(_readyState)}");
             }
+
+            // * a fixed delay held as it is called, after the state's guards and before its token,
+            // so a refused one moves nothing (spec 1.4)
+            TransportReconnection.Held(reconnect);
 
             // before the release below, so a token cancelled already leaves an open connection alone
             if (token.IsCancellationRequested)
@@ -401,7 +441,7 @@ public sealed class MemoryTransportClient : IRouterClientTransport, IAsyncDispos
 
     // who a connect says its client is, refused before anything moves: an address a handle can
     // name, and a port of the range
-    private static void AssertClient(MemoryConnectOptions options)
+    private static void AssertClient(MemoryTransportClientConnectOptions options)
     {
         if (options.Address is { } address && !IsHandlePart(address))
         {
@@ -434,7 +474,7 @@ public sealed class MemoryTransportClient : IRouterClientTransport, IAsyncDispos
 
     // a connect, or a reconnection's attempt, which its guard alone tells apart: an attempt passes
     // only while the client reconnects, and leaves the state to its reconnection when it fails
-    private async Task Connecting(MemoryConnectOptions given, (CancellationToken Token, bool IsAttempt) call)
+    private async Task Connecting(MemoryTransportClientConnectOptions given, (CancellationToken Token, bool IsAttempt) call)
     {
         ArgumentNullException.ThrowIfNull(given);
         ArgumentNullException.ThrowIfNull(given.Server, nameof(given));
@@ -443,7 +483,11 @@ public sealed class MemoryTransportClient : IRouterClientTransport, IAsyncDispos
         // held before anything moves or is kept, so a reconnection connects again with it held
         var options = given with
         {
-            Timeout = Clocks.AssertHeld(("a connect's timeout", nameof(MemoryConnectOptions.Timeout)), given.Timeout),
+            Timeout = Clocks.AssertHeld(("a connect's timeout", nameof(MemoryTransportClientConnectOptions.Timeout)), given.Timeout),
+
+            // ! its own connect's, which its call carries: a reconnection replays the rest, never
+            // a token a connect gave
+            CancellationToken = CancellationToken.None,
         };
         var (token, isAttempt) = call;
         var connecting = new CancellationTokenSource();
@@ -619,7 +663,25 @@ public sealed class MemoryTransportClient : IRouterClientTransport, IAsyncDispos
             return;
         }
 
-        _listeners.Tell(Message, message);
+        if (_hold.Offer((connection, message)))
+        {
+            _listeners.Tell(Message, message);
+        }
+    }
+
+    // * in a turn of its own: what it held handed on, in order, each after asking whether its
+    // router paused it again; nothing of a connection it let go of
+    private void HandHeld()
+    {
+        while (_hold.TryTake(out var held))
+        {
+            var (connection, message) = held;
+
+            if (_connection == connection && !connection.IsClosedAtClient)
+            {
+                _listeners.Tell(Message, message);
+            }
+        }
     }
 
     // * in a turn of its own: its server ended the connection, after what it sent before; told
@@ -642,6 +704,7 @@ public sealed class MemoryTransportClient : IRouterClientTransport, IAsyncDispos
             _readyState = ReadyState.Closed;
         }
 
+        _hold.Drop();
         _listeners.Tell(Close, (false, false));
     }
 
@@ -672,6 +735,8 @@ public sealed class MemoryTransportClient : IRouterClientTransport, IAsyncDispos
         {
             // the connect ended meanwhile: there is nothing left to cancel
         }
+
+        _hold.Drop();
 
         if (connection is not null)
         {

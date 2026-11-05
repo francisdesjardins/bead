@@ -2,8 +2,9 @@
 //! side's broker transports over the in-memory broker: in the server role, the interop service's
 //! server on a broker server transport over the participant `server`; in the client role, a broker
 //! client transport alone over the participant `client`; the case's peers, adapters of the same
-//! broker, publishing parcels and reading their inboxes. A trial a case; the cases over HTTP,
-//! WebSocket, MQTT 5 and AMQP 1.0 are ahead, with the stages that bring their transports.
+//! broker, publishing parcels and reading their inboxes. A trial a case; a case a row of the
+//! support matrix excuses this side from is not played. The cases over HTTP, WebSocket, MQTT 5 and
+//! AMQP 1.0 are ahead, with the stages that bring their transports.
 
 #![expect(
     clippy::disallowed_methods,
@@ -25,16 +26,16 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Instant, SystemTime};
 
 use bead::testing::parcels::{self, ParcelFields, ParcelReading};
-use bead::testing::{SteppingClock, files, hexadecimal, instants};
+use bead::testing::{Difference, SteppingClock, files, hexadecimal, instants, is_excused};
 use bead::{
-    BoxFuture, BrokerAdapter, BrokerCapabilities, BrokerClient, BrokerClientOptions,
-    BrokerConnectOptions, BrokerDelivery, BrokerError, BrokerListener, BrokerMessage,
-    BrokerParticipant, BrokerParticipantOptions, BrokerPublication, BrokerPublished,
-    BrokerRefusedError, BrokerServer, BrokerServerOptions, BrokerStart, BrokerSubscription,
-    ClientListener, ClientTransport, ConnectionHandle, MemoryBroker, MemoryBrokerAdapter,
-    MemoryBrokerAdapterOptions, MemoryBrokerOptions, RouterError, Server, ServerListener,
-    ServerOptions, ServerTransport, SharedClock, TransportError, TransportMessage,
-    TransportServerRefusal,
+    BoxFuture, BrokerAdapter, BrokerCapabilities, BrokerDelivery, BrokerError, BrokerListener,
+    BrokerMessage, BrokerParticipant, BrokerParticipantOptions, BrokerPublication, BrokerPublished,
+    BrokerRefusedError, BrokerStart, BrokerSubscription, BrokerTransportClient,
+    BrokerTransportClientConnectOptions, BrokerTransportClientOptions, BrokerTransportServer,
+    BrokerTransportServerOptions, ClientListener, ConnectionHandle, MemoryBroker,
+    MemoryBrokerAdapter, MemoryBrokerAdapterOptions, MemoryBrokerOptions, RouterClientTransport,
+    RouterError, Server, ServerListener, ServerOptions, ServerTransport, SharedClock,
+    TransportError, TransportMessage, TransportServerRefusal,
 };
 use bytes::Bytes;
 use libtest_mimic::{Arguments, Failed, Trial};
@@ -53,8 +54,9 @@ const ROOT: &str = "bead";
 
 // ! every key of a case and of a step this player reads: one it does not know fails the case,
 // rather than pass it unplayed
-const CASE_KEYS: [&str; 9] = [
+const CASE_KEYS: [&str; 10] = [
     "clauses",
+    "differs",
     "limits",
     "name",
     "options",
@@ -65,7 +67,7 @@ const CASE_KEYS: [&str; 9] = [
     "transport",
 ];
 
-const STEP_KEYS: [&str; 19] = [
+const STEP_KEYS: [&str; 20] = [
     "advance",
     "at",
     "connect",
@@ -74,6 +76,7 @@ const STEP_KEYS: [&str; 19] = [
     "leave",
     "lose",
     "on",
+    "participant",
     "publish",
     "refused",
     "reported",
@@ -348,7 +351,7 @@ async fn peer_of(
     (id, under, is_client, will): (&str, &str, bool, Option<&str>),
 ) -> Result<Peer, String> {
     let adapter = broker
-        .adapter(&MemoryBrokerAdapterOptions::of(id))
+        .adapter(&MemoryBrokerAdapterOptions::new(id))
         .map_err(|error| error.to_string())?;
     let heard = Arc::new(Heard::default());
 
@@ -378,7 +381,7 @@ async fn peer_of(
             code: None,
         };
 
-        start.will = Some(BrokerPublication::of(
+        start.will = Some(BrokerPublication::new(
             [ROOT, "d", id],
             Bytes::from(parcels::encode(&gone)?),
         ));
@@ -739,8 +742,8 @@ struct Case {
     clock: Arc<SteppingClock>,
     recording: Arc<Recording>,
     participant: BrokerParticipant,
-    server: Option<(Server, BrokerServer)>,
-    client: Option<BrokerClient>,
+    server: Option<(Server, BrokerTransportServer)>,
+    client: Option<BrokerTransportClient>,
     connecting: Option<tokio::task::JoinHandle<Result<(), TransportError>>>,
     peers: HashMap<String, Peer>,
     twin: Option<Peer>,
@@ -775,7 +778,7 @@ async fn case_of((case, wall): (&Value, SystemTime)) -> Result<Case, String> {
 
     let broker = MemoryBroker::new(&broker_options).map_err(|error| error.to_string())?;
     let inner = broker
-        .adapter(&MemoryBrokerAdapterOptions::of(under))
+        .adapter(&MemoryBrokerAdapterOptions::new(under))
         .map_err(|error| error.to_string())?;
     let mut adapters = HashMap::new();
 
@@ -799,7 +802,7 @@ async fn case_of((case, wall): (&Value, SystemTime)) -> Result<Case, String> {
     participant_options.minimum_body_bytes_per_second = options
         .get("minimumBodyBytesPerSecond")
         .and_then(Value::as_u64);
-    participant_options.is_reconnecting = Some(!is_client);
+    participant_options.reconnects = Some(!is_client);
 
     let adapter: Arc<dyn BrokerAdapter> = Arc::<Recording>::clone(&recording);
     let participant =
@@ -811,7 +814,7 @@ async fn case_of((case, wall): (&Value, SystemTime)) -> Result<Case, String> {
 
     if is_client {
         let built = participant
-            .client(&BrokerClientOptions::default())
+            .client(&BrokerTransportClientOptions::default())
             .map_err(|error| error.to_string())?;
 
         built.listen(Arc::new(AtClient(Arc::clone(&told))));
@@ -827,7 +830,7 @@ async fn case_of((case, wall): (&Value, SystemTime)) -> Result<Case, String> {
                     .collect()
             },
         );
-        let mut transport_options = BrokerServerOptions::of(names.clone());
+        let mut transport_options = BrokerTransportServerOptions::new(names.clone());
 
         transport_options.accept_timeout = duration_of(&options, "acceptTimeout");
         transport_options.is_in_group = options.get("group").and_then(Value::as_bool);
@@ -846,7 +849,7 @@ async fn case_of((case, wall): (&Value, SystemTime)) -> Result<Case, String> {
 
         server_options.clock = Some(Arc::clone(&shared));
         server_options.credentials = Some(
-            bead_interop::interop_credentials_of(&shared, Some(&limits))
+            bead_interop::interop_credentials_of(&shared, &limits)
                 .map_err(|error| error.to_string())?,
         );
         server_options.limits = Some(limits);
@@ -965,6 +968,15 @@ impl Case {
         &self,
         (step, values): (&Value, &HashMap<String, String>),
     ) -> Result<Vec<BrokerPublished>, String> {
+        published(self.publishing((step, values))?).await
+    }
+
+    // what a peer publishes in one turn, each publication made as it is called, in its order:
+    // what crosses a stop is made before that stop's call
+    fn publishing(
+        &self,
+        (step, values): (&Value, &HashMap<String, String>),
+    ) -> Result<Vec<BoxFuture<Result<BrokerPublished, BrokerError>>>, String> {
         let from = step.get("from").and_then(Value::as_str).unwrap_or("peer");
         let peer = self.peer(from)?;
         let topic = match step.get("to").and_then(Value::as_str) {
@@ -1002,7 +1014,7 @@ impl Case {
                     ));
                 }
             };
-            let publication = BrokerPublication::of(topic.clone(), Bytes::from(payload));
+            let publication = BrokerPublication::new(topic.clone(), Bytes::from(payload));
 
             publishing.push(if is_retained {
                 peer.adapter.publish_retained(publication)
@@ -1011,13 +1023,7 @@ impl Case {
             });
         }
 
-        let mut published = Vec::new();
-
-        for each in publishing {
-            published.push(each.await.map_err(|error| error.to_string())?);
-        }
-
-        Ok(published)
+        Ok(publishing)
     }
 
     fn gauge(&self, name: &str) -> Option<u64> {
@@ -1048,13 +1054,27 @@ impl Case {
             client.close();
         }
 
-        self.participant.stop().await;
+        // * its case ends: done with for good
+        self.participant.dispose().await;
 
         stopped
     }
 }
 
 // the server's ACCEPT, or the twin's OPEN, naming an opener's half, placed with it
+// what a peer published, each awaited in its order
+async fn published(
+    publishing: Vec<BoxFuture<Result<BrokerPublished, BrokerError>>>,
+) -> Result<Vec<BrokerPublished>, String> {
+    let mut published = Vec::new();
+
+    for each in publishing {
+        published.push(each.await.map_err(|error| error.to_string())?);
+    }
+
+    Ok(published)
+}
+
 fn take_placed(
     placed: &mut [(String, Vec<&'static str>)],
     (message, kind, where_): (Option<Bytes>, u8, &'static str),
@@ -1188,11 +1208,12 @@ async fn play_steps(case: &mut Case, steps: &[Value]) -> Result<(), String> {
             // * what crosses the stop is published in the turn it begins, before it
             let crossing = stop
                 .get("crossing")
-                .map(|crossing| case.publish((crossing, &values)));
+                .map(|crossing| case.publishing((crossing, &values)))
+                .transpose()?;
             let stopping = case.server.as_ref().map(|(_, transport)| transport.stop());
 
             if let Some(crossing) = crossing {
-                crossing.await?;
+                published(crossing).await?;
             }
 
             if let Some(stopping) = stopping {
@@ -1218,6 +1239,29 @@ async fn play_steps(case: &mut Case, steps: &[Value]) -> Result<(), String> {
                 .take_over();
         }
 
+        // * the participant under test stopped in place, or started again, each settled (spec 15.21);
+        // what crosses its stop is published in the turn it begins, before it
+        if let Some(act) = step.get("participant") {
+            let crossing = act.get("stop").map(|stop| stop.get("crossing"));
+
+            match (act.as_str(), crossing) {
+                (Some("stop"), None) => case.participant.stop().await,
+                (None, Some(Some(crossing))) => {
+                    let crossing = case.publishing((crossing, &values))?;
+                    let stopping = case.participant.stop();
+
+                    published(crossing).await?;
+                    stopping.await;
+                }
+                (Some("start"), None) => case
+                    .participant
+                    .start()
+                    .await
+                    .map_err(|error| format!("{at}: its start failed: {error}"))?,
+                _ => return Err(format!("{at}: the participant {act}")),
+            }
+        }
+
         if let Some(id) = step.get("leave").and_then(Value::as_str) {
             case.peer(id)?
                 .adapter
@@ -1229,10 +1273,10 @@ async fn play_steps(case: &mut Case, steps: &[Value]) -> Result<(), String> {
         if let Some(server) = step.get("connect").and_then(Value::as_str)
             && let Some(client) = &case.client
         {
-            let mut options = BrokerConnectOptions::of(server);
+            let mut options = BrokerTransportClientConnectOptions::new(server);
 
             options.timeout = case.timeout;
-            case.connecting = Some(tokio::spawn(client.connect(options)));
+            case.connecting = Some(tokio::spawn(client.connect(&options)));
         }
 
         if let Some(send) = step.get("transportSend")
@@ -1244,15 +1288,15 @@ async fn play_steps(case: &mut Case, steps: &[Value]) -> Result<(), String> {
                 .and_then(hexadecimal::bytes_of)
                 .ok_or("a send's envelope")?;
 
+            let mut message = TransportMessage::default();
+
+            message.data = Bytes::from(envelope);
+            message.credential = send
+                .get("credential")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
             client
-                .send(TransportMessage {
-                    data: Bytes::from(envelope),
-                    credential: send
-                        .get("credential")
-                        .and_then(Value::as_str)
-                        .map(str::to_owned),
-                    ..TransportMessage::default()
-                })
+                .send(message)
                 .map_err(|error| format!("{at}: {error}"))?;
         }
 
@@ -1386,7 +1430,7 @@ async fn play_steps(case: &mut Case, steps: &[Value]) -> Result<(), String> {
         }
 
         if let Some(secure) = expectation.and_then(|expected| expected.get("secure")) {
-            let seen = case.client.as_ref().map(ClientTransport::is_secure);
+            let seen = case.client.as_ref().map(RouterClientTransport::is_secure);
 
             hold(seen.as_ref() == secure.as_bool().as_ref(), || {
                 format!("{at}: secure {seen:?}, not {secure}")
@@ -1509,22 +1553,10 @@ fn trials() -> Result<Vec<Trial>, String> {
         .map(Arc::new)
         .collect();
     let mut trials = Vec::new();
-    let count = cases.len();
-    let names: HashSet<String> = cases
-        .iter()
-        .filter_map(|case| case.get("name").and_then(Value::as_str).map(str::to_owned))
-        .collect();
-
-    // no broker case a row of the support matrix excuses this side from: each played, once
-    trials.push(Trial::test(
-        "plays every broker case but those a row of the support matrix excuses this side from",
-        move || {
-            hold(count > 0 && names.len() == count, || {
-                format!("{} names for {count} cases", names.len())
-            })
-            .map_err(Failed::from)
-        },
-    ));
+    // each case's name, and whether a row of the support matrix excuses this side from it
+    let mut excusals = Vec::new();
+    // the names of the cases made a trial
+    let mut played = HashSet::new();
 
     for case in cases {
         let name = case
@@ -1532,7 +1564,22 @@ fn trials() -> Result<Vec<Trial>, String> {
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_owned();
+        // ! a differs malformed fails the run, as a key unread fails its case
+        let differs: Vec<Difference> = case
+            .get("differs")
+            .map(|differs| serde_json::from_value(differs.clone()))
+            .transpose()
+            .map_err(|error| format!("{name}'s differs: {error}"))?
+            .unwrap_or_default();
 
+        excusals.push((name.clone(), is_excused(&differs)));
+
+        // * an excused case is left out, as every other player leaves it
+        if is_excused(&differs) {
+            continue;
+        }
+
+        played.insert(name.clone());
         trials.push(
             Trial::test(name, move || {
                 let runtime = tokio::runtime::Builder::new_current_thread()
@@ -1545,6 +1592,38 @@ fn trials() -> Result<Vec<Trial>, String> {
             .with_kind("broker"),
         );
     }
+
+    // each broker case named once, at least one played, and each played if and only if no row
+    // excuses this side from it
+    trials.insert(
+        0,
+        Trial::test(
+            "plays every broker case but those a row of the support matrix excuses this side from",
+            move || {
+                let names: HashSet<&String> = excusals.iter().map(|(name, _)| name).collect();
+                let wrong: Vec<&String> = excusals
+                    .iter()
+                    .filter(|(name, is_excused)| played.contains(name) == *is_excused)
+                    .map(|(name, _)| name)
+                    .collect();
+
+                hold(!played.is_empty() && names.len() == excusals.len(), || {
+                    format!(
+                        "{} names for {} cases, {} played",
+                        names.len(),
+                        excusals.len(),
+                        played.len()
+                    )
+                })
+                .and_then(|()| {
+                    hold(wrong.is_empty(), || {
+                        format!("played against their excusal: {wrong:?}")
+                    })
+                })
+                .map_err(Failed::from)
+            },
+        ),
+    );
 
     Ok(trials)
 }

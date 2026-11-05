@@ -16,7 +16,7 @@ import {
   SEQUENCE_HEADER,
   WAIT_HEADER,
 } from '../shared/constants';
-import { assertHeld, assertHeldDelay, type TimeoutId } from '../shared/clock';
+import { assertHeld, assertHeldDelay, LONGEST_TIMER, type TimeoutId } from '../shared/clock';
 import { createPromise } from '../shared/create-promise';
 import {
   ConnectError,
@@ -27,6 +27,7 @@ import {
   toError,
   wrapReason,
 } from '../shared/errors';
+import { createHold } from '../shared/hold';
 import { noop } from '../shared/noop';
 import { isSecureUrl } from '../shared/secure';
 import { BARE_ITEM_TYPES, parseItem } from '../shared/structured-fields';
@@ -38,6 +39,7 @@ import {
   setReadyStateConnecting,
   setReadyStateOpen,
 } from '../shared/ready-state';
+import type { ITransportMessage } from '../shared/types';
 import { dispose } from './symbols';
 import {
   createTransportClient,
@@ -110,6 +112,12 @@ export const CONNECT_DEFAULTS = Object.freeze({
 export const DISCONNECT_TIMEOUT = 5_000;
 
 /**
+ * How long a client sends again an envelope that is no request, refused `busy`, from its first
+ * send, by default: 5 minutes, a server's own exchange timeout (spec 15.6, 15.12.8).
+ */
+export const EXCHANGE_TIMEOUT = 300_000;
+
+/**
  * How long a client goes on listening again, its listens lost, before it counts its connection lost,
  * by default: 5 minutes, a server's own inactivity timeout.
  */
@@ -132,6 +140,16 @@ export const WAIT = 25_000;
 
 // the length before each envelope of a batch
 const LENGTH_BYTES = 4;
+
+// what the transport's refusal for too much under way is marked with
+const BUSY = 'busy';
+
+// an envelope's kind, in its prefix's second byte, which a request's is
+const KIND_OFFSET = 1;
+const REQUEST_KIND = 0x10;
+
+// how long a refusal busy without a `Retry-After` that reads is waited out: the server's own
+const RETRY_AFTER_DEFAULT = 1_000;
 
 // helpers
 
@@ -236,6 +254,42 @@ const envelopesOf = (
   return envelopes;
 };
 
+// whether an envelope is a request, by its prefix: what is no request may be sent again
+// ! what is not read here, a string or a Blob, is taken for a request: never sent twice
+const isRequest = (data: unknown): boolean => {
+  if (data instanceof ArrayBuffer) {
+    return new Uint8Array(data)[KIND_OFFSET] === REQUEST_KIND;
+  }
+
+  if (ArrayBuffer.isView(data)) {
+    return (
+      new Uint8Array(data.buffer, data.byteOffset, data.byteLength)[KIND_OFFSET] === REQUEST_KIND
+    );
+  }
+
+  return true;
+};
+
+/**
+ * The milliseconds a `Retry-After` asks to be waited, from `now`: its seconds, or until its date
+ * (RFC 9110 §10.2.3); one that does not read, or none, the server's own second.
+ */
+export const retryAfterOf = (value: string | null, now: number): number => {
+  if (value === null) {
+    return RETRY_AFTER_DEFAULT;
+  }
+
+  const trimmed = value.trim();
+
+  if (/^\d+$/u.test(trimmed)) {
+    return Number(trimmed) * 1_000;
+  }
+
+  const date = Date.parse(trimmed);
+
+  return Number.isNaN(date) ? RETRY_AFTER_DEFAULT : Math.max(0, date - now);
+};
+
 // how long to wait before listening again after `losses` listens lost in a row, drawn apart so the
 // clients one restart dropped together come back apart, as EventSource's do; in whole
 // milliseconds, as every wait of Bead's
@@ -285,6 +339,14 @@ const retryDelayOf = (losses: number): number => {
  * `inactivityTimeout` has passed, which loses the connection, as a refusal of the server's or a
  * batch that does not read does.
  *
+ * An envelope that is no request, refused `busy` — 429, or 503 — is sent again once its
+ * `Retry-After` passed, its seconds or its date, a second when it says none (RFC 9110 §10.2.3):
+ * nothing of it was tried, and exchanges keep no order (spec 15.6). Still refused past
+ * `exchangeTimeout` from its first send, it rejects, and its connection is lost with it (spec
+ * 15.7). A request refused `busy` rejects its send at once. Paused by its router, it asks no
+ * listen, and holds in order what an answer or a batch it already read still brings, handing it on
+ * once resumed, then listening again (spec 15.12).
+ *
  * `error` tells what this side closes its connection for of its own (spec 15.1), each a
  * {@link GenericError}: an envelope past `maximumBodyBytes`, an answer's or a batch's, "the
  * connection is closed: an envelope past its maximumBodyBytes, N bytes"; a batch that does not
@@ -306,6 +368,7 @@ export const createHTTPTransportClient = (
 ): HTTPTransportClient => {
   const {
     clock,
+    exchangeTimeout: givenExchangeTimeout = EXCHANGE_TIMEOUT,
     fetch: fetchImpl = globalThis.fetch as FetchLike,
     inactivityTimeout: givenInactivityTimeout = INACTIVITY_TIMEOUT,
     isListening = true,
@@ -317,6 +380,7 @@ export const createHTTPTransportClient = (
     ...options,
   };
   const inactivityTimeout = assertHeld('inactivityTimeout', givenInactivityTimeout);
+  const exchangeTimeout = assertHeld('exchangeTimeout', givenExchangeTimeout);
   // 0 is at once: a listen again at once, and a listen the server answers at once, which polls
   const pause = assertHeldDelay('pause', givenPause);
   const wait = assertHeldDelay('wait', givenWait);
@@ -328,6 +392,42 @@ export const createHTTPTransportClient = (
       let rejectConnect: ((reason: Error) => void) | undefined;
       // whether the URL of the last connect is secure
       let isSecure = false;
+      // lets the listen go on once its router took what it held, paused no more
+      let unblock: (() => void) | undefined;
+      // * what an answer or a batch brought once its router paused it, in order, the rest of a
+      // batch already read among it; no listen is asked while it holds anything (spec 15.12)
+      const hold = createHold(
+        (message: ITransportMessage) => {
+          tell(MESSAGE_EVENT, [message]);
+        },
+        {
+          onReleased: () => {
+            unblock?.();
+            unblock = undefined;
+          },
+        }
+      );
+
+      // resolves once nothing is held and its router paused it no more, or once `signal` aborts
+      const intakeOpen = (signal: AbortSignal): Promise<void> => {
+        if (!hold.isPaused && hold.size === 0) {
+          return Promise.resolve();
+        }
+
+        const { promise, resolve } = Promise.withResolvers<void>();
+        const onAbort = (): void => {
+          resolve();
+        };
+
+        // its abort listener let go once it opened, so a pause each batch leaves none behind
+        unblock = () => {
+          signal.removeEventListener('abort', onAbort);
+          resolve();
+        };
+        signal.addEventListener('abort', onAbort, { once: true });
+
+        return promise;
+      };
 
       const execute = (url: string, init: IFetchInit): Promise<IFetchResponseLike> => {
         try {
@@ -373,6 +473,7 @@ export const createHTTPTransportClient = (
 
         drawn = undefined;
         client.socket = null;
+        hold.drop();
         connection.controller.abort();
 
         if (isReleased) {
@@ -396,13 +497,11 @@ export const createHTTPTransportClient = (
       // brought marked as what may overtake an answer; a listener that throws is reported, and
       // stops nothing
       const hear = (envelope: ArrayBuffer, { mayOvertake }: { mayOvertake: boolean }): void => {
-        tell(MESSAGE_EVENT, [
-          {
-            credential: undefined,
-            data: envelope,
-            ...(mayOvertake ? { mayOvertake: true } : {}),
-          },
-        ]);
+        hold.offer({
+          credential: undefined,
+          data: envelope,
+          ...(mayOvertake ? { mayOvertake: true } : {}),
+        });
       };
 
       // the answer a 200 carries, read up to an envelope's limit; anything else loses the connection
@@ -594,6 +693,14 @@ export const createHTTPTransportClient = (
 
         try {
           while (drawn === connection) {
+            // ! no listen while its router paused it, or while it holds what came: the server's
+            // outbox holds the rest, its bound pacing this side (spec 15.9, 15.12)
+            await intakeOpen(connection.controller.signal);
+
+            if (drawn !== connection) {
+              return;
+            }
+
             const listened = await listenOnce(connection, cursor);
 
             // its connection gone meanwhile — disconnected, disposed: nothing is counted on it
@@ -794,6 +901,7 @@ export const createHTTPTransportClient = (
 
           setReadyStateClosing(client);
           drawn = undefined;
+          hold.drop();
           let failure: GenericError | undefined;
 
           if (isQuick) {
@@ -850,90 +958,135 @@ export const createHTTPTransportClient = (
             );
           }
 
+          // * an envelope that is no request, refused busy, is sent again once its `Retry-After`
+          // passed: nothing of it was tried, and exchanges keep no order; still refused past
+          // `exchangeTimeout` from its first send, its exchange is lost (spec 15.6, 15.7)
+          const isResent = !isRequest(data);
+          const firstAt = client.clock.performance.now();
+
           return createPromise((resolve, reject) => {
-            execute(connection.url, {
-              body: data as BodyInit,
-              headers: {
-                ...(credential === undefined ? {} : { authorization: credential }),
-                'content-type': BEAD_MEDIA_TYPE,
-                [CONNECTION_TOKEN_HEADER]: connection.connectionToken,
-              },
-              method: 'POST',
-              redirect: 'manual',
-              signal: connection.controller.signal,
-            })
-              .then(
-                (response) => {
-                  // followed all the same: whatever the other place answered goes unheard, and the
-                  // connection whose token crossed is lost
-                  if (isFollowed(response)) {
-                    drain(response);
-                    resolve();
-
-                    return (lose(connection, { isReleased: true }), undefined);
-                  }
-
-                  if (response.ok) {
-                    resolve();
-
-                    return readAnswer(connection, response);
-                  }
-
-                  // a redirect's mark is left unread: no refusal of the transport's own is one
-                  const refusal = isRedirect(response.status)
-                    ? null
-                    : response.headers.get(REFUSAL_HEADER);
-
-                  drain(response);
-
-                  // a status nothing marked — a gateway's — or a redirect says nothing of whether the
-                  // server had it: lost
-                  if (refusal === null) {
-                    resolve();
-
-                    return (lose(connection, { isReleased: true }), undefined);
-                  }
-
-                  // refused by the transport before the router saw it: nothing of it was tried
-                  reject(
-                    new GenericError(
-                      `the server refused the exchange: ${String(response.status)} ${refusal}`
-                    )
-                  );
-
-                  // its connection gone: told after the refusal is heard, so its caller learns first
-                  // that it was never tried
-                  if (refusal === CONNECTION_UNKNOWN) {
-                    const loseIt = (): void => {
-                      lose(connection, { isReleased: false });
-                    };
-
-                    // oxlint-disable-next-line no-restricted-properties -- a deferral to the next turn, which no clock times
-                    globalThis.setTimeout(loseIt, 0);
-                  }
-
-                  return undefined;
+            const attempt = (): void => {
+              execute(connection.url, {
+                body: data as BodyInit,
+                headers: {
+                  ...(credential === undefined ? {} : { authorization: credential }),
+                  'content-type': BEAD_MEDIA_TYPE,
+                  [CONNECTION_TOKEN_HEADER]: connection.connectionToken,
                 },
-                (reason: unknown) => {
-                  // lost before its head: whether the server had it is not known, so it counts as
-                  // handed over, and the connection closes, as a dropped socket's
+                method: 'POST',
+                redirect: 'manual',
+                signal: connection.controller.signal,
+              })
+                .then(
+                  (response) => {
+                    // followed all the same: whatever the other place answered goes unheard, and the
+                    // connection whose token crossed is lost
+                    if (isFollowed(response)) {
+                      drain(response);
+                      resolve();
+
+                      return (lose(connection, { isReleased: true }), undefined);
+                    }
+
+                    if (response.ok) {
+                      resolve();
+
+                      return readAnswer(connection, response);
+                    }
+
+                    // a redirect's mark is left unread: no refusal of the transport's own is one
+                    const refusal = isRedirect(response.status)
+                      ? null
+                      : response.headers.get(REFUSAL_HEADER);
+
+                    drain(response);
+
+                    // a status nothing marked — a gateway's — or a redirect says nothing of whether the
+                    // server had it: lost
+                    if (refusal === null) {
+                      resolve();
+
+                      return (lose(connection, { isReleased: true }), undefined);
+                    }
+
+                    const isBusy =
+                      refusal === BUSY && (response.status === 429 || response.status === 503);
+                    const elapsed = client.clock.performance.now() - firstAt;
+
+                    if (isBusy && isResent && elapsed < exchangeTimeout) {
+                      // ! no longer than what is left of its exchange's time, nor than a timer
+                      // holds: a date far off resends once, as the time runs out
+                      const delay = Math.min(
+                        retryAfterOf(response.headers.get('retry-after'), client.clock.Date.now()),
+                        Math.ceil(exchangeTimeout - elapsed),
+                        LONGEST_TIMER
+                      );
+
+                      void pauseFor(connection.controller.signal, delay).then(() => {
+                        // its connection gone meanwhile: as any send whose connection drops
+                        if (drawn !== connection) {
+                          return (resolve(), undefined);
+                        }
+
+                        return (attempt(), undefined);
+                      });
+
+                      return undefined;
+                    }
+
+                    // refused by the transport before the router saw it: nothing of it was tried
+                    reject(
+                      new GenericError(
+                        `the server refused the exchange: ${String(response.status)} ${refusal}`
+                      )
+                    );
+
+                    // its connection gone, or its exchange lost, still busy past its timeout: told
+                    // after the refusal is heard, so its caller learns first that it was never tried
+                    if (refusal === CONNECTION_UNKNOWN || (isBusy && isResent)) {
+                      const isReleased = refusal !== CONNECTION_UNKNOWN;
+                      const loseIt = (): void => {
+                        lose(connection, { isReleased });
+                      };
+
+                      // oxlint-disable-next-line no-restricted-properties -- a deferral to the next turn, which no clock times
+                      globalThis.setTimeout(loseIt, 0);
+                    }
+
+                    return undefined;
+                  },
+                  (reason: unknown) => {
+                    // lost before its head: whether the server had it is not known, so it counts as
+                    // handed over, and the connection closes, as a dropped socket's
+                    resolve();
+                    lose(connection, {
+                      failure: executorFailureOf(reason, connection.controller.signal),
+                      isReleased: true,
+                    });
+                  }
+                )
+                .catch((reason: unknown) => {
+                  // a supplied answer can fail as its fields or its body are read, after its head
                   resolve();
                   lose(connection, {
-                    failure: executorFailureOf(reason, connection.controller.signal),
+                    failure:
+                      executorFailureOf(reason, connection.controller.signal) ?? toError(reason),
                     isReleased: true,
                   });
-                }
-              )
-              .catch((reason: unknown) => {
-                // a supplied answer can fail as its fields or its body are read, after its head
-                resolve();
-                lose(connection, {
-                  failure:
-                    executorFailureOf(reason, connection.controller.signal) ?? toError(reason),
-                  isReleased: true,
                 });
-              });
+            };
+
+            attempt();
           });
+        },
+
+        // ! no listen asked while paused: what a batch already read brought is held, in order
+        pause: () => {
+          hold.pause();
+        },
+        // what it held handed on from a microtask, its listen asked again once nothing is held
+        resume: () => {
+          hold.resume();
         },
 
         [dispose]: () => {
@@ -942,6 +1095,7 @@ export const createHTTPTransportClient = (
           rejectConnect?.(new ConnectError('the transport client was disposed as it connected'));
           drawn = undefined;
           client.socket = null;
+          hold.drop();
 
           if (connection !== undefined) {
             connection.controller.abort();

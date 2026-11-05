@@ -1,15 +1,15 @@
 # 0035 — A payload that reads is held to its message's rules before its resolver sees it
 
 - **Status**: accepted
-- **Scope**: the protocol, both runtimes and the builder: in [`spec/spec.md`](../../spec/spec.md),
+- **Scope**: the protocol, every runtime and the builder: in [`spec/spec.md`](../../spec/spec.md),
   8.1's `PAYLOAD_INVALID`, 9.2's step 9, 9.5, 17.2's first item and section 18; in
   [`spec/debugging.md`](../../spec/debugging.md), 4.2 to 4.4, 7.6, 7.7, 9.4's and 9.6's rows of a
   request its rules refuse; `spec/validations.proto`, `spec/validations.json`, their schema and
   their generator, `spec/generators/make_validations.py`, with the pin of Unicode's files,
   `spec/generators/ucd.json`; the interop's `checked`, its conversations and its exit; the
   blueprint's feature `validate`, beadc's rules on payload rules, its pattern compiler and its
-  Unicode tables, and `beadc breaking`'s `PROCEDURE_RULES_TIGHTENED`; both runtimes' service
-  managers, service layers and `proto` modules; the differential against protovalidate-es. The
+  Unicode tables, and `beadc breaking`'s `PROCEDURE_RULES_TIGHTENED`; every runtime's service
+  manager and service layer, and the TypeScript and C# sides' `proto` modules; the differential against protovalidate-es. The
   descriptor's `validate` and the options of the layer that hands it on are
   [0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)'s;
   the blueprint's form and its features,
@@ -113,7 +113,7 @@ writer will count it and keeps those the detail can carry; past them it counts t
 building their paths or words. Every rule is still judged and the count stays exact: what a judging
 holds is bounded by the detail's bound, its time by the payload, in
 [0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)'s terms. A validator gives
-`{ violations, more, stopped }` on both sides.
+`{ violations, more, stopped }` on every side.
 
 **A pattern is a table beadc builds; each runtime walks it.** beadc compiles a pattern with
 `@bufbuild/re2` into RE2's program, its Unicode classes rewritten first as the ranges of its own
@@ -135,8 +135,9 @@ side alone. `beadc breaking` reports `PROCEDURE_RULES_TIGHTENED`, a `WIRE` rule,
 earlier peer sends that the current refuses; a rule loosened moves the revision alone. Generated
 code holds the validators from contract 4 on, by
 [0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)'s
-counter. The runtimes hold 6, `GENERATED_CODE_SUPPORTS_VERSION_6` and
-`GeneratedCode.SupportsVersion6`, whose code calls the runtime codec of a schema
+counter. The TypeScript and C# runtimes hold 6 and 7, `GENERATED_CODE_SUPPORTS_VERSION_6` and `_7`,
+`GeneratedCode.SupportsVersion6` and `SupportsVersion7`, whose code calls the runtime codec
+of a schema
 ([0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)),
 and beside it 5, a route table's
 ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md));
@@ -170,18 +171,21 @@ violations its detail's reader reads (transcoding 7.4, 11.7).
 
 **Ahead, by a round of its own that meets the Tenth Man**: the rules written in CEL, a total subset
 beadc compiles into each side, typed against the message, by cel-spec's semantics where cel-es
-parts from it; then the well-known string formats, `bytes.pattern`, `bytes.in`, `any`, `duration`,
-`timestamp`, `field_mask` and `predefined` rules, each refused until it lands; and protovalidate's
+parts from it; then the rules beadc refuses, `VALIDATE_RULE_UNSUPPORTED`: the well-known string
+formats, `bytes.pattern`, `bytes.in`, `any`, `duration`, `timestamp`, `field_mask` and
+`predefined` rules; and protovalidate's
 Go runner as a gate beside the differential.
 
-**The gate.** `spec/validations.json`, played by both sides through the validators beadc generates
+**The gate.** `spec/validations.json`, played by the TypeScript and C# sides through the validators
+beadc generates
 for `spec/validations.proto`: its verdicts, every rule of the first set on both sides of its bound,
 the traps of code points, UTF-8 bytes, a float at its bound, 64-bit integers past 2⁵³, a reversed
 range, NaN, the infinities and `-0.0`, a number its enum does not declare, wrappers, presence and
 each `ignore`, messages held, map keys of every type in their order, a key cut, the orders where
 the readings part, a request of 100,000 breaking items held to its bound and counted exactly, and
 RE2's classes, anchors and folding, a backtracking engine's two worst inputs and a letter of Unicode
-17.0.0; its details, the writer under its bounds and the reader of what a cut leaves. The verdicts'
+17.0.0; its details, the writer under its bounds and the reader of what a cut leaves, which the Rust side
+plays too, its verdicts ahead with beadc's Rust target. The verdicts'
 patterns are judged by RE2 itself, `google-re2`, pinned with its hashes in
 `spec/requirements.txt`, and their Unicode classes by the pinned UCD files. The differential plays
 every verdict, and payloads mutated from them, through each side's validator and protovalidate-es,

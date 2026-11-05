@@ -174,9 +174,12 @@ export interface IWorkerPortLike {
  * with it (spec 15.19).
  */
 export interface IBrokerMessage {
+  /**
+   * Handed on as a message its broker kept, which a participant drops in silence (spec 15.23); not
+   * when absent.
+   */
+  readonly isRetained?: boolean | undefined;
   readonly payload: Uint8Array;
-  /** Handed on as a message its broker kept, which a participant drops in silence (spec 15.23). */
-  readonly retained?: boolean | undefined;
   readonly topic: BrokerTopic;
   settle(): void;
 }
@@ -269,10 +272,20 @@ export interface IBrokerAdapter {
   receiveBound(topic: BrokerTopic): number;
   /** Connects a link that keeps no broker session, its will set where it takes one. */
   start(options?: IBrokerStart): Promise<void>;
-  /** Ends its link cleanly, so no will goes. */
+  /**
+   * Ends its link cleanly, so no will goes: what it was handed to publish before it sent first,
+   * within a bound of its own, and what has not gone by then failed; settled once its broker let go
+   * of each subscription of its link, as its unsubscription lets one go, so that its broker then
+   * hands it nothing; a later start a new link (spec 15.24).
+   */
   stop(): Promise<void>;
   /** Holds a subscription, settling once its broker holds it. */
   subscribe(topic: BrokerTopic, options?: IBrokerSubscription): Promise<void>;
+  /**
+   * Lets a subscription go, taking effect as it is called, settling once its broker let it go,
+   * within a bound of its own, each message it sent of it before handed on first; or refused. A
+   * participant's stop asks it of each name it serves, before its stop (spec 15.21, 15.24).
+   */
   unsubscribe(topic: BrokerTopic): Promise<void>;
 }
 

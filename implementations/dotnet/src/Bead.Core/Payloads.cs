@@ -13,7 +13,8 @@ namespace Bead;
 /// as an I-JSON message is read but for its noncharacters, and written in the canonical form of
 /// RFC 8785, so that one value has one form whichever side writes it. <see cref="PayloadCodecs"/>
 /// gives them as codecs, and the interop's serializers delegate to them. What does not read, or does
-/// not write, is a <see cref="FormatException"/> saying why, in this side's words.
+/// not write, is a <see cref="FormatException"/> of its reason in spec 17.2's words, exactly, what
+/// more this side knows in its inner exception.
 /// </summary>
 internal static class Payloads
 {
@@ -29,31 +30,41 @@ internal static class Payloads
     private static readonly UTF8Encoding Strict = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 
     // ! a name given twice refuses the JSON, and the 65th level refuses it as it is read, before
-    // anything deeper is built
-    private static readonly JsonDocumentOptions Strictly = new()
+    // anything deeper is built: a json payload's, and a JWT's header and claims set (13.8 step 1)
+    internal static readonly JsonDocumentOptions Strictly = new()
     {
         AllowDuplicateProperties = false,
         MaxDepth = Depth,
     };
 
-    // what a json reader says of what it refuses, after the parse: its canonical write refuses it
+    // * the reasons of spec 17.2, a refusal's message exactly, and a request's PAYLOAD_UNDECODABLE's
+    // detail: a reader's, then a writer's own
+    private const string NotUtf8 = "not UTF-8";
+
+    private const string AByteOrderMark = "a byte order mark";
+
+    private const string NotJson = "not JSON";
+
+    private const string ASurrogateAlone = "a surrogate alone";
+
+    private const string ANameTwice = "a name twice";
+
+    private const string NestedPast64 = "nested past 64";
+
+    // what a json reader refuses, after the parse: its canonical write refuses it
     private static readonly Refusals Read = new()
     {
-        SurrogateAlone = "a json payload holds a surrogate alone",
-        NameTwice = "a json payload names a member twice",
-        Nested = "a json payload nests deeper than 64",
-        NotFinite = "a json payload holds a number past the largest double",
-        NoValue = "a json payload holds no JSON value",
+        SurrogateAlone = ASurrogateAlone,
+        NameTwice = ANameTwice,
+        Nested = NestedPast64,
+        NotFinite = "a number past a double",
+        NoValue = "no JSON value",
     };
 
-    // what a json writer says of a value it refuses
-    private static readonly Refusals Written = new()
+    // what a json writer refuses of a value
+    private static readonly Refusals Written = Read with
     {
-        SurrogateAlone = "a json value holds a surrogate alone",
-        NameTwice = "a json value names a member twice",
-        Nested = "a json value nests deeper than 64",
-        NotFinite = "a json value holds a number that is not finite",
-        NoValue = "a json value of kind Undefined is no JSON value",
+        NotFinite = "not a finite number",
     };
 
     private static ReadOnlySpan<byte> ByteOrderMark
@@ -88,13 +99,58 @@ internal static class Payloads
         }
         catch (JsonException)
         {
-            return "a json payload is not one JSON text";
+            return NotJson;
         }
 
-        return isRead ? Read.NameTwice : "a json payload is not one JSON text";
+        return isRead ? Read.NameTwice : NotJson;
+    }
+
+    // a number as a double, read from its digits
+    private static double DoubleOf(JsonElement value)
+    {
+        // ! never TryGetDouble nor GetDouble, which read some ties of many digits to the odd
+        // neighbour: double.Parse of the raw digits reads each to the nearest, a tie to the even
+        return double.Parse(JsonMarshal.GetRawUtf8Value(value), NumberStyles.Float, CultureInfo.InvariantCulture);
     }
 
     // definition
+
+    /// <summary>
+    /// Whether every number <paramref name="value"/> holds, at any depth, reads as a finite double
+    /// (17.5.6), each read as the canonical form reads it. A walk with a stack of its own, never a
+    /// recursion.
+    /// </summary>
+    internal static bool IsFinite(JsonElement value)
+    {
+        var pending = new Stack<JsonElement>();
+
+        pending.Push(value);
+
+        while (pending.TryPop(out var item))
+        {
+            if (item.ValueKind == JsonValueKind.Number && !double.IsFinite(DoubleOf(item)))
+            {
+                return false;
+            }
+
+            if (item.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var each in item.EnumerateArray())
+                {
+                    pending.Push(each);
+                }
+            }
+            else if (item.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var member in item.EnumerateObject())
+                {
+                    pending.Push(member.Value);
+                }
+            }
+        }
+
+        return true;
+    }
 
     /// <summary>
     /// The value of a <c>json</c> payload (17.5, 17.6), its canonical form's: the document read when
@@ -107,12 +163,12 @@ internal static class Payloads
         // ! .NET's reader takes a byte that is not UTF-8 within a string, and writes it back as U+FFFD
         if (!Utf8.IsValid(payload.Span))
         {
-            throw new FormatException("a json payload is not UTF-8");
+            throw new FormatException(NotUtf8);
         }
 
         if (payload.Span.StartsWith(ByteOrderMark))
         {
-            throw new FormatException("a json payload starts with a byte order mark");
+            throw new FormatException(AByteOrderMark);
         }
 
         JsonDocument document;
@@ -231,7 +287,7 @@ internal static class Payloads
         }
         catch (DecoderFallbackException reason)
         {
-            throw new FormatException("a text payload is not UTF-8", reason);
+            throw new FormatException(NotUtf8, reason);
         }
     }
 
@@ -246,7 +302,7 @@ internal static class Payloads
         }
         catch (EncoderFallbackException reason)
         {
-            throw new FormatException("a text value holds a surrogate alone", reason);
+            throw new FormatException(ASurrogateAlone, reason);
         }
     }
 
@@ -262,7 +318,7 @@ internal static class Payloads
         return value;
     }
 
-    // what a canonical write says of what it refuses: a reader's words, or a writer's
+    // the reasons a canonical write refuses with: a reader's, or a writer's
     private sealed record Refusals
     {
         public required string SurrogateAlone { get; init; }
@@ -372,7 +428,7 @@ internal static class Payloads
                     WriteObject(value, depth);
                     break;
                 default:
-                    throw new FormatException(refusals.NoValue);
+                    throw new FormatException(refusals.NoValue, new FormatException($"a json value of kind {value.ValueKind} is no JSON value"));
             }
         }
 
@@ -431,9 +487,7 @@ internal static class Payloads
 
         private void WriteNumber(JsonElement value)
         {
-            // ! never TryGetDouble nor GetDouble, which read some ties of many digits to the odd
-            // neighbour: double.Parse of the raw digits reads each to the nearest, a tie to the even
-            var number = double.Parse(JsonMarshal.GetRawUtf8Value(value), NumberStyles.Float, CultureInfo.InvariantCulture);
+            var number = DoubleOf(value);
 
             if (!double.IsFinite(number))
             {

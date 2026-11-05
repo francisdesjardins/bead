@@ -1,6 +1,7 @@
 //! A router's dispose and its end: what its transport tells once it is disposed reaches nothing of
-//! it, as both other sides stop listening within their dispose; and a router nobody holds, its
-//! transport gone, ends with its owner, as the other sides collect one nothing references.
+//! it, as both other sides stop listening within their dispose; a call made before it goes, and one
+//! made after it fails unsent; and a router nobody holds, its transport gone, ends with its owner,
+//! as the other sides collect one nothing references.
 
 use core::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Weak};
@@ -13,10 +14,10 @@ use crate::envelope::{Envelope, RequestHeader};
 use crate::errors::ResolverError;
 use crate::identity::Procedure;
 use crate::managers::service::{
-    ResolverDependencies, Response, ServiceManager, ServiceManagerOptions, ServiceRouter,
+    RequestResolverDependencies, Response, ServiceManager, ServiceManagerOptions, ServiceRouter,
 };
 use crate::payloads::RawCodec;
-use crate::router::core::ResolverProps;
+use crate::router::core::RequestResolverProps;
 use crate::router::server::RouterServerOptions;
 use crate::router::types::RouterAnswer;
 use crate::testing::pair::echo;
@@ -47,7 +48,10 @@ async fn a_request_its_transport_tells_once_its_router_is_disposed_reaches_no_re
 
     served
         .services
-        .get_request_resolver(&echo(), ResolverDependencies::of(RawCodec, RawCodec))
+        .get_request_resolver(
+            &echo(),
+            RequestResolverDependencies::new(RawCodec, RawCodec),
+        )
         .expect("echo resolved")
         .on(callback)
         .expect("echo registered");
@@ -79,14 +83,17 @@ async fn a_command_its_transport_tells_once_its_router_is_disposed_reaches_no_re
     .expect("a manager built");
     let (resolved, callback) = counting();
     let command = Procedure {
-        id: 9,
-        name: "clock".to_owned(),
-        kind: Some(ProcedureKind::Command),
+        procedure_id: 9,
+        procedure_name: "clock".to_owned(),
+        procedure_kind: Some(ProcedureKind::Command),
         ..echo()
     };
 
     services
-        .get_command_resolver(&command, ResolverDependencies::of(RawCodec, RawCodec))
+        .get_command_resolver(
+            &command,
+            RequestResolverDependencies::new(RawCodec, RawCodec),
+        )
         .expect("clock resolved")
         .on(callback)
         .expect("clock registered");
@@ -111,6 +118,66 @@ async fn a_command_its_transport_tells_once_its_router_is_disposed_reaches_no_re
     );
 }
 
+// spec 9.1; decision 0045: a dispose takes effect in two steps, its handle's mark at once and its
+// state's by its job, behind what came before it; each failure says which side of it its call was
+#[tokio::test]
+async fn a_call_made_before_its_router_s_dispose_goes_and_one_made_after_it_fails_unsent() {
+    let scripted = super::Scripted::new();
+
+    scripted.settle().await;
+
+    let request = || super::request_of((None, super::TIMEOUT));
+    let before = scripted
+        .router
+        .request(Bytes::from_static(b"before"), request())
+        .expect("a call made before");
+    let disposed = scripted.router.dispose();
+    let after = scripted
+        .router
+        .request(Bytes::from_static(b"after"), request())
+        .expect("a call made after");
+
+    scripted.settle().await;
+    disposed.await;
+
+    let sent: Vec<Bytes> = scripted
+        .transport
+        .envelopes()
+        .into_iter()
+        .filter_map(|envelope| match envelope {
+            Envelope::Request { payload, .. } => Some(payload),
+            Envelope::Result { .. }
+            | Envelope::Failure { .. }
+            | Envelope::Notification { .. }
+            | Envelope::Chunk { .. }
+            | Envelope::Credit { .. }
+            | Envelope::Cancel { .. } => None,
+        })
+        .collect();
+
+    assert_eq!(
+        sent,
+        [Bytes::from_static(b"before")],
+        "the call made before went"
+    );
+    assert_eq!(
+        super::answered(before)
+            .await
+            .err()
+            .map(|error| error.to_string()),
+        Some("the router was disposed before the answer".to_owned()),
+        "it went, and the dispose's job rejected it as it waited"
+    );
+    assert_eq!(
+        super::answered(after)
+            .await
+            .err()
+            .map(|error| error.to_string()),
+        Some("the router was disposed".to_owned()),
+        "the call made after failed unsent, saying so"
+    );
+}
+
 // waits, a while at most, for `weak` to be let go
 async fn let_go<T: ?Sized + Send + Sync>(weak: &Weak<T>) -> bool {
     for _ in 0..1_000 {
@@ -118,7 +185,7 @@ async fn let_go<T: ?Sized + Send + Sync>(weak: &Weak<T>) -> bool {
             return true;
         }
 
-        tokio::task::yield_now().await;
+        crate::testing::yield_now().await;
     }
 
     weak.strong_count() == 0
@@ -172,7 +239,7 @@ async fn a_router_never_disposed_ends_once_its_application_and_its_transport_let
 async fn a_router_its_transport_holds_answers_still_once_its_application_let_go_of_it() {
     let resolved = Arc::new(AtomicUsize::new(0));
     let counted = Arc::clone(&resolved);
-    let served = super::resolving(Arc::new(move |props: ResolverProps| {
+    let served = super::resolving(Arc::new(move |props: RequestResolverProps| {
         counted.fetch_add(1, Ordering::SeqCst);
 
         Box::pin(async move {
@@ -206,10 +273,12 @@ async fn routers_never_disposed_over_the_in_memory_transport_end_once_nothing_ho
     let kept = (Arc::downgrade(&server_held), Arc::downgrade(&client_held));
 
     {
-        let memory = crate::memory::MemoryServer::new(&crate::memory::MemoryServerOptions {
-            clock: Some(Arc::clone(&shared)),
-            runtime: None,
-        })
+        let memory = crate::memory::MemoryTransportServer::new(
+            &crate::memory::MemoryTransportServerOptions {
+                clock: Some(Arc::clone(&shared)),
+                runtime: None,
+            },
+        )
         .expect("a server transport");
         let server = crate::router::server::RouterServer::new(
             Arc::new(memory.clone()),
@@ -221,10 +290,11 @@ async fn routers_never_disposed_over_the_in_memory_transport_end_once_nothing_ho
             .await
             .expect("started");
 
-        let transport = crate::memory::MemoryClient::new(&crate::memory::MemoryClientOptions {
-            clock: Some(Arc::clone(&shared)),
-            server: memory.clone(),
-        })
+        let transport = crate::memory::MemoryTransportClient::new(
+            &crate::memory::MemoryTransportClientOptions {
+                clock: Some(Arc::clone(&shared)),
+            },
+        )
         .expect("a client transport");
         let client = crate::router::client::RouterClient::new(
             Arc::new(transport.clone()),
@@ -239,12 +309,14 @@ async fn routers_never_disposed_over_the_in_memory_transport_end_once_nothing_ho
             drop(Arc::clone(&client_held));
         }));
 
-        let connecting = transport.connect(crate::memory::MemoryConnectOptions::default());
+        let connecting = transport.connect(
+            &crate::memory::MemoryTransportClientConnectOptions::new(memory.clone()),
+        );
 
         clock.settle().await;
         connecting.await.expect("connected");
         transport
-            .disconnect(crate::transport::DisconnectOptions::default())
+            .disconnect(&crate::transport::TransportClientDisconnectOptions::default())
             .expect("closed");
         clock.settle().await;
     }

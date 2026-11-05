@@ -3,6 +3,7 @@
 //! `records.test.ts` and the C# side's `ProtoRecordsTests`. `spec/codecs.json`'s entries play the
 //! check through the codecs.
 
+use std::error::Error;
 use std::iter;
 use std::ptr;
 use std::sync::Arc;
@@ -281,6 +282,32 @@ fn refuses_a_varint_of_more_than_10_bytes_its_field_known_or_not() {
     ] {
         refuses(&schema, hex);
     }
+}
+
+// spec 17.9.1
+#[test]
+fn refuses_a_varint_of_10_bytes_past_64_bits_known_unknown_or_packed() {
+    let schema = probe();
+
+    for hex in [
+        "10 FF FF FF FF FF FF FF FF FF 02",
+        "48 80 80 80 80 80 80 80 80 80 02",
+        "52 0A FF FF FF FF FF FF FF FF FF 02",
+        "1A 0B 20 80 80 80 80 80 80 80 80 80 7F",
+    ] {
+        // * Bead's refusal, before Buffa's
+        let refusal = check_records(&bytes_of(hex), &schema).expect_err(hex);
+
+        assert_eq!(
+            (refusal.reason(), refusal.source().map(ToString::to_string)),
+            ("not its message", Some("a varint past 64 bits".to_owned())),
+            "{hex}"
+        );
+    }
+
+    // a 10th byte of 0x01 is the 64th bit, within
+    takes(&schema, "10 FF FF FF FF FF FF FF FF FF 01");
+    takes(&schema, "48 80 80 80 80 80 80 80 80 80 01");
 }
 
 // spec 17.9.1

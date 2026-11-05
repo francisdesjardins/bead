@@ -7,8 +7,9 @@ namespace Bead.Transport.WebSockets;
 
 /// <summary>
 /// One WebSocket connection, either end's: what goes out on it, in order, one message at a time;
-/// what comes in, each message whole and bounded; and its close — the peer's answered at once,
-/// this side's waited for within its timeout, then dropped.
+/// what comes in, each message whole and bounded, no message read while its router paused it; and
+/// its close — the peer's answered at once, this side's waited for within its timeout, then
+/// dropped.
 /// </summary>
 internal sealed class WebSocketConnection
 {
@@ -29,6 +30,13 @@ internal sealed class WebSocketConnection
     private bool _isTooBig;
     private bool _isAbandoned;
     private bool _isEnded;
+
+    // * its read's gate (spec 15.12, decision 0046): shut while its router paused it, what its read
+    // awaits then; opened for good once the connection closes, which reads on to its peer's Close
+    // (RFC 6455 §7.1.1); under the lock
+    private bool _isReadPaused;
+    private bool _isReadingOn;
+    private TaskCompletionSource? _resumed;
 
     public WebSocketConnection(WebSocket socket, (int MaximumMessageBytes, TimeSpan CloseTimeout) bounds)
         : this(socket, new Bounds { MaximumMessageBytes = bounds.MaximumMessageBytes, CloseTimeout = bounds.CloseTimeout })
@@ -242,7 +250,75 @@ internal sealed class WebSocketConnection
     private void Drop()
     {
         _sendPace?.Stop();
+        OpenGate(true);
         Socket.Abort();
+    }
+
+    /// <summary>
+    /// Reads no message more, its router behind (spec 15.12): a message partway is read to its end
+    /// and held, one at most, until <see cref="Resume"/>. Nothing once it closes, which reads on.
+    /// Idempotent; it takes this connection's lock alone, never held as it delivers.
+    /// </summary>
+    public void Pause()
+    {
+        lock (_gate)
+        {
+            if (!_isReadingOn)
+            {
+                _isReadPaused = true;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Reads again: what it held delivered, then each message as it comes, from its read's own
+    /// step, never within this call. Idempotent.
+    /// </summary>
+    public void Resume()
+    {
+        OpenGate(false);
+    }
+
+    // its read's gate opened: for a resume; or for good, the connection closing, which reads on to
+    // its peer's Close
+    private void OpenGate(bool isForGood)
+    {
+        TaskCompletionSource? resumed;
+
+        lock (_gate)
+        {
+            _isReadingOn |= isForGood;
+            _isReadPaused = false;
+            resumed = _resumed;
+            _resumed = null;
+        }
+
+        resumed?.TrySetResult();
+    }
+
+    // whether its gate opened for good, this side closing it
+    private bool IsReadingOn()
+    {
+        lock (_gate)
+        {
+            return _isReadingOn;
+        }
+    }
+
+    // settles once its read may go on: at once unless its router paused it
+    private Task Resumed()
+    {
+        lock (_gate)
+        {
+            if (!_isReadPaused)
+            {
+                return Task.CompletedTask;
+            }
+
+            _resumed ??= new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            return _resumed.Task;
+        }
     }
 
     // sends a close behind what was sent before it, and drops the socket should the peer not
@@ -250,6 +326,9 @@ internal sealed class WebSocketConnection
     // against a peer that does not answer, never what Bead times
     public async Task Close(WebSocketCloseStatus status)
     {
+        // ! a connection this side closes reads on to its peer's Close, whatever its router paused:
+        // its close handshake never waits on its own pause
+        OpenGate(true);
         await Answer(status);
 
         // the wait is cancelled once the connection's end wins it: nothing lingers until the
@@ -314,6 +393,17 @@ internal sealed class WebSocketConnection
 
             while (Socket.State is WebSocketState.Open or WebSocketState.CloseSent)
             {
+                // * no message started while its router paused it (spec 15.12)
+                if (message.WrittenCount == 0 && !isClosing)
+                {
+                    await Resumed();
+
+                    if (Socket.State is not (WebSocketState.Open or WebSocketState.CloseSent))
+                    {
+                        break;
+                    }
+                }
+
                 var received = await Socket.ReceiveAsync(buffer.AsMemory(), CancellationToken.None);
 
                 if (received.MessageType == WebSocketMessageType.Close)
@@ -326,7 +416,9 @@ internal sealed class WebSocketConnection
                     return;
                 }
 
-                if (isClosing || Socket.State == WebSocketState.CloseSent)
+                // ! once this side closes, what still comes is dropped, its gate opened as it began,
+                // before its close frame went
+                if (isClosing || Socket.State == WebSocketState.CloseSent || IsReadingOn())
                 {
                     continue;
                 }
@@ -356,6 +448,16 @@ internal sealed class WebSocketConnection
                 var bytes = message.WrittenSpan.ToArray();
 
                 message.ResetWrittenCount();
+
+                // * a message read whole past a pause is held until resumed, one at most; one this
+                // side closed meanwhile is dropped with its connection
+                await Resumed();
+
+                if (Socket.State != WebSocketState.Open || IsReadingOn())
+                {
+                    continue;
+                }
+
                 deliver(new TransportMessage(bytes, received.MessageType == WebSocketMessageType.Text));
             }
         }
@@ -373,6 +475,8 @@ internal sealed class WebSocketConnection
         {
             _isEnded = true;
         }
+
+        OpenGate(true);
 
         _outgoing.Writer.TryComplete();
         _ended.TrySetResult();

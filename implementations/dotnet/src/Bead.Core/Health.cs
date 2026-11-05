@@ -18,18 +18,22 @@ public enum HealthStatus
 /// orphans — the connections it keeps anything for that the transport no longer holds — never a
 /// handle.
 /// </summary>
-/// <param name="Anomalies">What it found that should never be.</param>
-/// <param name="Ceilings">The ceiling of each count that has one.</param>
-/// <param name="Counts">Each count, by its name.</param>
-/// <param name="Orphans">The connections it keeps anything for that the transport no longer holds.</param>
-public sealed record LayerGauges(
-    IReadOnlyList<string> Anomalies,
-    IReadOnlyDictionary<string, long> Ceilings,
-    IReadOnlyDictionary<string, long> Counts,
-    int Orphans)
+public sealed record LayerGauges
 {
+    /// <summary>What it found that should never be.</summary>
+    public required IReadOnlyList<string> Anomalies { get; init; }
+
+    /// <summary>The ceiling of each count that has one.</summary>
+    public required IReadOnlyDictionary<string, long> Ceilings { get; init; }
+
+    /// <summary>Each count, by its name.</summary>
+    public required IReadOnlyDictionary<string, long> Counts { get; init; }
+
+    /// <summary>The connections it keeps anything for that the transport no longer holds.</summary>
+    public required int Orphans { get; init; }
+
     /// <summary><paramref name="gauges"/> for leaving the process: its handles gone, each one <paramref name="held"/> does not hold an orphan.</summary>
-    public static LayerGauges Of(Gauges gauges, IReadOnlySet<string> held)
+    internal static LayerGauges Of(Gauges gauges, IReadOnlySet<string> held)
     {
         ArgumentNullException.ThrowIfNull(gauges);
         ArgumentNullException.ThrowIfNull(held);
@@ -39,22 +43,44 @@ public sealed record LayerGauges(
             return !held.Contains(connectionHandle);
         });
 
-        return new LayerGauges(gauges.Anomalies, gauges.Ceilings, gauges.Counts, orphans);
+        return new LayerGauges
+        {
+            Anomalies = gauges.Anomalies,
+            Ceilings = gauges.Ceilings,
+            Counts = gauges.Counts,
+            Orphans = orphans,
+        };
     }
 }
 
 /// <summary>What each layer of a server holds.</summary>
-/// <param name="Router">Its router's: its core, its subscriptions, its notifications, its relay.</param>
-/// <param name="Server">Its own: its connections, those closing, those with no session.</param>
-/// <param name="Sessions">Its sessions'.</param>
-/// <param name="Transport">Its transport's: the connections it holds, which the others are set against.</param>
-public sealed record ServerGauges(LayerGauges Router, LayerGauges Server, LayerGauges Sessions, LayerGauges Transport);
+public sealed record ServerGauges
+{
+    /// <summary>Its router's: its core, its subscriptions, its notifications, its relay.</summary>
+    public required LayerGauges Router { get; init; }
+
+    /// <summary>Its own: its connections, those closing, those with no session.</summary>
+    public required LayerGauges Server { get; init; }
+
+    /// <summary>Its sessions'.</summary>
+    public required LayerGauges Sessions { get; init; }
+
+    /// <summary>Its transport's: the connections it holds, which the others are set against.</summary>
+    public required LayerGauges Transport { get; init; }
+}
 
 /// <summary>A check, as the IETF draft "Health Check Response Format for HTTP APIs" writes one.</summary>
-/// <param name="ObservedValue">What it measured.</param>
-/// <param name="Status">Its verdict.</param>
-/// <param name="Output">What it says of a verdict other than a pass, or of a count and its ceiling.</param>
-public sealed record HealthCheck(long ObservedValue, HealthStatus Status, string? Output = null);
+public sealed record HealthCheck
+{
+    /// <summary>What it measured.</summary>
+    public required long ObservedValue { get; init; }
+
+    /// <summary>Its verdict.</summary>
+    public required HealthStatus Status { get; init; }
+
+    /// <summary>What it says of a verdict other than a pass, or of a count and its ceiling.</summary>
+    public string? Output { get; init; }
+}
 
 /// <summary>A server's verdict: the worst of its checks, and each check under <c>layer:measure</c>.</summary>
 /// <param name="Checks">Each check, under <c>layer:measure</c>.</param>
@@ -69,7 +95,7 @@ public sealed record Health(IReadOnlyDictionary<string, IReadOnlyList<HealthChec
     /// <see cref="HealthStatus.Warn"/> for a count at <see cref="WarningRatio"/> of its ceiling or
     /// past it, <see cref="HealthStatus.Pass"/> otherwise; the server's, the worst.
     /// </summary>
-    public static Health Of(ServerGauges gauges)
+    internal static Health Of(ServerGauges gauges)
     {
         ArgumentNullException.ThrowIfNull(gauges);
 
@@ -90,26 +116,39 @@ public sealed record Health(IReadOnlyDictionary<string, IReadOnlyList<HealthChec
             ("transport", gauges.Transport),
         ];
 
-        foreach (var (layer, (anomalies, ceilings, counts, orphans)) in layers)
+        foreach (var (layer, measured) in layers)
         {
+            var orphans = measured.Orphans;
+            var anomalies = measured.Anomalies;
+
             Check(
                 $"{layer}:orphans",
                 orphans == 0
-                    ? new HealthCheck(0, HealthStatus.Pass)
-                    : new HealthCheck(orphans, HealthStatus.Fail, $"{orphans} connections kept that the transport no longer holds"));
+                    ? new HealthCheck { ObservedValue = 0, Status = HealthStatus.Pass }
+                    : new HealthCheck
+                    {
+                        ObservedValue = orphans,
+                        Status = HealthStatus.Fail,
+                        Output = $"{orphans} connections kept that the transport no longer holds",
+                    });
             Check(
                 $"{layer}:anomalies",
                 anomalies.Count == 0
-                    ? new HealthCheck(0, HealthStatus.Pass)
-                    : new HealthCheck(anomalies.Count, HealthStatus.Fail, string.Join("; ", anomalies)));
+                    ? new HealthCheck { ObservedValue = 0, Status = HealthStatus.Pass }
+                    : new HealthCheck { ObservedValue = anomalies.Count, Status = HealthStatus.Fail, Output = string.Join("; ", anomalies) });
 
-            foreach (var (name, count) in counts)
+            foreach (var (name, count) in measured.Counts)
             {
-                if (ceilings.TryGetValue(name, out var ceiling))
+                if (measured.Ceilings.TryGetValue(name, out var ceiling))
                 {
                     Check(
                         $"{layer}:{name}",
-                        new HealthCheck(count, count >= WarningRatio * ceiling ? HealthStatus.Warn : HealthStatus.Pass, $"{count} of {ceiling}"));
+                        new HealthCheck
+                        {
+                            ObservedValue = count,
+                            Status = count >= WarningRatio * ceiling ? HealthStatus.Warn : HealthStatus.Pass,
+                            Output = $"{count} of {ceiling}",
+                        });
                 }
             }
         }

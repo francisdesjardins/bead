@@ -1,23 +1,26 @@
 //! A server's transport over a broker's participant (spec 15.18 to 15.23): it serves its names,
 //! judges each OPEN that comes to them in order — a layout to come refused 426, an id that is no
-//! token or a receive bound under 1,024 refused 400, past its bounds or once its stop began 503 —
-//! and answers any other with an ACCEPT, its connection then half-open, holding its place and
-//! telling nothing; it tells its router the connection, drawing its handle
+//! token or a receive bound under 1,024 refused 400, past its bounds or once its stop or its
+//! participant's began 503 — and answers any other with an ACCEPT, its connection then half-open,
+//! holding its place and telling nothing; it tells its router the connection, drawing its handle
 //! `type=…;participant=…;ordinal=…`, once the client's first parcel naming both halves proves it
 //! reads its inbox, and forgets one whose third leg did not come within its accept timeout. It
 //! hands its router each envelope with its peer participant's id as its address and no port, the
-//! credential its DATA carried beside it; it carries none toward its client.
+//! credential its DATA carried beside it; it carries none toward its client. A connection its
+//! router paused is held by its participant, never its link (spec 15.12, 15.23).
 
 use core::fmt;
-use core::sync::atomic::Ordering;
+use core::sync::atomic::{AtomicBool, Ordering};
 use core::time::Duration;
 use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
+use std::time::SystemTime;
 
 use tokio::sync::watch;
 
 use crate::broker::adapter::{BrokerCapabilities, BrokerError, BrokerSubscription};
 use crate::broker::client::MAXIMUM_UNSENT_BYTES;
+use crate::broker::memory::TRANSPORT_BROKER;
 use crate::broker::parcel::{
     LAYOUT, LEAST_BOUND, Parcel, ParcelRead, is_token, kinds, refuse_reason_of,
 };
@@ -30,7 +33,8 @@ use crate::duration::hold_finite;
 use crate::errors::ProgrammerError;
 use crate::router::types::{BoxFuture, ConnectionHandle, Gauges, RouterError, TransportMessage};
 use crate::transport::{
-    Listeners, ReadyState, Sent, ServerListener, ServerTransport, TransportServerRefusal,
+    Listeners, ReadyState, Sent, ServerListener, ServerTransport, TransportServerClient,
+    TransportServerRefusal,
 };
 
 /// The connections a server's transport holds at once by default, half-open ones among them
@@ -48,9 +52,9 @@ fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 /// How a broker's server transport is built (spec 15.12, 15.18, 15.23).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
-pub struct BrokerServerOptions {
+pub struct BrokerTransportServerOptions {
     /// The names it serves, each a token, a server's as a host name is (spec 15.16): its clients'
     /// OPENs go to them; one at least.
     pub names: Vec<String>,
@@ -76,18 +80,24 @@ pub struct BrokerServerOptions {
     pub secure: Option<bool>,
 }
 
-impl BrokerServerOptions {
+impl BrokerTransportServerOptions {
     /// A server transport serving `names`.
     #[must_use]
-    pub fn of<N: Into<String>, I: IntoIterator<Item = N>>(names: I) -> Self {
+    pub fn new<N: Into<String>, I: IntoIterator<Item = N>>(names: I) -> Self {
         Self {
             names: names.into_iter().map(Into::into).collect(),
-            ..Self::default()
+            is_in_group: None,
+            maximum_connections: None,
+            maximum_connections_per_address: None,
+            maximum_unsent_bytes: None,
+            accept_timeout: None,
+            secure: None,
         }
     }
 }
 
-// a connection held, half-open or told
+// a connection held, half-open or told, and the flag its router's pause sets, which its
+// participant reads
 struct HeldConnection {
     peer_id: String,
     opener: u64,
@@ -96,7 +106,8 @@ struct HeldConnection {
     handle: Option<ConnectionHandle>,
     accepting: Option<Arc<dyn Timer>>,
     arrival: u64,
-    last_activity: Option<i64>,
+    last_activity: Option<SystemTime>,
+    paused: Arc<AtomicBool>,
 }
 
 struct ServerState {
@@ -107,6 +118,8 @@ struct ServerState {
     handles: HashMap<ConnectionHandle, Pair>,
     // the names its broker holds a subscription to, from its SUBACK to its UNSUBACK
     subscribed: BTreeSet<String>,
+    // the names asked of its broker, from its SUBSCRIBE to its SUBACK or its refusal
+    joining: BTreeSet<String>,
     // whether it left its names while it holds its bound, served in a group
     is_full: bool,
     arrivals: u64,
@@ -130,14 +143,14 @@ pub(crate) struct ServerInner {
 
 /// A server's transport over a broker's participant, serving the names it is given.
 #[derive(Clone)]
-pub struct BrokerServer {
+pub struct BrokerTransportServer {
     inner: Arc<ServerInner>,
 }
 
-impl fmt::Debug for BrokerServer {
+impl fmt::Debug for BrokerTransportServer {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("BrokerServer")
+            .debug_struct("BrokerTransportServer")
             .field("names", &self.inner.names)
             .finish_non_exhaustive()
     }
@@ -161,15 +174,6 @@ pub(crate) fn refuse_open(state: &ParticipantState, (open, status): (&Parcel, u1
     refuse.status = Some(status);
     refuse.layouts = (status == 426).then(|| vec![LAYOUT]);
     state.quietly((state.config.inbox_of(id), &refuse));
-}
-
-fn wall_of(clock: &SharedClock) -> i64 {
-    clock
-        .wall()
-        .duration_since(std::time::SystemTime::UNIX_EPOCH)
-        .map_or(0, |since| {
-            i64::try_from(since.as_millis()).unwrap_or(i64::MAX)
-        })
 }
 
 impl ServerInner {
@@ -255,6 +259,9 @@ impl ServerInner {
             return;
         }
 
+        // * its participant's stop under way: what its broker hands it as it lets its names go is
+        // refused, its adapter still up (spec 15.18, 15.21)
+        let is_stopping = state.config.is_stopping();
         let is_busy = {
             let held = locked(&self.state);
 
@@ -273,7 +280,8 @@ impl ServerInner {
                 .filter(|connection| connection.peer_id == id)
                 .count();
 
-            held.ready != ReadyState::Open
+            is_stopping
+                || held.ready != ReadyState::Open
                 || u64::try_from(held.held.len()).unwrap_or(u64::MAX) >= self.maximum_connections
                 || u64::try_from(of_id).unwrap_or(u64::MAX) >= self.maximum_per_address
         };
@@ -299,10 +307,10 @@ impl ServerInner {
 
         refuse_open(state, (open, status));
 
-        let refusal = TransportServerRefusal::of(
-            (status, refuse_reason_of(status).unwrap_or("busy")),
-            Some(id),
-        );
+        let mut refusal =
+            TransportServerRefusal::new(status, refuse_reason_of(status).unwrap_or("busy"));
+
+        refusal.address = Some(id);
 
         self.tell((
             |listener: &dyn ServerListener| listener.on_refusal(&refusal),
@@ -323,6 +331,7 @@ impl ServerInner {
         let owner: Arc<dyn ConnectionOwner> = Arc::<Self>::clone(self);
         let peer_id = peer.id.clone();
         let is_peer_secure = peer.is_secure;
+        let paused = Arc::new(AtomicBool::new(false));
 
         state.hold(Setup {
             owner,
@@ -331,6 +340,7 @@ impl ServerInner {
             sent: 0,
             maximum_unsent: self.maximum_unsent,
             is_half_open: true,
+            paused: Arc::clone(&paused),
         });
 
         let room = state.room_of(pair).unwrap_or(0);
@@ -347,6 +357,18 @@ impl ServerInner {
             }),
         );
 
+        let accepting = match accepting {
+            Ok(timer) => timer,
+            Err(error) => {
+                state.drop_connection(pair);
+                self.participant
+                    .inner
+                    .config
+                    .report(&RouterError::Other(Arc::new(error)));
+                self.leave();
+                return;
+            }
+        };
         {
             let mut held = locked(&self.state);
 
@@ -361,6 +383,7 @@ impl ServerInner {
                     accepting: Some(accepting),
                     arrival: 0,
                     last_activity: None,
+                    paused,
                 },
             );
         }
@@ -386,7 +409,34 @@ impl ServerInner {
 
     /// Its link lost, its names held no more.
     pub(crate) fn unlinked(&self) {
-        locked(&self.state).subscribed.clear();
+        let mut state = locked(&self.state);
+
+        state.subscribed.clear();
+        state.joining.clear();
+    }
+
+    /// In its participant's turn, as it stops: each name its broker holds or was asked to hold let
+    /// go, its unsubscription made as it is called, its served state kept so that its participant's
+    /// next link serves it again; settles once its broker let each go (spec 15.21).
+    pub(crate) fn let_go(self: &Arc<Self>) -> BoxFuture<()> {
+        let leaving: Vec<BoxFuture<()>> = self
+            .asked()
+            .into_iter()
+            .map(|name| self.leave_one(name))
+            .collect();
+
+        Box::pin(async move {
+            for left in leaving {
+                left.await;
+            }
+        })
+    }
+
+    // each name its broker holds, or was asked to hold and has not answered yet
+    fn asked(&self) -> Vec<String> {
+        let state = locked(&self.state);
+
+        state.subscribed.union(&state.joining).cloned().collect()
     }
 
     // its names subscribed, alone or in its group, all asked at once, each counted once its broker
@@ -415,13 +465,18 @@ impl ServerInner {
         })
     }
 
-    // one name subscribed, counted once its broker holds it
+    // one name subscribed, counted once its broker holds it, and asked until then, so that a stop
+    // lets it go; a SUBACK that comes once its participant's stop began, or its own, holds nothing,
+    // that stop letting it go
     fn join_one(self: &Arc<Self>, name: String) -> BoxFuture<Result<(), BrokerError>> {
         let config = self.participant.config();
+        let record = config.current_record();
         let subscription = BrokerSubscription {
             group: self.is_in_group.then(|| name.clone()),
             ..BrokerSubscription::default()
         };
+
+        locked(&self.state).joining.insert(name.clone());
 
         let subscribing = config
             .adapter
@@ -429,12 +484,32 @@ impl ServerInner {
         let server = Arc::clone(self);
 
         Box::pin(async move {
-            match subscribing.await {
+            let subscribed = subscribing.await;
+
+            // ! held from its SUBACK on, in its participant's turn, where a stop reads it: asked
+            // until then
+            if subscribed.is_err() {
+                locked(&server.state).joining.remove(&name);
+            }
+
+            match subscribed {
                 Ok(()) => {
                     let participant = server.participant.clone();
 
                     participant
                         .run(move |state| {
+                            locked(&server.state).joining.remove(&name);
+
+                            let is_fenced = record.is_marked()
+                                || matches!(
+                                    server.ready(),
+                                    ReadyState::Closing | ReadyState::Closed
+                                );
+
+                            if is_fenced {
+                                return;
+                            }
+
                             locked(&server.state).subscribed.insert(name.clone());
                             state.config.name_changed((
                                 &name,
@@ -508,17 +583,22 @@ impl ServerInner {
     }
 
     // a name it left, held no more once its UNSUBACK came; one its broker refused to let go
-    // reported; and one served again meanwhile, which its rejoin found still held and asked nothing
-    // of, asked anew
+    // reported, and held still; and one served again meanwhile, which its rejoin found still held
+    // and asked nothing of, asked anew
     fn left(self: &Arc<Self>, (name, left): (String, Result<(), BrokerError>)) {
         let config = Arc::clone(self.participant.config());
 
-        if let Err(reason) = left
-            && !matches!(reason, BrokerError::Refused(_))
-            && config.is_linked()
-            && !config.is_down_as_it_links()
-        {
-            config.report(&RouterError::Other(Arc::new(reason)));
+        if let Err(reason) = left {
+            if config.is_let_go_reported(&reason) {
+                config.report(&RouterError::Other(Arc::new(reason)));
+            }
+
+            return;
+        }
+
+        // * its link lost as its participant stopped let it go of its own: told nothing
+        if config.is_lost_as_it_stops() {
+            return;
         }
 
         let is_asked_anew = {
@@ -565,8 +645,10 @@ impl ServerInner {
         }
     }
 
-    // one name let go as it stops, counted until its UNSUBACK came; one its broker refused to let
-    // go is reported, and its stop settles all the same
+    // one name let go as it stops, or as its participant does, its unsubscription made as it is
+    // called, counted until its UNSUBACK came; one its broker refused to let go is reported unless
+    // its link was lost meanwhile, and held still, its stop settling all the same, and one its link
+    // lost as its participant stopped told nothing (spec 15.21)
     fn leave_one(self: &Arc<Self>, name: String) -> BoxFuture<()> {
         let config = Arc::clone(self.participant.config());
         let leaving = config.adapter.unsubscribe(&config.name_of(&name));
@@ -578,12 +660,18 @@ impl ServerInner {
 
             participant
                 .run(move |state| {
-                    if let Err(reason) = left
-                        && !matches!(reason, BrokerError::Refused(_))
-                        && config.is_linked()
-                        && !config.is_down_as_it_links()
-                    {
-                        config.report(&RouterError::Other(Arc::new(reason)));
+                    if let Err(reason) = left {
+                        if config.is_let_go_reported(&reason) {
+                            config.report(&RouterError::Other(Arc::new(reason)));
+                        }
+
+                        return;
+                    }
+
+                    // * its link lost as it stopped let it go of its own: told nothing, and held
+                    // until that stop settles (debugging 13.5)
+                    if config.is_lost_as_it_stops() {
+                        return;
                     }
 
                     locked(&server.state).subscribed.remove(&name);
@@ -640,7 +728,7 @@ impl ConnectionOwner for ServerInner {
     }
 
     fn delivered(&self, pair: Pair, message: TransportMessage) {
-        let now = wall_of(&self.participant.clock());
+        let now = self.participant.clock().wall();
         let handle = {
             let mut state = locked(&self.state);
             let Some(held) = state.held.get_mut(&pair) else {
@@ -704,7 +792,7 @@ impl ConnectionOwner for ServerInner {
 }
 
 // what it holds of a connection told, its pair and what the gauges count
-impl BrokerServer {
+impl BrokerTransportServer {
     /// A server transport over `participant`, serving its options' names.
     ///
     /// # Errors
@@ -714,7 +802,7 @@ impl BrokerServer {
     /// timeout spec 1.4 does not hold.
     pub fn new(
         participant: &BrokerParticipant,
-        options: &BrokerServerOptions,
+        options: &BrokerTransportServerOptions,
     ) -> Result<Self, ProgrammerError> {
         if options.names.is_empty() || options.names.iter().any(|name| !is_token(name)) {
             return Err(ProgrammerError::new(
@@ -777,6 +865,7 @@ impl BrokerServer {
                 held: HashMap::new(),
                 handles: HashMap::new(),
                 subscribed: BTreeSet::new(),
+                joining: BTreeSet::new(),
                 is_full: false,
                 arrivals: 0,
                 stopped: None,
@@ -804,31 +893,31 @@ impl BrokerServer {
     /// The connections its router was told of, in the order they came: each its handle, its peer
     /// participant's id as its address, no port, and when it last delivered an envelope.
     #[must_use]
-    pub fn clients(&self) -> Vec<(ConnectionHandle, String, Option<u16>, Option<i64>)> {
+    pub fn clients(&self) -> Vec<TransportServerClient> {
         let mut told: Vec<_> = locked(&self.inner.state)
             .held
             .values()
             .filter_map(|held| {
                 held.handle.as_ref().map(|handle| {
-                    (
-                        held.arrival,
-                        Arc::clone(handle),
-                        held.peer_id.clone(),
-                        None,
-                        held.last_activity,
-                    )
+                    let client = TransportServerClient {
+                        connection_handle: Arc::clone(handle),
+                        address: held.peer_id.clone(),
+                        port: None,
+                        last_activity: held.last_activity,
+                        transport_type: TRANSPORT_BROKER,
+                    };
+
+                    (held.arrival, client)
                 })
             })
             .collect();
 
-        told.sort_by_key(|(arrival, ..)| *arrival);
-        told.into_iter()
-            .map(|(_, handle, address, port, last_activity)| (handle, address, port, last_activity))
-            .collect()
+        told.sort_by_key(|(arrival, _)| *arrival);
+        told.into_iter().map(|(_, client)| client).collect()
     }
 }
 
-impl ServerTransport for BrokerServer {
+impl ServerTransport for BrokerTransportServer {
     // a credential given here is not carried: the router fails a command that presents one its
     // transport cannot carry before it goes (spec 15.22)
     fn send(
@@ -896,6 +985,43 @@ impl ServerTransport for BrokerServer {
         self.inner.listeners.remove(listener);
     }
 
+    // ! its state's lock alone, which it never holds as it tells a listener: the flag its
+    // participant reads as each envelope of the connection comes whole, holding it from then on
+    // (spec 15.23); its link reads on
+    fn pause(&self, connection_handle: &ConnectionHandle) {
+        let state = locked(&self.inner.state);
+
+        if let Some(held) = state
+            .handles
+            .get(connection_handle)
+            .and_then(|pair| state.held.get(pair))
+        {
+            held.paused.store(true, Ordering::SeqCst);
+        }
+    }
+
+    // ! its state's lock alone, as `pause`: what the connection holds is handed on by a release
+    // turn of its participant's, behind what is queued there, never within this call
+    fn resume(&self, connection_handle: &ConnectionHandle) {
+        let pair = {
+            let state = locked(&self.inner.state);
+
+            state.handles.get(connection_handle).and_then(|pair| {
+                state.held.get(pair).map(|held| {
+                    held.paused.store(false, Ordering::SeqCst);
+
+                    *pair
+                })
+            })
+        };
+
+        if let Some(pair) = pair {
+            self.inner
+                .participant
+                .post(move |state: &mut ParticipantState| state.release(pair));
+        }
+    }
+
     fn clock(&self) -> Option<SharedClock> {
         self.inner.participant.config().given.clone()
     }
@@ -917,10 +1043,17 @@ impl ServerTransport for BrokerServer {
         false
     }
 
-    // its participant started where it was not, or linked anew where its link was taken over, and
-    // its names served, each subscribed; settles once its broker holds each, failing on a name its
-    // broker refused
+    // its participant started where it was not, linked anew where its link was taken over or its
+    // stop settled, and its names served, each subscribed; settles once its broker holds each,
+    // failing on a name its broker refused. Its participant disposed, it is refused first, its state
+    // kept (spec 15.21)
     fn start(&self) -> BoxFuture<Result<(), RouterError>> {
+        if self.inner.participant.is_disposed() {
+            let disposed = self.inner.participant.config().disposed_refusal();
+
+            return Box::pin(async move { Err(RouterError::Other(Arc::new(disposed))) });
+        }
+
         let refused = {
             let mut state = locked(&self.inner.state);
 
@@ -968,8 +1101,9 @@ impl ServerTransport for BrokerServer {
         })
     }
 
-    // no OPEN taken from now, one that comes refused 503; each connection closed with a CLOSE of
-    // 1001, its close told unclean, and its names let go; its participant's link kept (spec 15.21).
+    // no OPEN taken from now, one that comes refused 503; its names let go, each unsubscription
+    // handed before each connection's CLOSE of 1001, its close told unclean, settling once its
+    // broker let each go; its participant's link kept (spec 15.21).
     // A stop while it starts is refused, as the other sides' transport server life refuses one
     fn stop(&self) -> BoxFuture<Result<(), RouterError>> {
         let (stopping, stopped) = {
@@ -1013,19 +1147,20 @@ impl ServerTransport for BrokerServer {
             .inner
             .participant
             .run(move |state: &mut ParticipantState| {
+                // * all let go at once, each unsubscription before its CLOSEs in this turn, a name
+                // counted until its UNSUBACK came: its broker's word (spec 15.21)
+                let leaving: Vec<BoxFuture<()>> = server
+                    .asked()
+                    .into_iter()
+                    .map(|name| server.leave_one(name))
+                    .collect();
                 let held: Vec<Pair> = locked(&server.state).held.keys().copied().collect();
 
                 for pair in held {
                     state.close(pair, (crate::broker::parcel::codes::GOING_AWAY, false));
                 }
 
-                // * all let go at once, a name counted until its UNSUBACK came: its broker's word
-                let names = locked(&server.state).subscribed.clone();
-
-                names
-                    .into_iter()
-                    .map(|name| server.leave_one(name))
-                    .collect::<Vec<_>>()
+                leaving
             });
         let server = Arc::clone(&self.inner);
 

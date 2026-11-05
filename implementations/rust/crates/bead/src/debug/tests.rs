@@ -10,17 +10,21 @@ use serde_json::{Value, json};
 use tokio::sync::oneshot;
 
 use super::{CallAsked, DebugDirection, DebugFilterSource, DebugType, FilterKeeper, GivenFilter};
+use crate::NotificationResolverDependencies;
 use crate::clock::{Clock, Schedule};
 use crate::constants::{ProcedureKind, SERVER_CONNECTION_HANDLE};
 use crate::errors::{CallError, ResolverError};
 use crate::identity::Procedure;
 use crate::managers::service::{
-    DebugEvent, NotificationDependencies, NotifyOptions, RequestDependencies, RequestOptions,
-    ResolverDependencies, Response, ServiceManager, Traced, TracedError,
+    CommandOptions, DebugEvent, NotificationDependencies, NotifyOptions, RegistrationOptions,
+    RequestDependencies, RequestOptions, RequestResolverDependencies, Response, ServiceManager,
+    Traced, TracedError,
 };
 use crate::payloads::{CodecRefusal, JsonCodec, PayloadCodec};
 use crate::router::types::RequestCredential;
 use crate::testing::pair::{Pair, PairOptions, echo};
+
+mod filters;
 
 // what a manager's debug listener heard: why, when a step went wrong, and the step
 type Heard = Arc<Mutex<Vec<(Option<String>, DebugEvent)>>>;
@@ -65,7 +69,10 @@ fn serve_echo(pair: &Pair, delay: Option<Duration>) {
 
     pair.server
         .services()
-        .get_request_resolver(&echo(), ResolverDependencies::of(JsonCodec, JsonCodec))
+        .get_request_resolver(
+            &echo(),
+            RequestResolverDependencies::new(JsonCodec, JsonCodec),
+        )
         .expect("echo resolved")
         .on(Arc::new(move |request, response: Response<JsonCodec>| {
             let clock = Arc::clone(&clock);
@@ -93,14 +100,46 @@ fn serve_echo(pair: &Pair, delay: Option<Duration>) {
 }
 
 async fn pair() -> Pair {
-    Pair::connected((january_first(), PairOptions::default()))
+    Pair::connected(january_first(), &PairOptions::default())
         .await
         .expect("a pair connected")
 }
 
+#[tokio::test]
+async fn raises_deprecated_before_the_call_s_tx_step() {
+    let pair = pair().await;
+    serve_echo(&pair, None);
+    let manager = &pair.client.services().manager;
+    let heard = Arc::new(Mutex::new(Vec::new()));
+    let deprecations = Arc::clone(&heard);
+    manager.on_deprecated(Arc::new(move |_| locked(&deprecations).push("deprecated")));
+    let steps = Arc::clone(&heard);
+    manager.on_debug(Arc::new(move |_, event| {
+        locked(&steps).push(match event.direction {
+            DebugDirection::Tx => "tx",
+            DebugDirection::Rx => "rx",
+        });
+    }));
+    let procedure = Procedure {
+        deprecation: Some(crate::identity::Deprecation {
+            message: Some("use echo2".to_owned()),
+        }),
+        ..echo()
+    };
+    let request = manager
+        .get_request(&procedure, RequestDependencies::new(JsonCodec, JsonCodec))
+        .expect("echo requested");
+    let call = request
+        .call(json!({ "text": "a" }), &RequestOptions::default())
+        .expect("a call");
+    pair.settle().await;
+    assert_eq!(call.await.expect("an answer"), json!({ "text": "a" }));
+    assert_eq!(*locked(&heard), ["deprecated", "tx", "rx"]);
+}
+
 fn asking(manager: &ServiceManager) -> crate::managers::service::Request<JsonCodec, JsonCodec> {
     manager
-        .get_request(&echo(), RequestDependencies::of(JsonCodec, JsonCodec))
+        .get_request(&echo(), RequestDependencies::new(JsonCodec, JsonCodec))
         .expect("echo asked")
 }
 
@@ -108,7 +147,7 @@ fn asking(manager: &ServiceManager) -> crate::managers::service::Request<JsonCod
 #[tokio::test]
 async fn is_on_only_while_someone_listens() {
     let pair = pair().await;
-    let manager = pair.client.services();
+    let manager = &pair.client.services().manager;
 
     assert!(!manager.is_debugging(), "off while nobody listens");
 
@@ -131,7 +170,7 @@ async fn reads_no_clock_for_a_call_once_its_last_debug_listener_went() {
     ) -> (usize, usize) {
         let (walls, monotonics) = pair.clock.readings();
         let call = ask
-            .call(json!({ "text": "x" }), RequestOptions::default())
+            .call(json!({ "text": "x" }), &RequestOptions::default())
             .expect("a call");
 
         pair.settle().await;
@@ -146,15 +185,21 @@ async fn reads_no_clock_for_a_call_once_its_last_debug_listener_went() {
 
     serve_echo(&pair, None);
 
-    let ask = asking(pair.client.services());
+    let ask = asking(&pair.client.services().manager);
     let unheard = readings_of(&pair, &ask).await;
-    let listening = [pair.client.services(), pair.server.services()]
-        .map(|manager| manager.on_debug(Arc::new(|_error, _event| {})));
+    let listening = [
+        &pair.client.services().manager,
+        &pair.server.services().manager,
+    ]
+    .map(|manager| manager.on_debug(Arc::new(|_error, _event| {})));
     let heard = readings_of(&pair, &ask).await;
 
-    for (manager, listener) in [pair.client.services(), pair.server.services()]
-        .into_iter()
-        .zip(listening)
+    for (manager, listener) in [
+        &pair.client.services().manager,
+        &pair.server.services().manager,
+    ]
+    .into_iter()
+    .zip(listening)
     {
         manager.off(listener);
     }
@@ -171,13 +216,13 @@ async fn reads_no_clock_for_a_call_once_its_last_debug_listener_went() {
 #[tokio::test]
 async fn tells_each_step_of_a_request_and_once_answered_its_duration() {
     let pair = pair().await;
-    let manager = pair.client.services();
+    let manager = &pair.client.services().manager;
     let heard = recorded(manager);
 
     serve_echo(&pair, Some(Duration::from_millis(30)));
 
     let call = asking(manager)
-        .call(json!({ "text": "hello" }), RequestOptions::default())
+        .call(json!({ "text": "hello" }), &RequestOptions::default())
         .expect("echo called");
 
     pair.clock.advance(Duration::from_millis(30)).await;
@@ -252,24 +297,27 @@ async fn tells_each_step_of_a_request_and_once_answered_its_duration() {
 async fn tells_a_call_made_and_its_answer_with_the_call_id_its_router_drew_and_their_connection() {
     let pair = pair().await;
     let either = Procedure {
-        kind: None,
+        procedure_kind: None,
         ..echo()
     };
-    let seen = recorded(pair.client.services());
-    let commanded = recorded(pair.server.services());
+    let seen = recorded(&pair.client.services().manager);
+    let commanded = recorded(&pair.server.services().manager);
 
     serve_echo(&pair, None);
     pair.client
         .services()
-        .get_command_resolver(&either, ResolverDependencies::of(JsonCodec, JsonCodec))
+        .get_command_resolver(
+            &either,
+            RequestResolverDependencies::new(JsonCodec, JsonCodec),
+        )
         .expect("a command resolved")
         .on(Arc::new(|request, response: Response<JsonCodec>| {
             response.result(request.payload)
         }))
         .expect("a command registered");
 
-    let asked = asking(pair.client.services())
-        .call(json!({ "text": "a" }), RequestOptions::default())
+    let asked = asking(&pair.client.services().manager)
+        .call(json!({ "text": "a" }), &RequestOptions::default())
         .expect("a call");
 
     pair.settle().await;
@@ -278,15 +326,12 @@ async fn tells_a_call_made_and_its_answer_with_the_call_id_its_router_drew_and_t
     let command = pair
         .server
         .services()
-        .get_command(&either, RequestDependencies::of(JsonCodec, JsonCodec))
+        .get_command(&either, RequestDependencies::new(JsonCodec, JsonCodec))
         .expect("a command");
     let commanding = command
         .call(
             json!({ "text": "b" }),
-            RequestOptions {
-                connection_handle: Some(Arc::clone(&pair.connection_handle)),
-                ..RequestOptions::default()
-            },
+            &CommandOptions::new(Arc::clone(&pair.connection_handle)),
         )
         .expect("a command made");
 
@@ -336,13 +381,13 @@ async fn tells_a_call_made_and_its_answer_with_the_call_id_its_router_drew_and_t
 async fn tells_a_call_its_router_refuses_before_drawing_an_id_with_none_its_tx_step_then_its_rx_step()
  {
     let pair = pair().await;
-    let seen = recorded(pair.client.services());
+    let seen = recorded(&pair.client.services().manager);
 
     // OPAQUE with no session known: refused SESSION_REQUIRED once it started, no call id drawn
-    let refused = asking(pair.client.services())
+    let refused = asking(&pair.client.services().manager)
         .call(
             json!({ "text": "x" }),
-            RequestOptions {
+            &RequestOptions {
                 credential: Some(RequestCredential::Opaque),
                 ..RequestOptions::default()
             },
@@ -384,12 +429,12 @@ async fn tells_a_call_its_router_refuses_before_drawing_an_id_with_none_its_tx_s
 async fn reads_its_router_s_clock_a_call_s_start_on_the_wall_clock_its_duration_on_the_monotonic_reading()
  {
     let pair = pair().await;
-    let seen = recorded(pair.client.services());
+    let seen = recorded(&pair.client.services().manager);
 
     serve_echo(&pair, Some(Duration::from_millis(250)));
 
-    let answering = asking(pair.client.services())
-        .call(json!({ "text": "hello" }), RequestOptions::default())
+    let answering = asking(&pair.client.services().manager)
+        .call(json!({ "text": "hello" }), &RequestOptions::default())
         .expect("a call");
 
     // a wall clock set back by hand moves no duration
@@ -414,13 +459,16 @@ async fn reads_its_router_s_clock_a_call_s_start_on_the_wall_clock_its_duration_
 #[tokio::test]
 async fn tells_a_duration_in_whole_milliseconds_its_fraction_dropped() {
     let pair = pair().await;
-    let seen = recorded(pair.client.services());
+    let seen = recorded(&pair.client.services().manager);
     let (release, released) = oneshot::channel::<()>();
     let released = Arc::new(Mutex::new(Some(released)));
 
     pair.server
         .services()
-        .get_request_resolver(&echo(), ResolverDependencies::of(JsonCodec, JsonCodec))
+        .get_request_resolver(
+            &echo(),
+            RequestResolverDependencies::new(JsonCodec, JsonCodec),
+        )
         .expect("echo resolved")
         .on(Arc::new(move |request, response: Response<JsonCodec>| {
             let released = locked(&released).take();
@@ -436,8 +484,8 @@ async fn tells_a_duration_in_whole_milliseconds_its_fraction_dropped() {
         .expect("echo registered");
 
     let before = pair.clock.monotonic();
-    let answering = asking(pair.client.services())
-        .call(json!({ "text": "hello" }), RequestOptions::default())
+    let answering = asking(&pair.client.services().manager)
+        .call(json!({ "text": "hello" }), &RequestOptions::default())
         .expect("a call");
 
     pair.settle().await;
@@ -485,10 +533,10 @@ impl PayloadCodec for Unwritable {
 fn ticks() -> Procedure {
     Procedure {
         service_id: 2,
-        id: 2,
+        procedure_id: 2,
         service_revision: 3,
-        name: "ticks".to_owned(),
-        kind: Some(ProcedureKind::Notifies),
+        procedure_name: "ticks".to_owned(),
+        procedure_kind: Some(ProcedureKind::Notifies),
         maximum_payload_bytes: None,
         deprecation: None,
     }
@@ -500,12 +548,15 @@ async fn a_notification_starts_as_it_is_heard_or_sent_and_a_failed_notify_tells_
  {
     let pair = pair().await;
     let start = milliseconds_of(january_first());
-    let notifying = pair.server.services();
-    let hearing = pair.client.services();
+    let notifying = &pair.server.services().manager;
+    let hearing = &pair.client.services().manager;
     let notifier = notifying
         .get_notification_resolver(
             &ticks(),
-            (ResolverDependencies::of(JsonCodec, JsonCodec), JsonCodec),
+            NotificationResolverDependencies::new(
+                RequestResolverDependencies::new(JsonCodec, JsonCodec),
+                JsonCodec,
+            ),
         )
         .expect("ticks resolved")
         .on(Arc::new(|_request, response: Response<JsonCodec>| {
@@ -515,11 +566,14 @@ async fn a_notification_starts_as_it_is_heard_or_sent_and_a_failed_notify_tells_
     let failing = notifying
         .get_notification_resolver(
             &Procedure {
-                id: 3,
-                name: "late".to_owned(),
+                procedure_id: 3,
+                procedure_name: "late".to_owned(),
                 ..ticks()
             },
-            (ResolverDependencies::of(JsonCodec, JsonCodec), Unwritable),
+            NotificationResolverDependencies::new(
+                RequestResolverDependencies::new(JsonCodec, JsonCodec),
+                Unwritable,
+            ),
         )
         .expect("late resolved")
         .on(Arc::new(|_request, response: Response<JsonCodec>| {
@@ -529,12 +583,16 @@ async fn a_notification_starts_as_it_is_heard_or_sent_and_a_failed_notify_tells_
     let notification = hearing
         .get_notification(
             &ticks(),
-            NotificationDependencies::of((JsonCodec, JsonCodec, JsonCodec)),
+            NotificationDependencies::new(
+                RequestDependencies::new(JsonCodec, JsonCodec),
+                JsonCodec,
+            ),
         )
         .expect("ticks heard");
-    let registering = notification.on(
-        (Value::Null, Arc::new(|_value| Box::pin(async { Ok(()) }))),
-        RequestOptions::default(),
+    let registering = notification.register(
+        Value::Null,
+        Arc::new(|_value| Box::pin(async { Ok(()) })),
+        &RegistrationOptions::default(),
     );
 
     pair.settle().await;
@@ -597,89 +655,103 @@ async fn a_notification_starts_as_it_is_heard_or_sent_and_a_failed_notify_tells_
 #[tokio::test]
 async fn reads_no_clock_for_a_call_made_a_request_answered_a_notification_sent_and_one_heard_while_nobody_listens_and_three_for_a_call_with_a_listener()
  {
+    use crate::managers::service::tests::trace_clocks::{ReadClock, clocked};
+
     async fn readings_of(
-        pair: &Pair,
-        (manager_notifier, ask): (
-            &crate::managers::service::Notifier<JsonCodec>,
-            &crate::managers::service::Request<JsonCodec, JsonCodec>,
+        (pair, hearing, notifying): (&Pair, &ReadClock, &ReadClock),
+        (notifier, ask): (
+            &crate::Notifier<JsonCodec>,
+            &crate::Request<JsonCodec, JsonCodec>,
         ),
-    ) -> [(usize, usize); 2] {
-        let (walls, monotonics) = pair.clock.readings();
+    ) -> [(usize, usize); 4] {
+        fn since(after: (usize, usize), before: (usize, usize)) -> (usize, usize) {
+            (after.0 - before.0, after.1 - before.1)
+        }
+
+        let before = [hearing.readings(), notifying.readings()];
         let call = ask
-            .call(json!({ "text": "x" }), RequestOptions::default())
+            .call(json!({ "text": "x" }), &RequestOptions::default())
             .expect("a call");
 
         pair.settle().await;
         call.await.expect("an answer");
 
-        let (called_walls, called_monotonics) = pair.clock.readings();
+        let called = [hearing.readings(), notifying.readings()];
 
-        manager_notifier
+        notifier
             .notify(json!({ "text": "news" }), &NotifyOptions::default())
             .await;
         pair.settle().await;
 
-        let (notified_walls, notified_monotonics) = pair.clock.readings();
-
         [
-            (called_walls - walls, called_monotonics - monotonics),
-            (
-                notified_walls - called_walls,
-                notified_monotonics - called_monotonics,
-            ),
+            since(called[0], before[0]),
+            since(called[1], before[1]),
+            since(notifying.readings(), called[1]),
+            since(hearing.readings(), called[0]),
         ]
     }
 
     let pair = pair().await;
+    let (hearing, heard_clock) = clocked(&pair.client.services().manager);
+    let (notifying, sent_clock) = clocked(&pair.server.services().manager);
 
-    serve_echo(&pair, None);
-
-    let notifier = pair
-        .server
-        .services()
+    notifying
+        .get_request_resolver(
+            &echo(),
+            RequestResolverDependencies::new(JsonCodec, JsonCodec),
+        )
+        .expect("echo resolved")
+        .on(Arc::new(|request, response: Response<JsonCodec>| {
+            response.result(request.payload)
+        }))
+        .expect("echo registered");
+    let notifier = notifying
         .get_notification_resolver(
             &ticks(),
-            (ResolverDependencies::of(JsonCodec, JsonCodec), JsonCodec),
+            NotificationResolverDependencies::new(
+                RequestResolverDependencies::new(JsonCodec, JsonCodec),
+                JsonCodec,
+            ),
         )
         .expect("ticks resolved")
         .on(Arc::new(|_request, response: Response<JsonCodec>| {
             response.result(Value::Null)
         }))
         .expect("ticks registered");
-    let notification = pair
-        .client
-        .services()
+    let notification = hearing
         .get_notification(
             &ticks(),
-            NotificationDependencies::of((JsonCodec, JsonCodec, JsonCodec)),
+            NotificationDependencies::new(
+                RequestDependencies::new(JsonCodec, JsonCodec),
+                JsonCodec,
+            ),
         )
         .expect("ticks heard");
-    let registering = notification.on(
-        (Value::Null, Arc::new(|_value| Box::pin(async { Ok(()) }))),
-        RequestOptions::default(),
+    let registering = notification.register(
+        Value::Null,
+        Arc::new(|_value| Box::pin(async { Ok(()) })),
+        &RegistrationOptions::default(),
     );
 
     pair.settle().await;
     registering.await.expect("subscribed");
 
-    let ask = asking(pair.client.services());
-    let unheard = readings_of(&pair, (&notifier, &ask)).await;
+    let ask = asking(&hearing);
 
-    for manager in [pair.client.services(), pair.server.services()] {
+    assert_eq!(
+        readings_of((&pair, &heard_clock, &sent_clock), (&notifier, &ask)).await,
+        [(0, 0); 4],
+        "no trace reads either clock while nobody listens"
+    );
+
+    for manager in [&hearing, &notifying] {
         manager.on_debug(Arc::new(|_error, _event| {}));
     }
 
-    let heard = readings_of(&pair, (&notifier, &ask)).await;
-
-    // a call's start on both clocks, and its end on the monotonic one, at each end; a
-    // notification's on the wall clock alone, at each end (spec/debugging.md 3.2)
     assert_eq!(
-        [
-            (heard[0].0 - unheard[0].0, heard[0].1 - unheard[0].1),
-            (heard[1].0 - unheard[1].0, heard[1].1 - unheard[1].1),
-        ],
-        [(2, 4), (2, 0)],
-        "three readings a call made and three a request answered, one a notification sent and one heard"
+        readings_of((&pair, &heard_clock, &sent_clock), (&notifier, &ask)).await,
+        [(1, 2), (1, 2), (1, 0), (1, 0)],
+        "each call reads three times and each notification once"
     );
 }
 
@@ -688,7 +760,7 @@ async fn reads_no_clock_for_a_call_made_a_request_answered_a_notification_sent_a
 async fn a_debug_listener_that_throws_on_the_answer_is_reported_through_the_router_and_the_call_resolves_with_its_result_each_step_told()
  {
     let pair = pair().await;
-    let manager = pair.client.services();
+    let manager = &pair.client.services().manager;
     let seen: Arc<Mutex<Vec<DebugDirection>>> = Arc::default();
     let heard: Arc<Mutex<Vec<DebugDirection>>> = Arc::default();
     let (seeing, hearing) = (Arc::clone(&seen), Arc::clone(&heard));
@@ -705,7 +777,7 @@ async fn a_debug_listener_that_throws_on_the_answer_is_reported_through_the_rout
     }));
 
     let call = asking(manager)
-        .call(json!({ "text": "x" }), RequestOptions::default())
+        .call(json!({ "text": "x" }), &RequestOptions::default())
         .expect("a call");
 
     pair.settle().await;
@@ -745,8 +817,8 @@ async fn a_request_is_answered_as_a_debug_listener_throws_on_its_rx_step_the_err
             assert!(event.direction != DebugDirection::Rx, "listener bug");
         }));
 
-    let call = asking(pair.client.services())
-        .call(json!({ "text": "hi" }), RequestOptions::default())
+    let call = asking(&pair.client.services().manager)
+        .call(json!({ "text": "hi" }), &RequestOptions::default())
         .expect("a call");
 
     pair.settle().await;
@@ -771,14 +843,14 @@ async fn a_request_is_answered_as_a_debug_listener_throws_on_its_rx_step_the_err
 #[tokio::test]
 async fn hands_its_router_the_credential_a_call_presents_and_leaves_it_out_of_its_trace() {
     let pair = pair().await;
-    let seen = recorded(pair.client.services());
+    let seen = recorded(&pair.client.services().manager);
 
     serve_echo(&pair, None);
 
-    let call = asking(pair.client.services())
+    let call = asking(&pair.client.services().manager)
         .call(
             json!({ "text": "x" }),
-            RequestOptions {
+            &RequestOptions {
                 credential: Some(RequestCredential::Jwt("a.b.c".to_owned())),
                 ..RequestOptions::default()
             },
@@ -805,11 +877,11 @@ async fn hands_its_router_the_credential_a_call_presents_and_leaves_it_out_of_it
 async fn rethrows_what_the_router_rejects_with_and_tells_debug_its_failure_and_only_a_failure_one()
 {
     let pair = pair().await;
-    let seen = recorded(pair.client.services());
+    let seen = recorded(&pair.client.services().manager);
 
     // no resolver: the server answers PROCEDURE_UNKNOWN
-    let unknown = asking(pair.client.services())
-        .call(json!({ "text": "x" }), RequestOptions::default())
+    let unknown = asking(&pair.client.services().manager)
+        .call(json!({ "text": "x" }), &RequestOptions::default())
         .expect("a call");
 
     pair.settle().await;
@@ -824,10 +896,10 @@ async fn rethrows_what_the_router_rejects_with_and_tells_debug_its_failure_and_o
     // a timeout: no failure's record to tell
     serve_echo(&pair, Some(Duration::from_secs(60)));
 
-    let late = asking(pair.client.services())
+    let late = asking(&pair.client.services().manager)
         .call(
             json!({ "text": "y" }),
-            RequestOptions {
+            &RequestOptions {
                 timeout: Some(Duration::from_millis(10)),
                 ..RequestOptions::default()
             },
@@ -873,7 +945,10 @@ async fn tells_a_notification_sent_or_heard_with_no_call_id() {
         .services()
         .get_notification_resolver(
             &ticks(),
-            (ResolverDependencies::of(JsonCodec, JsonCodec), JsonCodec),
+            NotificationResolverDependencies::new(
+                RequestResolverDependencies::new(JsonCodec, JsonCodec),
+                JsonCodec,
+            ),
         )
         .expect("ticks resolved")
         .on(Arc::new(|_request, response: Response<JsonCodec>| {
@@ -885,19 +960,23 @@ async fn tells_a_notification_sent_or_heard_with_no_call_id() {
         .services()
         .get_notification(
             &ticks(),
-            NotificationDependencies::of((JsonCodec, JsonCodec, JsonCodec)),
+            NotificationDependencies::new(
+                RequestDependencies::new(JsonCodec, JsonCodec),
+                JsonCodec,
+            ),
         )
         .expect("ticks heard");
-    let registering = notification.on(
-        (Value::Null, Arc::new(|_value| Box::pin(async { Ok(()) }))),
-        RequestOptions::default(),
+    let registering = notification.register(
+        Value::Null,
+        Arc::new(|_value| Box::pin(async { Ok(()) })),
+        &RegistrationOptions::default(),
     );
 
     pair.settle().await;
     registering.await.expect("subscribed");
 
-    let heard = recorded(pair.client.services());
-    let sent = recorded(pair.server.services());
+    let heard = recorded(&pair.client.services().manager);
+    let sent = recorded(&pair.server.services().manager);
 
     notifier.notify(json!(1), &NotifyOptions::default()).await;
     pair.settle().await;
@@ -930,12 +1009,12 @@ async fn tells_a_notification_sent_or_heard_with_no_call_id() {
 async fn tells_the_request_it_received_and_the_answer_it_sent_with_that_request_s_call_id_and_connection()
  {
     let pair = pair().await;
-    let seen = recorded(pair.server.services());
+    let seen = recorded(&pair.server.services().manager);
 
     serve_echo(&pair, None);
 
-    let call = asking(pair.client.services())
-        .call(json!({ "text": "x" }), RequestOptions::default())
+    let call = asking(&pair.client.services().manager)
+        .call(json!({ "text": "x" }), &RequestOptions::default())
         .expect("a call");
 
     pair.settle().await;
@@ -969,11 +1048,14 @@ async fn tells_the_request_it_received_and_the_answer_it_sent_with_that_request_
 async fn tells_a_callback_that_fails_before_it_answers_as_an_answer_that_did_not_go_with_why_beside_it_nothing_more_for_one_that_fails_once_it_answered_nor_for_an_admission_that_fails()
  {
     let pair = pair().await;
-    let seen = recorded(pair.server.services());
+    let seen = recorded(&pair.server.services().manager);
 
     pair.server
         .services()
-        .get_request_resolver(&echo(), ResolverDependencies::of(JsonCodec, JsonCodec))
+        .get_request_resolver(
+            &echo(),
+            RequestResolverDependencies::new(JsonCodec, JsonCodec),
+        )
         .expect("echo resolved")
         .on(Arc::new(|request, response: Response<JsonCodec>| {
             Box::pin(async move {
@@ -987,8 +1069,8 @@ async fn tells_a_callback_that_fails_before_it_answers_as_an_answer_that_did_not
         .expect("echo registered");
 
     for payload in ["before", "after"] {
-        let call = asking(pair.client.services())
-            .call(json!(payload), RequestOptions::default())
+        let call = asking(&pair.client.services().manager)
+            .call(json!(payload), &RequestOptions::default())
             .expect("a call");
 
         pair.settle().await;

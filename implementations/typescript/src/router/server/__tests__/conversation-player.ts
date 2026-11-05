@@ -2,13 +2,13 @@
 
 // A conversation of `spec/conversations.json`, or an exit of `spec/metrics.json`, played against
 // Bead's TypeScript server of the interop service: what its clients send, what it sends back and
-// reports, and, for an exit, what moved in its registry's exposition.
+// reports, a listener's call where scripted, and, for an exit, what moved in its exposition.
 
 // dependencies
 
 import { expect } from '@playwright/test';
 import { interopCredentialsOf } from '../../../../interop/credentials';
-import { offerInterop } from '../../../../interop/handlers';
+import { offerInterop, QUESTION } from '../../../../interop/handlers';
 import { createServer } from '../../../server/server';
 import type { IServerTransportLike } from '../../../server/types';
 import {
@@ -24,6 +24,7 @@ import {
 } from '../../../transport/shared/broker-participant';
 import { createEmitter } from '../../../transport/shared/emitter';
 import { createMemoryBroker } from '../../../transport/shared/memory-broker';
+import { noop } from '../../../transport/shared/noop';
 import {
   createTestClock,
   duesOn,
@@ -86,6 +87,11 @@ export interface IStep {
 /** A conversation, or an exit: its steps, and how its server is built. */
 export interface IConversation {
   limits?: RouterLimitsOptions;
+  /**
+   * What the server's application does from within a telling: on the first telling of its kind on
+   * a connection, and once, a call of `command` on that connection, its answer let go (spec 9.0).
+   */
+  listener?: { command: string; telling: 'read' | 'report' };
   pacing?: PacingLimitsOptions;
   name: string;
   /** The server's relay's options, its admission by the name both sides give it. */
@@ -121,6 +127,10 @@ const WEB_CRYPTO_CALLS = ['importKey', 'verify'] as const;
 
 // a relay's admission, by the name a conversation gives it
 const ADMISSIONS = Object.freeze({ requireCredential, requireSession, shareLegBSession });
+
+// the tellings a conversation's listener acts on, and the commands it calls
+const TELLINGS: ReadonlySet<string> = new Set(['read', 'report']);
+const LISTENER_COMMANDS: ReadonlySet<string> = new Set(['clock']);
 
 // a token named in a send, between angle brackets
 const TOKEN_NAME = /<([a-z][a-z0-9]*)>/g;
@@ -221,6 +231,8 @@ const createScriptedConnections = () => {
     stop: () => {
       return Promise.resolve();
     },
+    pause: noop,
+    resume: noop,
     send: ({ credential, data }, connectionHandle) => {
       queueOf(connectionHandle).push({ bytes: bytesOf(data), credential });
 
@@ -376,7 +388,7 @@ const createMemoryConnections = (clock: TestClock) => {
       _flags: { carriesCredential: boolean; isSecure: boolean; isTwoWay: boolean }
     ): Promise<void> => {
       const port = ports.get(name) ?? 50_001 + ports.size;
-      const client = clients.get(name) ?? createMemoryTransportClient({ clock, server: transport });
+      const client = clients.get(name) ?? createMemoryTransportClient({ clock });
 
       if (!clients.has(name)) {
         client.on('message', ({ credential, data }) => {
@@ -386,10 +398,10 @@ const createMemoryConnections = (clock: TestClock) => {
 
       ports.set(name, port);
       clients.set(name, client);
-      transport.once('connection', (...[, , connectionHandle]) => {
+      transport.once('connection', (...[, connectionHandle]) => {
         handles.set(name, connectionHandle);
       });
-      await client.connect({ address: '127.0.0.1', port });
+      await client.connect({ address: '127.0.0.1', port, server: transport });
     },
     start: async (): Promise<void> => {
       await transport.start();
@@ -447,7 +459,7 @@ const createBrokerConnections = (clock: TestClock) => {
     return client;
   };
 
-  transport.on('connection', (...[peer, , connectionHandle]) => {
+  transport.on('connection', (...[{ socket: peer }, connectionHandle]) => {
     handles.set(peer.id, connectionHandle);
   });
 
@@ -675,7 +687,7 @@ export const playConversation = async (
     wallClock: string;
   }
 ): Promise<void> => {
-  const { limits, pacing, relay, steps } = conversation;
+  const { limits, listener, pacing, relay, steps } = conversation;
   // the clock every layer runs on: only a step that moves time moves it
   const clock = createTestClock(Date.parse(wallClock));
 
@@ -728,7 +740,39 @@ export const playConversation = async (
       connectionHandle,
     });
   });
-  offerInterop(server);
+  const interop = offerInterop(server);
+
+  // ! the conversation's listener, within its telling: a call made there goes as its side takes
+  // it, behind what that turn sends (spec 9.0)
+  if (listener !== undefined) {
+    expect(TELLINGS.has(listener.telling), 'a listener on a telling this player reads').toBe(true);
+    expect(LISTENER_COMMANDS.has(listener.command), 'a command this player calls').toBe(true);
+
+    const told = new Set<TransportServerConnectionHandle>();
+    const ask = (connectionHandle: TransportServerConnectionHandle): void => {
+      if (told.has(connectionHandle)) {
+        return;
+      }
+
+      told.add(connectionHandle);
+      interop.command.clock(QUESTION)({ connectionHandle, timeout: PATIENCE }).catch(noop);
+    };
+
+    if (listener.telling === 'report') {
+      router.on('error', (_error, connectionHandle) => {
+        if (connectionHandle !== undefined) {
+          ask(connectionHandle);
+        }
+      });
+    } else {
+      router.on('debug', ({ connectionHandle, direction }) => {
+        if (direction === 'rx') {
+          ask(connectionHandle);
+        }
+      });
+    }
+  }
+
   await connections.start();
 
   // every series at 0 as the case begins, once the server is built

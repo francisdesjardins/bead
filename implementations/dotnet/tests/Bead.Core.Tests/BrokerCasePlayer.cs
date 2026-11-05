@@ -123,7 +123,7 @@ internal sealed class BrokerCasePlayer : IAsyncDisposable
             Heartbeat = OptionOf((entry, "heartbeat")) is { } heartbeat ? TimeOf(heartbeat) : TimeSpan.FromSeconds(30),
 
             // * a client alone connects no more once its link is lost; a server's participant links anew
-            IsReconnecting = !_isClient,
+            Reconnects = !_isClient,
 
             // * the router's envelope by default, as its server sizes it (spec 15.20)
             MaximumEnvelopePartsBytes = OptionOf((entry, "maximumEnvelopePartsBytes"))?.GetInt64() ?? limits.MaximumEnvelopeBytes,
@@ -572,7 +572,7 @@ internal sealed class BrokerCasePlayer : IAsyncDisposable
         else if (step.TryGetProperty("connect", out var connect))
         {
             await NothingMore();
-            _connecting = _client!.Connect(new BrokerConnectOptions { Server = connect.GetString()!, Timeout = _connectTimeout }, Cancelled);
+            _connecting = _client!.Connect(new BrokerTransportClientConnectOptions { Server = connect.GetString()!, Timeout = _connectTimeout, CancellationToken = Cancelled });
         }
         else if (step.TryGetProperty("transportSend", out var send))
         {
@@ -591,6 +591,33 @@ internal sealed class BrokerCasePlayer : IAsyncDisposable
         {
             await NothingMore();
             await _broker.TakeOver(takeover.GetString()!);
+        }
+        else if (step.TryGetProperty("participant", out var act))
+        {
+            await NothingMore();
+
+            // * the participant under test stopped in place, or started again, each settled (spec 15.21);
+            // what crosses its stop is published in the turn it begins, before it
+            if (act.ValueKind == JsonValueKind.Object && act.TryGetProperty("stop", out var crossed))
+            {
+                await ParticipantStop(crossed);
+
+                return;
+            }
+
+            switch (act.GetString())
+            {
+                case "stop":
+                    await _participant.Stop();
+
+                    break;
+                case "start":
+                    await _participant.Start();
+
+                    break;
+                default:
+                    throw new ArgumentException($"a participant's step no test plays: {Describe(step)}", nameof(step));
+            }
         }
         else if (step.TryGetProperty("leave", out var leave))
         {
@@ -735,6 +762,30 @@ internal sealed class BrokerCasePlayer : IAsyncDisposable
         {
             await crossed.WaitAsync(Patience, Cancelled);
         }
+    }
+
+    // the stop of the participant under test, a publish crossing it published in the turn it begins,
+    // before it: each publication made as it is called, since its stop lets its names go in that
+    // turn, as it is called
+    private async Task ParticipantStop(JsonElement stop)
+    {
+        Task? stopping = null;
+        Task? crossed = null;
+
+        await _broker.Turn(() =>
+        {
+            var crossing = stop.GetProperty("crossing");
+            var from = crossing.GetProperty("from").GetString()!;
+            var peer = _peers[from].Adapter;
+
+            crossed = Task.WhenAll([.. PublicationsOf((TopicOf((crossing.GetProperty("to").GetString()!, from)), crossing.GetProperty("publish"))).Select((publication) =>
+            {
+                return peer.Publish(publication);
+            })]);
+            stopping = _participant.Stop();
+        });
+        await stopping!.WaitAsync(Patience, Cancelled);
+        await crossed!.WaitAsync(Patience, Cancelled);
     }
 
     private async Task Expect((JsonElement Expected, JsonElement Step, Timing Timing) step)

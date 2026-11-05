@@ -13,12 +13,7 @@
 
 import type { DescMessage, Message, MessageInitShape } from '@bufbuild/protobuf';
 import { toBinary } from '@bufbuild/protobuf';
-import {
-  JsonFormError,
-  readProtoJson,
-  typeRegistryOf,
-  writeProtoJson,
-} from '@francisdesjardins/bead/transcoding';
+import { createJsonForm, JsonFormError } from '@francisdesjardins/bead/transcoding';
 
 import { ProbeSchema } from './generated/codecs_pb.ts';
 import type {
@@ -99,8 +94,8 @@ const CODECS: ReadonlyMap<string, ICodec> = new Map([
   ['bead.codecs.v1.Probe', codecOf(ProbeSchema, ConformanceProcedures.probe)],
 ]);
 
-// the messages an `Any` of the suite's may name
-const REGISTRY = typeRegistryOf(
+// Bead's mapping, an `Any` of the suite's naming a message of its definitions
+const FORM = createJsonForm(
   [...CODECS.values()].map((codec) => {
     return codec.schema;
   })
@@ -114,10 +109,7 @@ const reasonOf = (error: unknown): string => {
 // payload (transcoding 5.2, its last step), a binary one by its codec alone
 const messageOf = (codec: ICodec, request: ConformanceRequest): Message => {
   if (request.payload.case === 'jsonPayload') {
-    const read = readProtoJson(codec.schema, {
-      bytes: new TextEncoder().encode(request.payload.value),
-      registry: REGISTRY,
-    });
+    const read = FORM.read(codec.schema, new TextEncoder().encode(request.payload.value));
 
     return codec.decode(toBinary(codec.schema, read));
   }
@@ -190,7 +182,7 @@ const answerOf = (request: ConformanceRequest): Response => {
       return {
         result: {
           case: 'jsonPayload',
-          value: writeProtoJson(codec.schema, { message, registry: REGISTRY }),
+          value: FORM.write(codec.schema, message),
         },
       };
     } catch (error) {
@@ -202,7 +194,17 @@ const answerOf = (request: ConformanceRequest): Response => {
     }
   }
 
-  return { result: { case: 'protobufPayload', value: codec.encode(message) } };
+  // * the writer refuses what its reader would (spec 17.2): a message read whole that its library
+  // writes deeper, an empty value given to an entry that held none, as the Rust side's testee says
+  try {
+    return { result: { case: 'protobufPayload', value: codec.encode(message) } };
+  } catch (error) {
+    if (error instanceof TypeError) {
+      return { result: { case: 'serializeError', value: error.message } };
+    }
+
+    throw error;
+  }
 };
 
 let pending = Buffer.alloc(0);

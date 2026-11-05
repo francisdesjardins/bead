@@ -1,0 +1,62 @@
+#nullable enable
+Bead.Transport.Mqtt.MqttBrokerAdapter
+Bead.Transport.Mqtt.MqttBrokerAdapter.Capabilities.get -> Bead.BrokerCapabilities
+Bead.Transport.Mqtt.MqttBrokerAdapter.Delivery.get -> Bead.BrokerDelivery
+Bead.Transport.Mqtt.MqttBrokerAdapter.DisposeAsync() -> System.Threading.Tasks.ValueTask
+Bead.Transport.Mqtt.MqttBrokerAdapter.Down -> System.Action<Bead.BrokerDown!>?
+Bead.Transport.Mqtt.MqttBrokerAdapter.Id.get -> string!
+Bead.Transport.Mqtt.MqttBrokerAdapter.IsLinked.get -> bool
+Bead.Transport.Mqtt.MqttBrokerAdapter.IsSecure.get -> bool
+Bead.Transport.Mqtt.MqttBrokerAdapter.MaximumPayloadBytes(System.Collections.Generic.IReadOnlyList<string!>! topic) -> long
+Bead.Transport.Mqtt.MqttBrokerAdapter.Message -> System.Action<Bead.BrokerMessage!>?
+Bead.Transport.Mqtt.MqttBrokerAdapter.MqttBrokerAdapter(Bead.Transport.Mqtt.MqttBrokerAdapterOptions! options) -> void
+Bead.Transport.Mqtt.MqttBrokerAdapter.Publish(Bead.BrokerPublication! publication) -> System.Threading.Tasks.Task<Bead.BrokerPublished>!
+Bead.Transport.Mqtt.MqttBrokerAdapter.ReceiveBound(System.Collections.Generic.IReadOnlyList<string!>! topic) -> long
+Bead.Transport.Mqtt.MqttBrokerAdapter.Start(Bead.BrokerStart? start = null) -> System.Threading.Tasks.Task!
+Bead.Transport.Mqtt.MqttBrokerAdapter.Stop() -> System.Threading.Tasks.Task!
+Bead.Transport.Mqtt.MqttBrokerAdapter.Subscribe(System.Collections.Generic.IReadOnlyList<string!>! topic, Bead.BrokerSubscription? subscription = null) -> System.Threading.Tasks.Task!
+Bead.Transport.Mqtt.MqttBrokerAdapter.Type.get -> string!
+Bead.Transport.Mqtt.MqttBrokerAdapter.Unsettled.get -> int
+Bead.Transport.Mqtt.MqttBrokerAdapter.Unsubscribe(System.Collections.Generic.IReadOnlyList<string!>! topic) -> System.Threading.Tasks.Task!
+Bead.Transport.Mqtt.MqttBrokerAdapterOptions
+Bead.Transport.Mqtt.MqttBrokerAdapterOptions.<Clone>$() -> Bead.Transport.Mqtt.MqttBrokerAdapterOptions!
+Bead.Transport.Mqtt.MqttBrokerAdapterOptions.ConnectTimeout.get -> System.TimeSpan
+Bead.Transport.Mqtt.MqttBrokerAdapterOptions.ConnectTimeout.init -> void
+Bead.Transport.Mqtt.MqttBrokerAdapterOptions.Delivery.get -> Bead.BrokerDelivery
+Bead.Transport.Mqtt.MqttBrokerAdapterOptions.Delivery.init -> void
+Bead.Transport.Mqtt.MqttBrokerAdapterOptions.Equals(Bead.Transport.Mqtt.MqttBrokerAdapterOptions? other) -> bool
+Bead.Transport.Mqtt.MqttBrokerAdapterOptions.Groups.get -> bool
+Bead.Transport.Mqtt.MqttBrokerAdapterOptions.Groups.init -> void
+Bead.Transport.Mqtt.MqttBrokerAdapterOptions.Id.get -> string!
+Bead.Transport.Mqtt.MqttBrokerAdapterOptions.Id.init -> void
+Bead.Transport.Mqtt.MqttBrokerAdapterOptions.KeepAlive.get -> System.TimeSpan
+Bead.Transport.Mqtt.MqttBrokerAdapterOptions.KeepAlive.init -> void
+Bead.Transport.Mqtt.MqttBrokerAdapterOptions.MaximumPacketSize.get -> long
+Bead.Transport.Mqtt.MqttBrokerAdapterOptions.MaximumPacketSize.init -> void
+Bead.Transport.Mqtt.MqttBrokerAdapterOptions.MqttBrokerAdapterOptions() -> void
+Bead.Transport.Mqtt.MqttBrokerAdapterOptions.Password.get -> string?
+Bead.Transport.Mqtt.MqttBrokerAdapterOptions.Password.init -> void
+Bead.Transport.Mqtt.MqttBrokerAdapterOptions.PasswordProvider.get -> System.Func<System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<string!>>?
+Bead.Transport.Mqtt.MqttBrokerAdapterOptions.PasswordProvider.init -> void
+Bead.Transport.Mqtt.MqttBrokerAdapterOptions.Tls.get -> Bead.Transport.Mqtt.MqttBrokerTlsOptions?
+Bead.Transport.Mqtt.MqttBrokerAdapterOptions.Tls.init -> void
+Bead.Transport.Mqtt.MqttBrokerAdapterOptions.Uri.get -> System.Uri!
+Bead.Transport.Mqtt.MqttBrokerAdapterOptions.Uri.init -> void
+Bead.Transport.Mqtt.MqttBrokerTlsOptions
+Bead.Transport.Mqtt.MqttBrokerTlsOptions.<Clone>$() -> Bead.Transport.Mqtt.MqttBrokerTlsOptions!
+Bead.Transport.Mqtt.MqttBrokerTlsOptions.ClientCertificates.get -> System.Security.Cryptography.X509Certificates.X509Certificate2Collection?
+Bead.Transport.Mqtt.MqttBrokerTlsOptions.ClientCertificates.init -> void
+Bead.Transport.Mqtt.MqttBrokerTlsOptions.Equals(Bead.Transport.Mqtt.MqttBrokerTlsOptions? other) -> bool
+Bead.Transport.Mqtt.MqttBrokerTlsOptions.MqttBrokerTlsOptions() -> void
+Bead.Transport.Mqtt.MqttBrokerTlsOptions.TrustChain.get -> System.Security.Cryptography.X509Certificates.X509Certificate2Collection?
+Bead.Transport.Mqtt.MqttBrokerTlsOptions.TrustChain.init -> void
+override Bead.Transport.Mqtt.MqttBrokerAdapterOptions.Equals(object? obj) -> bool
+override Bead.Transport.Mqtt.MqttBrokerAdapterOptions.GetHashCode() -> int
+override Bead.Transport.Mqtt.MqttBrokerAdapterOptions.ToString() -> string!
+override Bead.Transport.Mqtt.MqttBrokerTlsOptions.Equals(object? obj) -> bool
+override Bead.Transport.Mqtt.MqttBrokerTlsOptions.GetHashCode() -> int
+override Bead.Transport.Mqtt.MqttBrokerTlsOptions.ToString() -> string!
+static Bead.Transport.Mqtt.MqttBrokerAdapterOptions.operator !=(Bead.Transport.Mqtt.MqttBrokerAdapterOptions? left, Bead.Transport.Mqtt.MqttBrokerAdapterOptions? right) -> bool
+static Bead.Transport.Mqtt.MqttBrokerAdapterOptions.operator ==(Bead.Transport.Mqtt.MqttBrokerAdapterOptions? left, Bead.Transport.Mqtt.MqttBrokerAdapterOptions? right) -> bool
+static Bead.Transport.Mqtt.MqttBrokerTlsOptions.operator !=(Bead.Transport.Mqtt.MqttBrokerTlsOptions? left, Bead.Transport.Mqtt.MqttBrokerTlsOptions? right) -> bool
+static Bead.Transport.Mqtt.MqttBrokerTlsOptions.operator ==(Bead.Transport.Mqtt.MqttBrokerTlsOptions? left, Bead.Transport.Mqtt.MqttBrokerTlsOptions? right) -> bool

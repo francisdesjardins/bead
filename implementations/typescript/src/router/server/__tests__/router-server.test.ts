@@ -2,11 +2,19 @@ import { createHmac } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
 import { WebSocketServer } from 'ws';
-import { createWSClient } from '../../../client/ws-client';
+import { createWebSocketClient } from '../../../client/websocket-client';
 import { allClosed, host, IMPLEMENTATIONS } from '../../../transport/shared/__tests__/fixtures';
-import { createWSTransportServer } from '../../../transport/server/ws-transport-server';
-import type { TransportServerConnectionHandle } from '../../../transport/server/types';
+import { createWebSocketTransportServer } from '../../../transport/server/websocket-transport-server';
+import { createMemoryTransportServer } from '../../../transport/server/memory-transport-server';
+import { createMemoryTransportClient } from '../../../transport/client/memory-transport-client';
+import type {
+  ITransportServerConnection,
+  TransportServerConnectionHandle,
+} from '../../../transport/server/types';
 import { createEmitter } from '../../../transport/shared/emitter';
+import { createHold, type IHold } from '../../../transport/shared/hold';
+import { nextTask } from '../../../transport/shared/later-task';
+import { noop } from '../../../transport/shared/noop';
 import type { ITransportMessage } from '../../../transport/shared/types';
 import { bytesOf, readEnvelope } from '../../shared/envelope';
 import { headerBytesOf } from '../../shared/header';
@@ -20,8 +28,11 @@ import type {
   ICredentials,
   IElsewhereSession,
   IFailure,
+  IHandedRequestHeader,
   INotificationLike,
   IProcedure,
+  IRequestResolverDependencies,
+  IRequestResolverProps,
   OutgoingEnvelope,
   RequestCredential,
   RouterLimitsOptions,
@@ -264,7 +275,8 @@ const resultOf = (callId: number, payload = new Uint8Array(0)): OutgoingEnvelope
 /**
  * A transport server that records what it sends, read as a client reads it, and the credential it
  * is given beside it, delivers what a test gives, with what its transport carried, and carries a
- * credential, securely, unless told otherwise.
+ * credential, securely, unless told otherwise. A connection its router paused holds what the test
+ * delivers, in order, until resumed; `paces` holds each pause and resume, by connection.
  */
 const createScriptedTransport = ({
   carriesCredential = true,
@@ -272,11 +284,31 @@ const createScriptedTransport = ({
 }: { carriesCredential?: boolean; isSecure?: boolean } = {}) => {
   const emitter = createEmitter<{
     close: [wasClean: boolean, connectionHandle: Handle];
-    connection: [socket: unknown, request: unknown, connectionHandle: Handle];
+    connection: [connection: ITransportServerConnection, connectionHandle: Handle];
     message: [message: ITransportMessage, connectionHandle: Handle];
   }>();
   const sent: ISentEnvelope[] = [];
   const carried: (string | undefined)[] = [];
+  const paces: string[] = [];
+  const holds = new Map<Handle, IHold<ITransportMessage>>();
+  const holdOf = (connectionHandle: Handle): IHold<ITransportMessage> => {
+    const known = holds.get(connectionHandle);
+
+    if (known !== undefined) {
+      return known;
+    }
+
+    const hold = createHold((message: ITransportMessage) => {
+      emitter.emit('message', message, connectionHandle);
+    });
+
+    holds.set(connectionHandle, hold);
+
+    return hold;
+  };
+  const nameOf = (connectionHandle: Handle): string => {
+    return connectionHandle === first ? 'first' : 'second';
+  };
   const control = {
     /** Called with each envelope as it is handed over, before the send settles. */
     onSend: undefined as ((sentEnvelope: ISentEnvelope) => void) | undefined,
@@ -295,6 +327,14 @@ const createScriptedTransport = ({
     },
     off: emitter.off,
     on: emitter.on,
+    pause: (connectionHandle) => {
+      paces.push(`pause ${nameOf(connectionHandle)}`);
+      holdOf(connectionHandle).pause();
+    },
+    resume: (connectionHandle) => {
+      paces.push(`resume ${nameOf(connectionHandle)}`);
+      holdOf(connectionHandle).resume();
+    },
     send: ({ credential, data }, connectionHandle) => {
       carried.push(credential);
 
@@ -322,7 +362,7 @@ const createScriptedTransport = ({
   };
 
   const open = (connectionHandle: Handle) => {
-    emitter.emit('connection', {}, {}, connectionHandle);
+    emitter.emit('connection', { request: {}, socket: {} }, connectionHandle);
   };
 
   const close = (connectionHandle: Handle) => {
@@ -330,11 +370,9 @@ const createScriptedTransport = ({
   };
 
   const deliver = (connectionHandle: Handle, envelope: OutgoingEnvelope | Uint8Array) => {
-    emitter.emit(
-      'message',
-      { data: envelope instanceof Uint8Array ? envelope : envelopeOf(envelope) },
-      connectionHandle
-    );
+    holdOf(connectionHandle).offer({
+      data: envelope instanceof Uint8Array ? envelope : envelopeOf(envelope),
+    });
   };
 
   // as `deliver`, with what its transport carried beside it
@@ -342,10 +380,31 @@ const createScriptedTransport = ({
     connectionHandle: Handle,
     { credential, envelope }: { credential: string; envelope: OutgoingEnvelope }
   ) => {
-    emitter.emit('message', { credential, data: envelopeOf(envelope) }, connectionHandle);
+    holdOf(connectionHandle).offer({ credential, data: envelopeOf(envelope) });
   };
 
-  return { carried, carry, close, control, deliver, emitter, open, sent, transport };
+  // whether its router paused a connection, and what it holds of it
+  const isPaused = (connectionHandle: Handle): boolean => {
+    return holdOf(connectionHandle).isPaused;
+  };
+  const heldOf = (connectionHandle: Handle): number => {
+    return holdOf(connectionHandle).size;
+  };
+
+  return {
+    carried,
+    carry,
+    close,
+    control,
+    deliver,
+    emitter,
+    heldOf,
+    isPaused,
+    open,
+    paces,
+    sent,
+    transport,
+  };
 };
 
 const recordErrors = (router: ReturnType<typeof createRouterServer>) => {
@@ -399,7 +458,7 @@ const recordActivity = (router: ReturnType<typeof createRouterServer>) => {
 
 test.describe('createRouterServer', () => {
   test('takes this package’s transport server', () => {
-    const transport = createWSTransportServer({ WebSocketServer });
+    const transport = createWebSocketTransportServer({ WebSocketServer });
     using router = createRouterServer(transport);
 
     expect(router.transport).toBe(transport);
@@ -410,13 +469,17 @@ test.describe('createRouterServer', () => {
   test("runs on its transport's clock, or on the one it is given when its transport has none, and refuses one that differs", () => {
     const clock = createTestClock();
     const { transport } = createScriptedTransport();
-    using onItsTransport = createRouterServer(createWSTransportServer({ clock, WebSocketServer }));
+    using onItsTransport = createRouterServer(
+      createWebSocketTransportServer({ clock, WebSocketServer })
+    );
     using onItsOwn = createRouterServer(transport, { clock });
-    using same = createRouterServer(createWSTransportServer({ clock, WebSocketServer }), { clock });
+    using same = createRouterServer(createWebSocketTransportServer({ clock, WebSocketServer }), {
+      clock,
+    });
 
     expect([onItsTransport.clock, onItsOwn.clock, same.clock]).toEqual([clock, clock, clock]);
     expect(() => {
-      createRouterServer(createWSTransportServer({ WebSocketServer }), { clock });
+      createRouterServer(createWebSocketTransportServer({ WebSocketServer }), { clock });
     }).toThrow(
       new ProgrammerError(
         "a server's router runs on the clock of its transport, the platform's, and was given another, one of its own"
@@ -507,9 +570,10 @@ test.describe('createRouterServer', () => {
       await sleep(0);
 
       expect(asked).toEqual([31, 33]);
+      // the refusal in the turn its request came, the result in the later turn its resolver runs in
       expect(answersOf(sent)).toEqual([
-        [first, 'result', 31, 'hi!'],
         [first, 'failure', 33, ProtocolCode.ACCESS_DENIED],
+        [first, 'result', 31, 'hi!'],
       ]);
     });
 
@@ -549,19 +613,20 @@ test.describe('createRouterServer', () => {
       deliver(first, requestOf(35, { credential: { ...OPAQUE, token: OTHER_TOKEN } }));
       await sleep(0);
 
+      // each callback in a later turn than its request's, behind the requests delivered with it
       expect(order).toEqual([
         ['session', first, 31, false],
         ['admit', 31, undefined],
-        ['callback', 31, undefined],
         ['session', first, 33, false],
         ['admit', 33, { data: 'ada' }],
-        ['callback', 33, { data: 'ada' }],
         ['session', first, 35, false],
+        ['callback', 31, undefined],
+        ['callback', 33, { data: 'ada' }],
       ]);
       expect(answersOf(sent)).toEqual([
+        [first, 'failure', 35, ProtocolCode.SESSION_REQUIRED],
         [first, 'result', 31, 'ok'],
         [first, 'result', 33, 'ok'],
-        [first, 'failure', 35, ProtocolCode.SESSION_REQUIRED],
       ]);
     });
 
@@ -695,6 +760,8 @@ test.describe('createRouterServer', () => {
       deliver(first, requestOf(1));
       deliver(second, subscribingOf(1));
       emitter.emit('message', { data: 'text' }, first);
+      // each resolver handed its request in a later turn
+      await sleep(0);
 
       // a refusal that cannot go out
       const gone = new Error('gone');
@@ -704,18 +771,19 @@ test.describe('createRouterServer', () => {
       await sleep(0);
 
       expect(reportedOf(errors)).toEqual([
-        ['thrown', second],
         [ProtocolCode.ENVELOPE_MALFORMED, first],
+        ['thrown', second],
         ['rejected', first],
         ['gone', second],
       ]);
       expect(errors[3]?.[0]).toBe(gone);
-      // each resolver that failed answered PROCEDURE_FAILED: the one that threw within its
-      // delivery, before its connection's sends fail, then the one that rejected
+      // each resolver that failed answered PROCEDURE_FAILED, in the later turn it was handed its
+      // request in, before its connection's sends fail: the one that threw, then the one that
+      // rejected
       expect(answersOf(sent)).toEqual([
         [second, 'failure', 1, ProtocolCode.PROCEDURE_FAILED],
-        [second, 'failure', 3, ProtocolCode.SERVICE_UNKNOWN],
         [first, 'failure', 1, ProtocolCode.PROCEDURE_FAILED],
+        [second, 'failure', 3, ProtocolCode.SERVICE_UNKNOWN],
       ]);
     });
 
@@ -1600,6 +1668,44 @@ test.describe('createRouterServer', () => {
       expect(errors).toEqual([]);
     });
 
+    test('a subscription goes only to a request this router dispatched: a copy of its header is refused, and subscribes nothing', async () => {
+      const { deliver, open, sent, transport } = createScriptedTransport();
+      using router = createRouterServer(transport);
+      const errors = recordErrors(router);
+      const handed: IRequestResolverProps<Handle>[] = [];
+
+      open(first);
+      router.registerResolver(
+        Object.assign((props: IRequestResolverProps<Handle>) => {
+          handed.push(props);
+
+          return Promise.resolve();
+        }, news)
+      );
+      deliver(first, subscribingOf(1));
+      await sleep(0);
+
+      const [request] = handed;
+
+      if (request === undefined) {
+        throw new Error('the request reaches its resolver');
+      }
+
+      // a copy of its header was never dispatched: no call is tied to it (spec 9.3)
+      expect(() => {
+        return router.subscribe({ ...request, header: { ...request.header } });
+      }).toThrow(ProgrammerError);
+      expect(router.notifications.subscriptions()).toEqual([]);
+
+      // its own header subscribes it, the copy having marked nothing
+      expect(router.subscribe(request)).toBe(1);
+      expect(router.notifications.subscriptions()).toEqual([
+        { callId: 1, connectionHandle: first, procedureId: 5, serviceId: 2 },
+      ]);
+      expect(sent).toEqual([]);
+      expect(errors).toEqual([]);
+    });
+
     test('a cancel takes away what its call subscribed in flight, and nothing answers it', async () => {
       const { deliver, open, sent, transport } = createScriptedTransport();
       using router = createRouterServer(transport);
@@ -1933,10 +2039,7 @@ test.describe('createRouterServer', () => {
 
         await sleep(0);
         sent.length = 0;
-        await router.dropSubscriptions({
-          connectionHandle: first,
-          failure: SERVER_FAILURES.sessionRequired,
-        });
+        await router.dropSubscriptions(first, SERVER_FAILURES.sessionRequired);
         release();
         await sleep(0);
 
@@ -2082,10 +2185,7 @@ test.describe('createRouterServer', () => {
       sent.length = 0;
       token = undefined;
 
-      await router.dropSubscriptions({
-        connectionHandle: first,
-        failure: SERVER_FAILURES.sessionRequired,
-      });
+      await router.dropSubscriptions(first, SERVER_FAILURES.sessionRequired);
 
       expect(
         sent.map(({ connectionHandle, envelope }) => {
@@ -2116,10 +2216,7 @@ test.describe('createRouterServer', () => {
 
       // a failure that cannot go out is reported, and the subscription goes all the same
       control.sendErrors.set(second, new Error('gone'));
-      await router.dropSubscriptions({
-        connectionHandle: second,
-        failure: SERVER_FAILURES.sessionRequired,
-      });
+      await router.dropSubscriptions(second, SERVER_FAILURES.sessionRequired);
 
       expect(reportedOf(errors)).toEqual([['gone', second]]);
       expect(router.notifications.subscriptions(second)).toEqual([]);
@@ -2138,10 +2235,7 @@ test.describe('createRouterServer', () => {
       await sleep(0);
       sent.length = 0;
 
-      await router.dropSubscriptions({
-        connectionHandle: first,
-        failure: SERVER_FAILURES.sessionRequired,
-      });
+      await router.dropSubscriptions(first, SERVER_FAILURES.sessionRequired);
 
       expect(answersOf(sent.splice(0))).toEqual([
         [first, 'failure', 5, ProtocolCode.SESSION_REQUIRED],
@@ -2154,6 +2248,36 @@ test.describe('createRouterServer', () => {
 
       expect(answersOf(sent)).toEqual([[first, 'result', 1, 'held']]);
       expect(router.notifications.subscriptions()).toEqual(held());
+    });
+
+    test('dropSubscriptions takes a connection’s handle, a string, and rejects anything else', async () => {
+      const { router, sent } = createHolding('answer');
+
+      using _router = router;
+
+      await sleep(0);
+      sent.length = 0;
+
+      const subscriptions = router.notifications.subscriptions();
+
+      // * the record of 0.9.0's call among them: two things are two parameters
+      for (const [handle, shown] of [
+        [{ connectionHandle: first }, '[object Object]'],
+        [undefined, 'undefined'],
+        [7, '7'],
+      ] as const) {
+        const dropping = router.dropSubscriptions(handle as never, SERVER_FAILURES.sessionRequired);
+
+        await expect(dropping).rejects.toBeInstanceOf(ProgrammerError);
+        await expect(dropping).rejects.toThrow(
+          `dropSubscriptions takes a connection's handle, a string, not ${shown}`
+        );
+      }
+
+      await sleep(0);
+
+      expect(sent).toEqual([]);
+      expect(router.notifications.subscriptions()).toEqual(subscriptions);
     });
 
     // a handle opened again finds no call of the connection that closed waiting
@@ -2195,6 +2319,286 @@ test.describe('createRouterServer', () => {
       await expect(router.unregisterNotification(notification)).rejects.toBeInstanceOf(
         ProgrammerError
       );
+    });
+  });
+
+  test.describe('its intake', () => {
+    // each envelope it takes, by its connection and its call id, and whether its transport was
+    // paused on it as it took it
+    const takenBy = (
+      router: ReturnType<typeof createRouterServer>,
+      isPaused: (connectionHandle: Handle) => boolean
+    ) => {
+      const taken: string[] = [];
+
+      router.on('debug', ({ connectionHandle, direction, header }) => {
+        if (direction === 'rx') {
+          const name = connectionHandle === first ? 'first' : 'second';
+
+          taken.push(
+            `${name} ${String(header.callId)}${isPaused(connectionHandle) ? ' paused' : ''}`
+          );
+        }
+      });
+
+      return taken;
+    };
+
+    // spec 15.12.17, 15.12.18
+    test('pauses a connection once its untaken envelopes reach a bound, and resumes it once they are at half', async () => {
+      const { deliver, heldOf, isPaused, open, paces, transport } = createScriptedTransport();
+      using router = createRouterServer(transport, { intake: { maximumUntakenEnvelopes: 4 } });
+      const taken = takenBy(router, isPaused);
+
+      open(first);
+
+      for (const callId of [1, 3, 5]) {
+        deliver(first, cancelOf(callId));
+      }
+
+      // three untaken within this task, under its bound of 4
+      expect(isPaused(first)).toBe(false);
+
+      deliver(first, cancelOf(7));
+
+      expect(isPaused(first)).toBe(true);
+
+      for (const callId of [9, 11]) {
+        deliver(first, cancelOf(callId));
+      }
+
+      // what came after it held by its transport
+      expect([heldOf(first), taken]).toEqual([
+        2,
+        ['first 1', 'first 3', 'first 5', 'first 7 paused'],
+      ]);
+
+      // * released in the next task, every count cleared, below half: resumed, what it held handed
+      await nextTask();
+      await sleep(0);
+
+      expect(taken).toEqual([
+        'first 1',
+        'first 3',
+        'first 5',
+        'first 7 paused',
+        'first 9',
+        'first 11',
+      ]);
+      expect([paces, heldOf(first)]).toEqual([['pause first', 'resume first'], 0]);
+    });
+
+    // spec 15.12.17, 15.12.18
+    test('takes the envelope that reaches a bound', async () => {
+      const { deliver, heldOf, isPaused, open, paces, transport } = createScriptedTransport();
+      using router = createRouterServer(transport, { intake: { maximumUntakenEnvelopes: 2 } });
+      const taken = takenBy(router, isPaused);
+
+      open(first);
+
+      for (const callId of [1, 3, 5]) {
+        deliver(first, cancelOf(callId));
+      }
+
+      // the second, which reached the bound, taken; the third alone held
+      expect([taken, heldOf(first)]).toEqual([['first 1', 'first 3 paused'], 1]);
+
+      await nextTask();
+      await sleep(0);
+
+      expect(taken).toEqual(['first 1', 'first 3 paused', 'first 5']);
+
+      // * an envelope larger than the byte bound is taken whole, and released
+      const bytes = createScriptedTransport();
+      using byBytes = createRouterServer(bytes.transport, { intake: { maximumUntakenBytes: 100 } });
+      const byBytesTaken = takenBy(byBytes, bytes.isPaused);
+
+      bytes.open(first);
+      bytes.deliver(first, requestOf(1, { payload: new Uint8Array(1_000) }));
+
+      expect(bytes.isPaused(first)).toBe(true);
+
+      bytes.deliver(first, cancelOf(9));
+
+      expect(bytes.heldOf(first)).toBe(1);
+
+      await nextTask();
+      await sleep(0);
+
+      expect(byBytesTaken).toEqual(['first 1 paused', 'first 9']);
+      expect([paces, bytes.paces]).toEqual([
+        ['pause first', 'resume first'],
+        ['pause first', 'resume first'],
+      ]);
+    });
+
+    // spec 15.12.17
+    test('an envelope of one connection waits behind no more than the bound of another that floods', async () => {
+      const memory = createMemoryTransportServer();
+      using router = createRouterServer(memory, { intake: { maximumUntakenEnvelopes: 4 } });
+      await using flooding = createMemoryTransportClient();
+      await using other = createMemoryTransportClient();
+      const taken: string[] = [];
+
+      router.on('debug', ({ connectionHandle, direction, header }) => {
+        if (direction === 'rx') {
+          const from = connectionHandle.includes('ip=flooding;') ? 'flooding' : 'other';
+
+          taken.push(`${from} ${String(header.callId)}`);
+        }
+      });
+      await memory.start();
+      await flooding.connect({ address: 'flooding', server: memory });
+      await other.connect({ address: 'other', server: memory });
+
+      // * 40 of one connection, then one of the other, sent before any is taken
+      for (let callId = 1; callId <= 79; callId += 2) {
+        void flooding.send({ data: envelopeOf(cancelOf(callId)) });
+      }
+
+      void other.send({ data: envelopeOf(cancelOf(1_001)) });
+
+      for (let task = 0; task < 100 && taken.length < 41; task += 1) {
+        await nextTask();
+      }
+
+      const ahead = taken.indexOf('other 1001');
+
+      // the other's waited behind no more than the flood's bound of 4
+      expect(ahead).toBeGreaterThanOrEqual(0);
+      expect(ahead).toBeLessThanOrEqual(4);
+      // the flood taken whole, in order
+      expect(
+        taken.filter((seen) => {
+          return seen.startsWith('flooding');
+        })
+      ).toEqual(
+        Array.from({ length: 40 }, (_, index) => {
+          return `flooding ${String(2 * index + 1)}`;
+        })
+      );
+    });
+
+    // spec 15.12.17, 15.12.18
+    test('counts nothing the router does of its own: a timer, a resolution, a dispose, a deferred call', async () => {
+      const { deliver, open, paces, sent, transport } = createScriptedTransport();
+      const router = createRouterServer(transport, { intake: { maximumUntakenEnvelopes: 1 } });
+      const services = createServiceManager(router);
+      let isMade = false;
+
+      open(first);
+      // a resolution: answered in a later turn
+      services.getRequestResolver(echo, { serializer: answering })(async (request, response) => {
+        await sleep(0);
+
+        return response(request.payload);
+      });
+      // a deferred call: one of its own, made from within the telling of the request it takes
+      router.on('debug', ({ direction }) => {
+        if (direction === 'rx' && !isMade) {
+          isMade = true;
+          router
+            .request(new Uint8Array(0), {
+              options: { connectionHandle: first, timeout: 20 },
+              procedure: echo,
+            })
+            .catch(noop);
+        }
+      });
+
+      // a timer: a call of its own, ended by its timeout
+      const timed = router.request(new Uint8Array(0), {
+        options: { connectionHandle: first, timeout: 20 },
+        procedure: echo,
+      });
+
+      deliver(first, requestOf(1, { payload: text.encode('hi') }));
+      await expect(timed).rejects.toBeInstanceOf(TimeoutError);
+      await sleep(50);
+
+      expect(isMade).toBe(true);
+      expect(answersOf(sent)).toContainEqual([first, 'result', 1, 'hi']);
+
+      // a dispose
+      router[Symbol.dispose]();
+      await nextTask();
+
+      // * the envelope its transport handed alone counted
+      expect(paces).toEqual(['pause first', 'resume first']);
+    });
+
+    // spec 15.12.17; decision 0045
+    test('counts an envelope handed within a telling, and releases it by its deferred turn', async () => {
+      const { deliver, isPaused, open, paces, transport } = createScriptedTransport();
+      using router = createRouterServer(transport, { intake: { maximumUntakenEnvelopes: 1 } });
+      const seen: string[] = [];
+
+      open(first);
+      open(second);
+      router.on('debug', ({ direction, header }) => {
+        if (direction === 'rx' && header.callId === 1) {
+          // * handed within the telling of this listener: counted as it is handed
+          deliver(second, cancelOf(3));
+          seen.push(`the second paused within the telling: ${String(isPaused(second))}`);
+        }
+      });
+      deliver(first, cancelOf(1));
+      await nextTask();
+
+      expect(seen).toEqual(['the second paused within the telling: true']);
+      // released by its deferred turn's task, after the telling's
+      expect(paces).toEqual(['pause first', 'pause second', 'resume first', 'resume second']);
+      expect(isPaused(second)).toBe(false);
+    });
+
+    // spec 15.12.17
+    test('resumes a connection whose envelope a throwing listener heard', async () => {
+      const { deliver, isPaused, open, paces, transport } = createScriptedTransport();
+      using router = createRouterServer(transport, { intake: { maximumUntakenEnvelopes: 1 } });
+      const errors = recordErrors(router);
+
+      open(first);
+      router.on('debug', ({ direction }) => {
+        if (direction === 'rx') {
+          throw new Error('this listener breaks, on purpose');
+        }
+      });
+      deliver(first, cancelOf(1));
+
+      expect(isPaused(first)).toBe(true);
+
+      await nextTask();
+
+      // * the next task's release clears the count, whatever its turn threw
+      expect(paces).toEqual(['pause first', 'resume first']);
+      expect(reportedOf(errors)).toEqual([['this listener breaks, on purpose', first]]);
+    });
+
+    // spec 15.12.17
+    test('resumes every connection it paused as it is disposed', async () => {
+      const { deliver, heldOf, isPaused, open, paces, transport } = createScriptedTransport();
+      const router = createRouterServer(transport, { intake: { maximumUntakenEnvelopes: 1 } });
+
+      open(first);
+      open(second);
+      deliver(first, cancelOf(1));
+      deliver(second, cancelOf(3));
+
+      expect([isPaused(first), isPaused(second)]).toEqual([true, true]);
+
+      // * at once, before the next task's release
+      router[Symbol.dispose]();
+
+      expect(paces).toEqual(['pause first', 'pause second', 'resume first', 'resume second']);
+
+      // nothing paused after: what its transport hands from then on reaches no router
+      for (const callId of [5, 7, 9]) {
+        deliver(first, cancelOf(callId));
+      }
+
+      await nextTask();
+
+      expect([paces.length, heldOf(first)]).toEqual([4, 0]);
     });
   });
 
@@ -2303,14 +2707,14 @@ test.describe('createRouterServer', () => {
 for (const [label, TrackedWebSocket] of IMPLEMENTATIONS) {
   test.describe(`a WebSocket client and server, the client on ${label}`, () => {
     test('ask, answer, subscribe, notify, unsubscribe and command each other over the wire', async () => {
-      const serverRouter = createRouterServer(createWSTransportServer({ WebSocketServer }), {
+      const serverRouter = createRouterServer(createWebSocketTransportServer({ WebSocketServer }), {
         sessionTokenOf: () => {
           return TOKEN;
         },
       });
       const serverServices = createServiceManager(serverRouter);
       const { port } = await serverRouter.transport.start({ address: host, findOpenPort: true });
-      const client = createWSClient({ transport: { WebSocket: TrackedWebSocket } });
+      const client = createWebSocketClient({ transport: { WebSocket: TrackedWebSocket } });
       const told: unknown[] = [];
 
       client.router.on('debug', ({ direction, header }) => {
@@ -2348,7 +2752,7 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS) {
 
         const ping = { ...echo, procedureId: 40, procedureName: 'ping' };
 
-        client.services.getRequestResolver(ping, { serializer: answering })(
+        client.services.getCommandResolver(ping, { serializer: answering })(
           (_request, response) => {
             return response('pong');
           }
@@ -2389,7 +2793,7 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS) {
 
         // the server asks the client, naming its connection, on an even call id
         await expect(
-          serverServices.getRequest(ping, { serializer: asking })('ping')({
+          serverServices.getCommand(ping, { serializer: asking })('ping')({
             connectionHandle: await asked.promise,
           })
         ).resolves.toBe('pong');
@@ -2647,14 +3051,34 @@ test.describe('createRouterServer, credentials', () => {
     deliver(first, requestOf(7, { credential: ELSEWHERE }));
     await sleep(0);
 
+    const answers = answersOf(sent);
+    const at = (callId: number): number => {
+      return answers.findIndex(([, , answered]) => {
+        return answered === callId;
+      });
+    };
+
     expect(asked).toEqual([[` \t${CARRIED}`, false]]);
-    expect(answersOf(sent)).toEqual([
+    expect(
+      answers.toSorted(([, , a], [, , b]) => {
+        return Number(a) - Number(b);
+      })
+    ).toEqual([
+      [first, 'result', 1, JSON.stringify(` \t${CARRIED}`)],
       [first, 'result', 3, 'none'],
       [first, 'failure', 5, ProtocolCode.SESSION_REQUIRED],
-      [first, 'failure', 9, ProtocolCode.CREDENTIAL_UNSUPPORTED],
       [first, 'failure', 7, ProtocolCode.SESSION_REQUIRED],
-      [first, 'result', 1, JSON.stringify(` \t${CARRIED}`)],
+      [first, 'failure', 9, ProtocolCode.CREDENTIAL_UNSUPPORTED],
     ]);
+    // * the refusals in the turns their requests came, in their order, and a later request's
+    // refusal before the answer a resolver gives at once, which it is handed in a later turn
+    // (decision 0010); 3 and 7 keep no order between them
+    expect(at(5)).toBeLessThan(at(9));
+    expect(at(9)).toBeLessThan(at(3));
+    expect(at(9)).toBeLessThan(at(7));
+    // 3 before 1 and 7 before 1 are what this side's turns give, not an order the spec states
+    expect(at(3)).toBeLessThan(at(1));
+    expect(at(7)).toBeLessThan(at(1));
     expect(failuresOf(sent)).toEqual([
       [5, ProtocolCode.SESSION_REQUIRED, 'the credential does not hold'],
       [9, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE, ELSEWHERE'],
@@ -3730,25 +4154,26 @@ test.describe('createRouterServer, relaying', () => {
     deliver(first, requestOf(5, { destinationId: 7, procedure: { ...echo, procedureId: 9 } }));
     await sleep(0);
 
+    // the target's refusal in the turn its request came, its resolvers' answers in a later turn
     expect(answersOf(sent)).toEqual([
+      [first, 'failure', 5, ProtocolCode.PROCEDURE_UNKNOWN],
       [first, 'result', 1, 'HI'],
       [first, 'failure', 3, 21],
-      [first, 'failure', 5, ProtocolCode.PROCEDURE_UNKNOWN],
     ]);
     expect(
       sent.map(({ envelope }) => {
         return envelope?.kind === EnvelopeKind.FAILURE ? envelope.failure : envelope?.header;
       })
     ).toEqual([
-      // an answer names its call alone
-      { callId: 1, kind: EnvelopeKind.RESULT },
-      { code: 21, detail: 'nothing to echo', relays: 1, scope: FailureScope.APPLICATION },
       {
         code: ProtocolCode.PROCEDURE_UNKNOWN,
         detail: 'no procedure 9 in service 2',
         relays: 1,
         scope: FailureScope.PROTOCOL,
       },
+      // an answer names its call alone
+      { callId: 1, kind: EnvelopeKind.RESULT },
+      { code: 21, detail: 'nothing to echo', relays: 1, scope: FailureScope.APPLICATION },
     ]);
     expect(admissions).toBe(3);
     // the target's own failures are answered, not reported
@@ -4864,10 +5289,7 @@ test.describe('createRouterServer, its paced subscriptions', () => {
 
     expect(queuedOf(router)).toEqual({ pausedSubscriptions: 1, queuedNotifications: 2 });
 
-    await router.dropSubscriptions({
-      connectionHandle: third,
-      failure: SERVER_FAILURES.sessionRequired,
-    });
+    await router.dropSubscriptions(third, SERVER_FAILURES.sessionRequired);
 
     expect(queuedOf(router)).toEqual({ pausedSubscriptions: 0, queuedNotifications: 0 });
 
@@ -5114,6 +5536,84 @@ test.describe('createRouterServer, its metrics', () => {
     ).toEqual([]);
   });
 
+  // echo served on the first connection with `dependencies`, a request delivered to it: what it
+  // sent, what it reported and what the registry counted of its server calls
+  const countedThrough = async (
+    dependencies: IRequestResolverDependencies<string, string, Handle>
+  ) => {
+    const metricsRegistry = createMetricsRegistry();
+    const { deliver, open, sent, transport } = createScriptedTransport();
+    using router = createRouterServer(transport, { clock: createTestClock(), metricsRegistry });
+    const errors = recordErrors(router);
+    const reached: string[] = [];
+    const services = createServiceManager(router);
+
+    services.getRequestResolver(
+      echo,
+      dependencies
+    )((request, response) => {
+      reached.push(request.payload);
+
+      return response(request.payload);
+    });
+    open(first);
+    deliver(first, requestOf(1, { payload: text.encode('x') }));
+    await sleep(0);
+
+    // never reaching the callback
+    expect(reached).toEqual([]);
+
+    return {
+      answers: answersOf(sent),
+      counted: countedOf(metricsRegistry).filter((line) => {
+        return line.startsWith('bead_server_call_');
+      }),
+      errors,
+    };
+  };
+
+  // a request's call counted once, a failure under PROCEDURE_FAILED: never as its codec's refusal,
+  // PAYLOAD_UNDECODABLE, nor as an error
+  const echoed = lineOf('bead_server_call_', 'service="2",procedure="echo",type="request"');
+  const countedProcedureFailed = [
+    echoed('duration_seconds_count{} 1'),
+    echoed('handled_total{outcome="failure",code="PROCEDURE_FAILED"} 1'),
+    echoed('started_total{} 1'),
+  ];
+
+  // debugging 9.4.14, spec 9.0, 17.2
+  test('counts a request whose codec throws other than its refusal as failure PROCEDURE_FAILED', async () => {
+    // * a TypeError, not the SyntaxError a codec refuses with: its side's own error
+    const broken = new TypeError('this codec breaks as it reads, on purpose');
+    const { answers, counted, errors } = await countedThrough({
+      serializer: {
+        ...answering,
+        decode: () => {
+          throw broken;
+        },
+      },
+    });
+
+    expect(answers).toEqual([[first, 'failure', 1, ProtocolCode.PROCEDURE_FAILED]]);
+    expect(errors).toEqual([[broken, first]]);
+    expect(counted).toEqual(countedProcedureFailed);
+  });
+
+  // debugging 9.4.14, spec 18.2
+  test('counts a request whose rule fails to judge as failure PROCEDURE_FAILED', async () => {
+    const broken = new RangeError('this rule fails to judge, on purpose');
+    const { answers, counted, errors } = await countedThrough({
+      serializer: answering,
+      validate: () => {
+        throw broken;
+      },
+    });
+
+    expect(answers).toEqual([[first, 'failure', 1, ProtocolCode.PROCEDURE_FAILED]]);
+    expect(errors).toEqual([[broken, first]]);
+    expect(counted).toEqual(countedProcedureFailed);
+  });
+
   test('one registry given to a client’s router and a server’s counts a call at each of its ends, a command among them', async () => {
     const metricsRegistry = createMetricsRegistry();
     const clock = createTestClock();
@@ -5288,7 +5788,7 @@ test.describe('createRouterServer, its metrics', () => {
     sent.length = 0;
 
     for (const [connectionHandle, failure] of ending) {
-      await router.dropSubscriptions({ connectionHandle, failure });
+      await router.dropSubscriptions(connectionHandle, failure);
     }
 
     expect(answersOf(sent)).toEqual([
@@ -5743,5 +6243,143 @@ test.describe('createRouterServer, the accesses it refuses', () => {
     // the listener after it told all the same
     expect(after).toHaveLength(1);
     expect(errors).toEqual([[thrown, first]]);
+  });
+});
+
+test.describe('createRouterServer, within a telling', () => {
+  /** A request of the router's own to `first`, carrying `payload`, its rejection kept apart. */
+  const askFirst = (router: ReturnType<typeof createRouterServer>, payload: string) => {
+    return router.request(text.encode(payload), {
+      options: { ...options, connectionHandle: first },
+      procedure: echo,
+    });
+  };
+
+  // spec 9.0; decision 0045
+  test('a call its report listener makes goes behind what that turn answers', async () => {
+    const { deliver, open, sent, transport } = createScriptedTransport();
+    using router = createRouterServer(transport);
+    const failure = new Error('the resolver failed');
+    const made: Promise<unknown>[] = [];
+
+    router.registerResolver(
+      Object.assign(() => {
+        throw failure;
+      }, echo)
+    );
+    router.on('error', (error) => {
+      if (error === failure) {
+        // within the reporting turn, a call on the connection it reports
+        made.push(askFirst(router, 'what time?').catch(noop));
+      }
+    });
+    open(first);
+    deliver(first, requestOf(5));
+    // the turn its resolver is handed the request in, a later one
+    await Promise.resolve();
+
+    // * nothing of the call within the turn: its answer first
+    expect(answersOf(sent)).toEqual([[first, 'failure', 5, ProtocolCode.PROCEDURE_FAILED]]);
+    await sleep(0);
+
+    expect(answersOf(sent)).toEqual([
+      [first, 'failure', 5, ProtocolCode.PROCEDURE_FAILED],
+      [first, EnvelopeKind.REQUEST, 2, 'what time?'],
+    ]);
+    expect(made).toHaveLength(1);
+  });
+
+  // spec 9.0, 9.1; decision 0045: the call goes behind the turn's answer, and the dispose's turn
+  // lets go of it behind them both
+  test('a call then a dispose its report listener makes go behind that turn’s answer, the call before the dispose', async () => {
+    const { deliver, open, sent, transport } = createScriptedTransport();
+    const router = createRouterServer(transport);
+    const errors = recordErrors(router);
+    const failure = new Error('the resolver failed');
+    // why the call made before the dispose failed
+    const reasons: unknown[] = [];
+
+    router.registerResolver(
+      Object.assign(() => {
+        throw failure;
+      }, echo)
+    );
+    router.on('error', (error) => {
+      if (error === failure) {
+        askFirst(router, 'before').catch((reason: unknown) => {
+          reasons.push(reason);
+        });
+        router[Symbol.dispose]();
+      }
+    });
+    open(first);
+    deliver(first, requestOf(5));
+    await sleep(0);
+
+    expect(answersOf(sent)).toEqual([
+      [first, 'failure', 5, ProtocolCode.PROCEDURE_FAILED],
+      [first, EnvelopeKind.REQUEST, 2, 'before'],
+    ]);
+    // the failure reported, and nothing refused as disposed
+    expect(reportedOf(errors)).toEqual([['the resolver failed', first]]);
+    // it went, and the dispose's turn rejected it as it waited
+    expect(reasons).toEqual([new DisconnectError('the router was disposed before the answer')]);
+  });
+
+  // spec 9.1; decision 0045: its handle's mark at once, its state's by its own turn; each failure
+  // says which side of the dispose its call was
+  test('a call made before its router’s dispose goes, and one made after it fails unsent', async () => {
+    const { open, sent, transport } = createScriptedTransport();
+    const router = createRouterServer(transport);
+
+    open(first);
+
+    const before = askFirst(router, 'before');
+
+    router[Symbol.dispose]();
+
+    const after = askFirst(router, 'after');
+
+    await expect(before).rejects.toThrow(/^the router was disposed before the answer$/);
+    await expect(after).rejects.toThrow(/^the router was disposed$/);
+    await expect(after).rejects.toBeInstanceOf(DisconnectError);
+    expect(answersOf(sent)).toEqual([[first, EnvelopeKind.REQUEST, 2, 'before']]);
+  });
+
+  // decision 0045: the skip of an answer to a call no longer answering and the send gate read one
+  // mark, the state's, so an answer taken ahead of a dispose's turn, on a call its requester
+  // cancelled, goes nowhere, though the handle's mark is set
+  test('an answer its resolver gives after a dispose queued behind it sends nothing on a cancelled call', async () => {
+    const { deliver, emitter, open, sent, transport } = createScriptedTransport();
+    const router = createRouterServer(transport);
+    const errors = recordErrors(router);
+    const requests: { connectionHandle: Handle; header: IHandedRequestHeader }[] = [];
+    let answering: Promise<void> | undefined;
+
+    router.registerResolver(
+      Object.assign((props: { connectionHandle: Handle; header: IHandedRequestHeader }) => {
+        requests.push(props);
+
+        return new Promise<void>(noop);
+      }, echo)
+    );
+    open(first);
+    deliver(first, requestOf(5));
+    deliver(first, cancelOf(5));
+    await sleep(0);
+    sent.length = 0;
+
+    // * within a telling: the answer, then the dispose behind it, its handle's mark set at once
+    router.once('error', () => {
+      answering = router.respond({ payload: text.encode('late') }, requests[0]!);
+      router[Symbol.dispose]();
+    });
+    emitter.emit('message', { data: 'text' }, first);
+    await sleep(0);
+
+    expect(sent).toEqual([]);
+    // its answer skipped, as a cancelled call's is, never refused as disposed
+    await expect(answering).resolves.toBeUndefined();
+    expect(reportedOf(errors)).toEqual([[ProtocolCode.ENVELOPE_MALFORMED, first]]);
   });
 });

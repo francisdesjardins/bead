@@ -35,8 +35,17 @@ const drop = (client: ITransportClient<object, never>): void => {
   (client as ITransportClientInternal<object, never>)[dispose]();
 };
 
-/** A transport with no socket: it records its calls, fails `failures` times, and opens otherwise. */
-const createStubClient = (options?: { clock?: TestClock; failures?: number; hang?: boolean }) => {
+/**
+ * A transport with no socket: it records its calls, fails `failures` times, and opens otherwise;
+ * `assertConnect` and `lifetime`, when given, are its own.
+ */
+const createStubClient = (options?: {
+  assertConnect?: (options: ITransportClientAddressOptions) => void;
+  clock?: TestClock;
+  failures?: number;
+  hang?: boolean;
+  lifetime?: AbortSignal;
+}) => {
   const calls: string[] = [];
   let failuresLeft = options?.failures ?? 0;
   let failureCount = 0;
@@ -46,6 +55,8 @@ const createStubClient = (options?: { clock?: TestClock; failures?: number; hang
     defineOptions = given;
     return {
       clock: options?.clock,
+      ...(options?.assertConnect === undefined ? {} : { assertConnect: options.assertConnect }),
+      ...(options?.lifetime === undefined ? {} : { lifetime: options.lifetime }),
 
       connect: (connectOptions) => {
         calls.push(`connect:${String(connectOptions.port)}`);
@@ -74,6 +85,8 @@ const createStubClient = (options?: { clock?: TestClock; failures?: number; hang
         setReadyStateClosed(client);
         return Promise.resolve();
       },
+      pause: noop,
+      resume: noop,
       send: () => {
         calls.push('send');
         return Promise.resolve();
@@ -493,7 +506,7 @@ test.describe('createTransportClient #reconnect', () => {
           seen.push([previousDelay, attempt]);
           return (previousDelay ?? 5) * 2;
         },
-        maxAttempts: 4,
+        maximumAttempts: 4,
       })
     ).rejects.toBeInstanceOf(ReconnectError);
 
@@ -509,7 +522,7 @@ test.describe('createTransportClient #reconnect', () => {
 
     await expect(client.connect(target)).rejects.toBeInstanceOf(ConnectError);
 
-    const reconnecting = client.reconnect({ delay: 0, maxAttempts: 2 });
+    const reconnecting = client.reconnect({ delay: 0, maximumAttempts: 2 });
 
     await expect(reconnecting).rejects.toBeInstanceOf(ReconnectError);
     await expect(reconnecting).rejects.toHaveProperty('cause', expect.any(ConnectError));
@@ -518,11 +531,11 @@ test.describe('createTransportClient #reconnect', () => {
     expect(client.isClosed()).toBe(true);
   });
 
-  test('always makes one attempt, even with a maxAttempts of 0', async () => {
+  test('always makes one attempt, even with a maximum of zero', async () => {
     const { calls, client } = createStubClient({ failures: 5 });
 
     await expect(client.connect(target)).rejects.toBeInstanceOf(ConnectError);
-    await expect(client.reconnect({ delay: 0, maxAttempts: 0 })).rejects.toBeInstanceOf(
+    await expect(client.reconnect({ delay: 0, maximumAttempts: 0 })).rejects.toBeInstanceOf(
       ReconnectError
     );
 
@@ -556,11 +569,11 @@ test.describe('createTransportClient #reconnect', () => {
     expect(delaysOn(clock)).toEqual([]);
   });
 
-  test('rejects a maxAttempts that is not a number, leaving the state as it was', async () => {
+  test('rejects a maximumAttempts that is not a number, leaving the state as it was', async () => {
     const { calls, client } = createStubClient();
 
     await client.connect(target);
-    await expect(client.reconnect({ maxAttempts: Number.NaN })).rejects.toBeInstanceOf(
+    await expect(client.reconnect({ maximumAttempts: Number.NaN })).rejects.toBeInstanceOf(
       ProgrammerError
     );
 
@@ -573,10 +586,10 @@ test.describe('createTransportClient #reconnect', () => {
 
     await expect(client.connect(target)).rejects.toBeInstanceOf(ConnectError);
     await expect(
-      client.reconnect({ delay: 0, maxAttempts: undefined, tap: undefined, signal: undefined })
+      client.reconnect({ delay: 0, maximumAttempts: undefined, tap: undefined, signal: undefined })
     ).rejects.toBeInstanceOf(ReconnectError);
 
-    expect(calls).toHaveLength(1 + entry.RECONNECT_DEFAULTS.maxAttempts);
+    expect(calls).toHaveLength(1 + entry.RECONNECT_DEFAULTS.maximumAttempts);
   });
 
   test('rejects with a CancelError, without waiting out the delay, when the signal aborts mid-wait', async () => {
@@ -676,5 +689,59 @@ test.describe('createTransportClient #reconnect', () => {
 
     expect(calls).toEqual(['connect:1', 'dispose', 'connect:1', 'disconnect']);
     expect(client.isClosed()).toBe(true);
+  });
+
+  test('ends a reconnection as its implementation’s lifetime is aborted, and holds its target by assertConnect as reconnect is called', async () => {
+    const lifetime = new AbortController();
+    const asserted: number[] = [];
+    let isRefusing = false;
+    let reconnects = 0;
+    const { calls, client } = createStubClient({
+      assertConnect: ({ port }) => {
+        asserted.push(port);
+
+        if (isRefusing) {
+          throw new ProgrammerError('its owner forbids it');
+        }
+      },
+      failures: 2,
+      lifetime: lifetime.signal,
+    });
+
+    await expect(client.connect(target)).rejects.toBeInstanceOf(ConnectError);
+
+    // * its lifetime aborted mid-wait: ended at once, cancelled, its reason the cause
+    const reconnecting = client.reconnect({
+      delay: 60_000,
+      tap: () => {
+        queueMicrotask(() => {
+          lifetime.abort('ended');
+        });
+      },
+    });
+
+    await expect(reconnecting).rejects.toMatchObject(RECONNECTION_CANCELLED);
+    await expect(reconnecting).rejects.toHaveProperty('cause', 'ended');
+    expect([calls, client.isClosed()]).toEqual([['connect:1', 'connect:1'], true]);
+
+    // * its target held again as it is called, before its lifetime: a misuse, nothing moved
+    client.on('reconnect', () => {
+      reconnects += 1;
+    });
+    isRefusing = true;
+    await expect(client.reconnect({ delay: 0 })).rejects.toThrow(
+      new ProgrammerError('its owner forbids it')
+    );
+
+    // its lifetime over, its target taken: told, then cancelled before any attempt, its reason the
+    // cause, closed still
+    isRefusing = false;
+
+    const ended = client.reconnect({ delay: 0 });
+
+    await expect(ended).rejects.toMatchObject(RECONNECTION_CANCELLED);
+    await expect(ended).rejects.toHaveProperty('cause', 'ended');
+    expect([calls, reconnects, client.isClosed()]).toEqual([['connect:1', 'connect:1'], 1, true]);
+    expect(asserted, 'its connect, then each reconnect and its attempt').toEqual([1, 1, 1, 1, 1]);
   });
 });

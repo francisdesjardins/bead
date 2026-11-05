@@ -11,9 +11,10 @@ use crate::constants::RouterSide;
 use crate::duration::{LONGEST_TIMER, NEVER};
 use crate::failure::ProcedureAddress;
 use crate::router::parts::{
-    Abandoned, Answering, AnsweringCalls, PendingCalls, PendingRequest, Reservation,
+    Abandoned, Answering, AnsweringCalls, PendingCalls, PendingRequest, RequestReceiving,
+    Reservation,
 };
-use crate::router::types::{CallAddress, ConnectionHandle, Gauges, Signal};
+use crate::router::types::{CallAddress, ConnectionHandle, Gauges, Signal, SignalReason};
 use crate::server::{
     HealthCheck, HealthStatus, LayerGauges, ServerGauges, health_of, layer_gauges_of,
 };
@@ -89,13 +90,89 @@ fn handles_of(gauges: &Gauges) -> Vec<String> {
 
 // ── The call ids a side draws ────────────────────────────────────────────────────────────────
 
+// spec 9.1
+#[test]
+fn draws_a_side_s_own_range_by_default_to_its_last_unsigned() {
+    assert_eq!(RouterSide::Client.call_ids(), (1, u32::MAX));
+    assert_eq!(RouterSide::Server.call_ids(), (2, u32::MAX - 1));
+    let a = handle("a");
+    assert_eq!(
+        PendingCalls::new(RouterSide::Client).draw((&a, free)),
+        Some(1)
+    );
+    assert_eq!(
+        PendingCalls::new(RouterSide::Server).draw((&a, free)),
+        Some(2)
+    );
+}
+
+// spec 9.1
+#[test]
+fn refuses_a_last_call_id_of_the_other_parity_or_before_its_first() {
+    for (side, last) in [
+        (RouterSide::Client, 4),
+        (RouterSide::Client, 0),
+        (RouterSide::Server, 3),
+        (RouterSide::Server, 0),
+    ] {
+        let error = PendingCalls::bounded(side, last).expect_err("the last id is not of its side");
+        assert_eq!(
+            error.to_string(),
+            format!("the last call id of a {side} has its own parity and is not 0, not {last}")
+        );
+    }
+}
+
+#[test]
+fn refuses_a_last_call_id_of_zero_or_its_peer_s_parity_before_a_router_starts() {
+    use crate::router::client::{RouterClient, RouterClientOptions};
+    use crate::router::server::{RouterServer, RouterServerOptions};
+    use crate::testing::scripted::{ScriptedClient, ScriptedServer};
+
+    let clock = crate::testing::SteppingClock::new(crate::testing::instants::new_year());
+    let client = ScriptedClient::new(Arc::<crate::testing::SteppingClock>::clone(&clock));
+    let server = ScriptedServer::new(clock);
+    for last in [0, 2, 8, u32::MAX - 1] {
+        let error = RouterClient::new(
+            Arc::<ScriptedClient>::clone(&client),
+            &RouterClientOptions {
+                last_call_id: Some(last),
+                ..RouterClientOptions::default()
+            },
+        )
+        .expect_err("a client draws only nonzero odd ids");
+        assert!(error.message().contains("last call id"));
+    }
+    for last in [0, 1, 7, u32::MAX] {
+        let error = RouterServer::new(
+            Arc::<ScriptedServer>::clone(&server),
+            &RouterServerOptions {
+                last_call_id: Some(last),
+                ..RouterServerOptions::default()
+            },
+        )
+        .expect_err("a server draws only nonzero even ids");
+        assert!(error.message().contains("last call id"));
+    }
+    assert_eq!((client.listener_count(), server.listener_count()), (0, 0));
+    for (side, last) in [
+        (RouterSide::Client, 1),
+        (RouterSide::Client, u32::MAX),
+        (RouterSide::Server, 2),
+        (RouterSide::Server, u32::MAX - 1),
+    ] {
+        let mut calls = PendingCalls::bounded(side, last).expect("either boundary holds");
+        assert_eq!(calls.draw((&handle("a"), free)), Some(side.call_ids().0));
+    }
+}
+
 // a side draws from its first, two apart, where the TypeScript side's sequence takes any first and
 // step: each test below walks a side's own range, as the C# side's do
 
 // spec 9.1
 #[test]
 fn walks_its_range_by_two_then_from_its_first_again() {
-    let mut calls = PendingCalls::new(RouterSide::Client, Some(7));
+    let mut calls = PendingCalls::bounded(RouterSide::Client, 7).expect("a bound of its side");
     let a = handle("a");
     let drawn: Vec<Option<u32>> = (0..5).map(|_| calls.draw((&a, free))).collect();
 
@@ -109,7 +186,7 @@ fn walks_its_range_by_two_then_from_its_first_again() {
 // spec 9.1
 #[test]
 fn skips_the_ids_in_use_and_gives_none_once_every_one_is() {
-    let mut calls = PendingCalls::new(RouterSide::Server, Some(8));
+    let mut calls = PendingCalls::bounded(RouterSide::Server, 8).expect("a bound of its side");
     let a = handle("a");
     let some = |call_id: u32| call_id == 2 || call_id == 6;
     let drawn: Vec<Option<u32>> = (0..3).map(|_| calls.draw((&a, some))).collect();
@@ -123,7 +200,9 @@ fn skips_the_ids_in_use_and_gives_none_once_every_one_is() {
 
     // ids outside the range, however many, stop nothing: every id but 5 is in use here
     assert_eq!(
-        PendingCalls::new(RouterSide::Client, Some(7)).draw((&a, |call_id: u32| call_id != 5)),
+        PendingCalls::bounded(RouterSide::Client, 7)
+            .expect("a bound of its side")
+            .draw((&a, |call_id: u32| call_id != 5)),
         Some(5),
         "the one free"
     );
@@ -132,7 +211,7 @@ fn skips_the_ids_in_use_and_gives_none_once_every_one_is() {
 // spec 9.1
 #[test]
 fn asks_about_each_id_once_at_most_however_many_are_in_use() {
-    let mut calls = PendingCalls::new(RouterSide::Client, Some(9));
+    let mut calls = PendingCalls::bounded(RouterSide::Client, 9).expect("a bound of its side");
     let asked = std::sync::Mutex::new(Vec::new());
 
     assert_eq!(
@@ -152,8 +231,8 @@ fn asks_about_each_id_once_at_most_however_many_are_in_use() {
 // spec 9.1
 #[test]
 fn draws_call_ids_of_its_side_skipping_those_waited_on_reserved_or_in_use_by_the_side() {
-    let mut client = PendingCalls::new(RouterSide::Client, Some(9));
-    let mut server = PendingCalls::new(RouterSide::Server, None);
+    let mut client = PendingCalls::bounded(RouterSide::Client, 9).expect("a bound of its side");
+    let mut server = PendingCalls::new(RouterSide::Server);
     let (a, b) = (handle("a"), handle("b"));
     let in_use = |call_id: u32| call_id == 5;
 
@@ -176,7 +255,7 @@ fn draws_call_ids_of_its_side_skipping_those_waited_on_reserved_or_in_use_by_the
 // spec 9.1
 #[test]
 fn forgets_a_call_only_while_it_is_the_request_given_when_one_is() {
-    let mut calls = PendingCalls::new(RouterSide::Client, None);
+    let mut calls = PendingCalls::new(RouterSide::Client);
     let call = call_of((1, "a"));
 
     calls.add(&call, request_of(1));
@@ -199,7 +278,7 @@ fn forgets_a_call_only_while_it_is_the_request_given_when_one_is() {
 // spec 9.1
 #[test]
 fn takes_out_every_call_of_a_connection_or_of_every_one_freeing_the_call_ids_it_reserved() {
-    let mut calls = PendingCalls::new(RouterSide::Client, None);
+    let mut calls = PendingCalls::new(RouterSide::Client);
     let a = handle("a");
 
     calls.add(&call_of((1, "a")), request_of(1));
@@ -222,7 +301,7 @@ fn takes_out_every_call_of_a_connection_or_of_every_one_freeing_the_call_ids_it_
 // spec 9.1
 #[test]
 fn hears_each_call_leave_once_whichever_way_it_leaves() {
-    let mut calls = PendingCalls::new(RouterSide::Client, None);
+    let mut calls = PendingCalls::new(RouterSide::Client);
     let mut removed: Vec<u64> = Vec::new();
     let a = handle("a");
 
@@ -252,7 +331,7 @@ fn hears_each_call_leave_once_whichever_way_it_leaves() {
 // spec 9.1
 #[test]
 fn count_the_calls_waited_on_and_the_call_ids_reserved_and_the_connections_they_belong_to() {
-    let mut calls = PendingCalls::new(RouterSide::Client, None);
+    let mut calls = PendingCalls::new(RouterSide::Client);
 
     calls.add(&call_of((1, "a")), request_of(1));
     calls.add(&call_of((3, "a")), request_of(2));
@@ -293,7 +372,7 @@ async fn reserved_of(scripted: &Scripted, call_ids: [u32; 2]) -> [bool; 2] {
 async fn reserved(scripted: &Scripted, (call_id, timeout): (u32, Option<Duration>)) {
     scripted
         .router
-        .reserve((call_id, timeout))
+        .reserve(call_id, timeout)
         .expect("a reservation held")
         .await;
 }
@@ -342,7 +421,7 @@ async fn refuses_a_reservation_longer_than_a_timer_holds_or_under_a_millisecond_
         Duration::from_micros(500),
     ] {
         assert!(
-            scripted.router.reserve((1, Some(timeout))).is_err(),
+            scripted.router.reserve(1, Some(timeout)).is_err(),
             "{timeout:?} refused"
         );
     }
@@ -436,6 +515,42 @@ fn open(calls: &mut AnsweringCalls, (call_id, name): (u32, &str)) {
         .entry(handle(name))
         .or_default()
         .insert(call_id, answering_of(u64::from(call_id)));
+}
+
+#[test]
+fn takes_out_every_call_of_a_connection_or_of_every_one_giving_them() {
+    let mut calls = AnsweringCalls::default();
+    open(&mut calls, (3, "a"));
+    open(&mut calls, (3, "b"));
+    let first = calls
+        .get(&call_of((3, "a")))
+        .expect("a's call")
+        .signal
+        .clone();
+    let second = calls
+        .get(&call_of((3, "b")))
+        .expect("b's call")
+        .signal
+        .clone();
+
+    let taken = calls.take_all(Some(&handle("a")));
+    assert_eq!(taken.len(), 1);
+    assert_eq!(taken[0].0, call_of((3, "a")));
+    assert_eq!(taken[0].1.dispatched, 3);
+    assert!(!calls.has(&call_of((3, "a"))));
+    assert!(calls.has(&call_of((3, "b"))));
+    let rest = calls.take_all(None);
+    assert_eq!(rest.len(), 1);
+    assert_eq!(rest[0].0, call_of((3, "b")));
+    assert_eq!(rest[0].1.dispatched, 3);
+    assert_eq!(calls.take_all(None).len(), 0);
+    assert_eq!([first.is_aborted(), second.is_aborted()], [false, false]);
+
+    // The caller owns the very signals returned, and ends them when it chooses.
+    taken[0].1.signal.abort(SignalReason::Cancelled);
+    assert_eq!([first.is_aborted(), second.is_aborted()], [true, false]);
+    rest[0].1.signal.abort(SignalReason::Cancelled);
+    assert!(second.is_aborted());
 }
 
 #[test]
@@ -550,4 +665,170 @@ fn gauges_largest_answering_calls_under_its_ceiling_maximum_answering_calls_whic
     calls.answering.remove(&handle("a"));
 
     assert_eq!(calls.gauges().counts.get("largestAnsweringCalls"), Some(&1));
+}
+
+// ── The calls a side answers, found by their dispatch ────────────────────────────────────────
+
+// what a call receives, told apart by its transfer
+const fn receiving_of(transfer: u64) -> RequestReceiving {
+    RequestReceiving { transfer }
+}
+
+// the transfer a call left with, when it received one
+fn heard(left: Option<Answering>) -> Option<u64> {
+    left.and_then(|answering| answering.receiving)
+        .map(|receiving| receiving.transfer)
+}
+
+// ! a request is known by the id its dispatch drew, once per request dispatched, as the other sides
+// know it by the very header dispatched: a copy of the header is an id no dispatch of the call drew
+// spec 9.1, 9.4
+#[test]
+fn opens_a_call_as_its_request_is_dispatched_and_finds_it_again_by_that_very_header_alone() {
+    let mut calls = AnsweringCalls::default();
+    let call = call_of((3, "a"));
+    let signal = Signal::new();
+
+    calls.open(
+        &call,
+        Answering {
+            signal: signal.clone(),
+            ..answering_of(1)
+        },
+    );
+
+    assert!(calls.has(&call), "open on a");
+    assert!(!calls.has(&call_of((3, "b"))), "none on b");
+    assert_eq!(
+        calls
+            .answering_of((&call, 1))
+            .map(|answering| answering.dispatched),
+        Some(1),
+        "found by its dispatch"
+    );
+    assert!(
+        calls.is_answering((&call, 1)),
+        "its own dispatch answers it"
+    );
+
+    calls
+        .signal_of((&call, 1))
+        .expect("found by its dispatch")
+        .abort(SignalReason::Cancelled);
+
+    assert!(signal.is_aborted(), "the very signal it was opened with");
+
+    // a copy was never dispatched: it finds no call, and is open to none
+    assert!(
+        calls.answering_of((&call, 2)).is_none(),
+        "a copy finds nothing"
+    );
+    assert!(calls.signal_of((&call, 2)).is_none(), "nor its signal");
+    assert!(!calls.is_answering((&call, 2)), "a copy answers nothing");
+}
+
+// spec 9.3
+#[test]
+fn answers_a_call_no_more_once_its_answer_goes_out_while_the_call_stays_until_closed_a_copy_of_its_header_marking_nothing()
+ {
+    let mut calls = AnsweringCalls::default();
+    let call = call_of((3, "a"));
+
+    calls.open(&call, answering_of(1));
+
+    assert!(!calls.answer((&call, 2)), "a copy marks nothing");
+    assert!(!calls.answer((&call_of((3, "b")), 1)), "nor b's call id");
+    assert!(calls.is_answering((&call, 1)), "still to answer");
+    assert!(calls.answer((&call, 1)), "its own marks it");
+    assert!(!calls.is_answering((&call, 1)), "answered");
+    assert!(calls.has(&call), "the call stays");
+    assert!(calls.forget(&call, Some(1)).is_some(), "until closed");
+    assert!(!calls.has(&call), "closed");
+}
+
+// spec 9.4
+#[test]
+fn answers_a_call_no_more_once_closed_by_its_own_call_taken_or_opened_again() {
+    let mut calls = AnsweringCalls::default();
+    let call = call_of((3, "a"));
+
+    calls.open(&call, answering_of(1));
+
+    assert!(
+        calls.forget(&call, Some(9)).is_none(),
+        "another request's closes nothing"
+    );
+    assert!(calls.is_answering((&call, 1)), "still to answer");
+    assert!(calls.forget(&call, Some(1)).is_some(), "its own closes it");
+    assert!(!calls.has(&call), "closed");
+    assert!(!calls.is_answering((&call, 1)), "answered no more");
+
+    calls.open(&call, answering_of(2));
+
+    // the call id is open again, for another request
+    assert!(!calls.is_answering((&call, 1)), "the first still not");
+    assert_eq!(
+        calls
+            .forget(&call, None)
+            .map(|answering| answering.dispatched),
+        Some(2),
+        "taken"
+    );
+    assert!(calls.forget(&call, None).is_none(), "once");
+    assert!(!calls.is_answering((&call, 2)), "taken, answered no more");
+}
+
+// what a call left with is what its owner hears, given back once, as a call waited on gives its
+// request
+// spec 12.7, 12.10
+#[test]
+fn gives_a_call_what_it_receives_and_hears_it_leave_once_whichever_way_the_call_leaves() {
+    let mut calls = AnsweringCalls::default();
+    let call = call_of((3, "a"));
+    let mut left: Vec<u64> = Vec::new();
+
+    calls.open(&call, answering_of(1));
+
+    // a call not open receives nothing, on a connection with calls open or none
+    calls.attach(&call_of((5, "a")), receiving_of(9));
+    calls.attach(&call_of((5, "b")), receiving_of(9));
+    calls.attach(&call, receiving_of(1));
+
+    assert!(
+        calls.receiving_of(&call_of((5, "a"))).is_none(),
+        "none on a"
+    );
+    assert!(
+        calls.receiving_of(&call_of((5, "b"))).is_none(),
+        "none on b"
+    );
+    assert_eq!(
+        calls
+            .receiving_of(&call)
+            .map(|receiving| receiving.transfer),
+        Some(1),
+        "its own"
+    );
+
+    // another request's dispatch takes nothing out
+    left.extend(heard(calls.forget(&call, Some(9))));
+    left.extend(heard(calls.forget(&call, Some(1))));
+    left.extend(heard(calls.forget(&call, Some(1))));
+
+    assert!(calls.receiving_of(&call).is_none(), "gone with its call");
+
+    calls.open(&call, answering_of(2));
+    calls.attach(&call, receiving_of(2));
+    left.extend(heard(calls.forget(&call, None)));
+    left.extend(heard(calls.forget(&call, None)));
+    calls.open(&call, answering_of(3));
+    calls.open(&call_of((3, "b")), answering_of(4));
+    calls.attach(&call_of((3, "b")), receiving_of(3));
+
+    for (_, answering) in calls.take_all(None) {
+        left.extend(heard(Some(answering)));
+    }
+
+    // a call that received nothing leaves unheard
+    assert_eq!(left, [1, 2, 3], "closed, taken, gone");
 }

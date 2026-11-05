@@ -1,17 +1,21 @@
-import { fromBinary } from '@bufbuild/protobuf';
 import { expect, test } from '@playwright/test';
-import { createTestClock } from '../../transport/shared/__tests__/fixtures';
+import { createTestClock, delaysOn } from '../../transport/shared/__tests__/fixtures';
 import { ProgrammerError } from '../../transport/shared/errors';
 import {
   createEventStream,
-  eventDataOf,
   eventOf,
   HEARTBEAT,
   HEARTBEAT_COMMENT,
   type IEventSink,
 } from '../events';
-import { typeRegistryOf, writeProtoJson } from '../json-form';
+import { createJsonForm } from '../json-form';
 import { TickSchema } from './generated/transcoding_pb';
+
+// constants
+
+const FORM = createJsonForm([TickSchema]);
+
+const ENCODER = new TextEncoder();
 
 // helpers
 
@@ -75,8 +79,8 @@ test('writes the result, then each notification as a message, then the failure t
   );
   expect(stream.isEnded).toBe(true);
   expect(eventOf({ data: '1', id: 9 })).toBe('id: 9\ndata: 1\n\n');
-  expect(eventDataOf({ encoding: 'text', text: 'h\n\r' })).toBe('"h\\n\\r"');
-  expect(eventDataOf({ bytes: Uint8Array.of(0, 0xff, 0xfe), encoding: 'raw' })).toBe('"AP/+"');
+  expect(FORM.eventDataOf('text', ENCODER.encode('h\n\r'))).toBe('"h\\n\\r"');
+  expect(FORM.eventDataOf('raw', Uint8Array.of(0, 0xff, 0xfe))).toBe('"AP/+"');
 
   // a failure before the result is a problem, the notifications it held dropped
   const early = createSink();
@@ -98,6 +102,32 @@ test('writes the result, then each notification as a message, then the failure t
   open.close();
   await clock.tickAsync(HEARTBEAT * 2);
   expect(quiet.written.length).toBe(2);
+});
+
+test('refuses a heartbeat of 0, -1 or NaN in the gateway’s words, and holds 1.5 as 2', () => {
+  const clock = createTestClock();
+
+  for (const [heartbeat, written] of [
+    [0, '0'],
+    [-1, '-1'],
+    [Number.NaN, 'NaN'],
+  ] as const) {
+    expect(() => {
+      return createEventStream(createSink().sink, { clock, heartbeat });
+    }, written).toThrow(
+      new ProgrammerError(
+        `heartbeat is a number of milliseconds from 1 to 2147483647, or Infinity for never, not ${written}`
+      )
+    );
+  }
+
+  // * its comment armed at the whole millisecond, as a timer holds it on every platform
+  const stream = createEventStream(createSink().sink, { clock, heartbeat: 1.5 });
+
+  stream.result('{}');
+  expect(delaysOn(clock)).toEqual([2]);
+  stream.close();
+  expect(delaysOn(clock)).toEqual([]);
 });
 
 test('credits each notification once the event before it was taken', async () => {
@@ -186,19 +216,4 @@ test('settles a held notification whose event its response could not take, its c
   stream.result('{}');
   await expect(held).resolves.toBeUndefined();
   await expect(stream.notification('{"remaining":0}')).resolves.toBeUndefined();
-});
-
-test('writes each payload’s data as its encoding reads it', () => {
-  // * a proto one in Bead's proto JSON form, a text one a JSON string, a raw one its base64; a json
-  // one's bytes are its data as they are, which the TypeScript side's gateway hands on unread
-  expect(
-    writeProtoJson(TickSchema, {
-      message: fromBinary(TickSchema, Uint8Array.of(0x08, 0x01)),
-      registry: typeRegistryOf([TickSchema]),
-    })
-  ).toBe('{"remaining":1}');
-  expect(eventDataOf({ encoding: 'text', text: 'h"é' })).toBe('"h\\"é"');
-  expect(eventDataOf({ encoding: 'text', text: 'h\n\r' })).toBe('"h\\n\\r"');
-  expect(eventDataOf({ bytes: Uint8Array.of(0x01, 0x02, 0xff), encoding: 'raw' })).toBe('"AQL/"');
-  expect(eventDataOf({ bytes: Uint8Array.of(0, 0xff, 0xfe), encoding: 'raw' })).toBe('"AP/+"');
 });

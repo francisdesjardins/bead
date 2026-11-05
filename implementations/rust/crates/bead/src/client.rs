@@ -8,11 +8,16 @@ use tokio::runtime::Handle;
 use crate::clock::SharedClock;
 use crate::credentials::Credentials;
 use crate::errors::ProgrammerError;
-use crate::managers::service::{ServiceManager, ServiceManagerOptions, ServiceRouter};
+use crate::managers::service::{ServiceManagerClient, ServiceManagerOptions};
 use crate::metrics::MetricsRegistry;
 use crate::router::client::{RouterClient, RouterClientOptions};
-use crate::router::types::{BoxFuture, RequestCredential, RouterLimitsOptions};
-use crate::transport::ClientTransport;
+use crate::router::types::{
+    BoxFuture, IntakeLimitsOptions, RequestCredential, RouterLimitsOptions,
+};
+use crate::transport::RouterClientTransport;
+
+#[cfg(test)]
+mod tests;
 
 /// How a client is built, beyond its transport.
 #[derive(Clone, Default)]
@@ -28,6 +33,9 @@ pub struct ClientOptions {
     pub limits: Option<RouterLimitsOptions>,
     /// What its router counts its calls into.
     pub metrics_registry: Option<MetricsRegistry>,
+    /// What its router holds untaken of what its server sent, past which it pauses its transport
+    /// (spec 15.12).
+    pub intake: Option<IntakeLimitsOptions>,
 }
 
 impl fmt::Debug for ClientOptions {
@@ -43,8 +51,8 @@ impl fmt::Debug for ClientOptions {
 #[derive(Clone)]
 pub struct Client {
     router: RouterClient,
-    services: ServiceManager,
-    transport: Arc<dyn ClientTransport>,
+    services: ServiceManagerClient,
+    transport: Arc<dyn RouterClientTransport>,
 }
 
 impl fmt::Debug for Client {
@@ -60,24 +68,24 @@ impl Client {
     ///
     /// A [`ProgrammerError`] as its router or its services refuse their options.
     pub fn new(
-        transport: Arc<dyn ClientTransport>,
+        transport: Arc<dyn RouterClientTransport>,
         options: &ClientOptions,
     ) -> Result<Self, ProgrammerError> {
         let clock: Option<SharedClock> = transport.clock();
         let router_options = RouterClientOptions {
+            last_call_id: None,
             clock,
             runtime: options.runtime.clone(),
             credential: options.credential.clone(),
             credentials: options.credentials.clone(),
             limits: options.limits.clone(),
             metrics_registry: options.metrics_registry.clone(),
+            intake: options.intake.clone(),
         };
 
         let router = RouterClient::new(Arc::clone(&transport), &router_options)?;
-        let services = ServiceManager::new(
-            ServiceRouter::Client(router.clone()),
-            &ServiceManagerOptions::default(),
-        )?;
+        let services =
+            ServiceManagerClient::new(router.clone(), &ServiceManagerOptions::default())?;
 
         Ok(Self {
             router,
@@ -94,13 +102,13 @@ impl Client {
 
     /// Its services.
     #[must_use]
-    pub const fn services(&self) -> &ServiceManager {
+    pub const fn services(&self) -> &ServiceManagerClient {
         &self.services
     }
 
     /// Its transport.
     #[must_use]
-    pub fn transport(&self) -> Arc<dyn ClientTransport> {
+    pub fn transport(&self) -> Arc<dyn RouterClientTransport> {
         Arc::clone(&self.transport)
     }
 

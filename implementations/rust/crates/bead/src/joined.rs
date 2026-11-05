@@ -3,9 +3,10 @@
 //! an in-memory transport beside a broker's, say. Each handle is the one its transport drew, and the
 //! join refuses, as it is built, two transports of one type, whose handles might be one; each
 //! connection's flags, its sending and its closing are asked of the transport that drew it, known
-//! by its handle's type. Each transport's events are told on, with its handle, in the order that
-//! transport told them, each listener within the join's guard; its stop stops every one, and
-//! settles once all have; its gauges are their sum. It starts nothing: an application starts each
+//! by its handle's type; its pause and its resume of the transport whose events told it (spec
+//! 15.12). Each transport's events are told on, with its handle, in the order that transport told
+//! them, each listener within the join's guard; its stop stops every one, and settles once all
+//! have; its gauges are their sum. It starts nothing: an application starts each
 //! transport it joined, and the join serves no port of its own, one port for two coming from a
 //! proxy in front of them.
 
@@ -70,6 +71,16 @@ impl JoinedInner {
         self.by_type
             .get(kind)
             .and_then(|index| self.transports.get(*index))
+    }
+
+    // the transport whose events told a handle, by the connections each told; by its type for one
+    // told before the join was made
+    fn teller_of(&self, connection_handle: &ConnectionHandle) -> Option<&Arc<dyn ServerTransport>> {
+        self.told
+            .iter()
+            .position(|told| locked(told).contains(connection_handle))
+            .and_then(|index| self.transports.get(index))
+            .or_else(|| self.owner_of(connection_handle))
     }
 }
 
@@ -303,6 +314,21 @@ impl ServerTransport for JoinedServerTransport {
 
     fn unlisten(&self, listener: &Arc<dyn ServerListener>) {
         self.inner.listeners.remove(listener);
+    }
+
+    // ! its told sets' locks alone, which it never holds as it tells a listener, then the pause of
+    // the transport whose events told the connection
+    fn pause(&self, connection_handle: &ConnectionHandle) {
+        if let Some(teller) = self.inner.teller_of(connection_handle) {
+            teller.pause(connection_handle);
+        }
+    }
+
+    // ! as `pause`: the resume of the transport whose events told the connection
+    fn resume(&self, connection_handle: &ConnectionHandle) {
+        if let Some(teller) = self.inner.teller_of(connection_handle) {
+            teller.resume(connection_handle);
+        }
     }
 
     // the one clock of its transports

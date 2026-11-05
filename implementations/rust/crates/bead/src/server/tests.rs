@@ -13,10 +13,15 @@ use crate::router::types::{ConnectionHandle, Gauges};
 use crate::session_token::SessionToken;
 use crate::testing::pair::{Pair, PairOptions};
 
+mod facade;
+
 async fn pair() -> Pair {
-    Pair::connected((crate::testing::instants::new_year(), PairOptions::default()))
-        .await
-        .expect("a pair connected")
+    Pair::connected(
+        crate::testing::instants::new_year(),
+        &PairOptions::default(),
+    )
+    .await
+    .expect("a pair connected")
 }
 
 #[tokio::test]
@@ -76,11 +81,11 @@ async fn keeps_a_session_per_connection_its_token_drawn_as_it_is_first_stored() 
 #[tokio::test]
 async fn gauges_each_layer_and_passes_a_server_that_keeps_nothing_it_should_not() {
     let pair = pair().await;
-    let gauges = pair.server.gauges().await;
+    let gauges = pair.server.gauges().await.expect("distinct counts");
 
     assert_eq!(gauges.router.orphans, 0, "the router keeps no orphan");
     assert_eq!(
-        pair.server.health().await.status,
+        pair.server.health().await.expect("distinct counts").status,
         HealthStatus::Pass,
         "it passes"
     );
@@ -164,7 +169,7 @@ async fn update_data_emits_nothing_for_equal_data() {
     let hearing = Arc::clone(&changed);
 
     sessions.on(Arc::new(move |event: &SessionEvent| {
-        if matches!(event, SessionEvent::DataChanged(..)) {
+        if matches!(event, SessionEvent::DataChanged { .. }) {
             *hearing.lock().unwrap_or_else(PoisonError::into_inner) += 1;
         }
     }));
@@ -177,16 +182,20 @@ async fn update_data_emits_nothing_for_equal_data() {
     // the TypeScript side compares data deep, the C# side by its equality; this side by a JSON
     // value's, which compares an object's members by name, whatever their order
     sessions
-        .update_data((
-            Arc::clone(&pair.connection_handle),
-            Some(json!({ "name": "guest", "tags": ["a", "b"] })),
-        ))
+        .update_data({
+            let mut session = sessions.create(Arc::clone(&pair.connection_handle));
+
+            session.data = Some(json!({ "name": "guest", "tags": ["a", "b"] }));
+            session
+        })
         .await;
     sessions
-        .update_data((
-            Arc::clone(&pair.connection_handle),
-            Some(json!({ "tags": ["a", "b"], "name": "guest" })),
-        ))
+        .update_data({
+            let mut session = sessions.create(Arc::clone(&pair.connection_handle));
+
+            session.data = Some(json!({ "tags": ["a", "b"], "name": "guest" }));
+            session
+        })
         .await;
     pair.settle().await;
 
@@ -209,7 +218,7 @@ async fn off_takes_off_the_listener_its_id_names_and_no_other() {
         let hearing = Arc::clone(&heard);
 
         Arc::new(move |event: &SessionEvent| {
-            if matches!(event, SessionEvent::DataChanged(..)) {
+            if matches!(event, SessionEvent::DataChanged { .. }) {
                 hearing
                     .lock()
                     .unwrap_or_else(PoisonError::into_inner)
@@ -226,7 +235,12 @@ async fn off_takes_off_the_listener_its_id_names_and_no_other() {
         .await
         .expect("stored");
     sessions
-        .update_data((Arc::clone(&handle), Some(json!({ "step": 1 }))))
+        .update_data({
+            let mut session = sessions.create(Arc::clone(&handle));
+
+            session.data = Some(json!({ "step": 1 }));
+            session
+        })
         .await;
     pair.settle().await;
 
@@ -239,7 +253,12 @@ async fn off_takes_off_the_listener_its_id_names_and_no_other() {
     sessions.off(taken);
     sessions.off(taken);
     sessions
-        .update_data((Arc::clone(&handle), Some(json!({ "step": 2 }))))
+        .update_data({
+            let mut session = sessions.create(Arc::clone(&handle));
+
+            session.data = Some(json!({ "step": 2 }));
+            session
+        })
         .await;
     pair.settle().await;
 
@@ -270,7 +289,7 @@ async fn count_the_sessions_and_the_connections_timed() {
         .await
         .expect("stored");
 
-    let gauges = sessions.gauges().await;
+    let gauges = sessions.gauges().await.expect("distinct counts");
 
     assert!(gauges.anomalies.is_empty(), "no anomaly");
     assert!(gauges.ceilings.is_empty(), "no ceiling");
@@ -282,7 +301,7 @@ async fn count_the_sessions_and_the_connections_timed() {
     assert_eq!(counts_of(&gauges), (Some(1), Some(1)), "one, timed");
     assert!(sessions.delete(Arc::clone(&handle)).await, "deleted");
 
-    let gauges = sessions.gauges().await;
+    let gauges = sessions.gauges().await.expect("distinct counts");
 
     assert!(gauges.connection_handles.is_empty(), "no connection kept");
     assert_eq!(counts_of(&gauges), (Some(0), Some(0)), "none");
@@ -301,7 +320,7 @@ async fn count_the_sessions_and_the_connections_timed() {
         .expect("stored");
 
     assert_eq!(
-        counts_of(&sessions.gauges().await),
+        counts_of(&sessions.gauges().await.expect("distinct counts")),
         (Some(1), Some(1)),
         "one, timed"
     );

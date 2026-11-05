@@ -8,7 +8,7 @@ import { ProgrammerError, toError } from '../../transport/shared/errors';
 import { createEventMethods } from '../../transport/shared/lifecycle';
 import { isAdmissionFailure } from './admission';
 import { DEBUG_EVENT, DEPRECATED_EVENT, DROPPED_EVENT } from './constants';
-import { checkDeclaration } from './identity';
+import { checkDeclaration, checkProcedureKind, type DeclarationWay } from './identity';
 import { createNotification } from './notification';
 import { createProcedureMap } from './procedure-map';
 import { createServiceRequester, REQUEST_DEFAULTS } from './service-requester';
@@ -31,8 +31,59 @@ import type {
   NotificationResolverCallback,
   RequestResolverCallback,
   ResolverFailure,
+  RouterSide,
   ServiceManagerEventMap,
 } from './types';
+
+// types
+
+/** A maker of the manager's: the side whose router it belongs to, its way there, and its refusal. */
+interface IMaker {
+  /** Why it is refused on the other side's router, which declares in none of its ways. */
+  readonly refusal: string;
+  readonly side: RouterSide;
+  /** The way it declares on its side's router (spec 16.11), whose kinds it takes. */
+  readonly way: DeclarationWay;
+}
+
+// constants
+
+/**
+ * The six makers, each on one side's router alone: a request, a notification and the resolver of
+ * commands on a client's; a command and the resolvers of requests and notifications on a server's.
+ */
+const MAKERS = Object.freeze({
+  command: {
+    refusal: "a client's router makes requests: getRequest",
+    side: 'server',
+    way: 'server-requester',
+  },
+  commandResolver: {
+    refusal: "a server's router answers requests: getRequestResolver",
+    side: 'client',
+    way: 'client-resolver',
+  },
+  notification: {
+    refusal: 'only a client hears notifications; a server notifies them',
+    side: 'client',
+    way: 'client-requester',
+  },
+  notificationResolver: {
+    refusal: 'only a server notifies; a client hears notifications',
+    side: 'server',
+    way: 'server-notification-resolver',
+  },
+  request: {
+    refusal: "a server's router makes commands: getCommand",
+    side: 'client',
+    way: 'client-requester',
+  },
+  requestResolver: {
+    refusal: "a client's router answers commands: getCommandResolver",
+    side: 'server',
+    way: 'server-resolver',
+  },
+} as const satisfies Readonly<Record<string, IMaker>>);
 
 // helpers
 
@@ -124,8 +175,12 @@ const procedureOf = (given: IProcedure): IProcedure => {
 
 /**
  * The requesters and resolvers of the services on one router: what a requester calls, and what
- * answers it on the other side. Both sides of a router use the same manager, which runs on its
- * router's clock: one its options give that differs is a {@link ProgrammerError}.
+ * answers it on the other side. The untyped manager serves either side's router — a request or a
+ * notification made on a client's router, a command on a server's; a command answered on a
+ * client's, a request or a notification on a server's; each refused on the other's as it is made,
+ * its side first, then spec 16.10's reasons — which runs on its router's clock: one its options
+ * give that differs is a {@link ProgrammerError}. A client and a server give it typed by their
+ * side, `IServiceManagerClient` and `IServiceManagerServer`, without the other side's makers.
  *
  * @example
  * import { createServiceManager } from '@francisdesjardins/bead/service-manager';
@@ -209,12 +264,24 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
     trace: serviceTrace,
   });
 
+  // * the side first, since a maker outside its router's ways declares nothing (spec 16.11); then
+  // 16.10's reasons for its way, before any of the maker's own, a resolver's kind among them
+  const checkMaker = (procedure: IProcedure, { refusal, side, way }: IMaker): void => {
+    if (router.failures.side !== side) {
+      throw new ProgrammerError(refusal);
+    }
+
+    checkDeclaration(procedure);
+    checkProcedureKind(procedure, way);
+  };
+
   const getNotification = <RequestPayload, ResponsePayload, NotificationPayload>(
     procedure: IProcedure,
     dependencies: INotificationDependencies<RequestPayload, ResponsePayload, NotificationPayload>
   ): INotification<RequestPayload, NotificationPayload> => {
-    // * the router's check before the manager's own reason, so spec 16.10's order holds here too
-    checkDeclaration(procedure);
+    // * the side and spec 16.10's reasons before the manager's own, so a notification asked for
+    // otherwise is refused after them
+    checkMaker(procedure, MAKERS.notification);
 
     const known = notifications.get(procedure);
 
@@ -276,13 +343,11 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
   const { createResolver } = createServiceResolver(router, { nameAfter, trace: serviceTrace });
 
   // a refusal is checked once, as the resolver is asked for, rather than as each request is refused,
-  // after the procedure's identity, which spec 16.10 checks before any reason of the manager's
+  // after `checkMaker`: the side and spec 16.10's reasons come before any reason of the manager's
   const assertRefusal = (
     procedure: IProcedure,
     { beforeRequest }: Pick<IRequestResolverDependencies<never, never, Handle>, 'beforeRequest'>
   ): void => {
-    checkDeclaration(procedure);
-
     if (
       beforeRequest?.refusal !== undefined &&
       !isAdmissionFailure(beforeRequest.refusal, router.failures)
@@ -301,6 +366,7 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
     procedure: IProcedure,
     dependencies: IRequestResolverDependencies<RequestPayload, ResponsePayload, Handle>
   ) => {
+    checkMaker(procedure, MAKERS.requestResolver);
     assertRefusal(procedure, dependencies);
 
     return (
@@ -322,6 +388,7 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
     procedure: IProcedure,
     dependencies: IRequestResolverDependencies<RequestPayload, ResponsePayload, Handle>
   ) => {
+    checkMaker(procedure, MAKERS.commandResolver);
     assertRefusal(procedure, dependencies);
 
     return (
@@ -349,6 +416,7 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
       Handle
     >
   ) => {
+    checkMaker(procedure, MAKERS.notificationResolver);
     assertRefusal(procedure, dependencies);
 
     return (
@@ -423,12 +491,16 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
     },
 
     getCommand: (procedure, dependencies) => {
+      checkMaker(procedure, MAKERS.command);
+
       return requestOf(procedure, { dependencies, type: 'command' });
     },
     getCommandResolver,
     getNotification,
     getNotificationResolver,
     getRequest: (procedure, dependencies) => {
+      checkMaker(procedure, MAKERS.request);
+
       return requestOf(procedure, { dependencies, type: 'request' });
     },
     getRequestResolver,
@@ -482,6 +554,9 @@ export type {
   IApplicationFailure,
   IBeforeRequest,
   IBoundCall,
+  IBoundCommand,
+  ICommand,
+  ICommandOptions,
   IDebugEvent,
   IDebugFilter,
   IFailure,
@@ -497,6 +572,7 @@ export type {
   INotificationSerializerClient,
   INotificationSerializerServer,
   INotifyOptions,
+  INotifyRequest,
   IProcedure,
   IProcedureAddress,
   IProtocolFailure,
@@ -512,6 +588,7 @@ export type {
   IRequestResolverProps,
   IRequestSerializerClient,
   IRegistrar,
+  IRegistrationOptions,
   IRequestSerializerServer,
   IResolvedRequestOptions,
   IResponse,
@@ -519,14 +596,17 @@ export type {
   IRouterResult,
   IRouterFailures,
   IRouterLike,
+  IRouterRequest,
   IServiceManager,
+  IServiceManagerClient,
   IServiceManagerOptions,
+  IServiceManagerServer,
   ISubscriber,
+  IUnregisterNotificationOptions,
   NotificationKey,
   NotificationResolverCallback,
   ProcedureId,
   RedactedHeader,
-  RequestOptionsParameters,
   RequestResolverCallback,
   ResolverFailure,
   RouterAnswer,

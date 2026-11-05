@@ -157,12 +157,12 @@ public sealed class WebSocketServerTests
 
     private static async Task<int> PortOf(WebSocketServer<string> server)
     {
-        return (await server.Transport.Start(Loopback, Cancelled)).Port;
+        return (await server.Transport.Start(Loopback with { CancellationToken = Cancelled })).Port;
     }
 
     private static Task Connect(WebSocketClient client, int port)
     {
-        return client.Connect(new WebSocketConnectOptions { Host = Host, Port = port }, Cancelled);
+        return client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = port, CancellationToken = Cancelled });
     }
 
     // reads what comes until the server's close, answers it, and gives its status
@@ -453,6 +453,7 @@ public sealed class WebSocketServerTests
         Assert.Same(server.RequireCredential, beadServer.RequireCredential);
         Assert.NotNull(server.ShareLegBSession);
         Assert.Same(server.ShareLegBSession, beadServer.ShareLegBSession);
+        Assert.Equal(typeof(IServiceManagerServer), typeof(WebSocketServer<string>).GetProperty(nameof(WebSocketServer<string>.Services))!.PropertyType);
     }
 
     [Fact]
@@ -558,7 +559,7 @@ public sealed class WebSocketServerTests
 
         await Assert.ThrowsAsync<TimeoutException>(() =>
         {
-            return ends.Server.Services.GetCommand(Ping, TextAsked)("ping")(new RequestOptions
+            return ends.Server.Services.GetCommand(Ping, TextAsked)("ping")(new CommandOptions
             {
                 ConnectionHandle = connectionHandle,
                 Timeout = TimeSpan.FromMilliseconds(50),
@@ -598,7 +599,7 @@ public sealed class WebSocketServerTests
         // the clock is no part of it: a generous timeout
         var resulted = await ends.Client.Services.GetRequest(Echo, BytesAsked)(request)(new RequestOptions { Timeout = Generous })
             .WaitAsync(Generous, Cancelled);
-        var answered = await ends.Server.Services.GetCommand(Ping, BytesAsked)(command)(new RequestOptions
+        var answered = await ends.Server.Services.GetCommand(Ping, BytesAsked)(command)(new CommandOptions
         {
             ConnectionHandle = await opened.Task.WaitAsync(Patience, Cancelled),
             Timeout = Generous,
@@ -948,7 +949,7 @@ public sealed class WebSocketServerTests
         Assert.Equal("HI", await echoing("hi")().WaitAsync(Patience, Cancelled));
 
         // the server commands the client it names
-        Assert.Equal("pong", await server.Services.GetCommand(Ping, TextAsked)("ping")(new RequestOptions { ConnectionHandle = connectionHandle })
+        Assert.Equal("pong", await server.Services.GetCommand(Ping, TextAsked)("ping")(new CommandOptions { ConnectionHandle = connectionHandle })
             .WaitAsync(Patience, Cancelled));
 
         // silent past its connection timeout, the client is closed, and its session goes with it
@@ -1083,7 +1084,7 @@ public sealed class WebSocketServerTests
 
         await Assert.ThrowsAsync<TimeoutException>(() =>
         {
-            return ends.Server.Services.GetCommand(Ping, TextAsked)("ping")(new RequestOptions
+            return ends.Server.Services.GetCommand(Ping, TextAsked)("ping")(new CommandOptions
             {
                 ConnectionHandle = connectionHandle,
                 Timeout = TimeSpan.FromMilliseconds(50),
@@ -1241,7 +1242,7 @@ public sealed class WebSocketServerTests
     {
         // a server on every address, each socket bound to one address and port of the loopback
         var server = new WebSocketServer<string>();
-        var port = (await server.Transport.Start(new WebSocketTransportStartOptions { Address = "0.0.0.0", FindOpenPort = true }, Cancelled)).Port;
+        var port = (await server.Transport.Start(new WebSocketTransportStartOptions { Address = "0.0.0.0", FindOpenPort = true, CancellationToken = Cancelled })).Port;
         var localPort = new StrongBox<int>(0);
         using var aliceHandshakes = new SamePort(localPort);
         using var otherHandshakes = new SamePort(localPort);
@@ -1270,9 +1271,9 @@ public sealed class WebSocketServerTests
                 return response.Answer(request.Payload.ToUpperInvariant());
             });
 
-            await alice.Connect(new WebSocketConnectOptions { Host = "127.0.0.1", Port = port }, Cancelled);
+            await alice.Connect(new WebSocketTransportClientConnectOptions { Host = "127.0.0.1", Port = port, CancellationToken = Cancelled });
             await alice.Services.GetRequest(OpenSession, TextAsked)("alice")().WaitAsync(Patience, Cancelled);
-            await other.Connect(new WebSocketConnectOptions { Host = "127.0.0.2", Port = port }, Cancelled);
+            await other.Connect(new WebSocketTransportClientConnectOptions { Host = "127.0.0.2", Port = port, CancellationToken = Cancelled });
 
             // ! the client's connect settles on the 101, which the server writes before it keeps the
             // connection: wait for it to hold both
@@ -1347,7 +1348,7 @@ public sealed class WebSocketServerTests
         // the device behind it, at destination 7, on the hub's own connection to it: leg B
         await using var device = new WebSocketClient();
 
-        device.Services.GetRequestResolver(Echo, TextAnswered)((request, response) =>
+        device.Services.GetCommandResolver(Echo, TextAnswered)((request, response) =>
         {
             return response.Answer(request.Payload);
         });

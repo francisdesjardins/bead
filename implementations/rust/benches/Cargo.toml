@@ -1,6 +1,6 @@
 [package]
 name = "francisdesjardins-bead-bench"
-description = "The Rust side's in-memory bench: calls on one in-memory connection kept, and exchanges, each a client and its connection drawn, called once and closed, written as bead-bench/1."
+description = "The Rust side's in-memory bench: the envelope's codec, calls on one in-memory connection kept, and exchanges, each a client and its connection drawn, called once and closed, written as bead-bench/1."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

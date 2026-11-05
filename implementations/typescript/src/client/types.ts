@@ -10,7 +10,8 @@ import type {
 import type {
   DefaultCredential,
   ICredentials,
-  IServiceManager,
+  IntakeLimitsOptions,
+  IServiceManagerClient,
   RouterLimitsOptions,
 } from '../router/shared/types';
 
@@ -22,11 +23,15 @@ import type {
  */
 export interface IClient<Transport extends IClientTransportLike = IClientTransportLike> {
   readonly router: IRouterClient<Transport>;
-  /** The requesters and resolvers of the services, made on {@link IClient.router}. */
-  readonly services: IServiceManager<RouterClientConnectionHandle>;
+  /**
+   * A client's services, made on {@link IClient.router}: its requests and notifications, and its
+   * command resolvers.
+   */
+  readonly services: IServiceManagerClient<RouterClientConnectionHandle>;
   readonly transport: Transport;
 
-  connect(options: Parameters<Transport['connect']>[0]): Promise<void>;
+  /** Connects the transport, with its options, optional where every member of them is. */
+  connect(...[options]: Parameters<Transport['connect']>): Promise<void>;
   disconnect(options?: Parameters<Transport['disconnect']>[0]): Promise<void>;
   /** Reconnects the transport; a dispose aborts it, along with the signal given. */
   reconnect(options?: Parameters<Transport['reconnect']>[0]): Promise<void>;
@@ -53,7 +58,7 @@ export interface IClientLayers<Transport extends IClientTransportLike> {
     | undefined;
   /** Builds the services on the router; `createServiceManager` when not given. */
   services?:
-    | ((router: IRouterClient<Transport>) => IServiceManager<RouterClientConnectionHandle>)
+    | ((router: IRouterClient<Transport>) => IServiceManagerClient<RouterClientConnectionHandle>)
     | undefined;
   transport: Transport;
 }
@@ -75,6 +80,12 @@ export interface IClientOptions {
    */
   devtools?: boolean | undefined;
   /**
+   * What its router holds untaken of what its server sent within one task, past which it pauses
+   * its transport (spec 15.12), which it is built with: `INTAKE_DEFAULTS`' where these say nothing,
+   * each 1 at least, or the client is a {@link ProgrammerError}.
+   */
+  intake?: IntakeLimitsOptions | undefined;
+  /**
    * How much the router reads, writes and holds, which it is built with: {@link LIMIT_DEFAULTS}'
    * where these say nothing. They must hold together, or the client is a {@link ProgrammerError}.
    */
@@ -91,7 +102,7 @@ export interface IClientOptions {
  * package's. The options are the transport's own: {@link IClient} reads them back from it.
  */
 export interface IClientTransportLike extends IRouterClientTransportLike {
-  connect(options: unknown): Promise<void>;
+  connect(options?: unknown): Promise<void>;
   disconnect(options?: unknown): Promise<void>;
   reconnect(options?: { signal?: AbortSignal | undefined }): Promise<void>;
   [Symbol.asyncDispose](): Promise<void>;

@@ -40,7 +40,6 @@ MINUS_ONE = 'A duration of -1 ms'
 NOT_A_NUMBER = 'A duration that is not a number'
 UNDER_ZERO = 'A duration under zero'
 WEB_WORKER = 'The Web Worker transport'
-DELAY_AS_A_NUMBER = "A reconnection's delay given as a number"
 
 # what a value is beside a number of milliseconds
 NEVER = 'never'
@@ -184,6 +183,9 @@ def default(clause, *, milliseconds=None, ways, state=None):
 # a gateway's options, which take the bounds of 15.12 by their names (transcoding 10.2)
 GATEWAY = way('gateway', "a gateway's options, as it is built")
 
+# an HTTP policy's members, which an HTTP server or a gateway takes (spec 15.12, decision 0037)
+POLICY = way('policy', "an HTTP policy's members, as it is made")
+
 places = [
     {
         'id': 'call.timeout',
@@ -316,16 +318,6 @@ places = [
         'observed': 'held',
     },
     {
-        'id': 'httpTransportServer.exchangeTimeout',
-        'name': "an HTTP server's exchange timeout",
-        'kind': 'timeout',
-        'never': 'taken',
-        'neverClause': '15.12',
-        'ways': [way('options', "the transport server's options, as it is built")],
-        'default': default('15.12.8', milliseconds=DEFAULTS['exchangeTimeout'], ways=['options']),
-        'observed': 'held',
-    },
-    {
         'id': 'httpTransportServer.maximumWait',
         'name': 'the longest an HTTP server holds a listen',
         'kind': 'timeout',
@@ -341,7 +333,7 @@ places = [
         'kind': 'timeout',
         'never': 'refused',
         'neverClause': '15.12',
-        'ways': [way('options', "the transport server's options, as it is built"), GATEWAY],
+        'ways': [way('options', "the transport server's options, as it is built"), GATEWAY, POLICY],
         'observed': 'refusal',
     },
     {
@@ -350,7 +342,7 @@ places = [
         'kind': 'timeout',
         'never': 'refused',
         'neverClause': '15.12',
-        'ways': [way('options', "the transport server's options, as it is built"), GATEWAY],
+        'ways': [way('options', "the transport server's options, as it is built"), GATEWAY, POLICY],
         'observed': 'refusal',
     },
     {
@@ -359,8 +351,21 @@ places = [
         'kind': 'timeout',
         'never': 'refused',
         'neverClause': '15.12',
-        'ways': [way('options', "the transport server's options, as it is built"), GATEWAY],
+        'ways': [way('options', "the transport server's options, as it is built"), GATEWAY, POLICY],
         'default': default('15.12.16', milliseconds=DEFAULTS['bodyGracePeriod'], ways=['options', 'gateway']),
+        'observed': 'held',
+    },
+    {
+        'id': 'httpTransport.exchangeTimeout',
+        'name': "an HTTP exchange's timeout, its client's or its server's",
+        'kind': 'timeout',
+        'never': 'taken',
+        'neverClause': '15.12',
+        'ways': [
+            way('client', "the transport client's options, as it is built"),
+            way('server', "the transport server's options, as it is built"),
+        ],
+        'default': default('15.12.8', milliseconds=DEFAULTS['exchangeTimeout'], ways=['client', 'server']),
         'observed': 'held',
     },
     {
@@ -430,9 +435,9 @@ places = [
         'observed': 'held',
     },
     # a broker's (spec 15.21, 15.23): its heartbeat on the platform's timer, as a WebSocket's, observed
-    # by its refusal alone; a half-open connection's wait and the grace of an envelope's parts on the
-    # clock given (decision 0011). A participant's link reconnects as a transport client does, its delay
-    # transportClient.reconnectionDelay's
+    # by its refusal alone; a half-open connection's wait, the grace of an envelope's parts and its
+    # participant's reconnection delay on the clock given (decision 0011), that delay a place of its
+    # own, since no clause names one option for it and a transport client's
     {
         'id': 'brokerParticipant.heartbeat',
         'name': "a broker participant's heartbeat on a silent connection",
@@ -462,9 +467,22 @@ places = [
         'default': default('15.12.16', milliseconds=DEFAULTS['bodyGracePeriod'], ways=['options']),
         'observed': 'held',
     },
-    # MQTT 5's adapter (spec 15.26, 15.30): its Keep Alive and the wait for its CONNACK, each on its
-    # library's timer, so observed by its refusal alone; a Keep Alive is held in whole seconds, 65,535
-    # at most, a ceiling of its own below 1.4's
+    {
+        'id': 'brokerParticipant.reconnectionDelay',
+        'name': "a broker participant's reconnection delay, once its link went down",
+        'kind': 'delay',
+        'never': 'refused',
+        'ways': [
+            way('function', 'a function of the previous delay and the attempt, its answer'),
+            way('number', 'a number'),
+        ],
+        'observed': 'held',
+    },
+    # MQTT 5's adapter (spec 15.26, 15.27, 15.30): its Keep Alive, on its library's timer, and the
+    # wait for its password, where it asks its provider, and its CONNACK, from its start's call; a
+    # subscription let go's, for its UNSUBACK from its UNSUBSCRIBE; and its stop's, for what it was
+    # handed and its UNSUBACKs from its call, then for its DISCONNECT, each observed by its refusal
+    # alone; a Keep Alive is held in whole seconds, 65,535 at most, a ceiling of its own below 1.4's
     {
         'id': 'mqttBrokerAdapter.keepAlive',
         'name': "an MQTT 5 adapter's Keep Alive, which its broker counts its link lost by",
@@ -477,17 +495,18 @@ places = [
     },
     {
         'id': 'mqttBrokerAdapter.connectTimeout',
-        'name': "how long an MQTT 5 adapter's start waits for its CONNACK",
+        'name': "how long an MQTT 5 adapter waits: its start, for its password, where it asks its provider, and its CONNACK; a subscription let go, for its UNSUBACK; and its stop, for what it was handed and its UNSUBACKs, then for its DISCONNECT",
         'kind': 'timeout',
         'never': 'refused',
         'neverClause': '15.30',
         'ways': [way('options', "the adapter's options, as it is built")],
         'observed': 'refusal',
     },
-    # AMQP 1.0's adapter (spec 15.33, 15.37): its OPEN's idle-time-out and the wait for its broker's
-    # OPEN, its sessions and its inbox, each on its library's timer, so observed by its refusal alone;
-    # an idle-time-out is held to 1,073,741,823 ms, a ceiling of its own below 1.4's, since its library
-    # counts its link lost by twice it, which 2³¹ − 1 then still holds
+    # AMQP 1.0's adapter (spec 15.33, 15.37): its OPEN's idle-time-out, on its library's timer, and the
+    # wait for its password, where it asks its provider, its broker's OPEN, its sessions and its inbox,
+    # from its start's call, each observed by its refusal alone; an idle-time-out is held to
+    # 1,073,741,823 ms, a ceiling of its own below 1.4's, since its library counts its link lost by
+    # twice it, which 2³¹ − 1 then still holds
     {
         'id': 'amqpBrokerAdapter.idleTimeout',
         'name': "an AMQP 1.0 adapter's idle-time-out, which it counts its link lost by twice over",
@@ -500,7 +519,7 @@ places = [
     },
     {
         'id': 'amqpBrokerAdapter.connectTimeout',
-        'name': "how long an AMQP 1.0 adapter waits on its broker: its start, for its OPEN, its sessions and its inbox; its inbox's deletion; a name let go; and its stop",
+        'name': "how long an AMQP 1.0 adapter waits: its start, for its password, where it asks its provider, its broker's OPEN, its sessions and its inbox; its inbox's deletion; a name let go; and its stop",
         'kind': 'timeout',
         'never': 'refused',
         'neverClause': '15.37',
@@ -514,7 +533,7 @@ places = [
         'never': 'refused',
         'ways': [
             way('function', 'a function of the previous delay and the attempt, its answer'),
-            way('number', 'a number', differs=(('C#', DELAY_AS_A_NUMBER),)),
+            way('number', 'a number'),
         ],
         'observed': 'held',
     },
@@ -665,7 +684,7 @@ document = {
         'clauses are the units of spec.md a place checks, each for what the place observes of it, and nothing else: 1.4, which holds and refuses its durations; its neverClause; and its default\'s clause. A unit is a clause, 9.2; an item of its numbered list, 9.2.5; or a row of its table, counted from 1, 15.12.8. A gateway\'s place cites the units of transcoding.md behind transcoding:, transcoding:9.2.',
         'ways are each way the surface takes that duration, by an id stable in its place: each harness keeps a table from each place and way to a function that builds the place on its side\'s test clock, given one input or none, and fails when that table and this file differ by one. required marks a way whose duration cannot be left out.',
         'default is where a clause states one: its milliseconds, or never, with that clause, one of the place\'s own; ways, those a harness builds with nothing given to read it; state, where it holds only so. A default no clause states is left out.',
-        'observed is held, where what the place holds is read: an option read back, the due of the timer it arms on the side\'s test clock, or the wait a listen asks; at once, no timer armed and the act done; never, no timer armed. Or refusal, for a place on the real clock (decision 0011), whose harness reads whether it refuses alone.',
+        'observed is held, where what the place holds is read: an option read back, the due of the timer it arms on the side\'s test clock, the wait a listen asks, or, at an HTTP client\'s exchange timeout, the due of the pause a non-request refused busy arms, its Retry-After past the ceiling, held where a second busy at that due loses its exchange; at once, no timer armed and the act done; never, no timer armed, or, at that client, a second pause armed at that due. Or refusal, for a place on the real clock (decision 0011), whose harness reads whether it refuses alone.',
         'outcomes holds one outcome an input, in the inputs\' order: held, with the whole milliseconds held, a fraction rounded to the nearest, a half away from zero; at once; never; default, with the milliseconds of the default it is held as; taken, at a place observed by its refusal, for an input not refused; or refused, with its reason.',
         'reason is derived from the input, the place\'s kind and its never — under the floor, past the ceiling, 0 refused, never refused, or not a number — and held by the regeneration alone: the words of a refusal are each side\'s, which its harness builds, and a side that reports a refusal by a code checks the reason against that code.',
         'differs, on an input, a way or an outcome, names a row of docs/support.md, which names this file and what crosses it, and the language that row excuses from it: an input that language cannot be given, a way it lacks, or an outcome it reaches otherwise. A harness plays every input at every place and way but those a differs excuses its language from.',

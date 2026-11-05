@@ -45,6 +45,23 @@ export const STRICT_UTF8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: tr
 
 const ENCODER = new TextEncoder();
 
+/**
+ * The reasons a codec of spec 17 refuses with, in 17.2's words and no others: a refusal's message
+ * is its reason, exactly, and a request's `PAYLOAD_UNDECODABLE` carries it as its detail. What more
+ * the side knows rides in the refusal's `cause`.
+ */
+export const CODEC_REASONS = Object.freeze({
+  byteOrderMark: 'a byte order mark',
+  nameTwice: 'a name twice',
+  nestedPast64: 'nested past 64',
+  noJsonValue: 'no JSON value',
+  notAFiniteNumber: 'not a finite number',
+  notJson: 'not JSON',
+  notUtf8: 'not UTF-8',
+  numberPastADouble: 'a number past a double',
+  surrogateAlone: 'a surrogate alone',
+});
+
 // how deep a json payload nests at most, the outermost at depth 1 (spec 17.5, item 7)
 const DEPTH = 64;
 
@@ -111,7 +128,7 @@ const assertDepth = (text: string): void => {
       depth += 1;
 
       if (depth > DEPTH) {
-        throw new SyntaxError(`a json payload nests deeper than ${String(DEPTH)}`);
+        throw new SyntaxError(CODEC_REASONS.nestedPast64);
       }
     } else if (code === CLOSE_ARRAY || code === CLOSE_OBJECT) {
       depth -= 1;
@@ -122,11 +139,33 @@ const assertDepth = (text: string): void => {
 /** Throws when `value`, a leaf, is a number past a double or a string holding a surrogate alone. */
 const assertLeaf = (value: unknown): void => {
   if (typeof value === 'number' && !Number.isFinite(value)) {
-    throw new SyntaxError('a json payload holds a number past the largest double');
+    throw new SyntaxError(CODEC_REASONS.numberPastADouble);
   }
 
   if (typeof value === 'string' && !value.isWellFormed()) {
-    throw new SyntaxError('a json payload holds a surrogate alone');
+    throw new SyntaxError(CODEC_REASONS.surrogateAlone);
+  }
+};
+
+/**
+ * Throws when `value`, as `JSON.parse` gave it, holds a number past a double at any depth. A walk
+ * with a stack of its own, never a recursion.
+ */
+const assertFinite = (value: unknown): void => {
+  const pending: unknown[] = [value];
+
+  // ! no JSON value is undefined, so an empty stack alone ends the walk
+  for (let item = pending.pop(); item !== undefined; item = pending.pop()) {
+    if (typeof item === 'number' && !Number.isFinite(item)) {
+      throw new SyntaxError(CODEC_REASONS.numberPastADouble);
+    }
+
+    if (typeof item === 'object' && item !== null) {
+      // * one by one, never spread: an array as long as a token allows passes no argument limit
+      for (const member of Object.values(item)) {
+        pending.push(member);
+      }
+    }
   }
 };
 
@@ -149,7 +188,7 @@ const settle = (value: unknown): unknown => {
 
     for (const name of names) {
       if (typeof name === 'string' && !name.isWellFormed()) {
-        throw new SyntaxError('a json payload holds a surrogate alone');
+        throw new SyntaxError(CODEC_REASONS.surrogateAlone);
       }
 
       const item = record[name];
@@ -321,15 +360,22 @@ const buildJson = (text: string): unknown => {
 };
 
 /**
- * The value of `text`, a JSON text, as `JSON.parse` reads it: built by Bead's own reader when a
- * member's name holds an escape, which V8 can read as the name of an earlier object of the same
- * shape, one holding a backslash and as long once read. Throws what `JSON.parse` throws.
+ * The value of `text`, a JSON text, as `JSON.parse` reads it, bounded as spec 17.5's items 6 and 7
+ * bound a payload: no number past the largest double, 64 deep at most. Built by Bead's own reader
+ * when a member's name holds an escape, which V8 can read as the name of an earlier object of the
+ * same shape, one holding a backslash and as long once read. Throws a `SyntaxError`.
  */
 export const parseJson = (text: string): unknown => {
-  const value: unknown = JSON.parse(text);
+  // * before the parse, so a peer never chooses how deep it goes
+  assertDepth(text);
 
+  const value: unknown = JSON.parse(text);
   // * the parse holds the text to JSON's grammar; only the names it hands on are in doubt
-  return scanNames(text).isEscaped ? buildJson(text) : value;
+  const read: unknown = scanNames(text).isEscaped ? buildJson(text) : value;
+
+  assertFinite(read);
+
+  return read;
 };
 
 /**
@@ -342,11 +388,11 @@ const readJson = (bytes: Uint8Array): JsonValue => {
   try {
     text = STRICT_UTF8.decode(bytes);
   } catch (reason) {
-    throw new SyntaxError('a json payload is not UTF-8', { cause: reason });
+    throw new SyntaxError(CODEC_REASONS.notUtf8, { cause: reason });
   }
 
   if (text.charCodeAt(0) === BYTE_ORDER_MARK) {
-    throw new SyntaxError('a json payload starts with a byte order mark');
+    throw new SyntaxError(CODEC_REASONS.byteOrderMark);
   }
 
   // * before the parse, so a peer never chooses how deep it goes
@@ -357,9 +403,7 @@ const readJson = (bytes: Uint8Array): JsonValue => {
   try {
     value = JSON.parse(text);
   } catch (reason) {
-    throw new SyntaxError('a json payload is not one JSON text', {
-      cause: reason,
-    });
+    throw new SyntaxError(CODEC_REASONS.notJson, { cause: reason });
   }
 
   const names = scanNames(text);
@@ -368,14 +412,14 @@ const readJson = (bytes: Uint8Array): JsonValue => {
   value = settle(names.isEscaped ? buildJson(text) : value);
 
   if (!names.isOnce) {
-    throw new SyntaxError('a json payload names a member twice');
+    throw new SyntaxError(CODEC_REASONS.nameTwice);
   }
 
   // * what JSON.parse gives, every leaf checked: a JSON value
   return value as JsonValue;
 };
 
-/** What a value JSON has no value for is, for a refusal's words: its type, or its object's class. */
+/** What a value JSON has no value for is, for a refusal's cause: its type, or its object's class. */
 const kindOf = (value: unknown): string => {
   if (typeof value !== 'object' || value === null) {
     return typeof value;
@@ -427,12 +471,20 @@ const writeByHand = (value: unknown, parts: string[]): void => {
   }
 };
 
+/** A writer's refusal of what JSON has no value for: its reason, what the value is in its cause. */
+const noJsonValue = (what: string): TypeError => {
+  return new TypeError(CODEC_REASONS.noJsonValue, {
+    cause: new TypeError(`a json value holds what JSON has no value for, ${what}`),
+  });
+};
+
 /**
  * The bytes of `value`'s canonical form, as spec 17.7 writes it: RFC 8785's, each object's names
  * sorted by their UTF-16 code units, which a string's default order compares. What no reader takes
- * throws a `TypeError`: a number that is not finite, a string or a name holding a surrogate alone,
- * a value nested deeper than 64, and what JSON has no value for — `undefined`, a function, a
- * `BigInt`, a `Date`, a `Map`, an object of a class, an array with a hole.
+ * throws a `TypeError` of its reason: a number that is not finite, a string or a name holding a
+ * surrogate alone, a value nested deeper than 64, and what JSON has no value for — `undefined`, a
+ * function, a `BigInt`, a `Date`, a `Map`, an object of a class, an array with a hole, which its
+ * cause names.
  */
 const writeJson = (value: unknown): Uint8Array<ArrayBuffer> => {
   // set as the copy finds one, out of the flow a type follows here
@@ -447,7 +499,7 @@ const writeJson = (value: unknown): Uint8Array<ArrayBuffer> => {
 
     if (typeof given === 'number') {
       if (!Number.isFinite(given)) {
-        throw new TypeError('a json value holds a number that is not finite');
+        throw new TypeError(CODEC_REASONS.notAFiniteNumber);
       }
 
       return given === 0 ? 0 : given;
@@ -455,18 +507,18 @@ const writeJson = (value: unknown): Uint8Array<ArrayBuffer> => {
 
     if (typeof given === 'string') {
       if (!given.isWellFormed()) {
-        throw new TypeError('a json value holds a surrogate alone');
+        throw new TypeError(CODEC_REASONS.surrogateAlone);
       }
 
       return given;
     }
 
     if (typeof given !== 'object' || !(Array.isArray(given) || isPlain(given))) {
-      throw new TypeError(`a json value holds what JSON has no value for, ${kindOf(given)}`);
+      throw noJsonValue(kindOf(given));
     }
 
     if (depth === DEPTH) {
-      throw new TypeError(`a json value nests deeper than ${String(DEPTH)}`);
+      throw new TypeError(CODEC_REASONS.nestedPast64);
     }
 
     if (Array.isArray(given)) {
@@ -474,9 +526,7 @@ const writeJson = (value: unknown): Uint8Array<ArrayBuffer> => {
 
       for (let index = 0; index < given.length; index += 1) {
         if (!Object.hasOwn(given, index)) {
-          throw new TypeError(
-            'a json value holds what JSON has no value for, an array with a hole'
-          );
+          throw noJsonValue('an array with a hole');
         }
 
         items[index] = copy(given[index], depth + 1);
@@ -490,7 +540,7 @@ const writeJson = (value: unknown): Uint8Array<ArrayBuffer> => {
 
     for (const name of Object.keys(record).toSorted()) {
       if (!name.isWellFormed()) {
-        throw new TypeError('a json value holds a surrogate alone');
+        throw new TypeError(CODEC_REASONS.surrogateAlone);
       }
 
       const first = name.charCodeAt(0);
@@ -522,18 +572,21 @@ const readText = (bytes: Uint8Array): string => {
   try {
     return STRICT_UTF8.decode(bytes);
   } catch (reason) {
-    throw new SyntaxError('a text payload is not UTF-8', { cause: reason });
+    throw new SyntaxError(CODEC_REASONS.notUtf8, { cause: reason });
   }
 };
 
-/** A string's bytes in UTF-8; one that is not a string, or holds a surrogate alone, throws. */
+/**
+ * A string's bytes in UTF-8; one holding a surrogate alone is refused. One that is not a string is
+ * no value of the codec but its caller's error, as the C# side's `ArgumentNullException` is.
+ */
 const writeText = (text: unknown): Uint8Array<ArrayBuffer> => {
   if (typeof text !== 'string') {
-    throw new TypeError(`a text payload is a string, not ${kindOf(text)}`);
+    throw new ProgrammerError(`a text payload is a string, not ${kindOf(text)}`);
   }
 
   if (!text.isWellFormed()) {
-    throw new TypeError('a text value holds a surrogate alone');
+    throw new TypeError(CODEC_REASONS.surrogateAlone);
   }
 
   return ENCODER.encode(text);
@@ -549,7 +602,8 @@ const passBytes = (bytes: Uint8Array): Uint8Array => {
 /**
  * The codecs of spec section 17, by their encoding's name: `raw`, the bytes; `text`, a string in
  * UTF-8; `json`, a JSON value, read as I-JSON but for its noncharacters and written in RFC 8785's
- * canonical form. A reader's refusal is a `SyntaxError`, a writer's a `TypeError`.
+ * canonical form. A reader's refusal is a `SyntaxError`, a writer's a `TypeError`, each of its
+ * reason in 17.2's words ({@link CODEC_REASONS}).
  */
 export const PAYLOAD_CODECS: Readonly<{
   json: IPayloadCodec<JsonValue, unknown>;
@@ -564,9 +618,11 @@ export const PAYLOAD_CODECS: Readonly<{
 /**
  * A codec of `codec`'s two functions, frozen: an encoding of a project's own, or a protobuf
  * message's, which generated code takes from `protoCodecOf` of `./proto`, spec 17.9 held there
- * whole. The runtime reads no field of the message; what does not read throws, and a request's
- * payload is answered `PAYLOAD_UNDECODABLE` as any other's. One that is not a function is a
- * {@link ProgrammerError}.
+ * whole. The runtime reads no field of the message; what does not read throws a `SyntaxError`, its
+ * refusal, and a request's payload so refused is answered `PAYLOAD_UNDECODABLE` as any other's,
+ * the refusal's message its detail: a codec an application writes refuses in words of its own.
+ * Anything else its reader throws is the side's own error: a request is answered `PROCEDURE_FAILED`
+ * and the error reported (spec 9.0, 17.2). One that is not a function is a {@link ProgrammerError}.
  *
  * @example
  * import { protoCodecOf } from '@francisdesjardins/bead/proto';

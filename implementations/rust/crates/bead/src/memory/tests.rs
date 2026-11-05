@@ -9,13 +9,15 @@ use bytes::Bytes;
 use tokio_util::sync::CancellationToken;
 
 use super::{
-    MemoryClient, MemoryClientOptions, MemoryConnectOptions, MemoryServer, MemoryServerOptions,
+    MemoryTransportClient, MemoryTransportClientConnectOptions, MemoryTransportClientOptions,
+    MemoryTransportServer, MemoryTransportServerOptions, TRANSPORT_MEMORY,
 };
 use crate::client::ClientOptions;
 use crate::clock::SharedClock;
-use crate::errors::TransportError;
+use crate::duration::{DurationRefusal, NEVER};
+use crate::errors::{Refusal, TransportError};
 use crate::managers::service::{
-    RequestDependencies, RequestOptions, ResolverDependencies, Response,
+    RequestDependencies, RequestOptions, RequestResolverDependencies, Response,
 };
 use crate::payloads::RawCodec;
 use crate::router::types::{
@@ -26,9 +28,14 @@ use crate::testing::SteppingClock;
 use crate::testing::hexadecimal;
 use crate::testing::pair::{Pair, PairOptions, echo};
 use crate::transport::{
-    ClientListener, ClientTransport, DisconnectOptions, ReadyState, ReconnectDelay,
-    ReconnectOptions, ServerListener, ServerTransport,
+    ClientListener, ReadyState, RouterClientTransport, ServerListener, ServerTransport,
+    TransportClientDisconnectOptions, TransportClientReconnectDelay,
+    TransportClientReconnectOptions, TransportServerClient,
 };
+
+mod lifecycle;
+mod reconnection;
+mod server_connections;
 
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
@@ -123,7 +130,7 @@ impl<F: Fn() + Send + Sync> ClientListener for OnReconnect<F> {
 struct Ends {
     clock: Arc<SteppingClock>,
     shared: SharedClock,
-    server: MemoryServer,
+    server: MemoryTransportServer,
     at_server: Told,
 }
 
@@ -140,7 +147,7 @@ impl Ends {
     fn unstarted() -> Self {
         let clock = SteppingClock::new(crate::testing::instants::new_year());
         let shared: SharedClock = Arc::<SteppingClock>::clone(&clock);
-        let server = MemoryServer::new(&MemoryServerOptions {
+        let server = MemoryTransportServer::new(&MemoryTransportServerOptions {
             clock: Some(Arc::clone(&shared)),
             runtime: None,
         })
@@ -159,10 +166,9 @@ impl Ends {
         }
     }
 
-    fn client(&self) -> (MemoryClient, Told) {
-        let client = MemoryClient::new(&MemoryClientOptions {
+    fn client(&self) -> (MemoryTransportClient, Told) {
+        let client = MemoryTransportClient::new(&MemoryTransportClientOptions {
             clock: Some(Arc::clone(&self.shared)),
-            server: self.server.clone(),
         })
         .expect("a client");
         let told: Told = Arc::default();
@@ -177,13 +183,12 @@ impl Ends {
     async fn connected(
         &self,
         (address, port): (Option<&str>, Option<u16>),
-    ) -> (MemoryClient, Told) {
+    ) -> (MemoryTransportClient, Told) {
         let (client, told) = self.client();
-        let connecting = client.connect(MemoryConnectOptions {
+        let connecting = client.connect(&MemoryTransportClientConnectOptions {
             address: address.map(str::to_owned),
             port,
-            signal: None,
-            timeout: None,
+            ..MemoryTransportClientConnectOptions::new(self.server.clone())
         });
 
         self.clock.settle().await;
@@ -216,6 +221,10 @@ const FIRST: &str = "type=MEMORY;ip=local;ordinal=1";
 // once sent with no copy to show it
 // spec 15.13, 15.15
 #[tokio::test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test slices its own fixed payload at offsets within its length"
+)]
 async fn hands_each_envelope_on_whole_once_and_in_order_in_a_later_turn_than_its_send() {
     let ends = Ends::started().await;
     let (client, at_client) = ends.connected((None, None)).await;
@@ -432,26 +441,26 @@ async fn hands_its_router_the_address_and_the_port_its_client_gave_as_it_connect
         "each with what its client gave"
     );
 
-    let clients: Vec<(String, String, Option<u16>)> = ends
-        .server
-        .clients()
-        .into_iter()
-        .map(|(handle, address, port, _)| (handle.to_string(), address, port))
-        .collect();
+    // each read by its fields, its activity the instant its envelope came on the server's clock
+    let delivered = Some(crate::testing::instants::new_year());
 
     assert_eq!(
-        clients,
+        ends.server.clients(),
         [
-            (
-                "type=MEMORY;ip=203.0.113.7;ordinal=1".to_owned(),
-                "203.0.113.7".to_owned(),
-                Some(50_123)
-            ),
-            (
-                "type=MEMORY;ip=local;ordinal=2".to_owned(),
-                "local".to_owned(),
-                None
-            ),
+            TransportServerClient {
+                connection_handle: Arc::from("type=MEMORY;ip=203.0.113.7;ordinal=1"),
+                address: "203.0.113.7".to_owned(),
+                port: Some(50_123),
+                last_activity: delivered,
+                transport_type: TRANSPORT_MEMORY,
+            },
+            TransportServerClient {
+                connection_handle: Arc::from("type=MEMORY;ip=local;ordinal=2"),
+                address: "local".to_owned(),
+                port: None,
+                last_activity: delivered,
+                transport_type: TRANSPORT_MEMORY,
+            },
         ],
         "its clients, as they connected"
     );
@@ -468,15 +477,14 @@ async fn draws_a_handle_of_type_memory_for_each_connect_and_gives_none_twice() {
     // a client connected again is a new connection, drawn at the next rank; so is one after a stop
     // and a start, which reset no rank
     first
-        .disconnect(DisconnectOptions::default())
+        .disconnect(&TransportClientDisconnectOptions::default())
         .expect("closed");
     ends.clock.settle().await;
 
-    let again = first.connect(MemoryConnectOptions {
+    let again = first.connect(&MemoryTransportClientConnectOptions {
         address: Some("127.0.0.1".to_owned()),
         port: Some(50_001),
-        signal: None,
-        timeout: None,
+        ..MemoryTransportClientConnectOptions::new(ends.server.clone())
     });
 
     ends.clock.settle().await;
@@ -485,7 +493,9 @@ async fn draws_a_handle_of_type_memory_for_each_connect_and_gives_none_twice() {
     ends.clock.settle().await;
     ends.server.start().await.expect("started again");
 
-    let after = third.connect(MemoryConnectOptions::default());
+    let after = third.connect(&MemoryTransportClientConnectOptions::new(
+        ends.server.clone(),
+    ));
 
     ends.clock.settle().await;
     after.await.expect("connected after a start");
@@ -514,9 +524,9 @@ async fn draws_a_handle_of_type_memory_for_each_connect_and_gives_none_twice() {
 
     for address in ["", "a;ordinal=1", "a b"] {
         let refused = named
-            .connect(MemoryConnectOptions {
+            .connect(&MemoryTransportClientConnectOptions {
                 address: Some(address.to_owned()),
-                ..MemoryConnectOptions::default()
+                ..MemoryTransportClientConnectOptions::new(ends.server.clone())
             })
             .await
             .expect_err("an address no handle names");
@@ -548,7 +558,7 @@ async fn tells_the_other_end_of_a_close_in_a_later_turn_the_closer_s_clean() {
     // after what it sent before, clean as the closer's
     client.send(message_of(&[1], None)).expect("sent");
     client
-        .disconnect(DisconnectOptions::default())
+        .disconnect(&TransportClientDisconnectOptions::default())
         .expect("closed");
 
     assert_eq!(
@@ -618,7 +628,7 @@ async fn tells_the_other_end_of_a_close_in_a_later_turn_the_closer_s_clean() {
 
     ends.server_told();
     unclean
-        .disconnect(DisconnectOptions {
+        .disconnect(&TransportClientDisconnectOptions {
             is_clean: Some(false),
             is_quick: None,
         })
@@ -644,15 +654,14 @@ async fn tells_the_other_end_of_a_close_in_a_later_turn_the_closer_s_clean() {
 async fn closes_each_connection_as_it_stops_and_takes_no_connect_after() {
     let clock = SteppingClock::new(crate::testing::instants::new_year());
     let shared: SharedClock = Arc::<SteppingClock>::clone(&clock);
-    let server = MemoryServer::new(&MemoryServerOptions {
+    let server = MemoryTransportServer::new(&MemoryTransportServerOptions {
         clock: Some(Arc::clone(&shared)),
         runtime: None,
     })
     .expect("a server");
     let client_of = || {
-        MemoryClient::new(&MemoryClientOptions {
+        MemoryTransportClient::new(&MemoryTransportClientOptions {
             clock: Some(Arc::clone(&shared)),
-            server: server.clone(),
         })
         .expect("a client")
     };
@@ -660,7 +669,7 @@ async fn closes_each_connection_as_it_stops_and_takes_no_connect_after() {
 
     // a connect before its start fails before anything goes
     let early = first
-        .connect(MemoryConnectOptions::default())
+        .connect(&MemoryTransportClientConnectOptions::new(server.clone()))
         .await
         .expect_err("refused before its start");
 
@@ -684,7 +693,7 @@ async fn closes_each_connection_as_it_stops_and_takes_no_connect_after() {
     server.start().await.expect("started");
 
     for client in [&first, &second] {
-        let connecting = client.connect(MemoryConnectOptions::default());
+        let connecting = client.connect(&MemoryTransportClientConnectOptions::new(server.clone()));
 
         clock.settle().await;
         connecting.await.expect("connected");
@@ -716,7 +725,7 @@ async fn closes_each_connection_as_it_stops_and_takes_no_connect_after() {
     assert!(server.clients().is_empty(), "no connection held");
 
     let late = first
-        .connect(MemoryConnectOptions::default())
+        .connect(&MemoryTransportClientConnectOptions::new(server.clone()))
         .await
         .expect_err("refused once stopped");
 
@@ -745,12 +754,12 @@ async fn carries_a_transfer_under_its_routers_credit() {
     client.limits = Some(limits);
 
     let options = PairOptions {
-        server,
-        client,
+        server: Some(server),
+        client: Some(client),
         ..PairOptions::default()
     };
 
-    let pair = Pair::connected((crate::testing::instants::new_year(), options))
+    let pair = Pair::connected(crate::testing::instants::new_year(), &options)
         .await
         .expect("a pair connected");
     let kinds: Arc<Mutex<Vec<String>>> = Arc::default();
@@ -758,7 +767,10 @@ async fn carries_a_transfer_under_its_routers_credit() {
 
     pair.server
         .services()
-        .get_request_resolver(&echo(), ResolverDependencies::of(RawCodec, RawCodec))
+        .get_request_resolver(
+            &echo(),
+            RequestResolverDependencies::new(RawCodec, RawCodec),
+        )
         .expect("echo resolved")
         .on(Arc::new(|request, response: Response<RawCodec>| {
             response.result(request.payload)
@@ -778,9 +790,9 @@ async fn carries_a_transfer_under_its_routers_credit() {
     let call = pair
         .client
         .services()
-        .get_request(&echo(), RequestDependencies::of(RawCodec, RawCodec))
+        .get_request(&echo(), RequestDependencies::new(RawCodec, RawCodec))
         .expect("echo asked")
-        .call(payload.clone(), RequestOptions::default())
+        .call(payload.clone(), &RequestOptions::default())
         .expect("echo called");
 
     pair.settle().await;
@@ -817,9 +829,9 @@ async fn gives_up_a_connect_its_dispose_its_token_or_its_clock_ends_before_its_s
     // its token cancelled before its server drew it
     let (cancelled, _) = ends.client();
     let token = CancellationToken::new();
-    let connecting = cancelled.connect(MemoryConnectOptions {
+    let connecting = cancelled.connect(&MemoryTransportClientConnectOptions {
         signal: Some(token.clone()),
-        ..MemoryConnectOptions::default()
+        ..MemoryTransportClientConnectOptions::new(ends.server.clone())
     });
 
     token.cancel();
@@ -829,7 +841,9 @@ async fn gives_up_a_connect_its_dispose_its_token_or_its_clock_ends_before_its_s
 
     // disposed before its server drew it
     let (disposed, _) = ends.client();
-    let connecting = disposed.connect(MemoryConnectOptions::default());
+    let connecting = disposed.connect(&MemoryTransportClientConnectOptions::new(
+        ends.server.clone(),
+    ));
 
     disposed.dispose();
     ends.clock.settle().await;
@@ -858,23 +872,22 @@ async fn gives_up_a_connect_its_dispose_its_token_or_its_clock_ends_before_its_s
 }
 
 // a client of a server never started, its first connect failed and kept for its reconnection
-async fn never_started() -> (Arc<SteppingClock>, MemoryClient) {
+async fn never_started() -> (Arc<SteppingClock>, MemoryTransportClient) {
     let clock = SteppingClock::new(crate::testing::instants::new_year());
     let shared: SharedClock = Arc::<SteppingClock>::clone(&clock);
-    let server = MemoryServer::new(&MemoryServerOptions {
+    let server = MemoryTransportServer::new(&MemoryTransportServerOptions {
         clock: Some(Arc::clone(&shared)),
         runtime: None,
     })
     .expect("a server");
-    let client = MemoryClient::new(&MemoryClientOptions {
+    let client = MemoryTransportClient::new(&MemoryTransportClientOptions {
         clock: Some(shared),
-        server,
     })
     .expect("a client");
 
     assert!(
         client
-            .connect(MemoryConnectOptions::default())
+            .connect(&MemoryTransportClientConnectOptions::new(server.clone()))
             .await
             .is_err(),
         "its server never started"
@@ -883,11 +896,11 @@ async fn never_started() -> (Arc<SteppingClock>, MemoryClient) {
     (clock, client)
 }
 
-fn reconnecting((delay, maximum_attempts): (Duration, u32)) -> ReconnectOptions {
-    ReconnectOptions {
-        delay: Some(ReconnectDelay::Fixed(delay)),
+fn reconnecting((delay, maximum_attempts): (Duration, u32)) -> TransportClientReconnectOptions {
+    TransportClientReconnectOptions {
+        delay: Some(TransportClientReconnectDelay::Fixed(delay)),
         maximum_attempts: Some(maximum_attempts),
-        ..ReconnectOptions::default()
+        ..TransportClientReconnectOptions::default()
     }
 }
 
@@ -895,7 +908,7 @@ fn reconnecting((delay, maximum_attempts): (Duration, u32)) -> ReconnectOptions 
 async fn rejects_with_a_reconnect_error_carrying_the_last_failure_as_cause_ending_closed() {
     let (clock, client) = never_started().await;
     let reconnection = client
-        .reconnect(reconnecting((Duration::from_secs(1), 2)))
+        .reconnect(&reconnecting((Duration::from_secs(1), 2)))
         .expect("a reconnection");
 
     assert_eq!(
@@ -927,7 +940,7 @@ async fn refuses_a_second_reconnection_leaving_the_first_alone() {
     let (clock, client) = never_started().await;
     let first = crate::testing::spawn(
         client
-            .reconnect(reconnecting((Duration::from_secs(1), 2)))
+            .reconnect(&reconnecting((Duration::from_secs(1), 2)))
             .expect("a reconnection"),
     );
 
@@ -935,7 +948,7 @@ async fn refuses_a_second_reconnection_leaving_the_first_alone() {
 
     assert!(
         matches!(
-            client.reconnect(ReconnectOptions::default()),
+            client.reconnect(&TransportClientReconnectOptions::default()),
             Err(TransportError::Refused(_))
         ),
         "a second refused"
@@ -1035,7 +1048,9 @@ async fn fails_a_connect_its_server_closed_as_it_opened_what_it_sent_before_unhe
         })));
 
     let (client, at_client) = ends.client();
-    let connecting = client.connect(MemoryConnectOptions::default());
+    let connecting = client.connect(&MemoryTransportClientConnectOptions::new(
+        ends.server.clone(),
+    ));
 
     ends.clock.settle().await;
 
@@ -1074,7 +1089,9 @@ async fn closes_at_once_unclean_a_connection_its_server_draws_once_a_dispose_gav
             server.send(message_of(&[1], None), handle).expect("sent");
         })));
 
-    let connecting = client.connect(MemoryConnectOptions::default());
+    let connecting = client.connect(&MemoryTransportClientConnectOptions::new(
+        ends.server.clone(),
+    ));
 
     ends.clock.settle().await;
 
@@ -1120,7 +1137,9 @@ async fn a_connect_given_up_its_client_let_go_as_its_server_draws_it_leaves_no_c
             }
         })));
 
-    let connecting = client.connect(MemoryConnectOptions::default());
+    let connecting = client.connect(&MemoryTransportClientConnectOptions::new(
+        ends.server.clone(),
+    ));
 
     drop(client);
     ends.clock.settle().await;
@@ -1167,7 +1186,7 @@ async fn refuses_a_send_or_a_disconnect_unless_open_and_a_send_of_what_is_no_byt
     );
 
     let unclosed = client
-        .disconnect(DisconnectOptions::default())
+        .disconnect(&TransportClientDisconnectOptions::default())
         .expect_err("never connected");
 
     assert!(
@@ -1201,29 +1220,32 @@ async fn refuses_a_reconnect_never_connected_and_a_connect_unless_closed_nothing
 
     // * never connected: nothing to connect again to
     assert_eq!(
-        refusal_of(client.reconnect(ReconnectOptions::default())).as_deref(),
+        refusal_of(client.reconnect(&TransportClientReconnectOptions::default())).as_deref(),
         Some("the transport client was never connected"),
         "said why"
     );
+    assert_eq!(client.ready_state(), ReadyState::Uninitialized);
 
     // its token cancelled already, and a server not started: refused, the first leaving its state
     // as it was
     let refused = client
-        .connect(MemoryConnectOptions {
+        .connect(&MemoryTransportClientConnectOptions {
             signal: Some(cancelled.clone()),
-            ..MemoryConnectOptions::default()
+            ..MemoryTransportClientConnectOptions::new(ends.server.clone())
         })
         .await
         .expect_err("cancelled already");
 
     assert!(
-        matches!(refused, TransportError::Cancelled(_)),
+        matches!(refused, TransportError::Cancelled { .. }),
         "cancelled: {refused:?}"
     );
     assert_eq!(client.ready_state(), ReadyState::Uninitialized, "as it was");
 
     let refused = client
-        .connect(MemoryConnectOptions::default())
+        .connect(&MemoryTransportClientConnectOptions::new(
+            ends.server.clone(),
+        ))
         .await
         .expect_err("its server not started");
 
@@ -1238,13 +1260,17 @@ async fn refuses_a_reconnect_never_connected_and_a_connect_unless_closed_nothing
     // it open
     ends.server.start().await.expect("started");
 
-    let connecting = client.connect(MemoryConnectOptions::default());
+    let connecting = client.connect(&MemoryTransportClientConnectOptions::new(
+        ends.server.clone(),
+    ));
 
     ends.clock.settle().await;
     connecting.await.expect("connected");
 
     let again = client
-        .connect(MemoryConnectOptions::default())
+        .connect(&MemoryTransportClientConnectOptions::new(
+            ends.server.clone(),
+        ))
         .await
         .expect_err("open already");
 
@@ -1256,12 +1282,12 @@ async fn refuses_a_reconnect_never_connected_and_a_connect_unless_closed_nothing
     assert!(
         matches!(
             client
-                .reconnect(ReconnectOptions {
+                .reconnect(&TransportClientReconnectOptions {
                     signal: Some(cancelled),
-                    ..ReconnectOptions::default()
+                    ..TransportClientReconnectOptions::default()
                 })
                 .err(),
-            Some(TransportError::Cancelled(_))
+            Some(TransportError::Cancelled { .. })
         ),
         "a reconnection cancelled already refused"
     );
@@ -1269,8 +1295,65 @@ async fn refuses_a_reconnect_never_connected_and_a_connect_unless_closed_nothing
     assert_eq!(ends.server.clients().len(), 1, "one connection held");
 }
 
+// spec 1.4
+#[tokio::test]
+async fn refuses_a_fixed_delay_out_of_bounds_as_reconnect_is_called_nothing_changed() {
+    let ends = Ends::started().await;
+    let (client, told) = ends.connected((None, None)).await;
+    let cancelled = CancellationToken::new();
+    let fixed = |delay: Duration| TransportClientReconnectOptions {
+        delay: Some(TransportClientReconnectDelay::Fixed(delay)),
+        signal: Some(cancelled.clone()),
+        ..TransportClientReconnectOptions::default()
+    };
+
+    cancelled.cancel();
+    ends.server_told();
+    taken(&told);
+
+    // * refused as it is called, by its reason's code: after its state's guards, before its signal
+    for (delay, reason) in [
+        (Duration::from_micros(500), DurationRefusal::UnderTheFloor),
+        (
+            Duration::from_millis(2_147_483_648),
+            DurationRefusal::PastTheCeiling,
+        ),
+        (NEVER, DurationRefusal::NeverRefused),
+    ] {
+        let refused = client.reconnect(&fixed(delay)).err();
+
+        assert!(
+            matches!(
+                &refused,
+                Some(TransportError::Refused(misuse))
+                    if misuse.reason() == Some(Refusal::Duration(reason))
+            ),
+            "{delay:?} refused: {refused:?}"
+        );
+    }
+
+    // nothing changed: open, its connection kept, no reconnect told and no close
+    assert_eq!(client.ready_state(), ReadyState::Open, "still open");
+    assert_eq!(ends.server.clients().len(), 1, "its connection kept");
+    assert!(taken(&told).is_empty(), "nothing told");
+    assert!(ends.server_told().is_empty(), "nothing told its server");
+
+    // its state's guards first: a client never connected says so
+    let (never, _) = ends.client();
+
+    assert_eq!(
+        refusal_of(never.reconnect(&fixed(NEVER))).as_deref(),
+        Some("the transport client was never connected"),
+        "its state first"
+    );
+}
+
 // pending from its call to a later turn: what the other sides hold behind an accept, this side
 // asks within the call's own turn, before any later one runs
+#[expect(
+    clippy::too_many_lines,
+    reason = "the twin plays a connect and a reconnect alike, as the other sides' twins do"
+)]
 #[tokio::test]
 async fn refuses_a_second_connect_or_reconnect_while_one_is_pending() {
     for is_reconnect in [false, true] {
@@ -1278,7 +1361,9 @@ async fn refuses_a_second_connect_or_reconnect_while_one_is_pending() {
         let (client, at_client) = ends.client();
 
         if is_reconnect {
-            let connecting = client.connect(MemoryConnectOptions::default());
+            let connecting = client.connect(&MemoryTransportClientConnectOptions::new(
+                ends.server.clone(),
+            ));
 
             ends.clock.settle().await;
             connecting.await.expect("connected");
@@ -1287,13 +1372,15 @@ async fn refuses_a_second_connect_or_reconnect_while_one_is_pending() {
 
         let pending: BoxFuture<Result<(), TransportError>> = if is_reconnect {
             client
-                .reconnect(ReconnectOptions {
+                .reconnect(&TransportClientReconnectOptions {
                     maximum_attempts: Some(1),
-                    ..ReconnectOptions::default()
+                    ..TransportClientReconnectOptions::default()
                 })
                 .expect("a reconnection")
         } else {
-            Box::pin(client.connect(MemoryConnectOptions::default()))
+            Box::pin(client.connect(&MemoryTransportClientConnectOptions::new(
+                ends.server.clone(),
+            )))
         };
         let state = if is_reconnect {
             "reconnecting"
@@ -1303,7 +1390,9 @@ async fn refuses_a_second_connect_or_reconnect_while_one_is_pending() {
 
         assert_eq!(
             client
-                .connect(MemoryConnectOptions::default())
+                .connect(&MemoryTransportClientConnectOptions::new(
+                    ends.server.clone()
+                ))
                 .await
                 .err()
                 .map(|refused| refused.to_string()),
@@ -1311,7 +1400,7 @@ async fn refuses_a_second_connect_or_reconnect_while_one_is_pending() {
             "a second connect refused"
         );
         assert_eq!(
-            refusal_of(client.reconnect(ReconnectOptions::default())).as_deref(),
+            refusal_of(client.reconnect(&TransportClientReconnectOptions::default())).as_deref(),
             Some(if is_reconnect {
                 "the transport client is already reconnecting"
             } else {
@@ -1349,7 +1438,7 @@ async fn refuses_a_second_connect_or_reconnect_while_one_is_pending() {
         assert_eq!(ends.server.clients().len(), 1, "one connection held");
 
         client
-            .disconnect(DisconnectOptions::default())
+            .disconnect(&TransportClientDisconnectOptions::default())
             .expect("closed");
         ends.clock.settle().await;
 
@@ -1391,17 +1480,17 @@ async fn reconnects_with_its_last_connect_s_options_replacing_its_connection_wit
     // * each listener of its start told, the one that panics reported, and the reconnection goes on
     client.listen(Arc::new(Breaking));
 
-    let connecting = client.connect(MemoryConnectOptions {
+    let connecting = client.connect(&MemoryTransportClientConnectOptions {
         address: Some("10.0.0.1".to_owned()),
         port: Some(4_000),
-        ..MemoryConnectOptions::default()
+        ..MemoryTransportClientConnectOptions::new(ends.server.clone())
     });
 
     ends.clock.settle().await;
     connecting.await.expect("connected");
 
     let reconnection = client
-        .reconnect(ReconnectOptions::default())
+        .reconnect(&TransportClientReconnectOptions::default())
         .expect("a reconnection");
 
     ends.clock.settle().await;
@@ -1434,9 +1523,9 @@ async fn reconnects_with_its_last_connect_s_options_replacing_its_connection_wit
     );
 
     let reconnection = client
-        .reconnect(ReconnectOptions {
+        .reconnect(&TransportClientReconnectOptions {
             maximum_attempts: Some(1),
-            ..ReconnectOptions::default()
+            ..TransportClientReconnectOptions::default()
         })
         .expect("a reconnection");
 
@@ -1472,10 +1561,10 @@ async fn cancels_a_reconnection_before_its_first_attempt_when_its_start_listener
     ends.server_told();
 
     let reconnection = client
-        .reconnect(ReconnectOptions {
+        .reconnect(&TransportClientReconnectOptions {
             maximum_attempts: Some(1),
             signal: Some(cancelling),
-            ..ReconnectOptions::default()
+            ..TransportClientReconnectOptions::default()
         })
         .expect("a reconnection");
 
@@ -1486,7 +1575,7 @@ async fn cancels_a_reconnection_before_its_first_attempt_when_its_start_listener
     ends.clock.settle().await;
 
     assert!(
-        matches!(cancelled, TransportError::Cancelled(_)),
+        matches!(cancelled, TransportError::Cancelled { .. }),
         "cancelled: {cancelled:?}"
     );
     assert_eq!(
@@ -1529,7 +1618,7 @@ async fn closes_a_successful_last_attempt_when_its_reconnection_is_cancelled_aft
             locked(&seen).push(seam.ready_state());
 
             if is_closed_before_cancel {
-                seam.disconnect(DisconnectOptions::default())
+                seam.disconnect(&TransportClientDisconnectOptions::default())
                     .expect("closed");
             }
 
@@ -1538,10 +1627,10 @@ async fn closes_a_successful_last_attempt_when_its_reconnection_is_cancelled_aft
         ends.server_told();
 
         let reconnection = client
-            .reconnect(ReconnectOptions {
+            .reconnect(&TransportClientReconnectOptions {
                 maximum_attempts: Some(1),
                 signal: Some(cancelling),
-                ..ReconnectOptions::default()
+                ..TransportClientReconnectOptions::default()
             })
             .expect("a reconnection");
 
@@ -1597,9 +1686,9 @@ async fn closes_what_its_last_attempt_opened_as_its_reconnection_was_cancelled()
     ends.server_told();
 
     let reconnection = client
-        .reconnect(ReconnectOptions {
+        .reconnect(&TransportClientReconnectOptions {
             signal: Some(cancelling),
-            ..ReconnectOptions::default()
+            ..TransportClientReconnectOptions::default()
         })
         .expect("a reconnection");
 
@@ -1646,7 +1735,7 @@ async fn hears_nothing_once_it_let_go_of_its_connection_and_tells_one_close_at_e
     let ending = ends.server.close(&handle);
 
     client
-        .disconnect(DisconnectOptions::default())
+        .disconnect(&TransportClientDisconnectOptions::default())
         .expect("closed");
     ends.clock.settle().await;
 
@@ -1718,9 +1807,9 @@ async fn draws_no_connection_for_a_connect_cancelled_as_it_held_it_and_reports_w
     // * a connect whose token is cancelled as its server holds it, before the turn it would be
     // drawn in: no connection drawn
     let cancelling = CancellationToken::new();
-    let connecting = client.connect(MemoryConnectOptions {
+    let connecting = client.connect(&MemoryTransportClientConnectOptions {
         signal: Some(cancelling.clone()),
-        ..MemoryConnectOptions::default()
+        ..MemoryTransportClientConnectOptions::new(ends.server.clone())
     });
 
     cancelling.cancel();
@@ -1730,14 +1819,16 @@ async fn draws_no_connection_for_a_connect_cancelled_as_it_held_it_and_reports_w
     ends.clock.settle().await;
 
     assert!(
-        matches!(refused, TransportError::Cancelled(_)),
+        matches!(refused, TransportError::Cancelled { .. }),
         "cancelled: {refused:?}"
     );
     assert!(ends.server_told().is_empty(), "none drawn");
     assert!(ends.server.clients().is_empty(), "none held");
 
     // a listener's panic reported with its connection, the transport going on
-    let connecting = client.connect(MemoryConnectOptions::default());
+    let connecting = client.connect(&MemoryTransportClientConnectOptions::new(
+        ends.server.clone(),
+    ));
 
     ends.clock.settle().await;
     connecting.await.expect("connected");
@@ -1765,14 +1856,13 @@ async fn draws_no_connection_for_a_connect_cancelled_as_it_held_it_and_reports_w
 async fn calls_each_listener_though_one_throws_reporting_the_throw_with_its_connection() {
     let clock = SteppingClock::new(crate::testing::instants::new_year());
     let shared: SharedClock = Arc::<SteppingClock>::clone(&clock);
-    let server = MemoryServer::new(&MemoryServerOptions {
+    let server = MemoryTransportServer::new(&MemoryTransportServerOptions {
         clock: Some(Arc::clone(&shared)),
         runtime: None,
     })
     .expect("a server");
-    let client = MemoryClient::new(&MemoryClientOptions {
+    let client = MemoryTransportClient::new(&MemoryTransportClientOptions {
         clock: Some(shared),
-        server: server.clone(),
     })
     .expect("a client");
     let told: Told = Arc::default();
@@ -1788,7 +1878,7 @@ async fn calls_each_listener_though_one_throws_reporting_the_throw_with_its_conn
     }));
     server.start().await.expect("started");
 
-    let connecting = client.connect(MemoryConnectOptions::default());
+    let connecting = client.connect(&MemoryTransportClientConnectOptions::new(server.clone()));
 
     clock.settle().await;
     connecting.await.expect("connected");
@@ -1797,7 +1887,7 @@ async fn calls_each_listener_though_one_throws_reporting_the_throw_with_its_conn
 
     // a client's events carry no connection: its panics are reported with none
     let reconnection = client
-        .reconnect(ReconnectOptions::default())
+        .reconnect(&TransportClientReconnectOptions::default())
         .expect("a reconnection");
 
     clock.settle().await;
@@ -1834,4 +1924,139 @@ async fn calls_each_listener_though_one_throws_reporting_the_throw_with_its_conn
         ],
         "every listener told, each panic reported, with its connection where there is one"
     );
+}
+
+// spec 15.12.17, 15.12.18: the twin of "a paused in-memory transport holds what it is sent, in
+// order, and hands it on once resumed", each end; what comes as it hands what it held waits behind
+// it, and a pause again stops it at once
+#[tokio::test]
+async fn a_paused_in_memory_transport_holds_what_it_is_sent_in_order_and_hands_it_on_once_resumed()
+{
+    let ends = Ends::started().await;
+    let (client, at_client) = ends.connected((None, None)).await;
+    let handle: ConnectionHandle = Arc::from(FIRST);
+    let heard =
+        |bytes: &str| format!("heard {bytes} on {FIRST} carrying None from Some(\"local\") None");
+
+    ends.server_told();
+
+    // * its server's end: paused, it holds what its client sends, in order
+    ends.server.pause(&handle);
+    ends.server.pause(&handle);
+
+    for bytes in [&[1_u8][..], &[2], &[3]] {
+        client.send(message_of_bytes(bytes)).expect("sent");
+    }
+
+    ends.clock.settle().await;
+
+    assert!(ends.server_told().is_empty(), "nothing told while paused");
+
+    // resumed: what it held handed on in a later turn, never within the call; what comes meanwhile
+    // waits behind it
+    ends.server.resume(&handle);
+    client.send(message_of_bytes(&[4])).expect("sent");
+
+    assert!(
+        ends.server_told().is_empty(),
+        "nothing told within the resume"
+    );
+
+    ends.clock.settle().await;
+
+    assert_eq!(
+        ends.server_told(),
+        ["01", "02", "03", "04"].map(heard),
+        "each once, in the order sent"
+    );
+
+    // * a pause again, told as it hands what it held, stops it at once: the rest stays held
+    ends.server.pause(&handle);
+
+    for bytes in [&[5_u8][..], &[6], &[7]] {
+        client.send(message_of_bytes(bytes)).expect("sent");
+    }
+
+    ends.clock.settle().await;
+
+    let server = ends.server.clone();
+    let pausing = Arc::clone(&handle);
+
+    ends.server.listen(Arc::new(OnServerMessage(
+        move |message: &TransportMessage, _: &ConnectionHandle| {
+            if message.data.as_ref() == [5] {
+                server.pause(&pausing);
+            }
+        },
+    )));
+    ends.server.resume(&handle);
+    ends.clock.settle().await;
+
+    assert_eq!(
+        ends.server_told(),
+        [heard("05")],
+        "the one handed as it paused again, the rest held"
+    );
+
+    ends.server.resume(&handle);
+    ends.clock.settle().await;
+
+    assert_eq!(
+        ends.server_told(),
+        ["06", "07"].map(heard),
+        "the rest, in order, once resumed"
+    );
+
+    // * its client's end alike, whole
+    client.pause();
+
+    for bytes in [&[8_u8][..], &[9]] {
+        ends.server
+            .send(message_of_bytes(bytes), &handle)
+            .expect("sent");
+    }
+
+    ends.clock.settle().await;
+
+    assert!(taken(&at_client).is_empty(), "nothing told while paused");
+
+    client.resume();
+    ends.server
+        .send(message_of_bytes(&[10]), &handle)
+        .expect("sent");
+    ends.clock.settle().await;
+
+    assert_eq!(
+        taken(&at_client),
+        [
+            "heard 08 carrying None",
+            "heard 09 carrying None",
+            "heard 0A carrying None"
+        ],
+        "each once, in the order sent"
+    );
+
+    // what a connection held is dropped with it
+    ends.server.pause(&handle);
+    client.send(message_of_bytes(&[11])).expect("sent");
+    ends.clock.settle().await;
+    client
+        .disconnect(&TransportClientDisconnectOptions::default())
+        .expect("disconnected");
+    ends.clock.settle().await;
+    ends.server.resume(&handle);
+    ends.clock.settle().await;
+
+    assert_eq!(
+        ends.server_told(),
+        [format!("closed {FIRST} true")],
+        "its close, and nothing of what it held"
+    );
+}
+
+fn message_of_bytes(bytes: &[u8]) -> TransportMessage {
+    TransportMessage {
+        data: Bytes::copy_from_slice(bytes),
+        ..TransportMessage::default()
+    }
 }

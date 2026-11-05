@@ -1,0 +1,206 @@
+# Dependabot's version updates: each lockfile's dependencies, every week, as grouped pull requests
+# against develop, which CI judges as it judges any branch. Each entry waits out a release's first
+# days, against a release compromised and caught in them; Yarn's own gate, `npmMinimalAgeGate` in
+# each `.yarnrc.yml`, holds the shortest of those waits at install.
+#
+# ! no `target-branch`: develop is the repository's default branch, so the pull requests go there
+# as it is, and a `target-branch` would cut security updates, which always take the default branch,
+# off each entry's options, the commit message's prefix among them, which tools/check-commits.mjs
+# holds every subject to.
+#
+# No `docker` entry: builder/Dockerfile names its base as `${NODE_IMAGE}@${NODE_DIGEST}`, which
+# Dependabot's reading of a FROM line does not resolve, nor the frontend's digest in its `syntax`
+# line; a release moves both by hand, with the images ci.yml runs by their digests.
+version: 2
+
+updates:
+  # ── TypeScript ───────────────────────────────────────────────────────────────
+  # The TypeScript side and examples/hello's TypeScript half in one pull request a dependency:
+  # tools/check-examples.mjs holds each descriptor the half shares with the side to the side's, so
+  # one moved without the other fails the examples job.
+  - package-ecosystem: npm
+    directories:
+      - /implementations/typescript
+      - /examples/hello/typescript
+    schedule:
+      interval: weekly
+      day: monday
+      # before the fuzz campaign's 06:17, so its runners and these pull requests' CI do not meet
+      time: '04:00'
+      timezone: UTC
+    # a release waits out its first days, the longer the bigger the step; security updates are
+    # not held by it, as GitHub documents
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+      semver-minor-days: 7
+      semver-patch-days: 3
+    # `build(deps): bump …`, a Conventional Commit; Dependabot adds the colon after the parenthesis
+    commit-message:
+      prefix: 'build(deps)'
+      prefix-development: 'build(deps)'
+    open-pull-requests-limit: 3
+    groups:
+      typescript:
+        # one pull request a dependency, across both folders, rather than one a folder
+        group-by: dependency-name
+        patterns: ['*']
+    ignore:
+      # @types/node follows `engines.node`, the floor of 24.9: its line moves with that floor
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
+      # the half's `typescript` is the side's `typescript-7` alias, which Dependabot leaves alone,
+      # as it does every `npm:` alias: both move by hand
+      - dependency-name: typescript
+
+  # Each other Yarn project by its own lock, a pull request a week for its minor and patch updates
+  # and one for its majors: beadc, the page's render, and the two folders of Jazzer.js, which only
+  # the weekly campaign installs. beadc's floor of @bufbuild/protobuf, an `npm:` alias, and every
+  # `peerDependencies` range are not Dependabot's to move.
+  - package-ecosystem: npm
+    directories:
+      - /builder
+      - /site
+      - /builder/tools/fuzz
+      - /implementations/typescript/tools/fuzz
+    schedule:
+      interval: weekly
+      day: monday
+      time: '04:00'
+      timezone: UTC
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+      semver-minor-days: 7
+      semver-patch-days: 3
+    commit-message:
+      prefix: 'build(deps)'
+      prefix-development: 'build(deps)'
+    open-pull-requests-limit: 3
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+        patterns: ['*']
+      major:
+        update-types: [major]
+        patterns: ['*']
+    ignore:
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
+
+  # ── C# ───────────────────────────────────────────────────────────────────────
+  # One Directory.Packages.props for the side and examples/hello's C# half, which imports it: one
+  # pull request a dependency moves both folders' packages.lock.json, which CI restores locked.
+  - package-ecosystem: nuget
+    directories:
+      - /implementations/dotnet
+      - /examples/hello/dotnet
+    schedule:
+      interval: weekly
+      day: monday
+      time: '04:00'
+      timezone: UTC
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+      semver-minor-days: 7
+      semver-patch-days: 3
+    commit-message:
+      prefix: 'build(deps)'
+      prefix-development: 'build(deps)'
+    open-pull-requests-limit: 3
+    groups:
+      dotnet:
+        group-by: dependency-name
+        patterns: ['*']
+    ignore:
+      # ! Google.Protobuf moves in one commit with protobuf's conformance runner,
+      # tools/protobuf-conformance/runner.json, and protoc's pin, builder/protoc.json (decision 0028)
+      - dependency-name: Google.Protobuf
+
+  # ── Rust ─────────────────────────────────────────────────────────────────────
+  # The workspace, the fuzz targets and the conformance suite's testee, each a project of its own
+  # with its own lock. The toolchain moves by a commit of its own, never here.
+  - package-ecosystem: cargo
+    directories:
+      - /implementations/rust
+      - /implementations/rust/fuzz
+      - /implementations/rust/tools/protobuf-conformance
+    schedule:
+      interval: weekly
+      day: monday
+      time: '04:00'
+      timezone: UTC
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+      semver-minor-days: 7
+      semver-patch-days: 3
+    commit-message:
+      prefix: 'build(deps)'
+      prefix-development: 'build(deps)'
+    open-pull-requests-limit: 3
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+        patterns: ['*']
+      major:
+        update-types: [major]
+        patterns: ['*']
+
+  # ── Spec ─────────────────────────────────────────────────────────────────────
+  # What spec/check.py and the generators need, spec/requirements.in, locked with every hash by
+  # pip-compile into spec/requirements.txt.
+  - package-ecosystem: pip
+    directory: /spec
+    schedule:
+      interval: weekly
+      day: monday
+      time: '04:00'
+      timezone: UTC
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+      semver-minor-days: 7
+      semver-patch-days: 3
+    commit-message:
+      prefix: 'build(deps)'
+      prefix-development: 'build(deps)'
+    open-pull-requests-limit: 3
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+        patterns: ['*']
+      major:
+        update-types: [major]
+        patterns: ['*']
+    ignore:
+      # ! protobuf's Python library is the conformance suite's release, which moves with
+      # Google.Protobuf and protoc's pin
+      - dependency-name: protobuf
+
+  # ── Actions ──────────────────────────────────────────────────────────────────
+  # Every action, pinned by its commit with its version beside it: Dependabot moves both.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '04:00'
+      timezone: UTC
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+      semver-minor-days: 7
+      semver-patch-days: 3
+    commit-message:
+      prefix: 'build(deps)'
+      prefix-development: 'build(deps)'
+    open-pull-requests-limit: 3
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+        patterns: ['*']
+      major:
+        update-types: [major]
+        patterns: ['*']

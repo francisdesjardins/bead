@@ -2,7 +2,7 @@
 
 use core::num::NonZeroU16;
 use core::time::Duration;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
 
@@ -16,8 +16,97 @@ use crate::failure::FailureOrigin;
 use crate::router::core as router_core;
 use crate::router::requester;
 use crate::router::types::{CallAddress, RouterActivity, RouterError, RouterLimitsOptions};
-use crate::testing::core_port::{Peer, completed, error_of, request_of};
+use crate::testing::core_port::{Peer, PeerOptions, completed, error_of, request_of};
 use crate::transport::Sent;
+
+// spec 9.1
+#[tokio::test]
+async fn draw_their_call_ids_round_their_range_skip_the_ones_held_and_fail_once_every_one_is() {
+    let peer = Peer::with_options(
+        RouterSide::Server,
+        &PeerOptions {
+            last_call_id: Some(8),
+            ..PeerOptions::default()
+        },
+    )
+    .expect("a bounded server");
+    peer.owner
+        .run(|state| {
+            state.held.push(4);
+        })
+        .await
+        .expect("4 held");
+    let drawn = Arc::new(Mutex::new(Vec::new()));
+    let request = || {
+        let ids = Arc::clone(&drawn);
+        let mut request = request_of("a");
+        request.on_call_id = Some(Box::new(move |id| super::locked(&ids).push(id)));
+        peer.request((Bytes::new(), request))
+    };
+    let two = request();
+    let six = request();
+    peer.receive((result_of(2, None), Arc::from("a")));
+    completed(two).await.expect("2 answered");
+    let eight = request();
+    let two_again = request();
+    let error = completed(request()).await.expect_err("no id left");
+    let CallError::Failure(failure) = error else {
+        panic!("capacity exceeded");
+    };
+    assert_eq!(
+        (failure.code(), failure.side()),
+        (
+            ProtocolCode::CAPACITY_EXCEEDED.get(),
+            Some(RouterSide::Server)
+        )
+    );
+    assert_eq!(
+        peer.sent()
+            .await
+            .iter()
+            .map(|(_, envelope)| envelope.call_id())
+            .collect::<Vec<_>>(),
+        [2, 6, 8, 2]
+    );
+    assert_eq!(*super::locked(&drawn), [2, 6, 8, 2]);
+    peer.owner
+        .run(router_core::dispose)
+        .await
+        .expect("disposed");
+    for pending in [six, eight, two_again] {
+        assert!(matches!(
+            completed(pending).await,
+            Err(CallError::Disconnected(_))
+        ));
+    }
+
+    let client = Peer::new(RouterSide::Client, &RouterLimitsOptions::default());
+    let mut request = request_of("a");
+    request.options.timeout = Duration::from_millis(1);
+    let ids = Arc::clone(&drawn);
+    request.on_call_id = Some(Box::new(move |id| super::locked(&ids).push(id)));
+    let first = client.request((Bytes::new(), request));
+    client.settle().await;
+    assert_eq!(client.sent().await[0].1.call_id(), 1);
+    assert_eq!(super::locked(&drawn).last(), Some(&1));
+    client.clock.advance(Duration::from_millis(1)).await;
+    assert!(
+        matches!(completed(first).await, Err(CallError::TimedOut(timeout)) if timeout == Duration::from_millis(1))
+    );
+    for (side, last) in [(RouterSide::Server, 7), (RouterSide::Client, 8)] {
+        assert!(
+            Peer::with_options(
+                side,
+                &PeerOptions {
+                    last_call_id: Some(last),
+                    ..PeerOptions::default()
+                }
+            )
+            .is_err(),
+            "the peer's parity is refused as the core is built"
+        );
+    }
+}
 
 pub(super) fn limits() -> RouterLimitsOptions {
     RouterLimitsOptions {
@@ -394,6 +483,10 @@ async fn send_no_cancel_for_a_request_whose_send_failed_whole_or_its_transfers_o
 
 // spec 12
 #[tokio::test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test slices its own fixed payload at offsets within its length"
+)]
 async fn receive_a_result_in_a_transfer_credited_as_it_comes_and_settle_its_call_once_whole() {
     for (side, call_id) in [(RouterSide::Server, 2), (RouterSide::Client, 1)] {
         let peer = Peer::new(side, &limits());
@@ -607,11 +700,18 @@ async fn end_a_results_transfer_the_peer_fails_giving_the_budget_back_and_drop_w
         })
         .await
         .expect("second cancelled");
-    assert!(matches!(completed(second).await, Err(CallError::Cancelled)));
+    assert!(matches!(
+        completed(second).await,
+        Err(CallError::Cancelled(_))
+    ));
 }
 
 // spec 9.2, 12
 #[tokio::test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test slices its own fixed payload at offsets within its length"
+)]
 async fn report_a_second_result_on_a_call_whose_result_comes_in_a_transfer_and_go_on_receiving_it()
 {
     for (side, call_id) in [(RouterSide::Server, 2), (RouterSide::Client, 1)] {

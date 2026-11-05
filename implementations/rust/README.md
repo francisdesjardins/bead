@@ -2,15 +2,16 @@
 
 Bead is a binary wire protocol: the envelopes of a request, its result or failure, the notifications
 of a subscription and the commands a server sends back, written at fixed offsets. This workspace is
-its Rust implementation, at parity with the TypeScript and C# sides: the same behaviour, played from
-the same conformance files in [`spec/`](../../spec/). It holds its core: the envelope's codec; the
-client and server routers with their service, session and notification managers, and the service
-layer's server half, its client half ahead in the core; sessions and credentials with a `JWT`'s
-verification; the clock it is given and every duration held as spec 1.4 holds it; the trace, the
-filter and the registry, and a participant's trace of its parcels; the in-memory transport; the
-broker's core over an in-memory broker, and the joined transport; and the `proto` payload's codec on
-Buffa — playing every conformance file its core reaches, each part it lacks a row of
-[`docs/support.md`](../../docs/support.md)'s differences, ahead with the stage that brings it. The
+its Rust implementation, at behavioural parity with the TypeScript and C# sides in what it holds: the
+same behaviour, played from the same conformance files in [`spec/`](../../spec/). It holds its core:
+the envelope's codec; the client and server routers with their service, session and notification
+managers, and the service layer's server half, its client half ahead in the core; sessions and
+credentials with a `JWT`'s verification; the clock it is given and every duration held as spec 1.4
+holds it; the trace, the filter and the registry, and a participant's trace of its parcels; the
+in-memory transport; the broker's core over an in-memory broker, and the joined transport; and the
+`proto` payload's codec on Buffa — playing every conformance file its core reaches, each part it
+lacks a row of [`docs/support.md`](../../docs/support.md)'s differences, ahead with the stage that
+brings it. The
 rules its code keeps — one owner per router, traits and composition, no unsafe code, two parameters
 then an options struct, every warning an error — are
 [decision 0044](../../docs/decisions/0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)'s.
@@ -27,6 +28,8 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features --locked
 cargo clippy -p francisdesjardins-bead --lib --all-features --locked --target wasm32-unknown-unknown
 cargo test --workspace --all-features --locked
+cargo doc --workspace --no-deps --all-features --locked
+cargo build --workspace --locked
 cargo deny --locked check
 ```
 
@@ -72,10 +75,14 @@ crates/
                                 reflection, and each repeated or map field of a closed enum opened
   bead-interop/                 the interop service: its descriptors, written by hand from
                                 spec/interop-blueprint.json as beadc writes the other sides',
-                                until beadc's Rust target generates them; its resolvers and its
+                                which beadc's Rust target, ahead, generates; its resolvers and its
                                 credentials
   bead-house/                   the side's own checks that no lint holds: the parameter rule, the
-                                comment tags, every member under the workspace's lints
+                                options struct's shape, each library crate's public surface
+                                against its list under surfaces/, no tuple on that surface, the
+                                count of the tuples of three elements or more a function takes,
+                                the errors a future of a Result documents, the comment tags, every
+                                member under the workspace's lints
 benches/                        bead-bench, the in-memory bench, written as bead-bench/1
 fuzz/                           cargo-fuzz's targets, a project outside the workspace
 tools/protobuf-conformance/     the testee of protobuf's conformance suite, which
@@ -97,12 +104,12 @@ a resolver a service manager registered holds that manager, and so its router, w
 its dispose. A job that panics past the guards of the sites the spec lets throw ends its router at
 once, each call it waits on failed with that panic for its reason.
 
-The core spawns through one private module, `platform`, and reads time through its clock alone
-(decision 0011): clippy's `disallowed-methods` and `disallowed-types`, in `clippy.toml`, refuse
-tokio's spawns and timers, std's `Instant`, `SystemTime::now` and a thread of Bead's own anywhere
-else. A test takes them from the kit, `bead::testing`'s `spawn`, `rest`, `patience`, `Instant` and
-`wall_now`; a native target, the benches or a player that measures real time, is exempted once, at
-its root, with its reason.
+The core spawns and yields through one private module, `platform`, and reads time through its
+clock alone (decision 0011): clippy's `disallowed-methods` and `disallowed-types`, in `clippy.toml`,
+refuse tokio's spawns, its yield and its timers, std's `Instant`, `SystemTime::now` and a thread of
+Bead's own anywhere else. A test takes them from the kit, `bead::testing`'s `spawn`, `yield_now`,
+`rest`, `patience`, `Instant` and `wall_now`; a native target, the benches, the interop or a player
+that measures real time, is exempted once, at its root, with its reason.
 
 ## Modules
 
@@ -115,7 +122,7 @@ its root, with its reason.
 | `identity`, `duration`, `clock`                                | a procedure's identity (spec 16), every duration held as spec 1.4 holds it, the clock a side is given (decision 0011)                              |
 | `payloads`, `json`, `violations`                               | the codecs of spec 17, `raw`, `text` and `json`; a `json` value's reader and writer; `PAYLOAD_INVALID`'s detail (spec 18)                          |
 | `router`                                                       | the core both routers share, the client's and the server's, the relay, the admissions Bead gives, and transfers                                    |
-| `owner`                                                        | one owner per router: its jobs in order, a call within a turn as that turn ends, a listener's hand-back behind them all                            |
+| `owner`                                                        | one owner per router: its jobs from one queue, in order, what a turn defers and what a listener makes within it at the tail                        |
 | `platform`                                                     | what the core spawns on, the application's tokio runtime, its time driver checked: the one place it spawns                                         |
 | `managers`                                                     | the service manager, a server's notifications and their pacing, its sessions                                                                       |
 | `service`                                                      | a service's procedures as typed descriptors, its failures, and the service server                                                                  |
@@ -134,12 +141,13 @@ serializer, which refuses a double that is not finite at any depth, where `serde
 
 `crates/bead-protobuf/src`:
 
-| Module     | What it holds                                                                                                                               |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `records`  | a message's schema, read once from its descriptors, and the check of a payload's records against it (spec 17.9.1 to 17.9.6)                 |
-| `required` | the walk of the fields protobuf requires (spec 17.9.7), over a view or a dynamic message, whose presence is the wire's or the application's |
-| `codec`    | `ProtoCodec`, the typed codec of a message Buffa generates, and `DynamicCodec`, by its descriptor alone, each a payload codec of `proto`    |
-| `testing`  | the test kit, behind the feature `testing`: the tests' messages, generated from `proto/tests.binpb`; no API                                 |
+| Module     | What it holds                                                                                                                                                                                                   |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `records`  | a message's schema, read once from its descriptors, and the check of a payload's records against it (spec 17.9.1 to 17.9.6)                                                                                     |
+| `required` | the walk of the fields protobuf requires (spec 17.9.7), over a view or a dynamic message, whose presence is the wire's or the application's, and a writer's depth pass (17.9.3), each 100 messages deep at most |
+| `refusal`  | a refusal's reasons in spec 17.2's words, what more the side knows in its cause                                                                                                                                 |
+| `codec`    | `ProtoCodec`, the typed codec of a message Buffa generates, and `DynamicCodec`, by its descriptor alone, each a payload codec of `proto`                                                                        |
+| `testing`  | the test kit, behind the feature `testing`: the tests' messages, generated from `proto/tests.binpb`; no API                                                                                                     |
 
 A message an application binds to `proto` is generated as `bead-protobuf-build` sets Buffa's
 generator, from the set protoc writes; `ProtoCodec` reads it through its view, which tells a field
@@ -158,14 +166,28 @@ entry's own name, under `libtest-mimic`; the `proto` entries of `spec/codecs.jso
 
 `bead::testing`, behind the feature `testing`, is the test kit: the stepping clock the players give
 the side, the conformance files' typed readers, the durations' helper, a pair of the in-memory
-transport, the scripted transports the unit tests write bytes on, and what a test takes from its
-platform: a task spawned, a rest, a patience, a monotonic instant and the wall clock's reading. It is
-no API: an application never turns the feature on.
+transport, the scripted transports the unit tests write bytes on, the seeded mutations the suite's
+readers are fed, and what a test takes from its platform: a task spawned, a turn yielded, a rest, a
+patience, a monotonic instant and the wall clock's reading. It is no API: an application never turns
+the feature on. What the conformance players, the fuzz targets, the interop service and the bench
+reach that the API does not offer, the envelope's codec among it, is `bead::internal`, hidden from
+the docs and outside SemVer, as the C# side's members reach theirs by `InternalsVisibleTo`; no
+feature turns it on. `BEAD_HOUSE_WRITE=1 cargo test -p francisdesjardins-bead-house` writes each
+crate's list of its public items anew, its diff the change's to review.
 
 ## Fuzzing and the bench
 
-`node ../../tools/fuzz.mjs build rust`, then `run rust envelope|payload-codecs|debug-filter|jwt`,
-fuzzes the core's four targets with cargo-fuzz on the nightly the tool pins by its date, on Linux or
-WSL; the transports' two come with them. `node ../../tools/bench-release.mjs rust` runs bead-bench in
-fresh processes, from its release build: calls on one in-memory connection kept, and exchanges, each
-a client and its connection drawn, called once and closed.
+`node ../../tools/fuzz.mjs build rust`, then `run rust
+envelope|payload-codecs|debug-filter|jwt|broker-parcel|proto-codecs`, fuzzes the side's six targets
+with cargo-fuzz on the nightly the tool pins by its date, on Linux or WSL; the transports' two come
+with them. [`fuzz.yml`](../../.github/workflows/fuzz.yml) runs the six every week, each ten minutes,
+its corpus kept between runs ([the root README](../../README.md#fuzzing)).
+`crates/bead/tests/envelope_fuzz.rs` and `broker_parcel_fuzz.rs` feed the envelope readers and the
+parcel's seeded mutations of `spec/vectors.json` in the suite, from `bead::testing::mutations`, the
+generator every side shares. `node ../../tools/bench-release.mjs rust` runs bead-bench in fresh
+processes, from its release build: the envelope's codec, a request written and read back, calls on
+one in-memory connection kept, and exchanges, each a client and its connection drawn, called once
+and closed; [`bench.yml`](../../.github/workflows/bench.yml) compares it with the last release's on
+every push to a release or hotfix branch. `cargo run --release --locked --manifest-path
+benches/Cargo.toml -- --scale` measures instead a message's cost through a router alone and through
+a `Server`, each holding 1, 1,000 and 10,000 connections, and fails unless it holds flat.

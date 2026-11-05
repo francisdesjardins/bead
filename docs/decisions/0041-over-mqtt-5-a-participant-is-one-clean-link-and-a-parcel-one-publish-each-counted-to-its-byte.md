@@ -91,14 +91,51 @@ by one participant alone. Its handles' type is `MQTT`.
 
 **A link is one network connection that keeps no session** (spec 15.26): Clean Start 1, Session
 Expiry 0, the participant's id its Client Identifier, authenticated by a User Name and a Password,
-asked anew at each link where it expires, or by a TLS client certificate its broker ties to the
-id; Receive Maximum 65,535; Topic Alias Maximum 0; Maximum Packet Size its `maximumPacketSize`,
-16,777,216 by default and never without end (0033); Keep Alive its `keepAlive`, 30 s by default and
-never 0, so its will comes at 45 s, inside the 60 s a connection's heartbeat takes. A Server Keep
-Alive replaces it: MQTT.js applies it, and the C# adapter sends a PINGREQ once nothing went for a
-shorter one. A start waits `connectTimeout`, 30 s by default, for its CONNACK, which fails it on a
-reason but 0x00 and on a Maximum QoS of 0. The will is the participant's GONE, QoS 1, RETAIN 0,
-Delay 0; a stop is a DISCONNECT of 0x00, so no will goes.
+given or asked of its provider anew at each link's start
+([0040](0040-a-brokers-adapter-offers-bytes-at-topics-and-bead-keeps-its-own-credit-credential-and-heartbeat.md)),
+or by a TLS client certificate its broker ties to the id, never both, a User Name alone where it is
+given neither; Receive Maximum 65,535; Topic Alias Maximum 0; Maximum Packet Size its
+`maximumPacketSize`, 16,777,216 by default and never without end (0033); Keep Alive its
+`keepAlive`, 30 s by default and never 0, so its will comes at 45 s, inside the 60 s a connection's
+heartbeat takes. A Server Keep Alive replaces it: MQTT.js applies it, and the C# adapter sends a
+PINGREQ once nothing went for a shorter one. A start waits `connectTimeout`, 30 s by default, for
+its password, where it asks its provider, and its CONNACK, which fails it on a reason but 0x00 and
+on a Maximum QoS of 0. The will is the participant's GONE, QoS 1, RETAIN 0, Delay 0.
+
+**A stop lets go of each subscription, then ends its link with a DISCONNECT of 0x00** (spec 15.21,
+15.24, 15.26): it takes no new publication, and once what it was handed went, each PUBACK come, it
+sends one UNSUBSCRIBE a filter its link asked or holds, its inbox, its names and its peers'
+departures, one whose SUBSCRIBE went with no SUBACK yet among them, all at once, and awaits their
+UNSUBACKs together, 0x00 or 0x11 a subscription let go, the drain and the UNSUBACKs within one
+`connectTimeout` from its call; then its DISCONNECT goes within a `connectTimeout` of its own, an
+UNSUBACK that refuses, or none in time, going on to it, so no will goes ([MQTT-3.14.4-3]). A link
+that is down sends nothing. Once a stop settled, its broker hands the participant nothing, and its
+inbox, and a name no other member serves, find no subscriber. An UNSUBACK is its broker's word,
+which reaches the participant end to end: the subscription is deleted before it goes
+([MQTT-3.10.4-2], §3.11.3), where the DISCONNECT's sender closes the network connection itself
+([MQTT-3.14.4-2]) and a FIN its broker sends back, or the end of a session of Expiry 0, is no word
+a proxy or a gateway carries through. The UNSUBSCRIBEs go after the drain, since an UNSUBSCRIBE
+waits on no Receive Maximum and would overtake a CLOSE that does; one a filter, since an UNSUBSCRIBE
+of every filter passes a CONNACK's Maximum Packet Size, a Protocol Error that ends the link with
+0x95 and publishes the will ([MQTT-3.2.2-15], §4.13).
+
+**A participant's stop lets each name it serves go first** (spec 15.18, 15.21, 15.24, 15.27): in
+its turn it hands its adapter one UNSUBSCRIBE of each name its link holds or asked, each kept wanted
+for its next link, then its CLOSEs of 1001, which its adapter's drain sends; one network connection
+carries them in that order, an UNSUBSCRIBE held by no quota, so its broker reads it first. It then
+awaits their UNSUBACKs, its adapter still up, refusing 503 `busy` each OPEN its broker hands it
+meanwhile, and only then stops its adapter as above. Its broker adds no new message of a name once
+it read its UNSUBSCRIBE, and completes, before its UNSUBACK, each it began to send
+([MQTT-3.10.4-2], [MQTT-3.10.4-3]): so an OPEN to the name reaches the participant before its
+UNSUBACK, where it is answered, or after it another member of its group, or finds no subscriber,
+PUBACK 0x10, and none is acknowledged by an adapter that takes no publication and lost. The
+companion's 13.5 tells a `names` event for each name so let go, before `stopped`. A REFUSE 503 is
+the one answer: a member's PUBACK of 0x80 or more makes its broker discard a shared message rather
+than hand it to another ([MQTT-4.8.2-6]), and Mosquitto 2.1.2 hands none of a member's
+unacknowledged messages to another even at its end, for a DISCONNECT of 0x00 and a dropped socket
+alike, though §4.8.2 says it SHOULD. A name whose UNSUBACK refuses, 0x80 or more, or has not come
+within `connectTimeout`, is reported and stays held, its adapter's stop letting it go with the
+link's other subscriptions.
 
 **A link taken over is fenced** (spec 15.21): a DISCONNECT of 0x8E from its broker is its link
 taken over by another of its id. The adapter tells its `down` so, `isTakenOver` / `IsTakenOver`,
@@ -110,7 +147,13 @@ incarnation (0038).
 
 **A subscription is QoS 1, No Local 0, Retain As Published 0, Retain Handling 2** (spec 15.27),
 one filter a SUBSCRIBE, held once its SUBACK grants QoS 1, refused otherwise, a QoS 0 granted among
-the refusals. A SUBACK proves no authorization.
+the refusals. A SUBACK proves no authorization. An UNSUBSCRIBE names one filter, the one its
+SUBSCRIBE named: a filter is recorded as its SUBSCRIBE goes and kept until its UNSUBACK, so that a
+stop lets go of one whose SUBACK has not come, which its broker, reading a link's packets in their
+order, installed all the same. An unsubscription awaits its UNSUBACK within `connectTimeout` of its
+UNSUBSCRIBE, past which it fails, its link kept so that no will goes and its filter kept so that its
+adapter's stop lets it go again; its library's request is never cancelled, since an UNSUBACK that
+comes for no awaiter may end the link as a protocol violation, its will published.
 
 **A publication is QoS 1, or QoS 0 at most once, RETAIN 0, and carries nothing but a Message Expiry
 Interval** where the core asks one (spec 15.28): a parcel names its connection, an OPEN and an
@@ -143,7 +186,8 @@ the identity it authenticated; its access control, by that id, lets a participan
 inbox and its will alone write its departure, every participant write any inbox and read any
 departure, a server's participants alone read its name on the name's own topic and its clients
 alone write it; its queues are lifted or sized to `maximumConnections` × `maximumUnsentBytes`; its
-receive maximum is sized for a server's participant. No participant writes a retained message, and
+receive maximum is sized for a server's participant, and it keeps in flight toward one up to the
+Receive Maximum that participant sends. No participant writes a retained message, and
 a broker that serves Bead alone may refuse them. `tools/mqtt-broker.mjs` is its example: Mosquitto
 by its digest, a password drawn per run, a container name and loopback ports of its own.
 
@@ -188,14 +232,53 @@ most, 30 s against 60 s by default.
 there, naming why, and a link from a page authenticates by a password, a row of "Differences" in
 [`docs/support.md`](../support.md).
 
-**Ahead**: an Authentication Method, MQTT 5's enhanced authentication (§4.12), and EMQX played
-beside Mosquitto; and the brokers' TLS played, the fixtures' Mosquitto and RabbitMQ under TLS, a
-client certificate and SASL EXTERNAL among it, where the matrix holds rows "not tested", since each
-fixture's broker listens in clear on the loopback (0043).
+**A stop costs one UNSUBSCRIBE a subscription**, a departure a peer among them: its names' in its
+turn, their UNSUBACKs within one `connectTimeout`, then the others' in one round trip after its
+drain, before its DISCONNECT. Against a broker that answers nothing it takes up to three
+`connectTimeout`s, 90 s by default, past the 30 s an orchestrator such as Kubernetes grants a
+process before it kills it; its CLOSEs wait on none of them, since they go at its call, and a
+deployment that stops under such a grace lowers `connectTimeout`. A drain that spends its whole
+`connectTimeout` leaves the other UNSUBACKs no time, so a parcel to a stopped participant's inbox
+may still be taken, against a broker that withholds its PUBACKs that long and already fails the
+drain. A stop settles a round trip later where its broker hands it OPENs to refuse while it lets
+its names go, its adapter's drain sending the REFUSEs, and within a few milliseconds of one that
+refuses none otherwise.
 
-**Its gates**: the cases over `mqtt` and the broker cases 37 to 44 of `spec/transports.json`;
+**A group member's stop hands the others what follows its UNSUBACK**, and refuses 503 `busy` each
+OPEN its broker routed to it before: a reconnecting peer's next attempt places it anew, and a
+connect fails on it, naming its status and reason, for its application to retry. It cannot hand
+them what came before ([MQTT-4.8.2-6]). Against the fixture, through a relay of a 300 ms round trip,
+no connect was lost across three stops in a group, 11 refused 503 and 217 opened by the other
+member.
+
+**What a broker holds back past its window is the one residual**: a broker that keeps fewer
+publications in flight toward a participant than its Receive Maximum, as MQTT 5.0 §4.9 lets it,
+sends what it held back after the UNSUBACK, under [MQTT-3.10.4-3]'s MAY, and a stop acknowledges
+and loses an OPEN among it: on Mosquitto 2.1.2, 198 of 200 at a Receive Maximum of 2, none at Bead's
+65,535. Spec 15.31 closes it as a deployment's requirement, its broker keeping in flight toward a
+server's participant up to the Receive Maximum that participant sends; closing it in the protocol
+would need the adapter's drain to take the core's REFUSEs, a change to its stop's contract.
+
+**An UNSUBACK is one node's word**: a cluster replicates its routes later, so what 15.21 says of a
+stop that settled is what the broker its link reached acknowledged, never what every node routes.
+
+**Ahead**: an Authentication Method, MQTT 5's enhanced authentication (§4.12), and EMQX played
+beside Mosquitto; and the brokers' TLS played, the fixtures' Mosquitto and RabbitMQ under
+TLS, a client certificate and SASL EXTERNAL among it, where the matrix holds rows "not tested",
+since each fixture's broker listens in clear on the loopback (0043).
+
+**Its gates**: the cases over `mqtt` and the broker cases 37 to 44 of `spec/transports.json`, a
+participant's stop among them, its inbox and its name finding no subscriber once it settled;
 `mqttPublishBounds`; the places `mqttBrokerAdapter.keepAlive` and `mqttBrokerAdapter.connectTimeout`;
-the adapters' twins, against a scripted MQTT 5 peer and against the fixture; the interop over MQTT
+the adapters' twins, against a scripted MQTT 5 peer and against the fixture, a stop's among them:
+against the peer, its order, the drain, the UNSUBSCRIBEs, the UNSUBACKs, the DISCONNECT; an UNSUBACK
+withheld and the DISCONNECT still within its bound; one UNSUBSCRIBE a filter under a small CONNACK
+Maximum Packet Size; a SUBSCRIBE under way let go; nothing overtaking a CLOSE under a Receive
+Maximum of 2; an unsubscription whose UNSUBACK has not come within `connectTimeout` failed, its link
+kept and no will gone, the late UNSUBACK read; against the fixture, a group, whose name one member's
+stop leaves taken while another serves it, and unserved once both stopped, and a group member's stop
+answering each OPEN that comes during it by another member or refusing it 503, none lost; the
+participant's twins of its stop that lets each name go first; the interop over MQTT
 5 both ways, a name served by two in one group proven by no ACCEPT ever answered twice; and the CI
 job `mqtt`, `BEAD_MQTT_REQUIRED=1`.
 
@@ -219,3 +302,49 @@ accepted, one in part, none refused. The dissent also checked and upheld the dra
 | 15.31's SHOULD refuse retained messages cannot be kept on a broker shared with clients that retain, since `retain_available` is broker-wide, and buys little.                                                                                                                                                        | **Accepted.** Verified: the option applies globally; Retain Handling 2 hands no retained copy and Retain As Published 0 forwards a live one as live. 15.31 states that no participant writes a retained message and none reaches one, a copy left on a Bead topic the deployment's to clear, and that a broker serving Bead alone MAY refuse them, as the fixture does.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | The WebSocket leg is played by a page alone, never by the C# side, nor by the TypeScript side in Node.                                                                                                                                                                                                               | **Accepted.** Each adapter's suite carries a link over the fixture's WebSocket listener, the TypeScript side in Node through MQTT.js's own `ws`. The C# adapter sets MQTTnet's `SubProtocols` to `mqtt` itself, since its sources show no default; the test settles it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | Mosquitto's undercount is one byte outbound and none inbound, not one byte both ways.                                                                                                                                                                                                                                | **Accepted.** Verified: toward a subscriber of bound 1,052 a 1,053-byte packet (R 1,050) went and R 1,051 was dropped; from a publisher under 4,096, packets of 4,097 and 4,098 bytes were taken and R 4,096 drew 0x95. The finding reads: toward a subscriber it counts the Remaining Length as one byte, so it sends up to `v(R) − 1` bytes past the subscriber's bound; from a publisher as none, so it takes up to `v(R)` bytes past its own; so here, and in the report for Mosquitto.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+
+### On a stop that lets go of each subscription
+
+A stop that settles before its broker let go of its subscriptions leaves a parcel to its inbox or
+its name right after it taken, against 15.21: 4 to 8 % on the C# side over MQTT 5, whose
+`DisconnectAsync` returns at its local close, and 91 of 200 to an inbox over AMQP 1.0 on the
+TypeScript side, whose exclusive queue outlives the CLOSE until its broker processes it. The draft
+has the MQTT 5 stop send one UNSUBSCRIBE of every filter before its DISCONNECT. Ten objections,
+each verified against its probe or its source, against the fixture's Mosquitto and RabbitMQ, all
+accepted, one as a change of its own. The dissent also upheld the draft's form: an UNSUBACK is the
+broker's word end to end where a DISCONNECT, its broker's close or a session's end is not, no
+retained message is at stake, the will is untouched, a shared subscription is let go by its exact
+filter, and the players stay strict.
+
+| Objection                                                                                                                                                                                                                        | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| One UNSUBSCRIBE of every filter is a packet no one counts: past the CONNACK's Maximum Packet Size it is a Protocol Error, its broker ends the link with 0x95 and publishes the will, the one thing the stop exists to prevent.   | **Accepted.** Verified: 60 filters in one UNSUBSCRIBE, 4,143 bytes against the fixture's 4,096, gave 0x95 and the will 5 of 5; one UNSUBSCRIBE a filter gave none in 5. The stop sends one a filter, all at once, their UNSUBACKs awaited together, one round trip still; 15.27 says an UNSUBSCRIBE names one filter; a twin test plays a small CONNACK Maximum Packet Size.                                                                                                                                                                                                                                                                                                                        |
+| The guarantee drafted for 15.21, nothing routed to a stopped participant's names or inbox, is false over AMQP 1.0: a name's queue holds an OPEN through a stop by design, and the inbox, an exclusive queue, outlives the CLOSE. | **Accepted, as the same guarantee on every binding.** Verified: 91 of 200 taken to an inbox after the TypeScript AMQP adapter's stop settled, none over MQTT 5. The contract reads that a stop lets go of each subscription as its unsubscription lets one go: over AMQP 1.0 the inbox deleted through its broker's management after the drain, before the DETACHes and the CLOSE ([0043](0043-over-amqp-1-0-a-participant-is-one-connection-whose-exclusive-inbox-ends-with-it-and-a-parcel-one-message-of-one-profile-each-counted-to-its-byte.md)). 15.21 excepts what a name's queue holds (15.38). A row of "Differences" for the AMQP inbox is weighed and refused: the difference can close. |
+| The bound is unnamed and stacks: the C# stop already spends two `connectTimeout`s in a row, the draft adds a third, and every document of the place says it bounds the start alone.                                              | **Accepted.** The drain and the UNSUBACKs share one `connectTimeout` from the stop's call, the DISCONNECT one of its own, so a drain that spent its time still leaves the DISCONNECT one and no will goes; the TypeScript side's `end` is raced against it, then forced. The worst case is twice `connectTimeout`, stated in the Consequences. The place's name in `spec/durations.json`, 15.30's row and both options' docs say so. A bound of the stop's own is weighed and refused: AMQP 1.0 spends `connectTimeout` on its stop, and a new place costs surface on three sides.                                                                                                                  |
+| "Every filter the link holds" misses one whose SUBSCRIBE went and whose SUBACK has not come, which its broker installs all the same.                                                                                             | **Accepted.** A filter is recorded as its SUBSCRIBE goes and kept until its UNSUBACK, on both sides; the stop lets go of each filter asked or held, its broker reading one link's packets in their order. A twin test withholds a SUBACK at the stop.                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| The draft closes the window after the stop and leaves the one during it: the names stay subscribed through the drain, and an OPEN its broker hands the participant then is acknowledged and lost.                                | **Accepted, as a change of its own:** a participant's stop lets each name go in its turn, its broker's word awaited before its adapter stops (the section below).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| A group whose name one member's stop leaves taken, played against the scripted MQTT 5 peer, proves nothing of routing, which the peer does not do.                                                                               | **Accepted.** The group is played against the fixture in each adapter suite: one member stops and the name is taken, the other stops and the next finds no subscriber. The scripted peer keeps the order, the withheld UNSUBACK, one packet a filter, the SUBSCRIBE under way and the Receive Maximum of 2.                                                                                                                                                                                                                                                                                                                                                                                         |
+| The cases test the name alone: the inbox's guarantee would be held by twin tests on two sides and nothing on the Rust side.                                                                                                      | **Accepted.** Each of the case's three variants, in memory, over MQTT 5 and over AMQP 1.0, publishes to the inbox after the stop and reads no subscriber, citing 15.24 beside its binding's units; the Rust side plays it in memory.                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| The draft leaves out the version, the units and the records.                                                                                                                                                                     | **Accepted.** A minor of the spec, since a conforming MQTT 5 adapter must change ([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)); 15.21, 15.24, 15.26, 15.27, 15.30.3 and 15.33 acknowledged; the companion unchanged; this record and 0043 amended; a line in the CHANGELOG.                                                                                                                                                                                                                                                                                                                                                                                               |
+| What the Rust side and the matrix owe goes unstated.                                                                                                                                                                             | **Accepted.** The Rust side's adapter contract states the let-go; it has no MQTT 5 adapter, so its cells stay ahead. No row of the matrix: every side can send an UNSUBSCRIBE, none is held to another's narrower form, and no platform forbids it.                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| An UNSUBACK is one node's word: a cluster replicates its routes later.                                                                                                                                                           | **Accepted.** 15.21 speaks of what the broker its link reached acknowledged; the Consequences say so.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+
+### On a stop that lets each name go first
+
+A stop that leaves its names subscribed through its adapter's drain has an OPEN its broker hands it
+then acknowledged and lost: 69 connects across three stops over MQTT 5 through a 300 ms round trip,
+33 in a group, 2 over AMQP 1.0. The draft let each name go first, awaited, before
+its CLOSEs. Seven objections, each verified against its probe or its source, against the fixture's
+Mosquitto and RabbitMQ, all accepted. The dissent upheld the goal, the 503 during the let-go, the
+MQTT 5 bound on an unsubscription, the companion's minor and the refusal of a release: Mosquitto
+hands no unacknowledged shared message to another member, even at a member's end.
+
+| Objection                                                                                                                                                                                                                                                                                                                                                                                             | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The strict order, names awaited before the CLOSEs, makes the stop a partial drain: for the let-go, a round trip or a `connectTimeout`, the stopped participant hands its router new envelopes and a half-open connection's third leg, then cuts them with 1001, against 15.21's "in place" and 0023's "takes nothing new"; over AMQP 1.0 a let-go past its bound loses the link before the CLOSEs go. | **Accepted.** Verified: in memory at a 200 ms round trip, envelopes handed on at +2 and +112 ms and a connection told at +113 ms after the call, the 1001s at +210 ms; with the CLOSEs at the call, nothing handed on and the 1001s at +1 ms. The stop hands its names' unsubscriptions, then its CLOSEs, then marks itself, in one turn, and awaits its broker's word before its adapter stops.                                                                                            |
+| The draft refused the concurrent order for a race over AMQP 1.0, a peer told 1001 reconnecting onto the stopping member, which did not show; measured on every binding, the concurrent order closes the same window, tells the 1001 a round trip sooner and settles no later.                                                                                                                         | **Accepted.** Verified: 10 of 10 reconnections onto the other member over AMQP 1.0 and MQTT 5, the 1001 at about +160 ms against +470 ms; the window probe 22 refused 503 and none lost alone, 11 refused and 217 opened by the group, none taken over AMQP 1.0. The race stays stated: a 503 and one reconnection delay, no loss. Forgetting each connection at the mark and closing it after the let-go is weighed and refused: each peer reads its 1001 a round trip later, for nothing. |
+| Aligning the server transport's stop to the strict order makes it a partial drain too, its 1001s waiting a `connectTimeout` against a mute broker; the order both stops share is the concurrent one.                                                                                                                                                                                                  | **Accepted.** Verified: all three transports' stops run concurrently in one turn. Each hands its names' unsubscriptions before its CLOSEs, with no wait; on the TypeScript side `want` runs at once when nothing is before it, since its chain put the UNSUBSCRIBE a microtask behind the CLOSEs.                                                                                                                                                                                           |
+| A name refused at a stop cannot be reported as drafted: the let-go's failures are read by `isLinked`, false from the stop's mark, so C# swallows a refusal, TypeScript cannot tell one from a lost link, and the draft's Rust order kept `is_linked()` true through the let-go where the others read false.                                                                                           | **Accepted.** Verified: C#'s filter reads `!IsLinked`, Rust's `is_linked()`, and TypeScript's `down` returns while `!isLinked`. Each core notes a down its adapter tells during its stop; a let-go that fails is reported unless that down came first or the adapter refused a misuse, and the name stays held. `is_linked()` reads false from the stop's turn on every side. Twins: a refusal reported, a lost link not.                                                                   |
+| The promise that no OPEN is lost overreaches: a broker that keeps fewer in flight than its participant's Receive Maximum sends what it held back after the UNSUBACK, and the stop acknowledges and loses it.                                                                                                                                                                                          | **Accepted.** Verified on Mosquitto 2.1.2: at a Receive Maximum of 2, 198 of 200 came after the UNSUBACK, alone and in a group; at Bead's 65,535, none. MQTT 5.0 §4.9 makes the Receive Maximum a ceiling. 15.31 requires the broker to keep in flight toward a server's participant up to its Receive Maximum, and the promise names what the broker sent before the name was let go.                                                                                                      |
+| Three claims say more than the probes show: over AMQP 1.0 a connect with no member waits its time; a 503 to a fresh connect fails it, no reconnection placing it; and the strict restart opened nothing within the probe.                                                                                                                                                                             | **Accepted.** Verified: 152 of 152 AMQP connects waited out their 3 s, held in the name's queue; the group's 503s were fresh connects; the restart served its name past the probe's window. The record says the queue holds the OPEN for its life and a connect fails on a 503 for its application to retry, and the changelog says so.                                                                                                                                                     |
+| 15.21's tail, a server transport's participant "then ends its link", is held by no side.                                                                                                                                                                                                                                                                                                              | **Accepted.** Verified: the C# and TypeScript stops keep the link, and Rust's ends none. It reads "its participant's link is kept".                                                                                                                                                                                                                                                                                                                                                         |

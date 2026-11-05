@@ -23,14 +23,14 @@ use crate::constants::{
 };
 use crate::debug::DebugDirection;
 use crate::envelope::{
-    CancelHeader, Credential, CreditHeader, Envelope, FailureHeader, FailureRecord, Header,
+    CancelHeader, Credential, CreditHeader, Envelope, EnvelopeHeader, FailureHeader, FailureRecord,
     NotificationHeader, Prefix, ReadEnvelopeOptions, RequestHeader, ResultHeader, read_envelope,
     read_prefix, write_envelope,
 };
 use crate::errors::{CallError, CapacityError, ProgrammerError, ResolverError};
 use crate::failure::Failure;
 use crate::metrics::{CallEnding, ProcedureSeries, ResolverSeries, RouterMetrics};
-use crate::owner::{Job, Owned, WeakOwner};
+use crate::owner::{Deferral, Job, Owned, WeakOwner};
 use crate::router::parts::{
     Announcements, Answering, AnsweringCalls, PendingCalls, Placed, Placement, ReceivingTransfers,
     RequestReceiving, SendingFor, SendingTransfers, cancel_timer,
@@ -42,7 +42,7 @@ use crate::router::types::{
     TransportMessage,
 };
 use crate::session_token::SessionToken;
-use crate::transport::{Panicked, Sent, caught_future, panicked_of};
+use crate::transport::{Panicked, Sent, caught, caught_future, panicked_of};
 use crate::violations::detail_bound_of;
 
 /// What a router's handlers are told the router was disposed with.
@@ -85,13 +85,14 @@ pub(crate) struct Carried {
     clippy::partial_pub_fields,
     reason = "what its transport carried, a bearer's secret, stays the router's"
 )]
+#[non_exhaustive]
 pub struct AdmissionRequest {
     /// The connection it came from.
     pub connection_handle: ConnectionHandle,
     /// Its header, a `JWT`'s token left out.
     pub header: RequestHeader,
-    /// The call's session; none when the call runs in none.
-    pub session: Option<CallSession>,
+    /// The call's shared session; admission and the callback receive the same allocation.
+    pub session: Option<Arc<CallSession>>,
     pub(crate) carried: Option<Carried>,
 }
 
@@ -111,11 +112,20 @@ impl fmt::Debug for AdmissionRequest {
 /// An admission's refusal: its failure, and the name of the admission Bead gives that refused it,
 /// which an access refused tells (spec 13.12); none for an application's own.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct AdmissionRefusal {
     /// The failure answered.
     pub failure: Failure,
     /// The admission of Bead's that refused it.
     pub by: Option<String>,
+}
+
+impl AdmissionRefusal {
+    /// Refuses admission with `failure`, without naming an admission of Bead's.
+    #[must_use]
+    pub fn new(failure: Failure) -> Self {
+        Self { failure, by: None }
+    }
 }
 
 /// An admission: none admits; a refusal refuses; an error refuses as failed, reported.
@@ -124,7 +134,7 @@ pub type AdmitFn =
 
 /// What answers a request once its payload is whole: a resolver, or a destination's handler.
 pub(crate) type ResolveFn =
-    Arc<dyn Fn(ResolverProps) -> BoxFuture<Result<(), ResolverError>> + Send + Sync>;
+    Arc<dyn Fn(RequestResolverProps) -> BoxFuture<Result<(), ResolverError>> + Send + Sync>;
 
 /// A request's handler, as a router keeps it: what answers it, its admission, its payload's
 /// limit, whether it forwards a credential unresolved, and whether it notifies.
@@ -135,6 +145,41 @@ pub(crate) struct Handler {
     pub(crate) maximum_payload_bytes: Option<u64>,
     pub(crate) forwards_credentials: bool,
     pub(crate) notifies: bool,
+}
+
+impl Handler {
+    /// Asks its admission when a caller hands it a request the router has not admitted.
+    pub(crate) fn self_admitting(mut self) -> Self {
+        if let Some(admit) = self.admit.clone() {
+            let resolve = self.resolve;
+            self.resolve = Arc::new(move |props| {
+                let admit = Arc::clone(&admit);
+                let resolve = Arc::clone(&resolve);
+
+                Box::pin(async move {
+                    if !props.is_admitted {
+                        let request = AdmissionRequest {
+                            connection_handle: Arc::clone(&props.connection_handle),
+                            header: props.header.clone(),
+                            session: props.session.clone(),
+                            carried: props.carried.clone(),
+                        };
+                        if let Some(refused) = admit(&request)? {
+                            return props
+                                .answerer
+                                .respond(RouterAnswer::Failure(refused.failure.record()))
+                                .await
+                                .map_err(ResolverError::other);
+                        }
+                    }
+
+                    resolve(props).await
+                })
+            });
+        }
+
+        self
+    }
 }
 
 impl fmt::Debug for Handler {
@@ -156,7 +201,7 @@ pub(crate) struct Dispatch {
     /// Its header as a procedure is handed it: a `JWT`'s scheme alone.
     pub(crate) header: RequestHeader,
     pub(crate) handler: Mutex<Option<Arc<Handler>>>,
-    pub(crate) session: Mutex<Option<CallSession>>,
+    pub(crate) session: Mutex<Option<Arc<CallSession>>>,
     pub(crate) answered: Mutex<Option<FailureRecord>>,
     pub(crate) origin: (Option<String>, Option<u16>),
 }
@@ -165,9 +210,24 @@ fn locked<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+pub(crate) mod sealed {
+    /// The answerer's seal: only this crate supplies one.
+    #[expect(
+        unnameable_types,
+        reason = "a sealed trait is public only as an unnameable supertrait"
+    )]
+    pub trait Answerer {}
+}
+
 /// What a request's handler answers its call by, from off the router's owner.
-pub trait Answerer: Send + Sync {
+///
+/// Implemented by Bead alone: an answer always goes through its owning router.
+pub trait Answerer: sealed::Answerer + Send + Sync {
     /// Answers the call; settles once the answer went, or as it could not.
+    ///
+    /// # Errors
+    ///
+    /// A [`CallError`] when its answer is refused, its call is cancelled, its connection ends, or its transport fails.
     fn respond(&self, answer: RouterAnswer) -> BoxFuture<Result<(), CallError>>;
 
     /// The failure the router answered the call with in its handler's place, read as it answers.
@@ -175,6 +235,10 @@ pub trait Answerer: Send + Sync {
 
     /// Subscribes the call's connection to its procedure, on a server's router: the subscription's
     /// call id.
+    ///
+    /// # Errors
+    ///
+    /// A [`CallError`] when its request opens no subscription, or its call or connection ends.
     fn subscribe(&self) -> BoxFuture<Result<u32, CallError>>;
 }
 
@@ -184,15 +248,18 @@ pub trait Answerer: Send + Sync {
     clippy::partial_pub_fields,
     reason = "what its transport carried, a bearer's secret, stays the router's"
 )]
-pub struct ResolverProps {
+#[non_exhaustive]
+pub struct RequestResolverProps {
+    /// Whether its router has admitted it; otherwise its handler asks its own admission.
+    pub is_admitted: bool,
     /// The connection it came from.
     pub connection_handle: ConnectionHandle,
     /// Its header, a `JWT`'s token left out (spec 13.1).
     pub header: RequestHeader,
     /// Its payload, whole, still encoded.
     pub payload: Bytes,
-    /// The call's session; none when the call runs in none.
-    pub session: Option<CallSession>,
+    /// The call's shared session; admission and the callback receive the same allocation.
+    pub session: Option<Arc<CallSession>>,
     /// Aborted when the call ends before its answer.
     pub signal: Signal,
     /// What answers the call.
@@ -200,10 +267,10 @@ pub struct ResolverProps {
     pub(crate) carried: Option<Carried>,
 }
 
-impl fmt::Debug for ResolverProps {
+impl fmt::Debug for RequestResolverProps {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("ResolverProps")
+            .debug_struct("RequestResolverProps")
             .field("connection_handle", &self.connection_handle)
             .field("header", &self.header)
             .finish_non_exhaustive()
@@ -245,7 +312,7 @@ pub(crate) struct BeforeAnswer {
     pub(crate) header: RequestHeader,
     pub(crate) is_failure: bool,
     pub(crate) handler: Option<Arc<Handler>>,
-    pub(crate) session: Option<CallSession>,
+    pub(crate) session: Option<Arc<CallSession>>,
 }
 
 /// What undoes what a side did before an answer that did not go out.
@@ -253,6 +320,15 @@ pub(crate) type Undo<S> = Box<dyn FnOnce(&mut S) + Send>;
 
 /// What sets one side of a router apart, for its core: its port.
 pub(crate) trait Side: Sized + Send + 'static {
+    /// Reads an envelope with this side's codec, past its prefix.
+    fn read_envelope(
+        &mut self,
+        data: &Bytes,
+        options: &ReadEnvelopeOptions,
+    ) -> Result<Option<Envelope>, Failure> {
+        read_envelope(data, self.core().side, options)
+    }
+
     /// Its core.
     fn core(&mut self) -> &mut Core<Self>;
 
@@ -314,7 +390,12 @@ pub(crate) trait Side: Sized + Send + 'static {
     }
 
     /// Every result and failure received, before it is paired with its call.
-    fn on_answer_received(&mut self, _header: &Header, _connection_handle: &ConnectionHandle) {}
+    fn on_answer_received(
+        &mut self,
+        _header: &EnvelopeHeader,
+        _connection_handle: &ConnectionHandle,
+    ) {
+    }
 
     /// A failure that answers no call waiting, which it takes or not.
     fn on_unpaired_failure(
@@ -334,7 +415,7 @@ pub(crate) trait Side: Sized + Send + 'static {
     fn trace(
         &mut self,
         _direction: DebugDirection,
-        (_connection_handle, _header): (&ConnectionHandle, &Header),
+        (_connection_handle, _header): (&ConnectionHandle, &EnvelopeHeader),
     ) {
     }
 
@@ -370,8 +451,11 @@ pub(crate) trait Side: Sized + Send + 'static {
     }
 
     /// The session of `connection_handle`, which its next answer announces when it changed.
-    fn session_token_of(&mut self, _connection_handle: &ConnectionHandle) -> Option<SessionToken> {
-        None
+    fn session_token_of(
+        &mut self,
+        _connection_handle: &ConnectionHandle,
+    ) -> Result<Option<SessionToken>, RouterError> {
+        Ok(None)
     }
 
     /// The session a credential resolved to, as the side keeps it: a credential's session a
@@ -402,8 +486,10 @@ pub(crate) struct Registered {
     pub(crate) series: Option<ResolverSeries>,
 }
 
-/// Whether a router was disposed, which its handle and its owner's state share: set at once by its
-/// dispose, what it holds let go in a later turn, behind what came before it (spec 9.0).
+/// Whether a router's handle was disposed, which its handle and what its transport tells share: set
+/// at once by its dispose, so an operation made after it fails unsent and what its transport tells
+/// is dropped; what it holds is let go by the dispose's job, behind what came before it, which sets
+/// its state's own mark first (spec 9.0, 9.1; decision 0045).
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Disposal(Arc<AtomicBool>);
 
@@ -424,6 +510,8 @@ pub(crate) struct Core<S> {
     pub(crate) side: RouterSide,
     pub(crate) limits: RouterLimits,
     pub(crate) clock: SharedClock,
+    #[cfg(test)]
+    pub(crate) observed_reads: Option<Arc<Mutex<Vec<Gauges>>>>,
     pub(crate) owner: WeakOwner<S>,
     pub(crate) metrics: Option<RouterMetrics>,
     pub(crate) placement: Placement,
@@ -433,7 +521,14 @@ pub(crate) struct Core<S> {
     pub(crate) pending: PendingCalls,
     pub(crate) announcements: Announcements,
     pub(crate) resolvers: Resolvers,
+    // the handle's mark, which a debug view reads
     pub(crate) disposal: Disposal,
+    // ! the state's mark, set first by the dispose's job, or as its owner ends: what skips an
+    // answer, gates a send and sends a cancel read it, never the handle's, so the skip and the gate
+    // always agree (decision 0045)
+    pub(crate) disposed: bool,
+    // what it defers to a later turn: its owner's queue's tail, or held as its owner ends
+    pub(crate) deferral: Deferral<S>,
     // the receiving transfers of requests, by their transfer's id: the request as it waits, and
     // its handler
     pub(crate) receiving_requests: BTreeMap<u64, (Arc<Dispatch>, Arc<Handler>)>,
@@ -469,6 +564,9 @@ impl<S: Side> Core<S> {
             side,
             limits,
             clock,
+            #[cfg(test)]
+            observed_reads: None,
+            deferral: Deferral::of(owner.clone()),
             owner,
             metrics,
             placement,
@@ -478,10 +576,11 @@ impl<S: Side> Core<S> {
                 most: limits.maximum_answering_calls,
                 ..AnsweringCalls::default()
             },
-            pending: PendingCalls::new(side, None),
+            pending: PendingCalls::new(side),
             announcements: Announcements::default(),
             resolvers: Resolvers::default(),
             disposal: Disposal::default(),
+            disposed: false,
             receiving_requests: BTreeMap::new(),
             results: BTreeMap::new(),
             settled: BTreeMap::new(),
@@ -489,9 +588,17 @@ impl<S: Side> Core<S> {
         }
     }
 
-    /// Whether its router was disposed.
-    pub(crate) fn is_disposed(&self) -> bool {
-        self.disposal.is_set()
+    /// Whether its router was disposed, by the state's mark: once the dispose's job ran, or its
+    /// owner ended.
+    pub(crate) const fn is_disposed(&self) -> bool {
+        self.disposed
+    }
+
+    /// Marks its router disposed: its state's mark, and its handle's should a turn of its own end
+    /// it; the first thing a dispose's job does.
+    pub(crate) fn mark_disposed(&mut self) {
+        self.disposed = true;
+        self.disposal.set();
     }
 
     /// A number never given before, which tells one thing from another of the same place.
@@ -514,23 +621,28 @@ impl<S: Side> Core<S> {
         &self,
         due: Duration,
         job: J,
-    ) -> Arc<dyn Timer> {
+    ) -> Result<Arc<dyn Timer>, ProgrammerError> {
         self.owner.after((&self.clock, due), job)
     }
 
-    /// Posts `job` to the owner, to run in a later turn: as this one ends, when posted within it.
+    /// Defers `job` to a later turn, at its owner's queue's tail, behind every job queued: never
+    /// within this one (decision 0045).
     pub(crate) fn later<J: FnOnce(&mut S) + Send + 'static>(&self, job: J) {
-        self.owner.offer(Box::new(job));
+        self.deferral.offer(Box::new(job));
     }
 
     /// The monotonic reading now.
     pub(crate) fn now(&self) -> Duration {
+        #[cfg(test)]
+        if let Some(reads) = &self.observed_reads {
+            locked(reads).push(self.gauges().expect("each core part names its own counts"));
+        }
         self.clock.monotonic()
     }
 
     /// Gauges of every part.
-    pub(crate) fn gauges(&self) -> Gauges {
-        Gauges::merged(vec![
+    pub(crate) fn gauges(&self) -> Result<Gauges, ProgrammerError> {
+        Gauges::merge(vec![
             self.pending.gauges(),
             self.answering.gauges(),
             self.sendings.gauges(),
@@ -568,11 +680,11 @@ pub(crate) fn reported_error_of(error: Box<dyn Error + Send + Sync>) -> RouterEr
 pub(crate) fn reported_call(error: CallError) -> RouterError {
     match error {
         CallError::Failure(failure) => RouterError::Failure(failure),
-        other @ (CallError::Cancelled
+        CallError::Other(error) => RouterError::Other(error),
+        other @ (CallError::Cancelled(_)
         | CallError::Disconnected(_)
         | CallError::TimedOut(_)
-        | CallError::Refused(_)
-        | CallError::Other(_)) => RouterError::Other(Arc::new(other)),
+        | CallError::Refused(_)) => RouterError::Other(Arc::new(other)),
     }
 }
 
@@ -605,15 +717,15 @@ impl<S> Deliver<S> {
 fn announce<S: Side>(
     state: &mut S,
     (envelope, handle): (Envelope, &ConnectionHandle),
-) -> (Envelope, Option<crate::router::parts::Announced>) {
+) -> Result<(Envelope, Option<crate::router::parts::Announced>), RouterError> {
     if !matches!(envelope, Envelope::Result { .. } | Envelope::Failure { .. }) {
-        return (envelope, None);
+        return Ok((envelope, None));
     }
 
-    let current = state.session_token_of(handle);
+    let current = state.session_token_of(handle)?;
     let Some((credential, announced)) = state.core().announcements.announce((handle, current))
     else {
-        return (envelope, None);
+        return Ok((envelope, None));
     };
 
     let envelope = match envelope {
@@ -638,7 +750,7 @@ fn announce<S: Side>(
         | Envelope::Cancel { .. }) => other,
     };
 
-    (envelope, Some(announced))
+    Ok((envelope, Some(announced)))
 }
 
 /// Sends an envelope, within its limits, announced, traced and handed to the transport; `then`
@@ -689,7 +801,10 @@ pub(crate) fn deliver<S: Side>(state: &mut S, (envelope, options): (Envelope, De
         return settle(state, Err(CallError::Failure(failure)), then);
     }
 
-    let (envelope, announced) = announce(state, (envelope, &connection_handle));
+    let (envelope, announced) = match announce(state, (envelope, &connection_handle)) {
+        Ok(announced) => announced,
+        Err(error) => return settle(state, Err(call_error_of(error)), then),
+    };
     let detail_bytes = detail_bound_of(
         usize::try_from(limits.maximum_detail_bytes).unwrap_or(usize::MAX),
         usize::try_from(limits.maximum_envelope_bytes).unwrap_or(usize::MAX),
@@ -811,7 +926,7 @@ pub(crate) fn send_reporting<S: Side>(
 // a failure the core raises itself, on what came in, for the side to hear
 fn report_failure<S: Side>(
     state: &mut S,
-    (failure, (handle, header)): (Failure, (&ConnectionHandle, &Header)),
+    (failure, (handle, header)): (Failure, (&ConnectionHandle, &EnvelopeHeader)),
 ) {
     state.report(reported(failure.about(header)), handle);
 }
@@ -844,11 +959,25 @@ pub(crate) fn receive<S: Side>(
         maximum_envelope_bytes: usize::try_from(limits.maximum_envelope_bytes).ok(),
     };
 
-    let envelope = match read_envelope(&data, side, &options) {
-        Ok(Some(envelope)) => envelope,
+    let envelope = match caught(("an envelope codec", || state.read_envelope(&data, &options))) {
+        Ok(Ok(Some(envelope))) => envelope,
         // an advisory kind is skipped
-        Ok(None) => return,
-        Err(failure) => return gate(state, ((failure, handle, prefix), false)),
+        Ok(Ok(None)) => return,
+        Ok(Err(failure)) => return gate(state, ((failure, handle, prefix), false)),
+        Err(panicked) => {
+            let failure = state.core().failure(ProtocolCode::ENVELOPE_MALFORMED);
+            state.report(
+                reported(
+                    failure
+                        .clone()
+                        // ! a detail of the side's own words: the report alone takes the panic; the peer gets the failure cloned before it
+                        .saying(panicked.message())
+                        .caused_by(Arc::new(panicked)),
+                ),
+                handle,
+            );
+            return gate(state, ((failure, handle, prefix), true));
+        }
     };
 
     if state.is_tracing() {
@@ -908,7 +1037,7 @@ pub(crate) fn receive<S: Side>(
                         .failure(ProtocolCode::KIND_UNSUPPORTED)
                         .saying("this side sends no notification");
 
-                    report_failure(state, (failure, (handle, &Header::Credit(header))));
+                    report_failure(state, (failure, (handle, &EnvelopeHeader::Credit(header))));
                 }
             } else {
                 credit_sending(state, (handle, header.call_id, header.credit_end));
@@ -1048,10 +1177,7 @@ fn gate_chunk<S: Side>(
     let invalid = core
         .failure(ProtocolCode::CHUNK_INVALID)
         .saying(failure.detail().to_owned());
-    let receiving = core
-        .answering
-        .get(&call)
-        .and_then(|answering| answering.receiving.clone());
+    let receiving = core.answering.receiving_of(&call).cloned();
 
     if let Some(RequestReceiving { transfer }) = receiving {
         let is_whole = core
@@ -1086,7 +1212,7 @@ fn receive_cancel<S: Side>(state: &mut S, (header, handle): (CancelHeader, &Conn
                 "call {call_id} is this side's, which the peer cannot cancel"
             ));
 
-        return report_failure(state, (failure, (handle, &Header::Cancel(header))));
+        return report_failure(state, (failure, (handle, &EnvelopeHeader::Cancel(header))));
     }
 
     let call = CallAddress {
@@ -1100,6 +1226,8 @@ fn receive_cancel<S: Side>(state: &mut S, (header, handle): (CancelHeader, &Conn
     if let Some(answering) = taken {
         answering.signal.abort(SignalReason::Cancelled);
     }
+
+    crate::router::answers::cancel(state, &call);
 }
 
 fn receive_notification<S: Side>(
@@ -1112,7 +1240,10 @@ fn receive_notification<S: Side>(
             .failure(ProtocolCode::KIND_UNSUPPORTED)
             .saying("this side takes no notification");
 
-        return report_failure(state, (failure, (handle, &Header::Notification(header))));
+        return report_failure(
+            state,
+            (failure, (handle, &EnvelopeHeader::Notification(header))),
+        );
     }
 
     // one on a call id reserved was on its way, and is dropped in silence
@@ -1168,39 +1299,16 @@ pub(crate) fn pump<S: Side>(state: &mut S, (call, purpose): (&CallAddress, Sendi
 
 // ── Answering ────────────────────────────────────────────────────────────────────────────────
 
-// counts a call ended, once, timed to now
-fn ended<S: Side>(state: &mut S, (call, ending): (&CallAddress, CallEnding)) {
-    let core = state.core();
-
-    if let Some(answering) = core.answering.get_mut(call)
-        && !answering.is_ended
-        && let Some(series) = answering.series.clone()
-    {
-        // * read only for a call counted (spec/debugging.md 3.1)
-        let now = core.clock.monotonic();
-
-        answering.is_ended = true;
-        series.end(
-            ending,
-            microseconds_of(now.saturating_sub(answering.started_at)),
-        );
-    }
-}
-
 // counts the call of a request ended, as `ending` says, while it is the one `dispatch` opened
 fn end_answering<S: Side>(state: &mut S, (dispatch, ending): (&Dispatch, CallEnding)) {
     let call = CallAddress {
         connection_handle: Arc::clone(&dispatch.connection_handle),
         call_id: dispatch.header.call_id,
     };
-    let is_its = state
-        .core()
-        .answering
-        .get(&call)
-        .is_some_and(|answering| answering.dispatched == dispatch.id);
+    let core = state.core();
 
-    if is_its {
-        ended(state, (&call, ending));
+    if let Some(answering) = core.answering.answering_of_mut((&call, dispatch.id)) {
+        answering.end(ending, || core.clock.monotonic());
     }
 }
 
@@ -1247,7 +1355,12 @@ fn abandon<S: Side>(state: &mut S, (call, credit_end): (&CallAddress, u64)) {
             .forget_abandoned(&forgotten, Some(id));
     });
 
-    core.answering
+    let Some(timer) = timer_of(state, (timer, &call.connection_handle)) else {
+        return;
+    };
+    state
+        .core()
+        .answering
         .abandoned
         .entry(Arc::clone(&call.connection_handle))
         .or_default()
@@ -1311,8 +1424,12 @@ pub(crate) fn send_credits<S: Side>(state: &mut S, credits: Vec<(CallAddress, u6
 
 // takes a call out, cancelled, counted so
 fn take_answering<S: Side>(state: &mut S, call: &CallAddress) -> Option<Answering> {
-    ended(state, (call, CallEnding::Cancelled));
-    forget_answering(state, (call, None))
+    let mut answering = forget_answering(state, (call, None))?;
+    let core = state.core();
+
+    answering.end(CallEnding::Cancelled, || core.clock.monotonic());
+
+    Some(answering)
 }
 
 // closes the call `dispatch` opened, none that took its call id since: unanswered, counted an error
@@ -1321,15 +1438,11 @@ pub(crate) fn close_answering<S: Side>(state: &mut S, dispatch: &Dispatch) {
         connection_handle: Arc::clone(&dispatch.connection_handle),
         call_id: dispatch.header.call_id,
     };
-    let is_its = state
-        .core()
-        .answering
-        .get(&call)
-        .is_some_and(|answering| answering.dispatched == dispatch.id);
 
-    if is_its {
-        ended(state, (&call, CallEnding::Error));
-        forget_answering(state, (&call, Some(dispatch.id)));
+    if let Some(mut answering) = forget_answering(state, (&call, Some(dispatch.id))) {
+        let core = state.core();
+
+        answering.end(CallEnding::Error, || core.clock.monotonic());
     }
 }
 
@@ -1340,11 +1453,7 @@ pub(crate) fn is_answering<S: Side>(state: &mut S, dispatch: &Dispatch) -> bool 
         call_id: dispatch.header.call_id,
     };
 
-    state
-        .core()
-        .answering
-        .get(&call)
-        .is_some_and(|answering| answering.dispatched == dispatch.id && !answering.is_answered)
+    state.core().answering.is_answering((&call, dispatch.id))
 }
 
 /// The signal of the call `dispatch` opened, while it is open.
@@ -1354,12 +1463,7 @@ pub(crate) fn signal_of<S: Side>(state: &mut S, dispatch: &Dispatch) -> Option<S
         call_id: dispatch.header.call_id,
     };
 
-    state
-        .core()
-        .answering
-        .get(&call)
-        .filter(|answering| answering.dispatched == dispatch.id)
-        .map(|answering| answering.signal.clone())
+    state.core().answering.signal_of((&call, dispatch.id))
 }
 
 /// What settles once an answer went, or could not.
@@ -1408,7 +1512,7 @@ pub(crate) fn respond<S: Side>(
             match core.placement.transfer_of(
                 payload,
                 (
-                    &Header::Result(result_header.clone()),
+                    &EnvelopeHeader::Result(result_header.clone()),
                     maximum_payload_bytes,
                 ),
             ) {
@@ -1421,7 +1525,7 @@ pub(crate) fn respond<S: Side>(
                                 "a subscription's result goes in one envelope, of {} bytes at most",
                                 core.placement.whole_bytes
                             ))
-                            .about(&Header::Result(result_header));
+                            .about(&EnvelopeHeader::Result(result_header));
 
                         return finish(state, Err(CallError::Failure(failure)), done);
                     }
@@ -1429,7 +1533,7 @@ pub(crate) fn respond<S: Side>(
                     Some(outgoing)
                 }
                 Err(failure) => {
-                    let failure = failure.about(&Header::Result(result_header));
+                    let failure = failure.about(&EnvelopeHeader::Result(result_header));
 
                     return finish(state, Err(CallError::Failure(failure)), done);
                 }
@@ -1449,16 +1553,8 @@ pub(crate) fn respond<S: Side>(
         connection_handle: Arc::clone(&handle),
         call_id,
     };
-    let is_its = state
-        .core()
-        .answering
-        .get(&call)
-        .is_some_and(|answering| answering.dispatched == dispatch.id);
-
     // its answer going out: a second goes nowhere, and this one closes the call once done
-    if is_its && let Some(answering) = state.core().answering.get_mut(&call) {
-        answering.is_answered = true;
-    }
+    let is_its = state.core().answering.answer((&call, dispatch.id));
 
     if let RouterAnswer::Failure(failure) = &answer
         && is_its
@@ -1593,6 +1689,8 @@ struct CallAnswerer<S> {
     dispatch: Arc<Dispatch>,
 }
 
+impl<S: Side> sealed::Answerer for CallAnswerer<S> {}
+
 impl<S: Side> Answerer for CallAnswerer<S> {
     fn respond(&self, answer: RouterAnswer) -> BoxFuture<Result<(), CallError>> {
         let (reply, answered) = ::tokio::sync::oneshot::channel();
@@ -1658,7 +1756,8 @@ fn dispatch_to<S: Side>(
     let core = state.core();
     let owner = core.owner.clone();
     let session = locked(&dispatch.session).clone();
-    let props = ResolverProps {
+    let props = RequestResolverProps {
+        is_admitted: true,
         connection_handle: Arc::clone(&dispatch.connection_handle),
         header: dispatch.header.clone(),
         payload,
@@ -1671,7 +1770,12 @@ fn dispatch_to<S: Side>(
         carried: None,
     };
     // * off the owner, on the runtime: one that blocks its thread stalls a worker, never the router
-    let resolving = (handler.resolve)(props);
+    let resolving = match caught(("a resolver", || (handler.resolve)(props))) {
+        Ok(resolving) => resolving,
+        Err(panicked) => {
+            return resolver_failed(state, (&dispatch, &signal, ResolverError::other(panicked)));
+        }
+    };
     let Some(running) = owner.spawn(resolving) else {
         return;
     };
@@ -1846,9 +1950,7 @@ fn admit_routed<S: Side>(
         .insert(transfer, (Arc::clone(&dispatch), Arc::clone(&handler)));
 
     // kept before its first credit goes, so a chunk that credit brings at once finds it
-    if let Some(answering) = core.answering.get_mut(&call) {
-        answering.receiving = Some(RequestReceiving { transfer });
-    }
+    core.answering.attach(&call, RequestReceiving { transfer });
 
     touch_request_transfer(state, (transfer, timeout));
 
@@ -1878,6 +1980,15 @@ fn touch_request_transfer<S: Side>(state: &mut S, (transfer, timeout): (u64, Dur
         refuse(state, (failure, &dispatch));
     });
 
+    let Some((dispatch, _)) = state.core().receiving_requests.get(&transfer).cloned() else {
+        if let Ok(timer) = timer {
+            timer.cancel();
+        }
+        return;
+    };
+    let Some(timer) = timer_of(state, (timer, &dispatch.connection_handle)) else {
+        return;
+    };
     if let Some(receiving) = state.core().receivings.get_mut(transfer) {
         cancel_timer(&mut receiving.timer);
         receiving.timer = Some(timer);
@@ -1952,6 +2063,19 @@ fn resolve_session<S: Side>(
         carried,
     };
     let resolution = state.session_of(&request, &signal);
+    // NONE and OPAQUE resolve in the receive turn. A future violates that contract; its eventual
+    // outcome is consumed off the owner and never admits the call (spec 13.1).
+    let resolution = match resolution {
+        Resolution::Later(resolving) if !is_later => {
+            state.core().owner.cover(async move {
+                let _outcome = resolving.await;
+            });
+            Resolution::Now(Err(Unresolved::Other(Arc::new(ProgrammerError::new(
+                "session_of resolves a request presenting none or OPAQUE in the turn it came, never by a future",
+            )))))
+        }
+        resolution @ (Resolution::Now(_) | Resolution::Later(_)) => resolution,
+    };
     let settle = move |state: &mut S, resolved: Result<Resolved, Unresolved>| {
         match resolved {
             Ok(resolved) => {
@@ -1959,7 +2083,7 @@ fn resolve_session<S: Side>(
                     Resolved::Session(session) => {
                         let handle = Arc::clone(&dispatch.connection_handle);
 
-                        (Some(state.resolved(session, &handle)), None)
+                        (Some(Arc::new(state.resolved(session, &handle))), None)
                     }
                     Resolved::Refused(reason) => (None, Some(reason)),
                     Resolved::None => (None, None),
@@ -1991,6 +2115,7 @@ fn resolve_session<S: Side>(
                 let failure = state
                     .core()
                     .failure(ProtocolCode::CAPACITY_EXCEEDED)
+                    // ! a detail of the side's own words: a bound of the side's own, its own words
                     .saying(error.message().to_owned());
 
                 refuse(state, (failure, &dispatch));
@@ -2018,13 +2143,22 @@ fn resolve_session<S: Side>(
         }),
         Resolution::Later(resolving) => {
             let owner = state.core().owner.clone();
+            let token = signal.token().clone();
 
             state.core().owner.cover(async move {
                 // ! what a resolution panics is its throw, as a resolver's is: the call answered
                 // PROCEDURE_FAILED and the panic reported (decision 0044)
-                let resolved = caught_future(("a credential's resolution", resolving))
-                    .await
-                    .unwrap_or_else(|panicked| Err(Unresolved::Other(Arc::new(panicked))));
+                let mut resolving =
+                    Box::pin(caught_future(("a credential's resolution", resolving)));
+                let Some(resolved) = token.run_until_cancelled(resolving.as_mut()).await else {
+                    // ! the verifier may ignore its signal: its task keeps no cancelled call's
+                    // payload, which belongs to the settlement alone
+                    drop(settle);
+                    drop(resolving.await);
+                    return;
+                };
+                let resolved =
+                    resolved.unwrap_or_else(|panicked| Err(Unresolved::Other(Arc::new(panicked))));
                 owner.offer(Box::new(move |state: &mut S| {
                     if !signal.is_aborted() {
                         settle(state, resolved);
@@ -2042,12 +2176,6 @@ fn schemes_detail_of(schemes: &BTreeSet<u16>) -> String {
         .map(|&scheme| CredentialScheme::new(scheme).to_string())
         .collect::<Vec<_>>()
         .join(", ")
-}
-
-/// `CREDENTIAL_UNSUPPORTED`'s detail, as a 401 names its schemes (RFC 9110 §11.6.1).
-#[must_use]
-pub fn credential_schemes_detail_of(schemes: &[CredentialScheme]) -> String {
-    schemes_detail_of(&schemes.iter().map(|scheme| scheme.get()).collect())
 }
 
 // a request's header as its side hands it to a procedure and its admission (spec 13.1): a `JWT`'s
@@ -2097,7 +2225,7 @@ fn receive_request<S: Side>(
                 "call {call_id} is this side's to open, not the peer's"
             ));
 
-        return report_failure(state, (failure, (handle, &Header::Request(header))));
+        return report_failure(state, (failure, (handle, &EnvelopeHeader::Request(header))));
     }
 
     let is_open = core.answering.has(&call);
@@ -2108,7 +2236,7 @@ fn receive_request<S: Side>(
             .failure(ProtocolCode::ENVELOPE_MALFORMED)
             .saying(format!("call {call_id} is open already"));
 
-        return report_failure(state, (failure, (handle, &Header::Request(header))));
+        return report_failure(state, (failure, (handle, &EnvelopeHeader::Request(header))));
     }
 
     let core = state.core();
@@ -2162,23 +2290,18 @@ fn receive_request<S: Side>(
         Duration::ZERO
     };
 
-    core.answering.forget_abandoned(&call, None);
-    core.answering
-        .answering
-        .entry(Arc::clone(handle))
-        .or_default()
-        .insert(
-            call_id,
-            Answering {
-                dispatched: id,
-                signal: Signal::new(),
-                is_answered: false,
-                is_ended: false,
-                receiving: None,
-                series,
-                started_at,
-            },
-        );
+    core.answering.open(
+        &call,
+        Answering {
+            dispatched: id,
+            signal: Signal::new(),
+            is_answered: false,
+            is_ended: false,
+            receiving: None,
+            series,
+            started_at,
+        },
+    );
 
     // ! what its transport carried stands for ELSEWHERE alone (spec 13.1, 15.1)
     let carried = Carried {
@@ -2297,7 +2420,7 @@ fn carrying_of(handler: &Handler, carried: &Carried) -> ResolveFn {
     let resolve = Arc::clone(&handler.resolve);
     let carried = carried.clone();
 
-    Arc::new(move |mut props: ResolverProps| {
+    Arc::new(move |mut props: RequestResolverProps| {
         props.carried = Some(carried.clone());
         resolve(props)
     })
@@ -2335,7 +2458,7 @@ pub(crate) fn receive_unplaced<S: Side>(
             "bytes from {offset} run past the credit's end of {credit_end}"
         ));
 
-        return report_failure(state, (failure, (handle, &Header::Chunk(header))));
+        return report_failure(state, (failure, (handle, &EnvelopeHeader::Chunk(header))));
     }
 
     let failure = if is_open {
@@ -2345,7 +2468,7 @@ pub(crate) fn receive_unplaced<S: Side>(
         core.failure(ProtocolCode::CALL_UNKNOWN)
     };
 
-    report_failure(state, (failure, (handle, &Header::Chunk(header))));
+    report_failure(state, (failure, (handle, &EnvelopeHeader::Chunk(header))));
 }
 
 // a chunk of a request's payload: the call is the peer's
@@ -2355,10 +2478,7 @@ fn receive_request_chunk<S: Side>(
 ) {
     let core = state.core();
     let handle = Arc::clone(&call.connection_handle);
-    let receiving = core
-        .answering
-        .get(&call)
-        .and_then(|answering| answering.receiving.clone());
+    let receiving = core.answering.receiving_of(&call).cloned();
     let length = u64::try_from(chunk.bytes.len()).unwrap_or(u64::MAX);
     let Some(RequestReceiving { transfer }) = receiving else {
         let credit_end = core.answering.abandoned_end_of(&call);
@@ -2380,7 +2500,7 @@ fn receive_request_chunk<S: Side>(
     match outcome {
         Err(failure) => {
             if was_whole {
-                report_failure(state, (failure, (&handle, &Header::Chunk(header))));
+                report_failure(state, (failure, (&handle, &EnvelopeHeader::Chunk(header))));
             } else {
                 refuse(state, (failure, &dispatch));
             }
@@ -2414,17 +2534,21 @@ fn receive_request_chunk<S: Side>(
 /// them as it is asked, and its owner, which finds them.
 pub(crate) type Resolvers = Arc<Mutex<BTreeMap<(u16, u16), Registered>>>;
 
+#[cfg(test)]
+#[path = "tests/answering_accounting.rs"]
+mod answering_accounting_tests;
+
 /// Registers a handler for a procedure in `resolvers`, declared to the router's `metrics`.
 pub(crate) fn register_resolver(
     resolvers: &Resolvers,
     (procedure, handler, metrics): (&crate::identity::Procedure, Handler, Option<&RouterMetrics>),
 ) -> Result<Option<ResolverSeries>, ProgrammerError> {
-    let address = (procedure.service_id, procedure.id);
+    let address = (procedure.service_id, procedure.procedure_id);
 
     if handler.maximum_payload_bytes == Some(0) {
         return Err(ProgrammerError::new(format!(
             "{}'s payload limit is a whole number above 0, not 0",
-            procedure.name
+            procedure.procedure_name
         )));
     }
 
@@ -2433,7 +2557,7 @@ pub(crate) fn register_resolver(
     if registered.contains_key(&address) {
         return Err(ProgrammerError::new(format!(
             "{} is already a registered resolver",
-            procedure.name
+            procedure.procedure_name
         )));
     }
 
@@ -2476,58 +2600,15 @@ pub(crate) fn reject_pending<S: Side>(
     core.announcements.forget(handle);
 
     // ! the calls it answers taken last, each counted closed once all are out
-    let handles: Vec<ConnectionHandle> = handle.map_or_else(
-        || {
-            let mut handles: BTreeSet<ConnectionHandle> =
-                core.answering.answering.keys().cloned().collect();
+    let mut taken = core.answering.take_all(handle);
 
-            handles.extend(core.answering.abandoned.keys().cloned());
-            handles.into_iter().collect()
-        },
-        |handle| vec![Arc::clone(handle)],
-    );
-    let mut taken: Vec<(CallAddress, Answering)> = Vec::new();
-
-    for handle in handles {
-        if let Some(calls) = core.answering.answering.remove(&handle) {
-            for (call_id, answering) in calls {
-                taken.push((
-                    CallAddress {
-                        connection_handle: Arc::clone(&handle),
-                        call_id,
-                    },
-                    answering,
-                ));
-            }
-        }
-
-        if let Some(calls) = core.answering.abandoned.remove(&handle) {
-            for (_, mut abandoned) in calls {
-                cancel_timer(&mut abandoned.timer);
-            }
-        }
-    }
-
-    // * read only when a call it takes is counted (spec/debugging.md 3.1)
-    let now = if taken
-        .iter()
-        .any(|(_, answering)| !answering.is_ended && answering.series.is_some())
-    {
-        core.now()
-    } else {
-        Duration::ZERO
-    };
+    // * read once, and only when a call it takes is counted (spec/debugging.md 3.1)
+    let mut now = None;
 
     for (_, answering) in &mut taken {
-        if !answering.is_ended
-            && let Some(series) = &answering.series
-        {
-            answering.is_ended = true;
-            series.end(
-                CallEnding::Closed,
-                microseconds_of(now.saturating_sub(answering.started_at)),
-            );
-        }
+        answering.end(CallEnding::Closed, || {
+            *now.get_or_insert_with(|| core.now())
+        });
     }
 
     // then each call waiting settled, and each signal aborted, application code last
@@ -2543,24 +2624,48 @@ pub(crate) fn reject_pending<S: Side>(
 }
 
 /// A router whose owner ends on a job that panicked: marked disposed, each call it waits on failed
-/// now, with that panic for its reason, the signal of each it answers aborted alike.
+/// now, with that panic for its reason, the signal of each it answers aborted alike; what it defers
+/// from now on held, for its owner to run next, its queue closed.
 pub(crate) fn end<S: Side>(state: &mut S, panicked: &Panicked) {
-    state.core().disposal.set();
+    let core = state.core();
+
+    core.deferral.end();
+    core.mark_disposed();
     reject_pending(state, (&panicked.to_string(), None));
 }
 
-// * a router's state, as its owner ends on a job that panicked: its side's way (decision 0044)
+// * a router's state, as its owner ends on a job that panicked: its side's way, then what that
+// deferred (decision 0044)
 impl<S: Side> Owned for S {
     fn on_panic(&mut self, panicked: &(dyn core::any::Any + Send)) {
         self.ended(&panicked_of(("a turn of the router's", panicked)));
+    }
+
+    fn deferred(&mut self) -> Option<Job<Self>> {
+        self.core().deferral.next()
     }
 }
 
 /// Rejects what still waits, aborts the signal of each call it still answers, and sends nothing
 /// more: no cancel either.
 pub(crate) fn dispose<S: Side>(state: &mut S) {
-    state.core().disposal.set();
+    state.core().mark_disposed();
     reject_pending(state, (&format!("{DISPOSED} before the answer"), None));
+}
+
+// a clock that refuses a deadline cannot keep this router's calls bounded
+pub(crate) fn timer_of<S: Side>(
+    state: &mut S,
+    (armed, connection): (Result<Arc<dyn Timer>, ProgrammerError>, &ConnectionHandle),
+) -> Option<Arc<dyn Timer>> {
+    match armed {
+        Ok(timer) => Some(timer),
+        Err(error) => {
+            state.report(reported_call(CallError::Refused(error)), connection);
+            dispose(state);
+            None
+        }
+    }
 }
 
 /// Sends a notification to one subscription, counted: sent once its transport has it, whatever the

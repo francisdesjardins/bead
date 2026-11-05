@@ -21,7 +21,9 @@
   [0020](0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md)'s; an access refused,
   told, [0034](0034-a-server-tells-each-access-it-refuses-never-the-credential.md)'s; the Web Worker
   client's error,
-  [0036](0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md)'s.
+  [0036](0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md)'s;
+  what waits for a router's turn, the inbound twin of what waits for a socket,
+  [0046](0046-a-router-paces-each-connections-reads-by-what-it-has-not-taken.md)'s.
 
 ## Context
 
@@ -84,25 +86,25 @@ cited holds one. A depth bound alone on a socket drops an honest burst.
 ## Decision
 
 **The calls a connection has its side answer at once are a limit of the protocol's**,
-`maximumAnsweringCalls`, `MaximumAnsweringCalls`, 64 (spec 12.2), set alike at both ends and
-announced by nothing, as every limit of 12.2 is, so a requester knows its peer's number: its own.
-Both of HTTP/2's halves hold. **A requester holds its calls waiting on a connection to it**, failing
-one past it before it goes, `CAPACITY_EXCEEDED`, drawing no call id, as it fails a call with no call
-id free (spec 9.1). **A receiver answers a request past it `CAPACITY_EXCEEDED`** at 9.2's step 3:
-after steps 1 and 2, which must stay first since a request on the receiver's parity or on a call id
-open is never answered, and before its route, its credential's resolution and a transfer's first
-credit, so nothing of it is held. Its refusal stays for a peer that does not keep the rule, or whose
-count runs ahead of the receiver's: over HTTP, a request that overtakes the cancel of an earlier
-call (spec 15.1, 15.5). A relay's leg B is a requester as any other, so a refusal past its number is
-the relay's own (spec 14.5), never the destination's. A call counts from the turn its request opens
-it until its answer is wholly sent — a whole answer handed to its transport, a result's transfer by
-its last chunk — its cancel comes or its connection closes, its credential resolving and its
-transfer coming among it, as HTTP/2 counts a half-closed stream. A subscription once answered, a
-call id reserved and a call abandoned take no place, which 11.3, 11.10 and 12.9 bound: counting a
-subscription would cap a client's subscriptions at 64 and block its calls behind them. The name is
-the set both sides gauge, `answeringCalls`; "open" is not its word, since 9.2's step 2 calls a held
-subscription's call id open. Each side gauges `largestAnsweringCalls`, its busiest connection's,
-under its ceiling, beside the sum, as `largestOutboxBytes` stands beside `outboxBytes`.
+`maximumAnsweringCalls`, 64 (spec 12.2), set alike at both ends and announced by nothing, as every
+limit of 12.2 is, so a requester knows its peer's number: its own. Both of HTTP/2's halves hold. **A
+requester holds its calls waiting on a connection to it**, failing one past it before it goes,
+`CAPACITY_EXCEEDED`, drawing no call id, as it fails a call with no call id free (spec 9.1). **A
+receiver answers a request past it `CAPACITY_EXCEEDED`** at 9.2's step 3: after steps 1 and 2, which
+must stay first since a request on the receiver's parity or on a call id open is never answered, and
+before its route, its credential's resolution and a transfer's first credit, so nothing of it is
+held. Its refusal stays for a peer that does not keep the rule, or whose count runs ahead of the
+receiver's: over HTTP, a request that overtakes the cancel of an earlier call (spec 15.1, 15.5). A
+relay's leg B is a requester as any other, so a refusal past its number is the relay's own (spec
+14.5), never the destination's. A call counts from the turn its request opens it until its answer is
+wholly sent — a whole answer handed to its transport, a result's transfer by its last chunk — its
+cancel comes or its connection closes, its credential resolving and its transfer coming among it, as
+HTTP/2 counts a half-closed stream. A subscription once answered, a call id reserved and a call
+abandoned take no place, which 11.3, 11.10 and 12.9 bound: counting a subscription would cap a
+client's subscriptions at 64 and block its calls behind them. The name is the set every side gauges,
+`answeringCalls`; "open" is not its word, since 9.2's step 2 calls a held subscription's call id
+open. Each side gauges `largestAnsweringCalls`, its busiest connection's, under its ceiling, beside
+the sum, as `largestOutboxBytes` stands beside `outboxBytes`.
 
 **Its default is 64**, Bead's number for "so many at once from one peer", HTTP's
 `maximumWaitingExchanges` and 13.9's `maximumWaitingCalls`. An HTTP server's
@@ -270,7 +272,7 @@ the calls a connection has answered, as HTTP/2's connection window; a raise of
 waits for every socket together, as `bodyBytesBudget` is for bodies; and 0030's fit of the bound per
 address, an IPv6 client keyed by its prefix and a value fit for a NAT, for both transports at once.
 
-**The gate.** `spec/conversations.json`, played by both sides: a request past the calls its
+**The gate.** `spec/conversations.json`, played by every side: a request past the calls its
 connection has its side answer refused while the others go on, and one taken once a call ends; a
 cancel freeing its place at once; a call whose credential resolves, and a result going as a transfer
 until its last chunk, holding theirs; a subscription once answered holding none; the refusal before

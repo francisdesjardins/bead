@@ -5,6 +5,7 @@
 import { CLOSE_EVENT, ERROR_EVENT, MESSAGE_EVENT, WORKER_MESSAGES } from '../shared/constants';
 import { createPromise } from '../shared/create-promise';
 import { ConnectError, GenericError, ProgrammerError, ReadyStateError } from '../shared/errors';
+import { createHold } from '../shared/hold';
 import {
   getReadyState,
   ReadyState,
@@ -14,7 +15,7 @@ import {
   setReadyStateOpen,
 } from '../shared/ready-state';
 import { transferableOf } from '../shared/transferable';
-import type { IWorkerPortLike } from '../shared/types';
+import type { ITransportMessage, IWorkerPortLike } from '../shared/types';
 import { dispose } from './symbols';
 import { createTransportClient, DISCONNECT_DEFAULTS } from './transport-client';
 import type {
@@ -66,12 +67,14 @@ const erredOf = ({ colno, filename, lineno, message }: IWorkerErrorEventLike): s
  * failed to load — fails the connect under way with a `ConnectError` at once, or ends the connection
  * of the client's own: told once on `error`, with the error's message and where it was thrown, then
  * its close, unclean, its server told `bead-lost`. A worker terminated without a word is not heard. A
- * worker carries no credential beside an envelope: one given to `send` is not carried.
+ * worker carries no credential beside an envelope: one given to `send` is not carried. A port hands
+ * each message as its own task, so its router's count pauses none of it; paused all the same, it
+ * holds what its port brings, in order, without bound, and hands it on once resumed (spec 15.12).
  *
  * @example
  * const client = createWorkerTransportClient({ worker });
  * client.on('message', ({ data }) => {});
- * await client.connect({});
+ * await client.connect();
  * await client.send({ data: envelope });
  * await client.disconnect();
  */
@@ -85,6 +88,11 @@ export const createWorkerTransportClient = ({
       let port: IWorkerPortLike | undefined;
       // settles the connect in flight, so a dispose under it cannot leave it pending
       let rejectConnect: ((reason: Error) => void) | undefined;
+      // what its router paused it for, held in order without bound, its peer its application's own
+      // script; what a connection holds goes with it, its pause outlasting it (spec 15.12)
+      const hold = createHold((message: ITransportMessage) => {
+        tell(MESSAGE_EVENT, [message]);
+      });
 
       // ended at the other end, or by its worker's error, which may leave it running: its server
       // told all the same, the error before the close, whatever `error` throws (spec 15.1); unclean
@@ -96,6 +104,7 @@ export const createWorkerTransportClient = ({
 
         port = undefined;
         client.socket = null;
+        hold.drop();
         lost.postMessage(failure === undefined ? WORKER_MESSAGES.CLOSE : WORKER_MESSAGES.LOST);
         lost.close();
         worker.removeEventListener?.('error', onError);
@@ -136,10 +145,7 @@ export const createWorkerTransportClient = ({
             if (data instanceof ArrayBuffer) {
               const isHeard = port === opened;
 
-              return (
-                isHeard ? tell(MESSAGE_EVENT, [{ credential: undefined, data }]) : undefined,
-                undefined
-              );
+              return (isHeard ? hold.offer({ credential: undefined, data }) : undefined, undefined);
             }
 
             if (data === WORKER_MESSAGES.CLOSE) {
@@ -199,6 +205,7 @@ export const createWorkerTransportClient = ({
           setReadyStateClosing(client);
           port = undefined;
           client.socket = null;
+          hold.drop();
           // its server hears the close as clean as it is
           closing.postMessage(isClean ? WORKER_MESSAGES.CLOSE : WORKER_MESSAGES.LOST);
           closing.close();
@@ -207,6 +214,15 @@ export const createWorkerTransportClient = ({
           tell(CLOSE_EVENT, [isClean, isQuick]);
 
           return Promise.resolve();
+        },
+
+        // * a port has no pause: what it brings while paused is held, in order, and handed on from
+        // a microtask once resumed
+        pause: () => {
+          hold.pause();
+        },
+        resume: () => {
+          hold.resume();
         },
 
         // a credential given here is not carried: the client fails a call that presents one its
@@ -237,6 +253,7 @@ export const createWorkerTransportClient = ({
           rejectConnect?.(new ConnectError('the transport client was disposed as it connected'));
           port = undefined;
           client.socket = null;
+          hold.drop();
           worker.removeEventListener?.('error', onError);
 
           // the server told, since a port does not tell its close

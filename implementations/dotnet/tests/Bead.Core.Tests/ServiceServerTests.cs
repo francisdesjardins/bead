@@ -210,6 +210,35 @@ public sealed class ServiceServerTests
         Assert.StartsWith("the hook loud admits by a function", first.Message, StringComparison.Ordinal);
     }
 
+    // decision 0047: the hooks are required exactly when a procedure names one, refused as the
+    // service is built where the TypeScript side's types refuse them
+    [Fact]
+    public void Refuses_options_without_admissions_where_a_procedure_names_a_hook()
+    {
+        const string Refusal = "shout is admitted by the hook loud, which the options do not give";
+
+        Assert.All(
+            new Func<ServiceServer<GreeterProcedures, string>>[]
+            {
+                () =>
+                {
+                    return new ServiceServer<GreeterProcedures, string>(GreeterProcedures.All);
+                },
+                () =>
+                {
+                    return new ServiceServer<GreeterProcedures, string>(GreeterProcedures.All, new ServiceServerOptions<GreeterProcedures>());
+                },
+                () =>
+                {
+                    return new ServiceServer<GreeterProcedures, string>(GreeterProcedures.All, new ServiceServerOptions<GreeterProcedures> { FailFast = true });
+                },
+            },
+            (building) =>
+            {
+                Assert.StartsWith(Refusal, Assert.Throws<ArgumentException>(building).Message, StringComparison.Ordinal);
+            });
+    }
+
     [Fact]
     public async Task Answers_a_failure_its_procedure_lists()
     {
@@ -340,7 +369,7 @@ public sealed class ServiceServerTests
         {
             Assert.Equal(
                 $"noon, {asked}",
-                await greeter.CommandOf(GreeterProcedures.Clock)(asked)(new RequestOptions { ConnectionHandle = ServiceLink.Handle }).WaitAsync(Patience, Cancelled));
+                await greeter.CommandOf(GreeterProcedures.Clock)(asked)(new CommandOptions { ConnectionHandle = ServiceLink.Handle }).WaitAsync(Patience, Cancelled));
         }
 
         Assert.Equal(["requester clock", "requester guarded"], server.Intercepted.Declared.Order(StringComparer.Ordinal));
@@ -356,7 +385,7 @@ public sealed class ServiceServerTests
         var first = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var news = greeter.NotifierOf(GreeterProcedures.News);
 
-        await news("before", null).WaitAsync(Patience, Cancelled);
+        await news("before").WaitAsync(Patience, Cancelled);
 
         greeter.On(GreeterProcedures.News, async (_, response) =>
         {
@@ -377,7 +406,7 @@ public sealed class ServiceServerTests
             return Task.CompletedTask;
         })().WaitAsync(Patience, Cancelled);
 
-        await news("after", null).WaitAsync(Patience, Cancelled);
+        await news("after").WaitAsync(Patience, Cancelled);
         await first.Task.WaitAsync(Patience, Cancelled);
 
         // * every notification heard, collected: the one after its offer, once, none before
@@ -385,6 +414,34 @@ public sealed class ServiceServerTests
         {
             Assert.Equal(["after"], heard);
         }
+    }
+
+    [Fact]
+    public async Task Gives_one_notifier_for_each_procedure_that_notifies_and_refuses_a_procedure_its_service_lacks()
+    {
+        await using var link = await ServiceLink.Open();
+        var greeter = GreeterOf();
+        var other = new RequestProcedure<GreeterProcedures, string, string, string, NoFailure>(
+            GreeterProcedures.News.Procedure,
+            GreeterProcedures.News.Bindings);
+
+        // * one for news, the one procedure that notifies, given before the offer as after it; a
+        // procedure that does not notify has no notifier, which does not compile
+        Notifier<string> news = greeter.NotifierOf(GreeterProcedures.News);
+
+        Assert.NotNull(news);
+        Assert.Throws<ArgumentException>(() =>
+        {
+            return greeter.NotifierOf(other);
+        });
+
+        greeter.Offer(link.Server);
+
+        Assert.NotNull(greeter.NotifierOf(GreeterProcedures.News));
+        Assert.Throws<ArgumentException>(() =>
+        {
+            return greeter.NotifierOf(other);
+        });
     }
 
     [Fact]
@@ -432,7 +489,7 @@ public sealed class ServiceServerTests
 
         await Record.ExceptionAsync(() =>
         {
-            return greeter.CommandOf(GreeterProcedures.Clock)("now")(new RequestOptions
+            return greeter.CommandOf(GreeterProcedures.Clock)("now")(new CommandOptions
             {
                 ConnectionHandle = ServiceLink.Handle,
                 Timeout = TimeSpan.FromMilliseconds(50),
@@ -485,7 +542,8 @@ public sealed class ServiceServerTests
         var reported = await link.FirstReported.WaitAsync(Patience, Cancelled);
 
         Assert.IsType<FormatException>(reported);
-        Assert.Equal(RequiredProcedures.Words, reported.Message);
+        Assert.Equal(RequiredProcedures.Reason, reported.Message);
+        Assert.Equal(RequiredProcedures.Words, reported.InnerException?.Message);
         Assert.Single(link.Reported);
     }
 
@@ -581,7 +639,7 @@ public sealed class ServiceServerTests
         });
         validating.Offer(link.Server);
 
-        var call = new RequestOptions { ConnectionHandle = ServiceLink.Handle };
+        var call = new CommandOptions { ConnectionHandle = ServiceLink.Handle };
         var refused = await Assert.ThrowsAsync<FailureException>(() =>
         {
             return validating.CommandOf(CheckedProcedures.Shout)("")(call).WaitAsync(Patience, Cancelled);
@@ -594,5 +652,50 @@ public sealed class ServiceServerTests
         Assert.Empty(heard);
         Assert.Equal("HI", await validating.CommandOf(CheckedProcedures.Shout)("hi")(call).WaitAsync(Patience, Cancelled));
         Assert.Equal(["hi"], heard);
+    }
+
+    // spec 18.2
+    [Fact]
+    public async Task Fails_a_command_whose_rule_throws_as_it_judges_with_that_throw_before_anything_goes()
+    {
+        await using var link = await ServiceLink.Open();
+        var broken = new InvalidOperationException("this rule fails to judge, on purpose first");
+        var shout = new CommandProcedure<CheckedProcedures, string, string, NoFailure>(
+            CheckedProcedures.Shout.Procedure,
+            CheckedProcedures.BindingsOf((_, _) =>
+            {
+                throw broken;
+            }));
+        var validating = new ServiceServer<CheckedProcedures, string>(
+            [shout],
+            new ServiceServerOptions<CheckedProcedures> { Admissions = new CheckedAdmissions(), Validates = true });
+        var client = new ServiceClient<CheckedProcedures>(CheckedProcedures.All, link.Client);
+        var heard = new List<string>();
+        var sent = new List<EnvelopeKind>();
+
+        client.On(CheckedProcedures.Shout, (request, response) =>
+        {
+            heard.Add(request.Payload);
+
+            return response.Answer(request.Payload.ToUpperInvariant());
+        });
+        link.Server.Router.Debug += (direction, envelope) =>
+        {
+            if (direction == DebugDirection.Tx)
+            {
+                sent.Add(envelope.Header.Kind);
+            }
+        };
+        validating.Offer(link.Server);
+
+        var thrown = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        {
+            return validating.CommandOf(shout)("hi")(new CommandOptions { ConnectionHandle = ServiceLink.Handle }).WaitAsync(Patience, Cancelled);
+        });
+
+        // * its call fails with the rule's own throw, and nothing went: the client never heard it
+        Assert.Same(broken, thrown);
+        Assert.Empty(sent);
+        Assert.Empty(heard);
     }
 }

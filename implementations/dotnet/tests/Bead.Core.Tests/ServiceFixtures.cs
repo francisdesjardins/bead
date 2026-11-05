@@ -173,7 +173,10 @@ public sealed class RequiredProcedures
         }
     }
 
-    /// <summary>The words its codec refuses <see cref="Unset"/> in, reading and writing.</summary>
+    /// <summary>The reason its codec refuses <see cref="Unset"/> for, reading and writing (spec 17.2).</summary>
+    public const string Reason = "a required field unset";
+
+    /// <summary>What the refusal's inner exception says of the field <see cref="Unset"/> leaves unset.</summary>
     public const string Words = "a proto message leaves bead.codecs.v1.Needs.shade unset";
 
     private static Procedure ProcedureOf(ushort procedureId, string procedureName)
@@ -279,7 +282,7 @@ internal sealed class InterceptedServer(Server<string> server) : IBeadServer<str
         }
     }
 
-    public ServiceManager Services
+    public IServiceManagerServer Services
     {
         get
         {
@@ -351,7 +354,7 @@ internal sealed class InterceptedClient(IClient client) : IClient
         }
     }
 
-    public ServiceManager Services
+    public IServiceManagerClient Services
     {
         get
         {
@@ -359,12 +362,12 @@ internal sealed class InterceptedClient(IClient client) : IClient
         }
     }
 
-    public Task Disconnect(TransportDisconnectOptions? options = null)
+    public Task Disconnect(TransportClientDisconnectOptions? options = null)
     {
         return client.Disconnect(options);
     }
 
-    public Task Reconnect(TransportReconnectOptions? options = null)
+    public Task Reconnect(TransportClientReconnectOptions? options = null)
     {
         return client.Reconnect(options);
     }

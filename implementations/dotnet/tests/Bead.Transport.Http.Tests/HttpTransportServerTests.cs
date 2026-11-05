@@ -439,7 +439,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
             _closes.Enqueue((wasClean, connectionHandle));
         };
         _server.Refusal += _refusals.Enqueue;
-        _port = (await _server.Start(Loopback, Cancelled)).Port;
+        _port = (await _server.Start(Loopback with { CancellationToken = Cancelled })).Port;
     }
 
     /// <summary>An answer's head: its status, and its headers by their names in lower case.</summary>
@@ -783,7 +783,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         var first = Assert.Single(_connections);
         var clients = _server.Clients;
 
-        Assert.Equal([new TransportServerClient(Host, first, null, port, TransportTypes.Http)], clients);
+        Assert.Equal([new TransportServerClient { Address = Host, ConnectionHandle = first, LastActivity = null, Port = port, Type = TransportTypes.Http }], clients);
 
         // in the order they were drawn, whichever went in between; the copy taken before stays
         var (_, second) = await Connect();
@@ -1524,7 +1524,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         Assert.True(await coming.IsClosed());
         Assert.Equal(ReadyState.Closed, _server.ReadyState);
         // the port is free once it stopped
-        Assert.Equal(_port, (await _server.Start(new HttpTransportStartOptions { Address = Host, Port = _port }, Cancelled)).Port);
+        Assert.Equal(_port, (await _server.Start(new HttpTransportStartOptions { Address = Host, Port = _port, CancellationToken = Cancelled })).Port);
     }
 
     [Fact]
@@ -1547,7 +1547,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         foreach (var tls in new[] { true, false })
         {
             await using var active = new HttpTransportServer(new HttpTransportServerOptions { Certificate = tls ? Certificate.Value : null });
-            await active.Start(new HttpTransportStartOptions { Address = "0.0.0.0", FindOpenPort = true }, Cancelled);
+            await active.Start(new HttpTransportStartOptions { Address = "0.0.0.0", FindOpenPort = true, CancellationToken = Cancelled });
             Assert.Equal((false, tls), (active.CarriesCredential("any"), active.IsSecure("any")));
         }
     }
@@ -1582,12 +1582,12 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         {
             await using var wildcard = new HttpTransportServer(new HttpTransportServerOptions { Secure = secure });
 
-            await wildcard.Start(new HttpTransportStartOptions { Address = "0.0.0.0", FindOpenPort = true }, Cancelled);
+            await wildcard.Start(new HttpTransportStartOptions { Address = "0.0.0.0", FindOpenPort = true, CancellationToken = Cancelled });
             Assert.Equal(expected, wildcard.IsSecure("any"));
         }
 
         // the explicit setting also governs a running TLS listener off the loopback
-        await underTls.Start(new HttpTransportStartOptions { Address = "0.0.0.0", FindOpenPort = true }, Cancelled);
+        await underTls.Start(new HttpTransportStartOptions { Address = "0.0.0.0", FindOpenPort = true, CancellationToken = Cancelled });
         Assert.False(underTls.IsSecure("any"));
     }
 
@@ -1936,7 +1936,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         await using var server = new HttpTransportServer();
 
         Assert.Equal(ReadyState.Uninitialized, server.ReadyState);
-        Assert.Equal(new TransportServerAddress(Host, port), await server.Start(new HttpTransportStartOptions { Address = Host, Port = port }, Cancelled));
+        Assert.Equal(new TransportServerAddress(Host, port), await server.Start(new HttpTransportStartOptions { Address = Host, Port = port, CancellationToken = Cancelled }));
         Assert.Equal(ReadyState.Open, server.ReadyState);
         Assert.DoesNotContain("http2Sessions", server.Gauges().Counts.Keys);
     }
@@ -1956,7 +1956,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
 
         await Assert.ThrowsAnyAsync<IOException>(() =>
         {
-            return failing.Start(new HttpTransportStartOptions { Address = Host, Port = _port }, Cancelled);
+            return failing.Start(new HttpTransportStartOptions { Address = Host, Port = _port, CancellationToken = Cancelled });
         });
         Assert.Equal(ReadyState.Closed, failing.ReadyState);
         Assert.NotNull(failedApplication);
@@ -1965,7 +1965,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
             return failedApplication.Services.GetService(typeof(Microsoft.AspNetCore.Hosting.Server.IServer));
         });
         // what it opened is closed: it starts again
-        Assert.NotEqual(_port, (await failing.Start(Loopback, Cancelled)).Port);
+        Assert.NotEqual(_port, (await failing.Start(Loopback with { CancellationToken = Cancelled })).Port);
 
         await using var aborted = new HttpTransportServer();
         using var source = new CancellationTokenSource();
@@ -1979,7 +1979,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         await source.CancelAsync();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
         {
-            return aborted.Start(Loopback, source.Token);
+            return aborted.Start(Loopback with { CancellationToken = source.Token });
         });
         Assert.Equal(ReadyState.Closed, aborted.ReadyState);
         Assert.NotNull(cancelledApplication);
@@ -1987,7 +1987,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         {
             return cancelledApplication.Services.GetService(typeof(Microsoft.AspNetCore.Hosting.Server.IServer));
         });
-        Assert.NotEqual(0, (await aborted.Start(Loopback, Cancelled)).Port);
+        Assert.NotEqual(0, (await aborted.Start(Loopback with { CancellationToken = Cancelled })).Port);
 
         // a live start, held once its application is built, is cancelled before it listens
         await using var pending = new HttpTransportServer();
@@ -2008,7 +2008,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
 
         var starting = Task.Run(() =>
         {
-            return pending.Start(Loopback, during.Token);
+            return pending.Start(Loopback with { CancellationToken = during.Token });
         }, Cancelled);
 
         try
@@ -2032,7 +2032,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
             {
                 return pendingApplication.Services.GetService(typeof(Microsoft.AspNetCore.Hosting.Server.IServer));
             });
-            Assert.NotEqual(0, (await pending.Start(Loopback, Cancelled)).Port);
+            Assert.NotEqual(0, (await pending.Start(Loopback with { CancellationToken = Cancelled })).Port);
         }
         finally
         {
@@ -2124,7 +2124,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
     {
         await Start(new HttpTransportServerOptions { TrustedProxies = ["127.0.0.1"] });
         await _server.Stop().WaitAsync(Patience, Cancelled);
-        _port = (await _server.Start(new HttpTransportStartOptions { Address = "::", FindOpenPort = true }, Cancelled)).Port;
+        _port = (await _server.Start(new HttpTransportStartOptions { Address = "::", FindOpenPort = true, CancellationToken = Cancelled })).Port;
 
         var drawn = await Connect();
 
@@ -2192,15 +2192,15 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
 
         Assert.Equal(
             [
-                new("127.0.0.1", "rebind.example:8080", "http://a.example, http://b.example", ports[0], HttpRefusals.Host, 403),
-                new("127.0.0.1", "rebind.example", null, ports[1], HttpRefusals.Host, 403),
-                new("127.0.0.1", "", null, ports[2], HttpRefusals.Host, 403),
-                new("127.0.0.1", null, null, ports[3], HttpRefusals.Host, 403),
-                new("127.0.0.1", own, null, ports[4], HttpRefusals.Path, 404),
-                new("127.0.0.1", own, "http://elsewhere.example", ports[5], HttpRefusals.Origin, 403),
-                new("127.0.0.1", own, null, ports[6], HttpRefusals.Method, 405),
-                new("127.0.0.1", own, null, ports[7], HttpRefusals.Type, 415),
-                new TransportServerRefusal("127.0.0.1", own, null, ports[8], HttpRefusals.ConnectionUnknown, 404),
+                new TransportServerRefusal { Address = "127.0.0.1", Authority = "rebind.example:8080", Origin = "http://a.example, http://b.example", Port = ports[0], Reason = HttpRefusals.Host, Status = 403 },
+                new TransportServerRefusal { Address = "127.0.0.1", Authority = "rebind.example", Port = ports[1], Reason = HttpRefusals.Host, Status = 403 },
+                new TransportServerRefusal { Address = "127.0.0.1", Authority = "", Port = ports[2], Reason = HttpRefusals.Host, Status = 403 },
+                new TransportServerRefusal { Address = "127.0.0.1", Port = ports[3], Reason = HttpRefusals.Host, Status = 403 },
+                new TransportServerRefusal { Address = "127.0.0.1", Authority = own, Port = ports[4], Reason = HttpRefusals.Path, Status = 404 },
+                new TransportServerRefusal { Address = "127.0.0.1", Authority = own, Origin = "http://elsewhere.example", Port = ports[5], Reason = HttpRefusals.Origin, Status = 403 },
+                new TransportServerRefusal { Address = "127.0.0.1", Authority = own, Port = ports[6], Reason = HttpRefusals.Method, Status = 405 },
+                new TransportServerRefusal { Address = "127.0.0.1", Authority = own, Port = ports[7], Reason = HttpRefusals.Type, Status = 415 },
+                new TransportServerRefusal { Address = "127.0.0.1", Authority = own, Port = ports[8], Reason = HttpRefusals.ConnectionUnknown, Status = 404 },
             ],
             told);
         Assert.Empty(_connections);
@@ -2222,7 +2222,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
                 return next(context);
             });
         };
-        var scriptedPort = (await scripted.Start(Loopback, Cancelled)).Port;
+        var scriptedPort = (await scripted.Start(Loopback with { CancellationToken = Cancelled })).Port;
 
         async Task<Head> Asked(string head, byte[]? body = null)
         {
@@ -2280,15 +2280,15 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         });
         Assert.Equal(
             [
-                new TransportServerRefusal("192.0.2.7", "rebind.example:8080", "http://rebind.example:8080, null", 40_001, HttpRefusals.Host, 403),
-                new("192.0.2.7", "elsewhere.test:81", null, 40_001, HttpRefusals.Host, 403),
-                new("192.0.2.7", null, null, 40_001, HttpRefusals.Host, 403),
-                new("192.0.2.7", "bead.test", null, 40_001, HttpRefusals.Path, 404),
-                new("192.0.2.7", "bead.test", "https://elsewhere.test", 40_001, HttpRefusals.Origin, 403),
-                new("192.0.2.7", "bead.test", null, 40_001, HttpRefusals.Method, 405),
-                new("192.0.2.7", "bead.test", null, 40_001, HttpRefusals.Type, 415),
-                new("192.0.2.7", "bead.test", null, 40_001, HttpRefusals.ConnectionUnknown, 404),
-                new("10.0.0.1", "bead.localhost", null, 40_000, HttpRefusals.TooLarge, 413),
+                new TransportServerRefusal { Address = "192.0.2.7", Authority = "rebind.example:8080", Origin = "http://rebind.example:8080, null", Port = 40_001, Reason = HttpRefusals.Host, Status = 403 },
+                new TransportServerRefusal { Address = "192.0.2.7", Authority = "elsewhere.test:81", Port = 40_001, Reason = HttpRefusals.Host, Status = 403 },
+                new TransportServerRefusal { Address = "192.0.2.7", Port = 40_001, Reason = HttpRefusals.Host, Status = 403 },
+                new TransportServerRefusal { Address = "192.0.2.7", Authority = "bead.test", Port = 40_001, Reason = HttpRefusals.Path, Status = 404 },
+                new TransportServerRefusal { Address = "192.0.2.7", Authority = "bead.test", Origin = "https://elsewhere.test", Port = 40_001, Reason = HttpRefusals.Origin, Status = 403 },
+                new TransportServerRefusal { Address = "192.0.2.7", Authority = "bead.test", Port = 40_001, Reason = HttpRefusals.Method, Status = 405 },
+                new TransportServerRefusal { Address = "192.0.2.7", Authority = "bead.test", Port = 40_001, Reason = HttpRefusals.Type, Status = 415 },
+                new TransportServerRefusal { Address = "192.0.2.7", Authority = "bead.test", Port = 40_001, Reason = HttpRefusals.ConnectionUnknown, Status = 404 },
+                new TransportServerRefusal { Address = "10.0.0.1", Authority = "bead.localhost", Port = 40_000, Reason = HttpRefusals.TooLarge, Status = 413 },
             ], records);
         Assert.Empty(scripted.ConnectionHandles);
 
@@ -2304,8 +2304,8 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
 
         Assert.Equal(
             [
-                new TransportServerRefusal(Host, "rebind.example", null, directPort, HttpRefusals.Host, 403),
-                new("203.0.113.9", "rebind.example", null, proxyPort, HttpRefusals.Host, 403),
+                new TransportServerRefusal { Address = Host, Authority = "rebind.example", Port = directPort, Reason = HttpRefusals.Host, Status = 403 },
+                new TransportServerRefusal { Address = "203.0.113.9", Authority = "rebind.example", Port = proxyPort, Reason = HttpRefusals.Host, Status = 403 },
             ], _refusals);
         Assert.Empty(_connections);
 
@@ -2603,7 +2603,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         Assert.Equal("localhost", new HttpTransportStartOptions().Address);
 
         await using var server = new HttpTransportServer();
-        var bound = await server.Start(new HttpTransportStartOptions { FindOpenPort = true }, Cancelled);
+        var bound = await server.Start(new HttpTransportStartOptions { FindOpenPort = true, CancellationToken = Cancelled });
         var hasIPv6 = Addresses.HasIPv6Loopback();
         string[] hosts = hasIPv6 ? ["127.0.0.1", "::1", "localhost"] : ["127.0.0.1", "localhost"];
 
@@ -2654,7 +2654,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
 
         // both loopbacks under its one certificate, HTTP/2 over TLS on each
         await using var server = new HttpTransportServer(new HttpTransportServerOptions { Certificate = Certificate.Value });
-        var bound = await server.Start(new HttpTransportStartOptions { FindOpenPort = true }, Cancelled);
+        var bound = await server.Start(new HttpTransportStartOptions { FindOpenPort = true, CancellationToken = Cancelled });
         using var secure = SecureClient();
 
         Assert.Equal("localhost", bound.Address);
@@ -2683,7 +2683,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
 
         await Assert.ThrowsAnyAsync<IOException>(() =>
         {
-            return server.Start(new HttpTransportStartOptions { Port = port }, Cancelled);
+            return server.Start(new HttpTransportStartOptions { Port = port, CancellationToken = Cancelled });
         });
         Assert.Equal(ReadyState.Closed, server.ReadyState);
 
@@ -2721,7 +2721,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
 
         server.Built += built.Add;
 
-        var bound = await server.Start(new HttpTransportStartOptions { FindOpenPort = true }, Cancelled);
+        var bound = await server.Start(new HttpTransportStartOptions { FindOpenPort = true, CancellationToken = Cancelled });
 
         Assert.Equal(("localhost", 2), (bound.Address, drawn.Count));
         Assert.Equal((held, drawn[1]), (drawn[0], bound.Port));
@@ -2776,7 +2776,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
 
             var failure = await Assert.ThrowsAnyAsync<IOException>(() =>
             {
-                return refused.Start(new HttpTransportStartOptions { FindOpenPort = findOpenPort, Port = held }, Cancelled);
+                return refused.Start(new HttpTransportStartOptions { FindOpenPort = findOpenPort, Port = held, CancellationToken = Cancelled });
             });
 
             Assert.True(Loopbacks.IsInUse(failure));
@@ -2815,7 +2815,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
             var built = new List<Microsoft.AspNetCore.Builder.WebApplication>();
 
             server.Built += built.Add;
-            var bound = await server.Start(new HttpTransportStartOptions { FindOpenPort = true }, Cancelled);
+            var bound = await server.Start(new HttpTransportStartOptions { FindOpenPort = true, CancellationToken = Cancelled });
             string[] hosts = ["127.0.0.1"];
 
             Assert.Equal("127.0.0.1", bound.Address);
@@ -2856,7 +2856,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
             await using var server = new HttpTransportServer();
             var refused = await Assert.ThrowsAsync<ArgumentException>(() =>
             {
-                return server.Start(new HttpTransportStartOptions { Address = address, FindOpenPort = true }, Cancelled);
+                return server.Start(new HttpTransportStartOptions { Address = address, FindOpenPort = true, CancellationToken = Cancelled });
             });
 
             Assert.Equal((address, nameof(HttpTransportStartOptions.Address), ReadyState.Closed), (address, refused.ParamName, server.ReadyState));
@@ -2868,7 +2868,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         {
             await using var server = new HttpTransportServer();
 
-            Assert.Equal(Addresses.HasIPv6Loopback() ? address : "127.0.0.1", (await server.Start(new HttpTransportStartOptions { Address = address, FindOpenPort = true }, Cancelled)).Address);
+            Assert.Equal(Addresses.HasIPv6Loopback() ? address : "127.0.0.1", (await server.Start(new HttpTransportStartOptions { Address = address, FindOpenPort = true, CancellationToken = Cancelled })).Address);
             await server.Stop();
         }
 
@@ -2879,7 +2879,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         {
             await using var server = new HttpTransportServer();
 
-            Assert.Equal(address, (await server.Start(new HttpTransportStartOptions { Address = address, FindOpenPort = true }, Cancelled)).Address);
+            Assert.Equal(address, (await server.Start(new HttpTransportStartOptions { Address = address, FindOpenPort = true, CancellationToken = Cancelled })).Address);
             await server.Stop();
         }
     }
@@ -2897,7 +2897,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         {
             await using var server = new HttpTransportServer();
 
-            await server.Start(new HttpTransportStartOptions { Address = address, FindOpenPort = true }, Cancelled);
+            await server.Start(new HttpTransportStartOptions { Address = address, FindOpenPort = true, CancellationToken = Cancelled });
             secured.Add((address, server.IsSecure("any")));
             await server.Stop();
         }
@@ -2943,13 +2943,13 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
     {
         await Start(new HttpTransportServerOptions { MaximumConnectionsPerAddress = 5 });
 
-        var none = new LayerGauges([], new Dictionary<string, long>(), new Dictionary<string, long>(), 0);
+        var none = new LayerGauges { Anomalies = [], Ceilings = new Dictionary<string, long>(), Counts = new Dictionary<string, long>(), Orphans = 0 };
 
         // the transport's one check of its busiest address, as its server's health gives it
         HealthCheck CheckOf()
         {
             var gauges = _server.Gauges();
-            var health = Health.Of(new ServerGauges(none, none, none, LayerGauges.Of(gauges, gauges.ConnectionHandles)));
+            var health = Health.Of(new ServerGauges { Router = none, Server = none, Sessions = none, Transport = LayerGauges.Of(gauges, gauges.ConnectionHandles) });
 
             return Assert.Single(health.Checks["transport:largestAddressConnections"]);
         }
@@ -2962,14 +2962,14 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         await Connect();
         await Connect();
         await ConnectFrom(Elsewhere, false);
-        Assert.Equal(new HealthCheck(3, HealthStatus.Pass, "3 of 5"), CheckOf());
+        Assert.Equal(new HealthCheck { ObservedValue = 3, Status = HealthStatus.Pass, Output = "3 of 5" }, CheckOf());
 
         // the busiest address at 80% of its ceiling warns, before its first 503
         await Connect();
-        Assert.Equal(new HealthCheck(4, HealthStatus.Warn, "4 of 5"), CheckOf());
+        Assert.Equal(new HealthCheck { ObservedValue = 4, Status = HealthStatus.Warn, Output = "4 of 5" }, CheckOf());
         await Connect();
         Assert.Equal((503, HttpRefusals.Busy), await RefusalOf(PostOf(null, null)));
-        Assert.Equal(new HealthCheck(5, HealthStatus.Warn, "5 of 5"), CheckOf());
+        Assert.Equal(new HealthCheck { ObservedValue = 5, Status = HealthStatus.Warn, Output = "5 of 5" }, CheckOf());
         await _server.Stop().WaitAsync(Patience, Cancelled);
         Assert.Equal(0, _server.Gauges().Counts["largestAddressConnections"]);
     }
@@ -4135,7 +4135,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         {
             _closes.Enqueue((wasClean, connectionHandle));
         };
-        _port = (await _server.Start(Loopback, Cancelled)).Port;
+        _port = (await _server.Start(Loopback with { CancellationToken = Cancelled })).Port;
 
         var reported = new ConcurrentQueue<(Exception Reason, string ConnectionHandle)>();
 
@@ -4205,7 +4205,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         {
             _closes.Enqueue((wasClean, connectionHandle));
         };
-        _port = (await _server.Start(Loopback, Cancelled)).Port;
+        _port = (await _server.Start(Loopback with { CancellationToken = Cancelled })).Port;
 
         var reported = new ConcurrentQueue<(Exception Reason, string ConnectionHandle)>();
 
@@ -4390,7 +4390,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         await Start(new HttpTransportServerOptions { HeadersTimeout = timeout });
 
         await using var webSocket = new WebSockets.WebSocketTransportServer(new WebSockets.WebSocketTransportServerOptions { HeadersTimeout = timeout });
-        var webSocketPort = (await webSocket.Start(new WebSockets.WebSocketTransportStartOptions { Address = Host, FindOpenPort = true }, Cancelled)).Port;
+        var webSocketPort = (await webSocket.Start(new WebSockets.WebSocketTransportStartOptions { Address = Host, FindOpenPort = true, CancellationToken = Cancelled })).Port;
 
         foreach (var (port, start) in new[] { (_port, "POST /bead HTTP/1.1"), (webSocketPort, "GET / HTTP/1.1") })
         {
@@ -4423,12 +4423,12 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         await _server.Stop().WaitAsync(Patience, Cancelled);
         _server = new HttpTransportServer(new HttpTransportServerOptions { HeadersTimeout = TimeSpan.FromSeconds(7) });
         _server.Built += built.Add;
-        await _server.Start(new HttpTransportStartOptions { FindOpenPort = true }, Cancelled);
+        await _server.Start(new HttpTransportStartOptions { FindOpenPort = true, CancellationToken = Cancelled });
 
         await using var webSocket = new WebSockets.WebSocketTransportServer(new WebSockets.WebSocketTransportServerOptions { HeadersTimeout = TimeSpan.FromSeconds(9) });
 
         webSocket.Built += built.Add;
-        await webSocket.Start(new WebSockets.WebSocketTransportStartOptions { FindOpenPort = true }, Cancelled);
+        await webSocket.Start(new WebSockets.WebSocketTransportStartOptions { FindOpenPort = true, CancellationToken = Cancelled });
 
         // every listener of each start, both loopbacks among them, by its one configuration
         Assert.Equal(
@@ -4504,5 +4504,122 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
             SendGracePeriod = TimeSpan.FromMilliseconds(1),
             BodyGracePeriod = TimeSpan.FromMilliseconds(1),
         });
+    }
+
+    // spec 15.5.2, 15.6.13, 15.12.17
+    [Fact]
+    public async Task Hands_on_no_envelope_of_a_paused_connection_its_204_going_once_handed_on_and_429_busy_with_Retry_After_past_the_exchanges_under_way()
+    {
+        await Start(new HttpTransportServerOptions { MaximumWaitingExchanges = 2 });
+
+        var (connectionToken, connectionHandle) = await Connect();
+
+        _server.Pause(connectionHandle);
+
+        // * four under way, twice the requests that may wait: each read whole, and held at its
+        // gate, in the order it came
+        var request = Fetch(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 1)));
+
+        await Until(() =>
+        {
+            return _server.HeldOf(connectionHandle) == 1;
+        });
+
+        var cancels = new List<Task<HttpResponseMessage>>();
+
+        foreach (var callId in new uint[] { 9, 11, 13 })
+        {
+            cancels.Add(Fetch(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Cancel, callId))));
+            await Until(() =>
+            {
+                return _server.HeldOf(connectionHandle) == cancels.Count + 1;
+            });
+        }
+
+        await Task.Delay(TimeSpan.FromMilliseconds(50), Cancelled);
+
+        // * each body still charged, as a slow body holds it
+        Assert.Equal(32, Count("bodyBytes"));
+
+        Assert.Empty(_messages);
+        Assert.False(request.IsCompleted);
+        Assert.All(cancels, (cancel) =>
+        {
+            Assert.False(cancel.IsCompleted);
+        });
+
+        // past the exchanges under way: busy, told when to come back
+        using (var crowded = await Fetch(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Cancel, 15))))
+        {
+            Assert.Equal(
+                (429, HttpRefusals.Busy, "1"),
+                ((int)crowded.StatusCode, HeaderOf(crowded, HttpTransport.RefusalHeader), HeaderOf(crowded, "retry-after")));
+        }
+
+        _server.Resume(connectionHandle);
+
+        // handed on in order, each non-request's 204 once it was, the request's head once it was
+        foreach (var cancel in cancels)
+        {
+            using var answered = await cancel;
+
+            Assert.Equal(204, (int)answered.StatusCode);
+        }
+
+        using var asked = await request;
+
+        Assert.Equal(200, (int)asked.StatusCode);
+        Assert.Equal([1u, 9u, 11u, 13u], _messages.Select((message) =>
+        {
+            return BinaryPrimitives.ReadUInt32BigEndian(message.Bytes.AsSpan(4));
+        }));
+        Assert.Equal(0, Count("bodyBytes"));
+
+        await _server.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Result, 1), false), connectionHandle);
+        await BytesOf(asked);
+    }
+
+    // spec 15.12.17
+    [Fact]
+    public async Task Tells_an_exchange_held_at_the_gate_of_a_paused_connection_that_its_connection_is_gone_as_it_closes()
+    {
+        await Start(new HttpTransportServerOptions());
+
+        var (connectionToken, connectionHandle) = await Connect();
+
+        _server.Pause(connectionHandle);
+
+        var held = RefusalOf(Fetch(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Cancel, 9))));
+
+        await Until(() =>
+        {
+            return _server.HeldOf(connectionHandle) == 1;
+        });
+        Assert.True(await _server.CloseConnection(connectionHandle).WaitAsync(Patience, Cancelled));
+
+        // * what waited at its gate goes with it, its charge released, and nothing of it handed on
+        Assert.Equal((404, HttpRefusals.ConnectionUnknown), await held);
+        Assert.Empty(_messages);
+        Assert.Equal(0, Count("bodyBytes"));
+    }
+
+    // decision 0003
+    [Fact]
+    public async Task Refuses_a_start_once_disposed_its_state_kept_and_disposes_once_stopping_it_first()
+    {
+        var server = new HttpTransportServer();
+
+        await server.Start(Loopback with { CancellationToken = Cancelled });
+
+        // * two disposes: one stop, shared
+        await Task.WhenAll(server.DisposeAsync().AsTask(), server.DisposeAsync().AsTask());
+        Assert.Equal(ReadyState.Closed, server.ReadyState);
+
+        // * a start after it: its application's misuse, its state kept
+        Assert.Equal("the transport server is disposed", (await Assert.ThrowsAsync<ObjectDisposedException>(() =>
+        {
+            return server.Start(Loopback with { CancellationToken = Cancelled });
+        })).Message);
+        Assert.Equal(ReadyState.Closed, server.ReadyState);
     }
 }

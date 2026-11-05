@@ -13,13 +13,14 @@ namespace Bead.Transport.Amqp;
 /// <summary>
 /// One link of a participant to a broker of AMQP 1.0 that is RabbitMQ 4 (spec 15.32 to 15.38), over
 /// AMQPNetLite, as its participant takes it: one network connection opened anew at each start, its
-/// container-id the participant's id, authenticated by SASL PLAIN under its id or by EXTERNAL under
-/// a TLS client certificate; on it a session for its inbox's receiver, one for each name it serves,
-/// and one for each of its two senders, to inboxes and to names, each to the anonymous terminus; its
-/// inbox an exclusive queue declared through its broker's management on that connection, so that it
-/// ends with it; each publication one message of the profile, counted to its byte before it goes,
-/// held to its sender's credit, <c>released</c> read as no subscriber; each message handed on before
-/// its <c>accepted</c>, which goes once its participant settled it, with one more credit. AMQPNetLite
+/// container-id the participant's id, authenticated by SASL PLAIN under its id, its password given
+/// or asked at each start, or by EXTERNAL under a TLS client certificate, never ANONYMOUS; on it a
+/// session for its inbox's receiver, one for each name it serves, and one for each of its two
+/// senders, to inboxes and to names, each to the anonymous terminus; its inbox an exclusive queue
+/// declared through its broker's management on that connection, so that it ends with it; each
+/// publication one message of the profile, counted to its byte before it goes, held to its sender's
+/// credit, <c>released</c> read as no subscriber; each message handed on before its
+/// <c>accepted</c>, which goes once its participant settled it, with one more credit. AMQPNetLite
 /// reconnects nothing, and nothing of a lost link reaches the next: each incarnation is a connection
 /// of its own, every late callback of a former one doing nothing. The TypeScript side's adapter over
 /// rhea does the same.
@@ -43,14 +44,19 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     private long _namesBound = AmqpMessages.LargestBound;
     private int _unsettled;
 
+    // its dispose, which every later one shares: set under its gate, and a start after it refused
+    private Task? _disposed;
+
     // the links each connection draws, so that no two of one connection share a name
     private int _drawn;
 
     /// <summary>
     /// An adapter of <see cref="AmqpBrokerAdapterOptions.Id"/> to the broker at
     /// <see cref="AmqpBrokerAdapterOptions.Uri"/>, not yet started. A scheme but <c>amqp</c> or
-    /// <c>amqps</c>, a certificate in the clear, or an empty id, is an <see cref="ArgumentException"/>;
-    /// a bound or a duration out of its range an <see cref="ArgumentOutOfRangeException"/> naming it.
+    /// <c>amqps</c>, a certificate in the clear, an empty id, or a password refused (a password and
+    /// its provider both, either beside a client certificate, neither nor a certificate, or one that is
+    /// empty or holds a NUL), is an <see cref="ArgumentException"/>; a bound or a duration out of its
+    /// range an <see cref="ArgumentOutOfRangeException"/> naming it.
     /// </summary>
     public AmqpBrokerAdapter(AmqpBrokerAdapterOptions options)
     {
@@ -86,6 +92,19 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         if (options.LinkCredit < 1)
         {
             throw new ArgumentOutOfRangeException(nameof(options), string.Create(CultureInfo.InvariantCulture, $"{nameof(AmqpBrokerAdapterOptions.LinkCredit)} is a whole number from 1 to {int.MaxValue}, not {options.LinkCredit}"));
+        }
+
+        var hasCertificate = options.Tls?.ClientCertificates is not null;
+
+        if (BrokerPasswords.RefusalOf((options.Password, options.PasswordProvider is not null), hasCertificate) is { } refusal)
+        {
+            throw new ArgumentException(refusal, nameof(options));
+        }
+
+        // * PLAIN's password is one octet at least, and ANONYMOUS no mechanism of its link (spec 15.33)
+        if (options.Password is null && options.PasswordProvider is null && !hasCertificate)
+        {
+            throw new ArgumentException("an AMQP link authenticates by a password or by its client certificate", nameof(options));
         }
 
         _options = options with
@@ -208,13 +227,16 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     }
 
     /// <summary>
-    /// Opens a link anew (spec 15.33): one network connection, its SASL PLAIN under its id or
-    /// EXTERNAL under its client certificate, its OPEN of its id as its container-id, its virtual
-    /// host as its hostname where it has one and its idle-time-out; then its two sending sessions,
-    /// each a sender to the anonymous terminus, whose ATTACH names what it may publish. A will is an
-    /// <see cref="ArgumentException"/>: AMQP 1.0 has none. A connection refused or ended, or a sender
-    /// refused, before then fails it naming why, an <see cref="IOException"/>; none of it within its connect timeout, a
+    /// Opens a link anew (spec 15.33): one network connection, its SASL PLAIN under its id, its
+    /// password the one given or its provider's answer, or EXTERNAL under its client certificate, its
+    /// OPEN of its id as its container-id, its virtual host as its hostname where it has one and its
+    /// idle-time-out; then its two sending sessions, each a sender to the anonymous terminus, whose
+    /// ATTACH names what it may publish. A will is an <see cref="ArgumentException"/>: AMQP 1.0 has
+    /// none. A connection refused or ended, or a sender refused, before then fails it naming why, an
+    /// <see cref="IOException"/>; no password, or none of it, within its connect timeout, a
     /// <see cref="TimeoutException"/>; a link up already, an <see cref="InvalidOperationException"/>.
+    /// Refused with an <see cref="ObjectDisposedException"/> once disposed, before anything moves
+    /// (decision 0003).
     /// </summary>
     public async Task Start(BrokerStart? start = null)
     {
@@ -227,6 +249,12 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
         lock (_gate)
         {
+            // ! a dispose is final: a start after it is its application's misuse (decision 0003)
+            if (_disposed is not null)
+            {
+                throw new ObjectDisposedException(null, $"the adapter of {Id} is disposed");
+            }
+
             if (_link is { IsEnded: false })
             {
                 throw new InvalidOperationException($"the link of {Id} is up already");
@@ -237,23 +265,39 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
         var token = start?.CancellationToken ?? CancellationToken.None;
 
+        // * one connectTimeout from its call: its password's ask, then its OPEN and its sessions
+        using var timeout = new CancellationTokenSource(_options.ConnectTimeout, TimeProvider.System);
+
+        // its provider's token, its start's, its timeout's and its stop's, cancelled once its start ends, linked or not
+        var asking = _options.PasswordProvider is null ? null : CancellationTokenSource.CreateLinkedTokenSource(token, timeout.Token, link.Life.Token);
+
         try
         {
-            using var timeout = new CancellationTokenSource(_options.ConnectTimeout, TimeProvider.System);
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, timeout.Token, link.Life.Token);
             Sending parcels;
             Sending opens;
 
+            // ! asked outside the connect's own catches, whose words name no password's ask
+            var password = asking is not null && _options.PasswordProvider is { } provider
+                ? await BrokerPasswords.Asked(provider, new BrokerPasswordAsk
+                {
+                    Id = Id,
+                    ConnectTimeout = _options.ConnectTimeout,
+                    Start = token,
+                    Stop = link.Life.Token,
+                    Timeout = timeout.Token,
+                    Provider = asking.Token,
+                })
+                : _options.Password;
+
+            // ! stopped as it asked its password: no connection is opened
+            if (link.IsEnded)
+            {
+                throw new IOException($"the link of {Id} stopped as it started");
+            }
+
             try
             {
-                var password = _options.PasswordProvider is { } provider ? await provider(linked.Token) : _options.Password;
-
-                // ! stopped as it asked its password: no connection is opened
-                if (link.IsEnded)
-                {
-                    throw new IOException($"the link of {Id} stopped as it started");
-                }
-
                 link.Connection = await Connected((link, password), linked.Token);
                 Watch(link);
                 link.Parcels = SenderOf((link, true));
@@ -276,7 +320,7 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             // * the timeout's, whatever its cancel ended after it
             catch (Exception reason) when (timeout.IsCancellationRequested && !token.IsCancellationRequested && !link.IsEnded)
             {
-                throw new TimeoutException(string.Create(CultureInfo.InvariantCulture, $"the link of {Id} had no OPEN and sessions within {_options.ConnectTimeout.TotalMilliseconds} ms, its connectTimeout"), reason);
+                throw new TimeoutException(string.Create(CultureInfo.InvariantCulture, $"the link of {Id} had no OPEN and no sessions within {_options.ConnectTimeout.TotalMilliseconds} ms, its connectTimeout"), reason);
             }
             catch (Exception reason) when (reason is not (OperationCanceledException or IOException) || (reason is OperationCanceledException && !token.IsCancellationRequested))
             {
@@ -301,6 +345,10 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             End((link, null), reason);
 
             throw;
+        }
+        finally
+        {
+            BrokerPasswords.Release(asking);
         }
     }
 
@@ -449,10 +497,46 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     /// broker's management deleted it, answered 200 within its connect timeout, what comes meanwhile
     /// handed on and credited, its receiver detached with it, which tells no loss; a refusal an
     /// <see cref="IOException"/>, and no answer within it a <see cref="TimeoutException"/>, its inbox
-    /// still held. A link down, an <see cref="InvalidOperationException"/>.
+    /// still held. A link down, an <see cref="InvalidOperationException"/>. A name's let-go past its
+    /// bound fails before its link is told lost for it, so that what let it go reads that bound
+    /// passed, never a loss of its link (spec 15.21).
     /// </summary>
-    public async Task Unsubscribe(IReadOnlyList<string> topic)
+    public Task Unsubscribe(IReadOnlyList<string> topic)
     {
+        var losing = new Losing();
+        var settled = new TaskCompletionSource();
+
+        // ! settled with its continuations run as it settles, each queued where it awaits it, then
+        // its link told lost: what hears both hears its failure first
+        _ = Unsubscribing((topic, losing)).ContinueWith(
+            (done) =>
+            {
+                if (done.Exception is { } failed)
+                {
+                    settled.SetException(failed.InnerExceptions);
+                }
+                else
+                {
+                    settled.SetResult();
+                }
+
+                if (losing.Lost is { } lost)
+                {
+                    End((lost.Link, new BrokerDown()), lost.Reason);
+                }
+            },
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+
+        return settled.Task;
+    }
+
+    // its unsubscription, a name's let-go past its bound leaving its link's end to its caller
+    private async Task Unsubscribing((IReadOnlyList<string> Topic, Losing Losing) unsubscribing)
+    {
+        var (topic, losing) = unsubscribing;
+
         ArgumentNullException.ThrowIfNull(topic);
 
         var link = LinkOpen();
@@ -499,13 +583,14 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
         if (receiving is not null)
         {
-            await LetGo((link, receiving));
+            await LetGo((link, receiving), losing);
         }
     }
 
     // * a name let go within its connect timeout: its DETACH once what its receiver handed on was
-    // settled, then its session ended once its broker answered it; past that bound, its link lost
-    private async Task LetGo((Incarnation Link, Receiving Receiving) letting)
+    // settled, then its session ended once its broker answered it; past that bound, its link lost,
+    // which `losing` holds for its caller to end once it failed
+    private async Task LetGo((Incarnation Link, Receiving Receiving) letting, Losing losing)
     {
         var (link, receiving) = letting;
         using var timeout = new CancellationTokenSource(_options.ConnectTimeout, TimeProvider.System);
@@ -529,7 +614,7 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         {
             var lost = new IOException(string.Create(CultureInfo.InvariantCulture, $"the link of {Id} was lost: it let the name {receiving.Queue} go within no {_options.ConnectTimeout.TotalMilliseconds} ms, its connectTimeout"), reason);
 
-            End((link, new BrokerDown()), lost);
+            losing.Lost = (link, lost);
 
             throw lost;
         }
@@ -644,10 +729,26 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         ArgumentNullException.ThrowIfNull(publication);
 
         var link = LinkOpen();
+
+        publication.CancellationToken.ThrowIfCancellationRequested();
+
+        // * counted from its hand-over to its outcome, which its link's stop awaits (spec 15.24)
+        link.Handed();
+
+        try
+        {
+            return await Publishing(link, publication);
+        }
+        finally
+        {
+            link.Answered();
+        }
+    }
+
+    // a publication handed over: sent on its sender once that one began, and its outcome read
+    private async Task<BrokerPublished> Publishing(Incarnation link, BrokerPublication publication)
+    {
         var token = publication.CancellationToken;
-
-        token.ThrowIfCancellationRequested();
-
         var isInbox = IsInbox(publication.Topic);
         var address = AmqpMessages.AddressOf(publication.Topic);
         var ttl = MillisecondsOf(publication.ExpiresAfter);
@@ -708,15 +809,22 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     }
 
     /// <summary>
-    /// Ends its link with no error (spec 15.33): each receiver detached and its DETACH awaited, each
-    /// session ended, then its CLOSE and its broker's, all within its connect timeout; its inbox ends
-    /// with its connection. Each publication without an outcome, sent or waiting for credit, and each
-    /// subscription awaiting its ATTACH fail with its stop, an <see cref="IOException"/>. Nothing
-    /// where it has none.
+    /// Ends its link with no error (spec 15.33), within one connect timeout of its call: no new
+    /// publication taken, what it was handed to publish before it goes first, sent as its credit
+    /// comes and each outcome awaited, as a graceful close sends what is queued before its FIN
+    /// (spec 15.24, RFC 9293 §3.6); then its inbox deleted through its broker's management, as its
+    /// unsubscription deletes it, so that a message to it finds no subscriber; then each receiver
+    /// detached and its DETACH awaited, each session ended, then its CLOSE and its broker's. A
+    /// name's queue keeps what comes to it (spec 15.38). It settles once its broker let go of each
+    /// subscription of its link, as its unsubscription lets one go, so that its broker hands it
+    /// nothing more. Each publication without an outcome by then, sent or waiting for credit, and
+    /// each subscription awaiting its ATTACH fail with its stop, an <see cref="IOException"/>.
+    /// Nothing where it has none; a later start a new link.
     /// </summary>
     public async Task Stop()
     {
         Incarnation? link;
+        // ! the link's end, its message alone: what waits on it fails with an IOException that carries it
         var stopped = new InvalidOperationException($"the link of {Id} stopped");
 
         lock (_gate)
@@ -738,6 +846,57 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
         try
         {
+            // * one connect timeout from its call, its whole stop: what is not answered within it
+            // is not waited for, each end still sent
+            using var bounded = new CancellationTokenSource(_options.ConnectTimeout, TimeProvider.System);
+            var began = TimeProvider.System.GetTimestamp();
+
+            TimeSpan Left()
+            {
+                var left = _options.ConnectTimeout - TimeProvider.System.GetElapsedTime(began);
+
+                return left > TimeSpan.Zero ? left : TimeSpan.Zero;
+            }
+
+            // * what it was handed goes first, no new publication taken meanwhile: each outcome
+            // come
+            if (link.Connection is { IsClosed: false })
+            {
+                try
+                {
+                    await link.AllAnswered().WaitAsync(bounded.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    // what has not gone by then fails with its stop
+                }
+            }
+
+            // ! from here, an outcome its library gives as its sessions end is none its broker gave
+            link.IsEnding = true;
+
+            // ! its inbox deleted after the drain, so that no CLOSE waiting on a sender's credit is
+            // overtaken, its peer reading released before its 1001; and before its connection ends,
+            // which its broker processes later, a message to it taken meanwhile
+            Receiving? inbox;
+
+            lock (_gate)
+            {
+                inbox = link.Inbox;
+            }
+
+            if (link.Connection is { IsClosed: false } && inbox is not null && !bounded.IsCancellationRequested)
+            {
+                try
+                {
+                    await UnsubscribeInbox((link, inbox.Queue)).WaitAsync(bounded.Token);
+                }
+                catch (Exception reason) when (reason is not OutOfMemoryException)
+                {
+                    // refused or past its bound: its inbox ends with its connection all the same
+                }
+            }
+
             if (link.Connection is { IsClosed: false } connection)
             {
                 List<Receiving> receivings;
@@ -747,15 +906,15 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
                 {
                     receivings = [.. link.Names.Values];
 
-                    if (link.Inbox is { } inbox)
+                    if (link.Inbox is { } kept)
                     {
-                        receivings.Insert(0, inbox);
+                        receivings.Insert(0, kept);
                     }
                 }
 
                 await Task.WhenAll(receivings.Select((receiving) =>
                 {
-                    return AmqpEndpoints.Ending(receiving.Receiver!, _options.ConnectTimeout);
+                    return AmqpEndpoints.Ending(receiving.Receiver!, Left());
                 }));
                 sessions.AddRange(receivings.Select((receiving) =>
                 {
@@ -766,9 +925,9 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
                 await Task.WhenAll(sessions.Select((session) =>
                 {
-                    return AmqpEndpoints.Ending(session, _options.ConnectTimeout);
+                    return AmqpEndpoints.Ending(session, Left());
                 }));
-                await AmqpEndpoints.Ending(connection, _options.ConnectTimeout);
+                await AmqpEndpoints.Ending(connection, Left());
             }
         }
         finally
@@ -777,10 +936,35 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         }
     }
 
-    /// <summary>As <see cref="Stop"/>.</summary>
+    /// <summary>
+    /// Stops it, then ends it for good (decision 0003): a start after it is its application's
+    /// misuse, an <see cref="ObjectDisposedException"/>; a later dispose settles with the first.
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
-        await Stop();
+        var disposing = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task disposed;
+
+        lock (_gate)
+        {
+            _disposed ??= disposing.Task;
+            disposed = _disposed;
+        }
+
+        if (disposed == disposing.Task)
+        {
+            try
+            {
+                await Stop();
+                disposing.SetResult();
+            }
+            catch (Exception reason)
+            {
+                disposing.SetException(reason);
+            }
+        }
+
+        await disposed;
     }
 
     /// <summary>
@@ -861,9 +1045,10 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         var (link, sender, address) = sent;
         var (outcome, published) = read;
 
-        // ! none read once its stop began: its library releases what its sessions held as they end,
-        // a release no broker gave, so that every publication without an outcome fails with the stop
-        if (link.IsStopping)
+        // ! none read once its stop's drain ended: its library releases what its sessions held as they
+        // end, a release no broker gave, so that every publication without an outcome fails with the
+        // stop
+        if (link.IsEnding)
         {
             published.TrySetException(new IOException(link.Ended?.Message));
 
@@ -982,8 +1167,9 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             }
         }
 
-        // ! under a client certificate and no password, EXTERNAL: its broker maps the certificate to its user
-        var isExternal = certificates is not null && password is null;
+        // ! under a client certificate, which a password never stands beside, EXTERNAL: its broker
+        // maps the certificate to its user; PLAIN otherwise, its password one octet at least
+        var isExternal = certificates is not null;
 
         if (isExternal)
         {
@@ -992,7 +1178,7 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
         var host = uri.Host.Trim('[', ']');
         var port = uri.IsDefaultPort || uri.Port < 0 ? (isTls ? 5671 : 5672) : uri.Port;
-        var address = new Address(host, port, isExternal ? null : Id, isExternal ? null : password ?? "", "/", isTls ? "AMQPS" : "AMQP");
+        var address = new Address(host, port, isExternal ? null : Id, isExternal ? null : password, "/", isTls ? "AMQPS" : "AMQP");
         var opening = factory.CreateAsync(address, token, new Opening((link, _options.VirtualHost), (closing) =>
         {
             // ! its library closing it of its own, its idle-time-out passed or a frame it refused:
@@ -1613,6 +1799,12 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     }
 
     // a sending session and its sender, and what its ATTACH lets it publish
+    // a link a let-go past its bound lost, ended once that let-go failed
+    private sealed class Losing
+    {
+        public (Incarnation Link, IOException Reason)? Lost { get; set; }
+    }
+
     private sealed class Sending(Session session)
     {
         public Session Session { get; } = session;
@@ -1673,6 +1865,12 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     // one incarnation: its connection, what ends with it, its sessions and receivers, and its names
     private sealed class Incarnation
     {
+        private readonly Lock _gate = new();
+
+        // the publications handed to it without an outcome, and what its stop awaits of them
+        private int _unanswered;
+        private TaskCompletionSource? _answered;
+
         public CancellationTokenSource Life { get; } = new();
 
         public Connection? Connection { get; set; }
@@ -1702,6 +1900,53 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
         public bool IsStopping { get; set; }
 
+        // its stop's drain ended: an outcome its library gives from now on is none its broker gave
+        public bool IsEnding { get; set; }
+
         public Exception? Ended { get; set; }
+
+        /// <summary>A publication handed to it, counted until its outcome.</summary>
+        public void Handed()
+        {
+            lock (_gate)
+            {
+                _unanswered += 1;
+            }
+        }
+
+        /// <summary>A publication's outcome come, or its failure: its stop told once none is left.</summary>
+        public void Answered()
+        {
+            TaskCompletionSource? answered = null;
+
+            lock (_gate)
+            {
+                _unanswered -= 1;
+
+                if (_unanswered == 0 && _answered is not null)
+                {
+                    answered = _answered;
+                    _answered = null;
+                }
+            }
+
+            answered?.TrySetResult();
+        }
+
+        /// <summary>Settles once every publication handed to it has its outcome.</summary>
+        public Task AllAnswered()
+        {
+            lock (_gate)
+            {
+                if (_unanswered == 0)
+                {
+                    return Task.CompletedTask;
+                }
+
+                _answered ??= new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+                return _answered.Task;
+            }
+        }
     }
 }

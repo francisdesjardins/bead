@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { noop } from '../../transport/shared/noop';
 import { createTestClock } from '../../transport/shared/__tests__/fixtures';
 import { createEmitter } from '../../transport/shared/emitter';
 import type { ITransportMessage } from '../../transport/shared/types';
@@ -17,7 +18,7 @@ import {
 } from '../client';
 import { createHTTPClient } from '../http-client';
 import { createWorkerClient } from '../worker-client';
-import { createWSClient } from '../ws-client';
+import { createWebSocketClient } from '../websocket-client';
 
 // helpers
 
@@ -36,7 +37,10 @@ const serializer = {
 /** The echo transport's own options, which the client reads back from it. */
 interface IEchoTransport extends IClientTransportLike {
   connect(options: { host: string }): Promise<void>;
-  reconnect(options?: { maxAttempts?: number; signal?: AbortSignal | undefined }): Promise<void>;
+  reconnect(options?: {
+    maximumAttempts?: number;
+    signal?: AbortSignal | undefined;
+  }): Promise<void>;
 }
 
 /** A transport that records its calls, and answers each request with its own payload. */
@@ -71,12 +75,14 @@ const createEchoTransport = () => {
           reject(reason instanceof Error ? reason : new Error('aborted'));
         });
         queueMicrotask(() => {
-          if (options?.maxAttempts !== undefined) {
+          if (options?.maximumAttempts !== undefined) {
             reject(new Error('given up'));
           }
         });
       });
     },
+    pause: noop,
+    resume: noop,
     send: ({ data }) => {
       const request = readEnvelope(bytesOf(data), {
         failures: SERVER_FAILURES,
@@ -118,12 +124,12 @@ test.describe('createClient', () => {
 
     await client.connect({ host: 'h' });
     await client.disconnect({ isClean: false });
-    await expect(client.reconnect({ maxAttempts: 2 })).rejects.toThrow('given up');
+    await expect(client.reconnect({ maximumAttempts: 2 })).rejects.toThrow('given up');
 
     expect(calls).toEqual([
       ['connect', { host: 'h' }],
       ['disconnect', { isClean: false }],
-      ['reconnect', { maxAttempts: 2, signal: expect.any(AbortSignal) }],
+      ['reconnect', { maximumAttempts: 2, signal: expect.any(AbortSignal) }],
     ]);
     expect(client.transport).toBe(transport);
     expect(client.router.transport).toBe(transport);
@@ -145,7 +151,7 @@ test.describe('createClient', () => {
     const worker = { postMessage: () => {} };
 
     for (const client of [
-      createWSClient({ transport: { clock } }),
+      createWebSocketClient({ transport: { clock } }),
       createHTTPClient({ transport: { clock } }),
       createWorkerClient({ transport: { clock, worker } }),
       createClient({ transport: { ...createEchoTransport().transport, clock } }),

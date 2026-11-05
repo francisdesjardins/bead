@@ -290,6 +290,10 @@ async fn refuse_a_payload_past_its_own_limit_and_an_envelope_past_its_own() {
 
 // spec 9.2, 12.2
 #[tokio::test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test repeats its own string a bounded number of times"
+)]
 async fn cut_a_failures_detail_to_its_envelopes_room_and_to_its_own_limit_both_ways() {
     let record = FailureRecord {
         code: NonZeroU16::new(7).expect("an application code"),
@@ -386,4 +390,64 @@ async fn refuse_a_notification_too_large_for_one_envelope_and_send_one_that_fits
             (EnvelopeKind::Notification, 2)
         ]
     );
+}
+
+#[tokio::test]
+async fn hands_an_envelope_within_its_limits_to_its_ports_transport_traced_refuses_one_past_them_and_sends_nothing_once_its_router_is_disposed()
+ {
+    let peer = Peer::new(
+        RouterSide::Server,
+        &RouterLimitsOptions {
+            buffered_bytes_budget: Some(1_024),
+            maximum_payload_bytes: Some(1_024),
+            ..small()
+        },
+    );
+    let envelope = |length| Envelope::Request {
+        header: scripted_header(1),
+        payload: Bytes::from(vec![0; length]),
+    };
+    completed(peer.send((envelope(4), Arc::from("a"))))
+        .await
+        .expect("the envelope fits");
+    assert_eq!(peer.sent().await, [(Arc::from("a"), envelope(4))]);
+    peer.owner
+        .run(|state| {
+            assert_eq!(state.traces.len(), 1);
+            let (direction, traced) = &state.traces[0];
+            assert_eq!(*direction, crate::debug::DebugDirection::Tx);
+            assert_eq!(traced.connection_handle.as_ref(), "a");
+            assert_eq!(
+                traced.header,
+                crate::envelope::EnvelopeHeader::Request(scripted_header(1))
+            );
+            assert_eq!(traced.credential_scheme, None);
+        })
+        .await
+        .expect("the trace checked");
+    for length in [100, 2_000] {
+        let error = completed(peer.send((envelope(length), Arc::from("a"))))
+            .await
+            .expect_err("the envelope exceeds its limit");
+        let CallError::Failure(failure) = error else {
+            panic!("a protocol failure")
+        };
+        assert_eq!(failure.code(), ProtocolCode::PAYLOAD_TOO_LARGE.get());
+    }
+    peer.owner
+        .run(router_core::dispose)
+        .await
+        .expect("disposed");
+    assert!(
+        matches!(completed(peer.send((envelope(4), Arc::from("a")))).await,
+        Err(CallError::Disconnected(reason)) if reason == router_core::DISPOSED)
+    );
+    assert_eq!(peer.sent().await, [(Arc::from("a"), envelope(4))]);
+    peer.owner
+        .run(|state| {
+            assert_eq!(state.traces.len(), 1);
+            assert!(state.reports.is_empty());
+        })
+        .await
+        .expect("no more transport use or trace");
 }

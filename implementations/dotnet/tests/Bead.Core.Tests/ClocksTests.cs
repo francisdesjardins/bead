@@ -226,6 +226,49 @@ public sealed class ClocksTests
         Assert.Equal(three, Clocks.AssertHeldDelay(("a duration", "Duration"), twoAndAHalf));
     }
 
+    // every input of the durations' file, under MQTT 5's Keep Alive's ceiling, 65,535 s, as the place
+    // of the file that holds it: what the timer's ceiling holds, held alike; what it refuses, and the
+    // ceiling's last millisecond past, refused in its words, which name the ceiling of its own
+    [Fact]
+    public void Holds_a_duration_under_a_ceiling_of_its_own_as_under_the_timers_refusing_one_past_it_in_the_same_message()
+    {
+        var ceiling = TimeSpan.FromMilliseconds(65_535_000);
+        var place = Durations.PlaceOf("mqttBrokerAdapter.keepAlive");
+        var names = ("a duration", "Duration");
+
+        foreach (var (input, outcome) in Durations.Played(place))
+        {
+            var given = input.Given!.Value;
+
+            if (outcome.Outcome == "refused")
+            {
+                var refused = Assert.Throws<ArgumentOutOfRangeException>(() =>
+                {
+                    Clocks.AssertHeldWithin(names, (given, ceiling));
+                });
+
+                Assert.StartsWith(Durations.RefusalOf(("a duration", place), given), refused.Message, StringComparison.Ordinal);
+                Assert.Equal("Duration", refused.ParamName);
+            }
+            else
+            {
+                Assert.Equal((input.Name, Clocks.AssertHeldFinite(names, given)), (input.Name, Clocks.AssertHeldWithin(names, (given, ceiling))));
+            }
+        }
+
+        // the ceiling held, and one past it refused, in the sentence the timer's ceiling writes
+        var past = ceiling + TimeSpan.FromMilliseconds(1);
+
+        Assert.Equal(ceiling, Clocks.AssertHeldWithin(names, (ceiling, ceiling)));
+        Assert.Equal(
+            "a duration is a number of milliseconds from 1 to 65535000, not 65535001",
+            Durations.RefusalOf(("a duration", place), past));
+        Assert.StartsWith(Durations.RefusalOf(("a duration", place), past), Assert.Throws<ArgumentOutOfRangeException>(() =>
+        {
+            Clocks.AssertHeldWithin(names, (past, ceiling));
+        }).Message, StringComparison.Ordinal);
+    }
+
     // a platform's difference: -1 ms is .NET's infinite, Timeout.InfiniteTimeSpan, where the
     // TypeScript side's twin reads -1 as a number under a millisecond, and refuses it
     [Fact]
@@ -286,13 +329,13 @@ public sealed class ClocksTests
         Assert.Same(beneath, Clocks.Of((null, beneath), names));
         Assert.Same(beneath, Clocks.Of((beneath, beneath), names));
         Assert.Equal(
-            "a server runs on the clock of its transport, a FakeTimeProvider, and was given another, a FakeTimeProvider",
+            "a server runs on the clock of its transport, one of its own, and was given another, one of its own",
             Assert.Throws<ArgumentException>(() =>
             {
                 Clocks.Of((given, beneath), names);
             }).Message);
         Assert.Equal(
-            "a server runs on the clock of its transport, a FakeTimeProvider, and was given another, the system's",
+            "a server runs on the clock of its transport, one of its own, and was given another, the platform's",
             Assert.Throws<ArgumentException>(() =>
             {
                 Clocks.Of((TimeProvider.System, beneath), names);

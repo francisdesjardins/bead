@@ -15,44 +15,36 @@ use bytes::Bytes;
 
 use crate::constants::{CredentialScheme, FailureScope, ProtocolCode, RouterSide};
 use crate::duration::{NEVER, hold};
-use crate::envelope::{Credential, Header, RequestHeader, header_bytes_of};
+use crate::envelope::{Credential, EnvelopeHeader, RequestHeader, header_bytes_of};
 use crate::errors::{CallError, ProgrammerError, ResolverError};
-use crate::failure::{Failure, FailureOrigin, ProcedureAddress};
+use crate::failure::{Failure, FailureOrigin};
 use crate::identity::Procedure;
 use crate::jwt_verifier::{audiences_of, read_jwt};
 use crate::owner::WeakOwner;
 use crate::router::admissions::BeforeRequest;
-use crate::router::core::{AdmissionRefusal, AdmissionRequest, AdmitFn, Handler, ResolverProps};
-use crate::router::server::{Call, CallHooks, ServerRequest, ServerState, request_on};
+use crate::router::core::{
+    AdmissionRefusal, AdmissionRequest, AdmitFn, Handler, RequestResolverProps,
+};
+use crate::router::server::{Call, ServerState, request_on};
 use crate::router::types::{
     BoxFuture, ConnectionHandle, Gauges, RequestCredential, ResolvedRequestOptions, RouterAnswer,
-    RouterError, RouterLimits,
+    RouterError, RouterLimits, RouterRequest,
 };
 use crate::transport::ServerTransport;
 
 /// How a server's router relays the requests that name a destination.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub struct RelayOptions {
     /// Whether a request may be relayed, asked on its header and the call's session, before its
     /// destination is looked up. Without it, the relay admits nobody.
     pub before_route: Option<BeforeRequest>,
-    /// How long leg B waits for its answer at most, whatever a destination says; [`NEVER`] by
-    /// default.
-    pub timeout: Duration,
+    /// How long leg B waits for its answer at most, whatever a destination says: [`NEVER`] when
+    /// none.
+    pub timeout: Option<Duration>,
     /// Whether it verifies what it forwards besides (spec 14.3, step 1), with its router's
-    /// credentials, before `before_route`.
-    pub verifies: bool,
-}
-
-impl Default for RelayOptions {
-    fn default() -> Self {
-        Self {
-            before_route: None,
-            timeout: NEVER,
-            verifies: false,
-        }
-    }
+    /// credentials, before `before_route`: `false` when none.
+    pub verifies: Option<bool>,
 }
 
 /// A destination's registration, as it is asked.
@@ -131,6 +123,7 @@ pub enum RelayTarget {
     clippy::struct_field_names,
     reason = "a destination's id, as every side names it"
 )]
+#[non_exhaustive]
 pub struct Destination {
     /// Its id.
     pub destination_id: u32,
@@ -232,6 +225,8 @@ fn locked(inner: &Mutex<Inner>) -> MutexGuard<'_, Inner> {
 /// What a server's router relays by: its destinations, shared by its handle and its owner.
 #[derive(Debug, Clone)]
 pub(crate) struct Relay {
+    #[cfg(test)]
+    pub(crate) fills: Option<Arc<crate::testing::scripted::DestinationFills>>,
     inner: Arc<Mutex<Inner>>,
     before_route: Option<BeforeRequest>,
     timeout: Duration,
@@ -250,7 +245,7 @@ impl Relay {
     /// not hold.
     pub(crate) fn new(
         (side, limits): (RouterSide, RouterLimits),
-        options: RelayOptions,
+        options: &RelayOptions,
     ) -> Result<Self, ProgrammerError> {
         if let Some(refusal) = options
             .before_route
@@ -264,16 +259,18 @@ impl Relay {
             )));
         }
 
-        let timeout = hold("a relay's timeout", options.timeout)?;
+        let timeout = hold("a relay's timeout", options.timeout.unwrap_or(NEVER))?;
 
         Ok(Self {
+            #[cfg(test)]
+            fills: None,
             inner: Arc::new(Mutex::new(Inner {
                 registrations: Vec::new(),
                 open: BTreeSet::new(),
             })),
-            before_route: options.before_route,
+            before_route: options.before_route.clone(),
             timeout,
-            verifies: options.verifies,
+            verifies: options.verifies.unwrap_or(false),
             side,
             limits,
             serials: Arc::new(AtomicU64::new(1)),
@@ -362,11 +359,11 @@ pub(crate) fn gauges(relay: &Relay) -> Gauges {
     gauges
 }
 
-fn draw_destination_id(is_in_use: &dyn Fn(u32) -> bool) -> u32 {
+fn draw_destination_id(relay: &Relay, is_in_use: &dyn Fn(u32) -> bool) -> u32 {
     loop {
         let mut bytes = [0_u8; 4];
 
-        if getrandom::fill(&mut bytes).is_err() {
+        if fill_destination(relay, &mut bytes).is_err() {
             continue;
         }
 
@@ -378,6 +375,17 @@ fn draw_destination_id(is_in_use: &dyn Fn(u32) -> bool) -> u32 {
     }
 }
 
+fn fill_destination(relay: &Relay, bytes: &mut [u8; 4]) -> Result<(), getrandom::Error> {
+    #[cfg(test)]
+    if let Some(fills) = &relay.fills {
+        *bytes = fills.draw();
+        return Ok(());
+    }
+    #[cfg(not(test))]
+    let _: &Relay = relay;
+    getrandom::fill(bytes)
+}
+
 /// Registers a destination.
 ///
 /// # Errors
@@ -386,7 +394,7 @@ fn draw_destination_id(is_in_use: &dyn Fn(u32) -> bool) -> u32 {
 /// hold, or a timeout spec 1.4 does not hold.
 pub(crate) fn register(
     relay: &Relay,
-    (target, options): (RelayTarget, DestinationOptions),
+    (target, options): (RelayTarget, &DestinationOptions),
 ) -> Result<DestinationRegistration, ProgrammerError> {
     let DestinationOptions {
         audience,
@@ -394,7 +402,7 @@ pub(crate) fn register(
         label,
         replaces,
         timeout,
-    } = options;
+    } = options.clone();
     let given =
         destination_id.or_else(|| replaces.as_ref().map(|replaced| replaced.destination_id));
     let timeout = hold("a relay's timeout", timeout.unwrap_or(NEVER))?;
@@ -440,7 +448,7 @@ pub(crate) fn register(
     }
 
     let destination_id = given.unwrap_or_else(|| {
-        draw_destination_id(&|candidate| {
+        draw_destination_id(relay, &|candidate| {
             inner
                 .registrations
                 .iter()
@@ -502,7 +510,7 @@ fn forwarded_of(credential: Option<&Credential>) -> Option<Credential> {
 
 // a request's header on leg B, counted with its credential (spec 14.3, step 6)
 fn leg_header_bytes_of(credential: Option<&Credential>) -> u64 {
-    let header = Header::Request(RequestHeader {
+    let header = EnvelopeHeader::Request(RequestHeader {
         call_id: 1,
         service_id: 1,
         procedure_id: 1,
@@ -631,7 +639,7 @@ impl Route {
         match credential {
             Some(Credential::Jwt(token)) => {
                 // read as a token's aud is read, verified or not: a token that does not read names none
-                let claims = read_jwt(token).map(|(_, claims)| claims);
+                let claims = read_jwt(token).map(|read| read.claims);
                 let audiences = audiences_of(claims.as_ref().and_then(|claims| claims.get("aud")));
 
                 if audience.is_none_or(|audience| !audiences.iter().any(|named| named == audience))
@@ -692,7 +700,7 @@ impl Route {
 
 // what leg B presents: a JWT, as leg A does; an ELSEWHERE, with what leg A's transport carried;
 // none, said so, for none or OPAQUE
-fn leg_credential_of(props: &ResolverProps) -> RequestCredential {
+fn leg_credential_of(props: &RequestResolverProps) -> RequestCredential {
     match &props.header.credential {
         Some(Credential::Jwt(token)) => {
             RequestCredential::Jwt(String::from_utf8_lossy(token).into_owned())
@@ -751,18 +759,18 @@ fn failure_of(
 
 // leg B: the same service and procedure, the payload's bytes, leg A's signal; its answer, or none
 // once leg A ended
-async fn answer_of(route: &Route, props: &ResolverProps) -> Option<RouterAnswer> {
+async fn answer_of(route: &Route, props: &RequestResolverProps) -> Option<RouterAnswer> {
     let header = &props.header;
     let destination_id = route.registration.destination_id;
     let procedure = Procedure {
         service_id: header.service_id,
-        id: header.procedure_id,
+        procedure_id: header.procedure_id,
         service_revision: 0,
-        name: format!(
+        procedure_name: format!(
             "{}/{} to {destination_id}",
             header.service_id, header.procedure_id
         ),
-        kind: None,
+        procedure_kind: None,
         maximum_payload_bytes: Some(route.payload_limit_of(header.credential.as_ref())),
         deprecation: None,
     };
@@ -772,37 +780,24 @@ async fn answer_of(route: &Route, props: &ResolverProps) -> Option<RouterAnswer>
 
         Box::new(move |is_handed: bool| is_sent.store(is_handed, Ordering::Release))
     };
-    let options = ResolvedRequestOptions {
-        timeout: route.registration.timeout,
-        destination_id: None,
-        connection_handle: None,
-        credential: Some(leg_credential_of(props)),
-        signal: Some(props.signal.token().clone()),
-        close_on_timeout: false,
-    };
+    let mut options = ResolvedRequestOptions::new(route.registration.timeout);
+
+    options.credential = Some(leg_credential_of(props));
+    options.signal = Some(props.signal.token().clone());
+
     let made = match &route.registration.target {
         RelayTarget::Connection(handle) => request_on(
             &route.owner,
-            (
-                props.payload.clone(),
-                ServerRequest {
-                    procedure: ProcedureAddress {
-                        service_id: procedure.service_id,
-                        procedure_id: procedure.id,
-                    },
-                    maximum_payload_bytes: procedure.maximum_payload_bytes,
-                    options: ResolvedRequestOptions {
-                        connection_handle: Some(Arc::clone(handle)),
-                        ..options
-                    },
-                    series: None,
-                    refusal: None,
-                },
-                CallHooks {
-                    on_call_id: None,
-                    on_sent: Some(on_sent),
-                },
-            ),
+            (props.payload.clone(), {
+                let mut options = options.clone();
+
+                options.connection_handle = Some(Arc::clone(handle));
+
+                let mut request = RouterRequest::new(procedure.clone(), &options);
+
+                request.on_sent = Some(on_sent);
+                request
+            }),
         ),
         RelayTarget::Router(router) => router.request(
             props.payload.clone(),
@@ -841,7 +836,7 @@ async fn answer_of(route: &Route, props: &ResolverProps) -> Option<RouterAnswer>
 
 // leg B, then leg A's answer; a connection that closed while the payload came takes nothing, and a
 // payload that came whole past what leg B takes goes nowhere
-async fn forward(route: Route, props: ResolverProps) -> Result<(), ResolverError> {
+async fn forward(route: Route, props: RequestResolverProps) -> Result<(), ResolverError> {
     let length = u64::try_from(props.payload.len()).unwrap_or(u64::MAX);
     let too_large = route.too_large_of((length, props.header.credential.as_ref()));
     let answer = if route.registration.is_closed() {
@@ -921,17 +916,20 @@ pub(crate) fn handler_of(state: &ServerState, destination_id: u32) -> Option<Arc
             })))
         });
 
-        return Some(Arc::new(Handler {
-            resolve: Arc::new(
-                |_props: ResolverProps| -> BoxFuture<Result<(), ResolverError>> {
-                    Box::pin(async { Ok(()) })
-                },
-            ),
-            admit: Some(admit),
-            maximum_payload_bytes: None,
-            forwards_credentials: !relay.verifies,
-            notifies: false,
-        }));
+        return Some(Arc::new(
+            Handler {
+                resolve: Arc::new(
+                    |_props: RequestResolverProps| -> BoxFuture<Result<(), ResolverError>> {
+                        Box::pin(async { Ok(()) })
+                    },
+                ),
+                admit: Some(admit),
+                maximum_payload_bytes: None,
+                forwards_credentials: !relay.verifies,
+                notifies: false,
+            }
+            .self_admitting(),
+        ));
     };
     let carriage = carriage_of(state, &registration.target);
     let route = Arc::new(Route {
@@ -955,22 +953,25 @@ pub(crate) fn handler_of(state: &ServerState, destination_id: u32) -> Option<Arc
     };
     let maximum_payload_bytes = route.payload_limit_of(None);
 
-    Some(Arc::new(Handler {
-        resolve: Arc::new(
-            move |props: ResolverProps| -> BoxFuture<Result<(), ResolverError>> {
-                let route = Route {
-                    relay: route.relay.clone(),
-                    owner: route.owner.clone(),
-                    registration: route.registration.clone(),
-                    carriage: route.carriage.clone(),
-                };
+    Some(Arc::new(
+        Handler {
+            resolve: Arc::new(
+                move |props: RequestResolverProps| -> BoxFuture<Result<(), ResolverError>> {
+                    let route = Route {
+                        relay: route.relay.clone(),
+                        owner: route.owner.clone(),
+                        registration: route.registration.clone(),
+                        carriage: route.carriage.clone(),
+                    };
 
-                Box::pin(forward(route, props))
-            },
-        ),
-        admit: Some(admit),
-        maximum_payload_bytes: Some(maximum_payload_bytes),
-        forwards_credentials: !relay.verifies,
-        notifies: false,
-    }))
+                    Box::pin(forward(route, props))
+                },
+            ),
+            admit: Some(admit),
+            maximum_payload_bytes: Some(maximum_payload_bytes),
+            forwards_credentials: !relay.verifies,
+            notifies: false,
+        }
+        .self_admitting(),
+    ))
 }

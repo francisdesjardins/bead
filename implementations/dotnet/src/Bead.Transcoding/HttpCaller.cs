@@ -369,7 +369,7 @@ public sealed class HttpCaller : IDisposable
         }
         catch (Exception cause) when (cause is not FailureException)
         {
-            throw LocalFailure(ProtocolCode.PayloadUndecodable, "the HTTP payload cannot be decoded", new LocalFailureOptions(cause));
+            throw LocalFailure(ProtocolCode.PayloadUndecodable, "the HTTP payload cannot be decoded", new FailureExceptionOptions { Cause = cause });
         }
     }
 
@@ -409,7 +409,7 @@ public sealed class HttpCaller : IDisposable
         }
         catch (Exception cause) when (cause is not FailureException)
         {
-            throw LocalFailure(ProtocolCode.PayloadUndecodable, "the HTTP payload cannot be decoded", new LocalFailureOptions(cause));
+            throw LocalFailure(ProtocolCode.PayloadUndecodable, "the HTTP payload cannot be decoded", new FailureExceptionOptions { Cause = cause });
         }
     }
 
@@ -471,25 +471,23 @@ public sealed class HttpCaller : IDisposable
         return LocalFailure(ProtocolCode.PayloadUndecodable, detail);
     }
 
-    private sealed record LocalFailureOptions(Exception Cause);
-
-    private static FailureException LocalFailure(ProtocolCode code, string detail, LocalFailureOptions? options = null)
+    private static FailureException LocalFailure(ProtocolCode code, string detail, FailureExceptionOptions? options = null)
     {
         var failure = Failure.OfProtocol(code, detail);
         var raised = new FailureException.Raised(FailureOrigin.Local, RouterSide.Client);
-        return options is null ? new FailureException(failure, raised) : new FailureException(failure, (raised, options.Cause));
+        return options is null ? new FailureException(failure, raised) : new FailureException(failure, raised, options);
     }
 
     private static JsonElement ProblemOf(ReadOnlyMemory<byte> bytes)
     {
         try { return PayloadCodecs.Json.Decode(bytes); }
-        catch (Exception cause) { throw LocalFailure(ProtocolCode.PayloadUndecodable, "the HTTP payload cannot be decoded", new LocalFailureOptions(cause)); }
+        catch (Exception cause) { throw LocalFailure(ProtocolCode.PayloadUndecodable, "the HTTP payload cannot be decoded", new FailureExceptionOptions { Cause = cause }); }
     }
 
     private static string Decode(ReadOnlySpan<byte> bytes)
     {
         try { return Utf8.GetString(bytes); }
-        catch (DecoderFallbackException cause) { throw LocalFailure(ProtocolCode.PayloadUndecodable, "the HTTP payload cannot be decoded", new LocalFailureOptions(cause)); }
+        catch (DecoderFallbackException cause) { throw LocalFailure(ProtocolCode.PayloadUndecodable, "the HTTP payload cannot be decoded", new FailureExceptionOptions { Cause = cause }); }
     }
 
     private static async ValueTask<int> ReadChunk(Stream stream, (Memory<byte> Buffer, CancellationToken CancellationToken) read)
@@ -497,7 +495,7 @@ public sealed class HttpCaller : IDisposable
         try { return await stream.ReadAsync(read.Buffer, read.CancellationToken).ConfigureAwait(false); }
         catch (Exception cause) when (!read.CancellationToken.IsCancellationRequested)
         {
-            throw LocalFailure(ProtocolCode.DestinationLost, "the HTTP body ends before its answer", new LocalFailureOptions(cause));
+            throw LocalFailure(ProtocolCode.DestinationLost, "the HTTP body ends before its answer", new FailureExceptionOptions { Cause = cause });
         }
     }
 

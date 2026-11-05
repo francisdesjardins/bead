@@ -1,6 +1,6 @@
 {
   "name": "@francisdesjardins/bead",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "private": true,
   "description": "Bead, the binary wire protocol, on the TypeScript side: a WebSocket, an HTTP, a Web Worker, an in-memory and a broker's transport, each a client and a server, an in-memory broker and an adapter of MQTT 5 and one of AMQP 1.0, a server's transports joined into one, a client and a server router with the service, session and notification managers, the client and server over them, and a gateway that answers a service's procedures over HTTP and JSON.",
   "license": "Apache-2.0",
@@ -38,14 +38,14 @@
     "./transcoding": "./src/transcoding/transcoding.ts",
     "./transport-client": "./src/transport/client/transport-client.ts",
     "./transport-server": "./src/transport/server/transport-server.ts",
+    "./websocket-client": "./src/client/websocket-client.ts",
+    "./websocket-server": "./src/server/websocket-server.ts",
+    "./websocket-transport-client": "./src/transport/client/websocket-transport-client.ts",
+    "./websocket-transport-server": "./src/transport/server/websocket-transport-server.ts",
     "./worker-client": "./src/client/worker-client.ts",
     "./worker-server": "./src/server/worker-server.ts",
     "./worker-transport-client": "./src/transport/client/worker-transport-client.ts",
     "./worker-transport-server": "./src/transport/server/worker-transport-server.ts",
-    "./ws-client": "./src/client/ws-client.ts",
-    "./ws-server": "./src/server/ws-server.ts",
-    "./ws-transport-client": "./src/transport/client/ws-transport-client.ts",
-    "./ws-transport-server": "./src/transport/server/ws-transport-server.ts",
     "./package.json": "./package.json"
   },
   "scripts": {
@@ -55,7 +55,7 @@
     "playground:build:file": "node demo/playground.ts",
     "docs:examples": "node tools/check-examples.mjs",
     "docs:examples:fix": "node tools/check-examples.mjs --fix",
-    "check": "yarn type-check && yarn lint --deny-warnings && yarn lint:cases && yarn format:check && yarn comment-budget && yarn docs:examples && yarn protobuf:check",
+    "check": "yarn type-check && yarn lint --deny-warnings && yarn lint:cases && yarn format:check && yarn comment-budget && yarn docs:examples && yarn protobuf:check && yarn surface:check",
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
     "lint": "oxlint --type-aware",
@@ -64,7 +64,7 @@
     "test": "playwright test",
     "test:coverage": "c8 playwright test",
     "test:interop": "playwright test src/client/__tests__/interop.test.ts",
-    "test:mqtt": "playwright test --grep \"over MQTT 5\"",
+    "test:mqtt": "playwright test --grep \"over MQTT 5\" --workers 1",
     "test:amqp": "playwright test --grep \"over AMQP 1.0\" --workers 1",
     "test:browser": "playwright test --config playwright.browser.config.ts",
     "test:demo": "playwright test --config playwright.demo.config.ts",
@@ -73,6 +73,8 @@
     "verify:all": "yarn check && yarn test",
     "protobuf:check": "node tools/check-protobuf.mjs",
     "protobuf:generate": "node tools/check-protobuf.mjs --write",
+    "surface:check": "node tools/check-surface.mjs && node tools/check-surface.mjs --cases",
+    "surface:write": "node tools/check-surface.mjs --write",
     "validations:check": "node ../../tools/check-validations.mjs typescript",
     "validations:generate": "node ../../tools/check-validations.mjs typescript --write"
   },
@@ -93,7 +95,7 @@
     "oxlint-tsgolint": "7.0.2005",
     "rhea": "3.0.5",
     "typescript-7": "npm:typescript@7.0.2",
-    "ws": "^8.22.0"
+    "ws": "^8.22.1"
   },
   "dependenciesMeta": {
     "@bufbuild/buf": {
@@ -118,6 +120,10 @@
     "rhea": {
       "optional": true
     }
+  },
+  "resolutions": {
+    "glob": "^14.0.3",
+    "minimatch": "^11.0.3"
   },
   "engines": {
     "node": ">=24.9"

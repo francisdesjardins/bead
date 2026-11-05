@@ -26,6 +26,7 @@ import type {
   IResolverSeries,
   IRouterMetrics,
 } from './metrics-registry';
+import type { ITelling } from './telling';
 import type { IJudged, IValidateOptions } from './violations';
 
 // declarations
@@ -165,6 +166,18 @@ export interface IResultHeader {
  */
 export interface IRouterFailures extends RouterFailureEntries {
   readonly side: RouterSide;
+}
+
+/**
+ * What a router holds of each connection that no turn of it took yet, past which it pauses that
+ * connection's transport (spec 15.12, decision 0046): a side's own, announced to no one, so no
+ * limit of {@link IRouterLimits}, which both ends set alike.
+ */
+export interface IIntakeLimits {
+  /** The bytes of those envelopes. */
+  maximumUntakenBytes: number;
+  /** The envelopes one connection's transport handed its router that no turn of it took yet. */
+  maximumUntakenEnvelopes: number;
 }
 
 /** How much a router reads, writes and holds. */
@@ -458,13 +471,10 @@ export interface INotificationLike extends IProcedure {
   trigger: (payload: Uint8Array) => Promise<PromiseSettledResult<unknown>[]>;
 }
 
-export interface IRequestOptions<Handle extends string = ConnectionHandle> {
-  /**
-   * Whether the connection it names is closed when it goes unanswered past its timeout; the
-   * manager's default when not given. Only a manager that can close a connection — a server's —
-   * does.
-   */
-  closeOnTimeout?: boolean | undefined;
+/**
+ * What every request takes, a command's among them, which takes them in {@link ICommandOptions}.
+ */
+export interface IRequestOptions {
   /**
    * The credential the call presents, for this call alone: `OPAQUE`, the session its router
    * learned — a server's, its connection's — so the call is refused rather than run in another
@@ -473,11 +483,6 @@ export interface IRequestOptions<Handle extends string = ConnectionHandle> {
    * `SESSION_REQUIRED`.
    */
   credential?: RequestCredential | undefined;
-  /**
-   * The connection the request goes to, for a router with more than one: a server's names its
-   * client; a client's has one peer, and names none.
-   */
-  connectionHandle?: Handle | undefined;
   /**
    * What the request is for behind the peer; the peer itself when not given. A router that relays
    * nothing refuses it with `DESTINATION_UNKNOWN`.
@@ -496,6 +501,19 @@ export interface IRequestOptions<Handle extends string = ConnectionHandle> {
    * call, before it is traced or told deprecated.
    */
   timeout?: number | undefined;
+}
+
+/**
+ * What a command takes: a request's options, the connection it goes to and its close on timeout.
+ */
+export interface ICommandOptions<Handle extends string = ConnectionHandle> extends IRequestOptions {
+  /**
+   * Whether the connection it names is closed when it goes unanswered past its timeout; the
+   * manager's default when not given. Only a manager that can close a connection does.
+   */
+  closeOnTimeout?: boolean | undefined;
+  /** The connection the command goes to: a server's names its client. */
+  connectionHandle: Handle;
 }
 
 /**
@@ -547,9 +565,15 @@ export interface IRequestResolverProps<Handle extends string = ConnectionHandle>
   signal: AbortSignal;
 }
 
-/** The options of a request, with the manager's defaults applied. */
+/**
+ * The options of a call, a request's or a command's, with the manager's defaults applied: what a
+ * router sends for any call.
+ */
 export interface IResolvedRequestOptions extends IRequestOptions {
+  /** Whether a command's connection is closed when it goes unanswered past its timeout. */
   closeOnTimeout?: boolean | undefined;
+  /** The connection a command goes to; a request names none. */
+  connectionHandle?: string | undefined;
   /**
    * The call's timeout, or the manager's default, held as the defaults are applied: in whole
    * milliseconds, rounded, or `Infinity`, which waits on.
@@ -565,7 +589,11 @@ export interface IRouterResult {
 
 /** What both sides of a router do alike, as each side's router builds on it. */
 export interface IRouterCore<Handle extends string> {
-  /** Whether it was disposed: nothing more goes out, and nothing more waits. */
+  /**
+   * Whether it was disposed, as its dispose marks it at once: what it holds is let go then, or —
+   * disposed within a telling — in a later turn, behind what that turn sends, after which nothing
+   * more goes out and nothing more waits.
+   */
   readonly isDisposed: boolean;
   /** What it reads, writes and holds by: its options', {@link LIMIT_DEFAULTS}' where they say nothing. */
   readonly limits: IRouterLimits;
@@ -596,10 +624,15 @@ export interface IRouterCore<Handle extends string> {
   gauges(): IGauges<Handle>;
   /**
    * Whether the call of a request is still to be answered: once its answer goes out, or it is
-   * cancelled, or gone with its connection, it is not. A request this side never dispatched is taken
-   * as one to answer.
+   * cancelled, or gone with its connection, it is not. A request this side never dispatched is open
+   * to none.
    */
   isAnswering(request: { connectionHandle: Handle; header: IHandedRequestHeader }): boolean;
+  /**
+   * Whether this side dispatched a request with `header`, that very object: a copy of it, or a
+   * header built by hand, was never dispatched, and is answered and subscribed by nothing.
+   */
+  isDispatched(header: IHandedRequestHeader): boolean;
   /** Whether this side's `callId` is reserved on `connectionHandle`, since its call ended. */
   isReserved(callId: CallId, connectionHandle: Handle): boolean;
   /**
@@ -612,6 +645,8 @@ export interface IRouterCore<Handle extends string> {
    * comes with the credential its transport carried beside it, which a request presenting
    * `ELSEWHERE` stands for (spec 15.1); given alone, it came with none. Given from within a
    * listener this core called, it is taken in a later turn, behind what came before it (spec 9.0).
+   * Each is counted as it is given, against its `intake`, its connection paused past a bound within
+   * one task and resumed in the next (spec 15.12).
    */
   receive(message: Data | ITransportMessage, connectionHandle: Handle): void;
   /**
@@ -687,8 +722,8 @@ export interface IRouterCore<Handle extends string> {
    * cannot go out rejects it. A result past its limit, a transfer where this side sends none, or the
    * result of a call that opens a subscription, which goes in one envelope, is a
    * {@link FailureError}, and nothing goes out. A failure whose code is not an integer from 1 to
-   * 65535, or a transfer for a request this side never dispatched, is a {@link ProgrammerError}, and
-   * nothing goes out.
+   * 65535, or an answer, whole or a transfer, to a request this side never dispatched — a copy of its
+   * header, say — is a {@link ProgrammerError}, and nothing goes out.
    */
   respond(
     response: RouterAnswer,
@@ -711,7 +746,8 @@ export interface IRouterCore<Handle extends string> {
   ): Promise<void>;
   /**
    * Rejects what still waits, aborts the signal of each call it still answers, and sends nothing
-   * more: no cancel either. Disposed at once, it lets go of what waits as `rejectPending` does.
+   * more: no cancel either. Marked disposed at once, it lets go of what waits as `rejectPending`
+   * does: then, or — within a telling — in a later turn, behind what that turn sends.
    */
   [Symbol.dispose](): void;
 }
@@ -738,6 +774,17 @@ export interface IRouterCoreOptions {
    * inactivity from 1 to 2³¹ − 1 milliseconds, held rounded to the nearest whole one.
    */
   limits?: RouterLimitsOptions | undefined;
+  /**
+   * What it holds of each connection that no turn took yet, past which it pauses that connection
+   * (spec 15.12): {@link INTAKE_DEFAULTS}' where these say nothing, each 1 at least, or the core is
+   * a {@link ProgrammerError}.
+   */
+  intake?: IntakeLimitsOptions | undefined;
+  /**
+   * The telling it shares with its router: what it tells its side runs within it, and what is
+   * handed back from within one waits for a later turn; one of its own when not given.
+   */
+  telling?: ITelling | undefined;
 }
 
 /**
@@ -831,8 +878,19 @@ export interface IRouterCorePort<Handle extends string> {
   ): boolean;
   /** Whether anyone listens to the envelopes traced: nothing is built for `trace` otherwise. */
   isTracing(): boolean;
+  /**
+   * Pauses `connectionHandle`'s transport, what it handed within this task untaken past a bound
+   * (spec 15.12): it hands nothing more of that connection, holding what it received, until
+   * `resume`. Called within the turn that counted the envelope; what it throws is reported.
+   */
+  pause(connectionHandle: Handle): void;
   /** What went wrong that no call waits on. */
   report(error: Error, connectionHandle: Handle): void;
+  /**
+   * Resumes `connectionHandle`'s transport, paused by `pause`: in the next task, or as the core is
+   * disposed. What it throws is reported.
+   */
+  resume(connectionHandle: Handle): void;
   /**
    * Hands an envelope's bytes over to the transport, for `connectionHandle`, with the credential it
    * carries beside them, when it carries one.
@@ -877,9 +935,9 @@ export interface IRouterCorePort<Handle extends string> {
 
 /**
  * The part of a router a service manager calls: it triggers the notifications registered, calls
- * the resolvers registered, and names the failures its side raises. One manager serves both sides,
- * so each router refuses the half that is not its own: a server notifies and subscribes, and holds
- * no notification; a client holds notifications, and notifies nobody.
+ * the resolvers registered, and names the failures its side raises. The untyped manager serves
+ * either side, so each router refuses the half that is not its own: a server notifies and
+ * subscribes, and holds no notification; a client holds notifications, and notifies nobody.
  */
 export interface IRouterLike<Handle extends string = ConnectionHandle> {
   /** The clock it runs on, its transport's, which what is built on it runs on too. */
@@ -910,19 +968,7 @@ export interface IRouterLike<Handle extends string = ConnectionHandle> {
    * given why its value does not write (spec 17.2, item 6), sends it to none, counts it failed for
    * each of them, and reports why once.
    */
-  notify(
-    payload: Uint8Array | Error,
-    notification: {
-      /**
-       * Whether a subscription gets it, by its subscriber: its connection and the session that
-       * holds it; each does when not given.
-       */
-      filter?: ((subscriber: ISubscriber<Handle>) => boolean) | undefined;
-      /** What it replaces, queued for a paced subscription: the one of the same key. */
-      key?: NotificationKey | undefined;
-      procedure: IProcedureAddress;
-    }
-  ): Promise<unknown>;
+  notify(payload: Uint8Array | Error, notification: INotifyRequest<Handle>): Promise<unknown>;
   /**
    * Registers a notification; a procedure off spec section 16, refused first, rejects with a
    * {@link ProgrammerError}, as one already registered does.
@@ -941,27 +987,12 @@ export interface IRouterLike<Handle extends string = ConnectionHandle> {
    * by a throw: the manager tells the call's `tx` step once it returns, so a router that throws
    * loses that step.
    */
-  request(
-    payload: Uint8Array,
-    request: {
-      /**
-       * Hears the call's id once the router drew it, before the request goes; a call refused before
-       * it draws one is never heard. A router that never calls it leaves each step of its calls
-       * naming no call, as a call refused before its id does.
-       */
-      onCallId?: ((callId: CallId) => void) | undefined;
-      options: IResolvedRequestOptions;
-      procedure: IProcedure;
-      /**
-       * What refuses the call once it started, before it goes, as its requester judged it: a value
-       * its rules refuse (spec 18.2). It draws no call id, and its payload goes nowhere.
-       */
-      refusal?: Error | undefined;
-      /** The series its requester's declaration gave; a call that carries none counts as `_OTHER`. */
-      series?: IProcedureSeries | undefined;
-      subscribes?: INotificationLike | undefined;
-    }
-  ): Promise<IRouterResult>;
+  request(payload: Uint8Array, request: IRouterRequest): Promise<IRouterResult>;
+  /**
+   * Answers a request, by the very header its resolver was handed, while its call is open. A request
+   * this side never dispatched — a copy of its header, say — is a {@link ProgrammerError}, and
+   * nothing goes out.
+   */
   respond(
     response: RouterAnswer,
     request: Pick<IRequestResolverProps<Handle>, 'connectionHandle' | 'header'>
@@ -969,10 +1000,10 @@ export interface IRouterLike<Handle extends string = ConnectionHandle> {
   /**
    * Subscribes the connection a request came from to that request's procedure, in the call's
    * session, which bounds it, and gives the call id of the subscription: a server's router does; a
-   * client's, which notifies nobody, cannot. A request that opens no subscription is a
-   * {@link ProgrammerError}: its requester asked for an answer alone. A connection closed, or a
-   * router disposed, is a {@link DisconnectError}; a call its requester cancelled, or one answered
-   * already, a {@link CancelError}.
+   * client's, which notifies nobody, cannot. A request that opens no subscription, or one this side
+   * never dispatched, is a {@link ProgrammerError}: its requester asked for an answer alone, or no
+   * call is tied to it. A connection closed, or a router disposed, is a {@link DisconnectError}; a
+   * call its requester cancelled, or one answered already, a {@link CancelError}.
    */
   subscribe(
     request: Pick<IRequestResolverProps<Handle>, 'connectionHandle' | 'header' | 'session'>
@@ -985,8 +1016,55 @@ export interface IRouterLike<Handle extends string = ConnectionHandle> {
    */
   unregisterNotification(
     notification: INotificationLike,
-    options?: { cancel?: boolean | undefined }
+    options?: IUnregisterNotificationOptions
   ): Promise<unknown>;
+}
+
+/** What a router's `notify` sends a notification's payload with: its procedure, and to whom. */
+export interface INotifyRequest<Handle extends string = ConnectionHandle> {
+  /**
+   * Whether a subscription gets it, by its subscriber: its connection and the session that holds
+   * it; each does when not given.
+   */
+  filter?: ((subscriber: ISubscriber<Handle>) => boolean) | undefined;
+  /** What it replaces, queued for a paced subscription: the one of the same key. */
+  key?: NotificationKey | undefined;
+  procedure: IProcedureAddress;
+}
+
+/** What a router's `request` sends a payload with: its procedure, its options, and its hooks. */
+export interface IRouterRequest {
+  /**
+   * Hears the call's id once the router drew it, before the request goes; a call refused before it
+   * draws one is never heard. A router that never calls it leaves each step of its calls naming no
+   * call, as a call refused before its id does.
+   */
+  onCallId?: ((callId: CallId) => void) | undefined;
+  /**
+   * Hears `true` as the request is handed to the transport, and `false` should the transport refuse
+   * it: before `true`, or after `false`, nothing of it was tried.
+   */
+  onSent?: ((isHanded: boolean) => void) | undefined;
+  options: IResolvedRequestOptions;
+  procedure: IProcedure;
+  /**
+   * What refuses the call once it started, before it goes, as its requester judged it: a value its
+   * rules refuse (spec 18.2). It draws no call id, and its payload goes nowhere.
+   */
+  refusal?: Error | undefined;
+  /**
+   * The series its requester's declaration gave, which a counted call counts into; `_OTHER`'s when
+   * none is given, as a relay's leg B.
+   */
+  series?: IProcedureSeries | undefined;
+  /** The notification the router holds for the procedure, which the call subscribes. */
+  subscribes?: INotificationLike | undefined;
+}
+
+/** How a router unregisters a notification. */
+export interface IUnregisterNotificationOptions {
+  /** Whether its peer is sent a cancel; `true` when not given. */
+  cancel?: boolean | undefined;
 }
 
 /** Where a call is: the connection it is on, and its call id there. */
@@ -1046,6 +1124,9 @@ export type NotificationKey = number | string;
 
 /** A router's limits as its options give them: each one it leaves out, or `undefined`, the default. */
 export type RouterLimitsOptions = { [Key in keyof IRouterLimits]?: IRouterLimits[Key] | undefined };
+
+/** An intake's limits as options give them: each one left out, or `undefined`, the default. */
+export type IntakeLimitsOptions = { [Key in keyof IIntakeLimits]?: IIntakeLimits[Key] | undefined };
 
 /** What a router did: sent or took a request, a response, or a notification. */
 export type RouterActivity = 'notification' | 'request' | 'response';
@@ -1165,18 +1246,6 @@ export type SessionOf<Handle extends string = ConnectionHandle> = (
 /** The stage of a request's that refused it, told (spec 13.12): its credential, or its admission. */
 export type AccessRefusalStage = 'admission' | 'credential';
 
-/**
- * What a call of a procedure takes after its payload: options a server's router must have, naming
- * the connection the call goes to; a client's, or a router's whose handle is any string, may go
- * without.
- */
-export type RequestOptionsParameters<Handle extends string> = string extends Handle
-  ? [options?: IRequestOptions<Handle>]
-  : // bracketed, so a union of handles — a server's, of every transport — stays one handle
-    [Handle] extends [ServerConnectionHandle]
-    ? [options?: Omit<IRequestOptions<never>, 'closeOnTimeout' | 'connectionHandle'>]
-    : [options: IRequestOptions<Handle> & { connectionHandle: Handle }];
-
 /** An answer for the router to send: a payload, or a failure. */
 export type RouterAnswer =
   | { failure: IFailure; payload?: undefined }
@@ -1195,20 +1264,31 @@ export type ServerConnectionHandle = 'server';
  * A call bound to its payload: called with its options, it goes. Never a promise: awaiting it, its
  * options' call forgotten, is a compile error (TS1320), where it would send nothing.
  */
-export interface IBoundCall<Result, Options extends unknown[] = RequestOptionsParameters<string>> {
+export interface IBoundCall<Result, Options extends unknown[] = [options?: IRequestOptions]> {
   (...options: Options): Promise<Result>;
   /** Never set: what makes awaiting the bound call, its options' call forgotten, TS1320. */
   readonly then?: (guard: never) => never;
 }
 
 /**
+ * A command bound to its payload: called with its options, which name its connection, it goes.
+ */
+export type IBoundCommand<Result, Handle extends string = ConnectionHandle> = IBoundCall<
+  Result,
+  [options: ICommandOptions<Handle>]
+>;
+
+/**
  * A subscribing call bound to its payload and its callback: called with its options, it registers
  * the callback, as {@link INotification} says.
  */
-export type IRegistrar = IBoundCall<
-  INotificationRegistration,
-  [options?: Pick<IRequestOptions, 'destinationId' | 'signal' | 'timeout'>]
->;
+export type IRegistrar = IBoundCall<INotificationRegistration, [options?: IRegistrationOptions]>;
+
+/**
+ * What a subscribing call takes: a timeout, a destination and a signal, and no credential, which it
+ * never presents: its subscription is the connection's.
+ */
+export type IRegistrationOptions = Pick<IRequestOptions, 'destinationId' | 'signal' | 'timeout'>;
 
 /**
  * Which `debug` events a listener hears: those of a direction and a type among the ones given — any,
@@ -1372,15 +1452,20 @@ export interface INotificationSerializerClient<
 }
 
 /**
- * A procedure as a requester calls it: its payload, then the options of that call —
- * which, on a server's router, name the connection it goes to.
+ * A command as a server's requester calls it: its payload, then the options of that call, which
+ * name the connection it goes to.
  */
-export interface IRequest<
+export interface ICommand<
   RequestPayload,
   ResponsePayload,
   Handle extends string = ConnectionHandle,
 > extends IProcedure {
-  (requestPayload: RequestPayload): IBoundCall<ResponsePayload, RequestOptionsParameters<Handle>>;
+  (requestPayload: RequestPayload): IBoundCommand<ResponsePayload, Handle>;
+}
+
+/** A procedure as a client's requester calls it: its payload, then the options of that call. */
+export interface IRequest<RequestPayload, ResponsePayload> extends IProcedure {
+  (requestPayload: RequestPayload): IBoundCall<ResponsePayload>;
 }
 
 export interface IRequestDependencies<
@@ -1546,10 +1631,11 @@ export interface IServiceManagerOptions<Handle extends string = ConnectionHandle
 }
 
 /**
- * The resolvers and requesters of the services on one router; `Handle` is how that router names who
- * a request came from.
+ * A client's services, on a client's router (spec 16.11): the requests and notifications it makes
+ * of its server, and the resolvers of the commands it answers; a server's makers are none of its
+ * own. `IClient.services` gives it.
  */
-export interface IServiceManager<Handle extends string = ConnectionHandle> {
+export interface IServiceManagerClient<Handle extends string = ConnectionHandle> {
   /**
    * Whether anyone listens to `debug`: the calls read no clock and build nothing for it otherwise,
    * the one check each makes.
@@ -1566,20 +1652,94 @@ export interface IServiceManager<Handle extends string = ConnectionHandle> {
     options?: IEventIteratorOptions
   ): AsyncIterableIterator<ServiceManagerEventMap[K], undefined>;
   /**
-   * A procedure whose answer is a subscription. One request goes out however many callbacks
-   * register at once; once registered, a callback joins without a request. The same procedure
+   * A procedure whose answer is a subscription, on a client's router alone. One request goes out
+   * however many callbacks register at once; once registered, a callback joins without a request. The same procedure
    * gives the same notification, since the router holds one per procedure; asking for it off spec
    * section 16, checked first, or under another kind, name, revision, deprecation, payload limit or
    * window — unpaced and paced are two — is a {@link ProgrammerError}. A registration cancelled or
    * timed out once its request went out cancels its call, so the other end holds no subscription for
    * it. The serializer of the first ask is the one kept: one procedure's payloads are one
-   * procedure's.
+   * procedure's. Past the types, or on a manager over a router whose side its type does not name,
+   * one asked for on a server's router, which notifies, is a {@link ProgrammerError} as it is made,
+   * before spec 16.10's reasons.
    */
   getNotification<RequestPayload, ResponsePayload, NotificationPayload>(
     procedure: IProcedure,
     dependencies: INotificationDependencies<RequestPayload, ResponsePayload, NotificationPayload>
   ): INotification<RequestPayload, NotificationPayload>;
-  /** As {@link IServiceManager.getRequestResolver}, with a `notify` on the resolver. */
+  /**
+   * What runs a command, on a client's router alone: the server's request, answered as
+   * {@link IServiceManager.getRequestResolver} answers one; told to `debug` as a `command`. Past the
+   * types, or on a manager over a router whose side its type does not name, one asked for on a
+   * server's router, which answers requests, is a {@link ProgrammerError} as it is made, before
+   * spec 16.10's reasons.
+   */
+  getCommandResolver<
+    RequestPayload,
+    ResponsePayload,
+    Failure extends ResolverFailure = ResolverFailure,
+  >(
+    procedure: IProcedure,
+    dependencies: IRequestResolverDependencies<RequestPayload, ResponsePayload, Handle>
+  ): (
+    callback: RequestResolverCallback<RequestPayload, ResponsePayload, Failure, Handle>
+  ) => IRequestResolver<Handle>;
+  /**
+   * A procedure to call, on a client's router alone; a deprecated one emits `deprecated` at each
+   * call. A call whose value does not write fails before anything goes, and is neither traced nor
+   * deprecated: no call is made. Past the types, or on a manager over a router whose side its type
+   * does not name, one asked for on a server's router, which makes commands, is a
+   * {@link ProgrammerError} as it is made, before spec 16.10's reasons.
+   */
+  getRequest<RequestPayload, ResponsePayload>(
+    procedure: IProcedure,
+    dependencies: IRequestDependencies<RequestPayload, ResponsePayload>
+  ): IRequest<RequestPayload, ResponsePayload>;
+  off<K extends SERVICE_MANAGER_EVENTS>(
+    event: K,
+    listener: EmitterListener<ServiceManagerEventMap[K]>
+  ): this;
+  on<K extends SERVICE_MANAGER_EVENTS>(
+    event: K,
+    listener: EmitterListener<ServiceManagerEventMap[K]>
+  ): this;
+  once<K extends SERVICE_MANAGER_EVENTS>(
+    event: K,
+    listener: EmitterListener<ServiceManagerEventMap[K]>
+  ): this;
+  removeAllListeners(event?: SERVICE_MANAGER_EVENTS): this;
+}
+
+/**
+ * A server's services, on a server's router (spec 16.11): the commands it makes of a client, and
+ * the resolvers of the requests and notifications it answers; a client's makers are none of its
+ * own, and no notification of its own is dropped. `IServer.services` gives it.
+ */
+export interface IServiceManagerServer<Handle extends string = ConnectionHandle> {
+  /**
+   * Whether anyone listens to `debug`: the calls read no clock and build nothing for it otherwise,
+   * the one check each makes.
+   */
+  readonly isDebugging: boolean;
+
+  emit<K extends Exclude<SERVICE_MANAGER_EVENTS, 'dropped'>>(
+    event: K,
+    ...params: ServiceManagerEventMap[K]
+  ): boolean;
+  /**
+   * Every `event` from now on, as its arguments, for `for await`; the signal, a `break` or a throw
+   * ends it.
+   */
+  events<K extends Exclude<SERVICE_MANAGER_EVENTS, 'dropped'>>(
+    event: K,
+    options?: IEventIteratorOptions
+  ): AsyncIterableIterator<ServiceManagerEventMap[K], undefined>;
+  /**
+   * As {@link IServiceManager.getRequestResolver}, with a `notify` on the resolver, on a server's
+   * router alone. Past the types, or on a manager over a router whose side its type does not name,
+   * one asked for on a client's router, which hears notifications, is a {@link ProgrammerError} as
+   * it is made, before spec 16.10's reasons.
+   */
   getNotificationResolver<
     RequestPayload,
     ResponsePayload,
@@ -1597,41 +1757,26 @@ export interface IServiceManager<Handle extends string = ConnectionHandle> {
     callback: NotificationResolverCallback<RequestPayload, ResponsePayload, Failure, Handle>
   ) => INotificationResolver<NotificationPayload, Handle>;
   /**
-   * A command: a procedure the server asks one client to run, on a server's router — its request
-   * names the connection it goes to, which the types require. The same as
-   * {@link IServiceManager.getRequest} on the wire; told to `debug` as a `command`.
+   * A command: a procedure the server asks one client to run, on a server's router alone — its
+   * options name the connection it goes to, which the types require. The same as
+   * {@link IServiceManager.getRequest} on the wire; told to `debug` as a `command`. Past the types,
+   * or on a manager over a router whose side its type does not name, one asked for on a client's
+   * router, which makes requests, is a {@link ProgrammerError} as it is made, before spec 16.10's
+   * reasons.
    */
   getCommand<RequestPayload, ResponsePayload>(
     procedure: IProcedure,
     dependencies: IRequestDependencies<RequestPayload, ResponsePayload>
-  ): IRequest<RequestPayload, ResponsePayload, Handle>;
+  ): ICommand<RequestPayload, ResponsePayload, Handle>;
   /**
-   * What runs a command, on a client's router: the server's request, answered as
-   * {@link IServiceManager.getRequestResolver} answers one; told to `debug` as a `command`.
-   */
-  getCommandResolver<
-    RequestPayload,
-    ResponsePayload,
-    Failure extends ResolverFailure = ResolverFailure,
-  >(
-    procedure: IProcedure,
-    dependencies: IRequestResolverDependencies<RequestPayload, ResponsePayload, Handle>
-  ): (
-    callback: RequestResolverCallback<RequestPayload, ResponsePayload, Failure, Handle>
-  ) => IRequestResolver<Handle>;
-  /**
-   * A procedure to call; a deprecated one emits `deprecated` at each call. A call whose value does
-   * not write fails before anything goes, and is neither traced nor deprecated: no call is made.
-   */
-  getRequest<RequestPayload, ResponsePayload>(
-    procedure: IProcedure,
-    dependencies: IRequestDependencies<RequestPayload, ResponsePayload>
-  ): IRequest<RequestPayload, ResponsePayload, Handle>;
-  /**
-   * A procedure to answer: given its callback, the resolver is made and registered in the router.
-   * A procedure off spec section 16 is a {@link ProgrammerError}, before any other reason. A request
+   * A procedure to answer, on a server's router alone: given its callback, the resolver is made and
+   * registered in the router. Past the types, or on a manager over a router whose side its type
+   * does not name, one asked for on a client's router, which answers commands, is a
+   * {@link ProgrammerError} as it is made, before spec 16.10's reasons; then a procedure off spec
+   * section 16, or against its kind (16.11), is one, before any other reason. A request
    * `beforeRequest` refuses — before its payload is read — or whose payload does not decode, is
-   * answered with a failure of the router's without reaching the callback.
+   * answered with a failure of the router's without reaching the callback: a codec that throws other
+   * than its refusal, a `SyntaxError`, is answered `PROCEDURE_FAILED`, and why goes on to the router.
    */
   getRequestResolver<
     RequestPayload,
@@ -1643,6 +1788,33 @@ export interface IServiceManager<Handle extends string = ConnectionHandle> {
   ): (
     callback: RequestResolverCallback<RequestPayload, ResponsePayload, Failure, Handle>
   ) => IRequestResolver<Handle>;
+  off<K extends Exclude<SERVICE_MANAGER_EVENTS, 'dropped'>>(
+    event: K,
+    listener: EmitterListener<ServiceManagerEventMap[K]>
+  ): this;
+  on<K extends Exclude<SERVICE_MANAGER_EVENTS, 'dropped'>>(
+    event: K,
+    listener: EmitterListener<ServiceManagerEventMap[K]>
+  ): this;
+  once<K extends Exclude<SERVICE_MANAGER_EVENTS, 'dropped'>>(
+    event: K,
+    listener: EmitterListener<ServiceManagerEventMap[K]>
+  ): this;
+  removeAllListeners(event?: Exclude<SERVICE_MANAGER_EVENTS, 'dropped'>): this;
+}
+
+/**
+ * The resolvers and requesters of the services on one router whose side its type does not name:
+ * both sides' makers, each refused on the other side's router as it is made; `Handle` is how that
+ * router names who a request came from.
+ */
+export interface IServiceManager<Handle extends string = ConnectionHandle>
+  extends IServiceManagerClient<Handle>, IServiceManagerServer<Handle> {
+  emit<K extends SERVICE_MANAGER_EVENTS>(event: K, ...params: ServiceManagerEventMap[K]): boolean;
+  events<K extends SERVICE_MANAGER_EVENTS>(
+    event: K,
+    options?: IEventIteratorOptions
+  ): AsyncIterableIterator<ServiceManagerEventMap[K], undefined>;
   off<K extends SERVICE_MANAGER_EVENTS>(
     event: K,
     listener: EmitterListener<ServiceManagerEventMap[K]>

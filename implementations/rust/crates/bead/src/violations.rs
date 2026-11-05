@@ -4,11 +4,10 @@
 //! the detail's bound and read back line by line, each through the `json` codec, so a cut keeps
 //! every whole line.
 
-use core::num::NonZeroU16;
-
 use serde_json::{Map, Value};
 
 use crate::constants::{FailureScope, ProtocolCode};
+use crate::failure::Failure;
 use crate::json;
 
 #[cfg(test)]
@@ -37,6 +36,7 @@ pub struct Violation {
 /// What a judging gives: the violations its detail can carry, the count of the rest, and whether
 /// it stopped at its first.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub struct Judged {
     /// The violations, in their order (spec 18.5).
     pub violations: Vec<Violation>,
@@ -51,6 +51,7 @@ pub struct Judged {
 /// Its violations, and its closing line's count, or that its side stopped; neither where the detail
 /// holds no closing line.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub struct ReadViolations {
     /// The violations read, in their order.
     pub violations: Vec<Violation>,
@@ -144,7 +145,7 @@ pub fn detail_bound_of(maximum_detail_bytes: usize, maximum_envelope_bytes: usiz
 
 /// Whether a judging refuses its request: a violation held, or one counted past its bound.
 #[must_use]
-pub fn is_refused(judged: &Judged) -> bool {
+pub(crate) fn is_refused(judged: &Judged) -> bool {
     !judged.violations.is_empty() || judged.more > 0
 }
 
@@ -502,11 +503,12 @@ fn as_violation(value: &Value) -> Option<Violation> {
 /// given the words its rule and its bounds give; then its closing line's count, or that its side
 /// stopped. A failure of another code gives none.
 #[must_use]
-pub fn violations_of((code, scope): (NonZeroU16, FailureScope), detail: &str) -> ReadViolations {
+pub fn violations_of(failure: &Failure) -> ReadViolations {
     let mut read = ReadViolations::default();
+    let detail = failure.detail();
 
-    if code != ProtocolCode::PAYLOAD_INVALID.get()
-        || scope != FailureScope::Protocol
+    if failure.code() != ProtocolCode::PAYLOAD_INVALID.get()
+        || failure.scope() != FailureScope::Protocol
         || detail.is_empty()
     {
         return read;

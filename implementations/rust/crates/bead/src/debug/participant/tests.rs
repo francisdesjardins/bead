@@ -9,7 +9,9 @@ use super::{ParcelVerdict, ParticipantDebugEvent, ParticipantDebugListener};
 use crate::broker::adapter::{
     BrokerAdapter, BrokerDown, BrokerListener, BrokerMessage, BrokerPublication, BrokerSubscription,
 };
-use crate::broker::client::{BrokerClient, BrokerClientOptions, BrokerConnectOptions};
+use crate::broker::client::{
+    BrokerTransportClient, BrokerTransportClientConnectOptions, BrokerTransportClientOptions,
+};
 use crate::broker::memory::{
     MemoryBroker, MemoryBrokerAdapter, MemoryBrokerAdapterOptions, MemoryBrokerOptions,
 };
@@ -17,13 +19,16 @@ use crate::broker::parcel::{
     Parcel, ParcelRead, encode_parcel, flags, kinds, read_parcel, write_parcel,
 };
 use crate::broker::participant::{BrokerParticipant, BrokerParticipantOptions};
-use crate::broker::server::{BrokerServer, BrokerServerOptions};
+use crate::broker::server::{BrokerTransportServer, BrokerTransportServerOptions};
 use crate::clock::SharedClock;
 use crate::debug::DebugDirection;
 use crate::duration::NEVER;
 use crate::router::types::TransportMessage;
 use crate::testing::SteppingClock;
-use crate::transport::{ClientTransport, ReconnectDelay, ReconnectOptions, ServerTransport};
+use crate::transport::{
+    RouterClientTransport, ServerTransport, TransportClientReconnectDelay,
+    TransportClientReconnectOptions,
+};
 
 type Events = Arc<Mutex<Vec<ParticipantDebugEvent>>>;
 
@@ -58,8 +63,8 @@ struct TracePair {
     server_adapter: MemoryBrokerAdapter,
     client_participant: BrokerParticipant,
     server_participant: BrokerParticipant,
-    client: BrokerClient,
-    server: BrokerServer,
+    client: BrokerTransportClient,
+    server: BrokerTransportServer,
     events: Events,
     server_events: Events,
     listener: ParticipantDebugListener,
@@ -78,19 +83,19 @@ impl TracePair {
         })
         .expect("a broker");
         let client_adapter = broker
-            .adapter(&MemoryBrokerAdapterOptions::of("client"))
+            .adapter(&MemoryBrokerAdapterOptions::new("client"))
             .expect("an adapter");
         let server_adapter = broker
-            .adapter(&MemoryBrokerAdapterOptions::of("server"))
+            .adapter(&MemoryBrokerAdapterOptions::new("server"))
             .expect("an adapter");
         let client_participant = BrokerParticipant::new(
             Arc::new(client_adapter.clone()),
             &BrokerParticipantOptions {
                 clock: Some(Arc::clone(&shared)),
                 heartbeat: Some(NEVER),
-                reconnect: Some(ReconnectOptions {
-                    delay: Some(ReconnectDelay::Fixed(Duration::ZERO)),
-                    ..ReconnectOptions::default()
+                reconnect: Some(TransportClientReconnectOptions {
+                    delay: Some(TransportClientReconnectDelay::Fixed(Duration::ZERO)),
+                    ..TransportClientReconnectOptions::default()
                 }),
                 ..BrokerParticipantOptions::default()
             },
@@ -118,15 +123,15 @@ impl TracePair {
         server_participant.on_debug(hear(&server_events));
 
         let server = server_participant
-            .server(&BrokerServerOptions::of(["interop"]))
+            .server(&BrokerTransportServerOptions::new(["interop"]))
             .expect("a server");
         let client = client_participant
-            .client(&BrokerClientOptions::default())
+            .client(&BrokerTransportClientOptions::default())
             .expect("a client");
 
         server.start().await.expect("started");
         client
-            .connect(BrokerConnectOptions::of("interop"))
+            .connect(&BrokerTransportClientConnectOptions::new("interop"))
             .await
             .expect("connected");
         settle(&clock, &server_clock).await;
@@ -155,7 +160,7 @@ impl TracePair {
 
     async fn send(&self, payload: Bytes) {
         self.server_adapter
-            .publish(BrokerPublication::of(["bead", "i", "client"], payload))
+            .publish(BrokerPublication::new(["bead", "i", "client"], payload))
             .await
             .expect("published");
         settle(&self.clock, &self.server_clock).await;
@@ -163,7 +168,7 @@ impl TracePair {
 
     async fn publish(&self, payload: Bytes, place: &str) {
         self.client_adapter
-            .publish(BrokerPublication::of(
+            .publish(BrokerPublication::new(
                 [
                     "bead",
                     place,
@@ -185,13 +190,13 @@ impl TracePair {
 async fn settle(clock: &SteppingClock, server_clock: &SteppingClock) {
     // * the server's owner has its own clock: settle across both owners and the broker
     for _ in 0..50 {
-        tokio::task::yield_now().await;
+        crate::testing::yield_now().await;
     }
     clock.settle().await;
     server_clock.settle().await;
     clock.settle().await;
     for _ in 0..50 {
-        tokio::task::yield_now().await;
+        crate::testing::yield_now().await;
     }
 }
 
@@ -311,7 +316,7 @@ async fn traces_each_incoming_verdict_once_after_judgment_and_names_a_loss_by_it
     }))
     .await;
     pair.server_adapter
-        .publish_retained(BrokerPublication::of(
+        .publish_retained(BrokerPublication::new(
             ["bead", "i", "client"],
             written(&parcel),
         ))
@@ -325,7 +330,7 @@ async fn traces_each_incoming_verdict_once_after_judgment_and_names_a_loss_by_it
         .await
         .expect("subscribed");
     pair.server_adapter
-        .publish(BrokerPublication::of(
+        .publish(BrokerPublication::new(
             ["other", "i", "client"],
             written(&parcel),
         ))
@@ -363,6 +368,10 @@ async fn traces_each_incoming_verdict_once_after_judgment_and_names_a_loss_by_it
     pair.stop().await;
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "the twin plays every leg's trace in one connection's history"
+)]
 // debugging 13.3, 13.7
 #[tokio::test]
 async fn traces_parcel_attempts_and_third_leg_handles_without_carried_bytes_credentials_or_an_acceptor_s_half()
@@ -391,7 +400,14 @@ async fn traces_parcel_attempts_and_third_leg_handles_without_carried_bytes_cred
             event.direction == Some(DebugDirection::Rx) && event.kind.as_deref() == Some("DATA")
         })
         .expect("a DATA taken");
-    let handle = Arc::clone(&pair.server.clients().first().expect("a client").0);
+    let handle = Arc::clone(
+        &pair
+            .server
+            .clients()
+            .first()
+            .expect("a client")
+            .connection_handle,
+    );
 
     assert_eq!(
         (
@@ -529,7 +545,7 @@ async fn tells_completed_link_transitions_and_held_names_by_push_and_keeps_level
         "levels by pull"
     );
     pair.client
-        .connect(BrokerConnectOptions::of("interop"))
+        .connect(&BrokerTransportClientConnectOptions::new("interop"))
         .await
         .expect("connected");
     settle(&pair.clock, &pair.server_clock).await;
@@ -575,6 +591,47 @@ async fn tells_completed_link_transitions_and_held_names_by_push_and_keeps_level
     pair.stop().await;
 }
 
+// debugging 13.5
+#[tokio::test]
+async fn tells_each_name_its_stop_lets_go_once_its_broker_let_it_go_after_its_closes_and_before_its_stopped()
+ {
+    let pair = TracePair::of().await;
+    let from = locked(&pair.server_events).len();
+
+    pair.server_participant.stop().await;
+
+    let told: Vec<ParticipantDebugEvent> = locked(&pair.server_events)
+        .get(from..)
+        .unwrap_or_default()
+        .to_vec();
+    let at = |found: &dyn Fn(&ParticipantDebugEvent) -> bool| told.iter().position(found);
+    let close = at(&|event| {
+        event.kind.as_deref() == Some("CLOSE") && event.direction == Some(DebugDirection::Tx)
+    })
+    .expect("its CLOSE");
+    let names = at(&|event| event.event == "names").expect("its name let go");
+    let stopped =
+        at(&|event| event.event == "link" && event.state == Some("stopped")).expect("its stopped");
+
+    assert!(
+        close < names && names < stopped,
+        "its CLOSE, then its name let go, then its stopped"
+    );
+    assert_eq!(
+        told.iter()
+            .filter(|event| event.event == "names")
+            .map(|event| (event.name.clone(), event.is_held, event.group.clone()))
+            .collect::<Vec<_>>(),
+        [(Some("interop".to_owned()), Some(false), None)],
+        "its name let go, once"
+    );
+    assert!(
+        pair.server_participant.names().is_empty(),
+        "none held once stopped"
+    );
+    pair.stop().await;
+}
+
 #[tokio::test]
 async fn tells_a_takeover_once_after_clearing_names_and_connections_and_tells_no_later_link_transition()
  {
@@ -605,13 +662,69 @@ async fn tells_a_takeover_once_after_clearing_names_and_connections_and_tells_no
     pair.stop().await;
 }
 
+// debugging 13.5
+#[tokio::test]
+async fn tells_a_stop_once_then_its_next_link_s_up_as_another_incarnation_and_nothing_after_a_dispose()
+ {
+    let pair = TracePair::of().await;
+    let participant = &pair.client_participant;
+
+    // * a stop, then another with no link between, which tells nothing
+    participant.stop().await;
+    participant.stop().await;
+    settle(&pair.clock, &pair.server_clock).await;
+
+    // * its next link, then its dispose, then nothing more: a stop, a dispose, a start refused
+    participant.start().await.expect("started");
+    settle(&pair.clock, &pair.server_clock).await;
+    participant.dispose().await;
+    participant.stop().await;
+    participant.dispose().await;
+    assert!(participant.start().await.is_err(), "a start refused");
+    settle(&pair.clock, &pair.server_clock).await;
+
+    let links: Vec<ParticipantDebugEvent> = locked(&pair.events)
+        .iter()
+        .filter(|event| event.event == "link")
+        .cloned()
+        .collect();
+    let incarnation_of = |at: usize| links.get(at).and_then(|event| event.incarnation.clone());
+
+    assert_eq!(
+        links.iter().map(|event| event.state).collect::<Vec<_>>(),
+        [Some("up"), Some("stopped"), Some("up"), Some("stopped")],
+        "each stop told once, its next link's up between them, and nothing after its dispose"
+    );
+    assert_eq!(
+        links.get(1).and_then(|event| event.ended.clone()),
+        Some(vec![1]),
+        "the connection its stop ended"
+    );
+    assert_eq!(
+        incarnation_of(0),
+        incarnation_of(1),
+        "its stop names the link it ended"
+    );
+    assert_ne!(
+        incarnation_of(1),
+        incarnation_of(2),
+        "its next link another incarnation"
+    );
+    assert_eq!(
+        incarnation_of(2),
+        incarnation_of(3),
+        "its dispose stops that link"
+    );
+    pair.stop().await;
+}
+
 // debugging 13.6, 13.9
 #[tokio::test]
 async fn reports_a_debug_listener_s_throw_and_calls_later_listeners_while_the_participant_carries_on()
  {
     let broker = MemoryBroker::new(&MemoryBrokerOptions::default()).expect("a broker");
     let adapter = broker
-        .adapter(&MemoryBrokerAdapterOptions::of("client"))
+        .adapter(&MemoryBrokerAdapterOptions::new("client"))
         .expect("an adapter");
     let participant =
         BrokerParticipant::new(Arc::new(adapter), &BrokerParticipantOptions::default())
@@ -919,6 +1032,10 @@ fn check_verdict_names() {
 }
 
 #[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test repeats its own string a bounded number of times"
+)]
 fn keeps_only_each_parcel_kind_s_body_fields_and_the_prefix_when_no_body_reads() {
     check_verdict_names();
 

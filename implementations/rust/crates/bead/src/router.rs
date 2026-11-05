@@ -5,6 +5,7 @@ pub(crate) mod admissions;
 pub(crate) mod answers;
 pub(crate) mod client;
 pub(crate) mod core;
+pub(crate) mod intake;
 pub(crate) mod parts;
 pub(crate) mod relay;
 pub(crate) mod requester;

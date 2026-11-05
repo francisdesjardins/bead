@@ -25,13 +25,7 @@ import type {
 } from '../router/shared/types';
 import { PAYLOAD_CODECS } from '../router/shared/payloads';
 import { createMemoryTransportClient } from '../transport/client/memory-transport-client';
-import {
-  assertHeld,
-  assertHeldFinite,
-  type IClock,
-  PLATFORM_CLOCK,
-  type TimeoutId,
-} from '../transport/shared/clock';
+import { assertHeld, type IClock, PLATFORM_CLOCK, type TimeoutId } from '../transport/shared/clock';
 import { REFUSAL_HEADER } from '../transport/shared/constants';
 import { createEmitter } from '../transport/shared/emitter';
 import {
@@ -57,6 +51,8 @@ import {
   requestTargetOf,
 } from '../transport/server/hosts-and-origins';
 import {
+  httpPolicyOf,
+  type IHTTPPolicy,
   type IHTTPPolicyInit,
   type IHTTPPolicyOption,
   withPolicy,
@@ -92,21 +88,10 @@ import type {
   IHTTPResponseLike,
   IHTTPServerLike,
 } from '../transport/server/types';
-import { MAXIMUM_UNSENT_BYTES } from '../transport/server/ws-transport-server';
-import { bindRequest } from './binding';
-import {
-  createEventStream,
-  EVENT_STREAM_MEDIA_TYPE,
-  eventDataOf,
-  type IEventStream,
-} from './events';
-import {
-  JsonFormError,
-  type ITypeRegistry,
-  typeRegistryOf,
-  writeFieldJson,
-  writeProtoJson,
-} from './json-form';
+import { MAXIMUM_UNSENT_BYTES } from '../transport/server/websocket-transport-server';
+import { createHTTPBinding } from './binding';
+import { createEventStream, EVENT_STREAM_MEDIA_TYPE, type IEventStream } from './events';
+import { createJsonForm, JsonFormError, responseFieldOf } from './json-form';
 import {
   type Arose,
   type Encoding,
@@ -535,12 +520,14 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
 
   const timeout = assertHeld('timeout', givenTimeout);
   const heartbeat = assertHeld('heartbeat', givenHeartbeat);
-  const headersTimeout = assertHeldFinite('headersTimeout', givenHeadersTimeout);
-  const bodyGracePeriod = assertHeldFinite('bodyGracePeriod', givenBodyGracePeriod);
-  const pace = {
-    minimumSendBytesPerSecond,
-    sendGracePeriod: assertHeldFinite('sendGracePeriod', givenSendGracePeriod),
-  };
+  // 15.12's three durations, held once by the policy's own check and in its words, as an HTTP
+  // server built on a policy holds them: each given, so each kept
+  const { bodyGracePeriod, headersTimeout, sendGracePeriod } = httpPolicyOf({
+    bodyGracePeriod: givenBodyGracePeriod,
+    headersTimeout: givenHeadersTimeout,
+    sendGracePeriod: givenSendGracePeriod,
+  }) as IHTTPPolicy & Record<'bodyGracePeriod' | 'headersTimeout' | 'sendGracePeriod', number>;
+  const pace = { minimumSendBytesPerSecond, sendGracePeriod };
 
   assertHosts(hosts);
   assertOrigins(origins);
@@ -583,13 +570,13 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
       );
     }
   }
-  const registry: ITypeRegistry = typeRegistryOf(
-    routes.flatMap(({ notification, request, result }) => {
-      return [request, result, notification].filter((payload): payload is DescMessage => {
-        return typeof payload === 'object';
-      });
-    })
-  );
+  const schemas = routes.flatMap(({ notification, request, result }) => {
+    return [request, result, notification].filter((payload): payload is DescMessage => {
+      return typeof payload === 'object';
+    });
+  });
+  const form = createJsonForm(schemas);
+  const binding = createHTTPBinding(schemas);
   const documentBytes = document === undefined ? undefined : ENCODER.encode(document);
   const etag =
     documentBytes === undefined
@@ -982,13 +969,13 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
 
     if (token === undefined) {
       return {
-        problem: problemOfOwn('scheme', { challenge, detail: 'an auth-scheme but Bearer' }),
+        problem: problemOfOwn('scheme', 'an auth-scheme but Bearer', { challenge }),
       };
     }
 
     if (ENCODER.encode(token).length > JWT_BYTES) {
       return {
-        problem: problemOfOwn('jwt', { detail: `a token past ${String(JWT_BYTES)} bytes` }),
+        problem: problemOfOwn('jwt', `a token past ${String(JWT_BYTES)} bytes`),
       };
     }
 
@@ -1023,8 +1010,8 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     return {
       body:
         route.responseBody === undefined || isNotification
-          ? writeProtoJson(payload, { message, registry })
-          : writeFieldJson(payload, { message, name: route.responseBody, registry }),
+          ? form.write(payload, message)
+          : form.writeField(responseFieldOf(payload, route.responseBody), message),
     };
   };
 
@@ -1096,7 +1083,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     if (reason instanceof TimeoutError) {
       report(reason);
 
-      return problemOfOwn('timeout', { detail: `no answer within ${String(timeout)} ms` });
+      return problemOfOwn('timeout', `no answer within ${String(timeout)} ms`);
     }
 
     // * the mapping's own words of the result it holds no form of, fixed in transcoding.json
@@ -1104,7 +1091,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
       report(reason);
 
       // ! a detail of the side's own words: the mapping's own, fixed in transcoding.json
-      return problemOfOwn('unwritable', { detail: reason.message });
+      return problemOfOwn('unwritable', reason.message);
     }
 
     if (reason instanceof CancelError) {
@@ -1114,7 +1101,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     if (reason instanceof DisconnectError) {
       report(reason);
 
-      return problemOfOwn('closed', { detail: 'the connection closed' });
+      return problemOfOwn('closed', 'the connection closed');
     }
 
     // the stock library's refusal of a result, or a notification, the server answered: its words
@@ -1131,7 +1118,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     // ! what no gate foresaw: its words are reported, never the gateway's
     report(reason);
 
-    return problemOfOwn('failed', { detail: '' });
+    return problemOfOwn('failed', '');
   };
 
   /** Serves an exchange its routes take, past the gates of 10.1's steps 8 to 11. */
@@ -1263,11 +1250,10 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
       }
 
       if (typeof init.request === 'object') {
-        const message = bindRequest(init.request, {
+        const message = binding.bind(init.request, {
           body,
           isPatch: route.method === 'PATCH',
           query,
-          registry,
           routeBody: route.body,
           variables: decoded.variables,
         });
@@ -1311,7 +1297,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     // * one Bead connection for this exchange, closed as its response ends (2.1); its client
     // declares no resolver: a command its server sends is answered SERVICE_UNKNOWN (2.6)
     const client = createClient(
-      { transport: createMemoryTransportClient({ clock, server: transport }) },
+      { transport: createMemoryTransportClient({ clock }) },
       { devtools: false, limits }
     );
     const abort = new AbortController();
@@ -1334,6 +1320,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
       await client.connect({
         address: exchange.address,
         ...(exchange.port === undefined ? {} : { port: exchange.port }),
+        server: transport,
       });
     } catch (error) {
       if (abort.signal.aborted) {
@@ -1357,7 +1344,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
                   },
                   { challenge }
                 )
-              : problemOfOwn('failed', { detail: '' }),
+              : problemOfOwn('failed', ''),
         }),
         undefined
       );
@@ -1439,7 +1426,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
         drop: (failure?: IReceivedFailure) => {
           end(
             failure === undefined
-              ? problemOfOwn('closed', { detail: 'the connection closed' })
+              ? problemOfOwn('closed', 'the connection closed')
               : problemOfFailure(
                   {
                     arose: 'server',
@@ -1471,7 +1458,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
                 encoding,
                 isHanded: true,
                 variables,
-              }) ?? problemOfOwn('closed', { detail: 'the connection closed' })
+              }) ?? problemOfOwn('closed', 'the connection closed')
             );
 
             return [];
@@ -1540,7 +1527,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
           encoding,
           isHanded: true,
           variables,
-        }) ?? problemOfOwn('closed', { detail: 'the connection closed' });
+        }) ?? problemOfOwn('closed', 'the connection closed');
 
       if (stream === undefined) {
         answerProblem(exchange, { problem });
@@ -1582,11 +1569,12 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
         return PAYLOAD_CODECS.text.decode(bytes);
       });
 
-      return eventDataOf({ encoding: 'text', text });
+      return JSON.stringify(text);
     }
 
-    if (payload === 'raw') {
-      return eventDataOf({ bytes, encoding: 'raw' });
+    // * a proto one never comes here: it is written as the result's body is
+    if (payload === 'json' || payload === 'raw') {
+      return form.eventDataOf(payload, bytes);
     }
 
     return DECODER.decode(bytes);
@@ -1768,7 +1756,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
       // ! what no gate foresaw: its exchange ends, never the gateway, and its words are reported
       report(error);
       answerProblem(exchange, {
-        problem: problemOfOwn('failed', { detail: '' }),
+        problem: problemOfOwn('failed', ''),
       });
     });
 

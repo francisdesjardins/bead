@@ -58,7 +58,7 @@ internal sealed class CredentialResolver
         _audiences = _credentials.Audience is { } audience ? [audience] : [];
         _minute = (long)(KeySetMinute.TotalSeconds * _clock.TimestampFrequency);
         _hold = (long)(KeySetHold.TotalSeconds * _clock.TimestampFrequency);
-        JwtVerifier.AssertHeld((_credentials.Keys, _audiences));
+        JwtVerifier.AssertJwtKey((_credentials.Keys, _audiences));
 
         // ! keys held to no audience would refuse every JWT SESSION_REQUIRED, which withdraws a
         // client's default: the application's fault, told as the side is built, never charged to a
@@ -472,7 +472,7 @@ internal sealed class CredentialResolver
             {
                 return new JwtKey { Issuer = issuer.Name, Algorithm = key.Algorithm, Jwk = key.Jwk };
             })];
-            JwtVerifier.AssertHeld((answered, []));
+            JwtVerifier.AssertJwtKey((answered, []));
         }
         catch (Exception reason)
         {

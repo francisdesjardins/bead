@@ -19,7 +19,7 @@ import {
   type IHandshakeRequestLike,
   refusalOfHandshake,
   toldOfHandshake,
-} from '../../src/transport/server/ws-handshake';
+} from '../../src/transport/server/websocket-handshake';
 
 // constants
 

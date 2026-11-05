@@ -318,7 +318,8 @@ test.describe('createHTTPRequestExchange', () => {
     expect(ends).toEqual([
       { reason: REFUSALS.MALFORMED, status: 400 },
       { reason: REFUSALS.TOO_LARGE, status: 413 },
-      { reason: REFUSALS.BUSY, status: 429 },
+      // * told when to come back, which a client waits for before it sends again (spec 15.6)
+      { headers: { 'retry-after': '1' }, reason: REFUSALS.BUSY, status: 429 },
     ]);
     expect(asked).toEqual(['finish', 'finish', 'admitExchange', 'finish']);
   });

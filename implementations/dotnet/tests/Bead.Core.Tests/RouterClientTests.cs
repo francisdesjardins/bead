@@ -36,7 +36,7 @@ public sealed partial class RouterClientTests
 
     // helpers
 
-    private static Func<JsonElement, BoundCall<JsonElement>> RequesterOf(ServiceManager services, string procedureName)
+    private static Func<JsonElement, BoundCall<JsonElement>> RequesterOf(IServiceManagerClient services, string procedureName)
     {
         return services.GetRequest(
             InteropProcedures.All.Single((procedure) =>
@@ -145,7 +145,7 @@ public sealed partial class RouterClientTests
     }
 
     [Fact]
-    public async Task Fails_a_command_to_no_connection_or_to_none_named()
+    public async Task Fails_a_command_to_a_connection_not_open()
     {
         using var link = new Link();
 
@@ -155,11 +155,7 @@ public sealed partial class RouterClientTests
 
         await Assert.ThrowsAsync<DisconnectException>(() =>
         {
-            return clock(JsonOf("null"))(new RequestOptions { ConnectionHandle = "type=WS;ip=127.0.0.1;port=1;ordinal=1" }).WaitAsync(Patience, Cancelled);
-        });
-        await Assert.ThrowsAsync<ArgumentException>(() =>
-        {
-            return clock(JsonOf("null"))();
+            return clock(JsonOf("null"))(new CommandOptions { ConnectionHandle = "type=WS;ip=127.0.0.1;port=1;ordinal=1" }).WaitAsync(Patience, Cancelled);
         });
     }
 
@@ -280,7 +276,7 @@ public sealed partial class RouterClientTests
         });
 
         Assert.Equal(
-            "a client's router runs on the clock of its transport, a FakeTimeProvider, and was given another, the system's",
+            "a client's router runs on the clock of its transport, one of its own, and was given another, the platform's",
             refusal.Message);
     }
 
@@ -1079,11 +1075,15 @@ public sealed partial class RouterClientTests
         var router = scripted.Router;
         var failure = new InvalidOperationException("drop bug");
         var again = new ScriptedNotification(Service);
+
+        // whether what a drop registers again was held within that drop's turn
+        var heldWithin = new List<bool>();
         var reregistering = new ScriptedNotification(Service with { ProcedureId = 7 })
         {
             OnDrop = (reason) =>
             {
                 _ = router.RegisterNotification(again);
+                heldWithin.Add(router.HasNotification(again));
             },
         };
 
@@ -1098,6 +1098,9 @@ public sealed partial class RouterClientTests
         scripted.Transport.CloseConnection();
         await scripted.Settle();
         Assert.Same(failure, Assert.Single(scripted.Errors));
+
+        // what a drop registers again is taken in a later turn (spec 9.0)
+        Assert.Equal([false], heldWithin);
         Assert.True(router.HasNotification(again));
         Assert.False(router.HasNotification(reregistering));
     }
@@ -1860,6 +1863,127 @@ public sealed partial class RouterClientTests
         Assert.Equal(0, transport.Listeners);
     }
 
+    // spec 9.0, 15.1; decision 0045: the client's side of the conversation of a call made as a
+    // request is read, its turn deferring the refusal of an ELSEWHERE its transport carried nothing
+    // beside
+    [Fact]
+    public async Task A_call_a_listener_makes_goes_among_what_its_turn_defers_in_the_order_deferred()
+    {
+        using var scripted = new ScriptedRouter(new RouterClientOptions
+        {
+            Credentials = new Credentials
+            {
+                Verify = (_, _) =>
+                {
+                    return ValueTask.FromResult<ElsewhereSession?>(null);
+                },
+            },
+        });
+        var (router, transport) = (scripted.Router, scripted.Transport);
+        var made = new List<Task<RouterResult>>();
+
+        router.RegisterResolver(new ScriptedResolver(Service, (_) =>
+        {
+            return Task.CompletedTask;
+        }));
+        router.Debug += (direction, envelope) =>
+        {
+            if (direction != DebugDirection.Rx || envelope.Header is not RequestHeader)
+            {
+                return;
+            }
+
+            // within the turn that reads its server's command, before the refusal it defers
+            made.Add(router.Request(new byte[] { 7 }, RequestOf()));
+        };
+
+        // its server's command, an ELSEWHERE its transport carried nothing beside
+        transport.Deliver(new Envelope { Header = RequestHeaderOf(2) with { Credential = Credential.Elsewhere() } });
+        await scripted.Settle();
+
+        Assert.Equal([(EnvelopeKind.Request, 1u), (EnvelopeKind.Failure, 2u)], transport.Calls);
+        Assert.Equal(new byte[] { 7 }, transport.Envelopes[0].Payload.ToArray());
+        Assert.Equal((2u, ProtocolCode.SessionRequired), Assert.Single(transport.Failures));
+        Assert.Equal("no credential came", transport.Envelopes[1].Failure!.Detail);
+        _ = Assert.Single(made);
+    }
+
+    // decision 0045: one queue of turns, the scheduler's, a listener's call at its tail, behind one
+    // another thread made while that listener waited within its turn
+    [Fact]
+    public async Task A_call_a_listener_makes_within_a_turn_goes_behind_every_call_made_before_it()
+    {
+        using var scripted = new ScriptedRouter();
+        var (router, transport) = (scripted.Router, scripted.Transport);
+        using var entered = new ManualResetEventSlim();
+        using var released = new ManualResetEventSlim();
+        var made = new List<Task<RouterResult>>();
+
+        router.Debug += (direction, envelope) =>
+        {
+            if (direction != DebugDirection.Rx || envelope.Header.CallId != 1)
+            {
+                return;
+            }
+
+            // within its router's turn: it says so, waits until another thread made its call, then
+            // calls, still within that turn
+            entered.Set();
+            _ = released.Wait(Patience, Cancelled);
+            made.Add(router.Request(new byte[] { 3 }, RequestOf()));
+        };
+
+        var first = router.Request(new byte[] { 1 }, RequestOf());
+
+        await scripted.Settle();
+
+        // * the first answer handed to its router, read in a turn its listener holds; meanwhile, from
+        // this thread, a call: queued while that turn runs
+        transport.Deliver(ResultOf(1));
+        Assert.True(entered.Wait(Patience, Cancelled));
+
+        var second = router.Request(new byte[] { 2 }, RequestOf());
+
+        released.Set();
+        await first.WaitAsync(Patience, Cancelled);
+        await scripted.Settle();
+
+        // the listener's call behind the one made before it
+        Assert.Equal(
+            [1, 2, 3],
+            transport.Envelopes.Where((envelope) =>
+            {
+                return envelope.Kind == EnvelopeKind.Request;
+            }).Select((envelope) =>
+            {
+                return (int)envelope.Payload.Span[0];
+            }));
+        _ = Assert.Single(made);
+        Assert.False(second.IsCompleted);
+    }
+
+    // spec 11.7; decision 0045: a step on its router's state, never deferred, as the facade calls
+    // its core within the turn
+    [Fact]
+    public async Task A_subscription_s_call_cancels_the_one_bound_before_it_ahead_of_its_own_request()
+    {
+        using var scripted = new ScriptedRouter();
+        var (router, transport) = (scripted.Router, scripted.Transport);
+        var notification = new ScriptedNotification(Service);
+
+        var first = await scripted.Subscribe(notification);
+
+        transport.Deliver(ResultOf(1));
+        await first.WaitAsync(Patience, Cancelled);
+
+        var second = router.Request(ReadOnlyMemory<byte>.Empty, RequestOf(notification));
+
+        await scripted.Settle();
+
+        Assert.Equal([(EnvelopeKind.Request, 1u), (EnvelopeKind.Cancel, 1u), (EnvelopeKind.Request, 3u)], transport.Calls);
+        Assert.False(second.IsCompleted);
+    }
+
     // a router that records the resolvers registered on it, and does nothing else
     private sealed class Registrations(RouterSide side) : IRouterLike
     {
@@ -2082,9 +2206,54 @@ public sealed partial class RouterClientTests
             }
         }
 
+        // each pause, true, and resume its router asked of it
+        public List<bool> Pauses { get; } = [];
+
+        // * what it holds while its router paused it, in order, handed on once resumed
+        public TransportHold<TransportMessage> Hold { get; } = new();
+
+        // where what it held is handed on once resumed, a step of its own: the thread pool unless a
+        // test gives its router's scheduler, so what it hands is settled with the rest
+        public Action<Action> Later { get; init; } = (step) =>
+        {
+            ThreadPool.QueueUserWorkItem((_) =>
+            {
+                step();
+            });
+        };
+
+        public void Pause()
+        {
+            lock (Pauses)
+            {
+                Pauses.Add(true);
+            }
+
+            Hold.Pause();
+        }
+
+        public void Resume()
+        {
+            lock (Pauses)
+            {
+                Pauses.Add(false);
+            }
+
+            if (Hold.Resume())
+            {
+                Later(() =>
+                {
+                    while (Hold.TryTake(out var message))
+                    {
+                        Message?.Invoke(message);
+                    }
+                });
+            }
+        }
+
         public void Deliver(byte[] bytes)
         {
-            Message?.Invoke(new TransportMessage(bytes, false));
+            Hand(new TransportMessage(bytes, false));
         }
 
         public void Deliver(Envelope envelope)
@@ -2095,18 +2264,18 @@ public sealed partial class RouterClientTests
         // an envelope that came by a way that keeps no order with the answers, which it may overtake
         public void Overtaking(Envelope envelope)
         {
-            Message?.Invoke(new TransportMessage(EnvelopeCodec.WriteEnvelope(envelope), false) { MayOvertake = true });
+            Hand(new TransportMessage(EnvelopeCodec.WriteEnvelope(envelope), false) { MayOvertake = true });
         }
 
         // an envelope, with what the transport carried beside it
         public void Carrying(Envelope envelope, string carried)
         {
-            Message?.Invoke(new TransportMessage(EnvelopeCodec.WriteEnvelope(envelope), false) { Credential = carried });
+            Hand(new TransportMessage(EnvelopeCodec.WriteEnvelope(envelope), false) { Credential = carried });
         }
 
         public void DeliverText(byte[] bytes)
         {
-            Message?.Invoke(new TransportMessage(bytes, true));
+            Hand(new TransportMessage(bytes, true));
         }
 
         public void CloseConnection()
@@ -2118,6 +2287,15 @@ public sealed partial class RouterClientTests
         public void Replace()
         {
             Reconnect?.Invoke();
+        }
+
+        // what a test delivers: handed on at once, or held while its router paused it
+        private void Hand(TransportMessage message)
+        {
+            if (Hold.Offer(message))
+            {
+                Message?.Invoke(message);
+            }
         }
 
         public bool Carries(string credential)
@@ -2155,7 +2333,7 @@ public sealed partial class RouterClientTests
         {
             var scheduler = new SerialScheduler();
 
-            Transport = new ScriptedTransport { Clock = options.Clock ?? new FakeTimeProvider() };
+            Transport = new ScriptedTransport { Clock = options.Clock ?? new FakeTimeProvider(), Later = scheduler.Post };
             Router = new RouterClient(
                 Transport,
                 options with
@@ -2426,12 +2604,12 @@ public sealed partial class RouterClientTests
             }
         }
 
-        public ServiceManager ClientServices { get; }
+        public IServiceManagerClient ClientServices { get; }
 
         // the client as a Bead client, its services those above, for the interop's generated client
         public ServiceLink.LinkedClient AsClient { get; }
 
-        public ServiceManager ServerServices { get; }
+        public IServiceManagerServer ServerServices { get; }
 
         public List<IEnvelopeHeader> ClientReceived { get; } = [];
 
@@ -2445,6 +2623,16 @@ public sealed partial class RouterClientTests
 
         private sealed class ClientEnd : IRouterClientTransport
         {
+            // its router paused and resumed it, which hands what it hands all the same: no test of
+            // this one's reaches a bound
+            public void Pause()
+            {
+            }
+
+            public void Resume()
+            {
+            }
+
             public TimeProvider Clock { get; init; } = TimeProvider.System;
 
             public event Action<TransportMessage>? Message;
@@ -2475,6 +2663,16 @@ public sealed partial class RouterClientTests
 
         private sealed class ServerEnd : IServerTransport
         {
+            // its router paused and resumed it, which hands what it hands all the same: no test of
+            // this one's reaches a bound
+            public void Pause(string connectionHandle)
+            {
+            }
+
+            public void Resume(string connectionHandle)
+            {
+            }
+
             public string? Type
             {
                 get
@@ -2560,6 +2758,16 @@ public sealed partial class RouterClientTests
     // a client's transport a test delivers to, and whose connection it replaces, as a reconnection does
     private sealed class ReconnectingTransport : IRouterClientTransport
     {
+        // its router paused and resumed it, which hands what it hands all the same: no test of
+        // this one's reaches a bound
+        public void Pause()
+        {
+        }
+
+        public void Resume()
+        {
+        }
+
         public TimeProvider Clock { get; init; } = TimeProvider.System;
 
         public event Action<TransportMessage>? Message;

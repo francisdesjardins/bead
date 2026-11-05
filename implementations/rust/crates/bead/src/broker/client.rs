@@ -6,9 +6,11 @@
 //! ended. It carries the credential a request presents beside it, any field value, on the first
 //! part of its DATA, and takes none from its server, closing with 1002 a connection whose server's
 //! DATA carries one (spec 15.22). It is secure while its own leg and its server's are, as its ACCEPT
-//! said.
+//! said. Paused by its router, whole, its participant holds what comes on its connection, never its
+//! link (spec 15.12, 15.23).
 
 use core::fmt;
+use core::sync::atomic::{AtomicBool, Ordering};
 use core::time::Duration;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
@@ -18,8 +20,8 @@ use tokio_util::sync::CancellationToken;
 use crate::broker::adapter::BrokerPublished;
 use crate::broker::parcel::{Parcel, flags, is_token, kinds, write_parcel};
 use crate::broker::participant::{
-    BrokerParticipant, BrokerRefusedError, ConnectionOwner, End, Pair, ParticipantState, Peer,
-    PendingConnect, Setup,
+    BrokerParticipant, BrokerRefusal, BrokerRefusedError, ConnectionOwner, End, Pair,
+    ParticipantState, Peer, PendingConnect, Setup, StopRecord, connect_error_of,
 };
 use crate::broker::sequence::fits;
 use crate::clock::{Schedule, SharedClock, Timer};
@@ -27,9 +29,9 @@ use crate::duration::{NEVER, hold};
 use crate::errors::{ConnectError, ProgrammerError, ReadyStateError, TransportError};
 use crate::router::types::{BoxFuture, ConnectionHandle, RouterError, TransportMessage};
 use crate::transport::{
-    CONNECT_TIMEOUT, ClientListener, ClientTransport, Connect, DisconnectOptions, Listeners,
-    RECONNECTION_CANCELLED, ReadyState, ReconnectOptions, Sent, attempting, first_of,
-    is_field_value,
+    CONNECT_TIMEOUT, ClientListener, Connect, Listeners, RECONNECTION_CANCELLED, ReadyState,
+    RouterClientTransport, Sent, TransportClientDisconnectOptions, TransportClientReconnectOptions,
+    attempting, first_of, hold_reconnection, is_field_value, joined,
 };
 
 /// What may wait on a connection for its broker, by default: a WebSocket's own bound, since a
@@ -45,7 +47,7 @@ fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 /// How a broker's client transport is built.
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
-pub struct BrokerClientOptions {
+pub struct BrokerTransportClientOptions {
     /// What may wait for its broker on its connection (spec 15.23), past which the connection is
     /// lost, a CLOSE of 4000: [`MAXIMUM_UNSENT_BYTES`] when none.
     pub maximum_unsent_bytes: Option<u64>,
@@ -54,7 +56,7 @@ pub struct BrokerClientOptions {
 /// Where a broker's client connects — a server's name — and how long it waits.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
-pub struct BrokerConnectOptions {
+pub struct BrokerTransportClientConnectOptions {
     /// The server's name its OPEN goes to, a token (spec 15.16).
     pub server: String,
     /// What cancels it.
@@ -64,10 +66,10 @@ pub struct BrokerConnectOptions {
     pub timeout: Option<Duration>,
 }
 
-impl BrokerConnectOptions {
+impl BrokerTransportClientConnectOptions {
     /// A connect through the name `server`, within [`CONNECT_TIMEOUT`].
     #[must_use]
-    pub fn of<S: Into<String>>(server: S) -> Self {
+    pub fn new<S: Into<String>>(server: S) -> Self {
         Self {
             server: server.into(),
             signal: None,
@@ -84,9 +86,11 @@ struct Held {
     room: u64,
 }
 
-// a connect under way, settled once
+// a connect under way, settled once; the stop of its participant's current as it was called, which
+// fails it at once, stopped as it connected (spec 15.21)
 struct Attempt {
     reply: Mutex<Option<oneshot::Sender<Result<(), TransportError>>>>,
+    record: Arc<StopRecord>,
     given_up: CancellationToken,
     timer: Mutex<Option<Arc<dyn Timer>>>,
     opener: Mutex<Option<u64>>,
@@ -102,7 +106,7 @@ struct ClientState {
     early: Option<Vec<TransportMessage>>,
     connecting: Option<Arc<Attempt>>,
     // the options of the last connect let through, which a reconnection connects with
-    last_connect: Option<BrokerConnectOptions>,
+    last_connect: Option<BrokerTransportClientConnectOptions>,
     is_attempting: bool,
 }
 
@@ -111,19 +115,22 @@ pub(crate) struct ClientInner {
     maximum_unsent: u64,
     state: Mutex<ClientState>,
     listeners: Listeners<dyn ClientListener>,
+    // its router's pause, whole, which outlasts a connection: the flag each connection's
+    // participant reads (spec 15.12)
+    paused: Arc<AtomicBool>,
 }
 
 /// A client's transport over a broker's participant, one connection at a time through a server's
 /// name.
 #[derive(Clone)]
-pub struct BrokerClient {
+pub struct BrokerTransportClient {
     inner: Arc<ClientInner>,
 }
 
-impl fmt::Debug for BrokerClient {
+impl fmt::Debug for BrokerTransportClient {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("BrokerClient")
+            .debug_struct("BrokerTransportClient")
             .field("participant", &self.inner.participant.id())
             .finish_non_exhaustive()
     }
@@ -229,6 +236,7 @@ impl ClientInner {
             sent: 1,
             maximum_unsent: self.maximum_unsent,
             is_half_open: false,
+            paused: Arc::clone(&self.paused),
         });
         state.open(pair);
         *locked(&attempt.pair) = Some(pair);
@@ -332,9 +340,18 @@ async fn opening(
     (server, timeout, started): (String, Duration, Duration),
 ) {
     let participant = client.participant.clone();
+    // * its participant's stop met before it settled, whatever it awaits: stopped as it connected
+    let stopped = || {
+        TransportError::Connect(ConnectError::new(
+            participant.config().stopped_as_it_connected(),
+        ))
+    };
 
     // * its link up first, within its time (spec 15.15)
-    if let Err(error) = participant.linked(Some(attempt.given_up.clone())).await {
+    if let Err(error) = participant
+        .linked((Arc::clone(&attempt.record), Some(attempt.given_up.clone())))
+        .await
+    {
         return client.settle((&attempt, Err(error)));
     }
 
@@ -343,8 +360,8 @@ async fn opening(
     let asked = Arc::clone(&attempt);
     let opened = participant
         .run(move |state: &mut ParticipantState| {
-            // ! given up as its link came up: no OPEN goes
-            if asked.given_up.is_cancelled() {
+            // ! given up, or its participant's stop come, as its link came up: no OPEN goes
+            if asked.given_up.is_cancelled() || asked.record.is_marked() {
                 return None;
             }
 
@@ -392,10 +409,13 @@ async fn opening(
         })
         .await;
     let Ok(Some(published)) = opened else {
-        return client.settle((
-            &attempt,
-            Err(TransportError::Connect(ConnectError::new(DISPOSED))),
-        ));
+        let failed = if attempt.record.is_marked() {
+            stopped()
+        } else {
+            TransportError::Connect(ConnectError::new(DISPOSED))
+        };
+
+        return client.settle((&attempt, Err(failed)));
     };
 
     // * a broker that says nothing serves the name fails the connect at once (spec 15.18)
@@ -404,17 +424,18 @@ async fn opening(
             return client.settle((
                 &attempt,
                 Err(
-                    BrokerRefusedError::new(BrokerRefusedError::NO_SUBSCRIBER, (None, None))
+                    BrokerRefusedError::new(BrokerRefusal::new(BrokerRefusedError::NO_SUBSCRIBER))
                         .connect_error(),
                 ),
             ));
         }
+        Err(_) if attempt.record.is_marked() => {
+            return client.settle((&attempt, Err(stopped())));
+        }
         Err(error) => {
             return client.settle((
                 &attempt,
-                Err(TransportError::Connect(ConnectError::new(
-                    error.to_string(),
-                ))),
+                Err(TransportError::Connect(connect_error_of(error))),
             ));
         }
         Ok(_) => {}
@@ -435,7 +456,7 @@ async fn opening(
     // ! settled in a turn of its participant's, after every parcel taken before it: a CLOSE that
     // came with its ACCEPT is the connection's end as it opened
     let outcome = participant
-        .run_behind(move |state: &mut ParticipantState| {
+        .run(move |state: &mut ParticipantState| {
             let is_open = state.is_open(pair);
             let early = {
                 let mut held = locked(&opening.state);
@@ -453,9 +474,10 @@ async fn opening(
                 held.early.take().unwrap_or_default()
             };
 
-            // * after what came before its connect returned, in order, then each as it comes
+            // * after what came before its connect returned, in order, then each as it comes; held
+            // as any other while its router paused it
             for message in early {
-                opening.delivered(pair, message);
+                state.hand(pair, message);
             }
 
             (true, is_open)
@@ -464,6 +486,9 @@ async fn opening(
 
     match outcome {
         Ok((true, _)) => client.settle((&attempt, Ok(()))),
+        Ok((false, false)) if attempt.record.is_marked() => {
+            client.settle((&attempt, Err(stopped())));
+        }
         Ok((false, false)) => client.settle((
             &attempt,
             Err(TransportError::Connect(ConnectError::new(
@@ -477,7 +502,7 @@ async fn opening(
     }
 }
 
-impl BrokerClient {
+impl BrokerTransportClient {
     /// A client transport over `participant`.
     ///
     /// # Errors
@@ -485,7 +510,7 @@ impl BrokerClient {
     /// A [`ProgrammerError`] for a bound under 1.
     pub fn new(
         participant: &BrokerParticipant,
-        options: &BrokerClientOptions,
+        options: &BrokerTransportClientOptions,
     ) -> Result<Self, ProgrammerError> {
         if options.maximum_unsent_bytes == Some(0) {
             return Err(ProgrammerError::new(
@@ -506,15 +531,20 @@ impl BrokerClient {
                     is_attempting: false,
                 }),
                 listeners: Listeners::default(),
+                paused: Arc::new(AtomicBool::new(false)),
             }),
         })
     }
 
     /// Connects through a server's name, started as it is called: open once the first ACCEPT naming
-    /// its half came, its third leg sent. It fails naming the REFUSE it read, or `no-subscriber`
-    /// when its broker says nothing serves the name, or a dispose that gave up on it; past its
-    /// timeout; once its signal is cancelled; each ending closed.
-    pub fn connect(&self, options: BrokerConnectOptions) -> Connect {
+    /// its half came, its third leg sent, its participant linked first where it is not, anew once
+    /// its stop settled. It fails naming the REFUSE it read, or `no-subscriber` when its broker says
+    /// nothing serves the name, or a dispose that gave up on it; past its timeout; once its signal
+    /// is cancelled; at once as its participant stops before it settled, stopped as it connected,
+    /// whether it awaits its answer or its participant's link; each ending closed. Its participant
+    /// disposed, it is refused, a [`TransportError::Refused`], after its options' own checks and
+    /// before anything moves, its state and its target kept (spec 15.21).
+    pub fn connect(&self, options: &BrokerTransportClientConnectOptions) -> Connect {
         match self.start_connect(options) {
             Ok(outcome) => Connect::of(outcome),
             Err(error) => Connect::refused(error),
@@ -523,7 +553,7 @@ impl BrokerClient {
 
     fn start_connect(
         &self,
-        options: BrokerConnectOptions,
+        options: &BrokerTransportClientConnectOptions,
     ) -> Result<oneshot::Receiver<Result<(), TransportError>>, TransportError> {
         let inner = &self.inner;
 
@@ -539,6 +569,15 @@ impl BrokerClient {
             "a connect's timeout",
             options.timeout.unwrap_or(CONNECT_TIMEOUT),
         )?;
+
+        // * its participant outranks it: a connect once it is disposed is a misuse, refused before
+        // its state is read, nothing kept
+        if inner.participant.is_disposed() {
+            return Err(TransportError::Refused(
+                inner.participant.config().disposed_refusal(),
+            ));
+        }
+
         let (attempt, reply) = {
             let mut state = locked(&inner.state);
             let is_refused = if state.is_attempting {
@@ -555,7 +594,7 @@ impl BrokerClient {
             }
 
             // without its signal: a reconnection brings its own
-            state.last_connect = Some(BrokerConnectOptions {
+            state.last_connect = Some(BrokerTransportClientConnectOptions {
                 signal: None,
                 ..options.clone()
             });
@@ -565,9 +604,7 @@ impl BrokerClient {
                 .as_ref()
                 .is_some_and(CancellationToken::is_cancelled)
             {
-                return Err(TransportError::Cancelled(
-                    "the connect was cancelled".to_owned(),
-                ));
+                return Err(TransportError::cancelled("the connect was cancelled"));
             }
 
             if !state.is_attempting {
@@ -577,6 +614,9 @@ impl BrokerClient {
             let (reply, outcome) = oneshot::channel();
             let attempt = Arc::new(Attempt {
                 reply: Mutex::new(Some(reply)),
+                // ! the stop current as it is called: one that comes before it settles fails it at
+                // once, and one called once it is let through stops what it links
+                record: inner.participant.config().linking_record(),
                 given_up: CancellationToken::new(),
                 timer: Mutex::new(None),
                 opener: Mutex::new(None),
@@ -604,11 +644,18 @@ impl BrokerClient {
                 }),
             );
 
+            let timer = match timer {
+                Ok(timer) => timer,
+                Err(error) => {
+                    inner.settle((&attempt, Err(TransportError::Refused(error.clone()))));
+                    return Err(error.into());
+                }
+            };
             *locked(&attempt.timer) = Some(timer);
         }
 
         // its signal: cancelled, the connect gives up
-        if let Some(signal) = options.signal {
+        if let Some(signal) = options.signal.clone() {
             let client = Arc::downgrade(inner);
             let cancelled = Arc::clone(&attempt);
 
@@ -619,9 +666,7 @@ impl BrokerClient {
                 if is_cancelled && let Some(client) = client.upgrade() {
                     client.settle((
                         &cancelled,
-                        Err(TransportError::Cancelled(
-                            "the connect was cancelled".to_owned(),
-                        )),
+                        Err(TransportError::cancelled("the connect was cancelled")),
                     ));
                 }
             });
@@ -629,7 +674,7 @@ impl BrokerClient {
 
         inner.participant.cover(opening(
             (Arc::clone(inner), attempt),
-            (options.server, timeout, started),
+            (options.server.clone(), timeout, started),
         ));
 
         Ok(reply)
@@ -641,7 +686,10 @@ impl BrokerClient {
     /// # Errors
     ///
     /// A [`TransportError`] when it is not open.
-    pub fn disconnect(&self, options: DisconnectOptions) -> Result<(), TransportError> {
+    pub fn disconnect(
+        &self,
+        options: &TransportClientDisconnectOptions,
+    ) -> Result<(), TransportError> {
         let inner = &self.inner;
         let is_clean = options.is_clean.unwrap_or(true);
         let is_quick = options.is_quick.unwrap_or(false);
@@ -706,22 +754,26 @@ impl BrokerClient {
     /// Closes its connection cleanly when it is open, then lets go of everything.
     pub fn close(&self) {
         if self.ready_state() == ReadyState::Open {
-            drop(self.disconnect(DisconnectOptions::default()));
+            drop(self.disconnect(&TransportClientDisconnectOptions::default()));
         }
 
         self.dispose();
     }
 
     /// Connects again through the name of the last connect let through, a pair drawn anew,
-    /// replacing an open connection without a close, started as it is called.
+    /// replacing an open connection without a close, started as it is called. Called once its
+    /// participant's stop settled, it links its participant anew.
     ///
     /// # Errors
     ///
     /// A [`TransportError`] for a reconnection under way, a client never connected, one connecting
-    /// or closing, or a signal cancelled already.
+    /// or closing, its participant disposed (spec 15.21), a fixed delay out of bounds (spec 1.4), or
+    /// a signal cancelled already: each refused before anything moves, in that order. A
+    /// reconnection under way, or called, as its participant stops ends cancelled at once, in a
+    /// wait or once its attempt under way failed, no wait told after it, the stop its source.
     pub fn reconnect(
         &self,
-        options: ReconnectOptions,
+        options: &TransportClientReconnectOptions,
     ) -> Result<BoxFuture<Result<(), TransportError>>, TransportError> {
         let inner = &self.inner;
         let (target, replaced) = {
@@ -746,12 +798,22 @@ impl BrokerClient {
                 ))));
             }
 
+            // * its participant disposed: a misuse, no reconnect told, nothing moved
+            if inner.participant.is_disposed() {
+                return Err(TransportError::Refused(
+                    inner.participant.config().disposed_refusal(),
+                ));
+            }
+
+            // * a fixed delay out of bounds refused as it is given, before anything moves
+            hold_reconnection(options)?;
+
             if options
                 .signal
                 .as_ref()
                 .is_some_and(CancellationToken::is_cancelled)
             {
-                return Err(TransportError::Cancelled(RECONNECTION_CANCELLED.to_owned()));
+                return Err(TransportError::cancelled(RECONNECTION_CANCELLED));
             }
 
             let replaced = state.held.take();
@@ -761,6 +823,9 @@ impl BrokerClient {
 
             (target, replaced)
         };
+        // ! the stop current as it is called: one under way, or one that comes before it ends,
+        // ends it at once, and one called once it is let through stops what it links
+        let record = inner.participant.config().linking_record();
 
         inner.tell(|listener: &dyn ClientListener| listener.on_reconnect());
 
@@ -772,9 +837,10 @@ impl BrokerClient {
 
         let (reply, outcome) = oneshot::channel();
         let client = self.clone();
+        let options = options.clone();
 
         inner.participant.cover(async move {
-            let reconnected = client.reconnecting((target, options)).await;
+            let reconnected = client.reconnecting((target, options, record)).await;
 
             if reconnected.is_err() {
                 locked(&client.inner.state).ready = ReadyState::Closed;
@@ -784,41 +850,71 @@ impl BrokerClient {
         });
 
         Ok(Box::pin(async move {
-            outcome.await.unwrap_or_else(|_dropped| {
-                Err(TransportError::Cancelled(RECONNECTION_CANCELLED.to_owned()))
-            })
+            outcome
+                .await
+                .unwrap_or_else(|_dropped| Err(TransportError::cancelled(RECONNECTION_CANCELLED)))
         }))
     }
 
     async fn reconnecting(
         &self,
-        (target, options): (BrokerConnectOptions, ReconnectOptions),
+        (target, options, record): (
+            BrokerTransportClientConnectOptions,
+            TransportClientReconnectOptions,
+            Arc<StopRecord>,
+        ),
     ) -> Result<(), TransportError> {
         let inner = &self.inner;
         let clock = inner.participant.clock();
+        let config = Arc::clone(inner.participant.config());
+        // * its own signal joined with its participant's stop, as a dispose ends one: the stop ends
+        // it at once in a wait, or once its attempt under way failed, no wait told after it
+        let (joined, watching) = joined(record.signal(), options.signal.clone());
+        // ! cancelled as it returns, which ends the watch of its application's signal
+        let _ended = joined.clone().drop_guard();
 
-        attempting((&clock, &options), |signal| {
+        if let Some(watching) = watching {
+            inner.participant.cover(watching);
+        }
+
+        let joined_options = TransportClientReconnectOptions {
+            signal: Some(joined.clone()),
+            ..options
+        };
+
+        attempting((&clock, &joined_options), |signal| {
             locked(&inner.state).is_attempting = true;
 
-            let connecting = self.connect(BrokerConnectOptions {
+            let connecting = self.connect(&BrokerTransportClientConnectOptions {
                 signal,
                 ..target.clone()
             });
 
             locked(&inner.state).is_attempting = false;
 
-            connecting
+            let (record, ending) = (Arc::clone(&record), joined.clone());
+
+            async move {
+                let connected = connecting.await;
+
+                // ! its stop is marked before its signal is cancelled: an attempt that failed
+                // with its participant's stop come cancels it itself, so no wait is told after it
+                if connected.is_err() && record.is_marked() {
+                    ending.cancel();
+                }
+
+                connected
+            }
         })
-        .await?;
+        .await
+        .map_err(|ended| config.attributed((ended, &record)))?;
 
-        if options
-            .signal
-            .as_ref()
-            .is_some_and(CancellationToken::is_cancelled)
-        {
-            drop(self.disconnect(DisconnectOptions::default()));
+        if joined.is_cancelled() {
+            drop(self.disconnect(&TransportClientDisconnectOptions::default()));
 
-            return Err(TransportError::Cancelled(RECONNECTION_CANCELLED.to_owned()));
+            return Err(
+                config.attributed((TransportError::cancelled(RECONNECTION_CANCELLED), &record))
+            );
         }
 
         Ok(())
@@ -836,7 +932,7 @@ impl BrokerClient {
     }
 }
 
-impl ClientTransport for BrokerClient {
+impl RouterClientTransport for BrokerTransportClient {
     // * copied as it is sent: the sender's buffer stays its own
     fn send(&self, message: TransportMessage) -> Result<Sent, RouterError> {
         let held = {
@@ -890,6 +986,26 @@ impl ClientTransport for BrokerClient {
 
     fn unlisten(&self, listener: &Arc<dyn ClientListener>) {
         self.inner.listeners.remove(listener);
+    }
+
+    // ! no lock: the flag its participant reads as each envelope of its connection comes whole,
+    // holding it from then on (spec 15.23); its link reads on
+    fn pause(&self) {
+        self.inner.paused.store(true, Ordering::SeqCst);
+    }
+
+    // ! its state's lock alone, which it never holds as it tells a listener: what its connection
+    // holds is handed on by a release turn of its participant's, never within this call
+    fn resume(&self) {
+        self.inner.paused.store(false, Ordering::SeqCst);
+
+        let held = locked(&self.inner.state).held.map(|held| held.pair);
+
+        if let Some(pair) = held {
+            self.inner
+                .participant
+                .post(move |state: &mut ParticipantState| state.release(pair));
+        }
     }
 
     fn clock(&self) -> Option<SharedClock> {

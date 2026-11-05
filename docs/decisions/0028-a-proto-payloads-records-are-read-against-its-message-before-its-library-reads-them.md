@@ -14,8 +14,8 @@
   [0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)'s;
   the generated codec, and what a target writes beside what a runtime does,
   [0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)'s;
-  the runtime codec of a schema that calls the check, its required walk and, on the C# side, its
-  filter of a closed enum's record, and generated code's contract 6, [0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)'s; the root's
+  the runtime codec of a schema that calls the check, its required walk and its filter of a closed
+  enum's record, and generated code's contract 6, [0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)'s; the root's
   tools, [0005](0005-a-toolchain-per-language.md)'s.
 
 ## Context
@@ -23,14 +23,17 @@
 **Each stock library reads bytes that are no encoding of the message**, against protobuf's own
 rules, and spec 17.9.1 says they do not read. protobuf-es 2.16.0 reads a record that runs past the
 end of its message, since its reader never checks that the last ended there, and a varint of more
-than 10 bytes where its field is unknown. Google.Protobuf 3.36.2 reads a tag of more than 5 bytes
-or past 32 bits, keeping its low 32 bits, where the
+than 10 bytes where its field is unknown. Google.Protobuf 3.36.2 reads a tag of more than 5 bytes or
+past 32 bits, keeping its low 32 bits, where the
 [Encoding](https://protobuf.dev/programming-guides/encoding/) guide's reference card gives a tag
 "encoded as uint32 varint" and protobuf's conformance suite refuses one in its REQUIRED `BadTag_*`
 tests, which protobuf's own failure list for C# keeps. Both read a length whose varint sets bits
 past 32, which the guide gives as "size encoded as int32 varint" and the suite's
-`BadLength_Varint32BitOverflow` refuses. Without a check, each is an open row of the support matrix,
-its entries of `spec/codecs.json` excused for the side that reads them.
+`BadLength_Varint32BitOverflow` refuses. Both read a varint whose 10th byte sets a bit past the
+64th, dropping the bits, where the guide's "Base 128 Varints" encodes "unsigned 64-bit integers
+using anywhere between one and ten bytes"; Buffa and Go's `protowire` refuse it, and the suite tests
+none: the guide's width decides. Without a check, each is an open row of the support matrix, its
+entries of `spec/codecs.json` excused for the side that reads them.
 
 **Probed on `TestAllTypesProto3`, the two libraries part on more**, where Google.Protobuf is right
 by protobuf's guide or no rule settles it:
@@ -101,22 +104,25 @@ each side against its library regressing on what another's gets right.
 **A side narrows what reads; it never changes what its stock library reads or writes.** The check
 refuses a payload before the library sees it, as 17.9.1 has it of bytes that are no encoding of the
 message; where protobuf states no rule and the libraries read apart, a refusal is a
-leveling, put to the user. On the C# side, a record of a singular closed enum whose number its enum
-declares no value of is dropped before Google.Protobuf reads, which treats every enum as open, so
-that it reads what protobuf-es reads and what protobuf keeps among the unknown fields (spec 17.9.8,
-[0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)): a record set aside, never a value read. It never reads in the library's place, and
-nothing writes in its place:
-a difference in what a library writes, the order of unknown fields and a map's entry's key at its
-default among them, is a platform row.
+leveling, put to the user. On every side, a record of a singular closed enum whose number its enum
+declares no value of is dropped before the library reads, since Google.Protobuf treats every enum
+as open, so that every library reads the field as protobuf does and none writes the number back,
+where protobuf keeps it among the unknown fields: a row of "Leveled down" (spec 17.9.8,
+[0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)),
+a record dropped, never a value read. It never reads in the library's place, and nothing writes in
+its place: a difference in what a library writes, the order of unknown fields, the order of a map's
+entries and an entry's key or value at its default among them, is a platform row.
 
 **The check reads the message's own descriptor**, the one its library and the generated code already
-hold: protobuf-es's `DescMessage`, the `…Schema` a generated file imports, and Google.Protobuf's
-`MessageDescriptor`, `Foo.Descriptor`. Under `messages: external` it is the descriptor of the code
-the project's own build compiles, so it cannot go stale, and the library that reads resolves
-editions' features and map entries, so the check sees what it reads. Each message's shape is built
-once, at first use, and cached by its descriptor, in a `WeakMap` and a `ConditionalWeakTable`: each
-field number to what its records take, and the shapes of the messages it holds, so a message holds
-itself.
+hold: protobuf-es's `DescMessage`, the `…Schema` a generated file imports, Google.Protobuf's
+`MessageDescriptor`, `Foo.Descriptor`, and Buffa's, a `buffa_descriptor::DescriptorPool` and the
+message's `MessageIndex`, held as a `ProtoSchema`. Under `messages: external` it is the descriptor
+of the code the project's own build compiles, so it cannot go stale, and the library that reads
+resolves editions' features and map entries, so the check sees what it reads. Each message's
+shape is built once, at first use, and cached by its descriptor, in a `WeakMap` and a
+`ConditionalWeakTable`, and on the Rust side read once into the `ProtoSchema` its codec holds,
+shared by every clone: each field number to what its records take, and the shapes of the messages
+it holds, so a message holds itself.
 
 - **TypeScript**: the subpath `@francisdesjardins/bead/proto`, `src/proto/proto.ts`, and its
   `checkProtoRecords(bytes, schema)`, in `src/proto/records.ts`, which throws a `SyntaxError`, as
@@ -132,17 +138,24 @@ itself.
   `FormatException`, as `Payloads` does; its tests in `tests/Bead.Protobuf.Tests/`. `Bead.Core`
   references no Google.Protobuf: a project that binds `proto` references `Bead.Protobuf`, which
   carries the library its generated messages need.
+- **Rust**: the crate `bead-protobuf`, beside the core, which depends on no protobuf library,
+  `check_records(bytes: &[u8], schema: &ProtoSchema)`, which returns a `CodecRefusal`, as every
+  codec of `bead` does; its tests in `src/records/tests.rs`.
 
-The two map name for name, `./proto` and `checkProtoRecords`, `Bead.Protobuf` and
-`ProtoRecords.Check`; the router answers a throw from either `PAYLOAD_UNDECODABLE`, as it answers
-any decoder's. The target still writes data and types, the call and the descriptor its library
-gives, and the check is the runtime's behaviour
+The three map name for name, `./proto` and `checkProtoRecords`, `Bead.Protobuf` and
+`ProtoRecords.Check`, `bead-protobuf` and `check_records`. A request whose check refuses it is
+answered `PAYLOAD_UNDECODABLE`, as any codec's refusal is; a request's decoder that throws, or
+panics, other than by its refusal is its side's own error, answered `PROCEDURE_FAILED` with no
+detail and reported; a result's or a notification's fails as a refusal does (spec 9.0, 17.2). The
+target still writes data and types, the call and the descriptor its library gives, and the check
+is the runtime's behaviour
 ([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)).
 
 **What the check refuses**, in one walk of the payload that allocates nothing per record:
 
 - a tag of more than 5 bytes or past 32 bits, and field number 0;
-- a varint of more than 10 bytes, its field known or not;
+- a varint of more than 10 bytes, or whose 10th byte sets a bit past the 64th, its field known or
+  not, packed or not;
 - a length whose varint runs past 10 bytes or that runs past the bytes after it, a length past
   2³¹ − 1 among them, which also passes every payload Bead carries;
 - a fixed value past its message;
@@ -156,8 +169,8 @@ gives, and the check is the runtime's behaviour
 - a group not closed by an end group of its own number, an unknown group walked as an unknown
   message; the wire types 6 and 7, and an end group that closes no group;
 - a message nested more than 100 deep below the top one, a group and a map's entry each counting as
-  a message (17.9.3): Google.Protobuf counts them so, and the check refuses first where protobuf-es,
-  which does not count an entry, would read on;
+  a message (17.9.3): Google.Protobuf counts them so, and the check refuses first where protobuf-es
+  and Buffa, which count no entry, would read on;
 - a field the message declares, at a wire type its type does not take, in a map's entry too, a
   repeated scalar of a numeric type taking its own and the length-delimited (17.9.5);
 - a field a map's entry does not declare (17.9.6).
@@ -177,15 +190,18 @@ as Google.Protobuf counts them.
 
 **The runtime codec calls the check, for generated code.** A generated codec is the runtime's
 codec of its message's schema, `protoCodecOf(FooSchema)` of `@francisdesjardins/bead/proto` and
-`global::Bead.Protobuf.ProtoCodecs.Of<global::Foo>()`, whose read checks the records before the
-library reads them, then reads at 17.9.3's bound and judges the message's required fields
+`global::Bead.Protobuf.ProtoCodecs.Of<global::Foo>()`, and on the Rust side
+`bead_protobuf::ProtoCodec::<Foo>::new()`, whose read checks the records before the library reads
+them, then reads at 17.9.3's bound and judges the message's required fields
 ([0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)). 3 is the contract whose code first called the check, since generated code that
 calls it needs an export a runtime without it lacks, which is what moves the counter. **The runtimes
-hold 5 and 6**, on the TypeScript and C# sides, 5 for a route table ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)) and 6 since a service's
-generated file calls the runtime codec ([0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)), and none older: they hold no
+hold 5, 6 and 7**, on the TypeScript and C# sides, 5 for a route table ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)), 6 since a service's
+generated file calls the runtime codec ([0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)) and 7 for what a server's handles
+and a catalogue are typed by ([0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)), and none older: they hold no
 `GENERATED_CODE_SUPPORTS_VERSION_2`, `_3` or `_4` and no `GeneratedCode.SupportsVersion2`,
 `SupportsVersion3` or `SupportsVersion4`, so code that names 2, 3 or 4, an earlier beadc's, fails its
-type-check and its build until it is regenerated.
+type-check and its build until it is regenerated. On the Rust side, whose beadc target is ahead,
+an application makes the runtime codec itself.
 A runtime keeps a constant while it still serves the code that names it, and one that would run
 version-2 code unchecked no longer serves it as Bead conforms: before 1.0.0, an older constant goes
 once the code that names it no longer conforms through the runtime; from 1.0.0, it stays for the
@@ -222,9 +238,9 @@ which a row's `read` gives as a depth. protoc 36.2, protoc-gen-es 2.16.0 under b
 
 **The entries.** The entries of what a stock library reads past protobuf's rules — a tag of more
 than 5 bytes or past 32 bits, a length past 32 bits, an unknown varint of more than 10 bytes, a
-record past the end of its message — are played by every side, none excused. Each part has its
-entries, each citing its unit, none excused, every reading confirmed on protobuf-es and
-Google.Protobuf, the check in front:
+varint past 64 bits, a record past the end of its message — are played by every side, none excused.
+Each part has its entries, each citing its unit, none excused, every reading confirmed on
+protobuf-es, Google.Protobuf and Buffa, the check in front:
 
 - read: `counts packed`, `counts unpacked and packed, in one message`, `stamps unpacked`,
   `stamps packed`, `a map's entry, its value before its key`, `a group closed by its own end group`
@@ -233,7 +249,7 @@ Google.Protobuf, the check in front:
   `a packed uint32 whose last varint runs past its record, a field after`,
   `a group closed by another number's end group`, `a group never closed` (17.9.1);
 - refused, nested past 100: `51 maps deep, 102 messages below the top, each entry counted`, which
-  protobuf-es alone reads (17.9.3);
+  protobuf-es and Buffa read (17.9.3);
 - refused under 17.9.5: `a string at the varint wire type`,
   `a uint32 at the length-delimited wire type`, `a uint32 at the fixed32 wire type`,
   `a message at the varint wire type, a string after`, `stamps at the varint wire type`,
@@ -263,8 +279,9 @@ codec, the check in front:
   `conformance_test_runner --enforce_recommended --maximum_edition MAX --failure_list <the side's list> <testee>`.
   **Its floor**: a side's successes and its expected failures are 5,601, and its skips 48, its JSON
   tests answered through Bead's mapping of protobuf's JSON
-  ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)),
-  the Rust side's through Buffa's `DynamicMessage` until its gateway brings that mapping; the runner
+  ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md))
+  on the TypeScript and C# sides, and on the Rust side through Buffa's `DynamicMessage`, Bead's
+  mapping coming with its gateway, ahead; the runner
   closes a text-format suite after it, whose 909 tests a testee skips, since Bead's `proto` carries
   no text form. Each count moves only with the pin, or with a form the testees answer. The Rust
   side's beadc target is ahead, so for it protoc writes the set of the suite's test messages and
@@ -296,8 +313,8 @@ codec, the check in front:
   message's unknown fields back by number and wire type, a platform row; and each names besides the
   two JSON tests of an extension's JSON name, which Bead's mapping reads as no field of its message
   ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)).
-  The Rust side's names the extension's test alone, its JSON Buffa's until its gateway brings Bead's
-  mapping.
+  The Rust side's names the extension's test alone, its JSON read by Buffa's `DynamicMessage`, Bead's
+  mapping coming with its gateway, ahead.
 
 **How the pin moves.** One runner serves every side's library. The tool fails when `runner.json`'s
 `upstreamVersion` and Google.Protobuf's pin name different protobuf releases, `v36` and `3.36`
@@ -306,23 +323,29 @@ alike. A bump of `@bufbuild/protobuf` reads the `protobuf-conformance` version i
 moves `runner.json`, the failure lists and the floor in one commit. Where the two pin different
 releases, the runner follows the older, and the newer library's bump waits for the other.
 
-**The differential.** `tools/protobuf-conformance.mjs differential` feeds the TypeScript and C#
-sides' testees the same 10,000 payloads from a fixed seed: `Probe`'s own records, mutated by cuts,
-lengths, wire types and nesting, maps and groups among them. It compares each side's verdict, read
-or refused, and the bytes each writes back as what they read, at every depth, the choices protobuf
-leaves to a writer aside: the order of unknown fields, the order of a map's entries, and an entry's
-key at its default, which protobuf-es writes and Google.Protobuf leaves out. The first and the last
-are the platform rows; any other parting fails it.
+**The differential.** `tools/protobuf-conformance.mjs differential` feeds every side's testee the
+same 12,500 payloads from a fixed seed: `Probe`'s own records, mutated by cuts, lengths, wire types
+and nesting, maps and groups among them, and records of every field of `Probe`: a `Needs` that
+leaves a required field unset, and a closed enum's number declared, undeclared, past 31 and 32 bits,
+of ten bytes and overlong. Beside them, it takes `spec/codecs.json`'s `proto` payloads but those a
+`differs` excuses, each mutated by the same steps. It compares the sides two by two, each one's
+verdict, read or refused, and the bytes each writes back as what they read, at every depth, a closed
+enum's number by its low 32 bits, declared or not, since every side drops an undeclared one before
+its library reads (spec 17.9.8). The choices protobuf leaves to a writer are forgiven, each a
+platform row: the order of unknown fields, the order of a map's entries, and an entry's key or
+scalar value at its default, which protobuf-es and Buffa write and Google.Protobuf leaves out. Any
+other parting fails it.
 
 ## Consequences
 
 **The matrix holds no open row for a stock library reading past protobuf's rules**, every side
 playing those entries. Its "Leveled down" holds "A known proto field at a wire type its type does
-not take, a map's entry's included" and "A proto map's entry with a field other than its key and
-its value"; two platform rows, "A proto message's unknown fields, written back" and "A proto map's
-entry, its key at its default, written back", say what each library writes; "A string's leading
-U+FEFF in a proto payload" is open, as it says why, and "A proto string no string holds, given to a
-writer" is a platform row
+not take, a map's entry's included", "A proto map's entry with a field other than its key and its
+value" and "A singular closed enum's undeclared number, written back"; three platform rows, "A
+proto message's unknown fields, written back", "A proto map's entry, its key or its value at its
+default, written back" and "A proto map's entries, written back", say what each library writes;
+"A string's leading U+FEFF in a proto payload" is open, as it says why, and "A proto string no
+string holds, given to a writer" is a platform row
 ([0031](0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)).
 
 **Code that names contract 2, 3 or 4 is regenerated**, on the TypeScript and C# sides, before it
@@ -349,7 +372,11 @@ messages, where TypeScript's ratio ran from 47% to 84% across runs, and close to
 A packed record's walk counts its varints' bytes without decoding a value, which keeps it under the
 library's decoding of each. The bound the TypeScript and C# runtimes hold: on each row, the check
 costs no more than its library's read, the packed walk included, and allocates nothing per record;
-the C# side's allocates no byte over 1,000 checks of each payload.
+the C# side's allocates no byte over 1,000 checks of each payload. The Rust side's bench, which a
+release keeps, measures no `proto` payload, so no bound is stated of its check. A `proto` writer
+runs the same check over the bytes it wrote, its refusal the writer's
+([0031](0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)), so a write costs
+that walk too.
 
 **The gate.** [0006](0006-a-rule-has-its-gate.md)'s table holds the suite and the differential, a
 job of their own, `protobuf-conformance`; `spec/codecs.json`'s entries hold the parts the suite at
@@ -391,3 +418,22 @@ the answer that holds:
 | Keeping version 2 lets code generated before the check run unchecked on a runtime that claims to refuse those payloads                                                                                                                                                                                                     | Accepted: the runtime holds contract 3 alone, on both sides, so code that names 2 fails its type-check and build until it is regenerated. The reason is the runtime's own rule ("while the runtime still serves the code that names it"): a runtime that would run version-2 code unchecked no longer serves it as Bead conforms. `generated-code.ts` and its C# twin state the rule before and after 1.0.0.                                                                                                                                                                                                         |
 | Filing the unknown ordering as `open` contradicts the matrix's own kinds, 17.9 and the row's own text, and the draft gives no criterion for when a side may go past its library                                                                                                                                            | Accepted: the row is `platform`, lifting when Google.Protobuf keeps the order. This record states the criterion: a side may narrow what reads before its library, never read or write in its place. The check is a refusal before a read. Reordering a write would replace the library's writer, which 17.9 does not allow.                                                                                                                                                                                                                                                                                          |
 | The U+FEFF row's "the decoder strips it before any check could" passes over `configureTextEncoding`                                                                                                                                                                                                                        | In part: the row already names `configureTextEncoding` and why it is not taken (global to the library's copy, and deprecated), so the row stands as it is. The out-of-scope sentence points at the row.                                                                                                                                                                                                                                                                                                                                                                                                              |
+
+The Rust testee's place in the differential, and a varint past 64 bits, met their round with the
+gates every side shares:
+[0006](0006-a-rule-has-its-gate.md#on-the-gates-every-side-shares-held-on-the-rust-side).
+
+### On the corpus that writes every field of `Probe`
+
+The differential's corpus of fields 7, 8 and 14, and every side's drop of a singular closed enum's
+undeclared number, met the Tenth Man in one round, at xhigh effort: six objections, each checked
+against its probe before it was answered, five accepted and one in part.
+
+| Objection                                                                                                                                                                                                                                | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| "No side has a bug to fix" weighs only what the tool can forgive. It keeps three behaviours of a singular closed enum's undeclared number, written back, makes the gate blind to all three, and never weighs one behaviour on every side | Accepted, and the design changes. Three designs were weighed: every side drops the number before its library reads, the TypeScript reader puts the lost record back, or the tool sets the record aside. Every side drops it. The parity rule says so: where one side does Y and another Y and Z, every one does Y, and keeping to what one platform can do against a standard is a row of "Leveled down" ([0004](0004-one-behaviour-in-every-language.md)). Google.Protobuf holds a known field's record in no unknown set a caller can fill, and 17.9.8's repeated items are already leveled against Enum Behavior. The TypeScript and Rust sides gain the C# side's filter, so the number is never read by a library and never written back. The 619 C# partings and the 338 TypeScript-against-Rust partings close by behaviour. An open reading of `shade` outside a `Needs` parts in 478 of 5,219 read payloads, against 31 under the set-aside, with 17 of them in a map's value against none. The twins hold one byte string on every side, and an echo that a stock open-enum reader would read as another value is gone. The cost is stated in 17.9.8 and the row: a newer peer's undeclared number no longer survives a read, modify and write on the TypeScript and Rust sides, as it already did not on the C# side. The objection's own claim that this would be no leveling does not hold: dropping is less than protobuf's rule because one platform cannot do more, which is the leveling's definition, and the row names what lifts it. The repair is not taken, as the round on the gates every side shares decided: 17.9 reads through the stock library, and the C# side would still part. This reverses what two sides wrote and the platform row of [0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md), which yields to the parity rule before 1.0.0. |
+| 17.9's last paragraph covers only what protobuf states no rule of, and keeping the number is a rule it states. "Written again" is Enum Behavior's sentence on a repeated field                                                           | Accepted. 17.9.8 states the departure: a reader drops such a record before its library reads, where protobuf keeps it among the unknown fields, a leveling the matrix keeps. `spec/units.txt` moves, and so does the spec's minor. The rule cited for a singular field, here, in the matrix and in the upstream issue, is Enum Behavior's definition, "store it in the message's unknown field set", with the Language Guide's "Unknown Fields". The repeated field's sentence is cited nowhere.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| The drop's condition is wrong in every text the draft proposes: protobuf-es keeps the number beside another unknown field where its message already held one                                                                             | Accepted, verified: `1A 02 20 01 1A 04 70 05 28 01` keeps it, and `70 05 20 01 70 06` loses both. Every text that states protobuf-es's drop says it drops where the record that holds it reads another unknown field into a message that held none before it: the matrix's row, 0042 and the upstream issue, whose title says so. The TypeScript side no longer meets the drop, since its filter runs first. The twins hold both cases, with one expected byte string on every side.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| The form's safety rests on 31 payloads and none in a map's value, and refused payloads hide every parting of what they would write back                                                                                                  | In part. With one behaviour, the form sets nothing aside, and 478 payloads tell an open reading apart, 17 in a map's value. So the pick that writes `shade` twice is not needed. The masking is real: a parse error compares nothing, and the read payloads fell from 6,352 to 5,219. `CORPUS_SIZE` rises to 12,500, 6,544 read, 0.6 s more. Drawing complete `Needs` more often would thin 17.9.7's refusals, which are half of what the corpus adds.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| The order of a map's entries has no row: the three sides write three orders, Rust's another on each run, and Buffa has the switch that fixes it                                                                                          | Accepted. The claim that the order was already stated was wrong. A platform row, "A proto map's entries, written back", gives the three: a JavaScript object's, integer keys first; the order read; and hashbrown's, another on each run. Each has its twin. Buffa's `MapRepr::BTreeMap` would fix the Rust side's order by key, but it changes the generated type, so it is a round of its own.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Some evidence is stale or malformed: protobuf-es's head is `9ef472d864`, not `9b53e50b4e`; #1572 is left out; the probes C10 and C11 were malformed                                                                                      | Accepted. The issue cites `9ef472d864`, whose `from-binary.ts` is the one read. #1572, a string's leading U+FEFF kept, is unreleased. At the next bump of `@bufbuild/protobuf` it closes the open row and its `differs`, and the seed comes into the corpus, as #1544 may lift the leveling of a map entry's unknown field. C10 and C11 give `needs` its true length: every side reads 2³² + 1 and 2³² as 1 and 0, and refuses 2³² + 5.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |

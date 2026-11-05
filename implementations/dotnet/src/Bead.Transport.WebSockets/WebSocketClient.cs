@@ -23,6 +23,13 @@ public sealed record WebSocketClientOptions
     /// says; none counts nothing.
     /// </summary>
     public MetricsRegistry? MetricsRegistry { get; init; }
+
+    /// <summary>
+    /// What its router holds untaken of what its server sent, past which it pauses its transport
+    /// (spec 15.12), as its own option of that name says: <see cref="IntakeLimits.Default"/> when
+    /// none.
+    /// </summary>
+    public IntakeLimits? Intake { get; init; }
 }
 
 /// <summary>
@@ -61,6 +68,7 @@ public sealed class WebSocketClient : IClient
             Credentials = options?.Credentials,
             Limits = limits,
             MetricsRegistry = options?.MetricsRegistry,
+            Intake = options?.Intake,
         });
         Services = new ServiceManager(Router);
     }
@@ -72,16 +80,16 @@ public sealed class WebSocketClient : IClient
     public RouterClient Router { get; }
 
     /// <summary>Its services.</summary>
-    public ServiceManager Services { get; }
+    public IServiceManagerClient Services { get; }
 
     /// <summary>Connects its transport, as <see cref="WebSocketTransportClient.Connect"/> does.</summary>
-    public Task Connect(WebSocketConnectOptions options, CancellationToken cancellationToken = default)
+    public Task Connect(WebSocketTransportClientConnectOptions options)
     {
-        return Transport.Connect(options, cancellationToken);
+        return Transport.Connect(options);
     }
 
     /// <summary>Closes its transport's connection, as <see cref="WebSocketTransportClient.CloseConnection"/> does.</summary>
-    public Task Disconnect(TransportDisconnectOptions? options = null)
+    public Task Disconnect(TransportClientDisconnectOptions? options = null)
     {
         return Transport.CloseConnection(options);
     }
@@ -90,9 +98,9 @@ public sealed class WebSocketClient : IClient
     /// Reconnects its transport, as <see cref="WebSocketTransportClient.Reconnect"/> does; a dispose
     /// cancels it, as the token given does.
     /// </summary>
-    public async Task Reconnect(TransportReconnectOptions? options = null)
+    public async Task Reconnect(TransportClientReconnectOptions? options = null)
     {
-        var reconnect = options ?? new TransportReconnectOptions();
+        var reconnect = options ?? new TransportClientReconnectOptions();
 
         using var cancelling = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token, reconnect.CancellationToken);
 

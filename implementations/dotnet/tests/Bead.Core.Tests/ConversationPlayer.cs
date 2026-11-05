@@ -59,7 +59,74 @@ internal static class ConversationPlayer
         "send", "token", "twoWay", "until", "wall",
     ];
 
+    // the tellings a conversation's listener acts on, and the commands it calls
+    private static readonly HashSet<string> Tellings = ["read", "report"];
+
+    private static readonly HashSet<string> ListenerCommands = ["clock"];
+
     // helpers
+
+    // the conversation's listener, where it gives one: what the server's application does from
+    // within a telling — on the first telling of its kind on a connection, and once, a call of its
+    // command on that connection, its answer let go. A call made there goes as its side takes it,
+    // behind what that turn sends (spec 9.0)
+    private static void Listen(JsonElement conversation, (RouterServer Router, ServiceServer<InteropProcedures, string> Interop) server)
+    {
+        if (!conversation.TryGetProperty("listener", out var listener))
+        {
+            return;
+        }
+
+        var telling = listener.GetProperty("telling").GetString()!;
+
+        Assert.Contains(telling, Tellings);
+        Assert.Contains(listener.GetProperty("command").GetString()!, ListenerCommands);
+
+        var clock = server.Interop.CommandOf(InteropProcedures.Clock);
+        var told = new HashSet<string>(StringComparer.Ordinal);
+
+        void Ask(string connectionHandle)
+        {
+            if (!told.Add(connectionHandle))
+            {
+                return;
+            }
+
+            _ = clock(JsonSerializer.SerializeToElement(InteropHandlers.Question))(new CommandOptions
+            {
+                ConnectionHandle = connectionHandle,
+                Timeout = Patience,
+            }).ContinueWith(
+                static (asked) =>
+                {
+                    _ = asked.Exception;
+                },
+                CancellationToken.None,
+                TaskContinuationOptions.DenyChildAttach,
+                TaskScheduler.Default);
+        }
+
+        if (telling == "report")
+        {
+            server.Router.Error += (_, connectionHandle) =>
+            {
+                if (connectionHandle is not null)
+                {
+                    Ask(connectionHandle);
+                }
+            };
+
+            return;
+        }
+
+        server.Router.Debug += (direction, envelope) =>
+        {
+            if (direction == DebugDirection.Rx)
+            {
+                Ask(envelope.ConnectionHandle);
+            }
+        };
+    }
 
     // the server's limits, the conversation's where it gives them
     private static RouterLimits LimitsOf(JsonElement conversation)
@@ -376,8 +443,8 @@ internal static class ConversationPlayer
     // definition
 
     /// <summary>
-    /// Plays <paramref name="conversation"/>, its steps, its limits, its pacing and its relay, on a
-    /// server of the interop service's built anew, as <paramref name="options"/> say.
+    /// Plays <paramref name="conversation"/>, its steps, its limits, its pacing, its relay and its
+    /// listener, on a server of the interop service's built anew, as <paramref name="options"/> say.
     /// </summary>
     public static async Task Play(JsonElement conversation, PlayerOptions options)
     {
@@ -427,7 +494,7 @@ internal static class ConversationPlayer
                 reason is FailureException failure ? failure.Code.ToString(System.Globalization.CultureInfo.InvariantCulture) : "exception",
                 connectionHandle));
         };
-        InteropHandlers.Offer(server);
+        Listen(conversation, (router, InteropHandlers.Offer(server)));
 
         // the series written once the server settled, read on its scheduler
         async Task<Dictionary<string, string>> Exposed()
@@ -707,7 +774,7 @@ internal static class ConversationPlayer
 
             try
             {
-                await client.Connect(new MemoryConnectOptions { Server = _server, Address = "127.0.0.1", Port = port });
+                await client.Connect(new MemoryTransportClientConnectOptions { Server = _server, Address = "127.0.0.1", Port = port });
             }
             finally
             {
@@ -744,7 +811,7 @@ internal static class ConversationPlayer
         {
             if (_clients.Remove(name, out var client))
             {
-                await client.CloseConnection(new TransportDisconnectOptions { IsClean = false });
+                await client.CloseConnection(new TransportClientDisconnectOptions { IsClean = false });
                 await client.DisposeAsync();
             }
         }
@@ -861,7 +928,7 @@ internal static class ConversationPlayer
 
             try
             {
-                await client.Connect(new BrokerConnectOptions { Server = "interop" });
+                await client.Connect(new BrokerTransportClientConnectOptions { Server = "interop" });
 
                 // * told at its third leg, which follows the connect's own end
                 handle = await drawn.Task.WaitAsync(Patience);
@@ -899,7 +966,7 @@ internal static class ConversationPlayer
         {
             if (_clients.Remove(name, out var client))
             {
-                await client.CloseConnection(new TransportDisconnectOptions { IsClean = false });
+                await client.CloseConnection(new TransportClientDisconnectOptions { IsClean = false });
                 await client.DisposeAsync();
             }
         }
@@ -953,6 +1020,16 @@ internal static class ConversationPlayer
     // never gave (spec 15.1)
     private sealed class ScriptedTransport : IServerTransport, IPlayedTransport
     {
+        // its router paused and resumed it, which hands what it hands all the same: no test of
+        // this one's reaches a bound
+        public void Pause(string connectionHandle)
+        {
+        }
+
+        public void Resume(string connectionHandle)
+        {
+        }
+
         // what is sent and asked on the router's scheduler, and taken on the test's
         private readonly Lock _gate = new();
 

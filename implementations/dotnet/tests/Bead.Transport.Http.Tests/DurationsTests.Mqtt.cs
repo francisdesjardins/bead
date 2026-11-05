@@ -4,8 +4,9 @@ namespace Bead.Transport.Http.Tests;
 
 /// <summary>
 /// The places of MQTT 5's adapter (spec 15.26, 15.30): its Keep Alive, held in whole seconds up to
-/// 65,535, and the wait for its CONNACK, each on MQTTnet's own timer, so taken or refused as it is
-/// built, never without end.
+/// 65,535, and the wait for its password, where it asks its provider, and its CONNACK, which bounds
+/// its stop's wait as well, each on MQTTnet's own timer, so taken or refused as it is built, never
+/// without end.
 /// </summary>
 public sealed partial class DurationsTests
 {

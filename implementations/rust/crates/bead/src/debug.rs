@@ -5,7 +5,7 @@ use core::fmt;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use crate::constants::{CredentialScheme, EnvelopeKind};
-use crate::envelope::{Credential, FailureHeader, Header, RequestHeader, ResultHeader};
+use crate::envelope::{Credential, EnvelopeHeader, FailureHeader, RequestHeader, ResultHeader};
 use crate::errors::{ProgrammerError, Refusal};
 use crate::router::types::ConnectionHandle;
 
@@ -13,6 +13,27 @@ use crate::router::types::ConnectionHandle;
 mod tests;
 
 pub(crate) mod participant;
+
+/// Keeps the call steps `source` names, passing their error and event to `listener` as given.
+///
+/// # Errors
+///
+/// A [`ProgrammerError`] for a filter whose first value is not a filter.
+pub fn filter_debug(
+    listener: crate::managers::service::DebugListener,
+    source: DebugFilterSource,
+) -> Result<crate::managers::service::DebugListener, ProgrammerError> {
+    let keeper = FilterKeeper::new(source)?;
+    Ok(Arc::new(move |error, event| {
+        if keeper.keeps_call(&CallAsked {
+            direction: event.direction,
+            call_type: event.call_type,
+            procedure_name: &event.procedure_name,
+        }) {
+            listener(error, event);
+        }
+    }))
+}
 
 /// Which way a step or an envelope went: in, or out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -32,7 +53,7 @@ pub struct TracedEnvelope {
     /// The connection it went or came on: the server's, on a client's router.
     pub connection_handle: ConnectionHandle,
     /// Its header, its credential taken out.
-    pub header: Header,
+    pub header: EnvelopeHeader,
     /// Its credential's scheme, in place of its credential.
     pub credential_scheme: Option<CredentialScheme>,
 }
@@ -41,24 +62,25 @@ impl TracedEnvelope {
     /// The trace of `header`, on `connection_handle`: a session's token, a `JWT` and a scheme to
     /// come's bytes never in it.
     #[must_use]
-    pub fn of(connection_handle: &ConnectionHandle, header: &Header) -> Self {
+    pub fn new(connection_handle: &ConnectionHandle, header: &EnvelopeHeader) -> Self {
         let credential_scheme = header.credential().map(Credential::scheme);
         let header = match header {
-            Header::Request(request) => Header::Request(RequestHeader {
+            EnvelopeHeader::Request(request) => EnvelopeHeader::Request(RequestHeader {
                 credential: None,
                 ..request.clone()
             }),
-            Header::Result(result) => Header::Result(ResultHeader {
+            EnvelopeHeader::Result(result) => EnvelopeHeader::Result(ResultHeader {
                 credential: None,
                 ..result.clone()
             }),
-            Header::Failure(failure) => Header::Failure(FailureHeader {
+            EnvelopeHeader::Failure(failure) => EnvelopeHeader::Failure(FailureHeader {
                 credential: None,
                 ..failure.clone()
             }),
-            Header::Notification(_) | Header::Chunk(_) | Header::Credit(_) | Header::Cancel(_) => {
-                header.clone()
-            }
+            EnvelopeHeader::Notification(_)
+            | EnvelopeHeader::Chunk(_)
+            | EnvelopeHeader::Credit(_)
+            | EnvelopeHeader::Cancel(_) => header.clone(),
         };
 
         Self {
@@ -110,6 +132,7 @@ impl DebugType {
 /// procedure's name matches one pattern of `include`, when there is one, and none of `exclude`,
 /// which wins.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub struct DebugFilter {
     /// The directions kept.
     pub directions: Vec<DebugDirection>,
@@ -532,3 +555,5 @@ impl FilterKeeper {
         self.now().keeps_envelope(asked)
     }
 }
+
+impl std::error::Error for FilterRefusal {}

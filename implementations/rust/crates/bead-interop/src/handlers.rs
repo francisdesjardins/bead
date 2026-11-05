@@ -6,15 +6,20 @@ use core::time::Duration;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
+use bead::internal::{hold_finite, session_key_of};
 use bead::{
-    AdmissionHook, BoxFuture, CallSession, ConnectionHandle, DestinationOptions,
-    DestinationRegistration, Failure, JsonCodec, Judged, NotifyOptions, ProgrammerError,
-    ProtocolCode, RelayTarget, RequestOptions, RequestProps, ResolverCallback, ResolverError,
-    Response, RouterSide, Schedule, Server, ServiceServer, ServiceServerOptions, SessionIdentifier,
-    Validate, ValidateOptions, Violation, ViolationHolder, hold_finite, session_key_of,
+    AdmissionHook, BoxFuture, CallSession, Client, CommandOptions, ConnectionHandle,
+    DestinationOptions, DestinationRegistration, Failure, JsonCodec, Judged, NotifyOptions,
+    ProgrammerError, ProtocolCode, RelayTarget, RequestProps, RequestResolverDependencies,
+    ResolverCallback, ResolverError, Response, RouterSide, Schedule, Server, ServiceServer,
+    ServiceServerOptions, SessionIdentifier, Validate, ValidateOptions, Violation, ViolationHolder,
 };
 use serde_json::{Map, Value, json};
 use tokio::sync::oneshot;
+
+#[cfg(test)]
+#[path = "handlers/tests.rs"]
+mod tests;
 
 use crate::descriptors::{InteropProcedures, ON_PURPOSE, REGISTERED_ALREADY, interop_procedures};
 
@@ -106,22 +111,24 @@ fn names_of(request: &Value) -> Option<Vec<String>> {
 
 /// `checked`'s rules, judged of `request`.
 #[must_use]
-pub fn judge_checked(request: &Value, options: ValidateOptions) -> Judged {
+pub fn judge_checked(request: &Value, options: &ValidateOptions) -> Judged {
+    let fail_fast = options.fail_fast.unwrap_or(false);
     let mut sink = Sink {
-        fail_fast: options.fail_fast,
-        holder: ViolationHolder::new(options.maximum_bytes),
+        fail_fast,
+        holder: ViolationHolder::new(options.maximum_bytes.unwrap_or(usize::MAX)),
         path: Vec::new(),
         violations: Vec::new(),
         more: 0,
         is_full: false,
     };
-    let stopped = judge_names(request, &mut sink) && options.fail_fast;
+    let stopped = judge_names(request, &mut sink) && fail_fast;
 
-    Judged {
-        violations: sink.violations,
-        more: sink.more,
-        stopped,
-    }
+    let mut judged = Judged::default();
+
+    judged.violations = sink.violations;
+    judged.more = sink.more;
+    judged.stopped = stopped;
+    judged
 }
 
 fn judge_names(request: &Value, sink: &mut Sink) -> bool {
@@ -226,7 +233,27 @@ fn duration_of(name: &str, given: Option<&Value>) -> Result<Option<Duration>, Pr
             ProgrammerError::new(format!("{name} is a number of milliseconds, not {given}"))
         })?;
 
-    hold_finite(name, Duration::from_secs_f64(milliseconds / 1_000.0)).map(Some)
+    let duration = Duration::try_from_secs_f64(milliseconds / 1_000.0).map_err(|_range| {
+        ProgrammerError::new(format!(
+            "{name} is a representable duration in milliseconds, not {given}"
+        ))
+    })?;
+
+    hold_finite(name, duration).map(Some)
+}
+
+// the C# handler reads an Int32; reserve the accepted bytes fallibly before filling them
+fn bytes_of(length: u64) -> Result<String, ResolverError> {
+    let length = i32::try_from(length).map_err(ResolverError::other)?;
+    let length = usize::try_from(length).map_err(ResolverError::other)?;
+    let mut value = String::new();
+
+    value
+        .try_reserve_exact(length)
+        .map_err(ResolverError::other)?;
+    value.extend(std::iter::repeat_n('x', length));
+
+    Ok(value)
 }
 
 fn name_of(session: Option<&CallSession>) -> Value {
@@ -331,6 +358,17 @@ fn failed(error: ProgrammerError) -> ResolverError {
     ResolverError::other(error)
 }
 
+/// The interop service as it is offered: its server, and the descriptors that server holds, the
+/// same ones its handles answer to.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct OfferedInterop {
+    /// The service's server.
+    pub service: ServiceServer,
+    /// The descriptors it was built of.
+    pub procedures: Arc<InteropProcedures>,
+}
+
 /// The interop service, offered on `server`.
 ///
 /// # Errors
@@ -340,20 +378,22 @@ fn failed(error: ProgrammerError) -> ResolverError {
     clippy::too_many_lines,
     reason = "one resolver per procedure, as the service states them"
 )]
-pub fn offer_interop(server: &Server) -> Result<ServiceServer, ProgrammerError> {
-    let validate: Validate<Value> = Arc::new(judge_checked);
+pub fn offer_interop(server: &Server) -> Result<OfferedInterop, ProgrammerError> {
+    // its rules judge every value: none fails to judge
+    let validate: Validate<Value> =
+        Arc::new(|request, options| Ok(judge_checked(request, options)));
     let procedures = Arc::new(interop_procedures(Some(validate))?);
     let mut options = ServiceServerOptions::default();
 
-    options.admissions = vec![(
+    options.admissions = Some(BTreeMap::from([(
         "nobody",
         AdmissionHook {
             admits: Arc::new(|_request| false),
             detail: Some("this procedure admits nobody".to_owned()),
         },
-    )];
+    )]));
 
-    let interop = ServiceServer::new(procedures.all(), options)?;
+    let interop = ServiceServer::new(procedures.all(), &options)?;
     let kept = Arc::new(Kept {
         cancellations: Mutex::new(BTreeMap::new()),
         destinations: Mutex::new(Vec::new()),
@@ -402,6 +442,7 @@ pub fn offer_interop(server: &Server) -> Result<ServiceServer, ProgrammerError> 
                 );
 
                 Box::pin(async move {
+                    let timer = timer.map_err(ResolverError::other)?;
                     let signal = request.signal.token().clone();
                     let mut wait = core::pin::pin!(wait);
                     let mut cancelled = core::pin::pin!(signal.cancelled());
@@ -471,10 +512,12 @@ pub fn offer_interop(server: &Server) -> Result<ServiceServer, ProgrammerError> 
                 .payload
                 .get("length")
                 .and_then(Value::as_u64)
-                .and_then(|length| usize::try_from(length).ok())
                 .unwrap_or(0);
 
-            response.result(Value::String("x".repeat(length)))
+            match bytes_of(length) {
+                Ok(value) => response.result(Value::String(value)),
+                Err(refused) => Box::pin(async move { Err(refused) }),
+            }
         }),
     )?;
 
@@ -538,14 +581,12 @@ pub fn offer_interop(server: &Server) -> Result<ServiceServer, ProgrammerError> 
     // that session it was the last for answer, before it does
     {
         let kept = Arc::clone(&kept);
-        let interop_of = interop.clone();
-        let ticks = procedures_of.ticks.clone();
+        let ticks = interop.notifier_of(&procedures_of.ticks)?;
 
         interop.on(
             &procedures_of.tick,
             callback_of(move |request, response| {
                 let kept = Arc::clone(&kept);
-                let interop = interop_of.clone();
                 let ticks = ticks.clone();
 
                 Box::pin(async move {
@@ -571,7 +612,7 @@ pub fn offer_interop(server: &Server) -> Result<ServiceServer, ProgrammerError> 
                     }));
                     options.key = key.map(bead::NotificationKey::Text);
 
-                    interop.notify(&ticks, (value, &options)).await;
+                    ticks.notify(value, &options).await;
 
                     let due: Vec<Hold> = {
                         let mut holds = locked(&kept.holds);
@@ -674,30 +715,25 @@ pub fn offer_interop(server: &Server) -> Result<ServiceServer, ProgrammerError> 
     // the name its call's session holds, whatever its connection's holds meanwhile
     interop.on(
         &procedures_of.whoami,
-        callback_of(|request, response| response.result(name_of(request.session.as_ref()))),
+        callback_of(|request, response| response.result(name_of(request.session.as_deref()))),
     )?;
 
     // the server asks its client back, by a command, before it answers
     {
-        let interop_of = interop.clone();
-        let clock = procedures_of.clock.clone();
+        let clock = interop.command_of(&procedures_of.clock)?;
 
         interop.on(
             &procedures_of.ask,
             callback_of(move |request, response| {
-                let interop = interop_of.clone();
                 let clock = clock.clone();
 
                 Box::pin(async move {
-                    let mut options = RequestOptions::default();
+                    let mut options = CommandOptions::new(Arc::clone(&request.connection_handle));
 
-                    options.connection_handle = Some(Arc::clone(&request.connection_handle));
                     options.timeout = Some(Duration::from_millis(CLOCK_MILLISECONDS));
 
-                    let time = interop
-                        .command(&clock)
-                        .map_err(failed)?
-                        .call(Value::String(QUESTION.to_owned()), options)
+                    let time = clock
+                        .call(Value::String(QUESTION.to_owned()), &options)
                         .map_err(failed)?
                         .await
                         .map_err(ResolverError::other)?;
@@ -764,10 +800,10 @@ pub fn offer_interop(server: &Server) -> Result<ServiceServer, ProgrammerError> 
                     options.timeout = timeout;
 
                     let registration = router
-                        .register_destination((
+                        .register_destination(
                             RelayTarget::Connection(Arc::clone(&request.connection_handle)),
-                            options,
-                        ))
+                            &options,
+                        )
                         .map_err(failed)?;
 
                     // ! taken out first, so the order kept is the order registered
@@ -867,5 +903,27 @@ pub fn offer_interop(server: &Server) -> Result<ServiceServer, ProgrammerError> 
 
     interop.offer(server)?;
 
-    Ok(interop)
+    Ok(OfferedInterop {
+        service: interop,
+        procedures,
+    })
+}
+
+/// What a client of the interop service answers its server: the `clock` command, `"noon"`.
+///
+/// # Errors
+///
+/// A [`ProgrammerError`] its services refuse the resolver with.
+pub fn offer_interop_client(client: &Client) -> Result<(), ProgrammerError> {
+    let procedures = interop_procedures(None)?;
+
+    client
+        .services()
+        .get_command_resolver(
+            procedures.clock.procedure(),
+            RequestResolverDependencies::new(JsonCodec, JsonCodec),
+        )?
+        .on(callback_of(|_request, response| {
+            response.result(Value::String("noon".to_owned()))
+        }))
 }

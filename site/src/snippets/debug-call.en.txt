@@ -1,0 +1,15 @@
+// a call's listener: (error, info), for the request echo('hi') that succeeds
+null, {
+  direction: 'rx',
+  duration: 1,
+  options: { timeout: 2000 },
+  procedureId: 2,
+  procedureName: 'echo',
+  rx: 'HI',
+  serviceId: 1,
+  serviceRevision: 1,
+  startedAt: 1790700108977,
+  tx: 'hi',
+  type: 'request',
+}
+// its outgoing step, at the same start: direction 'tx', duration: undefined, rx: undefined

@@ -18,24 +18,18 @@ import {
   StringValueSchema,
   UninterpretedOption_NamePartSchema,
   ValueSchema,
-  type FieldOptions,
 } from '@bufbuild/protobuf/wkt';
 import { expect, test } from '@playwright/test';
-import {
-  MapsSchema,
-  PresenceSchema,
-  type Maps,
-} from '../../proto/__tests__/generated/validations_pb';
+import { MapsSchema, PresenceSchema } from '../../proto/__tests__/generated/validations_pb';
 import { ProgrammerError } from '../../transport/shared/errors';
 import { PatchProfileSchema } from './binding-fixtures/generated/patch_binding_pb';
+import type { HttpPayload } from '../routes';
 import {
   base64Of,
+  createJsonForm,
   JsonFormError,
   readJsonText,
-  readProtoJson,
-  typeRegistryOf,
-  writeFieldJson,
-  writeProtoJson,
+  responseFieldOf,
 } from '../json-form';
 import {
   EdgesSchema,
@@ -44,12 +38,13 @@ import {
   ListBooksResponseSchema,
   type Aliased,
   type Edges,
+  TickSchema,
   type Everything,
 } from './generated/transcoding_pb';
 
 // constants
 
-const REGISTRY = typeRegistryOf([EdgesSchema, EverythingSchema]);
+const FORM = createJsonForm([EdgesSchema, EverythingSchema]);
 
 const INT32_VALUE_URL = 'type.googleapis.com/google.protobuf.Int32Value';
 
@@ -60,7 +55,7 @@ const ENCODER = new TextEncoder();
 test('refuses empty and trailing JSON texts through the public message reader', () => {
   for (const text of ['', ' \t\r\n', '{} {}', '{} true', '[] 0', 'null false', '{}x']) {
     expect(() => {
-      return readProtoJson(EmptySchema, { bytes: ENCODER.encode(text), registry: REGISTRY });
+      return FORM.read(EmptySchema, ENCODER.encode(text));
     }).toThrow('not JSON');
   }
 });
@@ -71,13 +66,13 @@ test('bounds JSON arrays and objects before reading a message', () => {
     '{"a":'.repeat(203) + '0' + '}'.repeat(203),
   ]) {
     expect(() => {
-      return readProtoJson(EmptySchema, { bytes: ENCODER.encode(text), registry: REGISTRY });
+      return FORM.read(EmptySchema, ENCODER.encode(text));
     }).toThrow('nested past 100');
   }
 });
 
 test('packs an Any with unset proto2 required fields and keeps explicit defaults on repeated reads', () => {
-  const registry = typeRegistryOf([UninterpretedOption_NamePartSchema]);
+  const form = createJsonForm([UninterpretedOption_NamePartSchema]);
   const typeUrl = 'type.googleapis.com/google.protobuf.UninterpretedOption.NamePart';
   const cases = [
     { members: '', bytes: [] },
@@ -88,10 +83,10 @@ test('packs an Any with unset proto2 required fields and keeps explicit defaults
   for (const { members, bytes } of cases) {
     const text = `{"@type":"${typeUrl}"${members}}`;
     for (let pass = 0; pass < 2; pass += 1) {
-      const any = readProtoJson(AnySchema, { bytes: ENCODER.encode(text), registry });
+      const any = form.read(AnySchema, ENCODER.encode(text));
 
       expect(any).toEqual(create(AnySchema, { typeUrl, value: Uint8Array.from(bytes) }));
-      expect(writeProtoJson(AnySchema, { message: any, registry })).toBe(text);
+      expect(form.write(AnySchema, any)).toBe(text);
     }
   }
 });
@@ -106,9 +101,7 @@ test('reads and writes signed infinities and NaN in double and float fields', ()
     const message = readEdges(text);
     expect(message.aDouble).toBe(value);
     expect(message.aFloat).toBe(value);
-    expect(writeProtoJson(EdgesSchema, { message, registry: REGISTRY })).toBe(
-      `{"aFloat":"${word}","aDouble":"${word}"}`
-    );
+    expect(FORM.write(EdgesSchema, message)).toBe(`{"aFloat":"${word}","aDouble":"${word}"}`);
     expect(fromBinary(EdgesSchema, toBinary(EdgesSchema, message))).toEqual(message);
   }
 });
@@ -116,14 +109,11 @@ test('reads and writes signed infinities and NaN in double and float fields', ()
 // helpers
 
 const readEverything = (body: string): Everything => {
-  return readProtoJson(EverythingSchema, {
-    bytes: ENCODER.encode(body),
-    registry: REGISTRY,
-  }) as Everything;
+  return FORM.read(EverythingSchema, ENCODER.encode(body));
 };
 
 const readEdges = (body: string): Edges => {
-  return readProtoJson(EdgesSchema, { bytes: ENCODER.encode(body), registry: REGISTRY }) as Edges;
+  return FORM.read(EdgesSchema, ENCODER.encode(body));
 };
 
 /** Why `body` is refused as an `Edges`, in the words of transcoding 5. */
@@ -176,7 +166,7 @@ const writeEdges = (init: Parameters<typeof create<typeof EdgesSchema>>[1]): str
   // * through binary, as a result comes
   const message = fromBinary(EdgesSchema, toBinary(EdgesSchema, create(EdgesSchema, init)));
 
-  return writeProtoJson(EdgesSchema, { message, registry: REGISTRY });
+  return FORM.write(EdgesSchema, message);
 };
 
 // tests
@@ -188,14 +178,11 @@ test('reads enum lists by name or number and refuses an invalid member at its in
     '{"targets":[1,4]}',
     '{"targets":["TARGET_TYPE_FILE","TARGET_TYPE_FIELD"]}',
   ]) {
-    const message = readProtoJson(FieldOptionsSchema, {
-      bytes: ENCODER.encode(body),
-      registry: REGISTRY,
-    }) as FieldOptions;
+    const message = FORM.read(FieldOptionsSchema, ENCODER.encode(body));
 
     expect(message).toEqual(expected);
     expect(fromBinary(FieldOptionsSchema, toBinary(FieldOptionsSchema, message))).toEqual(expected);
-    expect(writeProtoJson(FieldOptionsSchema, { message, registry: REGISTRY })).toBe(
+    expect(FORM.write(FieldOptionsSchema, message)).toBe(
       '{"targets":["TARGET_TYPE_FILE","TARGET_TYPE_FIELD"]}'
     );
   }
@@ -206,29 +193,21 @@ test('reads enum lists by name or number and refuses an invalid member at its in
     ['true', 'no OptionTargetType'],
   ]) {
     expect(() => {
-      readProtoJson(FieldOptionsSchema, {
-        bytes: ENCODER.encode(`{"targets":[1,${member}]}`),
-        registry: REGISTRY,
-      });
+      FORM.read(FieldOptionsSchema, ENCODER.encode(`{"targets":[1,${member}]}`));
     }).toThrow(expect.objectContaining({ pointer: '#/targets/1', reason }));
   }
 });
 
 test('refuses unknown numbers of a closed enum and keeps open enum numbers', () => {
   const read = (body: string) => {
-    return readProtoJson(FieldDescriptorProtoSchema, {
-      bytes: ENCODER.encode(body),
-      registry: REGISTRY,
-    });
+    return FORM.read(FieldDescriptorProtoSchema, ENCODER.encode(body));
   };
 
   for (const body of ['{"type":1}', '{"type":"TYPE_DOUBLE"}']) {
     const message = read(body);
 
     expect(message).toEqual(create(FieldDescriptorProtoSchema, { type: 1 }));
-    expect(writeProtoJson(FieldDescriptorProtoSchema, { message, registry: REGISTRY })).toBe(
-      '{"type":"TYPE_DOUBLE"}'
-    );
+    expect(FORM.write(FieldDescriptorProtoSchema, message)).toBe('{"type":"TYPE_DOUBLE"}');
   }
 
   for (const body of ['{"type":0}', '{"type":999}']) {
@@ -256,7 +235,7 @@ test('refuses an Empty value that is not an object', () => {
     let refused: unknown;
 
     try {
-      readProtoJson(EmptySchema, { bytes: ENCODER.encode(body), registry: REGISTRY });
+      FORM.read(EmptySchema, ENCODER.encode(body));
     } catch (error) {
       refused = error;
     }
@@ -272,7 +251,7 @@ test('reads unsigned 64-bit map keys exactly and refuses keys outside their boun
     ['byFixed64', 'fixed64'],
   ] as const) {
     const read = (body: string) => {
-      return readProtoJson(MapsSchema, { bytes: ENCODER.encode(body), registry: REGISTRY }) as Maps;
+      return FORM.read(MapsSchema, ENCODER.encode(body));
     };
     const message = read(
       `{"${field}":{"9007199254740993":"large","18446744073709551615":"max","0":"zero"}}`
@@ -283,7 +262,7 @@ test('reads unsigned 64-bit map keys exactly and refuses keys outside their boun
 
     expect(message).toEqual(expected);
     expect(fromBinary(MapsSchema, toBinary(MapsSchema, message))).toEqual(expected);
-    expect(writeProtoJson(MapsSchema, { message, registry: REGISTRY })).toBe(
+    expect(FORM.write(MapsSchema, message)).toBe(
       `{"${field}":{"0":"zero","18446744073709551615":"max","9007199254740993":"large"}}`
     );
 
@@ -419,7 +398,7 @@ test('writes a proto result in Bead’s proto JSON form, its fields by number, i
       EverythingSchema,
       create(EverythingSchema, {
         aDouble: 1e21,
-        aString: ' <>\u001f',
+        aString: '\u2028<>\u001f',
         anInt64: -5n,
         byId: { '10': 'x', '2': 'y', '-1': 'z' },
         customNamed: 'r',
@@ -430,8 +409,8 @@ test('writes a proto result in Bead’s proto JSON form, its fields by number, i
     )
   );
 
-  expect(writeProtoJson(EverythingSchema, { message, registry: REGISTRY })).toBe(
-    '{"aDouble":1e+21,"anInt64":"-5","aString":" <>\\u001f","someBytes":"+w==","labels":{"Z":4,"a":2,"b":1,"é":3},"byId":{"-1":"z","10":"x","2":"y"},"wrappedInt64":"0","renamed":"r"}'
+  expect(FORM.write(EverythingSchema, message)).toBe(
+    '{"aDouble":1e+21,"anInt64":"-5","aString":"\u2028<>\\u001f","someBytes":"+w==","labels":{"Z":4,"a":2,"b":1,"é":3},"byId":{"-1":"z","10":"x","2":"y"},"wrappedInt64":"0","renamed":"r"}'
   );
   expect(
     writeEdges({
@@ -556,7 +535,7 @@ test('refuses a value its field’s type holds none of, each by its reason', () 
     [EdgesSchema, '{"mask":1}', 'a FieldMask that is no string'],
   ] as const) {
     try {
-      readProtoJson(schema, { bytes: ENCODER.encode(body), registry: REGISTRY });
+      FORM.read(schema, ENCODER.encode(body));
       parted.push(`${body}: taken, where ${words}`);
     } catch (error) {
       if (!(error instanceof JsonFormError)) {
@@ -618,10 +597,7 @@ test('writes each well-known form at its edges, and refuses what its form holds 
   expect(writeEdges({ took: { nanos: -1, seconds: -1n } })).toBe('{"took":"-1.000000001s"}');
   expect(writeEdges({ took: { nanos: 1000 } })).toBe('{"took":"0.000001s"}');
   expect(
-    writeProtoJson(EverythingSchema, {
-      message: create(EverythingSchema, { flags: { true: 't', false: 'f' } }),
-      registry: REGISTRY,
-    })
+    FORM.write(EverythingSchema, create(EverythingSchema, { flags: { true: 't', false: 'f' } }))
   ).toBe('{"flags":{"false":"f","true":"t"}}');
 
   const parted: string[] = [];
@@ -643,7 +619,7 @@ test('writes each well-known form at its edges, and refuses what its form holds 
     ],
   ] as const) {
     try {
-      writeProtoJson(EdgesSchema, { message: create(EdgesSchema, init), registry: REGISTRY });
+      FORM.write(EdgesSchema, create(EdgesSchema, init));
       parted.push(`${JSON.stringify(Object.keys(init))}: written, where ${words}`);
     } catch (error) {
       if (!(error instanceof JsonFormError)) {
@@ -687,30 +663,11 @@ test('reads and writes an Any of a wrapper by its value, and a wrapper alone as 
   ).toBe(packed);
 
   // a wrapper alone, read and written as its scalar, at its default too
-  expect(
-    readProtoJson(Int32ValueSchema, { bytes: ENCODER.encode('3'), registry: REGISTRY })
-  ).toMatchObject({ value: 3 });
-  expect(
-    writeProtoJson(Int32ValueSchema, {
-      message: create(Int32ValueSchema, { value: 3 }),
-      registry: REGISTRY,
-    })
-  ).toBe('3');
-  expect(
-    writeProtoJson(StringValueSchema, {
-      message: create(StringValueSchema, { value: 'a' }),
-      registry: REGISTRY,
-    })
-  ).toBe('"a"');
-  expect(
-    writeProtoJson(Int32ValueSchema, { message: create(Int32ValueSchema), registry: REGISTRY })
-  ).toBe('0');
-  expect(
-    writeProtoJson(Int64ValueSchema, {
-      message: create(Int64ValueSchema, { value: -3n }),
-      registry: REGISTRY,
-    })
-  ).toBe('"-3"');
+  expect(FORM.read(Int32ValueSchema, ENCODER.encode('3'))).toMatchObject({ value: 3 });
+  expect(FORM.write(Int32ValueSchema, create(Int32ValueSchema, { value: 3 }))).toBe('3');
+  expect(FORM.write(StringValueSchema, create(StringValueSchema, { value: 'a' }))).toBe('"a"');
+  expect(FORM.write(Int32ValueSchema, create(Int32ValueSchema))).toBe('0');
+  expect(FORM.write(Int64ValueSchema, create(Int64ValueSchema, { value: -3n }))).toBe('"-3"');
 });
 
 test('writes each kind of Value, and a Struct within a Struct, in its own form', () => {
@@ -764,17 +721,11 @@ test('writes each kind of Value, and a Struct within a Struct, in its own form',
 
 test('writes a message nested 100 deep, and refuses one nested past 100', () => {
   // * 100 below the result written; 101 refused, a Struct's members counted as a message's
-  expect(
-    writeProtoJson(EdgesSchema, {
-      message: create(EdgesSchema, nestedEdges(100)),
-      registry: REGISTRY,
-    })
-  ).toMatch(/^\{"child":\{"child":/u);
+  expect(FORM.write(EdgesSchema, create(EdgesSchema, nestedEdges(100)))).toMatch(
+    /^\{"child":\{"child":/u
+  );
   expect(() => {
-    return writeProtoJson(EdgesSchema, {
-      message: create(EdgesSchema, nestedEdges(101)),
-      registry: REGISTRY,
-    });
+    return FORM.write(EdgesSchema, create(EdgesSchema, nestedEdges(101)));
   }).toThrow('a message nested past 100');
 
   let structured: MessageInitShape<typeof EdgesSchema> = { extra: { a: 1 } };
@@ -784,10 +735,7 @@ test('writes a message nested 100 deep, and refuses one nested past 100', () => 
   }
 
   expect(() => {
-    return writeProtoJson(EdgesSchema, {
-      message: create(EdgesSchema, structured),
-      registry: REGISTRY,
-    });
+    return FORM.write(EdgesSchema, create(EdgesSchema, structured));
   }).toThrow('a message nested past 100');
 });
 
@@ -797,14 +745,14 @@ test('writes an unset 64-bit oneof field as zero in a response body', () => {
     create(PatchProfileSchema, { selection: { case: 'label', value: 'Ada' } }),
   ]) {
     for (const name of ['count', 'string_count']) {
-      expect(writeFieldJson(PatchProfileSchema, { message, name, registry: REGISTRY })).toBe('"0"');
+      expect(FORM.writeField(responseFieldOf(PatchProfileSchema, name), message)).toBe('"0"');
     }
   }
 });
 
 test('writes a response body’s field at its default where its oneof holds another member or none', () => {
   const fieldOf = (schema: DescMessage, init: { message: Message; name: string }): string => {
-    return writeFieldJson(schema, { ...init, registry: REGISTRY });
+    return FORM.writeField(responseFieldOf(schema, init.name), init.message);
   };
   const edges = create(EdgesSchema);
   const everything = create(EverythingSchema);
@@ -846,39 +794,49 @@ test('writes a response body’s field at its default where its oneof holds anot
       return fieldOf(EverythingSchema, { message: everything, name });
     }).toThrow(ProgrammerError);
   }
+
+  // a field of another message, the same caller's bug, in the words of a name of no field
+  expect(() => {
+    return FORM.writeField(responseFieldOf(EdgesSchema, 'an_int32'), everything);
+  }).toThrow(ProgrammerError);
+  expect(() => {
+    return FORM.writeField(responseFieldOf(EdgesSchema, 'an_int32'), everything);
+  }).toThrow('bead.transcoding.v1.Everything has no field an_int32');
 });
 
 test('writes a field of its own presence where it is set, at its default too, and leaves it out unset', () => {
-  expect(
-    writeProtoJson(EverythingSchema, { message: create(EverythingSchema), registry: REGISTRY })
-  ).toBe('{}');
-  expect(
-    writeProtoJson(EverythingSchema, {
-      message: create(EverythingSchema, { aString: '', maybe: 0 }),
-      registry: REGISTRY,
-    })
-  ).toBe('{"maybe":0}');
+  expect(FORM.write(EverythingSchema, create(EverythingSchema))).toBe('{}');
+  expect(FORM.write(EverythingSchema, create(EverythingSchema, { aString: '', maybe: 0 }))).toBe(
+    '{"maybe":0}'
+  );
 
   // TypeScript alone: edition 2023's explicit presence, `explicit` and `needed`, and `implicit` of
   // its own, on a message of the validations' definitions, which the C# side's transcoding tests
   // do not build
-  const registry = typeRegistryOf([PresenceSchema]);
+  const form = createJsonForm([PresenceSchema]);
 
-  expect(writeProtoJson(PresenceSchema, { message: create(PresenceSchema), registry })).toBe('{}');
-  expect(
-    writeProtoJson(PresenceSchema, {
-      message: create(PresenceSchema, { explicit: '', implicit: '' }),
-      registry,
-    })
-  ).toBe('{"explicit":""}');
+  expect(form.write(PresenceSchema, create(PresenceSchema))).toBe('{}');
+  expect(form.write(PresenceSchema, create(PresenceSchema, { explicit: '', implicit: '' }))).toBe(
+    '{"explicit":""}'
+  );
 });
 
 // TypeScript alone: a JavaScript number is a double, which a float field may hold unrounded
 test('writes a float field that holds what no 32-bit float holds as the double it holds', () => {
-  expect(
-    writeProtoJson(EdgesSchema, {
-      message: create(EdgesSchema, { aFloat: 0.1 }),
-      registry: REGISTRY,
-    })
-  ).toBe('{"aFloat":0.1}');
+  expect(FORM.write(EdgesSchema, create(EdgesSchema, { aFloat: 0.1 }))).toBe('{"aFloat":0.1}');
+});
+
+test('writes each payload’s data as its encoding reads it', () => {
+  const data = (payload: HttpPayload, bytes: Uint8Array): string => {
+    return createJsonForm([TickSchema]).eventDataOf(payload, bytes);
+  };
+
+  // * a proto one in Bead's proto JSON form, a json one as it is, a text one a JSON string, a raw
+  // one its base64
+  expect(data(TickSchema, Uint8Array.of(0x08, 0x01))).toBe('{"remaining":1}');
+  expect(data('json', ENCODER.encode('[1, 2]'))).toBe('[1, 2]');
+  expect(data('text', ENCODER.encode('h"é'))).toBe('"h\\"é"');
+  expect(data('text', ENCODER.encode('h\n\r'))).toBe('"h\\n\\r"');
+  expect(data('raw', Uint8Array.of(0x01, 0x02, 0xff))).toBe('"AQL/"');
+  expect(data('raw', Uint8Array.of(0, 0xff, 0xfe))).toBe('"AP/+"');
 });

@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 // The root's own files keep the layout the TypeScript side's formatter gives them, under its
-// configuration: the README to the CI, the spec's texts and schemas, the tools, the workflows. The
-// conformance files are left to their generators, the interop's blueprint to spec/check.py, which
-// holds its form (decision 0022), what beadc generates to beadc; each implementation, the builder
-// and each half of an example hold their own files in their gate. The CHANGELOG is held up to its
-// first released section: a released one stays as its tag shipped it.
+// configuration: the README to the CI, the spec's texts and schemas, the tools, the workflows, the
+// page's scripts and styles. The conformance files are left to their generators, the interop's
+// blueprint to spec/check.py, which holds its form (decision 0022), what beadc generates to beadc;
+// each implementation, the builder and each half of an example hold their own files in their gate.
+// The CHANGELOG is held up to its first released section: a released one stays as its tag shipped
+// it.
 //
 //   node tools/check-format.mjs            every root file this check holds
 //   node tools/check-format.mjs --staged   the staged ones alone, as the pre-commit hook asks
@@ -36,6 +37,16 @@ const ROOT = [
   'spec/schemas',
   'tools',
   '.github',
+  // the page's scripts, styles and manifest; its HTML templates hold placeholders no formatter reads,
+  // and what it generates is held by site/check.mjs
+  'site/build.mjs',
+  'site/check.mjs',
+  'site/render.mjs',
+  'site/package.json',
+  'site/src/data.mjs',
+  'site/src/head.js',
+  'site/src/page.js',
+  'site/src/styles.css',
 ];
 
 const OXFMT = 'implementations/typescript/node_modules/oxfmt/bin/oxfmt';

@@ -71,8 +71,9 @@ internal sealed record BrokerConnectionSetup
 /// <summary>
 /// One end of a connection over a broker (spec 15.17 to 15.23): its pair, the halves both its ends
 /// drew; what it sent, numbered from its first; what it awaits, by its sequence, a copy dropped and
-/// a gap a loss; its envelope in parts each way; what waits for its broker; its heartbeat; its end.
-/// Touched on its participant's scheduler alone.
+/// a gap a loss; its envelope in parts each way; what waits for its broker; what it holds for its
+/// router, paused; its heartbeat; its end. Touched on its participant's scheduler alone, but its
+/// pause and its resume, which its router asks from any thread.
 /// </summary>
 internal sealed class BrokerConnection
 {
@@ -83,6 +84,14 @@ internal sealed class BrokerConnection
     private Heartbeat? _heartbeat;
     private ulong _sent;
     private long _unsent;
+
+    // * what its router paused it for: each envelope come whole held in order, its bytes counted
+    // apart from its parts', and the CLOSE that came behind them, whether clean (spec 15.12, 15.23);
+    // the flag set from any thread, the rest touched in its participant's turn
+    private readonly Queue<TransportMessage> _held = new();
+    private volatile bool _isPaused;
+    private long _heldBytes;
+    private bool? _closing;
 
     public BrokerConnection(BrokerParticipant participant, BrokerConnectionSetup setup)
     {
@@ -191,6 +200,69 @@ internal sealed class BrokerConnection
         }
     }
 
+    /// <summary>What it holds, in bytes, of the envelopes its router paused it for.</summary>
+    public long HeldEnvelopeBytes
+    {
+        get
+        {
+            return _heldBytes;
+        }
+    }
+
+    /// <summary>
+    /// Holds each envelope that comes whole for it from now on, its router paused (spec 15.12): in
+    /// order, its peer's CLOSE behind them, to <c>maximumHeldEnvelopeBytes</c>, past which it is
+    /// lost; its link reads on, which carries other connections. Idempotent, from any thread.
+    /// </summary>
+    public void Pause()
+    {
+        // ! a flag alone, never a lock its participant holds as it tells
+        _isPaused = true;
+    }
+
+    /// <summary>
+    /// Hands on what it holds, in order, in a turn of its participant's, never within this call,
+    /// asking before each whether it was paused again; then a CLOSE held behind them ends it.
+    /// Idempotent, from any thread.
+    /// </summary>
+    public void Resume()
+    {
+        _isPaused = false;
+        _participant.Scheduler.Post(Release);
+    }
+
+    /// <summary>
+    /// An envelope come whole, in its participant's turn: handed on to its owner; or, while its
+    /// router paused it or anything is held, held behind what is held, in order, the connection lost
+    /// past what it may hold.
+    /// </summary>
+    public void Hand(TransportMessage message)
+    {
+        if (State == BrokerConnectionState.Closed)
+        {
+            return;
+        }
+
+        if (!_isPaused && _held.Count == 0)
+        {
+            _setup.Owner.Delivered(this, message);
+
+            return;
+        }
+
+        var bound = _participant.MaximumHeldEnvelopeBytes ?? _setup.MaximumUnsentBytes;
+
+        if (_heldBytes + message.Bytes.Length > bound)
+        {
+            Lose((4000, string.Create(CultureInfo.InvariantCulture, $"what it holds for its router, paused, would pass maximumHeldEnvelopeBytes, {bound} bytes")));
+
+            return;
+        }
+
+        _heldBytes += message.Bytes.Length;
+        _held.Enqueue(message);
+    }
+
     /// <summary>Opens it: its heartbeat started, its peer's departure subscribed (spec 15.21).</summary>
     public void Open()
     {
@@ -236,6 +308,13 @@ internal sealed class BrokerConnection
     public void Take(BrokerParcel parcel, (int Bytes, byte? Flags) incoming = default)
     {
         if (State == BrokerConnectionState.Closed)
+        {
+            return;
+        }
+
+        // * its peer's CLOSE held behind what it holds: nothing comes after a CLOSE but a RESET,
+        // which ends it at once, what it holds lost with it (spec 15.21)
+        if (_closing is not null && parcel.Kind != BrokerParcelKinds.Reset)
         {
             return;
         }
@@ -314,7 +393,7 @@ internal sealed class BrokerConnection
                 break;
 
             case BrokerParcelKinds.Close:
-                Ended((parcel.Code == 1000, null));
+                TakeClose(parcel.Code == 1000);
 
                 break;
 
@@ -331,7 +410,8 @@ internal sealed class BrokerConnection
     /// </summary>
     public void TakeUnread((BrokerParcel Prefix, string Why) unread, int bytes = 0)
     {
-        if (State == BrokerConnectionState.Closed)
+        // nothing comes after a CLOSE: what comes once one is held behind what it holds is dropped
+        if (State == BrokerConnectionState.Closed || _closing is not null)
         {
             return;
         }
@@ -386,7 +466,7 @@ internal sealed class BrokerConnection
 
         foreach (var part in parts)
         {
-            Publish((part, part.Credential is null ? null : life));
+            _ = Publish((part, part.Credential is null ? null : life));
         }
     }
 
@@ -398,17 +478,21 @@ internal sealed class BrokerConnection
     /// </summary>
     public void Publish(BrokerParcel parcel)
     {
-        Publish((parcel, null));
+        _ = Publish((parcel, null));
     }
 
-    /// <summary>As <see cref="Publish(BrokerParcel)"/>, living in its broker as long as given, where its adapter offers a message's life.</summary>
-    public void Publish((BrokerParcel Parcel, TimeSpan? ExpiresAfter) publication)
+    /// <summary>
+    /// As <see cref="Publish(BrokerParcel)"/>, living in its broker as long as given, where its
+    /// adapter offers a message's life; what its broker says of it, none when nothing went.
+    /// </summary>
+    public Task<BrokerPublished>? Publish((BrokerParcel Parcel, TimeSpan? ExpiresAfter) publication)
     {
         var (parcel, expiresAfter) = publication;
 
-        if (State == BrokerConnectionState.Closed)
+        // its peer's CLOSE came, held behind what it holds: nothing goes after a CLOSE
+        if (State == BrokerConnectionState.Closed || _closing is not null)
         {
-            return;
+            return null;
         }
 
         var isReset = parcel.Kind == BrokerParcelKinds.Reset;
@@ -421,7 +505,7 @@ internal sealed class BrokerConnection
         {
             Lose((4000, string.Create(CultureInfo.InvariantCulture, $"what waits for its broker would pass maximumUnsentBytes, {_setup.MaximumUnsentBytes} bytes")));
 
-            return;
+            return null;
         }
 
         if (!isReset)
@@ -451,22 +535,27 @@ internal sealed class BrokerConnection
             CancellationToken.None,
             TaskContinuationOptions.ExecuteSynchronously,
             TaskScheduler.Default);
+
+        return published;
     }
 
     /// <summary>
-    /// Closes it of this end's own: a CLOSE of <paramref name="close"/>'s code sent, its other end
-    /// told, a half-open one's among them, which its client holds open; this end's owner told as it
-    /// says.
+    /// Closes it of this end's own: a CLOSE of <paramref name="close"/>'s code handed to its adapter
+    /// in this turn, its other end told, a half-open one's among them, which its client holds open;
+    /// this end's owner told as it says. What its broker says of that CLOSE, none when none went.
     /// </summary>
-    public void Close((int Code, bool IsClean) close)
+    public Task<BrokerPublished>? Close((int Code, bool IsClean) close)
     {
         if (State == BrokerConnectionState.Closed)
         {
-            return;
+            return null;
         }
 
-        Publish(new BrokerParcel { Kind = BrokerParcelKinds.Close, Code = close.Code });
+        var published = Publish((new BrokerParcel { Kind = BrokerParcelKinds.Close, Code = close.Code }, null));
+
         Ended((close.IsClean, null));
+
+        return published;
     }
 
     /// <summary>Lets go of it at once, sending nothing, unclean: its link lost, its peer gone, or a half-open one forgotten.</summary>
@@ -566,12 +655,43 @@ internal sealed class BrokerConnection
         if (taken.Envelope is { } envelope)
         {
             LastActivity = _participant.Clock.GetUtcNow();
-            _setup.Owner.Delivered(this, new TransportMessage(envelope, false)
+            Hand(new TransportMessage(envelope, false)
             {
                 Credential = taken.Credential,
                 Address = _setup.Owner.IsOpener ? null : _setup.PeerId,
             });
         }
+    }
+
+    // * a resume's turn: what it holds handed on, in order, each after asking whether its router
+    // paused it again, which handing one may do; then a CLOSE held behind them ends it (spec 15.21)
+    private void Release()
+    {
+        while (!_isPaused && State != BrokerConnectionState.Closed && _held.TryDequeue(out var message))
+        {
+            _heldBytes -= message.Bytes.Length;
+            _setup.Owner.Delivered(this, message);
+        }
+
+        if (!_isPaused && _held.Count == 0 && _closing is { } isClean)
+        {
+            Ended((isClean, null));
+        }
+    }
+
+    // a CLOSE ends its connection once all before it was handed on: at once, unless what its router
+    // paused it for is held, which it then waits behind, its heartbeat stopped
+    private void TakeClose(bool isClean)
+    {
+        if (_held.Count == 0)
+        {
+            Ended((isClean, null));
+
+            return;
+        }
+
+        _closing = isClean;
+        _heartbeat?.Stop();
     }
 
     // lost of its own: a CLOSE of its code, its end unclean, reported naming why (spec 15.1)
@@ -609,6 +729,8 @@ internal sealed class BrokerConnection
         State = BrokerConnectionState.Closed;
         _heartbeat?.Stop();
         _parts.Stop();
+        _held.Clear();
+        _heldBytes = 0;
         _participant.Forget(this);
 
         if (wasOpen)

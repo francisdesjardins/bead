@@ -41,7 +41,7 @@ with the hash of its text. The why of each rule is in the decisions:
 - [0022](../docs/decisions/0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md):
   the blueprint its routes come from, and the document its builder writes (3.9, 11).
 
-**Version: 0.2.1**. Its conformance file repeats it as its `transcodingVersion`, and follows its
+**Version: 0.2.2**. Its conformance file repeats it as its `transcodingVersion`, and follows its
 schema in [`schemas/`](schemas/). It moves by `spec.md`'s rule, under a version of its own
 ([0008](../docs/decisions/0008-three-version-axes-and-names-qualified-by-their-owner.md)): the minor
 when a gateway that conforms to its last version must change to conform to this one, the patch when
@@ -758,12 +758,12 @@ a schema states: a field's proto name, an enum's number and a 64-bit integer as 
 12.1. An output with `http: true` writes, beside its route table, a typed `<Service>HttpClient`
 that calls each procedure of its service by its default `POST` route (section 3.1), its request
 whole and its result whole, whatever `google.api.http` rules the procedure also serves; a command,
-which no exchange answers, has none. Its surface maps name for name: on the TypeScript side
-`new HelloHttpClient(url, options?)`, `hello.sayHello(request, options?)` and, for a procedure that
-notifies, `hello.subscribeCountDown(request, options?)`; on the C# side `new HelloHttpClient(uri,
-options)`, `hello.SayHello(request, options)` and `hello.SubscribeCountDown(request, options)`. The
-names `<Service>HttpClient` and `subscribe<Procedure>`, or `Subscribe<Procedure>`, are a target's
-own, which beadc keeps a blueprint's names from (its rule `NAME_TARGET`).
+which no exchange answers, has none. Its surface maps name for name, each in its target's case:
+the client is made of its URL and its options, calls a procedure by the procedure's name,
+`sayHello`, its request and its options given, and calls one that notifies by `subscribe` and the
+procedure's name, `subscribeCountDown`. The names `<Service>HttpClient` and `subscribe<Procedure>`,
+in a target's case, are a target's own, which beadc keeps a blueprint's names from (its rule
+`NAME_TARGET`).
 
 12.2. Its URL is HTTP's or HTTPS's, with no user information, no query and no fragment; it may end
 in a path, a prefix under which each route resolves as [RFC 3986
@@ -779,8 +779,8 @@ Section 13.4's withdrawal of a default credential on `SESSION_REQUIRED` does not
 call holds no session to end. It follows no redirect, presents no cookie and, from a page, nothing
 the browser would add beyond its own origin's (`credentials: 'same-origin'`).
 
-12.4. A problem is a Bead failure, raised as its side raises one, `FailureError` on the TypeScript
-side and `FailureException` on the C# side, its detail its problem's:
+12.4. A problem is a Bead failure, raised as its side raises the failure an answer carries, its
+detail its problem's:
 
 1. one that holds a `code` and a `scope` (section 7.1) is that failure, the peer's: its code an
    integer of 1 to 65,535, `1.0` and `1e0` code 1, a member of another JSON kind a malformed
@@ -803,10 +803,10 @@ types compared without regard to case, [RFC 9110
 §8.3.1](https://www.rfc-editor.org/rfc/rfc9110#section-8.3.1)), and a body section 5 cannot read,
 whatever the platform throws for it, are `PAYLOAD_UNDECODABLE`.
 
-12.5. A subscription reads its stream (section 8) through `fetch` or `HttpClient`, so that a page
-presents its credential, which `EventSource` cannot: an async sequence of its result, then its
-notifications, then its end, a failure raised as section 12.4 raises one; a leading byte order
-mark is taken away, as
+12.5. A subscription reads its stream (section 8) through an exchange the client makes itself,
+never through `EventSource`, which cannot present a page's credential: an async sequence of its
+result, then its notifications, then its end, a failure raised as section 12.4 raises one; a
+leading byte order mark is taken away, as
 [the HTML standard](https://html.spec.whatwg.org/multipage/server-sent-events.html) decodes a
 stream. A stream cut before its end is `DESTINATION_LOST`, since its procedure may have run. Ending
 the sequence, or cancelling it, releases its exchange. A client MUST NOT reconnect or send
@@ -815,7 +815,7 @@ the sequence, or cancelling it, releases its exchange. A client MUST NOT reconne
 12.6. It bounds the body of each answer and each event of a stream by `maximumBodyBytes`, by
 default `maximumEnvelopeBytes`, as its gateway bounds a request's (section 10.2), and the message it
 reads by the envelope's bound: past either, `PAYLOAD_TOO_LARGE`. It counts a stream's bytes as they
-come. A call's cancellation is its platform's, an `AbortSignal` or a `CancellationToken`; on the C#
-side, a handler it is given is the application's, which it never disposes, and it judges each
-answer whatever the handler does; the handler it makes is the transports', which connects as [RFC
-8305](https://www.rfc-editor.org/rfc/rfc8305) does.
+come. A call's cancellation is its platform's. What carries its exchanges, when its application
+gives one, is the application's: the client never disposes it, and judges each answer whatever it
+does. What carries them when its application gives none races a name's address families, as [RFC
+8305 §5](https://www.rfc-editor.org/rfc/rfc8305#section-5) asks.

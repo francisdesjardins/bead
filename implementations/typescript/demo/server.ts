@@ -9,7 +9,7 @@ import { createMetricsRegistry } from '../src/router/shared/metrics-registry';
 import type { HealthStatus } from '../src/server/health';
 import { createHTTPServer } from '../src/server/http-server';
 import { createServer as createBeadServer } from '../src/server/server';
-import { createWSServer } from '../src/server/ws-server';
+import { createWebSocketServer } from '../src/server/websocket-server';
 import { createHTTPGateway } from '../src/transcoding/http-gateway';
 import { createMemoryTransportServer } from '../src/transport/server/memory-transport-server';
 import { HTTP_PROBLEM_TYPES, HTTP_ROUTES, OPENAPI_DOCUMENT } from './gen/typescript/bead_http';
@@ -128,7 +128,7 @@ const serve = async (request: IncomingMessage, reply: ServerResponse): Promise<v
 // a connection gone silent is closed, as no session of its own times it; behind the relay, an
 // upgrade names the host a page named, `localhost` or this machine's address, which every server
 // takes, as an HTTP exchange does
-const overWebSocket = createWSServer({
+const overWebSocket = createWebSocketServer({
   connectionInactivityTimeout: SILENCE_MILLISECONDS,
   credentials: CREDENTIALS,
   metricsRegistry: METRICS_REGISTRY,

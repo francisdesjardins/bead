@@ -2,7 +2,7 @@
   "name": "beadc-fuzz",
   "version": "0.0.0",
   "private": true,
-  "description": "Jazzer.js, which fuzzes beadc's blueprint reader by coverage, by hand: installed apart, so neither beadc's install nor CI fetches it.",
+  "description": "Jazzer.js, which fuzzes beadc's blueprint reader by coverage, by hand and every week: installed apart, so neither beadc's install nor a pull request's CI fetches it.",
   "license": "Apache-2.0",
   "type": "module",
   "devDependencies": {

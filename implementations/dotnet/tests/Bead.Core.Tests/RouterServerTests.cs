@@ -79,6 +79,7 @@ public sealed partial class RouterServerTests : IDisposable
     private void Start(RouterServerOptions? options = null)
     {
         _transport.Clock = options?.Clock ?? _time;
+        _transport.Later = _scheduler.Post;
         _router = new RouterServer(
             _transport,
             (options ?? new RouterServerOptions()) with { ResolverScheduler = _scheduler, Scheduler = _scheduler });
@@ -377,7 +378,7 @@ public sealed partial class RouterServerTests : IDisposable
 
         Assert.Equal((_time, _time), (Router.Clock, same.Clock));
         Assert.Equal(
-            "a server's router runs on the clock of its transport, a FakeTimeProvider, and was given another, the system's",
+            "a server's router runs on the clock of its transport, one of its own, and was given another, the platform's",
             Assert.Throws<ArgumentException>(() =>
             {
                 return new RouterServer(_transport, new RouterServerOptions { Clock = TimeProvider.System });
@@ -762,7 +763,7 @@ public sealed partial class RouterServerTests : IDisposable
         _transport.Open(First);
         _transport.Open(Second);
 
-        var running = command("run")(new RequestOptions { ConnectionHandle = Second, Timeout = TimeSpan.FromSeconds(1) });
+        var running = command("run")(new CommandOptions { ConnectionHandle = Second, Timeout = TimeSpan.FromSeconds(1) });
 
         Deliver(Second, ResultOf(2, "done"));
 
@@ -813,12 +814,13 @@ public sealed partial class RouterServerTests : IDisposable
     {
         Start();
 
-        await Assert.ThrowsAsync<ArgumentException>(() =>
+        var unnamed = await Assert.ThrowsAsync<ArgumentException>(() =>
         {
             return Router.Request(
                 ReadOnlyMemory<byte>.Empty,
                 new RouterRequest(Echo, new ResolvedRequestOptions { Timeout = TimeSpan.FromSeconds(1) })).WaitAsync(Patience, Cancelled);
         });
+        Assert.StartsWith("a server request names the connection it goes to", unnamed.Message, StringComparison.Ordinal);
         await Assert.ThrowsAsync<DisconnectException>(() =>
         {
             return Router.Request(ReadOnlyMemory<byte>.Empty, CommandOf(First)).WaitAsync(Patience, Cancelled);
@@ -1018,11 +1020,12 @@ public sealed partial class RouterServerTests : IDisposable
         Start();
 
         // * who a notification would reach as each answer is handed over, read in its router's turn
-        // by a filter that keeps none
+        // by a filter that keeps none: through its own form, as a public notify made there is taken
+        // in a later turn
         _transport.OnSend = (connectionHandle, _) =>
         {
             var reached = new List<string>();
-            var probing = Router.Notify(BytesOf(Probe), new NotifyRequest
+            var probing = Router.NotifyOnLoop(BytesOf(Probe), new NotifyRequest
             {
                 Procedure = News.Address,
                 Filter = (subscriber) =>
@@ -1540,6 +1543,38 @@ public sealed partial class RouterServerTests : IDisposable
 
         // nor answered, nor reported: its connection took the call away, and its call id may be
         // another's now
+        Assert.Empty(_transport.Sent);
+        Assert.Empty(_errors);
+    }
+
+    [Fact]
+    public async Task A_subscription_goes_only_to_a_request_this_router_dispatched_a_copy_of_its_header_is_refused_and_subscribes_nothing()
+    {
+        var handed = new List<RequestResolverProps>();
+
+        Start();
+        _transport.Open(First);
+        Router.RegisterResolver(new RawResolver(News, (props) =>
+        {
+            handed.Add(props);
+
+            return Task.CompletedTask;
+        }));
+        Deliver(First, SubscribingOf(1));
+        await Settle();
+
+        var request = Assert.Single(handed);
+
+        // a copy of its header was never dispatched: no call is tied to it (spec 9.3)
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+        {
+            return Router.Subscribe(new AnswerTarget(request.ConnectionHandle, request.Header with { })).WaitAsync(Patience, Cancelled);
+        });
+        Assert.Empty(await SubscribedTo(News));
+
+        // its own header subscribes it, the copy having marked nothing
+        Assert.Equal(1u, await Router.Subscribe(new AnswerTarget(request.ConnectionHandle, request.Header)).WaitAsync(Patience, Cancelled));
+        Assert.Equal(["first 1"], await SubscribedTo(News));
         Assert.Empty(_transport.Sent);
         Assert.Empty(_errors);
     }
@@ -2143,7 +2178,7 @@ public sealed partial class RouterServerTests : IDisposable
 
             await response.Answer(isHeld.ToString(CultureInfo.InvariantCulture));
         });
-        clientServices.GetRequestResolver(ping, new RequestResolverDependencies<string, string> { Serializer = Text })((_, response) =>
+        clientServices.GetCommandResolver(ping, new RequestResolverDependencies<string, string> { Serializer = Text })((_, response) =>
         {
             return response.Answer("pong");
         });
@@ -2182,8 +2217,8 @@ public sealed partial class RouterServerTests : IDisposable
         // the server asks the client, naming its connection, on an even call id
         Assert.Equal(
             "pong",
-            await Services.GetRequest(ping, new RequestDependencies<string, string> { Serializer = Text })("ping")(
-                new RequestOptions { ConnectionHandle = await asked.Task.WaitAsync(Patience, Cancelled) }).WaitAsync(Patience, Cancelled));
+            await Services.GetCommand(ping, new RequestDependencies<string, string> { Serializer = Text })("ping")(
+                new CommandOptions { ConnectionHandle = await asked.Task.WaitAsync(Patience, Cancelled) }).WaitAsync(Patience, Cancelled));
 
         // unsubscribed at the server, by the call id that subscribed, by the time it is taken away
         await registration.Unregister().WaitAsync(Patience, Cancelled);
@@ -2677,6 +2712,16 @@ public sealed partial class RouterServerTests : IDisposable
     // a client's end of a connection linked in memory to the server's transport, as the first
     private sealed class ClientEnd(ScriptedTransport server) : IRouterClientTransport
     {
+        // its router paused and resumed it, which hands what it hands all the same: no test of
+        // this one's reaches a bound
+        public void Pause()
+        {
+        }
+
+        public void Resume()
+        {
+        }
+
         // the link's, which its server end runs on
         public TimeProvider Clock
         {
@@ -2766,9 +2811,104 @@ public sealed partial class RouterServerTests : IDisposable
             }
         }
 
+        // each pause and resume its router asked of it, by connection, and what each connection holds
+        public List<string> Paces { get; } = [];
+
+        // whether each pause and resume throws once done, while set: an application's transport
+        // that breaks
+        public bool IsPacingBroken { get; set; }
+
+        // where what it held is handed on once resumed, a step of its own: the thread pool unless a
+        // test gives its router's scheduler, so what it hands is settled with the rest
+        public Action<Action> Later { get; set; } = (step) =>
+        {
+            ThreadPool.QueueUserWorkItem((_) =>
+            {
+                step();
+            });
+        };
+
+        private Dictionary<string, TransportHold<TransportMessage>> Holds { get; } = [];
+
         public void Open(string connectionHandle)
         {
             Connection?.Invoke(connectionHandle);
+        }
+
+        // whether its router paused a connection, and what it holds of it
+        public bool IsPaused(string connectionHandle)
+        {
+            return HoldOf(connectionHandle).IsPaused;
+        }
+
+        public int HeldOf(string connectionHandle)
+        {
+            return HoldOf(connectionHandle).Count;
+        }
+
+        // * a connection its router paused holds what a test delivers, in order, until resumed
+        public void Pause(string connectionHandle)
+        {
+            lock (Paces)
+            {
+                Paces.Add($"pause {NameOf(connectionHandle)}");
+            }
+
+            HoldOf(connectionHandle).Pause();
+
+            if (IsPacingBroken)
+            {
+                throw new InvalidOperationException("no pause");
+            }
+        }
+
+        public void Resume(string connectionHandle)
+        {
+            lock (Paces)
+            {
+                Paces.Add($"resume {NameOf(connectionHandle)}");
+            }
+
+            var hold = HoldOf(connectionHandle);
+
+            if (hold.Resume())
+            {
+                Later(() =>
+                {
+                    while (hold.TryTake(out var message))
+                    {
+                        Message?.Invoke(message, connectionHandle);
+                    }
+                });
+            }
+
+            if (IsPacingBroken)
+            {
+                throw new InvalidOperationException("no resume");
+            }
+        }
+
+        private TransportHold<TransportMessage> HoldOf(string connectionHandle)
+        {
+            lock (Holds)
+            {
+                if (!Holds.TryGetValue(connectionHandle, out var hold))
+                {
+                    hold = new TransportHold<TransportMessage>();
+                    Holds[connectionHandle] = hold;
+                }
+
+                return hold;
+            }
+        }
+
+        // what a test delivers: handed on at once, or held while its connection is paused
+        private void Hand(TransportMessage message, string connectionHandle)
+        {
+            if (HoldOf(connectionHandle).Offer(message))
+            {
+                Message?.Invoke(message, connectionHandle);
+            }
         }
 
         public void Closed(string connectionHandle)
@@ -2778,25 +2918,25 @@ public sealed partial class RouterServerTests : IDisposable
 
         public void Deliver(string connectionHandle, byte[] bytes)
         {
-            Message?.Invoke(new TransportMessage(bytes, false), connectionHandle);
+            Hand(new TransportMessage(bytes, false), connectionHandle);
         }
 
         public void DeliverText(string connectionHandle, string text)
         {
-            Message?.Invoke(new TransportMessage(Encoding.UTF8.GetBytes(text), true), connectionHandle);
+            Hand(new TransportMessage(Encoding.UTF8.GetBytes(text), true), connectionHandle);
         }
 
         // an envelope, with the address and the port its transport hands beside it
         public void DeliverFrom(string connectionHandle, (byte[] Bytes, string Address, int Port) message)
         {
-            Message?.Invoke(new TransportMessage(message.Bytes, false) { Address = message.Address, Port = message.Port }, connectionHandle);
+            Hand(new TransportMessage(message.Bytes, false) { Address = message.Address, Port = message.Port }, connectionHandle);
         }
 
         // an envelope, with what its transport carried beside it, and the address and the port it
         // hands beside it
         public void CarryingFrom(string connectionHandle, (byte[] Bytes, string Carried, (string Address, int Port) From) message)
         {
-            Message?.Invoke(
+            Hand(
                 new TransportMessage(message.Bytes, false) { Credential = message.Carried, Address = message.From.Address, Port = message.From.Port },
                 connectionHandle);
         }
@@ -2804,7 +2944,7 @@ public sealed partial class RouterServerTests : IDisposable
         // an envelope, with what its transport carried beside it
         public void Carrying(string connectionHandle, (byte[] Bytes, string Carried) message)
         {
-            Message?.Invoke(new TransportMessage(message.Bytes, false) { Credential = message.Carried }, connectionHandle);
+            Hand(new TransportMessage(message.Bytes, false) { Credential = message.Carried }, connectionHandle);
         }
 
         public bool IsTwoWay(string connectionHandle)

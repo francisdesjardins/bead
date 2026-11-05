@@ -8,13 +8,20 @@
 //!    [`check_records`]), which refuses what protobuf refuses where Buffa reads on: a tag of more
 //!    than 5 bytes, a map's entry with a field it does not declare, a message nested past the
 //!    bound through a map's entries;
-//! 2. Buffa's view of it, decoded within the bound of 17.9.3, 100 messages below the top one,
-//!    which sets a singular closed enum's undeclared number aside among the unknown fields, its
-//!    last declared number kept (17.9.8);
+//! 2. Buffa's view of it, decoded within the bound of 17.9.3, 100 messages below the top one; Bead
+//!    drops a singular closed enum's undeclared number before Buffa reads (17.9.8), its last
+//!    declared number kept, as every side does;
 //! 3. the walk of its fields protobuf requires over the view (17.9.7, [`check_required`]), whose
 //!    presence is the wire's: an owned message holds such a field bare, its value no witness of
 //!    whether it was given;
 //! 4. the owned message the view gives the application.
+//!
+//! A value is written in four steps too: refused where its known fields nest past the bound,
+//! before anything walks it further (17.9.3); its required fields walked; Buffa's writing; and its
+//! bytes checked as a reader checks them, so a writer writes nothing its reader refuses (17.2).
+//! Every refusal is a [`CodecRefusal`](bead::CodecRefusal) of 17.2's words, `not its message`,
+//! `nested past 100` or `a required field unset`, Buffa's own error or what Bead found in its
+//! cause.
 //!
 //! [`ProtoCodec`] reads and writes a message Buffa generated, set as `bead_protobuf_build` sets
 //! its generator; [`DynamicCodec`] reads and writes a [`DynamicMessage`] by its descriptor alone,
@@ -25,11 +32,12 @@
 
 mod codec;
 mod records;
+mod refusal;
 mod required;
 
 pub use codec::{DynamicCodec, ENCODING, ProtoCodec};
 pub use records::{ProtoSchema, check_records};
-pub use required::{Place, Unset, UnsetStep, check_required, unset_of};
+pub use required::check_required;
 
 #[cfg(feature = "testing")]
 #[doc(hidden)]

@@ -19,18 +19,18 @@ use crate::session_token::SessionToken;
 mod tests;
 
 /// The bytes a header takes at most: the 255 words its fourth byte counts.
-pub const MAXIMUM_HEADER_BYTES: usize = 1_020;
+pub(crate) const MAXIMUM_HEADER_BYTES: usize = 1_020;
 
 /// The largest value a 64-bit field holds: 2⁵³ − 1, the largest integer every side holds exactly,
 /// as JavaScript's numbers do.
-pub const LARGEST_64_BIT_FIELD: u64 = 0x001f_ffff_ffff_ffff;
+pub(crate) const LARGEST_64_BIT_FIELD: u64 = 0x001f_ffff_ffff_ffff;
 
 /// How many bytes of a failure's detail a reader keeps, and a writer writes, when nothing else is
 /// given (spec 7.3).
 pub const MAXIMUM_DETAIL_BYTES: usize = 1_024;
 
 /// How many bytes a whole envelope holds at most, when nothing else is given (spec 12.2).
-pub const MAXIMUM_ENVELOPE_BYTES: usize = 16_778_240;
+pub(crate) const MAXIMUM_ENVELOPE_BYTES: usize = 16_778_240;
 
 // the prefix: layout, kind, flags, header words, then the call id at bytes 4 to 7
 const PREFIX_BYTES: usize = 8;
@@ -71,6 +71,11 @@ pub enum Credential {
         /// Its bytes.
         bytes: Bytes,
     },
+    /// A credential kept by its scheme alone, without a token; never a wire credential.
+    Redacted {
+        /// The credential's scheme.
+        scheme: CredentialScheme,
+    },
 }
 
 impl Credential {
@@ -82,7 +87,7 @@ impl Credential {
             Self::Opaque(_) => CredentialScheme::OPAQUE,
             Self::Jwt(_) => CredentialScheme::JWT,
             Self::Elsewhere => CredentialScheme::ELSEWHERE,
-            Self::ToCome { scheme, .. } => *scheme,
+            Self::ToCome { scheme, .. } | Self::Redacted { scheme } => *scheme,
         }
     }
 }
@@ -174,7 +179,7 @@ pub struct CancelHeader {
 /// An envelope's header, by its kind.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum Header {
+pub enum EnvelopeHeader {
     /// A request's.
     Request(RequestHeader),
     /// A result's.
@@ -191,7 +196,7 @@ pub enum Header {
     Cancel(CancelHeader),
 }
 
-impl Header {
+impl EnvelopeHeader {
     /// Its kind.
     #[must_use]
     pub fn kind(&self) -> EnvelopeKind {
@@ -231,18 +236,21 @@ impl Header {
         }
     }
 
-    /// A copy fit to be traced or kept: a bearer credential, a `JWT`'s or one to come, kept by its
-    /// scheme alone, its bytes dropped.
+    /// A copy fit to be traced or kept: a bearer credential, including an `OPAQUE` token, kept by
+    /// its scheme alone, its bytes dropped.
     #[must_use]
     pub fn redacted(&self) -> Self {
         let redact = |credential: &Option<Credential>| -> Option<Credential> {
             credential.as_ref().map(|credential| match credential {
+                Credential::Opaque(_) => Credential::Redacted {
+                    scheme: CredentialScheme::OPAQUE,
+                },
                 Credential::Jwt(_) => Credential::Jwt(Bytes::new()),
                 Credential::ToCome { scheme, .. } => Credential::ToCome {
                     scheme: *scheme,
                     bytes: Bytes::new(),
                 },
-                Credential::None | Credential::Opaque(_) | Credential::Elsewhere => {
+                Credential::None | Credential::Elsewhere | Credential::Redacted { .. } => {
                     credential.clone()
                 }
             })
@@ -283,7 +291,7 @@ pub struct Prefix {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReadHeader {
     /// The header.
-    pub header: Header,
+    pub header: EnvelopeHeader,
     /// Its length, where the payload starts.
     pub header_bytes: usize,
 }
@@ -356,15 +364,15 @@ pub enum Envelope {
 impl Envelope {
     /// Its header.
     #[must_use]
-    pub fn header(&self) -> Header {
+    pub fn header(&self) -> EnvelopeHeader {
         match self {
-            Self::Request { header, .. } => Header::Request(header.clone()),
-            Self::Result { header, .. } => Header::Result(header.clone()),
-            Self::Failure { header, .. } => Header::Failure(header.clone()),
-            Self::Notification { header, .. } => Header::Notification(header.clone()),
-            Self::Chunk { header, .. } => Header::Chunk(header.clone()),
-            Self::Credit { header } => Header::Credit(header.clone()),
-            Self::Cancel { header } => Header::Cancel(header.clone()),
+            Self::Request { header, .. } => EnvelopeHeader::Request(header.clone()),
+            Self::Result { header, .. } => EnvelopeHeader::Result(header.clone()),
+            Self::Failure { header, .. } => EnvelopeHeader::Failure(header.clone()),
+            Self::Notification { header, .. } => EnvelopeHeader::Notification(header.clone()),
+            Self::Chunk { header, .. } => EnvelopeHeader::Chunk(header.clone()),
+            Self::Credit { header } => EnvelopeHeader::Credit(header.clone()),
+            Self::Cancel { header } => EnvelopeHeader::Cancel(header.clone()),
         }
     }
 
@@ -405,7 +413,7 @@ impl Envelope {
     reason = "the spec's names of its bounds, each in bytes"
 )]
 pub struct ReadEnvelopeOptions {
-    /// The bytes a whole envelope holds at most; [`MAXIMUM_ENVELOPE_BYTES`] when none.
+    /// The bytes a whole envelope holds at most; `MAXIMUM_ENVELOPE_BYTES`, 16,778,240, when none.
     pub maximum_envelope_bytes: Option<usize>,
     /// The bytes a request holds at most, whole or a transfer's opening, as its requester sends
     /// one (spec 12.2); the envelope's bound when none.
@@ -586,7 +594,7 @@ fn check_prefix(bytes: &[u8], side: RouterSide) -> Result<Option<(EnvelopeKind, 
         ));
     }
 
-    let Some(kind) = EnvelopeKind::of(prefix.kind) else {
+    let Ok(kind) = EnvelopeKind::try_from(prefix.kind) else {
         return Err(
             Failure::protocol(ProtocolCode::KIND_UNSUPPORTED, side).saying(format!(
                 "{} is not a kind this peer takes",
@@ -725,9 +733,11 @@ fn read_credential(
 
     Ok(match scheme {
         CredentialScheme::NONE => Credential::None,
-        CredentialScheme::OPAQUE => Credential::Opaque(
-            SessionToken::from_slice(held).map_err(|error| malformed(side, error.to_string()))?,
-        ),
+        CredentialScheme::OPAQUE => {
+            Credential::Opaque(SessionToken::from_slice(held).map_err(|_error| {
+                malformed(side, "an OPAQUE token is never all zero".to_owned())
+            })?)
+        }
         // a relay passes the same bytes on, whatever they are: a token past ASCII never verifies
         CredentialScheme::JWT => Credential::Jwt(Bytes::copy_from_slice(held)),
         CredentialScheme::ELSEWHERE => Credential::Elsewhere,
@@ -786,7 +796,7 @@ fn read_blocks(
 fn header_of(
     bytes: &[u8],
     ((kind, call_id, flags), (blocks, side)): ((EnvelopeKind, u32, u8), (Blocks, RouterSide)),
-) -> Result<Header, Failure> {
+) -> Result<EnvelopeHeader, Failure> {
     Ok(match kind {
         EnvelopeKind::Request => {
             let service_id = read_u16(bytes, PREFIX_BYTES).unwrap_or(0);
@@ -806,7 +816,7 @@ fn header_of(
                 ));
             }
 
-            Header::Request(RequestHeader {
+            EnvelopeHeader::Request(RequestHeader {
                 call_id,
                 service_id,
                 procedure_id,
@@ -817,22 +827,22 @@ fn header_of(
                 credential: blocks.credential,
             })
         }
-        EnvelopeKind::Result => Header::Result(ResultHeader {
+        EnvelopeKind::Result => EnvelopeHeader::Result(ResultHeader {
             call_id,
             total: blocks.total,
             credential: blocks.credential,
         }),
-        EnvelopeKind::Failure => Header::Failure(FailureHeader {
+        EnvelopeKind::Failure => EnvelopeHeader::Failure(FailureHeader {
             call_id,
             credential: blocks.credential,
         }),
-        EnvelopeKind::Notification => Header::Notification(NotificationHeader { call_id }),
+        EnvelopeKind::Notification => EnvelopeHeader::Notification(NotificationHeader { call_id }),
         EnvelopeKind::Chunk => {
             let Some(offset) = read_u53(bytes, PREFIX_BYTES) else {
                 return Err(malformed(side, "a chunk's offset is below 2⁵³".to_owned()));
             };
 
-            Header::Chunk(ChunkHeader {
+            EnvelopeHeader::Chunk(ChunkHeader {
                 call_id,
                 offset,
                 is_last: flags & EnvelopeFlag::MORE.bits() == 0,
@@ -843,13 +853,13 @@ fn header_of(
                 return Err(malformed(side, "a credit's end is below 2⁵³".to_owned()));
             };
 
-            Header::Credit(CreditHeader {
+            EnvelopeHeader::Credit(CreditHeader {
                 call_id,
                 credit_end,
                 paced: flags & EnvelopeFlag::PACED.bits() != 0,
             })
         }
-        EnvelopeKind::Cancel => Header::Cancel(CancelHeader { call_id }),
+        EnvelopeKind::Cancel => EnvelopeHeader::Cancel(CancelHeader { call_id }),
     })
 }
 
@@ -921,8 +931,9 @@ fn cut_of(payload: &[u8], end: usize) -> usize {
 
 /// A failure's record, from a failure envelope's payload.
 ///
-/// Its code, its relays as they came, its scope, and its detail — cut to `maximum_detail_bytes`, back to the start of the character the
-/// cut fell in, bytes that are not UTF-8 read as U+FFFD, a leading U+FEFF kept.
+/// Its code, its relays as they came, its scope, and its detail — cut to the options'
+/// `maximum_detail_bytes`, [`MAXIMUM_DETAIL_BYTES`] when none, back to the start of the character
+/// the cut fell in, bytes that are not UTF-8 read as U+FFFD, a leading U+FEFF kept.
 ///
 /// # Errors
 ///
@@ -930,8 +941,10 @@ fn cut_of(payload: &[u8], end: usize) -> usize {
 /// application's.
 pub fn read_failure(
     payload: &[u8],
-    (side, maximum_detail_bytes): (RouterSide, usize),
+    side: RouterSide,
+    options: &ReadEnvelopeOptions,
 ) -> Result<FailureRecord, Failure> {
+    let maximum_detail_bytes = options.maximum_detail_bytes.unwrap_or(MAXIMUM_DETAIL_BYTES);
     let (Some(code), Some(&relays), Some(&flags)) =
         (read_u16(payload, 0), payload.get(2), payload.get(3))
     else {
@@ -1020,6 +1033,10 @@ pub fn read_envelope(
     else {
         return Ok(None);
     };
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the header's end is clamped to the envelope's length"
+    )]
     let body = bytes.slice(header_bytes.min(bytes.len())..);
     let nothing_after = |what: &str| -> Result<(), Failure> {
         if body.is_empty() {
@@ -1033,29 +1050,23 @@ pub fn read_envelope(
     };
 
     Ok(Some(match header {
-        Header::Failure(header) => Envelope::Failure {
+        EnvelopeHeader::Failure(header) => Envelope::Failure {
             header,
-            failure: read_failure(
-                &body,
-                (
-                    side,
-                    options.maximum_detail_bytes.unwrap_or(MAXIMUM_DETAIL_BYTES),
-                ),
-            )?,
+            failure: read_failure(&body, side, options)?,
         },
-        Header::Notification(header) => Envelope::Notification {
+        EnvelopeHeader::Notification(header) => Envelope::Notification {
             header,
             payload: body,
         },
-        Header::Request(header) => Envelope::Request {
+        EnvelopeHeader::Request(header) => Envelope::Request {
             header,
             payload: body,
         },
-        Header::Result(header) => Envelope::Result {
+        EnvelopeHeader::Result(header) => Envelope::Result {
             header,
             payload: body,
         },
-        Header::Chunk(header) => {
+        EnvelopeHeader::Chunk(header) => {
             // a chunk carries the next bytes of its payload: without any, it moves nothing on
             if body.is_empty() {
                 return Err(malformed(
@@ -1069,12 +1080,12 @@ pub fn read_envelope(
                 payload: body,
             }
         }
-        Header::Credit(header) => {
+        EnvelopeHeader::Credit(header) => {
             nothing_after("credit")?;
 
             Envelope::Credit { header }
         }
-        Header::Cancel(header) => {
+        EnvelopeHeader::Cancel(header) => {
             nothing_after("cancel")?;
 
             Envelope::Cancel { header }
@@ -1124,14 +1135,17 @@ fn credential_bytes_of(
 
             Ok((scheme, bytes.clone()))
         }
+        Credential::Redacted { .. } => Err(ProgrammerError::new(
+            "a redacted credential has no token to write",
+        )),
     }
 }
 
 // the flags `header` writes: the blocks it carries, whether it opens a subscription, whether it is
 // paced, and, for a chunk, whether more follow it
-fn flags_of(header: &Header) -> u8 {
+fn flags_of(header: &EnvelopeHeader) -> u8 {
     match header {
-        Header::Request(header) => {
+        EnvelopeHeader::Request(header) => {
             let mut flags = 0;
 
             if header.destination_id.is_some() {
@@ -1156,7 +1170,7 @@ fn flags_of(header: &Header) -> u8 {
 
             flags
         }
-        Header::Result(header) => {
+        EnvelopeHeader::Result(header) => {
             let mut flags = 0;
 
             if header.total.is_some() {
@@ -1169,28 +1183,28 @@ fn flags_of(header: &Header) -> u8 {
 
             flags
         }
-        Header::Failure(header) => {
+        EnvelopeHeader::Failure(header) => {
             if header.credential.is_some() {
                 EnvelopeFlag::CREDENTIAL.bits()
             } else {
                 0
             }
         }
-        Header::Chunk(header) => {
+        EnvelopeHeader::Chunk(header) => {
             if header.is_last {
                 0
             } else {
                 EnvelopeFlag::MORE.bits()
             }
         }
-        Header::Credit(header) => {
+        EnvelopeHeader::Credit(header) => {
             if header.paced {
                 EnvelopeFlag::PACED.bits()
             } else {
                 0
             }
         }
-        Header::Notification(_) | Header::Cancel(_) => 0,
+        EnvelopeHeader::Notification(_) | EnvelopeHeader::Cancel(_) => 0,
     }
 }
 
@@ -1199,10 +1213,12 @@ fn flags_of(header: &Header) -> u8 {
 // a credential as a header writes it: its scheme and its bytes
 type Written = (CredentialScheme, Bytes);
 
-fn unbounded_layout_of(header: &Header) -> Result<(u8, Option<Written>, usize), ProgrammerError> {
+fn unbounded_layout_of(
+    header: &EnvelopeHeader,
+) -> Result<(u8, Option<Written>, usize), ProgrammerError> {
     let flags = flags_of(header);
 
-    if let Header::Request(request) = header
+    if let EnvelopeHeader::Request(request) = header
         && request.paced
         && !request.opens_subscription
     {
@@ -1232,7 +1248,7 @@ fn unbounded_layout_of(header: &Header) -> Result<(u8, Option<Written>, usize), 
 /// # Errors
 ///
 /// As [`write_header`] refuses, but for its bound.
-pub fn unbounded_header_bytes_of(header: &Header) -> Result<usize, ProgrammerError> {
+pub(crate) fn unbounded_header_bytes_of(header: &EnvelopeHeader) -> Result<usize, ProgrammerError> {
     unbounded_layout_of(header).map(|(_, _, header_bytes)| header_bytes)
 }
 
@@ -1241,7 +1257,7 @@ pub fn unbounded_header_bytes_of(header: &Header) -> Result<usize, ProgrammerErr
 /// # Errors
 ///
 /// As [`write_header`] refuses.
-pub fn header_bytes_of(header: &Header) -> Result<usize, ProgrammerError> {
+pub fn header_bytes_of(header: &EnvelopeHeader) -> Result<usize, ProgrammerError> {
     let header_bytes = unbounded_header_bytes_of(header)?;
 
     if header_bytes > MAXIMUM_HEADER_BYTES {
@@ -1281,7 +1297,10 @@ fn assert_u53(field: &str, value: u64) -> Result<(), ProgrammerError> {
 /// maximum — from 0 to 2⁵³ − 1 for an offset, an end or a total — a credential of a scheme its kind
 /// does not take or that its scheme does not hold, a request paced that opens no subscription, or a
 /// header past 1,020 bytes.
-pub fn write_header(header: &Header, bytes: &mut Vec<u8>) -> Result<usize, ProgrammerError> {
+pub fn write_header(
+    header: &EnvelopeHeader,
+    bytes: &mut Vec<u8>,
+) -> Result<usize, ProgrammerError> {
     let (flags, credential, header_bytes) = unbounded_layout_of(header)?;
 
     if header_bytes > MAXIMUM_HEADER_BYTES {
@@ -1297,7 +1316,7 @@ pub fn write_header(header: &Header, bytes: &mut Vec<u8>) -> Result<usize, Progr
     let mut total = None;
 
     match header {
-        Header::Request(request) => {
+        EnvelopeHeader::Request(request) => {
             assert_field("serviceId", (u64::from(request.service_id), 0xffff))?;
             assert_field("procedureId", (u64::from(request.procedure_id), 0xffff))?;
             part.extend(request.service_id.to_be_bytes());
@@ -1305,16 +1324,18 @@ pub fn write_header(header: &Header, bytes: &mut Vec<u8>) -> Result<usize, Progr
             destination_id = request.destination_id;
             total = request.total;
         }
-        Header::Result(result) => total = result.total,
-        Header::Chunk(chunk) => {
+        EnvelopeHeader::Result(result) => total = result.total,
+        EnvelopeHeader::Chunk(chunk) => {
             assert_u53("offset", chunk.offset)?;
             part.extend(chunk.offset.to_be_bytes());
         }
-        Header::Credit(credit) => {
+        EnvelopeHeader::Credit(credit) => {
             assert_u53("creditEnd", credit.credit_end)?;
             part.extend(credit.credit_end.to_be_bytes());
         }
-        Header::Failure(_) | Header::Notification(_) | Header::Cancel(_) => {}
+        EnvelopeHeader::Failure(_)
+        | EnvelopeHeader::Notification(_)
+        | EnvelopeHeader::Cancel(_) => {}
     }
 
     if let Some(destination_id) = destination_id {
@@ -1355,7 +1376,7 @@ pub fn write_header(header: &Header, bytes: &mut Vec<u8>) -> Result<usize, Progr
 /// A failure's record, to send: its code, the relays it crossed, its scope, and its detail cut to
 /// `maximum_detail_bytes` at a character's boundary.
 #[must_use]
-pub fn write_failure(record: &FailureRecord, maximum_detail_bytes: usize) -> Vec<u8> {
+pub(crate) fn write_failure(record: &FailureRecord, maximum_detail_bytes: usize) -> Vec<u8> {
     let mut end = record.detail.len().min(maximum_detail_bytes);
 
     while !record.detail.is_char_boundary(end) {

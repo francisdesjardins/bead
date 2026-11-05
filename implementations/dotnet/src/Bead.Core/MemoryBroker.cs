@@ -67,9 +67,9 @@ public sealed record MemoryBrokerFaultOptions
 /// publications refused when no subscriber takes them, a message's life — and hands each message on
 /// copied as it is published, whole, in a later turn than its publish, in the order its publisher
 /// published it to that topic, once; or, as a test asks, again, behind the next, never, or to
-/// another member of its group. It holds a queue for each subscriber, bounded as it is given, past
-/// which it drops a message, and publishes a link's will as the link is lost or taken over, never at
-/// a stop. Its
+/// another member of its group. It lets a subscription go once what it queued to it before was
+/// handed on. It holds a queue for each subscriber, bounded as it is given, past which it drops a
+/// message, and publishes a link's will as the link is lost or taken over, never at a stop. Its
 /// handles' type is <see cref="TransportTypes.Broker"/>, and it never leaves the process, so its
 /// legs are secure.
 /// </summary>
@@ -182,12 +182,14 @@ public sealed class MemoryBroker
     }
 
     /// <summary>
-    /// Runs <paramref name="action"/> in one turn of the broker's: what it publishes is published in
-    /// that turn, each in its order, none handed on before it ends.
+    /// Runs <paramref name="action"/> in one turn of the broker's, behind what came before it — never
+    /// at once, even from within a turn of its own, so a publish a listener makes as it is handed a
+    /// message goes behind one its publisher made before it (spec 15.24; decision 0045): what it
+    /// publishes is published in that turn, each in its order, none handed on before it ends.
     /// </summary>
     internal Task Turn(Action action)
     {
-        return _scheduler.Run(() =>
+        return _scheduler.RunBehind(() =>
         {
             // ! a refusal is the call's task, never a throw into the turn that called
             try
@@ -206,7 +208,7 @@ public sealed class MemoryBroker
     /// <summary>As <see cref="Turn"/>, giving what <paramref name="action"/> gives.</summary>
     internal Task<T> Turn<T>(Func<T> action)
     {
-        return _scheduler.Run(() =>
+        return _scheduler.RunBehind(() =>
         {
             try
             {
@@ -506,7 +508,11 @@ public sealed class MemoryBrokerAdapter : IBrokerAdapter
         });
     }
 
-    /// <summary>Lets the subscription go: what was routed to it before is handed on all the same.</summary>
+    /// <summary>
+    /// Lets the subscription go, routed nothing from its turn on: what was routed to it before is
+    /// handed on all the same, and it settles once that was, so that its subscriber read each
+    /// message of it first (spec 15.24).
+    /// </summary>
     public Task Unsubscribe(IReadOnlyList<string> topic)
     {
         var key = MemoryBroker.KeyOf(topic);
@@ -514,7 +520,20 @@ public sealed class MemoryBrokerAdapter : IBrokerAdapter
         return _broker.Turn(() =>
         {
             _subscriptions.Remove(key);
-        });
+
+            // ! each message queued posted its hand-on as it was queued, and each one handed on
+            // already had its subscriber post what it does with it, on a scheduler it may share: a
+            // turn posted now comes behind every one of them, in its broker's order, though none is
+            // queued; settled with its continuations queued, never run within that turn
+            var settled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            _broker.Scheduler.Post(() =>
+            {
+                settled.SetResult();
+            });
+
+            return settled.Task;
+        }).Unwrap();
     }
 
     /// <summary>
@@ -618,26 +637,28 @@ public sealed class MemoryBrokerAdapter : IBrokerAdapter
     {
         ArgumentNullException.ThrowIfNull(published.Publication);
 
+        // * copied as it is published, at the call: the publisher's buffer stays its own, though it
+        // is routed in a later turn
+        var copy = published.Publication with
+        {
+            Topic = [.. published.Publication.Topic],
+            Payload = published.Publication.Payload.ToArray(),
+        };
+
         return _broker.Turn(() =>
         {
             AssertLinked();
 
-            if (_broker.MaximumMessageBytes is { } bound && published.Publication.Payload.Length > bound)
+            if (_broker.MaximumMessageBytes is { } bound && copy.Payload.Length > bound)
             {
-                throw new ArgumentException(string.Create(CultureInfo.InvariantCulture, $"a payload of {published.Publication.Payload.Length} bytes, past the broker's maximumMessageBytes, {bound} bytes"), nameof(published));
+                throw new ArgumentException(string.Create(CultureInfo.InvariantCulture, $"a payload of {copy.Payload.Length} bytes, past the broker's maximumMessageBytes, {bound} bytes"), nameof(published));
             }
 
-            if (published.Publication.CancellationToken.IsCancellationRequested)
+            if (copy.CancellationToken.IsCancellationRequested)
             {
-                throw new OperationCanceledException("the publication was given up on", published.Publication.CancellationToken);
+                throw new OperationCanceledException("the publication was given up on", copy.CancellationToken);
             }
 
-            // * copied as it is published: the publisher's buffer stays its own
-            var copy = published.Publication with
-            {
-                Topic = [.. published.Publication.Topic],
-                Payload = published.Publication.Payload.ToArray(),
-            };
             var isRouted = _broker.Route((copy, published.IsRetained));
 
             return !isRouted && (_capabilities & BrokerCapabilities.NoSubscriber) != 0 ? BrokerPublished.NoSubscriber : BrokerPublished.Taken;

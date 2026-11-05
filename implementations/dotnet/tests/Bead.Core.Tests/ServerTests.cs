@@ -127,7 +127,7 @@ public sealed class ServerTests : IAsyncLifetime
 
         return Record.ExceptionAsync(() =>
         {
-            return clock(JsonSerializer.SerializeToElement(0))(new RequestOptions
+            return clock(JsonSerializer.SerializeToElement(0))(new CommandOptions
             {
                 CloseOnTimeout = closeOnTimeout,
                 ConnectionHandle = Handle,
@@ -532,6 +532,7 @@ public sealed class ServerTests : IAsyncLifetime
         Assert.Same(Server.ShareLegBSession, server.ShareLegBSession);
         Assert.Same(Server.RequireSession, server.RequireSession);
         Assert.Same(Server.Services, server.Services);
+        Assert.Equal(typeof(IServiceManagerServer), typeof(Server<string>).GetProperty(nameof(Server<string>.Services))!.PropertyType);
     }
 
     [Fact]
@@ -932,9 +933,9 @@ public sealed class ServerTests : IAsyncLifetime
 
         Assert.Equal(HealthStatus.Fail, status);
         Assert.Equal(
-            [new HealthCheck(1, HealthStatus.Fail, "1 connections kept that the transport no longer holds")],
+            [new HealthCheck { ObservedValue = 1, Status = HealthStatus.Fail, Output = "1 connections kept that the transport no longer holds" }],
             checks["server:orphans"]);
-        Assert.Equal([new HealthCheck(1, HealthStatus.Fail, "1 connections kept that the transport no longer holds")], checks["router:orphans"]);
+        Assert.Equal([new HealthCheck { ObservedValue = 1, Status = HealthStatus.Fail, Output = "1 connections kept that the transport no longer holds" }], checks["router:orphans"]);
         Assert.Equal(new Dictionary<string, long> { ["connections"] = 0 }, (await Server.Gauges()).Transport.Counts);
         _transport.Counted = new HashSet<string> { Handle };
         Assert.Equal(HealthStatus.Pass, (await Server.Health()).Status);
@@ -952,7 +953,7 @@ public sealed class ServerTests : IAsyncLifetime
         Start(Timeout.InfiniteTimeSpan);
 
         var thrown = new InvalidOperationException("a listener that throws");
-        var refusal = new TransportServerRefusal("127.0.0.1", "rebind.example:8080", null, 50_000, "host-refused", 403);
+        var refusal = new TransportServerRefusal { Address = "127.0.0.1", Authority = "rebind.example:8080", Port = 50_000, Reason = "host-refused", Status = 403 };
         var heard = new List<string>();
 
         // the server gives its transport as IServerTransport, which carries both, whichever
@@ -1138,7 +1139,7 @@ public sealed class ServerTests : IAsyncLifetime
     }
 
     [Fact]
-    public void Runs_every_layer_on_its_transport_s_clock_and_refuses_another_which_leaves_nothing_on_its_transport()
+    public void Runs_every_layer_on_its_transport_s_clock_the_sessions_are_built_with_it_and_a_layer_on_another_is_refused_leaving_nothing_on_its_transport()
     {
         Start(new ServerOptions { Clock = _time });
 
@@ -1149,25 +1150,30 @@ public sealed class ServerTests : IAsyncLifetime
         Assert.Same(_time, Server.Sessions.Clock);
 
         var other = new FakeTimeProvider();
-        var refusal = Assert.Throws<ArgumentException>(() =>
-        {
-            return new Server<string>(_transport, new ServerOptions { Clock = other });
-        });
+        var elsewhere = new ScriptedTransport { Clock = new FakeTimeProvider() };
 
         Assert.Equal(
-            "a server runs on the clock of its transport, a FakeTimeProvider, and was given another, a FakeTimeProvider",
-            refusal.Message);
-        Assert.Throws<ArgumentException>(() =>
-        {
-            return new Server<string>(_transport, new ServerOptions { Sessions = new SessionManagerOptions { Clock = other } });
-        });
-        Assert.Throws<ArgumentException>(() =>
-        {
-            return new Server<string>(new ScriptedTransport(), new ServerOptions { Clock = _time });
-        });
+            "a server runs on the clock of its transport, one of its own, and was given another, one of its own",
+            Assert.Throws<ArgumentException>(() =>
+            {
+                return new Server<string>(_transport, new ServerOptions { Clock = other });
+            }).Message);
+        Assert.Equal(
+            "a server's session manager runs on the clock of its server, one of its own, and was given another, one of its own",
+            Assert.Throws<ArgumentException>(() =>
+            {
+                return new Server<string>(_transport, new ServerOptions { Sessions = new SessionManagerOptions { Clock = other } });
+            }).Message);
+        Assert.Equal(
+            "a server runs on the clock of its transport, one of its own, and was given another, one of its own",
+            Assert.Throws<ArgumentException>(() =>
+            {
+                return new Server<string>(elsewhere, new ServerOptions { Clock = _time });
+            }).Message);
 
         // what the server started with is all it holds
         Assert.Equal(subscribers, _transport.Subscribers);
+        Assert.Equal(0, elsewhere.Subscribers);
     }
 
     [Fact]
@@ -1240,7 +1246,7 @@ public sealed class ServerTests : IAsyncLifetime
         var clock = Server.Services.GetCommand(
             InteropProcedures.Clock.Procedure,
             new RequestDependencies<JsonElement, JsonElement> { Serializer = new JsonPayloads() });
-        var waiting = clock(JsonSerializer.SerializeToElement("ping"))(new RequestOptions { ConnectionHandle = Handle });
+        var waiting = clock(JsonSerializer.SerializeToElement("ping"))(new CommandOptions { ConnectionHandle = Handle });
 
         await _scheduler.WhenIdle();
 
@@ -1262,7 +1268,7 @@ public sealed class ServerTests : IAsyncLifetime
     [Fact]
     public async Task An_ordinary_request_to_the_procedure_of_a_subscription_held_moves_nothing_notify_still_reaches_it()
     {
-        // its TypeScript twin, ws-server.test.ts:975, runs over a WebSocket: the scripted transport
+        // its TypeScript twin, in websocket-server.test.ts, runs over a WebSocket: the scripted transport
         // stands in for it
         var errors = new List<Exception>();
 
@@ -1303,6 +1309,16 @@ public sealed class ServerTests : IAsyncLifetime
     // how often it is stopped
     private sealed class ScriptedTransport : IServerTransport
     {
+        // its router paused and resumed it, which hands what it hands all the same: no test of
+        // this one's reaches a bound
+        public void Pause(string connectionHandle)
+        {
+        }
+
+        public void Resume(string connectionHandle)
+        {
+        }
+
         public string? Type
         {
             get
@@ -1464,6 +1480,16 @@ public sealed class ServerTests : IAsyncLifetime
     // a transport that counts nothing: the server's own connections stand for its
     private sealed class Uncounted : IServerTransport
     {
+        // its router paused and resumed it, which hands what it hands all the same: no test of
+        // this one's reaches a bound
+        public void Pause(string connectionHandle)
+        {
+        }
+
+        public void Resume(string connectionHandle)
+        {
+        }
+
         public string? Type
         {
             get

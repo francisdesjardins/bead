@@ -14,7 +14,7 @@
     "defaults are the gateway's options where a case gives none, by the names of transcoding 2.4, 7.6, 8.7, 8.8, 9.2, 10.3 and 11.1, and of spec 15.12, in milliseconds for a time; options, where given, are a case's beside them. service is what each procedure's resolver does, by its name, what its server verifies, and the counts an exchange waits on. A case marked realTime plays on the real clock.",
     "clauses are the units of transcoding.md an entry checks: a clause, 5.2; an item of its numbered list, 5.2.1; a row of its table, counted from 1, 7.6.8; and a unit of spec.md behind spec:, spec:9.2.5, after them."
   ],
-  "transcodingVersion": "0.2.1",
+  "transcodingVersion": "0.2.2",
   "defaults": {
     "hosts": [],
     "origins": [
@@ -3701,7 +3701,7 @@
       ],
       "message": "bead.transcoding.v1.Everything",
       "payload": "42 0F E2 80 A8 3C 3E 26 7F 1F 09 22 5C F0 9F 98 80",
-      "body": "{\"aString\":\" <>&\\u001f\\t\\\"\\\\😀\"}"
+      "body": "{\"aString\":\"\u2028<>&\\u001f\\t\\\"\\\\😀\"}"
     },
     {
       "name": "a oneof's member at its default",
@@ -5428,6 +5428,7 @@
         "7.1.1",
         "7.1.2",
         "7.1.3",
+        "7.1.4",
         "7.1.5",
         "7.1.6",
         "7.2",
@@ -5440,11 +5441,12 @@
       "failure": {
         "code": 50,
         "arose": "server",
-        "encoding": "json"
+        "encoding": "json",
+        "detail": "not JSON"
       },
       "status": 400,
       "fields": {},
-      "problem": "{\"code\":50,\"scope\":\"protocol\",\"status\":400,\"title\":\"PAYLOAD_UNDECODABLE\",\"type\":\"tag:francisdesjardins.ca,2026:bead/PAYLOAD_UNDECODABLE\"}"
+      "problem": "{\"code\":50,\"detail\":\"not JSON\",\"scope\":\"protocol\",\"status\":400,\"title\":\"PAYLOAD_UNDECODABLE\",\"type\":\"tag:francisdesjardins.ca,2026:bead/PAYLOAD_UNDECODABLE\"}"
     },
     {
       "name": "a proto request its server does not read",
@@ -5453,6 +5455,7 @@
         "7.1.1",
         "7.1.2",
         "7.1.3",
+        "7.1.4",
         "7.1.5",
         "7.1.6",
         "7.2",
@@ -5465,11 +5468,12 @@
       "failure": {
         "code": 50,
         "arose": "server",
-        "encoding": "proto"
+        "encoding": "proto",
+        "detail": "not its message"
       },
       "status": 502,
       "fields": {},
-      "problem": "{\"code\":50,\"scope\":\"protocol\",\"status\":502,\"title\":\"PAYLOAD_UNDECODABLE\",\"type\":\"tag:francisdesjardins.ca,2026:bead/PAYLOAD_UNDECODABLE\"}"
+      "problem": "{\"code\":50,\"detail\":\"not its message\",\"scope\":\"protocol\",\"status\":502,\"title\":\"PAYLOAD_UNDECODABLE\",\"type\":\"tag:francisdesjardins.ca,2026:bead/PAYLOAD_UNDECODABLE\"}"
     },
     {
       "name": "a result the gateway's client does not read",
@@ -6242,13 +6246,13 @@
         },
         {
           "notification": {
-            "text": "hé\n\r "
+            "text": "hé\n\r\u2028"
           }
         }
       ],
       "status": 200,
       "contentType": "text/event-stream",
-      "body": "event: result\nid: 1\ndata: \"r\"\n\nid: 2\ndata: \"hé\\n\\r \"\n\n"
+      "body": "event: result\nid: 1\ndata: \"r\"\n\nid: 2\ndata: \"hé\\n\\r\u2028\"\n\n"
     },
     {
       "name": "a raw result and notification, each a JSON string of base64",

@@ -4,6 +4,7 @@
 use core::fmt;
 use core::marker::PhantomData;
 use std::error::Error;
+use std::sync::Arc;
 
 use bytes::Bytes;
 use serde::Serialize;
@@ -11,15 +12,23 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use crate::json::{self, JsonRefusal};
-use crate::transport::caught;
+use crate::transport::{Panicked, caught};
 
 #[cfg(test)]
 mod tests;
 
-/// Why a codec does not read a payload, or write a value: its reason, in its own words.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Why a codec does not read a payload, or write a value: its reason, and what more the side knows
+/// of it in its cause.
+///
+/// A codec of spec 17 refuses with its reason in 17.2's words and no others, `not UTF-8` or
+/// `nested past 100`, say: the words a request's `PAYLOAD_UNDECODABLE` carries as its detail. What
+/// more a side knows, its library's own words, the record refused, a required field's name, rides
+/// in its cause, its [`source`](Error::source), for its reports and its trace, never on the wire.
+/// Two refusals are equal by their reasons.
+#[derive(Debug, Clone)]
 pub struct CodecRefusal {
     reason: String,
+    source: Option<Arc<dyn Error + Send + Sync>>,
 }
 
 impl CodecRefusal {
@@ -28,7 +37,15 @@ impl CodecRefusal {
     pub fn new<R: Into<String>>(reason: R) -> Self {
         Self {
             reason: reason.into(),
+            source: None,
         }
+    }
+
+    /// The same refusal, caused by `cause`: what more the side knows of it.
+    #[must_use]
+    pub fn caused_by(mut self, cause: Arc<dyn Error + Send + Sync>) -> Self {
+        self.source = Some(cause);
+        self
     }
 
     /// Its reason.
@@ -38,21 +55,57 @@ impl CodecRefusal {
     }
 }
 
+impl PartialEq for CodecRefusal {
+    fn eq(&self, other: &Self) -> bool {
+        self.reason == other.reason
+    }
+}
+
+impl Eq for CodecRefusal {}
+
 impl fmt::Display for CodecRefusal {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(&self.reason)
     }
 }
 
-impl Error for CodecRefusal {}
-
-impl From<JsonRefusal> for CodecRefusal {
-    fn from(refusal: JsonRefusal) -> Self {
-        Self::new(refusal.to_string())
+impl Error for CodecRefusal {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        self.source
+            .as_deref()
+            .map(|source| -> &(dyn Error + 'static) { source })
     }
 }
 
-/// How one encoding reads a payload and writes a value.
+// * the refusal's reason is the JSON refusal's, in 17.2's words; what serde said, where it said
+// anything, rides in its cause
+impl From<JsonRefusal> for CodecRefusal {
+    fn from(refusal: JsonRefusal) -> Self {
+        let reason = refusal.reason();
+
+        match refusal {
+            JsonRefusal::NoJsonValue(_) | JsonRefusal::NotItsType(_) => {
+                Self::new(reason).caused_by(Arc::new(refusal))
+            }
+            JsonRefusal::NotUtf8
+            | JsonRefusal::ByteOrderMark
+            | JsonRefusal::NotJson
+            | JsonRefusal::NameTwice
+            | JsonRefusal::SurrogateAlone
+            | JsonRefusal::NumberPastADouble
+            | JsonRefusal::NestedPast64
+            | JsonRefusal::NotAFiniteNumber => Self::new(reason),
+        }
+    }
+}
+
+/// How one encoding reads a payload and writes a value: what does not read, or write, is a
+/// [`CodecRefusal`], its refusal.
+///
+/// A request's payload its codec refuses is answered `PAYLOAD_UNDECODABLE`, the refusal's reason its
+/// detail (spec 17.2). A codec that panics is
+/// no refusal but the side's own error: a request is answered `PROCEDURE_FAILED` and the panic
+/// reported (spec 9.0, 17.2).
 pub trait PayloadCodec: Send + Sync + fmt::Debug + 'static {
     /// What it reads a payload to, and writes.
     type Value: Send + 'static;
@@ -61,7 +114,8 @@ pub trait PayloadCodec: Send + Sync + fmt::Debug + 'static {
     ///
     /// # Errors
     ///
-    /// A [`CodecRefusal`] for bytes that do not read.
+    /// A [`CodecRefusal`] for bytes that do not read, its refusal; what it panics with is the
+    /// side's own error (spec 9.0, 17.2).
     fn decode(&self, bytes: &Bytes) -> Result<Self::Value, CodecRefusal>;
 
     /// The bytes `value` writes.
@@ -75,18 +129,27 @@ pub trait PayloadCodec: Send + Sync + fmt::Debug + 'static {
     fn encoding(&self) -> &'static str;
 }
 
-/// What `codec` reads `bytes` to, within a guard: a codec is the application's code, and what it
-/// panics is its throw, a refusal saying it, as both other sides take any throw of a decode
-/// (decision 0044).
-pub(crate) fn decoded<C: PayloadCodec>(codec: &C, bytes: &Bytes) -> Result<C::Value, CodecRefusal> {
+/// What `codec` reads `bytes` to, within a guard: its value or its refusal, the payload's; or,
+/// apart, what it panicked with, its throw other than its refusal, the side's own error (spec 9.0,
+/// 17.2, decision 0044), since a codec is the application's code.
+pub(crate) fn decoded<C: PayloadCodec>(
+    codec: &C,
+    bytes: &Bytes,
+) -> Result<Result<C::Value, CodecRefusal>, Panicked> {
     caught(("a codec", || codec.decode(bytes)))
-        .unwrap_or_else(|panicked| Err(CodecRefusal::new(panicked.to_string())))
 }
 
-/// The bytes `codec` writes `value` to, within a guard, as [`decoded`] reads.
+/// A codec's panic where a refusal and a bug end alike, a result's or a notification's read or any
+/// write (spec 17.2, items 2 to 6): a refusal saying it, its words the side's own.
+pub(crate) fn refusal_saying(panicked: &Panicked) -> CodecRefusal {
+    CodecRefusal::new(panicked.to_string())
+}
+
+/// The bytes `codec` writes `value` to, within a guard, as [`decoded`] reads: its panic a refusal
+/// saying it, as [`refusal_saying`] has it (spec 17.2, items 4 to 6).
 pub(crate) fn encoded<C: PayloadCodec>(codec: &C, value: &C::Value) -> Result<Bytes, CodecRefusal> {
     caught(("a codec", || codec.encode(value)))
-        .unwrap_or_else(|panicked| Err(CodecRefusal::new(panicked.to_string())))
+        .unwrap_or_else(|panicked| Err(refusal_saying(&panicked)))
 }
 
 /// `raw`: a payload's bytes as they are, any of them, none included (spec 17.3).
@@ -119,7 +182,7 @@ impl PayloadCodec for TextCodec {
     fn decode(&self, bytes: &Bytes) -> Result<String, CodecRefusal> {
         core::str::from_utf8(bytes)
             .map(str::to_owned)
-            .map_err(|_error| CodecRefusal::new("not UTF-8"))
+            .map_err(|error| CodecRefusal::new("not UTF-8").caused_by(Arc::new(error)))
     }
 
     fn encode(&self, value: &String) -> Result<Bytes, CodecRefusal> {

@@ -47,14 +47,11 @@ denied whole and a CI job of its own, each part it lacks a row of the support ma
 ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md),
 [0004](0004-one-behaviour-in-every-language.md)). Ahead, in this order:
 
-- **Rust's service client and its transports**: the client half of its service layer, in its core,
-  and a bound on what waits for a router's turn, a connection's reads paced by what waits for its
-  owner, as HTTP/2's flow control paces a stream
-  ([RFC 9113 §5.2](https://www.rfc-editor.org/rfc/rfc9113#section-5.2)), on the Rust and the C#
-  sides alike; then WebSocket (RFC 6455) and HTTP/1.1 and HTTP/2 (RFC 9110, 9112, 9113) over
-  sockets, with the interop both ways with the TypeScript and C# sides; then its broker bindings,
-  MQTT 5 and AMQP 1.0; its gateway; and beadc's Rust target, with `examples/hello`'s Rust half and
-  the validators of a blueprint's rules generated for it, or beadc refusing to generate them
+- **Rust's service client and its transports**: the client half of its service layer, in its core;
+  then WebSocket (RFC 6455) and HTTP/1.1 and HTTP/2 (RFC 9110, 9112, 9113) over sockets, with the
+  interop both ways with the TypeScript and C# sides; then its broker bindings, MQTT 5 and AMQP 1.0;
+  its gateway; and beadc's Rust target, with `examples/hello`'s Rust half and the validators of a
+  blueprint's rules generated for it, or beadc refusing to generate them
   ([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)),
   each stage under a record of its own
   ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md));
@@ -74,11 +71,7 @@ Ahead besides: each a record binds, as it names; each no record decides, by a de
 that meets the Tenth Man:
 
 - what [0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md) keeps
-  ahead of the routers on every side: one order for a call a listener makes within its router's
-  turn; one behaviour for a call made just before its router's dispose; and one answer to a codec
-  that throws or panics as it reads a request, which every side answers `PAYLOAD_UNDECODABLE` where
-  spec 9.0 answers a codec that throws other than a refusal `PROCEDURE_FAILED`; and an optional
-  bridge from the Rust side's trace to `tracing`;
+  ahead of the Rust side's trace: an optional bridge from it to `tracing`;
 - **the core in a page and in a worker**, the Rust side's and the C# side's in one stage, with its
   executor, its clock and its tests, then what it serves there: the transports in a page, the Web
   Worker transport, the DevTools hook from their clients, its contract then a document every side
@@ -97,8 +90,7 @@ that meets the Tenth Man:
   them ([0015](0015-a-pages-client-announces-itself-to-a-devtools-hook.md));
 - **a counted call's cost, measured**: a call counted against one not counted, on each side, a
   measure beside those the benches take
-  ([0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)), and a guard in CI against a
-  gross regression of the benches ([the root README](../../README.md#measurement));
+  ([0013](0013-every-language-debugs-alike-at-no-cost-when-off.md));
 - **a constrained C side**, which builds debugging by its switches
   ([0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)), refuses a declaration out of
   its range alone ([0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md))
@@ -129,10 +121,12 @@ that meets the Tenth Man:
   `bodyBytesBudget` is for bodies;
 - **one corpus read alike by every side's parsers**, held as a gate, as
   `tools/protobuf-conformance.mjs differential` holds a `proto` payload
-  ([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)),
-  beside the targets each side fuzzes by hand, guided by coverage, the six the TypeScript and C#
-  sides share and four of them on the Rust side ([the root README](../../README.md#fuzzing)), and a
-  short run of them in CI;
+  ([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)):
+  the parsers the sides fuzz, the eight the TypeScript and C# sides share and six of them on the
+  Rust side ([the root README](../../README.md#fuzzing)), each read on one corpus by every side and
+  compared, beside the seeded mutations of the envelope and the parcel that each side's suite reads
+  alike and judges alone; and the `envelope` target's writer held to the refusals it documents, as
+  `broker-parcel`'s is ([0006](0006-a-rule-has-its-gate.md));
 - what [0030](0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-and-counts.md)
   names: `Forwarded`, an IPv6 client keyed by its prefix, and a per-address value fit for a NAT,
   for an HTTP server and a WebSocket server at once;
@@ -174,11 +168,12 @@ table.
 
 ### The envelope and its calls
 
-| #                                                           | Decision                                                                                                        | Status   |
-| ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | -------- |
-| [0001](0001-the-envelope-sits-at-fixed-offsets.md)          | The envelope sits at fixed big-endian offsets, behind an 8-byte prefix and its layout byte                      | accepted |
-| [0002](0002-a-subscription-goes-at-its-clients-pace.md)     | A client may pace its subscription, and what waits, waits by key                                                | accepted |
-| [0010](0010-a-request-presents-a-credential-of-a-scheme.md) | A request presents a credential of a scheme, in the header's last block, and runs in the session it resolves to | accepted |
+| #                                                                                                    | Decision                                                                                                        | Status   |
+| ---------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | -------- |
+| [0001](0001-the-envelope-sits-at-fixed-offsets.md)                                                   | The envelope sits at fixed big-endian offsets, behind an 8-byte prefix and its layout byte                      | accepted |
+| [0002](0002-a-subscription-goes-at-its-clients-pace.md)                                              | A client may pace its subscription, and what waits, waits by key                                                | accepted |
+| [0010](0010-a-request-presents-a-credential-of-a-scheme.md)                                          | A request presents a credential of a scheme, in the header's last block, and runs in the session it resolves to | accepted |
+| [0045](0045-a-router-takes-what-its-application-makes-in-one-queue-behind-the-turn-that-tells-it.md) | A router takes what its application makes in one queue, behind the turn that tells it                           | accepted |
 
 ### Payloads
 
@@ -211,6 +206,7 @@ table.
 | [0029](0029-a-listen-names-its-cursor-and-its-wait-in-fields-of-its-own.md)                                               | A listen names its cursor and its wait in fields of its own, at the connection's one URL                                                                           | accepted |
 | [0032](0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md)                             | A WebSocket upgrade from no page carries its credential beside every envelope of its connection, a client follows no redirect, and a connect bounds what it awaits | accepted |
 | [0036](0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md) | An in-memory transport joins two routers of one process, and a server takes several transports through one                                                         | accepted |
+| [0046](0046-a-router-paces-each-connections-reads-by-what-it-has-not-taken.md)                                            | A router paces each connection's reads by what it has not taken                                                                                                    | accepted |
 
 ### Over a broker
 
@@ -254,6 +250,7 @@ table.
 | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
 | [0003](0003-one-word-one-meaning.md)                                                 | One word means one thing, and there are no abbreviations                                                                                                                                                | accepted |
 | [0004](0004-one-behaviour-in-every-language.md)                                      | Every language plays one behaviour, held by the conformance files and the interop                                                                                                                       | accepted |
+| [0047](0047-every-side-shows-one-public-surface.md)                                  | Every side shows one public surface: one name a concept, two parameters then one options object, no tuple, the same exports, each pinned to its list                                                    | accepted |
 | [0005](0005-a-toolchain-per-language.md)                                             | Each language keeps its own toolchain, and the root holds only what all share                                                                                                                           | accepted |
 | [0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md)                   | The C# side composes interfaces, writes every body as a block, takes two parameters and an options record, and builds without a warning                                                                 | accepted |
 | [0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)                | Versions run on three axes, and names are qualified by their owner                                                                                                                                      | accepted |
@@ -268,7 +265,7 @@ table.
 
 ## Writing one
 
-The next decision is 0045. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
+The next decision is 0048. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
 the decision, not its subject. The title may grow with the record; the file's name stays, unless it
 would mislead.
 

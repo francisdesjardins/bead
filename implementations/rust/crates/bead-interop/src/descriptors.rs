@@ -19,10 +19,16 @@ pub const SERVICE_NAME: &str = "Interop";
 pub const SERVICE_REVISION: u32 = 2;
 
 /// This procedure fails, on purpose.
-pub const ON_PURPOSE: ListedFailure = ListedFailure::new("ON_PURPOSE", 7);
+pub const ON_PURPOSE: ListedFailure = ListedFailure::new(
+    "ON_PURPOSE",
+    core::num::NonZeroU16::new(7).expect("a nonzero code"),
+);
 
 /// That destination is registered already.
-pub const REGISTERED_ALREADY: ListedFailure = ListedFailure::new("REGISTERED_ALREADY", 8);
+pub const REGISTERED_ALREADY: ListedFailure = ListedFailure::new(
+    "REGISTERED_ALREADY",
+    core::num::NonZeroU16::new(8).expect("a nonzero code"),
+);
 
 /// A procedure of the interop service, every payload JSON.
 pub type InteropDescriptor = Descriptor<JsonCodec, JsonCodec>;
@@ -74,10 +80,10 @@ pub struct InteropProcedures {
 fn procedure_of((id, name): (u16, &str), kind: ProcedureKind) -> Procedure {
     Procedure {
         service_id: SERVICE_ID,
-        id,
+        procedure_id: id,
         service_revision: SERVICE_REVISION,
-        name: name.to_owned(),
-        kind: Some(kind),
+        procedure_name: name.to_owned(),
+        procedure_kind: Some(kind),
         maximum_payload_bytes: None,
         deprecation: None,
     }
@@ -164,25 +170,25 @@ impl InteropProcedures {
     #[must_use]
     pub fn all(&self) -> Vec<ServiceProcedure> {
         vec![
-            ServiceProcedure::of(&self.echo),
-            ServiceProcedure::of(&self.fail),
-            ServiceProcedure::of(&self.slow),
-            ServiceProcedure::of(&self.cancellations),
-            ServiceProcedure::of(&self.denied),
-            ServiceProcedure::of(&self.broken),
-            ServiceProcedure::of(&self.bytes),
-            ServiceProcedure::of(&self.ask),
-            ServiceProcedure::of(&self.clock),
-            ServiceProcedure::of_notifying(&self.ticks),
-            ServiceProcedure::of(&self.tick),
-            ServiceProcedure::of(&self.login),
-            ServiceProcedure::of(&self.logout),
-            ServiceProcedure::of(&self.whoami),
-            ServiceProcedure::of(&self.register),
-            ServiceProcedure::of(&self.unregister),
-            ServiceProcedure::of(&self.end_session),
-            ServiceProcedure::of(&self.end_sessions_of),
-            ServiceProcedure::of(&self.checked),
+            ServiceProcedure::from(&self.echo),
+            ServiceProcedure::from(&self.fail),
+            ServiceProcedure::from(&self.slow),
+            ServiceProcedure::from(&self.cancellations),
+            ServiceProcedure::from(&self.denied),
+            ServiceProcedure::from(&self.broken),
+            ServiceProcedure::from(&self.bytes),
+            ServiceProcedure::from(&self.ask),
+            ServiceProcedure::from(&self.clock),
+            ServiceProcedure::from(&self.ticks),
+            ServiceProcedure::from(&self.tick),
+            ServiceProcedure::from(&self.login),
+            ServiceProcedure::from(&self.logout),
+            ServiceProcedure::from(&self.whoami),
+            ServiceProcedure::from(&self.register),
+            ServiceProcedure::from(&self.unregister),
+            ServiceProcedure::from(&self.end_session),
+            ServiceProcedure::from(&self.end_sessions_of),
+            ServiceProcedure::from(&self.checked),
         ]
     }
 

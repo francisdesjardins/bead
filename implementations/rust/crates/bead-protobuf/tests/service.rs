@@ -18,7 +18,8 @@ use bead::testing::instants::new_year;
 use bead::testing::pair::{Pair, PairOptions, echo};
 use bead::{
     CallError, DebugEvent, FailureOrigin, FailureScope, PayloadCodec, ProtocolCode, RawCodec,
-    RequestDependencies, RequestOptions, ResolverDependencies, Response, RouterSide, TracedError,
+    RequestDependencies, RequestOptions, RequestResolverDependencies, Response, RouterSide,
+    TracedError,
 };
 use bead_protobuf::testing::codecs::{Needs, Probe, Shade, descriptor_pool};
 use bead_protobuf::{DynamicCodec, ProtoCodec};
@@ -29,15 +30,15 @@ use bytes::Bytes;
 // how long a call is waited on
 const PATIENCE: Duration = Duration::from_secs(10);
 
-// the words the codec refuses the unset value in, reading and writing
-const WORDS: &str = "a proto message leaves bead.codecs.v1.Needs.shade unset";
+// the words the codec refuses the unset value in, reading and writing: its reason (spec 17.2)
+const WORDS: &str = "a required field unset";
 
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 async fn pair() -> Result<Pair, String> {
-    Pair::connected((new_year(), PairOptions::default())).await
+    Pair::connected(new_year(), &PairOptions::default()).await
 }
 
 fn typed() -> ProtoCodec<Probe> {
@@ -97,7 +98,10 @@ async fn fails_a_call_whose_request_leaves_a_required_field_unset_before_anythin
 
     pair.server
         .services()
-        .get_request_resolver(&echo(), ResolverDependencies::of(RawCodec, RawCodec))
+        .get_request_resolver(
+            &echo(),
+            RequestResolverDependencies::new(RawCodec, RawCodec),
+        )
         .expect("echo resolved")
         .on(Arc::new(move |request, response: Response<RawCodec>| {
             locked(&sending).push(request.payload.clone());
@@ -116,11 +120,11 @@ async fn fails_a_call_whose_request_leaves_a_required_field_unset_before_anythin
 
     // * the codec's own refusal, its writer's, as the value is written (spec 17.2, item 4)
     let refused = manager
-        .get_request(&echo(), RequestDependencies::of(dynamic(), typed()))
+        .get_request(&echo(), RequestDependencies::new(dynamic(), typed()))
         .expect("echo asked")
         .call(
             unset().expect("a Probe left unset"),
-            RequestOptions::default(),
+            &RequestOptions::default(),
         )
         .expect("a call");
     let refused = tokio::time::timeout(PATIENCE, refused)
@@ -140,9 +144,9 @@ async fn fails_a_call_whose_request_leaves_a_required_field_unset_before_anythin
 
     // a Probe whose needs is whole goes as ever
     let answered = manager
-        .get_request(&echo(), RequestDependencies::of(typed(), typed()))
+        .get_request(&echo(), RequestDependencies::new(typed(), typed()))
         .expect("echo asked")
-        .call(whole(), RequestOptions::default())
+        .call(whole(), &RequestOptions::default())
         .expect("a call");
     let answered = tokio::time::timeout(PATIENCE, answered)
         .await
@@ -163,7 +167,10 @@ async fn fails_a_call_whose_result_leaves_a_required_field_unset_with_payload_un
     // * a peer of no such codec answers what the codec refuses to read (spec 17.9.7)
     pair.server
         .services()
-        .get_request_resolver(&echo(), ResolverDependencies::of(RawCodec, RawCodec))
+        .get_request_resolver(
+            &echo(),
+            RequestResolverDependencies::new(RawCodec, RawCodec),
+        )
         .expect("echo resolved")
         .on(Arc::new(|_request, response: Response<RawCodec>| {
             response.result(unset_bytes())
@@ -173,9 +180,9 @@ async fn fails_a_call_whose_result_leaves_a_required_field_unset_with_payload_un
     let failed = pair
         .client
         .services()
-        .get_request(&echo(), RequestDependencies::of(typed(), typed()))
+        .get_request(&echo(), RequestDependencies::new(typed(), typed()))
         .expect("echo asked")
-        .call(Probe::default(), RequestOptions::default())
+        .call(Probe::default(), &RequestOptions::default())
         .expect("a call");
     let failed = tokio::time::timeout(PATIENCE, failed)
         .await
@@ -209,7 +216,7 @@ async fn answers_payload_undecodable_to_a_request_that_leaves_a_required_field_u
 
     pair.server
         .services()
-        .get_request_resolver(&echo(), ResolverDependencies::of(typed(), typed()))
+        .get_request_resolver(&echo(), RequestResolverDependencies::new(typed(), typed()))
         .expect("echo resolved")
         .on(Arc::new(
             move |request, response: Response<ProtoCodec<Probe>>| {
@@ -224,9 +231,9 @@ async fn answers_payload_undecodable_to_a_request_that_leaves_a_required_field_u
     let failed = pair
         .client
         .services()
-        .get_request(&echo(), RequestDependencies::of(RawCodec, RawCodec))
+        .get_request(&echo(), RequestDependencies::new(RawCodec, RawCodec))
         .expect("echo asked")
-        .call(unset_bytes(), RequestOptions::default())
+        .call(unset_bytes(), &RequestOptions::default())
         .expect("a call");
     let failed = tokio::time::timeout(PATIENCE, failed)
         .await
@@ -234,9 +241,10 @@ async fn answers_payload_undecodable_to_a_request_that_leaves_a_required_field_u
 
     pair.settle().await;
 
+    // * its detail the codec's reason (spec 17.2, item 1)
     assert!(
-        matches!(&failed, Err(CallError::Failure(failure)) if failure.protocol_code() == Some(ProtocolCode::PAYLOAD_UNDECODABLE)),
-        "answered PAYLOAD_UNDECODABLE: {failed:?}"
+        matches!(&failed, Err(CallError::Failure(failure)) if failure.protocol_code() == Some(ProtocolCode::PAYLOAD_UNDECODABLE) && failure.detail() == WORDS),
+        "answered PAYLOAD_UNDECODABLE, saying its reason: {failed:?}"
     );
     assert!(locked(&resolved).is_empty(), "its resolver not called");
     assert!(locked(&pair.server_reports).is_empty(), "nothing reported");
@@ -249,7 +257,10 @@ async fn answers_procedure_failed_to_a_result_that_leaves_a_required_field_unset
 
     pair.server
         .services()
-        .get_request_resolver(&echo(), ResolverDependencies::of(typed(), dynamic()))
+        .get_request_resolver(
+            &echo(),
+            RequestResolverDependencies::new(typed(), dynamic()),
+        )
         .expect("echo resolved")
         .on(Arc::new(
             move |_request, response: Response<DynamicCodec>| response.result(left.clone()),
@@ -259,9 +270,9 @@ async fn answers_procedure_failed_to_a_result_that_leaves_a_required_field_unset
     let failed = pair
         .client
         .services()
-        .get_request(&echo(), RequestDependencies::of(typed(), typed()))
+        .get_request(&echo(), RequestDependencies::new(typed(), typed()))
         .expect("echo asked")
-        .call(Probe::default(), RequestOptions::default())
+        .call(Probe::default(), &RequestOptions::default())
         .expect("a call");
     let failed = tokio::time::timeout(PATIENCE, failed)
         .await

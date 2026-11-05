@@ -36,7 +36,7 @@ public sealed class BrokerTransportClientTests
         // the inner exception
         var failed = await Assert.ThrowsAsync<ConnectException>(() =>
         {
-            return client.Connect(new BrokerConnectOptions { Server = "nobody" }, Cancelled);
+            return client.Connect(new BrokerTransportClientConnectOptions { Server = "nobody", CancellationToken = Cancelled });
         });
         var refused = Assert.IsType<BrokerRefusedException>(failed.InnerException);
 
@@ -47,7 +47,7 @@ public sealed class BrokerTransportClientTests
         await silent.Start();
         await silent.Subscribe(["bead", "s", "interop"]);
 
-        var timing = client.Connect(new BrokerConnectOptions { Server = "interop", Timeout = TimeSpan.FromSeconds(1) }, Cancelled);
+        var timing = client.Connect(new BrokerTransportClientConnectOptions { Server = "interop", Timeout = TimeSpan.FromSeconds(1), CancellationToken = Cancelled });
 
         Assert.True(SteppingClock.IsEarliest(await clock.UntilEarliest(TimeSpan.FromSeconds(1), BrokerPair.Patience), TimeSpan.FromSeconds(1)));
         await BrokerPair.Until(
@@ -61,11 +61,11 @@ public sealed class BrokerTransportClientTests
         {
             return timing.WaitAsync(BrokerPair.Patience, Cancelled);
         })).Message);
-        Assert.Equal(TimeSpan.FromSeconds(10), new BrokerConnectOptions { Server = "interop" }.Timeout);
+        Assert.Equal(TimeSpan.FromSeconds(10), new BrokerTransportClientConnectOptions { Server = "interop" }.Timeout);
 
         // then given up by its token
         using var cancelling = new CancellationTokenSource();
-        var cancelled = client.Connect(new BrokerConnectOptions { Server = "interop" }, cancelling.Token);
+        var cancelled = client.Connect(new BrokerTransportClientConnectOptions { Server = "interop", CancellationToken = cancelling.Token });
 
         await BrokerPair.Until(
             () =>
@@ -85,7 +85,7 @@ public sealed class BrokerTransportClientTests
         {
             await Assert.ThrowsAsync<ArgumentException>(() =>
             {
-                return client.Connect(new BrokerConnectOptions { Server = server }, Cancelled);
+                return client.Connect(new BrokerTransportClientConnectOptions { Server = server, CancellationToken = Cancelled });
             });
         }
 
@@ -148,7 +148,7 @@ public sealed class BrokerTransportClientTests
             told.Enqueue((client.ReadyState, Convert.ToHexString(message.Bytes.Span)));
         };
 
-        var connecting = client.Connect(new BrokerConnectOptions { Server = "interop" }, Cancelled);
+        var connecting = client.Connect(new BrokerTransportClientConnectOptions { Server = "interop", CancellationToken = Cancelled });
         var opener = await OpenerOf(heard);
 
         // * its ACCEPT and an envelope after it, published in one turn: the envelope comes before its
@@ -173,6 +173,56 @@ public sealed class BrokerTransportClientTests
         Assert.Equal([(ReadyState.Open, "A116")], told);
     }
 
+    // spec 15.12.17
+    [Fact]
+    public async Task Paused_before_its_connect_opened_holds_what_its_server_sent_and_hands_it_in_order_once_resumed()
+    {
+        var scheduler = new SerialScheduler();
+        var broker = new MemoryBroker(new MemoryBrokerOptions { Scheduler = scheduler });
+        await using var ada = new BrokerParticipant(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "ada" }), new BrokerParticipantOptions { Scheduler = scheduler });
+        var (peer, heard) = await PeerOf(broker);
+        await using var client = ada.Client();
+        var told = new ConcurrentQueue<string>();
+
+        client.Message += (message) =>
+        {
+            told.Enqueue(Convert.ToHexString(message.Bytes.Span));
+        };
+
+        // * a pause outlasts its connection: the connection it opens is paused as it is made
+        client.Pause();
+
+        var connecting = client.Connect(new BrokerTransportClientConnectOptions { Server = "interop", CancellationToken = Cancelled });
+        var opener = await OpenerOf(heard);
+
+        await peer.Publish(new BrokerPublication { Topic = Inbox, Payload = AcceptOf(opener) });
+        await connecting.WaitAsync(BrokerPair.Patience, Cancelled);
+
+        foreach (var (sequence, value) in new (uint Sequence, byte Value)[] { (2, 0x01), (3, 0x02) })
+        {
+            await peer.Publish(new BrokerPublication
+            {
+                Topic = Inbox,
+                Payload = BrokerParcels.Write(new BrokerParcel { Kind = BrokerParcelKinds.Data, Opener = opener, Acceptor = Half, Sequence = sequence, Carried = (byte[])[0xA1, value] }),
+            });
+        }
+
+        await scheduler.WhenIdle();
+
+        Assert.Empty(told);
+        Assert.Equal(ReadyState.Open, client.ReadyState);
+
+        client.Resume();
+        await BrokerPair.Until(
+            () =>
+            {
+                return told.Count == 2;
+            },
+            "what it held told");
+
+        Assert.Equal(["A101", "A102"], told);
+    }
+
     [Fact]
     public async Task Fails_a_connect_its_server_refused_as_malformed_or_closed_as_it_opened_telling_no_close_and_tells_one_once_it_opened()
     {
@@ -189,7 +239,7 @@ public sealed class BrokerTransportClientTests
         };
 
         // refused 400: its refusal the inner exception, named as section 15.6 names it
-        var refusing = client.Connect(new BrokerConnectOptions { Server = "interop" }, Cancelled);
+        var refusing = client.Connect(new BrokerTransportClientConnectOptions { Server = "interop", CancellationToken = Cancelled });
 
         await peer.Publish(new BrokerPublication
         {
@@ -208,7 +258,7 @@ public sealed class BrokerTransportClientTests
         // and no close is told
         heard.Clear();
 
-        var closing = client.Connect(new BrokerConnectOptions { Server = "interop" }, Cancelled);
+        var closing = client.Connect(new BrokerTransportClientConnectOptions { Server = "interop", CancellationToken = Cancelled });
         var opener = await OpenerOf(heard);
 
         await broker.Turn(() =>
@@ -231,7 +281,7 @@ public sealed class BrokerTransportClientTests
         // once it opened, its server's close is told, unclean but for 1000
         heard.Clear();
 
-        var opening = client.Connect(new BrokerConnectOptions { Server = "interop" }, Cancelled);
+        var opening = client.Connect(new BrokerTransportClientConnectOptions { Server = "interop", CancellationToken = Cancelled });
         var opened = await OpenerOf(heard);
 
         await peer.Publish(new BrokerPublication { Topic = Inbox, Payload = AcceptOf(opened) });
@@ -268,7 +318,7 @@ public sealed class BrokerTransportClientTests
         Assert.Equal(ReadyState.Open, client.ReadyState);
 
         // * not clean: a RESET, its server told unclean
-        await client.CloseConnection(new TransportDisconnectOptions { IsClean = false });
+        await client.CloseConnection(new TransportClientDisconnectOptions { IsClean = false });
         await BrokerPair.Until(
             () =>
             {
@@ -289,7 +339,7 @@ public sealed class BrokerTransportClientTests
 
         // * disposed before its link is up: no OPEN goes
         var early = ada.Client();
-        var linking = early.Connect(new BrokerConnectOptions { Server = "interop" }, Cancelled);
+        var linking = early.Connect(new BrokerTransportClientConnectOptions { Server = "interop", CancellationToken = Cancelled });
 
         await early.DisposeAsync();
         Assert.Equal(Disposed, (await Assert.ThrowsAsync<ConnectException>(() =>
@@ -299,7 +349,7 @@ public sealed class BrokerTransportClientTests
 
         // disposed as its OPEN awaits its answer, the one OPEN that went
         var client = ada.Client();
-        var connecting = client.Connect(new BrokerConnectOptions { Server = "interop" }, Cancelled);
+        var connecting = client.Connect(new BrokerTransportClientConnectOptions { Server = "interop", CancellationToken = Cancelled });
 
         await OpenerOf(heard);
         Assert.Single(heard);
@@ -356,16 +406,16 @@ public sealed class BrokerTransportClientTests
         // given up already: refused, nothing sent
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
         {
-            return client.Connect(new BrokerConnectOptions { Server = "interop" }, new CancellationToken(true));
+            return client.Connect(new BrokerTransportClientConnectOptions { Server = "interop", CancellationToken = new CancellationToken(true) });
         });
         Assert.Equal(ReadyState.Uninitialized, client.ReadyState);
 
-        var connecting = client.Connect(new BrokerConnectOptions { Server = "interop" }, Cancelled);
+        var connecting = client.Connect(new BrokerTransportClientConnectOptions { Server = "interop", CancellationToken = Cancelled });
 
         // * one under way: a second is refused, and the first goes on
         Assert.Equal("the transport client is already connecting", (await Assert.ThrowsAsync<InvalidOperationException>(() =>
         {
-            return client.Connect(new BrokerConnectOptions { Server = "interop" }, Cancelled);
+            return client.Connect(new BrokerTransportClientConnectOptions { Server = "interop", CancellationToken = Cancelled });
         })).Message);
         await OpenerOf(heard);
         await client.DisposeAsync();
@@ -373,6 +423,56 @@ public sealed class BrokerTransportClientTests
         {
             return connecting.WaitAsync(BrokerPair.Patience, Cancelled);
         });
+    }
+
+    // spec 1.4
+    [Fact]
+    public async Task Refuses_a_fixed_delay_out_of_bounds_as_reconnect_is_called_nothing_changed()
+    {
+        await using var pair = await BrokerPair.Of();
+        await using var client = await pair.Connect();
+        var before = client.Pair;
+        var told = new ConcurrentQueue<string>();
+
+        ((IRouterClientTransport)client).Reconnect += () =>
+        {
+            told.Enqueue("reconnect");
+        };
+        client.Close += (_, _) =>
+        {
+            told.Enqueue("close");
+        };
+
+        // * refused as it is called: after its state's guards, before its token
+        foreach (var (delay, written) in new[]
+        {
+            (TimeSpan.FromTicks(4_000), "0.4"),
+            (TimeSpan.FromMilliseconds(2_147_483_648), "2147483648"),
+            (Timeout.InfiniteTimeSpan, "infinite"),
+        })
+        {
+            var refused = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            {
+                return client.Reconnect(new TransportClientReconnectOptions { Delay = new TransportClientReconnectDelay(delay), CancellationToken = new CancellationToken(true) });
+            });
+
+            Assert.Equal($"a delay is 0 for at once, or a number of milliseconds from 1 to 2147483647, not {written} (Parameter 'Delay')", refused.Message);
+        }
+
+        await pair.Scheduler.WhenIdle();
+
+        // nothing changed: open on its pair, no reconnect told and no close, at either end
+        Assert.Equal((ReadyState.Open, before), (client.ReadyState, client.Pair));
+        Assert.Empty(told);
+        Assert.Empty(pair.Closed);
+
+        // its state's guards first: a client never connected says so
+        await using var never = pair.ClientParticipant.Client();
+
+        Assert.Equal("the transport client was never connected", (await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        {
+            return never.Reconnect(new TransportClientReconnectOptions { Delay = new TransportClientReconnectDelay(Timeout.InfiniteTimeSpan) });
+        })).Message);
     }
 
     [Fact]
@@ -395,7 +495,7 @@ public sealed class BrokerTransportClientTests
 
         // a connect to a name nobody answers, given up once refused its reconnection
         using var giving = new CancellationTokenSource();
-        var connecting = client.Connect(new BrokerConnectOptions { Server = "quiet" }, giving.Token);
+        var connecting = client.Connect(new BrokerTransportClientConnectOptions { Server = "quiet", CancellationToken = giving.Token });
 
         Assert.Equal("the transport client cannot reconnect while connecting", (await Assert.ThrowsAsync<InvalidOperationException>(() =>
         {
@@ -408,10 +508,10 @@ public sealed class BrokerTransportClientTests
         });
 
         // given up already: the open connection left alone
-        await client.Connect(new BrokerConnectOptions { Server = "interop" }, Cancelled);
+        await client.Connect(new BrokerTransportClientConnectOptions { Server = "interop", CancellationToken = Cancelled });
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
         {
-            return client.Reconnect(new TransportReconnectOptions { CancellationToken = new CancellationToken(true) });
+            return client.Reconnect(new TransportClientReconnectOptions { CancellationToken = new CancellationToken(true) });
         });
         Assert.Equal(ReadyState.Open, client.ReadyState);
 
@@ -425,7 +525,7 @@ public sealed class BrokerTransportClientTests
             },
             "its server's stop closes its connection");
 
-        var reconnecting = client.Reconnect(new TransportReconnectOptions { Delay = Briefly, MaximumAttempts = 2 });
+        var reconnecting = client.Reconnect(new TransportClientReconnectOptions { Delay = Briefly, MaximumAttempts = 2 });
 
         Assert.Equal("the transport client is already reconnecting", (await Assert.ThrowsAsync<InvalidOperationException>(() =>
         {
@@ -438,10 +538,327 @@ public sealed class BrokerTransportClientTests
         Assert.Equal(ReadyState.Closed, client.ReadyState);
     }
 
-    private static TimeSpan Briefly(TimeSpan? previousDelay, int attempt)
+    // spec 15.21
+    [Fact]
+    public async Task Refuses_a_connect_or_a_reconnect_once_its_participant_is_disposed_its_state_kept_no_reconnect_told()
     {
-        return TimeSpan.FromMilliseconds(100);
+        await using var pair = await BrokerPair.Of();
+        await using var never = pair.ClientParticipant.Client();
+        await using var connected = await pair.Connect();
+        var (tapped, reconnect) = Tapping(TimeSpan.FromSeconds(60));
+        var told = new ConcurrentQueue<string>();
+
+        ((IRouterClientTransport)connected).Reconnect += () =>
+        {
+            told.Enqueue("reconnect");
+        };
+        await pair.ClientParticipant.DisposeAsync();
+        await BrokerPair.Until(
+            () =>
+            {
+                return connected.ReadyState == ReadyState.Closed;
+            },
+            "closed as its participant is disposed");
+
+        // * a client never connected: its connect a misuse, its state and its target kept
+        Assert.Equal("the participant client is disposed", (await Assert.ThrowsAsync<ObjectDisposedException>(() =>
+        {
+            return never.Connect(new BrokerTransportClientConnectOptions { Server = "interop", CancellationToken = Cancelled });
+        })).Message);
+        Assert.Equal(ReadyState.Uninitialized, never.ReadyState);
+        Assert.Equal("the transport client was never connected", (await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        {
+            return never.Reconnect();
+        })).Message);
+
+        // * a client its participant's dispose closed: its reconnect a misuse, no reconnect told
+        Assert.Equal("the participant client is disposed", (await Assert.ThrowsAsync<ObjectDisposedException>(() =>
+        {
+            return connected.Reconnect(reconnect);
+        })).Message);
+        await pair.Scheduler.WhenIdle();
+        Assert.Equal(ReadyState.Closed, connected.ReadyState);
+        Assert.Empty(told);
+        Assert.Empty(tapped);
     }
+
+    // spec 15.15, 15.21
+    [Fact]
+    public async Task Ends_its_reconnection_as_its_participant_stops_in_a_wait_or_in_an_attempt_no_wait_told_after_it()
+    {
+        // in a wait: on the test's clock, its first attempt refused at once, nothing serving the name
+        var clock = new SteppingClock(DateTimeOffset.UnixEpoch);
+        var broker = new MemoryBroker(new MemoryBrokerOptions { Clock = clock });
+        await using var serving = new BrokerParticipant(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "server" }), new BrokerParticipantOptions { Clock = clock });
+        await using var server = serving.Server(new BrokerTransportServerOptions { Names = ["interop"] });
+        await using var ada = new BrokerParticipant(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "ada" }), new BrokerParticipantOptions { Clock = clock });
+        await using var client = ada.Client();
+
+        await server.Start();
+        await client.Connect(new BrokerTransportClientConnectOptions { Server = "interop", CancellationToken = Cancelled });
+        await server.Stop();
+        await BrokerPair.Until(
+            () =>
+            {
+                return client.ReadyState == ReadyState.Closed;
+            },
+            "closed as its server stops");
+
+        var (waits, waiting) = Tapping(TimeSpan.FromSeconds(60));
+        var inAWait = client.Reconnect(waiting);
+
+        await BrokerPair.Until(
+            () =>
+            {
+                return waits.Count == 1;
+            },
+            "its first wait told");
+
+        var before = clock.GetUtcNow();
+
+        await ada.Stop();
+
+        // * ended at once, cancelled, its wait not waited out, the stop inside
+        var cancelled = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+        {
+            return inAWait.WaitAsync(BrokerPair.Patience, Cancelled);
+        });
+
+        Assert.Equal(TransportReconnection.Cancelled, cancelled.Message);
+        Assert.Equal("the participant ada stopped", Assert.IsType<IOException>(cancelled.InnerException).Message);
+        Assert.Equal(before, clock.GetUtcNow());
+        Assert.Equal([TimeSpan.FromSeconds(60)], waits);
+        Assert.Equal(ReadyState.Closed, client.ReadyState);
+        Assert.False(ada.IsLinked);
+
+        // in an attempt: its link's start held as it connects again, its participant's own
+        // reconnection off
+        var other = new MemoryBroker();
+        await using var accepting = new BrokerParticipant(other.Adapter(new MemoryBrokerAdapterOptions { Id = "server" }));
+        await using var acceptor = accepting.Server(new BrokerTransportServerOptions { Names = ["interop"] });
+        var bob = other.Adapter(new MemoryBrokerAdapterOptions { Id = "bob" });
+        var holding = new CallingAdapter(bob) { HoldsStart = 1 };
+        await using var participant = new BrokerParticipant(holding, new BrokerParticipantOptions { Reconnects = false });
+        await using var attempting = participant.Client();
+
+        await acceptor.Start();
+        await attempting.Connect(new BrokerTransportClientConnectOptions { Server = "interop", CancellationToken = Cancelled });
+        bob.Lose();
+        await BrokerPair.Until(
+            () =>
+            {
+                return attempting.ReadyState == ReadyState.Closed;
+            },
+            "closed as its link goes down");
+
+        var (tapped, reconnect) = Tapping(TimeSpan.FromSeconds(60));
+        var inAnAttempt = attempting.Reconnect(reconnect);
+
+        await BrokerPair.Until(
+            () =>
+            {
+                return holding.Holding == 1;
+            },
+            "its attempt's link held");
+
+        var stopping = participant.Stop();
+
+        // * its attempt fails, and its reconnection ends, cancelled, no wait told after its stop, the
+        // stop inside
+        var ended = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+        {
+            return inAnAttempt.WaitAsync(BrokerPair.Patience, Cancelled);
+        });
+
+        Assert.Equal(TransportReconnection.Cancelled, ended.Message);
+        Assert.Equal("the participant bob stopped", Assert.IsType<IOException>(ended.InnerException).Message);
+        Assert.True(holding.Release());
+        await stopping.WaitAsync(BrokerPair.Patience, Cancelled);
+        await participant.Scheduler.WhenIdle();
+        Assert.Empty(tapped);
+        Assert.Equal(ReadyState.Closed, attempting.ReadyState);
+        Assert.Equal((false, false), (participant.IsLinked, bob.IsLinked));
+    }
+
+    // spec 15.21
+    [Fact]
+    public async Task Retries_its_connect_when_its_adapter_refuses_its_link_s_start_as_its_participant_s_own_reconnection_does()
+    {
+        var broker = new MemoryBroker();
+        await using var serving = new BrokerParticipant(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "server" }));
+        await using var server = serving.Server(new BrokerTransportServerOptions { Names = ["interop"] });
+        var refusing = new CallingAdapter(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "fli" })) { Refuses = 2 };
+        await using var participant = new BrokerParticipant(refusing);
+        await using var client = participant.Client();
+
+        await server.Start();
+
+        // * its connect fails as a connect, the adapter's misuse inside
+        var failed = await Assert.ThrowsAsync<ConnectException>(() =>
+        {
+            return client.Connect(new BrokerTransportClientConnectOptions { Server = "interop", CancellationToken = Cancelled });
+        });
+
+        Assert.Equal("the link of fli is up already", failed.Message);
+        Assert.Equal("the link of fli is up already", Assert.IsType<InvalidOperationException>(failed.InnerException).Message);
+        Assert.Equal(ReadyState.Closed, client.ReadyState);
+
+        // * then its reconnection tries again, and connects after one wait
+        var (tapped, reconnect) = Tapping(TimeSpan.Zero);
+
+        await client.Reconnect(reconnect).WaitAsync(BrokerPair.Patience, Cancelled);
+        Assert.Single(tapped);
+        Assert.Equal(ReadyState.Open, client.ReadyState);
+    }
+
+    // spec 15.21
+    [Fact]
+    public async Task Fails_a_connect_awaiting_its_participant_s_link_at_once_as_the_participant_stops_at_its_start_or_as_it_links_anew_stopped_as_it_connected_spec_15_21()
+    {
+        // at its start: its link's first start held, on the test's clock, its connect's time never
+        // passed
+        var clock = new SteppingClock(DateTimeOffset.UnixEpoch);
+        var broker = new MemoryBroker(new MemoryBrokerOptions { Clock = clock });
+        var holding = new CallingAdapter(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "ada" })) { HoldsStart = 0 };
+        await using var participant = new BrokerParticipant(holding, new BrokerParticipantOptions { Clock = clock });
+        await using var client = participant.Client();
+        var connecting = client.Connect(new BrokerTransportClientConnectOptions { Server = "interop", CancellationToken = Cancelled });
+
+        await BrokerPair.Until(
+            () =>
+            {
+                return holding.Holding == 1;
+            },
+            "its link's start held");
+
+        var before = clock.GetTimestamp();
+        var stopping = participant.Stop();
+
+        // * it fails at once, its participant's start held still
+        Assert.Equal("the participant ada stopped as it connected", (await Assert.ThrowsAsync<ConnectException>(() =>
+        {
+            return connecting.WaitAsync(BrokerPair.Patience, Cancelled);
+        })).Message);
+        Assert.Equal(ReadyState.Closed, client.ReadyState);
+        Assert.False(stopping.IsCompleted);
+        Assert.True(holding.Release());
+        await stopping.WaitAsync(BrokerPair.Patience, Cancelled);
+
+        // as it links anew: its link lost, each attempt of its own reconnection refused, and a wait of
+        // 60 s never passed on the test's clock
+        var bob = broker.Adapter(new MemoryBrokerAdapterOptions { Id = "bob" });
+        var refusing = new CallingAdapter(bob) { Starts = 1 };
+        var (tapped, reconnect) = Tapping(TimeSpan.FromSeconds(60));
+        await using var linking = new BrokerParticipant(refusing, new BrokerParticipantOptions { Clock = clock, Reconnect = reconnect });
+        await using var waiting = linking.Client();
+
+        await linking.Start();
+        bob.Lose();
+        await BrokerPair.Until(
+            () =>
+            {
+                return tapped.Count == 1;
+            },
+            "its reconnection's wait told");
+
+        var awaiting = waiting.Connect(new BrokerTransportClientConnectOptions { Server = "interop", CancellationToken = Cancelled });
+
+        // its reconnection's wait keeps its scheduler busy: a real pause, never its idleness
+        await Task.Delay(50, Cancelled);
+        Assert.False(awaiting.IsCompleted);
+        await linking.Stop();
+
+        // * it fails at once, stopped as it connected, neither its time nor the wait passed
+        Assert.Equal("the participant bob stopped as it connected", (await Assert.ThrowsAsync<ConnectException>(() =>
+        {
+            return awaiting.WaitAsync(BrokerPair.Patience, Cancelled);
+        })).Message);
+        Assert.Equal(before, clock.GetTimestamp());
+        Assert.Equal(ReadyState.Closed, waiting.ReadyState);
+        Assert.False(linking.IsLinked);
+    }
+
+    // spec 15.21
+    [Fact]
+    public async Task Ends_a_reconnection_called_while_its_participant_stops_and_links_its_participant_anew_by_one_called_once_that_stop_settled_spec_15_21()
+    {
+        var broker = new MemoryBroker();
+        await using var serving = new BrokerParticipant(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "server" }));
+        await using var server = serving.Server(new BrokerTransportServerOptions { Names = ["interop"] });
+        var holding = new CallingAdapter(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "ada" })) { HoldsStops = true };
+        var participant = new BrokerParticipant(holding);
+        await using var client = participant.Client();
+        var told = 0;
+
+        ((IRouterClientTransport)client).Reconnect += () =>
+        {
+            Interlocked.Increment(ref told);
+        };
+        await server.Start();
+        await client.Connect(new BrokerTransportClientConnectOptions { Server = "interop", CancellationToken = Cancelled });
+
+        var former = participant.Incarnation;
+
+        // * called while its participant's stop is under way: it ends at once, cancelled, the stop
+        // inside, no wait told
+        var stopping = participant.Stop();
+
+        await BrokerPair.Until(
+            () =>
+            {
+                return holding.Stopping == 1 && client.ReadyState == ReadyState.Closed;
+            },
+            "its adapter's stop held, its client closed");
+
+        var (tapped, reconnect) = Tapping(TimeSpan.FromSeconds(60));
+        var ended = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+        {
+            return client.Reconnect(reconnect).WaitAsync(BrokerPair.Patience, Cancelled);
+        });
+
+        Assert.Equal(TransportReconnection.Cancelled, ended.Message);
+        Assert.Equal("the participant ada stopped", Assert.IsType<IOException>(ended.InnerException).Message);
+        Assert.Empty(tapped);
+        Assert.Equal(ReadyState.Closed, client.ReadyState);
+        Assert.True(holding.ReleaseStop());
+        await stopping.WaitAsync(BrokerPair.Patience, Cancelled);
+
+        // * called once that stop settled: it links its participant anew, another incarnation
+        await client.Reconnect(reconnect).WaitAsync(BrokerPair.Patience, Cancelled);
+        Assert.Equal(ReadyState.Open, client.ReadyState);
+        Assert.True(participant.IsLinked);
+        Assert.NotEqual(former, participant.Incarnation);
+        Assert.Empty(tapped);
+        Assert.Equal(2, Volatile.Read(ref told));
+
+        var disposing = participant.DisposeAsync().AsTask();
+
+        await BrokerPair.Until(
+            () =>
+            {
+                return holding.Stopping == 1;
+            },
+            "its adapter's stop held");
+        Assert.True(holding.ReleaseStop());
+        await disposing.WaitAsync(BrokerPair.Patience, Cancelled);
+    }
+
+    // the delays a reconnection told, each as it told it, and its options at a fixed delay
+    private static (ConcurrentQueue<TimeSpan> Tapped, TransportClientReconnectOptions Options) Tapping(TimeSpan delay)
+    {
+        var tapped = new ConcurrentQueue<TimeSpan>();
+
+        return (tapped, new TransportClientReconnectOptions
+        {
+            Delay = new TransportClientReconnectDelay(delay),
+            Tap = (told, _) =>
+            {
+                tapped.Enqueue(told);
+            },
+        });
+    }
+
+    private static readonly TransportClientReconnectDelay Briefly = new TransportClientReconnectDelay(TimeSpan.FromMilliseconds(100));
 
     private static readonly IReadOnlyList<string> Inbox = ["bead", "i", "ada"];
 

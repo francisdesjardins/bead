@@ -11,6 +11,13 @@ internal static class MqttFixture
     /// <summary>What a test that needs a broker says as it is skipped.</summary>
     public const string Reason = "no broker: BEAD_MQTT_URL is not set (node tools/mqtt-broker.mjs start)";
 
+    /// <summary>
+    /// The collection of every class that plays against the broker, so that none plays beside
+    /// another: the cases' users are the adapter's tests' too, and a second link of an id takes the
+    /// first over.
+    /// </summary>
+    public const string Collection = "the Mosquitto of the run";
+
     /// <summary>Whether a broker is given, or asked for, so that its tests run, and fail where none is.</summary>
     public static bool IsGiven
     {
@@ -54,4 +61,10 @@ internal static class MqttFixture
             ? value
             : throw new InvalidOperationException($"BEAD_MQTT_REQUIRED=1 asks for a broker, and {name} is not set (node tools/mqtt-broker.mjs start)");
     }
+}
+
+/// <summary>The classes that play against the run's broker, one at a time.</summary>
+[CollectionDefinition(MqttFixture.Collection, DisableParallelization = true)]
+public sealed class MqttBrokerRun
+{
 }

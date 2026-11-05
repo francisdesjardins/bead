@@ -31,7 +31,7 @@ interface IHold {
 // constants
 
 /** The question `ask` puts to its client's `clock`, and how long it waits for the answer. */
-const QUESTION = 'What time is it where you are?';
+export const QUESTION = 'What time is it where you are?';
 const CLOCK_MILLISECONDS = 10_000;
 
 // the rules of `checked`, as spec/interop-service.json states them: 50 names at most, each of 1 to 3

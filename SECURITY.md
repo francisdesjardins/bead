@@ -13,15 +13,17 @@ extension or the demo — how to reproduce it, and what it lets a peer do.
 Bead is a personal project, kept at its author's pace, with no warranty (see the
 [licence](LICENSE)) and no promise of an answer or a fix by any date. A report is read, and a fix,
 when one comes, lands on `develop` and in the next release; an earlier release takes none. Nothing
-is published to npm, NuGet or a registry before 1.0.0, so a fix reaches a user as a new commit to
-build on, pinned.
+is published to npm, NuGet or a registry yet; publication is ahead, so a fix reaches a user as a new
+commit to build on, pinned.
 
 ## What Bead already holds
 
 The bounds a side keeps against a peer that holds it — calls, connections, transfers, the pace of
 what waits for a socket, the time a request's head and body take — are stated in the spec's
-section 15.12 and decision [0033](docs/decisions/0033-a-side-bounds-what-a-peer-holds-of-it.md);
+section 15.12 and decision [0033](docs/decisions/0033-a-side-bounds-what-a-peer-holds-of-it.md),
+a connection's reads paced by what its router has not taken
+([0046](docs/decisions/0046-a-router-paces-each-connections-reads-by-what-it-has-not-taken.md));
 a refused access is told to its server, never its credential
-([0034](docs/decisions/0034-a-server-tells-each-access-it-refuses-never-the-credential.md)). Both
-sides' parsers are fuzzed, guided by coverage ([README.md](README.md#fuzzing)). A report that one of
-them does not hold is a vulnerability.
+([0034](docs/decisions/0034-a-server-tells-each-access-it-refuses-never-the-credential.md)). Every
+side's parsers are fuzzed, guided by coverage, every week by the fuzzing campaign
+([README.md](README.md#fuzzing)). A report that one of them does not hold is a vulnerability.

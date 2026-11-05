@@ -54,7 +54,7 @@ public static class Resolvers
         {
             var connectionHandle = request.ConnectionHandle;
             var name = request.Payload.Name.Length == 0
-                ? (await hello.Command.AskName(new AskNameRequest { Question = Question })(new RequestOptions { ConnectionHandle = connectionHandle })).Name
+                ? (await hello.Command.AskName(new AskNameRequest { Question = Question })(new CommandOptions { ConnectionHandle = connectionHandle })).Name
                 : request.Payload.Name;
 
             if (name.Length == 0)

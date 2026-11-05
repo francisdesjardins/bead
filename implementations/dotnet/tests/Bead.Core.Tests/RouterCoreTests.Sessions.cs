@@ -635,13 +635,17 @@ public sealed partial class RouterCoreTests
         Assert.Empty(server.Sent);
     }
 
-    // spec 13.1: the C# side's surface, by reflection, which the TypeScript side's twin holds by its
-    // entry points and its types
+    // spec 13.1 and decision 0047: the C# side's surface, by reflection, which the TypeScript side's
+    // twin holds by its entry points and its types: the envelope's codec is internal on every side
     [Fact]
-    public void Keeps_the_router_core_and_the_transport_s_credential_out_of_the_public_surface()
+    public void Keeps_the_router_core_the_envelope_codec_and_the_transport_s_credential_out_of_the_public_surface()
     {
         Assert.All(
-            new[] { typeof(RouterCore), typeof(RouterCoreOptions), typeof(IRouterCorePort), typeof(CoreRequest), typeof(AnswerInfo) },
+            new[]
+            {
+                typeof(RouterCore), typeof(RouterCoreOptions), typeof(IRouterCorePort), typeof(CoreRequest), typeof(AnswerInfo),
+                typeof(EnvelopeCodec), typeof(Envelope), typeof(EnvelopePrefix), typeof(EnvelopeReadOptions),
+            },
             (type) =>
             {
                 Assert.False(type.IsVisible, type.Name);

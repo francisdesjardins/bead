@@ -135,8 +135,7 @@ test('traces each incoming verdict once after judgment and names a loss by its a
     await pair.send(writeParcel({ ...parcel, sequence: 6 }));
     await pair.send(Uint8Array.of(0));
     await pair.send(encodeParcel({ ...parcel, kind: 0x0a, sequence: 7 }));
-    await pair.serverAdapter.publish({
-      retained: true,
+    await pair.serverAdapter.publishRetained({
       payload: writeParcel(parcel),
       topic: ['bead', 'i', 'client'],
     });
@@ -315,6 +314,86 @@ test('tells a takeover once after clearing names and connections and tells no la
           return state;
         })
     ).toEqual(['up', 'taken-over']);
+  } finally {
+    await pair.stop();
+  }
+});
+
+// debugging 13.5
+test('tells a stop once, then its next link’s up as another incarnation, and nothing after a dispose', async () => {
+  const pair = await pairOf();
+  const participant = pair.clientParticipant;
+
+  try {
+    // * a stop, then another with no link between, which tells nothing
+    await participant.stop();
+    await participant.stop();
+    await settled();
+
+    // * its next link, then its dispose, then nothing more: a stop, a dispose, a start refused
+    await participant.start();
+    await settled();
+    await participant[Symbol.asyncDispose]();
+    await participant.stop();
+    await participant[Symbol.asyncDispose]();
+    await expect(participant.start(), 'a start refused').rejects.toThrow(
+      'the participant client is disposed'
+    );
+    await settled();
+
+    const links = pair.events.filter(({ event }) => {
+      return event === 'link';
+    });
+
+    expect(
+      links.map(({ state }) => {
+        return state;
+      }),
+      "each stop told once, its next link's up between them, and nothing after its dispose"
+    ).toEqual(['up', 'stopped', 'up', 'stopped']);
+    expect(links[1]?.ended, 'the connection its stop ended').toEqual([1]);
+    expect(links[1]?.incarnation, 'its stop names the link it ended').toBe(links[0]?.incarnation);
+    expect(links[2]?.incarnation, 'its next link another incarnation').not.toBe(
+      links[1]?.incarnation
+    );
+    expect(links[3]?.incarnation, 'its dispose stops that link').toBe(links[2]?.incarnation);
+  } finally {
+    await pair.stop();
+  }
+});
+
+// debugging 13.5
+test('tells each name its stop lets go, once its broker let it go, after its CLOSEs and before its stopped', async () => {
+  const pair = await pairOf();
+
+  try {
+    const from = pair.serverEvents.length;
+
+    await pair.serverParticipant.stop();
+
+    const told = pair.serverEvents.slice(from);
+    const close = told.findIndex(({ direction, kind }) => {
+      return kind === 'CLOSE' && direction === 'tx';
+    });
+    const names = told.findIndex(({ event }) => {
+      return event === 'names';
+    });
+    const stopped = told.findIndex(({ event, state }) => {
+      return event === 'link' && state === 'stopped';
+    });
+
+    expect([close, names, stopped].includes(-1), 'each told').toBe(false);
+    expect(
+      close < names && names < stopped,
+      'its CLOSE, then its name let go, then its stopped'
+    ).toBe(true);
+    expect(
+      told.filter(({ event }) => {
+        return event === 'names';
+      }),
+      'its name let go, once'
+    ).toEqual([{ event: 'names', name: 'interop', isHeld: false, group: undefined }]);
+    expect(pair.serverParticipant.names.size, 'none held once stopped').toBe(0);
   } finally {
     await pair.stop();
   }

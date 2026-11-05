@@ -8,6 +8,7 @@ import re
 from datetime import datetime
 
 from details import detail_of as violations_detail, judged, violation
+from make_codecs import payload_outcome
 from spec_version import spec_version
 
 # the conformance files sit one folder up from their generators
@@ -17,6 +18,8 @@ SERVICE = json.load(open(ROOT + 'interop-service.json', encoding='utf8'))
 API = json.load(open(ROOT + 'interop-blueprint.json', encoding='utf8'))['services'][0]
 SERVICE_ID = API['serviceId']
 PROCEDURES = {procedure['procedureName']: procedure['procedureId'] for procedure in API['procedures']}
+# each procedure's request's encoding, which reads its payload
+ENCODINGS = {procedure['procedureName']: procedure['request']['encoding'] for procedure in API['procedures']}
 # the interop's own failures, by their names in its blueprint's catalogue: a code renumbered there moves here
 FAILURES = {failure['failureName']: failure['code'] for failure in API['failures']}
 ON_PURPOSE, REGISTERED_ALREADY = FAILURES['ON_PURPOSE'], FAILURES['REGISTERED_ALREADY']
@@ -84,6 +87,13 @@ def failure(call_id, code, scope=PROTOCOL, credential=None, relays=0, detail=Non
                        **({'credential': credential} if credential else {})}}
 
 
+def undecodable(call_id, procedure, payload):
+    """A request whose payload does not read, and its PAYLOAD_UNDECODABLE, its detail the reason its
+    codec refuses it for, as spec/codecs.json derives it (17.2, item 1)."""
+    reason = payload_outcome(ENCODINGS[procedure], bytes.fromhex(payload))['refused']
+    return [request(call_id, procedure, payload), failure(call_id, PAYLOAD_UNDECODABLE, detail=reason)]
+
+
 def report(code):
     return {'report': code}
 
@@ -123,6 +133,17 @@ def refusal(call_id, code, scope=PROTOCOL):
 
 
 QUESTION = '"What time is it where you are?"'
+
+# the listener a conversation's server's application attaches, by its name: on the first telling of
+# its kind on a connection, it calls a command of the interop service's on that connection once
+LISTENERS = {}
+
+
+def with_listener(telling, conversation):
+    # a conversation whose server's application calls clock, the command, from within that telling:
+    # report, a report heard with a connection; read, its debug listener hearing an envelope read
+    LISTENERS[conversation[0]] = {'telling': telling, 'command': 'clock'}
+    return conversation
 
 
 def subscribe(call_id, *, paced=False, hold=None, fail=False):
@@ -336,9 +357,10 @@ def access(issuer=ISSUERS['HS256'], *, exp=START + HOUR, iat=START, jti, aud=AUD
 
 def hs256(claims, jwk=HS_KEY):
     """A JWS signed with HMAC-SHA256 (RFC 7518 §3.2), with Python's own hmac, typed at+jwt, and named
-    by its key's kid when the key has one."""
+    by its key's kid when the key has one; its claims a JSON value, or their bytes as given."""
     header = {'alg': 'HS256', 'typ': 'at+jwt', **({'kid': jwk['kid']} if 'kid' in jwk else {})}
-    signing_input = base64url(compact(header)) + '.' + base64url(compact(claims))
+    claims = claims if isinstance(claims, bytes) else compact(claims)
+    signing_input = base64url(compact(header)) + '.' + base64url(claims)
     signature = hmac.new(unbase64url(jwk['k']), signing_input.encode('ascii'), hashlib.sha256).digest()
     return signing_input + '.' + base64url(signature)
 
@@ -838,8 +860,13 @@ conversations = [
     # detail of it (9.0)
     ('a resolver that throws before it answers is answered PROCEDURE_FAILED, and reported', ['9.0', '9.5'], None, [
         json_request(1, 'broken', 'null'), failure(1, PROCEDURE_FAILED, detail=''), report('exception')]),
+    # 9.0: a call the server's application makes from its report listener goes behind what the
+    # reporting turn answers
+    with_listener('report', ('a call the report listener makes goes behind what the reporting turn answers', ['9.0'], None, [
+        json_request(1, 'broken', 'null'), failure(1, PROCEDURE_FAILED, detail=''),
+        command(2, 'clock', QUESTION), report('exception'), answer(2, '"noon"')])),
     ('a payload that is not JSON is answered PAYLOAD_UNDECODABLE', ['9.5'], None, [
-        request(1, 'echo', 'FF'), failure(1, PAYLOAD_UNDECODABLE)]),
+        *undecodable(1, 'echo', 'FF')]),
     # 18: checked's rules, which each server gives its descriptor by hand, judged once its payload
     # reads and before its resolver, its violations in the detail of the PAYLOAD_INVALID it answers
     ('a request its rules refuse is answered PAYLOAD_INVALID, its violations in its detail', ['9.5', '17.2.1', '18.2', '18.6'], None, [
@@ -851,7 +878,7 @@ conversations = [
     ('a request its rules take reaches its resolver', ['18.2'], None, [
         json_request(1, 'checked', '{"names":["a","bcd"]}'), result(1, '2')]),
     ('a request of checked that is not JSON is answered PAYLOAD_UNDECODABLE', ['9.2.9', '9.5'], None, [
-        request(1, 'checked', 'FF'), failure(1, PAYLOAD_UNDECODABLE)]),
+        *undecodable(1, 'checked', 'FF')]),
     ('a request of checked of another shape breaks required at names', ['18.2', '18.3'], None, [
         json_request(1, 'checked', '{"names":3}'), failure(1, PAYLOAD_INVALID, detail=checked_detail(None))]),
     # 17: a json payload read as section 17.5 reads it, and written in its canonical form, whichever side
@@ -870,17 +897,17 @@ conversations = [
         on(json_request(1, 'echo', '{"' + SILL + '":2,"x' + BACKSLASH + '"":2}'), 'second'),
         on(result(1, '{"' + SILL + '":2,"x' + BACKSLASH + '"":2}'), 'second')]),
     ('a payload that starts with a byte order mark is answered PAYLOAD_UNDECODABLE', ['17.2.1', '17.5.2'], None, [
-        request(1, 'echo', 'EF BB BF 31'), failure(1, PAYLOAD_UNDECODABLE)]),
+        *undecodable(1, 'echo', 'EF BB BF 31')]),
     ('a payload that names a member twice is answered PAYLOAD_UNDECODABLE', ['17.2.1', '17.5.4'], None, [
-        json_request(1, 'echo', '{"a":1,"a":2}'), failure(1, PAYLOAD_UNDECODABLE)]),
+        *undecodable(1, 'echo', text('{"a":1,"a":2}'))]),
     ('a payload whose string holds a byte that is not UTF-8 is answered PAYLOAD_UNDECODABLE', ['17.2.1', '17.5.1'], None, [
-        request(1, 'echo', '22 FF 22'), failure(1, PAYLOAD_UNDECODABLE)]),
+        *undecodable(1, 'echo', '22 FF 22')]),
     ('a payload whose string holds a surrogate alone is answered PAYLOAD_UNDECODABLE', ['17.2.1', '17.5.5'], None, [
-        json_request(1, 'echo', '"' + BACKSLASH + 'uD800"'), failure(1, PAYLOAD_UNDECODABLE)]),
+        *undecodable(1, 'echo', text('"' + BACKSLASH + 'uD800"'))]),
     ('a payload nested past 64 is answered PAYLOAD_UNDECODABLE', ['17.2.1', '17.5.7'], None, [
-        json_request(1, 'echo', '[' * 65 + ']' * 65), failure(1, PAYLOAD_UNDECODABLE)]),
+        *undecodable(1, 'echo', text('[' * 65 + ']' * 65))]),
     ('a payload whose number is past a double is answered PAYLOAD_UNDECODABLE', ['17.2.1', '17.5.6'], None, [
-        json_request(1, 'echo', '1E400'), failure(1, PAYLOAD_UNDECODABLE)]),
+        *undecodable(1, 'echo', text('1E400'))]),
     ('an admission is asked before the payload is read: one that is not JSON is refused by it, not undecodable', ['9.2.6'], None, [
         request(1, 'denied', 'FF'), failure(1, ACCESS_DENIED, detail=ADMITS_NOBODY),
         request(3, 'whoami', 'FF'), failure(3, SESSION_REQUIRED)]),
@@ -1028,6 +1055,11 @@ conversations = [
     ('an ELSEWHERE whose transport carried nothing is refused SESSION_REQUIRED, whatever its procedure requires, its detail saying no credential came',
      ['9.2.6', '15.1'], None, [
          elsewhere(1, 'echo', '"x"'), failure(1, SESSION_REQUIRED, detail=NO_CREDENTIAL)]),
+    # 9.0: a call the server's application makes as it reads a request goes before what that turn
+    # defers after it
+    with_listener('read', ('a call made as a request is read goes before the refusal its turn defers', ['9.0', '15.1'], None, [
+        elsewhere(1, 'echo', '"x"'), command(2, 'clock', QUESTION),
+        failure(1, SESSION_REQUIRED, detail=NO_CREDENTIAL), answer(2, '"noon"')])),
     *elsewhere_conversations(),
     # 9.2, steps 1 and 2: what would answer another call
     ('a request on the server\'s own parity is reported, never answered', ['9.2.1'], None, [
@@ -1361,6 +1393,14 @@ def credentials_through_a_relay():
     # and one whose aud array holds that string beside the audience, which is no array of strings
     lone = hs256(access(sub='carol', aud=audience + '\ud800', jti='at-relay-0003'))
     beside = hs256(access(sub='carol', aud=[audience + '\ud800', audience], jti='at-relay-0004'))
+    # a JWT whose claims set section 17.5 does not let read, its aud its destination's audience: its
+    # exp past the largest double, written by hand since JSON has no infinity, and a claim nested 65
+    # deep, the claims set at depth 1
+    exp_past_a_double = compact(access(sub='carol', jti='at-relay-0005')).replace(
+        b'"exp":%d' % (START + HOUR), b'"exp":1e400')
+    assert b'"exp":1e400' in exp_past_a_double
+    past_a_double = hs256(exp_past_a_double)
+    too_deep = hs256({**access(sub='carol', jti='at-relay-0006'), 'deep': json.loads('[' * 64 + ']' * 64)})
     # a JWT whose parts do not read: its aud names nothing
     unreadable = '00 02 00 05  61 2E 62 2E 63  00 00 00'
     no_credential_came, does_not_hold = NO_CREDENTIAL, DOES_NOT_HOLD
@@ -1399,6 +1439,11 @@ def credentials_through_a_relay():
              opened('client'), opened('device'), *registered_as(DEVICE, audience),
              to(1, '"x"', jwt(lone)), refused_with(1, DESTINATION_UNREACHABLE),
              to(3, '"y"', jwt(beside)), refused_with(3, DESTINATION_UNREACHABLE)]),
+        ('a JWT whose claims set holds a number past the largest double, or nests 65 deep, does not read at a relay that does not verify: its aud names nothing, DESTINATION_UNREACHABLE',
+         ['13.8.1', '14.3.5'], None, [
+             opened('client'), opened('device'), *registered_as(DEVICE, audience),
+             to(1, '"x"', jwt(past_a_double)), refused_with(1, DESTINATION_UNREACHABLE),
+             to(3, '"y"', jwt(too_deep)), refused_with(3, DESTINATION_UNREACHABLE)]),
         ('a JWT to a destination of another audience, or of none, is answered DESTINATION_UNREACHABLE: its credential may hold, and its route does not',
          ['14.1', '14.3.5'], None, [
              opened('client'), opened('device'), opened('other'),
@@ -1552,6 +1597,7 @@ document = {
         'A conversation that opens its connections, open, plays them all at once: every other step names its connection, on, but a step that moves time, which is the server\'s, and each connection has its own expectations; one that opens none plays one connection, opened before its first step. twoWay false beside open declares a connection that carries nothing back, as an HTTP client that does not listen; carries false, one whose transport carries no credential beside an envelope it sends, as a WebSocket\'s toward its client or a listen\'s batch; secure false, one that reaches off the machine in the clear, neither over TLS nor within the machine. By default a connection carries a credential and is secure. A connection closed and opened again is a new connection under the same name.',
         'Before each send, after close, and at the end, nothing more was sent or reported: what a conversation does not expect, a server does not do.',
         'limits, where given, are the server\'s limits, by the names section 12.2 gives them, in milliseconds for a time; any other is its default. pacing, where given, bounds the queues of its paced subscriptions. relay, where given, sets the options of the server\'s relay: verifies true has it verify what it forwards (decision 0010); beforeRoute names its admission, requireCredential by default, shareLegBSession or requireSession.',
+        'listener, where given, is what the server\'s application does from within a telling: on the first telling of its kind on a connection, and once, it calls command, a command of the interop service\'s, on that connection, with the clock\'s question as its payload, and lets its answer go. telling report is a report it hears with that connection; read, its debug listener hearing an envelope read on it.',
         'The server is given the interop service\'s credentials: credentials.jwt, its keys, its audience, and its key set with the issuers it answers for, which answers on the server\'s clock as its words say, and with maximumWaitingCalls, the most calls that wait for one issuer\'s deadline at once; and credentials.elsewhere, its verifier, which settles on the server\'s clock as its words say. A server whose limits hold chunkBytes or maximumEnvelopeBytes under 1,024 bytes is given no JWT key and no key set, which section 12.2 forbids beside them, and takes no JWT. A JWT a send presents is written as its characters\' bytes, as any header byte is.',
         'clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8.',
     ],
@@ -1560,6 +1606,7 @@ document = {
     'conversations': [
         {'name': name, 'clauses': clauses, **({'limits': limits} if limits else {}),
          **({'pacing': rest[0]} if len(rest) > 1 else {}), **({'relay': RELAY_OPTIONS[name]} if name in RELAY_OPTIONS else {}),
+         **({'listener': LISTENERS[name]} if name in LISTENERS else {}),
          'steps': rest[-1]}
         for name, clauses, limits, *rest in conversations
     ],

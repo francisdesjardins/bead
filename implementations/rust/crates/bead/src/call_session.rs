@@ -20,7 +20,7 @@ mod tests;
 /// One presenting none runs in it whenever there is one; one presenting `OPAQUE`, when it is that
 /// token, compared in constant time; none for any other.
 #[must_use]
-pub fn connection_session_of(
+pub(crate) fn connection_session_of(
     credential: Option<&Credential>,
     (token, data): (Option<&SessionToken>, Option<Value>),
 ) -> Option<CallSession> {
@@ -32,6 +32,7 @@ pub fn connection_session_of(
             Credential::None
             | Credential::Jwt(_)
             | Credential::Elsewhere
+            | Credential::Redacted { .. }
             | Credential::ToCome { .. } => false,
         };
 
@@ -50,7 +51,7 @@ pub fn connection_session_of(
 /// What a call presents, and what its transport carries beside it.
 #[derive(Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
-pub struct Presented {
+pub(crate) struct Presented {
     /// The credential its header presents.
     pub credential: Option<Credential>,
     /// What its transport carries beside it, which an `ELSEWHERE` stands for.
@@ -78,7 +79,7 @@ impl fmt::Debug for Presented {
 ///
 /// A [`CallError`]: a failure of `side`'s, `SESSION_REQUIRED`, for `OPAQUE` with no session known,
 /// which refuses the call once it started; refused for a `JWT` of no token.
-pub fn presented_credential_of(
+pub(crate) fn presented_credential_of(
     requested: Option<&RequestCredential>,
     (side, token): (RouterSide, Option<&SessionToken>),
 ) -> Result<Presented, CallError> {
@@ -122,7 +123,7 @@ pub fn presented_credential_of(
 /// What a call's transport carries beside it: what it was given, whether it takes a credential,
 /// whether it stays off the machine's clear; and the side whose failure refuses it.
 #[derive(Clone, Copy)]
-pub struct Carriage<'carriage> {
+pub(crate) struct Carriage<'carriage> {
     /// What its transport carries beside it, which an `ELSEWHERE` stands for.
     pub carried: Option<&'carriage str>,
     /// Whether its transport takes that credential beside an envelope.
@@ -148,7 +149,10 @@ impl fmt::Debug for Carriage<'_> {
 /// An `ELSEWHERE` whose transport does not carry what it stands for, or a bearer credential over a
 /// transport that leaves the machine in the clear.
 #[must_use]
-pub fn uncarried_of(credential: Option<&Credential>, carriage: &Carriage<'_>) -> Option<Failure> {
+pub(crate) fn uncarried_of(
+    credential: Option<&Credential>,
+    carriage: &Carriage<'_>,
+) -> Option<Failure> {
     let Carriage {
         carried,
         takes,

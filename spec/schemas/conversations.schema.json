@@ -47,6 +47,9 @@
         "relay": {
           "$ref": "#/$defs/relay"
         },
+        "listener": {
+          "$ref": "#/$defs/listener"
+        },
         "steps": {
           "type": "array",
           "minItems": 1,
@@ -564,6 +567,22 @@
         "beforeRoute": {
           "description": "The relay's admission, by the name both sides give it: requireCredential, its default, shareLegBSession or requireSession.",
           "enum": ["requireCredential", "shareLegBSession", "requireSession"]
+        }
+      }
+    },
+    "listener": {
+      "description": "What the server's application does from within a telling, where given: on the first telling of its kind on a connection, and once, it calls command on that connection, with the clock's question as its payload, and lets its answer go (spec 9.0).",
+      "type": "object",
+      "required": ["telling", "command"],
+      "additionalProperties": false,
+      "properties": {
+        "telling": {
+          "description": "report: a report the application hears with a connection; read: its debug listener hearing an envelope read on a connection.",
+          "enum": ["report", "read"]
+        },
+        "command": {
+          "description": "A procedure of the interop service's blueprint whose kind is command, which spec/check.py holds.",
+          "$ref": "common.schema.json#/$defs/procedureName"
         }
       }
     },

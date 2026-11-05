@@ -137,7 +137,7 @@ public sealed class HttpGatewayTests
                 _ = memory.CloseConnection(connectionHandle);
             }
         };
-        var address = await gateway.Start(new HttpGatewayStartOptions { Address = "127.0.0.1", FindOpenPort = true }, Cancelled);
+        var address = await gateway.Start(new HttpGatewayStartOptions { Address = "127.0.0.1", FindOpenPort = true, CancellationToken = Cancelled });
         using var client = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{address.Port}") };
 
         for (var index = 0; index < 2; index++)
@@ -173,7 +173,7 @@ public sealed class HttpGatewayTests
         var service = await TranscodingService.Start();
         var options = Exchanges.OptionsOf(service.Memory, null);
         var gateway = new HttpGateway(change is null ? options : change(options));
-        var address = await gateway.Start(new HttpGatewayStartOptions { Address = "127.0.0.1", FindOpenPort = true }, Cancelled);
+        var address = await gateway.Start(new HttpGatewayStartOptions { Address = "127.0.0.1", FindOpenPort = true, CancellationToken = Cancelled });
         var client = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{address.Port}") };
 
         return new Fixture(service, gateway, client, address.Port);
@@ -1236,14 +1236,14 @@ public sealed class HttpGatewayTests
 
         // one that listens on localhost, its loopbacks, listens once; one that listens on none stops at once
         await using var gateway = new HttpGateway(options);
-        var address = await gateway.Start(new HttpGatewayStartOptions { FindOpenPort = true }, Cancelled);
+        var address = await gateway.Start(new HttpGatewayStartOptions { FindOpenPort = true, CancellationToken = Cancelled });
 
         Assert.Equal("localhost", address.Address);
         Assert.Equal(
             "a gateway listens once",
             (await Assert.ThrowsAsync<InvalidOperationException>(() =>
             {
-                return gateway.Start(new HttpGatewayStartOptions { FindOpenPort = true }, Cancelled);
+                return gateway.Start(new HttpGatewayStartOptions { FindOpenPort = true, CancellationToken = Cancelled });
             })).Message);
 
         using (var client = new HttpClient { BaseAddress = new Uri($"http://localhost:{address.Port}") })
@@ -1255,12 +1255,12 @@ public sealed class HttpGatewayTests
 
         // a port another listener holds: its listen fails, and it listens on none
         await using var held = new HttpGateway(options);
-        var port = (await held.Start(new HttpGatewayStartOptions { Address = "127.0.0.1", FindOpenPort = true }, Cancelled)).Port;
+        var port = (await held.Start(new HttpGatewayStartOptions { Address = "127.0.0.1", FindOpenPort = true, CancellationToken = Cancelled })).Port;
         await using var second = new HttpGateway(options);
 
         await Assert.ThrowsAnyAsync<IOException>(() =>
         {
-            return second.Start(new HttpGatewayStartOptions { Address = "127.0.0.1", Port = port }, Cancelled);
+            return second.Start(new HttpGatewayStartOptions { Address = "127.0.0.1", Port = port, CancellationToken = Cancelled });
         });
         await second.Stop();
         await using var never = new HttpGateway(options);
@@ -1754,7 +1754,7 @@ public sealed class HttpGatewayTests
                 Payload = "ok"u8.ToArray(),
             }), false), connectionHandle);
         };
-        var address = await gateway.Start(new HttpGatewayStartOptions { Address = "127.0.0.1", FindOpenPort = true }, Cancelled);
+        var address = await gateway.Start(new HttpGatewayStartOptions { Address = "127.0.0.1", FindOpenPort = true, CancellationToken = Cancelled });
         using var client = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{address.Port}") };
 
         // * step 4 of transcoding 5.2: the client's own request, 400, at the first field unset by number
@@ -1817,7 +1817,7 @@ public sealed class HttpGatewayTests
             Assert.Equal(
                 "{\"code\":50,\"scope\":\"protocol\",\"status\":502,\"title\":\"PAYLOAD_UNDECODABLE\",\"type\":\"tag:francisdesjardins.ca,2026:bead/PAYLOAD_UNDECODABLE\"}",
                 await answered.Content.ReadAsStringAsync(Cancelled));
-            Assert.Equal(["a proto message leaves bead.transcoding.v1.Needs.name unset"], reported);
+            Assert.Equal(["a required field unset"], reported);
         }
         finally
         {
@@ -1835,14 +1835,14 @@ public sealed class HttpGatewayTests
         Assert.Null(Edges.Parser.ParseFrom(varintAt).At);
 
         // HttpEvents.DataOf, as a stream's writer calls it: through the runtime reader, its records checked
-        Assert.Equal("{\"ints\":[1]}", Text(HttpEvents.DataOf(HttpPayload.Of(Edges.Descriptor), (new byte[] { 0x70, 1 }, Form))));
+        Assert.Equal("{\"ints\":[1]}", Text(Form.EventDataOf(HttpPayload.Of(Edges.Descriptor), new byte[] { 0x70, 1 })));
         Assert.Throws<FormatException>(() =>
         {
-            return HttpEvents.DataOf(HttpPayload.Of(Edges.Descriptor), (varintAt, Form));
+            return Form.EventDataOf(HttpPayload.Of(Edges.Descriptor), varintAt);
         });
-        Assert.Equal("a proto message leaves bead.transcoding.v1.Needs.name unset", Assert.Throws<FormatException>(() =>
+        Assert.Equal("a required field unset", Assert.Throws<FormatException>(() =>
         {
-            return HttpEvents.DataOf(HttpPayload.Of(Needs.Descriptor), (new byte[] { 0x10, 1 }, Form));
+            return Form.EventDataOf(HttpPayload.Of(Needs.Descriptor), new byte[] { 0x10, 1 });
         }).Message);
 
         // and the gateway's stream, its notifications read so
@@ -1878,7 +1878,7 @@ public sealed class HttpGatewayTests
             }
         };
 
-        var address = await gateway.Start(new HttpGatewayStartOptions { Address = "127.0.0.1", FindOpenPort = true }, Cancelled);
+        var address = await gateway.Start(new HttpGatewayStartOptions { Address = "127.0.0.1", FindOpenPort = true, CancellationToken = Cancelled });
         using var client = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{address.Port}") };
         using var request = Json("/api/Transcoding/watch", "{}");
 
@@ -1932,7 +1932,7 @@ public sealed class HttpGatewayTests
             _ = memory.Send(new TransportMessage(EnvelopeCodec.WriteEnvelope(new Envelope { Header = new FailureHeader { CallId = header.CallId }, Failure = Failure.OfProtocol(ProtocolCode.SessionRequired) }), false), connectionHandle);
             Interlocked.Increment(ref frames);
         };
-        var address = await gateway.Start(new HttpGatewayStartOptions { Address = "127.0.0.1", FindOpenPort = true }, Cancelled);
+        var address = await gateway.Start(new HttpGatewayStartOptions { Address = "127.0.0.1", FindOpenPort = true, CancellationToken = Cancelled });
         var received = await Received(address.Port, OctetsOf(address.Port, new OwnCase(["POST /api/Transcoding/watch HTTP/1.1", "content-type: application/json", "accept: text/event-stream"], 0, "") { Body = "{}" }));
         await Until(() => { return memory.ConnectionHandles.Count == 0; });
         Assert.Empty(received);
@@ -1983,7 +1983,7 @@ public sealed class HttpGatewayTests
                 _ = memory.Send(new TransportMessage(EnvelopeCodec.WriteEnvelope(outgoing), false), connectionHandle);
             }
         };
-        var address = await gateway.Start(new HttpGatewayStartOptions { Address = "127.0.0.1", FindOpenPort = true }, Cancelled);
+        var address = await gateway.Start(new HttpGatewayStartOptions { Address = "127.0.0.1", FindOpenPort = true, CancellationToken = Cancelled });
         using var client = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{address.Port}") };
         using var request = Json("/api/Transcoding/watch", "{}");
         request.Headers.Accept.ParseAdd("text/event-stream");
@@ -2195,7 +2195,7 @@ public sealed class HttpGatewayTests
                 Header = new ResultHeader { CallId = header.CallId },
             }), false), connectionHandle);
         };
-        var address = await gateway.Start(new HttpGatewayStartOptions { Address = "127.0.0.1", FindOpenPort = true }, Cancelled);
+        var address = await gateway.Start(new HttpGatewayStartOptions { Address = "127.0.0.1", FindOpenPort = true, CancellationToken = Cancelled });
         using var client = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{address.Port}") };
         using var request = new HttpRequestMessage(HttpMethod.Post, "/api/Transcoding/watch")
         {

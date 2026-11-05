@@ -29,7 +29,7 @@ internal sealed class BrokerPair : IAsyncDisposable
         ClientParticipant = new BrokerParticipant(ClientAdapter, new BrokerParticipantOptions
         {
             Heartbeat = options.Heartbeat,
-            Reconnect = new TransportReconnectOptions { Delay = Immediately, MaximumAttempts = int.MaxValue },
+            Reconnect = new TransportClientReconnectOptions { Delay = Immediately },
             Scheduler = Scheduler,
         });
         Server = ServerParticipant.Server(new BrokerTransportServerOptions { Names = ["interop"] });
@@ -97,7 +97,7 @@ internal sealed class BrokerPair : IAsyncDisposable
         var before = Opened.Count;
         var client = ClientParticipant.Client();
 
-        await client.Connect(new BrokerConnectOptions { Server = "interop" }, Cancelled);
+        await client.Connect(new BrokerTransportClientConnectOptions { Server = "interop", CancellationToken = Cancelled });
         await Until(
             () =>
             {
@@ -115,8 +115,5 @@ internal sealed class BrokerPair : IAsyncDisposable
         await ServerParticipant.DisposeAsync();
     }
 
-    private static TimeSpan Immediately(TimeSpan? previousDelay, int attempt)
-    {
-        return TimeSpan.Zero;
-    }
+    private static readonly TransportClientReconnectDelay Immediately = new TransportClientReconnectDelay(TimeSpan.Zero);
 }

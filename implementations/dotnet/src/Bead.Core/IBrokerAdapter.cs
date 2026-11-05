@@ -199,7 +199,11 @@ public interface IBrokerAdapter
     /// <summary>Holds a subscription to <paramref name="topic"/>, alone or in a group; settles once its broker holds it.</summary>
     Task Subscribe(IReadOnlyList<string> topic, BrokerSubscription? subscription = null);
 
-    /// <summary>Lets the subscription to <paramref name="topic"/> go.</summary>
+    /// <summary>
+    /// Lets the subscription to <paramref name="topic"/> go, taking effect as it is called; settles
+    /// once its broker let it go, within a bound of its own, each message its broker sent of it
+    /// before then handed on first (spec 15.24).
+    /// </summary>
     Task Unsubscribe(IReadOnlyList<string> topic);
 
     /// <summary>
@@ -212,7 +216,11 @@ public interface IBrokerAdapter
     /// <summary>The largest payload a message it publishes to <paramref name="topic"/> carries whole, its own bytes deducted.</summary>
     long MaximumPayloadBytes(IReadOnlyList<string> topic);
 
-    /// <summary>Ends its link cleanly, so its broker publishes no will.</summary>
+    /// <summary>
+    /// Ends its link cleanly, so its broker publishes no will; settles once its broker let go of
+    /// each subscription of its link, as its unsubscription lets one go, so that its broker hands
+    /// it nothing more.
+    /// </summary>
     [SuppressMessage(
         "Naming",
         "CA1716:Identifiers should not match keywords",

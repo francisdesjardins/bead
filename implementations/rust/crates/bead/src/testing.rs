@@ -12,25 +12,62 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::task::Wake;
 use std::time::SystemTime;
 
+use serde::Deserialize;
 use tokio::sync::Notify;
 
 use crate::clock::{Clock, Schedule, Timer, TimerCallback};
 use crate::duration::LONGEST_TIMER;
 
 #[cfg(test)]
+pub(crate) mod clockless;
+#[cfg(test)]
 pub(crate) mod core_port;
 pub mod durations;
 pub mod files;
 pub mod hexadecimal;
 pub mod instants;
+pub mod mutations;
 pub mod pair;
 pub mod parcels;
 mod platform;
+mod reading_clock;
 pub mod scripted;
+#[cfg(test)]
+pub(crate) mod sessions;
+#[cfg(test)]
+pub(crate) mod surface;
+#[cfg(test)]
+mod tests;
 pub mod validations;
 pub mod vectors;
 
-pub use platform::{Instant, patience, rest, spawn, wall_now};
+#[cfg(test)]
+pub(crate) use platform::blocking;
+pub use platform::{Instant, patience, rest, spawn, wall_now, yield_now};
+pub use reading_clock::ReadingClock;
+
+/// The language a row of the support matrix names when it excuses this side from an entry.
+pub const LANGUAGE: &str = "Rust";
+
+/// A row of the support matrix that excuses a side from an entry of a conformance file, as an
+/// entry's `differs` lists it.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Difference {
+    /// The row.
+    pub row: String,
+    /// The side it excuses.
+    pub language: String,
+}
+
+/// Whether an entry whose `differs` lists `differs` is excused on this side: one of its rows
+/// names [`LANGUAGE`]. An excused entry is left out, not played.
+#[must_use]
+pub fn is_excused(differs: &[Difference]) -> bool {
+    differs
+        .iter()
+        .any(|difference| difference.language == LANGUAGE)
+}
 
 /// What a side does on a test's clock: the jobs its owners hold queued or run, and the work they
 /// cover while it can run. The side is settled once it is none.
@@ -69,7 +106,7 @@ impl Activity {
 
             if self.count.load(Ordering::SeqCst) == 0 {
                 // * a task woken by the last job may still run without posting: one turn more
-                tokio::task::yield_now().await;
+                yield_now().await;
 
                 if self.count.load(Ordering::SeqCst) == 0 {
                     return;
@@ -391,6 +428,31 @@ impl SteppingClock {
         Some(callback)
     }
 
+    // A synchronous callback can move the clock while the side is in its turn: each timer due
+    // fires, without waiting for the turn that called it to settle.
+    #[cfg(test)]
+    pub(crate) fn tick(&self, by: Duration) {
+        let end = {
+            let mut readings = self.readings.lock().unwrap_or_else(PoisonError::into_inner);
+
+            assert!(
+                !readings.is_advancing,
+                "a test clock advances once at a time: an advance within another would move it back"
+            );
+            readings.is_advancing = true;
+            readings.monotonic.saturating_add(by)
+        };
+
+        while let Some(callback) = self.next(end) {
+            (callback.lock().unwrap_or_else(PoisonError::into_inner))();
+        }
+
+        self.readings
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_advancing = false;
+    }
+
     /// Steps both readings `by`, from due to due: each timer due within fires at its own, the side
     /// settled before it and after it. One advance at a time.
     ///
@@ -460,7 +522,11 @@ impl Clock for SteppingClock {
         }
     }
 
-    fn arm(&self, schedule: Schedule, callback: TimerCallback) -> Arc<dyn Timer> {
+    fn arm(
+        &self,
+        schedule: Schedule,
+        callback: TimerCallback,
+    ) -> Result<Arc<dyn Timer>, crate::errors::ProgrammerError> {
         let (due, period) = match schedule {
             Schedule::Once(due) => (due, None),
             Schedule::Every(period) => (period, Some(period)),
@@ -487,10 +553,10 @@ impl Clock for SteppingClock {
         });
         drop(readings);
 
-        Arc::new(SteppedTimer {
+        Ok(Arc::new(SteppedTimer {
             number,
             readings: Arc::downgrade(&self.readings),
-        })
+        }))
     }
 
     fn activity(&self) -> Option<Arc<Activity>> {

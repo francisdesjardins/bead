@@ -27,7 +27,7 @@ public sealed class HttpCallerTests
     {
         var service = await TranscodingService.Start();
         var gateway = new HttpGateway(Exchanges.OptionsOf(service.Memory, null));
-        var address = await gateway.Start(new HttpGatewayStartOptions { Address = "127.0.0.1", FindOpenPort = true }, Cancelled);
+        var address = await gateway.Start(new HttpGatewayStartOptions { Address = "127.0.0.1", FindOpenPort = true, CancellationToken = Cancelled });
 
         return new Fixture(service, gateway, new Uri($"http://127.0.0.1:{address.Port}"));
     }
@@ -1164,13 +1164,15 @@ public sealed class HttpCallerTests
         });
         using var client = new TranscodingHttpClient(new Uri("http://localhost"), new HttpCallerOptions { Handler = handler });
 
-        // * the codec's writer's refusal, its words, thrown before the request is built (spec 17.9.7)
+        // * the codec's writer's refusal, its reason, thrown before the request is built (spec 17.2,
+        // 17.9.7), the field it leaves unset in its inner exception
         var refused = await Assert.ThrowsAsync<FormatException>(() =>
         {
             return client.Require(new Requiring { Needs = new Needs { Count = 1 } });
         });
 
-        Assert.Equal("a proto message leaves bead.transcoding.v1.Needs.name unset", refused.Message);
+        Assert.Equal("a required field unset", refused.Message);
+        Assert.Equal("a proto message leaves bead.transcoding.v1.Needs.name unset", refused.InnerException?.Message);
         Assert.Equal(0, sent);
     }
 

@@ -18,6 +18,7 @@ import {
   type JsonObject,
   type JsonValue,
   type Message,
+  type MessageShape,
   ScalarType,
   toBinary,
 } from '@bufbuild/protobuf';
@@ -45,11 +46,13 @@ import {
   UInt64ValueSchema,
   ValueSchema,
 } from '@bufbuild/protobuf/wkt';
-import { readProtoBytes } from '../proto/codec';
-import { requiredShapeOf } from '../proto/records';
+import { protoCodecOf, readProtoBytes } from '../proto/codec';
+import { jsonNestsPast } from '../proto/depth';
+import { PROTO_DEPTH, requiredShapeOf } from '../proto/records';
 import { unsetPathOf } from '../proto/required';
-import { STRICT_UTF8 } from '../router/shared/payloads';
+import { PAYLOAD_CODECS, STRICT_UTF8 } from '../router/shared/payloads';
 import { ProgrammerError } from '../transport/shared/errors';
+import type { HttpPayload } from './routes';
 
 // types
 
@@ -65,6 +68,37 @@ export type JsonNode =
 // interfaces
 
 /**
+ * Bead's mapping of protobuf's JSON (transcoding 5, decision 0037), made over the messages an `Any`
+ * may name: a body read over its message's schema, a message written in Bead's proto JSON form, a
+ * field of one or an event's data. A refusal is a {@link JsonFormError}.
+ */
+export interface IJsonForm {
+  /**
+   * The payload's event data (8.4): a `proto` one read by the runtime's codec, its records checked
+   * and its required fields judged, then written in Bead's proto JSON form; a `text` one a JSON
+   * string; a `raw` one its standard base64, padded, a JSON string; a `json` one its text as it is.
+   */
+  readonly eventDataOf: (payload: HttpPayload, bytes: Uint8Array) => string;
+  /**
+   * A message of `schema` of `body`, read by Bead's mapping (5.2): its text, then its members by
+   * its fields, each scalar and well-known type in its one form, then a required field unset.
+   */
+  readonly read: <Desc extends DescMessage>(schema: Desc, body: Uint8Array) => MessageShape<Desc>;
+  /**
+   * `message`'s JSON in Bead's proto JSON form (5.6): its members by JSON name in their fields'
+   * numbers' order, a map's entries and a `Struct`'s members sorted, an aliased enum by its first
+   * name, a `float` at its shortest, each well-known type in its form. What the form holds none of
+   * is refused (5.7), which a gateway answers 500.
+   */
+  readonly write: <Desc extends DescMessage>(schema: Desc, message: MessageShape<Desc>) => string;
+  /**
+   * The JSON of `message`'s top-level `field`, its default written where it is at its default too,
+   * so that a body is always there (5.8). A field of another message is its caller's bug.
+   */
+  readonly writeField: (field: DescField, message: Message) => string;
+}
+
+/**
  * The messages an `Any` may name, by their full names: those of its definitions, and the
  * well-known types (transcoding 5.4.6).
  */
@@ -72,21 +106,19 @@ export interface ITypeRegistry {
   readonly messageOf: (typeName: string) => DescMessage | undefined;
 }
 
-/** What a reading and a writing are given: the messages an `Any` may name. */
-export interface IJsonFormOptions {
-  readonly registry: ITypeRegistry;
-}
-
 // constants
 
 /** How deep a message nests below the one read or written, as spec 17.9.3 counts it. */
-export const MAXIMUM_DEPTH = 100;
+export const MAXIMUM_DEPTH = PROTO_DEPTH;
 
 /**
  * How deep a JSON text nests at most before its message is read: two levels a message, an array of
  * a repeated field and the object of each item, for 100 below the request and the request's own.
  */
 const TEXT_DEPTH = 2 * (MAXIMUM_DEPTH + 1);
+
+// a `json` payload's text, as it is handed on
+const DECODER = new TextDecoder();
 
 const NUMBER = /-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/uy;
 const WHOLE_NUMBER = /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$/u;
@@ -1678,7 +1710,7 @@ export const judgeUnset = (schema: DescMessage, message: Message): void => {
 /** A message of `schema` of `node`, read by steps 2 and 3 alone: a binding sets its mask before step 4. */
 export const readDraft = (
   schema: DescMessage,
-  { node, registry }: IJsonFormOptions & { node: JsonNode }
+  { node, registry }: { readonly node: JsonNode; readonly registry: ITypeRegistry }
 ): Message => {
   return readMessageAt(schema, node, { at: ROOT, depth: 0, registry });
 };
@@ -1693,21 +1725,13 @@ export const readDraft = (
  */
 export const readMessage = (
   schema: DescMessage,
-  options: IJsonFormOptions & { node: JsonNode }
+  options: { readonly node: JsonNode; readonly registry: ITypeRegistry }
 ): Message => {
   const message = readDraft(schema, options);
 
   judgeUnset(schema, message);
 
   return message;
-};
-
-/** A `proto` request's body read by Bead's mapping, its text then its message (transcoding 5.2). */
-export const readProtoJson = (
-  schema: DescMessage,
-  { bytes, registry }: IJsonFormOptions & { bytes: Uint8Array }
-): Message => {
-  return readMessage(schema, { node: readJsonText(bytes), registry });
 };
 
 // ── Writing ───────────────────────────────────────────────────────────────────
@@ -1874,12 +1898,11 @@ const structJsonOf = (struct: Message, writing: IWritingOptions): string => {
 };
 
 /**
- * A JSON value protobuf-es holds of a `Struct` of a field, as the `Value` it stands for, at
- * `depth`: an object a `Struct` below it, an array a `ListValue`, a number held finite.
+ * A JSON value protobuf-es holds of a `Struct` of a field, as the `Value` it stands for: an object
+ * a `Struct`, an array a `ListValue`, a number held finite. Its depth is counted before, by
+ * `jsonNestsPast`.
  */
-const localValueJsonOf = (value: JsonValue, depth: number): string => {
-  assertWritingDepth(depth);
-
+const localValueJsonOf = (value: JsonValue): string => {
   if (value === null || typeof value === 'boolean' || typeof value === 'string') {
     return JSON.stringify(value);
   }
@@ -1893,26 +1916,18 @@ const localValueJsonOf = (value: JsonValue, depth: number): string => {
   }
 
   if (Array.isArray(value)) {
-    assertWritingDepth(depth + 1);
-
-    return `[${value
-      .map((item) => {
-        return localValueJsonOf(item, depth + 2);
-      })
-      .join(',')}]`;
+    return `[${value.map(localValueJsonOf).join(',')}]`;
   }
 
-  return localStructJsonOf(value, depth + 1);
+  return localStructJsonOf(value);
 };
 
-/** A JSON object protobuf-es holds of a `Struct` of a field, as that `Struct` at `depth`. */
-const localStructJsonOf = (object: JsonObject, depth: number): string => {
-  assertWritingDepth(depth);
-
+/** A JSON object protobuf-es holds of a `Struct` of a field, as that `Struct`. */
+const localStructJsonOf = (object: JsonObject): string => {
   const members = Object.keys(object)
     .toSorted()
     .map((name) => {
-      return `${JSON.stringify(name)}:${localValueJsonOf(object[name] ?? null, depth + 2)}`;
+      return `${JSON.stringify(name)}:${localValueJsonOf(object[name] ?? null)}`;
     });
 
   return `{${members.join(',')}}`;
@@ -1985,8 +2000,13 @@ const fieldValueJsonOf = (field: DescField, value: unknown, writing: IWritingOpt
       return scalarJsonOf(inner.scalar, value);
     }
 
+    // * counted as a proto writer counts it, three messages a level, before any of it is written
     if (local === 'struct') {
-      return localStructJsonOf(value as JsonObject, below.depth);
+      if (jsonNestsPast(value as JsonObject, below.depth)) {
+        throw new JsonFormError(`a message nested past ${String(MAXIMUM_DEPTH)}`);
+      }
+
+      return localStructJsonOf(value as JsonObject);
     }
 
     return messageJsonOf(message, value as Message, below);
@@ -2149,28 +2169,11 @@ const messageJsonOf = (schema: DescMessage, message: Message, writing: IWritingO
 };
 
 /**
- * A message's JSON in Bead's proto JSON form (transcoding 5.6): 17.7's tokens, its members by JSON
- * name in their fields' numbers' order, a map's entries and a `Struct`'s members sorted, an
- * aliased enum by its first name, a `float` at its shortest, each well-known type in its form.
- * What the form holds none of is a {@link JsonFormError} (5.7), which a gateway answers 500.
+ * A route's `response_body` as the field of `schema` it names, by its proto name alone, as
+ * `http.proto` names it, never by its JSON name. A name of no field is its caller's bug, which a
+ * route's builder refuses (3.9).
  */
-export const writeProtoJson = (
-  schema: DescMessage,
-  { message, registry }: IJsonFormOptions & { message: Message }
-): string => {
-  return messageJsonOf(schema, message, { depth: 0, registry });
-};
-
-/**
- * The JSON of `message`'s top-level field `name`, by its proto name as `http.proto`'s
- * `response_body` names it, its default written where it is at its default too, so that a body is
- * always there (transcoding 5.8). A name of no field is its caller's bug, which a route's builder
- * refuses (3.9).
- */
-export const writeFieldJson = (
-  schema: DescMessage,
-  { message, name, registry }: IJsonFormOptions & { message: Message; name: string }
-): string => {
+export const responseFieldOf = (schema: DescMessage, name: string): DescField => {
   const field = schema.fields.find((each) => {
     return each.name === name;
   });
@@ -2179,6 +2182,14 @@ export const writeFieldJson = (
     throw new ProgrammerError(`${schema.typeName} has no field ${name}`);
   }
 
+  return field;
+};
+
+// the JSON of `message`'s top-level `field`, its default where it holds none (5.8)
+const fieldJsonOf = (
+  field: DescField,
+  { message, registry }: { message: Message; registry: ITypeRegistry }
+): string => {
   const record = message as Message & Record<string, unknown>;
   const choice =
     field.oneof === undefined
@@ -2263,6 +2274,55 @@ export const typeRegistryOf = (schemas: readonly DescMessage[]): ITypeRegistry =
   return Object.freeze({
     messageOf: (typeName: string) => {
       return messages.get(typeName);
+    },
+  });
+};
+
+// ── Form ──────────────────────────────────────────────────────────────────────
+
+/**
+ * Bead's mapping of protobuf's JSON made over `schemas` (transcoding 5, decision 0037): an `Any`
+ * names a message of the files they are declared in and of those files' imports, or a well-known
+ * type. Each call writes with the schema its caller holds, and resolves a name only inside an `Any`.
+ *
+ * @example
+ * import { createJsonForm } from '@francisdesjardins/bead/transcoding';
+ *
+ * const form = createJsonForm([SayHelloRequestSchema]);
+ * const request = form.read(SayHelloRequestSchema, new TextEncoder().encode('{"name":"Ada"}'));
+ * const body = form.write(SayHelloRequestSchema, request);
+ */
+export const createJsonForm = (schemas: readonly DescMessage[]): IJsonForm => {
+  const registry = typeRegistryOf(schemas);
+
+  const write = <Desc extends DescMessage>(schema: Desc, message: MessageShape<Desc>): string => {
+    return messageJsonOf(schema, message, { depth: 0, registry });
+  };
+
+  return Object.freeze({
+    eventDataOf: (payload: HttpPayload, bytes: Uint8Array): string => {
+      if (typeof payload === 'object') {
+        return write(payload, protoCodecOf(payload).decode(bytes));
+      }
+
+      if (payload === 'text') {
+        return JSON.stringify(PAYLOAD_CODECS.text.decode(bytes));
+      }
+
+      return payload === 'raw' ? `"${base64Of(bytes)}"` : DECODER.decode(bytes);
+    },
+    read: <Desc extends DescMessage>(schema: Desc, body: Uint8Array): MessageShape<Desc> => {
+      return readMessage(schema, { node: readJsonText(body), registry }) as MessageShape<Desc>;
+    },
+    write,
+    writeField: (field: DescField, message: Message): string => {
+      // ! a field of another message is the caller's bug that the C# side's WriteField refuses as a
+      // name of no field, in its words
+      if (field.parent.typeName !== message.$typeName) {
+        throw new ProgrammerError(`${message.$typeName} has no field ${field.name}`);
+      }
+
+      return fieldJsonOf(field, { message, registry });
     },
   });
 };

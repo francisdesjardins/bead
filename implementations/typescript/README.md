@@ -12,21 +12,22 @@ Nothing in it imports a framework at run time. The specification and the conform
 side plays are in [`spec/`](../../spec/).
 
 ```ts
-import { createWSTransportClient } from '@francisdesjardins/bead/ws-transport-client';
-import { createWSTransportServer } from '@francisdesjardins/bead/ws-transport-server';
+import { createWebSocketTransportClient } from '@francisdesjardins/bead/websocket-transport-client';
+import { createWebSocketTransportServer } from '@francisdesjardins/bead/websocket-transport-server';
 import { createHTTPTransportClient } from '@francisdesjardins/bead/http-transport-client';
 import { createHTTPTransportServer } from '@francisdesjardins/bead/http-transport-server';
 ```
 
 ## The transport
 
-`transport-client`, `ws-transport-client`, `transport-server` and `ws-transport-server` are the
+`transport-client`, `websocket-transport-client`, `transport-server` and `websocket-transport-server` are the
 first layer of a transport → router → service stack, which is why they sit together under
 `src/transport/`, split the way the rest is: `client/`, `server/`, and the `shared/` both stand on.
 
 Each end — client or server — has a shared half and a transport. The shared half owns the events and the guards
 around the life of the connection — `reconnect` and the drop behind `await using` for a client, `start` and `stop`
-and the connection registry for a server. The transport supplies what only it knows: how to open,
+and the connection registry for a server, whose dispose, behind `await using`, stops it for good, a
+start after it a misuse (decision 0003). The transport supplies what only it knows: how to open,
 close and send on the wire. WebSocket, HTTP, a Web Worker, memory and a broker each supply theirs —
 see [HTTP](#http), [In memory](#in-memory-and-a-servers-transports-joined) and
 [Over a broker](#over-a-broker); another transport supplies its own.
@@ -77,7 +78,7 @@ connection's deadline by the time its bytes take at `minimumSendBytesPerSecond`,
 `sendGracePeriod`, 5 seconds, at least, and a socket that still holds something past it, judged
 each second on the real clock, is dropped. An envelope that would take what waits past
 `maximumUnsentBytes` drops it too: what a peer that keeps every rule can be owed at once,
-184,551,424 bytes under the limits by default, which `createWSServer` derives from its router's.
+184,551,424 bytes under the limits by default, which `createWebSocketServer` derives from its router's.
 Each drop is reported on `error` as its connection closes, naming its bound and its value, and its
 close is not clean; the heartbeat drops a reader that stops behind a large backlog besides. A paced
 subscription queues on the server what a client that falls behind has not credited.
@@ -120,13 +121,13 @@ server.on('refusal', ({ address, authority, origin, port, reason, status }) => {
 ```ts
 import { WebSocketServer } from 'ws';
 
-const server = createWSTransportServer({ WebSocketServer });
+const server = createWebSocketTransportServer({ WebSocketServer });
 server.on('message', ({ data }, connectionHandle) => {
   void server.send({ data }, connectionHandle);
 });
 const { port } = await server.start({ findOpenPort: true });
 
-const client = createWSTransportClient();
+const client = createWebSocketTransportClient();
 client.on('close', (clean) => {
   if (!clean) {
     client.reconnect({ signal: AbortSignal.timeout(30_000) }).catch((reason: unknown) => {
@@ -142,9 +143,9 @@ Each listener of a transport's events is called within a guard: what one throws 
 transport's `error`, the next listener is called all the same, and the transport goes on as if it
 returned (spec 15.1). It awaits nothing a listener returns, so a listener's rejection is Node's, as
 what a listener of `error` throws is: an unhandled rejection ends the process, and a listener
-catches its own, as the `reconnect` above does. Neither client reads a `Retry-After`, which a
-server's 503 `busy` carries and spec 15.7 lets a client wait for: a reconnection waits its own
-schedule, whatever the field asks.
+catches its own, as the `reconnect` above does. The HTTP client waits a `busy` refusal's
+`Retry-After` before it sends an envelope that is no request again, until `exchangeTimeout` from
+its first send (spec 15.6); a reconnection waits its own schedule, whatever the field asks.
 
 What a transport carries, both ways, is a message, `{ data, credential }`: an envelope, and the
 credential the transport carries beside it, which a request presenting `ELSEWHERE` stands for. Over
@@ -204,7 +205,7 @@ let token = await signIn();
 const elsewhere = () => {
   return { carried: `Bearer ${token}`, scheme: CredentialScheme.ELSEWHERE } as const;
 };
-const client = createWSClient({ credential: elsewhere(), transport: { WebSocket } });
+const client = createWebSocketClient({ credential: elsewhere(), transport: { WebSocket } });
 
 client.router.on('credentialWithdrawn', () => {
   void signIn().then(async (renewed) => {
@@ -227,13 +228,13 @@ Each end takes its time from a `clock`: the part of the globals Bead calls — `
 `clearTimeout`, `setInterval`, `clearInterval`, `Date.now` and `performance.now` — in their own
 shape, so the platform's, `globalThis`, is the default, and `@sinonjs/fake-timers`' `createClock()`,
 never installed on the globals, is a test's. A stack has one clock, set where it starts and read
-upward: a router or a server built on a transport runs on the transport's, a server's sessions on
-the server's, a service manager on its router's, and one given that differs is a `ProgrammerError`.
-Each transport, router and session manager exposes the one it runs on as `clock`. What bounds a
-platform's own close stays on the real clock — a ping, a WebSocket's close handshake, its client's
-and its server's, the HTTP client's disconnect. A timeout past `LONGEST_TIMER`, 2³¹ − 1
-milliseconds, is refused wherever one is taken; never is `Infinity`, which arms nothing of
-Bead's own: a close over `ws` still arms `ws`'s timer, held to `LONGEST_TIMER`.
+upward: a router or a server built on a transport runs on the transport's, a server's session
+manager on the server's, a service manager on its router's, and one given that differs is a
+`ProgrammerError`. Each transport, router and session manager exposes the one it runs on as `clock`.
+What bounds a platform's own close stays on the real clock — a ping, a WebSocket's close handshake,
+its client's and its server's, the HTTP client's disconnect. A timeout past `LONGEST_TIMER`, 2³¹ − 1
+milliseconds, is refused wherever one is taken; never is `Infinity`, which arms nothing of Bead's
+own: a close over `ws` still arms `ws`'s timer, held to `LONGEST_TIMER`.
 
 The router's layer sits under `src/router/`. Both sides build on one core, under `shared/`: it
 writes the envelopes that go out and reads those that come in, pairs each result and failure with
@@ -357,7 +358,7 @@ token, an `ELSEWHERE` with nothing to carry, a scheme to come — is a `Programm
 call starts.
 
 ```ts
-const client = createWSClient({ credential: { scheme: CredentialScheme.JWT, token } });
+const client = createWebSocketClient({ credential: { scheme: CredentialScheme.JWT, token } });
 
 // the call that renews presents none: until a default is given again, a call that would present it fails
 client.router.on('credentialWithdrawn', () => {
@@ -426,40 +427,41 @@ A1 15 20 04  00 00 00 07  00 00 00 00 00 00 00 02
    CREDIT, PACED: two notifications sent at most, the first one's callbacks settled
 ```
 
-The service manager — one for both sides — makes what a requester calls and what answers it, over
-any router that meets `IRouterLike`: a request is answered once, and as `PROCEDURE_FAILED` when its
-resolver fails first. A resolver answers the procedure's own failure, `response(null, { code: 21 })`
-with a code from 1 to 65,535, or a refusal of admission from its router's table. The types refuse
-the protocol's other failures; a code out of that range, or a refusal from the other side's table,
-fails the resolver, and the request is answered as `PROCEDURE_FAILED`, with no detail: the error is
-reported, never the peer's to read (spec 9.0). A `beforeRequest` admits a request only by returning
-`true`: anything else refuses it, with the `refusal` the function carries, or with `ACCESS_DENIED`.
-It is synchronous, and sees the request's header, its connection and the call's session, `session`,
-never its payload: its router asks it through the resolver's `admit` once the request's credential
-resolved and before the payload is read — or comes, for a transfer — so a request refused is never
-decoded, and a resolver called by a router that asked nothing asks it itself, first. An admission of
-the application's own reads the session's data — a token's claims, say — and a callback receives
-the same session, as `request.session`. The header a resolver, its `admit`, its callback and a
-`beforeRequest` are handed, a relay's `beforeRoute` among them, is an `IHandedRequestHeader`: the
-header as it came, but for its credential, a `HandedCredential`, which says of a `JWT` its scheme
-alone. No procedure is handed a bearer credential its call came with: a `JWT`'s token, and what a
-transport carried beside an `ELSEWHERE`, reach the side's verifier, its `credentials`, and a relay,
-which forwards them to leg B, alone (spec 13.1). A callback's
-`request.signal` is aborted when its call ends before its answer — a `CancelError` when its
-requester cancels it, a `DisconnectError` when its connection closes — so it may stop: its answer
-would go nowhere, and what it throws then is not reported. A listener of that signal that throws is
-an uncaught exception, which a peer's cancel can set off. Under `server/`, the session manager
-keeps each connection's session — its token, 16 bytes drawn from `crypto`, its data and two
-inactivity timers — the notification manager who is subscribed to what, by connection, call id and
-session, and `credential-sessions.ts` each credential's session that bounds a subscription, its end
-timed on the router's clock.
+The service manager makes what a requester calls and what answers it, over any router that meets
+`IRouterLike`; a client and a server give it typed by their side, `IServiceManagerClient` and
+`IServiceManagerServer`, each with its side's makers alone. A request is answered once, and as
+`PROCEDURE_FAILED` when its resolver fails first. A resolver answers the procedure's own failure,
+`response(null, { code: 21 })` with a code from 1 to 65,535, or a refusal of admission from its
+router's table. The types refuse the protocol's other failures; a code out of that range, or a
+refusal from the other side's table, fails the resolver, and the request is answered as
+`PROCEDURE_FAILED`, with no detail: the error is reported, never the peer's to read (spec 9.0). A
+`beforeRequest` admits a request only by returning `true`: anything else refuses it, with the
+`refusal` the function carries, or with `ACCESS_DENIED`. It is synchronous, and sees the request's
+header, its connection and the call's session, `session`, never its payload: its router asks it
+through the resolver's `admit` once the request's credential resolved and before the payload is read
+— or comes, for a transfer — so a request refused is never decoded, and a resolver called by a
+router that asked nothing asks it itself, first. An admission of the application's own reads the
+session's data — a token's claims, say — and a callback receives the same session, as
+`request.session`. The header a resolver, its `admit`, its callback and a `beforeRequest` are
+handed, a relay's `beforeRoute` among them, is an `IHandedRequestHeader`: the header as it came, but
+for its credential, a `HandedCredential`, which says of a `JWT` its scheme alone. No procedure is
+handed a bearer credential its call came with: a `JWT`'s token, and what a transport carried beside
+an `ELSEWHERE`, reach the side's verifier, its `credentials`, and a relay, which forwards them to
+leg B, alone (spec 13.1). A callback's `request.signal` is aborted when its call ends before its
+answer — a `CancelError` when its requester cancels it, a `DisconnectError` when its connection
+closes — so it may stop: its answer would go nowhere, and what it throws then is not reported. A
+listener of that signal that throws is an uncaught exception, which a peer's cancel can set off.
+Under `server/`, the session manager keeps each connection's session — its token, 16 bytes drawn
+from `crypto`, its data and two inactivity timers — the notification manager who is subscribed to
+what, by connection, call id and session, and `credential-sessions.ts` each credential's session
+that bounds a subscription, its end timed on the router's clock.
 
 `client` puts the three layers together, bottom up — the transport, the router built on it, the
-services built on the router — each replaceable on its own. `ws-client` is that over WebSocket, and
+services built on the router — each replaceable on its own. `websocket-client` is that over WebSocket, and
 is what an application starts from:
 
 ```ts
-const client = createWSClient();
+const client = createWebSocketClient();
 
 client.services.on('debug', (error, info) => {
   console.log(info.direction, info.procedureName, error);
@@ -531,21 +533,24 @@ credential goes out `ACCESS_DENIED`, so its client keeps a credential that may h
 `&&`, it loses that refusal and the composition refuses with `ACCESS_DENIED` — a caller that wants
 to keep it puts `refusal` on its own function.
 
-The server asks a client with a command, `getCommand`, which names the connection; the client runs
-it with `getCommandResolver`, and resolves the command's credential as a server does, by the
-`credentials` among its own options, the session it learned standing for its connection's. None of
-this package's server transports carries a credential beside an envelope it sends, so a command
-presenting `ELSEWHERE` fails before it goes, `DESTINATION_UNREACHABLE`, as a `JWT` command does
-over a connection that is not secure. A command left unanswered past its timeout closes its
-connection when the server's `closeOnCommandTimeout` says so, or the command's own
-`closeOnTimeout`. `ws-server` is the server over WebSocket. A server hears what goes wrong where
-each layer tells it: a call's on its router's `error`, and its transport's — a socket's, or what a
-listener of its events threw — on the transport's `error`, beside each refusal it tells, both on
-`server.transport` whichever transport it was built on
-([decision 0023](../../docs/decisions/0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md)):
+The server asks a client with a command, `getCommand`, whose options, `ICommandOptions`, name the
+connection, which the types require; a server's services carry no request, notification nor command
+resolver, nor a `dropped` event, and a client's no command, request resolver nor notification
+resolver, so the other side's maker does not compile; past the types, or on a manager over a router
+of the application's own, each is refused as it is made. The client runs it with
+`getCommandResolver`, and resolves the command's credential as a server does, by the `credentials`
+among its own options, the session it learned standing for its connection's. None of this package's
+server transports carries a credential beside an envelope it sends, so a command presenting
+`ELSEWHERE` fails before it goes, `DESTINATION_UNREACHABLE`, as a `JWT` command does over a
+connection that is not secure. A command left unanswered past its timeout closes its connection when
+the server's `closeOnCommandTimeout` says so, or the command's own `closeOnTimeout`. `websocket-server` is
+the server over WebSocket. A server hears what goes wrong where each layer tells it: a call's on its
+router's `error`, and its transport's — a socket's, or what a listener of its events threw — on the
+transport's `error`, beside each refusal it tells, both on `server.transport` whichever transport it
+was built on ([decision 0023](../../docs/decisions/0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md)):
 
 ```ts
-const server = createWSServer({
+const server = createWebSocketServer({
   credentials: {
     audience: 'https://api.example.com',
     keys: [{ algorithm: 'ES256', issuer: 'https://id.example.com', jwk }],
@@ -579,7 +584,7 @@ failures it lists, and its payloads' codecs; its failures are a catalogue, `fail
 ```ts
 const { text } = PAYLOAD_CODECS;
 
-export const GreeterFailures = failuresOf({ codes: { NOBODY_TO_GREET: 1 }, serviceId: 7 });
+export const GreeterFailures = failuresOf(7, { NOBODY_TO_GREET: 1 });
 
 export const GreeterProcedures = Object.freeze({
   clock: commandOf({
@@ -618,7 +623,11 @@ hands out is a function that carries its procedure's members, read bare.
 
 The codecs are spec 17's, `PAYLOAD_CODECS.raw`, `.text` and `.json`, the last reading a `JsonValue`
 and writing what section 17.7 takes; `payloadCodecOf({ decode, encode })` makes one of two
-functions. A protobuf message's is `protoCodecOf(schema)` of `@francisdesjardins/bead/proto`, which
+functions. A reader refuses with a `SyntaxError`, a writer with a `TypeError`, its message the
+reason in section 17.2's words and no others, `not JSON` or `nested past 100`, say, what more the
+side knows in its `cause`; a request whose payload does not read is answered `PAYLOAD_UNDECODABLE`,
+the refusal's reason its detail
+([0016](../../docs/decisions/0016-a-json-payload-has-one-form-whichever-side-writes-it.md)). A protobuf message's is `protoCodecOf(schema)` of `@francisdesjardins/bead/proto`, which
 generated code calls and which holds section 17.9 whole. Its reader first calls
 `checkProtoRecords(bytes, schema)`, which reads the payload's records against the message's own
 descriptor and throws a `SyntaxError` where they are no encoding of it and protobuf-es would read on,
@@ -628,11 +637,15 @@ a map's entry with a field other than its key and its value
 It then reads with protobuf-es's `fromBinary(schema, bytes, { recursionLimit: 101 })` — 101, since
 protobuf-es counts the top message, and section 17.9 bounds a message 100 deep below it
 ([0031](../../docs/decisions/0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)),
-a closed enum's undeclared number setting nothing (17.9.8). Last, it walks the message for a field of
-`LEGACY_REQUIRED` presence left unset, proto2's `required`, at any depth but in an extension or an
-`Any`, and throws a `SyntaxError`; its writer walks the message it builds before `toBinary` and
-throws a `TypeError` in the same words
+a singular closed enum's undeclared number dropped before it reads, so it sets nothing (17.9.8).
+Last, it walks the message for a field of `LEGACY_REQUIRED` presence left unset, proto2's
+`required`, at any depth but in an extension or an `Any`, and throws a `SyntaxError`; its writer
+walks the message it builds before `toBinary` and throws a `TypeError` of the same reason
 ([0042](../../docs/decisions/0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)).
+The writer writes nothing its reader refuses (17.2): a value whose own fields nest a message past
+the bound is refused before protobuf-es builds any of it, a `Struct` held as a JSON object counted
+as the wire nests it, and the bytes it writes are checked as its reader checks them, which refuses
+what a reading kept nesting past it (0031).
 Each message's shape is built once, from its descriptor, a message that reaches no required field
 walked at the cost of one lookup; `./proto` takes `@bufbuild/protobuf` as an optional peer. Protobuf's
 conformance suite plays the generated codec through the testee in
@@ -714,15 +727,16 @@ procedure that notifies opens no subscription. Its `on` answers a command, its `
 refused with the client router's own `SESSION_REQUIRED`; a client side is given no hooks, so a
 command a hook admits is a `ProgrammerError` there. Each requester and resolver is declared once. A
 call stays curried, `request.sayHello(payload)(options)`: what the payload gives is a bound call,
-`IBoundCall`, or `IRegistrar` for a notification, whose `then` no promise matches, so
-`await greeter.request.sayHello('Ada')`, its options' call forgotten, does not compile. A descriptor
-may carry `validate`, its request's rules (spec 18), which beadc generates: the side that answers
-judges every request once it reads, before its resolver, and answers one its rules refuse
-`PAYLOAD_INVALID`, its violations in its detail, lines of canonical JSON that `violationsOf` reads
-back; a client whose options say `validates: true`, or a server's for its commands, judges the value
-before it is written, and a value its rules refuse fails its call before anything goes, with the
-same failure, counted and traced as a call refused before it goes. `failFast: true` stops a judging
-at its first violation. A `validate` that throws is its side's own error, `PROCEDURE_FAILED`.
+`IBoundCall`, `IBoundCommand` for a command, or `IRegistrar` for a notification, whose `then` no
+promise matches, so `await greeter.request.sayHello('Ada')`, its options' call forgotten, does not
+compile. A descriptor may carry `validate`, its request's rules (spec 18), which beadc generates:
+the side that answers judges every request once it reads, before its resolver, and answers one its
+rules refuse `PAYLOAD_INVALID`, its violations in its detail, lines of canonical JSON that
+`violationsOf` reads back; a client whose options say `validates: true`, or a server's for its
+commands, judges the value before it is written, and a value its rules refuse fails its call before
+anything goes, with the same failure, counted and traced as a call refused before it goes.
+`failFast: true` stops a judging at its first violation. A `validate` that throws is its side's own
+error, `PROCEDURE_FAILED`.
 
 ### Transfers
 
@@ -772,21 +786,21 @@ reserved as long, or for its timeout when longer — so a late copy of a chunk u
 granted is dropped in silence. A notification, a failure, and the result of a call
 that opens a subscription always go in one envelope.
 
-| Limit                       | By default  | Bounds                                                                                                                                                                                                                                                                     |
-| --------------------------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `maximumEnvelopeBytes`      | 16,778,240  | an envelope, as it comes in and as it goes out; the WebSocket transports' `maxPayload` follows it in `createWSServer` and `createWSClient`, never below; built alone, a transport takes 16,778,240, `MAXIMUM_MESSAGE_BYTES`, raised by hand for a router whose envelope is |
-| `chunkBytes`                | 1,048,576   | a chunk's envelope, and the largest a payload goes whole in: a request that comes whole past it, or an opening, is refused `ENVELOPE_TOO_LARGE`, nothing of it held                                                                                                        |
-| `windowBytes`               | 4,194,304   | how far past what it received, from the start, a receiver lets its sender send                                                                                                                                                                                             |
-| `maximumPayloadBytes`       | 16,777,216  | a payload, whole or as a transfer; a procedure's own `maximumPayloadBytes` narrows it                                                                                                                                                                                      |
-| `bufferedBytesBudget`       | 268,435,456 | the bytes every transfer a router receives holds together                                                                                                                                                                                                                  |
-| `maximumTransfers`          | 4           | the transfers a connection receives at once; 0 takes none, and sends none                                                                                                                                                                                                  |
-| `maximumChunkRuns`          | 1,024       | the runs of bytes apart a transfer received holds before it is whole                                                                                                                                                                                                       |
-| `transferInactivityTimeout` | 30,000      | the milliseconds a transfer waits for its next chunk or credit, and a call that received one keeps its call id                                                                                                                                                             |
-| `maximumDetailBytes`        | 1,024       | a failure's detail                                                                                                                                                                                                                                                         |
-| `maximumAnsweringCalls`     | 64          | the calls a connection's peer has a router answer at once — a request past them is refused `CAPACITY_EXCEEDED` before its route, its credential or its transfer — and the calls a requester has wait on a connection, one past them failed before it goes                  |
+| Limit                       | By default  | Bounds                                                                                                                                                                                                                                                                                   |
+| --------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `maximumEnvelopeBytes`      | 16,778,240  | an envelope, as it comes in and as it goes out; the WebSocket transports' `maxPayload` follows it in `createWebSocketServer` and `createWebSocketClient`, never below; built alone, a transport takes 16,778,240, `MAXIMUM_MESSAGE_BYTES`, raised by hand for a router whose envelope is |
+| `chunkBytes`                | 1,048,576   | a chunk's envelope, and the largest a payload goes whole in: a request that comes whole past it, or an opening, is refused `ENVELOPE_TOO_LARGE`, nothing of it held                                                                                                                      |
+| `windowBytes`               | 4,194,304   | how far past what it received, from the start, a receiver lets its sender send                                                                                                                                                                                                           |
+| `maximumPayloadBytes`       | 16,777,216  | a payload, whole or as a transfer; a procedure's own `maximumPayloadBytes` narrows it                                                                                                                                                                                                    |
+| `bufferedBytesBudget`       | 268,435,456 | the bytes every transfer a router receives holds together                                                                                                                                                                                                                                |
+| `maximumTransfers`          | 4           | the transfers a connection receives at once; 0 takes none, and sends none                                                                                                                                                                                                                |
+| `maximumChunkRuns`          | 1,024       | the runs of bytes apart a transfer received holds before it is whole                                                                                                                                                                                                                     |
+| `transferInactivityTimeout` | 30,000      | the milliseconds a transfer waits for its next chunk or credit, and a call that received one keeps its call id                                                                                                                                                                           |
+| `maximumDetailBytes`        | 1,024       | a failure's detail                                                                                                                                                                                                                                                                       |
+| `maximumAnsweringCalls`     | 64          | the calls a connection's peer has a router answer at once — a request past them is refused `CAPACITY_EXCEEDED` before its route, its credential or its transfer — and the calls a requester has wait on a connection, one past them failed before it goes                                |
 
 The limits are options of each router and each facade — `createClient(layers, { limits })`,
-`createWSClient({ limits })`, `createServer(layers, { limits })`, `createWSServer({ limits })` — and
+`createWebSocketClient({ limits })`, `createServer(layers, { limits })`, `createWebSocketServer({ limits })` — and
 must hold together, or the router is a `ProgrammerError`: an envelope of 64 bytes at least, a chunk
 from 64 bytes to an envelope, a window of two chunks, a payload within the budget, a call at once at
 least, a timeout a timer holds; and, on a side that takes or presents a `JWT`, a chunk and an
@@ -795,6 +809,18 @@ a connection are set alike. A transport that carries transfers delimits its mess
 envelope's size at both ends, delivers every chunk and credit — in any order, a copy tolerated — and
 carries both ways. WebSocket does all four. The router copies every payload it reads, so a
 transport may use its buffers again once `receive` returns.
+
+Beside the limits, and like `pacing` a side's own, `intake` bounds what each connection hands its
+router within one task of its event loop (spec 15.12): `maximumUntakenEnvelopes`, 64, and
+`maximumUntakenBytes`, 1 MiB, `INTAKE_DEFAULTS`, each 1 at least. The envelope that reaches either
+bound is taken, and the router pauses that connection's transport, which hands nothing more of it
+and holds in order what it received, until the next task resumes it — `createServer(layers,
+{ intake })`, `createClient(layers, { intake })`, or a router's own options. A `ws` socket stops
+reading, holding the rest of the read under way; an HTTP server holds a paused connection's
+exchanges at its gate, and its client asks no listen; a broker's participant holds the connection's
+envelopes to `maximumHeldEnvelopeBytes`, losing it alone past them; the in-memory and the worker
+transports hold what their application sends. So one connection's flood keeps no other connection,
+and no timer, waiting behind more than these bounds of it. Nothing announces them.
 
 What comes late is dropped in silence where it is known for late, and reported elsewhere:
 
@@ -892,7 +918,7 @@ const isAdmitted = (request: IAdmissionRequest<TransportServerConnectionHandle>)
   );
 };
 
-const server = createWSServer({ relay: { beforeRoute: isAdmitted } });
+const server = createWebSocketServer({ relay: { beforeRoute: isAdmitted } });
 ```
 
 A composition by `||` answers `ACCESS_DENIED` without the default's detail. `shareLegBSession`, in
@@ -987,7 +1013,7 @@ redirect followed", and a send or a listen loses its connection, nothing of the 
 | 413    | `too-large`                           | a body past the envelope's limit                                                                                                                                                                                                                                            |
 | 415    | `type-refused`                        | not `application/prs.bead`, or encoded                                                                                                                                                                                                                                      |
 | 426    | `upgrade-required`, `version-refused` | at a WebSocket's address, a request that asks no WebSocket, `Upgrade: websocket`; an upgrade of a version but 13, or of none, `Sec-WebSocket-Version: 13` beside it                                                                                                         |
-| 429    | `busy`                                | too many requests waiting on one connection, or exchanges under way                                                                                                                                                                                                         |
+| 429    | `busy`                                | too many requests waiting on one connection, or exchanges under way; `Retry-After` 1                                                                                                                                                                                        |
 | 503    | `busy`                                | too many connections — all, or one address's — bytes of body being read, or a connect or a WebSocket's upgrade once the server's stop began; `Retry-After`                                                                                                                  |
 
 The server bounds what its clients hold: `maximumConnections`, 10 000, and 64 per address;
@@ -1196,29 +1222,32 @@ script did not catch, or a script that failed to load — fails a connect under 
 its message and where it was thrown, then its close, unclean at both ends. A worker terminated
 without a word is not heard.
 `createWorkerServer({ transport: { scope: self } })` in the worker and `createWorkerClient({
-transport: { worker } })` in the page are the facades. This one is a page's own: a server in C# has
-no counterpart to mirror.
+transport: { worker } })` in the page are the facades. This one is a page's own, which the C# and
+Rust sides come to with their core in a page, ahead
+([`docs/support.md`](../../docs/support.md#differences)).
 
 ### In memory, and a server's transports joined
 
 `memory-transport-client` and `memory-transport-server` join a client's router and a server's
 router of one process (spec 15.13): a gateway that calls its application's own server, a core
-before it has a socket, a test. `createMemoryTransportClient({ server })` connects to a
-`createMemoryTransportServer()` with the address and port its caller gives, `local` and none by
-default; the server draws the connection `type=MEMORY;ip=<address>;ordinal=n` and hands that
-address and port with each envelope, so a refusal told names them. Each envelope crosses as a copy,
-whole, once and in order, in a later turn than its send, never within it, so no router is entered
-from its own call. A request's credential crosses beside it, any field value, as `POST /bead`
-carries one; none goes toward a client, so a command presenting `ELSEWHERE` fails before it goes.
-It never leaves the process, so it is secure and a bearer credential crosses it; it carries
-transfers under its routers' limits and holds no bound or heartbeat of its own. Either end closes a
-connection, the other told in a later turn; a server that stops closes each and takes no connect.
+before it has a socket, a test. `createMemoryTransportClient()` connects, at `connect({ server })`,
+to a `createMemoryTransportServer()` with the address and port its caller gives, `local` and none by
+default, and a reconnection connects to that server again; the server draws the connection
+`type=MEMORY;ip=<address>;ordinal=n` and hands that address and port with each envelope, so a
+refusal told names them. Each envelope crosses as a copy, whole, once and in order, in a later
+turn than its send, never within it, so no router is entered from its own call. A request's
+credential crosses beside it, any field value, as `POST /bead` carries one; none goes toward a
+client, so a command presenting `ELSEWHERE` fails before it goes. It never leaves the process, so
+it is secure and a bearer credential crosses it; it carries transfers under its routers' limits and
+holds no bound or heartbeat of its own. Either end closes a connection, the other told in a later
+turn; a server that stops closes each and takes no connect.
 
 `joinTransports([memory, webSocket])`, of `joined-transport-server`, is one server transport over
 several (spec 15.14), so one server — one router, one admission, one session manager, each service
 offered once — takes its connections from all of them. Each handle stays the one its transport drew,
 and its flags, sends and closes go to that transport; each transport's events are told on with
-their handles, each listener within its guard; its stop stops each, and its gauges are their sum.
+their handles, each listener within its guard; its stop stops each, its dispose disposes each for
+good, and its gauges are their sum.
 Two transports of one type, whose handles might be one, are refused as the join is built: one
 transport binds both addresses. The join starts nothing: each transport is started where it
 listens, and one port for two still comes from a proxy in front.
@@ -1277,11 +1306,24 @@ it.
 A link that its broker ends for another link of its id, a takeover, closes each connection, unclean,
 is reported, and connects no more until its application starts it again — its participant's
 `start()` or a server transport's — so that two holders of one id never take each other over
-without end; any other link lost connects anew. A server's transport starts once its broker holds
-each name it serves, failing on one refused, and stops once it let each go, its gauge `names`
-counting a name from its subscription's acknowledgement to its release's. Where the adapter offers a
-message's life, an OPEN lives in its broker its connect's time left, and a DATA that carries a
-credential twice `heartbeat`; nothing else has a life.
+without end; any other link lost connects anew, as its `reconnect` says, a transport client's
+reconnection options, its attempts without end unless it bounds them, or stays down where
+`reconnects` is false. Its reconnection ends by its attempts, its signal or its stop, at once in a
+wait, reported on `error`, what ended it the `cause`, and its next start or connect links it anew.
+Its `stop()` ends its link in place, and with it what is under way: each connection closed with
+1001, its CLOSE sent before the link ends so that no will goes, a connect awaiting its link or its
+answer failed at once, stopped as it connected, a reconnection ended, cancelled, the stop its cause.
+A start while that stop is under way is a misuse; once it settled, its start, a server's start or a
+client's connect or reconnect over it links it anew as another incarnation, its transports, their
+routers and its listeners kept, and a RESET goes to each peer whose CLOSE its broker did not take.
+Its `[Symbol.asyncDispose]()` stops it and ends it for good, its adapter's listeners and its DevTools
+announcement let go: its `start()`, or a connect, reconnect or server's start over it, made after it,
+is refused as a misuse, a `ProgrammerError`, before anything moves. A participant no longer in use is
+disposed, by `await using` or that call. A server's transport starts once its broker holds each
+name it serves, failing on one refused, and stops once it let each go, its gauge `names` counting a
+name from its subscription's acknowledgement to its release's. Where the adapter offers a message's
+life, an OPEN lives in its broker its connect's time left, and a DATA that carries a credential
+twice `heartbeat`; nothing else has a life.
 
 #### MQTT 5
 
@@ -1294,7 +1336,7 @@ MQTT.js's browser build.
 ```ts
 const adapter = createMqttBrokerAdapter({
   id: 'server',
-  password: () => readPassword(),
+  passwordProvider: () => readPassword(),
   url: 'mqtts://broker.example:8883',
 });
 const participant = createBrokerParticipant({ adapter });
@@ -1303,16 +1345,26 @@ const transport = participant.transportServer({ group: true, names: ['interop'] 
 await transport.start();
 ```
 
-Each link is one network connection that keeps no session — Clean Start 1, a Session Expiry
-Interval of 0 — its Client Identifier the participant's id, authenticated by a Password under its id
-as User Name, a string or asked at each link's start, or by a TLS client certificate, `tls: { cert,
-key }`, over `mqtts` or `wss` in Node alone: a page chooses none, and the adapter refuses one there.
-Its CONNECT says a Receive Maximum of 65,535, a Topic Alias Maximum of 0, its `maximumPacketSize`,
-16,777,216 bytes by default, and its `keepAlive`, 30 s by default; its start waits `connectTimeout`,
-30 s by default, for a CONNACK of Reason Code 0x00 whose Maximum QoS is not 0. Its will is the
-participant's GONE, QoS 1, RETAIN 0, a Will Delay Interval of 0; its stop sends a DISCONNECT of
-0x00, so that none goes; a DISCONNECT of 0x8E from its broker is its link taken over. MQTT.js
-reconnects nothing, subscribes nothing again and holds nothing while down: what is asked of a link
+Each link is one network connection that keeps no session — Clean Start 1, a Session Expiry Interval
+of 0 — its Client Identifier the participant's id, authenticated by a Password under its id as User
+Name, `password` as given or what `passwordProvider` hands at each link's start, or by a TLS client
+certificate, `tls: { cert, key }`, over `mqtts` or `wss` in Node alone: a page chooses none, and the
+adapter refuses one there; with neither, its CONNECT carries its User Name alone. A password is
+UTF-8 text, never empty and holding no NUL; the adapter is refused as it is built given one that is
+not, a password and a provider both, or either beside a certificate, and its start fails on an
+answer that is not. Its provider is asked with a signal its start's own signal, its stop and its
+`connectTimeout` abort, and that is aborted once its start ends, linked or not: an ask that outlives
+the `connectTimeout`, or that a stop meets, fails that start whether or not it hears its signal, a
+later answer serving nothing; what it throws fails it, its cause. Its CONNECT says a Receive Maximum
+of 65,535, a Topic Alias Maximum of 0, its `maximumPacketSize`, 16,777,216 bytes by default, and its
+`keepAlive`, 30 s by default; its start waits `connectTimeout`, 30 s by default, for its password,
+where it asks its provider, and a CONNACK of Reason Code 0x00 whose Maximum QoS is not 0. Its will
+is the participant's GONE, QoS 1, RETAIN 0, a Will Delay Interval of 0; its stop takes no publication,
+sends what waits on its Receive Maximum and awaits each PUBACK, fails what has not gone by then, then
+sends an UNSUBSCRIBE of each filter its link asked or holds, one a packet, and awaits their UNSUBACKs,
+all within `connectTimeout` of its call, then a DISCONNECT of 0x00 within one of its own, so that
+none goes and its broker hands it nothing once it settled; a DISCONNECT of 0x8E from its
+broker is its link taken over. MQTT.js reconnects nothing, subscribes nothing again and holds nothing while down: what is asked of a link
 that is down is refused at once.
 
 A name in a group is the shared subscription `$share/<name>/bead/s/<name>`, every subscription of
@@ -1347,7 +1399,7 @@ page, naming why.
 ```ts
 const adapter = createAmqpBrokerAdapter({
   id: 'server',
-  password: () => readPassword(),
+  passwordProvider: () => readPassword(),
   url: 'amqps://broker.example:5671',
 });
 const participant = createBrokerParticipant({ adapter });
@@ -1357,18 +1409,24 @@ await transport.start();
 ```
 
 Each link is one fresh network connection, its OPEN's container-id the participant's id, its
-`hostname` `vhost:` and its `virtualHost` where one is given, its idle-time-out its `idleTimeout`, 30
-s by default, its link counted lost silent for twice it; authenticated by SASL PLAIN under its id, a
-password a string or asked at each link's start, or by SASL EXTERNAL under a TLS client certificate,
-`tls: { cert, key }`, over `amqps`. Its start waits `connectTimeout`, 30 s by default, for its
-broker's OPEN and its sessions, and its inbox's subscription as long for its declaration, its
-binding and its receiver. On it a session holds its inbox's receiver, one each name it serves, one
-sends to inboxes and one to names, each sender to the anonymous terminus; a name past what its
-broker's channel-max leaves is refused. Its inbox is a queue `<root>.i.<id>` declared exclusive,
-classic and not durable through RabbitMQ's management on that connection (`amqp-management`), then
-bound to its root's topic exchange by its name, so that it ends with the connection; a second link
-of its id is refused it while the first holds it. rhea reconnects nothing, recovers nothing and
-holds nothing while down: what is asked of a link that is down is refused at once.
+`hostname` `vhost:` and its `virtualHost` where one is given, its idle-time-out its `idleTimeout`,
+30 s by default, its link counted lost silent for twice it; authenticated by SASL PLAIN under its
+id, `password` as given or what `passwordProvider` hands at each link's start, or by SASL EXTERNAL
+under a TLS client certificate, `tls: { cert, key }`, over `amqps`, never ANONYMOUS: the adapter is
+refused as it is built given neither, and its password is given, asked and refused as an MQTT 5
+link's is. Its start waits `connectTimeout`, 30 s by default, for its password, where it asks its
+provider, its broker's OPEN and its sessions, and its inbox's subscription as long for its
+declaration, its binding and its receiver. On it a session holds its inbox's receiver, one each name
+it serves, one sends to inboxes and one to names, each sender to the anonymous terminus; a name past
+what its broker's channel-max leaves is refused. Its inbox is a queue `<root>.i.<id>` declared
+exclusive, classic and not durable through RabbitMQ's management on that connection
+(`amqp-management`), then bound to its root's topic exchange by its name, so that it ends with the
+connection; a second link of its id is refused it while the first holds it. Its stop, within
+`connectTimeout` of its call, takes no publication, sends what waits on its senders' credit and
+awaits each outcome, fails what has not gone by then, deletes its inbox through the management, so
+that a message to it finds no subscriber, then detaches its receivers and closes its connection
+with no error. rhea reconnects nothing, recovers nothing and holds nothing while down:
+what is asked of a link that is down is refused at once.
 
 A name is its queue `<root>.s.<name>`, which the deployment provisions and every participant serving
 it consumes, the queue its group. Each receiver is unsettled, first, of no max-message-size, its
@@ -1688,7 +1746,7 @@ mean reads from a histogram's `_sum` and `_count`, and a quantile as Prometheus'
 import { createServer } from 'node:http';
 
 const metricsRegistry = createMetricsRegistry();
-const server = createWSServer({ metricsRegistry, transport: { WebSocketServer } });
+const server = createWebSocketServer({ metricsRegistry, transport: { WebSocketServer } });
 
 createServer((request, reply) => {
   if (request.url === '/metrics') {

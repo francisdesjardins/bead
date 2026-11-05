@@ -15,16 +15,17 @@ use super::{
 use crate::clock::{Clock, Schedule, SharedClock, Timer, TimerCallback};
 use crate::constants::{CredentialScheme, ProcedureKind, ProtocolCode, SERVER_CONNECTION_HANDLE};
 use crate::debug::{DebugDirection, TracedEnvelope};
-use crate::envelope::{Credential, Header, ResultHeader};
+use crate::envelope::{Credential, EnvelopeHeader, ResultHeader};
 use crate::errors::CallError;
 use crate::identity::Procedure;
 use crate::metrics::{MetricsRegistry, MetricsRegistryOptions};
-use crate::router::client::{ClientRequest, RouterClientOptions};
-use crate::router::server::{Call, CallHooks};
+use crate::router::client::RouterClientOptions;
+use crate::router::server::Call;
 use crate::router::types::RequestCredential;
 use crate::testing::SteppingClock;
 use crate::testing::pair::echo;
 use crate::testing::scripted::Sending;
+use crate::{RouterRequest, UnregisterNotificationOptions};
 
 // echo's labels among the calls a client makes, requests
 const LABELS: &str = "service=\"2\",procedure=\"echo\",type=\"request\"";
@@ -84,17 +85,16 @@ fn counted(registry: &MetricsRegistry) -> Scripted {
 // a call to echo counted into its requester's series
 fn call_of(
     scripted: &Scripted,
-    request: ClientRequest,
+    request: RouterRequest,
 ) -> Result<Call, crate::errors::ProgrammerError> {
     let series = scripted
         .router
         .declare_requester(&echo())
         .expect("echo declared");
 
-    scripted.router.request(
-        Bytes::new(),
-        (ClientRequest { series, ..request }, CallHooks::default()),
-    )
+    scripted
+        .router
+        .request(Bytes::new(), RouterRequest { series, ..request })
 }
 
 // debugging 1.1, 5.1
@@ -113,10 +113,7 @@ async fn tells_each_envelope_out_and_in_with_its_connection_server_its_header_an
 
     let answering = scripted
         .router
-        .request(
-            Bytes::new(),
-            (request_of((None, super::TIMEOUT)), CallHooks::default()),
-        )
+        .request(Bytes::new(), request_of((None, super::TIMEOUT)))
         .expect("echo called");
 
     scripted.settle().await;
@@ -140,7 +137,7 @@ async fn tells_each_envelope_out_and_in_with_its_connection_server_its_header_an
                 DebugDirection::Tx,
                 TracedEnvelope {
                     connection_handle: Arc::clone(&server),
-                    header: Header::Request(request_header_of(1)),
+                    header: EnvelopeHeader::Request(request_header_of(1)),
                     credential_scheme: None,
                 }
             ),
@@ -148,7 +145,7 @@ async fn tells_each_envelope_out_and_in_with_its_connection_server_its_header_an
                 DebugDirection::Rx,
                 TracedEnvelope {
                     connection_handle: server,
-                    header: Header::Result(ResultHeader {
+                    header: EnvelopeHeader::Result(ResultHeader {
                         call_id: 1,
                         total: None,
                         credential: None,
@@ -182,10 +179,7 @@ async fn a_debug_listener_that_throws_on_an_envelope_is_reported_and_the_envelop
 
     let answering = scripted
         .router
-        .request(
-            Bytes::new(),
-            (request_of((None, super::TIMEOUT)), CallHooks::default()),
-        )
+        .request(Bytes::new(), request_of((None, super::TIMEOUT)))
         .expect("echo called");
 
     scripted.settle().await;
@@ -261,7 +255,7 @@ async fn counts_a_call_refused_before_it_goes_session_required_or_destination_un
         Err(CallError::Failure(failure)) => Some(failure.code().get()),
         Ok(_)
         | Err(
-            CallError::Cancelled
+            CallError::Cancelled(_)
             | CallError::Disconnected(_)
             | CallError::TimedOut(_)
             | CallError::Refused(_)
@@ -308,7 +302,10 @@ async fn counts_a_call_refused_before_it_goes_session_required_or_destination_un
     let cancelled = call_of(&scripted, cancelled).expect("a call aborted already");
 
     assert!(
-        matches!(super::answered(cancelled).await, Err(CallError::Cancelled)),
+        matches!(
+            super::answered(cancelled).await,
+            Err(CallError::Cancelled(_))
+        ),
         "an aborted signal cancels it"
     );
     scripted.settle().await;
@@ -379,7 +376,10 @@ async fn counts_a_call_its_caller_cancels_as_cancelled_and_one_its_transport_ref
     cancelling.cancel();
 
     assert!(
-        matches!(super::answered(cancelled).await, Err(CallError::Cancelled)),
+        matches!(
+            super::answered(cancelled).await,
+            Err(CallError::Cancelled(_))
+        ),
         "cancelled by its caller"
     );
 
@@ -416,9 +416,9 @@ async fn counts_a_notification_heard_under_a_subscription_it_holds_and_a_subscri
     let scripted = counted(&registry);
     let notification = Notified::new(None);
     let other = Notified::of(Procedure {
-        id: 2,
-        name: "other".to_owned(),
-        kind: Some(ProcedureKind::Notifies),
+        procedure_id: 2,
+        procedure_name: "other".to_owned(),
+        procedure_kind: Some(ProcedureKind::Notifies),
         ..echo()
     });
 
@@ -448,7 +448,10 @@ async fn counts_a_notification_heard_under_a_subscription_it_holds_and_a_subscri
     super::answered(again).await.expect("subscribed again");
     scripted
         .router
-        .unregister_notification((&notification.like(), true))
+        .unregister_notification(
+            &notification.like(),
+            &UnregisterNotificationOptions::default(),
+        )
         .await;
 
     // and again, a close drops it with no code; a subscription not yet answered, none
@@ -505,7 +508,11 @@ impl Clock for Coarse {
         self.fine.wall()
     }
 
-    fn arm(&self, schedule: Schedule, callback: TimerCallback) -> Arc<dyn Timer> {
+    fn arm(
+        &self,
+        schedule: Schedule,
+        callback: TimerCallback,
+    ) -> Result<Arc<dyn Timer>, crate::errors::ProgrammerError> {
         self.fine.arm(schedule, callback)
     }
 
@@ -525,7 +532,7 @@ async fn observes_a_call_on_a_clock_whose_monotonic_reading_moves_by_100_us_as_a
         fine: Arc::clone(&fine),
     });
     let transport = crate::testing::scripted::ScriptedClient::new(Arc::clone(&coarse));
-    let carried: Arc<dyn crate::transport::ClientTransport> =
+    let carried: Arc<dyn crate::transport::RouterClientTransport> =
         Arc::<crate::testing::scripted::ScriptedClient>::clone(&transport);
     let options = RouterClientOptions {
         metrics_registry: Some(registry.clone()),
@@ -543,13 +550,10 @@ async fn observes_a_call_on_a_clock_whose_monotonic_reading_moves_by_100_us_as_a
         let answering = router
             .request(
                 Bytes::new(),
-                (
-                    ClientRequest {
-                        series: series.clone(),
-                        ..request_of((None, super::TIMEOUT))
-                    },
-                    CallHooks::default(),
-                ),
+                RouterRequest {
+                    series: series.clone(),
+                    ..request_of((None, super::TIMEOUT))
+                },
             )
             .expect("echo called");
 

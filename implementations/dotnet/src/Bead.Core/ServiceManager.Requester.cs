@@ -31,20 +31,30 @@ public sealed partial class ServiceManager
             internal required Action<Procedure> Deprecated { get; init; }
         }
 
-        // a requester: given a payload, then options, one call
+        // a declaration checked as its maker makes it, before anything is declared: the side the
+        // maker is for first, since a maker that is not its router's way declares nothing, then spec
+        // 16.10's reasons, for the way of its side's requester
+        internal void CheckMade(Procedure procedure, (RouterSide Side, string Refusal) maker)
+        {
+            if (_router.Side != maker.Side)
+            {
+                throw new InvalidOperationException(maker.Refusal);
+            }
+
+            Identity.Check(procedure, (Identity.RequesterWayOf(maker.Side), nameof(procedure)));
+        }
+
+        // a requester of a client's: given a payload, then options, one request
         internal Func<TRequest, BoundCall<TResponse>> RequesterOf<TRequest, TResponse>(
             Procedure procedure,
-            (RequestDependencies<TRequest, TResponse> Dependencies, DebugType Type) made)
+            RequestDependencies<TRequest, TResponse> dependencies)
         {
-            ArgumentNullException.ThrowIfNull(procedure);
-            ArgumentNullException.ThrowIfNull(made.Dependencies);
-
             // declared as it is made (spec/debugging.md 7.2): each of its calls carries its series
             var series = _router.DeclareRequester(procedure);
 
             async Task<TResponse> Called(TRequest payload, RequestOptions? options)
             {
-                return (await CallOf(payload, (procedure, made.Dependencies.Serializer, options, (made.Type, null, series)))).Response;
+                return (await CallOf(payload, (procedure, dependencies.Serializer, OptionsOf(options), (DebugType.Request, null, series)))).Response;
             }
 
             return (payload) =>
@@ -56,20 +66,64 @@ public sealed partial class ServiceManager
             };
         }
 
-        // a call's options, with the defaults applied: the call's, then the manager's, which is 5 s when
-        // none, and no close; the timeout held as a call's, so the trace, the router and the error tell
-        // one number
-        private ResolvedRequestOptions OptionsOf(RequestOptions? given)
+        // a requester of a server's: given a payload, then options that name a connection, one command
+        internal Func<TRequest, BoundCommand<TResponse>> CommanderOf<TRequest, TResponse>(
+            Procedure procedure,
+            RequestDependencies<TRequest, TResponse> dependencies)
+        {
+            var series = _router.DeclareRequester(procedure);
+
+            async Task<TResponse> Called(TRequest payload, CommandOptions options)
+            {
+                return (await CallOf(payload, (procedure, dependencies.Serializer, OptionsOf(options), (DebugType.Command, null, series)))).Response;
+            }
+
+            return (payload) =>
+            {
+                return (options) =>
+                {
+                    // ! a caller whose nullable context is off can pass none; a connection it leaves
+                    // none is the router's to refuse
+                    ArgumentNullException.ThrowIfNull(options);
+
+                    return Called(payload, options);
+                };
+            };
+        }
+
+        // a request's options, with the defaults applied: the call's, then the manager's, which is 5 s
+        // when none; no connection, and no close on timeout, a command's alone. The timeout held as a
+        // call's, so the trace, the router and the error tell one number
+        internal ResolvedRequestOptions OptionsOf(RequestOptions? given)
         {
             return new ResolvedRequestOptions
             {
                 CancellationToken = given?.CancellationToken ?? CancellationToken.None,
-                CloseOnTimeout = given?.CloseOnTimeout ?? _defaults.CloseOnTimeout,
-                ConnectionHandle = given?.ConnectionHandle,
                 Credential = given?.Credential,
                 DestinationId = given?.DestinationId,
-                Timeout = Clocks.AssertHeld(("a call's timeout", nameof(RequestOptions.Timeout)), given?.Timeout ?? _defaults.Timeout!.Value),
+                Timeout = TimeoutOf(given?.Timeout),
             };
+        }
+
+        // a command's options, with the defaults applied: its connection, and its close on timeout, the
+        // call's or else the manager's
+        private ResolvedRequestOptions OptionsOf(CommandOptions given)
+        {
+            return new ResolvedRequestOptions
+            {
+                CancellationToken = given.CancellationToken,
+                CloseOnTimeout = given.CloseOnTimeout ?? _defaults.CloseOnTimeout,
+                ConnectionHandle = given.ConnectionHandle,
+                Credential = given.Credential,
+                DestinationId = given.DestinationId,
+                Timeout = TimeoutOf(given.Timeout),
+            };
+        }
+
+        // a call's timeout, or the manager's, held as a call's
+        private TimeSpan TimeoutOf(TimeSpan? given)
+        {
+            return Clocks.AssertHeld(("a call's timeout", nameof(RequestOptions.Timeout)), given ?? _defaults.Timeout!.Value);
         }
 
         // a result decoded; one that does not decode fails here, with the result's header
@@ -84,9 +138,11 @@ public sealed partial class ServiceManager
             catch (Exception reason)
             {
                 throw new FailureException(
-                    // ! a detail of the side's own words: the decoder's, for this side's caller alone
+                    // ! a detail of the side's own words: its codec's reason, in spec 17.2's words; the
+                    // rest in its inner exception
                     Failure.OfProtocol(ProtocolCode.PayloadUndecodable, reason.Message),
-                    (new FailureException.Raised(FailureOrigin.Local, _router.Side), reason))
+                    new FailureException.Raised(FailureOrigin.Local, _router.Side),
+                    new FailureExceptionOptions { Cause = reason })
                 {
                     DestinationId = call.Options.DestinationId,
                     Header = result.Header,
@@ -121,18 +177,18 @@ public sealed partial class ServiceManager
         }
 
         // one call — a request, a command, or the request that subscribes a notification: its options
-        // with the defaults applied, its trace, the request, the close on timeout, and its result
-        // decoded; a timeout refused fails as the options are resolved, and a value that does not write
-        // as it is written, both before the trace and the deprecation: no call is made (spec 17.2,
-        // item 4; spec/debugging.md 4.3). A value its rules refuse is a call refused before it goes:
-        // handed to the router with its refusal, which fails it in its turn, counted, its tx step told
-        // as it is refused, no call id drawn (spec 18.2; spec/debugging.md 4.4, 9.6)
+        // as its maker resolved them, the defaults applied, its trace, the request, the close on
+        // timeout, and its result decoded; a timeout refused fails as the options are resolved, and a
+        // value that does not write as it is written, both before the trace and the deprecation: no
+        // call is made (spec 17.2, item 4; spec/debugging.md 4.3). A value its rules refuse is a call
+        // refused before it goes: handed to the router with its refusal, which fails it in its turn,
+        // counted, its tx step told as it is refused, no call id drawn (spec 18.2; spec/debugging.md
+        // 4.4, 9.6)
         internal async Task<(uint CallId, TResponse Response)> CallOf<TRequest, TResponse>(
             TRequest payload,
-            (Procedure Procedure, IRequestSerializerClient<TRequest, TResponse> Serializer, RequestOptions? Options, (DebugType Type, INotificationLike? Subscribes, ProcedureSeries? Series) Made) call)
+            (Procedure Procedure, IRequestSerializerClient<TRequest, TResponse> Serializer, ResolvedRequestOptions Options, (DebugType Type, INotificationLike? Subscribes, ProcedureSeries? Series) Made) call)
         {
-            var (procedure, serializer, given, (type, subscribes, series)) = call;
-            var options = OptionsOf(given);
+            var (procedure, serializer, options, (type, subscribes, series)) = call;
             var (encoded, refusal) = WrittenOf(serializer, payload);
 
             // * one check a call while nobody listens: no clock read, no step, no copy of its options,

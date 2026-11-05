@@ -110,7 +110,7 @@ const connectWorker = async (
     return response(request.payload.slice().reverse());
   });
   await server.transport.start();
-  await client.connect({});
+  await client.connect();
 
   return {
     client,
@@ -154,7 +154,7 @@ test.describe('a server in a worker, and a client to it', () => {
       })
       .toEqual(['first']);
 
-    client.services.getRequestResolver(ping, { serializer: text })((request, response) => {
+    client.services.getCommandResolver(ping, { serializer: text })((request, response) => {
       return response(`${request.payload} pong`);
     });
 

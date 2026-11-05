@@ -442,7 +442,7 @@ test.describe('createRelay, credentials', () => {
 
   test('counts ELSEWHERE in leg B’s payload bound and forwards its carried credential at the boundary', async () => {
     await using server = createMemoryTransportServer();
-    await using transport = createMemoryTransportClient({ server });
+    await using transport = createMemoryTransportClient();
     using relay = createRouterServer(server, {
       relay: {
         beforeRoute: () => {
@@ -476,7 +476,7 @@ test.describe('createRelay, credentials', () => {
     );
 
     await server.start();
-    await transport.connect({});
+    await transport.connect({ server });
 
     const request = {
       options: {

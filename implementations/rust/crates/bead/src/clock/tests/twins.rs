@@ -1,0 +1,164 @@
+//! The shared clock kit refuses invalid timers and nested advances, and truncates dues.
+
+use core::future::poll_fn;
+use core::task::Poll;
+use core::time::Duration;
+use std::sync::{Arc, Mutex};
+
+use crate::clock::{Clock, LayeredClocks, Schedule, SharedClock, SystemClock, clock_of};
+use crate::duration::LONGEST_TIMER;
+use crate::testing::{SteppingClock, instants};
+use crate::transport::{caught, caught_future};
+
+#[test]
+fn refuses_a_timer_or_a_period_bead_never_arms_under_a_millisecond_or_past_the_ceiling_naming_it() {
+    let clock = SteppingClock::new(instants::new_year());
+    for due in [
+        Duration::ZERO,
+        Duration::from_micros(500),
+        LONGEST_TIMER.saturating_add(Duration::from_millis(1)),
+    ] {
+        for schedule in [Schedule::Once(due), Schedule::Every(due)] {
+            let refused = caught(("a test timer", || clock.arm(schedule, Box::new(|| {}))))
+                .expect_err("an invalid delay");
+            assert!(refused.to_string().ends_with(&format!("a test clock arms a timer for 1 to 2147483647 milliseconds, as Bead does, not {due:?}")));
+        }
+    }
+    assert_eq!(clock.dues(), []);
+}
+
+#[tokio::test]
+async fn counts_a_due_in_whole_milliseconds_a_fraction_dropped_from_1_to_the_ceiling() {
+    let clock = SteppingClock::new(instants::new_year());
+    let fired = Arc::new(Mutex::new(Vec::new()));
+    let mut timers = Vec::new();
+    for due in [Duration::from_micros(1_900), LONGEST_TIMER] {
+        let reading = Arc::clone(&clock);
+        let firing = Arc::clone(&fired);
+        timers.push(
+            clock
+                .arm(
+                    Schedule::Once(due),
+                    Box::new(move || {
+                        firing
+                            .lock()
+                            .expect("the readings")
+                            .push(reading.monotonic().as_millis());
+                    }),
+                )
+                .expect("a held timer"),
+        );
+    }
+    clock.advance(Duration::from_millis(1)).await;
+    clock
+        .advance(LONGEST_TIMER.saturating_sub(Duration::from_millis(1)))
+        .await;
+    assert_eq!(*fired.lock().expect("the readings"), [1, 2_147_483_647]);
+    for timer in timers {
+        timer.cancel();
+    }
+}
+
+#[tokio::test]
+async fn refuses_an_advance_within_another_and_takes_one_once_it_ends() {
+    let clock = SteppingClock::new(instants::new_year());
+    let mut advancing = Box::pin(clock.advance(Duration::from_millis(1_000)));
+    assert!(
+        poll_fn(|context| Poll::Ready(advancing.as_mut().poll(context)))
+            .await
+            .is_pending()
+    );
+    let refused = caught_future(("a clock advance", clock.advance(Duration::from_millis(1))))
+        .await
+        .expect_err("a nested advance");
+    assert!(refused.to_string().ends_with(
+        "a test clock advances once at a time: an advance within another would move it back"
+    ));
+    advancing.await;
+    clock.advance(Duration::from_millis(1)).await;
+    assert_eq!(clock.monotonic(), Duration::from_millis(1_001));
+}
+
+#[tokio::test]
+async fn describes_the_platform_s_clock_and_one_of_the_application_s_own() {
+    let own = SteppingClock::new(instants::new_year());
+    let platform = SystemClock::current().expect("a platform clock");
+    assert_eq!(own.description(), "one of its own");
+    assert_eq!(platform.description(), "the platform's");
+}
+
+#[tokio::test]
+async fn a_layer_runs_on_the_clock_of_the_one_beneath_it_unless_given_one_and_refuses_one_that_differs_naming_both()
+ {
+    let beneath: SharedClock = SteppingClock::new(instants::new_year());
+    let given: SharedClock = SteppingClock::new(instants::new_year());
+    let platform: SharedClock = Arc::new(SystemClock::current().expect("a platform clock"));
+    let layered = |(beneath, given): (Option<&SharedClock>, Option<&SharedClock>)| {
+        clock_of(&LayeredClocks {
+            beneath,
+            given,
+            layer: "a server",
+            below: "its transport",
+        })
+    };
+    for (below, own, expected) in [
+        (Some(&beneath), None, &beneath),
+        (Some(&beneath), Some(&beneath), &beneath),
+        (None, Some(&given), &given),
+    ] {
+        assert!(Arc::ptr_eq(
+            &layered((below, own))
+                .expect("one clock")
+                .expect("a clock selected"),
+            expected
+        ));
+    }
+    assert!(
+        layered((None, None))
+            .expect("the builder supplies its platform clock")
+            .is_none()
+    );
+    for (given, description) in [(&given, "one of its own"), (&platform, "the platform's")] {
+        assert_eq!(
+            layered((Some(&beneath), Some(given)))
+                .expect_err("two clocks")
+                .message(),
+            format!(
+                "a server runs on the clock of its transport, one of its own, and was given another, {description}"
+            )
+        );
+    }
+}
+
+// no globals to install on this side: the test kit's clock is a clock of its own, which moves as
+// it is advanced alone, never the platform's
+#[tokio::test]
+async fn a_fake_one_never_installed_is_one_its_timers_fire_and_its_readings_move_as_it_is_advanced_the_globals_never()
+ {
+    let stepping = SteppingClock::new(instants::new_year());
+    let clock: SharedClock = Arc::<SteppingClock>::clone(&stepping);
+    let fired = Arc::new(Mutex::new(Vec::new()));
+    let (reading, firing) = (Arc::clone(&clock), Arc::clone(&fired));
+    let started_at = (clock.monotonic(), clock.wall());
+    let _timer = clock
+        .arm(
+            Schedule::Once(Duration::from_millis(250)),
+            Box::new(move || {
+                firing.lock().expect("the readings").push(reading.wall());
+            }),
+        )
+        .expect("a held timer");
+
+    stepping.advance(Duration::from_millis(249)).await;
+    assert_eq!(*fired.lock().expect("the readings"), []);
+
+    stepping.advance(Duration::from_millis(1)).await;
+    assert_eq!(
+        *fired.lock().expect("the readings"),
+        [started_at.1 + Duration::from_millis(250)]
+    );
+    assert_eq!(
+        clock.monotonic().checked_sub(started_at.0),
+        Some(Duration::from_millis(250))
+    );
+}

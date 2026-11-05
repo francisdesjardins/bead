@@ -44,6 +44,13 @@ public delegate Task ServiceNotificationResolverCallback<TRequest, TResult, TFai
     where TFailure : IApplicationFailure;
 
 /// <summary>
+/// What notifies the subscribers of one procedure that notifies, as its options, when any, filter
+/// them: a server side's handle of that procedure, given before its service is offered.
+/// </summary>
+/// <typeparam name="TNotification">What a notification carries.</typeparam>
+public delegate Task Notifier<TNotification>(TNotification notification, NotifyOptions? options = null);
+
+/// <summary>
 /// The hooks a server side of <typeparamref name="TService"/> is given, as the service layer reads
 /// them: each by the name its procedures give it. A service's record of hooks, which beadc generates
 /// with a required member a hook, implements it.
@@ -60,11 +67,12 @@ public interface IServiceAdmissions<TService>
 public sealed record ServiceServerOptions<TService>
 {
     /// <summary>
-    /// The hooks its procedures name, an empty record where they name none: a hook a procedure
-    /// names that they lack, one they give that no procedure names, and one that is null, are an
-    /// <see cref="ArgumentException"/>.
+    /// The hooks its procedures name, none where they name none: required exactly when a procedure
+    /// names a hook (0047), so that their absence then, a hook a procedure names that they lack, one
+    /// they give that no procedure names, and one that is null, are an
+    /// <see cref="ArgumentException"/> as the service is built.
     /// </summary>
-    public required IServiceAdmissions<TService> Admissions { get; init; }
+    public IServiceAdmissions<TService>? Admissions { get; init; }
 
     /// <summary>
     /// Whether the judging of a request by its procedure's rules stops at its first violation,
@@ -148,7 +156,8 @@ public sealed class ServiceServer<TService, TData>
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        // ! a record past the types, null, gives no hook, as the TypeScript side reads admissions undefined
+        // none given gives no hook, as the TypeScript side reads admissions undefined: a procedure that
+        // names one is refused by the check that follows
         return options.Admissions?.ToDictionary() ?? new Dictionary<string, AdmissionHook>();
     }
 
@@ -168,7 +177,7 @@ public sealed class ServiceServer<TService, TData>
 
         Register(procedure, (server) =>
         {
-            server.Services.GetRequestResolver(
+            server.Services.Manager.GetRequestResolver(
                 procedure.Procedure,
                 new RequestResolverDependencies<TRequest, TResult>
                 {
@@ -201,7 +210,7 @@ public sealed class ServiceServer<TService, TData>
 
         Register(procedure, (server) =>
         {
-            var resolver = server.Services.GetNotificationResolver(
+            var resolver = server.Services.Manager.GetNotificationResolver(
                 procedure.Procedure,
                 new NotificationResolverDependencies<TRequest, TResult, TNotification>
                 {
@@ -249,7 +258,7 @@ public sealed class ServiceServer<TService, TData>
 
             foreach (var procedure in _procedures.Values.Where(ServiceLayer.IsCommand))
             {
-                _commands[procedure.Procedure.Address] = ((IDescribedProcedure)procedure).RequesterOn(server.Services, _judging);
+                _commands[procedure.Procedure.Address] = ((IDescribedProcedure)procedure).RequesterOn(server.Services.Manager, _judging);
             }
 
             registering = [.. _resolvers.Values];
@@ -266,7 +275,7 @@ public sealed class ServiceServer<TService, TData>
     /// called before the service is offered is an <see cref="InvalidOperationException"/>; a command
     /// the service lacks, an <see cref="ArgumentException"/>.
     /// </summary>
-    public Func<TRequest, BoundCall<TResult>> CommandOf<TRequest, TResult, TFailure>(CommandProcedure<TService, TRequest, TResult, TFailure> procedure)
+    public Func<TRequest, BoundCommand<TResult>> CommandOf<TRequest, TResult, TFailure>(CommandProcedure<TService, TRequest, TResult, TFailure> procedure)
         where TFailure : IApplicationFailure
     {
         ArgumentNullException.ThrowIfNull(procedure);
@@ -283,7 +292,7 @@ public sealed class ServiceServer<TService, TData>
                 _commands.TryGetValue(address, out made);
             }
 
-            if (made is not Func<TRequest, BoundCall<TResult>> requester)
+            if (made is not Func<TRequest, BoundCommand<TResult>> requester)
             {
                 throw new InvalidOperationException(
                     $"{procedure.Procedure.ProcedureName} is a command of a service not offered yet: its requester is made as the service is offered");
@@ -298,7 +307,7 @@ public sealed class ServiceServer<TService, TData>
     /// the service is offered, or before its resolver is registered, it sends nothing and resolves. A
     /// procedure the service lacks is an <see cref="ArgumentException"/>.
     /// </summary>
-    public Func<TNotification, NotifyOptions?, Task> NotifierOf<TRequest, TResult, TNotification, TFailure>(
+    public Notifier<TNotification> NotifierOf<TRequest, TResult, TNotification, TFailure>(
         RequestProcedure<TService, TRequest, TResult, TNotification, TFailure> procedure)
         where TFailure : IApplicationFailure
     {
@@ -425,7 +434,7 @@ internal static class ServiceLayer
             {
                 if (!hooks.ContainsKey(name))
                 {
-                    throw new ArgumentException($"a procedure names the hook {name}, which the options lack", nameof(hooks));
+                    throw new ArgumentException($"{procedure.Procedure.ProcedureName} is admitted by the hook {name}, which the options do not give", nameof(hooks));
                 }
 
                 named.Add(name);
@@ -436,7 +445,7 @@ internal static class ServiceLayer
         {
             if (!named.Contains(name))
             {
-                throw new ArgumentException($"the options give the hook {name}, which no procedure names", nameof(hooks));
+                throw new ArgumentException($"the hook {name} is given, and no procedure names it", nameof(hooks));
             }
 
             if (hook?.Admits is null)

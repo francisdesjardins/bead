@@ -31,7 +31,7 @@ import { wholeEnvelopeLimitsOf } from '../../../router/shared/whole-envelope-lim
 import { CONNECTION_INACTIVITY_TIMEOUT } from '../../../server/http-server';
 import { createServer } from '../../../server/server';
 import type { IServer, IServerTransportLike } from '../../../server/types';
-import { createWSServer } from '../../../server/ws-server';
+import { createWebSocketServer } from '../../../server/websocket-server';
 import { BrokerRefusedError } from '../../client/broker-transport-client';
 import { createAmqpBrokerAdapter, type IAmqpBrokerAdapter } from '../../shared/amqp-broker-adapter';
 import {
@@ -77,7 +77,11 @@ import type {
   TransportServerConnectionHandle,
 } from '../types';
 import { ACCEPT_TIMEOUT } from '../broker-transport-server';
-import { createWSTransportServer, HEARTBEAT, MAXIMUM_UNSENT_BYTES } from '../ws-transport-server';
+import {
+  createWebSocketTransportServer,
+  HEARTBEAT,
+  MAXIMUM_UNSENT_BYTES,
+} from '../websocket-transport-server';
 import {
   createBrokerPeers,
   expectedSeenOf,
@@ -238,6 +242,7 @@ interface IBrokerStep extends Partial<IPublication> {
   leave?: string;
   lose?: string;
   on?: string;
+  participant?: 'start' | 'stop' | { stop: { crossing: IPublication } };
   reported?: string[];
   stop?: true | { crossing: IPublication };
   takeover?: 'client' | 'server';
@@ -349,6 +354,7 @@ const BROKER_STEP_KEYS: ReadonlySet<string> = new Set([
   'leave',
   'lose',
   'on',
+  'participant',
   'publish',
   'refused',
   'reported',
@@ -766,7 +772,7 @@ const serverOf = (
   } = options;
 
   if (transport === 'websocket') {
-    return createWSServer<string>({
+    return createWebSocketServer<string>({
       credentials: interopCredentialsOf(clock, limits),
       limits,
       transport: {
@@ -1385,7 +1391,7 @@ const placedOf = async (
  * transport alone over the participant `client`, with no reconnection; its adapter wrapped to note
  * the lives it asks; the test's peers and twin publishing parcels and reading their inboxes. Its
  * `maximumEnvelopePartsBytes` is its router's `maximumEnvelopeBytes` unless the case sets it. Every
- * participant is stopped before the next case, whose own a link left up would take over.
+ * participant is disposed before the next case, whose own a link left up would take over.
  */
 const playBrokerCase = async (
   testCase: ICase,
@@ -1464,7 +1470,7 @@ const playBrokerCase = async (
       heldBytesBudget: options.heldBytesBudget,
       maximumEnvelopePartsBytes: options.maximumEnvelopePartsBytes ?? limits?.maximumEnvelopeBytes,
       minimumBodyBytesPerSecond: options.minimumBodyBytesPerSecond,
-      reconnect: isClient ? false : {},
+      reconnects: !isClient,
     });
 
     if (isClient) {
@@ -1505,7 +1511,7 @@ const playBrokerCase = async (
       transportServer.on('error', (error, connectionHandle) => {
         errors.push({ connectionHandle, error });
       });
-      transportServer.on('connection', (...[peer, , connectionHandle]) => {
+      transportServer.on('connection', (...[{ socket: peer }, connectionHandle]) => {
         addresses.set(connectionHandle, peer.id);
       });
       transportServer.on('close', (wasClean, connectionHandle) => {
@@ -1597,6 +1603,18 @@ const playBrokerCase = async (
 
       if (step.leave !== undefined) {
         await peers.leave(step.leave);
+      }
+
+      // * the participant under test stopped in place, or started again, settled (spec 15.21); what
+      // crosses its stop is published in the turn it begins, before it
+      if (step.participant === 'stop') {
+        await participant.stop();
+      } else if (typeof step.participant === 'object') {
+        const crossing = peers.publish(step.participant.stop.crossing, values);
+
+        await Promise.all([crossing, participant.stop()]);
+      } else if (step.participant === 'start') {
+        await participant.start();
       }
 
       if (step.connect !== undefined && client !== undefined) {
@@ -1798,7 +1816,7 @@ const playBrokerCase = async (
     await twin?.[Symbol.asyncDispose]();
     await server?.[Symbol.asyncDispose]();
     await client?.[Symbol.asyncDispose]();
-    await participant?.stop();
+    await participant?.[Symbol.asyncDispose]();
     await world[Symbol.asyncDispose]();
   }
 };
@@ -1857,7 +1875,9 @@ test.describe('the transports', () => {
   test('bounds default to what the file states', async () => {
     // the bound the WebSocket transport server takes when built alone and told none
     const fake = createFakeWebSocketServer();
-    const wsTransport = createWSTransportServer({ WebSocketServer: fake.FakeWebSocketServer });
+    const wsTransport = createWebSocketTransportServer({
+      WebSocketServer: fake.FakeWebSocketServer,
+    });
     const starting = wsTransport.start({ address: HOST, port: 4_321 });
 
     fake.instances[0]?.emit('listening');

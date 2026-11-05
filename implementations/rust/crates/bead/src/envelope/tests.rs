@@ -4,12 +4,17 @@
 use bytes::Bytes;
 
 use super::{
-    ChunkHeader, Credential, CreditHeader, FailureHeader, FailureRecord, Header, RequestHeader,
-    ResultHeader, header_bytes_of, write_failure, write_header,
+    ChunkHeader, Credential, CreditHeader, EnvelopeHeader, FailureHeader, FailureRecord,
+    RequestHeader, ResultHeader, header_bytes_of, write_failure, write_header,
 };
 use crate::constants::{CredentialScheme, FailureScope};
 use crate::router::types::LIMIT_DEFAULTS;
 use crate::testing::hexadecimal;
+
+mod fuzz;
+mod redaction;
+mod twins;
+mod vectors;
 
 const TWO_TO_53: u64 = 1 << 53;
 
@@ -40,7 +45,7 @@ fn refuses_to_write_a_header_and_writes_nothing() {
     let unwritable = [
         (
             "a call id of 0",
-            Header::Result(ResultHeader {
+            EnvelopeHeader::Result(ResultHeader {
                 call_id: 0,
                 ..result(None)
             }),
@@ -48,7 +53,7 @@ fn refuses_to_write_a_header_and_writes_nothing() {
         ),
         (
             "a service id of 0",
-            Header::Request(RequestHeader {
+            EnvelopeHeader::Request(RequestHeader {
                 service_id: 0,
                 ..request(None)
             }),
@@ -56,7 +61,7 @@ fn refuses_to_write_a_header_and_writes_nothing() {
         ),
         (
             "a procedure id of 0",
-            Header::Request(RequestHeader {
+            EnvelopeHeader::Request(RequestHeader {
                 procedure_id: 0,
                 ..request(None)
             }),
@@ -64,7 +69,7 @@ fn refuses_to_write_a_header_and_writes_nothing() {
         ),
         (
             "a destination id of 0",
-            Header::Request(RequestHeader {
+            EnvelopeHeader::Request(RequestHeader {
                 destination_id: Some(0),
                 ..request(None)
             }),
@@ -72,7 +77,7 @@ fn refuses_to_write_a_header_and_writes_nothing() {
         ),
         (
             "a request paced that opens no subscription",
-            Header::Request(RequestHeader {
+            EnvelopeHeader::Request(RequestHeader {
                 paced: true,
                 ..request(None)
             }),
@@ -80,7 +85,7 @@ fn refuses_to_write_a_header_and_writes_nothing() {
         ),
         (
             "an offset of 2^53",
-            Header::Chunk(ChunkHeader {
+            EnvelopeHeader::Chunk(ChunkHeader {
                 call_id: 7,
                 offset: TWO_TO_53,
                 is_last: true,
@@ -89,7 +94,7 @@ fn refuses_to_write_a_header_and_writes_nothing() {
         ),
         (
             "an end of 2^53",
-            Header::Credit(CreditHeader {
+            EnvelopeHeader::Credit(CreditHeader {
                 call_id: 7,
                 credit_end: TWO_TO_53,
                 paced: false,
@@ -98,7 +103,7 @@ fn refuses_to_write_a_header_and_writes_nothing() {
         ),
         (
             "a total of 2^53",
-            Header::Result(ResultHeader {
+            EnvelopeHeader::Result(ResultHeader {
                 call_id: 3,
                 total: Some(TWO_TO_53),
                 credential: None,
@@ -129,40 +134,40 @@ fn refuses_a_credential_its_kind_does_not_take_or_its_scheme_does_not_hold() {
     let unwritable = [
         (
             "NONE on a request",
-            Header::Request(request(Some(Credential::None))),
+            EnvelopeHeader::Request(request(Some(Credential::None))),
         ),
         (
             "a JWT on a result",
-            Header::Result(result(Some(Credential::Jwt(Bytes::from_static(b"a"))))),
+            EnvelopeHeader::Result(result(Some(Credential::Jwt(Bytes::from_static(b"a"))))),
         ),
         (
             "ELSEWHERE on a failure",
-            Header::Failure(FailureHeader {
+            EnvelopeHeader::Failure(FailureHeader {
                 call_id: 2,
                 credential: Some(Credential::Elsewhere),
             }),
         ),
         (
             "a scheme to come on a result",
-            Header::Result(result(Some(Credential::ToCome {
+            EnvelopeHeader::Result(result(Some(Credential::ToCome {
                 scheme: CredentialScheme::new(4),
                 bytes: Bytes::new(),
             }))),
         ),
         (
             "a JWT of no character",
-            Header::Request(request(Some(Credential::Jwt(Bytes::new())))),
+            EnvelopeHeader::Request(request(Some(Credential::Jwt(Bytes::new())))),
         ),
         (
             "a JWT of 1,005 characters",
-            Header::Request(request(Some(Credential::Jwt(Bytes::from(vec![
+            EnvelopeHeader::Request(request(Some(Credential::Jwt(Bytes::from(vec![
                 b'a';
                 1_005
             ]))))),
         ),
         (
             "a scheme to come numbered as one the protocol names",
-            Header::Request(request(Some(Credential::ToCome {
+            EnvelopeHeader::Request(request(Some(Credential::ToCome {
                 scheme: CredentialScheme::JWT,
                 bytes: Bytes::from_static(b"a"),
             }))),
@@ -198,6 +203,10 @@ fn detail_of(detail: &str) -> String {
     String::from_utf8(record.get(4..).unwrap_or_default().to_vec()).expect("a detail in UTF-8")
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test repeats its own string a bounded number of times"
+)]
 fn letters(count: usize) -> String {
     "a".repeat(count)
 }
@@ -272,5 +281,23 @@ fn writes_a_lone_surrogate_as_u_fffd() {
         hexadecimal::text_of(&write_failure(&record, 1_024)),
         "00 13 00 00 61 EF BF BD 62",
         "the surrogate written as U+FFFD"
+    );
+}
+
+// the envelope's codec is internal on every side (decision 0047): the root offers none of it, and
+// the workspace's own members reach it through `internal`
+#[test]
+fn refuses_the_envelope_codec_at_the_root() {
+    let consumer = crate::testing::surface::Consumer::new();
+
+    for name in ["read_envelope", "write_envelope"] {
+        consumer.refuses(
+            &format!("pub fn check() {{ let _ = bead::{name}; }}"),
+            ("E0425", name),
+        );
+    }
+
+    consumer.accepts(
+        "pub fn check() { let _ = (bead::internal::read_envelope, bead::internal::write_envelope); let _ = bead::internal::ReadEnvelopeOptions::default(); }",
     );
 }

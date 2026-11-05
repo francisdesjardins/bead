@@ -24,6 +24,7 @@ import type {
   TransportServerToldEvent,
 } from './types';
 
+export type { IGauges } from '../shared/types';
 export type { IJoinableTransportServer, IJoinedTransportServer } from './types';
 
 // constants
@@ -95,14 +96,14 @@ const clockOf = (transports: readonly IJoinableTransportServer[]): IClock | unde
  * type, whose handles might be one, are a {@link ProgrammerError} as the join is built: one
  * transport binds both addresses instead. So is none, a join among them, and two clocks.
  *
- * A connection's flags, sends and closes go to the transport that drew its handle; each transport's
- * events are told on with that handle, in the order it told them, each listener within a guard
- * (spec 15.1). It starts nothing and serves no port: an application starts each transport, where it
- * listens; one port for two comes from a proxy in front of them.
+ * A connection's flags, sends, closes, pauses and resumes go to the transport that drew its
+ * handle; each transport's events are told on with that handle, in the order it told them, each
+ * listener within a guard (spec 15.1). It starts nothing and serves no port: an application starts
+ * each transport, where it listens; one port for two comes from a proxy in front of them.
  *
  * @example
  * const memory = createMemoryTransportServer();
- * const webSocket = createWSTransportServer({ WebSocketServer });
+ * const webSocket = createWebSocketTransportServer({ WebSocketServer });
  * const server = createServer({ transport: joinTransports([memory, webSocket]) });
  *
  * await memory.start();
@@ -135,6 +136,8 @@ export const joinTransports = <const Transports extends readonly IJoinableTransp
   }
 
   const clock = clockOf(transports);
+  // its dispose, which every later one shares
+  let disposed: Promise<void> | undefined;
   const emitter = createEmitter<TransportServerEventMap>();
   // each transport's gauges: its own, or, for one that counts nothing, its connections as its
   // events told them
@@ -152,7 +155,7 @@ export const joinTransports = <const Transports extends readonly IJoinableTransp
     if (transport.gauges === undefined) {
       const handles = new Set<TransportServerConnectionHandle>();
 
-      transport.on(CONNECTION_EVENT, (...[, , connectionHandle]) => {
+      transport.on(CONNECTION_EVENT, (...[, connectionHandle]) => {
         handles.add(connectionHandle);
       });
       transport.on(CLOSE_EVENT, (_, connectionHandle) => {
@@ -215,6 +218,13 @@ export const joinTransports = <const Transports extends readonly IJoinableTransp
 
       return owner === undefined ? false : (owner.isTwoWay?.(connectionHandle) ?? true);
     },
+    // ! to the transport that drew the handle, by its type, unique within a join (spec 15.14)
+    pause: (connectionHandle) => {
+      ownerOf(connectionHandle)?.pause(connectionHandle);
+    },
+    resume: (connectionHandle) => {
+      ownerOf(connectionHandle)?.resume(connectionHandle);
+    },
     send: (message, connectionHandle) => {
       return ownerOf(connectionHandle)?.send(message, connectionHandle) ?? Promise.resolve();
     },
@@ -231,8 +241,26 @@ export const joinTransports = <const Transports extends readonly IJoinableTransp
         }
       }
     },
+    // * it starts nothing: its dispose disposes every transport it joined, final for each, and a
+    // later dispose settles with the first
     [Symbol.asyncDispose]: () => {
-      return joined.stop();
+      disposed ??= (async () => {
+        const outcomes = await Promise.allSettled(
+          transports.map((transport) => {
+            return Symbol.asyncDispose in transport
+              ? (transport as AsyncDisposable)[Symbol.asyncDispose]()
+              : transport.stop();
+          })
+        );
+
+        for (const outcome of outcomes) {
+          if (outcome.status === 'rejected') {
+            throw outcome.reason;
+          }
+        }
+      })();
+
+      return disposed;
     },
   };
 

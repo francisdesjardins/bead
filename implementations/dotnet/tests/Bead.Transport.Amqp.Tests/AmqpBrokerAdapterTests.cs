@@ -245,7 +245,11 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
             return IsAttachOf(frame, NameQueue);
         };
 
-        await using var adapter = AdapterOf();
+        await using var adapter = AdapterOf((options) =>
+        {
+            // * its stop's drain bounded short: what has not gone by then fails (spec 15.24)
+            return options with { ConnectTimeout = TimeSpan.FromMilliseconds(300) };
+        });
         var (_, downs) = HeardOf(adapter);
         var connection = await LinkUp((adapter, _script));
         Assert.Equal(BrokerPublished.Taken, await adapter.Publish(new BrokerPublication { Payload = (byte[])[1], Topic = Inbox }));
@@ -304,7 +308,11 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
             return (frame.Performative is AmqpTransfer && !IsRequestOf(frame, "PUT") && !IsRequestOf(frame, "POST")) || IsAttachOf(frame, NameQueue);
         };
 
-        await using var adapter = AdapterOf();
+        await using var adapter = AdapterOf((options) =>
+        {
+            // * its stop's drain bounded short: what has not gone by then fails (spec 15.24)
+            return options with { ConnectTimeout = TimeSpan.FromMilliseconds(300) };
+        });
         var (_, downs) = HeardOf(adapter);
         var connection = await LinkUp((adapter, _script));
         var sent = adapter.Publish(new BrokerPublication { Payload = (byte[])[1], Topic = Inbox });
@@ -604,7 +612,7 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
                 Password = null,
                 PasswordProvider = (_) =>
                 {
-                    return Task.FromResult($"{Password}-{Interlocked.Increment(ref asked)}");
+                    return ValueTask.FromResult($"{Password}-{Interlocked.Increment(ref asked)}");
                 },
             };
         });
@@ -1629,11 +1637,20 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
             return options with { ConnectTimeout = TimeSpan.FromMilliseconds(300) };
         });
         var (messages, downs) = HeardOf(adapter);
+        var told = new ConcurrentQueue<string>();
+
+        adapter.Down += (_) =>
+        {
+            told.Enqueue("down");
+        };
+
         var connection = await LinkUp((adapter, _script));
 
         await adapter.Subscribe(Name).WaitAsync(Patience, Cancelled);
 
-        // * what it handed on not settled within it: no DETACH goes, and its link is lost
+        // * what it handed on not settled within it: no DETACH goes, and its link is lost, its
+        // let-go failed before its link is told lost, so that a stop that let it go reads that bound
+        // passed (spec 15.21)
         var name = connection.LinkOf(NameQueue);
 
         await connection.Deliver((name, ParcelOf([1])));
@@ -1641,12 +1658,24 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
         {
             return !messages.IsEmpty;
         });
+
+        var leaving = adapter.Unsubscribe(Name);
+
+        _ = leaving.ContinueWith(
+            (_) =>
+            {
+                told.Enqueue("failed");
+            },
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
         Assert.Equal(LostWithin, (await Assert.ThrowsAsync<IOException>(() =>
         {
-            return adapter.Unsubscribe(Name);
+            return leaving;
         })).Message);
         await connection.Closed.WaitAsync(Patience, Cancelled);
         Assert.Equal((1, false, 0), (downs.Count, adapter.IsLinked, adapter.Unsettled));
+        Assert.Equal(["failed", "down"], told);
         Assert.DoesNotContain(connection.Frames, (frame) =>
         {
             return frame.Performative is global::Amqp.Framing.Detach detach && frame.Channel == name.Channel && detach.Handle == name.Handle;
@@ -2536,7 +2565,7 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
                 Password = null,
                 PasswordProvider = (_) =>
                 {
-                    return asking.Task;
+                    return new ValueTask<string>(asking.Task);
                 },
             };
         }))
@@ -2713,6 +2742,380 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Fails_its_start_once_its_password_provider_outlives_its_connect_timeout_and_takes_no_late_answer()
+    {
+        var late = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var adapter = AdapterOf((options) =>
+        {
+            return options with
+            {
+                ConnectTimeout = TimeSpan.FromMilliseconds(200),
+                Password = null,
+                PasswordProvider = (_) =>
+                {
+                    return new ValueTask<string>(late.Task);
+                },
+            };
+        });
+        var (_, downs) = HeardOf(adapter);
+
+        Assert.Equal("the link of ada had no password within 200 ms, its connectTimeout", Assert.IsType<TimeoutException>(await FailureOf(() =>
+        {
+            return adapter.Start();
+        })).Message);
+
+        // * its answer, come too late, opens no connection
+        late.SetResult(Password);
+        await Assert.ThrowsAsync<TimeoutException>(() =>
+        {
+            return _script.Connection(TimeSpan.FromMilliseconds(300));
+        });
+        Assert.Equal((false, 0), (adapter.IsLinked, downs.Count));
+
+        // * one connectTimeout from its start's call: its OPEN and sessions wait what its ask left of it
+        _script.Holding = (frame) =>
+        {
+            return frame.Performative is Attach { Role: false } attach && (attach.Target as Target)?.Address is null;
+        };
+
+        await using var slow = AdapterOf((options) =>
+        {
+            return options with
+            {
+                ConnectTimeout = TimeSpan.FromMilliseconds(600),
+                Password = null,
+                PasswordProvider = async (token) =>
+                {
+                    await Task.Delay(450, token);
+
+                    return Password;
+                },
+            };
+        });
+        var began = Stopwatch.StartNew();
+        var waiting = FailureOf(() =>
+        {
+            return slow.Start();
+        });
+        var held = await _script.Connection();
+
+        Assert.Equal("the link of ada had no OPEN and no sessions within 600 ms, its connectTimeout", Assert.IsType<TimeoutException>(await waiting).Message);
+        Assert.True(began.Elapsed < TimeSpan.FromMilliseconds(900));
+        await held.Closed.WaitAsync(Patience, Cancelled);
+    }
+
+    [Fact]
+    public async Task Ends_its_start_once_stopped_as_its_password_is_asked_and_links_at_the_next_start_asked_anew()
+    {
+        var asked = 0;
+        await using var adapter = AdapterOf((options) =>
+        {
+            return options with
+            {
+                Password = null,
+                PasswordProvider = (_) =>
+                {
+                    var count = Interlocked.Increment(ref asked);
+
+                    // * the first ask never answers, nor hears its token
+                    return count == 1 ? new ValueTask<string>(new TaskCompletionSource<string>().Task) : ValueTask.FromResult($"{Password}-{count}");
+                },
+            };
+        });
+        var starting = adapter.Start();
+
+        await Until(() =>
+        {
+            return Volatile.Read(ref asked) == 1;
+        });
+        await adapter.Stop();
+        Assert.Equal("the link of ada stopped as it started", Assert.IsType<IOException>(await FailureOf(() =>
+        {
+            return starting;
+        })).Message);
+        await Assert.ThrowsAsync<TimeoutException>(() =>
+        {
+            return _script.Connection(TimeSpan.FromMilliseconds(200));
+        });
+
+        var connection = await LinkUp((adapter, _script));
+
+        Assert.Equal($"\0{Id}\0{Password}-2", Encoding.UTF8.GetString(connection.SaslInit!.InitialResponse));
+        Assert.Equal((2, true), (Volatile.Read(ref asked), adapter.IsLinked));
+        await adapter.Stop();
+    }
+
+    [Fact]
+    public async Task Ends_its_start_at_its_own_cancellation_as_its_password_is_asked()
+    {
+        var tokens = new ConcurrentQueue<CancellationToken>();
+        await using var adapter = AdapterOf((options) =>
+        {
+            return options with
+            {
+                Password = null,
+                PasswordProvider = (token) =>
+                {
+                    tokens.Enqueue(token);
+
+                    // it never settles
+                    return new ValueTask<string>(new TaskCompletionSource<string>().Task);
+                },
+            };
+        });
+        using var given = new CancellationTokenSource();
+        var starting = adapter.Start(new BrokerStart { CancellationToken = given.Token });
+
+        await Until(() =>
+        {
+            return tokens.Count == 1;
+        });
+
+        var asked = Assert.Single(tokens);
+
+        Assert.False(asked.IsCancellationRequested);
+        await given.CancelAsync();
+        Assert.IsAssignableFrom<OperationCanceledException>(await FailureOf(() =>
+        {
+            return starting;
+        }));
+
+        // * its provider's token cancelled with it
+        Assert.True(asked.IsCancellationRequested);
+        await Assert.ThrowsAsync<TimeoutException>(() =>
+        {
+            return _script.Connection(TimeSpan.FromMilliseconds(200));
+        });
+
+        // and a token cancelled already asks nothing
+        Assert.IsAssignableFrom<OperationCanceledException>(await FailureOf(() =>
+        {
+            return adapter.Start(new BrokerStart { CancellationToken = new CancellationToken(true) });
+        }));
+        Assert.Single(tokens);
+    }
+
+    [Fact]
+    public async Task Fails_its_start_when_its_password_provider_throws_its_throw_the_cause()
+    {
+        var thrown = new InvalidOperationException("the vault is down");
+
+        // * as it is called, or as it answers
+        Func<CancellationToken, ValueTask<string>>[] providers =
+        [
+            (_) =>
+            {
+                throw thrown;
+            },
+            (_) =>
+            {
+                return ValueTask.FromException<string>(thrown);
+            },
+        ];
+
+        foreach (var provider in providers)
+        {
+            await using var adapter = AdapterOf((options) =>
+            {
+                return options with { Password = null, PasswordProvider = provider };
+            });
+            var error = Assert.IsType<IOException>(await FailureOf(() =>
+            {
+                return adapter.Start();
+            }));
+
+            Assert.Equal(("the password provider failed", (Exception)thrown), (error.Message, error.InnerException));
+            Assert.False(adapter.IsLinked);
+        }
+
+        await Assert.ThrowsAsync<TimeoutException>(() =>
+        {
+            return _script.Connection(TimeSpan.FromMilliseconds(200));
+        });
+    }
+
+    [Fact]
+    public async Task Refuses_a_password_that_is_empty_or_holds_a_NUL_as_built_or_as_answered()
+    {
+        const string Refusal = "a password is a non-empty string holding no NUL";
+
+        foreach (var password in new[] { "", $"{Password}\0" })
+        {
+            var built = Assert.Throws<ArgumentException>(() =>
+            {
+                return new AmqpBrokerAdapter(new AmqpBrokerAdapterOptions { Id = Id, Password = password, Uri = _script.Uri });
+            });
+
+            Assert.Equal((Refusal, "options"), (built.Message.Split(" (Parameter", 2)[0], built.ParamName));
+
+            await using var answering = AdapterOf((options) =>
+            {
+                return options with
+                {
+                    Password = null,
+                    PasswordProvider = (_) =>
+                    {
+                        return ValueTask.FromResult(password);
+                    },
+                };
+            });
+            var answered = Assert.IsType<ArgumentException>(await FailureOf(() =>
+            {
+                return answering.Start();
+            }));
+
+            // ! no word names the secret it refuses
+            Assert.StartsWith(Refusal, answered.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain(Password, answered.Message, StringComparison.Ordinal);
+        }
+
+        // * and an answer that is none: none is never taken for no password, so never ANONYMOUS
+        await using var unanswered = AdapterOf((options) =>
+        {
+            return options with
+            {
+                Password = null,
+                PasswordProvider = (_) =>
+                {
+                    return ValueTask.FromResult<string>(null!);
+                },
+            };
+        });
+
+        Assert.StartsWith(Refusal, Assert.IsType<ArgumentException>(await FailureOf(() =>
+        {
+            return unanswered.Start();
+        })).Message, StringComparison.Ordinal);
+        await Assert.ThrowsAsync<TimeoutException>(() =>
+        {
+            return _script.Connection(TimeSpan.FromMilliseconds(200));
+        });
+    }
+
+    [Fact]
+    public async Task Aborts_its_password_provider_s_signal_once_its_start_ends_linked_or_not()
+    {
+        var tokens = new ConcurrentQueue<CancellationToken>();
+
+        // whether its token was live as it answered
+        var live = new ConcurrentQueue<bool>();
+        await using var adapter = AdapterOf((options) =>
+        {
+            return options with
+            {
+                ConnectTimeout = TimeSpan.FromSeconds(1),
+                Password = null,
+                PasswordProvider = async (token) =>
+                {
+                    tokens.Enqueue(token);
+                    await Task.Delay(20, token);
+                    live.Enqueue(!token.IsCancellationRequested);
+
+                    return Password;
+                },
+            };
+        });
+
+        await LinkUp((adapter, _script));
+        await Until(() =>
+        {
+            return tokens.Single().IsCancellationRequested;
+        });
+        Assert.True(tokens.Single().IsCancellationRequested);
+        Assert.Equal([true], live);
+        await adapter.Stop();
+
+        // and a start that fails, its senders' ATTACHes held past its connectTimeout
+        _script.Holding = (frame) =>
+        {
+            return frame.Performative is Attach { Role: false } attach && (attach.Target as Target)?.Address is null;
+        };
+
+        var failing = FailureOf(() =>
+        {
+            return adapter.Start();
+        });
+        var held = await _script.Connection();
+
+        Assert.Contains("had no OPEN and no sessions within 1000 ms", (await failing).Message, StringComparison.Ordinal);
+        await Until(() =>
+        {
+            return tokens.Count == 2 && tokens.All((token) =>
+            {
+                return token.IsCancellationRequested;
+            });
+        });
+        Assert.Equal([true, true], tokens.Select((token) =>
+        {
+            return token.IsCancellationRequested;
+        }));
+        Assert.Equal([true, true], live);
+        await held.Closed.WaitAsync(Patience, Cancelled);
+    }
+
+    [Fact]
+    public void Refuses_a_password_beside_a_client_certificate_both_a_password_and_its_provider_and_neither()
+    {
+        var secured = new Uri("amqps://127.0.0.1:5671");
+        var certificate = new AmqpBrokerTlsOptions { ClientCertificates = [Certificate.Value] };
+        Func<CancellationToken, ValueTask<string>> provider = (_) =>
+        {
+            return ValueTask.FromResult(Password);
+        };
+        AmqpBrokerAdapterOptions[] refused =
+        [
+            new AmqpBrokerAdapterOptions { Id = Id, Password = Password, Tls = certificate, Uri = secured },
+            new AmqpBrokerAdapterOptions { Id = Id, PasswordProvider = provider, Tls = certificate, Uri = secured },
+            new AmqpBrokerAdapterOptions { Id = Id, Password = Password, PasswordProvider = provider, Uri = secured },
+
+            // * both, and a certificate: the first refusal, in one order on every side
+            new AmqpBrokerAdapterOptions { Id = Id, Password = Password, PasswordProvider = provider, Tls = certificate, Uri = secured },
+
+            // * neither: PLAIN's password is one octet at least, and its link never ANONYMOUS
+            new AmqpBrokerAdapterOptions { Id = Id, Uri = secured },
+        ];
+
+        Assert.Equal(
+            [
+                "a link authenticates by its client certificate or by a password, not both",
+                "a link authenticates by its client certificate or by a password, not both",
+                "a link takes a password or a password provider, not both",
+                "a link takes a password or a password provider, not both",
+                "an AMQP link authenticates by a password or by its client certificate",
+            ],
+            refused.Select((options) =>
+            {
+                var refusal = Assert.Throws<ArgumentException>(() =>
+                {
+                    return new AmqpBrokerAdapter(options);
+                });
+
+                Assert.Equal("options", refusal.ParamName);
+
+                return refusal.Message.Split(" (Parameter", 2)[0];
+            }));
+    }
+
+    [Fact]
+    public void Prints_no_password_nor_its_provider()
+    {
+        var given = new AmqpBrokerAdapterOptions { Id = Id, Password = Password, Uri = new Uri("amqp://127.0.0.1:5672") };
+        var asked = given with
+        {
+            Password = null,
+            PasswordProvider = (_) =>
+            {
+                return ValueTask.FromResult(Password);
+            },
+        };
+
+        Assert.DoesNotContain(Password, given.ToString(), StringComparison.Ordinal);
+        Assert.StartsWith("AmqpBrokerAdapterOptions { Uri = amqp://127.0.0.1:5672/, Id = ada, Password = set, PasswordProvider = none, Tls = , ", given.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Password = none, PasswordProvider = set", asked.ToString(), StringComparison.Ordinal);
+        Assert.EndsWith("Delivery = AtLeastOnce, VirtualHost =  }", asked.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Refuses_a_departure_offering_no_will_spec_15_32()
     {
         await using var adapter = AdapterOf();
@@ -2742,7 +3145,7 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
     {
         static bool IsSecure(string uri)
         {
-            return new AmqpBrokerAdapter(new AmqpBrokerAdapterOptions { Id = Id, Uri = new Uri(uri) }).IsSecure;
+            return new AmqpBrokerAdapter(new AmqpBrokerAdapterOptions { Id = Id, Password = Password, Uri = new Uri(uri) }).IsSecure;
         }
 
         Assert.Equal(
@@ -2762,7 +3165,7 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
         // and an id that is none
         Assert.Throws<ArgumentException>(() =>
         {
-            return new AmqpBrokerAdapter(new AmqpBrokerAdapterOptions { Id = "", Uri = new Uri("amqp://127.0.0.1") });
+            return new AmqpBrokerAdapter(new AmqpBrokerAdapterOptions { Id = "", Password = Password, Uri = new Uri("amqp://127.0.0.1") });
         });
     }
 
@@ -2829,5 +3232,266 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
         Assert.Equal(BrokerPublished.NoSubscriber, await caller.Publish(new BrokerPublication { Topic = ["bead", "i", "bob"], Payload = new byte[] { 4 } }).WaitAsync(Patience, Cancelled));
         await first.Stop();
         await caller.Stop();
+    }
+
+    [Fact]
+    public async Task Deletes_its_inbox_through_its_broker_s_management_at_its_stop_once_what_it_was_handed_has_its_outcome_and_before_it_detaches_its_receivers_and_closes_its_connection_spec_15_33()
+    {
+        await using var adapter = AdapterOf();
+        var (_, downs) = HeardOf(adapter);
+        var connection = await LinkUp((adapter, _script));
+
+        await adapter.Subscribe(Name).WaitAsync(Patience, Cancelled);
+
+        // * its publication's outcome and its broker's answer to a deletion held
+        _script.Holding = (frame) =>
+        {
+            return frame.Performative is AmqpTransfer && !IsRequestOf(frame, "PUT") && !IsRequestOf(frame, "POST");
+        };
+
+        var publishing = adapter.Publish(new BrokerPublication { Topic = PeerInbox, Payload = (byte[])[1] });
+
+        await Until(() =>
+        {
+            return TransfersTo((connection, "/exchanges/bead/bead.i.peer")).Count == 1;
+        });
+
+        var mark = connection.Frames.Count;
+        var stopping = adapter.Stop();
+
+        List<ScriptedFrame> Since()
+        {
+            return [.. connection.Frames.Skip(mark)];
+        }
+
+        // none while what it was handed awaits its outcome
+        await Task.Delay(100, Cancelled);
+        Assert.DoesNotContain(Since(), (frame) =>
+        {
+            return IsRequestOf(frame, "DELETE");
+        });
+        await connection.Settle(TransfersTo((connection, "/exchanges/bead/bead.i.peer"))[0], new Accepted());
+        Assert.Equal(BrokerPublished.Taken, await publishing.WaitAsync(Patience, Cancelled));
+
+        var (deleted, transfer) = await connection.NextRequest(2);
+
+        Assert.Equal(("DELETE", "/queues/bead.i.ada"), (deleted.Method, deleted.Path));
+
+        // none detached nor closed before its broker deleted it
+        await Task.Delay(100, Cancelled);
+        Assert.DoesNotContain(Since(), (frame) =>
+        {
+            return frame.Performative is global::Amqp.Framing.Detach or AmqpClose;
+        });
+        await connection.Answer(transfer, ("200", new Map { ["message_count"] = 0UL }));
+        await stopping.WaitAsync(Patience, Cancelled);
+        await connection.Closed.WaitAsync(Patience, Cancelled);
+
+        // * its receivers detached, its inbox first
+        var inbox = connection.LinkOf(InboxQueue);
+        var name = connection.LinkOf(NameQueue);
+
+        int DetachOf(ScriptedLink link)
+        {
+            return Since().FindIndex((frame) =>
+            {
+                return frame.Performative is global::Amqp.Framing.Detach detach && detach.Handle == link.Handle && frame.Channel == link.Channel;
+            });
+        }
+
+        Assert.True(DetachOf(inbox) >= 0 && DetachOf(inbox) < DetachOf(name), $"its inbox's DETACH at {DetachOf(inbox)}, its name's at {DetachOf(name)}");
+        Assert.Null(Assert.Single(connection.Of<AmqpClose>()).Error);
+        Assert.Empty(downs);
+    }
+
+    [Fact(Skip = AmqpFixture.Reason, SkipUnless = nameof(IsBroker))]
+    public async Task Finds_no_subscriber_for_a_parcel_to_its_inbox_once_its_stop_settled_its_broker_having_deleted_it_spec_15_21_15_33()
+    {
+        await using var adapter = BrokerAdapterOf(("other", null));
+        await using var caller = BrokerAdapterOf(("coming", null));
+        string[] inbox = ["bead", "i", "other"];
+
+        await caller.Start().WaitAsync(Patience, Cancelled);
+
+        // * at once after each stop, as the race the stop closes was
+        for (var round = 0; round < 5; round++)
+        {
+            await adapter.Start().WaitAsync(Patience, Cancelled);
+            await adapter.Subscribe(inbox).WaitAsync(Patience, Cancelled);
+            await adapter.Stop().WaitAsync(Patience, Cancelled);
+            Assert.Equal(BrokerPublished.NoSubscriber, await caller.Publish(new BrokerPublication { Topic = inbox, Payload = (byte[])[(byte)round] }).WaitAsync(Patience, Cancelled));
+        }
+
+        await caller.Stop();
+    }
+
+    // spec 15.24
+    [Fact]
+    public async Task Sends_what_waits_on_its_link_credit_before_its_stop_s_close_within_its_connectTimeout_and_fails_what_has_not_gone_by_then()
+    {
+        _script.SenderCredit = 1;
+
+        await using var adapter = AdapterOf();
+        var connection = await LinkUp((adapter, _script));
+        var published = Enumerable.Range(1, 3).Select((each) =>
+        {
+            return adapter.Publish(new BrokerPublication { Topic = PeerInbox, Payload = new byte[] { (byte)each } });
+        }).ToList();
+
+        await Until(() =>
+        {
+            return TransfersTo((connection, "/exchanges/bead/bead.i.peer")).Count > 0;
+        });
+
+        var mark = connection.Frames.Count;
+        var stopping = adapter.Stop();
+
+        // * its stop waits for what it was handed, its credit given late, then ends its link
+        await Task.Delay(200, Cancelled);
+        Assert.False(stopping.IsCompleted);
+        Assert.Single(TransfersTo((connection, "/exchanges/bead/bead.i.peer")));
+        Assert.Empty(connection.Of<AmqpClose>());
+
+        var parcels = connection.Links.First((link) =>
+        {
+            return link.Name.StartsWith("parcels", StringComparison.Ordinal);
+        });
+
+        await connection.Credit((parcels, 2));
+        await stopping.WaitAsync(Patience, Cancelled);
+        await connection.Closed.WaitAsync(Patience, Cancelled);
+        Assert.Equal(Enumerable.Repeat(BrokerPublished.Taken, 3), await Task.WhenAll(published).WaitAsync(Patience, Cancelled));
+        Assert.Equal(
+            ["01", "02", "03"],
+            TransfersTo((connection, "/exchanges/bead/bead.i.peer")).Select((transfer) =>
+            {
+                return Convert.ToHexString((byte[])transfer.Message.Body);
+            }));
+
+        // * each transfer before any end its stop sent
+        var frames = connection.Frames.Skip(mark).ToList();
+        var lastTransfer = frames.FindLastIndex((frame) =>
+        {
+            return frame.Performative is AmqpTransfer && !IsRequestOf(frame, "PUT") && !IsRequestOf(frame, "POST") && !IsRequestOf(frame, "DELETE");
+        });
+
+        Assert.True(lastTransfer < frames.FindIndex((frame) =>
+        {
+            return frame.Performative is global::Amqp.Framing.Detach or AmqpEnd or AmqpClose;
+        }));
+
+        // * past its connectTimeout, what has not gone fails, and its link ends with no error all the
+        // same
+        await using var bounded = AdapterOf((options) =>
+        {
+            return options with { ConnectTimeout = TimeSpan.FromMilliseconds(300) };
+        });
+        var held = await LinkUp((bounded, _script));
+        var sent = bounded.Publish(new BrokerPublication { Topic = PeerInbox, Payload = (byte[])[4] });
+
+        await sent.WaitAsync(Patience, Cancelled);
+
+        var waiting = bounded.Publish(new BrokerPublication { Topic = PeerInbox, Payload = (byte[])[5] });
+
+        await bounded.Stop().WaitAsync(Patience, Cancelled);
+        Assert.Equal("the link of ada stopped", Assert.IsType<IOException>(await FailureOf(() =>
+        {
+            return waiting;
+        })).Message);
+        await held.Closed.WaitAsync(Patience, Cancelled);
+        Assert.Null(Assert.Single(held.Of<AmqpClose>()).Error);
+        Assert.Single(TransfersTo((held, "/exchanges/bead/bead.i.peer")));
+    }
+
+    // decision 0003
+    [Fact]
+    public async Task Refuses_a_start_once_disposed_its_state_kept_and_disposes_once_stopping_it_first()
+    {
+        var adapter = AdapterOf();
+        var connection = await LinkUp((adapter, _script));
+
+        // * two disposes: one stop, one CLOSE
+        await Task.WhenAll(adapter.DisposeAsync().AsTask(), adapter.DisposeAsync().AsTask()).WaitAsync(Patience, Cancelled);
+        await connection.Closed.WaitAsync(Patience, Cancelled);
+        Assert.Single(connection.Of<AmqpClose>());
+        Assert.False(adapter.IsLinked);
+
+        // * a start after it: its application's misuse, refused before anything goes
+        Assert.Equal("the adapter of ada is disposed", (await Assert.ThrowsAsync<ObjectDisposedException>(() =>
+        {
+            return adapter.Start();
+        })).Message);
+        Assert.False(adapter.IsLinked);
+    }
+
+    [Fact(Skip = AmqpFixture.Reason, SkipUnless = nameof(IsBroker))]
+    public async Task An_OPEN_that_comes_during_a_participant_s_stop_waits_in_its_name_s_queue_and_is_answered_at_its_next_link_spec_15_21_15_38()
+    {
+        // * the stopping participant a round trip of 300 ms away, so that its broker hands it the OPEN
+        // before it read its DETACH
+        await using var relay = LinkRelay.To(AmqpFixture.Url, TimeSpan.FromMilliseconds(150));
+        await using var serving = new BrokerParticipant(BrokerAdapterOf(("other", relay)));
+        await using var calling = new BrokerParticipant(BrokerAdapterOf(("coming", null)));
+        var reported = new ConcurrentQueue<string>();
+        var opened = 0;
+
+        serving.Error += (reason) =>
+        {
+            reported.Enqueue(reason.Message);
+        };
+
+        // * what earlier runs left in the name's queue purged
+        await AmqpFixture.Purge("bead.s.interop");
+
+        try
+        {
+            var server = serving.Server(new BrokerTransportServerOptions { Names = ["interop"] });
+
+            server.Connection += (_) =>
+            {
+                Interlocked.Increment(ref opened);
+            };
+            await server.Start().WaitAsync(Patience, Cancelled);
+
+            // * a connection it holds, whose CLOSE its stop sends and awaits a round trip
+            await using var holding = calling.Client();
+            var closes = new ConcurrentQueue<bool>();
+
+            holding.Close += (isClean, _) =>
+            {
+                closes.Enqueue(isClean);
+            };
+            await holding.Connect(new BrokerTransportClientConnectOptions { Server = "interop", CancellationToken = Cancelled }).WaitAsync(Patience, Cancelled);
+            await Until(() =>
+            {
+                return Volatile.Read(ref opened) == 1;
+            });
+
+            // * an OPEN published as its stop lets its name go: its receiver hands it nothing, and it
+            // goes back to its name's queue, where its connect waits
+            var stopping = serving.Stop();
+            await using var client = calling.Client();
+            var connecting = client.Connect(new BrokerTransportClientConnectOptions { Server = "interop", Timeout = TimeSpan.FromSeconds(15), CancellationToken = Cancelled });
+
+            await stopping.WaitAsync(Patience, Cancelled);
+            await Task.Delay(500, Cancelled);
+            Assert.Equal((false, 1), (connecting.IsCompleted, Volatile.Read(ref opened)));
+            Assert.Equal([false], closes);
+
+            // * its next link serves the name, and takes it, its third leg a round trip later
+            await serving.Start().WaitAsync(Patience, Cancelled);
+            await connecting.WaitAsync(TimeSpan.FromSeconds(15), Cancelled);
+            await Until(() =>
+            {
+                return Volatile.Read(ref opened) == 2;
+            });
+            Assert.Equal(2, Volatile.Read(ref opened));
+            Assert.Empty(reported);
+            await client.CloseConnection();
+        }
+        finally
+        {
+            await AmqpFixture.Purge("bead.s.interop");
+        }
     }
 }

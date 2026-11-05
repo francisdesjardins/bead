@@ -45,8 +45,9 @@ refused token's `iss` and `sub`: they are the requester's text, and personal dat
 ## Decision
 
 **A server's router tells each access it refuses**, `accessRefused` on the TypeScript side
-(`RouterServerEventMap`), `AccessRefused` on the C# side (`RouterServer`), its record
-`IAccessRefusal`, `AccessRefusal`, named alike (spec 13.12):
+(`RouterServerEventMap`), `AccessRefused` on the C# side (`RouterServer`), `on_access_refused` on
+the Rust side (`RouterServer`), its record `IAccessRefusal`, `AccessRefusal` on the C# and Rust
+sides, named alike (spec 13.12):
 
 | Member                                      | What it holds                                                                                                                              |
 | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -58,7 +59,7 @@ refused token's `iss` and `sub`: they are the requester's text, and personal dat
 | `connectionHandle`                          | the connection the request came on                                                                                                         |
 | `address`, `port`                           | the refused request's own: over HTTP its exchange's, read as 15.12 reads it; over a WebSocket its connection's; none over a Web Worker     |
 
-**Why is one word of a closed list, which both sides read from `spec/vectors.json`.** For a `JWT`,
+**Why is one word of a closed list, which every side reads from `spec/vectors.json`.** For a `JWT`,
 the step of 13.8 that refused it — `token`, `crit`, `typ`, `kid`, `alg`, `key`, `signature`, `iss`,
 `exp`, `nbf`, `aud`, `sid`, `sub` — as `jwtVerdicts` give them; for an `OPAQUE`, `session`; for an
 `ELSEWHERE`, `nothing-carried`, `verifier`, its verifier having made no session of it, or `end`, its
@@ -67,7 +68,7 @@ admission the spec names that refused, `requireSession`, `requireCredential` or 
 or `no-before-route` for a relay that has none, and none for the application's own. Each
 credential's resolution hands its verdict's reason on to the router. `credentialRefusals` gives
 every refusing situation but a `JWT`'s with its reason, shaped as `jwtVerdicts` are: the scheme, the
-situation both sides' tests set up, the code and the word.
+situation every side's tests set up, the code and the word.
 
 **Never the credential**, any part of it, nor a claim of a token, nor an admission's detail, which
 is the application's text (CWE-117, CWE-532). **Never a success**: every call that resolves reaches
@@ -86,8 +87,8 @@ an issuer, `CAPACITY_EXCEEDED` (spec 13.9): nothing was refused there. A client'
 **The transport hands the address.** Each envelope a server's transport hands on carries, beside
 what it carried of a credential, the address and port of what brought it — over HTTP its exchange's,
 read as 15.12 reads it, whichever socket or proxy brought its connect; over a WebSocket its
-connection's; none over a Web Worker — on the TypeScript side's `ITransportMessage` and the C#
-side's `TransportMessage` alike, and 15.1 says so.
+connection's; none over a Web Worker — on the TypeScript side's `ITransportMessage` and the C# and
+Rust sides' `TransportMessage` alike, and 15.1 says so.
 
 ## Consequences
 
@@ -97,15 +98,15 @@ rate. **Every envelope a server's transport hands on is wider by an address and 
 Web Worker leaves empty. **A `JWT` refused names the step that refused it**, which tells an operator
 a key rotated from a clock skewed, and tells a scanner nothing it is answered.
 
-**The gate.** `spec/vectors.json`'s `credentialRefusals`, which both sides' twins play as they play
+**The gate.** `spec/vectors.json`'s `credentialRefusals`, which every side's twins play as they play
 `jwtVerdicts`, and `jwtVerdicts` themselves for a `JWT`'s reasons; no step of
-`spec/conversations.json` tells it, the event being no part of the wire. Twins by the same
-sentence ([0004](0004-one-behaviour-in-every-language.md)): each server router's `tells each access
-it refuses, its stage, its code, its reason and what was called, with the connection and the
-request’s address and port, never the credential`, `tells a JWT refused by the step of section 13.8
-that refused it, for every verdict of spec/vectors.json that refuses`, `tells each credential
-refused by the reason spec/vectors.json’s credentialRefusals gives it`, `tells the admission a relay
-or a procedure refused with, by its name, no-before-route for a relay with none, never its detail`,
+`spec/conversations.json` tells it, the event being no part of the wire. Twins by the same sentence
+([0004](0004-one-behaviour-in-every-language.md)): each server router's `tells each access it
+refuses, its stage, its code, its reason and what was called, with the connection and the request’s
+address and port, never the credential`, `tells a JWT refused by the step of section 13.8 that
+refused it, for every verdict of spec/vectors.json that refuses`, `tells each credential refused by
+the reason spec/vectors.json’s credentialRefusals gives it`, `tells the admission a relay or a
+procedure refused with, by its name, no-before-route for a relay with none, never its detail`,
 `tells nothing of a verifier or an admission that fails, or of a call past those let wait for an
 issuer` and `refuses as it would though an accessRefused listener throws, the throw reported with
 its connection`; and each HTTP server's `tells over HTTP the address and port of the exchange

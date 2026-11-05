@@ -38,7 +38,7 @@ export {
   MESSAGE_EVENT,
   REFUSAL_EVENT,
   TRANSPORT_HTTP,
-  TRANSPORT_WS,
+  TRANSPORT_WEBSOCKET,
 } from '../shared/constants';
 export type { TRANSPORTS } from '../shared/constants';
 export {
@@ -67,12 +67,13 @@ export {
   setReadyStateReconnecting,
   setReadyStateUninitialized,
 } from '../shared/ready-state';
-export type { Data, IEventIteratorOptions, ITransportMessage } from '../shared/types';
+export type { Data, IEventIteratorOptions, IGauges, ITransportMessage } from '../shared/types';
 export type {
   ITransportServer,
   ITransportServerAddress,
   ITransportServerClient,
   ITransportServerClientAware,
+  ITransportServerConnection,
   ITransportServerHandleInfo,
   ITransportServerImplementation,
   ITransportServerDefineOptions,
@@ -206,6 +207,8 @@ export const listenOn = async (
  *     defaults: { address: '127.0.0.1', findOpenPort: false, port: 80 },
  *     type: 'WS',
  *     close: () => Promise.resolve(),
+ *     pause: noop,
+ *     resume: noop,
  *     send: () => Promise.resolve(),
  *     start: ({ address, port }) => Promise.resolve({ address, port }),
  *     stop: () => Promise.resolve(),
@@ -230,6 +233,8 @@ export const createTransportServer = <Socket extends object, Request>(
     port: 0,
   };
   let stopping: Promise<void> | undefined;
+  // ! its dispose, final: a start since is its application's misuse; later disposes share it
+  let disposed: Promise<void> | undefined;
   let hasStarted = false;
 
   // each listener within a guard (spec 15.1): what one throws is reported with the connection it
@@ -328,6 +333,21 @@ export const createTransportServer = <Socket extends object, Request>(
         ...(implementation.gauges === undefined ? [] : [implementation.gauges()]),
       ]);
     },
+    // * a connection it holds, by its handle: one gone, or unknown, is let be, its hold gone with it
+    pause: (connectionHandle) => {
+      const connection = connections.get(connectionHandle);
+
+      if (connection !== undefined) {
+        implementation.pause(connection);
+      }
+    },
+    resume: (connectionHandle) => {
+      const connection = connections.get(connectionHandle);
+
+      if (connection !== undefined) {
+        implementation.resume(connection);
+      }
+    },
     send: async (message, connectionHandle) => {
       const connection = connections.get(connectionHandle);
 
@@ -336,6 +356,14 @@ export const createTransportServer = <Socket extends object, Request>(
       }
     },
     start: async (options) => {
+      // ! disposed: final, refused before anything moves (decision 0003)
+      if (disposed !== undefined) {
+        throw new ProgrammerError('the transport server is disposed');
+      }
+
+      // * what its transport's owner forbids first, as a connect's options are held first
+      implementation.assertStart?.();
+
       if (!server.isUninitialized() && !server.isClosed()) {
         throw new ProgrammerError(`the transport server is already ${getReadyStateName(server)}`);
       }
@@ -396,8 +424,11 @@ export const createTransportServer = <Socket extends object, Request>(
 
       return stopping;
     },
+    // * stopped, then done for good: a later dispose settles with the first
     [Symbol.asyncDispose]: () => {
-      return server.stop();
+      disposed ??= server.stop();
+
+      return disposed;
     },
   };
 

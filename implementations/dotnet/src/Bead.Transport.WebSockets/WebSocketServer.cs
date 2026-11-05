@@ -74,7 +74,7 @@ public sealed class WebSocketServer<TData> : IBeadServer<TData>
     }
 
     /// <summary>Its services.</summary>
-    public ServiceManager Services
+    public IServiceManagerServer Services
     {
         get
         {

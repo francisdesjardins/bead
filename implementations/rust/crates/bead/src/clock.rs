@@ -44,6 +44,11 @@ pub trait Timer: Send + Sync + fmt::Debug {
 
 /// What Bead takes its time from: the platform's, [`SystemClock`], or a test's.
 pub trait Clock: Send + Sync + fmt::Debug {
+    /// How a refusal names it: one of the application's own, or the platform's.
+    fn description(&self) -> &'static str {
+        "one of its own"
+    }
+
     /// Its monotonic reading, since an origin of its own: what a deadline of Bead's own is
     /// compared on.
     fn monotonic(&self) -> Duration;
@@ -52,7 +57,15 @@ pub trait Clock: Send + Sync + fmt::Debug {
     fn wall(&self) -> SystemTime;
 
     /// Arms a timer that calls `callback` as `schedule` says.
-    fn arm(&self, schedule: Schedule, callback: TimerCallback) -> Arc<dyn Timer>;
+    ///
+    /// # Errors
+    ///
+    /// A [`ProgrammerError`] for a zero period or a deadline outside the platform's range.
+    fn arm(
+        &self,
+        schedule: Schedule,
+        callback: TimerCallback,
+    ) -> Result<Arc<dyn Timer>, ProgrammerError>;
 
     /// What the side does on it, which a test's clock settles on: none for any other.
     #[cfg(any(test, feature = "testing"))]
@@ -140,6 +153,10 @@ mod native {
     }
 
     impl Clock for SystemClock {
+        fn description(&self) -> &'static str {
+            "the platform's"
+        }
+
         fn monotonic(&self) -> Duration {
             self.origin.elapsed()
         }
@@ -148,16 +165,29 @@ mod native {
             SystemTime::now()
         }
 
-        fn arm(&self, schedule: Schedule, mut callback: TimerCallback) -> Arc<dyn Timer> {
+        fn arm(
+            &self,
+            schedule: Schedule,
+            mut callback: TimerCallback,
+        ) -> Result<Arc<dyn Timer>, ProgrammerError> {
+            let due = match schedule {
+                Schedule::Every(period) if period.is_zero() => {
+                    return Err(ProgrammerError::new("a clock's timer period is positive"));
+                }
+                Schedule::Once(due) | Schedule::Every(due) => due,
+            };
+            let _entered = self.handle.enter();
+            let start = tokio::time::Instant::now()
+                .checked_add(due)
+                .ok_or_else(|| {
+                    ProgrammerError::new("a clock's timer deadline fits the platform's range")
+                })?;
             let task = match schedule {
-                Schedule::Once(due) => platform::spawn(&self.handle, async move {
-                    tokio::time::sleep(due).await;
+                Schedule::Once(_) => platform::spawn(&self.handle, async move {
+                    tokio::time::sleep_until(start).await;
                     callback();
                 }),
                 Schedule::Every(period) => platform::spawn(&self.handle, async move {
-                    let start = tokio::time::Instant::now()
-                        .checked_add(period)
-                        .unwrap_or_else(tokio::time::Instant::now);
                     let mut interval = tokio::time::interval_at(start, period);
 
                     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -169,11 +199,25 @@ mod native {
                 }),
             };
 
-            Arc::new(SystemTimer {
+            Ok(Arc::new(SystemTimer {
                 task: Mutex::new(Some(task.abort_handle())),
-            })
+            }))
         }
     }
+}
+
+/// A layer built on another, as its clock is chosen: the clock beneath it and the one it was given,
+/// each by its name, and the two layers' names.
+pub(crate) struct LayeredClocks<'clocks> {
+    /// The clock of the layer beneath, when it has one.
+    pub(crate) beneath: Option<&'clocks SharedClock>,
+    /// The clock the layer was given, when it was.
+    pub(crate) given: Option<&'clocks SharedClock>,
+    /// The layer's name, as a refusal names it: in the singular, which the refusal's verbs agree
+    /// with.
+    pub(crate) layer: &'clocks str,
+    /// The layer beneath's name, as a refusal names it.
+    pub(crate) below: &'clocks str,
 }
 
 /// The clock of a layer built on another: the one beneath it, unless it was given one — the one
@@ -181,16 +225,26 @@ mod native {
 ///
 /// # Errors
 ///
-/// A [`ProgrammerError`] naming both when one given differs from the one beneath: `a server runs
-/// on the clock of its transport, and was given another`.
-pub fn clock_of(
-    (beneath, given): (Option<&SharedClock>, Option<&SharedClock>),
-    (layer, below): (&str, &str),
+/// A [`ProgrammerError`] naming both layers and describing each clock when one given differs from
+/// the one beneath.
+pub(crate) fn clock_of(
+    layered: &LayeredClocks<'_>,
 ) -> Result<Option<SharedClock>, ProgrammerError> {
+    let LayeredClocks {
+        beneath,
+        given,
+        layer,
+        below,
+    } = *layered;
+
     match (beneath, given) {
-        (Some(beneath), Some(given)) if !Arc::ptr_eq(beneath, given) => Err(ProgrammerError::new(
-            format!("{layer} runs on the clock of {below}, and was given another"),
-        )),
+        (Some(beneath), Some(given)) if !Arc::ptr_eq(beneath, given) => {
+            Err(ProgrammerError::new(format!(
+                "{layer} runs on the clock of {below}, {}, and was given another, {}",
+                beneath.description(),
+                given.description()
+            )))
+        }
         (Some(clock), _) | (None, Some(clock)) => Ok(Some(Arc::clone(clock))),
         (None, None) => Ok(None),
     }

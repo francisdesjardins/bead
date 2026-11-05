@@ -7,7 +7,7 @@ import { bytesStartWith, codePointLength, entriesByKey, isUnique, matchesPattern
 import type { Address, Member } from "./rules_pb.ts";
 import { Member_ReceiptSchema, MemberSchema } from "./rules_pb.ts";
 import type { IServiceClient, IServiceClientOptions, IServiceServer, ServiceResolvers, ServiceServerOptions } from "@francisdesjardins/bead/service";
-import { createServiceClient, createServiceServer, failuresOf, GENERATED_CODE_SUPPORTS_VERSION_6, requestOf } from "@francisdesjardins/bead/service";
+import { createServiceClient, createServiceServer, failuresOf, GENERATED_CODE_SUPPORTS_VERSION_7, requestOf } from "@francisdesjardins/bead/service";
 
 
 // * each request's rules, judged before its resolver, every rule a site of its own (spec 18, decision 0035)
@@ -266,7 +266,7 @@ export const RegistryProcedures = Object.freeze({
 /**
  * The failures of `bead.messages.v1.RegistryService`, by name: service 4's catalogue.
  */
-export const RegistryFailures = failuresOf({ codes: {  }, serviceId: 4 });
+export const RegistryFailures = failuresOf(4, {  });
 
 /**
  * Each procedure's resolver, by its name: for resolvers written in a module of their own.
@@ -362,4 +362,4 @@ export class RegistryClient {
 }
 
 // the contract with the runtime this file needs: an older runtime lacks the constant, and fails here
-void GENERATED_CODE_SUPPORTS_VERSION_6;
+void GENERATED_CODE_SUPPORTS_VERSION_7;

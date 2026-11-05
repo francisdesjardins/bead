@@ -56,19 +56,31 @@ export interface ITransportClientOptions {
   clock?: IClock | undefined;
 }
 
+/**
+ * How a transport client's `reconnect` connects again, and a broker participant's link once lost
+ * (spec 15.21).
+ */
 export interface ITransportClientReconnectOptions {
   /**
    * Milliseconds to wait after a failed attempt before the next one, or a function of the previous
-   * wait and the number of the attempt that failed. The first attempt goes at once; one of 0 waits
-   * none, one from 1 to 2³¹ − 1 is rounded to the nearest whole one, which `tap` hears, and any
-   * other — `Infinity` among them — rejects with a {@link ProgrammerError}, before `tap` hears it.
+   * wait and the number of the attempt that failed; 1,000 by default. The first attempt goes at
+   * once; one of 0 arms no timer, one from 1 to 2³¹ − 1 is rounded to the nearest whole one, which
+   * `tap` hears, and any other — `Infinity` among them — is a {@link ProgrammerError}: a number's
+   * where it is given (spec 1.4), a function's answer at the attempt it follows, before `tap`
+   * hears it. A delay of 0 waits a later task of the platform, which fake timers on the globals
+   * hold, as they hold its timers.
    */
-  delay?: TransportClientReconnectDelayOrDelayResolver | undefined;
-  /** Attempts before giving up with a {@link ReconnectError}; there is always at least one. */
-  maxAttempts?: number | undefined;
+  delay?: TransportClientReconnectDelay | undefined;
   /**
-   * Aborting it stops the attempts, the one connecting included, or disconnects a success, with a
-   * {@link CancelError}.
+   * Attempts before giving up with a {@link ReconnectError}; there is always at least one. Its
+   * owner's default when left out: 5 for a transport client's `reconnect`, without end for a broker
+   * participant's link.
+   */
+  maximumAttempts?: number | undefined;
+  /**
+   * Aborting it stops the attempts with a {@link CancelError}: it is read before each attempt and
+   * during each wait. A transport client's attempt under way is handed it, and a success it comes
+   * after is disconnected; a broker participant's attempt under way is not cut short.
    */
   signal?: AbortSignal | undefined;
   /** Told the wait and the number of the attempt that failed, before waiting. */
@@ -105,9 +117,11 @@ export interface ITransportClient<
    * reconnection replays, as they were; with a {@link ProgrammerError} unless UNINITIALIZED or
    * CLOSED; and with a
    * {@link CancelError}, nothing changed, when its signal is aborted already. Then it rejects with a
-   * {@link ConnectError} when it cannot open, a {@link TimeoutError}, or a {@link CancelError}.
+   * {@link ConnectError} when it cannot open, a {@link TimeoutError}, or a {@link CancelError}. Its
+   * options are optional where every member of them is, as a worker's are, and required where one
+   * is, as where an address or a server is.
    */
-  connect(options: ConnectOptions): Promise<void>;
+  connect(...[options]: ConnectParameters<ConnectOptions>): Promise<void>;
   /**
    * Closes the connection and emits `close`. Rejects with a {@link ReadyStateError} unless OPEN, or a
    * {@link ProgrammerError} when the socket's close throws; the socket is then dropped, as
@@ -136,16 +150,28 @@ export interface ITransportClient<
     listener: EmitterListener<TransportClientEventMap[K]>
   ): this;
   /**
+   * Pauses it whole, its router behind (spec 15.12, decision 0046): it emits no more `message`, and
+   * holds what it already received, in order, until `resume`; while it holds anything, what comes
+   * next waits behind it, paused or not. What it holds of a connection goes with that connection; a
+   * pause outlasts it, until a resume. Idempotent, it emits nothing within it.
+   */
+  pause(): void;
+  /**
    * Connects again with the options of the last accepted `connect`, replacing an open socket without
    * a `close`. Attempts that run out end CLOSED without a `close`; a cancel after a successful
-   * attempt disconnects, which emits one; a misuse or an already aborted signal leaves the state as it
-   * was. Rejects with a {@link ProgrammerError}, a {@link ReconnectError} or a {@link CancelError},
-   * `the reconnection was cancelled`, its signal's reason its `cause`; an error thrown by `tap`
-   * passes through, and so does a {@link ProgrammerError} an attempt rejects with, which the next
-   * would meet again.
+   * attempt disconnects, which emits one; a misuse, a fixed `delay` out of bounds among them, or an
+   * already aborted signal leaves the state as it was, no `reconnect` emitted. Rejects with a
+   * {@link ProgrammerError}, a {@link ReconnectError} or a {@link CancelError}, `the reconnection
+   * was cancelled`, its signal's reason its `cause`; an error thrown by `tap` passes through, and so
+   * does a {@link ProgrammerError} an attempt rejects with, which the next would meet again.
    */
   reconnect(options?: ITransportClientReconnectOptions): Promise<void>;
   removeAllListeners(event?: TRANSPORT_CLIENT_EVENTS): this;
+  /**
+   * Resumes it: what it holds it emits, in order, from a later turn of its own, never within this
+   * call, asking before each whether it was paused again. Idempotent, it emits nothing within it.
+   */
+  resume(): void;
   /**
    * Resolves once the message is on its way, not once it is delivered: over a socket, once the
    * socket has accepted it; over HTTP, on the head of its exchange's answer — the server had it — or
@@ -198,8 +224,21 @@ export interface ITransportClientImplementation<
   readonly clock?: IClock | undefined;
   /** Whether it is secure, as its last connect was given; not, without it. */
   readonly isSecure?: boolean | undefined;
+  /**
+   * A signal of its owner's end, read as a reconnection is called: one under way ends as it aborts,
+   * cancelled, its reason the `cause`; one called once it aborted is told, then ends so before any
+   * attempt.
+   */
+  readonly lifetime?: AbortSignal | undefined;
   connect(options: ConnectOptions): Promise<void>;
   disconnect(options?: ITransportClientDisconnectOptions): Promise<void>;
+  /**
+   * Pauses it, as {@link ITransportClient.pause} says: required, so each transport states what it
+   * pauses.
+   */
+  pause(): void;
+  /** Resumes it, as {@link ITransportClient.resume} says. */
+  resume(): void;
   send(message: ITransportMessage): Promise<void>;
   [dispose](): void;
 }
@@ -218,6 +257,16 @@ export interface ITransportClientDefineOptions {
 }
 
 // types
+
+/**
+ * What a connect takes: its options, optional where every member of them is and required where one
+ * is (decision 0047).
+ */
+export type ConnectParameters<ConnectOptions extends ITransportClientConnectOptions> =
+  // an object of no member is options of which every member is optional
+  Record<never, never> extends ConnectOptions
+    ? [options?: ConnectOptions]
+    : [options: ConnectOptions];
 
 /** Event name → the arguments its listeners receive. */
 export type TransportClientEventMap = {
@@ -258,14 +307,12 @@ export type TransportClientOnMessageCallback = EmitterListener<
   TransportClientEventMap[MESSAGE_EVENT]
 >;
 
-export type TransportClientReconnectDelay = number;
+/** A reconnection's wait, in milliseconds, or a function of the previous one and the attempt. */
+export type TransportClientReconnectDelay = number | TransportClientReconnectDelayResolver;
 export type TransportClientReconnectDelayResolver = (
   previousDelay: number | undefined,
   attempt: number
-) => TransportClientReconnectDelay;
-export type TransportClientReconnectDelayOrDelayResolver =
-  | TransportClientReconnectDelay
-  | TransportClientReconnectDelayResolver;
+) => number;
 export type TransportClientReconnectTapCallback = (nextDelay: number, attempt: number) => void;
 
 // ── WebSocket ─────────────────────────────────────────────────────────────────
@@ -309,8 +356,15 @@ export interface IWebSocketLike {
     event: 'unexpected-response',
     listener: (request: unknown, response: IUpgradeResponseLike) => void
   ): unknown;
+  /**
+   * `ws`'s alone: stops reading its socket, what it parsed of the read under way still emitted; a
+   * browser's socket has none.
+   */
+  pause?(): void;
   /** As `on`. */
   ping?(): void;
+  /** As `pause`: reads its socket again. */
+  resume?(): void;
   send(data: Data): void;
   /** As `on`: drops the socket without a close handshake. */
   terminate?(): void;
@@ -337,7 +391,7 @@ export interface IWebSocketConstructor {
   readonly OPEN: number;
 }
 
-export interface IWSTransportClientConnectOptions extends ITransportClientAddressOptions {
+export interface IWebSocketTransportClientConnectOptions extends ITransportClientAddressOptions {
   /**
    * The credential its upgrade carries, in its `Authorization`, as given (spec 15.2): what a call
    * presenting `ELSEWHERE` over it stands for at its server, resolved per request; a reconnection
@@ -371,7 +425,7 @@ export interface IWSTransportClientConnectOptions extends ITransportClientAddres
   secured?: boolean | undefined;
 }
 
-export interface IWSTransportClientOptions extends ITransportClientOptions {
+export interface IWebSocketTransportClientOptions extends ITransportClientOptions {
   /**
    * Defaults to {@link TRANSPORT_WEBSOCKET_BINARYTYPE}. `ws`'s `'fragments'` is left out: it delivers
    * an array of buffers, which is not a {@link Data}. `'nodebuffer'` needs `ws`; the global
@@ -401,7 +455,7 @@ export interface IWSTransportClientOptions extends ITransportClientOptions {
    * the global `WebSocket` takes none, its
    * platform's bound applying. Defaults to {@link MAXIMUM_MESSAGE_BYTES}, the default envelope's
    * limit: a router whose `maximumEnvelopeBytes` is raised needs it raised alike, as
-   * `createWSClient` does.
+   * `createWebSocketClient` does.
    */
   maxPayload?: number | undefined;
   /**
@@ -418,7 +472,10 @@ export interface IWSTransportClientOptions extends ITransportClientOptions {
 // types both satisfy these without a cast.
 type Handler<E> = { handler(event: E): void }['handler'];
 
-export type WSTransportClient = ITransportClient<IWebSocketLike, IWSTransportClientConnectOptions>;
+export type WebSocketTransportClient = ITransportClient<
+  IWebSocketLike,
+  IWebSocketTransportClientConnectOptions
+>;
 
 // ── HTTP ──────────────────────────────────────────────────────────────────────
 
@@ -464,6 +521,14 @@ export interface IHTTPTransportClientConnectOptions extends ITransportClientAddr
 }
 
 export interface IHTTPTransportClientOptions extends ITransportClientOptions {
+  /**
+   * Milliseconds from its first send a client sends again an envelope that is no request, refused
+   * `busy` — 429, or 503 — once its `Retry-After` passed; still refused past them, its exchange is
+   * lost, and its connection with it (spec 15.6, 15.7): from 1 to 2³¹ − 1, rounded to the nearest
+   * whole one, or `Infinity` for as long as it is refused; 0 is refused. Defaults to
+   * {@link EXCHANGE_TIMEOUT}. A request refused `busy` rejects its send at once.
+   */
+  exchangeTimeout?: number | undefined;
   /**
    * Defaults to the global `fetch`. One given honours `redirect`, and follows no redirect: one whose
    * answer says it followed one fails the connect, and loses the connection of a send or a listen.
@@ -517,6 +582,16 @@ export type HTTPTransportClient = ITransportClient<
 
 // interfaces
 
+/** What a {@link BrokerRefusedError} holds of a connect refused (spec 15.18, 15.6). */
+export interface IBrokerRefusal {
+  /** The layouts a 426 names. */
+  layouts?: readonly number[] | undefined;
+  /** `malformed`, `layout-refused`, `busy`, or `no-subscriber`. */
+  reason: string;
+  /** The REFUSE's status; none for `no-subscriber`. */
+  status?: number | undefined;
+}
+
 /** What a broker connect takes besides: the server it opens a connection to, by its name. */
 export interface IBrokerTransportClientConnectOptions extends ITransportClientConnectOptions {
   /** The server's name, a token (spec 15.16): its OPEN goes there, to one participant serving it. */
@@ -544,7 +619,10 @@ export type BrokerTransportClient = ITransportClient<
 
 // interfaces
 
-/** What an in-memory connect takes besides: who connects, as its server's router is to see it. */
+/**
+ * What an in-memory connect takes besides: the server it connects to, and who connects, as its
+ * server's router is to see it. A reconnection connects to the same server.
+ */
 export interface IMemoryTransportClientConnectOptions extends ITransportClientConnectOptions {
   /**
    * The address its server hands with each envelope and names its connection by (spec 15.13): the
@@ -554,12 +632,12 @@ export interface IMemoryTransportClientConnectOptions extends ITransportClientCo
   address?: string | undefined;
   /** The port its server hands beside the address: a whole number from 0 to 65535; none by default. */
   port?: number | undefined;
-}
-
-export interface IMemoryTransportClientOptions extends ITransportClientOptions {
   /** What it connects to: an in-memory transport server of the same process. */
   server: IMemoryTransportServerLike;
 }
+
+/** What an in-memory transport client takes: what every transport client does. */
+export type IMemoryTransportClientOptions = ITransportClientOptions;
 
 // types
 

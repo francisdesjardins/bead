@@ -71,7 +71,10 @@ export interface IReceivingTransfers<Handle extends string> {
     opening: Uint8Array,
     options: { call: ICallAddress<Handle>; onStall?: (() => void) | undefined; total: number }
   ): IReceiving<Handle> | IProtocolFailure;
-  /** Places a chunk; what places bytes is progress, and sets the timer going again. */
+  /**
+   * Places a chunk; what places bytes is progress, and sets the timer going again, unless it makes
+   * the payload whole, which stops it.
+   */
   place(receiving: IReceiving<Handle>, chunk: IChunk): ChunkOutcome | IProtocolFailure;
 }
 
@@ -115,9 +118,15 @@ export const createReceivingTransfers = <Handle extends string>({
   const connections = new Map<Handle, { transfers: number }>();
   let buffered = 0;
 
+  // stops a transfer's timer
+  const stop = (state: IHeld): void => {
+    clock.clearTimeout(state.timer);
+    state.timer = undefined;
+  };
+
   // sets a transfer's timer going again, when one governs it; it keeps no process alive
   const touch = (state: IHeld): void => {
-    clock.clearTimeout(state.timer);
+    stop(state);
 
     if (state.onStall !== undefined) {
       state.timer = clock.setTimeout(state.onStall, limits.transferInactivityTimeout);
@@ -285,10 +294,14 @@ export const createReceivingTransfers = <Handle extends string>({
       const outcome = receiving.incoming.place(bytes, { isLast, offset });
       const state = held.get(receiving);
 
-      if (
-        state !== undefined &&
-        (outcome === ChunkOutcome.PLACED || outcome === ChunkOutcome.COMPLETE)
-      ) {
+      if (state === undefined) {
+        return outcome;
+      }
+
+      // * the chunk that makes the payload whole leaves nothing to wait for (spec 12.6, 12.7)
+      if (outcome === ChunkOutcome.COMPLETE) {
+        stop(state);
+      } else if (outcome === ChunkOutcome.PLACED) {
         touch(state);
       }
 

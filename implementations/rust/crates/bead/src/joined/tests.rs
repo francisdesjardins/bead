@@ -16,19 +16,23 @@ use bytes::Bytes;
 
 use super::JoinedServerTransport;
 use crate::broker::adapter::BrokerAdapter;
-use crate::broker::client::{BrokerClient, BrokerClientOptions, BrokerConnectOptions};
+use crate::broker::client::{
+    BrokerTransportClient, BrokerTransportClientConnectOptions, BrokerTransportClientOptions,
+};
 use crate::broker::memory::{MemoryBroker, MemoryBrokerAdapterOptions, MemoryBrokerOptions};
 use crate::broker::participant::{BrokerParticipant, BrokerParticipantOptions};
-use crate::broker::server::{BrokerServer, BrokerServerOptions};
+use crate::broker::server::{BrokerTransportServer, BrokerTransportServerOptions};
 use crate::client::{Client, ClientOptions};
 use crate::clock::SharedClock;
 use crate::debug::DebugDirection;
 use crate::duration::NEVER;
 use crate::managers::service::{
-    DebugEvent, RequestDependencies, RequestOptions, ResolverDependencies, Response, TracedError,
+    DebugEvent, RequestDependencies, RequestOptions, RequestResolverDependencies, Response,
+    TracedError,
 };
 use crate::memory::{
-    MemoryClient, MemoryClientOptions, MemoryConnectOptions, MemoryServer, MemoryServerOptions,
+    MemoryTransportClient, MemoryTransportClientConnectOptions, MemoryTransportClientOptions,
+    MemoryTransportServer, MemoryTransportServerOptions,
 };
 use crate::payloads::TextCodec;
 use crate::router::types::{BoxFuture, ConnectionHandle, Gauges, RouterError, TransportMessage};
@@ -36,8 +40,8 @@ use crate::server::{HealthStatus, Server, ServerOptions};
 use crate::testing::pair::echo;
 use crate::testing::{SteppingClock, hexadecimal};
 use crate::transport::{
-    ClientListener, ClientTransport, DisconnectOptions, Listeners, ReadyState, Sent,
-    ServerListener, ServerTransport, TransportServerRefusal,
+    ClientListener, Listeners, ReadyState, RouterClientTransport, Sent, ServerListener,
+    ServerTransport, TransportClientDisconnectOptions, TransportServerRefusal,
 };
 
 // the one connection of the WebSocket-typed transport
@@ -163,6 +167,14 @@ impl ServerTransport for Paired {
         self.listeners.remove(listener);
     }
 
+    fn pause(&self, connection_handle: &ConnectionHandle) {
+        locked(&self.calls).push(format!("pause {connection_handle}"));
+    }
+
+    fn resume(&self, connection_handle: &ConnectionHandle) {
+        locked(&self.calls).push(format!("resume {connection_handle}"));
+    }
+
     fn clock(&self) -> Option<SharedClock> {
         self.clock.clone()
     }
@@ -234,6 +246,14 @@ impl ServerTransport for Silent {
 
     fn unlisten(&self, _listener: &Arc<dyn ServerListener>) {}
 
+    fn pause(&self, _connection_handle: &ConnectionHandle) {
+        locked(&self.calls).push("pause".to_owned());
+    }
+
+    fn resume(&self, _connection_handle: &ConnectionHandle) {
+        locked(&self.calls).push("resume".to_owned());
+    }
+
     fn start(&self) -> BoxFuture<Result<(), RouterError>> {
         Box::pin(async { Ok(()) })
     }
@@ -248,8 +268,8 @@ impl ServerTransport for Silent {
 }
 
 // an in-memory transport server on `clock`, started
-async fn memory_on(clock: &SharedClock) -> MemoryServer {
-    let server = MemoryServer::new(&MemoryServerOptions {
+async fn memory_on(clock: &SharedClock) -> MemoryTransportServer {
+    let server = MemoryTransportServer::new(&MemoryTransportServerOptions {
         clock: Some(Arc::clone(clock)),
         runtime: None,
     })
@@ -260,10 +280,9 @@ async fn memory_on(clock: &SharedClock) -> MemoryServer {
     server
 }
 
-fn memory_client_of((server, clock): (&MemoryServer, &SharedClock)) -> MemoryClient {
-    MemoryClient::new(&MemoryClientOptions {
+fn memory_client_of(clock: &SharedClock) -> MemoryTransportClient {
+    MemoryTransportClient::new(&MemoryTransportClientOptions {
         clock: Some(Arc::clone(clock)),
-        server: server.clone(),
     })
     .expect("a client")
 }
@@ -272,7 +291,7 @@ fn memory_client_of((server, clock): (&MemoryServer, &SharedClock)) -> MemoryCli
 struct Brokered {
     server_participant: BrokerParticipant,
     client_participant: BrokerParticipant,
-    server: BrokerServer,
+    server: BrokerTransportServer,
 }
 
 fn brokered(clock: &SharedClock) -> Brokered {
@@ -284,7 +303,7 @@ fn brokered(clock: &SharedClock) -> Brokered {
     let participant_of = |id: &str| {
         let adapter: Arc<dyn BrokerAdapter> = Arc::new(
             broker
-                .adapter(&MemoryBrokerAdapterOptions::of(id))
+                .adapter(&MemoryBrokerAdapterOptions::new(id))
                 .expect("an adapter"),
         );
         // * no heartbeat: its PINGs, on the platform's timer, would cross what a test counts
@@ -299,7 +318,7 @@ fn brokered(clock: &SharedClock) -> Brokered {
     let server_participant = participant_of("server");
     let client_participant = participant_of("client");
     let server = server_participant
-        .server(&BrokerServerOptions::of(["interop"]))
+        .server(&BrokerTransportServerOptions::new(["interop"]))
         .expect("a server");
 
     Brokered {
@@ -309,10 +328,10 @@ fn brokered(clock: &SharedClock) -> Brokered {
     }
 }
 
-fn broker_client_of(brokered: &Brokered) -> BrokerClient {
+fn broker_client_of(brokered: &Brokered) -> BrokerTransportClient {
     brokered
         .client_participant
-        .client(&BrokerClientOptions::default())
+        .client(&BrokerTransportClientOptions::default())
         .expect("a client")
 }
 
@@ -420,10 +439,10 @@ async fn hands_on_each_transport_s_events_with_the_handle_it_drew() {
     brokered.server.start().await.expect("started");
 
     // the in-memory transport's
-    let client = memory_client_of((&memory, &shared));
+    let client = memory_client_of(&shared);
 
     client
-        .connect(MemoryConnectOptions::default())
+        .connect(&MemoryTransportClientConnectOptions::new(memory.clone()))
         .await
         .expect("connected");
     clock.settle().await;
@@ -431,7 +450,7 @@ async fn hands_on_each_transport_s_events_with_the_handle_it_drew() {
     let drawn = memory
         .clients()
         .first()
-        .map(|(handle, ..)| Arc::clone(handle))
+        .map(|client| Arc::clone(&client.connection_handle))
         .expect("drawn");
 
     client
@@ -442,7 +461,7 @@ async fn hands_on_each_transport_s_events_with_the_handle_it_drew() {
         .expect("sent");
     clock.settle().await;
     client
-        .disconnect(DisconnectOptions::default())
+        .disconnect(&TransportClientDisconnectOptions::default())
         .expect("closed");
     clock.settle().await;
 
@@ -450,7 +469,7 @@ async fn hands_on_each_transport_s_events_with_the_handle_it_drew() {
     let broker_client = broker_client_of(&brokered);
 
     broker_client
-        .connect(BrokerConnectOptions::of("interop"))
+        .connect(&BrokerTransportClientConnectOptions::new("interop"))
         .await
         .expect("connected");
     clock.settle().await;
@@ -459,7 +478,7 @@ async fn hands_on_each_transport_s_events_with_the_handle_it_drew() {
         .server
         .clients()
         .first()
-        .map(|(handle, ..)| Arc::clone(handle))
+        .map(|client| Arc::clone(&client.connection_handle))
         .expect("drawn");
 
     broker_client
@@ -470,7 +489,7 @@ async fn hands_on_each_transport_s_events_with_the_handle_it_drew() {
         .expect("sent");
     clock.settle().await;
     broker_client
-        .disconnect(DisconnectOptions::default())
+        .disconnect(&TransportClientDisconnectOptions::default())
         .expect("closed");
     clock.settle().await;
 
@@ -544,17 +563,17 @@ async fn asks_each_connection_s_flags_of_the_transport_that_drew_it_and_sends_an
 
     brokered.server.start().await.expect("started");
 
-    let client = memory_client_of((&memory, &shared));
+    let client = memory_client_of(&shared);
     let broker_client = broker_client_of(&brokered);
 
     client.listen(Arc::new(Hearing(Arc::clone(&heard))));
     broker_client.listen(Arc::new(Hearing(Arc::clone(&heard))));
     client
-        .connect(MemoryConnectOptions::default())
+        .connect(&MemoryTransportClientConnectOptions::new(memory.clone()))
         .await
         .expect("connected");
     broker_client
-        .connect(BrokerConnectOptions::of("interop"))
+        .connect(&BrokerTransportClientConnectOptions::new("interop"))
         .await
         .expect("connected");
     clock.settle().await;
@@ -563,13 +582,13 @@ async fn asks_each_connection_s_flags_of_the_transport_that_drew_it_and_sends_an
     let drawn = memory
         .clients()
         .first()
-        .map(|(handle, ..)| Arc::clone(handle))
+        .map(|client| Arc::clone(&client.connection_handle))
         .expect("drawn");
     let by_broker = brokered
         .server
         .clients()
         .first()
-        .map(|(handle, ..)| Arc::clone(handle))
+        .map(|client| Arc::clone(&client.connection_handle))
         .expect("drawn");
     let socket: ConnectionHandle = Arc::from(SOCKET);
     let silent_handle: ConnectionHandle = Arc::from("type=HTTP;ip=127.0.0.1;ordinal=1");
@@ -666,8 +685,10 @@ async fn asks_each_connection_s_flags_of_the_transport_that_drew_it_and_sends_an
 // spec 15.14
 #[tokio::test]
 async fn refuses_to_join_two_transports_of_one_type() {
-    let first = MemoryServer::new(&MemoryServerOptions::default()).expect("a server");
-    let second = MemoryServer::new(&MemoryServerOptions::default()).expect("a server");
+    let first =
+        MemoryTransportServer::new(&MemoryTransportServerOptions::default()).expect("a server");
+    let second =
+        MemoryTransportServer::new(&MemoryTransportServerOptions::default()).expect("a server");
     let paired = Arc::new(Paired::default());
 
     assert!(
@@ -697,7 +718,7 @@ async fn refuses_to_join_two_transports_of_one_type() {
 
     let clock = SteppingClock::new(january_first());
     let shared: SharedClock = Arc::<SteppingClock>::clone(&clock);
-    let elsewhere = MemoryServer::new(&MemoryServerOptions {
+    let elsewhere = MemoryTransportServer::new(&MemoryTransportServerOptions {
         clock: Some(Arc::clone(&shared)),
         runtime: None,
     })
@@ -763,15 +784,15 @@ async fn stops_every_transport_it_joined_and_sums_their_gauges() {
         Arc::<Paired>::clone(&uncounted),
     ])
     .expect("a join");
-    let first = memory_client_of((&memory, &shared));
-    let second = memory_client_of((&memory, &shared));
+    let first = memory_client_of(&shared);
+    let second = memory_client_of(&shared);
 
     first
-        .connect(MemoryConnectOptions::default())
+        .connect(&MemoryTransportClientConnectOptions::new(memory.clone()))
         .await
         .expect("connected");
     second
-        .connect(MemoryConnectOptions::default())
+        .connect(&MemoryTransportClientConnectOptions::new(memory.clone()))
         .await
         .expect("connected");
     clock.settle().await;
@@ -781,7 +802,7 @@ async fn stops_every_transport_it_joined_and_sums_their_gauges() {
     let mut handles: Vec<ConnectionHandle> = memory
         .clients()
         .into_iter()
-        .map(|(handle, ..)| handle)
+        .map(|client| client.connection_handle)
         .collect();
 
     handles.push(Arc::from(SOCKET));
@@ -864,7 +885,10 @@ async fn serves_one_service_offered_once_to_a_client_of_each_transport() {
     // * offered once, on the one server: each transport's client reaches it, both at once
     server
         .services()
-        .get_request_resolver(&echo(), ResolverDependencies::of(TextCodec, TextCodec))
+        .get_request_resolver(
+            &echo(),
+            RequestResolverDependencies::new(TextCodec, TextCodec),
+        )
         .expect("echo resolved")
         .on(Arc::new(|request, response: Response<TextCodec>| {
             response.result(request.payload)
@@ -881,7 +905,7 @@ async fn serves_one_service_offered_once_to_a_client_of_each_transport() {
     ));
     brokered.server.start().await.expect("started");
 
-    let in_memory = memory_client_of((&memory, &shared));
+    let in_memory = memory_client_of(&shared);
     let by_broker = broker_client_of(&brokered);
     let by_memory =
         Client::new(Arc::new(in_memory.clone()), &ClientOptions::default()).expect("a client");
@@ -889,11 +913,11 @@ async fn serves_one_service_offered_once_to_a_client_of_each_transport() {
         Client::new(Arc::new(by_broker.clone()), &ClientOptions::default()).expect("a client");
 
     in_memory
-        .connect(MemoryConnectOptions::default())
+        .connect(&MemoryTransportClientConnectOptions::new(memory.clone()))
         .await
         .expect("connected");
     by_broker
-        .connect(BrokerConnectOptions::of("interop"))
+        .connect(&BrokerTransportClientConnectOptions::new("interop"))
         .await
         .expect("connected");
     clock.settle().await;
@@ -901,9 +925,9 @@ async fn serves_one_service_offered_once_to_a_client_of_each_transport() {
     let call = |client: &Client, text: &str| {
         client
             .services()
-            .get_request(&echo(), RequestDependencies::of(TextCodec, TextCodec))
+            .get_request(&echo(), RequestDependencies::new(TextCodec, TextCodec))
             .expect("echo asked")
-            .call(text.to_owned(), RequestOptions::default())
+            .call(text.to_owned(), &RequestOptions::default())
             .expect("echo called")
     };
     let from_memory = call(&by_memory, "from memory");
@@ -934,9 +958,13 @@ async fn serves_one_service_offered_once_to_a_client_of_each_transport() {
         Arc::ptr_eq(&server.transport(), &joined),
         "the join its transport"
     );
-    assert_eq!(server.health().await.status, HealthStatus::Pass, "healthy");
+    assert_eq!(
+        server.health().await.expect("distinct counts").status,
+        HealthStatus::Pass,
+        "healthy"
+    );
 
-    let gauges = server.gauges().await;
+    let gauges = server.gauges().await.expect("distinct counts");
 
     // both transports' connections counted as one transport's, and none of the router's left out
     assert_eq!(
@@ -949,4 +977,92 @@ async fn serves_one_service_offered_once_to_a_client_of_each_transport() {
     );
     brokered.client_participant.stop().await;
     brokered.server_participant.stop().await;
+}
+
+// what the join tells of each message, its first byte and its connection, as a line
+struct Messages(Arc<Mutex<Vec<String>>>);
+
+impl ServerListener for Messages {
+    fn on_message(&self, message: TransportMessage, connection_handle: &ConnectionHandle) {
+        locked(&self.0).push(format!(
+            "message {} {connection_handle}",
+            message.data.first().copied().unwrap_or_default()
+        ));
+    }
+}
+
+// spec 15.12.17, 15.14: the twin of "a joined transport pauses the connection on the transport
+// that drew it"
+#[tokio::test]
+async fn a_joined_transport_pauses_the_connection_on_the_transport_that_drew_it() {
+    let clock = SteppingClock::new(january_first());
+    let shared: SharedClock = Arc::<SteppingClock>::clone(&clock);
+    let memory = memory_on(&shared).await;
+    let paired = Arc::new(Paired::default());
+    let joined = JoinedServerTransport::new(vec![
+        Arc::new(memory.clone()),
+        Arc::<Paired>::clone(&paired),
+    ])
+    .expect("a join");
+    let told: Arc<Mutex<Vec<String>>> = Arc::default();
+
+    joined.listen(Arc::new(Messages(Arc::clone(&told))));
+
+    let client = memory_client_of(&shared);
+    let connecting = client.connect(&MemoryTransportClientConnectOptions::new(memory.clone()));
+
+    clock.settle().await;
+    connecting.await.expect("connected");
+    paired.open();
+
+    let local: ConnectionHandle = Arc::from("type=MEMORY;ip=local;ordinal=1");
+    let socket: ConnectionHandle = Arc::from(SOCKET);
+
+    // * the WebSocket-typed one's pause and resume asked of it alone
+    joined.pause(&socket);
+    joined.resume(&socket);
+
+    assert_eq!(
+        paired.calls(),
+        [format!("pause {SOCKET}"), format!("resume {SOCKET}")],
+        "asked of the transport that drew it"
+    );
+
+    // the in-memory one's held by it, in order, until resumed
+    joined.pause(&local);
+
+    for byte in [1_u8, 2] {
+        client
+            .send(TransportMessage {
+                data: Bytes::copy_from_slice(&[byte]),
+                ..TransportMessage::default()
+            })
+            .expect("sent");
+    }
+
+    clock.settle().await;
+
+    assert!(locked(&told).is_empty(), "nothing told while paused");
+
+    joined.resume(&local);
+    clock.settle().await;
+
+    assert_eq!(
+        *locked(&told),
+        [
+            "message 1 type=MEMORY;ip=local;ordinal=1",
+            "message 2 type=MEMORY;ip=local;ordinal=1"
+        ],
+        "each told, in order, once resumed"
+    );
+    assert_eq!(
+        paired.calls(),
+        [format!("pause {SOCKET}"), format!("resume {SOCKET}")],
+        "nothing more asked of the other"
+    );
+
+    // a handle no transport of it drew is asked of none
+    joined.pause(&Arc::from("type=HTTP;ip=127.0.0.1;port=50003;ordinal=1"));
+
+    assert_eq!(paired.calls().len(), 2, "none asked");
 }

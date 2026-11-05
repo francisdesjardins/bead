@@ -67,12 +67,12 @@ codes from a procedure's.
 
 **A failure answered for an error of the side's own carries none of that error**: a resolver that
 throws, a verifier or an admission that fails, a result the side cannot send, an answer a relay's
-leg A cannot carry, a codec that throws other than a refusal. Its code says how far the call went,
-which is all its requester acts on; the error, an exception's message above all, is reported where
-the side runs, since its internals tell a peer nothing it can use and tell an attacker what to try
-next, as OWASP's Application Security Verification Standard returns a generic message to the
-consumer of an unexpected error (ASVS 5.0, 16.5.1). `PROCEDURE_FAILED` so answered carries no
-detail at all, the one form every language writes alike (spec 9.0).
+leg A cannot carry, an envelope's or a payload's codec that throws other than its refusal. Its code
+says how far the call went, which is all its requester acts on; the error, an exception's message
+above all, is reported where the side runs, since its internals tell a peer nothing it can use and
+tell an attacker what to try next, as OWASP's Application Security Verification Standard returns a
+generic message to the consumer of an unexpected error (ASVS 5.0, 16.5.1). `PROCEDURE_FAILED` so
+answered carries no detail at all, the one form every language writes alike (spec 9.0).
 
 **Every bit this layout does not define refuses the envelope as malformed**, and so do bytes after
 the header of a kind that carries no payload, a credit's or a cancel's, and a chunk that carries
@@ -187,13 +187,13 @@ several gigabytes needs a stream, a decision of its own.
 ## The Tenth Man
 
 The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md))
-in three rounds. A transport's order and copies met it with sections 15.1 and 15.9 of the spec,
+in four rounds. A transport's order and copies met it with sections 15.1 and 15.9 of the spec,
 which [0020](0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md) points here for; the
 wire's edges met it with sections 7.3, 9.5, 12 and 14.3, a round
 [0010](0010-a-request-presents-a-credential-of-a-scheme.md) points here for; a closing connection's
 teardown met it with sections 9.10 and 12.10, and with debugging 9.7 and an exit of
 `spec/metrics.json`, which [0013](0013-every-language-debugs-alike-at-no-cost-when-off.md) points
-here for. A failure's detail for an error of the side's own met it in
+here for; the chunk that makes a payload whole met it with sections 12.6 and 12.7. A failure's detail for an error of the side's own met it in
 [0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)'s round, on the answer leg A
 cannot carry, which keeps its objections and answers. Their objections, each with the answer that
 holds:
@@ -250,3 +250,25 @@ answers before it rejects the calls it made. The user chose that order, with `Ca
 | Neither order counts an incoming call twice, both detaching first; the first proposal's risk is TypeScript listeners running while the calls a connection made are detached and unsettled                                                                                                                                                                        | Accepted: the twin tests keep their second close and its counts, and add the requester's                                                                                                                                                                                                                                                                                                                                                 |
 | The C# test's marker, a task posted from inside the clock's read, has no TypeScript counterpart and nothing an application does at that instant                                                                                                                                                                                                                  | Accepted: on both sides, the marker gives way to what it stands for, a resolver finding its signal aborted as it catches its outgoing call's rejection                                                                                                                                                                                                                                                                                   |
 | Conformance can carry neither the order nor the gauges, a counted step seeing both ends at once, but it can carry the outcomes and the count once, which no exit holds for a call and the command its resolver made                                                                                                                                              | Accepted: an exit of `spec/metrics.json`, a call awaiting its command as their connection closes, each counted `closed` once (debugging 9.4.20, 9.6.11); the order and the gauges stay with the twin tests                                                                                                                                                                                                                               |
+
+### On the chunk that makes a payload whole
+
+On the server's receiving path, the chunk that makes a payload whole stops its transfer's
+inactivity timer and sets none going: nothing is left to wait for (sections 12.6 and 12.7). The
+TypeScript and C# sides' `place` stops the timer on Complete, a stop, so the C# side's generation
+guard holds; the Rust side's core arms none; each side's requester does so already. The twin,
+`stops a transfer’s timer once its payload is whole, and once it is closed` on the TypeScript side
+and under its own name on the others, holds that no timer of the transfer is live right after that
+chunk, then that two timers were armed, the opening's and the next transfer's, then that nothing
+stalls; the TypeScript and C# sides test the module, the Rust side its core. Nothing a peer
+observes moves: the spec stays as it is, and the changelog has no line for it. Its objections,
+each with the answer that holds:
+
+| #   | Objection                                                                                                                                             | Answer                                                                                                                                                                      |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 7   | It is no minor of the spec: 0008 counts one only when a conforming implementation must change, and nothing observable moves                           | Accepted: no spec change at all                                                                                                                                             |
+| 8   | Rewording 12.8 is unneeded and risky: 12.6 and 12.7 settle it, and the sentence also governs the sender's credit and the requester                    | Accepted: no reword                                                                                                                                                         |
+| 9   | The twin pins an internal history recorded at different layers, the module on two sides and the core on the third                                     | Accepted: right after the payload is whole, and before the next transfer opens, no timer of the transfer is live; then the arms, two on every side; then the no-stall check |
+| 10  | The scope is narrower than stated, the server's receiving path alone, and a stop on Complete keeps the C# side's generation guard                     | Accepted: the server's receiving path alone, with a stop on Complete                                                                                                        |
+| 11  | No changelog line: an internal count of arms is nothing worth telling                                                                                 | Accepted for this change; the leveling of [0010](0010-a-request-presents-a-credential-of-a-scheme.md)'s round, which moves what the TypeScript side sends, has its line     |
+| 12  | No record holds transfer pacing but this one, and the TypeScript title is `stops a transfer’s timer once its payload is whole, and once it is closed` | Accepted: this record, and the title copied byte for byte, its curly apostrophe and comma included                                                                          |

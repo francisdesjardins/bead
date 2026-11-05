@@ -90,18 +90,22 @@ impl DeclarationWay {
 
 /// One procedure of one service, which names what is made for it (spec 16).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[expect(
+    clippy::struct_field_names,
+    reason = "a procedure's id, name and kind, as every side names them: procedureId, ProcedureId"
+)]
 pub struct Procedure {
     /// Its service's id, from 1 to 65535 (spec 16.2).
     pub service_id: u16,
     /// Its id in its service, from 1 to 65535 (spec 16.2).
-    pub id: u16,
+    pub procedure_id: u16,
     /// Which revision of its service it is, from 1 to 2³¹ − 1 (spec 16.2, 16.9); it does not
     /// travel.
     pub service_revision: u32,
     /// Its name, which labels what a side traces and counts and never travels (spec 16.4).
-    pub name: String,
+    pub procedure_name: String,
     /// Its kind, which each router holds its declaration to; none given, nothing checks it.
-    pub kind: Option<ProcedureKind>,
+    pub procedure_kind: Option<ProcedureKind>,
     /// The bytes a payload of it holds at most, its request's and its result's, whole or as a
     /// transfer; the router's alone when none.
     pub maximum_payload_bytes: Option<u64>,
@@ -122,7 +126,7 @@ impl Procedure {
     pub fn address(&self) -> ProcedureAddress {
         ProcedureAddress {
             service_id: self.service_id,
-            procedure_id: self.id,
+            procedure_id: self.procedure_id,
         }
     }
 }
@@ -162,12 +166,12 @@ pub fn are_one_name(one: &str, other: &str) -> bool {
 /// # Errors
 ///
 /// A [`ProgrammerError`] whose reason is the first of 16.10 that applies.
-pub fn check_declaration(procedure: &Procedure) -> Result<(), ProgrammerError> {
+pub(crate) fn check_declaration(procedure: &Procedure) -> Result<(), ProgrammerError> {
     let Procedure {
         service_id,
-        id: procedure_id,
+        procedure_id,
         service_revision,
-        name: procedure_name,
+        procedure_name,
         ..
     } = procedure;
 
@@ -213,12 +217,12 @@ fn words_of(kind: ProcedureKind) -> &'static str {
 /// # Errors
 ///
 /// A [`ProgrammerError`] whose reason is [`IdentityRefusal::AgainstItsKind`].
-pub fn check_procedure_kind(
+pub(crate) fn check_procedure_kind(
     procedure: &Procedure,
     way: DeclarationWay,
 ) -> Result<(), ProgrammerError> {
     let (takes, named) = way.takes();
-    let Some(kind) = procedure.kind else {
+    let Some(kind) = procedure.procedure_kind else {
         return Ok(());
     };
 
@@ -230,9 +234,9 @@ pub fn check_procedure_kind(
         Refusal::Identity(IdentityRefusal::AgainstItsKind),
         format!(
             "\"{}\" at {}/{} is {}: {}, which {named} does not take; it takes {} (spec 16.11)",
-            procedure.name,
+            procedure.procedure_name,
             procedure.service_id,
-            procedure.id,
+            procedure.procedure_id,
             IdentityRefusal::AgainstItsKind,
             words_of(kind),
             takes
@@ -243,3 +247,5 @@ pub fn check_procedure_kind(
         ),
     ))
 }
+
+impl std::error::Error for IdentityRefusal {}

@@ -1,0 +1,6 @@
+const metricsRegistry = createMetricsRegistry();
+const server = createServer({ transport }, { metricsRegistry });
+
+// à /metrics, pour Prometheus, et un Grafana derrière lui
+const { contentType, text } = metricsRegistry.exposition();
+// contentType : 'text/plain; version=0.0.4; charset=utf-8'

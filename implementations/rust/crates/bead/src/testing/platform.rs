@@ -1,11 +1,11 @@
-//! What a test takes from its platform: a task spawned, a rest, a patience, a monotonic instant and
-//! the wall clock's reading, natively tokio's and std's (decision 0044). A test names no platform's
-//! spawn or time of its own, as clippy's `disallowed-methods` and `disallowed-types` hold it, so a
-//! test reads the same wherever the core runs.
+//! What a test takes from its platform: a task spawned, a turn yielded, a rest, a patience, a
+//! monotonic instant and the wall clock's reading, natively tokio's and std's (decision 0044). A
+//! test names no platform's spawn, yield or time of its own, as clippy's `disallowed-methods` and
+//! `disallowed-types` hold it, so a test reads the same wherever the core runs.
 #![expect(
     clippy::disallowed_methods,
     clippy::disallowed_types,
-    reason = "the test kit's funnel: the one place a test reaches tokio's spawn and time and std's"
+    reason = "the test kit's funnel: a test's one way to tokio's spawn, yield and time and to std's"
 )]
 
 use core::future::{Future, IntoFuture};
@@ -22,6 +22,18 @@ where
     F::Output: Send + 'static,
 {
     tokio::spawn(future)
+}
+
+// A native blocking witness lends its executor worker back while it waits. The router's owner
+// still runs one job at a time: a listener called within that owner cannot take its answer.
+#[cfg(test)]
+pub(crate) fn blocking<F: FnOnce() -> R, R>(wait: F) -> R {
+    tokio::task::block_in_place(wait)
+}
+
+/// Hands the current task's turn back to its runtime, as `tokio::task::yield_now` does.
+pub async fn yield_now() {
+    tokio::task::yield_now().await;
 }
 
 /// Rests `duration` on the platform's timers, as `tokio::time::sleep` does.

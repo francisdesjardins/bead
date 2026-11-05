@@ -1,0 +1,15 @@
+// l'écouteur d'un appel : (error, info), pour la requête echo('hi') qui réussit
+null, {
+  direction: 'rx',
+  duration: 1,
+  options: { timeout: 2000 },
+  procedureId: 2,
+  procedureName: 'echo',
+  rx: 'HI',
+  serviceId: 1,
+  serviceRevision: 1,
+  startedAt: 1790700108977,
+  tx: 'hi',
+  type: 'request',
+}
+// son aller, au même début : direction 'tx', duration: undefined, rx: undefined

@@ -17,14 +17,18 @@ use crate::debug::DebugDirection;
 use crate::errors::CallError;
 use crate::failure::Failure;
 use crate::managers::service::{
-    DebugEvent, RequestDependencies, RequestOptions, ResolverDependencies, Response, TracedError,
-    ValidateOptions,
+    DebugEvent, RequestDependencies, RequestOptions, RequestResolverDependencies, Response,
+    TracedError, ValidateOptions,
 };
 use crate::metrics::{MetricsRegistry, MetricsRegistryOptions};
 use crate::payloads::JsonCodec;
 use crate::router::types::RouterError;
 use crate::testing::pair::{Pair, PairOptions, echo};
 use crate::violations::{Judged, Violation};
+
+mod descriptors;
+mod failures;
+mod server;
 
 // what a manager's debug listener heard: why, when a step went wrong, and the step
 type Heard = Arc<Mutex<Vec<(Option<String>, DebugEvent)>>>;
@@ -35,10 +39,17 @@ fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 
 #[test]
 fn keeps_a_catalogue_of_failures_each_of_its_own_code_refusing_one_of_0_or_one_twice() {
-    let on_purpose = ListedFailure::new("ON_PURPOSE", 7);
+    assert_eq!(NonZeroU16::new(0), None, "no code of zero is constructed");
+    let on_purpose = ListedFailure::new("ON_PURPOSE", NonZeroU16::new(7).expect("a nonzero code"));
     let catalogue = failures_of(
         1,
-        &[on_purpose, ListedFailure::new("REGISTERED_ALREADY", 8)],
+        &[
+            on_purpose,
+            ListedFailure::new(
+                "REGISTERED_ALREADY",
+                NonZeroU16::new(8).expect("a nonzero code"),
+            ),
+        ],
     )
     .expect("a catalogue of two codes");
 
@@ -50,21 +61,22 @@ fn keeps_a_catalogue_of_failures_each_of_its_own_code_refusing_one_of_0_or_one_t
             .expect_err("a service of id 0")
             .message()
             .to_owned(),
-        failures_of(1, &[ListedFailure::new("NONE", 0)])
-            .expect_err("a code of 0")
-            .message()
-            .to_owned(),
-        failures_of(1, &[on_purpose, ListedFailure::new("AGAIN", 7)])
-            .expect_err("a code twice")
-            .message()
-            .to_owned(),
+        failures_of(
+            1,
+            &[
+                on_purpose,
+                ListedFailure::new("AGAIN", NonZeroU16::new(7).expect("a nonzero code")),
+            ],
+        )
+        .expect_err("a code twice")
+        .message()
+        .to_owned(),
     ];
 
     assert_eq!(
         refused,
         [
             "a service's id is a whole number from 1 to 65535, not 0",
-            "a failure's code is a whole number from 1 to 65535, not 0 for NONE",
             "AGAIN and ON_PURPOSE are both failure 7",
         ],
         "each refused, saying why"
@@ -72,7 +84,7 @@ fn keeps_a_catalogue_of_failures_each_of_its_own_code_refusing_one_of_0_or_one_t
 }
 
 // a string empty breaks the rule that it holds one character at least
-fn judge(value: &Value, _options: ValidateOptions) -> Judged {
+fn judge(value: &Value, _options: &ValidateOptions) -> Judged {
     if value.as_str().is_some_and(|text| !text.is_empty()) {
         return Judged::default();
     }
@@ -99,17 +111,20 @@ async fn counts_a_call_its_rules_refuse_before_it_goes_as_payload_invalid_starte
     };
 
     let options = PairOptions {
-        client,
+        client: Some(client),
         ..PairOptions::default()
     };
 
-    let pair = Pair::connected((crate::testing::instants::new_year(), options))
+    let pair = Pair::connected(crate::testing::instants::new_year(), &options)
         .await
         .expect("a pair connected");
 
     pair.server
         .services()
-        .get_request_resolver(&echo(), ResolverDependencies::of(JsonCodec, JsonCodec))
+        .get_request_resolver(
+            &echo(),
+            RequestResolverDependencies::new(JsonCodec, JsonCodec),
+        )
         .expect("echo resolved")
         .on(Arc::new(|request, response: Response<JsonCodec>| {
             response.result(request.payload)
@@ -130,8 +145,8 @@ async fn counts_a_call_its_rules_refuse_before_it_goes_as_payload_invalid_starte
         .get_request(
             &echo(),
             RequestDependencies {
-                validate: Some(Arc::new(judge)),
-                ..RequestDependencies::of(JsonCodec, JsonCodec)
+                validate: Some(Arc::new(|value, options| Ok(judge(value, options)))),
+                ..RequestDependencies::new(JsonCodec, JsonCodec)
             },
         )
         .expect("echo asked");
@@ -139,7 +154,7 @@ async fn counts_a_call_its_rules_refuse_before_it_goes_as_payload_invalid_starte
     // * the call queued on its router's owner, then a read queued right behind it: what the call
     // did in its own turn is counted by then, and nothing after
     let refusing = validating
-        .call(Value::from(""), RequestOptions::default())
+        .call(Value::from(""), &RequestOptions::default())
         .expect("a call");
     let reading = registry.clone();
     let in_its_turn = pair
@@ -186,21 +201,27 @@ async fn counts_a_call_its_rules_refuse_before_it_goes_as_payload_invalid_starte
 
 #[tokio::test]
 async fn sends_an_unlisted_code_as_written_and_reports_it() {
-    let pair = Pair::connected((crate::testing::instants::new_year(), PairOptions::default()))
-        .await
-        .expect("a pair connected");
+    let pair = Pair::connected(
+        crate::testing::instants::new_year(),
+        &PairOptions::default(),
+    )
+    .await
+    .expect("a pair connected");
     let descriptor = request_of(DescriptorInit {
         procedure: echo(),
         admission: AdmissionRule::None,
-        failures: vec![ListedFailure::new("ON_PURPOSE", 7)],
+        failures: vec![ListedFailure::new(
+            "ON_PURPOSE",
+            NonZeroU16::new(7).expect("a nonzero code"),
+        )],
         request: JsonCodec,
         result: JsonCodec,
         validate: None,
     })
     .expect("echo described");
     let service = ServiceServer::new(
-        vec![ServiceProcedure::of(&descriptor)],
-        ServiceServerOptions::default(),
+        vec![ServiceProcedure::from(&descriptor)],
+        &ServiceServerOptions::default(),
     )
     .expect("its server");
 
@@ -223,9 +244,9 @@ async fn sends_an_unlisted_code_as_written_and_reports_it() {
     let answered = pair
         .client
         .services()
-        .get_request(&echo(), RequestDependencies::of(JsonCodec, JsonCodec))
+        .get_request(&echo(), RequestDependencies::new(JsonCodec, JsonCodec))
         .expect("echo asked")
-        .call(json!("hello"), RequestOptions::default())
+        .call(json!("hello"), &RequestOptions::default())
         .expect("echo called")
         .await;
 

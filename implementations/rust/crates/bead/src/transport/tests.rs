@@ -1,7 +1,9 @@
 //! The transports' shared parts: what a credential beside an envelope may be, where a transport
 //! stands, and how a reconnection waits by default.
 
-use super::{RECONNECT_ATTEMPTS, RECONNECT_DELAY, ReadyState, is_field_value};
+use super::{RECONNECT_DEFAULTS, ReadyState, TransportClientReconnectDelay, is_field_value};
+
+mod reconnection;
 
 #[test]
 fn takes_a_field_s_value_as_a_credential_visible_ascii_spaces_and_tabs_alone_none_first_or_last() {
@@ -54,8 +56,40 @@ fn names_where_it_stands_as_the_other_sides_do() {
 #[test]
 fn reconnects_five_times_a_second_apart_by_default() {
     assert_eq!(
-        (RECONNECT_ATTEMPTS, RECONNECT_DELAY),
-        (5, core::time::Duration::from_secs(1)),
-        "its defaults"
+        RECONNECT_DEFAULTS.maximum_attempts,
+        Some(5),
+        "its attempts by default"
     );
+    assert!(
+        matches!(
+            RECONNECT_DEFAULTS.delay,
+            Some(TransportClientReconnectDelay::Fixed(delay))
+                if delay == core::time::Duration::from_secs(1)
+        ),
+        "its delay by default"
+    );
+    assert!(
+        RECONNECT_DEFAULTS.signal.is_none() && RECONNECT_DEFAULTS.tap.is_none(),
+        "nothing else by default"
+    );
+}
+
+// a server transport's gauges are none unless it says otherwise: the trait's own, which a transport
+// that counts overrides
+#[test]
+fn a_transport_counts_nothing_unless_it_says_so() {
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+
+    use super::ServerTransport;
+    use crate::router::types::Gauges;
+    use crate::testing::SteppingClock;
+    use crate::testing::clockless::Clockless;
+    use crate::testing::scripted::ScriptedServer;
+
+    let counting = ScriptedServer::new(SteppingClock::new(crate::testing::instants::new_year()));
+    let counted = Gauges::new(BTreeMap::from([("held", 1)]), []);
+    counting.count_as(Some(counted.clone()));
+    assert_eq!(counting.gauges(), Some(counted));
+    assert_eq!(Clockless(Arc::clone(&counting)).gauges(), None);
 }

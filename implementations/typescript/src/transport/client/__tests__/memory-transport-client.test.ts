@@ -65,7 +65,7 @@ const bytesOf = ({ data }: ITransportMessage): number[] => {
  */
 const connected = async () => {
   const server: MemoryTransportServer = createMemoryTransportServer();
-  const client = createMemoryTransportClient({ server });
+  const client = createMemoryTransportClient();
   const atServer: unknown[][] = [];
   const atClient: unknown[][] = [];
 
@@ -82,7 +82,7 @@ const connected = async () => {
     atClient.push(['close', ...params]);
   });
   await server.start();
-  await client.connect({});
+  await client.connect({ server });
 
   const [{ connectionHandle } = { connectionHandle: undefined }] = server.clients;
 
@@ -230,7 +230,7 @@ test.describe('createMemoryTransportClient', () => {
     // * through both routers: a call presenting ELSEWHERE stands for what came beside it
     const carried = 'Interop sub=ada';
     await using transport = createMemoryTransportServer();
-    await using caller = createMemoryTransportClient({ server: transport });
+    await using caller = createMemoryTransportClient();
     using router = createRouterServer(transport, {
       credentials: {
         verify: (given) => {
@@ -248,7 +248,7 @@ test.describe('createMemoryTransportClient', () => {
       }
     );
     await transport.start();
-    await caller.connect({});
+    await caller.connect({ server: transport });
 
     await expect(
       createServiceManager(routerClient).getRequest(whoami, { serializer: PAYLOAD_CODECS.text })(
@@ -338,14 +338,14 @@ test.describe('createMemoryTransportClient', () => {
   test('hears what its server sent before the connection opened once it has, in its order', async () => {
     {
       const held = createHeldServer();
-      await using client = createMemoryTransportClient({ server: held.server });
+      await using client = createMemoryTransportClient();
       const heard: number[][] = [];
 
       client.on('message', (message) => {
         heard.push(bytesOf(message));
       });
 
-      const connecting = client.connect({});
+      const connecting = client.connect({ server: held.server });
 
       await turn();
       held.peers[0]?.receive({ data: new Uint8Array([1]) });
@@ -359,11 +359,11 @@ test.describe('createMemoryTransportClient', () => {
 
     {
       await using server = createMemoryTransportServer();
-      await using client = createMemoryTransportClient({ server });
+      await using client = createMemoryTransportClient();
       const heard: number[][] = [];
 
       // * sent in the turn its server draws it, before its client opened: heard once it has, in order
-      server.on('connection', (...[, , connectionHandle]) => {
+      server.on('connection', (...[, connectionHandle]) => {
         void server.send({ data: new Uint8Array([1]) }, connectionHandle);
         void server.send({ data: new Uint8Array([2]) }, connectionHandle);
       });
@@ -371,7 +371,7 @@ test.describe('createMemoryTransportClient', () => {
         heard.push(bytesOf(message));
       });
       await server.start();
-      await client.connect({});
+      await client.connect({ server });
       await turn();
 
       expect([heard, client.isOpen()]).toEqual([[[1], [2]], true]);
@@ -383,7 +383,7 @@ test.describe('createMemoryTransportClient', () => {
   test('fails a connect its server closed as it opened, what it sent before unheard', async () => {
     {
       const held = createHeldServer();
-      await using client = createMemoryTransportClient({ server: held.server });
+      await using client = createMemoryTransportClient();
       const heard: unknown[] = [];
 
       client.on('message', (message) => {
@@ -393,7 +393,7 @@ test.describe('createMemoryTransportClient', () => {
         heard.push(['close', ...params]);
       });
 
-      const connecting = client.connect({});
+      const connecting = client.connect({ server: held.server });
 
       await turn();
       held.peers[0]?.close(false);
@@ -408,11 +408,11 @@ test.describe('createMemoryTransportClient', () => {
 
     {
       await using server = createMemoryTransportServer();
-      await using client = createMemoryTransportClient({ server });
+      await using client = createMemoryTransportClient();
       const heard: unknown[] = [];
 
       // * sent and closed in the turn its server draws it, before its client opened
-      server.on('connection', (...[, , connectionHandle]) => {
+      server.on('connection', (...[, connectionHandle]) => {
         void server.send({ data: new Uint8Array([1]) }, connectionHandle);
         void server.close(connectionHandle);
       });
@@ -424,7 +424,7 @@ test.describe('createMemoryTransportClient', () => {
       });
       await server.start();
 
-      await expect(client.connect({})).rejects.toThrow(
+      await expect(client.connect({ server })).rejects.toThrow(
         new ConnectError('the in-memory transport server closed the connection as it opened')
       );
       await turn();
@@ -438,14 +438,14 @@ test.describe('createMemoryTransportClient', () => {
   test('closes at once, unclean, a connection its server draws once a dispose gave up on its connect', async () => {
     {
       const held = createHeldServer();
-      const client = createMemoryTransportClient({ server: held.server });
+      const client = createMemoryTransportClient();
       const heard: unknown[] = [];
 
       client.on('message', (message) => {
         heard.push(message);
       });
 
-      const connecting = client.connect({});
+      const connecting = client.connect({ server: held.server });
 
       await turn();
       (client as unknown as ITransportClientInternal)[dispose]();
@@ -463,13 +463,13 @@ test.describe('createMemoryTransportClient', () => {
 
     {
       await using server = createMemoryTransportServer();
-      const client = createMemoryTransportClient({ server });
+      const client = createMemoryTransportClient();
       const heard: unknown[] = [];
       const closedAtServer: boolean[] = [];
 
       // * its dispose in the turn its server draws the connection, before its client opened; what
       // its server sends after goes unheard
-      server.on('connection', (...[, , connectionHandle]) => {
+      server.on('connection', (...[, connectionHandle]) => {
         (client as unknown as ITransportClientInternal)[dispose]();
         void server.send({ data: new Uint8Array([1]) }, connectionHandle);
       });
@@ -481,7 +481,7 @@ test.describe('createMemoryTransportClient', () => {
       });
       await server.start();
 
-      await expect(client.connect({})).rejects.toThrow(
+      await expect(client.connect({ server })).rejects.toThrow(
         new ConnectError('the transport client was disposed as it connected')
       );
       await turn();
@@ -497,7 +497,7 @@ test.describe('createMemoryTransportClient', () => {
 
   test('refuses a send or a disconnect unless open, and a send of what is no bytes', async () => {
     {
-      await using client = createMemoryTransportClient({ server: createHeldServer().server });
+      await using client = createMemoryTransportClient();
       const unopened = { expected: ReadyState.OPEN, got: ReadyState.UNINITIALIZED };
 
       // * never connected: nothing to send on, nor to close
@@ -529,7 +529,7 @@ test.describe('createMemoryTransportClient', () => {
   // spec 15.13
   test('refuses a reconnect never connected, and a connect unless closed, nothing changed', async () => {
     await using server = createMemoryTransportServer();
-    await using client = createMemoryTransportClient({ server });
+    await using client = createMemoryTransportClient();
     const aborted = AbortSignal.abort();
 
     // * never connected: nothing to connect again to
@@ -537,11 +537,18 @@ test.describe('createMemoryTransportClient', () => {
       new ProgrammerError('the transport client was never connected')
     );
 
+    // no server, which its type requires and a caller in JavaScript may still leave out
+    // @ts-expect-error: an in-memory connect names the server it connects to
+    await expect(client.connect()).rejects.toThrow(
+      new ProgrammerError("an in-memory connect's server is an in-memory transport server")
+    );
+    expect(client.isUninitialized()).toBe(true);
+
     // its token, a signal on this side, aborted already, and a server not started: refused, the
     // first leaving its state as it was
-    await expect(client.connect({ signal: aborted })).rejects.toBeInstanceOf(CancelError);
+    await expect(client.connect({ server, signal: aborted })).rejects.toBeInstanceOf(CancelError);
     expect(client.isUninitialized()).toBe(true);
-    await expect(client.connect({})).rejects.toThrow(
+    await expect(client.connect({ server })).rejects.toThrow(
       new ConnectError('the in-memory transport server is uninitialized, not open')
     );
     expect(client.isClosed()).toBe(true);
@@ -549,13 +556,56 @@ test.describe('createMemoryTransportClient', () => {
     // open: a second connect refused, and a reconnection whose signal is aborted already leaves it
     // open
     await server.start();
-    await client.connect({});
-    await expect(client.connect({})).rejects.toThrow(
+    await client.connect({ server });
+    await expect(client.connect({ server })).rejects.toThrow(
       new ProgrammerError('the transport client is already open')
     );
     await expect(client.reconnect({ signal: aborted })).rejects.toBeInstanceOf(CancelError);
 
     expect([client.isOpen(), server.clients.length]).toEqual([true, 1]);
+  });
+
+  // spec 1.4
+  test('refuses a fixed delay out of bounds as reconnect is called, nothing changed', async () => {
+    await using server = createMemoryTransportServer();
+    await using client = createMemoryTransportClient();
+    const aborted = AbortSignal.abort();
+    const told: string[] = [];
+    const refusalOf = (written: string): ProgrammerError => {
+      return new ProgrammerError(
+        `a delay is 0 for at once, or a number of milliseconds from 1 to 2147483647, not ${written}`
+      );
+    };
+
+    await server.start();
+    await client.connect({ server });
+    client.on('reconnect', () => {
+      told.push('reconnect');
+    });
+    client.on('close', () => {
+      told.push('close');
+    });
+
+    // * refused as it is called: after its state's guards, before its signal
+    for (const [delay, written] of [
+      [0.4, '0.4'],
+      [2 ** 31, '2147483648'],
+      [Infinity, 'Infinity'],
+    ] as const) {
+      await expect(client.reconnect({ delay, signal: aborted }), written).rejects.toThrow(
+        refusalOf(written)
+      );
+    }
+
+    // nothing changed: open, its connection kept, no reconnect told and no close
+    expect([client.isOpen(), server.clients.length, told]).toEqual([true, 1, []]);
+
+    // its state's guards first: a client never connected says so
+    await using never = createMemoryTransportClient();
+
+    await expect(never.reconnect({ delay: Infinity })).rejects.toThrow(
+      new ProgrammerError('the transport client was never connected')
+    );
   });
 
   test('refuses a second connect or reconnect while one is pending', async () => {
@@ -574,14 +624,14 @@ test.describe('createMemoryTransportClient', () => {
           return server.accept(peer, options);
         },
       };
-      await using client = createMemoryTransportClient({ server: accepting });
+      await using client = createMemoryTransportClient();
       const drawn: string[] = [];
       const clientCloses: boolean[][] = [];
       const serverCloses: boolean[] = [];
       const errors: Error[] = [];
       let starts = 0;
 
-      server.on('connection', (...[, , handle]) => {
+      server.on('connection', (...[, handle]) => {
         drawn.push(handle);
       });
       server.on('close', (isClean) => {
@@ -602,11 +652,13 @@ test.describe('createMemoryTransportClient', () => {
       await server.start();
 
       if (isReconnect) {
-        await client.connect({});
+        await client.connect({ server: accepting });
         isHolding = true;
       }
 
-      const pending = isReconnect ? client.reconnect({ maxAttempts: 1 }) : client.connect({});
+      const pending = isReconnect
+        ? client.reconnect({ maximumAttempts: 1 })
+        : client.connect({ server: accepting });
 
       try {
         await held.promise;
@@ -614,7 +666,7 @@ test.describe('createMemoryTransportClient', () => {
 
         const state = isReconnect ? 'reconnecting' : 'connecting';
 
-        await expect(client.connect({})).rejects.toThrow(
+        await expect(client.connect({ server: accepting })).rejects.toThrow(
           new ProgrammerError(`the transport client is already ${state}`)
         );
         await expect(client.reconnect()).rejects.toThrow(
@@ -659,14 +711,14 @@ test.describe('createMemoryTransportClient', () => {
   // spec 15.13
   test('reconnects with its last connect’s options, replacing its connection without a close', async () => {
     await using server = createMemoryTransportServer();
-    await using client = createMemoryTransportClient({ server });
+    await using client = createMemoryTransportClient();
     const drawn: string[] = [];
     const closedAtServer: string[] = [];
     const closedAtClient: string[] = [];
     const reported: string[] = [];
     let starts = 0;
 
-    server.on('connection', (...[, , connectionHandle]) => {
+    server.on('connection', (...[, connectionHandle]) => {
       drawn.push(connectionHandle);
     });
     server.on('close', (wasClean, connectionHandle) => {
@@ -688,7 +740,7 @@ test.describe('createMemoryTransportClient', () => {
     });
 
     await server.start();
-    await client.connect({ address: '10.0.0.1', port: 4_000 });
+    await client.connect({ address: '10.0.0.1', port: 4_000, server });
     await client.reconnect();
     await turn();
 
@@ -706,7 +758,7 @@ test.describe('createMemoryTransportClient', () => {
     await turn();
     expect(closedAtClient).toEqual(['false false']);
 
-    const gaveUp = await client.reconnect({ maxAttempts: 1 }).then(
+    const gaveUp = await client.reconnect({ maximumAttempts: 1 }).then(
       () => {
         throw new Error('the reconnection was taken');
       },
@@ -729,7 +781,7 @@ test.describe('createMemoryTransportClient', () => {
     const errors: Error[] = [];
     let starts = 0;
 
-    server.on('connection', (...[, , handle]) => {
+    server.on('connection', (...[, handle]) => {
       drawn.push(handle);
     });
     server.on('error', (error) => {
@@ -744,7 +796,7 @@ test.describe('createMemoryTransportClient', () => {
     });
 
     const cancelled: unknown = await client
-      .reconnect({ maxAttempts: 1, signal: cancelling.signal })
+      .reconnect({ maximumAttempts: 1, signal: cancelling.signal })
       .catch((error: unknown) => {
         return error;
       });
@@ -767,7 +819,7 @@ test.describe('createMemoryTransportClient', () => {
   test('closes a successful last attempt when its reconnection is cancelled after it opens', async () => {
     for (const closedBeforeCancel of [false, true]) {
       await using server = createMemoryTransportServer();
-      await using client = createMemoryTransportClient({ server });
+      await using client = createMemoryTransportClient();
       const cancelling = new AbortController();
       const closedAtClient: [boolean, boolean][] = [];
       const closedAtServer: boolean[] = [];
@@ -777,7 +829,7 @@ test.describe('createMemoryTransportClient', () => {
       let opened = 0;
 
       await server.start();
-      await client.connect({});
+      await client.connect({ server });
       client.on('close', (isClean, isQuick) => {
         closedAtClient.push([isClean, isQuick]);
       });
@@ -792,7 +844,7 @@ test.describe('createMemoryTransportClient', () => {
       });
 
       // ! an early message is delivered after Open, within the successful connect's own turn
-      server.on('connection', (...[, , connectionHandle]) => {
+      server.on('connection', (...[, connectionHandle]) => {
         sent.push(server.send({ data: Uint8Array.of(8) }, connectionHandle));
       });
       client.on('message', ({ data }) => {
@@ -808,7 +860,7 @@ test.describe('createMemoryTransportClient', () => {
         cancelling.abort();
       });
       const cancelled: unknown = await client
-        .reconnect({ signal: cancelling.signal, maxAttempts: 1 })
+        .reconnect({ signal: cancelling.signal, maximumAttempts: 1 })
         .catch((reason: unknown) => {
           return reason;
         });
@@ -830,13 +882,13 @@ test.describe('createMemoryTransportClient', () => {
 
   test('closes what its last attempt opened as its reconnection was cancelled', async () => {
     await using server = createMemoryTransportServer();
-    await using client = createMemoryTransportClient({ server });
+    await using client = createMemoryTransportClient();
     const cancelling = new AbortController();
     const closedAtClient: string[] = [];
     const closedAtServer: boolean[] = [];
 
     await server.start();
-    await client.connect({});
+    await client.connect({ server });
     client.on('close', (isClean, isQuick) => {
       closedAtClient.push(`${String(isClean)} ${String(isQuick)}`);
     });
@@ -881,8 +933,8 @@ test.describe('createMemoryTransportClient', () => {
 
     // its clock past its timeout
     {
-      await using timed = createMemoryTransportClient({ clock, server: held.server });
-      const timing = timed.connect({ timeout: 1_000 });
+      await using timed = createMemoryTransportClient({ clock });
+      const timing = timed.connect({ server: held.server, timeout: 1_000 });
       const timedOut = expect(timing).rejects.toMatchObject({
         message: 'timed out after 1000ms',
         name: 'TimeoutError',
@@ -897,9 +949,9 @@ test.describe('createMemoryTransportClient', () => {
 
     // its token cancelled
     {
-      await using asked = createMemoryTransportClient({ server: held.server });
+      await using asked = createMemoryTransportClient();
       const cancelling = new AbortController();
-      const asking = asked.connect({ signal: cancelling.signal });
+      const asking = asked.connect({ server: held.server, signal: cancelling.signal });
 
       await turn();
       expect(held.peers).toHaveLength(2);
@@ -910,8 +962,8 @@ test.describe('createMemoryTransportClient', () => {
 
     // its dispose
     {
-      const disposed = createMemoryTransportClient({ server: held.server });
-      const disposing = disposed.connect({});
+      const disposed = createMemoryTransportClient();
+      const disposing = disposed.connect({ server: held.server });
 
       await turn();
       expect(held.peers).toHaveLength(3);

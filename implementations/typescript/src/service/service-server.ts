@@ -11,11 +11,11 @@ import type {
   AdmissionFailure,
   CallId,
   IBeforeRequest,
+  ICommand,
   INotificationResolver,
   INotificationResponse,
   INotifyOptions,
   IProcedure,
-  IRequest,
   IRequestProps,
   IResponse,
   ResolverFailure,
@@ -55,7 +55,7 @@ export interface IServiceServer<S extends ServiceProcedures, Data = unknown> {
   readonly command: {
     // ! keyof S, filtered: a computed key drops the link to the descriptor, and its
     // @deprecated with it
-    readonly [Name in keyof S as Name extends CommandName<S> ? Name : never]: IRequest<
+    readonly [Name in keyof S as Name extends CommandName<S> ? Name : never]: ICommand<
       GivenOf<S[Name]['request']>,
       ValueOf<S[Name]['result']>,
       TransportServerConnectionHandle
@@ -68,10 +68,9 @@ export interface IServiceServer<S extends ServiceProcedures, Data = unknown> {
   readonly notify: {
     // ! keyof S, filtered: a computed key drops the link to the descriptor, and its
     // @deprecated with it
-    readonly [Name in keyof S as Name extends NotifyingName<S> ? Name : never]: (
-      notification: GivenOf<NonNullable<S[Name]['notification']>>,
-      options?: INotifyOptions<TransportServerConnectionHandle>
-    ) => Promise<void>;
+    readonly [Name in keyof S as Name extends NotifyingName<S> ? Name : never]: INotifier<
+      GivenOf<NonNullable<S[Name]['notification']>>
+    >;
   };
 
   /**
@@ -92,6 +91,15 @@ export interface IServiceServer<S extends ServiceProcedures, Data = unknown> {
 }
 
 // types
+
+/**
+ * Notifies one procedure's subscribers, as a resolver's `notify` does: a service server's notifier,
+ * one for each procedure that notifies, given before the service is offered.
+ */
+export type INotifier<Notification, Handle extends string = TransportServerConnectionHandle> = (
+  notification: Notification,
+  options?: INotifyOptions<Handle>
+) => Promise<void>;
 
 /**
  * How a resolver of the service layer answers: a result, a failure its procedure lists, or a
@@ -274,7 +282,7 @@ export const judgingOf = (
  *   requestOf,
  * } from '@francisdesjardins/bead/service';
  *
- * const GreeterFailures = failuresOf({ codes: { NOBODY_TO_GREET: 1 }, serviceId: 1 });
+ * const GreeterFailures = failuresOf(1, { NOBODY_TO_GREET: 1 });
  * const GreeterProcedures = Object.freeze({
  *   sayHello: requestOf({
  *     admission: 'none',
@@ -303,7 +311,7 @@ export const createServiceServer = <const S extends ServiceProcedures, Data = un
   const callbacks = new Map<string, AnyCallback>();
   // what the offer made: the requester of each command, and the resolver of each procedure that
   // notifies, once registered
-  const commands = new Map<string, IRequest<unknown, unknown, TransportServerConnectionHandle>>();
+  const commands = new Map<string, ICommand<unknown, unknown, TransportServerConnectionHandle>>();
   const notifiers = new Map<
     string,
     INotificationResolver<unknown, TransportServerConnectionHandle>

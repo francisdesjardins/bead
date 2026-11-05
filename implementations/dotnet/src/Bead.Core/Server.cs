@@ -96,6 +96,12 @@ public sealed record ServerOptions
     public PacingLimits? Pacing { get; init; }
 
     /// <summary>
+    /// What its router holds untaken of each connection, past which it pauses that connection's
+    /// transport (spec 15.12), which it is built with: <see cref="IntakeLimits.Default"/> when none.
+    /// </summary>
+    public IntakeLimits? Intake { get; init; }
+
+    /// <summary>
     /// How long a connection without a session may stay silent before it is closed — one that never
     /// opened a session, or one whose session ended, counted from that end; over HTTP, a listen held
     /// is no silence, and the count starts anew at its end. Infinite when none, unless a facade says
@@ -213,7 +219,7 @@ public sealed class Server<TData> : IBeadServer<TData>
 
         Sessions = new SessionManager<TData>(sessions with
         {
-            Clock = Clocks.Of((sessions.Clock, _clock), ("a server's sessions", "their server")),
+            Clock = Clocks.Of((sessions.Clock, _clock), ("a server's session manager", "its server")),
         });
         RequireSession = new BeforeRequest(
             (request) =>
@@ -261,6 +267,7 @@ public sealed class Server<TData> : IBeadServer<TData>
                     Limits = options?.Limits,
                     MetricsRegistry = options?.MetricsRegistry,
                     Pacing = options?.Pacing,
+                    Intake = options?.Intake,
                     Relay = (options?.Relay ?? new RelayOptions()) with { BeforeRoute = options?.Relay?.BeforeRoute ?? RequireCredential },
                     ResolverScheduler = options?.ResolverScheduler,
                     Scheduler = options?.Scheduler,
@@ -319,7 +326,7 @@ public sealed class Server<TData> : IBeadServer<TData>
     public RouterServer Router { get; }
 
     /// <summary>Its services.</summary>
-    public ServiceManager Services { get; }
+    public IServiceManagerServer Services { get; }
 
     /// <summary>Its sessions.</summary>
     public SessionManager<TData> Sessions { get; }
@@ -343,11 +350,13 @@ public sealed class Server<TData> : IBeadServer<TData>
             held = Transport.Gauges() ?? Bead.Gauges.Of(new Dictionary<string, long>(), _connections);
         }
 
-        return new ServerGauges(
-            LayerGauges.Of(router, held.ConnectionHandles),
-            LayerGauges.Of(own, held.ConnectionHandles),
-            LayerGauges.Of(Sessions.Gauges(), held.ConnectionHandles),
-            LayerGauges.Of(held, held.ConnectionHandles));
+        return new ServerGauges
+        {
+            Router = LayerGauges.Of(router, held.ConnectionHandles),
+            Server = LayerGauges.Of(own, held.ConnectionHandles),
+            Sessions = LayerGauges.Of(Sessions.Gauges(), held.ConnectionHandles),
+            Transport = LayerGauges.Of(held, held.ConnectionHandles),
+        };
     }
 
     /// <summary>

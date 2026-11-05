@@ -16,8 +16,16 @@ use tokio_util::sync::CancellationToken;
 use crate::constants::CredentialScheme;
 use crate::duration::{LONGEST_TIMER, hold_finite};
 use crate::envelope::{FailureRecord, MAXIMUM_DETAIL_BYTES, MAXIMUM_ENVELOPE_BYTES, ResultHeader};
-use crate::errors::ProgrammerError;
-use crate::failure::Failure;
+use crate::errors::{CallError, ProgrammerError};
+use crate::failure::{Failure, ProcedureAddress};
+use crate::identity::Procedure;
+use crate::managers::notification::NotificationKey;
+use crate::metrics::ProcedureSeries;
+use crate::router::client::NotificationLike;
+use crate::router::server::NotifyFilter;
+
+#[cfg(test)]
+mod tests;
 
 /// A future of Bead's, boxed, as an application's callback gives one.
 pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
@@ -37,6 +45,7 @@ pub struct CallAddress {
 
 /// How much a router reads, writes and holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct RouterLimits {
     /// The bytes every transfer the router receives holds together.
     pub buffered_bytes_budget: u64,
@@ -207,7 +216,9 @@ pub fn limits_of(given: &RouterLimitsOptions) -> Result<RouterLimits, Programmer
 /// # Errors
 ///
 /// A [`ProgrammerError`] for a transfer asked for.
-pub fn whole_envelope_limits_of(
+// its one caller its unit test, until the HTTP transport, a feature of the core, calls it
+#[cfg(test)]
+pub(crate) fn whole_envelope_limits_of(
     limits: &RouterLimitsOptions,
 ) -> Result<RouterLimitsOptions, ProgrammerError> {
     let maximum_envelope_bytes = limits
@@ -229,6 +240,68 @@ pub fn whole_envelope_limits_of(
     whole.window_bytes = Some(maximum_envelope_bytes.saturating_mul(2));
 
     Ok(whole)
+}
+
+/// What a router holds of each connection that its turns have not taken yet (spec 15.12).
+///
+/// Past either bound it pauses the connection, and resumes it once both counts are at half their
+/// bound or below (decision 0046). A side's own, announced to no one, unlike the limits of
+/// [`RouterLimits`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct IntakeLimits {
+    /// The envelopes one connection's transport handed its router that no turn of it took yet.
+    pub maximum_untaken_envelopes: u64,
+    /// Their bytes.
+    pub maximum_untaken_bytes: u64,
+}
+
+/// What a router holds of each connection untaken when its options say nothing: 64 envelopes, and
+/// 1 MiB of them.
+pub const INTAKE_DEFAULTS: IntakeLimits = IntakeLimits {
+    maximum_untaken_envelopes: 64,
+    maximum_untaken_bytes: 1_048_576,
+};
+
+/// A router's intake limits as its options give them: each left out, the default.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct IntakeLimitsOptions {
+    /// See [`IntakeLimits::maximum_untaken_envelopes`].
+    pub maximum_untaken_envelopes: Option<u64>,
+    /// See [`IntakeLimits::maximum_untaken_bytes`].
+    pub maximum_untaken_bytes: Option<u64>,
+}
+
+/// `options` over [`INTAKE_DEFAULTS`], where they say nothing.
+///
+/// # Errors
+///
+/// A [`ProgrammerError`] for a bound below 1.
+pub(crate) fn intake_limits_of(
+    options: &IntakeLimitsOptions,
+) -> Result<IntakeLimits, ProgrammerError> {
+    let limits = IntakeLimits {
+        maximum_untaken_envelopes: options
+            .maximum_untaken_envelopes
+            .unwrap_or(INTAKE_DEFAULTS.maximum_untaken_envelopes),
+        maximum_untaken_bytes: options
+            .maximum_untaken_bytes
+            .unwrap_or(INTAKE_DEFAULTS.maximum_untaken_bytes),
+    };
+
+    for (name, value) in [
+        ("maximumUntakenEnvelopes", limits.maximum_untaken_envelopes),
+        ("maximumUntakenBytes", limits.maximum_untaken_bytes),
+    ] {
+        if value < 1 {
+            return Err(ProgrammerError::new(format!(
+                "{name} is a whole number above 0, not {value}"
+            )));
+        }
+    }
+
+    Ok(limits)
 }
 
 /// A credential's session's identifier (spec 13.10): its scheme and its claim.
@@ -285,6 +358,7 @@ pub fn session_key_of(identifier: Option<&SessionIdentifier>) -> String {
 
 /// The session a call runs in, its credential resolved (spec 13.1).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub struct CallSession {
     /// What the session holds: a connection's session's data, a `JWT`'s claims set, or what an
     /// `ELSEWHERE`'s verifier gave.
@@ -384,6 +458,7 @@ impl Signal {
 
 /// A request's options, with its manager's defaults applied.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ResolvedRequestOptions {
     /// The call's timeout, held; [`crate::NEVER`] waits on.
     pub timeout: Duration,
@@ -395,12 +470,109 @@ pub struct ResolvedRequestOptions {
     pub credential: Option<RequestCredential>,
     /// What cancels it.
     pub signal: Option<CancellationToken>,
-    /// Whether the connection it names is closed when it goes unanswered past its timeout.
-    pub close_on_timeout: bool,
+    /// Whether the connection it names is closed when it goes unanswered past its timeout: `false`
+    /// when none.
+    pub close_on_timeout: Option<bool>,
+}
+
+impl ResolvedRequestOptions {
+    /// A request's options of `timeout`, held, every other option none.
+    #[must_use]
+    pub const fn new(timeout: Duration) -> Self {
+        Self {
+            timeout,
+            destination_id: None,
+            connection_handle: None,
+            credential: None,
+            signal: None,
+            close_on_timeout: None,
+        }
+    }
+}
+
+/// A call a router makes: a client's, or a server's own to the connection its options name.
+#[non_exhaustive]
+pub struct RouterRequest {
+    /// The procedure it calls.
+    pub procedure: Procedure,
+    /// Its options, resolved: on a server's, the connection it goes to among them.
+    pub options: ResolvedRequestOptions,
+    /// The series it counts into: its requester's.
+    pub series: Option<ProcedureSeries>,
+    /// What refuses it once it started, as its requester judged it.
+    pub refusal: Option<CallError>,
+    /// The notification it subscribes, the one its router holds for its procedure; a client's
+    /// alone, since a server's router refuses one.
+    pub subscribes: Option<Arc<dyn NotificationLike>>,
+    /// Hears the call's id once its router drew it.
+    pub on_call_id: Option<Box<dyn FnOnce(u32) + Send>>,
+    /// Hears whether its transport took it.
+    pub on_sent: Option<Box<dyn FnMut(bool) + Send>>,
+}
+
+impl fmt::Debug for RouterRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RouterRequest")
+            .field("procedure", &self.procedure)
+            .finish_non_exhaustive()
+    }
+}
+
+impl RouterRequest {
+    /// A call of `procedure`, under `options`, nothing else told.
+    #[must_use]
+    pub fn new(procedure: Procedure, options: &ResolvedRequestOptions) -> Self {
+        Self {
+            procedure,
+            options: options.clone(),
+            series: None,
+            refusal: None,
+            subscribes: None,
+            on_call_id: None,
+            on_sent: None,
+        }
+    }
+}
+
+/// What a server's router notifies: the procedure whose subscriptions hear it, what keeps each, and
+/// the key its notifications are told apart by.
+#[non_exhaustive]
+pub struct NotifyRequest {
+    /// The procedure whose subscriptions hear it.
+    pub procedure: ProcedureAddress,
+    /// What keeps each subscription that hears it: every one when none.
+    pub filter: Option<NotifyFilter>,
+    /// The key a notification of its procedure is told apart by, which its subscription's window
+    /// keeps the latest of.
+    pub key: Option<NotificationKey>,
+}
+
+impl fmt::Debug for NotifyRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("NotifyRequest")
+            .field("procedure", &self.procedure)
+            .field("key", &self.key)
+            .finish_non_exhaustive()
+    }
+}
+
+impl NotifyRequest {
+    /// A notification of `procedure`, to every subscription of it, under no key.
+    #[must_use]
+    pub const fn new(procedure: ProcedureAddress) -> Self {
+        Self {
+            procedure,
+            filter: None,
+            key: None,
+        }
+    }
 }
 
 /// A result, as a request resolves with it: its header, and its payload.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct RouterResult {
     /// Its header.
     pub header: ResultHeader,
@@ -420,6 +592,7 @@ pub enum RouterAnswer {
 
 /// What a transport hands its router of one message: an envelope's bytes, and what came beside it.
 #[derive(Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct TransportMessage {
     /// The envelope's bytes.
     pub data: Bytes,
@@ -484,6 +657,7 @@ pub enum AccessRefusalStage {
 
 /// A call a server refused as its credential resolved or as it was admitted, as it tells it.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct AccessRefusal {
     /// The stage that refused it.
     pub stage: AccessRefusalStage,
@@ -526,11 +700,24 @@ impl fmt::Display for RouterError {
     }
 }
 
-impl Error for RouterError {}
+// * transparent, as each error enum is: its inner error's words displayed, its inner error's sources
+// walked, so a walk from a participant's report reaches its cause once
+impl Error for RouterError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Failure(failure) => failure.source(),
+            Self::Other(error) => {
+                let source: &(dyn Error + 'static) = error.as_ref();
+                source.source()
+            }
+        }
+    }
+}
 
 /// What a part holds right now, for diagnosis: its counts and ceilings, the connections it keeps
 /// anything for, and what it found that should never be.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Gauges {
     /// What it holds, by name.
     pub counts: BTreeMap<&'static str, u64>,
@@ -543,19 +730,36 @@ pub struct Gauges {
 }
 
 impl Gauges {
-    /// The gauges of several parts as one.
+    /// A part's counts and the connections it keeps, each connection held once. Ceilings and
+    /// anomalies are empty; a reader borrows the snapshot to inspect it.
     #[must_use]
-    pub fn merged(parts: Vec<Self>) -> Self {
+    pub fn new<Handles: IntoIterator<Item = ConnectionHandle>>(
+        counts: BTreeMap<&'static str, u64>,
+        connection_handles: Handles,
+    ) -> Self {
+        Self {
+            counts,
+            connection_handles: connection_handles.into_iter().collect(),
+            ..Self::default()
+        }
+    }
+
+    // the gauges of several parts as one, refused where two parts name the same count
+    pub(crate) fn merge(parts: Vec<Self>) -> Result<Self, ProgrammerError> {
         let mut merged = Self::default();
 
         for part in parts {
-            merged.counts.extend(part.counts);
+            for (name, count) in part.counts {
+                if merged.counts.insert(name, count).is_some() {
+                    return Err(ProgrammerError::new(format!("two parts count {name}")));
+                }
+            }
             merged.ceilings.extend(part.ceilings);
             merged.connection_handles.extend(part.connection_handles);
             merged.anomalies.extend(part.anomalies);
         }
 
-        merged
+        Ok(merged)
     }
 }
 

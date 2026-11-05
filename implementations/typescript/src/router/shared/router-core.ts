@@ -18,12 +18,15 @@ import { sideOfCallId } from './identifiers';
 import { checkDeclaration } from './identity';
 import { CallEnding, endingOf, type IResolverSeries, microsecondsOf } from './metrics-registry';
 import { type ChunkEnvelope, createPayloadPlacement, isPayloadLimit } from './payload-placement';
+import { createIntake } from './intake';
+import { intakeLimitsOf } from './intake-limits';
 import { createProcedureMap } from './procedure-map';
 import { createReceivingTransfers, type IReceiving } from './receiving-transfers';
 import { limitsOf } from './router-limits';
 import { createRouterRequester } from './router-requester';
 import { createRouterWriter, DISPOSED } from './router-writer';
 import { createSendingTransfers } from './sending-transfers';
+import { createTelling } from './telling';
 import { ChunkOutcome, type IChunk, type IOutgoingTransfer } from './transfer';
 import type {
   AccessRefusalStage,
@@ -238,17 +241,38 @@ export const createRouterCore = <Handle extends string>(
       receivings.close(transfer);
     },
   });
-  // ! its port's listeners this core calls, counted while one runs: what one hands this core back
-  // is taken in a later turn, behind what came before it (spec 9.0)
-  let listening = 0;
-  const heard = <Value>(listener: () => Value): Value => {
-    listening += 1;
-
+  // * what each connection's transport handed within this task, paused past a bound and resumed in
+  // the next, whatever a turn threw; what the port throws as it pauses or resumes is reported
+  // (spec 15.12; decision 0046)
+  const paced = (connectionHandle: Handle, isPaused: boolean): void => {
     try {
-      return listener();
-    } finally {
-      listening -= 1;
+      if (isPaused) {
+        port.pause(connectionHandle);
+      } else {
+        port.resume(connectionHandle);
+      }
+    } catch (reason) {
+      heard(() => {
+        port.report(toError(reason), connectionHandle);
+      });
     }
+  };
+  const intake = createIntake<Handle>(
+    {
+      pause: (connectionHandle) => {
+        paced(connectionHandle, true);
+      },
+      resume: (connectionHandle) => {
+        paced(connectionHandle, false);
+      },
+    },
+    intakeLimitsOf(options?.intake)
+  );
+  // ! its port's listeners this core calls run within the telling it shares with its router: what
+  // one hands this core back is taken in a later turn, behind what came before it (spec 9.0)
+  const telling = options?.telling ?? createTelling();
+  const heard = <Value>(listener: () => Value): Value => {
+    return telling.heard(listener);
   };
   // what the writer tells the side, heard as this core's listeners are; the rest asked of the
   // port as it stands
@@ -319,7 +343,11 @@ export const createRouterCore = <Handle extends string>(
     { address?: string | undefined; port?: number | undefined }
   >();
 
+  // ! the state's mark, set by the dispose's own turn: what skips an answer, gates a send and sends
+  // a cancel read it, never the handle's, so the skip and the gate always agree (decision 0045)
   let isDisposed = false;
+  // the handle's mark, set at once by the dispose, which `isDisposed` gives
+  let isDisposeMarked = false;
 
   // what the core raises itself, for the side to hear
   const report = (
@@ -558,17 +586,15 @@ export const createRouterCore = <Handle extends string>(
   const resultTransferOf = (
     payload: Uint8Array,
     {
-      controller,
       header,
       maximumPayloadBytes,
       request,
     }: {
-      controller: AbortController | undefined;
       header: IResultHeader;
       maximumPayloadBytes: number;
       request: IHandedRequestHeader;
     }
-  ): { controller: AbortController; outgoing: IOutgoingTransfer } | undefined => {
+  ): IOutgoingTransfer | undefined => {
     const outgoing = transferOf(payload, { header, maximumPayloadBytes });
 
     if (outgoing === undefined) {
@@ -589,13 +615,7 @@ export const createRouterCore = <Handle extends string>(
       );
     }
 
-    if (controller === undefined) {
-      throw new ProgrammerError(
-        `a result goes as a transfer only on a call this router dispatched, not on call ${String(request.callId)}`
-      );
-    }
-
-    return { controller, outgoing };
+    return outgoing;
   };
 
   const respond: IRouterCore<Handle>['respond'] = async (
@@ -609,9 +629,16 @@ export const createRouterCore = <Handle extends string>(
       writeFailure(response.failure);
     }
 
-    // the call this answer is for, when this side dispatched its request; an answer to any other
-    // header ends no call
+    // the call this answer is for, found by the very header its request was dispatched with: a copy,
+    // or a header built by hand, is tied to no call, so nothing could tell it the call's only answer,
+    // nor the call open (spec 9.3, 9.4)
     const controller = answeringCalls.controllerOf(header);
+
+    if (controller === undefined) {
+      throw new ProgrammerError(
+        `an answer goes only to a request this router dispatched, not to call ${String(callId)}`
+      );
+    }
 
     // a call its requester cancelled, its connection took away, or whose call id another request
     // opened since, is answered by nothing: the answer would settle a call it does not belong to;
@@ -622,8 +649,8 @@ export const createRouterCore = <Handle extends string>(
 
     // an answer names its call alone: never its procedure, never its destination
     const result: IResultHeader = { callId, kind: EnvelopeKind.RESULT };
-    // the handler its request was routed to; a copy of a header finds its procedure's, and a request
-    // to a destination never a resolver of this side's
+    // the handler its request was routed to; a request refused before it was routed finds its
+    // procedure's, and a request to a destination never a resolver of this side's
     const resolver =
       handlers.get(header) ??
       (header.destinationId === undefined
@@ -632,7 +659,6 @@ export const createRouterCore = <Handle extends string>(
     const transfer =
       response.failure === undefined
         ? resultTransferOf(response.payload, {
-            controller,
             header: result,
             maximumPayloadBytes: payloadLimitOf(resolver),
             request: header,
@@ -651,7 +677,7 @@ export const createRouterCore = <Handle extends string>(
     // its answer going out: a second goes nowhere, and this one closes the call once done
     answeringCalls.answer({ connectionHandle, header });
 
-    if (controller !== undefined && response.failure !== undefined) {
+    if (response.failure !== undefined) {
       failuresAnswered.set(header, response.failure);
     }
 
@@ -662,8 +688,8 @@ export const createRouterCore = <Handle extends string>(
         : endingOf(response.failure);
 
     try {
-      // ! disposed, it fails in this turn, its call closed before what the dispose lets go in a
-      // later one finds it (spec 9.0)
+      // ! disposed — its dispose's turn ran — it fails, its call closed, as the writer's gate would
+      // fail it: both read the state's mark (decision 0045)
       if (isDisposed) {
         throw new DisconnectError(DISPOSED);
       }
@@ -681,30 +707,25 @@ export const createRouterCore = <Handle extends string>(
               connectionHandle,
               // answered: the call id is the peer's to open again
               onHandOff: () => {
-                if (controller !== undefined) {
-                  // * counted, it ends as its transport has it; uncounted, nothing is built for it
-                  if (metrics !== undefined) {
-                    answeringCalls.end({ connectionHandle, header }, ending);
-                  }
-
-                  answeringCalls.close({ callId, connectionHandle }, controller);
+                // * counted, it ends as its transport has it; uncounted, nothing is built for it
+                if (metrics !== undefined) {
+                  answeringCalls.end({ connectionHandle, header }, ending);
                 }
+
+                answeringCalls.close({ callId, connectionHandle }, controller);
               },
             }
           )
-        : sendResult(transfer.outgoing, {
+        : sendResult(transfer, {
             connectionHandle,
-            controller: transfer.controller,
+            controller,
             header: result,
             request: header,
           }));
     } catch (reason) {
       // an answer that did not go out leaves nothing done for it behind, and its call closed
       undo?.();
-
-      if (controller !== undefined) {
-        answeringCalls.close({ callId, connectionHandle }, controller);
-      }
+      answeringCalls.close({ callId, connectionHandle }, controller);
 
       throw reason;
     }
@@ -761,8 +782,9 @@ export const createRouterCore = <Handle extends string>(
     });
   };
 
-  // hands a request to its resolver: one that throws before it returns fails as one that rejects,
-  // reported unless its call was cancelled or went with its connection
+  // hands a request to its resolver in a later turn, its call's signal aborted if it ended
+  // meanwhile: one that throws before it returns fails as one that rejects, reported unless its call
+  // was cancelled or went with its connection
   const dispatch = (
     resolver: IRequestHandler<Handle>,
     dispatched: IDispatched<Handle> & { payload: Uint8Array }
@@ -783,19 +805,23 @@ export const createRouterCore = <Handle extends string>(
       }
     };
 
-    // admitted already, before its payload was read: the resolver asks nothing again
-    try {
-      resolver({
-        connectionHandle,
-        header,
-        isAdmitted: true,
-        payload,
-        session,
-        signal: controller.signal,
-      }).catch(fail);
-    } catch (reason) {
-      fail(reason);
-    }
+    // ! a later turn, whether the resolver waits or not, so a later request's refusal goes before an
+    // answer given at once, as on every side (decision 0010, spec 9.0)
+    queueMicrotask(() => {
+      try {
+        resolver({
+          connectionHandle,
+          header,
+          // admitted already, before its payload was read: the resolver asks nothing again
+          isAdmitted: true,
+          payload,
+          session,
+          signal: controller.signal,
+        }).catch(fail);
+      } catch (reason) {
+        fail(reason);
+      }
+    });
   };
 
   // an admission's refusal as it is answered
@@ -1427,13 +1453,12 @@ export const createRouterCore = <Handle extends string>(
     );
   };
 
-  const receive = (message: Data | ITransportMessage, connectionHandle: Handle): void => {
-    // ! handed within a listener of this core's turn, it is taken in a later turn, behind what
-    // came before it (spec 9.0)
-    if (listening > 0) {
+  const take = (message: Data | ITransportMessage, connectionHandle: Handle): void => {
+    // ! handed within a telling, it is taken in a later turn, behind what came before it (spec 9.0)
+    if (telling.isTelling()) {
       return (
         queueMicrotask(() => {
-          receive(message, connectionHandle);
+          take(message, connectionHandle);
         }),
         undefined
       );
@@ -1527,10 +1552,16 @@ export const createRouterCore = <Handle extends string>(
     }
   };
 
+  // * counted as its transport hands it, one within a telling among them, before it is taken: its
+  // connection paused at a bound, the envelope that reached it taken all the same (spec 15.12)
+  const receive = (message: Data | ITransportMessage, connectionHandle: Handle): void => {
+    intake.handed(connectionHandle, messageOf(message).data);
+    take(message, connectionHandle);
+  };
+
   const rejectPending = (reason: string, connectionHandle?: Handle): void => {
-    // ! asked within a listener of this core's turn, it is done in a later turn, behind what came
-    // before it (spec 9.0)
-    if (listening > 0) {
+    // ! asked within a telling, it is done in a later turn, behind what came before it (spec 9.0)
+    if (telling.isTelling()) {
       return (
         queueMicrotask(() => {
           rejectPending(reason, connectionHandle);
@@ -1565,7 +1596,7 @@ export const createRouterCore = <Handle extends string>(
 
   return {
     get isDisposed() {
-      return isDisposed;
+      return isDisposeMarked;
     },
     get limits() {
       return limits;
@@ -1587,6 +1618,9 @@ export const createRouterCore = <Handle extends string>(
     },
     isAnswering: (request) => {
       return answeringCalls.isAnswering(request);
+    },
+    isDispatched: (header) => {
+      return answeringCalls.controllerOf(header) !== undefined;
     },
     isReserved: (callId, connectionHandle) => {
       return requester.isReserved(callId, connectionHandle);
@@ -1656,10 +1690,16 @@ export const createRouterCore = <Handle extends string>(
       }
     },
     [Symbol.dispose]: () => {
-      isDisposed = true;
-      // every connection's — in a later turn, disposed by a listener of this core's — each call
-      // answering aborted too, so what a resolution settles after dispatches nothing
-      rejectPending(`${DISPOSED} before the answer`);
+      isDisposeMarked = true;
+      // * a transport outlives its router: each connection paused resumed at once, and none after
+      intake.end();
+      // * the state's mark, then every connection's calls let go, each call answering aborted too,
+      // so what a resolution settles after dispatches nothing: at once, or — disposed within a
+      // telling — in a later turn, behind what that turn sends (spec 9.0)
+      telling.defer(() => {
+        isDisposed = true;
+        rejectPending(`${DISPOSED} before the answer`);
+      });
     },
   };
 };

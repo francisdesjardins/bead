@@ -7,6 +7,7 @@ import { type IPayloadCodec, PAYLOAD_CODECS } from '../../router/shared/payloads
 import type { IProcedure, IRequestResolver } from '../../router/shared/types';
 import { violationsOf } from '../../router/shared/violations';
 import { ProgrammerError } from '../../transport/shared/errors';
+import { noop } from '../../transport/shared/noop';
 import { commandOf, type IAdmissionHook, requestOf } from '../descriptors';
 import { createServiceClient } from '../service-client';
 import { createServiceServer } from '../service-server';
@@ -55,6 +56,7 @@ const namePartOf = ({ request, result }: { request: 'proto' | 'raw'; result: 'pr
 // a NamePart that leaves is_extension unset, `name_part` "a" alone
 const PARTIAL = Uint8Array.of(0x0a, 0x01, 0x61);
 
+// what the refusal's cause says of the field it leaves unset, its reason 17.2's words
 const UNSET =
   'a proto message leaves google.protobuf.UninterpretedOption.NamePart.is_extension unset';
 
@@ -195,6 +197,26 @@ test.describe('createServiceServer', () => {
           admissions: { loud: null, quiet: loud } as never,
         });
       }).toThrow(/^the hook loud admits by a function/u);
+    });
+
+    // decision 0047: the hooks are required exactly when a procedure names one, which the types hold
+    test('refuses options without admissions where a procedure names a hook', () => {
+      const refusal = new ProgrammerError(
+        'shout is admitted by the hook loud, which the options do not give'
+      );
+
+      expect(() => {
+        // @ts-expect-error: a procedure names a hook, so the options and their admissions are required
+        return createServiceServer(GreeterProcedures);
+      }).toThrow(refusal);
+      expect(() => {
+        // @ts-expect-error: a procedure names a hook, so the admissions are required
+        return createServiceServer(GreeterProcedures, {});
+      }).toThrow(refusal);
+      expect(() => {
+        // @ts-expect-error: a procedure names a hook, so the admissions are required
+        return createServiceServer(GreeterProcedures, { failFast: true });
+      }).toThrow(refusal);
     });
   });
 
@@ -359,6 +381,29 @@ test.describe('createServiceServer', () => {
         return heard;
       })
       .toEqual(['after']);
+  });
+
+  test('gives one notifier for each procedure that notifies, and refuses a procedure its service lacks', () => {
+    const greeter = greeterOf();
+    const notify: Readonly<Record<string, unknown>> = greeter.notify;
+
+    // * one for news, the one procedure that notifies, given before the offer and frozen
+    expect([Object.keys(notify), Object.isFrozen(notify), typeof greeter.notify.news]).toEqual([
+      ['news'],
+      true,
+      'function',
+    ]);
+
+    for (const name of ['sayHello', 'clock', 'missing']) {
+      expect(Object.hasOwn(notify, name), name).toBe(false);
+    }
+
+    expect(() => {
+      Object.assign(notify, { missing: noop });
+    }).toThrow(TypeError);
+
+    // @ts-expect-error a procedure that does not notify has no notifier
+    void greeter.notify.sayHello;
   });
 
   test('lists the procedures without a resolver, which the router answers PROCEDURE_UNKNOWN', async () => {
@@ -561,6 +606,48 @@ test.describe('createServiceServer', () => {
     expect(heard).toEqual(['hi']);
   });
 
+  // spec 18.2
+  test('fails a command whose rule throws as it judges, with that throw, before anything goes', async () => {
+    await using connected = await connectWorker();
+    const broken = new Error('this rule fails to judge, on purpose first');
+    const procedures = Object.freeze({
+      shout: commandOf({
+        admission: 'none',
+        failures: {},
+        procedure: { procedureId: 3, procedureName: 'shout', serviceId: 8, serviceRevision: 1 },
+        request: PAYLOAD_CODECS.text,
+        result: PAYLOAD_CODECS.text,
+        validate: (request: unknown, options) => {
+          if (request === '') {
+            throw broken;
+          }
+
+          return notEmpty(request, options);
+        },
+      }),
+    });
+    const validating = createServiceServer(procedures, { validates: true });
+    const heard: unknown[] = [];
+    const client = createServiceClient(procedures, connected.client);
+
+    client.on('shout', (request, response) => {
+      heard.push(request.payload);
+
+      return response(request.payload.toUpperCase());
+    });
+    validating.offer(connected.server);
+
+    // * the rule's own throw, passed on as it is: no Bead failure, and its client heard nothing
+    await expect(
+      validating.command.shout('')({ connectionHandle: CONNECTION, timeout: 1_000 })
+    ).rejects.toBe(broken);
+    expect(heard).toEqual([]);
+    await expect(
+      validating.command.shout('hi')({ connectionHandle: CONNECTION, timeout: 1_000 })
+    ).resolves.toBe('HI');
+    expect(heard).toEqual(['hi']);
+  });
+
   // spec 17.2.5, 17.9.7
   test('answers PAYLOAD_UNDECODABLE to a request that leaves a required field unset, before its resolver', async () => {
     await using connected = await connectWorker();
@@ -619,7 +706,12 @@ test.describe('createServiceServer', () => {
     expect(await codeOf(client.request.part(new Uint8Array())())).toBe(
       ProtocolCode.PROCEDURE_FAILED
     );
-    expect(reported).toEqual([new TypeError(UNSET)]);
+    expect(
+      reported.map((error) => {
+        return [(error as Error).message, ((error as Error).cause as Error).message];
+      })
+    ).toEqual([['a required field unset', UNSET]]);
+    expect(reported[0]).toBeInstanceOf(TypeError);
   });
 
   test("a mapped member keeps its descriptor's @deprecated", async () => {

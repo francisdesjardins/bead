@@ -57,9 +57,15 @@ public sealed class HttpServerTests
         return Convert.ToHexStringLower(SHA256.HashData(payload));
     }
 
-    private static Func<string, BoundCall<string>> TextRequester(ServiceManager services, Procedure procedure)
+    private static Func<string, BoundCall<string>> TextRequester(IServiceManagerClient services, Procedure procedure)
     {
         return services.GetRequest(procedure, new RequestDependencies<string, string> { Serializer = Text });
+    }
+
+    // a server's command of text, which names its connection
+    private static Func<string, BoundCommand<string>> TextCommander(IServiceManagerServer services, Procedure procedure)
+    {
+        return services.GetCommand(procedure, new RequestDependencies<string, string> { Serializer = Text });
     }
 
     // what each layer of the server still keeps, each as `layer:count value`
@@ -181,10 +187,10 @@ public sealed class HttpServerTests
             await response.RegisterNotification();
             await response.Answer("subscribed");
         });
-        var address = await server.Transport.Start(new HttpTransportStartOptions { Address = Host, FindOpenPort = true }, Cancelled);
+        var address = await server.Transport.Start(new HttpTransportStartOptions { Address = Host, FindOpenPort = true, CancellationToken = Cancelled });
         var client = new BeadHttpClient(new BeadHttpClientOptions { Transport = new HttpTransportClientOptions { IsListening = isListening } });
 
-        await client.Connect(new HttpConnectOptions { Host = Host, Port = address.Port }, Cancelled);
+        await client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = address.Port, CancellationToken = Cancelled });
 
         return new Connected((server, client), (address.Port, aborted, news));
     }
@@ -205,6 +211,7 @@ public sealed class HttpServerTests
         Assert.Same(server.RequireCredential, beadServer.RequireCredential);
         Assert.NotNull(server.ShareLegBSession);
         Assert.Same(server.ShareLegBSession, beadServer.ShareLegBSession);
+        Assert.Equal(typeof(IServiceManagerServer), typeof(HttpServer<string>).GetProperty(nameof(HttpServer<string>.Services))!.PropertyType);
     }
 
     [Fact]
@@ -268,7 +275,7 @@ public sealed class HttpServerTests
         // no transfer over HTTP: past what one envelope holds, refused before anything goes
         await using var small = new BeadHttpClient(new BeadHttpClientOptions { Limits = RouterLimits.Default with { MaximumEnvelopeBytes = 1_024 } });
 
-        await small.Connect(new HttpConnectOptions { Host = Host, Port = connected.Port }, Cancelled);
+        await small.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = connected.Port, CancellationToken = Cancelled });
         await TextRequester(small.Services, OpenSession)("me")().WaitAsync(Patience, Cancelled);
 
         var refused = await Assert.ThrowsAsync<FailureException>(() =>
@@ -291,7 +298,7 @@ public sealed class HttpServerTests
         var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider();
         await using var client = new BeadHttpClient(new BeadHttpClientOptions { Transport = new HttpTransportClientOptions { Clock = time } });
 
-        await client.Connect(new HttpConnectOptions { Host = Host, Port = connected.Port }, Cancelled);
+        await client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = connected.Port, CancellationToken = Cancelled });
 
         var slow = TextRequester(client.Services, Slow)("wait")(new RequestOptions { Timeout = TimeSpan.FromMilliseconds(100) });
 
@@ -334,7 +341,7 @@ public sealed class HttpServerTests
         var connectionHandle = connected.Server.Transport.ConnectionHandles.Single();
         var commanded = await Record.ExceptionAsync(() =>
         {
-            return TextRequester(connected.Server.Services, Ping)("ping")(new RequestOptions { ConnectionHandle = connectionHandle, Timeout = TimeSpan.FromSeconds(1) })
+            return TextCommander(connected.Server.Services, Ping)("ping")(new CommandOptions { ConnectionHandle = connectionHandle, Timeout = TimeSpan.FromSeconds(1) })
                 .WaitAsync(Patience, Cancelled);
         });
 
@@ -372,10 +379,10 @@ public sealed class HttpServerTests
         var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider();
 
         await using var server = new HttpServer<string>(new HttpServerOptions { Transport = new HttpTransportServerOptions { Clock = time } });
-        var address = await server.Transport.Start(new HttpTransportStartOptions { Address = Host, FindOpenPort = true }, Cancelled);
+        var address = await server.Transport.Start(new HttpTransportStartOptions { Address = Host, FindOpenPort = true, CancellationToken = Cancelled });
         await using var client = new BeadHttpClient(new BeadHttpClientOptions { Transport = new HttpTransportClientOptions { IsListening = false } });
 
-        await client.Connect(new HttpConnectOptions { Host = Host, Port = address.Port }, Cancelled);
+        await client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = address.Port, CancellationToken = Cancelled });
         Assert.Equal(TimeSpan.FromSeconds(30), HttpServerOptions.ConnectionInactivityTimeoutDefault);
         time.Advance(TimeSpan.FromSeconds(29));
         Assert.Single(server.Transport.ConnectionHandles);
@@ -406,7 +413,7 @@ public sealed class HttpServerTests
             await response.Answer("subscribed");
         });
 
-        var address = await server.Transport.Start(new HttpTransportStartOptions { Address = Host, FindOpenPort = true }, Cancelled);
+        var address = await server.Transport.Start(new HttpTransportStartOptions { Address = Host, FindOpenPort = true, CancellationToken = Cancelled });
         await using var client = new BeadHttpClient();
         var dropped = new TaskCompletionSource<(string ProcedureName, ushort? Code)>(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -414,7 +421,7 @@ public sealed class HttpServerTests
         {
             dropped.TrySetResult((procedure.ProcedureName, failure?.Code));
         };
-        await client.Connect(new HttpConnectOptions { Host = Host, Port = address.Port }, Cancelled);
+        await client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = address.Port, CancellationToken = Cancelled });
         await TextRequester(client.Services, OpenSession)("me")().WaitAsync(Patience, Cancelled);
 
         await using var subscribed = await client.Services.GetNotification(News, new NotificationDependencies<string, string, string> { Serializer = Text }).Register("subscribe", (_) =>
@@ -467,23 +474,23 @@ public sealed class HttpServerTests
         });
 
         // the server asks, and the client answers
-        client.Services.GetRequestResolver(Ping, new RequestResolverDependencies<string, string> { Serializer = Text })((request, response) =>
+        client.Services.GetCommandResolver(Ping, new RequestResolverDependencies<string, string> { Serializer = Text })((request, response) =>
         {
             return response.Answer($"{request.Payload} pong");
         });
         Assert.Equal(
             "ping pong",
-            await TextRequester(server.Services, Ping)("ping")(new RequestOptions { ConnectionHandle = connectionHandle, Timeout = TimeSpan.FromSeconds(5) }).WaitAsync(Patience, Cancelled));
+            await TextCommander(server.Services, Ping)("ping")(new CommandOptions { ConnectionHandle = connectionHandle, Timeout = TimeSpan.FromSeconds(5) }).WaitAsync(Patience, Cancelled));
 
         // a call another client makes, relayed to this one
         await using var requester = new BeadHttpClient();
 
-        client.Services.GetRequestResolver(Echo, new RequestResolverDependencies<string, string> { Serializer = Text })((request, response) =>
+        client.Services.GetCommandResolver(Echo, new RequestResolverDependencies<string, string> { Serializer = Text })((request, response) =>
         {
             return response.Answer(request.Payload.ToUpperInvariant());
         });
         server.Router.RegisterDestination(new ConnectionTarget(connectionHandle), new DestinationOptions { DestinationId = 5 });
-        await requester.Connect(new HttpConnectOptions { Host = Host, Port = connected.Port }, Cancelled);
+        await requester.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = connected.Port, CancellationToken = Cancelled });
         await TextRequester(requester.Services, OpenSession)("me")().WaitAsync(Patience, Cancelled);
         Assert.Equal("HI", await TextRequester(requester.Services, Echo)("hi")(new RequestOptions { DestinationId = 5 }).WaitAsync(Patience, Cancelled));
     }
@@ -492,14 +499,14 @@ public sealed class HttpServerTests
     public async Task Relay_a_call_from_an_HTTP_requester_to_a_target_behind_a_WebSocket_once_a_session_admits_it()
     {
         await using var target = new WebSocketServer<string>();
-        var targetAddress = await target.Transport.Start(new WebSocketTransportStartOptions { Address = Host, FindOpenPort = true }, Cancelled);
+        var targetAddress = await target.Transport.Start(new WebSocketTransportStartOptions { Address = Host, FindOpenPort = true, CancellationToken = Cancelled });
         await using var toTarget = new WebSocketClient();
 
         target.Services.GetRequestResolver(Echo, new RequestResolverDependencies<string, string> { Serializer = Text })((request, response) =>
         {
             return response.Answer(request.Payload.ToUpperInvariant());
         });
-        await toTarget.Connect(new WebSocketConnectOptions { Host = Host, Port = targetAddress.Port }, Cancelled);
+        await toTarget.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = targetAddress.Port, CancellationToken = Cancelled });
 
         var hub = new StrongBox<HttpServer<string>>();
         await using var connected = await ConnectHttp(SharingLegBSession(hub));
@@ -542,7 +549,7 @@ public sealed class HttpServerTests
         await using var connected = await ConnectHttp(SharingLegBSession(hub));
         using var handler = new ScriptedHandler();
         await using var legB = new BeadHttpClient(new BeadHttpClientOptions { Transport = new HttpTransportClientOptions { Handler = handler, IsListening = false } });
-        var connecting = legB.Connect(new HttpConnectOptions { Host = Host, Port = 1 }, Cancelled);
+        var connecting = legB.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 1, CancellationToken = Cancelled });
 
         (await handler.Next()).Answer.SetResult(ScriptedHandler.Drawn());
         await connecting.WaitAsync(Patience, Cancelled);
@@ -585,7 +592,7 @@ public sealed class HttpServerTests
 
         // leg B, an HTTP client on the loopback — secure, and carrying a credential — to a
         // destination that verifies an audience
-        await legB.Connect(new HttpConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        await legB.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
         connected.Server.Router.RegisterDestination(legB.Router, new DestinationOptions { Audience = "bead-interop", DestinationId = 7 });
 
         var echoing = TextRequester(connected.Client.Services, Echo);
@@ -669,7 +676,7 @@ public sealed class HttpServerTests
                 await Task.Delay(Timeout.Infinite, request.Signal);
             });
 
-            var address = await server.Transport.Start(new HttpTransportStartOptions { Address = Host, FindOpenPort = true }, Cancelled);
+            var address = await server.Transport.Start(new HttpTransportStartOptions { Address = Host, FindOpenPort = true, CancellationToken = Cancelled });
             using var http = new HttpClient();
             var uri = new Uri($"http://{Host}:{address.Port}/bead");
             using var connect = new HttpRequestMessage(HttpMethod.Post, uri) { Content = new ByteArrayContent([]) };
@@ -726,7 +733,7 @@ public sealed class HttpServerTests
             return response.Answer(request.Payload);
         });
 
-        var address = await server.Transport.Start(new HttpTransportStartOptions { Address = Host, FindOpenPort = true }, Cancelled);
+        var address = await server.Transport.Start(new HttpTransportStartOptions { Address = Host, FindOpenPort = true, CancellationToken = Cancelled });
 
         // one socket and one proxy's walk for the connect, another for the POST
         async Task<(TcpClient Socket, string Head)> Exchange(string forwarded, (string Fields, byte[] Body) request)

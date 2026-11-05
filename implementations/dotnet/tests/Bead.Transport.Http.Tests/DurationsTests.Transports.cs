@@ -12,12 +12,12 @@ using Bead.Transport.WebSockets;
 namespace Bead.Transport.Http.Tests;
 
 /// <summary>
-/// The places of the transports: an HTTP server's exchange timeout, its longest wait and its way of
-/// an HTTP connection's inactivity timeout, read from the timers it arms on its clock as a client of
-/// the tests' own drives it; an HTTP client's way of that inactivity timeout, its wait and its pause,
-/// against a handler of the tests' own; a WebSocket's heartbeat and its close timeout, its client's and its
-/// server's, taken or refused as each is built, on the real clock; and every client's connect
-/// timeout and reconnection delay.
+/// The places of the transports: an HTTP server's ways of an HTTP exchange's timeout and of an HTTP
+/// connection's inactivity timeout, and its longest wait, read from the timers it arms on its clock
+/// as a client of the tests' own drives it; an HTTP client's ways of those two timeouts, its wait and
+/// its pause, against a handler of the tests' own; a WebSocket's heartbeat and its close timeout,
+/// its client's and its server's, taken or refused as each is built, on the real clock; and every
+/// client's connect timeout and reconnection delay.
 /// </summary>
 public sealed partial class DurationsTests
 {
@@ -30,11 +30,14 @@ public sealed partial class DurationsTests
 
     private static readonly string Token = new('T', 22);
 
-    // httpTransportServer.exchangeTimeout, httpTransport.inactivityTimeout by its server, httpTransportServer.maximumWait
+    // a Retry-After that asks longer than a timer holds, in whole seconds
+    private static readonly string PastTheCeiling = Math.Ceiling(Clocks.LongestTimer.TotalSeconds).ToString(CultureInfo.InvariantCulture);
+
+    // httpTransport.exchangeTimeout by its server, httpTransport.inactivityTimeout by its server, httpTransportServer.maximumWait
 
     // the transport server's options, as it is built: the due of the timer it arms for an exchange
     // handed on, waiting its answer; never, none armed; refused, no server built
-    private static Task<Observed> ExchangeTimeoutByOptions(TimeSpan? given)
+    private static Task<Observed> ExchangeTimeoutByServer(TimeSpan? given)
     {
         // its connection's own timer never armed, so the exchange's alone is read
         return HttpServerOf(given is { } timeout ? new HttpTransportServerOptions { ExchangeTimeout = timeout, InactivityTimeout = Never } : new HttpTransportServerOptions { InactivityTimeout = Never }, async (drive) =>
@@ -109,7 +112,7 @@ public sealed partial class DurationsTests
 
         await using (server)
         {
-            var port = (await server.Start(Loopback, Cancelled)).Port;
+            var port = (await server.Start(Loopback with { CancellationToken = Cancelled })).Port;
             using var http = new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false });
             var dues = await drive(new ServerDrive(server, (http, clock, new Uri($"http://{Host}:{port}{HttpTransport.Pathname}"))));
 
@@ -144,7 +147,76 @@ public sealed partial class DurationsTests
         return bytes;
     }
 
-    // httpTransport.inactivityTimeout by its client, httpTransportClient.wait, httpTransportClient.pause
+    // httpTransport.exchangeTimeout by its client, httpTransport.inactivityTimeout by its client,
+    // httpTransportClient.wait, httpTransportClient.pause
+
+    // the transport client's options, as it is built, its listens off so its pause is its one timer:
+    // a non-request refused busy, its Retry-After past the ceiling, pauses no longer than what is
+    // left of its time; at that due, a second busy loses its exchange where the timeout is held, and
+    // pauses again where it is never; refused, no client built
+    private static Task<Observed> ExchangeTimeoutByClient(TimeSpan? given)
+    {
+        var options = new HttpTransportClientOptions { IsListening = false };
+
+        return HttpClientOf(given is { } timeout ? options with { ExchangeTimeout = timeout } : options, async (drive) =>
+        {
+            var sending = drive.Client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Cancel, 1), false));
+
+            (await drive.Fetch.Next()).Answer(BusyPastTheCeiling());
+            await Until(() =>
+            {
+                return drive.Clock.Dues().Count > 0;
+            });
+
+            // ! a pause is armed whatever the timeout: none armed is never read as never here
+            var due = Assert.Single(drive.Clock.Dues());
+            var again = drive.Fetch.Next();
+
+            await drive.Clock.Advance(due - Millisecond);
+            Assert.False(again.IsCompleted);
+            await drive.Clock.Advance(Millisecond);
+            (await again).Answer(BusyPastTheCeiling());
+            await Until(() =>
+            {
+                return sending.IsCompleted || drive.Clock.Dues().Count > 0;
+            });
+
+            // held: refused, its exchange lost and its connection with it, and no pause again
+            if (sending.IsCompleted)
+            {
+                var refused = await Assert.ThrowsAsync<IOException>(() =>
+                {
+                    return sending;
+                });
+
+                await Until(() =>
+                {
+                    return drive.Client.ReadyState == ReadyState.Closed;
+                });
+                Assert.Equal("the server refused the exchange: 429 busy", refused.Message);
+                Assert.Empty(drive.Clock.Dues());
+
+                return HeldAt(due);
+            }
+
+            // never: each pause as long as a timer holds, and another after it
+            Assert.Equal(Clocks.LongestTimer, due);
+            Assert.Equal([Clocks.LongestTimer], drive.Clock.Dues());
+
+            return HeldAt(Never);
+        });
+    }
+
+    // a refusal busy whose Retry-After asks longer than a timer holds
+    private static HttpResponseMessage BusyPastTheCeiling()
+    {
+        var busy = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
+
+        busy.Headers.TryAddWithoutValidation(HttpTransport.RefusalHeader, HttpRefusals.Busy);
+        busy.Headers.TryAddWithoutValidation("retry-after", PastTheCeiling);
+
+        return busy;
+    }
 
     // the transport client's options, as it is built: the due of the timer it arms at a listen's
     // first loss, as it listens again at once; never, none armed; refused, no client built
@@ -206,7 +278,8 @@ public sealed partial class DurationsTests
     }
 
     // a transport client on a clock of the tests' own and on a handler of the tests' own, built with
-    // the options given, and connected, listening; then what it holds, as the handler drives it
+    // the options given, and connected, listening unless they say not to; then what it holds, as the
+    // handler drives it, its connection closed where it is still open
     private static async Task<Observed> HttpClientOf(HttpTransportClientOptions options, Func<ClientDrive, Task<Observed>> drive)
     {
         var clock = new SteppingClock(Epoch);
@@ -224,7 +297,7 @@ public sealed partial class DurationsTests
 
         await using (client)
         {
-            var connecting = client.Connect(new HttpConnectOptions { Host = Host, Port = 8_080 }, Cancelled);
+            var connecting = client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 8_080, CancellationToken = Cancelled });
             var drawn = new HttpResponseMessage(HttpStatusCode.Created);
 
             drawn.Headers.TryAddWithoutValidation(HttpTransport.ConnectionTokenHeader, Token);
@@ -232,9 +305,12 @@ public sealed partial class DurationsTests
             (await fetch.Next()).Answer(drawn);
             await connecting.WaitAsync(Patience, Cancelled);
 
-            var observed = await drive(new ClientDrive(fetch, clock));
+            var observed = await drive(new ClientDrive(client, (fetch, clock)));
 
-            await client.CloseConnection(new TransportDisconnectOptions { IsQuick = true }).WaitAsync(Patience, Cancelled);
+            if (client.ReadyState == ReadyState.Open)
+            {
+                await client.CloseConnection(new TransportClientDisconnectOptions { IsQuick = true }).WaitAsync(Patience, Cancelled);
+            }
 
             return observed;
         }
@@ -347,27 +423,87 @@ public sealed partial class DurationsTests
     {
         var options = new HttpTransportServerOptions { InactivityTimeout = Never };
 
-        return HttpServerOf(given is { } grace ? options with { BodyGracePeriod = grace } : options, async (drive) =>
+        return HttpServerOf(given is { } grace ? options with { BodyGracePeriod = grace } : options, BodyGraceDues);
+    }
+
+    // the dues a server arms once a body declares its bytes and brings none, on a connection that
+    // arms no other: the body's grace, the first timer armed
+    private static async Task<IReadOnlyList<TimeSpan>> BodyGraceDues(ServerDrive drive)
+    {
+        var connectionToken = await drive.Connect(false);
+        using var socket = new TcpClient();
+
+        await socket.ConnectAsync(IPAddress.Loopback, drive.Url.Port, Cancelled);
+        await socket.GetStream().WriteAsync(
+            Encoding.ASCII.GetBytes($"POST {HttpTransport.Pathname} HTTP/1.1\r\nHost: {Host}\r\nContent-Type: {HttpTransport.MediaType}\r\n{HttpTransport.ConnectionTokenHeader}: {connectionToken}\r\nContent-Length: 100\r\n\r\n"),
+            Cancelled);
+
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var dues = drive.Clock.Dues();
+
+        while (dues.Count == 0 && watch.Elapsed < Patience)
         {
-            var connectionToken = await drive.Connect(false);
-            using var socket = new TcpClient();
+            await Task.Delay(5, Cancelled);
+            dues = drive.Clock.Dues();
+        }
 
-            await socket.ConnectAsync(IPAddress.Loopback, drive.Url.Port, Cancelled);
-            await socket.GetStream().WriteAsync(
-                Encoding.ASCII.GetBytes($"POST {HttpTransport.Pathname} HTTP/1.1\r\nHost: {Host}\r\nContent-Type: {HttpTransport.MediaType}\r\n{HttpTransport.ConnectionTokenHeader}: {connectionToken}\r\nContent-Length: 100\r\n\r\n"),
-                Cancelled);
+        return dues;
+    }
 
-            var watch = System.Diagnostics.Stopwatch.StartNew();
-            var dues = drive.Clock.Dues();
+    // httpTransportServer.sendGracePeriod, httpTransportServer.headersTimeout, a policy's
 
-            while (dues.Count == 0 && watch.Elapsed < Patience)
-            {
-                await Task.Delay(5, Cancelled);
-                dues = drive.Clock.Dues();
-            }
+    // an HTTP policy's members, as it is made: taken by a transport server built on it, or refused,
+    // on the real clock
+    private static Task<Observed> SendGracePeriodByPolicy(TimeSpan? given)
+    {
+        return HttpServerOnPolicy(new HttpPolicyOptions { SendGracePeriod = Assert.NotNull(given) });
+    }
 
-            return dues;
-        });
+    private static Task<Observed> HeadersTimeoutByPolicy(TimeSpan? given)
+    {
+        return HttpServerOnPolicy(new HttpPolicyOptions { HeadersTimeout = Assert.NotNull(given) });
+    }
+
+    // a policy made of what is given, and an HTTP transport server built on it, taken or refused
+    private static Task<Observed> HttpServerOnPolicy(HttpPolicyOptions given)
+    {
+        HttpPolicy policy;
+
+        try
+        {
+            policy = HttpPolicy.Of(given);
+        }
+        catch (ArgumentOutOfRangeException refused)
+        {
+            return Task.FromResult(Refused(refused));
+        }
+
+        return HttpServerBuilt(new HttpTransportServerOptions { Policy = policy });
+    }
+
+    // httpTransportServer.bodyGracePeriod, a policy's
+
+    // an HTTP policy's members, as it is made: what the policy holds, read back, and the due of the
+    // timer a transport server built on it arms for a body that declares its bytes and brings none,
+    // the same; refused, no policy made
+    private static async Task<Observed> BodyGracePeriodByPolicy(TimeSpan? given)
+    {
+        HttpPolicy policy;
+
+        try
+        {
+            policy = HttpPolicy.Of(new HttpPolicyOptions { BodyGracePeriod = Assert.NotNull(given) });
+        }
+        catch (ArgumentOutOfRangeException refused)
+        {
+            return Refused(refused);
+        }
+
+        var observed = await HttpServerOf(new HttpTransportServerOptions { InactivityTimeout = Never, Policy = policy }, BodyGraceDues);
+
+        Assert.Equal(policy.BodyGracePeriod, observed.Held);
+
+        return observed;
     }
 
     // webSocketTransportServer.sendGracePeriod, webSocketTransportServer.headersTimeout
@@ -418,7 +554,7 @@ public sealed partial class DurationsTests
         {
             Connect = (token) =>
             {
-                return client.Connect(new HttpConnectOptions { Host = Host, Port = 80, Timeout = Assert.NotNull(given) }, token);
+                return client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = 80, Timeout = Assert.NotNull(given), CancellationToken = token });
             },
             StateOf = () =>
             {
@@ -454,7 +590,7 @@ public sealed partial class DurationsTests
             {
                 Connect = (token) =>
                 {
-                    return client.Connect(new WebSocketConnectOptions { Host = Host, Port = listener.Port, Timeout = Assert.NotNull(given) }, token);
+                    return client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, Timeout = Assert.NotNull(given), CancellationToken = token });
                 },
                 StateOf = () =>
                 {
@@ -504,7 +640,7 @@ public sealed partial class DurationsTests
         {
             Connect = (token) =>
             {
-                return client.Connect(new MemoryConnectOptions { Server = server, Timeout = Assert.NotNull(given) }, token);
+                return client.Connect(new MemoryTransportClientConnectOptions { Server = server, Timeout = Assert.NotNull(given), CancellationToken = token });
             },
             StateOf = () =>
             {
@@ -583,36 +719,76 @@ public sealed partial class DurationsTests
 
     // transportClient.reconnectionDelay
 
-    // a function of the previous delay and the attempt, on a WebSocket client whose connect was
-    // refused, after a first attempt refused again: the delay its tap hears and the due of its wait,
-    // the attempt at it and not before; at once, no wait and the attempt at once; refused, before
-    // its tap hears it, no attempt more, and the client closed
-    private static async Task<Observed> ReconnectionDelayByFunction(TimeSpan? given)
+    // a function of the previous delay and the attempt
+    private static Task<Observed> ReconnectionDelayByFunction(TimeSpan? given)
+    {
+        return ReconnectionDelayBy(given, (delay) =>
+        {
+            return new TransportClientReconnectDelay((_, _) =>
+            {
+                return delay;
+            });
+        });
+    }
+
+    // a number: the wait itself
+    private static Task<Observed> ReconnectionDelayByNumber(TimeSpan? given)
+    {
+        return ReconnectionDelayBy(given, (delay) =>
+        {
+            return new TransportClientReconnectDelay(delay);
+        });
+    }
+
+    // the delay in the form given, on a WebSocket client whose connect was refused, after a first
+    // attempt refused again: the delay its tap hears and the due of its wait, the attempt at it and
+    // not before; at once, no wait and the attempt at once; refused, a number as reconnect is called,
+    // no attempt, no reconnect told and the client as it was, and a function's answer before its tap
+    // hears it, no attempt more, and the client closed
+    private static async Task<Observed> ReconnectionDelayBy(TimeSpan? given, Func<TimeSpan, TransportClientReconnectDelay> delayOf)
     {
         var delay = Assert.NotNull(given);
         var clock = new SteppingClock(Epoch);
         using var listener = new Listener();
         await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Clock = clock });
         var taps = Channel.CreateUnbounded<TimeSpan>();
-        var connecting = client.Connect(new WebSocketConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        var connecting = client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
+        var told = 0;
 
         await Listener.Refuse((await Reached(listener, connecting)).Peer);
         await Assert.ThrowsAsync<WebSocketException>(() =>
         {
             return connecting.WaitAsync(Patience, Cancelled);
         });
-
-        var reconnecting = client.Reconnect(new TransportReconnectOptions
+        ((IRouterClientTransport)client).Reconnect += () =>
         {
-            Delay = (_, _) =>
-            {
-                return delay;
-            },
+            Interlocked.Increment(ref told);
+        };
+
+        var before = client.ReadyState;
+        var form = delayOf(delay);
+        var reconnect = new TransportClientReconnectOptions
+        {
+            Delay = form,
             Tap = (heard, _) =>
             {
                 taps.Writer.TryWrite(heard);
             },
-        });
+        };
+        var reconnecting = client.Reconnect(reconnect);
+
+        // * a number refused as reconnect is called: nothing moved
+        if (reconnecting.IsCompleted && form.Fixed is not null)
+        {
+            var refusal = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            {
+                return reconnecting;
+            });
+
+            Assert.Equal((before, 0, false), (client.ReadyState, Volatile.Read(ref told), listener.IsPending));
+
+            return Refused(refusal);
+        }
 
         await Listener.Refuse((await Reached(listener, Task.WhenAny(reconnecting, taps.Reader.WaitToReadAsync(Cancelled).AsTask()).Unwrap())).Peer);
         await Task.WhenAny(reconnecting, taps.Reader.WaitToReadAsync(Cancelled).AsTask()).WaitAsync(Patience, Cancelled);
@@ -624,7 +800,9 @@ public sealed partial class DurationsTests
                 return reconnecting;
             });
 
-            Assert.Equal((ReadyState.Closed, false), (client.ReadyState, listener.IsPending));
+            // ! a number's refusal comes as reconnect is called, never at its attempt
+            Assert.Null(form.Fixed);
+            Assert.Equal((ReadyState.Closed, 1, false), (client.ReadyState, Volatile.Read(ref told), listener.IsPending));
 
             return Refused(refused);
         }
@@ -725,8 +903,25 @@ public sealed partial class DurationsTests
         }
     }
 
-    /// <summary>A transport client connected, listening, the handler its exchanges go through, and its clock.</summary>
-    private sealed record ClientDrive(Fetch Fetch, SteppingClock Clock);
+    /// <summary>A transport client connected, the handler its exchanges go through, and its clock.</summary>
+    private sealed record ClientDrive(HttpTransportClient Client, (Fetch Fetch, SteppingClock Clock) Handler)
+    {
+        public Fetch Fetch
+        {
+            get
+            {
+                return Handler.Fetch;
+            }
+        }
+
+        public SteppingClock Clock
+        {
+            get
+            {
+                return Handler.Clock;
+            }
+        }
+    }
 
     /// <summary>
     /// A client's connect, on its clock: how it is made, where the client stands, how it is asked to

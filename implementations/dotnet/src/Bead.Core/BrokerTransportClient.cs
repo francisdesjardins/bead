@@ -69,7 +69,7 @@ public sealed record BrokerTransportClientOptions
 }
 
 /// <summary>Where a broker's client connects — a server's name — and how long it waits.</summary>
-public sealed record BrokerConnectOptions
+public sealed record BrokerTransportClientConnectOptions
 {
     /// <summary>The server's name its OPEN goes to, a token (spec 15.16).</summary>
     public required string Server { get; init; }
@@ -81,6 +81,13 @@ public sealed record BrokerConnectOptions
     /// <see cref="System.Threading.Timeout.InfiniteTimeSpan"/>, which never times out; zero is refused.
     /// </summary>
     public TimeSpan Timeout { get; init; } = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    /// What gives the connect up: one cancelled already refuses it before anything moves, one
+    /// cancelled after ends it Closed, each an <see cref="OperationCanceledException"/>. Its own
+    /// connect's alone: a reconnection replays the rest of these options, never this token.
+    /// </summary>
+    public CancellationToken CancellationToken { get; init; }
 }
 
 /// <summary>
@@ -92,6 +99,9 @@ public sealed record BrokerConnectOptions
 /// carries the credential a request presents beside it, any field value, on the first part of its
 /// DATA, and takes none from its server, closing with 1002 a connection whose server's DATA carries
 /// one (spec 15.22). It is secure while its own leg and its server's are, as its ACCEPT said.
+/// Paused by its router, whole, a pause that outlasts its connection, its participant holds what
+/// comes on it, in order, to <c>maximumHeldEnvelopeBytes</c>, and never pauses its link (spec
+/// 15.12, 15.23).
 /// </summary>
 public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDisposable, IBrokerConnectionOwner
 {
@@ -101,7 +111,7 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
     private readonly Lock _gate = new();
     private volatile ReadyState _readyState = ReadyState.Uninitialized;
     // the options of the last connect its guard let through, which a reconnection connects with
-    private BrokerConnectOptions? _lastConnectOptions;
+    private BrokerTransportClientConnectOptions? _lastConnectOptions;
     // what a dispose cancels the connect under way by
     private CancellationTokenSource? _connecting;
     // the open connection; one this side let go of is none, and its end tells nothing
@@ -110,6 +120,9 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
     // participant's turn alone
     private List<TransportMessage>? _early;
     private Action? _reconnect;
+    // * paused whole by its router, a pause outlasting its connection: its participant holds what
+    // comes on the connection, never its link (spec 15.12, 15.23)
+    private volatile bool _isPaused;
 
     internal BrokerTransportClient(BrokerParticipant participant, BrokerTransportClientOptions? options)
     {
@@ -225,19 +238,61 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
 
     /// <summary>
     /// Connects through a server's name; settles once the first ACCEPT naming its half came, its
-    /// third leg sent. Refused with an <see cref="ArgumentOutOfRangeException"/> for a timeout
-    /// <see cref="BrokerConnectOptions.Timeout"/> does not take, and an <see cref="ArgumentException"/>
+    /// third leg sent, its participant linked first where it is not, anew once its stop settled.
+    /// Refused with an <see cref="ArgumentOutOfRangeException"/> for a timeout
+    /// <see cref="BrokerTransportClientConnectOptions.Timeout"/> does not take, and an <see cref="ArgumentException"/>
     /// for a name that is no token, each leaving its state as it was; with an
+    /// <see cref="ObjectDisposedException"/> once its participant is disposed, its state and its
+    /// target kept, before its state's guard (spec 15.21); with an
     /// <see cref="InvalidOperationException"/> unless Uninitialized or Closed; with an
     /// <see cref="OperationCanceledException"/>, nothing changed, when its token is cancelled
     /// already. Then it throws a <see cref="ConnectException"/> naming the REFUSE it read, its
     /// status and its reason, or <c>no-subscriber</c> when its broker says nothing serves the name,
-    /// or a dispose that gave up on it; a <see cref="TimeoutException"/> past its timeout; an
-    /// <see cref="OperationCanceledException"/> once its token is cancelled; each ending Closed.
+    /// or a dispose that gave up on it, or, at once, its participant's stop before it settled,
+    /// stopped as it connected, whether it awaits its answer or its participant's link; a
+    /// <see cref="TimeoutException"/> past its timeout; an <see cref="OperationCanceledException"/>
+    /// once its token is cancelled; each ending Closed.
     /// </summary>
-    public Task Connect(BrokerConnectOptions options, CancellationToken cancellationToken = default)
+    public Task Connect(BrokerTransportClientConnectOptions options)
     {
-        return Connecting(options, (cancellationToken, false));
+        // none refused where the connect refuses it, in its task
+        return Connecting(options, (options?.CancellationToken ?? CancellationToken.None, null));
+    }
+
+    /// <summary>
+    /// Pauses it whole, a pause that outlasts its connection: its participant holds what comes on
+    /// it, in order, its CLOSE behind what it holds, to <c>maximumHeldEnvelopeBytes</c>, and never
+    /// pauses its link (spec 15.12, 15.23).
+    /// </summary>
+    public void Pause()
+    {
+        BrokerConnection? connection;
+
+        // ! its own lock, never held as it tells, then the connection's flag
+        lock (_gate)
+        {
+            _isPaused = true;
+            connection = _connection;
+        }
+
+        connection?.Pause();
+    }
+
+    /// <summary>
+    /// Resumes it: what its participant held handed on, in order, in a turn of its participant's,
+    /// never within this call.
+    /// </summary>
+    public void Resume()
+    {
+        BrokerConnection? connection;
+
+        lock (_gate)
+        {
+            _isPaused = false;
+            connection = _connection;
+        }
+
+        connection?.Resume();
     }
 
     /// <summary>
@@ -291,10 +346,10 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
 
     /// <summary>
     /// Closes the connection with a CLOSE of 1000, or by a RESET, at once, where
-    /// <see cref="TransportDisconnectOptions.IsClean"/> says it is not clean, and raises its close
+    /// <see cref="TransportClientDisconnectOptions.IsClean"/> says it is not clean, and raises its close
     /// as its options say. Refused with a <see cref="DisconnectException"/> unless Open. It ends Closed.
     /// </summary>
-    public Task CloseConnection(TransportDisconnectOptions? options = null)
+    public Task CloseConnection(TransportClientDisconnectOptions? options = null)
     {
         var isClean = options?.IsClean ?? true;
         var isQuick = options?.IsQuick ?? false;
@@ -332,16 +387,24 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
     /// Connects again through the name of the last connect its guard let through, a pair drawn
     /// anew, replacing an open connection without a close, and raises
     /// <see cref="IRouterClientTransport.Reconnect"/> as it starts. The first attempt goes at once,
-    /// each next one after its <see cref="TransportReconnectOptions.Delay"/>. Attempts that run out
+    /// each next one after its <see cref="TransportClientReconnectOptions.Delay"/>. Attempts that run out
     /// end Closed with a <see cref="ReconnectException"/>; a cancel stops them with an
     /// <see cref="OperationCanceledException"/>. A reconnection under way, never connected, or
-    /// connecting is an <see cref="InvalidOperationException"/>.
+    /// connecting is an <see cref="InvalidOperationException"/>; once its participant is disposed,
+    /// after those, an <see cref="ObjectDisposedException"/>, no reconnect raised (spec 15.21); a
+    /// fixed delay out of bounds is an <see cref="ArgumentOutOfRangeException"/> as it is called,
+    /// after those and before the token; a misuse, such a delay or a token cancelled already leaves
+    /// the state as it was. A reconnection under way, or called, as its participant stops ends at
+    /// once, in a wait or once its attempt under way failed, no wait told after it, an
+    /// <see cref="OperationCanceledException"/> as any cancel, an <see cref="IOException"/> naming
+    /// the stop inside (spec 15.15, 15.21); one called once that stop settled links its participant
+    /// anew.
     /// </summary>
-    public async Task Reconnect(TransportReconnectOptions? options = null)
+    public async Task Reconnect(TransportClientReconnectOptions? options = null)
     {
-        var reconnect = options ?? new TransportReconnectOptions();
+        var reconnect = options ?? new TransportClientReconnectOptions();
         var token = reconnect.CancellationToken;
-        BrokerConnectOptions target;
+        BrokerTransportClientConnectOptions target;
         BrokerConnection? replaced;
         Action? starting;
 
@@ -362,6 +425,16 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
                 throw new InvalidOperationException($"the transport client cannot reconnect while {NameOf(_readyState)}");
             }
 
+            // ! its participant disposed: its application's misuse, nothing moved (spec 15.21)
+            if (_participant.IsDisposed)
+            {
+                throw _participant.DisposedRefusal();
+            }
+
+            // * a fixed delay held as it is called, after the state's guards and before its token,
+            // so a refused one moves nothing (spec 1.4)
+            TransportReconnection.Held(reconnect);
+
             if (token.IsCancellationRequested)
             {
                 throw new OperationCanceledException(TransportReconnection.Cancelled, token);
@@ -373,6 +446,13 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
             _readyState = ReadyState.Reconnecting;
             starting = _reconnect;
         }
+
+        // ! the stop current as it is called: one under way, or one that comes before it ends, ends
+        // it at once, and one called once it is let through stops what it links
+        var record = _participant.Linking();
+
+        // * its own token joined to its participant's stop: a stop ends it as a cancel does (spec 15.15)
+        using var reconnecting = CancellationTokenSource.CreateLinkedTokenSource(token, record.Ending);
 
         try
         {
@@ -391,14 +471,33 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
                 }
             }
 
-            await TransportReconnection.Attempting(
-                (token) =>
-                {
-                    return Connecting(target, (token, true));
-                },
-                (reconnect, _participant.Clock));
+            try
+            {
+                await TransportReconnection.Attempting(
+                    async (attempting) =>
+                    {
+                        try
+                        {
+                            await Connecting(target, (attempting, record));
+                        }
+                        catch (Exception) when (record.IsMarked)
+                        {
+                            // ! its stop marked before its token is cancelled: cancelled here, so no
+                            // wait is told after it
+                            await reconnecting.CancelAsync();
 
-            if (token.IsCancellationRequested)
+                            throw;
+                        }
+                    },
+                    (reconnect with { CancellationToken = reconnecting.Token }, _participant.Clock));
+            }
+            catch (OperationCanceledException) when (record.IsMarked)
+            {
+                // * ended by its participant's stop: that stop inside, where the wait's own cancel was
+                throw new OperationCanceledException(TransportReconnection.Cancelled, BrokerStopRecord.CauseOf(_participant.Id), reconnecting.Token);
+            }
+
+            if (reconnecting.IsCancellationRequested)
             {
                 try
                 {
@@ -409,7 +508,7 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
                     // closed meanwhile: there is nothing left to close
                 }
 
-                throw new OperationCanceledException(TransportReconnection.Cancelled, token);
+                throw new OperationCanceledException(TransportReconnection.Cancelled, record.IsMarked ? BrokerStopRecord.CauseOf(_participant.Id) : null, reconnecting.Token);
             }
         }
         catch
@@ -535,8 +634,9 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
         return readyState.ToString().ToLowerInvariant();
     }
 
-    // a connect, or a reconnection's attempt, which its guard alone tells apart
-    private async Task Connecting(BrokerConnectOptions given, (CancellationToken Token, bool IsAttempt) call)
+    // a connect, or a reconnection's attempt, given the stop's record its reconnection captured, which
+    // its guard alone tells apart
+    private async Task Connecting(BrokerTransportClientConnectOptions given, (CancellationToken Token, BrokerStopRecord? Reconnection) call)
     {
         ArgumentNullException.ThrowIfNull(given);
 
@@ -547,9 +647,22 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
 
         var options = given with
         {
-            Timeout = Clocks.AssertHeld(("a connect's timeout", nameof(BrokerConnectOptions.Timeout)), given.Timeout),
+            Timeout = Clocks.AssertHeld(("a connect's timeout", nameof(BrokerTransportClientConnectOptions.Timeout)), given.Timeout),
+
+            // ! its own connect's, which its call carries: a reconnection replays the rest, never
+            // a token a connect gave
+            CancellationToken = CancellationToken.None,
         };
-        var (token, isAttempt) = call;
+        var (token, reconnection) = call;
+        var isAttempt = reconnection is not null;
+
+        // ! its participant disposed: its application's misuse, before its state and its target
+        // move; an attempt it overtook fails at its link instead (spec 15.21)
+        if (!isAttempt && _participant.IsDisposed)
+        {
+            throw _participant.DisposedRefusal();
+        }
+
         var connecting = new CancellationTokenSource();
 
         lock (_gate)
@@ -577,6 +690,9 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
             _connecting = connecting;
         }
 
+        // ! the stop current as it is called: one that comes before it settles fails it at once, and
+        // one called once it is let through stops what it links
+        var record = reconnection ?? _participant.Linking();
         var clock = _participant.Clock;
 
         // * the connect's start, on its monotonic clock: its OPEN lives the time left of it
@@ -585,11 +701,11 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
         try
         {
             using var timeout = options.Timeout == System.Threading.Timeout.InfiniteTimeSpan ? null : new CancellationTokenSource(options.Timeout, clock);
-            using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, connecting.Token, timeout?.Token ?? CancellationToken.None);
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource([token, connecting.Token, record.Ending, timeout?.Token ?? CancellationToken.None]);
 
             try
             {
-                var connection = await Opening((options, started), linked.Token);
+                var connection = await Opening((options, started, record), linked.Token);
                 var isOpen = false;
 
                 // ! settled in a turn of its participant's, after every parcel taken before it: a
@@ -615,9 +731,10 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
 
                         _early = null;
 
+                        // through its hold, which a pause meanwhile holds them in, behind what it holds
                         foreach (var message in early)
                         {
-                            ((IBrokerConnectionOwner)this).Delivered(connection, message);
+                            connection.Hand(message);
                         }
                     });
 
@@ -640,6 +757,12 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
                 });
 
                 throw new ConnectException("the transport client was disposed as it connected");
+            }
+            catch (Exception reason) when (record.IsMarked && reason is not ConnectException)
+            {
+                // * its participant's stop before it settled, whatever it awaited: stopped as it
+                // connected, at once (spec 15.21)
+                throw _participant.StoppedAsItConnected(reason);
             }
             catch (OperationCanceledException reason) when (connecting.IsCancellationRequested)
             {
@@ -676,18 +799,23 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
     // its OPEN, once its link is up, to the server's name, living in its broker the connect's time
     // left, none when it is without end (spec 15.18); its connection once the first ACCEPT naming its
     // half came, failed as its link goes down before its answer
-    private async Task<BrokerConnection> Opening((BrokerConnectOptions Options, long Started) connect, CancellationToken cancellationToken)
+    private async Task<BrokerConnection> Opening((BrokerTransportClientConnectOptions Options, long Started, BrokerStopRecord Record) connect, CancellationToken cancellationToken)
     {
-        var (options, started) = connect;
+        var (options, started, record) = connect;
 
-        await _participant.WhenLinked(cancellationToken);
+        await _participant.WhenLinked(record, cancellationToken);
 
         BrokerPendingConnect? pending = null;
         Task<BrokerPublished>? published = null;
 
         await _participant.Scheduler.Run(() =>
         {
-            // ! given up as its link came up: no OPEN goes
+            // ! given up, or its participant's stop come, as its link came up: no OPEN goes
+            if (record.IsMarked)
+            {
+                throw _participant.StoppedAsItConnected();
+            }
+
             cancellationToken.ThrowIfCancellationRequested();
 
             pending = new BrokerPendingConnect
@@ -761,6 +889,12 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
         lock (_gate)
         {
             _connection = connection;
+        }
+
+        // a pause outlasts the connection it was made on
+        if (_isPaused)
+        {
+            connection.Pause();
         }
 
         _participant.Hold(connection);

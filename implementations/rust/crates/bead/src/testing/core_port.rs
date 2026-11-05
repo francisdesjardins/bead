@@ -9,15 +9,20 @@ use bytes::Bytes;
 use tokio::sync::oneshot;
 
 use crate::clock::{Clock, Schedule, SharedClock, Timer, TimerCallback};
-use crate::constants::RouterSide;
+use crate::constants::{CredentialScheme, RouterSide};
 use crate::debug::{DebugDirection, TracedEnvelope};
 use crate::envelope::{
-    CreditHeader, Envelope, FailureHeader, FailureRecord, Header, NotificationHeader,
+    CreditHeader, Envelope, EnvelopeHeader, FailureHeader, FailureRecord, NotificationHeader,
+    ReadEnvelopeOptions,
 };
-use crate::errors::CallError;
+use crate::errors::{CallError, ProgrammerError};
+use crate::failure::Failure;
 use crate::owner::Owner;
-use crate::router::core::{self as router_core, BeforeAnswer, Core, Dispatch, Side, Undo};
-use crate::router::parts::Answering;
+use crate::router::core::{
+    self as router_core, BeforeAnswer, Core, Dispatch, Handler, Resolution, Resolved,
+    SessionRequest, Side, Undo,
+};
+use crate::router::parts::{Answering, PendingCalls};
 use crate::router::requester::{self, CoreRequest};
 use crate::router::types::{
     ConnectionHandle, RouterAnswer, RouterError, RouterLimitsOptions, RouterResult, Signal,
@@ -29,6 +34,11 @@ use crate::transport::Sent;
 
 pub(crate) type Completion<T> = oneshot::Receiver<Result<T, CallError>>;
 pub(crate) type TransmitHook = Box<dyn FnMut(&mut State, &Envelope) + Send>;
+pub(crate) type TokenHook =
+    Box<dyn FnMut(&ConnectionHandle) -> Result<Option<SessionToken>, RouterError> + Send>;
+pub(crate) type SessionHook = Box<dyn FnMut(&SessionRequest, &Signal) -> Resolution + Send>;
+pub(crate) type ReadHook = Box<dyn FnOnce(&Bytes) -> Result<Option<Envelope>, Failure> + Send>;
+pub(crate) type TraceHook = Box<dyn FnMut(DebugDirection, &TracedEnvelope) + Send>;
 
 #[expect(
     clippy::struct_excessive_bools,
@@ -37,14 +47,22 @@ pub(crate) type TransmitHook = Box<dyn FnMut(&mut State, &Envelope) + Send>;
 pub(crate) struct State {
     pub(crate) core: Core<Self>,
     pub(crate) tokens: BTreeMap<ConnectionHandle, SessionToken>,
+    pub(crate) token: Option<TokenHook>,
     pub(crate) sending: VecDeque<Result<Sent, RouterError>>,
     pub(crate) on_transmit: Option<TransmitHook>,
+    pub(crate) session: Option<SessionHook>,
+    pub(crate) reader: Option<ReadHook>,
+    pub(crate) on_trace: Option<TraceHook>,
+    pub(crate) schemes: Vec<CredentialScheme>,
+    pub(crate) destination: Option<Arc<Handler>>,
+    pub(crate) held: Vec<u32>,
     pub(crate) sent: Vec<(ConnectionHandle, Envelope)>,
     pub(crate) reports: Vec<(ConnectionHandle, RouterError)>,
     pub(crate) before: Vec<BeforeAnswer>,
     pub(crate) before_sent: Vec<usize>,
     pub(crate) undone: Vec<u32>,
     pub(crate) notifications: Vec<(ConnectionHandle, NotificationHeader, Bytes)>,
+    pub(crate) cancels: Vec<(u32, ConnectionHandle)>,
     pub(crate) credits: Vec<(ConnectionHandle, CreditHeader)>,
     pub(crate) unpaired: Vec<(ConnectionHandle, FailureHeader, FailureRecord)>,
     pub(crate) traces: Vec<(DebugDirection, TracedEnvelope)>,
@@ -53,6 +71,8 @@ pub(crate) struct State {
     pub(crate) sends_notifications: bool,
     pub(crate) takes_unpaired: bool,
     pub(crate) two_way: bool,
+    pub(crate) one_way: Vec<ConnectionHandle>,
+    pub(crate) two_way_asked: Mutex<Vec<ConnectionHandle>>,
 }
 
 impl core::fmt::Debug for State {
@@ -65,12 +85,46 @@ impl core::fmt::Debug for State {
 }
 
 impl Side for State {
+    fn read_envelope(
+        &mut self,
+        data: &Bytes,
+        options: &ReadEnvelopeOptions,
+    ) -> Result<Option<Envelope>, Failure> {
+        self.reader.take().map_or_else(
+            || crate::envelope::read_envelope(data, self.core.side, options),
+            |read| read(data),
+        )
+    }
+
     fn core(&mut self) -> &mut Core<Self> {
         &mut self.core
     }
 
-    fn is_two_way(&self, _handle: &ConnectionHandle) -> bool {
-        self.two_way
+    fn credential_schemes(&self) -> Vec<CredentialScheme> {
+        self.schemes.clone()
+    }
+
+    fn session_of(&mut self, request: &SessionRequest, signal: &Signal) -> Resolution {
+        self.session.as_mut().map_or_else(
+            || Resolution::Now(Ok(Resolved::None)),
+            |resolve| resolve(request, signal),
+        )
+    }
+
+    fn handler_of_destination(&mut self, _destination_id: u32) -> Option<Arc<Handler>> {
+        self.destination.clone()
+    }
+
+    fn is_call_id_in_use(&self, call_id: u32, _handle: &ConnectionHandle) -> bool {
+        self.held.contains(&call_id)
+    }
+
+    fn is_two_way(&self, handle: &ConnectionHandle) -> bool {
+        self.two_way_asked
+            .lock()
+            .expect("two-way questions")
+            .push(Arc::clone(handle));
+        self.two_way && !self.one_way.contains(handle)
     }
 
     fn before_answer(&mut self, answer: BeforeAnswer) -> Option<Undo<Self>> {
@@ -113,6 +167,10 @@ impl Side for State {
         self.takes_unpaired
     }
 
+    fn on_cancel(&mut self, call_id: u32, handle: &ConnectionHandle) {
+        self.cancels.push((call_id, Arc::clone(handle)));
+    }
+
     fn is_tracing(&self) -> bool {
         true
     }
@@ -125,9 +183,16 @@ impl Side for State {
         self.activity.push((activity, Arc::clone(handle)));
     }
 
-    fn trace(&mut self, direction: DebugDirection, (handle, header): (&ConnectionHandle, &Header)) {
-        self.traces
-            .push((direction, TracedEnvelope::of(handle, header)));
+    fn trace(
+        &mut self,
+        direction: DebugDirection,
+        (handle, header): (&ConnectionHandle, &EnvelopeHeader),
+    ) {
+        let traced = TracedEnvelope::new(handle, header);
+        if let Some(hear) = &mut self.on_trace {
+            hear(direction, &traced);
+        }
+        self.traces.push((direction, traced));
     }
 
     fn report(&mut self, error: RouterError, handle: &ConnectionHandle) {
@@ -149,8 +214,14 @@ impl Side for State {
         sent
     }
 
-    fn session_token_of(&mut self, handle: &ConnectionHandle) -> Option<SessionToken> {
-        self.tokens.get(handle).copied()
+    fn session_token_of(
+        &mut self,
+        handle: &ConnectionHandle,
+    ) -> Result<Option<SessionToken>, RouterError> {
+        if let Some(token) = &mut self.token {
+            return token(handle);
+        }
+        Ok(self.tokens.get(handle).copied())
     }
 }
 
@@ -177,7 +248,11 @@ impl Clock for RecordedClock {
         self.clock.wall()
     }
 
-    fn arm(&self, schedule: Schedule, callback: TimerCallback) -> Arc<dyn Timer> {
+    fn arm(
+        &self,
+        schedule: Schedule,
+        callback: TimerCallback,
+    ) -> Result<Arc<dyn Timer>, ProgrammerError> {
         let (Schedule::Once(delay) | Schedule::Every(delay)) = schedule;
         self.armed.lock().expect("timer history").push(delay);
         self.clock.arm(schedule, callback)
@@ -188,8 +263,34 @@ impl Clock for RecordedClock {
     }
 }
 
+/// Construction controls shared by a scripted core and its bounded-range twins.
+#[derive(Debug, Default)]
+#[non_exhaustive]
+pub(crate) struct PeerOptions {
+    pub(crate) limits: Option<RouterLimitsOptions>,
+    pub(crate) last_call_id: Option<u32>,
+}
+
 impl Peer {
     pub(crate) fn new(side: RouterSide, limits: &RouterLimitsOptions) -> Self {
+        Self::with_options(
+            side,
+            &PeerOptions {
+                limits: Some(limits.clone()),
+                ..PeerOptions::default()
+            },
+        )
+        .expect("a core on valid limits")
+    }
+
+    pub(crate) fn with_options(
+        side: RouterSide,
+        options: &PeerOptions,
+    ) -> Result<Self, ProgrammerError> {
+        let pending = options.last_call_id.map_or_else(
+            || Ok(PendingCalls::new(side)),
+            |last| PendingCalls::bounded(side, last),
+        )?;
         let clock = SteppingClock::new(instants::new_year());
         let armed = Arc::default();
         let shared: SharedClock = Arc::new(RecordedClock {
@@ -197,12 +298,22 @@ impl Peer {
             armed: Arc::clone(&armed),
         });
         let runtime = crate::platform::runtime_of(None, "a test's core").expect("a runtime");
-        let limits = limits_of(limits).expect("limits that hold");
+        let limits = limits_of(&options.limits.clone().unwrap_or_default())?;
         let owner = Owner::spawn((&runtime, &shared), |owner| State {
-            core: Core::new(owner, (side, limits, Arc::clone(&shared), None)),
+            core: Core {
+                pending,
+                ..Core::new(owner, (side, limits, Arc::clone(&shared), None))
+            },
             tokens: BTreeMap::new(),
+            token: None,
             sending: VecDeque::new(),
             on_transmit: None,
+            session: None,
+            reader: None,
+            on_trace: None,
+            schemes: Vec::new(),
+            destination: None,
+            held: Vec::new(),
             sent: Vec::new(),
             reports: Vec::new(),
             before: Vec::new(),
@@ -210,6 +321,7 @@ impl Peer {
             undone: Vec::new(),
             notifications: Vec::new(),
             credits: Vec::new(),
+            cancels: Vec::new(),
             unpaired: Vec::new(),
             traces: Vec::new(),
             activity: Vec::new(),
@@ -217,12 +329,14 @@ impl Peer {
             sends_notifications: false,
             takes_unpaired: false,
             two_way: true,
+            one_way: Vec::new(),
+            two_way_asked: Mutex::new(Vec::new()),
         });
-        Self {
+        Ok(Self {
             clock,
             owner,
             armed,
-        }
+        })
     }
 
     pub(crate) fn armed(&self) -> Vec<Duration> {
@@ -257,24 +371,19 @@ impl Peer {
                 answered: Mutex::new(None),
                 origin: (None, None),
             });
-            state
-                .core
-                .answering
-                .answering
-                .entry(call.connection_handle)
-                .or_default()
-                .insert(
-                    call.call_id,
-                    Answering {
-                        dispatched: id,
-                        signal: Signal::new(),
-                        is_answered: false,
-                        is_ended: false,
-                        receiving: None,
-                        series: None,
-                        started_at: Duration::ZERO,
-                    },
-                );
+            // * opened as a request dispatched opens it: a call abandoned on its call id forgotten
+            state.core.answering.open(
+                &call,
+                Answering {
+                    dispatched: id,
+                    signal: Signal::new(),
+                    is_answered: false,
+                    is_ended: false,
+                    receiving: None,
+                    series: None,
+                    started_at: Duration::ZERO,
+                },
+            );
             router_core::respond(
                 state,
                 (
@@ -291,7 +400,7 @@ impl Peer {
 
     pub(crate) fn request(
         &self,
-        (payload, request): (Bytes, CoreRequest),
+        (payload, request): (Bytes, CoreRequest<State>),
     ) -> Completion<RouterResult> {
         let (reply, answer) = oneshot::channel();
         self.owner.offer(Box::new(move |state| {
@@ -349,22 +458,16 @@ pub(crate) fn scripted_header(call_id: u32) -> crate::envelope::RequestHeader {
     }
 }
 
-pub(crate) fn request_of(handle: &str) -> CoreRequest {
+pub(crate) fn request_of(handle: &str) -> CoreRequest<State> {
     CoreRequest {
         connection_handle: Arc::from(handle),
         credential: None,
+        on_drawn: None,
         on_call_id: None,
         on_sent: None,
         opens_subscription: false,
         paced: false,
-        options: crate::router::types::ResolvedRequestOptions {
-            timeout: Duration::from_secs(1),
-            destination_id: None,
-            connection_handle: None,
-            credential: None,
-            signal: None,
-            close_on_timeout: false,
-        },
+        options: crate::router::types::ResolvedRequestOptions::new(Duration::from_secs(1)),
         procedure: crate::testing::pair::echo().address(),
         maximum_payload_bytes: None,
         refusal: None,

@@ -13,7 +13,7 @@ import { create, type MessageInitShape } from '@bufbuild/protobuf';
 import { FailureScope } from '../src/router/shared/constants';
 import type { FailureError } from '../src/router/shared/errors';
 import { problemOfFailure } from '../src/transcoding/problems';
-import { typeRegistryOf, writeProtoJson } from '../src/transcoding/json-form';
+import { createJsonForm } from '../src/transcoding/json-form';
 import { OPENAPI_DOCUMENT } from './gen/typescript/bead_http';
 import { SignUpRequestSchema, SignUpResponseSchema } from './gen/typescript/demo/v1/sign_up_pb';
 
@@ -25,7 +25,7 @@ const ROUTE = '/api/SignUp/signUp';
 /** Where the internal demo, `yarn demo`, serves it: the page names its own origin where it can. */
 const DEMO_ORIGIN = 'http://localhost:8080';
 
-const REGISTRY = typeRegistryOf([SignUpRequestSchema, SignUpResponseSchema]);
+const FORM = createJsonForm([SignUpRequestSchema, SignUpResponseSchema]);
 
 /** The reason phrases of the statuses the sign-up answers, RFC 9110's. */
 const PHRASES: Readonly<Record<number, string>> = Object.freeze({
@@ -58,10 +58,7 @@ export const curlOf = (
   request: MessageInitShape<typeof SignUpRequestSchema>,
   { origin }: { origin?: string | undefined } = {}
 ): string => {
-  const body = writeProtoJson(SignUpRequestSchema, {
-    message: create(SignUpRequestSchema, request),
-    registry: REGISTRY,
-  });
+  const body = FORM.write(SignUpRequestSchema, create(SignUpRequestSchema, request));
 
   return [
     `curl -X POST ${origin ?? DEMO_ORIGIN}${ROUTE} \\`,
@@ -72,10 +69,7 @@ export const curlOf = (
 
 /** What the gateway answers a sign-up its server welcomed: a 200 of its result. */
 export const welcomedOf = (welcome: string): string => {
-  const body = writeProtoJson(SignUpResponseSchema, {
-    message: create(SignUpResponseSchema, { welcome }),
-    registry: REGISTRY,
-  });
+  const body = FORM.write(SignUpResponseSchema, create(SignUpResponseSchema, { welcome }));
 
   return `${headOf(200, 'application/json')}\n\n${indented(body)}`;
 };

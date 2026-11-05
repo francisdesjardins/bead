@@ -1,4 +1,5 @@
 import { once } from 'node:events';
+import { noop } from '../../transport/shared/noop';
 import { type IncomingMessage, request } from 'node:http';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
@@ -22,10 +23,11 @@ import { callIdsOf, envelopeOf } from '../../router/shared/__tests__/fixtures';
 import { LONGEST_TIMER } from '../../transport/shared/clock';
 import { createTestClock, delaysOn, duesOn } from '../../transport/shared/__tests__/fixtures';
 import type {
+  ITransportServerConnection,
   ITransportServerRefusal,
   TransportServerConnectionHandle,
 } from '../../transport/server/types';
-import { createWSTransportServer } from '../../transport/server/ws-transport-server';
+import { createWebSocketTransportServer } from '../../transport/server/websocket-transport-server';
 import { createEmitter } from '../../transport/shared/emitter';
 import { ProgrammerError } from '../../transport/shared/errors';
 import type { ITransportMessage } from '../../transport/shared/types';
@@ -77,7 +79,7 @@ const echo: IProcedure = {
 const createScriptedTransport = () => {
   const emitter = createEmitter<{
     close: [wasClean: boolean, connectionHandle: Handle];
-    connection: [socket: unknown, request: unknown, connectionHandle: Handle];
+    connection: [connection: ITransportServerConnection, connectionHandle: Handle];
     listen: [isHeld: boolean, connectionHandle: Handle];
     message: [message: ITransportMessage, connectionHandle: Handle];
   }>();
@@ -107,6 +109,8 @@ const createScriptedTransport = () => {
 
       return control.closeResult;
     },
+    pause: noop,
+    resume: noop,
     send: ({ data }, connectionHandle) => {
       sent.push({
         connectionHandle,
@@ -158,7 +162,7 @@ const createScriptedTransport = () => {
   };
 
   const open = (connectionHandle: Handle) => {
-    emitter.emit('connection', {}, {}, connectionHandle);
+    emitter.emit('connection', { request: {}, socket: {} }, connectionHandle);
   };
 
   /** A listen held on `connectionHandle`, as an HTTP transport tells it, or its end. */
@@ -670,6 +674,8 @@ test.describe('createServer', () => {
     });
 
     ask(first, { procedure: openSession });
+    // its session opened in the later turn its resolver runs in, before the subscription comes
+    await sleep(0);
     ask(first, { opensSubscription: true, procedure: news });
     await sleep(0);
 
@@ -979,6 +985,8 @@ test.describe('createServer', () => {
       return response('');
     });
     ask(first, { procedure: openSession });
+    // its session opened in the later turn its resolver runs in, before the subscription comes
+    await sleep(0);
     ask(first, { opensSubscription: true, procedure: news });
     await sleep(0);
     listen(first, true);
@@ -1295,6 +1303,33 @@ test.describe('createServer', () => {
     ).toEqual([0, 0, 0, 0]);
   });
 
+  test('builds its sessions with their own options on its transport’s clock', async () => {
+    const clock = createTestClock();
+    const { open, transport } = createScriptedTransport();
+
+    await using server = createServer({
+      sessions: (options) => {
+        return createSessionManager({ ...options, sessionInactivityTimeout: 3_000 });
+      },
+      transport: { ...transport, clock },
+    });
+
+    open(first);
+
+    const session = server.sessions.set({
+      ...server.sessions.create(first),
+      sessionInactivityTimeout: undefined,
+    });
+
+    // the default of its own options, timed by the server's clock
+    expect([session.sessionInactivityTimeout, delaysOn(clock)]).toEqual([3_000, [3_000]]);
+
+    clock.tick(3_000);
+    await sleep(0);
+
+    expect(server.sessions.has(first)).toBe(false);
+  });
+
   test("runs every layer on its transport's clock: the sessions are built with it, and a layer on another is refused, leaving nothing on its transport", async () => {
     const clock = createTestClock();
     const { emitter, transport } = createScriptedTransport();
@@ -1409,7 +1444,7 @@ test.describe('createServer', () => {
   });
 
   test("hears its transport's error and refusal through the server's transport", async () => {
-    const transport = createWSTransportServer({ WebSocketServer });
+    const transport = createWebSocketTransportServer({ WebSocketServer });
     // typed by what a server asks of its transport alone, as code over any transport sees it
     await using server: IServer = createServer({ transport });
     const refusals: [status: number, reason: string][] = [];

@@ -203,6 +203,9 @@ public sealed record WebSocketTransportStartOptions
 
     /// <summary>Whether it takes any free port instead.</summary>
     public bool FindOpenPort { get; init; }
+
+    /// <summary>What gives up on the start.</summary>
+    public CancellationToken CancellationToken { get; init; }
 }
 
 /// <summary>
@@ -463,17 +466,18 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     }
 
     /// <summary>
-    /// Listens, and gives where. Refused with an <see cref="InvalidOperationException"/> unless
-    /// Uninitialized or Closed — a second start even while the first is under way; one that fails
-    /// ends Closed, ready to start again.
+    /// Listens, and gives where. Refused with an <see cref="ObjectDisposedException"/> once disposed,
+    /// its state kept; then with an <see cref="InvalidOperationException"/> unless Uninitialized or
+    /// Closed — a second start even while the first is under way; one that fails ends Closed, ready
+    /// to start again.
     /// </summary>
-    public Task<TransportServerAddress> Start(WebSocketTransportStartOptions? options = null, CancellationToken cancellationToken = default)
+    public Task<TransportServerAddress> Start(WebSocketTransportStartOptions? options = null)
     {
         var start = options ?? new WebSocketTransportStartOptions();
 
         return _life.Start(() =>
         {
-            return Starting((start, cancellationToken));
+            return Starting((start, start.CancellationToken));
         });
     }
 
@@ -622,6 +626,32 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         return _isSecure;
     }
 
+    /// <summary>
+    /// Pauses a connection (spec 15.12): its socket read no more, a message partway read to its end
+    /// and held, one at most, so TCP's window paces its peer (RFC 9293 §3.8.6); one this side closes
+    /// reads on to its peer's Close. Nothing for a connection it does not hold.
+    /// </summary>
+    public void Pause(string connectionHandle)
+    {
+        // ! the connection's own lock alone, never held as it delivers
+        if (_connections.TryGetValue(connectionHandle, out var held))
+        {
+            held.Connection.Pause();
+        }
+    }
+
+    /// <summary>
+    /// Resumes a connection: what it held delivered, then each message as it comes, from its read's
+    /// own step. Nothing for a connection it does not hold.
+    /// </summary>
+    public void Resume(string connectionHandle)
+    {
+        if (_connections.TryGetValue(connectionHandle, out var held))
+        {
+            held.Connection.Resume();
+        }
+    }
+
     /// <inheritdoc/>
     public Task Send(TransportMessage message, string connectionHandle)
     {
@@ -632,10 +662,14 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
             : Task.CompletedTask;
     }
 
-    /// <summary>As <see cref="Stop"/>.</summary>
+    /// <summary>
+    /// Stops it, as <see cref="Stop"/>, then ends it for good (decision 0003): a start after it is
+    /// its application's misuse, an <see cref="ObjectDisposedException"/>, its state kept; a later
+    /// dispose settles with the first.
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
-        await Stop();
+        await _life.Dispose(Stopping);
     }
 
     // closes a connection, and settles once the server told its end, as the TypeScript side's close
@@ -769,13 +803,15 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         if (refusal.Refusal is { } reason && Refusal is { } listeners)
         {
             var (authority, origin) = WebSocketHandshake.ToldOf(context.Request);
-            var told = new TransportServerRefusal(
-                AddressOf(context),
-                authority,
-                origin,
-                context.Connection.RemotePort,
-                reason,
-                refusal.Status);
+            var told = new TransportServerRefusal
+            {
+                Address = AddressOf(context),
+                Authority = authority,
+                Origin = origin,
+                Port = context.Connection.RemotePort,
+                Reason = reason,
+                Status = refusal.Status,
+            };
 
             _listeners.Tell(listeners, told);
         }
@@ -856,7 +892,7 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         var held = new Held
         {
             Arrival = arrival,
-            Client = new TransportServerClient(ip, connectionHandle, null, port, TransportTypes.WebSocket),
+            Client = new TransportServerClient { Address = ip, ConnectionHandle = connectionHandle, LastActivity = null, Port = port, Type = TransportTypes.WebSocket },
             Closed = closed.Task,
             Connection = connection,
         };

@@ -3,7 +3,7 @@
   "$comment": [
     "Bead's codecs: what each encoding of spec section 17 reads and writes, raw, text and json (decision 0016) and proto (decision 0031), which every implementation's harness plays through its side's codecs.",
     "payloads are bytes read, in an encoding: written is the bytes its writer writes back of the value its reader read, the same bytes where they are canonical already; read, of a proto payload, what its reader read of them; refused, the reason its reader refuses them for. A harness checks the refusal, or that the bytes written are those given and that the value read equals the value its reader reads of them, or that what it read is read.",
-    "proto: a Probe, the message of spec/codecs.proto, read and written through the code each side's stock generator writes for it over its stock library, as generated code reads one: its records checked against Probe's descriptor before the library reads them (decision 0028), the bound of 17.9.3 set in the call, a closed enum's record of a number it does not declare set aside before the library reads it where the library would take it (17.9.8), and each message it holds judged by its required fields once it is read (17.9.7, decision 0042), as the runtime's codec reads one. read is what was read of the top Probe: text, its string as UTF-16 code units in hexadecimal, four capital digits each and a space between; number; nested, how deep messages nest below it, through child, delimited and children, a map's entry counting as a message and its value as another; counts and stamps, where it holds any, their values in their order; children, where it holds any, each key, its code units as text gives them, to what was read of its value, its text, number and nested; delimited, where it is set, what was read of it, its text, number and nested; and shade, where a record set it, its number. A harness checks these and nothing else, since protobuf fixes no message's bytes whole: needs and needs_items, of Needs, whose fields protobuf requires, are judged and not read back.",
+    "proto: a Probe, the message of spec/codecs.proto, read and written through the code each side's stock generator writes for it over its stock library, as generated code reads one: its records checked against Probe's descriptor before the library reads them (decision 0028), the bound of 17.9.3 set in the call, a singular closed enum's record of a number it does not declare dropped before the library reads it (17.9.8), and each message it holds judged by its required fields once it is read (17.9.7, decision 0042), as the runtime's codec reads one. read is what was read of the top Probe: text, its string as UTF-16 code units in hexadecimal, four capital digits each and a space between; number; nested, how deep messages nest below it, through child, delimited, children and tallies, a map's entry counting as a message and a value of children as another; counts and stamps, where it holds any, their values in their order; children, where it holds any, each key, its code units as text gives them, to what was read of its value, its text, number and nested; delimited, where it is set, what was read of it, its text, number and nested; and shade, where a record set it, its number. A harness checks these and nothing else, since protobuf fixes no message's bytes whole: needs and needs_items, of Needs, whose fields protobuf requires, are judged and not read back.",
     "values are a value given to a writer, in an encoding: written is the bytes it writes; refused, the reason it refuses the value for. A value is given in one of eight forms.",
     "json: a JSON value, as the file holds it: on the TypeScript side JSON.parse of the file, so that a member named __proto__ is a member; on the C# side a JsonElement of the file; on the Rust side a serde_json::Value that Bead's own reader reads of the file's text.",
     "double: a double by its 64 bits, in hexadecimal: on the TypeScript side read through a DataView; on the C# side a JsonElement of JsonSerializer.SerializeToElement(BitConverter.Int64BitsToDouble(bits)), which holds no NaN and no infinity; on the Rust side f64::from_bits(bits) given through bead::json::to_value, which refuses a double that is not finite.",
@@ -11,12 +11,12 @@
     "text: a string, given to a text writer, a String on the Rust side. bytes: bytes in hexadecimal, given to a raw writer, a Vec<u8> on the Rust side.",
     "form: a value no JSON text holds. loneSurrogate is the string a, U+D800, b, which the C# side gives a json writer as a JsonElement of the bytes of its escape, and a text writer as a string; loneSurrogateName, an object whose one member is named so, its value 1; nameTwice, an object of two members both named a, 1 then 2, which the C# side parses with JsonElement.Parse's defaults and the TypeScript side cannot hold; undefined, JavaScript's undefined on the TypeScript side, default(JsonElement), of kind Undefined, on the C# side. The Rust side holds none of the four: a String holds no surrogate alone, a serde_json Map no name twice, and Rust has no undefined.",
     "nested: that many arrays, one in another, the innermost empty, which the C# side parses into a JsonElement with a MaxDepth as deep, since 64, its default, refuses a 65th, and the Rust side builds as a serde_json::Value.",
-    "probe: a Probe given to a proto writer, one field set or none, so that protobuf fixes the bytes it writes: text, its string as UTF-16 code units, as read gives one; number; child, set to the empty message, {}; or needs, set to a Needs of the fields it gives, must and shade, each a number, none of them set where it gives none.",
-    "A reason is derived, and held by the regeneration alone: not UTF-8, a byte order mark, not JSON, a name twice, a surrogate alone, a number past a double and nested past 64 of a reader; not its message, nested past 100 and a required field unset of a proto reader; a surrogate alone, a name twice, nested past 64, not a finite number and no JSON value of a writer, and a required field unset of a proto writer. No harness reads it: a refusal answers PAYLOAD_UNDECODABLE whatever its reason, and its words are each side's.",
+    "probe: a Probe given to a proto writer, so that protobuf fixes the bytes it writes: one field set or none, text, its string as UTF-16 code units, as read gives one; number; child, set to the empty message, {}; or needs, set to a Needs of the fields it gives, must and shade, each a number, none of them set where it gives none. Or a chain, that many Probes below the top, none with a field set but the one that holds the next, in one of three forms: nested, through child; entries, through children, each entry holding the next Probe under the key \"\", each entry counting as a message of its own; delimited, through the group; and beside one of them tallied, true where the deepest Probe holds tallies {\"a\": 1}, its key and its value each written.",
+    "A reason is derived: not UTF-8, a byte order mark, not JSON, a name twice, a surrogate alone, a number past a double and nested past 64 of a reader; not its message, nested past 100 and a required field unset of a proto reader; a surrogate alone, a name twice, nested past 64, not a finite number and no JSON value of a writer; and a required field unset and nested past 100 of a proto writer. Every harness checks it: a refusal's message is its reason, and a request's PAYLOAD_UNDECODABLE carries it as its detail (17.2).",
     "Each item of differs names a row of docs/support.md an entry crosses, which names this file and the entry, and the language it excuses: a value that language's type cannot hold, or a payload its stock protobuf library reads otherwise than 17.9 says. A harness plays every entry but those a differs excuses its language from.",
     "clauses are the units of spec.md an entry checks: a clause, 17.6; an item of its numbered list, 17.5.7."
   ],
-  "specVersion": "0.10.0",
+  "specVersion": "0.11.0",
   "payloads": [
     {
       "name": "a string outside ASCII, written as it is",
@@ -946,6 +946,33 @@
       "refused": "not its message"
     },
     {
+      "name": "a varint of 10 bytes past 64 bits",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.1"
+      ],
+      "bytes": "10 FF FF FF FF FF FF FF FF FF 02",
+      "refused": "not its message"
+    },
+    {
+      "name": "an unknown varint of 10 bytes past 64 bits",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.1"
+      ],
+      "bytes": "48 80 80 80 80 80 80 80 80 80 02",
+      "refused": "not its message"
+    },
+    {
+      "name": "a packed uint32 of 10 bytes past 64 bits",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.1"
+      ],
+      "bytes": "52 0A FF FF FF FF FF FF FF FF FF 02",
+      "refused": "not its message"
+    },
+    {
       "name": "an unknown record past the end of its message",
       "encoding": "proto",
       "clauses": [
@@ -1359,6 +1386,55 @@
       "refused": "nested past 100"
     },
     {
+      "name": "100 groups below the top",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.3"
+      ],
+      "bytes": "6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C",
+      "read": {
+        "text": "",
+        "number": 0,
+        "nested": 100,
+        "delimited": {
+          "text": "",
+          "number": 0,
+          "nested": 99
+        }
+      }
+    },
+    {
+      "name": "101 groups below the top",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.3"
+      ],
+      "bytes": "6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C",
+      "refused": "nested past 100"
+    },
+    {
+      "name": "99 messages below the top, the last holding a scalar map's entry",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.3"
+      ],
+      "bytes": "1A F2 01 1A EF 01 1A EC 01 1A E9 01 1A E6 01 1A E3 01 1A E0 01 1A DD 01 1A DA 01 1A D7 01 1A D4 01 1A D1 01 1A CE 01 1A CB 01 1A C8 01 1A C5 01 1A C2 01 1A BF 01 1A BC 01 1A B9 01 1A B6 01 1A B3 01 1A B0 01 1A AD 01 1A AA 01 1A A7 01 1A A4 01 1A A1 01 1A 9E 01 1A 9B 01 1A 98 01 1A 95 01 1A 92 01 1A 8F 01 1A 8C 01 1A 89 01 1A 86 01 1A 83 01 1A 80 01 1A 7E 1A 7C 1A 7A 1A 78 1A 76 1A 74 1A 72 1A 70 1A 6E 1A 6C 1A 6A 1A 68 1A 66 1A 64 1A 62 1A 60 1A 5E 1A 5C 1A 5A 1A 58 1A 56 1A 54 1A 52 1A 50 1A 4E 1A 4C 1A 4A 1A 48 1A 46 1A 44 1A 42 1A 40 1A 3E 1A 3C 1A 3A 1A 38 1A 36 1A 34 1A 32 1A 30 1A 2E 1A 2C 1A 2A 1A 28 1A 26 1A 24 1A 22 1A 20 1A 1E 1A 1C 1A 1A 1A 18 1A 16 1A 14 1A 12 1A 10 1A 0E 1A 0C 1A 0A 1A 08 82 01 05 0A 01 61 10 01",
+      "read": {
+        "text": "",
+        "number": 0,
+        "nested": 100
+      }
+    },
+    {
+      "name": "100 messages below the top, the last holding a scalar map's entry",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.3"
+      ],
+      "bytes": "1A F5 01 1A F2 01 1A EF 01 1A EC 01 1A E9 01 1A E6 01 1A E3 01 1A E0 01 1A DD 01 1A DA 01 1A D7 01 1A D4 01 1A D1 01 1A CE 01 1A CB 01 1A C8 01 1A C5 01 1A C2 01 1A BF 01 1A BC 01 1A B9 01 1A B6 01 1A B3 01 1A B0 01 1A AD 01 1A AA 01 1A A7 01 1A A4 01 1A A1 01 1A 9E 01 1A 9B 01 1A 98 01 1A 95 01 1A 92 01 1A 8F 01 1A 8C 01 1A 89 01 1A 86 01 1A 83 01 1A 80 01 1A 7E 1A 7C 1A 7A 1A 78 1A 76 1A 74 1A 72 1A 70 1A 6E 1A 6C 1A 6A 1A 68 1A 66 1A 64 1A 62 1A 60 1A 5E 1A 5C 1A 5A 1A 58 1A 56 1A 54 1A 52 1A 50 1A 4E 1A 4C 1A 4A 1A 48 1A 46 1A 44 1A 42 1A 40 1A 3E 1A 3C 1A 3A 1A 38 1A 36 1A 34 1A 32 1A 30 1A 2E 1A 2C 1A 2A 1A 28 1A 26 1A 24 1A 22 1A 20 1A 1E 1A 1C 1A 1A 1A 18 1A 16 1A 14 1A 12 1A 10 1A 0E 1A 0C 1A 0A 1A 08 82 01 05 0A 01 61 10 01",
+      "refused": "nested past 100"
+    },
+    {
       "name": "a required field unset, one below the top",
       "encoding": "proto",
       "clauses": [
@@ -1516,6 +1592,28 @@
       }
     },
     {
+      "name": "a required closed enum given a number past 32 bits, whose low 32 bits it declares",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.7"
+      ],
+      "bytes": "3A 08 08 00 10 81 80 80 80 10",
+      "read": {
+        "text": "",
+        "number": 0,
+        "nested": 0
+      }
+    },
+    {
+      "name": "a required closed enum given a number past 32 bits, whose low 32 bits it does not declare",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.7"
+      ],
+      "bytes": "3A 08 08 00 10 85 80 80 80 10",
+      "refused": "a required field unset"
+    },
+    {
       "name": "a closed enum's number its enum does not declare, which sets nothing",
       "encoding": "proto",
       "clauses": [
@@ -1540,6 +1638,33 @@
         "number": 0,
         "nested": 0,
         "shade": 1
+      }
+    },
+    {
+      "name": "a closed enum's number past 32 bits, whose low 32 bits it declares",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.8"
+      ],
+      "bytes": "70 81 80 80 80 10",
+      "read": {
+        "text": "",
+        "number": 0,
+        "nested": 0,
+        "shade": 1
+      }
+    },
+    {
+      "name": "a closed enum's number past 32 bits, whose low 32 bits it does not declare",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.8"
+      ],
+      "bytes": "70 85 80 80 80 10",
+      "read": {
+        "text": "",
+        "number": 0,
+        "nested": 0
       }
     }
   ],
@@ -2148,6 +2273,103 @@
         }
       },
       "refused": "a required field unset"
+    },
+    {
+      "name": "100 messages below the top, written",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.3"
+      ],
+      "value": {
+        "probe": {
+          "nested": 100
+        }
+      },
+      "written": "1A E9 01 1A E6 01 1A E3 01 1A E0 01 1A DD 01 1A DA 01 1A D7 01 1A D4 01 1A D1 01 1A CE 01 1A CB 01 1A C8 01 1A C5 01 1A C2 01 1A BF 01 1A BC 01 1A B9 01 1A B6 01 1A B3 01 1A B0 01 1A AD 01 1A AA 01 1A A7 01 1A A4 01 1A A1 01 1A 9E 01 1A 9B 01 1A 98 01 1A 95 01 1A 92 01 1A 8F 01 1A 8C 01 1A 89 01 1A 86 01 1A 83 01 1A 80 01 1A 7E 1A 7C 1A 7A 1A 78 1A 76 1A 74 1A 72 1A 70 1A 6E 1A 6C 1A 6A 1A 68 1A 66 1A 64 1A 62 1A 60 1A 5E 1A 5C 1A 5A 1A 58 1A 56 1A 54 1A 52 1A 50 1A 4E 1A 4C 1A 4A 1A 48 1A 46 1A 44 1A 42 1A 40 1A 3E 1A 3C 1A 3A 1A 38 1A 36 1A 34 1A 32 1A 30 1A 2E 1A 2C 1A 2A 1A 28 1A 26 1A 24 1A 22 1A 20 1A 1E 1A 1C 1A 1A 1A 18 1A 16 1A 14 1A 12 1A 10 1A 0E 1A 0C 1A 0A 1A 08 1A 06 1A 04 1A 02 1A 00"
+    },
+    {
+      "name": "101 messages below the top",
+      "encoding": "proto",
+      "clauses": [
+        "17.2",
+        "17.9.3"
+      ],
+      "value": {
+        "probe": {
+          "nested": 101
+        }
+      },
+      "refused": "nested past 100"
+    },
+    {
+      "name": "51 maps deep, 102 messages below the top, each entry counted",
+      "encoding": "proto",
+      "clauses": [
+        "17.2",
+        "17.9.3"
+      ],
+      "value": {
+        "probe": {
+          "entries": 51
+        }
+      },
+      "refused": "nested past 100"
+    },
+    {
+      "name": "100 groups below the top, written",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.3"
+      ],
+      "value": {
+        "probe": {
+          "delimited": 100
+        }
+      },
+      "written": "6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C 6C"
+    },
+    {
+      "name": "101 groups below the top",
+      "encoding": "proto",
+      "clauses": [
+        "17.2",
+        "17.9.3"
+      ],
+      "value": {
+        "probe": {
+          "delimited": 101
+        }
+      },
+      "refused": "nested past 100"
+    },
+    {
+      "name": "99 messages below the top, the last holding a scalar map's entry, written",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.3"
+      ],
+      "value": {
+        "probe": {
+          "nested": 99,
+          "tallied": true
+        }
+      },
+      "written": "1A F2 01 1A EF 01 1A EC 01 1A E9 01 1A E6 01 1A E3 01 1A E0 01 1A DD 01 1A DA 01 1A D7 01 1A D4 01 1A D1 01 1A CE 01 1A CB 01 1A C8 01 1A C5 01 1A C2 01 1A BF 01 1A BC 01 1A B9 01 1A B6 01 1A B3 01 1A B0 01 1A AD 01 1A AA 01 1A A7 01 1A A4 01 1A A1 01 1A 9E 01 1A 9B 01 1A 98 01 1A 95 01 1A 92 01 1A 8F 01 1A 8C 01 1A 89 01 1A 86 01 1A 83 01 1A 80 01 1A 7E 1A 7C 1A 7A 1A 78 1A 76 1A 74 1A 72 1A 70 1A 6E 1A 6C 1A 6A 1A 68 1A 66 1A 64 1A 62 1A 60 1A 5E 1A 5C 1A 5A 1A 58 1A 56 1A 54 1A 52 1A 50 1A 4E 1A 4C 1A 4A 1A 48 1A 46 1A 44 1A 42 1A 40 1A 3E 1A 3C 1A 3A 1A 38 1A 36 1A 34 1A 32 1A 30 1A 2E 1A 2C 1A 2A 1A 28 1A 26 1A 24 1A 22 1A 20 1A 1E 1A 1C 1A 1A 1A 18 1A 16 1A 14 1A 12 1A 10 1A 0E 1A 0C 1A 0A 1A 08 82 01 05 0A 01 61 10 01"
+    },
+    {
+      "name": "100 messages below the top, the last holding a scalar map's entry",
+      "encoding": "proto",
+      "clauses": [
+        "17.2",
+        "17.9.3"
+      ],
+      "value": {
+        "probe": {
+          "nested": 100,
+          "tallied": true
+        }
+      },
+      "refused": "nested past 100"
     }
   ]
 }

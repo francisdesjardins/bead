@@ -4,17 +4,16 @@ Bead is a binary wire protocol: its spec and conformance files in `spec/`, a Typ
 implementation in `implementations/typescript` and a C# one in `implementations/dotnet`, at
 behavioural parity, and a Rust one in `implementations/rust`, its core, each part it lacks a
 row of `docs/support.md` ahead (decision 0044), the builder, `beadc`, in `builder/`, an example in
-`examples/hello`, the demo and the DevTools extension. `README.md` says how each part builds and
-tests.
+`examples/hello`, the demo, the DevTools extension, and the page francisdesjardins.ca serves at
+`/bead/`, in `site/`. `README.md` says how each part builds and tests.
 
 What a session needs beyond this file lives in `.claude/`:
 
 - `.claude/workflows/`: the workflow scripts, launched by their script's path. Committed.
 - `.claude/local/`: what this clone keeps for itself and git ignores, never to be committed: the
   plan (`plan.md`), the rules on names and their check (`rules.md`, `check.mjs`), the inputs of the
-  builder's design (`builder/`), the generator of the Bead page made for the user's colleague
-  (`page/`), and the scripts that replay CI on Linux in Docker (`tools/`). Read `plan.md` before a
-  change of any size.
+  builder's design (`builder/`), and the scripts that replay CI on Linux in Docker (`tools/`). Read
+  `plan.md` before a change of any size.
 
 The repository's documentation looks forward: it states what holds and where the project goes,
 in the present tense. Where something came from, and how it was before, stays out of it. What is ahead is said plainly,
@@ -29,9 +28,10 @@ number never given to another.
 
 - Replies to the user are in French.
 - Public pages are in English: what francisdesjardins.ca serves, the demo included, its messages and
-  refusals.
-- The repository's files are in English. What `.claude/local/` keeps may be in French: the plans,
-  and the Bead page for the colleague.
+  refusals. The Bead page at `/bead/` is also in French, the language chosen as the site chooses it:
+  `?lng=`, then the choice the site stored, then the browser's languages, then English.
+- The repository's files are in English, but the Bead page's French. What `.claude/local/` keeps
+  may be in French: the plans.
 
 ## Commits, changelog and branches
 
@@ -59,16 +59,16 @@ same conformance files and proves against the others in the interop. Where a lan
 or its platform cannot have it at all, the difference is a row of the support matrix,
 `docs/support.md`, with the test that shows it, and a difference that can close is work to do.
 
-- A test missing on one side is added to the other.
-- A term renamed on one side is renamed on both, wherever it applies.
+- A test missing on one side is added to the others.
+- A term renamed on one side is renamed on every side, wherever it applies.
 - No implementation is the reference: the set evolves together, wherever it can. Where one does Y
   and another can do Y and Z, every one does Y: the second keeps to Y, or comes back to it, and Z
   comes to all of them at once, by a decision that meets the Tenth Man. Where every side keeps to
   what one platform can do and a standard allows more, that leveling is a row of `docs/support.md`'s
   "Leveled down", to lift when the platform can. A divergence is put to the user.
-- The surface maps almost name for name across every language able to carry the protocol whole.
-  What couples transports (one port for HTTP and WebSocket) stays outside the protocol, in a small
-  local proxy.
+- The surface maps almost name for name across every language able to carry the protocol whole
+  (decision 0047). What couples transports (one port for HTTP and WebSocket) stays outside the
+  protocol, in a small local proxy.
 
 ## The Tenth Man Rule
 
@@ -118,8 +118,9 @@ titles that hold one write it `’`, and the citation does the same.
 - every body is a block: methods, constructors, operators, local functions, properties, accessors,
   indexers and lambdas, never an expression body; a block for every branch;
 - at most two parameters to a function, then at most one options record, always last (`TOptions?
-  options = null` when every member is optional, a `CancellationToken` inside it); a third
-  essential thing is a design to revisit, never a third parameter;
+  options = null` when every member is optional, a `required` member — a setting, at most two —
+  making it a required parameter, a `CancellationToken` inside it); a third essential thing is a
+  design to revisit, never a third parameter; no tuple on the public surface;
 - `TreatWarningsAsErrors`, the analyzers at `latest-recommended`, the code style enforced in the
   build, a doc comment on every public member;
 - `_camelCase` private fields; PascalCase constants and static readonly fields;
@@ -130,7 +131,9 @@ titles that hold one write it `’`, and the citation does the same.
 
 - oxlint and oxfmt as configured there, and `yarn check` passes;
 - the author's style: section comments, `I`-prefixed interfaces, block-bodied arrow functions, at
-  most two parameters then at most one options object, always last, frozen objects over `enum`;
+  most two parameters then at most one options object, always last, optional unless a member of it
+  is required (no `?`, at most two, never the operand), a conditional type where that depends on a
+  type parameter, no tuple on the public surface, frozen objects over `enum`;
 - one test file per module, named after it, in a `__tests__/` folder beside it
   (`src/transport/shared/create-promise.ts` →
   `src/transport/shared/__tests__/create-promise.test.ts`).
@@ -144,9 +147,12 @@ titles that hold one write it `’`, and the citation does the same.
 - every warning an error by `[build] warnings = "deny"` in `.cargo/config.toml`, never by
   `RUSTFLAGS`; the toolchain `rust-toolchain.toml` pins, edition 2024;
 - beside the receiver, at most two parameters, then at most one options struct, always last: named
-  `…Options`, `#[non_exhaustive]`, `Default`, its fields public, each an `Option`, set by
-  assignment over its default and taken by `&`; a third essential thing is a design to revisit,
-  never a third parameter;
+  `…Options`, `#[non_exhaustive]`, never `Copy`, its fields public, each an `Option` but a required
+  setting, at most two, which its constructor of the required members, `new`, sets, the struct then
+  without `Default`, and with `Default` otherwise; set by assignment over what that gives, and
+  taken by `&`; a third essential thing is a design to revisit, never a third parameter;
+- no tuple taken or given on a `pub` item, nor a variant of two unnamed fields; a third essential
+  thing is a record of the call;
 - traits and composition, no `I` prefix; a `Result` for every refusal, never a panic in the
   library;
 - one owner per router, its state one task's, a turn awaiting nothing; an operation takes effect as
@@ -158,15 +164,18 @@ titles that hold one write it `’`, and the citation does the same.
   in a crate's `tests/`, the test kit in `bead::testing`, behind the feature `testing`;
 - `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features --locked`,
   `cargo clippy -p francisdesjardins-bead --lib --all-features --locked --target
-  wasm32-unknown-unknown`, `cargo test --workspace --all-features --locked` and `cargo deny
-  --locked check` pass, from its folder.
+  wasm32-unknown-unknown`, `cargo test --workspace --all-features --locked`, `cargo doc --workspace
+  --no-deps --all-features --locked`, `cargo build --workspace --locked` and `cargo deny --locked
+  check` pass, from its folder.
 
 ## The Bead page
 
-The page that presents Bead to the user's colleague, in French, is built by
-`.claude/local/page/build-page.py` from `implementations/typescript/src`. After any change to the
-wire or to what the page states, rebuild it, check its diagrams, and republish it to the same URL:
-see `.claude/local/page/README.md`.
+The page francisdesjardins.ca serves at `/bead/`, in English and in French, is built from `site/`:
+its content in both languages, its diagrams' Mermaid sources, rendered into SVGs by
+`site/render.mjs`, and `site/build.mjs`, which writes `site/dist/index.html`; `site/check.mjs` holds
+both in CI. After any change to the wire or to what the page states, change both languages alike,
+render the diagrams that moved, rebuild it, and look at it in both themes, on a desktop and a phone:
+see the README's "The page".
 
 ## The agents' effort
 

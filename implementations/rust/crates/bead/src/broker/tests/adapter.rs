@@ -13,7 +13,7 @@ use crate::broker::adapter::{
 use crate::errors::ProgrammerError;
 
 fn publication() -> BrokerPublication {
-    BrokerPublication::of(["bead", "i", "ada"], Bytes::from_static(b"private payload"))
+    BrokerPublication::new(["bead", "i", "ada"], Bytes::from_static(b"private payload"))
 }
 
 #[test]
@@ -44,7 +44,8 @@ fn combines_capabilities_without_offering_any_that_are_absent() {
 }
 
 #[test]
-fn reports_a_refusal_as_its_cause_and_a_link_failure_as_its_message_alone() {
+fn reports_a_refusal_and_a_caused_failure_as_their_source_and_a_link_failure_as_its_message_alone()
+{
     let misuse = ProgrammerError::new("the adapter offers no groups");
     let refused = BrokerError::from(misuse.clone());
 
@@ -68,11 +69,36 @@ fn reports_a_refusal_as_its_cause_and_a_link_failure_as_its_message_alone() {
         "the failure"
     );
     assert!(failed.source().is_none(), "no fabricated cause");
+
+    // * a caused failure says its message alone, its source the one given
+    let source: Arc<dyn Error + Send + Sync> = Arc::new(BrokerError::failed("its broker hung up"));
+    let caused = BrokerError::caused(
+        "the participant ada stopped as it started",
+        Arc::clone(&source),
+    );
+
+    assert_eq!(
+        caused.to_string(),
+        "the participant ada stopped as it started",
+        "its message alone"
+    );
+    assert_eq!(
+        caused.source().map(ToString::to_string).as_deref(),
+        Some("its broker hung up"),
+        "its source"
+    );
+    assert!(
+        matches!(
+            &caused,
+            BrokerError::Failed { source: Some(given), .. } if Arc::ptr_eq(given, &source)
+        ),
+        "the source given"
+    );
 }
 
 #[test]
 fn describes_a_message_by_its_topic_and_size_without_its_payload() {
-    let message = BrokerMessage::new(publication(), BrokerMessageOptions::default());
+    let message = BrokerMessage::new(publication(), &BrokerMessageOptions::default());
 
     assert_eq!(message.topic(), ["bead", "i", "ada"], "the topic tokens");
     assert_eq!(
@@ -109,8 +135,8 @@ fn describes_a_settle_without_calling_it_and_shares_it_through_cloned_options() 
         "absent options"
     );
     let copy = options.clone();
-    let first = BrokerMessage::new(publication(), options);
-    let second = BrokerMessage::new(publication(), copy);
+    let first = BrokerMessage::new(publication(), &options);
+    let second = BrokerMessage::new(publication(), &copy);
 
     assert_eq!(
         settles.load(Ordering::SeqCst),
@@ -148,15 +174,15 @@ impl BrokerListener for DownsOnly {
 
 #[test]
 fn lets_a_listener_hear_messages_or_link_loss_alone() {
-    let message = BrokerMessage::new(publication(), BrokerMessageOptions::default());
+    let message = BrokerMessage::new(publication(), &BrokerMessageOptions::default());
     let messages = MessagesOnly::default();
     let downs = DownsOnly::default();
 
-    messages.on_down(BrokerDown::of(true));
+    messages.on_down(BrokerDown::new(true));
     messages.on_message(&message);
     downs.on_message(&message);
-    downs.on_down(BrokerDown::of(false));
-    downs.on_down(BrokerDown::of(true));
+    downs.on_down(BrokerDown::new(false));
+    downs.on_down(BrokerDown::new(true));
     assert_eq!(messages.0.load(Ordering::SeqCst), 1, "one message");
     assert_eq!(downs.0.load(Ordering::SeqCst), 1, "one takeover");
 }

@@ -51,19 +51,43 @@ pub enum JsonRefusal {
     NotItsType(String),
 }
 
+impl JsonRefusal {
+    /// Its reason, in spec 17.2's words: what a codec's refusal of it says, and a request's
+    /// `PAYLOAD_UNDECODABLE` carries as its detail, without the words of what `serde` refused. A
+    /// value not of the type asked of it is a type of the application's own, so its words are
+    /// Bead's own: `not its type`.
+    #[must_use]
+    pub fn reason(&self) -> &'static str {
+        match self {
+            Self::NotUtf8 => "not UTF-8",
+            Self::ByteOrderMark => "a byte order mark",
+            Self::NotJson => "not JSON",
+            Self::NameTwice => "a name twice",
+            Self::SurrogateAlone => "a surrogate alone",
+            Self::NumberPastADouble => "a number past a double",
+            Self::NestedPast64 => "nested past 64",
+            Self::NotAFiniteNumber => "not a finite number",
+            Self::NoJsonValue(_) => "no JSON value",
+            Self::NotItsType(_) => "not its type",
+        }
+    }
+}
+
+// its reason, then what serde said, where it said anything
 impl fmt::Display for JsonRefusal {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::NotUtf8 => formatter.write_str("not UTF-8"),
-            Self::ByteOrderMark => formatter.write_str("a byte order mark"),
-            Self::NotJson => formatter.write_str("not JSON"),
-            Self::NameTwice => formatter.write_str("a name twice"),
-            Self::SurrogateAlone => formatter.write_str("a surrogate alone"),
-            Self::NumberPastADouble => formatter.write_str("a number past a double"),
-            Self::NestedPast64 => formatter.write_str("nested past 64"),
-            Self::NotAFiniteNumber => formatter.write_str("not a finite number"),
-            Self::NoJsonValue(what) => write!(formatter, "no JSON value: {what}"),
-            Self::NotItsType(why) => write!(formatter, "not its type: {why}"),
+            Self::NoJsonValue(what) | Self::NotItsType(what) => {
+                write!(formatter, "{}: {what}", self.reason())
+            }
+            Self::NotUtf8
+            | Self::ByteOrderMark
+            | Self::NotJson
+            | Self::NameTwice
+            | Self::SurrogateAlone
+            | Self::NumberPastADouble
+            | Self::NestedPast64
+            | Self::NotAFiniteNumber => formatter.write_str(self.reason()),
         }
     }
 }

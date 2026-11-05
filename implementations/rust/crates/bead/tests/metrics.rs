@@ -113,23 +113,32 @@ fn ending_of(outcome: &str, code: Option<&str>) -> Result<CallEnding, Failed> {
     })
 }
 
-// a dropped subscription's failure, by its code's name
-fn failure_of(
-    code: Option<&str>,
-) -> Result<Option<(core::num::NonZeroU16, bead::FailureScope)>, Failed> {
+// a dropped subscription's failure, by its code's name, as its client's router receives it
+fn failure_of(code: Option<&str>) -> Result<Option<bead::Failure>, Failed> {
+    let record = |(code, scope): (u16, bead::FailureScope)| {
+        core::num::NonZeroU16::new(code).map(|code| {
+            bead::Failure::received(
+                &bead::FailureRecord {
+                    code,
+                    scope,
+                    detail: String::new(),
+                    relays: 0,
+                },
+                RouterSide::Client,
+            )
+        })
+    };
+
     Ok(match code {
         None => None,
-        Some("application") => {
-            core::num::NonZeroU16::new(1).map(|code| (code, bead::FailureScope::Application))
-        }
-        Some("_OTHER") => {
-            core::num::NonZeroU16::new(999).map(|code| (code, bead::FailureScope::Protocol))
-        }
-        Some(name) => Some((
+        Some("application") => record((1, bead::FailureScope::Application)),
+        Some("_OTHER") => record((999, bead::FailureScope::Protocol)),
+        Some(name) => record((
             ProtocolCode::named()
                 .into_iter()
                 .find(|code| code.name() == Some(name))
                 .ok_or_else(|| format!("{name} is no code"))?
+                .get()
                 .get(),
             bead::FailureScope::Protocol,
         )),
@@ -145,10 +154,10 @@ fn declare(
         .ok_or("a router the entry gives")?;
     let procedure = Procedure {
         service_id: declaration.service_id,
-        id: declaration.procedure_id,
+        procedure_id: declaration.procedure_id,
         service_revision: declaration.service_revision.unwrap_or(1),
-        name: declaration.procedure_name.clone(),
-        kind: None,
+        procedure_name: declaration.procedure_name.clone(),
+        procedure_kind: None,
         maximum_payload_bytes: None,
         deprecation: None,
     };
@@ -222,7 +231,7 @@ fn count(entry: &Count, (routers, declared): (&[RouterMetrics], &Declared)) -> R
         (Some("sent"), _) => series.sent(),
         (Some("failed"), _) => series.failed(),
         (Some("heard"), _) => series.heard(),
-        (_, Some(_)) => series.dropped(failure_of(entry.code.as_deref())?),
+        (_, Some(_)) => series.dropped(failure_of(entry.code.as_deref())?.as_ref()),
         _ => return Err("a count is of a call, a notification or a subscription dropped".into()),
     }
 
@@ -283,7 +292,7 @@ fn exited(exit: &Value, wall_clock: std::time::SystemTime) -> Result<(), Failed>
     runtime
         .block_on(conversation::play(
             exit,
-            conversation::PlayOptions {
+            &conversation::PlayOptions {
                 in_memory: false,
                 over_broker: false,
                 metrics_registry: Some(registry),

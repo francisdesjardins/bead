@@ -16,8 +16,7 @@ use super::{Handed, Scripted, answer, keeping, locked, request_of as call_of, re
 use crate::clock::{Clock, Schedule, SharedClock, Timer, TimerCallback};
 use crate::errors::CallError;
 use crate::router::client::{RouterClient, RouterClientOptions};
-use crate::router::server::CallHooks;
-use crate::router::types::{RouterAnswer, RouterError};
+use crate::router::types::{RouterAnswer, RouterError, RouterRequest};
 use crate::testing::SteppingClock;
 use crate::testing::pair::echo;
 use crate::testing::scripted::{ScriptedClient, Sending};
@@ -32,15 +31,23 @@ fn said(outcome: &Result<crate::router::types::RouterResult, CallError>) -> Stri
     }
 }
 
-// a call to echo, its hooks given
-fn call_with(scripted: &Scripted, hooks: CallHooks) -> crate::router::server::Call {
+// a call to echo, its hooks set by `hooked`
+fn call_with<H: FnOnce(&mut RouterRequest)>(
+    scripted: &Scripted,
+    hooked: H,
+) -> crate::router::server::Call {
+    let mut request = call_of((None, super::TIMEOUT));
+
+    hooked(&mut request);
     scripted
         .router
-        .request(
-            Bytes::from_static(b"hi"),
-            (call_of((None, super::TIMEOUT)), hooks),
-        )
+        .request(Bytes::from_static(b"hi"), request)
         .expect("a call")
+}
+
+// a call to echo, of no hook
+fn call(scripted: &Scripted) -> crate::router::server::Call {
+    call_with(scripted, |_request| {})
 }
 
 // decision 0044: a hook is the application's code its router calls within its turn; what it panics
@@ -49,15 +56,11 @@ fn call_with(scripted: &Scripted, hooks: CallHooks) -> crate::router::server::Ca
 #[tokio::test]
 async fn a_hook_that_panics_fails_its_own_call_and_the_router_answers_the_next() {
     let scripted = Scripted::new();
-    let broken = call_with(
-        &scripted,
-        CallHooks {
-            on_call_id: Some(Box::new(|_call_id| {
-                panic!("this hook breaks, on purpose");
-            })),
-            ..CallHooks::default()
-        },
-    );
+    let broken = call_with(&scripted, |request| {
+        request.on_call_id = Some(Box::new(|_call_id| {
+            panic!("this hook breaks, on purpose");
+        }));
+    });
 
     scripted.settle().await;
 
@@ -71,15 +74,11 @@ async fn a_hook_that_panics_fails_its_own_call_and_the_router_answers_the_next()
         "nothing of it went out"
     );
 
-    let handed = call_with(
-        &scripted,
-        CallHooks {
-            on_sent: Some(Box::new(|_is_sent| {
-                panic!("this hook breaks too");
-            })),
-            ..CallHooks::default()
-        },
-    );
+    let handed = call_with(&scripted, |request| {
+        request.on_sent = Some(Box::new(|_is_sent| {
+            panic!("this hook breaks too");
+        }));
+    });
 
     scripted.settle().await;
 
@@ -89,7 +88,7 @@ async fn a_hook_that_panics_fails_its_own_call_and_the_router_answers_the_next()
         "a call whose hand-off hook panics fails alike"
     );
 
-    let next = call_with(&scripted, CallHooks::default());
+    let next = call(&scripted);
 
     scripted.settle().await;
 
@@ -117,12 +116,16 @@ async fn a_request_whose_send_panics_fails_as_its_transport_s_throw_would_and_th
         let scripted = Scripted::new();
         let words = match &panicking {
             Sending::Panicked(words) | Sending::PanickedLater(words) => words.clone(),
-            Sending::Taken | Sending::Thrown(_) | Sending::Rejected(_) => String::new(),
+            Sending::Taken
+            | Sending::Thrown(_)
+            | Sending::Rejected(_)
+            | Sending::Error(_)
+            | Sending::Waiting { .. } => String::new(),
         };
 
         scripted.transport.send_as(panicking);
 
-        let broken = call_with(&scripted, CallHooks::default());
+        let broken = call(&scripted);
 
         scripted.settle().await;
 
@@ -134,7 +137,7 @@ async fn a_request_whose_send_panics_fails_as_its_transport_s_throw_would_and_th
 
         scripted.transport.send_as(Sending::Taken);
 
-        let next = call_with(&scripted, CallHooks::default());
+        let next = call(&scripted);
 
         scripted.settle().await;
 
@@ -218,9 +221,9 @@ async fn an_answer_whose_send_panics_fails_as_its_transport_s_throw_would_and_it
 
 /// A clock that breaks as it arms its next timer once told to: an application's clock, called
 /// within a router's turn.
-struct Breaking {
-    clock: Arc<SteppingClock>,
-    breaks: AtomicBool,
+pub(super) struct Breaking {
+    pub(super) clock: Arc<SteppingClock>,
+    pub(super) breaks: AtomicBool,
 }
 
 impl fmt::Debug for Breaking {
@@ -238,7 +241,11 @@ impl Clock for Breaking {
         self.clock.wall()
     }
 
-    fn arm(&self, schedule: Schedule, callback: TimerCallback) -> Arc<dyn Timer> {
+    fn arm(
+        &self,
+        schedule: Schedule,
+        callback: TimerCallback,
+    ) -> Result<Arc<dyn Timer>, crate::errors::ProgrammerError> {
         // * once: the panic of one turn, what follows it arming its timers as ever
         assert!(
             !self.breaks.swap(false, Ordering::SeqCst),
@@ -266,7 +273,7 @@ async fn a_turn_that_panics_ends_its_router_failing_each_call_it_waits_on_with_t
     });
     let shared: SharedClock = Arc::<Breaking>::clone(&clock);
     let transport = ScriptedClient::new(shared);
-    let carried: Arc<dyn crate::transport::ClientTransport> =
+    let carried: Arc<dyn crate::transport::RouterClientTransport> =
         Arc::<ScriptedClient>::clone(&transport);
     let router =
         RouterClient::new(carried, &RouterClientOptions::default()).expect("a router built");
@@ -279,10 +286,7 @@ async fn a_turn_that_panics_ends_its_router_failing_each_call_it_waits_on_with_t
 
     let request = || {
         router
-            .request(
-                Bytes::from_static(b"hi"),
-                (call_of((None, super::TIMEOUT)), CallHooks::default()),
-            )
+            .request(Bytes::from_static(b"hi"), call_of((None, super::TIMEOUT)))
             .expect("a call")
     };
     let waiting = request();
@@ -322,9 +326,37 @@ async fn a_turn_that_panics_ends_its_router_failing_each_call_it_waits_on_with_t
         "a call made after refused at once"
     );
     assert_eq!(
-        router.gauges().await,
+        router.gauges().await.expect("distinct counts"),
         crate::router::types::Gauges::default(),
         "its owner gone"
+    );
+}
+
+#[tokio::test]
+async fn keeps_the_result_of_a_subscription_answered_before_a_later_turn_panics() {
+    let scripted = Scripted::new();
+    let notification = super::client::Notified::new(Some(4));
+    let subscribing = scripted
+        .subscribe((&notification.like(), super::TIMEOUT))
+        .await;
+    let transport = Arc::clone(&scripted.transport);
+    let owner = scripted.router.owner().clone();
+    scripted
+        .router
+        .owner()
+        .run(move |_| {
+            transport.deliver(&result_of(1, None));
+            owner.offer(Box::new(|_| panic!("a later turn breaks")));
+        })
+        .await
+        .expect("the result precedes the failing turn");
+    super::answered(subscribing)
+        .await
+        .expect("the completed call keeps its result");
+    scripted.settle().await;
+    assert_eq!(
+        scripted.codes(),
+        ["a turn of the router's panicked: a later turn breaks"]
     );
 }
 
@@ -355,7 +387,7 @@ async fn answers_a_verifier_that_throws_at_once_procedure_failed_and_reports_it_
         .services
         .get_request_resolver(
             &echo(),
-            crate::managers::service::ResolverDependencies::of(
+            crate::managers::service::RequestResolverDependencies::new(
                 crate::payloads::RawCodec,
                 crate::payloads::RawCodec,
             ),

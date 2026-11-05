@@ -73,6 +73,28 @@ public interface IRouterServerTransport
     /// </summary>
     Task Send(TransportMessage message, string connectionHandle);
 
+    /// <summary>
+    /// Pauses a connection, its router behind on it (spec 15.12, decision 0046): it hands nothing
+    /// more of it, and holds what it already received, whole or still arriving, in order, until
+    /// <see cref="Resume"/>; while it holds anything, what comes next waits behind it, paused or
+    /// not, so nothing overtakes what is held. One whose peer is its application's own code holds
+    /// without bound, and says so. Idempotent, it never blocks, tells no listener within it, and
+    /// takes no lock the transport holds while it tells one; an unknown handle is let be.
+    /// </summary>
+    void Pause(string connectionHandle);
+
+    /// <summary>
+    /// Resumes a connection: what it holds it hands on, in order, from a later step of its own, never
+    /// within this call, asking before each hand whether it was paused again. Idempotent, it never
+    /// blocks, tells no listener within it, and takes no lock the transport holds while it tells one;
+    /// an unknown handle is let be.
+    /// </summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage(
+        "Naming",
+        "CA1716:Identifiers should not match keywords",
+        Justification = "pause and resume, as every side's transport and the readers they are built on name them: one word, one meaning (0003)")]
+    void Resume(string connectionHandle);
+
     /// <summary>Whether a connection carries both ways; every one does by default.</summary>
     bool IsTwoWay(string connectionHandle)
     {
@@ -114,6 +136,13 @@ public sealed record RouterServerOptions
 
     /// <summary>What each paced subscription queues at most; <see cref="PacingLimits.Default"/> when none.</summary>
     public PacingLimits? Pacing { get; init; }
+
+    /// <summary>
+    /// What it holds untaken of each connection, past which it pauses that connection's transport,
+    /// and resumes it once both counts are at half (spec 15.12); <see cref="IntakeLimits.Default"/>
+    /// when none. Limits below 1 are an <see cref="ArgumentException"/>.
+    /// </summary>
+    public IntakeLimits? Intake { get; init; }
 
     /// <summary>How it relays a request that names a destination registered in it.</summary>
     public RelayOptions? Relay { get; init; }
@@ -225,6 +254,10 @@ public sealed class RouterServer : IRouterLike, IDisposable
     // goes past its bounds before the answer is answered with that failure
     private readonly System.Runtime.CompilerServices.ConditionalWeakTable<NotificationPacing, RequestHeader> _requests = [];
 
+    // what each connection's transport handed it that no turn took yet, which pauses and resumes
+    // that connection (decision 0046)
+    private readonly RouterIntake _intake;
+
     /// <summary>
     /// A server's router over <paramref name="transport"/>, on its transport's clock: one given that
     /// differs is an <see cref="ArgumentException"/>.
@@ -236,6 +269,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
         var clock = Clocks.Of((options?.Clock, transport.Clock), ("a server's router", "its transport"));
 
         Transport = transport;
+        _intake = new RouterIntake(options?.Intake ?? IntakeLimits.Default);
         _notifications = new NotificationManager(options?.Pacing ?? PacingLimits.Default);
         _places = new SubscriptionPlaces(
             _notifications,
@@ -270,8 +304,10 @@ public sealed class RouterServer : IRouterLike, IDisposable
                 IsTwoWay = transport.IsTwoWay,
                 Limits = _core.Limits,
                 Report = Report,
-                Request = Request,
-                Respond = Respond,
+
+                // * the router's own calls, never deferred: its leg B and its answers on leg A
+                Request = RequestOnLoop,
+                Respond = _core.Respond,
             },
             options?.Relay);
         _notifications.OnRegister = OnSubscribed;
@@ -354,46 +390,55 @@ public sealed class RouterServer : IRouterLike, IDisposable
         _core.RegisterResolver(resolver);
     }
 
-    /// <inheritdoc/>
+    /// <summary>
+    /// Answers a request, as <see cref="IRouterLike.Respond"/> says, in a turn of its own behind what
+    /// came before it (spec 9.0); once disposed, it fails unsent, a
+    /// <see cref="DisconnectException"/>.
+    /// </summary>
     public Task Respond(RouterAnswer response, AnswerTarget target)
     {
-        return _core.Respond(response, target);
+        ArgumentNullException.ThrowIfNull(response);
+
+        // ! the handle's mark, read once, at the call (decision 0045)
+        if (_core.IsDisposed)
+        {
+            return Task.FromException(new DisconnectException(RouterCore.Disposed));
+        }
+
+        return _core.Loop.RunBehind(() =>
+        {
+            return _core.Respond(response, target);
+        });
     }
 
     /// <summary>
     /// A request of the router's own — a command — to the connection its options name, on an even
-    /// call id. One that names none fails with an <see cref="ArgumentException"/>, refused before it
-    /// starts; one that names a connection not open, with a <see cref="DisconnectException"/>, as it
-    /// starts. Each fails by the task it gives, as <see cref="IRouterLike.Request"/> says.
+    /// call id, in a turn of its own behind what came before it (spec 9.0). One that names none
+    /// fails with an <see cref="ArgumentException"/>, refused before it starts; one made once the
+    /// router was disposed, with a <see cref="DisconnectException"/>, unsent; one that names a
+    /// connection not open, with a <see cref="DisconnectException"/>, as it starts. Each fails by
+    /// the task it gives, as <see cref="IRouterLike.Request"/> says.
     /// </summary>
     public Task<RouterResult> Request(ReadOnlyMemory<byte> payload, RouterRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        if (request.Subscribes is not null)
+        // ! a programmer's error first, then the handle's mark, both read at once: one made after the
+        // dispose fails unsent (spec 9.1)
+        if (MisuseOf(request) is { } misuse)
         {
-            return Task.FromException<RouterResult>(
-                new InvalidOperationException("a server does not subscribe to notifications; it sends them"));
+            return Task.FromException<RouterResult>(misuse);
         }
 
-        if (request.Options.ConnectionHandle is not { } connectionHandle)
+        if (_core.IsDisposed)
         {
-            return Task.FromException<RouterResult>(
-                new ArgumentException("a server request names the connection it goes to", nameof(request)));
+            return Task.FromException<RouterResult>(new DisconnectException(RouterCore.Disposed));
         }
 
-        return _core.Request(
-            payload,
-            new CoreRequest
-            {
-                ConnectionHandle = connectionHandle,
-                OnCallId = request.OnCallId,
-                OnSent = request.OnSent,
-                Options = request.Options,
-                Procedure = request.Procedure,
-                Refusal = request.Refusal,
-                Series = request.Series,
-            });
+        return _core.Loop.RunBehind(() =>
+        {
+            return RequestOnLoop(payload, request);
+        });
     }
 
     /// <inheritdoc/>
@@ -406,14 +451,28 @@ public sealed class RouterServer : IRouterLike, IDisposable
     }
 
     /// <summary>
-    /// Notifies each connection subscribed to a procedure, as its filter keeps them, in order: a
-    /// paced subscription sends it, queues it, or ends past its bounds. Settles once each was sent or
-    /// queued; one that cannot go out is reported, and keeps none of the others from going.
+    /// Notifies each connection subscribed to a procedure, as its filter keeps them, in order, in a
+    /// turn of its own behind what came before it (spec 9.0): a paced subscription sends it, queues
+    /// it, or ends past its bounds. Settles once each was sent or queued; one that cannot go out is
+    /// reported, and keeps none of the others from going.
     /// </summary>
     public Task Notify(ReadOnlyMemory<byte> payload, NotifyRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        return _core.Loop.RunBehind(() =>
+        {
+            return NotifyOnLoop(payload, request);
+        });
+    }
+
+    /// <summary>
+    /// As <see cref="Notify(ReadOnlyMemory{byte}, NotifyRequest)"/>, in the turn it is made in when
+    /// that is its router's: the router's own, and a test's that reads who a notification reaches
+    /// as an envelope is handed over.
+    /// </summary>
+    internal Task NotifyOnLoop(ReadOnlyMemory<byte> payload, NotifyRequest request)
+    {
         return _core.Loop.Run(() =>
         {
             var targets = TargetsOf(request);
@@ -449,7 +508,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
         ArgumentNullException.ThrowIfNull(unwritten);
         ArgumentNullException.ThrowIfNull(request);
 
-        return _core.Loop.Run(() =>
+        return _core.Loop.RunBehind(() =>
         {
             foreach (var target in TargetsOf(request))
             {
@@ -466,7 +525,8 @@ public sealed class RouterServer : IRouterLike, IDisposable
     /// Subscribes the connection a request came from to that request's procedure, in the call's
     /// session, which bounds it, and gives the call id of the subscription. A request that opens no subscription is an
     /// <see cref="InvalidOperationException"/>; a connection closed, a
-    /// <see cref="DisconnectException"/>; a call cancelled or answered already, an
+    /// <see cref="DisconnectException"/>; a request this side never dispatched, an
+    /// <see cref="ArgumentException"/>; a call cancelled or answered already, an
     /// <see cref="OperationCanceledException"/>.
     /// </summary>
     public Task<uint> Subscribe(AnswerTarget target)
@@ -487,6 +547,15 @@ public sealed class RouterServer : IRouterLike, IDisposable
             if (!_connections.Contains(connectionHandle))
             {
                 return Task.FromException<uint>(new DisconnectException($"{connectionHandle} is not an open connection"));
+            }
+
+            // ! a subscription goes only to a request this side dispatched, as an answer does: a copy
+            // of its header would subscribe a call nobody opened
+            if (!_core.IsDispatched(header))
+            {
+                return Task.FromException<uint>(new ArgumentException(
+                    $"a subscription goes only to a request this router dispatched, not to call {header.CallId}",
+                    nameof(target)));
             }
 
             if (!_core.IsAnswering(target))
@@ -614,7 +683,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
     /// </summary>
     public Task DropSubscriptions(string connectionHandle, Failure failure)
     {
-        return _core.Loop.Run(() =>
+        return _core.Loop.RunBehind(() =>
         {
             return Task.WhenAll(_places.Drop(connectionHandle).Select((dropped) =>
             {
@@ -635,7 +704,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
     {
         ArgumentNullException.ThrowIfNull(identifier);
 
-        return _core.Loop.Run(() =>
+        return _core.Loop.RunBehind(() =>
         {
             return Task.WhenAll(_kept.Keys.Where((place) =>
             {
@@ -659,7 +728,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
     {
         ArgumentNullException.ThrowIfNull(issuer);
 
-        return _core.Loop.Run(() =>
+        return _core.Loop.RunBehind(() =>
         {
             return Task.WhenAll(_kept.Keys.Where((place) =>
             {
@@ -692,32 +761,80 @@ public sealed class RouterServer : IRouterLike, IDisposable
 
     /// <summary>
     /// Follows no connection any more, forgets its subscriptions, rejects what still waits and
-    /// cancels the signal of each call it still answers.
+    /// cancels the signal of each call it still answers: in two steps (decision 0045), its mark and
+    /// its transport heard no more at once, so what is made after fails unsent; what it holds let go
+    /// in a job of its own, behind what came before it, the turn it was made in included.
     /// </summary>
     public void Dispose()
     {
+        _core.MarkDisposed();
+
+        // * a transport outlives its router: each connection it paused resumed before it hears no
+        // more, and none paused after (decision 0046)
+        _intake.End(Resume);
         Transport.Connection -= OnConnection;
         Transport.Message -= OnMessage;
         Transport.Close -= OnClose;
-        WhenDisposed = _core.Loop.Run(() =>
+        WhenDisposed = _core.Loop.RunBehind(() =>
         {
-            DropEstablished(null);
-            _connections.Clear();
-            _open.Clear();
-            _places.Clear();
-            _notifications.CleanAll();
-            Forget(null);
+            _core.DisposeOnLoop(() =>
+            {
+                DropEstablished(null);
+                _connections.Clear();
+                _open.Clear();
+                _places.Clear();
+                _notifications.CleanAll();
+                Forget(null);
+            });
 
             return Task.CompletedTask;
         });
-        _core.Dispose();
     }
 
     /// <summary>
     /// Settles once what <see cref="Dispose"/> ran on the core's scheduler: the sessions kept, the
-    /// subscriptions and the notifications forgotten — their timers stopped — not merely posted.
+    /// subscriptions and the notifications forgotten — their timers stopped — and what waited
+    /// rejected, not merely posted.
     /// </summary>
     internal Task WhenDisposed { get; private set; } = Task.CompletedTask;
+
+    // what a request of the router's own asks that no server does: a programmer's error
+    private static Exception? MisuseOf(RouterRequest request)
+    {
+        if (request.Subscribes is not null)
+        {
+            return new InvalidOperationException("a server does not subscribe to notifications; it sends them");
+        }
+
+        if (request.Options.ConnectionHandle is null)
+        {
+            return new ArgumentException("a server request names the connection it goes to", nameof(request));
+        }
+
+        return null;
+    }
+
+    // a request of the router's own, in its turn — the relay's leg B, too, which is never deferred
+    private Task<RouterResult> RequestOnLoop(ReadOnlyMemory<byte> payload, RouterRequest request)
+    {
+        if (MisuseOf(request) is { } misuse)
+        {
+            return Task.FromException<RouterResult>(misuse);
+        }
+
+        return _core.Request(
+            payload,
+            new CoreRequest
+            {
+                ConnectionHandle = request.Options.ConnectionHandle!,
+                OnCallId = request.OnCallId,
+                OnSent = request.OnSent,
+                Options = request.Options,
+                Procedure = request.Procedure,
+                Refusal = request.Refusal,
+                Series = request.Series,
+            });
+    }
 
     // the end a credential's session gives, in milliseconds since the epoch; none for one no timer
     // ends
@@ -980,6 +1097,9 @@ public sealed class RouterServer : IRouterLike, IDisposable
         });
     }
 
+    // * counted as it is handed, one within a telling among them, and released once the job that
+    // takes it returned or threw: the scheduler goes on past a throw, so a release in its finally
+    // never leaves its connection paused (decision 0046)
     private void OnMessage(TransportMessage message, string connectionHandle)
     {
         // a connection that speaks is open, even one opened before the router was built
@@ -993,23 +1113,80 @@ public sealed class RouterServer : IRouterLike, IDisposable
             _connections.Add(connectionHandle);
         });
 
+        var counted = (connectionHandle, (long)message.Bytes.Length);
+
+        // ! counted before its job is posted, so no turn releases what is not counted yet; the
+        // transport paused under the count's lock, and its pair takes no lock it holds as it tells
+        var isCounted = _intake.Handed(counted, Pause);
+
+        void Taken()
+        {
+            if (isCounted)
+            {
+                _intake.Taken(counted, Resume);
+            }
+        }
+
         if (message.IsText)
         {
             _core.Post(() =>
             {
-                Error?.Invoke(FailureException.OfProtocol(ProtocolCode.EnvelopeMalformed, RouterSide.Server, "an envelope is binary, not a string"), connectionHandle);
+                try
+                {
+                    Error?.Invoke(FailureException.OfProtocol(ProtocolCode.EnvelopeMalformed, RouterSide.Server, "an envelope is binary, not a string"), connectionHandle);
+                }
+                finally
+                {
+                    Taken();
+                }
             });
 
             return;
         }
 
-        _core.Receive(message, connectionHandle);
+        _core.Receive(message, (connectionHandle, Taken));
+    }
+
+    // the transport paused on a connection, what it throws dropped as a send's is: what the count
+    // decided holds whatever it does
+    private void Pause(string connectionHandle)
+    {
+        try
+        {
+            Transport.Pause(connectionHandle);
+        }
+        catch (Exception reason)
+        {
+            _core.Post(() =>
+            {
+                Error?.Invoke(reason, connectionHandle);
+            });
+        }
+    }
+
+    // the transport resumed on a connection, as it is paused
+    private void Resume(string connectionHandle)
+    {
+        try
+        {
+            Transport.Resume(connectionHandle);
+        }
+        catch (Exception reason)
+        {
+            _core.Post(() =>
+            {
+                Error?.Invoke(reason, connectionHandle);
+            });
+        }
     }
 
     private void OnClose(bool wasClean, string connectionHandle)
     {
         _core.Post(() =>
         {
+            // what it handed before its close was taken in the turns before this one: nothing of it
+            // is left to resume
+            _intake.Forget(connectionHandle);
             _connections.Remove(connectionHandle);
 
             // ! closed for its relay first: a destination registered on it from now on is registered

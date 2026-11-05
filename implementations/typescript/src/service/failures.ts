@@ -61,23 +61,22 @@ const LARGEST_SERVICE_ID = 0xffff;
 // definition
 
 /**
- * A service's catalogue, frozen: its names, each with its code, and its service's id. A service's id
- * or a code that is not a whole number from 1 to 65535, or two names of one code, is a
+ * The catalogue of service `serviceId`, frozen: its names, each with its code in `codes`. A service's
+ * id or a code that is not a whole number from 1 to 65535, or two names of one code, is a
  * {@link ProgrammerError}.
  *
  * @example
  * import { failuresOf } from '@francisdesjardins/bead/service';
  *
- * const GreeterFailures = failuresOf({ codes: { NOBODY_TO_GREET: 1, TOO_LOUD: 2 }, serviceId: 1 });
+ * const GreeterFailures = failuresOf(1, { NOBODY_TO_GREET: 1, TOO_LOUD: 2 });
  *
  * const failure = GreeterFailures.of('NOBODY_TO_GREET', 'a name is needed');
  */
-export const failuresOf = <const Name extends string>(catalogue: {
-  codes: Readonly<Record<Name, number>>;
-  serviceId: ServiceId;
-}): IFailureCatalogue<Name> => {
-  const codes = Object.freeze({ ...catalogue.codes });
-  const { serviceId } = catalogue;
+export const failuresOf = <const Name extends string>(
+  serviceId: ServiceId,
+  codes: Readonly<Record<Name, number>>
+): IFailureCatalogue<Name> => {
+  const listed = Object.freeze({ ...codes });
 
   if (!Number.isInteger(serviceId) || serviceId < 1 || serviceId > LARGEST_SERVICE_ID) {
     throw new ProgrammerError(
@@ -88,7 +87,7 @@ export const failuresOf = <const Name extends string>(catalogue: {
   // each code's name, so a code is listed once
   const named = new Map<number, string>();
 
-  for (const [name, code] of Object.entries<number>(codes)) {
+  for (const [name, code] of Object.entries<number>(listed)) {
     if (!Number.isInteger(code) || code < 1 || code > LARGEST_CODE) {
       throw new ProgrammerError(
         `a failure's code is a whole number from 1 to 65535, not ${String(code)} for ${name}`
@@ -105,9 +104,9 @@ export const failuresOf = <const Name extends string>(catalogue: {
   }
 
   const codeOf = (name: string): number => {
-    const code = (codes as Readonly<Record<string, number>>)[name];
+    const code = (listed as Readonly<Record<string, number>>)[name];
 
-    if (code === undefined || !Object.hasOwn(codes, name)) {
+    if (code === undefined || !Object.hasOwn(listed, name)) {
       throw new ProgrammerError(`${name} is no failure of service ${String(serviceId)}`);
     }
 
@@ -115,7 +114,7 @@ export const failuresOf = <const Name extends string>(catalogue: {
   };
 
   return Object.freeze({
-    codes,
+    codes: listed,
     serviceId,
 
     is: <Given extends Name>(error: unknown, name: Given): error is IListedFailureError<Given> => {

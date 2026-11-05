@@ -41,11 +41,11 @@ public sealed class ServiceClientTests
     }
 
     // a command's call to the link's one connection
-    private static RequestOptions Call
+    private static CommandOptions Call
     {
         get
         {
-            return new RequestOptions { ConnectionHandle = ServiceLink.Handle };
+            return new CommandOptions { ConnectionHandle = ServiceLink.Handle };
         }
     }
 
@@ -308,7 +308,8 @@ public sealed class ServiceClientTests
             return client.RequesterOf(RequiredProcedures.Echo)(RequiredProcedures.Unset)().WaitAsync(Patience, Cancelled);
         });
 
-        Assert.Equal(RequiredProcedures.Words, refused.Message);
+        Assert.Equal(RequiredProcedures.Reason, refused.Message);
+        Assert.Equal(RequiredProcedures.Words, refused.InnerException?.Message);
 
         // no call is made: no step told, nothing sent
         Assert.Empty(steps);

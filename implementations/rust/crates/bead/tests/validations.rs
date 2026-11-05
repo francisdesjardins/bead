@@ -5,7 +5,9 @@
 use std::process::ExitCode;
 
 use bead::testing::validations;
-use bead::{FailureScope, Judged, ProtocolCode, Violation, violations_detail_of, violations_of};
+use bead::{
+    Failure, Judged, ProtocolCode, RouterSide, Violation, violations_detail_of, violations_of,
+};
 use libtest_mimic::{Arguments, Failed, Trial};
 use serde::Deserialize;
 use serde_json::{Map, Value};
@@ -69,11 +71,11 @@ fn violation_of(written: &Written) -> Violation {
 
 fn play(entry: &Detail) -> Result<(), Failed> {
     if let Some(write) = &entry.write {
-        let judged = Judged {
-            violations: write.violations.iter().map(violation_of).collect(),
-            more: write.more.unwrap_or(0),
-            stopped: write.stopped.unwrap_or(false),
-        };
+        let mut judged = Judged::default();
+
+        judged.violations = write.violations.iter().map(violation_of).collect();
+        judged.more = write.more.unwrap_or(0);
+        judged.stopped = write.stopped.unwrap_or(false);
         let detail = violations_detail_of(&judged, write.maximum_bytes);
 
         if detail != entry.detail {
@@ -83,8 +85,8 @@ fn play(entry: &Detail) -> Result<(), Failed> {
 
     if let Some(read) = &entry.read {
         let got = violations_of(
-            (ProtocolCode::PAYLOAD_INVALID.get(), FailureScope::Protocol),
-            &entry.detail,
+            &Failure::protocol(ProtocolCode::PAYLOAD_INVALID, RouterSide::Client)
+                .saying(entry.detail.as_str()),
         );
         let violations: Vec<Violation> = read.violations.iter().map(violation_of).collect();
 

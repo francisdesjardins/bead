@@ -322,6 +322,10 @@ pub(crate) fn read_parcel(message: &Bytes) -> ParcelRead {
         sequence: u64_at(bytes, 20).unwrap_or(0),
         ..Parcel::of(kind)
     };
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the prefix length is checked before reading its fields"
+    )]
     let body = message.slice(PREFIX_BYTES..);
 
     if layout != LAYOUT {
@@ -557,9 +561,15 @@ fn read_body(prefix: Parcel, body: &Bytes) -> ParcelRead {
             }
 
             if length > at {
+                #[expect(
+                    clippy::disallowed_methods,
+                    reason = "the body length exceeds the checked credential's end"
+                )]
+                let carried = body.slice(at..);
+
                 ParcelRead::Parcel(Parcel {
                     credential,
-                    carried: Some(body.slice(at..)),
+                    carried: Some(carried),
                     ..prefix
                 })
             } else {

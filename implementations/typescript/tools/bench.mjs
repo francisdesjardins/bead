@@ -48,8 +48,8 @@ for (let at = 0; at < args.length; at++) {
 
 const entry = `
   export { WebSocket, WebSocketServer } from 'ws';
-  export { createWSClient } from './src/client/ws-client.ts';
-  export { createWSServer } from './src/server/ws-server.ts';
+  export { createWebSocketClient } from './src/client/websocket-client.ts';
+  export { createWebSocketServer } from './src/server/websocket-server.ts';
   export { createHTTPClient } from './src/client/http-client.ts';
   export { createHTTPServer } from './src/server/http-server.ts';
   export { createClient } from './src/client/client.ts';
@@ -62,7 +62,7 @@ const entry = `
   export { InteropClient } from './interop/generated/interop_bead.ts';
   export { offerInterop } from './interop/handlers.ts';
   export { fromBinary, fromJsonString, toBinary, toJsonString } from '@bufbuild/protobuf';
-  export { readProtoJson, typeRegistryOf, writeProtoJson } from './src/transcoding/json-form.ts';
+  export { createJsonForm } from './src/transcoding/json-form.ts';
   export { EverythingSchema } from './src/transcoding/__tests__/generated/transcoding_pb.ts';
 `;
 
@@ -154,19 +154,17 @@ const transcoding = (reader) => {
     return Number.parseInt(pair, 16);
   });
   const schema = reader.EverythingSchema;
-  const registry = reader.typeRegistryOf([schema]);
+  const form = reader.createJsonForm([schema]);
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
-  const body = encoder.encode(
-    reader.writeProtoJson(schema, { message: reader.fromBinary(schema, payload), registry })
-  );
+  const body = encoder.encode(form.write(schema, reader.fromBinary(schema, payload)));
   const row = { sizeBytes: body.length, unit: 'ns' };
 
   if (selected('transcoding.read.bead', row)) {
     record(
       'transcoding.read.bead',
       codec(() => {
-        return reader.toBinary(schema, reader.readProtoJson(schema, { bytes: body, registry }));
+        return reader.toBinary(schema, form.read(schema, body));
       }, 100),
       row
     );
@@ -184,9 +182,7 @@ const transcoding = (reader) => {
     record(
       'transcoding.write.bead',
       codec(() => {
-        return encoder.encode(
-          reader.writeProtoJson(schema, { message: reader.fromBinary(schema, payload), registry })
-        );
+        return encoder.encode(form.write(schema, reader.fromBinary(schema, payload)));
       }, 100),
       row
     );
@@ -250,10 +246,11 @@ const startInterop = async () => {
   }
 };
 
-// A client of the in-memory transport to `server`'s, announced to no DevTools, as a gateway's is.
-const memoryClientOf = (reader, { limits, server }) => {
+// A client of the in-memory transport, announced to no DevTools, as a gateway's is; its connect
+// names the server.
+const memoryClientOf = (reader, { limits } = {}) => {
   return reader.createClient(
-    { transport: reader.createMemoryTransportClient({ server: server.transport }) },
+    { transport: reader.createMemoryTransportClient() },
     { devtools: false, limits }
   );
 };
@@ -275,7 +272,7 @@ const connect = async (reader, transport, settings = {}) => {
           ? reader.createHTTPServer({ limits, transport: { createServer } })
           : transport === 'memory'
             ? reader.createServer({ transport: reader.createMemoryTransportServer() }, { limits })
-            : reader.createWSServer({
+            : reader.createWebSocketServer({
                 limits,
                 transport: { WebSocketServer: reader.WebSocketServer },
               });
@@ -286,9 +283,11 @@ const connect = async (reader, transport, settings = {}) => {
       transport === 'http'
         ? reader.createHTTPClient({ limits })
         : transport === 'memory'
-          ? memoryClientOf(reader, { limits, server })
-          : reader.createWSClient({ limits, transport: { WebSocket: reader.WebSocket } });
-    await client.connect(transport === 'memory' ? {} : { host: '127.0.0.1', port });
+          ? memoryClientOf(reader, { limits })
+          : reader.createWebSocketClient({ limits, transport: { WebSocket: reader.WebSocket } });
+    await client.connect(
+      transport === 'memory' ? { server: server.transport } : { host: '127.0.0.1', port }
+    );
     return {
       client,
       server,
@@ -611,9 +610,9 @@ try {
         await calls(
           (body) => {
             return async () => {
-              const client = memoryClientOf(reader, { server: connection.server });
+              const client = memoryClientOf(reader);
               try {
-                await client.connect({});
+                await client.connect({ server: connection.server.transport });
                 return await new reader.InteropClient(client).echo(body)();
               } finally {
                 await client[Symbol.asyncDispose]();

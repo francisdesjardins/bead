@@ -1,7 +1,8 @@
 # 0004 — Every language plays one behaviour, held by the conformance files and the interop
 
 - **Status**: accepted
-- **Scope**: every implementation, and the specification
+- **Scope**: every implementation, and the specification; the public surface every side shows is
+  [0047](0047-every-side-shows-one-public-surface.md)'s
 
 ## Context
 
@@ -24,7 +25,10 @@ copies do.
 **The conformance files are the contract.** [`spec/spec.md`](../../spec/spec.md) states what every
 implementation does, in the RFC 2119 sense. A unit no entry cites, which `spec/units.txt` lists,
 binds every implementation all the same: the entries say what a side does, and the text states what
-it must. Beside it, `spec/vectors.json` holds the bytes of envelopes and what they say, and what a
+it must. The spec and its companions state each rule once, a member in its platform's form or case,
+and name no language; `spec/check.py` holds it
+([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md#on-the-rust-sides-form-in-the-spec-its-companions-and-the-records)).
+Beside the spec, `spec/vectors.json` holds the bytes of envelopes and what they say, and what a
 reader refuses with which code, a broker's parcels and the messages refused as parcels, and an
 MQTT 5 PUBLISH and an AMQP 1.0 message counted to their every byte; `spec/conversations.json`
 holds what a server of the interop service — its API, `spec/interop-blueprint.json`, and its
@@ -308,17 +312,11 @@ how a side plays it — is its own record's: the durations' one harness and one 
 [0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md)'s, the debug filters'
 and the metrics' [0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)'s.
 
-**The surface is one too.** A name on one side is the same name on every other, in its language's
-case, and any language that can carry the protocol whole mirrors the surface almost name for name;
-each language's own mapping of terms is its implementation's record, as
-[0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md) is the C# side's. A router's core,
-which both routers build on, is internal on every side: an application builds on the routers, and
-stands behind a destination by a target it registers with a relay, a client router or a connection
-of the relay's own (`RelayTarget` on the TypeScript side; `IRouterTarget`, which `RouterClient`
-implements, or `ConnectionTarget` on the C# side)
-([0010](0010-a-request-presents-a-credential-of-a-scheme.md), On what a procedure is handed of its
-call's credentials). A test missing on one side is added to the other, and a term renamed on one
-side is renamed on every side where it applies. What couples transports stays outside the
+**The surface is one too**: one name a concept, two parameters then one options object, no
+tuple, the same exports on every side, each side's surface pinned to its list, as
+[0047](0047-every-side-shows-one-public-surface.md) decides.
+
+A test missing on one side is added to the others. What couples transports stays outside the
 protocol: one public port for WebSocket and HTTP comes from a small local proxy in front, as the
 demo's `demo/relay.ts` is, never from a server the transports share, so no transport needs
 another's server in any language.
@@ -353,11 +351,11 @@ and fails on any byte that differs, or on any file a generator writes that is no
 
 **What no entry plays stays with each side's twin tests**, and `docs/support.md` says so: a
 destination that is a router the relay calls through, with its two legs' limits and the session
-every requester presenting none or `OPAQUE` shares behind it (sections 14.3 and 14.7), until the
-interop plays a relay across languages, which is ahead
-([0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)), and its leg B refused or
-lost there over HTTP (section 14.5, its fourth and fifth rows), whose responses the twins script,
-until the transports' file has a client part over HTTP and a WebSocket; HTTP/2 and TLS, which both
+every requester presenting none or `OPAQUE` shares behind it (sections 14.3 and 14.7), which a relay
+across languages in the interop, ahead, plays in their place
+([0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)); its leg B refused or lost
+there over HTTP (section 14.5, its fourth and fifth rows), whose responses the twins script, which
+the transports' client part over HTTP and a WebSocket, ahead, plays; HTTP/2 and TLS, which both
 servers serve, an open row of the matrix naming both; keep-alive, pipelining and a connection used
 again, which one socket per exchange leaves out; and the transport's contract with its router — its
 events, its handles, its gauges.
@@ -402,8 +400,8 @@ of the run's own, on the runner's host.
 
 **A language is whole with every vector, conversation and transport case passing, and with interop
 against every language already here**: a client of each against a server of each other, N × (N − 1)
-pairs, two with two languages and six with three. Until it is, it plays the part its stages have
-landed, every other part a row ahead, and its interop is one of them.
+pairs, two with two languages and six with three. A partial side plays the part its stages landed,
+every other part a row ahead, its interop among them.
 
 **No side decides by default.** What one language could add on its own waits for the others, or for
 a decision that brings it to all of them; what a platform cannot do at all stays a row of the
@@ -417,7 +415,7 @@ The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-th
 seven rounds. Its objections, each with its answer, beside which the partial side's, a side that
 plays part of the corpus while its stages land, are
 [0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)'s, the round of
-Rust's core:
+Rust's core, and the public surface's are [0047](0047-every-side-shows-one-public-surface.md)'s:
 
 ### On the files' schemas, their version and their check
 

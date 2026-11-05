@@ -45,7 +45,7 @@ public sealed class JoinedServerTransportTests
         await using var joined = new JoinedServerTransport([memory, paired]);
         await using var client = new MemoryTransportClient(new MemoryTransportClientOptions { Scheduler = scheduler });
         var told = new List<string>();
-        var refusal = new TransportServerRefusal("203.0.113.7", "example.com", null, 50_002, "host-refused", 403);
+        var refusal = new TransportServerRefusal { Address = "203.0.113.7", Authority = "example.com", Port = 50_002, Reason = "host-refused", Status = 403 };
 
         joined.Connection += (connectionHandle) =>
         {
@@ -101,7 +101,7 @@ public sealed class JoinedServerTransportTests
         };
 
         await memory.Start();
-        await client.Connect(new MemoryConnectOptions { Server = memory }, Cancelled);
+        await client.Connect(new MemoryTransportClientConnectOptions { Server = memory, CancellationToken = Cancelled });
 
         var drawn = Assert.Single(memory.ConnectionHandles);
 
@@ -154,7 +154,7 @@ public sealed class JoinedServerTransportTests
             heard.Add(Convert.ToHexString(message.Bytes.Span));
         };
         await memory.Start();
-        await client.Connect(new MemoryConnectOptions { Server = memory }, Cancelled);
+        await client.Connect(new MemoryTransportClientConnectOptions { Server = memory, CancellationToken = Cancelled });
         paired.Open();
 
         var drawn = Assert.Single(memory.ConnectionHandles);
@@ -187,6 +187,53 @@ public sealed class JoinedServerTransportTests
         Assert.Equal((ReadyState.Closed, 0), (client.ReadyState, memory.ConnectionHandles.Count));
         Assert.Equal(["send 02", $"close {Socket}"], paired.Calls);
         Assert.Empty(silent.Calls);
+    }
+
+    // spec 15.12.17, 15.14
+    [Fact]
+    public async Task A_joined_transport_pauses_the_connection_on_the_transport_that_drew_it()
+    {
+        const string ToHttp = "type=HTTP;ip=127.0.0.1;ordinal=1";
+
+        // a handle no transport joined draws
+        const string Unknown = "type=OTHER;ip=local;ordinal=1";
+
+        var scheduler = new SerialScheduler();
+        await using var memory = new MemoryTransportServer(new MemoryTransportServerOptions { Scheduler = scheduler });
+        var webSocket = new PairedTransport(scheduler);
+        var http = new PairedTransport(scheduler) { Kind = TransportTypes.Http, Handle = ToHttp };
+        await using var joined = new JoinedServerTransport([webSocket, http, memory]);
+        await using var client = new MemoryTransportClient(new MemoryTransportClientOptions { Scheduler = scheduler });
+        var heard = new List<byte>();
+
+        joined.Message += (message, _) =>
+        {
+            heard.AddRange(message.Bytes.ToArray());
+        };
+        await memory.Start();
+        await client.Connect(new MemoryTransportClientConnectOptions { Server = memory, CancellationToken = Cancelled });
+
+        var toMemory = Assert.Single(memory.ConnectionHandles);
+
+        joined.Pause(Socket);
+        joined.Pause(ToHttp);
+        joined.Pause(toMemory);
+        joined.Pause(Unknown);
+        await client.Send(new TransportMessage(new byte[] { 1 }, false));
+        await client.Send(new TransportMessage(new byte[] { 2 }, false));
+        await scheduler.WhenIdle().WaitAsync(Patience, Cancelled);
+
+        // * the memory transport holds what its client sent, paused through the join
+        Assert.Empty(heard);
+
+        joined.Resume(ToHttp);
+        joined.Resume(toMemory);
+        joined.Resume(Unknown);
+        await scheduler.WhenIdle().WaitAsync(Patience, Cancelled);
+
+        Assert.Equal([1, 2], heard);
+        Assert.Equal([$"pause {Socket}"], webSocket.Calls);
+        Assert.Equal([$"pause {ToHttp}", $"resume {ToHttp}"], http.Calls);
     }
 
     [Fact]
@@ -252,8 +299,8 @@ public sealed class JoinedServerTransportTests
         await using var second = new MemoryTransportClient(new MemoryTransportClientOptions { Scheduler = scheduler });
 
         await memory.Start();
-        await first.Connect(new MemoryConnectOptions { Server = memory }, Cancelled);
-        await second.Connect(new MemoryConnectOptions { Server = memory }, Cancelled);
+        await first.Connect(new MemoryTransportClientConnectOptions { Server = memory, CancellationToken = Cancelled });
+        await second.Connect(new MemoryTransportClientConnectOptions { Server = memory, CancellationToken = Cancelled });
         uncounted.Open();
 
         var gauges = joined.Gauges();
@@ -344,7 +391,7 @@ public sealed class JoinedServerTransportTests
             }
         };
         await memory.Start();
-        await inMemory.Connect(new MemoryConnectOptions { Server = memory }, Cancelled);
+        await inMemory.Connect(new MemoryTransportClientConnectOptions { Server = memory, CancellationToken = Cancelled });
         paired.Open();
 
         var echoed = await Task.WhenAll(
@@ -488,6 +535,24 @@ public sealed class JoinedServerTransportTests
             return Stopping?.Invoke() ?? Task.CompletedTask;
         }
 
+        // each pause and resume recorded, holding nothing: no test of this one's hands it an
+        // envelope while paused
+        public void Pause(string connectionHandle)
+        {
+            lock (Calls)
+            {
+                Calls.Add($"pause {connectionHandle}");
+            }
+        }
+
+        public void Resume(string connectionHandle)
+        {
+            lock (Calls)
+            {
+                Calls.Add($"resume {connectionHandle}");
+            }
+        }
+
         public Task Send(TransportMessage message, string connectionHandle)
         {
             var bytes = message.Bytes.ToArray();
@@ -579,6 +644,17 @@ public sealed class JoinedServerTransportTests
             return Task.FromResult(true);
         }
 
+        // each pause and resume recorded, holding nothing: it hands nothing on
+        public void Pause(string connectionHandle)
+        {
+            Calls.Add($"pause {connectionHandle}");
+        }
+
+        public void Resume(string connectionHandle)
+        {
+            Calls.Add($"resume {connectionHandle}");
+        }
+
         public Task Shutdown()
         {
             Calls.Add("shutdown");
@@ -597,6 +673,16 @@ public sealed class JoinedServerTransportTests
     // the client's end of the paired transport's one connection, secure
     private sealed class ClientEnd(PairedTransport server) : IRouterClientTransport
     {
+        // its router paused and resumed it, which hands what it hands all the same: no test of
+        // this one's reaches a bound
+        public void Pause()
+        {
+        }
+
+        public void Resume()
+        {
+        }
+
         public TimeProvider Clock
         {
             get
@@ -637,5 +723,33 @@ public sealed class JoinedServerTransportTests
 
             return Task.CompletedTask;
         }
+    }
+
+    // decision 0003
+    [Fact]
+    public async Task Refuses_a_start_once_disposed_its_state_kept_and_disposes_once_stopping_it_first()
+    {
+        var memory = new MemoryTransportServer();
+        await using var participant = new BrokerParticipant(new MemoryBroker().Adapter(new MemoryBrokerAdapterOptions { Id = "ada" }));
+        var broker = participant.Server(new BrokerTransportServerOptions { Names = ["interop"] });
+        var joined = new JoinedServerTransport([memory, broker]);
+
+        await memory.Start();
+        await broker.Start();
+
+        // * two disposes: each transport it joined disposed, its dispose final
+        await Task.WhenAll(joined.DisposeAsync().AsTask(), joined.DisposeAsync().AsTask());
+        Assert.Equal((ReadyState.Closed, ReadyState.Closed), (memory.ReadyState, broker.ReadyState));
+
+        // * a start of a transport it joined, after it: its application's misuse, its state kept
+        Assert.Equal("the transport server is disposed", (await Assert.ThrowsAsync<ObjectDisposedException>(() =>
+        {
+            return memory.Start();
+        })).Message);
+        Assert.Equal("the transport server is disposed", (await Assert.ThrowsAsync<ObjectDisposedException>(() =>
+        {
+            return broker.Start();
+        })).Message);
+        Assert.Equal((ReadyState.Closed, ReadyState.Closed), (memory.ReadyState, broker.ReadyState));
     }
 }

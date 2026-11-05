@@ -368,9 +368,18 @@ public sealed partial class RouterCoreTests
         Assert.Empty(refusing.Requests);
         await handler.Answer(0, PatternOf(64)).WaitAsync(Patience, TestContext.Current.CancellationToken);
 
-        // a copy of its header, which names a destination, finds the handler no more, nor a resolver
-        await server.Core.Respond(RouterAnswer.OfPayload(PatternOf(64)), new AnswerTarget(Handle, handler.Requests[1].Header with { }))
-            .WaitAsync(Patience, TestContext.Current.CancellationToken);
+        // a copy of its header, which names a destination, was never dispatched: it is refused, and
+        // nothing goes out on its call until its own header answers it
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+        {
+            return server.Core.Respond(RouterAnswer.OfPayload(PatternOf(64)), new AnswerTarget(Handle, handler.Requests[1].Header with { }))
+                .WaitAsync(Patience, TestContext.Current.CancellationToken);
+        });
+        Assert.DoesNotContain(server.Sent, (envelope) =>
+        {
+            return envelope.Header.CallId == 7;
+        });
+        await handler.Answer(1, PatternOf(64)).WaitAsync(Patience, TestContext.Current.CancellationToken);
 
         Assert.Equal(
             [(EnvelopeKind.Failure, 3u), (EnvelopeKind.Failure, 5u), (EnvelopeKind.Result, 1u), (EnvelopeKind.Result, 7u)],
@@ -392,7 +401,7 @@ public sealed partial class RouterCoreTests
 
         // a request for a destination is written by the handler it was routed to, never by a resolver
         // of this side's; one routed to none, by none
-        Assert.Equal([null, refusing, handler, null], told);
+        Assert.Equal([null, refusing, handler, handler], told);
         Assert.Empty(server.Reports);
     }
 
@@ -777,9 +786,10 @@ public sealed partial class RouterCoreTests
         Assert.Equal([failure], server.Reports);
     }
 
-    // spec 9.0
+    // spec 9.0; decision 0045: its mark set at once, what it holds let go in a later turn, behind
+    // the answer of the turn its report listener disposes it in
     [Fact]
-    public async Task Lets_its_connections_go_after_the_turn_its_report_listener_disposes_it_in_the_failed_resolver_s_answer_refused_as_disposed_and_reported()
+    public async Task Lets_its_connections_go_after_the_turn_its_report_listener_disposes_it_in_behind_the_failed_resolver_s_answer()
     {
         var server = new Peer(RouterSide.Server);
         var core = server.Core;
@@ -804,16 +814,15 @@ public sealed partial class RouterCoreTests
 
         await server.Deliver(new Envelope { Header = RequestOf(5) }, "a");
 
-        // disposed at once, what it holds let go in a later turn
+        // marked at once, what it holds let go in a later turn, behind the turn's answer
         Assert.Equal([(1L, true)], disposed);
-        Assert.Empty(server.Sent);
-        Assert.Equal(2, server.Reports.Count);
-        Assert.Same(failure, server.Reports[0]);
-        Assert.Equal("the router was disposed", Assert.IsType<DisconnectException>(server.Reports[1]).Message);
-        Assert.Equal(["a", "a"], server.ReportedOn);
+        Assert.Equal([(EnvelopeKind.Failure, 5u, (ushort)ProtocolCode.ProcedureFailed)], AnswersOf(server));
+        Assert.Same(failure, Assert.Single(server.Reports));
+        Assert.Equal(["a"], server.ReportedOn);
+        Assert.True(core.IsDisposed);
         Assert.Equal(0, (await GaugesOf(server)).Counts["answeringCalls"]);
 
-        // its call closed as its answer failed, before what the dispose lets go: nothing cancelled
+        // its call closed as its answer went, before what the dispose lets go: nothing cancelled
         Assert.False(Assert.Single(resolver.Requests).Signal.IsCancellationRequested);
     }
 
@@ -1136,12 +1145,16 @@ public sealed partial class RouterCoreTests
     public async Task Its_answers_name_their_call_alone_a_result_with_its_payload_a_failure_with_its_record()
     {
         var server = new Peer(RouterSide.Server);
+        var handler = new Held(server.Core);
 
-        await server.Core.Respond(RouterAnswer.OfPayload(new byte[] { 4 }), new AnswerTarget("b", RequestOf(77)))
+        server.Destination = (_) =>
+        {
+            return handler;
+        };
+        await server.Deliver(new Envelope { Header = RequestOf(77) with { DestinationId = 3 } }, "a");
+        await server.Core.Respond(RouterAnswer.OfPayload(new byte[] { 4 }), await server.Open(77, "b"))
             .WaitAsync(Patience, TestContext.Current.CancellationToken);
-        await server.Core.Respond(
-            RouterAnswer.OfFailure(Failure.OfApplication(12, "why")),
-            new AnswerTarget("a", RequestOf(77) with { DestinationId = 3 })).WaitAsync(Patience, TestContext.Current.CancellationToken);
+        await handler.Fail(0, Failure.OfApplication(12, "why")).WaitAsync(Patience, TestContext.Current.CancellationToken);
 
         Assert.Equal(["b", "a"], server.SentOn);
         Assert.Equal(new ResultHeader { CallId = 77 }, server.Sent[0].Header);
@@ -1200,10 +1213,11 @@ public sealed partial class RouterCoreTests
     public async Task Refuses_a_failure_whose_code_is_not_one_sending_nothing_and_telling_nothing()
     {
         var server = new Peer(RouterSide.Server);
+        var call = await server.Open(1);
 
         await Assert.ThrowsAsync<ArgumentException>(() =>
         {
-            return server.Core.Respond(RouterAnswer.OfFailure(new Failure { Code = 0, Scope = FailureScope.Application }), new AnswerTarget(Handle, RequestOf(1)))
+            return server.Core.Respond(RouterAnswer.OfFailure(new Failure { Code = 0, Scope = FailureScope.Application }), call)
                 .WaitAsync(Patience, TestContext.Current.CancellationToken);
         });
         Assert.Equal(0, server.BeforeAnswers);
@@ -1217,7 +1231,8 @@ public sealed partial class RouterCoreTests
         using var orderedCore = ordered.Core;
         var told = new List<string>();
 
-        ordered.Resolve();
+        var calls = new[] { await ordered.Open(1, "a"), await ordered.Open(3, "a"), await ordered.Open(5, "b"), await ordered.Open(7, "a") };
+
         ordered.OnBeforeAnswer = (answer) =>
         {
             var kind = answer.IsFailure ? "failure" : "result";
@@ -1229,16 +1244,16 @@ public sealed partial class RouterCoreTests
         {
             return envelope.Header.CallId == 5 ? Task.FromException(new IOException("gone")) : Task.CompletedTask;
         };
-        await orderedCore.Respond(RouterAnswer.OfPayload(new byte[] { 1 }), new AnswerTarget("a", RequestOf(1)));
-        await orderedCore.Respond(RouterAnswer.OfFailure(Failure.OfProtocol(ProtocolCode.AccessDenied)), new AnswerTarget("a", RequestOf(3)));
+        await orderedCore.Respond(RouterAnswer.OfPayload(new byte[] { 1 }), calls[0]);
+        await orderedCore.Respond(RouterAnswer.OfFailure(Failure.OfProtocol(ProtocolCode.AccessDenied)), calls[1]);
         var rejected = await Assert.ThrowsAsync<IOException>(() =>
         {
-            return orderedCore.Respond(RouterAnswer.OfPayload(new byte[] { 1 }), new AnswerTarget("b", RequestOf(5))).WaitAsync(Patience, TestContext.Current.CancellationToken);
+            return orderedCore.Respond(RouterAnswer.OfPayload(new byte[] { 1 }), calls[2]).WaitAsync(Patience, TestContext.Current.CancellationToken);
         });
         Assert.Equal("gone", rejected.Message);
         Assert.Equal((ushort)ProtocolCode.PayloadTooLarge, (await Assert.ThrowsAsync<FailureException>(() =>
         {
-            return orderedCore.Respond(RouterAnswer.OfPayload(new byte[0x1000001]), new AnswerTarget("a", RequestOf(7))).WaitAsync(Patience, TestContext.Current.CancellationToken);
+            return orderedCore.Respond(RouterAnswer.OfPayload(new byte[0x1000001]), calls[3]).WaitAsync(Patience, TestContext.Current.CancellationToken);
         })).Code);
         Assert.Equal(["result a echo after 0 sent", "failure a echo after 1 sent", "result b echo after 2 sent", "undo b"], told);
         Assert.Equal((3, 1), (ordered.BeforeAnswers, ordered.Undone));
@@ -1291,11 +1306,11 @@ public sealed partial class RouterCoreTests
 
         var announced = new Peer(RouterSide.Server) { Session = token };
         using var announcedCore = announced.Core;
-        announced.Resolve();
-        await announcedCore.Respond(RouterAnswer.OfPayload(ReadOnlyMemory<byte>.Empty), new AnswerTarget(Handle, RequestOf(1)));
+        await announcedCore.Respond(RouterAnswer.OfPayload(ReadOnlyMemory<byte>.Empty), await announced.Open(1));
         await announced.Deliver(new Envelope { Header = RequestOf(3) with { Credential = Credential.Jwt("a.b.c") } });
         Assert.Equal(
             new (DebugDirection, IEnvelopeHeader)[] {
+                (DebugDirection.Rx, RequestOf(1)),
                 (DebugDirection.Tx, new ResultHeader { CallId = 1, Credential = Credential.Opaque() }),
                 (DebugDirection.Rx, RequestOf(3) with { Credential = Credential.SchemeOf(CredentialScheme.Jwt) }),
                 (DebugDirection.Tx, new FailureHeader { CallId = 3 }),
@@ -1397,7 +1412,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Says_whether_the_call_of_a_request_is_open_still()
+    public async Task Say_whether_the_call_of_a_request_is_open_still()
     {
         var server = new Peer(RouterSide.Server);
         var resolver = server.Resolve();
@@ -1431,10 +1446,10 @@ public sealed partial class RouterCoreTests
 
         Assert.Equal([false, false], ended);
 
-        // a request never dispatched says nothing against it
+        // a request never dispatched is open to none
         var undispatched = await IsAnswering(new AnswerTarget(Handle, RequestOf(9)));
 
-        Assert.Equal([true], undispatched);
+        Assert.Equal([false], undispatched);
     }
 
     [Fact]
@@ -1481,7 +1496,7 @@ public sealed partial class RouterCoreTests
         });
         await Assert.ThrowsAsync<DisconnectException>(() =>
         {
-            return server.Core.Respond(RouterAnswer.OfPayload(ReadOnlyMemory<byte>.Empty), new AnswerTarget(Handle, RequestOf(1)))
+            return server.Core.Respond(RouterAnswer.OfPayload(ReadOnlyMemory<byte>.Empty), new AnswerTarget(Handle, incoming.Requests[0].Header))
                 .WaitAsync(Patience, TestContext.Current.CancellationToken);
         });
         await Assert.ThrowsAsync<DisconnectException>(() =>
@@ -1492,6 +1507,7 @@ public sealed partial class RouterCoreTests
         Assert.Empty(server.Sent);
 
         var client = new Peer(RouterSide.Client);
+        var command = await client.Open(2);
         var asked = client.Request(new byte[] { 1 }, TimeSpan.FromSeconds(5));
 
         await client.Settle();
@@ -1504,7 +1520,7 @@ public sealed partial class RouterCoreTests
         })).Message);
         await Assert.ThrowsAsync<DisconnectException>(() =>
         {
-            return client.Core.Respond(RouterAnswer.OfPayload(new byte[] { 1 }), new AnswerTarget(Handle, RequestOf(2)))
+            return client.Core.Respond(RouterAnswer.OfPayload(new byte[] { 1 }), command)
                 .WaitAsync(Patience, TestContext.Current.CancellationToken);
         });
         await Assert.ThrowsAsync<DisconnectException>(() =>

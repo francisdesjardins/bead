@@ -1,0 +1,15 @@
+sequenceDiagram
+  participant H as Client HTTP
+  participant G as Passerelle HTTP/JSON
+  participant S as Serveur
+  H->>G: POST /api/Hello/sayHello<br/>{"name":"Ada"}
+  Note over G: ses portes passées :<br/>une connexion tirée, en mémoire
+  G->>S: REQUEST · callId 1 · la charge proto
+  S-->>G: RESULT · callId 1
+  G-->>H: 200 · application/json<br/>{"greeting":"Hello, Ada!"}
+  Note over G,S: la connexion fermée,<br/>et ce qu'elle tenait avec elle
+  H->>G: POST /api/Hello/countDown<br/>{"from":3}
+  G->>S: REQUEST · callId 1 · une connexion neuve
+  Note over S: l'admission veut une connexion<br/>que sayHello a saluée
+  S-->>G: FAILURE · callId 1 · ACCESS_DENIED
+  G-->>H: 403 · application/problem+json<br/>"detail":"say hello first"

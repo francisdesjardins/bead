@@ -22,7 +22,30 @@ use crate::router::types::{
 use crate::session_token::SessionToken;
 use crate::testing::SteppingClock;
 use crate::testing::scripted::ScriptedClient;
-use crate::transport::ClientTransport;
+use crate::transport::RouterClientTransport;
+
+mod elsewhere_bound;
+mod key_sets;
+mod values;
+
+#[tokio::test]
+async fn a_redacted_credential_has_no_token_to_resolve() {
+    let (_clock, resolver) = resolver_of(&Credentials::default());
+    let request = super::CredentialRequest {
+        audiences: None,
+        credential: Credential::Redacted {
+            scheme: crate::constants::CredentialScheme::OPAQUE,
+        },
+        transport_credential: None,
+    };
+    let outcome = resolver
+        .resolve((request, tokio_util::sync::CancellationToken::new()))
+        .await;
+    assert_eq!(
+        failed_with(outcome),
+        "a redacted credential has no token to resolve"
+    );
+}
 
 #[test]
 fn holds_a_jwt_s_header_in_a_chunk_and_an_envelope_of_1_024_bytes_at_least() {
@@ -53,7 +76,7 @@ fn holds_a_jwt_s_header_in_a_chunk_and_an_envelope_of_1_024_bytes_at_least() {
 #[tokio::test]
 async fn refuses_a_router_that_presents_a_jwt_by_default_within_limits_too_small_for_it() {
     let clock: SharedClock = SteppingClock::new(UNIX_EPOCH);
-    let transport: Arc<dyn ClientTransport> = ScriptedClient::new(clock);
+    let transport: Arc<dyn RouterClientTransport> = ScriptedClient::new(clock);
     let mut options = RouterClientOptions {
         credential: Some(RequestCredential::Jwt("a.b.c".to_owned())),
         limits: Some(RouterLimitsOptions {
@@ -238,7 +261,7 @@ fn an_admission_s_request_writes_no_transport_credential_nor_whether_one_was_car
 
 #[test]
 fn a_session_writes_whether_it_holds_a_token_never_the_token() {
-    let mut session = Session::new(handle(), 0);
+    let mut session = Session::new(handle(), std::time::SystemTime::UNIX_EPOCH);
 
     session.data = Some(json!("ada"));
     session.session_token = Some(token());
@@ -454,11 +477,16 @@ async fn fails_a_call_alike_when_its_key_set_throws_as_it_is_asked_and_has_the_n
             .expect("failed at once, not at its deadline")
             .expect("joined");
 
+        let Err(crate::router::core::Unresolved::Other(error)) = refused else {
+            panic!("{breaks}: failed with its throw");
+        };
         assert_eq!(
-            failed_with(refused),
-            format!(
-                "the key set's ask for {SET_ISSUER} failed: a key set's ask panicked: the key set cannot be reached"
-            ),
+            error.to_string(),
+            format!("the key set's ask for {SET_ISSUER} failed")
+        );
+        assert_eq!(
+            error.source().expect("the ask's panic").to_string(),
+            "a key set's ask panicked: the key set cannot be reached",
             "{breaks}: failed with its throw"
         );
 

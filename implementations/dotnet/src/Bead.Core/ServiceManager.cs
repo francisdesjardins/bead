@@ -25,7 +25,11 @@ public interface IRouterLike
     /// </summary>
     void RegisterResolver(IRequestResolver resolver);
 
-    /// <summary>Answers a request, while its call is open.</summary>
+    /// <summary>
+    /// Answers a request, while its call is open, by the very header its resolver was handed: an
+    /// answer, whole or a transfer, to a request this side never dispatched, is an
+    /// <see cref="ArgumentException"/>, and nothing goes out.
+    /// </summary>
     Task Respond(RouterAnswer response, AnswerTarget target);
 
     /// <summary>
@@ -128,9 +132,18 @@ public sealed record RequestDependencies<TRequest, TResponse>
 public delegate Task<TResponse> BoundCall<TResponse>(RequestOptions? options = null);
 
 /// <summary>
+/// A command bound to its payload: given its options, which name its connection, it goes, and gives
+/// its result.
+/// </summary>
+/// <typeparam name="TResponse">What a result carries.</typeparam>
+public delegate Task<TResponse> BoundCommand<TResponse>(CommandOptions options);
+
+/// <summary>
 /// How the side that answers a request reads it and writes the answer. A failure is the router's to
-/// write. What does not decode throws, and its request is answered with
-/// <see cref="ProtocolCode.PayloadUndecodable"/>.
+/// write. What does not decode throws a <see cref="FormatException"/>, its refusal, and its request
+/// is answered with <see cref="ProtocolCode.PayloadUndecodable"/>; anything else its reader throws
+/// is the side's own error: the request is answered with <see cref="ProtocolCode.ProcedureFailed"/>
+/// and the error reported (spec 9.0, 17.2).
 /// </summary>
 /// <typeparam name="TRequest">What a request carries.</typeparam>
 /// <typeparam name="TResponse">What a result carries.</typeparam>
@@ -497,8 +510,8 @@ public sealed record RequestDefaults
 public sealed record ServiceManagerOptions
 {
     /// <summary>
-    /// Closes a connection that let a command go unanswered, when the call's
-    /// <see cref="RequestOptions.CloseOnTimeout"/>, or the manager's default, says so. A server gives
+    /// Closes a connection that let a command go unanswered, when the command's
+    /// <see cref="CommandOptions.CloseOnTimeout"/>, or the manager's default, says so. A server gives
     /// it; a client has no connection to name.
     /// </summary>
     public Action<string>? CloseConnection { get; init; }
@@ -515,9 +528,14 @@ public sealed record ServiceManagerOptions
 
 /// <summary>
 /// The requesters and resolvers of the services on one router: what a requester calls, and what
-/// answers it on the other side. Both sides of a router use the same manager.
+/// answers it on the other side. The untyped manager serves either side's router: a request or a
+/// notification made on a client's router, a command on a server's; a command answered on a
+/// client's, a request or a notification on a server's; each refused on the other's as it is made,
+/// its side first, then spec 16.10's reasons. A client and a server give it by the interface of
+/// their side, <see cref="IServiceManagerClient"/> and <see cref="IServiceManagerServer"/>, without
+/// the other side's makers.
 /// </summary>
-public sealed partial class ServiceManager
+public sealed partial class ServiceManager : IServiceManagerClient, IServiceManagerServer
 {
     // how long a request waits for its answer when its options and the manager's say nothing
     private static readonly TimeSpan TimeoutDefault = TimeSpan.FromSeconds(5);
@@ -621,14 +639,32 @@ public sealed partial class ServiceManager
         }
     }
 
+    ServiceManager IServiceManagerClient.Manager
+    {
+        get
+        {
+            return this;
+        }
+    }
+
+    ServiceManager IServiceManagerServer.Manager
+    {
+        get
+        {
+            return this;
+        }
+    }
+
     /// <summary>
-    /// The notification of <paramref name="procedure"/>, which callbacks register on: the first
-    /// registration subscribes, by a request that opens a subscription — paced, with a window — and
-    /// the last one taken away unsubscribes. The same procedure asked for again, at the same window
-    /// or at none twice, gives the same notification; asked for differently, or at another window, it
-    /// is an <see cref="InvalidOperationException"/>, after its router's check: one out of its range
-    /// or off its form (spec 16.10) is an <see cref="ArgumentException"/> first, and one against its
-    /// call as its router holds it.
+    /// The notification of <paramref name="procedure"/>, which callbacks register on, a client's
+    /// router's alone: the first registration subscribes, by a request that opens a subscription —
+    /// paced, with a window — and the last one taken away unsubscribes. The same procedure asked for
+    /// again, at the same window or at none twice, gives the same notification; asked for
+    /// differently, or at another window, it is an <see cref="InvalidOperationException"/>, after
+    /// the side and spec 16.10's reasons. Asked for on a server's router, which notifies, it is an
+    /// <see cref="InvalidOperationException"/>; on a client's, one out of its range, off its form or
+    /// against its kind, as a requester on a client's router, is an <see cref="ArgumentException"/>,
+    /// as it is made.
     /// </summary>
     public INotification<TRequest, TNotification> GetNotification<TRequest, TResponse, TNotification>(
         Procedure procedure,
@@ -637,8 +673,9 @@ public sealed partial class ServiceManager
         ArgumentNullException.ThrowIfNull(procedure);
         ArgumentNullException.ThrowIfNull(dependencies);
 
-        // * the router's reasons come before the manager's own, as at every layer (spec 16.10)
-        Identity.Check(procedure, nameof(procedure));
+        // * the side first, then spec 16.10's reasons, before the manager's own: its subscribing
+        // request is a requester of a client's router
+        _requester.CheckMade(procedure, (RouterSide.Client, "only a client hears notifications; a server notifies them"));
 
         lock (_notifications)
         {
@@ -667,9 +704,14 @@ public sealed partial class ServiceManager
             var notification = new Notification<TRequest, TResponse, TNotification>(
                 procedure,
                 (_router, dependencies),
-                ((payload, call) =>
+                (async (payload, call) =>
                 {
-                    return _requester.CallOf(payload, (procedure, dependencies.Serializer, call.Options, (DebugType.Request, call.Subscribes, series)));
+                    // resolved as a request's, from the registration's own: no credential, no connection
+                    var options = _requester.OptionsOf(call.Options is { } asked
+                        ? new RequestOptions { CancellationToken = asked.CancellationToken, DestinationId = asked.DestinationId, Timeout = asked.Timeout }
+                        : null);
+
+                    return await _requester.CallOf(payload, (procedure, dependencies.Serializer, options, (DebugType.Request, call.Subscribes, series)));
                 },
                 (failure) =>
                 {
@@ -692,59 +734,93 @@ public sealed partial class ServiceManager
     }
 
     /// <summary>
-    /// A requester of <paramref name="procedure"/>: given a payload, then options, it calls the
-    /// procedure and gives its result, decoded. A failure answered, or one of the router's, throws a
-    /// <see cref="FailureException"/>; a result that does not decode, one of
-    /// <see cref="ProtocolCode.PayloadUndecodable"/>.
+    /// A requester of <paramref name="procedure"/>, a client's router's alone: given a payload, then
+    /// options, it calls the procedure and gives its result, decoded. A failure answered, or one of
+    /// the router's, throws a <see cref="FailureException"/>; a result that does not decode, one of
+    /// <see cref="ProtocolCode.PayloadUndecodable"/>. Made on a server's router, which makes
+    /// commands, it is an <see cref="InvalidOperationException"/>; on a client's, one out of its
+    /// range, off its form or against its kind (spec 16.10) is an <see cref="ArgumentException"/>, as
+    /// it is made.
     /// </summary>
     public Func<TRequest, BoundCall<TResponse>> GetRequest<TRequest, TResponse>(
         Procedure procedure,
         RequestDependencies<TRequest, TResponse> dependencies)
     {
-        return _requester.RequesterOf(procedure, (dependencies, DebugType.Request));
+        ArgumentNullException.ThrowIfNull(procedure);
+        ArgumentNullException.ThrowIfNull(dependencies);
+        _requester.CheckMade(procedure, (RouterSide.Client, "a server's router makes commands: GetCommand"));
+
+        return _requester.RequesterOf(procedure, dependencies);
     }
 
     /// <summary>
-    /// A requester of a command: what a server asks its client, the connection named in its
-    /// options. A requester as <see cref="GetRequest{TRequest, TResponse}"/> gives one; one
-    /// unanswered in time closes its connection when its options, or the manager's defaults, say so.
+    /// A requester of a command, a server's router's alone: what a server asks its client, the
+    /// connection named in its options, which a command cannot be made without. A requester as
+    /// <see cref="GetRequest{TRequest, TResponse}"/> gives one; one unanswered in time closes its
+    /// connection when its options, or the manager's defaults, say so. Made on a client's router,
+    /// which makes requests, it is an <see cref="InvalidOperationException"/>; on a server's, one out
+    /// of its range, off its form or against its kind (spec 16.10) is an
+    /// <see cref="ArgumentException"/>, as it is made.
     /// </summary>
-    public Func<TRequest, BoundCall<TResponse>> GetCommand<TRequest, TResponse>(
+    public Func<TRequest, BoundCommand<TResponse>> GetCommand<TRequest, TResponse>(
         Procedure procedure,
         RequestDependencies<TRequest, TResponse> dependencies)
     {
-        return _requester.RequesterOf(procedure, (dependencies, DebugType.Command));
+        ArgumentNullException.ThrowIfNull(procedure);
+        ArgumentNullException.ThrowIfNull(dependencies);
+        _requester.CheckMade(procedure, (RouterSide.Server, "a client's router makes requests: GetRequest"));
+
+        return _requester.CommanderOf(procedure, dependencies);
     }
 
     /// <summary>
-    /// The resolver of a command, which a client offers its server: a resolver as
-    /// <see cref="GetRequestResolver{TRequest, TResponse}"/> gives one.
+    /// The resolver of a command, which a client offers its server, a client's router's alone: a
+    /// resolver as <see cref="GetRequestResolver{TRequest, TResponse}"/> gives one. Made on a
+    /// server's router, which answers requests, it is an <see cref="InvalidOperationException"/>; on
+    /// a client's, one out of its range, off its form or against its kind (spec 16.10) is an
+    /// <see cref="ArgumentException"/>, as it is made.
     /// </summary>
     public Func<RequestResolverCallback<TRequest, TResponse>, IRequestResolver> GetCommandResolver<TRequest, TResponse>(
         Procedure procedure,
         RequestResolverDependencies<TRequest, TResponse> dependencies)
     {
+        ArgumentNullException.ThrowIfNull(procedure);
+        ArgumentNullException.ThrowIfNull(dependencies);
+        _resolver.CheckMade(procedure, (false, RouterSide.Client, "a server's router answers requests: GetRequestResolver"));
+
         return ResolverOf(procedure, (dependencies, DebugType.Command));
     }
 
     /// <summary>
-    /// The resolver of <paramref name="procedure"/>: given its callback, it is registered on the
-    /// router. A request is answered once — by its callback, by a refusal of its admission, with
-    /// PAYLOAD_UNDECODABLE when it does not decode, with PAYLOAD_INVALID when its rules refuse it, or
-    /// with PROCEDURE_FAILED when its rules or its callback throw before it answered.
+    /// The resolver of <paramref name="procedure"/>, a server's router's alone: given its callback,
+    /// it is registered on the router. Made on a client's router, which answers commands, it is an
+    /// <see cref="InvalidOperationException"/>; on a server's, one out of its range, off its form or
+    /// against its kind (spec 16.10) is an <see cref="ArgumentException"/>, as it is made. A request
+    /// is answered once — by its callback, by a refusal of its admission, with
+    /// PAYLOAD_UNDECODABLE when its codec refuses it, with PAYLOAD_INVALID when its rules refuse it,
+    /// or with PROCEDURE_FAILED when its codec throws other than its refusal, a
+    /// <see cref="FormatException"/>, or its rules or its callback throw before it answered, and why
+    /// goes on to the router.
     /// </summary>
     public Func<RequestResolverCallback<TRequest, TResponse>, IRequestResolver> GetRequestResolver<TRequest, TResponse>(
         Procedure procedure,
         RequestResolverDependencies<TRequest, TResponse> dependencies)
     {
+        ArgumentNullException.ThrowIfNull(procedure);
+        ArgumentNullException.ThrowIfNull(dependencies);
+        _resolver.CheckMade(procedure, (false, RouterSide.Server, "a client's router answers commands: GetCommandResolver"));
+
         return ResolverOf(procedure, (dependencies, DebugType.Request));
     }
 
     /// <summary>
-    /// The resolver of a notification's <paramref name="procedure"/>: a resolver as
-    /// <see cref="GetRequestResolver{TRequest, TResponse}"/> gives one, whose callback may subscribe
-    /// its requester first, and which notifies its subscribers. A successful answer to a request that
-    /// opens a subscription subscribes its requester all the same.
+    /// The resolver of a notification's <paramref name="procedure"/>, a server's router's alone: a
+    /// resolver as <see cref="GetRequestResolver{TRequest, TResponse}"/> gives one, whose callback
+    /// may subscribe its requester first, and which notifies its subscribers. A successful answer to
+    /// a request that opens a subscription subscribes its requester all the same. Made on a client's
+    /// router, which hears notifications, it is an <see cref="InvalidOperationException"/>; on a
+    /// server's, one out of its range, off its form or against its kind (spec 16.10) is an
+    /// <see cref="ArgumentException"/>, as it is made.
     /// </summary>
     public Func<NotificationResolverCallback<TRequest, TResponse>, INotificationResolver<TNotification>> GetNotificationResolver<TRequest, TResponse, TNotification>(
         Procedure procedure,
@@ -752,7 +828,7 @@ public sealed partial class ServiceManager
     {
         ArgumentNullException.ThrowIfNull(procedure);
         ArgumentNullException.ThrowIfNull(dependencies);
-        Identity.Check(procedure, nameof(procedure));
+        _resolver.CheckMade(procedure, (true, RouterSide.Server, "only a server notifies; a client hears notifications"));
 
         return (callback) =>
         {
@@ -802,16 +878,12 @@ public sealed partial class ServiceManager
         }
     }
 
-    // a resolver of a request or a command: given its callback, it is registered on the router
+    // a resolver of a request or a command, its maker's checks passed: given its callback, it is
+    // registered on the router
     private Func<RequestResolverCallback<TRequest, TResponse>, IRequestResolver> ResolverOf<TRequest, TResponse>(
         Procedure procedure,
         (RequestResolverDependencies<TRequest, TResponse> Dependencies, DebugType Type) made)
     {
-        ArgumentNullException.ThrowIfNull(procedure);
-        ArgumentNullException.ThrowIfNull(made.Dependencies);
-        // as the resolver is asked for, before its callback is given, as every side refuses it (spec 16.10)
-        Identity.Check(procedure, nameof(procedure));
-
         return (callback) =>
         {
             ArgumentNullException.ThrowIfNull(callback);

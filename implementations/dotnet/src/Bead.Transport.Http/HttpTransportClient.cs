@@ -27,6 +27,15 @@ public sealed record HttpTransportClientOptions
     /// </summary>
     public TimeSpan InactivityTimeout { get; init; } = TimeSpan.FromMinutes(5);
 
+    /// <summary>
+    /// How long it sends again an envelope that is no request, refused <c>busy</c>, from its first
+    /// send, before its exchange is lost, and its connection with it (spec 15.6, 15.7): 5 minutes by
+    /// default, a server's own exchange timeout (spec 15.12.8); infinite for ever. From 1 to
+    /// <see cref="Clocks.LongestTimer"/> milliseconds otherwise, rounded to the nearest whole one;
+    /// zero is refused.
+    /// </summary>
+    public TimeSpan ExchangeTimeout { get; init; } = TimeSpan.FromMinutes(5);
+
     /// <summary>Whether it listens for what the server sends of its own, once the server says it back at connect.</summary>
     public bool IsListening { get; init; } = true;
 
@@ -56,7 +65,7 @@ public sealed record HttpTransportClientOptions
 }
 
 /// <summary>Where a client connects — <c>http://host:port/pathname</c>, or <c>https://</c> when secured — and how long it waits.</summary>
-public sealed record HttpConnectOptions
+public sealed record HttpTransportClientConnectOptions
 {
     /// <summary>The server's host.</summary>
     public required string Host { get; init; }
@@ -77,6 +86,13 @@ public sealed record HttpConnectOptions
     /// zero is refused.
     /// </summary>
     public TimeSpan Timeout { get; init; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// What gives the connect up: one cancelled already refuses it before anything moves, one
+    /// cancelled after ends it Closed, each an <see cref="OperationCanceledException"/>. Its own
+    /// connect's alone: a reconnection replays the rest of these options, never this token.
+    /// </summary>
+    public CancellationToken CancellationToken { get; init; }
 }
 
 /// <summary>
@@ -102,6 +118,15 @@ public sealed record HttpConnectOptions
 /// inactivity timeout has passed, which loses the connection. It goes from
 /// <see cref="ReadyState.Uninitialized"/> through Connecting and Open to Closing and Closed, and
 /// connects again once Closed — or reconnects, with the options of its last connect.
+/// <para>
+/// An envelope that is no request, refused <c>busy</c> — 429, or 503 — is sent again once its
+/// <c>Retry-After</c> passed, its seconds or its date, a second when it says none (RFC 9110
+/// §10.2.3): nothing of it was tried, and exchanges keep no order (spec 15.6). Still refused past
+/// <see cref="HttpTransportClientOptions.ExchangeTimeout"/> from its first send, it fails, and its
+/// connection is lost with it (spec 15.7). A request refused <c>busy</c> fails its send at once.
+/// Paused by its router, it asks no listen, and holds in order what an answer or a batch it already
+/// read still brings, handing it on once resumed, then listening again (spec 15.12).
+/// </para>
 /// </remarks>
 public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposable
 {
@@ -117,6 +142,9 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     private static readonly TimeSpan FirstRetry = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan LastRetry = TimeSpan.FromSeconds(30);
 
+    // how long a refusal busy without a Retry-After that reads is waited out: the server's own
+    private static readonly TimeSpan RetryAfterDefault = TimeSpan.FromSeconds(1);
+
     private readonly HttpTransportClientOptions _options;
     private readonly TimeProvider _clock;
     private readonly int _maximumBodyBytes;
@@ -127,7 +155,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     private HttpClient? _http;
 
     // the options of the last connect its guard let through, which a reconnection connects with
-    private HttpConnectOptions? _lastConnectOptions;
+    private HttpTransportClientConnectOptions? _lastConnectOptions;
 
     // what aborts a connect under way: a dispose does
     private CancellationTokenSource? _connecting;
@@ -138,6 +166,11 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
 
     // how its events are told: what a listener throws is reported through Error
     private readonly ListenerGuard _listeners;
+
+    // * what an answer or a batch brought once its router paused it, in order, the rest of a batch
+    // already read among it; no listen is asked while it holds anything, or is paused, a pause
+    // outlasting its connection (spec 15.12)
+    private readonly TransportHold<(Drawn Connection, TransportMessage Message)> _hold = new();
 
     /// <summary>
     /// A transport client, not yet connected, its durations held. An inactivity timeout neither
@@ -157,6 +190,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
         _options = given with
         {
             InactivityTimeout = Clocks.AssertHeld((nameof(HttpTransportClientOptions.InactivityTimeout), nameof(HttpTransportClientOptions.InactivityTimeout)), given.InactivityTimeout),
+            ExchangeTimeout = Clocks.AssertHeld((nameof(HttpTransportClientOptions.ExchangeTimeout), nameof(HttpTransportClientOptions.ExchangeTimeout)), given.ExchangeTimeout),
             Pause = Clocks.AssertHeldDelay((nameof(HttpTransportClientOptions.Pause), nameof(HttpTransportClientOptions.Pause)), given.Pause),
             Wait = Clocks.AssertHeldDelay((nameof(HttpTransportClientOptions.Wait), nameof(HttpTransportClientOptions.Wait)), given.Wait),
         };
@@ -248,7 +282,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     /// <summary>
     /// Connects: the server draws a connection, and its token is kept here, never shown. Refused with
     /// an <see cref="ArgumentOutOfRangeException"/> for a timeout
-    /// <see cref="HttpConnectOptions.Timeout"/> does not take, zero among them, which leaves the state, and the target a
+    /// <see cref="HttpTransportClientConnectOptions.Timeout"/> does not take, zero among them, which leaves the state, and the target a
     /// reconnection replays, as they were; with an <see cref="InvalidOperationException"/> unless
     /// Uninitialized or Closed; and with an <see cref="OperationCanceledException"/>, nothing
     /// changed, when its token is cancelled already.
@@ -256,9 +290,10 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     /// <see cref="OperationCanceledException"/> once its token is cancelled, and an
     /// <see cref="HttpRequestException"/> when the server draws none, ending Closed.
     /// </summary>
-    public Task Connect(HttpConnectOptions options, CancellationToken cancellationToken = default)
+    public Task Connect(HttpTransportClientConnectOptions options)
     {
-        return Connecting(options, (cancellationToken, false));
+        // none refused where the connect refuses it, in its task
+        return Connecting(options, (options?.CancellationToken ?? CancellationToken.None, false));
     }
 
     /// <summary>
@@ -284,6 +319,35 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
             {
                 return _lastConnectOptions is { } given && TransportSecurity.IsSecure((given.Secured, given.Host));
             }
+        }
+    }
+
+    /// <summary>
+    /// Pauses it whole (spec 15.12): it asks no listen, and holds in order what an answer or a batch
+    /// it already read still brings; the server's outbox holds the rest, its bound pacing this side
+    /// (spec 15.9). A pause outlasts its connection, until a resume.
+    /// </summary>
+    public void Pause()
+    {
+        // ! its hold's own lock alone, never one held as it tells
+        _hold.Pause();
+    }
+
+    /// <summary>
+    /// Resumes it: what it held handed on, in order, from a step of its own, never within this
+    /// call; its listen asked again once nothing is held.
+    /// </summary>
+    public void Resume()
+    {
+        if (_hold.Resume())
+        {
+            ThreadPool.QueueUserWorkItem(
+                (client) =>
+                {
+                    client.HandHeld();
+                },
+                this,
+                preferLocal: false);
         }
     }
 
@@ -323,10 +387,10 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     /// <summary>
     /// Deletes the connection — the server ends it first, so what waits there learns it, then what
     /// waits here goes — and raises its close, which says it was clean as
-    /// <see cref="TransportDisconnectOptions.IsClean"/> does; quick, it lets the connection go at once,
+    /// <see cref="TransportClientDisconnectOptions.IsClean"/> does; quick, it lets the connection go at once,
     /// the server told unwaited. Refused with a <see cref="DisconnectException"/> unless Open.
     /// </summary>
-    public async Task CloseConnection(TransportDisconnectOptions? options = null)
+    public async Task CloseConnection(TransportClientDisconnectOptions? options = null)
     {
         var isClean = options?.IsClean ?? true;
         var isQuick = options?.IsQuick ?? false;
@@ -385,11 +449,11 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     /// connection without a close, and raises <see cref="IRouterClientTransport.Reconnect"/> as it
     /// starts — as the WebSocket transport client does, attempt for attempt.
     /// </summary>
-    public async Task Reconnect(TransportReconnectOptions? options = null)
+    public async Task Reconnect(TransportClientReconnectOptions? options = null)
     {
-        var reconnect = options ?? new TransportReconnectOptions();
+        var reconnect = options ?? new TransportClientReconnectOptions();
         var token = reconnect.CancellationToken;
-        HttpConnectOptions target;
+        HttpTransportClientConnectOptions target;
         Drawn? replaced;
         Action? starting;
 
@@ -409,6 +473,10 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
             {
                 throw new InvalidOperationException($"the transport client cannot reconnect while {NameOf(_readyState)}");
             }
+
+            // * a fixed delay held as it is called, after the state's guards and before its token,
+            // so a refused one moves nothing (spec 1.4)
+            TransportReconnection.Held(reconnect);
 
             // before the drop below, so a token cancelled already leaves an open connection alone
             if (token.IsCancellationRequested)
@@ -548,7 +616,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
 
     // http://host:port/pathname, or https://; an IPv6 literal bracketed, or its colons would read as
     // the port's
-    private static Uri UriOf(HttpConnectOptions options)
+    private static Uri UriOf(HttpTransportClientConnectOptions options)
     {
         var host = options.Host.Contains(':') && !options.Host.StartsWith('[') ? $"[{options.Host}]" : options.Host;
         var path = options.Pathname.StartsWith('/') ? options.Pathname : $"/{options.Pathname}";
@@ -711,6 +779,9 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
 
         connection.Exchanges.Cancel();
 
+        // what it held of the connection goes with it; a pause outlasts it
+        _hold.Drop();
+
         if (isReleased)
         {
             Release(connection);
@@ -734,14 +805,18 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
 
     // a connect, or a reconnection's attempt, which its guard alone tells apart: an attempt passes
     // only while the client reconnects, and leaves the state to its reconnection when it fails
-    private async Task Connecting(HttpConnectOptions given, (CancellationToken Token, bool IsAttempt) call)
+    private async Task Connecting(HttpTransportClientConnectOptions given, (CancellationToken Token, bool IsAttempt) call)
     {
         ArgumentNullException.ThrowIfNull(given);
 
         // held before anything moves or is kept, so a reconnection connects again with it held
         var options = given with
         {
-            Timeout = Clocks.AssertHeld(("a connect's timeout", nameof(HttpConnectOptions.Timeout)), given.Timeout),
+            Timeout = Clocks.AssertHeld(("a connect's timeout", nameof(HttpTransportClientConnectOptions.Timeout)), given.Timeout),
+
+            // ! its own connect's, which its call carries: a reconnection replays the rest, never
+            // a token a connect gave
+            CancellationToken = CancellationToken.None,
         };
         var (token, isAttempt) = call;
         var uri = UriOf(options);
@@ -914,6 +989,62 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     private async Task Exchanging((Drawn Connection, TransportMessage Message) sent, TaskCompletionSource settled)
     {
         var (connection, message) = sent;
+
+        // * an envelope that is no request, refused busy, is sent again once its Retry-After
+        // passed: nothing of it was tried, and exchanges keep no order; still refused past its
+        // exchange timeout from its first send, its exchange is lost (spec 15.6, 15.7)
+        var isResent = message.Bytes.Length < 2 || (EnvelopeKind)message.Bytes.Span[1] != EnvelopeKind.Request;
+        var firstAt = _clock.GetTimestamp();
+
+        while (true)
+        {
+            if (await Attempt(sent, settled) is not { } busy)
+            {
+                return;
+            }
+
+            var elapsed = _clock.GetElapsedTime(firstAt);
+
+            // ! never is Timeout.InfiniteTimeSpan, -1 ms, which any time elapsed passes
+            if (!isResent || (_options.ExchangeTimeout != Timeout.InfiniteTimeSpan && elapsed >= _options.ExchangeTimeout))
+            {
+                // refused by the transport before the router saw it: nothing of it was tried
+                settled.SetException(busy.Refused);
+
+                // its exchange lost, still busy past its timeout: told after the refusal is heard,
+                // so its caller learns first that it was never tried
+                if (isResent)
+                {
+                    Lose(connection, true);
+                }
+
+                return;
+            }
+
+            // ! no longer than what is left of its exchange's time, nor than a timer holds: a date
+            // far off resends once, as the time runs out
+            var left = _options.ExchangeTimeout == Timeout.InfiniteTimeSpan
+                ? Clocks.LongestTimer
+                : TimeSpan.FromMilliseconds(Math.Ceiling((_options.ExchangeTimeout - elapsed).TotalMilliseconds));
+            var delay = new[] { busy.RetryAfter, left, Clocks.LongestTimer }.Min();
+
+            await PauseFor((connection, delay), CancellationToken.None);
+
+            // its connection gone meanwhile: as any send whose connection drops
+            if (_drawn != connection)
+            {
+                settled.TrySetResult();
+
+                return;
+            }
+        }
+    }
+
+    // one POST of an envelope, settled as its outcome says; or, refused busy, how long its
+    // Retry-After asks to be waited, with the refusal it would fail with, its send not yet settled
+    private async Task<Busy?> Attempt((Drawn Connection, TransportMessage Message) sent, TaskCompletionSource settled)
+    {
+        var (connection, message) = sent;
         HttpResponseMessage response;
         var attempted = false;
 
@@ -938,14 +1069,14 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
             if (!attempted)
             {
                 settled.SetException(reason);
-                return;
+                return null;
             }
             // lost before its head: whether the server had it is not known, so it counts as handed
             // over, and the connection closes, as a dropped socket's
             settled.SetResult();
             Ended(connection, (true, ExecutorFailureOf(reason, connection.Exchanges.Token)));
 
-            return;
+            return null;
         }
 
         // followed all the same: nothing the other place answered is heard, and whether the server
@@ -956,7 +1087,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
             Lose(connection, true);
             settled.SetResult();
 
-            return;
+            return null;
         }
 
         if (response.IsSuccessStatusCode)
@@ -964,7 +1095,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
             settled.SetResult();
             await Answering((connection, response));
 
-            return;
+            return null;
         }
 
         using (response)
@@ -976,11 +1107,19 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
                 Lose(connection, true);
                 settled.SetResult();
 
-                return;
+                return null;
+            }
+
+            var refused = new IOException($"the server refused the exchange: {(int)response.StatusCode} {refusal}");
+
+            // busy: its caller decides by what it is, and how long it is asked to wait
+            if (refusal == HttpRefusals.Busy && response.StatusCode is HttpStatusCode.TooManyRequests or HttpStatusCode.ServiceUnavailable)
+            {
+                return new Busy(RetryAfterOf(response), refused);
             }
 
             // refused by the transport before the router saw it: nothing of it was tried
-            settled.SetException(new IOException($"the server refused the exchange: {(int)response.StatusCode} {refusal}"));
+            settled.SetException(refused);
 
             // its connection gone: told after the refusal is heard, so its caller learns first that
             // it was never tried
@@ -988,7 +1127,30 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
             {
                 Lose(connection, false);
             }
+
+            return null;
         }
+    }
+
+    // how long a Retry-After asks to be waited: its seconds, or until its date, on the client's
+    // clock (RFC 9110 §10.2.3); one that does not read, or none, the server's own second
+    private TimeSpan RetryAfterOf(HttpResponseMessage response)
+    {
+        var retryAfter = response.Headers.RetryAfter;
+
+        if (retryAfter?.Delta is { } delta)
+        {
+            return delta;
+        }
+
+        if (retryAfter?.Date is { } date)
+        {
+            var left = date - _clock.GetUtcNow();
+
+            return left > TimeSpan.Zero ? left : TimeSpan.Zero;
+        }
+
+        return RetryAfterDefault;
     }
 
     // the answer a 200 carries, read up to an envelope's limit; anything else loses the connection
@@ -1041,7 +1203,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
             // end — lost, or disconnecting — is no answer of this one's
             if (body.Length > 0 && _drawn == connection)
             {
-                Hear(body, false);
+                Hear(connection, (body, false));
             }
         }
     }
@@ -1063,6 +1225,22 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
         {
             while (_drawn == connection)
             {
+                // ! no listen while its router paused it, or while it holds what came: the server's
+                // outbox holds the rest, its bound pacing this side (spec 15.9, 15.12)
+                try
+                {
+                    await _hold.WhenOpen().WaitAsync(connection.Exchanges.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+
+                if (_drawn != connection)
+                {
+                    return;
+                }
+
                 var (listened, failure) = await ListenOnce((connection, cursor));
 
                 if (failure is not null)
@@ -1121,9 +1299,28 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     // an envelope an answer or a listen brought back, which carry no credential, what a listen
     // brought back marked as what may overtake an answer (spec 15.9); a listener that throws stops
     // nothing: its throw is reported through Error, and the client goes on
-    private void Hear(byte[] envelope, bool mayOvertake)
+    private void Hear(Drawn connection, (byte[] Envelope, bool MayOvertake) heard)
     {
-        _listeners.Tell(Message, new TransportMessage(envelope, false) { MayOvertake = mayOvertake });
+        var message = new TransportMessage(heard.Envelope, false) { MayOvertake = heard.MayOvertake };
+
+        // * held while its router paused it, or while anything is held, behind what is held
+        if (_hold.Offer((connection, message)))
+        {
+            _listeners.Tell(Message, message);
+        }
+    }
+
+    // * a resume's step: what it held handed on, in order, each after asking whether its router
+    // paused it again; nothing of a connection gone
+    private void HandHeld()
+    {
+        while (_hold.TryTake(out var held))
+        {
+            if (_drawn == held.Connection)
+            {
+                _listeners.Tell(Message, held.Message);
+            }
+        }
     }
 
     // a wait between two listens, which the connection's end cuts short, and so does the end of the
@@ -1251,7 +1448,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
 
                     cursor.After += 1;
                     heard += 1;
-                    Hear(envelope, true);
+                    Hear(connection, (envelope, true));
                 }
             }
             catch (Exception reason)
@@ -1288,6 +1485,10 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
         Followed,
         Broken,
     }
+
+    // a refusal busy: how long its Retry-After asks to be waited, and what its send fails with when
+    // it is not sent again
+    private sealed record Busy(TimeSpan RetryAfter, IOException Refused);
 
     // the number of the last envelope a listen heard, which the next acknowledges
     private sealed class Cursor

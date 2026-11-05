@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use crate::constants::{FailureScope, ProtocolCode, RouterSide};
 use crate::errors::ProgrammerError;
+use crate::failure::Failure;
 use crate::identity::{Procedure, are_one_name};
 
 #[cfg(test)]
@@ -17,8 +18,14 @@ mod tests;
 /// What an exposition is given as.
 pub const METRICS_CONTENT_TYPE: &str = "text/plain; version=0.0.4; charset=utf-8";
 
-/// The procedures each group of families names at most, when nothing else is given.
-pub const MAXIMUM_PROCEDURES: usize = 1_000;
+// the procedures each group of families names at most, when nothing else is given
+const MAXIMUM_PROCEDURES: usize = 1_000;
+
+/// How a registry is built when its options say nothing: 1000 procedures at most in each group of
+/// families.
+pub const METRICS_REGISTRY_DEFAULTS: MetricsRegistryOptions = MetricsRegistryOptions {
+    maximum_procedures: Some(MAXIMUM_PROCEDURES),
+};
 
 /// How a call ended: its result, a protocol failure by its code, or one of the others.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -65,12 +72,14 @@ impl CallEnding {
 #[non_exhaustive]
 pub struct MetricsRegistryOptions {
     /// The procedures its client families name at most, its server families as many, and its
-    /// notification families as many: [`MAXIMUM_PROCEDURES`] when none, above 0.
+    /// notification families as many: the ones [`METRICS_REGISTRY_DEFAULTS`] states when none,
+    /// above 0.
     pub maximum_procedures: Option<usize>,
 }
 
 /// A registry's exposition: its media type, and its text.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct MetricsExposition {
     /// [`METRICS_CONTENT_TYPE`], which Prometheus 3 requires of a target.
     pub content_type: &'static str,
@@ -452,18 +461,18 @@ impl State {
         procedure: &Procedure,
         groups: &[Group],
     ) -> Result<(u16, u16), ProgrammerError> {
-        let key = (procedure.service_id, procedure.id);
-        let at = format!("{}/{}", procedure.service_id, procedure.id);
+        let key = (procedure.service_id, procedure.procedure_id);
+        let at = format!("{}/{}", procedure.service_id, procedure.procedure_id);
         let quoted = |name: &str| serde_json::to_string(name).unwrap_or_default();
 
         // * a name held at its address is taken as it is, exactly, with no fold
         if let Some(held) = self.entries.get(&key)
-            && held.name != procedure.name
+            && held.name != procedure.procedure_name
         {
             return Err(ProgrammerError::new(format!(
                 "the metrics registry holds {at} as {}, and is given {}: another name at its address",
                 quoted(&held.name),
-                quoted(&procedure.name)
+                quoted(&procedure.procedure_name)
             )));
         }
 
@@ -472,14 +481,14 @@ impl State {
                 self.names.get(&procedure.service_id).and_then(|named| {
                     named
                         .iter()
-                        .find(|(name, _)| are_one_name(name, &procedure.name))
+                        .find(|(name, _)| are_one_name(name, &procedure.procedure_name))
                 })
         {
             return Err(ProgrammerError::new(format!(
                 "the metrics registry holds {} at {}/{procedure_id}, and is given {} at {at}: its name at another address",
                 quoted(name),
                 procedure.service_id,
-                quoted(&procedure.name)
+                quoted(&procedure.procedure_name)
             )));
         }
 
@@ -508,11 +517,11 @@ impl State {
             self.names
                 .entry(procedure.service_id)
                 .or_default()
-                .push((procedure.name.clone(), procedure.id));
+                .push((procedure.procedure_name.clone(), procedure.procedure_id));
             self.entries.insert(
                 key,
                 Entry {
-                    name: procedure.name.clone(),
+                    name: procedure.procedure_name.clone(),
                     ..Entry::default()
                 },
             );
@@ -564,6 +573,11 @@ impl fmt::Debug for ProcedureSeries {
 }
 
 impl ProcedureSeries {
+    #[cfg(test)]
+    pub(crate) fn is_same(&self, other: &Self) -> bool {
+        self.at == other.at && Arc::ptr_eq(&self.state, &other.state)
+    }
+
     /// Counts a call started.
     pub fn start(&self) {
         if let Some(data) = locked(&self.state).calls.get_mut(self.at) {
@@ -614,6 +628,11 @@ fn drop_slot_of(failure: Option<(NonZeroU16, FailureScope)>) -> usize {
 }
 
 impl NotificationSeries {
+    #[cfg(test)]
+    pub(crate) fn is_same(&self, other: &Self) -> bool {
+        self.key == other.key && Arc::ptr_eq(&self.state, &other.state)
+    }
+
     fn with<F: FnOnce(&mut Entry)>(&self, change: F) {
         if let Some(entry) = locked(&self.state).entries.get_mut(&self.key) {
             change(entry);
@@ -622,8 +641,8 @@ impl NotificationSeries {
 
     /// Counts a subscription ended, other than by its client's cancel, by the code and the scope
     /// of its failure, or with none.
-    pub fn dropped(&self, failure: Option<(NonZeroU16, FailureScope)>) {
-        let slot = drop_slot_of(failure);
+    pub fn dropped(&self, failure: Option<&Failure>) {
+        let slot = drop_slot_of(failure.map(|failure| (failure.code(), failure.scope())));
 
         self.with(|entry| {
             if let Some(dropped) = entry
@@ -666,6 +685,7 @@ impl NotificationSeries {
 
 /// What a resolver declared counts into: its calls, and its notifications when it notifies.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ResolverSeries {
     /// Its calls.
     pub calls: ProcedureSeries,

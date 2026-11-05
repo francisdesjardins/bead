@@ -49,6 +49,12 @@ jobs:
       - run: >-
           python -m pip install --disable-pip-version-check -q --require-hashes --only-binary=:all:
           -r spec/requirements.txt
+      # The UCD's files make_validations.py reads, kept between runs: it checks each one's sha256 as it
+      # reads it, and fetches only what the cache lacks.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /tmp/bead-ucd
+          key: ucd-${{ hashFiles('spec/generators/ucd.json') }}
       - run: python spec/generators/make_vectors.py
       - run: python spec/generators/make_conversations.py
       - run: python spec/generators/make_transports.py
@@ -89,9 +95,10 @@ jobs:
 
   # ── TypeScript ───────────────────────────────────────────────────────────────
   # The TypeScript side's own gate: types, lint and its plugin's cases, format, comment budget, doc
-  # examples, the generated `Probe` held to its generator, the generated interop's types and lint,
-  # then its tests, on the current line under coverage, held to the side's floor. The interop
-  # against the C# server runs in the .NET job. On the current line and on the floor
+  # examples, the generated `Probe` held to its generator, its public surface held to
+  # `surface.txt` with its options parameters, the generated interop's types and lint, then its
+  # tests, on the current line under coverage, held to the side's floor. The interop against the C#
+  # server runs in the .NET job. On the current line and on the floor
   # `engines.node` declares, so the floor holds by a run.
   typescript:
     name: TypeScript (Node ${{ matrix.node }})
@@ -166,7 +173,9 @@ jobs:
   # The C# side's gate — `dotnet format --verify-no-changes` holds the layout, the code style and
   # the analyzers, the generated folders left to their generator; `dotnet build` builds every
   # project with every warning an error, the builder's C# goldens among them, which `Bead.Goldens`
-  # compiles under this side's rules as a consumer compiles them; `dotnet test` runs the tests under
+  # compiles under this side's rules as a consumer compiles them, and holds each `src` project's
+  # public surface to its `PublicAPI.Shipped.txt` and `PublicAPI.Unshipped.txt` by
+  # PublicApiAnalyzers; `dotnet test` runs the tests under
   # coverage, held to the side's floor — and the interop, both ways: the C# client against the
   # TypeScript server, which `dotnet test` starts with Node, then the TypeScript client against the
   # C# server; then a page of another origin in Chromium against both sides' HTTP servers, what
@@ -236,9 +245,10 @@ jobs:
   # an error by its .cargo/config.toml, `[build] warnings = "deny"`; its format, its lints, the
   # core's lints on the browser's WebAssembly target, its documentation, a build on the default
   # features alone, where what the test kit alone reaches is left out, its dependencies' advisories,
-  # licences, bans and sources, then its tests and its conformance players under coverage, lines and
-  # regions on the pinned stable, held to the side's floor in tools/coverage-floors.json; and its
-  # fuzz targets built on the nightly pinned by its date, never run. On Windows, its tests alone, as
+  # licences, bans and sources, then its tests, bead-house's holding each library crate's public
+  # surface to its list, and its conformance players under coverage, lines and regions on the pinned
+  # stable, held to the side's floor in tools/coverage-floors.json; and its fuzz targets built on
+  # the nightly pinned by its date, never run. On Windows, its tests alone, as
   # the user's MSVC toolchain builds them. The registry and the target are cached by the lock and
   # the toolchain; every build is `--locked`.
   rust:
@@ -697,9 +707,10 @@ jobs:
   # 0037): the runner `tools/protobuf-conformance/runner.json`
   # pins, fetched and checked by its sha512 as protoc is by its sha256, against each side's testee
   # and its failure list, which the runner holds both ways, then the floor of tests run; then one
-  # corpus of Probe through the TypeScript and C# testees, read alike. A job of its own: it needs
-  # every side's runtime, beadc and protoc, which no other job has together; the Rust testee's JSON
-  # goes through Buffa's dynamic message until Rust's gateway brings Bead's mapping (decision 0044).
+  # corpus of Probe through every side's testee, read alike, compared two by two, after the suite
+  # step that built the Rust testee. A job of its own: it needs every side's runtime, beadc and
+  # protoc, which no other job has together; the Rust testee's JSON goes through Buffa's dynamic
+  # message until Rust's gateway brings Bead's mapping (decision 0044).
   # The C# testee lies outside Bead.slnx, so its format is held here, by name, the code generated
   # into it at run time aside; `CI=true`, the runner's own, restores it locked.
   protobuf-conformance:
@@ -770,7 +781,7 @@ jobs:
       - name: The Rust testee's format
         working-directory: implementations/rust/tools/protobuf-conformance
         run: cargo fmt --check
-      - name: One corpus through both sides
+      - name: One corpus through every side
         run: node tools/protobuf-conformance.mjs differential
 
   # ── protovalidate differential ───────────────────────────────────────────────
@@ -838,10 +849,11 @@ jobs:
   # ── Commits ──────────────────────────────────────────────────────────────────
   # Every commit subject the push or the pull request brings is a Conventional Commit; merges are
   # left out, git-flow writes them. Then every relative link of the repository's Markdown, and its
-  # anchor, resolves; every version agrees with itself, and a release moves each as its changes owe;
-  # the root's tools pass their own tests: here, since the job runs once, on the Node it already
-  # has; and the supply chain holds: every action pinned by its commit, no dependency under a known
-  # advisory, no code under a blocking rule of Semgrep's. `fetch-depth: 0` brings the whole history and every tag, which the subjects' range and each
+  # anchor, resolves; the page site/ builds is the one committed; every version agrees with itself,
+  # and a release moves each as its changes owe; the root's tools pass their own tests: here, since
+  # the job runs once, on the Node it already has; and the supply chain holds: every action pinned
+  # by its commit, no dependency under a known advisory, no code under a blocking rule of Semgrep's.
+  # `fetch-depth: 0` brings the whole history and every tag, which the subjects' range and each
   # version's last release are read from: a clone without its tags fails the versions' floors.
   commits:
     name: Commits
@@ -878,6 +890,20 @@ jobs:
         run: node tools/check-links.mjs
       - name: Check the details
         run: node tools/check-details.mjs
+      # The page francisdesjardins.ca serves at /bead/ is what its build writes from site/, byte for
+      # byte, and each diagram's SVG its source's render, by the hash it records: no browser, nothing
+      # installed.
+      - name: Check the page
+        run: node site/check.mjs
+      # Each side's public names, read from its committed surface list, are one on every side or a
+      # row of tools/names.tsv says how they render, why one is a side's own, or which row of the
+      # support matrix's Differences holds it; the names no reading placed only fall (decision 0047).
+      - name: Check the names
+        run: node tools/check-names.mjs
+      # Every duration an application gives a side through its surface is a place and a way of
+      # spec/durations.json, or says why none, in tools/durations.tsv (decision 0014).
+      - name: Check the durations' members
+        run: node tools/check-durations.mjs
       # Each version agrees with itself, the C# lock files' project ranges included, and a released
       # section of the CHANGELOG stays as its tag shipped it; on a release branch, a pull request
       # into main and main, the release moved each version its changes owe, dated its section, and
@@ -899,7 +925,7 @@ jobs:
             echo "::error title=actions::an action above is not pinned by a commit's full sha"
             exit 1
           fi
-      # Every dependency of every lockfile, the five yarn.lock, the C# side's packages.lock.json,
+      # Every dependency of every lockfile, the six yarn.lock, the C# side's packages.lock.json,
       # the Rust side's Cargo.lock and the spec's requirements.txt, against the advisories OSV
       # knows, the scanner at its digest. A known vulnerability fails the job.
       - name: The dependencies, against the known advisories

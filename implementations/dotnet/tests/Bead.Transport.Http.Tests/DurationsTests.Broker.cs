@@ -5,9 +5,11 @@ namespace Bead.Transport.Http.Tests;
 
 /// <summary>
 /// The places of a broker's transports (spec 15.20, 15.21, 15.23): its participant's heartbeat,
-/// taken or refused as it is built, on the real clock; its server's accept timeout and its parts'
-/// grace, read from the timer each arms on the clock given, as a peer of the tests' own opens a
-/// connection over the in-memory broker; and its client's connect timeout.
+/// taken or refused as it is built, on the real clock; its participant's reconnection delay, heard
+/// by its tap and read from the timer it arms on the clock given once its link went down; its
+/// server's accept timeout and its parts' grace, read from the timer each arms on the clock given,
+/// as a peer of the tests' own opens a connection over the in-memory broker; and its client's
+/// connect timeout.
 /// </summary>
 public sealed partial class DurationsTests
 {
@@ -106,6 +108,114 @@ public sealed partial class DurationsTests
         return Taken();
     }
 
+    // brokerParticipant.reconnectionDelay
+
+    // a function of the previous delay and the attempt
+    private static Task<Observed> ParticipantReconnectionDelayByFunction(TimeSpan? given)
+    {
+        return ParticipantReconnectionDelayBy(given, (delay) =>
+        {
+            return new TransportClientReconnectDelay((_, _) =>
+            {
+                return delay;
+            });
+        });
+    }
+
+    // a number: the wait itself
+    private static Task<Observed> ParticipantReconnectionDelayByNumber(TimeSpan? given)
+    {
+        return ParticipantReconnectionDelayBy(given, (delay) =>
+        {
+            return new TransportClientReconnectDelay(delay);
+        });
+    }
+
+    // the delay in the form given, of a participant whose link went down, its first attempt
+    // refused: the delay its tap hears, armed at its due on the clock it is given, none for at once;
+    // refused, a number as it is built, nothing started, and a function's answer as its report's
+    // inner exception, its link down
+    private static async Task<Observed> ParticipantReconnectionDelayBy(TimeSpan? given, Func<TimeSpan, TransportClientReconnectDelay> delayOf)
+    {
+        var delay = Assert.NotNull(given);
+        var scheduler = new SerialScheduler();
+        var clock = new SteppingClock(Epoch);
+        var adapter = new MemoryBroker(new MemoryBrokerOptions { Scheduler = scheduler }).Adapter(new MemoryBrokerAdapterOptions { Id = "ada" });
+        var form = delayOf(delay);
+        var taps = new System.Collections.Concurrent.ConcurrentQueue<TimeSpan>();
+        var reported = new System.Collections.Concurrent.ConcurrentQueue<Exception>();
+        // what lets a wait the clock never reaches go, once read
+        using var ending = new CancellationTokenSource();
+        BrokerParticipant participant;
+
+        try
+        {
+            participant = new BrokerParticipant(adapter, new BrokerParticipantOptions
+            {
+                Clock = clock,
+                Scheduler = scheduler,
+                Heartbeat = Never,
+                Reconnect = new TransportClientReconnectOptions
+                {
+                    Delay = form,
+                    // ! bounded: at once, it would attempt without end
+                    MaximumAttempts = 2,
+                    CancellationToken = ending.Token,
+                    Tap = (heard, _) =>
+                    {
+                        taps.Enqueue(heard);
+                    },
+                },
+            });
+        }
+        catch (ArgumentOutOfRangeException refused)
+        {
+            Assert.False(adapter.IsLinked);
+
+            return Refused(refused);
+        }
+
+        IReadOnlyList<TimeSpan> dues;
+
+        try
+        {
+            participant.Error += reported.Enqueue;
+            await participant.Start();
+            adapter.Lose();
+
+            // its broker holds its id's link of another start already: its first attempt is refused
+            await adapter.Start();
+
+            var watch = Stopwatch.StartNew();
+
+            while (taps.IsEmpty && reported.IsEmpty && watch.Elapsed < Patience)
+            {
+                await Task.Delay(5, Cancelled);
+            }
+
+            dues = clock.Dues();
+        }
+        finally
+        {
+            await participant.DisposeAsync();
+            await ending.CancelAsync();
+        }
+
+        if (taps.TryPeek(out var held))
+        {
+            // * on the clock it is given: a timer armed at the due its tap heard, none for at once
+            Assert.Equal(held == TimeSpan.Zero ? [] : [held], dues);
+
+            return HeldAt(held);
+        }
+
+        // ! a number's refusal comes as it is built, never at its attempt
+        Assert.Null(form.Fixed);
+        Assert.False(participant.IsLinked);
+
+        return Refused(Assert.IsType<ArgumentOutOfRangeException>(Assert.Single(reported).InnerException));
+    }
+
     // brokerTransportServer.acceptTimeout
 
     // the transport server's options, as it is built: the due of the timer an ACCEPT arms for its
@@ -188,7 +298,7 @@ public sealed partial class DurationsTests
         {
             Connect = (token) =>
             {
-                return client.Connect(new BrokerConnectOptions { Server = "interop", Timeout = Assert.NotNull(given) }, token);
+                return client.Connect(new BrokerTransportClientConnectOptions { Server = "interop", Timeout = Assert.NotNull(given), CancellationToken = token });
             },
             StateOf = () =>
             {

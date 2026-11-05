@@ -43,6 +43,13 @@ public enum OwnFailure
     Failed,
 }
 
+/// <summary>What a failure of the gateway's own is written with besides its failure and its detail.</summary>
+public sealed record OwnProblemOptions
+{
+    /// <summary>The gateway's challenge, which an auth-scheme but <c>Bearer</c> answers; <c>Bearer</c> unless told.</summary>
+    public string? Challenge { get; init; }
+}
+
 /// <summary>Where a failure is answered from, and what a gateway is given to answer it.</summary>
 public sealed record ProblemContext
 {
@@ -56,7 +63,7 @@ public sealed record ProblemContext
     public bool Credential { get; init; }
 
     /// <summary>The gateway's challenge, a <c>SESSION_REQUIRED</c>'s <c>www-authenticate</c>.</summary>
-    public string Challenge { get; init; } = "Bearer";
+    public string Challenge { get; init; } = HttpProblems.DefaultChallenge;
 
     /// <summary>The base its definitions give an application failure's problem type; none gives <c>about:blank</c>.</summary>
     public string? ProblemTypes { get; init; }
@@ -100,6 +107,9 @@ public static partial class HttpProblems
 
     /// <summary>The media type of a problem.</summary>
     public const string MediaType = "application/problem+json";
+
+    // the challenge a gateway answers with unless told, the TypeScript side's DEFAULT_CHALLENGE
+    internal const string DefaultChallenge = "Bearer";
 
     private static readonly Dictionary<int, string> Phrases = new()
     {
@@ -273,8 +283,10 @@ public static partial class HttpProblems
     /// A failure of the gateway's own (transcoding 7.6): <c>about:blank</c>, its status's phrase, its
     /// detail its words, none for what no gate foresaw.
     /// </summary>
-    public static HttpProblem Own(OwnFailure failure, (string Detail, string Challenge) told)
+    public static HttpProblem Own(OwnFailure failure, string detail, OwnProblemOptions? options = null)
     {
+        ArgumentNullException.ThrowIfNull(detail);
+
         var status = failure switch
         {
             OwnFailure.Timeout => 504,
@@ -287,10 +299,10 @@ public static partial class HttpProblems
 
         if (failure == OwnFailure.Scheme)
         {
-            fields["www-authenticate"] = ChallengeOf(told.Challenge, "invalid_request");
+            fields["www-authenticate"] = ChallengeOf(options?.Challenge ?? DefaultChallenge, "invalid_request");
         }
 
-        return new HttpProblem { Status = status, Fields = fields, Body = Refusal(status, told.Detail) };
+        return new HttpProblem { Status = status, Fields = fields, Body = Refusal(status, detail) };
     }
 
     /// <summary>

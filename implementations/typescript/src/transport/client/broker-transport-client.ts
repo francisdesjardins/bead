@@ -24,6 +24,7 @@ import {
   ReadyStateError,
   toError,
 } from '../shared/errors';
+import { createHold } from '../shared/hold';
 import { noop } from '../shared/noop';
 import {
   getReadyState,
@@ -40,6 +41,7 @@ import { dispose } from './symbols';
 import { createTransportClient, DISCONNECT_DEFAULTS, isFieldValue } from './transport-client';
 import type {
   BrokerTransportClient,
+  IBrokerRefusal,
   IBrokerTransportClientConnectOptions,
   IBrokerTransportClientOptions,
 } from './types';
@@ -47,6 +49,7 @@ import type {
 export { TRANSPORT_BROKER } from '../shared/constants';
 export type {
   BrokerTransportClient,
+  IBrokerRefusal,
   IBrokerTransportClientConnectOptions,
   IBrokerTransportClientOptions,
 } from './types';
@@ -92,15 +95,7 @@ export class BrokerRefusedError extends GenericError {
   /** The REFUSE's status; none for `no-subscriber`. */
   public readonly status: number | undefined;
 
-  public constructor({
-    layouts,
-    reason,
-    status,
-  }: {
-    layouts?: readonly number[] | undefined;
-    reason: string;
-    status?: number | undefined;
-  }) {
+  public constructor({ layouts, reason, status }: IBrokerRefusal) {
     super(
       status === undefined
         ? `no participant serves the name: ${reason}`
@@ -127,7 +122,13 @@ const refusedOf = (refusal: BrokerRefusedError): ConnectError => {
  * envelope crosses in DATA parcels, in parts past its server's bound, with the credential a request
  * presents, any field value; a server's DATA that carries one closes the connection with 1002. It is
  * secure while its participant's leg and its server's are; a reconnection opens a new connection
- * through the same name, possibly to another participant.
+ * through the same name, possibly to another participant. Paused by its router, whole, a pause that
+ * outlasts its connection, its participant holds what comes on it, in order, to
+ * `maximumHeldEnvelopeBytes`, and never pauses its link (spec 15.12, 15.23). As its participant
+ * stops, a connect under way fails at once, stopped as it connected, and a reconnection under way
+ * ends, cancelled, the stop its cause; once that stop settled, a connect or a reconnect links it
+ * anew. Once its participant is disposed, a connect or a reconnect is a {@link ProgrammerError}, its
+ * state and its target kept (spec 15.21).
  *
  * @example
  * const client = participant.transportClient();
@@ -150,12 +151,19 @@ export const createBrokerTransportClient = (
       // gives up on the connect in flight, so a dispose under it cannot leave it pending
       let giveUp: ((reason: Error) => void) | undefined;
       let isPeerSecure = false;
+      // * paused whole by its router, a pause outlasting its connection: its participant holds what
+      // comes on the connection, never its link; what came before its connect returned is held here
+      // behind its pause, in order (spec 15.12, 15.23)
+      const hold = createHold((message: ITransportMessage) => {
+        tell(MESSAGE_EVENT, [message]);
+      });
 
       const drop = (): IAttempt | undefined => {
         const attempt = current;
 
         current = undefined;
         client.socket = null;
+        hold.drop();
 
         return attempt;
       };
@@ -181,7 +189,7 @@ export const createBrokerTransportClient = (
                 const message = { data };
 
                 if (current === attempt && attempt.isOpen) {
-                  return (tell(MESSAGE_EVENT, [message]), undefined);
+                  return (hold.offer(message), undefined);
                 }
 
                 if (!attempt.isEnded) {
@@ -224,14 +232,25 @@ export const createBrokerTransportClient = (
           return port.isSecure && isPeerSecure;
         },
 
+        // ! its participant outranks it: once disposed, a connect or a reconnect over it is a misuse,
+        // refused before its state moves or its target is kept (spec 15.21)
         assertConnect: ({ server }) => {
           if (typeof server !== 'string' || !isToken(server)) {
             throw new ProgrammerError(
               `a server's name is a token of base64url's alphabet, 1 to 64 characters, not ${JSON.stringify(server)}`
             );
           }
+
+          if (port.isDisposed) {
+            throw new ProgrammerError(`the participant ${port.id} is disposed`);
+          }
         },
         carries: isFieldValue,
+        // * read as a reconnection is called: one under way, or called while its participant's stop
+        // is, ends as that stop is called, cancelled; one called once it settled reads the next
+        get lifetime() {
+          return port.stopped;
+        },
 
         connect: async ({ server, signal, timeout = CONNECT_DEFAULTS.timeout }) => {
           const attempt: IAttempt = {
@@ -246,12 +265,19 @@ export const createBrokerTransportClient = (
             setReadyStateConnecting(client);
           }
 
-          // * its time from its start: its OPEN lives in its broker what is left of it (spec 15.18)
+          // * its participant's stop current at its call: one called before it settled fails it at
+          // once, whether it awaits its participant's link or its answer (spec 15.21)
+          const { stopped } = port;
+          // its time from its start: its OPEN lives in its broker what is left of it (spec 15.18)
           const startedAt = port.clock.performance.now();
           const timeLeft = (): number | undefined => {
             const left = timeout - (port.clock.performance.now() - startedAt);
 
             return Number.isFinite(left) ? Math.max(1, Math.ceil(left)) : undefined;
+          };
+
+          const overtaken = (): void => {
+            giveUp?.(new ConnectError(`the participant ${port.id} stopped as it connected`));
           };
 
           try {
@@ -262,6 +288,8 @@ export const createBrokerTransportClient = (
                   attempt.isEnded = true;
                   reject(reason);
                 };
+
+                stopped.addEventListener('abort', overtaken, { once: true });
 
                 // * its link up first, within its time (spec 15.15); then its OPEN, its half drawn
                 // anew, and the first answer naming that half
@@ -278,6 +306,11 @@ export const createBrokerTransportClient = (
                     accept: (accepted) => {
                       attempt.release();
                       attempt.connection = connectionOf(attempt, { accepted, opener });
+
+                      if (hold.isPaused) {
+                        attempt.connection.pause();
+                      }
+
                       resolve();
                     },
                     fail: (error) => {
@@ -333,6 +366,7 @@ export const createBrokerTransportClient = (
 
             throw toError(reason);
           } finally {
+            stopped.removeEventListener('abort', overtaken);
             giveUp = undefined;
           }
 
@@ -344,7 +378,7 @@ export const createBrokerTransportClient = (
 
           for (const message of attempt.early.splice(0)) {
             if (current === attempt) {
-              tell(MESSAGE_EVENT, [message]);
+              hold.offer(message);
             }
           }
         },
@@ -372,6 +406,16 @@ export const createBrokerTransportClient = (
           tell(CLOSE_EVENT, [isClean, isQuick]);
 
           return Promise.resolve();
+        },
+
+        pause: () => {
+          hold.pause();
+          current?.connection?.pause();
+        },
+        // what it held here first, then what its participant held, each from a microtask in turn
+        resume: () => {
+          hold.resume();
+          current?.connection?.resume();
         },
 
         send: ({ credential, data }) => {

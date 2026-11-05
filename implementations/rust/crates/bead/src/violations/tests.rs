@@ -7,7 +7,25 @@ use super::{
     CLOSING_BYTES, Judged, Violation, detail_bound_of, is_refused, violations_detail_of,
     violations_of,
 };
-use crate::constants::{FailureScope, ProtocolCode};
+use crate::constants::{FailureScope, ProtocolCode, RouterSide};
+use crate::envelope::FailureRecord;
+use crate::failure::Failure;
+
+mod details;
+mod words;
+
+// a failure of `code` in `scope`, saying `detail`, as a client's router receives it
+fn failure_of((code, scope): (NonZeroU16, FailureScope), detail: &str) -> Failure {
+    Failure::received(
+        &FailureRecord {
+            code,
+            scope,
+            detail: detail.to_owned(),
+            relays: 0,
+        },
+        RouterSide::Client,
+    )
+}
 
 fn violation(rule_id: &str) -> Violation {
     Violation {
@@ -57,7 +75,7 @@ fn writes_each_violation_a_line_then_its_count_and_reads_them_back() {
     };
     let detail = violations_detail_of(&judged, 1_024);
     let invalid = ProtocolCode::PAYLOAD_INVALID.get();
-    let read = violations_of((invalid, FailureScope::Protocol), &detail);
+    let read = violations_of(&failure_of((invalid, FailureScope::Protocol), &detail));
 
     assert_eq!(
         detail.lines().count(),
@@ -79,7 +97,7 @@ fn writes_each_violation_a_line_then_its_count_and_reads_them_back() {
     let other = NonZeroU16::new(64).expect("64 is no zero");
 
     assert!(
-        violations_of((other, FailureScope::Protocol), &detail)
+        violations_of(&failure_of((other, FailureScope::Protocol), &detail))
             .violations
             .is_empty(),
         "none of another code"
@@ -89,7 +107,7 @@ fn writes_each_violation_a_line_then_its_count_and_reads_them_back() {
     let narrow = violations_detail_of(&judged, CLOSING_BYTES);
 
     assert_eq!(
-        violations_of((invalid, FailureScope::Protocol), &narrow).more,
+        violations_of(&failure_of((invalid, FailureScope::Protocol), &narrow)).more,
         Some(5),
         "every one counted: {narrow}"
     );

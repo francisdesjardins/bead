@@ -65,7 +65,7 @@ internal sealed class ServiceLink : IAsyncDisposable
         var link = new ServiceLink(new MemoryTransportServer(), registry);
 
         await link.Transport.Start();
-        await link._client.Connect(new MemoryConnectOptions { Server = link.Transport });
+        await link._client.Connect(new MemoryTransportClientConnectOptions { Server = link.Transport });
 
         return link;
     }
@@ -89,14 +89,14 @@ internal sealed class ServiceLink : IAsyncDisposable
 
         public RouterClient Router { get; }
 
-        public ServiceManager Services { get; }
+        public IServiceManagerClient Services { get; }
 
-        public Task Disconnect(TransportDisconnectOptions? options = null)
+        public Task Disconnect(TransportClientDisconnectOptions? options = null)
         {
             return Task.CompletedTask;
         }
 
-        public Task Reconnect(TransportReconnectOptions? options = null)
+        public Task Reconnect(TransportClientReconnectOptions? options = null)
         {
             return Task.CompletedTask;
         }

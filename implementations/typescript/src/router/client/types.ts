@@ -7,18 +7,16 @@ import type {
   ITransportMessage,
 } from '../../transport/shared/types';
 import type { CredentialScheme } from '../shared/constants';
-import type { IMetricsRegistry, IProcedureSeries } from '../shared/metrics-registry';
+import type { IMetricsRegistry } from '../shared/metrics-registry';
 import type {
-  CallId,
   DebugDirection,
   DefaultCredential,
   ICredentials,
-  INotificationLike,
-  IProcedure,
-  IResolvedRequestOptions,
   IRouterResult,
+  IntakeLimitsOptions,
   IRouterLike,
   IRouterLimits,
+  IRouterRequest,
   RedactedHeader,
   RouterActivity,
   RouterLimitsOptions,
@@ -103,34 +101,7 @@ export interface IRouterClient<
    * a `JWT` or an `ELSEWHERE` over one that is not secure — rejects with a {@link FailureError},
    * DESTINATION_UNREACHABLE, before it goes.
    */
-  request(
-    payload: Uint8Array,
-    request: {
-      /**
-       * Hears the call's id once the router drew it, before the request goes; a call refused before
-       * it draws one is never heard.
-       */
-      onCallId?: ((callId: CallId) => void) | undefined;
-      /**
-       * Hears `true` as the request is handed to the transport, and `false` should the transport
-       * refuse it: before `true`, or after `false`, nothing of it was tried.
-       */
-      onSent?: ((isHanded: boolean) => void) | undefined;
-      options: IResolvedRequestOptions;
-      procedure: IProcedure;
-      /**
-       * What refuses the call once it started, before it goes, as its requester judged it: a value
-       * its rules refuse (spec 18.2). It draws no call id, and its payload goes nowhere.
-       */
-      refusal?: Error | undefined;
-      /**
-       * The series its requester's declaration gave, which a counted call counts into; `_OTHER`'s
-       * when none is given.
-       */
-      series?: IProcedureSeries | undefined;
-      subscribes?: INotificationLike | undefined;
-    }
-  ): Promise<IRouterResult>;
+  request(payload: Uint8Array, request: IRouterRequest): Promise<IRouterResult>;
   /**
    * What `using` calls: stops listening to the transport, rejects every request still waiting with
    * a {@link DisconnectError}, and aborts the signal of each of the server's requests still being
@@ -159,6 +130,12 @@ export interface IRouterClientOptions {
    * no issuer, are a {@link ProgrammerError}.
    */
   credentials?: ICredentials | undefined;
+  /**
+   * What it holds untaken of what its server sent within one task, past which it pauses its
+   * transport, resumed in the next (spec 15.12): {@link INTAKE_DEFAULTS}' where these say nothing,
+   * each 1 at least, or the router is a {@link ProgrammerError}.
+   */
+  intake?: IntakeLimitsOptions | undefined;
   /**
    * How much the router reads, writes and holds: {@link LIMIT_DEFAULTS}' where these say nothing.
    * They must hold together, or the router is a {@link ProgrammerError}.
@@ -195,6 +172,21 @@ export interface IRouterClientTransportLike {
   on(event: 'close', listener: (wasClean: boolean, wasQuick: boolean) => void): unknown;
   on(event: 'message', listener: (message: ITransportMessage) => void): unknown;
   on(event: 'reconnect', listener: () => void): unknown;
+  /**
+   * Pauses it whole, its router behind (spec 15.12, decision 0046): it hands nothing more, and
+   * holds what it already received, whole or still arriving, in order, until `resume`; while it
+   * holds anything, what comes next waits behind it, paused or not. What it holds of a connection
+   * goes with that connection; a pause outlasts it, until a resume. One whose peer is its
+   * application's own code holds without bound, and says so. Idempotent, it tells no listener
+   * within it.
+   */
+  pause(): void;
+  /**
+   * Resumes it: what it holds it hands on, in order, from a later step of its own, never within
+   * this call, asking before each hand whether it was paused again. Idempotent, it tells no
+   * listener within it.
+   */
+  resume(): void;
   send(message: ITransportMessage): Promise<void>;
 }
 

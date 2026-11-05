@@ -10,16 +10,19 @@
 // `prepare`, on a release/* or hotfix/* branch, the product's <version> defaulting to the branch's:
 // moves the TypeScript package's version and the builder's where the tree has one, the C# side's
 // <Version> and the project ranges of its lock files and of an example's, the Rust workspace's
-// version and its members in the workspace's lock and the locks outside it where the tree has them, each document's line and
-// every conformance file's repeat of it, the two versions beadc's header names in each file it
-// generated, the image each committed wrapper of beadc's names and the spec's version in each
-// blueprint beadc wrote outside spec/, every text changed before any is written; runs the
-// generators; dates [Unreleased] as the version, under a new empty one, and links it; then runs the
-// gate as a release, spec/check.py and the root's format check, naming one whose tool is absent;
-// on a hotfix, which starts from main, takes every waiver out of CI's `beadc breaking` step, each
-// moot since the release main holds; and lists what it owes by hand: the CHANGELOG's line on a
-// document's new tag, each of decision 0006's gates owed that names the release, the documents
-// brought to it, and both benches' reports, compared with the last release's.
+// version and its members in the workspace's lock and the locks outside it where the tree has them,
+// each document's line and every conformance file's repeat of it, the two versions beadc's header
+// names in each file it generated, the image each committed wrapper of beadc's names and the spec's
+// version in each blueprint beadc wrote outside spec/; moves each C# project's
+// PublicAPI.Unshipped.txt into its PublicAPI.Shipped.txt, a `*REMOVED*` line taking its symbol out;
+// every text changed before any is written; runs the generators; dates [Unreleased] as the version,
+// under a new empty one, and links it; then runs the gate as a release, spec/check.py and the
+// root's format check, naming one whose tool is absent; on a hotfix, which starts from main, takes
+// every waiver out of CI's `beadc breaking` step, each moot since the release main holds; and lists
+// what it owes by hand: the CHANGELOG's line on a document's new tag, each of decision 0006's gates
+// owed that names the release, the documents brought to it, the run of the benches in CI on the
+// release's branch, each side's comparison with the last release read; and the last fuzzing
+// campaign's run, read.
 // A <move> is x.y.z, patch, minor, major or same, from the document's last release. Run again, it
 // re-dates, regenerates and checks. `tag`, after the finish, <version> defaulting to the newest v*:
 // tags spec-v…, debugging-v… and transcoding-v… at the commit v<version> tags, for each document whose version no
@@ -156,6 +159,70 @@ export const withLockRanges = (text, version) => {
     return `${open}${version}${close}`;
   });
   return { text: moved, count };
+};
+
+// a C# project's public surface, as PublicApiAnalyzers reads it (decisions 0047 and 0006): what
+// the last release shipped, and beside it what changed since, a `*REMOVED*` line taking a symbol
+// away
+export const UNSHIPPED_API = /(?:^|\/)PublicAPI\.Unshipped\.txt$/;
+const REMOVED = '*REMOVED*';
+const NULLABLE = '#nullable enable';
+
+// ! what changed since the last release moved into what it ships, as the analyzer reads the two
+// files: an added line goes into Shipped, a `*REMOVED*` line takes its symbol out of it, and
+// Unshipped keeps its `#nullable enable` alone. Shipped stays in ordinal order, its header first. A
+// line that does not fit, a symbol shipped twice or removed when it never was, is refused, never
+// guessed at. The two texts, and how many lines moved
+export const withApiShipped = ({ shipped, unshipped }) => {
+  const read = (text) => {
+    const lines = text.split('\n').filter((line) => {
+      return line.trim() !== '';
+    });
+    const nullable = lines[0] === NULLABLE;
+    return { nullable, entries: nullable ? lines.slice(1) : lines };
+  };
+  const from = read(unshipped);
+  const into = read(shipped);
+  if (from.nullable !== into.nullable) {
+    throw new Error(
+      `${NULLABLE} heads one of PublicAPI.Shipped.txt and PublicAPI.Unshipped.txt alone`
+    );
+  }
+  const symbols = new Set(into.entries);
+  if (symbols.size !== into.entries.length) {
+    throw new Error('PublicAPI.Shipped.txt lists a symbol twice');
+  }
+  const removed = from.entries.filter((entry) => {
+    return entry.startsWith(REMOVED);
+  });
+  const added = from.entries.filter((entry) => {
+    return !entry.startsWith(REMOVED);
+  });
+  // the removals first, so a symbol taken away and given again in one release ships once
+  for (const line of removed) {
+    if (!symbols.delete(line.slice(REMOVED.length))) {
+      throw new Error(`${line}: PublicAPI.Shipped.txt holds no such symbol`);
+    }
+  }
+  for (const line of added) {
+    if (symbols.has(line)) {
+      throw new Error(`${line}: PublicAPI.Shipped.txt holds it already`);
+    }
+    symbols.add(line);
+  }
+  const header = into.nullable ? [NULLABLE] : [];
+  const lines = (entries) => {
+    return entries
+      .map((entry) => {
+        return `${entry}\n`;
+      })
+      .join('');
+  };
+  return {
+    shipped: lines([...header, ...[...symbols].sort()]),
+    unshipped: lines(header),
+    count: from.entries.length,
+  };
 };
 
 // the first line of what beadc generates (decision 0022): beadc's version, the source, the
@@ -324,10 +391,21 @@ export const GATES = 'docs/decisions/0006-a-rule-has-its-gate.md';
 // the records' index: a tree that keeps it owes its documents brought to each release
 export const RECORDS = 'docs/decisions/README.md';
 
-// the benches' comparison: a tree that keeps it owes each release both benches' reports, kept in
-// REPORTS, which git ignores, and compared with the last release's, made on the same machine
-export const BENCH = 'tools/bench-compare.mjs';
-export const REPORTS = '.bench';
+// the benches' run in CI (decision 0006): a tree that keeps it owes each release the run on its
+// branch's commit read, each side's comparison with the last release, never a gate of the release
+export const BENCH = '.github/workflows/bench.yml';
+
+// the line that owes the run of the benches on the release's branch its reading
+export const benchOwed = (branch) => {
+  return `owed by hand: the run of ${BENCH} on ${branch}'s commit, each side's comparison with the last release read and a regression judged from its report, never a gate, as \`gh run list --workflow bench.yml --branch ${branch} --limit 1\` lists it`;
+};
+
+// the weekly fuzzing campaign (decision 0006): a tree that keeps it owes each release its last
+// run read, never a gate of the release
+export const FUZZ = '.github/workflows/fuzz.yml';
+
+// the line that owes the last fuzzing campaign's run its reading
+export const FUZZ_OWED = `owed by hand: the last run of ${FUZZ}, its findings read, each a case of its side's tests, as \`gh run list --workflow fuzz.yml --limit 1\` lists it`;
 
 // a line that runs `beadc breaking`, read whole
 const BREAKING = /\b(?:cli\.ts|beadc(?:\.sh|\.ps1)?) breaking\b/;
@@ -587,6 +665,33 @@ export const prepare = (root, options = {}) => {
       `no project range, "Bead.<Name>": "[x.y.z, )", in the ${locks.length} lock files of implementations/dotnet and examples`
     );
   }
+  // * each C# project's public surface: what changed since the last release becomes what this one
+  // ships, so the analyzer reads the next change against it
+  let shippedLines = 0;
+  let shippedProjects = 0;
+  for (const unshippedPath of listed.filter((path) => {
+    return UNSHIPPED_API.test(path);
+  })) {
+    const shippedPath = unshippedPath.replace(/Unshipped\.txt$/, 'Shipped.txt');
+    const shipped = readText(join(root, shippedPath));
+    if (shipped === null) {
+      throw new Error(`${shippedPath}: no such file, beside ${unshippedPath}`);
+    }
+    let moved;
+    try {
+      moved = withApiShipped({ shipped, unshipped: readText(join(root, unshippedPath)) });
+    } catch (error) {
+      throw new Error(`${unshippedPath}: ${error.message}`);
+    }
+    stage(shippedPath, () => {
+      return moved.shipped;
+    });
+    stage(unshippedPath, () => {
+      return moved.unshipped;
+    });
+    shippedLines += moved.count;
+    shippedProjects += moved.count > 0 ? 1 : 0;
+  }
   // every file beadc generated, known by its first line, outside the builder, whose goldens take
   // today's versions in their own test
   const outside = listed.filter((path) => {
@@ -678,6 +783,11 @@ export const prepare = (root, options = {}) => {
 
   // what follows, which it does none of
   log(`${summary} (${ranges} project ranges in ${holding} lock files)`);
+  if (shippedLines > 0) {
+    log(
+      `shipped: ${shippedLines} lines of PublicAPI.Unshipped.txt in ${shippedProjects} C# projects, each into its PublicAPI.Shipped.txt`
+    );
+  }
   const owed = DOCUMENTS.filter((document) => {
     const facts = releases.documents[document.id];
     return document.id in plan.documents && plan.documents[document.id] !== facts.last?.version;
@@ -700,12 +810,10 @@ export const prepare = (root, options = {}) => {
     );
   }
   if (existsSync(join(root, BENCH))) {
-    const kept = `${REPORTS}/v${product}-typescript.json and -csharp.json`;
-    log(
-      last === null
-        ? `owed by hand: both benches run through tools/bench-release.mjs, their reports kept as ${kept} (README.md, "Measurement")`
-        : `owed by hand: both benches run through tools/bench-release.mjs, their reports kept as ${kept}, each compared with ${last.name}'s on the machine that made them; regression and inconclusive measures confirmed by interleaving before the finish (README.md, "Measurement")`
-    );
+    log(benchOwed(branch));
+  }
+  if (existsSync(join(root, FUZZ))) {
+    log(FUZZ_OWED);
   }
   if (first) {
     log(`next: git add -A && git commit -m "chore(release): ${product}"`);

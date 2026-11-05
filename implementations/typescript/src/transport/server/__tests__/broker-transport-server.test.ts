@@ -96,7 +96,7 @@ test.describe('createBrokerTransportServer', () => {
     const opened: TransportServerConnectionHandle[] = [];
     const halfOpen: number[] = [];
 
-    server.on('connection', (...[peer, request, connectionHandle]) => {
+    server.on('connection', (...[{ request, socket: peer }, connectionHandle]) => {
       expect([peer.id, request]).toEqual(['ada', undefined]);
       opened.push(connectionHandle);
     });
@@ -199,7 +199,7 @@ test.describe('createBrokerTransportServer', () => {
     using router = createRouterServer(server);
     using routerClient = createRouterClient(client);
 
-    createServiceManager(routerClient).getRequestResolver(echo, {
+    createServiceManager(routerClient).getCommandResolver(echo, {
       serializer: PAYLOAD_CODECS.text,
     })((request, response) => {
       return response(request.payload);
@@ -428,6 +428,54 @@ test.describe('createBrokerTransportServer', () => {
     await Promise.all([participant.stop(), ada.stop()]);
   });
 
+  // spec 15.12.17: a router whose release is its next task's resumes a connection that may be gone
+  test('lets be a pause and a resume its router asks of a connection gone, its participant holding a paused one in order', async () => {
+    const broker = createMemoryBroker();
+    const participant = createBrokerParticipant({ adapter: broker.adapter({ id: 'server' }) });
+    const server = participant.transportServer({ names: ['interop'] });
+    const ada = createBrokerParticipant({ adapter: broker.adapter({ id: 'ada' }) });
+    const client = ada.transportClient();
+    const told: number[] = [];
+
+    server.on('message', ({ data }) => {
+      told.push(...(data as Uint8Array));
+    });
+    await server.start();
+    await client.connect({ server: 'interop' });
+    await turn();
+
+    const handle = server.clients[0]?.connectionHandle ?? 'type=BROKER;participant=ada;ordinal=1';
+
+    server.pause(handle);
+
+    for (const byte of [1, 2]) {
+      await client.send({ data: Uint8Array.of(byte) });
+    }
+
+    await until(() => {
+      return told.length > 0;
+    });
+
+    expect(told).toEqual([]);
+
+    server.resume(handle);
+    await until(() => {
+      return told.length === 2;
+    });
+
+    expect(told).toEqual([1, 2]);
+
+    // * a router's late resume of a connection gone: let be
+    await client.disconnect();
+    await turn();
+    server.pause(handle);
+    server.resume(handle);
+
+    expect(server.clients).toEqual([]);
+
+    await Promise.all([participant.stop(), ada.stop()]);
+  });
+
   test('starts once its broker holds each name it serves, fails its start on a name refused, and stops once it let each go', async () => {
     const broker = createMemoryBroker();
     const adapter = broker.adapter({ id: 'server' });
@@ -511,14 +559,26 @@ test.describe('createBrokerTransportServer', () => {
     await turn();
     expect([isStopped, server.gauges().counts['names']]).toEqual([false, 1]);
 
-    // * one its broker refuses to let go is reported, and its stop settles all the same
+    // * one its broker refuses to let go is reported, and counted still, and its stop settles all
+    // the same
     unsubscribing[1]?.refuse(new Error('its broker refused to let bead/s/bob go: 0x80'));
     await stopping;
     expect([server.gauges().counts['names'], reported]).toEqual([
-      0,
+      1,
       ['its broker refused to let bead/s/bob go: 0x80'],
     ]);
-    await participant.stop();
+
+    // * its participant's stop lets it go again, and its stopped clears it
+    const ending = participant.stop();
+
+    expect(
+      answers.map(({ what }) => {
+        return what;
+      })
+    ).toEqual(['unsubscribe bead/s/bob']);
+    answers.shift()?.settle();
+    await ending;
+    expect(server.gauges().counts['names']).toBe(0);
 
     // a name its broker refuses fails the start, and is not held
     const other = createBrokerParticipant({
@@ -535,6 +595,84 @@ test.describe('createBrokerTransportServer', () => {
     await expect(refused.start()).rejects.toThrow('0x87');
     expect(refused.gauges().counts['names']).toBe(0);
     await other.stop();
+  });
+
+  test('a server’s transport that stops hands each name’s unsubscription before each CLOSE of 1001, and settles once its broker let each go (spec 15.21)', async () => {
+    const broker = createMemoryBroker();
+    const adapter = broker.adapter({ id: 'server' });
+    // what its participant asks of its adapter, in its order, but its peers' departures, each
+    // name's unsubscription held until the test answers it
+    const log: string[] = [];
+    const letting: (() => void)[] = [];
+    const held = Object.assign(Object.create(adapter) as IBrokerAdapter, {
+      publish: (publication: Parameters<IBrokerAdapter['publish']>[0]) => {
+        log.push(`publish ${publication.topic.join('/')}`);
+
+        return adapter.publish(publication);
+      },
+      unsubscribe: (topic: BrokerTopic) => {
+        if (topic[1] !== 's') {
+          return adapter.unsubscribe(topic);
+        }
+
+        log.push(`unsubscribe ${topic.join('/')}`);
+
+        return new Promise<void>((resolve, reject) => {
+          letting.push(() => {
+            adapter.unsubscribe(topic).then(resolve, reject);
+          });
+        });
+      },
+    });
+    const participant = createBrokerParticipant({ adapter: held });
+    const server = participant.transportServer({ names: ['ada', 'bob'] });
+    const clients = createBrokerParticipant({ adapter: broker.adapter({ id: 'client' }) });
+    const closes: boolean[] = [];
+    const client = clients.transportClient();
+
+    client.on('close', (wasClean) => {
+      closes.push(wasClean);
+    });
+    await server.start();
+    await client.connect({ server: 'ada' });
+    await until(() => {
+      return server.clients.length === 1;
+    });
+
+    const from = log.length;
+    let isStopped = false;
+    const stopping = server.stop().then(() => {
+      isStopped = true;
+    });
+
+    // * in its turn, each name's unsubscription, then each CLOSE: nothing waits for its broker
+    await until(() => {
+      return log.length - from === 3;
+    });
+    expect(log.slice(from), "each name's unsubscription, then its CLOSE").toEqual([
+      'unsubscribe bead/s/ada',
+      'unsubscribe bead/s/bob',
+      'publish bead/i/client',
+    ]);
+    await until(() => {
+      return closes.length === 1;
+    });
+    expect(closes, 'closed with 1001').toEqual([false]);
+    await turn();
+    expect([isStopped, server.gauges().counts['names']], 'counted to its UNSUBACK').toEqual([
+      false,
+      2,
+    ]);
+
+    // * settled once its broker let each go, its participant's link kept
+    letting.shift()?.();
+    await turn();
+    expect([isStopped, server.gauges().counts['names']], 'one let go').toEqual([false, 1]);
+    letting.shift()?.();
+    await stopping;
+    expect(server.gauges().counts['names'], 'none held').toBe(0);
+    expect(participant.isLinked, "its participant's link kept").toBe(true);
+    await Promise.all([participant.stop(), clients.stop()]);
   });
 
   test('serves its name again in its group once a connection closes as its broker lets it go, and reports a name its broker refuses to let go or to serve again', async () => {
@@ -597,7 +735,8 @@ test.describe('createBrokerTransportServer', () => {
     });
     expect(server.gauges().counts['names']).toBe(1);
 
-    // * one its broker refuses to let go is reported
+    // * one its broker refuses to let go is reported, and held still: served again, it asks
+    // nothing, counted
     const second = clients.transportClient();
 
     await second.connect({ server: 'interop' });
@@ -608,9 +747,25 @@ test.describe('createBrokerTransportServer', () => {
     await until(() => {
       return reported.length > 0;
     });
-
-    // and one its broker refuses to serve again is reported, and left unheld
     await second.disconnect();
+    await until(() => {
+      return closes.length > 1;
+    });
+    await turn();
+    expect([answers.length, server.gauges().counts['names']]).toEqual([0, 1]);
+
+    // and one its broker refuses to serve again, once it let it go, is reported, and left unheld
+    const third = clients.transportClient();
+
+    await third.connect({ server: 'interop' });
+    await until(() => {
+      return asked('unsubscribe bead/s/interop') === 1;
+    });
+    answers.shift()?.settle();
+    await until(() => {
+      return server.gauges().counts['names'] === 0;
+    });
+    await third.disconnect();
     await until(() => {
       return asked('subscribe bead/s/interop') === 1;
     });
@@ -628,5 +783,22 @@ test.describe('createBrokerTransportServer', () => {
     ]);
     expect(server.gauges().counts['names']).toBe(0);
     await Promise.all([clients.stop(), participant.stop()]);
+  });
+
+  // spec 15.21
+  test('refuses its start once its participant is disposed, its state kept', async () => {
+    const broker = createMemoryBroker();
+    const participant = createBrokerParticipant({ adapter: broker.adapter({ id: 'ada' }) });
+    const server = participant.transportServer({ names: ['interop'] });
+
+    await participant.start();
+    await participant[Symbol.asyncDispose]();
+
+    // * a misuse, refused before anything moves: its state kept
+    const refused = server.start();
+
+    await expect(refused, 'a misuse').rejects.toBeInstanceOf(ProgrammerError);
+    await expect(refused, 'its words').rejects.toThrow('the participant ada is disposed');
+    expect(server.isUninitialized(), 'its state kept').toBe(true);
   });
 });

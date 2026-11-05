@@ -13,14 +13,15 @@ use bytes::Bytes;
 
 use super::locked;
 use super::server::{Served, first};
+use crate::RouterRequest;
 use crate::clock::{Clock, Schedule, SharedClock, Timer, TimerCallback};
 use crate::constants::ProcedureKind;
 use crate::envelope::{CreditHeader, Envelope, ResultHeader};
 use crate::identity::Procedure;
-use crate::managers::service::{ResolverDependencies, Response};
+use crate::managers::service::{RequestResolverDependencies, Response};
 use crate::payloads::RawCodec;
-use crate::router::client::{ClientRequest, RouterClient, RouterClientOptions};
-use crate::router::server::{CallHooks, RouterServerOptions};
+use crate::router::client::{RouterClient, RouterClientOptions};
+use crate::router::server::RouterServerOptions;
 use crate::router::types::{RouterLimitsOptions, TransportMessage};
 use crate::testing::SteppingClock;
 use crate::testing::hexadecimal;
@@ -88,7 +89,11 @@ impl Clock for HandFired {
         self.clock.wall()
     }
 
-    fn arm(&self, schedule: Schedule, callback: TimerCallback) -> Arc<dyn Timer> {
+    fn arm(
+        &self,
+        schedule: Schedule,
+        callback: TimerCallback,
+    ) -> Result<Arc<dyn Timer>, crate::errors::ProgrammerError> {
         let cancelled = Arc::new(AtomicBool::new(false));
 
         locked(&self.armed).push(Armed {
@@ -97,7 +102,7 @@ impl Clock for HandFired {
             cancelled: Arc::clone(&cancelled),
         });
 
-        Arc::new(HandTimer(cancelled))
+        Ok(Arc::new(HandTimer(cancelled)))
     }
 
     fn activity(&self) -> Option<Arc<crate::testing::Activity>> {
@@ -137,17 +142,20 @@ fn served_on(
     );
     let procedure = Procedure {
         service_id: 1,
-        id,
+        procedure_id: id,
         service_revision: 1,
-        name: "large".to_owned(),
-        kind: Some(ProcedureKind::Request),
+        procedure_name: "large".to_owned(),
+        procedure_kind: Some(ProcedureKind::Request),
         maximum_payload_bytes: None,
         deprecation: None,
     };
 
     served
         .services
-        .get_request_resolver(&procedure, ResolverDependencies::of(RawCodec, RawCodec))
+        .get_request_resolver(
+            &procedure,
+            RequestResolverDependencies::new(RawCodec, RawCodec),
+        )
         .expect("resolved")
         .on(Arc::new(move |_request, response: Response<RawCodec>| {
             response.result(Bytes::from_static(answer))
@@ -262,7 +270,7 @@ async fn ends_nothing_by_a_timer_that_fired_as_a_credit_set_it_going_again() {
     let clock = HandFired::new();
     let shared: SharedClock = Arc::<HandFired>::clone(&clock);
     let transport = ScriptedClient::new(shared);
-    let carried: Arc<dyn crate::transport::ClientTransport> =
+    let carried: Arc<dyn crate::transport::RouterClientTransport> =
         Arc::<ScriptedClient>::clone(&transport);
     let router = RouterClient::new(
         carried,
@@ -275,16 +283,15 @@ async fn ends_nothing_by_a_timer_that_fired_as_a_credit_set_it_going_again() {
     let call = router
         .request(
             Bytes::from(vec![7; 200]),
-            (
-                ClientRequest {
-                    procedure: crate::testing::pair::echo(),
-                    options: super::options_of(Duration::from_secs(60)),
-                    series: None,
-                    refusal: None,
-                    subscribes: None,
-                },
-                CallHooks::default(),
-            ),
+            RouterRequest {
+                procedure: crate::testing::pair::echo(),
+                options: super::options_of(Duration::from_secs(60)),
+                series: None,
+                refusal: None,
+                subscribes: None,
+                on_call_id: None,
+                on_sent: None,
+            },
         )
         .expect("a call");
 

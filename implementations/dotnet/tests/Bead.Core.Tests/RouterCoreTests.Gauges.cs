@@ -69,9 +69,9 @@ public sealed partial class RouterCoreTests
             },
         };
 
-        await server.Core.Respond(RouterAnswer.OfPayload(ReadOnlyMemory<byte>.Empty), new AnswerTarget("a", RequestOf(1)))
+        await server.Core.Respond(RouterAnswer.OfPayload(ReadOnlyMemory<byte>.Empty), await server.Open(1, "a"))
             .WaitAsync(Patience, TestContext.Current.CancellationToken);
-        await server.Core.Respond(RouterAnswer.OfPayload(ReadOnlyMemory<byte>.Empty), new AnswerTarget("b", RequestOf(3)))
+        await server.Core.Respond(RouterAnswer.OfPayload(ReadOnlyMemory<byte>.Empty), await server.Open(3, "b"))
             .WaitAsync(Patience, TestContext.Current.CancellationToken);
         Assert.Equal(["a", "b"], (await GaugesOf(server)).ConnectionHandles.Order());
         Assert.Equal(2, (await GaugesOf(server)).Counts["announced"]);

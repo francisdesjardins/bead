@@ -33,12 +33,22 @@ public sealed class ProtoRecordsTests
         return Convert.FromHexString(hexadecimal.Replace(" ", "", StringComparison.Ordinal));
     }
 
+    // bytes refused, a FormatException of not its message, as a codec's reader refuses
     private static void Refuses(string hexadecimal)
     {
-        Assert.Throws<FormatException>(() =>
+        Assert.Equal(ProtoRecords.NotItsMessage, Assert.Throws<FormatException>(() =>
         {
             ProtoRecords.Check(BytesOf(hexadecimal), Probe.Descriptor);
-        });
+        }).Message);
+    }
+
+    // bytes refused for their depth, a FormatException of nested past 100
+    private static void RefusesNested(byte[] bytes)
+    {
+        Assert.Equal(ProtoRecords.NestedPast100, Assert.Throws<FormatException>(() =>
+        {
+            ProtoRecords.Check(bytes, Probe.Descriptor);
+        }).Message);
     }
 
     // a record of field 'tag' given whole, its length before it
@@ -233,6 +243,34 @@ public sealed class ProtoRecordsTests
 
     // spec 17.9.1
     [Fact]
+    public void Refuses_a_varint_of_10_bytes_past_64_bits_known_unknown_or_packed()
+    {
+        foreach (var hex in new[]
+        {
+            "10 FF FF FF FF FF FF FF FF FF 02",
+            "48 80 80 80 80 80 80 80 80 80 02",
+            "52 0A FF FF FF FF FF FF FF FF FF 02",
+            "1A 0B 20 80 80 80 80 80 80 80 80 80 7F",
+        })
+        {
+            // * the check's refusal, where Google.Protobuf would drop the bits past the 64th: its
+            // reason 17.2's words, the record it refused in its inner exception
+            var refusal = Assert.Throws<FormatException>(() =>
+            {
+                ProtoRecords.Check(BytesOf(hex), Probe.Descriptor);
+            });
+
+            Assert.Equal("not its message", refusal.Message);
+            Assert.Equal("a proto payload is not its message: a varint past 64 bits", refusal.InnerException?.Message);
+        }
+
+        // a 10th byte of 0x01 is the 64th bit, within
+        ProtoRecords.Check(BytesOf("10 FF FF FF FF FF FF FF FF FF 01"), Probe.Descriptor);
+        ProtoRecords.Check(BytesOf("48 80 80 80 80 80 80 80 80 80 01"), Probe.Descriptor);
+    }
+
+    // spec 17.9.1
+    [Fact]
     public void Refuses_a_tag_of_more_than_5_bytes_or_past_32_bits()
     {
         Refuses("90 80 80 80 80 00 07");
@@ -266,22 +304,13 @@ public sealed class ProtoRecordsTests
     {
         // * by child, by group, by map's entry, which holds its value one deeper, and by unknown group
         ProtoRecords.Check(Nested(100, Child), Probe.Descriptor);
-        Assert.Throws<FormatException>(() =>
-        {
-            ProtoRecords.Check(Nested(101, Child), Probe.Descriptor);
-        });
+        RefusesNested(Nested(101, Child));
 
         ProtoRecords.Check(Nested(100, Group), Probe.Descriptor);
-        Assert.Throws<FormatException>(() =>
-        {
-            ProtoRecords.Check(Nested(101, Group), Probe.Descriptor);
-        });
+        RefusesNested(Nested(101, Group));
 
         ProtoRecords.Check(Nested(50, Entry), Probe.Descriptor);
-        Assert.Throws<FormatException>(() =>
-        {
-            ProtoRecords.Check(Nested(51, Entry), Probe.Descriptor);
-        });
+        RefusesNested(Nested(51, Entry));
 
         // ! an entry below 98 children holds its value at 100; below 99, at 101
         var entry = Entry([]);
@@ -292,16 +321,10 @@ public sealed class ProtoRecordsTests
         }
 
         ProtoRecords.Check(entry, Probe.Descriptor);
-        Assert.Throws<FormatException>(() =>
-        {
-            ProtoRecords.Check(Child(entry), Probe.Descriptor);
-        });
+        RefusesNested(Child(entry));
 
         ProtoRecords.Check([.. Enumerable.Repeat((byte)0x23, 100), .. Enumerable.Repeat((byte)0x24, 100)], Probe.Descriptor);
-        Assert.Throws<FormatException>(() =>
-        {
-            ProtoRecords.Check([.. Enumerable.Repeat((byte)0x23, 101), .. Enumerable.Repeat((byte)0x24, 101)], Probe.Descriptor);
-        });
+        RefusesNested([.. Enumerable.Repeat((byte)0x23, 101), .. Enumerable.Repeat((byte)0x24, 101)]);
     }
 
     [Fact]

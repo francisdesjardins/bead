@@ -5,6 +5,7 @@
 import { CLOSE_EVENT, MESSAGE_EVENT } from '../shared/constants';
 import { createPromise } from '../shared/create-promise';
 import { ConnectError, ProgrammerError, ReadyStateError, toError } from '../shared/errors';
+import { createHold } from '../shared/hold';
 import {
   getReadyState,
   ReadyState,
@@ -14,7 +15,12 @@ import {
   setReadyStateOpen,
 } from '../shared/ready-state';
 import { transferableOf } from '../shared/transferable';
-import type { IMemoryEndLike, IMemoryPeerLike, ITransportMessage } from '../shared/types';
+import type {
+  IMemoryEndLike,
+  IMemoryPeerLike,
+  IMemoryTransportServerLike,
+  ITransportMessage,
+} from '../shared/types';
 import { dispose } from './symbols';
 import { createTransportClient, DISCONNECT_DEFAULTS, isFieldValue } from './transport-client';
 import type {
@@ -42,7 +48,7 @@ export type {
 export const CONNECT_DEFAULTS = Object.freeze({
   address: 'local',
   timeout: 10_000,
-} satisfies IMemoryTransportClientConnectOptions);
+} satisfies Omit<IMemoryTransportClientConnectOptions, 'server'>);
 
 // an address a handle can name: visible ASCII but `;`, which ends a handle's part
 const ADDRESS = /^[!-:<-~]+$/u;
@@ -51,26 +57,27 @@ const ADDRESS = /^[!-:<-~]+$/u;
 
 /**
  * A transport client to an in-memory transport server of the same process (spec 15.13): `connect`
- * hands its server an end of its own, with the address and port it is given, and opens once the
- * server drew the connection. Each envelope crosses as a copy, whole, once and in order, in a later
- * turn than its send, with the credential a request presents beside it, any field value; nothing
- * the server sends carries one.
+ * hands the server it is given an end of its own, with the address and port it is given, and opens
+ * once the server drew the connection; a reconnection connects to that server again, as every
+ * transport connects again where its last connect went. Each envelope crosses as a copy, whole,
+ * once and in order, in a later turn than its send, with the credential a request presents beside
+ * it, any field value; nothing the server sends carries one.
  *
  * It never leaves the process, so it is secure; it holds no bound or heartbeat of its own, and a
- * connect's timeout alone. `disconnect` closes the connection, its server told in a later turn,
+ * connect's timeout alone. Paused by its router, it holds what its server sends, in order, without
+ * bound, and hands it on once resumed (spec 15.12). `disconnect` closes the connection, its server told in a later turn,
  * clean as the close said; a server that closes it is heard as a `close`, not clean at this end.
  *
  * @example
- * const client = createMemoryTransportClient({ server });
+ * const client = createMemoryTransportClient();
  * client.on('message', ({ data }) => {});
- * await client.connect({ address: '192.0.2.7', port: 50_000 });
+ * await client.connect({ address: '192.0.2.7', port: 50_000, server });
  * await client.send({ credential: 'Bearer token', data: envelope });
  * await client.disconnect();
  */
 export const createMemoryTransportClient = ({
   clock,
-  server,
-}: IMemoryTransportClientOptions): MemoryTransportClient => {
+}: IMemoryTransportClientOptions = {}): MemoryTransportClient => {
   return createTransportClient<IMemoryEndLike, IMemoryTransportClientConnectOptions>(
     (client, { tell }) => {
       // the open connection: this client's end, and its server's
@@ -78,12 +85,18 @@ export const createMemoryTransportClient = ({
       // gives up on the connect in flight, so a dispose under it cannot leave it pending, nor let it
       // open once its connection was drawn
       let giveUp: ((reason: Error) => void) | undefined;
+      // what its router paused it for, held in order without bound, its peer its application's own
+      // code; what a connection holds goes with it, its pause outlasting it (spec 15.12, 15.13)
+      const hold = createHold((message: ITransportMessage) => {
+        tell(MESSAGE_EVENT, [message]);
+      });
 
       const drop = (): IMemoryEndLike | undefined => {
         const end = current?.end;
 
         current = undefined;
         client.socket = null;
+        hold.drop();
 
         return end;
       };
@@ -92,7 +105,14 @@ export const createMemoryTransportClient = ({
         clock,
         isSecure: true,
 
-        assertConnect: ({ address = CONNECT_DEFAULTS.address, port }) => {
+        assertConnect: ({ address = CONNECT_DEFAULTS.address, port, server }) => {
+          // what its type requires, and a caller in JavaScript may still leave out
+          if (typeof (server as IMemoryTransportServerLike | undefined)?.accept !== 'function') {
+            throw new ProgrammerError(
+              "an in-memory connect's server is an in-memory transport server"
+            );
+          }
+
           if (typeof address !== 'string' || !ADDRESS.test(address)) {
             throw new ProgrammerError(
               "an in-memory connect's address is visible ASCII but ';', at least one character"
@@ -110,6 +130,7 @@ export const createMemoryTransportClient = ({
         connect: async ({
           address = CONNECT_DEFAULTS.address,
           port,
+          server,
           signal,
           timeout = CONNECT_DEFAULTS.timeout,
         }) => {
@@ -147,7 +168,7 @@ export const createMemoryTransportClient = ({
             },
             receive: (message) => {
               if (isCurrent()) {
-                return (tell(MESSAGE_EVENT, [message]), undefined);
+                return (hold.offer(message), undefined);
               }
 
               // what comes once this end closed is dropped, as a socket's would be
@@ -242,7 +263,7 @@ export const createMemoryTransportClient = ({
 
           for (const message of early) {
             if (isCurrent()) {
-              tell(MESSAGE_EVENT, [message]);
+              hold.offer(message);
             }
           }
         },
@@ -267,6 +288,13 @@ export const createMemoryTransportClient = ({
           tell(CLOSE_EVENT, [isClean, isQuick]);
 
           return Promise.resolve();
+        },
+
+        pause: () => {
+          hold.pause();
+        },
+        resume: () => {
+          hold.resume();
         },
 
         // ! the bytes copied now, so a sender that reuses its buffer changes nothing on its way

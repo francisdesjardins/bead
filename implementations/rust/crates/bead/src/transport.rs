@@ -11,6 +11,7 @@ use core::task::{Context, Poll};
 use core::time::Duration;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Mutex, PoisonError};
+use std::time::SystemTime;
 
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
@@ -112,11 +113,11 @@ pub struct TransportServerRefusal {
 }
 
 impl TransportServerRefusal {
-    /// A refusal of `status` and `reason` of the client at `address`, nothing else of it told.
+    /// A refusal of `status` and `reason`, nothing else of it told.
     #[must_use]
-    pub fn of<R: Into<String>>((status, reason): (u16, R), address: Option<String>) -> Self {
+    pub fn new<R: Into<String>>(status: u16, reason: R) -> Self {
         Self {
-            address,
+            address: None,
             authority: None,
             origin: None,
             port: None,
@@ -124,6 +125,23 @@ impl TransportServerRefusal {
             status,
         }
     }
+}
+
+/// A connection a transport server holds, as it tells it: its handle, the address and the port its
+/// client gave, when it last delivered an envelope, and its transport's type.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct TransportServerClient {
+    /// The handle its transport drew.
+    pub connection_handle: ConnectionHandle,
+    /// The client's address, as its transport read it: over a broker, its participant's id.
+    pub address: String,
+    /// The client's port; none when its transport gives none, as over a broker.
+    pub port: Option<u16>,
+    /// When it last delivered an envelope, as its server's clock read it; none before its first.
+    pub last_activity: Option<SystemTime>,
+    /// Its transport's type: [`crate::TRANSPORT_MEMORY`] or [`crate::TRANSPORT_BROKER`].
+    pub transport_type: &'static str,
 }
 
 /// What hears a transport server's events.
@@ -169,6 +187,23 @@ pub trait ServerTransport: Send + Sync + fmt::Debug {
     /// Hears its events no more.
     fn unlisten(&self, listener: &Arc<dyn ServerListener>);
 
+    /// Pauses `connection_handle`, its router behind on it (spec 15.12, decision 0046): it hands
+    /// nothing more of that connection, and holds what it already received, whole or still
+    /// arriving, in order, until it is resumed; while it holds anything, what comes next waits
+    /// behind it, paused or not, so nothing overtakes what is held. A transport whose peer is its
+    /// application's own code holds without bound, and says so.
+    ///
+    /// Idempotent, it never blocks and tells no listener within it. Its router calls it under the
+    /// lock of its counts, from a reader's thread or its own turn, so it takes no lock that this
+    /// transport holds while it tells a listener.
+    fn pause(&self, connection_handle: &ConnectionHandle);
+
+    /// Resumes `connection_handle`: what it holds it hands on, in order, from a later step of its
+    /// own, never within this call, asking before each hand whether it was paused again. As
+    /// [`ServerTransport::pause`], idempotent, never blocking, telling no listener within it, and
+    /// taking no lock this transport holds while it tells one.
+    fn resume(&self, connection_handle: &ConnectionHandle);
+
     /// The clock it runs on, which the layers above it run on too.
     fn clock(&self) -> Option<SharedClock> {
         None
@@ -190,6 +225,10 @@ pub trait ServerTransport: Send + Sync + fmt::Debug {
     }
 
     /// Starts it.
+    ///
+    /// # Errors
+    ///
+    /// A [`RouterError`] when its options or state are refused, or its listener cannot start.
     fn start(&self) -> BoxFuture<Result<(), RouterError>>;
 
     /// Stops it, closing every connection; settles at once when it never started or stopped
@@ -230,7 +269,7 @@ pub trait ClientListener: Send + Sync {
 }
 
 /// A transport client, as a router reaches it.
-pub trait ClientTransport: Send + Sync + fmt::Debug {
+pub trait RouterClientTransport: Send + Sync + fmt::Debug {
     /// Hands an envelope's bytes over, with the credential it carries beside it.
     ///
     /// # Errors
@@ -243,6 +282,23 @@ pub trait ClientTransport: Send + Sync + fmt::Debug {
 
     /// Hears its events no more.
     fn unlisten(&self, listener: &Arc<dyn ClientListener>);
+
+    /// Pauses it whole, its router behind (spec 15.12, decision 0046): it hands nothing more, and
+    /// holds what it already received, whole or still arriving, in order, until it is resumed;
+    /// while it holds anything, what comes next waits behind it, paused or not. What it holds of a
+    /// connection is dropped with that connection; a pause outlasts it, until a resume. A transport
+    /// whose peer is its application's own code holds without bound, and says so.
+    ///
+    /// Idempotent, it never blocks and tells no listener within it. Its router calls it under the
+    /// lock of its counts, from a reader's thread or its own turn, so it takes no lock that this
+    /// transport holds while it tells a listener.
+    fn pause(&self);
+
+    /// Resumes it: what it holds it hands on, in order, from a later step of its own, never within
+    /// this call, asking before each hand whether it was paused again. As
+    /// [`RouterClientTransport::pause`], idempotent, never blocking, telling no listener within it, and
+    /// taking no lock this transport holds while it tells one.
+    fn resume(&self);
 
     /// The clock it runs on.
     fn clock(&self) -> Option<SharedClock> {
@@ -269,31 +325,36 @@ pub trait ClientTransport: Send + Sync + fmt::Debug {
 }
 
 /// How a transport client's connection closes.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
-pub struct DisconnectOptions {
+pub struct TransportClientDisconnectOptions {
     /// Whether by its own word: `true` when none.
     pub is_clean: Option<bool>,
     /// Whether without a wait: `false` when none.
     pub is_quick: Option<bool>,
 }
 
-/// The delay between two attempts of a reconnection: one for all, or one each attempt gives,
-/// from the delay before it and its number.
+/// What gives the delay before an attempt of a reconnection, from the delay before it, none before
+/// the first, and the attempt's number, from 1.
+pub type TransportClientReconnectDelayResolver =
+    Arc<dyn Fn(Option<Duration>, u32) -> Duration + Send + Sync>;
+
+/// The delay between two attempts of a reconnection: one for all, or one its resolver gives each
+/// attempt.
 #[derive(Clone)]
 #[non_exhaustive]
-pub enum ReconnectDelay {
+pub enum TransportClientReconnectDelay {
     /// The same delay each time.
     Fixed(Duration),
-    /// A delay each attempt gives.
-    Computed(Arc<dyn Fn(Option<Duration>, u32) -> Duration + Send + Sync>),
+    /// A delay its resolver gives each attempt.
+    Resolver(TransportClientReconnectDelayResolver),
 }
 
-impl fmt::Debug for ReconnectDelay {
+impl fmt::Debug for TransportClientReconnectDelay {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Fixed(delay) => formatter.debug_tuple("Fixed").field(delay).finish(),
-            Self::Computed(_) => formatter.write_str("Computed"),
+            Self::Resolver(_) => formatter.write_str("Resolver"),
         }
     }
 }
@@ -301,30 +362,44 @@ impl fmt::Debug for ReconnectDelay {
 /// How long a connect waits for its server when it names no timeout.
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// The delay between two attempts when none is given.
-pub const RECONNECT_DELAY: Duration = Duration::from_secs(1);
+// the delay between two attempts when none is given
+const RECONNECT_DELAY: Duration = Duration::from_secs(1);
 
-/// The attempts a reconnection makes when none is given.
-pub const RECONNECT_ATTEMPTS: u32 = 5;
+// the attempts a transport client's reconnection makes when none is given
+const RECONNECT_ATTEMPTS: u32 = 5;
 
-/// How a transport client reconnects.
+/// How a transport client reconnects when its options say nothing: 5 attempts at most, 1 s apart;
+/// a broker participant's link goes without end.
+pub const RECONNECT_DEFAULTS: TransportClientReconnectOptions = TransportClientReconnectOptions {
+    delay: Some(TransportClientReconnectDelay::Fixed(RECONNECT_DELAY)),
+    maximum_attempts: Some(RECONNECT_ATTEMPTS),
+    signal: None,
+    tap: None,
+};
+
+/// How a transport client reconnects, or a broker participant's link.
 #[derive(Clone, Default)]
 #[non_exhaustive]
-pub struct ReconnectOptions {
-    /// The delay between two attempts: [`RECONNECT_DELAY`] when none.
-    pub delay: Option<ReconnectDelay>,
-    /// The attempts it makes at most: [`RECONNECT_ATTEMPTS`] when none.
+pub struct TransportClientReconnectOptions {
+    /// The delay between two attempts: the one [`RECONNECT_DEFAULTS`] states when none. A fixed one
+    /// out of bounds is refused where it is given (spec 1.4); a resolver's answer is held at each
+    /// attempt. One of 0 arms no timer, its next attempt in a later turn of its tokio runtime.
+    pub delay: Option<TransportClientReconnectDelay>,
+    /// The attempts it makes at most: its owner's default when none, the ones
+    /// [`RECONNECT_DEFAULTS`] states for a transport client's reconnection, without end for a broker
+    /// participant's.
     pub maximum_attempts: Option<u32>,
-    /// What cancels it.
+    /// What cancels it, read before each attempt and during each wait: a transport client's attempt
+    /// under way is handed it, a broker participant's is not cut short.
     pub signal: Option<CancellationToken>,
     /// Hears each delay as it is armed, and the attempt it follows.
     pub tap: Option<Arc<dyn Fn(Duration, u32) + Send + Sync>>,
 }
 
-impl fmt::Debug for ReconnectOptions {
+impl fmt::Debug for TransportClientReconnectOptions {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("ReconnectOptions")
+            .debug_struct("TransportClientReconnectOptions")
             .field("delay", &self.delay)
             .field("maximum_attempts", &self.maximum_attempts)
             .finish_non_exhaustive()
@@ -448,6 +523,12 @@ impl<L: ?Sized> Listened<Arc<L>> {
 pub(crate) struct Panicked {
     what: &'static str,
     message: String,
+}
+
+impl Panicked {
+    pub(crate) fn message(&self) -> &str {
+        &self.message
+    }
 }
 
 impl fmt::Display for Panicked {
@@ -581,6 +662,23 @@ impl Future for Connect {
     }
 }
 
+/// Holds the delay `options` gives, where it is given: a fixed one out of bounds is refused (spec
+/// 1.4); a resolver's answer is held at each attempt.
+///
+/// # Errors
+///
+/// A [`ProgrammerError`] whose reason is a duration's refusal.
+pub(crate) fn hold_reconnection(
+    options: &TransportClientReconnectOptions,
+) -> Result<(), ProgrammerError> {
+    match &options.delay {
+        Some(TransportClientReconnectDelay::Fixed(delay)) => {
+            hold_delay("a delay", *delay).map(drop)
+        }
+        Some(TransportClientReconnectDelay::Resolver(_)) | None => Ok(()),
+    }
+}
+
 /// Whether `first` settles before `second`.
 pub(crate) async fn first_of<A: Future, B: Future>((first, second): (A, B)) -> bool {
     let mut first = core::pin::pin!(first);
@@ -600,16 +698,42 @@ pub(crate) async fn first_of<A: Future, B: Future>((first, second): (A, B)) -> b
     .await
 }
 
+/// A signal cancelled once `first` or `second` is: a child of `first`, and what watches `second`,
+/// for its caller to cover. The watch ends once either is cancelled, or once the joined signal is,
+/// which its holder cancels as it is done with it.
+pub(crate) fn joined(
+    first: &CancellationToken,
+    second: Option<CancellationToken>,
+) -> (
+    CancellationToken,
+    Option<impl Future<Output = ()> + Send + 'static>,
+) {
+    let joined = first.child_token();
+    let watching = second.map(|second| {
+        let joining = joined.clone();
+
+        async move {
+            if first_of((second.cancelled(), joining.cancelled())).await {
+                joining.cancel();
+            }
+        }
+    });
+
+    (joined, watching)
+}
+
 /// A reconnection's attempts, on `clock`, as `options` says: the first at once, each next one after
-/// its delay, each made by `attempt`, given the reconnection's signal. It ends once one opened; with
-/// a [`TransportError::Reconnect`] once its attempts ran out; at once for a misuse an attempt met,
-/// which the next would meet again; and cancelled once its signal is.
+/// its delay, at a delay of 0 in a later turn of its runtime, never within the one its last failed
+/// in, each made by `attempt`, given the reconnection's signal, which is read before each. It
+/// ends once one opened; with a [`TransportError::Reconnect`] once its attempts ran out; at once for
+/// a misuse an attempt met, which the next would meet again, or a delay or a tap that panicked; and
+/// cancelled once its signal is.
 ///
 /// # Errors
 ///
 /// As above.
 pub(crate) async fn attempting<A, F>(
-    (clock, options): (&SharedClock, &ReconnectOptions),
+    (clock, options): (&SharedClock, &TransportClientReconnectOptions),
     mut attempt: A,
 ) -> Result<(), TransportError>
 where
@@ -619,7 +743,7 @@ where
     let delay = options
         .delay
         .clone()
-        .unwrap_or(ReconnectDelay::Fixed(RECONNECT_DELAY));
+        .unwrap_or(TransportClientReconnectDelay::Fixed(RECONNECT_DELAY));
     let maximum_attempts = options.maximum_attempts.unwrap_or(RECONNECT_ATTEMPTS);
     let signal = options.signal.clone();
     let is_cancelled = || signal.as_ref().is_some_and(CancellationToken::is_cancelled);
@@ -627,13 +751,18 @@ where
     let mut number = 0_u32;
 
     loop {
+        // * read before each attempt, the first included: an attempt under way is not cut short
+        if is_cancelled() {
+            return Err(TransportError::cancelled(RECONNECTION_CANCELLED));
+        }
+
         number = number.saturating_add(1);
 
         match attempt(signal.clone()).await {
             Ok(()) => return Ok(()),
             Err(reason) => {
                 if is_cancelled() {
-                    return Err(TransportError::Cancelled(RECONNECTION_CANCELLED.to_owned()));
+                    return Err(TransportError::cancelled(RECONNECTION_CANCELLED));
                 }
 
                 // a misuse an attempt met, the next would meet again
@@ -651,66 +780,65 @@ where
         }
 
         let next = match &delay {
-            ReconnectDelay::Fixed(delay) => *delay,
-            ReconnectDelay::Computed(delay_of) => {
-                let computed = catch_unwind(AssertUnwindSafe(|| delay_of(previous, number)));
-
-                computed.map_err(|_panicked| {
-                    TransportError::Refused(ProgrammerError::new("a reconnection's delay panicked"))
-                })?
+            TransportClientReconnectDelay::Fixed(delay) => *delay,
+            TransportClientReconnectDelay::Resolver(delay_of) => {
+                // * what it panicked with alone, as the other sides report what it throws
+                caught(("a reconnection's delay", || delay_of(previous, number))).map_err(
+                    |panicked| TransportError::Refused(ProgrammerError::new(panicked.message())),
+                )?
             }
         };
-        // held before tap hears it: 0 waits none, and never would wait for ever
+        // held before tap hears it: 0 arms none, and never would wait for ever
         let next = hold_delay("a delay", next)?;
         // armed before tap is told, so whoever moves the clock once told moves it past the wait;
-        // none armed for at once
-        let (woken, wait) = oneshot::channel::<()>();
-        let mut woken = Some(woken);
-        let timer = if next.is_zero() {
-            if let Some(woken) = woken.take() {
-                woken.send(()).ok();
-            }
+        // none at 0, which takes a turn of its runtime once told instead
+        let armed = (!next.is_zero())
+            .then(|| {
+                let (woken, wait) = oneshot::channel::<()>();
+                let mut woken = Some(woken);
+                let timer = clock.arm(
+                    Schedule::Once(next),
+                    Box::new(move || {
+                        if let Some(woken) = woken.take() {
+                            woken.send(()).ok();
+                        }
+                    }),
+                );
 
-            None
-        } else {
-            Some(clock.arm(
-                Schedule::Once(next),
-                Box::new(move || {
-                    if let Some(woken) = woken.take() {
-                        woken.send(()).ok();
-                    }
-                }),
-            ))
-        };
-        let cancel_timer = || {
-            if let Some(timer) = &timer {
+                timer.map(|timer| (timer, wait))
+            })
+            .transpose()?;
+
+        if let Some(tap) = &options.tap
+            && let Err(panicked) = caught(("a reconnection's tap", || tap(next, number)))
+        {
+            if let Some((timer, _wait)) = &armed {
                 timer.cancel();
             }
-        };
 
-        if let Some(tap) = &options.tap {
-            let tapped = catch_unwind(AssertUnwindSafe(|| tap(next, number)));
-
-            if tapped.is_err() {
-                cancel_timer();
-
-                return Err(TransportError::Refused(ProgrammerError::new(
-                    "a reconnection's tap panicked",
-                )));
-            }
+            return Err(TransportError::Refused(ProgrammerError::new(
+                panicked.message(),
+            )));
         }
 
         previous = Some(next);
 
+        // * at 0, a turn of its runtime between two attempts, never none: an attempt refused at once
+        // would otherwise run the reconnection within one poll, broken by tokio's budget alone
+        let Some((timer, wait)) = armed else {
+            crate::platform::yield_now().await;
+
+            continue;
+        };
         let is_woken = match &signal {
             Some(signal) => !first_of((signal.cancelled(), wait)).await,
             None => wait.await.is_ok(),
         };
 
         if !is_woken {
-            cancel_timer();
+            timer.cancel();
 
-            return Err(TransportError::Cancelled(RECONNECTION_CANCELLED.to_owned()));
+            return Err(TransportError::cancelled(RECONNECTION_CANCELLED));
         }
     }
 }

@@ -8,11 +8,13 @@ public sealed class HealthTests
 {
     // constants
 
-    private static readonly LayerGauges Quiet = new(
-        [],
-        new Dictionary<string, long>(),
-        new Dictionary<string, long>(),
-        0);
+    private static readonly LayerGauges Quiet = new LayerGauges
+    {
+        Anomalies = [],
+        Ceilings = new Dictionary<string, long>(),
+        Counts = new Dictionary<string, long>(),
+        Orphans = 0,
+    };
 
     // helpers
 
@@ -20,7 +22,7 @@ public sealed class HealthTests
         (LayerGauges? Router, LayerGauges? Sessions) above,
         LayerGauges? transport)
     {
-        return new ServerGauges(above.Router ?? Quiet, Quiet, above.Sessions ?? Quiet, transport ?? Quiet);
+        return new ServerGauges { Router = above.Router ?? Quiet, Server = Quiet, Sessions = above.Sessions ?? Quiet, Transport = transport ?? Quiet };
     }
 
     // a transport's gauges: its connections, under a ceiling of `ceiling`
@@ -81,9 +83,9 @@ public sealed class HealthTests
             }),
             (check) =>
             {
-                Assert.Equal([new HealthCheck(0, HealthStatus.Pass)], check.Value);
+                Assert.Equal([new HealthCheck { ObservedValue = 0, Status = HealthStatus.Pass }], check.Value);
             });
-        Assert.Equal([new HealthCheck(7, HealthStatus.Pass, "7 of 10")], health.Checks["transport:connections"]);
+        Assert.Equal([new HealthCheck { ObservedValue = 7, Status = HealthStatus.Pass, Output = "7 of 10" }], health.Checks["transport:connections"]);
     }
 
     [Fact]
@@ -92,16 +94,16 @@ public sealed class HealthTests
         var near = Health.Of(LayersOf((null, null), ConnectionsOf((8, 10))));
 
         Assert.Equal(HealthStatus.Warn, near.Status);
-        Assert.Equal([new HealthCheck(8, HealthStatus.Warn, "8 of 10")], near.Checks["transport:connections"]);
+        Assert.Equal([new HealthCheck { ObservedValue = 8, Status = HealthStatus.Warn, Output = "8 of 10" }], near.Checks["transport:connections"]);
         Assert.Equal(0.8, Health.WarningRatio);
 
         var failing = Health.Of(LayersOf((Quiet with { Orphans = 2 }, Quiet with { Anomalies = ["one", "two"] }), ConnectionsOf((9, 10))));
 
         Assert.Equal(HealthStatus.Fail, failing.Status);
         Assert.Equal(
-            [new HealthCheck(2, HealthStatus.Fail, "2 connections kept that the transport no longer holds")],
+            [new HealthCheck { ObservedValue = 2, Status = HealthStatus.Fail, Output = "2 connections kept that the transport no longer holds" }],
             failing.Checks["router:orphans"]);
-        Assert.Equal([new HealthCheck(2, HealthStatus.Fail, "one; two")], failing.Checks["sessions:anomalies"]);
+        Assert.Equal([new HealthCheck { ObservedValue = 2, Status = HealthStatus.Fail, Output = "one; two" }], failing.Checks["sessions:anomalies"]);
 
         // a warning after a failure leaves it the worst
         Assert.Equal(HealthStatus.Fail, Health.Of(LayersOf((Quiet with { Orphans = 1 }, null), ConnectionsOf((1, 1)))).Status);

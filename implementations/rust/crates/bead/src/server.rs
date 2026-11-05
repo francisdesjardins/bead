@@ -6,29 +6,30 @@ use core::fmt;
 use core::time::Duration;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
+use std::time::SystemTime;
 
-use serde_json::Value;
 use tokio::runtime::Handle;
 
-use crate::clock::{SharedClock, SystemClock, Timer, clock_of};
+use crate::clock::{LayeredClocks, SharedClock, SystemClock, Timer, clock_of};
 use crate::constants::ProtocolCode;
 use crate::credentials::Credentials;
 use crate::duration::{NEVER, hold};
 use crate::errors::{CallError, ProgrammerError};
 use crate::managers::notification::PacingLimitsOptions;
-use crate::managers::service::{
-    RequestDefaults, ServiceManager, ServiceManagerOptions, ServiceRouter,
-};
+use crate::managers::service::{RequestDefaults, ServiceManagerOptions, ServiceManagerServer};
 use crate::managers::sessions::{
-    Arming, Inactivity, Session, SessionEvent, SessionManager, SessionManagerOptions,
+    Arming, Inactivity, Session, SessionEvent, SessionManagerOptions, SessionState,
 };
 use crate::metrics::MetricsRegistry;
 use crate::ordered::Ordered;
 use crate::owner::WeakOwner;
 use crate::router::admissions::require_credential;
+use crate::router::core::{self as router_core, Side};
 use crate::router::relay::RelayOptions;
 use crate::router::server::{RouterServer, RouterServerOptions, ServerState, end_session};
-use crate::router::types::{BoxFuture, ConnectionHandle, Gauges, RouterError, RouterLimitsOptions};
+use crate::router::types::{
+    BoxFuture, ConnectionHandle, Gauges, IntakeLimitsOptions, RouterError, RouterLimitsOptions,
+};
 use crate::session_token::SessionToken;
 use crate::transport::{Listened, ListenerId, ServerTransport};
 
@@ -58,6 +59,9 @@ pub struct ServerOptions {
     pub metrics_registry: Option<MetricsRegistry>,
     /// What a paced subscription queues at most.
     pub pacing: Option<PacingLimitsOptions>,
+    /// What its router holds of each connection untaken, past which it pauses that connection
+    /// (spec 15.12).
+    pub intake: Option<IntakeLimitsOptions>,
     /// Its router's relay's options: its admission, `require_credential` when none.
     pub relay: Option<RelayOptions>,
     /// Its sessions' defaults, and their clock, which must be its own.
@@ -79,7 +83,7 @@ impl fmt::Debug for ServerOptions {
 
 /// What a server keeps beside its router, in its router's owner.
 pub(crate) struct Facade {
-    pub(crate) sessions: SessionManager,
+    pub(crate) sessions: SessionState,
     // the connections the transport holds: only these keep a session
     connections: Ordered<ConnectionHandle, ()>,
     // the connections being closed, so each is asked to close once
@@ -112,7 +116,7 @@ impl Arming for SessionArming {
         &self,
         due: Duration,
         (inactivity, connection_handle): (Inactivity, ConnectionHandle),
-    ) -> Arc<dyn Timer> {
+    ) -> Result<Arc<dyn Timer>, ProgrammerError> {
         // * cancelled once it fired, as a touch restarts it, its job does nothing
         self.owner
             .after((&self.clock, due), move |state: &mut ServerState| {
@@ -136,17 +140,8 @@ fn arming_of(state: &ServerState) -> SessionArming {
     }
 }
 
-fn wall_of(state: &ServerState) -> i64 {
-    wall_milliseconds(sessions_clock_of(state))
-}
-
-fn wall_milliseconds(clock: &SharedClock) -> i64 {
-    clock
-        .wall()
-        .duration_since(std::time::SystemTime::UNIX_EPOCH)
-        .map_or(0, |since| {
-            i64::try_from(since.as_millis()).unwrap_or(i64::MAX)
-        })
+fn wall_of(state: &ServerState) -> SystemTime {
+    crate::managers::sessions::wall_of(sessions_clock_of(state))
 }
 
 // what happened to the sessions, told: the server's own reaction first, which may tell more, then
@@ -237,10 +232,10 @@ fn react(state: &mut ServerState, event: &SessionEvent) {
 
             told(state, events);
         }
-        SessionEvent::DataChanged(..)
-        | SessionEvent::LastActivityChanged(..)
-        | SessionEvent::ConnectionInactivityTimeoutChanged(..)
-        | SessionEvent::SessionInactivityTimeoutChanged(..) => {}
+        SessionEvent::DataChanged { .. }
+        | SessionEvent::LastActivityChanged { .. }
+        | SessionEvent::ConnectionInactivityTimeoutChanged { .. }
+        | SessionEvent::SessionInactivityTimeoutChanged { .. } => {}
     }
 }
 
@@ -252,7 +247,7 @@ fn stored(state: &mut ServerState, handle: &ConnectionHandle) {
         .is_some_and(|facade| facade.listens.contains_key(handle));
 
     if is_listening {
-        hold_session(state, handle);
+        keep_session(state, handle);
     }
 }
 
@@ -304,15 +299,20 @@ fn close(state: &mut ServerState, handle: &ConnectionHandle) {
         return;
     }
 
-    let closing = transport.close(handle);
+    let closing = crate::transport::caught(("a transport's close", || transport.close(handle)));
     let owner = state.core.owner.clone();
     let handle = Arc::clone(handle);
 
     state.core.owner.cover(async move {
-        let is_closed = closing.await;
+        let outcome = match closing {
+            Ok(closing) => crate::transport::caught_future(("a transport's close", closing)).await,
+            Err(panicked) => Err(panicked),
+        };
         owner.offer(Box::new(move |state: &mut ServerState| {
-            if !is_closed {
-                forget_connection(state, &handle);
+            match outcome {
+                Ok(false) => forget_connection(state, &handle),
+                Ok(true) => {}
+                Err(panicked) => state.listeners.report(&panicked.into(), Some(&handle)),
             }
 
             if let Some(facade) = state.facade.as_mut() {
@@ -339,13 +339,24 @@ fn wait(state: &mut ServerState, handle: &ConnectionHandle) {
         })
     });
 
+    let timer = match timer.transpose() {
+        Ok(timer) => timer,
+        Err(error) => {
+            state.report(
+                router_core::reported_call(CallError::Refused(error)),
+                handle,
+            );
+            close(state, handle);
+            return;
+        }
+    };
     if let Some(facade) = state.facade.as_mut() {
         facade.idle.insert(Arc::clone(handle), timer);
     }
 }
 
 // a session's connection timer, stopped while a listen is held; its session timer runs on
-fn hold_session(state: &mut ServerState, handle: &ConnectionHandle) {
+fn keep_session(state: &mut ServerState, handle: &ConnectionHandle) {
     let arming = arming_of(state);
 
     if let Some(facade) = state.facade.as_mut() {
@@ -383,16 +394,25 @@ pub(crate) fn on_message(state: &mut ServerState, handle: &ConnectionHandle) {
 
     facade.connections.insert(Arc::clone(handle), ());
 
-    let touched = facade
-        .sessions
-        .touch((handle, now), (&arming, &mut events))
-        .is_some();
+    let touched = facade.sessions.touch((handle, now), (&arming, &mut events));
     let is_listening = facade.listens.contains_key(handle);
+    let touched = match touched {
+        Ok(session) => session.is_some(),
+        Err(error) => {
+            state.report(
+                router_core::reported_call(CallError::Refused(error)),
+                handle,
+            );
+            close(state, handle);
+            told(state, events);
+            return;
+        }
+    };
 
     if !touched {
         wait(state, handle);
     } else if is_listening {
-        hold_session(state, handle);
+        keep_session(state, handle);
     }
 
     told(state, events);
@@ -455,7 +475,7 @@ pub(crate) fn on_listen(state: &mut ServerState, (is_held, handle): (bool, &Conn
     if before == 0 && is_idle {
         wait(state, handle);
     } else if before == 0 {
-        hold_session(state, handle);
+        keep_session(state, handle);
     }
 }
 
@@ -590,7 +610,7 @@ pub struct Health {
 
 /// A layer's gauges, set against `held`, the connections its transport holds.
 #[must_use]
-pub fn layer_gauges_of(gauges: Gauges, held: &BTreeSet<ConnectionHandle>) -> LayerGauges {
+pub(crate) fn layer_gauges_of(gauges: Gauges, held: &BTreeSet<ConnectionHandle>) -> LayerGauges {
     let orphans = gauges
         .connection_handles
         .iter()
@@ -607,7 +627,7 @@ pub fn layer_gauges_of(gauges: Gauges, held: &BTreeSet<ConnectionHandle>) -> Lay
 
 /// The health its gauges give.
 #[must_use]
-pub fn health_of(gauges: &ServerGauges) -> Health {
+pub(crate) fn health_of(gauges: &ServerGauges) -> Health {
     let mut checks = BTreeMap::new();
     let mut status = HealthStatus::Pass;
     let mut check = |name: String, found: HealthCheck| {
@@ -686,14 +706,16 @@ pub fn health_of(gauges: &ServerGauges) -> Health {
 
 /// A server's sessions: a handle to its router's owner, which holds them.
 #[derive(Clone)]
-pub struct Sessions {
+pub struct SessionManager {
     router: RouterServer,
     listeners: Arc<Listened<SessionListener>>,
 }
 
-impl fmt::Debug for Sessions {
+impl fmt::Debug for SessionManager {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.debug_struct("Sessions").finish_non_exhaustive()
+        formatter
+            .debug_struct("SessionManager")
+            .finish_non_exhaustive()
     }
 }
 
@@ -706,16 +728,19 @@ fn on_owner<T: Send + 'static, J: FnOnce(&mut ServerState) -> T + Send + 'static
     Box::pin(async move { pending.await.unwrap_or(otherwise) })
 }
 
-impl Sessions {
+impl SessionManager {
     /// A session of `connection_handle`, not stored: holding nothing, never timed out, its
     /// activity now.
     #[must_use]
     pub fn create(&self, connection_handle: ConnectionHandle) -> Session {
-        Session::new(connection_handle, wall_milliseconds(&self.router.clock()))
+        Session::new(
+            connection_handle,
+            crate::managers::sessions::wall_of(&self.router.clock()),
+        )
     }
 
     /// Hears what happens to its sessions from now on; the id given takes it off again, with
-    /// [`Sessions::off`].
+    /// [`SessionManager::off`].
     pub fn on(&self, listener: SessionListener) -> ListenerId {
         self.listeners.add(listener)
     }
@@ -861,6 +886,10 @@ impl Sessions {
     }
 
     /// The session of `connection_handle`, stored first, its activity now, when it has none.
+    ///
+    /// # Errors
+    ///
+    /// A [`CallError`] when the connection or the sessions are gone, or its token cannot be drawn.
     pub fn get_or_else_set(
         &self,
         connection_handle: ConnectionHandle,
@@ -919,11 +948,26 @@ impl Sessions {
                 move |state: &mut ServerState| {
                     let (now, arming) = (wall_of(state), arming_of(state));
                     let mut events = Vec::new();
-                    let touched = state.facade.as_mut().and_then(|facade| {
-                        facade
-                            .sessions
-                            .touch((&connection_handle, now), (&arming, &mut events))
-                    });
+                    let touched = state
+                        .facade
+                        .as_mut()
+                        .map(|facade| {
+                            facade
+                                .sessions
+                                .touch((&connection_handle, now), (&arming, &mut events))
+                        })
+                        .transpose();
+                    let touched = match touched {
+                        Ok(session) => session.flatten(),
+                        Err(error) => {
+                            state.report(
+                                router_core::reported_call(CallError::Refused(error)),
+                                &connection_handle,
+                            );
+                            close(state, &connection_handle);
+                            None
+                        }
+                    };
 
                     told(state, events);
 
@@ -934,11 +978,14 @@ impl Sessions {
         )
     }
 
-    /// Stores `data` in the session of `connection_handle`.
-    pub fn update_data(
-        &self,
-        (connection_handle, data): (ConnectionHandle, Option<Value>),
-    ) -> BoxFuture<Option<Session>> {
+    /// Stores the data `session` holds in the session of its connection.
+    pub fn update_data(&self, session: Session) -> BoxFuture<Option<Session>> {
+        let Session {
+            connection_handle,
+            data,
+            ..
+        } = session;
+
         on_owner(
             &self.router,
             (
@@ -959,16 +1006,22 @@ impl Sessions {
         )
     }
 
-    /// Sets the connection's timeout of `connection_handle`'s session, its manager's default when
-    /// none.
+    /// Sets the connection's timeout `session` holds on the session of its connection, its
+    /// manager's default when none.
     ///
     /// # Errors
     ///
     /// A [`ProgrammerError`] for a timeout spec 1.4 does not hold.
     pub fn update_connection_inactivity_timeout(
         &self,
-        (connection_handle, timeout): (ConnectionHandle, Option<Duration>),
+        session: Session,
     ) -> Result<BoxFuture<Option<Session>>, ProgrammerError> {
+        let Session {
+            connection_handle,
+            connection_inactivity_timeout: timeout,
+            ..
+        } = session;
+
         if let Some(timeout) = timeout {
             hold("an inactivity timeout", timeout)?;
         }
@@ -999,16 +1052,22 @@ impl Sessions {
         ))
     }
 
-    /// Sets the session's own timeout of `connection_handle`'s session, its manager's default when
-    /// none.
+    /// Sets the session's own timeout `session` holds on the session of its connection, its
+    /// manager's default when none.
     ///
     /// # Errors
     ///
     /// A [`ProgrammerError`] for a timeout spec 1.4 does not hold.
     pub fn update_session_inactivity_timeout(
         &self,
-        (connection_handle, timeout): (ConnectionHandle, Option<Duration>),
+        session: Session,
     ) -> Result<BoxFuture<Option<Session>>, ProgrammerError> {
+        let Session {
+            connection_handle,
+            session_inactivity_timeout: timeout,
+            ..
+        } = session;
+
         if let Some(timeout) = timeout {
             hold("an inactivity timeout", timeout)?;
         }
@@ -1046,7 +1105,8 @@ impl Sessions {
     /// A [`ProgrammerError`] for a timeout spec 1.4 does not hold.
     pub fn reset_connection_inactivity_timeout(
         &self,
-        (connection_handle, timeout): (ConnectionHandle, Duration),
+        connection_handle: ConnectionHandle,
+        timeout: Duration,
     ) -> Result<BoxFuture<()>, ProgrammerError> {
         let timeout = hold("a connection inactivity timeout", timeout)?;
 
@@ -1077,7 +1137,8 @@ impl Sessions {
     /// A [`ProgrammerError`] for a timeout spec 1.4 does not hold.
     pub fn reset_session_inactivity_timeout(
         &self,
-        (connection_handle, timeout): (ConnectionHandle, Duration),
+        connection_handle: ConnectionHandle,
+        timeout: Duration,
     ) -> Result<BoxFuture<()>, ProgrammerError> {
         let timeout = hold("a session inactivity timeout", timeout)?;
 
@@ -1102,7 +1163,11 @@ impl Sessions {
     }
 
     /// Its sessions and its timers, counted.
-    pub fn gauges(&self) -> BoxFuture<Gauges> {
+    ///
+    /// # Errors
+    ///
+    /// A [`ProgrammerError`] when two parts name the same count.
+    pub fn gauges(&self) -> BoxFuture<Result<Gauges, ProgrammerError>> {
         on_owner(
             &self.router,
             (
@@ -1110,10 +1175,9 @@ impl Sessions {
                     state
                         .facade
                         .as_ref()
-                        .map(|facade| facade.sessions.gauges())
-                        .unwrap_or_default()
+                        .map_or_else(|| Ok(Gauges::default()), |facade| facade.sessions.gauges())
                 },
-                Gauges::default(),
+                Ok(Gauges::default()),
             ),
         )
     }
@@ -1123,8 +1187,8 @@ impl Sessions {
 
 struct Shared {
     router: RouterServer,
-    services: ServiceManager,
-    sessions: Sessions,
+    services: ServiceManagerServer,
+    sessions: SessionManager,
     transport: Arc<dyn ServerTransport>,
 }
 
@@ -1157,21 +1221,25 @@ impl Server {
         // * one clock for every layer: the transport's, or the one given, which the sessions and
         // the router are both handed
         let runtime = crate::platform::runtime_of(options.runtime.as_ref(), "a router")?;
-        let clock = clock_of(
-            (transport.clock().as_ref(), options.clock.as_ref()),
-            ("a server's router", "its transport"),
-        )?
+        let clock = clock_of(&LayeredClocks {
+            beneath: transport.clock().as_ref(),
+            given: options.clock.as_ref(),
+            layer: "a server",
+            below: "its transport",
+        })?
         .unwrap_or_else(|| {
             let platform: SharedClock = Arc::new(SystemClock::on(runtime.clone()));
 
             platform
         });
         let sessions_options = options.sessions.clone().unwrap_or_default();
-        let sessions = SessionManager::new(&SessionManagerOptions {
-            clock: clock_of(
-                (Some(&clock), sessions_options.clock.as_ref()),
-                ("a server's sessions", "its server"),
-            )?,
+        let sessions = SessionState::new(&SessionManagerOptions {
+            clock: clock_of(&LayeredClocks {
+                beneath: Some(&clock),
+                given: sessions_options.clock.as_ref(),
+                layer: "a server's session manager",
+                below: "its server",
+            })?,
             ..sessions_options
         })?;
         let listeners: Arc<Listened<SessionListener>> = Arc::default();
@@ -1196,20 +1264,24 @@ impl Server {
             Arc::clone(&transport),
             (
                 &RouterServerOptions {
+                    last_call_id: None,
+                    session_of: None,
                     clock: Some(clock),
                     runtime: Some(runtime),
                     limits: options.limits.clone(),
                     metrics_registry: options.metrics_registry.clone(),
                     pacing: options.pacing.clone(),
+                    intake: options.intake.clone(),
                     credentials: options.credentials.clone(),
                     relay: Some(relay),
+                    session_token_of: None,
                 },
                 Some(facade),
             ),
         )?;
         let closing = router.clone();
-        let services = ServiceManager::new(
-            ServiceRouter::Server(router.clone()),
+        let services = ServiceManagerServer::new(
+            router.clone(),
             &ServiceManagerOptions {
                 close_connection: Some(Arc::new(move |handle: &ConnectionHandle| {
                     let handle = Arc::clone(handle);
@@ -1229,7 +1301,7 @@ impl Server {
 
         Ok(Self {
             shared: Arc::new(Shared {
-                sessions: Sessions {
+                sessions: SessionManager {
                     router: router.clone(),
                     listeners,
                 },
@@ -1248,13 +1320,13 @@ impl Server {
 
     /// Its services.
     #[must_use]
-    pub fn services(&self) -> &ServiceManager {
+    pub fn services(&self) -> &ServiceManagerServer {
         &self.shared.services
     }
 
     /// Its sessions.
     #[must_use]
-    pub fn sessions(&self) -> &Sessions {
+    pub fn sessions(&self) -> &SessionManager {
         &self.shared.sessions
     }
 
@@ -1265,18 +1337,22 @@ impl Server {
     }
 
     /// Each layer's gauges, set against the connections the transport holds.
-    pub fn gauges(&self) -> BoxFuture<ServerGauges> {
+    ///
+    /// # Errors
+    ///
+    /// A [`ProgrammerError`] when two parts name the same count.
+    pub fn gauges(&self) -> BoxFuture<Result<ServerGauges, ProgrammerError>> {
         let transport = Arc::clone(&self.shared.transport);
         let gauged = self
             .shared
             .router
             .owner()
             .run(move |state: &mut ServerState| {
-                let router = crate::router::server::gauges(state);
-                let (own, sessions) = state.facade.as_ref().map_or_else(
-                    || (Gauges::default(), Gauges::default()),
-                    |facade| (facade_gauges(facade), facade.sessions.gauges()),
-                );
+                let router = crate::router::server::gauges(state)?;
+                let (own, sessions) = match state.facade.as_ref() {
+                    Some(facade) => (facade_gauges(facade), facade.sessions.gauges()?),
+                    None => (Gauges::default(), Gauges::default()),
+                };
                 let held = transport.gauges().unwrap_or_else(|| {
                     let mut held = Gauges::default();
 
@@ -1289,27 +1365,32 @@ impl Server {
                 });
                 let handles = held.connection_handles.clone();
 
-                ServerGauges {
+                Ok(ServerGauges {
                     router: layer_gauges_of(router, &handles),
                     server: layer_gauges_of(own, &handles),
                     sessions: layer_gauges_of(sessions, &handles),
                     transport: layer_gauges_of(held, &handles),
-                }
+                })
             });
 
-        Box::pin(async move { gauged.await.unwrap_or_default() })
+        Box::pin(async move { gauged.await.unwrap_or_else(|_| Ok(ServerGauges::default())) })
     }
 
     /// Its health, from its gauges.
-    pub fn health(&self) -> BoxFuture<Health> {
+    ///
+    /// # Errors
+    ///
+    /// A [`ProgrammerError`] when two parts name the same count.
+    pub fn health(&self) -> BoxFuture<Result<Health, ProgrammerError>> {
         let gauges = self.gauges();
 
-        Box::pin(async move { health_of(&gauges.await) })
+        Box::pin(async move { Ok(health_of(&gauges.await?)) })
     }
 
     /// Disposes of it: its router, its sessions, then its transport, stopped. Its router disposed
-    /// at once, what it holds is let go in a later turn, behind what came before it, a listener's
-    /// dispose too (spec 9.0).
+    /// at once, a call made after it fails unsent; what it holds is let go in a later turn, behind
+    /// what came before it, a call made before it among it, and a listener's dispose too (spec 9.0,
+    /// 9.1).
     ///
     /// # Errors
     ///
@@ -1318,18 +1399,14 @@ impl Server {
     pub fn dispose(&self) -> BoxFuture<Result<(), RouterError>> {
         self.shared.router.mark_disposed();
 
-        let disposed = self
-            .shared
-            .router
-            .owner()
-            .run_behind(|state: &mut ServerState| {
-                dispose_facade(state);
-                crate::router::server::dispose(state);
+        let disposed = self.shared.router.owner().run(|state: &mut ServerState| {
+            dispose_facade(state);
+            crate::router::server::dispose(state);
 
-                if let Some(facade) = state.facade.as_mut() {
-                    facade.sessions.dispose();
-                }
-            });
+            if let Some(facade) = state.facade.as_mut() {
+                facade.sessions.dispose();
+            }
+        });
         let transport = Arc::clone(&self.shared.transport);
 
         Box::pin(async move {
@@ -1344,6 +1421,6 @@ impl Server {
     }
 }
 
-pub(crate) fn sessions_of(state: &ServerState) -> Option<&SessionManager> {
+pub(crate) fn sessions_of(state: &ServerState) -> Option<&SessionState> {
     state.facade.as_ref().map(|facade| &facade.sessions)
 }
