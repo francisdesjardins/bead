@@ -1753,6 +1753,65 @@ test.describe('createAmqpBrokerAdapter', () => {
     expect(downs, 'no loss told').toEqual([]);
   });
 
+  test('deletes its inbox through its broker’s management at its stop, once what it was handed has its outcome and before it detaches its receivers and closes its connection (spec 15.33)', async () => {
+    const adapter = adapterOf(script);
+    const { downs } = heardOf(adapter);
+    const link = await inboxUp({ adapter, script });
+
+    await adapter.subscribe(NAME);
+    script.policy.settle = () => {
+      return 'hold';
+    };
+
+    const publishing = adapter.publish({ payload: Uint8Array.of(1), topic: ['bead', 'i', 'bob'] });
+
+    await link.until(() => {
+      return link.deliveries.length === 1;
+    });
+
+    const deletions = (): IAmqpScriptedLink['requests'] => {
+      return link.requests.filter(({ method }) => {
+        return method === 'DELETE';
+      });
+    };
+    const receivers = (): IScriptedAttach[] => {
+      return link.detached.filter(({ address }) => {
+        return address === INBOX_QUEUE || address === NAME_QUEUE;
+      });
+    };
+
+    script.policy.answer = () => {
+      return 'hold';
+    };
+
+    const stopping = adapter.stop();
+
+    await sleep(100);
+    expect(deletions(), 'none while what it was handed awaits its outcome').toEqual([]);
+    link.deliveries[0]?.delivery.accept();
+    expect(await publishing).toBe(BROKER_PUBLISHED.TAKEN);
+    await link.until(() => {
+      return deletions().length === 1;
+    });
+    expect(deletions()[0]?.path).toBe(INBOX_QUEUE);
+    await sleep(100);
+    expect(
+      [receivers(), link.closeFrame],
+      'none detached nor closed before its broker deleted it'
+    ).toEqual([[], undefined]);
+    deletions()[0]?.answer(200);
+    await stopping;
+    await link.closed;
+    expect(
+      receivers().map(({ address }) => {
+        return address;
+      }),
+      'its receivers detached, its inbox first'
+    ).toEqual([INBOX_QUEUE, NAME_QUEUE]);
+    expect(link.closeFrame?.error ?? null, 'its close, of no error').toBeNull();
+    expect(downs, 'no loss told').toEqual([]);
+  });
+
   test('reads accepted as taken, released as no subscriber, and rejected or any other outcome as refused (spec 15.35)', async () => {
     const adapter = adapterOf(script);
     const link = await inboxUp({ adapter, script });
@@ -2748,6 +2807,31 @@ test.describe('createAmqpBrokerAdapter, against a broker over AMQP 1.0', () => {
 
     expect(await holdsQueue(url, 'bead.i.other')).toBe(false);
     expect([downs, adapter.isLinked]).toEqual([[], false]);
+  });
+
+  test('finds no subscriber for a parcel to its inbox once its stop settled, its broker having deleted it (spec 15.21, 15.33)', async () => {
+    const url = brokerUrl();
+    const adapter = createAmqpBrokerAdapter({ id: 'other', password: AMQP_PASSWORD, url });
+    const caller = createAmqpBrokerAdapter({ id: 'coming', password: AMQP_PASSWORD, url });
+    const inbox = ['bead', 'i', 'other'];
+
+    try {
+      await caller.start();
+
+      // * at once after each stop, as the race the stop closes was
+      for (let round = 0; round < 5; round += 1) {
+        await adapter.start();
+        await adapter.subscribe(inbox);
+        await adapter.stop();
+        expect(
+          await caller.publish({ payload: Uint8Array.of(round), topic: inbox }),
+          `round ${String(round)}`
+        ).toBe(BROKER_PUBLISHED.NO_SUBSCRIBER);
+      }
+    } finally {
+      await adapter.stop();
+      await caller.stop();
+    }
   });
 
   test('carries a link through RabbitMQ’s topic exchange, a name’s queue consumed by two in turn (spec 15.32)', async () => {

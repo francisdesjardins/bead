@@ -403,6 +403,12 @@ that a test of each side does:
   `publishes at QoS 1 and RETAIN 0, a life in whole seconds rounded up where one is asked, and no other property (spec 15.28)`,
   `holds its QoS 1 publications to its CONNACK’s Receive Maximum, the next one going once a PUBACK came, and delays no other packet for them (spec 15.28)`,
   `sends what waits on its broker’s Receive Maximum before its stop’s DISCONNECT, within its connectTimeout, and fails what has not gone by then`,
+  `lets go at its stop of each subscription its link holds once what it was handed went, one UNSUBSCRIBE per filter sent at once and their UNSUBACKs of 0x00 or 0x11 awaited together, then sends its DISCONNECT of 0x00 (spec 15.24, 15.26)`,
+  `sends its stop’s DISCONNECT of 0x00 all the same where an UNSUBACK refuses or none comes, what it was handed and its UNSUBACKs awaited within one connectTimeout of its call (spec 15.26, 15.30)`,
+  `lets each filter go at its stop in an UNSUBSCRIBE of its own, none past its CONNACK’s Maximum Packet Size (spec 15.26, 15.27)`,
+  `lets go at its stop of a filter whose SUBSCRIBE went with no SUBACK yet, its subscription failed (spec 15.27)`,
+  `keeps a subscription asked again while its UNSUBSCRIBE awaits its UNSUBACK, which its stop then lets go (spec 15.27)`,
+  `sends no UNSUBSCRIBE at its stop ahead of a publication that waits on its broker’s Receive Maximum (spec 15.26, 15.28)`,
   `reads a PUBACK of 0x10 as no subscriber, under 0x80 as taken, and 0x80 or more as refused (spec 15.28)`,
   `refuses a publication past its CONNACK’s Maximum Packet Size before it goes (spec 15.28)`,
   `hands each message on before its PUBACK, which goes once it is settled, and once (spec 15.29)`,
@@ -419,8 +425,9 @@ that a test of each side does:
   `aborts its password provider’s signal once its start ends, linked or not`,
   `refuses a password beside a client certificate, and both a password and its provider`), and
   against the fixture,
-  `carries a link over a WebSocket of subprotocol mqtt (spec 15.25)` and
-  `sends each WebSocket message to its broker as one binary frame, a burst past 64 KiB among them (spec 15.25)`,
+  `carries a link over a WebSocket of subprotocol mqtt (spec 15.25)`,
+  `sends each WebSocket message to its broker as one binary frame, a burst past 64 KiB among them (spec 15.25)` and
+  `lets one member of a group go at its stop, a name the others serve still taken, and finds no subscriber for its inbox once it stopped, nor for the name once the last did (spec 15.21, 15.26)`,
   which skip where no broker is given, each twin named by the same sentence;
 - what of AMQP 1.0 no case reaches (spec 15.32 to 15.38), its adapter against a scripted AMQP
   1.0 peer, `transport/shared/__tests__/amqp-broker-adapter.test.ts` and
@@ -459,9 +466,11 @@ that a test of each side does:
   `refuses a password that is empty or holds a NUL, as built or as answered`,
   `aborts its password provider’s signal once its start ends, linked or not`,
   `refuses a password beside a client certificate, both a password and its provider, and neither`,
-  `sends what waits on its link credit before its stop’s close, within its connectTimeout, and fails what has not gone by then`),
-  the third, fourth, seventh, ninth, twenty-first, twenty-fourth and twenty-seventh against the
-  fixture,
+  `sends what waits on its link credit before its stop’s close, within its connectTimeout, and fails what has not gone by then`,
+  `deletes its inbox through its broker’s management at its stop, once what it was handed has its outcome and before it detaches its receivers and closes its connection (spec 15.33)`,
+  `finds no subscriber for a parcel to its inbox once its stop settled, its broker having deleted it (spec 15.21, 15.33)`),
+  the third, fourth, seventh, ninth, twenty-first, twenty-fourth, twenty-seventh and thirty-seventh
+  against the fixture,
   which skip where no broker is given; its management, `amqp-management.test.ts` and
   `AmqpManagementTests`
   (`pairs its sender and receiver under one name on a session of its own, one after the other, and matches each answer by its correlation-id`,

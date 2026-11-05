@@ -772,14 +772,17 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     }
 
     /// <summary>
-    /// Ends its link with no error (spec 15.33): what it was handed to publish before it goes first,
-    /// sent as its credit comes and each outcome awaited, within its connect timeout, as a graceful
-    /// close sends what is queued before its FIN (spec 15.24, RFC 9293 §3.6); then each receiver
-    /// detached and its DETACH awaited, each session ended, then its CLOSE and its broker's, each
-    /// within its connect timeout; its inbox ends with its connection. Each publication without an
-    /// outcome by then, sent or waiting for credit, and each subscription awaiting its ATTACH fail
-    /// with its stop, an <see cref="IOException"/>. Nothing where it has none; a later start a new
-    /// link.
+    /// Ends its link with no error (spec 15.33), within one connect timeout of its call: no new
+    /// publication taken, what it was handed to publish before it goes first, sent as its credit
+    /// comes and each outcome awaited, as a graceful close sends what is queued before its FIN
+    /// (spec 15.24, RFC 9293 §3.6); then its inbox deleted through its broker's management, as its
+    /// unsubscription deletes it, so that a message to it finds no subscriber; then each receiver
+    /// detached and its DETACH awaited, each session ended, then its CLOSE and its broker's. A
+    /// name's queue keeps what comes to it (spec 15.38). It settles once its broker let go of each
+    /// subscription of its link, as its unsubscription lets one go, so that its broker hands it
+    /// nothing more. Each publication without an outcome by then, sent or waiting for credit, and
+    /// each subscription awaiting its ATTACH fail with its stop, an <see cref="IOException"/>.
+    /// Nothing where it has none; a later start a new link.
     /// </summary>
     public async Task Stop()
     {
@@ -806,15 +809,25 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
         try
         {
-            // * what it was handed goes first, no new publication taken meanwhile: each outcome come,
-            // within its connect timeout
+            // * one connect timeout from its call, its whole stop: what is not answered within it
+            // is not waited for, each end still sent
+            using var bounded = new CancellationTokenSource(_options.ConnectTimeout, TimeProvider.System);
+            var began = TimeProvider.System.GetTimestamp();
+
+            TimeSpan Left()
+            {
+                var left = _options.ConnectTimeout - TimeProvider.System.GetElapsedTime(began);
+
+                return left > TimeSpan.Zero ? left : TimeSpan.Zero;
+            }
+
+            // * what it was handed goes first, no new publication taken meanwhile: each outcome
+            // come
             if (link.Connection is { IsClosed: false })
             {
-                using var draining = new CancellationTokenSource(_options.ConnectTimeout, TimeProvider.System);
-
                 try
                 {
-                    await link.AllAnswered().WaitAsync(draining.Token);
+                    await link.AllAnswered().WaitAsync(bounded.Token);
                 }
                 catch (OperationCanceledException)
                 {
@@ -825,6 +838,28 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             // ! from here, an outcome its library gives as its sessions end is none its broker gave
             link.IsEnding = true;
 
+            // ! its inbox deleted after the drain, so that no CLOSE waiting on a sender's credit is
+            // overtaken, its peer reading released before its 1001; and before its connection ends,
+            // which its broker processes later, a message to it taken meanwhile
+            Receiving? inbox;
+
+            lock (_gate)
+            {
+                inbox = link.Inbox;
+            }
+
+            if (link.Connection is { IsClosed: false } && inbox is not null && !bounded.IsCancellationRequested)
+            {
+                try
+                {
+                    await UnsubscribeInbox((link, inbox.Queue)).WaitAsync(bounded.Token);
+                }
+                catch (Exception reason) when (reason is not OutOfMemoryException)
+                {
+                    // refused or past its bound: its inbox ends with its connection all the same
+                }
+            }
+
             if (link.Connection is { IsClosed: false } connection)
             {
                 List<Receiving> receivings;
@@ -834,15 +869,15 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
                 {
                     receivings = [.. link.Names.Values];
 
-                    if (link.Inbox is { } inbox)
+                    if (link.Inbox is { } kept)
                     {
-                        receivings.Insert(0, inbox);
+                        receivings.Insert(0, kept);
                     }
                 }
 
                 await Task.WhenAll(receivings.Select((receiving) =>
                 {
-                    return AmqpEndpoints.Ending(receiving.Receiver!, _options.ConnectTimeout);
+                    return AmqpEndpoints.Ending(receiving.Receiver!, Left());
                 }));
                 sessions.AddRange(receivings.Select((receiving) =>
                 {
@@ -853,9 +888,9 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
                 await Task.WhenAll(sessions.Select((session) =>
                 {
-                    return AmqpEndpoints.Ending(session, _options.ConnectTimeout);
+                    return AmqpEndpoints.Ending(session, Left());
                 }));
-                await AmqpEndpoints.Ending(connection, _options.ConnectTimeout);
+                await AmqpEndpoints.Ending(connection, Left());
             }
         }
         finally

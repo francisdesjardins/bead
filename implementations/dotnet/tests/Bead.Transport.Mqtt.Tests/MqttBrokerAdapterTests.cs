@@ -1,10 +1,13 @@
 using System.Buffers;
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Globalization;
 using System.Net;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
+using MQTTnet.Formatter;
+using MQTTnet.Formatter.V5;
 using MQTTnet.Packets;
 using MQTTnet.Protocol;
 
@@ -17,6 +20,7 @@ namespace Bead.Transport.Mqtt.Tests;
 /// test</c>), a link over its WebSocket. The TypeScript side's <c>mqtt-broker-adapter.test.ts</c>
 /// plays the same sentences.
 /// </summary>
+[Collection(MqttFixture.Collection)]
 public sealed class MqttBrokerAdapterTests : IAsyncLifetime
 {
     // constants
@@ -30,6 +34,13 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
     private static readonly string[] Inbox = ["bead", "i", Id];
     private static readonly string[] Name = ["bead", "s", "interop"];
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(5);
+
+    // ! users of the broker's that read every name, its cases' own: no case plays meanwhile, the
+    // classes that play against the broker one collection
+    private static readonly string[] GroupUsers = ["quiet", "late", "flagged"];
+
+    // the peers whose departures a stop lets go of
+    private static readonly string[] Departed = ["amy", "bea", "cyd", "dot", "eve"];
 
     // a self-signed certificate for 127.0.0.1, its server's and its client's alike
     private static readonly Lazy<X509Certificate2> Certificate = new(CertificateOf);
@@ -103,6 +114,21 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         await answer.Link.Send(new MqttSubAckPacket { PacketIdentifier = subscribe.PacketIdentifier, ReasonCodes = [(MqttSubscribeReasonCode)answer.Code] });
 
         return subscribe;
+    }
+
+    // the filters the UNSUBSCRIBEs that came named, in their order
+    private static List<string> LetGoOf(ScriptedLink link)
+    {
+        return [.. link.PacketsOf<MqttUnsubscribePacket>().SelectMany((unsubscribe) =>
+        {
+            return unsubscribe.TopicFilters;
+        })];
+    }
+
+    // the bytes a packet takes, as MQTTnet's encoder writes MQTT 5
+    private static int BytesOf(MqttPacket packet)
+    {
+        return new MqttV5PacketEncoder(new MqttBufferWriter(4_096, 65_536)).Encode(packet).Join().Count;
     }
 
     private static Task PubAckOf((ScriptedLink Link, ushort PacketIdentifier, int Code) answer)
@@ -343,6 +369,9 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
 
         await link.Next<MqttSubscribePacket>();
         await adapter.Stop();
+
+        // * its SUBSCRIBE under way let go before its DISCONNECT
+        Assert.Equal(["bead/i/ada"], LetGoOf(link));
         Assert.Equal("the link of ada stopped", (await FailureOf(() =>
         {
             return pending;
@@ -367,7 +396,8 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         await link.Next<MqttSubscribePacket>();
         await participant.Stop().WaitAsync(Patience, Cancelled);
 
-        // * its adapter's stop ends that SUBSCRIBE, cleanly: no will goes
+        // * its adapter's stop ends that SUBSCRIBE, cleanly, its broker letting its filter go: no
+        // will goes
         Assert.Equal("the participant ada stopped as it started", (await FailureOf(() =>
         {
             return starting;
@@ -377,10 +407,11 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
 
         Assert.Equal(MqttDisconnectReasonCode.NormalDisconnection, disconnect.ReasonCode);
         await link.Closed.WaitAsync(Patience, Cancelled);
-        Assert.Equal([typeof(MqttConnectPacket), typeof(MqttSubscribePacket), typeof(MqttDisconnectPacket)], link.Packets.Select((packet) =>
+        Assert.Equal([typeof(MqttConnectPacket), typeof(MqttSubscribePacket), typeof(MqttUnsubscribePacket), typeof(MqttDisconnectPacket)], link.Packets.Select((packet) =>
         {
             return packet.GetType();
         }));
+        Assert.Equal(["bead/i/ada"], Assert.Single(link.PacketsOf<MqttUnsubscribePacket>()).TopicFilters);
     }
 
     [Fact]
@@ -441,6 +472,7 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
 
         await grouped.WaitAsync(Patience, Cancelled);
         Assert.Equal("$share/interop/bead/s/interop", shared.TopicFilters[0].Topic);
+        _script.IsHoldingUnsubscribes = true;
 
         var leaving = adapter.Unsubscribe(Name);
         var unsubscribe = await link.Next<MqttUnsubscribePacket>();
@@ -448,6 +480,7 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         Assert.Equal(["$share/interop/bead/s/interop"], unsubscribe.TopicFilters);
         await link.Send(new MqttUnsubAckPacket { PacketIdentifier = unsubscribe.PacketIdentifier, ReasonCodes = [MqttUnsubscribeReasonCode.Success] });
         await leaving.WaitAsync(Patience, Cancelled);
+        _script.IsHoldingUnsubscribes = false;
 
         // QoS 0 granted is refused, as a failure is
         var downgraded = adapter.Subscribe(["bead", "d", "bob"]);
@@ -466,6 +499,10 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
             return failed;
         })).Message, StringComparison.Ordinal);
         await adapter.Stop();
+
+        // * its stop lets go of what its broker holds, QoS 0 granted among it, and of nothing
+        // refused or let go before it
+        Assert.Equal(["bead/d/bob", "bead/i/ada"], LetGoOf(link).Skip(1).Order(StringComparer.Ordinal));
     }
 
     [Fact]
@@ -473,6 +510,8 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
     {
         await using var adapter = AdapterOf();
         var link = await LinkUp((adapter, _script));
+
+        _script.IsHoldingUnsubscribes = true;
 
         async Task<string> Answered((string[] Topic, MqttUnsubscribeReasonCode Code) answer)
         {
@@ -636,6 +675,7 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
             return (int)publish.Payload.FirstSpan[0];
         }));
         await adapter.Stop();
+        Assert.Equal(["bead/d/bob"], LetGoOf(link));
     }
 
     [Fact]
@@ -812,6 +852,7 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         Assert.Equal(0, adapter.Unsettled);
         Assert.Empty(errors);
         await participant.Stop();
+        Assert.Equal(["bead/i/ada"], LetGoOf(link));
     }
 
     [Fact]
@@ -1606,6 +1647,62 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         }
     }
 
+    [Fact(Skip = MqttFixture.Reason, SkipUnless = nameof(IsMqtt))]
+    public async Task Lets_one_member_of_a_group_go_at_its_stop_a_name_the_others_serve_still_taken_and_finds_no_subscriber_for_its_inbox_once_it_stopped_nor_for_the_name_once_the_last_did_spec_15_21_15_26()
+    {
+        var adapters = GroupUsers.Select((id) =>
+        {
+            return new MqttBrokerAdapter(new MqttBrokerAdapterOptions { Id = id, Password = MqttFixture.Password, Uri = MqttFixture.Url });
+        }).ToList();
+        var (leaving, staying, caller) = (adapters[0], adapters[1], adapters[2]);
+        string[] name = ["bead", "s", string.Create(CultureInfo.InvariantCulture, $"stopping-{TimeProvider.System.GetTimestamp()}")];
+        byte[] payload = [1];
+        var heard = new ConcurrentQueue<int>();
+
+        leaving.Message += (message) =>
+        {
+            message.Settle();
+        };
+        staying.Message += (message) =>
+        {
+            heard.Enqueue(message.Payload.Span[0]);
+            message.Settle();
+        };
+
+        try
+        {
+            await Task.WhenAll(staying.Start(), caller.Start()).WaitAsync(Patience, Cancelled);
+            await staying.Subscribe(name, new BrokerSubscription { Group = "stopping" }).WaitAsync(Patience, Cancelled);
+
+            // * at once after each stop, as the race the stop closes was
+            for (var round = 0; round < 5; round++)
+            {
+                await leaving.Start().WaitAsync(Patience, Cancelled);
+                await leaving.Subscribe(["bead", "i", leaving.Id]).WaitAsync(Patience, Cancelled);
+                await leaving.Subscribe(name, new BrokerSubscription { Group = "stopping" }).WaitAsync(Patience, Cancelled);
+                await leaving.Stop().WaitAsync(Patience, Cancelled);
+                Assert.Equal(BrokerPublished.NoSubscriber, await caller.Publish(new BrokerPublication { Topic = ["bead", "i", leaving.Id], Payload = payload }).WaitAsync(Patience, Cancelled));
+                Assert.Equal(BrokerPublished.Taken, await caller.Publish(new BrokerPublication { Topic = name, Payload = (byte[])[(byte)round] }).WaitAsync(Patience, Cancelled));
+            }
+
+            // * each taken by the member that stays
+            await Until(() =>
+            {
+                return heard.Count == 5;
+            });
+            Assert.Equal([0, 1, 2, 3, 4], heard);
+            await staying.Stop().WaitAsync(Patience, Cancelled);
+            Assert.Equal(BrokerPublished.NoSubscriber, await caller.Publish(new BrokerPublication { Topic = name, Payload = payload }).WaitAsync(Patience, Cancelled));
+        }
+        finally
+        {
+            foreach (var adapter in adapters)
+            {
+                await adapter.DisposeAsync();
+            }
+        }
+    }
+
     /// <summary>Whether a broker is given, or asked for: the fixture's tests run, and fail where none is.</summary>
     public static bool IsMqtt
     {
@@ -1723,6 +1820,285 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
 
         Assert.Equal(MqttDisconnectReasonCode.NormalDisconnection, (await held.Next<MqttDisconnectPacket>()).ReasonCode);
         Assert.Single(held.PacketsOf<MqttPublishPacket>());
+    }
+
+    [Fact]
+    public async Task Lets_go_at_its_stop_of_each_subscription_its_link_holds_once_what_it_was_handed_went_one_UNSUBSCRIBE_per_filter_sent_at_once_and_their_UNSUBACKs_of_0x00_or_0x11_awaited_together_then_sends_its_DISCONNECT_of_0x00_spec_15_24_15_26()
+    {
+        await using var adapter = AdapterOf();
+        var (_, downs) = HeardOf(adapter);
+        var link = await LinkUp((adapter, _script));
+
+        // * its inbox, a name of its group and a peer's departure
+        foreach (var (topic, group) in new (string[] Topic, string? Group)[] { (Inbox, null), (Name, "interop"), (["bead", "d", "bob"], null) })
+        {
+            var subscribing = adapter.Subscribe(topic, group is null ? null : new BrokerSubscription { Group = group });
+
+            await SubAckOf((link, 1));
+            await subscribing.WaitAsync(Patience, Cancelled);
+        }
+
+        _script.IsHoldingUnsubscribes = true;
+
+        var publishing = adapter.Publish(new BrokerPublication { Topic = ["bead", "i", "bob"], Payload = (byte[])[1] });
+        var publish = await link.Next<MqttPublishPacket>();
+        var stopping = adapter.Stop();
+
+        // none while what it was handed awaits its PUBACK
+        await Task.Delay(100, Cancelled);
+        Assert.Empty(link.PacketsOf<MqttUnsubscribePacket>());
+        await PubAckOf((link, publish.PacketIdentifier, 0));
+        Assert.Equal(BrokerPublished.Taken, await publishing.WaitAsync(Patience, Cancelled));
+
+        // * each read before any UNSUBACK is sent: all of them at once, one filter each
+        List<MqttUnsubscribePacket> unsubscribes = [await link.Next<MqttUnsubscribePacket>(), await link.Next<MqttUnsubscribePacket>(), await link.Next<MqttUnsubscribePacket>()];
+
+        Assert.Equal(["$share/interop/bead/s/interop", "bead/d/bob", "bead/i/ada"], unsubscribes.Select((unsubscribe) =>
+        {
+            return Assert.Single(unsubscribe.TopicFilters);
+        }).Order(StringComparer.Ordinal));
+
+        // * 0x11, none held, lets one go as 0x00 does
+        for (var index = 0; index < unsubscribes.Count; index++)
+        {
+            await Task.Delay(50, Cancelled);
+            Assert.Empty(link.PacketsOf<MqttDisconnectPacket>());
+            await link.Send(new MqttUnsubAckPacket
+            {
+                PacketIdentifier = unsubscribes[index].PacketIdentifier,
+                ReasonCodes = [index == 1 ? MqttUnsubscribeReasonCode.NoSubscriptionExisted : MqttUnsubscribeReasonCode.Success],
+            });
+        }
+
+        await stopping.WaitAsync(Patience, Cancelled);
+        Assert.Equal(MqttDisconnectReasonCode.NormalDisconnection, (await link.Next<MqttDisconnectPacket>()).ReasonCode);
+        Assert.Equal(
+            [
+                typeof(MqttConnectPacket),
+                typeof(MqttSubscribePacket),
+                typeof(MqttSubscribePacket),
+                typeof(MqttSubscribePacket),
+                typeof(MqttPublishPacket),
+                typeof(MqttUnsubscribePacket),
+                typeof(MqttUnsubscribePacket),
+                typeof(MqttUnsubscribePacket),
+                typeof(MqttDisconnectPacket),
+            ],
+            link.Packets.Select((packet) =>
+            {
+                return packet.GetType();
+            }));
+        Assert.Empty(downs);
+    }
+
+    [Fact]
+    public async Task Sends_its_stop_s_DISCONNECT_of_0x00_all_the_same_where_an_UNSUBACK_refuses_or_none_comes_what_it_was_handed_and_its_UNSUBACKs_awaited_within_one_connectTimeout_of_its_call_spec_15_26_15_30()
+    {
+        await using var adapter = AdapterOf((options) =>
+        {
+            return options with { ConnectTimeout = TimeSpan.FromMilliseconds(1_000) };
+        });
+        var (_, downs) = HeardOf(adapter);
+        var link = await LinkUp((adapter, _script));
+
+        foreach (var topic in new[] { Inbox, ["bead", "d", "bob"] })
+        {
+            var subscribing = adapter.Subscribe(topic);
+
+            await SubAckOf((link, 1));
+            await subscribing.WaitAsync(Patience, Cancelled);
+        }
+
+        _script.IsHoldingUnsubscribes = true;
+
+        var publishing = adapter.Publish(new BrokerPublication { Topic = ["bead", "i", "bob"], Payload = (byte[])[1] });
+        var publish = await link.Next<MqttPublishPacket>();
+        var watch = Stopwatch.StartNew();
+        var stopping = adapter.Stop();
+
+        // * half its connectTimeout spent on what it was handed
+        await Task.Delay(500, Cancelled);
+        await PubAckOf((link, publish.PacketIdentifier, 0));
+        Assert.Equal(BrokerPublished.Taken, await publishing.WaitAsync(Patience, Cancelled));
+
+        var refused = await link.Next<MqttUnsubscribePacket>();
+
+        // the second's UNSUBACK withheld
+        await link.Next<MqttUnsubscribePacket>();
+        await link.Send(new MqttUnsubAckPacket { PacketIdentifier = refused.PacketIdentifier, ReasonCodes = [MqttUnsubscribeReasonCode.UnspecifiedError] });
+        await stopping.WaitAsync(Patience, Cancelled);
+
+        var spent = watch.Elapsed;
+
+        Assert.True(spent >= TimeSpan.FromMilliseconds(950), $"its connectTimeout waited, {spent.TotalMilliseconds} ms");
+        Assert.True(spent < TimeSpan.FromMilliseconds(1_400), $"one connectTimeout from its call, not one after its drain, {spent.TotalMilliseconds} ms");
+
+        // * its DISCONNECT, no will
+        Assert.Equal(MqttDisconnectReasonCode.NormalDisconnection, (await link.Next<MqttDisconnectPacket>()).ReasonCode);
+        Assert.Empty(downs);
+    }
+
+    [Fact]
+    public async Task Lets_each_filter_go_at_its_stop_in_an_UNSUBSCRIBE_of_its_own_none_past_its_CONNACK_s_Maximum_Packet_Size_spec_15_26_15_27()
+    {
+        const uint MaximumPacketSize = 64;
+
+        await using var adapter = AdapterOf();
+        var answer = ScriptedLink.ConnAck();
+
+        answer.MaximumPacketSize = MaximumPacketSize;
+
+        var link = await LinkUp((adapter, _script), (answer, null));
+        var departures = Departed.Select((peer) =>
+        {
+            return new[] { "bead", "d", $"{peer}-{new string('x', 30)}" };
+        }).ToList();
+
+        foreach (var topic in departures)
+        {
+            var subscribing = adapter.Subscribe(topic);
+
+            await SubAckOf((link, 1));
+            await subscribing.WaitAsync(Patience, Cancelled);
+        }
+
+        await adapter.Stop();
+
+        var unsubscribes = link.PacketsOf<MqttUnsubscribePacket>();
+        var filters = LetGoOf(link);
+
+        Assert.Equal(departures.Select((topic) =>
+        {
+            return string.Join('/', topic);
+        }).Order(StringComparer.Ordinal), filters.Order(StringComparer.Ordinal));
+
+        // * one filter each, none past it
+        Assert.Equal([1, 1, 1, 1, 1], unsubscribes.Select((unsubscribe) =>
+        {
+            return unsubscribe.TopicFilters.Count;
+        }));
+        Assert.All(unsubscribes, (unsubscribe) =>
+        {
+            Assert.True(BytesOf(unsubscribe) <= MaximumPacketSize, $"an UNSUBSCRIBE of {BytesOf(unsubscribe)} bytes");
+        });
+
+        // * one packet of them all would pass it, which its broker ends the link for, its will sent
+        Assert.True(BytesOf(new MqttUnsubscribePacket { PacketIdentifier = 1, TopicFilters = filters }) > MaximumPacketSize);
+    }
+
+    [Fact]
+    public async Task Lets_go_at_its_stop_of_a_filter_whose_SUBSCRIBE_went_with_no_SUBACK_yet_its_subscription_failed_spec_15_27()
+    {
+        await using var adapter = AdapterOf();
+        var link = await LinkUp((adapter, _script));
+        var subscribing = adapter.Subscribe(Name, new BrokerSubscription { Group = "interop" });
+        var subscribe = await link.Next<MqttSubscribePacket>();
+
+        _script.IsHoldingUnsubscribes = true;
+
+        var stopping = adapter.Stop();
+        var unsubscribe = await link.Next<MqttUnsubscribePacket>();
+
+        Assert.Equal(["$share/interop/bead/s/interop"], unsubscribe.TopicFilters);
+
+        // * its SUBACK, come behind, holds nothing: its broker read the UNSUBSCRIBE after it
+        await link.Send(new MqttSubAckPacket { PacketIdentifier = subscribe.PacketIdentifier, ReasonCodes = [MqttSubscribeReasonCode.GrantedQoS1] });
+        await link.Send(new MqttUnsubAckPacket { PacketIdentifier = unsubscribe.PacketIdentifier, ReasonCodes = [MqttUnsubscribeReasonCode.Success] });
+        await stopping.WaitAsync(Patience, Cancelled);
+        Assert.Equal("the link of ada stopped", (await FailureOf(() =>
+        {
+            return subscribing;
+        })).Message);
+        Assert.Equal(MqttDisconnectReasonCode.NormalDisconnection, (await link.Next<MqttDisconnectPacket>()).ReasonCode);
+    }
+
+    [Fact]
+    public async Task Keeps_a_subscription_asked_again_while_its_UNSUBSCRIBE_awaits_its_UNSUBACK_which_its_stop_then_lets_go_spec_15_27()
+    {
+        await using var adapter = AdapterOf();
+        var link = await LinkUp((adapter, _script));
+        var subscribing = adapter.Subscribe(Name, new BrokerSubscription { Group = "interop" });
+
+        await SubAckOf((link, 1));
+        await subscribing.WaitAsync(Patience, Cancelled);
+
+        // * let go, then asked again before that UNSUBACK came
+        _script.IsHoldingUnsubscribes = true;
+
+        var leaving = adapter.Unsubscribe(Name);
+        var unsubscribe = await link.Next<MqttUnsubscribePacket>();
+        var again = adapter.Subscribe(Name, new BrokerSubscription { Group = "interop" });
+        var subscribe = await link.Next<MqttSubscribePacket>();
+
+        await link.Send(new MqttUnsubAckPacket { PacketIdentifier = unsubscribe.PacketIdentifier, ReasonCodes = [MqttUnsubscribeReasonCode.Success] });
+        await link.Send(new MqttSubAckPacket { PacketIdentifier = subscribe.PacketIdentifier, ReasonCodes = [MqttSubscribeReasonCode.GrantedQoS1] });
+        await leaving.WaitAsync(Patience, Cancelled);
+        await again.WaitAsync(Patience, Cancelled);
+        _script.IsHoldingUnsubscribes = false;
+        await adapter.Stop().WaitAsync(Patience, Cancelled);
+
+        // its own UNSUBSCRIBE, then its stop's, of the subscription asked again
+        Assert.Equal(["$share/interop/bead/s/interop", "$share/interop/bead/s/interop"], LetGoOf(link));
+        Assert.Equal(MqttDisconnectReasonCode.NormalDisconnection, (await link.Next<MqttDisconnectPacket>()).ReasonCode);
+    }
+
+    [Fact]
+    public async Task Sends_no_UNSUBSCRIBE_at_its_stop_ahead_of_a_publication_that_waits_on_its_broker_s_Receive_Maximum_spec_15_26_15_28()
+    {
+        await using var adapter = AdapterOf();
+        var link = await LinkUp((adapter, _script), (ConnAckOf(2), null));
+        var subscribing = adapter.Subscribe(Inbox);
+
+        await SubAckOf((link, 1));
+        await subscribing.WaitAsync(Patience, Cancelled);
+
+        // * a peer's CLOSE each, as a participant's stop hands them on
+        var publishing = Enumerable.Range(1, 4).Select((index) =>
+        {
+            return adapter.Publish(new BrokerPublication { Topic = ["bead", "i", "bob"], Payload = (byte[])[(byte)index] });
+        }).ToList();
+
+        await Until(() =>
+        {
+            return link.PacketsOf<MqttPublishPacket>().Count == 2;
+        });
+
+        var stopping = adapter.Stop();
+
+        for (var index = 0; index < 4; index++)
+        {
+            var sent = Math.Min(index + 2, 4);
+
+            await Until(() =>
+            {
+                return link.PacketsOf<MqttPublishPacket>().Count == sent;
+            });
+            await Task.Delay(20, Cancelled);
+
+            // none while one waits
+            Assert.Empty(link.PacketsOf<MqttUnsubscribePacket>());
+            await PubAckOf((link, link.PacketsOf<MqttPublishPacket>()[index].PacketIdentifier, 0));
+        }
+
+        await stopping.WaitAsync(Patience, Cancelled);
+        Assert.Equal(["bead/i/ada"], LetGoOf(link));
+        Assert.Equal(Enumerable.Repeat(BrokerPublished.Taken, 4), await Task.WhenAll(publishing).WaitAsync(Patience, Cancelled));
+        await link.Next<MqttDisconnectPacket>();
+        Assert.Equal(
+            [
+                typeof(MqttConnectPacket),
+                typeof(MqttSubscribePacket),
+                typeof(MqttPublishPacket),
+                typeof(MqttPublishPacket),
+                typeof(MqttPublishPacket),
+                typeof(MqttPublishPacket),
+                typeof(MqttUnsubscribePacket),
+                typeof(MqttDisconnectPacket),
+            ],
+            link.Packets.Select((packet) =>
+            {
+                return packet.GetType();
+            }));
     }
 
     // decision 0003

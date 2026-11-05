@@ -18709,7 +18709,8 @@
     {
       "name": "a participant that stops closes each connection with 1001 and serves no name, and at its next link serves it as another incarnation, resetting no peer",
       "clauses": [
-        "15.21"
+        "15.21",
+        "15.24"
       ],
       "transport": "broker",
       "steps": [
@@ -18809,6 +18810,22 @@
             "gauge": "names",
             "is": 0
           }
+        },
+        {
+          "publish": [
+            {
+              "parcel": {
+                "kind": 5,
+                "opener": "A1 00 00 00 00 00 00 01",
+                "acceptor": "{first}",
+                "sequence": 3,
+                "flags": 0
+              }
+            }
+          ],
+          "from": "peer",
+          "to": "inbox",
+          "refused": "no-subscriber"
         },
         {
           "publish": [
@@ -25959,6 +25976,7 @@
       "name": "a participant that stops closes each connection with 1001 and serves no name, and at its next link serves it as another incarnation, resetting no peer",
       "clauses": [
         "15.21",
+        "15.24",
         "15.26",
         "15.30",
         "15.30.1"
@@ -26061,6 +26079,22 @@
             "gauge": "names",
             "is": 0
           }
+        },
+        {
+          "publish": [
+            {
+              "parcel": {
+                "kind": 5,
+                "opener": "A1 00 00 00 00 00 00 01",
+                "acceptor": "{first}",
+                "sequence": 3,
+                "flags": 0
+              }
+            }
+          ],
+          "from": "peer",
+          "to": "inbox",
+          "refused": "no-subscriber"
         },
         {
           "publish": [
@@ -32662,6 +32696,7 @@
       "name": "a participant that stops closes each connection with 1001 and serves no name, and at its next link serves it as another incarnation, resetting no peer",
       "clauses": [
         "15.21",
+        "15.24",
         "15.33",
         "15.38",
         "15.37",
@@ -32765,6 +32800,22 @@
             "gauge": "names",
             "is": 0
           }
+        },
+        {
+          "publish": [
+            {
+              "parcel": {
+                "kind": 5,
+                "opener": "A1 00 00 00 00 00 00 01",
+                "acceptor": "{first}",
+                "sequence": 3,
+                "flags": 0
+              }
+            }
+          ],
+          "from": "peer",
+          "to": "inbox",
+          "refused": "no-subscriber"
         },
         {
           "publish": [

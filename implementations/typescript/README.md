@@ -1359,8 +1359,10 @@ of 65,535, a Topic Alias Maximum of 0, its `maximumPacketSize`, 16,777,216 bytes
 `keepAlive`, 30 s by default; its start waits `connectTimeout`, 30 s by default, for its password,
 where it asks its provider, and a CONNACK of Reason Code 0x00 whose Maximum QoS is not 0. Its will
 is the participant's GONE, QoS 1, RETAIN 0, a Will Delay Interval of 0; its stop takes no publication,
-sends what waits on its Receive Maximum and awaits each PUBACK within `connectTimeout`, fails what has
-not gone by then, and sends a DISCONNECT of 0x00, so that none goes; a DISCONNECT of 0x8E from its
+sends what waits on its Receive Maximum and awaits each PUBACK, fails what has not gone by then, then
+sends an UNSUBSCRIBE of each filter its link asked or holds, one a packet, and awaits their UNSUBACKs,
+all within `connectTimeout` of its call, then a DISCONNECT of 0x00 within one of its own, so that
+none goes and its broker hands it nothing once it settled; a DISCONNECT of 0x8E from its
 broker is its link taken over. MQTT.js reconnects nothing, subscribes nothing again and holds nothing while down: what is asked of a link
 that is down is refused at once.
 
@@ -1418,10 +1420,11 @@ it serves, one sends to inboxes and one to names, each sender to the anonymous t
 what its broker's channel-max leaves is refused. Its inbox is a queue `<root>.i.<id>` declared
 exclusive, classic and not durable through RabbitMQ's management on that connection
 (`amqp-management`), then bound to its root's topic exchange by its name, so that it ends with the
-connection; a second link of its id is refused it while the first holds it. Its stop takes no
-publication, sends what waits on its senders' credit and awaits each outcome within
-`connectTimeout`, fails what has not gone by then, then detaches its receivers and closes its
-connection with no error. rhea reconnects nothing, recovers nothing and holds nothing while down:
+connection; a second link of its id is refused it while the first holds it. Its stop, within
+`connectTimeout` of its call, takes no publication, sends what waits on its senders' credit and
+awaits each outcome, fails what has not gone by then, deletes its inbox through the management, so
+that a message to it finds no subscriber, then detaches its receivers and closes its connection
+with no error. rhea reconnects nothing, recovers nothing and holds nothing while down:
 what is asked of a link that is down is refused at once.
 
 A name is its queue `<root>.s.<name>`, which the deployment provisions and every participant serving

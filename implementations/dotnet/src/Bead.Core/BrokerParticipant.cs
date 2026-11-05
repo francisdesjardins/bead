@@ -618,9 +618,11 @@ public sealed class BrokerParticipant : IAsyncDisposable
     /// <summary>
     /// Ends its link in place, and with it what is under way as it is called (spec 15.21): gives up
     /// its link's start under way and awaits it, closes each of its connections with a CLOSE of
-    /// 1001, then stops its adapter, which sends those CLOSEs before it ends the link, so its broker
-    /// publishes no will of a link it held; a connect awaiting its link or its answer fails, stopped
-    /// as it connected, and a reconnection, its own or a client's, ends at once, the stop its cause.
+    /// 1001, then stops its adapter, which sends those CLOSEs, then has its broker let go of each
+    /// subscription of its link, before it ends the link, so its broker publishes no will of a link
+    /// it held and hands it nothing once it settled; a connect awaiting its link or its answer
+    /// fails, stopped as it connected, and a reconnection, its own or a client's, ends at once, the
+    /// stop its cause.
     /// Once it settled, its start, a server's start over it, or a client's connect or reconnection
     /// over it links it anew as another incarnation, its transports kept, and resets each peer whose
     /// CLOSE its broker did not take. A stop called again before its next link's start settles with

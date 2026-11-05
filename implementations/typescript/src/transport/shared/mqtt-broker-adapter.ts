@@ -44,8 +44,9 @@ export type { BrokerDelivery, BrokerPublished, BrokerTopic, IBrokerAdapter } fro
 
 export interface IMqttBrokerAdapterOptions {
   /**
-   * How long its start waits for its password, where it asks its provider, and its CONNACK, in
-   * milliseconds (spec 15.30). Defaults to {@link CONNECT_TIMEOUT}.
+   * How long it waits, in milliseconds: its start, for its password, where it asks its provider,
+   * and its CONNACK; and its stop, for what it was handed and its UNSUBACKs, then for its
+   * DISCONNECT (spec 15.26, 15.30). Defaults to {@link CONNECT_TIMEOUT}.
    */
   connectTimeout?: number | undefined;
   /** At least once by default, each publication of QoS 1; at most once, of QoS 0 (spec 15.28). */
@@ -113,8 +114,12 @@ interface IIncarnation {
   ending: Promise<void> | undefined;
   /** What its awaited operations are failed with as it ends. */
   readonly failures: Set<(error: Error) => void>;
-  /** The filter each topic was subscribed by, which its UNSUBSCRIBE names. */
-  readonly filters: Map<string, string>;
+  /**
+   * The filter each topic's SUBSCRIBE named, by its topic, from its SUBSCRIBE until its UNSUBACK:
+   * what its UNSUBSCRIBE names, and what its stop lets go. Each SUBSCRIBE's its own record, so that
+   * the UNSUBACK of a former one never forgets a later one.
+   */
+  readonly filters: Map<string, { readonly filter: string }>;
   /** Its QoS 1 publications sent and not acknowledged. */
   inFlight: number;
   /** Up, its CONNACK read, and not ended. */
@@ -136,7 +141,7 @@ interface IIncarnation {
 
 // constants
 
-/** How long a start waits for its password, where it asks its provider, and its CONNACK, by default: 30 seconds (spec 15.30). */
+/** How long a start waits for its password, where it asks its provider, and its CONNACK, and a stop for what it was handed and its UNSUBACKs, then for its DISCONNECT, by default: 30 seconds (spec 15.30). */
 export const CONNECT_TIMEOUT = 30_000;
 
 /** Its Keep Alive, by default: 30 seconds, its will inside two heartbeats (spec 15.30). */
@@ -231,10 +236,12 @@ const assertAuthentication = ({
  * Maximum, later ones waiting in their order; its PUBACK of 0x10 says no subscriber, of 0x80 or
  * more refuses it. Each message is handed on before its PUBACK, which goes once it is settled. A
  * DISCONNECT of 0x8E tells its link taken over; any other end, lost; its stop takes no publication,
- * sends what waits on the quota and awaits each PUBACK, within its connectTimeout, fails what has
- * not gone by then, and sends a DISCONNECT of 0x00, so that no will goes. Its leg is secure under
- * TLS or to the loopback. In a page, its WebSocket sends no message past 16 KiB, which Chromium
- * sends as one frame.
+ * sends what waits on the quota and awaits each PUBACK, fails what has not gone by then, sends an
+ * UNSUBSCRIBE for each filter its link asked or holds, one filter a packet, all at once, and awaits
+ * their UNSUBACKs, all within one connectTimeout of its call, then sends a DISCONNECT of 0x00
+ * within a connectTimeout of its own, so that no will goes: once it settled, its broker hands
+ * it nothing. Its leg is secure under TLS or to the loopback. In a page, its WebSocket sends no
+ * message past 16 KiB, which Chromium sends as one frame.
  *
  * @example
  * const adapter = createMqttBrokerAdapter({ id: 'server', password, url: 'mqtts://broker:8883' });
@@ -461,9 +468,44 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
     });
   };
 
+  // * each filter its link asked or holds let go, one UNSUBSCRIBE each, all sent at once: settles
+  // once every UNSUBACK came, 0x00 or 0x11 letting it go and any other code too, its link ended, or
+  // `within` passed (spec 15.26, 15.27)
+  const letGo = (incarnation: IIncarnation, within: number): Promise<void> => {
+    // ! one filter a packet: one UNSUBSCRIBE of them all may pass its CONNACK's Maximum Packet Size,
+    // which its broker ends the link for, its will published
+    const asked = [...incarnation.filters.values()].map(({ filter }) => {
+      return filter;
+    });
+    const answered = [...new Set(asked)].map((filter) => {
+      return new Promise<void>((resolve) => {
+        const done = (): void => {
+          incarnation.failures.delete(done);
+          resolve();
+        };
+
+        incarnation.failures.add(done);
+        // ! a callback after its bound, the purge's 'Message removed' among them, serves nothing
+        incarnation.client.unsubscribe(filter, done);
+      });
+    });
+
+    return new Promise<void>((resolve) => {
+      const timer = PLATFORM_CLOCK.setTimeout(resolve, Math.min(within, LONGEST_TIMER));
+
+      void Promise.all(answered).then(() => {
+        PLATFORM_CLOCK.clearTimeout(timer);
+        resolve();
+      });
+    });
+  };
+
   // * its stop, once: no down told, a stop is no loss, and no publication taken from it; what it
-  // was handed sent first, then what is left failed and its DISCONNECT of 0x00 sent
+  // was handed sent first, what is left failed, each filter let go, then its DISCONNECT of 0x00 sent
   const endOf = async (incarnation: IIncarnation): Promise<void> => {
+    // * one connectTimeout from its stop's call: what it was handed, then its UNSUBACKs
+    const deadline = PLATFORM_CLOCK.performance.now() + connectTimeout;
+
     incarnation.isLinked = false;
 
     // ! before any packet awaiting its answer is let go below, whose PUBACK it waits on: what it
@@ -480,19 +522,46 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
       fail(stopped);
     }
 
+    // ! after the drain, so that no UNSUBSCRIBE overtakes a publication waiting on its broker's
+    // Receive Maximum; and before it retires, so that a message that comes meanwhile is still handed
+    // on and settled: MQTT.js reads no UNSUBACK behind a PUBLISH it holds unacknowledged
+    if (!incarnation.isRetired && incarnation.client.connected) {
+      await letGo(incarnation, Math.max(0, deadline - PLATFORM_CLOCK.performance.now()));
+    }
+
     incarnation.isRetired = true;
-    current = undefined;
-    unsettled = 0;
+    incarnation.filters.clear();
+
+    if (current === incarnation) {
+      current = undefined;
+      unsettled = 0;
+    }
 
     if (incarnation.client.connected) {
-      // ! MQTT.js's clean end waits for every packet it awaits an answer to, a SUBACK that never
-      // comes among them: its DISCONNECT goes now, behind what was written
+      // ! MQTT.js's clean end waits for every packet it awaits an answer to, a SUBACK or an UNSUBACK
+      // that never comes among them: its DISCONNECT goes now, behind what was written
       for (const messageId of Object.keys(incarnation.client.outgoing)) {
         incarnation.client.removeOutgoingMessage(Number(messageId));
       }
 
+      // * its DISCONNECT within a connectTimeout of its own, though the drain spent the first: then
+      // its network connection ended at once, its broker never answering
       await new Promise<void>((resolve) => {
+        const timer = PLATFORM_CLOCK.setTimeout(
+          () => {
+            try {
+              incarnation.client.stream.destroy();
+            } catch {
+              // its stream ended
+            }
+
+            resolve();
+          },
+          Math.min(connectTimeout, LONGEST_TIMER)
+        );
+
         incarnation.client.end(false, { reasonCode: 0 }, () => {
+          PLATFORM_CLOCK.clearTimeout(timer);
           resolve();
         });
       });
@@ -1037,10 +1106,16 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
         );
       }
 
-      const filter = group === undefined ? topicOf(topic) : groupFilterOf(group, topic);
+      const key = topicOf(topic);
+      const filter = group === undefined ? key : groupFilterOf(group, topic);
 
       return awaited<void>(incarnation, {
         begin: ({ reject, resolve }) => {
+          // * recorded as its SUBSCRIBE goes, so that a stop before its SUBACK lets it go: its
+          // broker, reading the link's packets in their order, installs it before that UNSUBSCRIBE
+          const record = { filter };
+
+          incarnation.filters.set(key, record);
           incarnation.client.subscribe(
             filter,
             { nl: false, qos: 1, rap: false, rh: 2 },
@@ -1049,10 +1124,15 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
               const code = (suback?.granted as number[] | undefined)?.[0];
 
               if (code === 1) {
-                incarnation.filters.set(topicOf(topic), filter);
                 resolve();
 
                 return;
+              }
+
+              // ! kept where its broker may hold it, QoS 0 granted among them, which its stop lets
+              // go; a code of 0x80 or more installed nothing
+              if (code !== undefined && code >= 0x80 && incarnation.filters.get(key) === record) {
+                incarnation.filters.delete(key);
               }
 
               if (code === REASON.SHARED_SUBSCRIPTIONS_NOT_SUPPORTED) {
@@ -1079,7 +1159,8 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
       }
 
       const key = topicOf(topic);
-      const filter = incarnation.filters.get(key) ?? key;
+      const record = incarnation.filters.get(key);
+      const filter = record?.filter ?? key;
 
       return awaited<void>(incarnation, {
         begin: ({ reject, resolve }) => {
@@ -1096,7 +1177,11 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
                 )
               );
             } else {
-              incarnation.filters.delete(key);
+              // ! the record it let go alone: a SUBSCRIBE asked again meanwhile keeps its own
+              if (record !== undefined && incarnation.filters.get(key) === record) {
+                incarnation.filters.delete(key);
+              }
+
               resolve();
             }
           });

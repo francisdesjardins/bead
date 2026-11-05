@@ -153,9 +153,18 @@ the id holds the inbox, the start fails on the 400 and the participant's reconne
 the earlier link keeps the id, where MQTT 5's later one does. A link is up once its inbox's receiver
 attached; the end of its connection, of its inbox's session or of its receiver is its link lost,
 and its inbox is never attached again in place, since a receiver detached hands its unsettled
-messages back on the same connection, which the core would read behind later parcels. A stop fails
-what waits on its link, none of it a no subscriber, which `released` alone tells (spec 15.33,
-15.35).
+messages back on the same connection, which the core would read behind later parcels.
+
+**A stop deletes its inbox** (spec 15.21, 15.24, 15.33): within one `connectTimeout` from its call,
+it takes no new publication, and once what it was handed went, each outcome come, it deletes its
+inbox through the management, as its inbox is let go, then detaches its receivers and closes its
+connection with no error. The exclusive queue would end with the connection all the same, but only
+once its broker processed the close, a parcel to it taken meanwhile; deleted, it is let go as an
+MQTT 5 subscription is by its UNSUBACK, so once a stop settled a message to the inbox is `released`,
+no subscriber, on every binding alike. The deletion goes after the drain, so that no CLOSE still
+waiting on its sender's credit is overtaken and its peer reads `released` before its 1001. A name's
+queue keeps holding its name's parcels through the stop (spec 15.38). A stop fails what waits on its
+link, none of it a no subscriber, which `released` alone tells (spec 15.33, 15.35).
 
 **Sessions are the walls** (spec 15.33): one for the inbox's receiver, one for each name served,
 one sending to inboxes and one sending to names, each to the anonymous terminus, and the management
@@ -184,9 +193,9 @@ on after it is asked, all within one `connectTimeout`, past which the link is lo
 that answers heartbeats and not a DETACH is broken: RabbitMQ requeues a message detached unsettled,
 and an OPEN whose connection its server took and has since closed would be answered anew, its pair
 gone. A name whose subscription is under way as it is let go is let go once its ATTACH is answered,
-never held. An inbox, a test's peer's alone, is let go once the management deleted it, answered
-within `connectTimeout`, what comes meanwhile handed on and credited, since its messages end with
-it. No departure is subscribed: the adapter offers no will.
+never held. An inbox, a test's peer's or its own at a stop, is let go once the management deleted
+it, answered within `connectTimeout`, what comes meanwhile handed on and credited, since its
+messages end with it. No departure is subscribed: the adapter offers no will.
 
 **A publication is one message of format 0, of one profile** (spec 15.35): a header only where the
 core asks a life, its `ttl` alone, in whole milliseconds rounded up, 1 at least; properties whose
@@ -293,6 +302,9 @@ again in place (15.33, 15.36), so no requeue reaches a live connection.
 **AMQP 1.0 runs in no page**: no open-source RabbitMQ 4 carries it over a WebSocket, so the adapter
 runs in Node alone and refuses a page, naming why, a row of "Differences".
 
+**A stop costs a management request**, a round trip within its `connectTimeout`, to delete its
+inbox, which a lost link does not: an inbox its broker reaps after a loss takes parcels until then.
+
 **Ahead**: a publisher's identity a broker vouches for, standing for an `ELSEWHERE`
 ([0040](0040-a-brokers-adapter-offers-bytes-at-topics-and-bead-keeps-its-own-credit-credential-and-heartbeat.md)),
 by a decision of its own: it is no capability MQTT 5 or core NATS gives; over AMQP 1.0 RabbitMQ
@@ -302,12 +314,13 @@ TLS played is ahead too: the fixtures' Mosquitto and RabbitMQ under TLS, a clien
 SASL EXTERNAL among it, where the matrix holds rows "not tested", since each fixture's broker
 listens in clear on the loopback (0041).
 
-**Its gates**: the cases over `amqp` of `spec/transports.json` and its `brokers.amqp`;
-`amqpMessages` and `amqpPublishBounds`; the places `amqpBrokerAdapter.idleTimeout` and
-`amqpBrokerAdapter.connectTimeout`; the adapters' twins, against a scripted AMQP 1.0 peer and
-against the fixture, and the management helper's; the interop over AMQP 1.0 both ways, a name served
-by two in one group proven by no ACCEPT ever answered twice; and the CI job `amqp`,
-`BEAD_AMQP_REQUIRED=1`.
+**Its gates**: the cases over `amqp` of `spec/transports.json` and its `brokers.amqp`, a
+participant's stop among them, its inbox finding no subscriber once it settled and its name's queue
+holding an OPEN; `amqpMessages` and `amqpPublishBounds`; the places `amqpBrokerAdapter.idleTimeout`
+and `amqpBrokerAdapter.connectTimeout`; the adapters' twins, against a scripted AMQP 1.0 peer and
+against the fixture, the inbox deleted at a stop among them, and the management helper's; the
+interop over AMQP 1.0 both ways, a name served by two in one group proven by no ACCEPT ever answered
+twice; and the CI job `amqp`, `BEAD_AMQP_REQUIRED=1`.
 
 ## The Tenth Man
 
@@ -342,3 +355,12 @@ accepted.
 | (4) A name subscribed while its subscription is under way is held before its ATTACH on one side and attaches a second receiver on the other, and one an unsubscription meets is held after it. | **Accepted.** One under way is waited for, and one an unsubscription met is let go once attached, never held (15.34), on both sides.                                                                                                                                                                                                         |
 | (5) A refused inbox deletion leaves what came meanwhile unsettled and its credit spent, and the TypeScript deletion has no bound.                                                              | **Accepted.** The flag marks only the inbox's DETACH as asked, so it hands on and credits during the DELETE; each side's deletion is bounded by `connectTimeout`.                                                                                                                                                                            |
 | (6) The bounds' ranges are stated nowhere, the "Leveled down" row cites 15.34, and the twins assert different things.                                                                          | **Accepted.** 15.37 states both, `maximumMessageSize`'s from a Data section's `vbin32` and an OPEN's 4-byte receive bound; the row cites 15.37; the twin of the receive bound is widened to the ranges and plays the same assertions on both sides.                                                                                          |
+
+### On a stop that deletes its inbox
+
+The round of [0041](0041-over-mqtt-5-a-participant-is-one-clean-link-and-a-parcel-one-publish-each-counted-to-its-byte.md)'s
+"On a stop that lets go of each subscription", one of whose objections reaches this binding.
+
+| Objection                                                                                                                                                                                                                                                   | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| The guarantee drafted for 15.21, nothing routed to a stopped participant's names or inbox, is false over AMQP 1.0: a name's queue holds an OPEN through a stop by design, and the inbox, an exclusive queue, ends only once its broker processed the CLOSE. | **Accepted, as the same guarantee on every binding.** Verified against the fixture's RabbitMQ: after the TypeScript adapter's stop settled, its DETACHes and its CLOSE awaited, 91 of 200 parcels to its inbox were taken. The stop deletes its inbox through the management after the drain, before the DETACHes and the CLOSE, within its one bounded stop, as its unsubscription of an inbox already does on both sides; 15.33 says so, and 15.21 excepts what a name's queue holds (15.38). A stop and a start at once under the same id were probed too: none of 300 starts met the former inbox. |

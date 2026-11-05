@@ -274,8 +274,9 @@ export interface IBrokerAdapter {
   start(options?: IBrokerStart): Promise<void>;
   /**
    * Ends its link cleanly, so no will goes: what it was handed to publish before it sent first,
-   * within a bound of its own, and what has not gone by then failed; a later start a new link
-   * (spec 15.24).
+   * within a bound of its own, and what has not gone by then failed; settled once its broker let go
+   * of each subscription of its link, as its unsubscription lets one go, so that its broker then
+   * hands it nothing; a later start a new link (spec 15.24).
    */
   stop(): Promise<void>;
   /** Holds a subscription, settling once its broker holds it. */
