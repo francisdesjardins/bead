@@ -67,7 +67,8 @@ The options weighed:
 on every side, name for name, each in its language's case: its handles' type, `BROKER` in memory;
 the id its broker authenticates its link by; to start a link that keeps no broker session, with its
 will where it takes one; to subscribe a topic, alone or in a group, said held once its broker holds
-it; to let one go, said let go once its broker did; to publish a payload to a topic, said taken once
+it; to let one go, said let go once its broker did, within a bound of its own, what it handed on of
+it first; to publish a payload to a topic, said taken once
 its broker took it, or as it goes at most once, or refused, `no-subscriber` where its broker says
 so; each message, with its topic, its payload and its acknowledgement; its link lost, and whether
 another link of its id took it over; the largest payload a message to a topic carries, asked by the
@@ -83,7 +84,8 @@ down come to a `BrokerListener` it hands `listen`.
 **Each side's core holds an in-memory broker** of that contract, with every optional capability:
 topics and subscriptions, alone and in groups, a group's members chosen in turn; each message copied
 as it is published and handed on in a later turn than its publish, in the order its publisher
-published to that topic, once; a bound per message and a queue bound per subscriber it is given,
+published to that topic, once; a subscription let go once what it queued to it before was handed
+on; a bound per message and a queue bound per subscriber it is given,
 none by default, past which a message is dropped as a full broker queue drops one; a delivery level
 it is given, at least once by default; `noSubscriber` refusals; expiry on its clock; wills published
 as a link is lost, never at a stop; and, on a test's word, the next message copied, held behind the
@@ -163,10 +165,14 @@ that one is set, never its value, as `Credential` does. The Rust side's adapters
 form.
 
 **A server's transport serves by its broker's word**: it starts once its broker holds each name
-it serves, a name refused failing its start, and stops once it let each go; its gauge `names`
-counts a name from its broker's acknowledgement of the subscription to its acknowledgement of the
-unsubscription, MQTT's SUBACK and UNSUBACK, AMQP 1.0's ATTACH that names its source and its
-DETACH.
+it serves, a name refused failing its start, and stops once it let each go, its unsubscriptions
+handed before its CLOSEs; and a participant's stop lets each go in its turn, before its adapter
+stops. Its gauge `names` counts a name from its broker's acknowledgement of the subscription to its
+acknowledgement of the unsubscription, MQTT's SUBACK and UNSUBACK, AMQP 1.0's ATTACH that names its
+source and its DETACH: a refusal is none, so a name its broker refuses to let go stays counted, and
+held, until the link ends. A let-go that fails is reported, but where its adapter refused it as a
+misuse, no link up, or its link was lost: outside a stop as the link reads it, during a stop by a
+down its adapter told meanwhile, which the core notes and otherwise ignores.
 
 **A participant whose link is taken over is fenced** (spec 15.21): its adapter says its link went
 down for another link of its id, and the participant closes each connection, unclean, reports it,

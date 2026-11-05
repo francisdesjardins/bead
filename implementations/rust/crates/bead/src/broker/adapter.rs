@@ -356,11 +356,14 @@ pub trait BrokerAdapter: Send + Sync + fmt::Debug {
         options: BrokerSubscription,
     ) -> BoxFuture<Result<(), BrokerError>>;
 
-    /// Lets the subscription to `topic` go.
+    /// Lets the subscription to `topic` go, taking effect as it is called; settles once its broker
+    /// let it go, within a bound of its own, each message its broker sent of it before then handed
+    /// on first (spec 15.24). A participant's stop asks it of each name it serves, before its stop.
     ///
     /// # Errors
     ///
-    /// A [`BrokerError`] when the broker refuses the unsubscribe or the link is lost.
+    /// A [`BrokerError`] when the broker refuses the unsubscribe, does not let it go within that
+    /// bound, or the link is lost.
     fn unsubscribe(&self, topic: &[String]) -> BoxFuture<Result<(), BrokerError>>;
 
     /// Publishes a payload; settles once its broker took it, at least once, or as it goes, at most

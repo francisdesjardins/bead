@@ -212,13 +212,16 @@ export interface IBrokerParticipant {
    */
   start(options?: { signal?: AbortSignal | undefined }): Promise<void>;
   /**
-   * Ends its link in place, and with it what is under way: gives up its link's start under way and
-   * awaits it, fails each connect and ends each reconnection, closes each of its connections with
-   * 1001, then stops its adapter, which sends those CLOSEs before it ends the link, so its broker
-   * publishes no will. Its transports, their routers and its listeners are kept, and its next start,
-   * a server's start or a client's connect over it links it anew, resetting each peer whose CLOSE
-   * its broker did not take. A stop called again settles with the first; a participant no longer in
-   * use is disposed (spec 15.21).
+   * Ends its link in place, and with it what is under way: lets go of each name its broker holds
+   * or was asked to hold, kept wanted for its next link, closes each of its connections with 1001,
+   * those unsubscriptions handed first, gives up its link's start under way and awaits it, fails
+   * each connect and ends each reconnection; then awaits its broker's word on each name, within its
+   * adapter's bound, refusing 503 `busy` an OPEN its broker hands it meanwhile, a name it refuses to
+   * let go reported and held until its stop settles; then stops its adapter, which sends those
+   * CLOSEs before it ends the link, so its broker publishes no will. Its transports, their routers
+   * and its listeners are kept, and its next start, a server's start or a client's connect over it
+   * links it anew, resetting each peer whose CLOSE its broker did not take. A stop called again
+   * settles with the first; a participant no longer in use is disposed (spec 15.18, 15.21).
    */
   stop(): Promise<void>;
   /** A client's transport over it, one connection at a time through a server's name. */
@@ -365,9 +368,22 @@ export interface IBrokerParticipantPort {
   ): Promise<void>;
 }
 
+// a name its servers' transports want: its group, whether its broker holds it, from its SUBACK to
+// its UNSUBACK, whether it was asked to, from its SUBSCRIBE to its answer, and its asks in order
+interface INameEntry {
+  group: string | undefined;
+  isAsked: boolean;
+  isHeld: boolean;
+  isWanted: boolean;
+  pending: number;
+  settling: Promise<void>;
+}
+
 // one stop of a participant: marked as it is called, its adapter's start's signal then its clients'
 // aborted; its successor drawn as it settles
 interface IStopRecord {
+  /** Its adapter told its link down as it stopped: what fails of the link then is that loss. */
+  isDownAsItStops: boolean;
   isMarked: boolean;
   /** Its clients' connects and reconnections, and its own reconnection, end by it. */
   readonly ending: AbortController;
@@ -412,7 +428,12 @@ const isSame = (one: Uint8Array, other: Uint8Array): boolean => {
 
 // a stop to come, unmarked
 const stopRecordOf = (): IStopRecord => {
-  return { ending: new AbortController(), isMarked: false, stopping: new AbortController() };
+  return {
+    ending: new AbortController(),
+    isDownAsItStops: false,
+    isMarked: false,
+    stopping: new AbortController(),
+  };
 };
 
 // bytes drawn from a cryptographic source
@@ -539,12 +560,8 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
   const serving = new Map<string, IBrokerServing>();
   // the names its servers' transports hold, each one's alone, from the time each is built
   const reserved = new Set<string>();
-  // the names wanted, their group, whether the broker holds them now, from its SUBACK to its
-  // UNSUBACK, and what was asked of it last, each ask after the one before it
-  const names = new Map<
-    string,
-    { group: string | undefined; isHeld: boolean; isWanted: boolean; settling: Promise<void> }
-  >();
+  // the names its servers' transports want, by name
+  const names = new Map<string, INameEntry>();
   // the departures it subscribes, by peer, while it holds a connection with it
   const departures = new Map<string, { count: number; isAsked: boolean; isHeld: boolean }>();
 
@@ -655,10 +672,7 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
   // ── names and departures ──
 
   // * a name held by its broker's word: from its SUBACK to its UNSUBACK, on the link that asked it
-  const settleName = async (
-    name: string,
-    entry: { group: string | undefined; isHeld: boolean; isWanted: boolean }
-  ): Promise<void> => {
+  const settleName = async (name: string, entry: INameEntry): Promise<void> => {
     const asked = epoch;
 
     if (!isLinked) {
@@ -666,10 +680,18 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
     }
 
     if (entry.isWanted && !entry.isHeld) {
-      await adapter.subscribe(
-        topicOf('s', name),
-        entry.group === undefined ? {} : { group: entry.group }
-      );
+      // * asked from its SUBSCRIBE on, so that a stop before its SUBACK lets it go
+      entry.isAsked = true;
+
+      try {
+        await adapter.subscribe(
+          topicOf('s', name),
+          entry.group === undefined ? {} : { group: entry.group }
+        );
+      } finally {
+        entry.isAsked = false;
+      }
+
       entry.isHeld = asked === epoch;
       if (entry.isHeld && isDebugging()) {
         debug({ event: 'names', name, isHeld: true, group: entry.group });
@@ -682,10 +704,13 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
       try {
         await adapter.unsubscribe(topicOf('s', name));
       } catch (reason) {
-        // a link that went down let it go of its own
+        // * one its broker refused to let go is reported and held still; a link that went down let
+        // it go of its own, and a stop since lets it go itself (spec 15.21)
         if (asked === epoch) {
           report(toError(reason));
         }
+
+        return;
       }
 
       // ! nothing asks it again before this settles: each ask after the one before it
@@ -702,19 +727,27 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
   ): Promise<void> => {
     const entry = names.get(name) ?? {
       group,
+      isAsked: false,
       isHeld: false,
       isWanted,
+      pending: 0,
       settling: Promise.resolve(),
     };
 
     names.set(name, entry);
     entry.isWanted = isWanted;
 
-    // ! each ask after the one before it: a name let go as its SUBSCRIBE goes is let go once it came
-    const settled = entry.settling.then(() => {
-      return settleName(name, entry);
-    });
+    const ask = (): Promise<void> => {
+      return settleName(name, entry).finally(() => {
+        entry.pending -= 1;
+      });
+    };
+    // ! each ask after the one before it: a name let go as its SUBSCRIBE goes is let go once it
+    // came; one with none before it asked at once, so that a server's stop hands its UNSUBSCRIBE
+    // before its CLOSEs (spec 15.21)
+    const settled = entry.pending === 0 ? ask() : entry.settling.then(ask);
 
+    entry.pending += 1;
     entry.settling = settled.catch(noop);
 
     return settled;
@@ -1794,6 +1827,11 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
 
   const down = (event?: IBrokerDown): void => {
     if (!isLinked) {
+      // * down as it stops: noted, so that what fails of its link then is read as that loss
+      if (current.isMarked) {
+        current.isDownAsItStops = true;
+      }
+
       // * down as it connects: the attempt under way fails; taken over, none follows it
       if (isLinking) {
         downsAsItLinks += 1;
@@ -1828,7 +1866,9 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
         : `the link of ${id} went down as it connected`
     );
 
+    // * what its link held or was asked ends with it
     for (const entry of names.values()) {
+      entry.isAsked = false;
       entry.isHeld = false;
     }
 
@@ -1871,8 +1911,47 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
     linking.catch(noop);
   };
 
+  // * a name let go as it stops, through its adapter, never `want`, which asks nothing of a link
+  // down: told once let go; refused or past its adapter's bound, reported and held, unless its
+  // link was lost meanwhile or none is up (spec 15.21)
+  const letGoAsItStops = (
+    name: string,
+    { entry, record }: { entry: INameEntry; record: IStopRecord }
+  ): Promise<void> => {
+    let leaving: Promise<void>;
+
+    // ! asked as it is called: an adapter that throws fails it as one that refuses
+    try {
+      leaving = adapter.unsubscribe(topicOf('s', name));
+    } catch (reason) {
+      leaving = Promise.reject(toError(reason));
+    }
+
+    return leaving.then(
+      () => {
+        // * its link lost meanwhile let it go of its own, told nothing
+        if (record.isDownAsItStops) {
+          return;
+        }
+
+        entry.isHeld = false;
+        if (isDebugging()) {
+          debug({ event: 'names', name, isHeld: false, group: entry.group });
+        }
+      },
+      (reason: unknown) => {
+        const error = toError(reason);
+
+        if (!record.isDownAsItStops && error.message !== `the link of ${id} is not up`) {
+          report(error);
+        }
+      }
+    );
+  };
+
   // * its link ended in place with what is under way, its adapter stopped once its start under way
-  // settled, which sends each CLOSE first; shared until its next link starts (spec 15.21)
+  // settled and its broker let each name go, which sends each CLOSE first; shared until its next
+  // link starts (spec 15.21)
   const stopInPlace = (): Promise<void> => {
     stopped ??= (async () => {
       const record = current;
@@ -1885,6 +1964,19 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
       // ! a link up before it is shared by no later call, which links anew
       linking = undefined;
       relinking = undefined;
+
+      // * in its turn, before its CLOSEs and before it reads its link down: each name its broker
+      // holds or was asked to hold let go, kept wanted for its next link, so that its broker hands
+      // it no OPEN once it read them (spec 15.18, 15.21)
+      const letting = isLinked
+        ? [...names]
+            .filter(([, entry]) => {
+              return entry.isHeld || entry.isAsked;
+            })
+            .map(([name, entry]) => {
+              return letGoAsItStops(name, { entry, record });
+            })
+        : [];
 
       // * each CLOSE handed to its adapter before its stop: each pair its broker does not take is
       // reset at its next link
@@ -1908,6 +2000,9 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
 
       try {
         await starting?.catch(noop);
+        // * its adapter up while its broker lets each name go: an OPEN it hands meanwhile is
+        // refused 503, that REFUSE among what its adapter's stop sends
+        await Promise.all(letting);
         await adapter.stop();
       } finally {
         // ! an OPEN its link took as it ended, after its CLOSEs went, holds a connection on a link
@@ -1922,7 +2017,9 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
           }
         }
 
+        // * a name its broker did not let go, refused or past its bound, held until here
         for (const entry of names.values()) {
+          entry.isAsked = false;
           entry.isHeld = false;
         }
 

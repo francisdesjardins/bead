@@ -591,6 +591,47 @@ async fn tells_completed_link_transitions_and_held_names_by_push_and_keeps_level
     pair.stop().await;
 }
 
+// debugging 13.5
+#[tokio::test]
+async fn tells_each_name_its_stop_lets_go_once_its_broker_let_it_go_after_its_closes_and_before_its_stopped()
+ {
+    let pair = TracePair::of().await;
+    let from = locked(&pair.server_events).len();
+
+    pair.server_participant.stop().await;
+
+    let told: Vec<ParticipantDebugEvent> = locked(&pair.server_events)
+        .get(from..)
+        .unwrap_or_default()
+        .to_vec();
+    let at = |found: &dyn Fn(&ParticipantDebugEvent) -> bool| told.iter().position(found);
+    let close = at(&|event| {
+        event.kind.as_deref() == Some("CLOSE") && event.direction == Some(DebugDirection::Tx)
+    })
+    .expect("its CLOSE");
+    let names = at(&|event| event.event == "names").expect("its name let go");
+    let stopped =
+        at(&|event| event.event == "link" && event.state == Some("stopped")).expect("its stopped");
+
+    assert!(
+        close < names && names < stopped,
+        "its CLOSE, then its name let go, then its stopped"
+    );
+    assert_eq!(
+        told.iter()
+            .filter(|event| event.event == "names")
+            .map(|event| (event.name.clone(), event.is_held, event.group.clone()))
+            .collect::<Vec<_>>(),
+        [(Some("interop".to_owned()), Some(false), None)],
+        "its name let go, once"
+    );
+    assert!(
+        pair.server_participant.names().is_empty(),
+        "none held once stopped"
+    );
+    pair.stop().await;
+}
+
 #[tokio::test]
 async fn tells_a_takeover_once_after_clearing_names_and_connections_and_tells_no_later_link_transition()
  {

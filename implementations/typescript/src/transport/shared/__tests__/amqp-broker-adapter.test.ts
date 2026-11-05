@@ -237,11 +237,15 @@ const holdsQueue = async (url: string, name: string): Promise<boolean> => {
   }
 };
 
-/** A relay of the test's own in front of the broker at `url`. */
-const relayTo = (url: string): Promise<ILinkRelay> => {
+/** A relay of the test's own in front of the broker at `url`, each chunk held `delay` ms each way. */
+const relayTo = (url: string, options?: { delay?: number }): Promise<ILinkRelay> => {
   const parsed = new URL(url);
 
-  return createLinkRelay({ host: parsed.hostname, port: Number(parsed.port) });
+  return createLinkRelay({
+    delay: options?.delay ?? 0,
+    host: parsed.hostname,
+    port: Number(parsed.port),
+  });
 };
 
 /** The fixture's broker, or the skip that says none is given. */
@@ -1309,26 +1313,41 @@ test.describe('createAmqpBrokerAdapter', () => {
   test('lets a name go within one connectTimeout, what it handed on settled and its DETACH answered, and tells its link lost past it (spec 15.34, 15.37)', async () => {
     const adapter = adapterOf(script, { connectTimeout: 300 });
     const { downs, messages } = heardOf(adapter);
+    const told: string[] = [];
+
+    adapter.on('down', () => {
+      told.push('down');
+    });
+
     const link = await inboxUp({ adapter, script });
     const lostWithin =
       'the link of ada was lost: it let the name bead.s.interop go within no 300 ms, its connectTimeout';
 
     await adapter.subscribe(NAME);
 
-    // * what it handed on not settled within it: no DETACH goes, and its link is lost
+    // * what it handed on not settled within it: no DETACH goes, and its link is lost, its let-go
+    // failed before its link is told lost, so that a stop that let it go reads that bound passed
+    // (spec 15.21)
     const sender = await senderOf(link, NAME_QUEUE);
     const delivery = sender.send(dataOf(Uint8Array.of(1)));
 
     await until(() => {
       return messages.length === 1;
     });
-    await expect(adapter.unsubscribe(NAME)).rejects.toThrow(lostWithin);
+
+    const leaving = adapter.unsubscribe(NAME);
+
+    leaving.catch(() => {
+      told.push('failed');
+    });
+    await expect(leaving).rejects.toThrow(lostWithin);
     await link.closed;
     expect([downs, adapter.isLinked, adapter.unsettled]).toEqual([
       [{ isTakenOver: false }],
       false,
       0,
     ]);
+    expect(told, 'its let-go failed, then its link told lost').toEqual(['failed', 'down']);
     expect(attachesOf(link, { address: NAME_QUEUE, role: 'receiver' })[0]).toBeDefined();
     expect(
       link.detached.map(({ address }) => {
@@ -2917,6 +2936,95 @@ test.describe('createAmqpBrokerAdapter, against a broker over AMQP 1.0', () => {
       for (const adapter of adapters) {
         await adapter.stop();
       }
+    }
+  });
+
+  test('an OPEN that comes during a participant’s stop waits in its name’s queue and is answered at its next link (spec 15.21, 15.38)', async () => {
+    const url = brokerUrl();
+    // * the stopping participant a round trip of 300 ms away, so that its broker hands it the OPEN
+    // before it read its DETACH
+    const relay = await relayTo(url, { delay: 150 });
+    const serving = createBrokerParticipant({
+      adapter: createAmqpBrokerAdapter({
+        id: 'other',
+        password: AMQP_PASSWORD,
+        url: `amqp://127.0.0.1:${String(relay.port)}`,
+      }),
+      devtools: false,
+    });
+    const calling = createBrokerParticipant({
+      adapter: createAmqpBrokerAdapter({ id: 'coming', password: AMQP_PASSWORD, url }),
+      devtools: false,
+    });
+    const fixture = await brokerConnectionOf(url, FIXTURE_USER);
+    const reported: string[] = [];
+
+    serving.on('error', ({ message }) => {
+      reported.push(message);
+    });
+
+    try {
+      // * what earlier runs left in the name's queue purged
+      await requestOf(fixture, { method: 'DELETE', path: '/queues/bead.s.interop/messages' });
+
+      const server = serving.transportServer({ names: ['interop'] });
+      let opened = 0;
+
+      server.on('connection', () => {
+        opened += 1;
+      });
+      await server.start();
+
+      // * a connection it holds, whose CLOSE its stop sends and awaits a round trip
+      const holding = calling.transportClient();
+      const closes: boolean[] = [];
+
+      holding.on('close', (wasClean) => {
+        closes.push(wasClean);
+      });
+      await holding.connect({ server: 'interop' });
+      await until(() => {
+        return opened === 1;
+      });
+
+      // * an OPEN published as its stop lets its name go: its receiver hands it nothing, and it
+      // goes back to its name's queue, where its connect waits
+      const stopping = serving.stop();
+      const client = calling.transportClient();
+      const outcome = { value: 'waiting' };
+      const connecting = client.connect({ server: 'interop', timeout: 15_000 }).then(
+        () => {
+          outcome.value = 'opened';
+        },
+        (error: unknown) => {
+          outcome.value = `failed: ${String(error)}`;
+        }
+      );
+
+      await stopping;
+      await sleep(500);
+      expect([outcome.value, opened], 'waiting in its name’s queue').toEqual(['waiting', 1]);
+      expect(closes, 'the connection it held closed with 1001').toEqual([false]);
+
+      // * its next link serves the name, and takes it, its third leg a round trip later
+      await serving.start();
+      await connecting;
+      await until(() => {
+        return opened === 2;
+      });
+      expect([outcome.value, opened], 'answered at its next link').toEqual(['opened', 2]);
+      expect(reported, 'nothing reported').toEqual([]);
+      await client.disconnect();
+    } finally {
+      await requestOf(fixture, { method: 'DELETE', path: '/queues/bead.s.interop/messages' }).catch(
+        () => {
+          return undefined;
+        }
+      );
+      fixture.close();
+      await calling[Symbol.asyncDispose]();
+      await serving[Symbol.asyncDispose]();
+      await relay[Symbol.asyncDispose]();
     }
   });
 });

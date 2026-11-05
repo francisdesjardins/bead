@@ -497,10 +497,46 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     /// broker's management deleted it, answered 200 within its connect timeout, what comes meanwhile
     /// handed on and credited, its receiver detached with it, which tells no loss; a refusal an
     /// <see cref="IOException"/>, and no answer within it a <see cref="TimeoutException"/>, its inbox
-    /// still held. A link down, an <see cref="InvalidOperationException"/>.
+    /// still held. A link down, an <see cref="InvalidOperationException"/>. A name's let-go past its
+    /// bound fails before its link is told lost for it, so that what let it go reads that bound
+    /// passed, never a loss of its link (spec 15.21).
     /// </summary>
-    public async Task Unsubscribe(IReadOnlyList<string> topic)
+    public Task Unsubscribe(IReadOnlyList<string> topic)
     {
+        var losing = new Losing();
+        var settled = new TaskCompletionSource();
+
+        // ! settled with its continuations run as it settles, each queued where it awaits it, then
+        // its link told lost: what hears both hears its failure first
+        _ = Unsubscribing((topic, losing)).ContinueWith(
+            (done) =>
+            {
+                if (done.Exception is { } failed)
+                {
+                    settled.SetException(failed.InnerExceptions);
+                }
+                else
+                {
+                    settled.SetResult();
+                }
+
+                if (losing.Lost is { } lost)
+                {
+                    End((lost.Link, new BrokerDown()), lost.Reason);
+                }
+            },
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+
+        return settled.Task;
+    }
+
+    // its unsubscription, a name's let-go past its bound leaving its link's end to its caller
+    private async Task Unsubscribing((IReadOnlyList<string> Topic, Losing Losing) unsubscribing)
+    {
+        var (topic, losing) = unsubscribing;
+
         ArgumentNullException.ThrowIfNull(topic);
 
         var link = LinkOpen();
@@ -547,13 +583,14 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
         if (receiving is not null)
         {
-            await LetGo((link, receiving));
+            await LetGo((link, receiving), losing);
         }
     }
 
     // * a name let go within its connect timeout: its DETACH once what its receiver handed on was
-    // settled, then its session ended once its broker answered it; past that bound, its link lost
-    private async Task LetGo((Incarnation Link, Receiving Receiving) letting)
+    // settled, then its session ended once its broker answered it; past that bound, its link lost,
+    // which `losing` holds for its caller to end once it failed
+    private async Task LetGo((Incarnation Link, Receiving Receiving) letting, Losing losing)
     {
         var (link, receiving) = letting;
         using var timeout = new CancellationTokenSource(_options.ConnectTimeout, TimeProvider.System);
@@ -577,7 +614,7 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         {
             var lost = new IOException(string.Create(CultureInfo.InvariantCulture, $"the link of {Id} was lost: it let the name {receiving.Queue} go within no {_options.ConnectTimeout.TotalMilliseconds} ms, its connectTimeout"), reason);
 
-            End((link, new BrokerDown()), lost);
+            losing.Lost = (link, lost);
 
             throw lost;
         }
@@ -1762,6 +1799,12 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     }
 
     // a sending session and its sender, and what its ATTACH lets it publish
+    // a link a let-go past its bound lost, ended once that let-go failed
+    private sealed class Losing
+    {
+        public (Incarnation Link, IOException Reason)? Lost { get; set; }
+    }
+
     private sealed class Sending(Session session)
     {
         public Session Session { get; } = session;

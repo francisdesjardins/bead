@@ -765,8 +765,23 @@
           "$ref": "#/$defs/participant"
         },
         "participant": {
-          "description": "The participant under test stopped in place, or started again: its stop and its start settled.",
-          "enum": ["stop", "start"]
+          "description": "The participant under test stopped in place, or started again: its stop and its start settled; crossing, what a peer publishes in the turn its stop begins, before it.",
+          "oneOf": [
+            { "enum": ["stop", "start"] },
+            {
+              "type": "object",
+              "required": ["stop"],
+              "additionalProperties": false,
+              "properties": {
+                "stop": {
+                  "type": "object",
+                  "required": ["crossing"],
+                  "additionalProperties": false,
+                  "properties": { "crossing": { "$ref": "#/$defs/publication" } }
+                }
+              }
+            }
+          ]
         },
         "within": {
           "description": "How long an expect waits, in milliseconds, where not a patience of its own.",

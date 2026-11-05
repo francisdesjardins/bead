@@ -168,6 +168,78 @@ test.describe('memory broker', () => {
     ).toEqual(['one', 'two']);
   });
 
+  test('hands on what it queued to a subscription before it lets it go, then routes it nothing (spec 15.24)', async () => {
+    const broker = createMemoryBroker();
+    const ada = broker.adapter({ id: 'ada' });
+    const bob = broker.adapter({ id: 'bob' });
+
+    await ada.start();
+    await bob.start();
+    await bob.subscribe(NAME);
+
+    // each message with whether its unsubscription had settled as it came
+    const heard: string[] = [];
+    const letting = { isSettled: true };
+
+    bob.on('message', ({ payload, settle }) => {
+      heard.push(`${new TextDecoder().decode(payload)} ${letting.isSettled ? 'let go' : 'held'}`);
+      settle();
+    });
+
+    // * each queued before the unsubscription is made, none handed on yet: it settles once each was
+    const published = ['one', 'two', 'three'].map((text) => {
+      return ada.publish({ payload: bytesOf(text), topic: NAME });
+    });
+
+    letting.isSettled = false;
+
+    const leaving = bob.unsubscribe(NAME).then(() => {
+      letting.isSettled = true;
+    });
+
+    expect(heard, 'nothing handed on yet').toEqual([]);
+    await expect(Promise.all(published)).resolves.toEqual([
+      BROKER_PUBLISHED.TAKEN,
+      BROKER_PUBLISHED.TAKEN,
+      BROKER_PUBLISHED.TAKEN,
+    ]);
+    await leaving;
+    expect(heard, 'each handed on before it settled').toEqual([
+      'one held',
+      'two held',
+      'three held',
+    ]);
+
+    // * and from then on, it is routed nothing
+    await expect(ada.publish({ payload: bytesOf('four'), topic: NAME })).resolves.toBe(
+      BROKER_PUBLISHED.NO_SUBSCRIBER
+    );
+    await settled();
+    expect(heard, 'nothing more').toHaveLength(3);
+
+    // * one let go with nothing queued settles at once
+    await bob.subscribe(NAME);
+    await bob.unsubscribe(NAME);
+    expect(heard, 'nothing handed on').toHaveLength(3);
+
+    // * one whose link is lost meanwhile settles once its down was told
+    const downs: string[] = [];
+
+    bob.on('down', () => {
+      downs.push('down');
+    });
+    await bob.subscribe(NAME);
+    void ada.publish({ payload: bytesOf('five'), topic: NAME });
+
+    const lost = bob.unsubscribe(NAME).then(() => {
+      return [...downs];
+    });
+
+    bob.lose();
+    await expect(lost, 'settled behind its down').resolves.toEqual(['down']);
+    expect(heard, 'what its lost link held dropped').toHaveLength(3);
+  });
+
   test('hands a group message to one member in turn, and again to another when a test asks (spec 15.24)', async () => {
     const broker = createMemoryBroker();
     const [one, two, alone, client] = ['one', 'two', 'alone', 'client'].map((id) => {

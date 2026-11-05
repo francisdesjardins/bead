@@ -162,8 +162,14 @@ connection with no error. The exclusive queue would end with the connection all 
 once its broker processed the close, a parcel to it taken meanwhile; deleted, it is let go as an
 MQTT 5 subscription is by its UNSUBACK, so once a stop settled a message to the inbox is `released`,
 no subscriber, on every binding alike. The deletion goes after the drain, so that no CLOSE still
-waiting on its sender's credit is overtaken and its peer reads `released` before its 1001. A name's
-queue keeps holding its name's parcels through the stop (spec 15.38). A stop fails what waits on its
+waiting on its sender's credit is overtaken and its peer reads `released` before its 1001. Before
+its adapter's stop, its participant lets each name go, a DETACH of the name's receiver in the
+stop's turn, its CLOSEs then, its receiver handing nothing on once its DETACH is asked, and awaits
+each, refusing 503 `busy` the one OPEN its credit of 1 holds (spec 15.21, 15.34): an OPEN that comes
+during the stop waits in its name's queue, for another member or for the participant's next link
+within its life, and a peer told 1001 that connects again before its broker read the DETACH may
+meet a 503 and wait one reconnection delay, the DETACH and the CLOSE's transfer riding different
+sessions. A name's queue keeps holding its name's parcels through the stop (spec 15.38). A stop fails what waits on its
 link, none of it a no subscriber, which `released` alone tells (spec 15.33, 15.35).
 
 **Sessions are the walls** (spec 15.33): one for the inbox's receiver, one for each name served,
@@ -304,6 +310,9 @@ runs in Node alone and refuses a page, naming why, a row of "Differences".
 
 **A stop costs a management request**, a round trip within its `connectTimeout`, to delete its
 inbox, which a lost link does not: an inbox its broker reaps after a loss takes parcels until then.
+Its names' DETACHes cost a round trip before its adapter's stop, within one `connectTimeout`, past
+which its link is lost (spec 15.34), its CLOSEs already handed at its call: two `connectTimeout`s
+at worst against a broker that answers nothing.
 
 **Ahead**: a publisher's identity a broker vouches for, standing for an `ELSEWHERE`
 ([0040](0040-a-brokers-adapter-offers-bytes-at-topics-and-bead-keeps-its-own-credit-credential-and-heartbeat.md)),
@@ -318,7 +327,9 @@ listens in clear on the loopback (0041).
 participant's stop among them, its inbox finding no subscriber once it settled and its name's queue
 holding an OPEN; `amqpMessages` and `amqpPublishBounds`; the places `amqpBrokerAdapter.idleTimeout`
 and `amqpBrokerAdapter.connectTimeout`; the adapters' twins, against a scripted AMQP 1.0 peer and
-against the fixture, the inbox deleted at a stop among them, and the management helper's; the
+against the fixture, the inbox deleted at a stop among them, an OPEN that comes during a
+participant's stop waiting in its name's queue and answered at its next link, and the management
+helper's; the
 interop over AMQP 1.0 both ways, a name served by two in one group proven by no ACCEPT ever answered
 twice; and the CI job `amqp`, `BEAD_AMQP_REQUIRED=1`.
 
@@ -364,3 +375,12 @@ The round of [0041](0041-over-mqtt-5-a-participant-is-one-clean-link-and-a-parce
 | Objection                                                                                                                                                                                                                                                   | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | The guarantee drafted for 15.21, nothing routed to a stopped participant's names or inbox, is false over AMQP 1.0: a name's queue holds an OPEN through a stop by design, and the inbox, an exclusive queue, ends only once its broker processed the CLOSE. | **Accepted, as the same guarantee on every binding.** Verified against the fixture's RabbitMQ: after the TypeScript adapter's stop settled, its DETACHes and its CLOSE awaited, 91 of 200 parcels to its inbox were taken. The stop deletes its inbox through the management after the drain, before the DETACHes and the CLOSE, within its one bounded stop, as its unsubscription of an inbox already does on both sides; 15.33 says so, and 15.21 excepts what a name's queue holds (15.38). A stop and a start at once under the same id were probed too: none of 300 starts met the former inbox. |
+
+### On a stop that lets each name go first
+
+The round of [0041](0041-over-mqtt-5-a-participant-is-one-clean-link-and-a-parcel-one-publish-each-counted-to-its-byte.md)'s
+"On a stop that lets each name go first", one of whose objections reaches this binding.
+
+| Objection                                                                                                                                                                                                                                                                     | Answer                                                                                                                                                                                                                                                                                                                                                                     |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The draft refused the concurrent order for a race over AMQP 1.0, a peer told 1001 reconnecting onto the stopping member, which did not show; measured on every binding, the concurrent order closes the same window, tells the 1001 a round trip sooner and settles no later. | **Accepted.** Verified against the fixture's RabbitMQ: 10 of 10 reconnections opened by the other member, none refused 503, the 1001 read at +152 to +168 ms; no OPEN taken during the stop alone, and 228 of 228 opened by the group. The stop hands its names' DETACHes, then its CLOSEs, in its turn; the race stays stated, a 503 and one reconnection delay, no loss. |

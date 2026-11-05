@@ -599,13 +599,16 @@ judgment, never as a preliminary reading and another event after it.
 
 13.5. A `link` event tells a transition once complete: `state` is `up`, `down`, `taken-over`
 (spec 15.21, 0041) or `stopped`. It names its `incarnation`, the one drawn on `up`, and on a
-`down`, `taken-over` or `stopped` the ordinals of the connections it ends, `ended`. Its names
-are cleared and those connections dropped first. A takeover tells no later transition until
+`down`, `taken-over` or `stopped` the ordinals of the connections it ends, `ended`, read as it is
+called. Its names are cleared and those connections dropped first; before it, a stop has told a
+`names` event for each name its broker let go once its CLOSEs were handed (spec 15.21), and it
+clears with its `stopped` a name it did not. A takeover tells no later transition until
 the application starts the participant again. A stop tells none after its `stopped` until the
 participant's next link, told `up`; a link the stop met as it connected is never told `up`, a stop
 after a stop with no link between tells nothing, and a dispose tells none after it. A `names`
-event tells a name held or let go once the broker acknowledges it: `name`, `isHeld`, `group` when
-any. It covers a name let go at `maximumConnections` and taken again below it (spec 15.18).
+event tells a name held or let go once the broker acknowledges it, never on a refusal: `name`,
+`isHeld`, `group` when any. It covers a name let go at `maximumConnections` and taken again below it
+(spec 15.18), and each name a stop lets go (spec 15.21).
 
 13.6. A `report` event tells what the participant or one of its transports reports through its
 error event while watched, in its own words, `report` (spec 15.1, 15.19 to 15.23). It names the
@@ -635,9 +638,9 @@ listens. A listener filters what it receives, as 0013's call listener does; ther
 selection at the source.
 
 13.10. Twin tests hold each event and verdict, a takeover and no later transition, a link lost with
-the ordinals it ends and restored as another incarnation, the acceptor's half absent from every
-event, a throwing listener reported while the participant goes on, and no clock reading or trace
-construction while unwatched. Where the platform counts a thread's allocations, that count around a
+the ordinals it ends and restored as another incarnation, each name a stop lets go told before its
+`stopped`, the acceptor's half absent from every event, a throwing listener reported while the
+participant goes on, and no clock reading or trace construction while unwatched. Where the platform counts a thread's allocations, that count around a
 parcel taken and one sent pins what they allocate while nobody listens and shows no additional trace
 allocation; elsewhere this part is held by inspection, a row of the support matrix. Like sections 4
 and 5, this section has no conformance file.

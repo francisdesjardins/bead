@@ -13,7 +13,11 @@ namespace Bead.Tests;
 /// one while <see cref="HoldingStarts"/> holds; and each
 /// start refused as a misuse while <see cref="Refusing"/> holds, as its broker would refuse one while
 /// a link of its id is up, decided before its participant hears a loss, so no thread races it; each
-/// stop held, until the test releases it, where <see cref="HoldsStops"/> says so.
+/// subscription to a server's name made at once, its broker's word held until the test grants it,
+/// where <see cref="HoldsNames"/> says so; each unsubscription of a server's name held, unmade,
+/// until the test settles it, made then or failed as it says, where
+/// <see cref="HoldsUnsubscribes"/> says so; each stop held, until the test releases it, where
+/// <see cref="HoldsStops"/> says so.
 /// </summary>
 internal sealed class CallingAdapter(MemoryBrokerAdapter inner) : IBrokerAdapter
 {
@@ -22,6 +26,12 @@ internal sealed class CallingAdapter(MemoryBrokerAdapter inner) : IBrokerAdapter
 
     // the stops it holds, unreleased, the first asked first
     private readonly ConcurrentQueue<TaskCompletionSource> _stops = new();
+
+    // the subscriptions to a server's name it holds, ungranted, the first asked first
+    private readonly ConcurrentQueue<TaskCompletionSource> _names = new();
+
+    // the unsubscriptions of a server's name it holds, unsettled, the first asked first
+    private readonly ConcurrentQueue<TaskCompletionSource> _unsubscribing = new();
 
     // whether a start is refused as a misuse, set by the test from its own thread
     private volatile bool _refusing;
@@ -45,6 +55,28 @@ internal sealed class CallingAdapter(MemoryBrokerAdapter inner) : IBrokerAdapter
     public int? HoldsStart { get; init; }
 
     public bool HoldsStops { get; init; }
+
+    public bool HoldsNames { get; init; }
+
+    public bool HoldsUnsubscribes { get; init; }
+
+    /// <summary>The subscriptions to a server's name it holds, ungranted.</summary>
+    public int Naming
+    {
+        get
+        {
+            return _names.Count;
+        }
+    }
+
+    /// <summary>The unsubscriptions of a server's name it holds, unsettled.</summary>
+    public int Unsubscribing
+    {
+        get
+        {
+            return _unsubscribing.Count;
+        }
+    }
 
     /// <summary>The stops it holds, unreleased.</summary>
     public int Stopping
@@ -223,6 +255,26 @@ internal sealed class CallingAdapter(MemoryBrokerAdapter inner) : IBrokerAdapter
         return _stops.TryDequeue(out var release) && release.TrySetResult();
     }
 
+    /// <summary>Grants the subscription to a server's name its participant asked first, its broker's word.</summary>
+    public bool GrantName()
+    {
+        return _names.TryDequeue(out var grant) && grant.TrySetResult();
+    }
+
+    /// <summary>
+    /// Settles the unsubscription its participant asked first of those it holds: made then, or
+    /// failed with <paramref name="failure"/> where one is given.
+    /// </summary>
+    public bool SettleUnsubscribe(Exception? failure = null)
+    {
+        if (!_unsubscribing.TryDequeue(out var settle))
+        {
+            return false;
+        }
+
+        return failure is null ? settle.TrySetResult() : settle.TrySetException(failure);
+    }
+
     // * it waits for its stop's token, then fails, saying so
     private static async Task GivingUp(BrokerStart? start)
     {
@@ -247,6 +299,18 @@ internal sealed class CallingAdapter(MemoryBrokerAdapter inner) : IBrokerAdapter
     {
         Calls.Enqueue($"subscribe {string.Join('/', topic)}");
 
+        if (HoldsNames && topic is [_, "s", _])
+        {
+            var grant = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            // * made as it is asked: its broker's word held until the test grants it
+            var subscribing = inner.Subscribe(topic, subscription);
+
+            _names.Enqueue(grant);
+
+            return Granted((grant.Task, subscribing));
+        }
+
         return inner.Subscribe(topic, subscription);
     }
 
@@ -254,7 +318,30 @@ internal sealed class CallingAdapter(MemoryBrokerAdapter inner) : IBrokerAdapter
     {
         Calls.Enqueue($"unsubscribe {string.Join('/', topic)}");
 
+        if (HoldsUnsubscribes && topic is [_, "s", _])
+        {
+            var settle = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            _unsubscribing.Enqueue(settle);
+
+            return Unsubscribed((settle.Task, topic));
+        }
+
         return inner.Unsubscribe(topic);
+    }
+
+    // its broker's word once the test granted it
+    private static async Task Granted((Task Grant, Task Subscribing) granted)
+    {
+        await granted.Grant;
+        await granted.Subscribing;
+    }
+
+    // * unread by its broker until the test settles it: made then, or failed as it says
+    private async Task Unsubscribed((Task Settle, IReadOnlyList<string> Topic) unsubscribed)
+    {
+        await unsubscribed.Settle;
+        await inner.Unsubscribe(unsubscribed.Topic);
     }
 
     public Task<BrokerPublished> Publish(BrokerPublication publication)

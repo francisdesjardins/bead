@@ -242,7 +242,7 @@ interface IBrokerStep extends Partial<IPublication> {
   leave?: string;
   lose?: string;
   on?: string;
-  participant?: 'start' | 'stop';
+  participant?: 'start' | 'stop' | { stop: { crossing: IPublication } };
   reported?: string[];
   stop?: true | { crossing: IPublication };
   takeover?: 'client' | 'server';
@@ -1605,9 +1605,14 @@ const playBrokerCase = async (
         await peers.leave(step.leave);
       }
 
-      // * the participant under test stopped in place, or started again, settled (spec 15.21)
+      // * the participant under test stopped in place, or started again, settled (spec 15.21); what
+      // crosses its stop is published in the turn it begins, before it
       if (step.participant === 'stop') {
         await participant.stop();
+      } else if (typeof step.participant === 'object') {
+        const crossing = peers.publish(step.participant.stop.crossing, values);
+
+        await Promise.all([crossing, participant.stop()]);
       } else if (step.participant === 'start') {
         await participant.start();
       }

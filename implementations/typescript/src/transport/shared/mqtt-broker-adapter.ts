@@ -45,8 +45,9 @@ export type { BrokerDelivery, BrokerPublished, BrokerTopic, IBrokerAdapter } fro
 export interface IMqttBrokerAdapterOptions {
   /**
    * How long it waits, in milliseconds: its start, for its password, where it asks its provider,
-   * and its CONNACK; and its stop, for what it was handed and its UNSUBACKs, then for its
-   * DISCONNECT (spec 15.26, 15.30). Defaults to {@link CONNECT_TIMEOUT}.
+   * and its CONNACK; a subscription let go, for its UNSUBACK; and its stop, for what it was handed
+   * and its UNSUBACKs, then for its DISCONNECT (spec 15.26, 15.27, 15.30). Defaults to
+   * {@link CONNECT_TIMEOUT}.
    */
   connectTimeout?: number | undefined;
   /** At least once by default, each publication of QoS 1; at most once, of QoS 0 (spec 15.28). */
@@ -230,7 +231,8 @@ const assertAuthentication = ({
  * Interval of 0. Its library reconnects nothing, subscribes nothing again and holds nothing while
  * down. Each subscription is of QoS 1, No Local 0, Retain As Published 0 and Retain Handling 2, a
  * group's its shared subscription, held once its SUBACK grants QoS 1, and let go once its UNSUBACK
- * came under 0x80, one of 0x80 or more refusing it. Each publication is of QoS 1,
+ * came under 0x80, one of 0x80 or more refusing it, none within connectTimeout failing it, its link
+ * and its filter kept. Each publication is of QoS 1,
  * or 0 at most once, RETAIN 0, a life in whole seconds where asked and no other property, counted
  * to its byte and refused past its CONNACK's Maximum Packet Size, held to its CONNACK's Receive
  * Maximum, later ones waiting in their order; its PUBACK of 0x10 says no subscriber, of 0x80 or
@@ -1161,9 +1163,23 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
       const key = topicOf(topic);
       const record = incarnation.filters.get(key);
       const filter = record?.filter ?? key;
+      let timer: ReturnType<typeof PLATFORM_CLOCK.setTimeout> | undefined;
 
       return awaited<void>(incarnation, {
         begin: ({ reject, resolve }) => {
+          // * its UNSUBACK awaited within connectTimeout, past which it fails, its link kept so that
+          // no will goes, and its filter kept, which its stop lets go (spec 15.27)
+          timer = PLATFORM_CLOCK.setTimeout(
+            () => {
+              reject(
+                new GenericError(
+                  `the subscription of ${id} to ${filter} had no UNSUBACK within ${String(connectTimeout)} ms, its connectTimeout`
+                )
+              );
+            },
+            Math.min(connectTimeout, LONGEST_TIMER)
+          );
+          // ! its request never given up: MQTT.js reads a late UNSUBACK, which drops its record
           incarnation.client.unsubscribe(filter, (error, unsuback) => {
             // * the UNSUBACK's own code: 0x00, or 0x11 where its broker held none, lets it go
             const code = (unsuback as { granted?: number[] } | undefined)?.granted?.[0] ?? 0;
@@ -1186,6 +1202,8 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
             }
           });
         },
+      }).finally(() => {
+        PLATFORM_CLOCK.clearTimeout(timer);
       });
     },
   };

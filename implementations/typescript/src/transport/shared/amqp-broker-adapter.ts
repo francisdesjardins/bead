@@ -364,9 +364,11 @@ const assertAuthentication = ({
  * that it ends with it. Each receiver is unsettled, first, of no max-message-size, its credit its
  * own: its inbox's `linkCredit` and a name's 1 as it attaches, and one more as each message is
  * settled `accepted`, never released nor modified; a name is let go within `connectTimeout`, what
- * it handed on settled and its DETACH answered, or its link is lost. Each publication is one
- * message of the profile, counted to its byte and refused past its sender's max-message-size, held
- * to its sender's credit, later ones waiting in their order; `accepted` is taken, `released` no
+ * it handed on settled and its DETACH answered, or its let-go fails, then its link is lost, a
+ * microtask behind what its caller made as it awaited it, so that its caller reads that bound
+ * passed, never its link lost (spec 15.21). Each publication is one message of the profile, counted
+ * to its byte and refused past its sender's max-message-size, held to its sender's credit, later
+ * ones waiting in their order; `accepted` is taken, `released` no
  * subscriber, any other outcome refuses it. The end of its connection, of its inbox's session or
  * receiver, is its link lost; a name's receiver its broker ends is attached again once, on a
  * session of its own. Its stop, within its connectTimeout, takes no publication, sends what waits on
@@ -1279,13 +1281,17 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
   };
 
   // * a name let go within one connectTimeout: its DETACH once what its receiver handed on was
-  // settled, then its session ended once its broker answered it; past that bound, its link lost
-  const letGo = (incarnation: IIncarnation, receiving: IReceiving): Promise<void> => {
+  // settled, then its session ended once its broker answered it; past that bound, its link lost,
+  // which `losing` holds for its caller to end once it failed
+  const letGo = (
+    incarnation: IIncarnation,
+    { losing, receiving }: { losing: { lost?: Error | undefined }; receiving: IReceiving }
+  ): Promise<void> => {
     const key = topicOf(receiving.topic);
     let timer: ReturnType<typeof PLATFORM_CLOCK.setTimeout> | undefined;
 
     return awaited<void>(incarnation, {
-      begin: ({ resolve }) => {
+      begin: ({ reject, resolve }) => {
         const { receiver, session } = receiving;
         const done = (): void => {
           endSession(session);
@@ -1310,12 +1316,10 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
         // answered anew, its pair gone
         timer = PLATFORM_CLOCK.setTimeout(
           () => {
-            retire(
-              incarnation,
-              new GenericError(
-                `the link of ${id} was lost: it let the name ${key} go within no ${String(connectTimeout)} ms, its connectTimeout`
-              )
+            losing.lost = new GenericError(
+              `the link of ${id} was lost: it let the name ${key} go within no ${String(connectTimeout)} ms, its connectTimeout`
             );
+            reject(losing.lost);
           },
           Math.min(connectTimeout, LONGEST_TIMER)
         );
@@ -1893,31 +1897,42 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
       }
 
       const receiving = incarnation.names.get(key);
+      const pending = incarnation.pending.get(key);
+      const losing: { lost?: Error | undefined } = {};
+      let leaving: Promise<void>;
 
       if (receiving !== undefined) {
         receiving.isLeaving = true;
         incarnation.names.delete(key);
-
-        return letGo(incarnation, receiving);
-      }
-
-      const pending = incarnation.pending.get(key);
-
-      if (pending === undefined) {
+        leaving = letGo(incarnation, { losing, receiving });
+      } else if (pending === undefined) {
         return Promise.resolve();
+      } else {
+        // * a subscription under way, met: never held, and let go once its ATTACH is answered
+        pending.receiving.isLeaving = true;
+        leaving = pending.attached.then(
+          () => {
+            return letGo(incarnation, { losing, receiving: pending.receiving });
+          },
+          () => {
+            // refused or given up: nothing is held to let go
+          }
+        );
       }
 
-      // * a subscription under way, met: never held, and let go once its ATTACH is answered
-      pending.receiving.isLeaving = true;
+      // ! a let-go past its bound fails before its link is told lost: made first, this ends its link
+      // a microtask behind what its caller made as it awaited it
+      leaving.catch(() => {
+        const { lost } = losing;
 
-      return pending.attached.then(
-        () => {
-          return letGo(incarnation, pending.receiving);
-        },
-        () => {
-          // refused or given up: nothing is held to let go
+        if (lost !== undefined) {
+          queueMicrotask(() => {
+            retire(incarnation, lost);
+          });
         }
-      );
+      });
+
+      return leaving;
     },
   };
 

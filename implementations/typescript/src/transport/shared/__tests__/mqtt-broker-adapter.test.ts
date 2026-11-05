@@ -23,6 +23,7 @@ import {
 } from '../mqtt-broker-adapter';
 import { LARGEST_PACKET_SIZE, largestPayload } from '../mqtt-packets';
 import type { IBrokerDown, IBrokerMessage, IBrokerStart } from '../types';
+import { createLinkRelay } from '../../server/__tests__/link-relay';
 import { TLS_FIXTURE } from '../../server/__tests__/tls-fixture';
 import { createFrameRelay, unwholeOf } from './frame-relay';
 import { createMqttScript, type IMqttScript, type IScriptedLink } from './mqtt-script';
@@ -533,6 +534,58 @@ test.describe('createMqttBrokerAdapter', () => {
     // its link kept
     expect(adapter.isLinked).toBe(true);
     await adapter.stop();
+  });
+
+  test('fails an unsubscription whose UNSUBACK has not come within connectTimeout, its link kept and no will gone, then reads the late UNSUBACK (spec 15.27)', async () => {
+    const adapter = adapterOf(script, { connectTimeout: 300 });
+    const { downs } = heardOf(adapter);
+    const link = await linkUp(
+      { adapter, script },
+      { will: { payload: Uint8Array.of(1), topic: ['bead', 'd', ID] } }
+    );
+    const other = ['bead', 's', 'other'];
+
+    for (const topic of [NAME, other]) {
+      const subscribing = adapter.subscribe(topic);
+
+      await subackOf(link, 1);
+      await subscribing;
+    }
+
+    // * neither UNSUBACK comes within its connectTimeout: each fails, naming it, its link kept
+    const startedAt = Date.now();
+    const leaving = [NAME, other].map((topic) => {
+      return failureOf(adapter.unsubscribe(topic));
+    });
+    const unsubscribes = [await link.next('unsubscribe'), await link.next('unsubscribe')];
+
+    for (const failure of await Promise.all(leaving)) {
+      expect(failure, 'failed').toBeInstanceOf(GenericError);
+      expect(failure, 'naming its connectTimeout').toMatchObject({
+        message: expect.stringContaining('within 300 ms, its connectTimeout'),
+      });
+    }
+
+    expect(Date.now() - startedAt, 'its connectTimeout waited').toBeGreaterThanOrEqual(250);
+    expect([adapter.isLinked, link.isClosed, downs], 'its link kept').toEqual([true, false, []]);
+
+    // * the late UNSUBACK of the first read, which lets its filter go; the second's kept for its stop
+    link.send({
+      cmd: 'unsuback',
+      granted: [0],
+      messageId: unsubscribes[0]?.messageId ?? 0,
+      properties: {},
+    });
+    await sleep(50);
+    expect([adapter.isLinked, link.isClosed], 'read, its link kept').toEqual([true, false]);
+    expect(await unsubackedOf(link, adapter.stop()), 'its stop lets the second go').toEqual([
+      'bead/s/other',
+    ]);
+    expect(
+      ((await link.next('disconnect')) as { reasonCode?: number }).reasonCode ?? 0,
+      'its DISCONNECT, no will'
+    ).toBe(0);
+    expect(downs, 'no loss told').toEqual([]);
   });
 
   test('refuses a group once its CONNACK says Shared Subscription Available 0 or its SUBACK 0x9E (spec 15.25)', async () => {
@@ -1707,7 +1760,8 @@ test.describe('createMqttBrokerAdapter', () => {
 });
 
 test.describe('createMqttBrokerAdapter, against a broker over MQTT 5', () => {
-  // ! one at a time: each links as the fixture's user, and a second link of an id takes over
+  // ! one at a time, and beside nothing else of the broker's: a second link of an id takes over,
+  // and its groups link the cases' own users, so `test:mqtt` runs on one worker
   test.describe.configure({ mode: 'serial' });
 
   test('lets one member of a group go at its stop, a name the others serve still taken, and finds no subscriber for its inbox once it stopped, nor for the name once the last did (spec 15.21, 15.26)', async () => {
@@ -1762,6 +1816,95 @@ test.describe('createMqttBrokerAdapter, against a broker over MQTT 5', () => {
         await adapter.stop();
       }
     }
+  });
+
+  test('a group member’s stop answers each OPEN that comes during it by another member or refuses it 503, none lost (spec 15.21)', async () => {
+    test.skip(MQTT_URL === undefined && !IS_MQTT_REQUIRED, NO_BROKER);
+    expect(MQTT_URL, NO_BROKER).toBeDefined();
+    test.setTimeout(30_000);
+
+    const broker = new URL(MQTT_URL ?? '');
+    // * the stopping member a round trip of 300 ms away, as the window its stop closes was
+    const relay = await createLinkRelay({
+      delay: 150,
+      host: broker.hostname,
+      port: Number(broker.port),
+    });
+    const [stopping, twin, calling] = GROUP_USERS.map((id, index) => {
+      return createBrokerParticipant({
+        adapter: createMqttBrokerAdapter({
+          id,
+          password: MQTT_PASSWORD,
+          url: index === 0 ? `mqtt://127.0.0.1:${String(relay.port)}` : (MQTT_URL ?? ''),
+        }),
+        devtools: false,
+      });
+    }) as [
+      ReturnType<typeof createBrokerParticipant>,
+      ReturnType<typeof createBrokerParticipant>,
+      ReturnType<typeof createBrokerParticipant>,
+    ];
+    const name = `stopping-${String(Date.now())}`;
+    const outcomes: string[] = [];
+    // each connect's outcome: opened by a member, refused 503 by the stopping one, or lost
+    const connectOnce = async (): Promise<void> => {
+      const client = calling.transportClient();
+
+      try {
+        await client.connect({ server: name, timeout: 3_000 });
+        outcomes.push('opened');
+        await client.disconnect();
+      } catch (error) {
+        const { message } = error as Error;
+
+        outcomes.push(message.includes('503 busy') ? 'refused 503' : `lost: ${message}`);
+      }
+    };
+
+    try {
+      await stopping.transportServer({ group: true, names: [name] }).start();
+      await twin.transportServer({ group: true, names: [name] }).start();
+      await calling.start();
+
+      for (let round = 0; round < 2; round += 1) {
+        const connects: Promise<void>[] = [];
+        const stop = { isSettled: false };
+        const stopped = stopping.stop().then(() => {
+          stop.isSettled = true;
+        });
+
+        // * a connect at once, then every 20 ms through its stop and a round trip past it
+        while (!stop.isSettled) {
+          connects.push(connectOnce());
+          await sleep(20);
+        }
+
+        for (let after = 0; after < 15; after += 1) {
+          connects.push(connectOnce());
+          await sleep(20);
+        }
+
+        await stopped;
+        await Promise.all(connects);
+        await stopping.start();
+      }
+    } finally {
+      for (const participant of [calling, twin, stopping]) {
+        await participant[Symbol.asyncDispose]();
+      }
+
+      await relay[Symbol.asyncDispose]();
+    }
+
+    // * each answered: by another member, or refused 503 by the stopping one, none waiting out its
+    // connect
+    expect(
+      outcomes.filter((outcome) => {
+        return outcome.startsWith('lost');
+      }),
+      'none lost'
+    ).toEqual([]);
+    expect(outcomes.length, 'each connect made').toBeGreaterThan(20);
   });
 
   test('carries a link over a WebSocket of subprotocol mqtt (spec 15.25)', async () => {

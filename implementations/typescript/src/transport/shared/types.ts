@@ -281,6 +281,11 @@ export interface IBrokerAdapter {
   stop(): Promise<void>;
   /** Holds a subscription, settling once its broker holds it. */
   subscribe(topic: BrokerTopic, options?: IBrokerSubscription): Promise<void>;
+  /**
+   * Lets a subscription go, taking effect as it is called, settling once its broker let it go,
+   * within a bound of its own, each message it sent of it before handed on first; or refused. A
+   * participant's stop asks it of each name it serves, before its stop (spec 15.21, 15.24).
+   */
   unsubscribe(topic: BrokerTopic): Promise<void>;
 }
 

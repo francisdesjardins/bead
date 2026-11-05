@@ -1979,6 +1979,403 @@ public sealed class BrokerParticipantTests
         await serving.DisposeAsync();
     }
 
+    // ── A stop that lets each name go first (spec 15.18, 15.21) ───────────────────────────────────
+
+    [Fact]
+    public async Task A_participant_s_stop_lets_each_name_go_and_closes_each_connection_with_1001_at_its_call_then_stops_its_adapter_once_its_broker_let_each_go_each_served_again_at_its_next_link_spec_15_21()
+    {
+        await using var pair = await LettingPair.Of((inner) =>
+        {
+            return new CallingAdapter(inner) { HoldsUnsubscribes = true };
+        });
+        var calling = pair.Calling;
+        var before = calling.Calls.Count;
+        var stopping = pair.Participant.Stop();
+
+        // * in its turn, its name's unsubscription, then its CLOSE: its link down, its connection
+        // forgotten, nothing handed on after its call, its adapter up
+        await BrokerPair.Until(
+            () =>
+            {
+                return calling.Unsubscribing == 1;
+            },
+            "its name let go of");
+        await BrokerPair.Until(
+            () =>
+            {
+                return pair.Closes.Count == 1;
+            },
+            "its client told its close");
+        Assert.Equal(["unsubscribe bead/s/interop", "publish bead/i/client"], CallsSince((calling, before)));
+        Assert.Equal([(false, false)], pair.Closes);
+        Assert.False(pair.Participant.IsLinked);
+        Assert.Equal(0, pair.Server.Gauges().Counts["connections"]);
+        Assert.Empty(pair.Messages);
+        await pair.Scheduler.WhenIdle();
+        Assert.False(stopping.IsCompleted, "awaiting its broker's word");
+
+        // * its adapter stopped once its broker let its name go
+        Assert.True(calling.SettleUnsubscribe());
+        await stopping.WaitAsync(BrokerPair.Patience, Cancelled);
+        Assert.Equal(["unsubscribe bead/s/interop", "publish bead/i/client", "stop"], CallsSince((calling, before)));
+        Assert.Empty(pair.Participant.Names);
+
+        // * served again at its next link
+        await pair.Participant.Start().WaitAsync(BrokerPair.Patience, Cancelled);
+        await BrokerPair.Until(
+            () =>
+            {
+                return pair.Server.Gauges().Counts["names"] == 1;
+            },
+            "served again");
+
+        var disposing = pair.Participant.DisposeAsync().AsTask();
+
+        await BrokerPair.Until(
+            () =>
+            {
+                return calling.Unsubscribing == 1;
+            },
+            "let go of again");
+        Assert.True(calling.SettleUnsubscribe());
+        await disposing.WaitAsync(BrokerPair.Patience, Cancelled);
+    }
+
+    [Fact]
+    public async Task Refuses_503_an_OPEN_that_comes_while_its_stop_lets_its_names_go_its_adapter_up_spec_15_18_15_21()
+    {
+        await using var pair = await LettingPair.Of((inner) =>
+        {
+            return new CallingAdapter(inner) { HoldsUnsubscribes = true };
+        });
+        var late = pair.Broker.Adapter(new MemoryBrokerAdapterOptions { Id = "late" });
+        var heard = new ConcurrentQueue<BrokerParcel>();
+
+        late.Message += (message) =>
+        {
+            if (BrokerParcels.Read(message.Payload).Parcel is { } parcel)
+            {
+                heard.Enqueue(parcel);
+            }
+
+            message.Settle();
+        };
+        await late.Start();
+        await late.Subscribe(["bead", "i", "late"]);
+
+        var stopping = pair.Participant.Stop();
+
+        await BrokerPair.Until(
+            () =>
+            {
+                return pair.Calling.Unsubscribing == 1;
+            },
+            "its name let go of");
+
+        // * its broker holds its name still: the OPEN reaches it, and is refused 503, its adapter up
+        const ulong opener = 0xA4_00_00_00_00_00_00_04;
+
+        Assert.Equal(BrokerPublished.Taken, await late.Publish(new BrokerPublication
+        {
+            Topic = ["bead", "s", "interop"],
+            Payload = BrokerParcels.Write(new BrokerParcel { Kind = BrokerParcelKinds.Open, Opener = opener, Sequence = 1, Id = "late", Incarnation = 0xC0, Bound = 65_536 }),
+        }));
+        await BrokerPair.Until(
+            () =>
+            {
+                return !heard.IsEmpty;
+            },
+            "the OPEN answered");
+        Assert.Equal([(BrokerParcelKinds.Refuse, opener, (int?)503)], heard.Select((parcel) =>
+        {
+            return (parcel.Kind, parcel.Opener, parcel.Status);
+        }));
+        Assert.Equal([(503, "busy", "late")], pair.Refusals.Select((refusal) =>
+        {
+            return (refusal.Status, refusal.Reason, refusal.Address);
+        }));
+        Assert.Single(pair.Opened);
+        Assert.True(pair.Calling.SettleUnsubscribe());
+        await stopping.WaitAsync(BrokerPair.Patience, Cancelled);
+        await pair.Participant.DisposeAsync();
+        await late.Stop();
+    }
+
+    [Fact]
+    public async Task Lets_go_at_its_stop_a_name_whose_subscription_is_under_way_spec_15_21()
+    {
+        var scheduler = new SerialScheduler();
+        var broker = new MemoryBroker(new MemoryBrokerOptions { Scheduler = scheduler });
+        var calling = new CallingAdapter(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "server" })) { HoldsNames = true, HoldsStops = true };
+        var participant = new BrokerParticipant(calling, new BrokerParticipantOptions { Scheduler = scheduler });
+        var names = NamesOf(participant);
+        var asking = broker.Adapter(new MemoryBrokerAdapterOptions { Id = "asking" });
+
+        await asking.Start();
+        await participant.Start();
+
+        var server = participant.Server(new BrokerTransportServerOptions { Names = ["interop"] });
+        var starting = server.Start();
+
+        await BrokerPair.Until(
+            () =>
+            {
+                return calling.Naming == 1;
+            },
+            "its name asked of its broker");
+
+        // * asked, unanswered: its stop lets it go all the same, its broker's word on it coming after
+        var stopping = participant.Stop();
+
+        await BrokerPair.Until(
+            () =>
+            {
+                return calling.Calls.Contains("unsubscribe bead/s/interop");
+            },
+            "its name let go of");
+        Assert.True(calling.GrantName());
+        await BrokerPair.Until(
+            () =>
+            {
+                return calling.Stopping == 1;
+            },
+            "its adapter's stop held");
+        Assert.Equal(BrokerPublished.NoSubscriber, await asking.Publish(new BrokerPublication { Topic = ["bead", "s", "interop"], Payload = (byte[])[0] }));
+        Assert.Empty(participant.Names);
+        Assert.DoesNotContain(names, (name) =>
+        {
+            return name.IsHeld;
+        });
+        Assert.True(calling.ReleaseStop());
+        await stopping.WaitAsync(BrokerPair.Patience, Cancelled);
+        await ((Task)starting).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing | ConfigureAwaitOptions.ContinueOnCapturedContext);
+        await participant.DisposeAsync();
+        await server.DisposeAsync();
+        await asking.Stop();
+    }
+
+    [Fact]
+    public async Task Reports_a_name_its_broker_refuses_to_let_go_at_its_stop_keeps_it_held_and_stops_all_the_same_spec_15_21()
+    {
+        await using var pair = await LettingPair.Of((inner) =>
+        {
+            return new CallingAdapter(inner) { HoldsUnsubscribes = true, HoldsStops = true };
+        });
+        var reported = Hearing(pair.Participant);
+        var names = NamesOf(pair.Participant);
+        var stopping = pair.Participant.Stop();
+
+        await BrokerPair.Until(
+            () =>
+            {
+                return pair.Calling.Unsubscribing == 1;
+            },
+            "its name let go of");
+        Assert.True(pair.Calling.SettleUnsubscribe(new IOException("its broker refused to let bead/s/interop go: 0x80")));
+
+        // * reported, held still, and its adapter stopped all the same
+        await BrokerPair.Until(
+            () =>
+            {
+                return pair.Calling.Stopping == 1;
+            },
+            "its adapter's stop held");
+        Assert.Equal(["its broker refused to let bead/s/interop go: 0x80"], WordsOf(reported));
+        Assert.Equal(["interop"], pair.Participant.Names);
+        Assert.Equal(1, pair.Server.Gauges().Counts["names"]);
+        Assert.Empty(names);
+        Assert.True(pair.Calling.ReleaseStop());
+        await stopping.WaitAsync(BrokerPair.Patience, Cancelled);
+
+        // * its stopped clears it
+        Assert.Empty(pair.Participant.Names);
+        Assert.Equal(0, pair.Server.Gauges().Counts["names"]);
+        await pair.Participant.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Tells_nothing_of_a_name_its_link_lost_as_it_stopped_spec_15_21()
+    {
+        await using var pair = await LettingPair.Of((inner) =>
+        {
+            return new CallingAdapter(inner) { HoldsUnsubscribes = true, HoldsStops = true };
+        });
+        var reported = Hearing(pair.Participant);
+        var names = NamesOf(pair.Participant);
+        var stopping = pair.Participant.Stop();
+
+        await BrokerPair.Until(
+            () =>
+            {
+                return pair.Calling.Unsubscribing == 1;
+            },
+            "its name let go of");
+
+        // * its link lost as it lets its name go: what fails then is that loss, reported by none
+        pair.Inner.Lose();
+        await BrokerPair.Until(
+            () =>
+            {
+                return !pair.Inner.IsLinked;
+            },
+            "its link lost");
+        await pair.Scheduler.WhenIdle();
+        Assert.True(pair.Calling.SettleUnsubscribe(new IOException("the link of server is not up")));
+        await BrokerPair.Until(
+            () =>
+            {
+                return pair.Calling.Stopping == 1;
+            },
+            "its adapter's stop held");
+        Assert.Empty(reported);
+        Assert.Empty(names);
+        Assert.True(pair.Calling.ReleaseStop());
+        await stopping.WaitAsync(BrokerPair.Patience, Cancelled);
+        Assert.Empty(pair.Participant.Names);
+        Assert.Empty(reported);
+
+        // * its link lost as it lets its name go, its broker letting it go after: told nothing all
+        // the same, and held until its stop settles
+        await pair.Participant.Start().WaitAsync(BrokerPair.Patience, Cancelled);
+        await BrokerPair.Until(
+            () =>
+            {
+                return pair.Participant.Names.Count == 1;
+            },
+            "its name held at its next link");
+        names.Clear();
+
+        var restopping = pair.Participant.Stop();
+
+        await BrokerPair.Until(
+            () =>
+            {
+                return pair.Calling.Unsubscribing == 1;
+            },
+            "its name let go of again");
+        pair.Inner.Lose();
+        await BrokerPair.Until(
+            () =>
+            {
+                return !pair.Inner.IsLinked;
+            },
+            "its link lost again");
+        await pair.Scheduler.WhenIdle();
+        Assert.True(pair.Calling.SettleUnsubscribe());
+        await BrokerPair.Until(
+            () =>
+            {
+                return pair.Calling.Stopping == 1;
+            },
+            "its adapter's stop held again");
+        Assert.Empty(names);
+        Assert.Single(pair.Participant.Names);
+        Assert.True(pair.Calling.ReleaseStop());
+        await restopping.WaitAsync(BrokerPair.Patience, Cancelled);
+        Assert.Empty(pair.Participant.Names);
+        Assert.Empty(reported);
+        await pair.Participant.DisposeAsync();
+    }
+
+    // what it asked of its adapter since `before` but its peers' departures, which each connection's
+    // end lets go
+    private static string[] CallsSince((CallingAdapter Calling, int Before) since)
+    {
+        return [.. since.Calling.Calls.Skip(since.Before).Where((call) =>
+        {
+            return !call.Contains("bead/d/", StringComparison.Ordinal);
+        })];
+    }
+
+    // the `names` events its trace tells, each its name and whether held (debugging 13.5)
+    private static ConcurrentQueue<(string Name, bool IsHeld)> NamesOf(BrokerParticipant participant)
+    {
+        var names = new ConcurrentQueue<(string Name, bool IsHeld)>();
+
+        participant.Debug += (debugEvent) =>
+        {
+            if (debugEvent is { Event: "names", Name: { } name, IsHeld: { } isHeld })
+            {
+                names.Enqueue((name, isHeld));
+            }
+        };
+
+        return names;
+    }
+
+    // a participant `server` over an adapter of the test's, on one scheduler with its broker,
+    // serving interop, started; a client of `client`'s connected to it; and what each told. Its
+    // dispose disposes the client's side: the server's participant is the test's to dispose
+    private sealed class LettingPair : IAsyncDisposable
+    {
+        private LettingPair(Func<MemoryBrokerAdapter, CallingAdapter> calling)
+        {
+            Broker = new MemoryBroker(new MemoryBrokerOptions { Scheduler = Scheduler });
+            Inner = Broker.Adapter(new MemoryBrokerAdapterOptions { Id = "server" });
+            Calling = calling(Inner);
+            Participant = new BrokerParticipant(Calling, new BrokerParticipantOptions { Scheduler = Scheduler });
+            Server = Participant.Server(new BrokerTransportServerOptions { Names = ["interop"] });
+            Clients = new BrokerParticipant(Broker.Adapter(new MemoryBrokerAdapterOptions { Id = "client" }), new BrokerParticipantOptions { Scheduler = Scheduler });
+            Client = Clients.Client();
+            Server.Connection += Opened.Enqueue;
+            Server.Message += (message, connectionHandle) =>
+            {
+                Messages.Enqueue(connectionHandle);
+            };
+            Server.Refusal += Refusals.Enqueue;
+            Client.Close += (isClean, isQuick) =>
+            {
+                Closes.Enqueue((isClean, isQuick));
+            };
+        }
+
+        public SerialScheduler Scheduler { get; } = new();
+
+        public MemoryBroker Broker { get; }
+
+        public MemoryBrokerAdapter Inner { get; }
+
+        public CallingAdapter Calling { get; }
+
+        public BrokerParticipant Participant { get; }
+
+        public BrokerTransportServer Server { get; }
+
+        public BrokerParticipant Clients { get; }
+
+        public BrokerTransportClient Client { get; }
+
+        public ConcurrentQueue<string> Opened { get; } = new();
+
+        public ConcurrentQueue<string> Messages { get; } = new();
+
+        public ConcurrentQueue<TransportServerRefusal> Refusals { get; } = new();
+
+        public ConcurrentQueue<(bool IsClean, bool IsQuick)> Closes { get; } = new();
+
+        public static async Task<LettingPair> Of(Func<MemoryBrokerAdapter, CallingAdapter> calling)
+        {
+            var pair = new LettingPair(calling);
+
+            await pair.Server.Start();
+            await pair.Client.Connect(new BrokerTransportClientConnectOptions { Server = "interop", CancellationToken = Cancelled });
+            await BrokerPair.Until(
+                () =>
+                {
+                    return pair.Opened.Count == 1;
+                },
+                "told open");
+
+            return pair;
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            await Client.DisposeAsync();
+            await Clients.DisposeAsync();
+        }
+    }
+
     private static readonly TransportClientReconnectDelay Immediately = new TransportClientReconnectDelay(TimeSpan.Zero);
 
     // what a participant reports, each kept whole, its inner exception among it
