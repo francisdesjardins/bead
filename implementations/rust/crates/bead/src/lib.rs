@@ -170,7 +170,7 @@ pub use violations::{
 /// What the workspace's own members â€” the interop service, the bench, the conformance players and
 /// the fuzz targets â€” reach that the API does not offer: outside SemVer, and no road for another
 /// crate. The envelope's codec is here, internal on every side as a router's core is (decision
-/// 0004), as the C# side's members reach theirs by `InternalsVisibleTo`.
+/// 0047), as the C# side's members reach theirs by `InternalsVisibleTo`.
 #[doc(hidden)]
 pub mod internal {
     pub use crate::credentials::JWT_LIMIT_BYTES;

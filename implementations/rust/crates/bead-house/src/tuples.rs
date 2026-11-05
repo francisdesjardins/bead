@@ -1,4 +1,4 @@
-//! No tuple on the surface (decision 0004, as 0044 holds it): no item written `pub` takes or gives
+//! No tuple on the surface (decision 0047, as 0044 holds it): no item written `pub` takes or gives
 //! a tuple, at any depth of its type, in a parameter, a return, a `pub` field, a `pub` type alias,
 //! a constant or a static, nor takes a parameter by a tuple's pattern; no enum variant and no `pub`
 //! tuple struct has two unnamed fields or more, a one-field newtype aside (C-NEWTYPE). The unit

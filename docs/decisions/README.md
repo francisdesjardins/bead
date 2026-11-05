@@ -121,10 +121,12 @@ that meets the Tenth Man:
   `bodyBytesBudget` is for bodies;
 - **one corpus read alike by every side's parsers**, held as a gate, as
   `tools/protobuf-conformance.mjs differential` holds a `proto` payload
-  ([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)),
-  beside the targets each side fuzzes by hand, guided by coverage, the six the TypeScript and C#
-  sides share and four of them on the Rust side ([the root README](../../README.md#fuzzing)), and a
-  short run of them in CI;
+  ([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)):
+  the parsers the sides fuzz, the eight the TypeScript and C# sides share and six of them on the
+  Rust side ([the root README](../../README.md#fuzzing)), each read on one corpus by every side and
+  compared, beside the seeded mutations of the envelope and the parcel that each side's suite reads
+  alike and judges alone; and the `envelope` target's writer held to the refusals it documents, as
+  `broker-parcel`'s is ([0006](0006-a-rule-has-its-gate.md));
 - what [0030](0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-and-counts.md)
   names: `Forwarded`, an IPv6 client keyed by its prefix, and a per-address value fit for a NAT,
   for an HTTP server and a WebSocket server at once;
@@ -248,6 +250,7 @@ table.
 | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
 | [0003](0003-one-word-one-meaning.md)                                                 | One word means one thing, and there are no abbreviations                                                                                                                                                | accepted |
 | [0004](0004-one-behaviour-in-every-language.md)                                      | Every language plays one behaviour, held by the conformance files and the interop                                                                                                                       | accepted |
+| [0047](0047-every-side-shows-one-public-surface.md)                                  | Every side shows one public surface: one name a concept, two parameters then one options object, no tuple, the same exports, each pinned to its list                                                    | accepted |
 | [0005](0005-a-toolchain-per-language.md)                                             | Each language keeps its own toolchain, and the root holds only what all share                                                                                                                           | accepted |
 | [0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md)                   | The C# side composes interfaces, writes every body as a block, takes two parameters and an options record, and builds without a warning                                                                 | accepted |
 | [0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)                | Versions run on three axes, and names are qualified by their owner                                                                                                                                      | accepted |
@@ -262,7 +265,7 @@ table.
 
 ## Writing one
 
-The next decision is 0046. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
+The next decision is 0048. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
 the decision, not its subject. The title may grow with the record; the file's name stays, unless it
 would mislead.
 

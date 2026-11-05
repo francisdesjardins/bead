@@ -66,9 +66,9 @@ or its platform cannot have it at all, the difference is a row of the support ma
   comes to all of them at once, by a decision that meets the Tenth Man. Where every side keeps to
   what one platform can do and a standard allows more, that leveling is a row of `docs/support.md`'s
   "Leveled down", to lift when the platform can. A divergence is put to the user.
-- The surface maps almost name for name across every language able to carry the protocol whole.
-  What couples transports (one port for HTTP and WebSocket) stays outside the protocol, in a small
-  local proxy.
+- The surface maps almost name for name across every language able to carry the protocol whole
+  (decision 0047). What couples transports (one port for HTTP and WebSocket) stays outside the
+  protocol, in a small local proxy.
 
 ## The Tenth Man Rule
 
@@ -175,7 +175,7 @@ its content in both languages, its diagrams' Mermaid sources, rendered into SVGs
 `site/render.mjs`, and `site/build.mjs`, which writes `site/dist/index.html`; `site/check.mjs` holds
 both in CI. After any change to the wire or to what the page states, change both languages alike,
 render the diagrams that moved, rebuild it, and look at it in both themes, on a desktop and a phone:
-see the README's "The page". The private page `.claude/local/page/` held is retired.
+see the README's "The page".
 
 ## The agents' effort
 

@@ -284,7 +284,7 @@ fn writes_a_lone_surrogate_as_u_fffd() {
     );
 }
 
-// the envelope's codec is internal on every side (decision 0004): the root offers none of it, and
+// the envelope's codec is internal on every side (decision 0047): the root offers none of it, and
 // the workspace's own members reach it through `internal`
 #[test]
 fn refuses_the_envelope_codec_at_the_root() {

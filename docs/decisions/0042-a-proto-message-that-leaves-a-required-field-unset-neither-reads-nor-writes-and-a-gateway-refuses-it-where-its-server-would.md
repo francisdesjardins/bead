@@ -136,8 +136,8 @@ records check, the bound and the filter, and no walk.
 a runtime without it lacks, so it names `GENERATED_CODE_SUPPORTS_VERSION_6` and
 `GeneratedCode.SupportsVersion6`, or a later counter, 7
 ([0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)).
-4 goes from the TypeScript and C# runtimes, since code that names
-it checks no required field and no longer conforms through the runtime. 5, the route table's, stays:
+The TypeScript and C# runtimes hold no 4, since code that names
+it checks no required field and so does not conform through the runtime. 5, the route table's, stays:
 a route table holds descriptors and calls no codec, so code that names it still conforms, and by
 0028's rule before 1.0.0 it stays.
 
@@ -184,8 +184,7 @@ message holds one. buf's cardinality rules already judge a field made required o
 ## Consequences
 
 **Every file generated before contract 6 fails its build until it is regenerated**, on the
-TypeScript and C# sides, beadc's goldens, `examples/hello`'s and the demo's `gen/` among them; those
-sides and every gateway must change to conform.
+TypeScript and C# sides.
 
 **A PATCH of a message that holds a required field names that field on every call** whose mask is
 derived: a caller that would keep it unchanged sends its own `update_mask`, which beadc's

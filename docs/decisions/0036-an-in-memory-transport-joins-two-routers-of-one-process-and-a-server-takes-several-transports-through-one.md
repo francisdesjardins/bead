@@ -106,7 +106,8 @@ connect with a `ConnectError` at once.
 
 **A joined server transport in each core** (spec 15.14): `joinTransports` on the TypeScript side,
 `joined-transport-server.ts`, one `IServerTransportLike` over several; `JoinedServerTransport` on
-the C# side, one `IServerTransport` over several. Nothing changes in the router, the server or
+the C# side, one `IServerTransport` over several; `JoinedServerTransport` on the Rust side, one
+`ServerTransport` over several. Nothing changes in the router, the server or
 `offer`:
 
 - **each handle is its own transport's**: the join keeps the handle each transport drew, and
@@ -136,8 +137,9 @@ and a regression shows ([Measurement](../../README.md#measurement)).
 one transport both addresses. The join refuses the pair as it is built, before any handle could be
 given twice.
 
-**No conformance case holds either**: `spec/transports.json` plays real sockets alone, and no step
-of it names what a process does within itself. Each side's twin tests hold them, by the same
+**No conformance case holds either**: `spec/transports.json` plays HTTP and WebSocket over real
+sockets and a broker's transport over its brokers, the in-memory broker among them, and no case of
+it plays the in-memory transport or a join. Each side's twin tests hold them, by the same
 sentence ([0004](0004-one-behaviour-in-every-language.md)), naming spec 15.13 and 15.14, which
 `spec/units.txt` gives `twins`, and `docs/support.md`'s rows In memory and Joined name them. The
 in-memory transport's:

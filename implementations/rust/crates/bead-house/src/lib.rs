@@ -1,9 +1,9 @@
 //! The Rust side's own checks that no lint holds (decision 0044), as `oxlint-plugin.mjs` and
 //! `check-surface.mjs` hold the TypeScript side's: the parameter rule, the options struct's shape,
 //! each library crate's public surface pinned to its list, no tuple on that surface, the count of
-//! the tuples of three elements or more a function takes, the comment tags, and every member under
-//! the workspace's lints. Its tests run them over every crate's source, and over the cases of each
-//! verdict.
+//! the tuples of three elements or more a function takes, the errors a future of a Result
+//! documents, the comment tags, and every member under the workspace's lints. Its tests run them
+//! over every crate's source, and over the cases of each verdict.
 
 mod members;
 mod options;

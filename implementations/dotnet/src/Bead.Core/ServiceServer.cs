@@ -68,7 +68,7 @@ public sealed record ServiceServerOptions<TService>
 {
     /// <summary>
     /// The hooks its procedures name, none where they name none: required exactly when a procedure
-    /// names a hook (0004), so that their absence then, a hook a procedure names that they lack, one
+    /// names a hook (0047), so that their absence then, a hook a procedure names that they lack, one
     /// they give that no procedure names, and one that is null, are an
     /// <see cref="ArgumentException"/> as the service is built.
     /// </summary>

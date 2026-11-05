@@ -258,8 +258,9 @@ reasons that applies, before any of its own and before its registry's:
 | `against its kind` | a procedure whose kind its way of declaring does not take ([0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)) |
 
 A declaration refused declares nothing. The refusal is a `ProgrammerError` on the TypeScript side
-and an `ArgumentException` on the C# side, whose sentences are each side's own; a C side reports a
-code. The check is one function of the procedure alone, which holds nothing.
+and an `ArgumentException` on the C# side, whose sentences are each side's own, and on the Rust
+side a `ProgrammerError` whose reason is its code, an `IdentityRefusal`; a C side reports a code.
+The check is one function of the procedure alone, which holds nothing.
 
 **The service manager checks first where it refuses first.** A requester, a notification or a
 resolver the manager makes is checked as it is made. First comes the side its maker belongs to,
@@ -329,8 +330,8 @@ decision, not this one.
 `get_thing` or `getThing` is refused `NAME_FORM` and asks for `GetThing`.
 
 **Service 0's one id.** The protocol's procedures share service 0 and its revision, allocated by
-procedure id in section 16's table; the day the first is defined, 4.10 and both writers change, and
-a peer built before answers it `SERVICE_UNKNOWN`, as it answers any service it lacks.
+procedure id in section 16's table; the day the first is defined, 4.10 and every side's writer
+change, and a peer built before answers it `SERVICE_UNKNOWN`, as it answers any service it lacks.
 
 ## The Tenth Man
 

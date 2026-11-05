@@ -21,7 +21,7 @@ public delegate TimeSpan TransportClientReconnectDelayResolver(TimeSpan? previou
 /// <summary>
 /// A reconnection's delay, as every side takes one: a wait, the same after each failed attempt, or a
 /// <see cref="TransportClientReconnectDelayResolver"/> that resolves each, as the TypeScript side's
-/// <c>TransportClientReconnectDelay</c> is a number or a function (0004). It holds one of the two,
+/// <c>TransportClientReconnectDelay</c> is a number or a function (0047). It holds one of the two,
 /// built by the constructor of each; its owner holds a fixed wait where it is given, as a transport
 /// client's reconnection is called or a broker participant is built, and a resolver's answer at each
 /// attempt (spec 1.4).

@@ -28,9 +28,9 @@ neither reading.
 A file must not pin what the spec leaves to each side. A refusal's words are each side's: the C#
 side's message carries .NET's ` (Parameter '…')`, which its tests skip; each side names an option in
 its language's case, `exchangeTimeout` and `ExchangeTimeout`, as
-[0004](0004-one-behaviour-in-every-language.md) has a name; and a C side would report a code, not
-English. Nor may it pin a default no clause states: 9.9, 10.3, 12.2.8, 13.7, 14.4, 15.3 and 15.12
-state theirs, but no clause gives a client's connect its 30 s, its `wait` its 25 s or its
+[0047](0047-every-side-shows-one-public-surface.md) has a name; and a C side would report a code,
+not English. Nor may it pin a default no clause states: 9.9, 10.3, 12.2.8, 13.7, 14.4, 15.3 and
+15.12 state theirs, but no clause gives a client's connect its 30 s, its `wait` its 25 s or its
 reconnection its 1 s. Nor does a place observed by its refusal alone carry the default its clause
 states, which nothing in the file would read: a WebSocket's heartbeat, 30 s, and its close timeout,
 5 s (15.3), each side's tests hold. And the two platforms are not given a duration alike: a

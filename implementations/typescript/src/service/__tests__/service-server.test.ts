@@ -199,7 +199,7 @@ test.describe('createServiceServer', () => {
       }).toThrow(/^the hook loud admits by a function/u);
     });
 
-    // decision 0004: the hooks are required exactly when a procedure names one, which the types hold
+    // decision 0047: the hooks are required exactly when a procedure names one, which the types hold
     test('refuses options without admissions where a procedure names a hook', () => {
       const refusal = new ProgrammerError(
         'shout is admitted by the hook loud, which the options do not give'

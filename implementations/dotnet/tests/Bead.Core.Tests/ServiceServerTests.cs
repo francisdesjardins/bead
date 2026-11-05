@@ -210,7 +210,7 @@ public sealed class ServiceServerTests
         Assert.StartsWith("the hook loud admits by a function", first.Message, StringComparison.Ordinal);
     }
 
-    // decision 0004: the hooks are required exactly when a procedure names one, refused as the
+    // decision 0047: the hooks are required exactly when a procedure names one, refused as the
     // service is built where the TypeScript side's types refuse them
     [Fact]
     public void Refuses_options_without_admissions_where_a_procedure_names_a_hook()

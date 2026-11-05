@@ -11,7 +11,8 @@
   payload's codec, on Buffa; and every conformance file the core plays over them; the workspace, its
   toolchain, its lints, its gates, its CI job and its coverage floor; and the Rust side as a partial
   side, whose rule is [0004](0004-one-behaviour-in-every-language.md)'s. This record is
-  [0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md)'s twin for Rust; the
+  [0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md)'s twin for Rust, each rendering
+  for its sides the public surface [0047](0047-every-side-shows-one-public-surface.md) shapes; the
   toolchain's place is [0005](0005-a-toolchain-per-language.md)'s, the names and the versions
   [0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)'s, a clock
   [0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)'s, a duration
@@ -104,7 +105,8 @@ counts the receiver.
   no Miri, for the TLS of a later stage alone.
 - **cargo-nextest**: a second runner, where Cargo's own runs the doc tests among the rest.
 - **A minimal beadc target with the core** for the interop's descriptors: beadc's Rust target is a
-  stage of its own; until it lands the descriptors are written by hand and held to the blueprint.
+  stage of its own, ahead, which generates them; the descriptors are written by hand and held to the
+  blueprint.
 
 ## Decision
 
@@ -158,7 +160,7 @@ comment on a source's item never stands for a twin.
   already, so no rename follows: `bead-transport-websocket`, `bead-transport-http`,
   `bead-transport-mqtt`, `bead-transport-amqp`, `bead-transcoding`, `bead-transcoding-http`,
   `bead-interop-server`; a part that needs the core's inside and ships to applications, a transport,
-  comes instead as a feature of the core ([0004](0004-one-behaviour-in-every-language.md)).
+  comes instead as a feature of the core ([0047](0047-every-side-shows-one-public-surface.md)).
 - **Packages qualified by their owner, libraries short**, as NuGet's `FrancisDesjardins.Bead.*`
   over the assemblies `Bead.*`
   ([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)): the package
@@ -274,11 +276,11 @@ the parameter rule below, each options parameter taken by `&` and each public `�
 shape, its cases listed as `oxlint-plugin.cases.ts` lists its own; no tuple taken or given by a
 `pub` item, at any depth of its type, the crate's aliases of every visibility expanded, nor a
 variant or a `pub` tuple struct of two unnamed fields or more, a one-field newtype aside
-([0004](0004-one-behaviour-in-every-language.md)), its cases in `cases/tuples.rs`; each library crate's public
+([0047](0047-every-side-shows-one-public-surface.md)), its cases in `cases/tuples.rs`; each library crate's public
 items, every `pub` one with its declaration, its fields, its variants, its inherent methods and the
 traits it derives or implements, its bodies not, pinned to its list in
 `crates/bead-house/surfaces/`, `internal` a section of its own and the test kit left out by name, so
-the surface grows by a decision ([0004](0004-one-behaviour-in-every-language.md)); the comment tags
+the surface grows by a decision ([0047](0047-every-side-shows-one-public-surface.md)); the comment tags
 of `CLAUDE.md` on plain comments alone, none on a doc comment, a doc comment being what rustc's
 tokenizer reads as one (`///`, `//!`, `/** */`, `/*! */`), so `//!` is never taken for the `!` tag;
 and every member's `[lints] workspace = true`, so no crate leaves the policy. **`//!` is kept**,
@@ -419,7 +421,7 @@ ZeroRefused, NeverRefused, NotANumber}`, which the harness checks against the fi
 reason; the words stay Rust's. A `Duration` holds no value under zero, no NaN and nothing that is
 no number: those inputs are played at no place, each by its row. A reconnection's delay is a
 `TransportClientReconnectDelay`, `Fixed(Duration)` or `Resolver`, a function of the previous delay
-and the attempt, as every side takes a number or a function ([0004](0004-one-behaviour-in-every-language.md)).
+and the attempt, as every side takes a number or a function ([0047](0047-every-side-shows-one-public-surface.md)).
 
 ### Failures and errors
 
@@ -481,7 +483,7 @@ two parameters, then at most one options struct, always last**; a third essentia
 to revisit. The options struct is named `…Options`, **`#[non_exhaustive]` from its first commit**,
 its fields public, `Debug + Clone` and **never `Copy`**, **taken by `&`**. **Every field is an
 `Option`, with the default its doc states, but a setting the rule marks required
-([0004](0004-one-behaviour-in-every-language.md)): such a field is plain, at most two of them, and
+([0047](0047-every-side-shows-one-public-surface.md)): such a field is plain, at most two of them, and
 the struct's constructor of its required members, `new`, which takes them and nothing else, as
 C-BUILDER's `Command::new(program)` takes its program, sets them; the struct then has no `Default`. With none required it derives
 `Default`.** It is set as C#'s object initializer sets one, by assignment over what `default()` or
@@ -513,7 +515,7 @@ parameters' own types alone read, against each member's pin, which may only fall
 the count by a record of the call and none joins it. It reads what the house reads, each crate's
 tests, benches and fuzz targets among them, where the C# side's count reads its `src` assemblies
 alone: a crate's tests sit in its `src`. On the surface no item takes or gives one
-([0004](0004-one-behaviour-in-every-language.md)), which `bead-house`'s `tuples.rs` holds: two
+([0047](0047-every-side-shows-one-public-surface.md)), which `bead-house`'s `tuples.rs` holds: two
 things are two parameters, a third essential thing a record of the call, `RouterRequest` or
 `NotifyRequest`, and several values given back a `#[non_exhaustive]` struct.
 
@@ -551,8 +553,8 @@ exported, and one the TypeScript side holds as a table's member is a `const` of 
 that table satisfies, `REQUEST_DEFAULTS`, `RECONNECT_DEFAULTS`, `METRICS_REGISTRY_DEFAULTS`, as
 `LIMIT_DEFAULTS` and `PACING_DEFAULTS` are; `MEMORY_ADDRESS` stays a constant, since Rust's memory
 connect options require their server and hold the address as a `String`, so no `const` of them can
-be written ([0004](0004-one-behaviour-in-every-language.md)). The Rust names are the other sides',
-each held by `tools/names.tsv` ([0004](0004-one-behaviour-in-every-language.md)).
+be written ([0047](0047-every-side-shows-one-public-surface.md)). The Rust names are the other sides',
+each held by `tools/names.tsv` ([0047](0047-every-side-shows-one-public-surface.md)).
 
 ### Payloads, a `JWT`, randomness
 
@@ -642,11 +644,11 @@ is added to fit a library.**
   generated code holds none, and `bead-protobuf` forbids it.
 - **The testee** of `tools/protobuf-conformance.mjs` reads binary through the read path above and
   writes from the owned message. Its JSON goes through Buffa's `DynamicMessage` and its ProtoJSON,
-  `serde_json` reading with `float_roundtrip`, until Bead's own mapping of protobuf's JSON comes
-  with the gateway
+  `serde_json` reading with `float_roundtrip`; Bead's own mapping of protobuf's JSON comes with its
+  gateway, ahead
   ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)),
-  when the two `FieldNameExtension.Validator` tests join its failure list, as they stand on both
-  other sides'. The runner's binary asks glibc 2.38 or later, Debian 13's.
+  and with it the two `FieldNameExtension.Validator` tests join its failure list, as they stand on
+  both other sides'. The runner's binary asks glibc 2.38 or later, Debian 13's.
 
 ### Debugging and metrics
 
@@ -673,7 +675,7 @@ byte, and **always built**: no Cargo feature leaves debugging out, which would b
   what the conformance players, the fuzz targets, the interop service and the bench call — goes
   through one `#[doc(hidden)] pub mod internal` of the core, with no feature, as the C# players and
   the C# bench reach theirs by `InternalsVisibleTo`
-  ([0004](0004-one-behaviour-in-every-language.md)): outside SemVer, as its documentation says and
+  ([0047](0047-every-side-shows-one-public-surface.md)): outside SemVer, as its documentation says and
   as cargo-semver-checks reads a hidden item, and no road for another crate. The codec's items are
   `pub` in their private module and re-exported by `internal` alone, which `unreachable_pub`
   accepts; an item no member calls stays `pub(crate)`, and the kit's `testing::scripted` names the
@@ -752,8 +754,9 @@ plays every case no row of the matrix excuses it from ([0006](0006-a-rule-has-it
   library may, and brings a licence, `Zlib`, and a second `syn` at build time, each a line of
   `deny.toml`; its generated code lives under one `#[expect]` of the whole table, so a lint the
   pinned compiler adds is judged on Bead's own code alone.
-- **The interop service's descriptors written by hand** until beadc's Rust target, held by a test
-  against `spec/interop-blueprint.json`, an open row of the matrix.
+- **The interop service's descriptors written by hand**, held by a test against
+  `spec/interop-blueprint.json`, an open row of the matrix; beadc's Rust target, ahead, generates
+  them.
 - **The funnel, a rule to keep**: a change that spawns or reads time goes through `platform` or
   the clock, or fails clippy; a test reaches them through the kit; a target that stays native names
   its exemption and its reason. A core dependency that does not build for the browser's target
@@ -902,8 +905,8 @@ two in part, none refused.
 
 | Objection                                                                                                                                                                                                                                                               | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| The draft's rows for `DisconnectError` and `CancelError` turn `tools/check-names.mjs` red: the rule `error` keys a variant by its own name, `disconnected` against `disconnect`, and an `own` row names one side alone; `TimeoutError`, the same case, is left `alone`. | Accepted. Probed: both rows fail as drafted. The rule gains the participle, as std's `io::ErrorKind::TimedOut` names a timeout: a variant's keys are its own and the stems its first word may come of, -ed or -d taken off, a doubled consonant single again. `DisconnectError`, `CancelError` and `TimeoutError` are `rendered: error`, the C# cells `-` for the platform's `OperationCanceledException` and `TimeoutException`; the pin falls to 333; 0044 states the rendering; a test of its own pins three pairs that render and two that do not. The rows pass, today's file passes, and the 23 tests of the gate pass.                                                                      |
-| The gate does not hold O5's rule: its second check reads `tools/names.tsv`, which holds no members, and at the forms sweep's parent it passes three of the pairs that sweep had to move.                                                                                | Accepted. Verified: `check-names.mjs` leaves members to each side's surface test, and the pairs at debugging 252, 259 and 538 pass the drafted checks. The second check is the pair check: two backticked identifiers side by side, one name under `check-names.mjs`'s case rules and spelled apart, read by paragraph so a pair across a line break is caught. It finds the five pairs before the sweep, the two left today, none on the revised text, and no false hit. The `names.tsv` lookup stays as a third check, for a side's type named alone. The gate is implemented at high, run red on both texts and green on the revised one.                                                       |
+| The draft's rows for `DisconnectError` and `CancelError` turn `tools/check-names.mjs` red: the rule `error` keys a variant by its own name, `disconnected` against `disconnect`, and an `own` row names one side alone; `TimeoutError`, the same case, is left `alone`. | Accepted. Probed: both rows fail as drafted. The rule gains the participle, as std's `io::ErrorKind::TimedOut` names a timeout: a variant's keys are its own and the stems its first word may come of, -ed or -d taken off, a doubled consonant single again. `DisconnectError`, `CancelError` and `TimeoutError` are `rendered: error`, the C# cells `-` for the platform's `OperationCanceledException` and `TimeoutException`; the pin falls to 333; 0044 states the rendering; a test of its own pins three pairs that render and two that do not. The rows pass, the whole file passes, and the 23 tests of the gate pass.                                                                    |
+| The gate does not hold O5's rule: its second check reads `tools/names.tsv`, which holds no members, and at the forms sweep's parent it passes three of the pairs that sweep had to move.                                                                                | Accepted. Verified: `check-names.mjs` leaves members to each side's surface test, and the pairs at debugging 252, 259 and 538 pass the drafted checks. The second check is the pair check: two backticked identifiers side by side, one name under `check-names.mjs`'s case rules and spelled apart, read by paragraph so a pair across a line break is caught. It finds the five pairs before the sweep, the two the sweep left, none on the revised text, and no false hit. The `names.tsv` lookup stays as a third check, for a side's type named alone. The gate is implemented at high, run red on both texts and green on the revised one.                                                   |
 | Lifted as drafted, 9.7 sends the reader to `tools/names.tsv`, a tool's input that cannot hold the C# side's cancel, the platform's, where 17.2 sends a reader to the support matrix; and no row of the matrix names a disconnection or a cancel.                        | Accepted. Verified: no row names the six types, and 17.2 sends its reader to the matrix. 9.7 states the rule and ends "Each side's two types are the support matrix's"; a matrix row names the three disconnections and the three cancels, citing the six twins of 9.7, two on each side. The unit stays a wording change.                                                                                                                                                                                                                                                                                                                                                                         |
 | 0028's rewritten sentence answers "anything else a decoder throws" `PROCEDURE_FAILED`, unscoped, where 17.2 answers so at a request alone: a result's or a notification's decoder fails as a refusal does.                                                              | Accepted. Verified against spec 17.2. The sentence answers a request whose check refuses it `PAYLOAD_UNDECODABLE`, a request's decoder that throws or panics other than by its refusal `PROCEDURE_FAILED`, with no detail, reported, and has a result's or a notification's fail as a refusal does.                                                                                                                                                                                                                                                                                                                                                                                                |
 | The 9.4 row adds a codec's bug but leaves out a rule that fails to judge, which 17.2 pairs with it and 18.2 answers `PROCEDURE_FAILED`; the twins are placed in files with no registry; the claim that the change is wording rests on one side's probe.                 | Accepted. Verified: 18.2 answers a rule that fails to judge `PROCEDURE_FAILED`, the drafted files hold no registry, and the C# and Rust sides were read, not run. One row names a side's own error before it answers: a resolver that fails, a codec that fails other than by its refusal, a rule that fails to judge, or a result it cannot send. Its twins go beside the tests that count a server's call, two per side, the Rust one named by its panic; the change is a patch when all three pass as they stand, and a bug of a side, with the companion's minor, otherwise.                                                                                                                   |

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // A public name is one on every side, in each language's case, or a row of `tools/names.tsv` says
 // how it renders, why it is one side's own, or which row of `docs/support.md`'s Differences holds
-// it (decision 0004). The rows are read against the surface lists each side pins: the TypeScript
+// it (decision 0047). The rows are read against the surface lists each side pins: the TypeScript
 // side's `implementations/typescript/surface.txt`, each C# project's `PublicAPI.Shipped.txt` with
 // its `PublicAPI.Unshipped.txt` applied, and the Rust side's lists under
 // `implementations/rust/crates/bead-house/surfaces/`, which `tools/surface-lists.mjs` reads.

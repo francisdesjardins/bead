@@ -538,7 +538,7 @@ test.describe('createServiceManager', () => {
       ).toEqual([connectionHandle, connectionHandle, undefined, undefined, undefined]);
     });
 
-    // decision 0004: a command's options are a request's and its own, its connection and its close
+    // decision 0047: a command's options are a request's and its own, its connection and its close
     test('a command’s options carry every option of a request’s', () => {
       const { signal } = new AbortController();
       const credential = { scheme: CredentialScheme.OPAQUE } as const;
