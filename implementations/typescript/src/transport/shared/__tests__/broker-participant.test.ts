@@ -311,6 +311,134 @@ const stopsHeldOf = (adapter: IBrokerAdapter) => {
   return { held, releases };
 };
 
+/**
+ * An adapter that logs what its participant asks of it, in its order, but its peers' departures,
+ * which each connection's end lets go: each unsubscription of a name held while
+ * `holding.isHoldingUnsubscribes` says so, its broker holding the name until the test settles it,
+ * or refused; each subscription of a name answered once the test grants it, its broker holding it
+ * from its call, while `holding.isHoldingSubscribes` says so; and each stop held while
+ * `holding.isHoldingStops` says so.
+ */
+const lettingOf = (adapter: IBrokerAdapter) => {
+  const log: string[] = [];
+  const holding = {
+    isHoldingStops: false,
+    isHoldingSubscribes: false,
+    isHoldingUnsubscribes: true,
+  };
+  const unsubscribes: { refuse: (error: Error) => void; settle: () => void }[] = [];
+  const grants: (() => void)[] = [];
+  const stops: (() => void)[] = [];
+  const noted = (what: string): void => {
+    if (!what.includes('bead/d/')) {
+      log.push(what);
+    }
+  };
+  const held = Object.assign(Object.create(adapter) as IBrokerAdapter, {
+    publish: (publication: Parameters<IBrokerAdapter['publish']>[0]) => {
+      noted(`publish ${publication.topic.join('/')}`);
+
+      return adapter.publish(publication);
+    },
+    stop: () => {
+      noted('stop');
+
+      if (!holding.isHoldingStops) {
+        return adapter.stop();
+      }
+
+      return new Promise<void>((resolve, reject) => {
+        stops.push(() => {
+          adapter.stop().then(resolve, reject);
+        });
+      });
+    },
+    subscribe: (topic: BrokerTopic, options?: Parameters<IBrokerAdapter['subscribe']>[1]) => {
+      noted(`subscribe ${topic.join('/')}`);
+
+      const subscribing = adapter.subscribe(topic, options);
+
+      if (topic[1] !== 's' || !holding.isHoldingSubscribes) {
+        return subscribing;
+      }
+
+      return new Promise<void>((resolve, reject) => {
+        grants.push(() => {
+          subscribing.then(resolve, reject);
+        });
+      });
+    },
+    unsubscribe: (topic: BrokerTopic) => {
+      noted(`unsubscribe ${topic.join('/')}`);
+
+      if (topic[1] !== 's' || !holding.isHoldingUnsubscribes) {
+        return adapter.unsubscribe(topic);
+      }
+
+      return new Promise<void>((resolve, reject) => {
+        unsubscribes.push({
+          refuse: reject,
+          settle: () => {
+            adapter.unsubscribe(topic).then(resolve, reject);
+          },
+        });
+      });
+    },
+  });
+
+  return { grants, held, holding, log, stops, unsubscribes };
+};
+
+/**
+ * A participant `server` over `letting`, serving `interop`, started, and a client of a participant
+ * `client`'s connected to it: what the server's transport tells, and how the client closed.
+ */
+const lettingServerOf = async (broker: IMemoryBroker, letting: ReturnType<typeof lettingOf>) => {
+  const participant = createBrokerParticipant({ adapter: letting.held });
+  const server = participant.transportServer({ names: ['interop'] });
+  const clients = createBrokerParticipant({ adapter: broker.adapter({ id: 'client' }) });
+  const client = clients.transportClient();
+  const told = {
+    closes: [] as boolean[],
+    messages: 0,
+    opened: 0,
+    refusals: [] as [string | undefined, number, string][],
+  };
+
+  server.on('connection', () => {
+    told.opened += 1;
+  });
+  server.on('message', () => {
+    told.messages += 1;
+  });
+  server.on('refusal', ({ address, reason, status }) => {
+    told.refusals.push([address, status, reason]);
+  });
+  client.on('close', (wasClean) => {
+    told.closes.push(wasClean);
+  });
+  await server.start();
+  await client.connect({ server: 'interop' });
+  await until(() => {
+    return told.opened === 1;
+  }, 'its server told it open');
+
+  return { clients, participant, server, told };
+};
+
+/** The `names` events `participant` tells its trace, each its name and whether held. */
+const namesOf = (participant: ReturnType<typeof createBrokerParticipant>): string[] => {
+  const told: string[] = [];
+
+  participant.on('debug', (event) => {
+    if (event.event === 'names') {
+      told.push(`${String(event.name)} ${event.isHeld === true ? 'held' : 'let go'}`);
+    }
+  });
+
+  return told;
+};
+
 /** Stops `participant`, whose adapter `holding` holds each stop, once that stop is held. */
 const stoppedOf = async (
   participant: ReturnType<typeof createBrokerParticipant>,
@@ -351,7 +479,8 @@ const listenedOf = (adapter: IBrokerAdapter, log: string[]): IBrokerAdapter => {
  * A participant `srv` over the MQTT 5 adapter, linked to a scripted broker of a Receive Maximum of
  * 1, whose server transport holds `count` connections, each of a peer `c1`, `c2`… the script plays:
  * what the broker read, in its order, from each SUBSCRIBE to its DISCONNECT, each PUBLISH answered
- * while `acknowledging` says so, and its next link once its participant starts again.
+ * while `acknowledging` says so, each UNSUBSCRIBE at once, and its next link once its participant
+ * starts again.
  */
 const scriptedServerOf = async ({
   connectTimeout,
@@ -417,6 +546,25 @@ const scriptedServerOf = async ({
         } else {
           held.push({ link, messageId: packet.messageId ?? 0 });
         }
+      } else if (packet.cmd === 'unsubscribe') {
+        // * each let go at once: a stop awaits its UNSUBACK before its adapter's stop; its peers'
+        // departures, which each connection's end lets go, left out
+        const filters = packet.unsubscriptions.filter((filter) => {
+          return !filter.startsWith('bead/d/');
+        });
+
+        if (filters.length > 0) {
+          seen.push(`UNSUBSCRIBE ${filters.join(' ')}`);
+        }
+
+        link.send({
+          cmd: 'unsuback',
+          granted: packet.unsubscriptions.map(() => {
+            return 0;
+          }),
+          messageId: packet.messageId ?? 0,
+          properties: {},
+        });
       } else if (packet.cmd === 'disconnect') {
         seen.push(`DISCONNECT 0x${(packet.reasonCode ?? 0).toString(16).padStart(2, '0')}`);
       }
@@ -2891,19 +3039,25 @@ test.describe('broker participant', () => {
     await new Promise((resolve) => {
       setTimeout(resolve, 100);
     });
-    expect(scripted.seen.slice(from), 'one CLOSE alone, its PUBACK held').toEqual([
-      'PUBLISH bead/i/c1 CLOSE 1001',
-    ]);
+    expect(
+      scripted.seen.slice(from),
+      'its name let go, then one CLOSE alone, its PUBACK held'
+    ).toEqual(['UNSUBSCRIBE bead/s/interop', 'PUBLISH bead/i/c1 CLOSE 1001']);
     scripted.acknowledging.isAcknowledging = true;
     scripted.acknowledgeHeld();
     await stopping;
     await until(() => {
       return scripted.seen.at(-1) === 'DISCONNECT 0x00';
     }, 'its DISCONNECT read');
-    expect(scripted.seen.slice(from), 'each CLOSE, then the DISCONNECT').toEqual([
+    expect(
+      scripted.seen.slice(from),
+      'its name, each CLOSE, its inbox, then the DISCONNECT'
+    ).toEqual([
+      'UNSUBSCRIBE bead/s/interop',
       'PUBLISH bead/i/c1 CLOSE 1001',
       'PUBLISH bead/i/c2 CLOSE 1001',
       'PUBLISH bead/i/c3 CLOSE 1001',
+      'UNSUBSCRIBE bead/i/srv',
       'DISCONNECT 0x00',
     ]);
     await scripted.participant[Symbol.asyncDispose]();
@@ -2921,8 +3075,10 @@ test.describe('broker participant', () => {
 
     await scripted.participant.stop();
     expect(scripted.seen.slice(from), 'each CLOSE, the second unanswered').toEqual([
+      'UNSUBSCRIBE bead/s/interop',
       'PUBLISH bead/i/c1 CLOSE 1001',
       'PUBLISH bead/i/c2 CLOSE 1001',
+      'UNSUBSCRIBE bead/i/srv',
       'DISCONNECT 0x00',
     ]);
 
@@ -2963,5 +3119,248 @@ test.describe('broker participant', () => {
       'no RESET again'
     ).toEqual([]);
     await scripted.participant[Symbol.asyncDispose]();
+  });
+
+  // ── a stop that lets each name go first (spec 15.18, 15.21) ──
+
+  test('a participant’s stop lets each name go and closes each connection with 1001 at its call, then stops its adapter once its broker let each go, each served again at its next link (spec 15.21)', async () => {
+    const broker = createMemoryBroker();
+    const letting = lettingOf(broker.adapter({ id: 'server' }));
+    const { clients, participant, server, told } = await lettingServerOf(broker, letting);
+    const from = letting.log.length;
+    let isStopped = false;
+    const stopping = participant.stop().then(() => {
+      isStopped = true;
+    });
+
+    // * in its turn, its name's unsubscription, then its CLOSE: its link down, its connection
+    // forgotten, nothing handed on after its call, its adapter up
+    expect(letting.log.slice(from), "its name's unsubscription, then its CLOSE").toEqual([
+      'unsubscribe bead/s/interop',
+      'publish bead/i/client',
+    ]);
+    expect(participant.isLinked, 'down from its call').toBe(false);
+    expect(server.gauges().counts['connections'], 'its connection forgotten').toBe(0);
+    await until(() => {
+      return told.closes.length === 1;
+    }, 'its client told its close');
+    expect(told.closes, 'with 1001').toEqual([false]);
+    expect(told.messages, 'nothing handed on').toBe(0);
+    await settled();
+    expect(isStopped, "awaiting its broker's word").toBe(false);
+
+    // * its adapter stopped once its broker let its name go
+    letting.unsubscribes.shift()?.settle();
+    await stopping;
+    expect(letting.log.slice(from), "then its adapter's stop").toEqual([
+      'unsubscribe bead/s/interop',
+      'publish bead/i/client',
+      'stop',
+    ]);
+    expect(participant.names.size, 'none held').toBe(0);
+
+    // * served again at its next link
+    await participant.start();
+    await until(() => {
+      return server.gauges().counts['names'] === 1;
+    }, 'served again');
+
+    const disposing = participant[Symbol.asyncDispose]();
+
+    await until(() => {
+      return letting.unsubscribes.length === 1;
+    }, 'let go of again');
+    letting.unsubscribes.shift()?.settle();
+    await disposing;
+    await clients[Symbol.asyncDispose]();
+  });
+
+  test('refuses 503 an OPEN that comes while its stop lets its names go, its adapter up (spec 15.18, 15.21)', async () => {
+    const broker = createMemoryBroker();
+    const letting = lettingOf(broker.adapter({ id: 'server' }));
+    const { clients, participant, told } = await lettingServerOf(broker, letting);
+    const late = await peerOf(broker, { id: 'late' });
+    const stopping = participant.stop();
+
+    // * its broker holds its name still: the OPEN reaches it, and is refused 503, its adapter up
+    const opener = Uint8Array.of(0xa4, 0, 0, 0, 0, 0, 0, 4);
+
+    await expect(
+      late.adapter.publish({
+        payload: writeParcel({
+          acceptor: new Uint8Array(8),
+          bound: 65_536,
+          flags: 0,
+          id: 'late',
+          incarnation: INCARNATION,
+          kind: ParcelKind.OPEN,
+          opener,
+          sequence: 1,
+        }),
+        topic: NAME,
+      }),
+      'its broker holds its name'
+    ).resolves.toBe(BROKER_PUBLISHED.TAKEN);
+    await until(() => {
+      return late.heard.length > 0;
+    }, 'the OPEN answered');
+    expect(
+      late.heard.map(({ parcel }) => {
+        return [parcel?.kind, hexadecimalOf(parcel?.opener ?? new Uint8Array()), parcel?.status];
+      }),
+      'refused 503'
+    ).toEqual([[ParcelKind.REFUSE, hexadecimalOf(opener), 503]]);
+    expect(told.refusals, 'told').toEqual([['late', 503, 'busy']]);
+    expect(told.opened, 'no connection told').toBe(1);
+    letting.unsubscribes.shift()?.settle();
+    await stopping;
+    await late.adapter.stop();
+    await participant[Symbol.asyncDispose]();
+    await clients[Symbol.asyncDispose]();
+  });
+
+  test('lets go at its stop a name whose subscription is under way (spec 15.21)', async () => {
+    const broker = createMemoryBroker();
+    const letting = lettingOf(broker.adapter({ id: 'server' }));
+
+    letting.holding.isHoldingSubscribes = true;
+    letting.holding.isHoldingUnsubscribes = false;
+    letting.holding.isHoldingStops = true;
+
+    const participant = createBrokerParticipant({ adapter: letting.held });
+    const names = namesOf(participant);
+    const asking = await peerOf(broker, { id: 'asking' });
+
+    await participant.start();
+
+    const server = participant.transportServer({ names: ['interop'] });
+    const starting = server.start().catch((reason: unknown) => {
+      return reason;
+    });
+
+    await until(() => {
+      return letting.grants.length === 1;
+    }, 'its name asked of its broker');
+
+    // * asked, unanswered: its stop lets it go all the same, its broker's word on it coming after
+    const from = letting.log.length;
+    const stopping = participant.stop();
+
+    expect(letting.log.slice(from), 'its name let go of').toEqual(['unsubscribe bead/s/interop']);
+    letting.grants.shift()?.();
+    await until(() => {
+      return letting.stops.length === 1;
+    }, "its adapter's stop held");
+    await expect(
+      asking.adapter.publish({ payload: Uint8Array.of(0), topic: NAME }),
+      "let go before its adapter's stop"
+    ).resolves.toBe(BROKER_PUBLISHED.NO_SUBSCRIBER);
+    expect(participant.names.size, 'never held').toBe(0);
+    expect(
+      names.filter((each) => {
+        return each.endsWith(' held');
+      }),
+      'never told held'
+    ).toEqual([]);
+    letting.stops.shift()?.();
+    await stopping;
+    await starting;
+    await asking.adapter.stop();
+    letting.holding.isHoldingStops = false;
+    await participant[Symbol.asyncDispose]();
+  });
+
+  test('reports a name its broker refuses to let go at its stop, keeps it held, and stops all the same (spec 15.21)', async () => {
+    const broker = createMemoryBroker();
+    const letting = lettingOf(broker.adapter({ id: 'server' }));
+    const { clients, participant, server } = await lettingServerOf(broker, letting);
+    const reported = hearing(participant);
+    const names = namesOf(participant);
+
+    letting.holding.isHoldingStops = true;
+
+    const stopping = participant.stop();
+
+    letting.unsubscribes
+      .shift()
+      ?.refuse(new GenericError('its broker refused to let bead/s/interop go: 0x80'));
+
+    // * reported, held still, and its adapter stopped all the same
+    await until(() => {
+      return letting.stops.length === 1;
+    }, "its adapter's stop held");
+    expect(wordsOf(reported), 'reported').toEqual([
+      'its broker refused to let bead/s/interop go: 0x80',
+    ]);
+    expect([...participant.names], 'held still').toEqual(['interop']);
+    expect(server.gauges().counts['names'], 'counted').toBe(1);
+    expect(names, 'told nothing').toEqual([]);
+    letting.stops.shift()?.();
+    await stopping;
+
+    // * its stopped clears it
+    expect(participant.names.size, 'none held once stopped').toBe(0);
+    expect(server.gauges().counts['names'], 'none counted').toBe(0);
+    letting.holding.isHoldingStops = false;
+    await participant[Symbol.asyncDispose]();
+    await clients[Symbol.asyncDispose]();
+  });
+
+  test('tells nothing of a name its link lost as it stopped (spec 15.21)', async () => {
+    const broker = createMemoryBroker();
+    const inner = broker.adapter({ id: 'server' });
+    const letting = lettingOf(inner);
+    const { clients, participant } = await lettingServerOf(broker, letting);
+    const reported = hearing(participant);
+    const names = namesOf(participant);
+
+    letting.holding.isHoldingStops = true;
+
+    const stopping = participant.stop();
+
+    // * its link lost as it lets its name go: what fails then is that loss, reported by none
+    inner.lose();
+    await settled();
+    letting.unsubscribes
+      .shift()
+      ?.refuse(new GenericError('the UNSUBACK of bead/s/interop never came'));
+    await until(() => {
+      return letting.stops.length === 1;
+    }, "its adapter's stop held");
+    expect(wordsOf(reported), 'nothing reported').toEqual([]);
+    expect(names, 'told nothing').toEqual([]);
+    letting.stops.shift()?.();
+    await stopping;
+    expect(participant.names.size, 'none held once stopped').toBe(0);
+    expect(wordsOf(reported), 'nothing reported once stopped').toEqual([]);
+
+    // * its link lost as it lets its name go, its broker letting it go after: told nothing all the
+    // same, and held until its stop settles
+    await participant.start();
+    await until(() => {
+      return participant.names.size === 1;
+    }, 'its name held at its next link');
+    names.length = 0;
+
+    const restopping = participant.stop();
+
+    await until(() => {
+      return letting.unsubscribes.length === 1;
+    }, 'its name let go of again');
+    inner.lose();
+    await settled();
+    letting.unsubscribes.shift()?.settle();
+    await until(() => {
+      return letting.stops.length === 1;
+    }, "its adapter's stop held again");
+    expect(names, 'told nothing, let go').toEqual([]);
+    expect(participant.names.size, 'held until its stop settles').toBe(1);
+    letting.stops.shift()?.();
+    await restopping;
+    expect(participant.names.size, 'none held once stopped again').toBe(0);
+    expect(wordsOf(reported), 'nothing reported, let go').toEqual([]);
+    letting.holding.isHoldingStops = false;
+    await participant[Symbol.asyncDispose]();
+    await clients[Symbol.asyncDispose]();
   });
 });

@@ -113,6 +113,8 @@ interface ILink {
   /** Hands a message to its adapter's listeners, with its acknowledgement. */
   readonly deliver: (message: IQueued) => void;
   isDraining: boolean;
+  /** Each unsubscription waiting for what its queue held before it, by the messages left of it. */
+  readonly lettings: { left: number; readonly settle: () => void }[];
   readonly queue: IQueued[];
   readonly subscriptions: Map<string, string | undefined>;
   will?: { readonly payload: Uint8Array; readonly topic: BrokerTopic } | undefined;
@@ -152,9 +154,9 @@ const keyOf = (topic: BrokerTopic): string => {
  * alone and in groups, a group's members chosen in turn; each message copied as it is published,
  * and handed on whole in a later turn than its publish, in the order its publisher published it to
  * that topic, once — or, as a test asks, again, behind the next, never, or to another member of its
- * group. A subscriber's queue drops a message past `maximumQueuedMessages`; a message past its
- * `expiresAfter` on the clock is deleted; a will is published as a link is lost or taken over, never
- * at a stop.
+ * group. A subscription is let go once what it queued to it before was handed on. A subscriber's
+ * queue drops a message past `maximumQueuedMessages`; a message past its `expiresAfter` on the clock
+ * is deleted; a will is published as a link is lost or taken over, never at a stop.
  * Its handles' type is `BROKER`, and it never leaves the process, so its every leg is secure.
  *
  * @example
@@ -198,12 +200,26 @@ export const createMemoryBroker = (options?: IMemoryBrokerOptions): IMemoryBroke
         drain(link);
       }
 
-      if (message.expiresAt <= clock.performance.now()) {
-        return;
+      try {
+        if (message.expiresAt > clock.performance.now()) {
+          link.deliver(message);
+        }
+      } finally {
+        handedOn(link);
       }
-
-      link.deliver(message);
     });
+  };
+
+  // * one message of its queue handed on, or deleted: each unsubscription that waited on it settles,
+  // the first made the first to settle
+  const handedOn = (link: ILink): void => {
+    for (const letting of link.lettings) {
+      letting.left -= 1;
+    }
+
+    while (link.lettings[0]?.left === 0) {
+      link.lettings.shift()?.settle();
+    }
   };
 
   const enqueue = (to: readonly ILink[], message: IQueued): void => {
@@ -306,11 +322,16 @@ export const createMemoryBroker = (options?: IMemoryBrokerOptions): IMemoryBroke
     return BROKER_PUBLISHED.TAKEN;
   };
 
-  // a link gone, lost or stopped: what it held goes with it, no session kept
-  const unlink = (link: ILink): void => {
+  // a link gone, lost or stopped: what it held goes with it, no session kept; each unsubscription
+  // that waited on its queue given back, to settle as its caller says
+  const unlink = (link: ILink): (() => void)[] => {
     links.delete(link.adapter);
     link.queue.length = 0;
     link.subscriptions.clear();
+
+    return link.lettings.splice(0).map(({ settle }) => {
+      return settle;
+    });
   };
 
   return {
@@ -361,15 +382,22 @@ export const createMemoryBroker = (options?: IMemoryBrokerOptions): IMemoryBroke
           return;
         }
 
-        unlink(link);
+        const lettings = unlink(link);
+
         unsettled = 0;
 
         if (link.will !== undefined) {
           publishFrom(undefined, { ...link.will, isRetained: false });
         }
 
+        // ! an unsubscription that waited on its queue settles once its down was told: its
+        // participant reads the loss first
         queueMicrotask(() => {
           emitter.emit('down', down);
+
+          for (const settle of lettings) {
+            settle();
+          }
         });
       };
 
@@ -448,6 +476,7 @@ export const createMemoryBroker = (options?: IMemoryBrokerOptions): IMemoryBroke
               });
             },
             isDraining: false,
+            lettings: [],
             queue: [],
             subscriptions: new Map(),
             will: startOptions?.will,
@@ -461,7 +490,10 @@ export const createMemoryBroker = (options?: IMemoryBrokerOptions): IMemoryBroke
           const link = links.get(adapter);
 
           if (link !== undefined) {
-            unlink(link);
+            for (const settle of unlink(link)) {
+              settle();
+            }
+
             unsettled = 0;
           }
 
@@ -487,10 +519,20 @@ export const createMemoryBroker = (options?: IMemoryBrokerOptions): IMemoryBroke
         takeOver: () => {
           end({ isTakenOver: true });
         },
+        // * routed nothing from its call on; what was queued to its link before is handed on all
+        // the same, and it settles once that was, so that its subscriber read it first (spec 15.24)
         unsubscribe: (topic) => {
-          links.get(adapter)?.subscriptions.delete(keyOf(topic));
+          const link = links.get(adapter);
 
-          return Promise.resolve();
+          link?.subscriptions.delete(keyOf(topic));
+
+          if (link === undefined || link.queue.length === 0) {
+            return Promise.resolve();
+          }
+
+          return new Promise<void>((resolve) => {
+            link.lettings.push({ left: link.queue.length, settle: resolve });
+          });
         },
       };
 

@@ -25,17 +25,43 @@ export interface ILinkRelay extends AsyncDisposable {
 
 // definition
 
-/** A relay on 127.0.0.1, on a port of its own, piping each link to `host`:`port`. */
+/**
+ * A relay on 127.0.0.1, on a port of its own, piping each link to `host`:`port`, each chunk held
+ * `delay` milliseconds each way, in its order, where one is given, as a broker a round trip away.
+ */
 export const createLinkRelay = async ({
+  delay = 0,
   host,
   port,
 }: {
+  delay?: number;
   host: string;
   port: number;
 }): Promise<ILinkRelay> => {
   const pairs = new Set<readonly [Socket, Socket]>();
   // the sockets each silenced link holds open, both its ends
   const silenced = new Set<Socket>();
+  // * each chunk written once its delay passed, in its order, unless its link was silenced or ended
+  const forward = (from: Socket, to: Socket): void => {
+    if (delay === 0) {
+      from.pipe(to);
+
+      return;
+    }
+
+    from.on('data', (chunk: Buffer) => {
+      setTimeout(() => {
+        if (!silenced.has(from) && !to.destroyed) {
+          to.write(chunk);
+        }
+      }, delay);
+    });
+    from.on('end', () => {
+      setTimeout(() => {
+        to.end();
+      }, delay);
+    });
+  };
   const server = createServer((inward) => {
     const outward = createConnection({ host, port });
     const pair = [inward, outward] as const;
@@ -51,12 +77,21 @@ export const createLinkRelay = async ({
     };
 
     pairs.add(pair);
-    inward.pipe(outward);
-    outward.pipe(inward);
+    forward(inward, outward);
+    forward(outward, inward);
+
+    // * a delayed link ends once what it held went
+    const ending = (): void => {
+      if (delay === 0) {
+        end();
+      } else {
+        setTimeout(end, delay);
+      }
+    };
 
     for (const socket of pair) {
-      socket.on('error', end);
-      socket.on('close', end);
+      socket.on('error', ending);
+      socket.on('close', ending);
     }
   });
 

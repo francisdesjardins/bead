@@ -362,6 +362,43 @@ test('tells a stop once, then its next link’s up as another incarnation, and n
   }
 });
 
+// debugging 13.5
+test('tells each name its stop lets go, once its broker let it go, after its CLOSEs and before its stopped', async () => {
+  const pair = await pairOf();
+
+  try {
+    const from = pair.serverEvents.length;
+
+    await pair.serverParticipant.stop();
+
+    const told = pair.serverEvents.slice(from);
+    const close = told.findIndex(({ direction, kind }) => {
+      return kind === 'CLOSE' && direction === 'tx';
+    });
+    const names = told.findIndex(({ event }) => {
+      return event === 'names';
+    });
+    const stopped = told.findIndex(({ event, state }) => {
+      return event === 'link' && state === 'stopped';
+    });
+
+    expect([close, names, stopped].includes(-1), 'each told').toBe(false);
+    expect(
+      close < names && names < stopped,
+      'its CLOSE, then its name let go, then its stopped'
+    ).toBe(true);
+    expect(
+      told.filter(({ event }) => {
+        return event === 'names';
+      }),
+      'its name let go, once'
+    ).toEqual([{ event: 'names', name: 'interop', isHeld: false, group: undefined }]);
+    expect(pair.serverParticipant.names.size, 'none held once stopped').toBe(0);
+  } finally {
+    await pair.stop();
+  }
+});
+
 // debugging 13.6, 13.9
 test('reports a debug listener’s throw and calls later listeners while the participant carries on', async () => {
   const broker = createMemoryBroker();

@@ -76,13 +76,16 @@ const hexOf = (bytes: Uint8Array): string => {
  * A server's transport over a broker participant (spec 15.18 to 15.23), serving `names`: each OPEN
  * to one of them judged, in its order — a layout to come refused 426, an id that is no token or a
  * receive bound under 1,024 refused 400, past `maximumConnections` or `maximumConnectionsPerAddress`
- * or once its stop began 503, each told, its address the id the OPEN claims — and any other answered
+ * or once its stop or its participant's began 503, each told, its address the id the OPEN claims —
+ * and any other answered
  * by an ACCEPT, half-open until the opener's first parcel naming both halves, which draws its handle,
  * `type=BROKER;participant=<id>;ordinal=n`, and tells its router; one whose third leg does not come
  * within `acceptTimeout` is forgotten, telling nothing. In a group, it lets its names go while it
  * holds `maximumConnections`. It carries no credential toward its client, and a connection is secure
  * while its own leg and its peer's are, its own as `secure` says where given, its ACCEPT marked so.
- * Its stop takes no OPEN and closes each connection with 1001; its participant's link is kept. Its
+ * Its stop takes no OPEN, lets go of its names and closes each connection with 1001, its names'
+ * unsubscriptions handed first, and settles once its broker let each go; its participant's link is
+ * kept. Its
  * participant's stop keeps it open, its names wanted and served again at its next link; its start
  * once its participant is disposed is a {@link ProgrammerError}, its state kept (spec 15.21). A
  * connection its router paused is held by its participant, in order, its CLOSE behind what it
@@ -313,9 +316,12 @@ export const createBrokerTransportServer = (
           return;
         }
 
+        // * its participant's stop under way: what its broker hands it as it lets its names go is
+        // refused, its adapter still up (spec 15.18, 15.21)
         if (
           !isServing ||
           !server.isOpen() ||
+          port.stopped.aborted ||
           held.size >= maximumConnections ||
           countOf(id) >= maximumConnectionsPerAddress
         ) {
@@ -424,8 +430,9 @@ export const createBrokerTransportServer = (
 
           return { address: port.id, port: 0 };
         },
-        // * no OPEN taken from its start, each connection closed with 1001, and its names let go,
-        // settling once its broker let each go; its participant's link kept
+        // * no OPEN taken from its start, its names let go, each unsubscription handed before each
+        // connection's CLOSE of 1001, settling once its broker let each go; its participant's link
+        // kept (spec 15.21)
         stop: async () => {
           isServing = false;
 
