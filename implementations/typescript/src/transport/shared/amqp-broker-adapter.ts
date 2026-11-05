@@ -370,10 +370,11 @@ const assertAuthentication = ({
  * subscriber, any other outcome refuses it. The end of its connection, of its inbox's session or
  * receiver, is its link lost; a name's receiver its broker ends is attached again once, on a
  * session of its own. Its stop, within its connectTimeout, takes no publication, sends what waits on
- * a sender's credit and awaits each outcome, fails what has not gone by then, detaches each
- * receiver, ends each session and closes its connection with no error. No link of an id takes
- * another over. Its leg is secure under TLS or to the
- * loopback; it runs in Node alone.
+ * a sender's credit and awaits each outcome, fails what has not gone by then, deletes its inbox
+ * through its broker's management, detaches each receiver, ends each session and closes its
+ * connection with no error: once it settled, its broker hands it nothing, a name's queue holding
+ * what comes to the name. No link of an id takes another over. Its leg is secure under TLS or to
+ * the loopback; it runs in Node alone.
  *
  * @example
  * const adapter = createAmqpBrokerAdapter({ id: 'server', password, url: 'amqps://broker:5671' });
@@ -567,6 +568,25 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
       if (sending !== undefined) {
         endSending(sending, stopped);
       }
+    }
+
+    const { inbox } = incarnation;
+
+    // ! its inbox deleted by its broker's management, as its unsubscription deletes it: an exclusive
+    // queue outlives its connection's CLOSE until its broker ends it, taking what comes meanwhile;
+    // after the drain, so that what waits on a sender's credit is never overtaken
+    if (inbox !== undefined && connection.is_open()) {
+      const given = new AbortController();
+
+      inbox.isDeleting = true;
+      await Promise.race([
+        bounded.promise,
+        gone,
+        deleteInbox(connection, { queue: topicOf(inbox.topic), signal: given.signal }).catch(() => {
+          // * refused or lost: its link ends all the same, the queue with it
+        }),
+      ]);
+      given.abort();
     }
 
     if (connection.is_open()) {
