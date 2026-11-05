@@ -433,10 +433,14 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
     /// <summary>
     /// Lets the subscription to <paramref name="topic"/> go, by the filter its SUBSCRIBE named, or
-    /// the topic itself where it held none; settles once its UNSUBACK came of 0x00, or 0x11 where
-    /// its broker held none, and fails on 0x80 or more, an <see cref="IOException"/> naming it. Its
-    /// filter stays its link's until such an UNSUBACK came, so that a stop meanwhile lets it go
-    /// too.
+    /// the topic itself where it held none, its UNSUBSCRIBE sent as it is called; settles once its
+    /// UNSUBACK came of 0x00, or 0x11 where its broker held none, each PUBLISH its broker sent of it
+    /// before then read first, its connection carrying both in order ([MQTT-3.10.4-3]); fails on
+    /// 0x80 or more, an <see cref="IOException"/> naming it, and with none within
+    /// <see cref="MqttBrokerAdapterOptions.ConnectTimeout"/> of its call, a
+    /// <see cref="TimeoutException"/> naming it, its link kept so that no will goes (spec 15.27).
+    /// Its filter stays its link's until such an UNSUBACK came, a late one among them, so that a
+    /// stop meanwhile lets it go too.
     /// </summary>
     public async Task Unsubscribe(IReadOnlyList<string> topic)
     {
@@ -450,12 +454,42 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         }
 
         var filter = held?.Filter ?? key;
-        var left = await Asked((link, CancellationToken.None), link.Client.UnsubscribeAsync(new MqttClientUnsubscribeOptionsBuilder().WithTopicFilter(filter).Build(), link.Life.Token));
+
+        // ! its request never given up by a token, its link's own but: MQTTnet ends a link on an
+        // UNSUBACK no request awaits, with no DISCONNECT, so its will would go; its wait alone is
+        // bounded, and a late UNSUBACK read
+        var leaving = LeftOf((link, (key, held)), Asked((link, CancellationToken.None), link.Client.UnsubscribeAsync(new MqttClientUnsubscribeOptionsBuilder().WithTopicFilter(filter).Build(), link.Life.Token)));
+
+        try
+        {
+            await leaving.WaitAsync(_options.ConnectTimeout, TimeProvider.System);
+        }
+        catch (TimeoutException reason)
+        {
+            _ = leaving.ContinueWith(
+                (failed) =>
+                {
+                    _ = failed.Exception;
+                },
+                CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+
+            throw new TimeoutException(string.Create(CultureInfo.InvariantCulture, $"the subscription of {Id} to {filter} had no UNSUBACK within {_options.ConnectTimeout.TotalMilliseconds} ms, its connectTimeout"), reason);
+        }
+    }
+
+    // an UNSUBSCRIBE's UNSUBACK, whenever it comes: of 0x00 or 0x11, its filter its link's no more;
+    // of 0x80 or more, a refusal naming it
+    private async Task LeftOf((Link Link, (string Key, Held? Held) Filter) asked, Task<MqttClientUnsubscribeResult> unsubscribing)
+    {
+        var (link, (key, held)) = asked;
+        var left = await unsubscribing;
         var code = left.Items.Single().ResultCode;
 
         if (code is not (MqttClientUnsubscribeResultCode.Success or MqttClientUnsubscribeResultCode.NoSubscriptionExisted))
         {
-            throw new IOException(string.Create(CultureInfo.InvariantCulture, $"its broker refused to let the subscription of {Id} to {filter} go: UNSUBACK 0x{(int)code:X2}"));
+            throw new IOException(string.Create(CultureInfo.InvariantCulture, $"its broker refused to let the subscription of {Id} to {held?.Filter ?? key} go: UNSUBACK 0x{(int)code:X2}"));
         }
 
         if (held is not null)

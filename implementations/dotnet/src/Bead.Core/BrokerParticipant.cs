@@ -107,6 +107,9 @@ public sealed class BrokerParticipant : IAsyncDisposable
     private bool _isTakenOver;
     // its link went down as it connected: that attempt fails, rather than call it linked
     private bool _isDownAsItLinks;
+    // its link went down as it stopped: a let-go that fails then is that loss, never reported; set
+    // under its gate
+    private bool _isDownAsItStops;
     // what gives up the reconnection under way, as its link is taken over
     private CancellationTokenSource? _relinking;
     private TaskCompletionSource _live = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -383,6 +386,51 @@ public sealed class BrokerParticipant : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Whether its stop is under way, from its call to its settle, or it is disposed: an OPEN that
+    /// comes then is refused 503 <c>busy</c> (spec 15.18, 15.21).
+    /// </summary>
+    internal bool IsStopping
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _isStopping || _isDisposed;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether its link went down as it stops, so that what failed then is its loss, not a refusal:
+    /// its link reads down from its stop's call (spec 15.21).
+    /// </summary>
+    internal bool IsDownAsItStops
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _isDownAsItStops;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether its link was lost as its stop runs (spec 15.21): a name its broker let go since is
+    /// told nothing, its link having let it go of its own, and held until its stop settles.
+    /// </summary>
+    internal bool IsLostAsItStops
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return (_isStopping || _isDisposed) && _isDownAsItStops;
+            }
+        }
+    }
+
     internal SerialScheduler Scheduler
     {
         get
@@ -616,13 +664,18 @@ public sealed class BrokerParticipant : IAsyncDisposable
     }
 
     /// <summary>
-    /// Ends its link in place, and with it what is under way as it is called (spec 15.21): gives up
-    /// its link's start under way and awaits it, closes each of its connections with a CLOSE of
-    /// 1001, then stops its adapter, which sends those CLOSEs, then has its broker let go of each
-    /// subscription of its link, before it ends the link, so its broker publishes no will of a link
-    /// it held and hands it nothing once it settled; a connect awaiting its link or its answer
-    /// fails, stopped as it connected, and a reconnection, its own or a client's, ends at once, the
-    /// stop its cause.
+    /// Ends its link in place, and with it what is under way as it is called (spec 15.21): its link
+    /// down from its call; in its turn, lets go of each name its broker holds or was asked to hold
+    /// on the link, each kept wanted for its next link, then closes each of its connections with a
+    /// CLOSE of 1001; gives up its link's start under way and awaits it, then awaits its broker's
+    /// word on each name, within its adapter's bound, refusing 503 <c>busy</c> an OPEN its broker
+    /// hands it meanwhile, a <c>names</c> event told for each name let go; then stops its adapter,
+    /// which sends those CLOSEs, then has its broker let go of each subscription of its link, before
+    /// it ends the link, so its broker publishes no will of a link it held and hands it nothing once
+    /// it settled. A name its broker refuses to let go is reported, unless its link was lost
+    /// meanwhile, and stays held until it stopped. A connect awaiting its link or its answer fails,
+    /// stopped as it connected, and a reconnection, its own or a client's, ends at once, the stop
+    /// its cause.
     /// Once it settled, its start, a server's start over it, or a client's connect or reconnection
     /// over it links it anew as another incarnation, its transports kept, and resets each peer whose
     /// CLOSE its broker did not take. A stop called again before its next link's start settles with
@@ -632,6 +685,7 @@ public sealed class BrokerParticipant : IAsyncDisposable
     {
         BrokerStopRecord record;
         TaskCompletionSource ending;
+        bool isLinked;
 
         lock (_gate)
         {
@@ -643,6 +697,10 @@ public sealed class BrokerParticipant : IAsyncDisposable
 
             record = _current;
             record.Mark();
+
+            // * a link up as it is called lets its names go; one not up lets go of nothing, its
+            // adapter's start, given up, ending with what it brought up
+            isLinked = _live.Task.IsCompletedSuccessfully;
 
             if (!_isDisposed)
             {
@@ -659,23 +717,23 @@ public sealed class BrokerParticipant : IAsyncDisposable
         }
 
         // * outside its gate: no callback of its signals runs under it
-        _ = Ending((ending, record));
+        _ = Ending((ending, (record, isLinked)));
 
         return ending.Task;
     }
 
     // its stop's body: its signals cancelled right after its mark, its start under way given up, its
-    // connections closed, its link ended; its record renewed, unless it is disposed, then its end
-    // settled whatever the turn did, so that no later stop waits for ever and a start made as it
-    // settles links anew
-    private async Task Ending((TaskCompletionSource Ended, BrokerStopRecord Record) stop)
+    // names let go where its link was up as it was called, its connections closed, its link ended;
+    // its record renewed, unless it is disposed, then its end settled whatever the turn did, so that
+    // no later stop waits for ever and a start made as it settles links anew
+    private async Task Ending((TaskCompletionSource Ended, (BrokerStopRecord Record, bool IsLinked) Stopped) stop)
     {
-        var (ended, record) = stop;
+        var (ended, (record, isLinked)) = stop;
 
         try
         {
             await record.Cancel();
-            await Unlinking();
+            await Unlinking(isLinked);
             Renew();
             ended.SetResult();
         }
@@ -691,6 +749,8 @@ public sealed class BrokerParticipant : IAsyncDisposable
     {
         lock (_gate)
         {
+            _isDownAsItStops = false;
+
             if (!_isDisposed)
             {
                 _isStopping = false;
@@ -699,16 +759,31 @@ public sealed class BrokerParticipant : IAsyncDisposable
         }
     }
 
-    // in its turn: its connections closed with 1001, each CLOSE handed to its adapter before its
-    // stop, its connects failed, its adapter's start under way awaited, then its adapter stopped
-    // once; each peer whose CLOSE its broker did not take kept for its next link, and its server
-    // transports kept, their names held no more
-    private Task Unlinking()
+    // in its turn: each name its broker holds or was asked to hold let go, where its link was up as
+    // it was called, then its connections closed with 1001, each CLOSE handed to its adapter before
+    // its stop, its connects failed; then its adapter's start under way awaited, its broker's word on
+    // each name awaited, then its adapter stopped once; each peer whose CLOSE its broker did not take
+    // kept for its next link, and its server transports kept, their names held no more
+    private Task Unlinking(bool isLinked)
     {
         return _scheduler.Run(async () =>
         {
-            _linkEpoch += 1;
+            List<BrokerTransportServer> serving;
 
+            lock (_gate)
+            {
+                serving = [.. _servers];
+            }
+
+            // ! its names first, in this turn: each unsubscription taking effect as it is called, so
+            // its broker reads it before each CLOSE, and once it let a name go an OPEN to it goes
+            // elsewhere (spec 15.21)
+            var letting = isLinked
+                ? serving.Select((server) =>
+                {
+                    return server.LettingGo();
+                }).ToList()
+                : [];
             var ended = IsDebugging ? _connections.Values.Select((connection) => { return connection.Ordinal; }).ToArray() : null;
             var closing = new List<(string PeerId, (ulong Opener, ulong Acceptor) Pair, Task<BrokerPublished> Published)>();
 
@@ -734,6 +809,15 @@ public sealed class BrokerParticipant : IAsyncDisposable
                 await started.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing | ConfigureAwaitOptions.ContinueOnCapturedContext);
             }
 
+            // * its broker's word on each name, within its adapter's bound, its adapter still up: an
+            // OPEN its broker hands it meanwhile is refused 503, its REFUSE published (spec 15.18,
+            // 15.24)
+            await Task.WhenAll(letting);
+
+            // ! once its names were let go, so that the event of each is told under the epoch it
+            // began in; a SUBACK that comes from now on holds nothing
+            _linkEpoch += 1;
+
             // * its stop sends what it was handed before it, each CLOSE among it, within a bound of
             // its own, and fails what has not gone by then (spec 15.24)
             await _adapter.Stop();
@@ -748,8 +832,8 @@ public sealed class BrokerParticipant : IAsyncDisposable
                 }
             }
 
-            // ! an OPEN its link took as it ended, after its CLOSEs went, holds a connection on a link
-            // ended: dropped, unclean
+            // ! a connection held still as its link ended, none taken since its stop began: dropped,
+            // unclean
             foreach (var connection in _connections.Values.ToList())
             {
                 connection.Drop();
@@ -1024,15 +1108,18 @@ public sealed class BrokerParticipant : IAsyncDisposable
         }
     }
 
-    /// <summary>Subscribes a name served, alone or in its group; settles once its broker holds it.</summary>
-    internal async Task Subscribe((string Name, bool IsInGroup) name)
+    /// <summary>
+    /// Subscribes a name served, alone or in its group; settles once its broker holds it, true where
+    /// it is held, false where its link ended or its stop began meanwhile, that stop letting it go.
+    /// </summary>
+    internal async Task<bool> Subscribe((string Name, bool IsInGroup) name)
     {
         var epoch = _linkEpoch;
         var record = Captured();
         await _adapter.Subscribe(NameOf(name.Name), new BrokerSubscription { Group = name.IsInGroup ? name.Name : null });
         if (epoch != _linkEpoch || record.IsMarked)
         {
-            return;
+            return false;
         }
         lock (_gate)
         {
@@ -1042,15 +1129,24 @@ public sealed class BrokerParticipant : IAsyncDisposable
         {
             Trace(new ParticipantDebugEvent { Event = "names", Name = name.Name, IsHeld = true, Group = name.IsInGroup ? name.Name : null });
         }
+
+        return true;
     }
 
-    /// <summary>Lets a name go.</summary>
+    /// <summary>
+    /// Lets a name go, its unsubscription made as it is called; held no more once its broker let it
+    /// go, its <c>names</c> event told, and held still where its broker refused or its link was lost
+    /// as it stopped (debugging 13.5).
+    /// </summary>
     internal async Task Unsubscribe(string name)
     {
         var group = _heldNames.GetValueOrDefault(name);
         var epoch = _linkEpoch;
         await _adapter.Unsubscribe(NameOf(name));
-        if (epoch != _linkEpoch)
+
+        // * its link lost as it stopped let it go of its own: told nothing, and held until that stop
+        // settles
+        if (epoch != _linkEpoch || IsLostAsItStops)
         {
             return;
         }
@@ -1216,9 +1312,12 @@ public sealed class BrokerParticipant : IAsyncDisposable
 
         lock (_gate)
         {
-            // * a stop under way, or its dispose, ends the link itself
+            // * a stop under way, or its dispose, ends the link itself: its loss noted, so that what
+            // it lets go of and fails then is told apart from a refusal (spec 15.21)
             if (_isStopping || _isDisposed)
             {
+                _isDownAsItStops = true;
+
                 return;
             }
 

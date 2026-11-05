@@ -52,9 +52,9 @@ public sealed record MqttBrokerAdapterOptions
 
     /// <summary>
     /// How long it waits: its start, from its call, for its Password, where it asks its
-    /// <see cref="PasswordProvider"/>, and its CONNACK; and its stop, from its call, for what it
-    /// was handed and its UNSUBACKs, then for its DISCONNECT: 30 seconds unless told, never without
-    /// end (spec 15.26, 15.30).
+    /// <see cref="PasswordProvider"/>, and its CONNACK; a subscription let go, from its UNSUBSCRIBE,
+    /// for its UNSUBACK; and its stop, from its call, for what it was handed and its UNSUBACKs, then
+    /// for its DISCONNECT: 30 seconds unless told, never without end (spec 15.26, 15.27, 15.30).
     /// </summary>
     public TimeSpan ConnectTimeout { get; init; } = TimeSpan.FromSeconds(30);
 

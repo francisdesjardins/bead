@@ -67,9 +67,9 @@ public sealed record MemoryBrokerFaultOptions
 /// publications refused when no subscriber takes them, a message's life — and hands each message on
 /// copied as it is published, whole, in a later turn than its publish, in the order its publisher
 /// published it to that topic, once; or, as a test asks, again, behind the next, never, or to
-/// another member of its group. It holds a queue for each subscriber, bounded as it is given, past
-/// which it drops a message, and publishes a link's will as the link is lost or taken over, never at
-/// a stop. Its
+/// another member of its group. It lets a subscription go once what it queued to it before was
+/// handed on. It holds a queue for each subscriber, bounded as it is given, past which it drops a
+/// message, and publishes a link's will as the link is lost or taken over, never at a stop. Its
 /// handles' type is <see cref="TransportTypes.Broker"/>, and it never leaves the process, so its
 /// legs are secure.
 /// </summary>
@@ -508,7 +508,11 @@ public sealed class MemoryBrokerAdapter : IBrokerAdapter
         });
     }
 
-    /// <summary>Lets the subscription go: what was routed to it before is handed on all the same.</summary>
+    /// <summary>
+    /// Lets the subscription go, routed nothing from its turn on: what was routed to it before is
+    /// handed on all the same, and it settles once that was, so that its subscriber read each
+    /// message of it first (spec 15.24).
+    /// </summary>
     public Task Unsubscribe(IReadOnlyList<string> topic)
     {
         var key = MemoryBroker.KeyOf(topic);
@@ -516,7 +520,20 @@ public sealed class MemoryBrokerAdapter : IBrokerAdapter
         return _broker.Turn(() =>
         {
             _subscriptions.Remove(key);
-        });
+
+            // ! each message queued posted its hand-on as it was queued, and each one handed on
+            // already had its subscriber post what it does with it, on a scheduler it may share: a
+            // turn posted now comes behind every one of them, in its broker's order, though none is
+            // queued; settled with its continuations queued, never run within that turn
+            var settled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            _broker.Scheduler.Post(() =>
+            {
+                settled.SetResult();
+            });
+
+            return settled.Task;
+        }).Unwrap();
     }
 
     /// <summary>

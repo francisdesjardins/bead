@@ -596,7 +596,15 @@ internal sealed class BrokerCasePlayer : IAsyncDisposable
         {
             await NothingMore();
 
-            // * the participant under test stopped in place, or started again, each settled (spec 15.21)
+            // * the participant under test stopped in place, or started again, each settled (spec 15.21);
+            // what crosses its stop is published in the turn it begins, before it
+            if (act.ValueKind == JsonValueKind.Object && act.TryGetProperty("stop", out var crossed))
+            {
+                await ParticipantStop(crossed);
+
+                return;
+            }
+
             switch (act.GetString())
             {
                 case "stop":
@@ -754,6 +762,30 @@ internal sealed class BrokerCasePlayer : IAsyncDisposable
         {
             await crossed.WaitAsync(Patience, Cancelled);
         }
+    }
+
+    // the stop of the participant under test, a publish crossing it published in the turn it begins,
+    // before it: each publication made as it is called, since its stop lets its names go in that
+    // turn, as it is called
+    private async Task ParticipantStop(JsonElement stop)
+    {
+        Task? stopping = null;
+        Task? crossed = null;
+
+        await _broker.Turn(() =>
+        {
+            var crossing = stop.GetProperty("crossing");
+            var from = crossing.GetProperty("from").GetString()!;
+            var peer = _peers[from].Adapter;
+
+            crossed = Task.WhenAll([.. PublicationsOf((TopicOf((crossing.GetProperty("to").GetString()!, from)), crossing.GetProperty("publish"))).Select((publication) =>
+            {
+                return peer.Publish(publication);
+            })]);
+            stopping = _participant.Stop();
+        });
+        await stopping!.WaitAsync(Patience, Cancelled);
+        await crossed!.WaitAsync(Patience, Cancelled);
     }
 
     private async Task Expect((JsonElement Expected, JsonElement Step, Timing Timing) step)

@@ -115,6 +115,26 @@ public sealed class ParticipantDebugEventTests
         Assert.Equal(links[2].Incarnation, links[3].Incarnation);
     }
 
+    // debugging 13.5
+    [Fact]
+    public async Task Tells_each_name_its_stop_lets_go_once_its_broker_let_it_go_after_its_CLOSEs_and_before_its_stopped()
+    {
+        await using var pair = await TracePair.Of();
+        var from = pair.ServerEvents.Count;
+
+        await pair.ServerParticipant.Stop();
+
+        var told = pair.ServerEvents.Skip(from).ToList();
+        var close = told.FindIndex((item) => { return item.Kind == "CLOSE" && item.Direction == "tx"; });
+        var names = told.FindIndex((item) => { return item.Event == "names"; });
+        var stopped = told.FindIndex((item) => { return item.Event == "link" && item.State == "stopped"; });
+
+        // * its CLOSE, then its name let go, once, then its stopped
+        Assert.True(close >= 0 && close < names && names < stopped, $"its CLOSE at {close}, its name let go at {names}, its stopped at {stopped}");
+        Assert.Equal([("interop", (bool?)false, (string?)null)], told.Where((item) => { return item.Event == "names"; }).Select((item) => { return (item.Name, item.IsHeld, item.Group); }));
+        Assert.Empty(pair.ServerParticipant.Names);
+    }
+
     [Fact]
     public async Task Tells_a_takeover_once_after_clearing_names_and_connections_and_tells_no_later_link_transition()
     {

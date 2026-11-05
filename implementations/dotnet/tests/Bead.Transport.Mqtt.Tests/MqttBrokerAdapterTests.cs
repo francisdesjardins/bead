@@ -542,6 +542,47 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Fails_an_unsubscription_whose_UNSUBACK_has_not_come_within_connectTimeout_its_link_kept_and_no_will_gone_then_reads_the_late_UNSUBACK_spec_15_27()
+    {
+        await using var adapter = AdapterOf((options) =>
+        {
+            return options with { ConnectTimeout = TimeSpan.FromMilliseconds(300) };
+        });
+        var (_, downs) = HeardOf(adapter);
+        var link = await LinkUp((adapter, _script));
+        var subscribing = adapter.Subscribe(Name);
+
+        await SubAckOf((link, 1));
+        await subscribing.WaitAsync(Patience, Cancelled);
+        _script.IsHoldingUnsubscribes = true;
+
+        // * no UNSUBACK within its connectTimeout of its UNSUBSCRIBE: it fails, naming it, its link
+        // kept
+        var leaving = adapter.Unsubscribe(Name);
+        var unsubscribe = await link.Next<MqttUnsubscribePacket>();
+        var failure = await FailureOf(() =>
+        {
+            return leaving;
+        });
+
+        Assert.IsType<TimeoutException>(failure);
+        Assert.Equal("the subscription of ada to bead/s/interop had no UNSUBACK within 300 ms, its connectTimeout", failure.Message);
+        Assert.True(adapter.IsLinked);
+
+        // * its UNSUBACK, come late, read: its link kept, its filter its link's no more, so that its
+        // stop lets go of nothing more, then its DISCONNECT, no will
+        await link.Send(new MqttUnsubAckPacket { PacketIdentifier = unsubscribe.PacketIdentifier, ReasonCodes = [MqttUnsubscribeReasonCode.Success] });
+        await Task.Delay(200, Cancelled);
+        Assert.True(adapter.IsLinked);
+        Assert.Empty(downs);
+        _script.IsHoldingUnsubscribes = false;
+        await adapter.Stop().WaitAsync(Patience, Cancelled);
+        Assert.Equal(["bead/s/interop"], LetGoOf(link));
+        Assert.Equal(MqttDisconnectReasonCode.NormalDisconnection, (await link.Next<MqttDisconnectPacket>()).ReasonCode);
+        Assert.Empty(downs);
+    }
+
+    [Fact]
     public async Task Refuses_a_group_once_its_CONNACK_says_Shared_Subscription_Available_0_or_its_SUBACK_0x9E_spec_15_25()
     {
         await using var adapter = AdapterOf();
@@ -1701,6 +1742,82 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
                 await adapter.DisposeAsync();
             }
         }
+    }
+
+    [Fact(Skip = MqttFixture.Reason, SkipUnless = nameof(IsMqtt))]
+    public async Task A_group_member_s_stop_answers_each_OPEN_that_comes_during_it_by_another_member_or_refuses_it_503_none_lost_spec_15_21()
+    {
+        // * the stopping member a round trip of 300 ms away, as the window its stop closes was
+        await using var relay = Bead.Tests.LinkRelay.To(MqttFixture.Url, TimeSpan.FromMilliseconds(150));
+        var participants = GroupUsers.Select((id, index) =>
+        {
+            return new BrokerParticipant(new MqttBrokerAdapter(new MqttBrokerAdapterOptions { Id = id, Password = MqttFixture.Password, Uri = index == 0 ? relay.Uri : MqttFixture.Url }));
+        }).ToList();
+        var (stopping, twin, calling) = (participants[0], participants[1], participants[2]);
+        var name = string.Create(CultureInfo.InvariantCulture, $"stopping-{TimeProvider.System.GetTimestamp()}");
+        var outcomes = new ConcurrentQueue<string>();
+
+        // each connect's outcome: opened by a member, refused 503 by the stopping one, or lost
+        async Task ConnectOnce()
+        {
+            await using var client = calling.Client();
+
+            try
+            {
+                await client.Connect(new BrokerTransportClientConnectOptions { Server = name, Timeout = TimeSpan.FromSeconds(3), CancellationToken = Cancelled });
+                outcomes.Enqueue("opened");
+                await client.CloseConnection();
+            }
+            catch (Exception reason) when (reason is ConnectException or TimeoutException)
+            {
+                outcomes.Enqueue(reason.Message.Contains("503 busy", StringComparison.Ordinal) ? "refused 503" : $"lost: {reason.Message}");
+            }
+        }
+
+        try
+        {
+            await stopping.Server(new BrokerTransportServerOptions { Names = [name], IsInGroup = true }).Start().WaitAsync(Patience, Cancelled);
+            await twin.Server(new BrokerTransportServerOptions { Names = [name], IsInGroup = true }).Start().WaitAsync(Patience, Cancelled);
+            await calling.Start().WaitAsync(Patience, Cancelled);
+
+            for (var round = 0; round < 2; round++)
+            {
+                var connects = new List<Task>();
+                var stopped = stopping.Stop();
+
+                // * a connect at once, then every 20 ms through its stop and a round trip past it
+                while (!stopped.IsCompleted)
+                {
+                    connects.Add(ConnectOnce());
+                    await Task.Delay(20, Cancelled);
+                }
+
+                for (var after = 0; after < 15; after++)
+                {
+                    connects.Add(ConnectOnce());
+                    await Task.Delay(20, Cancelled);
+                }
+
+                await stopped.WaitAsync(Patience, Cancelled);
+                await Task.WhenAll(connects).WaitAsync(TimeSpan.FromSeconds(15), Cancelled);
+                await stopping.Start().WaitAsync(Patience, Cancelled);
+            }
+        }
+        finally
+        {
+            foreach (var participant in new[] { calling, twin, stopping })
+            {
+                await participant.DisposeAsync();
+            }
+        }
+
+        // * each answered: by another member, or refused 503 by the stopping one, none waiting out
+        // its connect
+        Assert.DoesNotContain(outcomes, (outcome) =>
+        {
+            return outcome.StartsWith("lost", StringComparison.Ordinal);
+        });
+        Assert.True(outcomes.Count > 20, $"each connect made: {outcomes.Count}");
     }
 
     /// <summary>Whether a broker is given, or asked for: the fixture's tests run, and fail where none is.</summary>

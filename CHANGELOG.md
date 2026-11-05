@@ -295,6 +295,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and closes, the C# side's whole stop within one `ConnectTimeout` of its call, as the TypeScript
   side's is. An adapter of an application's own lets go of its subscriptions at its stop alike
   (spec 15.21, 15.24, 15.26, 15.27, 15.30, 15.33; decisions 0041, 0043).
+- **Breaking:** a broker participant's stop lets each name go in its turn, on every side: it hands
+  an unsubscription of each name its broker holds or was asked to hold, kept wanted for its next
+  link, then closes each connection with 1001 as before; it awaits its broker's word on each before
+  its adapter stops, and refuses 503 `busy` an OPEN its broker hands it meanwhile, so that no OPEN
+  its broker sent it before it let the name go is acknowledged and lost. Once a name is let go, an
+  OPEN to it reaches another member of its group, waits in its queue over AMQP 1.0, or finds no
+  subscriber; a connect across a group member's stop may fail 503 `busy` rather than wait. A server
+  transport's stop hands its names' unsubscriptions before its CLOSEs. An adapter's unsubscription
+  settles within a bound of its own, after what it handed on of that subscription, the MQTT 5
+  adapters' within `connectTimeout`, past which it fails, its link kept; a name its broker refuses
+  to let go is reported and stays held, told no `names` event. A deployment's MQTT 5 broker keeps
+  in flight toward a server's participant up to its Receive Maximum. The companion's 13.5 tells a
+  `names` event for each name a stop lets go, before `stopped` (spec 15.18, 15.21, 15.24, 15.27,
+  15.30, 15.31; debugging 13.5; decisions 0038, 0040, 0041, 0043).
 
 ### Removed
 

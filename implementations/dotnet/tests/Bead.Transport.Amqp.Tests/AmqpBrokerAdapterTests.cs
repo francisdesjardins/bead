@@ -1637,11 +1637,20 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
             return options with { ConnectTimeout = TimeSpan.FromMilliseconds(300) };
         });
         var (messages, downs) = HeardOf(adapter);
+        var told = new ConcurrentQueue<string>();
+
+        adapter.Down += (_) =>
+        {
+            told.Enqueue("down");
+        };
+
         var connection = await LinkUp((adapter, _script));
 
         await adapter.Subscribe(Name).WaitAsync(Patience, Cancelled);
 
-        // * what it handed on not settled within it: no DETACH goes, and its link is lost
+        // * what it handed on not settled within it: no DETACH goes, and its link is lost, its
+        // let-go failed before its link is told lost, so that a stop that let it go reads that bound
+        // passed (spec 15.21)
         var name = connection.LinkOf(NameQueue);
 
         await connection.Deliver((name, ParcelOf([1])));
@@ -1649,12 +1658,24 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
         {
             return !messages.IsEmpty;
         });
+
+        var leaving = adapter.Unsubscribe(Name);
+
+        _ = leaving.ContinueWith(
+            (_) =>
+            {
+                told.Enqueue("failed");
+            },
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
         Assert.Equal(LostWithin, (await Assert.ThrowsAsync<IOException>(() =>
         {
-            return adapter.Unsubscribe(Name);
+            return leaving;
         })).Message);
         await connection.Closed.WaitAsync(Patience, Cancelled);
         Assert.Equal((1, false, 0), (downs.Count, adapter.IsLinked, adapter.Unsettled));
+        Assert.Equal(["failed", "down"], told);
         Assert.DoesNotContain(connection.Frames, (frame) =>
         {
             return frame.Performative is global::Amqp.Framing.Detach detach && frame.Channel == name.Channel && detach.Handle == name.Handle;
@@ -3401,5 +3422,76 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
             return adapter.Start();
         })).Message);
         Assert.False(adapter.IsLinked);
+    }
+
+    [Fact(Skip = AmqpFixture.Reason, SkipUnless = nameof(IsBroker))]
+    public async Task An_OPEN_that_comes_during_a_participant_s_stop_waits_in_its_name_s_queue_and_is_answered_at_its_next_link_spec_15_21_15_38()
+    {
+        // * the stopping participant a round trip of 300 ms away, so that its broker hands it the OPEN
+        // before it read its DETACH
+        await using var relay = LinkRelay.To(AmqpFixture.Url, TimeSpan.FromMilliseconds(150));
+        await using var serving = new BrokerParticipant(BrokerAdapterOf(("other", relay)));
+        await using var calling = new BrokerParticipant(BrokerAdapterOf(("coming", null)));
+        var reported = new ConcurrentQueue<string>();
+        var opened = 0;
+
+        serving.Error += (reason) =>
+        {
+            reported.Enqueue(reason.Message);
+        };
+
+        // * what earlier runs left in the name's queue purged
+        await AmqpFixture.Purge("bead.s.interop");
+
+        try
+        {
+            var server = serving.Server(new BrokerTransportServerOptions { Names = ["interop"] });
+
+            server.Connection += (_) =>
+            {
+                Interlocked.Increment(ref opened);
+            };
+            await server.Start().WaitAsync(Patience, Cancelled);
+
+            // * a connection it holds, whose CLOSE its stop sends and awaits a round trip
+            await using var holding = calling.Client();
+            var closes = new ConcurrentQueue<bool>();
+
+            holding.Close += (isClean, _) =>
+            {
+                closes.Enqueue(isClean);
+            };
+            await holding.Connect(new BrokerTransportClientConnectOptions { Server = "interop", CancellationToken = Cancelled }).WaitAsync(Patience, Cancelled);
+            await Until(() =>
+            {
+                return Volatile.Read(ref opened) == 1;
+            });
+
+            // * an OPEN published as its stop lets its name go: its receiver hands it nothing, and it
+            // goes back to its name's queue, where its connect waits
+            var stopping = serving.Stop();
+            await using var client = calling.Client();
+            var connecting = client.Connect(new BrokerTransportClientConnectOptions { Server = "interop", Timeout = TimeSpan.FromSeconds(15), CancellationToken = Cancelled });
+
+            await stopping.WaitAsync(Patience, Cancelled);
+            await Task.Delay(500, Cancelled);
+            Assert.Equal((false, 1), (connecting.IsCompleted, Volatile.Read(ref opened)));
+            Assert.Equal([false], closes);
+
+            // * its next link serves the name, and takes it, its third leg a round trip later
+            await serving.Start().WaitAsync(Patience, Cancelled);
+            await connecting.WaitAsync(TimeSpan.FromSeconds(15), Cancelled);
+            await Until(() =>
+            {
+                return Volatile.Read(ref opened) == 2;
+            });
+            Assert.Equal(2, Volatile.Read(ref opened));
+            Assert.Empty(reported);
+            await client.CloseConnection();
+        }
+        finally
+        {
+            await AmqpFixture.Purge("bead.s.interop");
+        }
     }
 }

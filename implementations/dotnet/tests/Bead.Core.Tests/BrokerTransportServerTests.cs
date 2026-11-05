@@ -363,30 +363,45 @@ public sealed class BrokerTransportServerTests
             "the first name let go");
         Assert.False(stopping.IsCompleted);
 
-        // * one its broker refuses to let go is reported, and its stop settles all the same
+        // * one its broker refuses to let go is reported, and held still, and its stop settles all
+        // the same
         holding.Unsubscribing.Dequeue().SetException(new IOException("its broker refused to let bead/s/echo go: 0x80"));
         await stopping.WaitAsync(BrokerPair.Patience, Cancelled);
-        Assert.Equal((ReadyState.Closed, 0L), (server.ReadyState, server.Gauges().Counts["names"]));
+        Assert.Equal((ReadyState.Closed, 1L), (server.ReadyState, server.Gauges().Counts["names"]));
         Assert.Equal(["its broker refused to let bead/s/echo go: 0x80"], reported);
 
-        // * a name its broker refuses fails its start as it is refused, and is counted none
+        // * a name its broker refuses fails its start as it is refused, and is counted none; the one
+        // its broker holds still is asked nothing
         var refusing = server.Start();
 
         await BrokerPair.Until(
             () =>
             {
-                return holding.Subscribing.Count == 2;
+                return holding.Subscribing.Count == 1;
             },
-            "each name asked anew");
+            "the name let go asked anew");
         holding.Subscribing.Dequeue().SetException(new InvalidOperationException("its broker refused bead/s/interop"));
         Assert.Equal("its broker refused bead/s/interop", (await Assert.ThrowsAsync<InvalidOperationException>(() =>
         {
             return refusing.WaitAsync(BrokerPair.Patience, Cancelled);
         })).Message);
-        holding.Subscribing.Dequeue().SetException(new InvalidOperationException("its broker refused bead/s/echo"));
         await participant.Scheduler.WhenIdle();
-        Assert.Equal(0, server.Gauges().Counts["names"]);
+        Assert.Empty(holding.Subscribing);
+        Assert.Equal(1, server.Gauges().Counts["names"]);
         Assert.Single(reported);
+
+        // its participant's stop lets go of the name its broker holds still
+        var leaving = participant.Stop();
+
+        await BrokerPair.Until(
+            () =>
+            {
+                return holding.Unsubscribing.Count == 1;
+            },
+            "the name held let go of");
+        holding.Unsubscribing.Dequeue().SetResult();
+        await leaving.WaitAsync(BrokerPair.Patience, Cancelled);
+        Assert.Equal(0, server.Gauges().Counts["names"]);
     }
 
     [Fact]
@@ -458,7 +473,8 @@ public sealed class BrokerTransportServerTests
             },
             "its name served again");
 
-        // * one its broker refuses to let go is reported
+        // * one its broker refuses to let go is reported, and held still: nothing is asked of it once
+        // it holds fewer
         await using var second = clients.Client();
 
         await second.Connect(new BrokerTransportClientConnectOptions { Server = "interop", CancellationToken = Cancelled });
@@ -475,9 +491,35 @@ public sealed class BrokerTransportServerTests
                 return !reported.IsEmpty;
             },
             "the refusal reported");
+        Assert.Equal(1, server.Gauges().Counts["names"]);
+        await second.CloseConnection();
+        await BrokerPair.Until(
+            () =>
+            {
+                return closes.Count == 2;
+            },
+            "the connection closed");
+        await participant.Scheduler.WhenIdle();
+        Assert.Empty(holding.Subscribing);
 
         // and one its broker refuses to serve again is reported, and left unheld
-        await second.CloseConnection();
+        await using var third = clients.Client();
+
+        await third.Connect(new BrokerTransportClientConnectOptions { Server = "interop", CancellationToken = Cancelled });
+        await BrokerPair.Until(
+            () =>
+            {
+                return holding.Unsubscribing.Count == 1;
+            },
+            "its name let go of as it is full a third time");
+        holding.Unsubscribing.Dequeue().SetResult();
+        await BrokerPair.Until(
+            () =>
+            {
+                return server.Gauges().Counts["names"] == 0;
+            },
+            "its name let go");
+        await third.CloseConnection();
         await BrokerPair.Until(
             () =>
             {
@@ -498,6 +540,77 @@ public sealed class BrokerTransportServerTests
             ],
             reported);
         Assert.Equal(0, server.Gauges().Counts["names"]);
+    }
+
+    [Fact]
+    public async Task A_server_s_transport_that_stops_hands_each_name_s_unsubscription_before_each_CLOSE_of_1001_and_settles_once_its_broker_let_each_go_spec_15_21()
+    {
+        var scheduler = new SerialScheduler();
+        var broker = new MemoryBroker(new MemoryBrokerOptions { Scheduler = scheduler });
+        var calling = new CallingAdapter(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "server" })) { HoldsUnsubscribes = true };
+        await using var participant = new BrokerParticipant(calling, new BrokerParticipantOptions { Scheduler = scheduler });
+        var server = participant.Server(new BrokerTransportServerOptions { Names = ["interop", "echo"] });
+        await using var clients = new BrokerParticipant(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "client" }), new BrokerParticipantOptions { Scheduler = scheduler });
+        var opened = new ConcurrentQueue<string>();
+        var closes = new ConcurrentQueue<bool>();
+
+        server.Connection += opened.Enqueue;
+        server.Close += (isClean, connectionHandle) =>
+        {
+            closes.Enqueue(isClean);
+        };
+        await server.Start();
+        await using var client = clients.Client();
+        await client.Connect(new BrokerTransportClientConnectOptions { Server = "interop", CancellationToken = Cancelled });
+        await BrokerPair.Until(
+            () =>
+            {
+                return opened.Count == 1;
+            },
+            "told open");
+
+        var before = calling.Calls.Count;
+        var stopping = server.Stop();
+
+        // * in one turn, each name's unsubscription, then each CLOSE of 1001, its close told unclean
+        await BrokerPair.Until(
+            () =>
+            {
+                return calling.Unsubscribing == 2;
+            },
+            "each name let go of");
+        await BrokerPair.Until(
+            () =>
+            {
+                return closes.Count == 1;
+            },
+            "its close told");
+
+        var calls = calling.Calls.Skip(before).Where((call) =>
+        {
+            return !call.Contains("bead/d/", StringComparison.Ordinal);
+        }).ToArray();
+
+        Assert.Equal(["unsubscribe bead/s/echo", "unsubscribe bead/s/interop"], calls.Take(2).Order(StringComparer.Ordinal));
+        Assert.Equal(["publish bead/i/client"], calls.Skip(2));
+        Assert.Equal([false], closes);
+
+        // * settled once its broker let each go, its participant's link kept
+        await scheduler.WhenIdle();
+        Assert.False(stopping.IsCompleted, "awaiting its broker's word");
+        Assert.Equal(2, server.Gauges().Counts["names"]);
+        Assert.True(calling.SettleUnsubscribe());
+        await BrokerPair.Until(
+            () =>
+            {
+                return server.Gauges().Counts["names"] == 1;
+            },
+            "the first let go");
+        Assert.False(stopping.IsCompleted, "awaiting its broker's word");
+        Assert.True(calling.SettleUnsubscribe());
+        await stopping.WaitAsync(BrokerPair.Patience, Cancelled);
+        Assert.Equal((ReadyState.Closed, 0L), (server.ReadyState, server.Gauges().Counts["names"]));
+        Assert.True(participant.IsLinked);
     }
 
     // spec 15.21
