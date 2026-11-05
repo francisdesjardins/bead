@@ -13,6 +13,7 @@ namespace Bead.Transport.Mqtt.Tests;
 /// test has the same id. Skipped, saying so, where no broker is given; the TypeScript side plays the
 /// same cases.
 /// </summary>
+[Collection(MqttFixture.Collection)]
 public sealed class MqttTransportsTests
 {
     // constants

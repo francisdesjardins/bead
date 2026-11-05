@@ -3213,6 +3213,97 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
         await caller.Stop();
     }
 
+    [Fact]
+    public async Task Deletes_its_inbox_through_its_broker_s_management_at_its_stop_once_what_it_was_handed_has_its_outcome_and_before_it_detaches_its_receivers_and_closes_its_connection_spec_15_33()
+    {
+        await using var adapter = AdapterOf();
+        var (_, downs) = HeardOf(adapter);
+        var connection = await LinkUp((adapter, _script));
+
+        await adapter.Subscribe(Name).WaitAsync(Patience, Cancelled);
+
+        // * its publication's outcome and its broker's answer to a deletion held
+        _script.Holding = (frame) =>
+        {
+            return frame.Performative is AmqpTransfer && !IsRequestOf(frame, "PUT") && !IsRequestOf(frame, "POST");
+        };
+
+        var publishing = adapter.Publish(new BrokerPublication { Topic = PeerInbox, Payload = (byte[])[1] });
+
+        await Until(() =>
+        {
+            return TransfersTo((connection, "/exchanges/bead/bead.i.peer")).Count == 1;
+        });
+
+        var mark = connection.Frames.Count;
+        var stopping = adapter.Stop();
+
+        List<ScriptedFrame> Since()
+        {
+            return [.. connection.Frames.Skip(mark)];
+        }
+
+        // none while what it was handed awaits its outcome
+        await Task.Delay(100, Cancelled);
+        Assert.DoesNotContain(Since(), (frame) =>
+        {
+            return IsRequestOf(frame, "DELETE");
+        });
+        await connection.Settle(TransfersTo((connection, "/exchanges/bead/bead.i.peer"))[0], new Accepted());
+        Assert.Equal(BrokerPublished.Taken, await publishing.WaitAsync(Patience, Cancelled));
+
+        var (deleted, transfer) = await connection.NextRequest(2);
+
+        Assert.Equal(("DELETE", "/queues/bead.i.ada"), (deleted.Method, deleted.Path));
+
+        // none detached nor closed before its broker deleted it
+        await Task.Delay(100, Cancelled);
+        Assert.DoesNotContain(Since(), (frame) =>
+        {
+            return frame.Performative is global::Amqp.Framing.Detach or AmqpClose;
+        });
+        await connection.Answer(transfer, ("200", new Map { ["message_count"] = 0UL }));
+        await stopping.WaitAsync(Patience, Cancelled);
+        await connection.Closed.WaitAsync(Patience, Cancelled);
+
+        // * its receivers detached, its inbox first
+        var inbox = connection.LinkOf(InboxQueue);
+        var name = connection.LinkOf(NameQueue);
+
+        int DetachOf(ScriptedLink link)
+        {
+            return Since().FindIndex((frame) =>
+            {
+                return frame.Performative is global::Amqp.Framing.Detach detach && detach.Handle == link.Handle && frame.Channel == link.Channel;
+            });
+        }
+
+        Assert.True(DetachOf(inbox) >= 0 && DetachOf(inbox) < DetachOf(name), $"its inbox's DETACH at {DetachOf(inbox)}, its name's at {DetachOf(name)}");
+        Assert.Null(Assert.Single(connection.Of<AmqpClose>()).Error);
+        Assert.Empty(downs);
+    }
+
+    [Fact(Skip = AmqpFixture.Reason, SkipUnless = nameof(IsBroker))]
+    public async Task Finds_no_subscriber_for_a_parcel_to_its_inbox_once_its_stop_settled_its_broker_having_deleted_it_spec_15_21_15_33()
+    {
+        await using var adapter = BrokerAdapterOf(("other", null));
+        await using var caller = BrokerAdapterOf(("coming", null));
+        string[] inbox = ["bead", "i", "other"];
+
+        await caller.Start().WaitAsync(Patience, Cancelled);
+
+        // * at once after each stop, as the race the stop closes was
+        for (var round = 0; round < 5; round++)
+        {
+            await adapter.Start().WaitAsync(Patience, Cancelled);
+            await adapter.Subscribe(inbox).WaitAsync(Patience, Cancelled);
+            await adapter.Stop().WaitAsync(Patience, Cancelled);
+            Assert.Equal(BrokerPublished.NoSubscriber, await caller.Publish(new BrokerPublication { Topic = inbox, Payload = (byte[])[(byte)round] }).WaitAsync(Patience, Cancelled));
+        }
+
+        await caller.Stop();
+    }
+
     // spec 15.24
     [Fact]
     public async Task Sends_what_waits_on_its_link_credit_before_its_stop_s_close_within_its_connectTimeout_and_fails_what_has_not_gone_by_then()

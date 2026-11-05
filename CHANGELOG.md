@@ -285,6 +285,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `failures_of` does, where it took `{ codes, serviceId }`; TypeScript generated code names
   contract 7, `GENERATED_CODE_SUPPORTS_VERSION_7`, which the runtime holds beside 5 and 6, and code
   an earlier beadc generated with failures is generated again.
+- **Breaking:** a broker adapter's stop settles once its broker let go of each subscription of its
+  link, so that a parcel to a stopped participant's inbox, or to a name no other participant
+  serves, finds no subscriber, but one a name's queue holds over AMQP 1.0. Over MQTT 5 the stop
+  sends, after what it was handed, one UNSUBSCRIBE a filter its link asked or holds, a filter whose
+  SUBSCRIBE went with no SUBACK yet among them, and awaits their UNSUBACKs, within the
+  `connectTimeout` that bounds the drain, then its DISCONNECT of 0x00 within one of its own; over
+  AMQP 1.0 it deletes its inbox through its broker's management before it detaches its receivers
+  and closes, the C# side's whole stop within one `ConnectTimeout` of its call, as the TypeScript
+  side's is. An adapter of an application's own lets go of its subscriptions at its stop alike
+  (spec 15.21, 15.24, 15.26, 15.27, 15.30, 15.33; decisions 0041, 0043).
 
 ### Removed
 

@@ -204,7 +204,9 @@ subscription of QoS 1 and Retain Handling 2 for each topic, a name in a group as
 subscription `$share/<name>/<root>/s/<name>`; each publication of QoS 1 counted to its byte by
 `MqttPackets` before it goes and held to its CONNACK's Receive Maximum, PUBACK 0x10 read as no
 subscriber; each message handed on before its PUBACK, which goes once the core settled it; a will of
-the participant's GONE; a DISCONNECT of 0x00 at a stop, one of 0x8E read as the link taken over. MQTTnet's automation is off: no reconnection, resubscription, offline queue
+the participant's GONE; at a stop, once what it was handed went, an UNSUBSCRIBE of each filter it
+asked or holds, one a packet, their UNSUBACKs awaited within its `ConnectTimeout`, then a
+DISCONNECT of 0x00 within one of its own, one of 0x8E read as the link taken over. MQTTnet's automation is off: no reconnection, resubscription, offline queue
 or alias, each incarnation a client of its own. Its handles' type is `MQTT`.
 
 ```csharp
@@ -226,7 +228,8 @@ start's own token, its stop and its `ConnectTimeout` cancel, and that is cancell
 ends, linked or not: an ask that outlives the `ConnectTimeout` fails that start, a
 `TimeoutException`, and one a stop meets an `IOException`, whether or not it hears its token, a
 later answer serving nothing; what it throws fails it, an `IOException` its cause. Its start waits
-`ConnectTimeout`, 30 s by default, for its password, where it asks its provider, and its CONNACK.
+`ConnectTimeout`, 30 s by default, for its password, where it asks its provider, and its CONNACK;
+its stop, from its call, for what it was handed and its UNSUBACKs, then for its DISCONNECT.
 The options' string says whether a password or a provider is set, never its value.
 
 `MqttBrokerAdapterTests` play its every packet against a scripted MQTT 5 peer, `MqttScript`, and
@@ -241,7 +244,9 @@ EXTERNAL under a TLS client certificate (`Tls`), never ANONYMOUS: the adapter is
 built given neither, and its password is given, asked and refused as an MQTT 5 link's is; its start
 waits `ConnectTimeout` for its password, where it asks its provider, its broker's OPEN and its
 sessions; its idle-time-out its `IdleTimeout`; its inbox an exclusive queue declared through
-RabbitMQ's management on that connection, so that it ends with it (`AmqpManagement`); a session for
+RabbitMQ's management on that connection, so that it ends with it, and deleted through it at a
+stop once what it was handed went, the whole stop within its `ConnectTimeout` (`AmqpManagement`); a
+session for
 its inbox's receiver, one for each name, a name's queue its members compete on, and one for each of
 its two senders, to inboxes and to names, each to the anonymous terminus, through the topic
 exchange named the root; each publication one message of the profile `AmqpMessages` counts to its

@@ -17,10 +17,11 @@ namespace Bead.Transport.Mqtt;
 /// for each topic, a name in a group as its shared subscription; a publication of QoS 1, RETAIN 0,
 /// counted to its byte before it goes and held to its CONNACK's Receive Maximum, its PUBACK's 0x10
 /// read as no subscriber; each message handed on before its PUBACK, which goes once its participant
-/// settled it; a will of its GONE; a DISCONNECT of 0x00 at a stop, and one of 0x8E read as its link
-/// taken over. MQTTnet's automation is off: no reconnection, resubscription, offline queue or alias;
-/// each incarnation is a client of its own, every late callback of a former one doing nothing. The
-/// TypeScript side's adapter over MQTT.js does the same.
+/// settled it; a will of its GONE; at a stop, an UNSUBSCRIBE of each filter it asked or holds, then
+/// a DISCONNECT of 0x00, and one of 0x8E read as its link taken over. MQTTnet's automation is off:
+/// no reconnection, resubscription, offline queue or alias; each incarnation is a client of its
+/// own, every late callback of a former one doing nothing. The TypeScript side's adapter over
+/// MQTT.js does the same.
 /// </summary>
 public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 {
@@ -335,8 +336,11 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     /// <summary>
     /// Holds a subscription to <paramref name="topic"/> of QoS 1, No Local 0, Retain As Published 0
     /// and Retain Handling 2, a group's as its shared subscription; settles once its SUBACK granted
-    /// QoS 1, and fails on any other code, QoS 0 among them (spec 15.27). A group its broker offers
-    /// none of is refused, naming why; a link down, an <see cref="InvalidOperationException"/>.
+    /// QoS 1, and fails on any other code, QoS 0 among them (spec 15.27). Its filter is its link's
+    /// as its SUBSCRIBE goes, so that its stop lets it go whether or not its SUBACK came, until a
+    /// SUBACK of 0x80 or more says its broker installed none; one whose SUBACK comes as its link
+    /// stops fails with its stop. A group its broker offers none of is refused, naming why; a link
+    /// down, an <see cref="InvalidOperationException"/>.
     /// </summary>
     public async Task Subscribe(IReadOnlyList<string> topic, BrokerSubscription? subscription = null)
     {
@@ -359,14 +363,35 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             throw new IOException($"the broker of {Id} offers no shared subscription: its CONNACK or a SUBACK said so");
         }
 
-        var filter = group is null ? MqttPackets.TopicOf(topic) : MqttPackets.GroupFilterOf((group, topic));
+        var key = MqttPackets.TopicOf(topic);
+        var held = new Held(group is null ? key : MqttPackets.GroupFilterOf((group, topic)));
         var asked = new MqttClientSubscribeOptionsBuilder().WithTopicFilter(new MqttTopicFilterBuilder()
-            .WithTopic(filter)
+            .WithTopic(held.Filter)
             .WithAtLeastOnceQoS()
             .WithNoLocal(false)
             .WithRetainAsPublished(false)
             .WithRetainHandling(MqttRetainHandling.DoNotSendOnSubscribe)
             .Build()).Build();
+        Task<MqttClientSubscribeResult> subscribing;
+
+        lock (_gate)
+        {
+            // ! its filter its link's before its SUBSCRIBE goes, and that SUBSCRIBE asked under the
+            // gate a stop is named under: a stop then finds it, its UNSUBSCRIBE behind it on the
+            // link, which its broker reads in their order ([MQTT-3.10.4-2]), or it is refused,
+            // nothing sent
+            if (link.IsStopping || link.IsEnded)
+            {
+                throw new InvalidOperationException($"the link of {Id} is not up");
+            }
+
+            link.Filters[key] = held;
+            subscribing = Sent(() =>
+            {
+                return link.Client.SubscribeAsync(asked, link.Life.Token);
+            });
+        }
+
         MqttClientSubscribeResult subscribed;
 
         // ! given up once its packet may have gone: its link retired, so nothing it asked enters another
@@ -375,19 +400,27 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             Retire(link);
         }))
         {
-            subscribed = await Asked((link, token), link.Client.SubscribeAsync(asked, link.Life.Token));
+            subscribed = await Asked((link, token), subscribing);
         }
 
         var code = subscribed.Items.Single().ResultCode;
 
+        // ! its SUBACK come as its link stops: never held, its stop letting it go
+        if (link.IsStopping || link.IsEnded)
+        {
+            throw new IOException(link.Ended?.Message ?? $"the link of {Id} went down");
+        }
+
         if (code == MqttClientSubscribeResultCode.GrantedQoS1)
         {
-            lock (_gate)
-            {
-                link.Filters[MqttPackets.TopicOf(topic)] = filter;
-            }
-
             return;
+        }
+
+        // * refused of 0x80 or more, its broker installed none; QoS 0 granted, refused all the
+        // same, is one its broker holds, which its stop lets go
+        if ((int)code >= 0x80)
+        {
+            Forget((link, key), held);
         }
 
         if (code == MqttClientSubscribeResultCode.SharedSubscriptionsNotSupported)
@@ -395,30 +428,39 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             link.IsSharedAvailable = false;
         }
 
-        throw new IOException(string.Create(CultureInfo.InvariantCulture, $"its broker refused the subscription of {Id} to {filter}: SUBACK 0x{(int)code:X2}"));
+        throw new IOException(string.Create(CultureInfo.InvariantCulture, $"its broker refused the subscription of {Id} to {held.Filter}: SUBACK 0x{(int)code:X2}"));
     }
 
     /// <summary>
-    /// Lets the subscription to <paramref name="topic"/> go, by the filter its SUBSCRIBE named, or the
-    /// topic itself where it held none; settles once its UNSUBACK came of 0x00, or 0x11 where its
-    /// broker held none, and fails on 0x80 or more, an <see cref="IOException"/> naming it.
+    /// Lets the subscription to <paramref name="topic"/> go, by the filter its SUBSCRIBE named, or
+    /// the topic itself where it held none; settles once its UNSUBACK came of 0x00, or 0x11 where
+    /// its broker held none, and fails on 0x80 or more, an <see cref="IOException"/> naming it. Its
+    /// filter stays its link's until such an UNSUBACK came, so that a stop meanwhile lets it go
+    /// too.
     /// </summary>
     public async Task Unsubscribe(IReadOnlyList<string> topic)
     {
         var link = LinkUp();
-        string filter;
+        var key = MqttPackets.TopicOf(topic);
+        Held? held;
 
         lock (_gate)
         {
-            filter = link.Filters.Remove(MqttPackets.TopicOf(topic), out var named) ? named : MqttPackets.TopicOf(topic);
+            held = link.Filters.GetValueOrDefault(key);
         }
 
+        var filter = held?.Filter ?? key;
         var left = await Asked((link, CancellationToken.None), link.Client.UnsubscribeAsync(new MqttClientUnsubscribeOptionsBuilder().WithTopicFilter(filter).Build(), link.Life.Token));
         var code = left.Items.Single().ResultCode;
 
         if (code is not (MqttClientUnsubscribeResultCode.Success or MqttClientUnsubscribeResultCode.NoSubscriptionExisted))
         {
             throw new IOException(string.Create(CultureInfo.InvariantCulture, $"its broker refused to let the subscription of {Id} to {filter} go: UNSUBACK 0x{(int)code:X2}"));
+        }
+
+        if (held is not null)
+        {
+            Forget((link, key), held);
         }
     }
 
@@ -518,11 +560,17 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     }
 
     /// <summary>
-    /// Ends its link with a DISCONNECT of 0x00, so that its broker publishes no will (spec 15.26):
-    /// what it was handed to publish before it goes first, each PUBACK awaited, within its
-    /// <see cref="MqttBrokerAdapterOptions.ConnectTimeout"/>, what has not gone by then failed, as a
-    /// graceful close sends what is queued before its FIN (spec 15.24, RFC 9293 §3.6); its DISCONNECT
-    /// within a bound of its own. Nothing where it has none; a later start a new link.
+    /// Ends its link once its broker let go of each of its subscriptions, with a DISCONNECT of
+    /// 0x00, so that its broker publishes no will (spec 15.26): no new publication taken, what it
+    /// was handed to publish before it goes first, each PUBACK awaited, as a graceful close sends
+    /// what is queued before its FIN (spec 15.24, RFC 9293 §3.6); then an UNSUBSCRIBE of each
+    /// filter its link asked or holds, one filter each, all at once, their UNSUBACKs of 0x00 or
+    /// 0x11 awaited together; what it was handed and those UNSUBACKs within one
+    /// <see cref="MqttBrokerAdapterOptions.ConnectTimeout"/> of its call, what has not gone by then
+    /// failed; its DISCONNECT within a bound of its own, an UNSUBACK that refuses, or none by then,
+    /// ending it all the same. It settles once its broker let go of each subscription of its link,
+    /// as its unsubscription lets one go, so that its broker hands it nothing more. Nothing where
+    /// it has none, and nothing sent where its link is down; a later start a new link.
     /// </summary>
     public async Task Stop()
     {
@@ -548,13 +596,40 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
         try
         {
+            // * one connectTimeout from its call: what it was handed, then its broker's let-go
+            using var letting = new CancellationTokenSource(_options.ConnectTimeout, TimeProvider.System);
+
             // * what it was handed goes first, no new publication taken meanwhile: its quota drained,
-            // each PUBACK come, within its connect timeout
+            // each PUBACK come
             if (link.IsUp && link.Client.IsConnected && link.Quota is { } quota)
             {
-                using var draining = new CancellationTokenSource(_options.ConnectTimeout, TimeProvider.System);
+                await Quietly(quota.Drained().WaitAsync(letting.Token));
+            }
 
-                await Quietly(quota.Drained().WaitAsync(draining.Token));
+            // ! after the drain, so that no UNSUBSCRIBE overtakes a CLOSE waiting on the quota, its
+            // peer reading no subscriber before its 1001; one filter each, since one packet of
+            // every filter may pass its broker's Maximum Packet Size, a Protocol Error that
+            // publishes its will
+            if (link.IsUp && link.Client.IsConnected)
+            {
+                List<string> filters;
+
+                lock (_gate)
+                {
+                    filters = [.. link.Filters.Values.Select((held) =>
+                    {
+                        return held.Filter;
+                    }).Distinct(StringComparer.Ordinal)];
+                }
+
+                await Quietly(Task.WhenAll(filters.Select((filter) =>
+                {
+                    // ! its link's client itself: LinkUp refuses a link stopping
+                    return Sent(() =>
+                    {
+                        return link.Client.UnsubscribeAsync(new MqttClientUnsubscribeOptionsBuilder().WithTopicFilter(filter).Build(), letting.Token);
+                    });
+                })).WaitAsync(letting.Token));
             }
 
             // ! a bound of its own: a drain that spent its time leaves its DISCONNECT one, or the
@@ -908,6 +983,21 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         }
     }
 
+    // a filter its broker holds no more, its link's no more, unless a later SUBSCRIBE of its topic
+    // recorded its own meanwhile
+    private void Forget((Link Link, string Key) forgotten, Held held)
+    {
+        var (link, key) = forgotten;
+
+        lock (_gate)
+        {
+            if (link.Filters.TryGetValue(key, out var current) && ReferenceEquals(current, held))
+            {
+                link.Filters.Remove(key);
+            }
+        }
+    }
+
     // given up once what it asked may have gone: its link lost, so nothing of it enters another
     private void Retire(Link link)
     {
@@ -966,7 +1056,15 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         });
     }
 
-    // one incarnation: its client, what ends with it, its quota and bounds, and its subscriptions' filters
+    // the filter a SUBSCRIBE named, recorded as it goes, an instance of its own, so that what lets
+    // it go forgets that one alone
+    private sealed class Held(string filter)
+    {
+        public string Filter { get; } = filter;
+    }
+
+    // one incarnation: its client, what ends with it, its quota and bounds, and the filters it
+    // asked, by topic, each until its broker let it go
     private sealed class Link(IMqttClient client)
     {
         public long LastSent = TimeProvider.System.GetTimestamp();
@@ -977,7 +1075,7 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
         public CancellationTokenSource Life { get; } = new();
 
-        public Dictionary<string, string> Filters { get; } = new(StringComparer.Ordinal);
+        public Dictionary<string, Held> Filters { get; } = new(StringComparer.Ordinal);
 
         public MqttSendQuota? Quota { get; set; }
 
