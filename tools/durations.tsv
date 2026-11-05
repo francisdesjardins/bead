@@ -81,6 +81,5 @@ no place	a constant: a default or a bound Bead declares	ACCEPT_TIMEOUT, BODY_GRA
 no place	a clock's own: a timer it arms, an instant it reads	IClock.setInterval(delay), IClock.setTimeout(delay)	-	Clock::monotonic, Schedule::Every, Schedule::Once
 no place	the duration family's own, which the side exports to hold its places	-	-	duration::hold, duration::hold(duration), duration::hold_finite, duration::hold_finite(duration)
 no place	what Bead sets on a platform's object, from a place's held value	IHTTPServerLike.connectionsCheckingInterval, IHTTPServerLike.headersTimeout, IHTTPServerLike.requestTimeout, IWebSocketConstructor.new(options), IWebSocketServerConstructor.new(options)	-	-
-no place	the TypeScript side's alone (tools/names.tsv, alone), held as the gateway's heartbeat is	IEventStreamOptions.heartbeat	-	-
 no place	a layer's factory, which Bead calls with the options it was given	IClientLayers.router, IHTTPClientOptions.router, IHTTPServerOptions.router, IHTTPServerOptions.services, IServerLayers.router, IServerLayers.services, IWorkerClientOptions.router, IWorkerServerOptions.router, IWorkerServerOptions.services, IWebSocketClientOptions.router, IWebSocketServerOptions.router, IWebSocketServerOptions.services	-	-
 no place	a pick of a router's limits that leaves its duration out	detailBoundOf(limits)	-	-

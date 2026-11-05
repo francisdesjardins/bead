@@ -45,8 +45,7 @@ export type {
   IProblemRoute,
   OwnFailure,
 } from './problems';
-export { createEventStream, EVENT_STREAM_MEDIA_TYPE, eventOf, HEARTBEAT_COMMENT } from './events';
-export type { IEventSink, IEventStream, IEventStreamOptions, IServerSentEvent } from './events';
+export type { IServerSentEvent } from './events';
 export { createHTTPCaller, httpRequesterOf, httpSubscriberOf } from './http-caller';
 export type {
   HTTPEvent,

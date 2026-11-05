@@ -871,18 +871,13 @@
 ./transcoding
   Arose	src/transcoding/problems.ts
   DEFAULT_CHALLENGE	src/transcoding/problems.ts
-  EVENT_STREAM_MEDIA_TYPE	src/transcoding/events.ts
   Encoding	src/transcoding/problems.ts
   GENERATED_CODE_SUPPORTS_VERSION_5	src/transcoding/routes.ts
-  HEARTBEAT_COMMENT	src/transcoding/events.ts
   HTTPEvent	src/transcoding/http-caller.ts
   HttpMethod	src/transcoding/routes.ts
   HttpPayload	src/transcoding/routes.ts
   IBindingOptions	src/transcoding/binding.ts
   ICallFailure	src/transcoding/problems.ts
-  IEventSink	src/transcoding/events.ts
-  IEventStream	src/transcoding/events.ts
-  IEventStreamOptions	src/transcoding/events.ts
   IHTTPBinding	src/transcoding/binding.ts
   IHTTPCallOptions	src/transcoding/http-caller.ts
   IHTTPCaller	src/transcoding/http-caller.ts
@@ -912,11 +907,9 @@
   Segment	src/transcoding/templates.ts
   TemplateReading	src/transcoding/templates.ts
   VariablesReading	src/transcoding/templates.ts
-  createEventStream	src/transcoding/events.ts
   createHTTPBinding	src/transcoding/binding.ts
   createHTTPCaller	src/transcoding/http-caller.ts
   createJsonForm	src/transcoding/json-form.ts
-  eventOf	src/transcoding/events.ts
   httpRequesterOf	src/transcoding/http-caller.ts
   httpSubscriberOf	src/transcoding/http-caller.ts
   isTie	src/transcoding/templates.ts
@@ -2758,36 +2751,11 @@ src/transcoding/binding.ts IHTTPBinding
     readonly bind: <Desc extends DescMessage>(schema: Desc, options: IBindingOptions) => MessageShape<Desc>
 src/transcoding/binding.ts createHTTPBinding
   const createHTTPBinding(schemas: readonly DescMessage[]): IHTTPBinding
-src/transcoding/events.ts EVENT_STREAM_MEDIA_TYPE
-  const EVENT_STREAM_MEDIA_TYPE: "text/event-stream"
-src/transcoding/events.ts HEARTBEAT_COMMENT
-  const HEARTBEAT_COMMENT: ":\n"
-src/transcoding/events.ts IEventSink
-  interface IEventSink
-    readonly answer: (problem: IProblem) => void
-    readonly end: () => void
-    readonly open: () => void
-    readonly write: (text: string) => Promise<void>
-src/transcoding/events.ts IEventStream
-  interface IEventStream
-    readonly isEnded: boolean
-    close: () => void
-    failure: (problem: IProblem) => void
-    notification: (data: string) => Promise<void>
-    result: (data: string) => void
-src/transcoding/events.ts IEventStreamOptions
-  interface IEventStreamOptions
-    readonly clock: IClock
-    readonly heartbeat: number
 src/transcoding/events.ts IServerSentEvent
   interface IServerSentEvent
     readonly data: string
     readonly id: number
     readonly name?: 'failure' | 'result' | undefined
-src/transcoding/events.ts createEventStream
-  const createEventStream(sink: IEventSink, {clock, heartbeat}: IEventStreamOptions): IEventStream
-src/transcoding/events.ts eventOf
-  const eventOf({data, id, name}: IServerSentEvent): string
 src/transcoding/http-caller.ts HTTPEvent
   type HTTPEvent<Result, Notification> = | {readonly kind: 'result'; readonly value: Result} | {readonly kind: 'notification'; readonly value: Notification}
 src/transcoding/http-caller.ts IHTTPCallOptions

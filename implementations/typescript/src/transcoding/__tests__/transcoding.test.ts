@@ -16,14 +16,12 @@ import { expect, test } from '@playwright/test';
 import { protoCodecOf } from '../../proto/codec';
 import { fromHexadecimal } from '../../router/shared/__tests__/vectors';
 import { createTestClock } from '../../transport/shared/__tests__/fixtures';
-import { HEARTBEAT } from '../events';
+import { createEventStream, EVENT_STREAM_MEDIA_TYPE, HEARTBEAT } from '../events';
 import {
   type Arose,
-  createEventStream,
   createHTTPBinding,
   createJsonForm,
   type Encoding,
-  EVENT_STREAM_MEDIA_TYPE,
   isTie,
   JsonFormError,
   type OwnFailure,

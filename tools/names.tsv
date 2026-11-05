@@ -1,4 +1,4 @@
-# alone: typescript 325, csharp 67, rust 78
+# alone: typescript 318, csharp 67, rust 78
 # concept	typescript	csharp	rust	class
 ACCEPT_TIMEOUT	ACCEPT_TIMEOUT [constant]	-	ACCEPT_TIMEOUT [constant]	same
 AccessRefusal	IAccessRefusal [record]	AccessRefusal [record]	AccessRefusal [record]	same
@@ -381,7 +381,6 @@ CONNECTION_TOKEN_HEADER	CONNECTION_TOKEN_HEADER [constant]	-	-	alone
 CONNECTION_UNKNOWN	CONNECTION_UNKNOWN [constant]	-	-	alone
 ConnectParameters	ConnectParameters [record]	-	-	alone
 CREATED_EVENT	CREATED_EVENT [constant]	-	-	alone
-createEventStream	createEventStream [function]	-	-	alone
 createHTTPClient	createHTTPClient [function]	-	-	alone
 createNotificationManager	createNotificationManager [function]	-	-	alone
 createTimers	createTimers [function]	-	-	alone
@@ -426,12 +425,7 @@ ENVELOPE_KINDS	ENVELOPE_KINDS [constant]	-	-	alone
 ENVELOPE_PREFIX	ENVELOPE_PREFIX [constant]	-	-	alone
 EnvelopeAsked	-	-	EnvelopeAsked [record]	alone
 ERROR_EVENT	ERROR_EVENT [constant]	-	-	alone
-EVENT_STREAM_MEDIA_TYPE	EVENT_STREAM_MEDIA_TYPE [constant]	-	-	alone
 EventIteratorOptions	IEventIteratorOptions [record]	-	-	alone
-eventOf	eventOf [function]	-	-	alone
-EventSink	IEventSink [record]	-	-	alone
-EventStream	IEventStream [record]	-	-	alone
-EventStreamOptions	IEventStreamOptions [record]	-	-	alone
 EXCHANGE_TIMEOUT	EXCHANGE_TIMEOUT [constant]	-	-	alone
 FailureArising	-	FailureArising [choice]	-	alone
 FailureException.Raised	-	FailureException.Raised [record]	-	alone
@@ -453,7 +447,6 @@ GivenOf	GivenOf [record]	-	-	alone
 HandedCredential	HandedCredential [choice]	-	-	alone
 HandedRequestHeader	IHandedRequestHeader [record]	-	-	alone
 HEADERS_TIMEOUT	HEADERS_TIMEOUT [constant]	-	-	alone
-HEARTBEAT_COMMENT	HEARTBEAT_COMMENT [constant]	-	-	alone
 HookName	HookName [record]	-	-	alone
 HOST_REFUSAL	HOST_REFUSAL [constant]	-	-	alone
 HTTP_POLICY_MEMBERS	HTTP_POLICY_MEMBERS [constant]	-	-	alone

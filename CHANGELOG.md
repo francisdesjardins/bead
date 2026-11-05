@@ -310,6 +310,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   crate's surface, and `HELD_BYTES_BUDGET`, `JWT_LEEWAY`, `JWT_LIMIT_BYTES` and `RESERVATION` with
   them; `DEFAULT_TIMEOUT`, `RECONNECT_ATTEMPTS`, `RECONNECT_DELAY` and `MAXIMUM_PROCEDURES` are
   members of `REQUEST_DEFAULTS`, `RECONNECT_DEFAULTS` and `METRICS_REGISTRY_DEFAULTS`.
+- **Breaking:** on the TypeScript side the writing of a stream's Server-Sent Events is the HTTP/JSON
+  gateway's own, as the C# side keeps it: `createEventStream`, `eventOf`, `EVENT_STREAM_MEDIA_TYPE`,
+  `HEARTBEAT_COMMENT`, `IEventSink`, `IEventStream` and `IEventStreamOptions` leave the
+  `./transcoding` entry; `IServerSentEvent`, an event a stream writes, stays.
 
 ### Fixed
 
