@@ -1070,6 +1070,57 @@ crate::json
   fn to_bytes<T: Serialize + ?Sized>(value: &T) -> Result<Vec<u8>, JsonRefusal>
 crate::json::to_value
   fn to_value<T: Serialize + ?Sized>(value: &T) -> Result<Value, JsonRefusal>
+crate::judgement
+  mod hosts
+  mod proxies
+crate::judgement::hosts
+  const HOST_REFUSAL: &str
+  const ORIGIN_REFUSAL: &str
+  const EVERY_HOST: &str
+  struct RequestTarget<'a> #[non_exhaustive]
+    pub authority: Option<&'a str>
+    pub path: &'a str
+    pub query: &'a str
+    derives Clone, Copy, Debug, Eq, PartialEq
+  struct TakenOrigins<'a> #[non_exhaustive]
+    pub host: Option<&'a str>
+    pub origins: &'a [String]
+    const fn new(host: Option<&'a str>, origins: &'a [String]) -> Self
+    derives Clone, Copy, Debug
+  fn is_ipv6_address(text: &str) -> bool
+  fn is_ipv4_address(value: &str) -> bool
+  fn is_ip_address(value: &str) -> bool
+  fn assert_listening_address(address: &str) -> Result<(), ProgrammerError>
+  fn is_visible_field(value: &str) -> bool
+  fn credential_of<'a>(lines: &[&'a str]) -> Option<&'a str>
+  fn has_visible_fields(raw: &[&str]) -> bool
+  fn is_visible_target(target: Option<&str>) -> bool
+  fn origin_of(lines: &[&str]) -> Option<String>
+  fn is_authority(value: &str) -> bool
+  fn host_part_of(authority: &str) -> &str
+  fn request_target_of(target: Option<&str>) -> Option<RequestTarget<'_>>
+  fn is_well_formed_host(lines: &[&str], is_required: bool) -> bool
+  fn is_taken_host(authority: Option<&str>, hosts: &[String]) -> bool
+  fn own_authority_of<'a>(authority: Option<&'a str>, hosts: &[String]) -> Option<&'a str>
+  fn is_taken_origin(origin: Option<&str>, taken: &TakenOrigins<'_>) -> bool
+  fn is_listed_origin(origin: Option<&str>, origins: &[String]) -> bool
+  fn assert_hosts(hosts: &[String]) -> Result<(), ProgrammerError>
+  fn assert_origins(origins: &[String]) -> Result<(), ProgrammerError>
+crate::judgement::proxies
+  const MAXIMUM_UNNAMED_PROXIES: u64
+  struct TrustedProxies
+    const fn unnamed(&self) -> u64
+    derives Clone, Debug, Default, Eq, PartialEq
+  struct ClientAddressOptions<'a> #[non_exhaustive]
+    pub forwarded: Option<&'a str>
+    pub trusted_proxies: Option<&'a TrustedProxies>
+    derives Clone, Debug, Default
+  fn held_address_of(address: &str) -> String
+  fn address_of_entry(entry: &str) -> Option<String>
+  fn assert_trusted_proxies(entries: &[String]) -> Result<(), ProgrammerError>
+  fn assert_unnamed_proxies(count: u64) -> Result<(), ProgrammerError>
+  fn trusted_proxies_of(entries: &[String], unnamed_proxies: Option<u64>) -> Result<TrustedProxies, ProgrammerError>
+  fn client_address_of(remote: &str, options: &ClientAddressOptions<'_>) -> String
 crate::jwt_verifier
   enum JwtAlgorithm #[non_exhaustive]
     Es256
@@ -2113,6 +2164,8 @@ crate::internal
   use crate::envelope::write_header
   use crate::identity::are_one_name
   use crate::identity::is_procedure_name
+  use crate::judgement::hosts
+  use crate::judgement::proxies
   use crate::jwt_verifier::ReadJwt
   use crate::jwt_verifier::read_jwt
   use crate::jwt_verifier::verify_jwt
