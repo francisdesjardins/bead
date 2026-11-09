@@ -34,7 +34,9 @@ use crate::http::fields::{
     LAST_LAYOUT, LISTEN_HEADER, REQUEST, RESULT, Request as Fields, WAIT_HEADER, busy, path_of,
     unknown_connection,
 };
-use crate::http::wire::{AnswerBody, Answered, Cut, Flow, WireOptions, response_of, serve};
+use crate::http::wire::{
+    AnswerBody, Answered, Cut, Flow, Malformed, WireOptions, response_of, serve,
+};
 use crate::http_policy::HttpPolicy;
 use crate::identity::procedures_taken_of;
 use crate::judgement::hosts::{
@@ -52,6 +54,7 @@ use crate::net::bounds::{
     SendPaceOptions, dropped_of, hold_count, late_of,
 };
 use crate::net::listening::{Bound, Listening, accepting, bind};
+use crate::net::tls::serving_config_of;
 use crate::platform::{self, Handle};
 use crate::router::types::{BoxFuture, ConnectionHandle, Gauges, RouterError, TransportMessage};
 use crate::transport::{
@@ -188,6 +191,11 @@ pub struct HttpTransportServerOptions {
     /// The proxies on every path to it that `trusted_proxies` does not name, 8 at most: 0 when
     /// none.
     pub unnamed_proxies: Option<u64>,
+    /// The TLS it serves under, the application's config, its certificate and key among it: it
+    /// serves a copy that offers HTTP/2, then HTTP/1.1, by ALPN (RFC 7301), both on one port, and
+    /// each of its connections is secure (spec 13.4) but where `secure` says otherwise. In clear when
+    /// none, HTTP/1.1 alone.
+    pub tls: Option<Arc<rustls::ServerConfig>>,
 }
 
 // a member given in the policy and beside it, refused, so that a listener never takes one value of
@@ -309,6 +317,8 @@ struct Settings {
     // the procedures a connection takes, every one when none
     procedures: Option<BTreeSet<ProcedureAddress>>,
     proxies: TrustedProxies,
+    // the config it serves under, ALPN's protocols Bead's; in clear when none
+    tls: Option<Arc<rustls::ServerConfig>>,
     body_bytes_budget: u64,
     body_grace_period: Duration,
     maximum_body_bytes: u64,
@@ -537,9 +547,10 @@ fn is_token(token: &str) -> bool {
 }
 
 // what HTTP refuses of its own (RFC 9112 §3.2, §3.2.2; RFC 9110 §5.5), as HTTP answers it,
-// unmarked, with none of the path's fields
+// unmarked, with none of the path's fields; over HTTP/2, its stream reset, `PROTOCOL_ERROR`,
+// nothing written (RFC 9113 §8.1.1)
 fn malformed(flow: &Arc<Flow>) -> Response<AnswerBody> {
-    response_of(
+    let mut response = response_of(
         400,
         (
             &[
@@ -548,7 +559,11 @@ fn malformed(flow: &Arc<Flow>) -> Response<AnswerBody> {
             ],
             AnswerBody::whole(None).settling(flow),
         ),
-    )
+    );
+
+    response.extensions_mut().insert(Malformed);
+
+    response
 }
 
 // an exchange the server answers at once, its head ready
@@ -748,6 +763,7 @@ impl ServerInner {
             runtime: self.runtime.clone(),
             platform: Arc::clone(&self.platform),
             headers_timeout: self.settings.headers_timeout,
+            tls: self.settings.tls.clone(),
         };
 
         serve(
@@ -2428,6 +2444,7 @@ impl HttpTransportServer {
             },
             procedures,
             proxies,
+            tls: options.tls.as_ref().map(serving_config_of),
             body_bytes_budget,
             body_grace_period,
             maximum_body_bytes,
@@ -2684,16 +2701,16 @@ impl ServerTransport for HttpTransportServer {
             .is_some_and(|drawn| drawn.is_listening)
     }
 
-    // as its application says of what stands in front of it, else by what it listens on
+    // as its application says of what stands in front of it, else under TLS, or by what it
+    // listens on
     fn is_secure(&self, connection_handle: &ConnectionHandle) -> bool {
         let state = locked(&self.inner.state);
+        let settings = &self.inner.settings;
 
         state.drawn.contains_key(connection_handle)
-            && self
-                .inner
-                .settings
-                .secure
-                .unwrap_or_else(|| state.listens_on.as_deref().is_some_and(is_loopback_host))
+            && settings.secure.unwrap_or_else(|| {
+                settings.tls.is_some() || state.listens_on.as_deref().is_some_and(is_loopback_host)
+            })
     }
 
     fn stop(&self) -> BoxFuture<Result<(), RouterError>> {
@@ -2762,8 +2779,11 @@ impl ServerTransport for HttpTransportServer {
         gauges
             .ceilings
             .insert("largestOutboxBytes", settings.maximum_outbox_bytes);
-        // HTTP/2's sessions, none over HTTP/1.1 alone
-        gauges.counts.insert("http2Sessions", 0);
+        // the sockets that serve an HTTP/2 session, none in clear
+        gauges.counts.insert(
+            "http2Sessions",
+            count(state.flows.values().filter(|flow| flow.is_http2()).count()),
+        );
         gauges
             .ceilings
             .insert("bodyBytes", settings.body_bytes_budget);

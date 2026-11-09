@@ -60,11 +60,13 @@ idna = { version = "1.1.0", default-features = false, features = ["std", "compil
 rustls = { version = "0.23.46", default-features = false, features = ["std", "aws_lc_rs", "tls12", "logging"] }
 tokio-rustls = { version = "0.26.6", default-features = false, features = ["aws_lc_rs", "tls12", "logging"] }
 rustls-platform-verifier = { version = "0.7.1", default-features = false }
-# the HTTP transport's (decision 0049): RFC 9112's server over tokio's sockets, its timer Bead's
-# own, its bodies read and written by Bead; an HTTP date (RFC 9110 §5.6.7), the one hyper writes,
-# on every response both socket servers write themselves
+# the HTTP transport's (decision 0049): RFC 9112's server and RFC 9113's over tokio's sockets, its
+# timer and its executor Bead's own, its bodies read and written by Bead; a stream reset with its
+# reason; an HTTP date (RFC 9110 §5.6.7), the one hyper writes, on every response both socket
+# servers write themselves
 hyper = { version = "1.12.0", default-features = false }
 hyper-util = { version = "0.1.21", default-features = false }
+h2 = { version = "0.4.20", default-features = false }
 httpdate = { version = "1.0.3", default-features = false }
 libtest-mimic = { version = "0.8.2" }
 syn = { version = "3.0.9", default-features = false, features = ["full", "parsing", "visit"] }

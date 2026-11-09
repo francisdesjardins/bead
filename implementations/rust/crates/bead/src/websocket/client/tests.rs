@@ -310,7 +310,10 @@ impl Peer {
     }
 }
 
-fn peer_of(upgraded: WebSocketStream<TcpStream>) -> Peer {
+fn peer_of<S>(upgraded: WebSocketStream<S>) -> Peer
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
     let (inbound_sender, inbound) = mpsc::unbounded_channel();
     let (outbound, mut outbound_receiver) = mpsc::unbounded_channel::<Message>();
 
@@ -800,6 +803,74 @@ async fn asks_for_wss_when_secured() {
 
     assert_eq!(hello, [0x16], "a ClientHello");
     assert!(is_cancelled(&settled(connecting).await), "cancelled");
+
+    // a round trip over TLS, with a peer that trusts its own certificate and serves the upgrade
+    // under it, HTTP/1.1 asked for by ALPN
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (taken, mut upgraded) = mpsc::unbounded_channel();
+    let alpn: Arc<Mutex<Option<Vec<u8>>>> = Arc::default();
+    let chosen = Arc::clone(&alpn);
+    let mut config = rustls::ServerConfig::clone(&crate::testing::tls::server_config().unwrap());
+
+    config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+
+    let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(config));
+
+    spawn(async move {
+        let (socket, _) = listener.accept().await.unwrap();
+        let secured = acceptor.accept(socket).await.unwrap();
+
+        *chosen.lock().unwrap() = secured.get_ref().1.alpn_protocol().map(<[u8]>::to_vec);
+
+        if let Ok(stream) = tokio_tungstenite::accept_async(secured).await {
+            taken.send(peer_of(stream)).ok();
+        }
+    });
+
+    let secured = client_of(&WebSocketTransportClientOptions {
+        tls: Some(crate::testing::tls::client_config().unwrap()),
+        ..WebSocketTransportClientOptions::default()
+    });
+    let recorder = recorded(&secured);
+
+    settled(secured.connect(&WebSocketTransportClientConnectOptions {
+        secured: Some(true),
+        ..to(port)
+    }))
+    .await
+    .unwrap();
+
+    let mut peer = patience(PATIENCE, upgraded.recv()).await.unwrap().unwrap();
+
+    secured.send(binary(b"hello")).unwrap();
+    assert_eq!(
+        peer.next().await,
+        Some(Message::Binary(Bytes::from_static(b"hello"))),
+        "sent over TLS"
+    );
+    peer.send(Message::Binary(Bytes::from_static(b"again")));
+    patience(PATIENCE, async {
+        while recorder.messages().is_empty() {
+            crate::testing::rest(Duration::from_millis(2)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        (
+            recorder.messages(),
+            alpn.lock().unwrap().clone(),
+            secured.is_secure()
+        ),
+        (
+            vec![Bytes::from_static(b"again")],
+            Some(b"http/1.1".to_vec()),
+            true
+        ),
+        "heard over TLS, HTTP/1.1 its protocol"
+    );
+    secured.dispose();
 }
 
 #[tokio::test]

@@ -1,6 +1,6 @@
 crate
   mod json
-  use rustls #[cfg(feature = "websocket")]
+  use rustls #[cfg(any(feature = "websocket", feature = "http"))]
   use tokio::runtime::Handle
   use tokio_util::sync::CancellationToken
   use broker::adapter::BrokerAdapter
@@ -1088,6 +1088,7 @@ crate::http::server
     pub send_grace_period: Option<Duration> #[cfg(feature = "http")]
     pub trusted_proxies: Option<Vec<String>> #[cfg(feature = "http")]
     pub unnamed_proxies: Option<u64> #[cfg(feature = "http")]
+    pub tls: Option<Arc<rustls::ServerConfig>> #[cfg(feature = "http")]
     derives Clone, Debug, Default #[cfg(feature = "http")]
   struct HttpTransportServer #[cfg(feature = "http")]
     fn new(options: &HttpTransportServerOptions) -> Result<Self, ProgrammerError>

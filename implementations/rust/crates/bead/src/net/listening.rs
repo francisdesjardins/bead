@@ -6,7 +6,6 @@
 use core::future::{Future, poll_fn};
 use core::pin::pin;
 use core::task::Poll;
-#[cfg(feature = "websocket")]
 use core::time::Duration;
 use std::io;
 use std::net::{IpAddr, SocketAddr};
@@ -14,11 +13,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use tokio::net::{TcpListener, TcpStream};
-#[cfg(feature = "websocket")]
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
-#[cfg(feature = "websocket")]
 use crate::clock::{Schedule, SharedClock};
 use crate::errors::{ProgrammerError, TransportError};
 use crate::judgement::handshake::AnswerField;
@@ -60,7 +57,6 @@ pub(crate) async fn unless_cancelled<F: Future>(
 }
 
 /// `future`'s output, or none once `timeout` passed on `clock` first.
-#[cfg(feature = "websocket")]
 pub(crate) async fn within<F: Future>(
     clock: &SharedClock,
     (timeout, future): (Duration, F),

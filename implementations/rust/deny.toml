@@ -37,6 +37,8 @@ skip = [
     # through bead-protobuf-build, the generator of the proto payload's messages; and jni-macros and
     # jni-sys-macros, the platform verifier's on Android alone; no runtime holds it
     { crate = "syn@2", reason = "Buffa's generator and the platform verifier's jni macros, Android's, bring it at build time, beside bead-house's syn 3" },
+    # hashbrown 0.15 beside h2's, through indexmap: Buffa's runtime takes 0.15
+    { crate = "hashbrown@0.15", reason = "Buffa's runtime alone takes 0.15, beside h2's indexmap 0.17" },
 ]
 
 [sources]

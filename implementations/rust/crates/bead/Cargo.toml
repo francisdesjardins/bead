@@ -34,7 +34,8 @@ websocket = [
   "dep:rustls-platform-verifier",
   "dep:httpdate",
 ]
-# the HTTP transport's server over tokio's sockets, on hyper's HTTP/1.1 (decision 0049)
+# the HTTP transport's server over tokio's sockets, on hyper's HTTP/1.1, and HTTP/2 beside it under
+# TLS (decision 0049)
 http = [
   "tokio/net",
   "tokio/io-util",
@@ -42,6 +43,11 @@ http = [
   "dep:http",
   "dep:hyper",
   "dep:hyper-util",
+  "dep:h2",
+  "dep:futures-util",
+  "dep:rustls",
+  "dep:tokio-rustls",
+  "dep:rustls-platform-verifier",
   "dep:httpdate",
 ]
 
@@ -67,16 +73,18 @@ sha1 = { workspace = true, optional = true }
 socket2 = { workspace = true, optional = true }
 http = { workspace = true, optional = true }
 httpdate = { workspace = true, optional = true }
-# the WebSocket transport's alone
-tungstenite = { workspace = true, optional = true }
-tokio-tungstenite = { workspace = true, optional = true }
+# both socket transports': a race's attempts, and TLS
 futures-util = { workspace = true, optional = true }
 rustls = { workspace = true, optional = true }
 tokio-rustls = { workspace = true, optional = true }
 rustls-platform-verifier = { workspace = true, optional = true }
+# the WebSocket transport's alone
+tungstenite = { workspace = true, optional = true }
+tokio-tungstenite = { workspace = true, optional = true }
 # the HTTP transport's alone
-hyper = { workspace = true, optional = true, features = ["server", "http1"] }
+hyper = { workspace = true, optional = true, features = ["server", "http1", "http2"] }
 hyper-util = { workspace = true, optional = true, features = ["tokio"] }
+h2 = { workspace = true, optional = true }
 
 [dev-dependencies]
 # the crate itself, with its test kit: one copy of bead for the unit tests and the players
@@ -84,6 +92,8 @@ bead = { package = "francisdesjardins-bead", path = ".", features = ["testing", 
 bead-interop = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 libtest-mimic = { workspace = true }
+# a session over HTTP/2 the tests open on the HTTP server
+h2 = { workspace = true }
 
 # the conformance players, a trial per entry, named by the entry's own name
 [[test]]

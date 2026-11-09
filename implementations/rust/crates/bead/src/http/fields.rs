@@ -9,7 +9,7 @@ use ::http::uri::Uri;
 
 use crate::judgement::hosts::{
     Authority, HOST_REFUSAL, HostRequest, ORIGIN_REFUSAL, RequestTarget, authority_of,
-    request_target_of,
+    is_authority, request_target_of,
 };
 use crate::judgement::items::{BareItem, parse_item};
 
@@ -207,8 +207,9 @@ impl Request<'_> {
         Some(raw)
     }
 
-    /// Its target as hyper keeps it, its `#` and what follows cut, its scheme in lower case: an
-    /// absolute-form's scheme, `://` and authority, then its path and query; `*` as it came.
+    /// Its target as hyper keeps it, its `#` and what follows cut, its scheme in lower case: over
+    /// HTTP/1, an absolute-form's scheme, `://` and authority, then its path and query; `*` as it
+    /// came. Over HTTP/2, its `:path` alone, its authority `:authority`'s.
     pub(crate) fn target(&self) -> String {
         let path = self
             .uri
@@ -216,7 +217,9 @@ impl Request<'_> {
             .map_or_else(|| self.uri.path().to_owned(), ToString::to_string);
 
         match (self.uri.scheme_str(), self.uri.authority()) {
-            (Some(scheme), Some(authority)) => format!("{scheme}://{}{path}", authority.as_str()),
+            (Some(scheme), Some(authority)) if self.is_http1 => {
+                format!("{scheme}://{}{path}", authority.as_str())
+            }
             _ => path,
         }
     }
@@ -259,8 +262,22 @@ impl Request<'_> {
     }
 
     /// Its authority (spec 15.12): over HTTP/1, as `authority_of` reads its `Host` and `target`;
-    /// none for what HTTP refuses of its own.
+    /// over HTTP/2, its `:authority`, a `host` beside it ignored, or its `host` where it has none
+    /// (RFC 9113 §8.3.1), of spec 15.12's grammar. None for what HTTP refuses of its own, over HTTP/2
+    /// a request that names no authority among it.
     pub(crate) fn authority<'t>(&'t self, target: &'t str) -> Option<Authority<'t>> {
+        if !self.is_http1 {
+            return self
+                .uri
+                .authority()
+                .map(::http::uri::Authority::as_str)
+                .or_else(|| self.header_of("host"))
+                .filter(|authority| is_authority(authority))
+                .map(|authority| Authority {
+                    authority: Some(authority),
+                });
+        }
+
         authority_of(
             &self.lines_of("host"),
             &HostRequest::new(self.is_http11, request_target_of(Some(target))),

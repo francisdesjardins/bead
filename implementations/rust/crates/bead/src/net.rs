@@ -8,5 +8,4 @@ pub(crate) mod listening;
 pub(crate) mod loopbacks;
 #[cfg(feature = "websocket")]
 pub(crate) mod racing;
-#[cfg(feature = "websocket")]
 pub(crate) mod tls;

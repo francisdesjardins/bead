@@ -1,13 +1,16 @@
 //! hyper's glue (decision 0049): a connection served by hyper's HTTP/1.1, its head bounded by
 //! `headers_timeout` on hyper's timer, the platform's; driven without its shutdown, so that the
 //! transport ends its socket itself: a head that did not come in time answered 408, a socket whose
-//! answer went before its request's body was whole closed in stages, any other let go. An answer's
+//! answer went before its request's body was whole closed in stages, any other let go. Under TLS,
+//! its handshake first, within `headers_timeout` on the platform's clock, then HTTP/2 or HTTP/1.1 as
+//! ALPN chose (RFC 7301), HTTP/2 by hyper's, its streams spawned through the platform; a request
+//! HTTP refuses of its own resets its stream there, `PROTOCOL_ERROR`, writing nothing. An answer's
 //! body is the transport's own, whole or handed on as it comes, cut where the transport cuts it.
 
 use core::error::Error;
 use core::fmt;
 use core::future::{Future, poll_fn};
-use core::pin::Pin;
+use core::pin::{Pin, pin};
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use core::task::{Context, Poll};
 use core::time::Duration;
@@ -16,21 +19,25 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use bytes::Bytes;
 use hyper::body::{Body, Frame, Incoming, SizeHint};
-use hyper::server::conn::http1;
+use hyper::server::conn::{http1, http2};
 use hyper::service::service_fn;
 use hyper::{Request, Response};
 use hyper_util::rt::TokioIo;
+use rustls::ServerConfig;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadBuf};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
+use tokio_rustls::TlsAcceptor;
 use tokio_util::sync::CancellationToken;
 
-use crate::clock::{HyperTimer, SharedClock};
+use crate::clock::{HyperTimer, Schedule, SharedClock};
 use crate::judgement::head::{MAXIMUM_HEAD_BYTES, MAXIMUM_HEAD_FIELDS};
-use crate::net::bounds::SendPace;
+use crate::net::bounds::{LINGER, SendPace};
 use crate::net::linger::close_in_stages;
-use crate::net::listening::{unless_cancelled, unmarked};
-use crate::platform::Handle;
+use crate::net::listening::{unless_cancelled, unmarked, within};
+use crate::net::tls::H2;
+use crate::platform::{self, Handle};
+use crate::router::types::BoxFuture;
 
 /// What an exchange's socket is cut with: an answer's body ended before its end, or an exchange
 /// whose socket the transport drops before its head.
@@ -51,6 +58,7 @@ impl Error for Cut {}
 #[derive(Debug, Default)]
 pub(crate) struct Flow {
     blocked: AtomicBool,
+    is_http2: AtomicBool,
     lingers: AtomicBool,
     heads: AtomicU64,
     answered: AtomicU64,
@@ -62,6 +70,11 @@ pub(crate) struct Flow {
 }
 
 impl Flow {
+    /// Whether its socket serves an HTTP/2 session.
+    pub(crate) fn is_http2(&self) -> bool {
+        self.is_http2.load(Ordering::SeqCst)
+    }
+
     /// Whether its socket held the last bytes written to it, unwritten.
     pub(crate) fn is_blocked(&self) -> bool {
         self.blocked.load(Ordering::SeqCst)
@@ -370,33 +383,106 @@ pub(crate) fn response_of(
 /// nothing written.
 pub(crate) type Answered = Pin<Box<dyn Future<Output = Result<Response<AnswerBody>, Cut>> + Send>>;
 
+/// What a response HTTP answers of its own carries, 400 unmarked over HTTP/1: over HTTP/2 its
+/// stream is reset instead, `PROTOCOL_ERROR`, nothing written (RFC 9113 §8.1.1).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Malformed;
+
 /// How a socket's connection is served: on which runtime, its head bounded by `headers_timeout`
-/// on the platform's clock, which bounds its linger too.
+/// on the platform's clock, which bounds its linger and its TLS handshake too; under `tls` when
+/// given, in clear otherwise.
 pub(crate) struct WireOptions {
     pub(crate) runtime: Handle,
     pub(crate) platform: SharedClock,
     pub(crate) headers_timeout: Duration,
+    pub(crate) tls: Option<Arc<ServerConfig>>,
 }
 
-/// Serves `socket` by hyper's HTTP/1.1 as `options` says, each request handed to `exchange` with
-/// its connection's flow, until its client ends it, hyper fails it, or its flow's stop.
-pub(crate) async fn serve<F>(
+/// What an exchange is given: the request hyper read, and its connection's flow.
+pub(crate) trait Exchange:
+    Fn(Request<Incoming>, &Arc<Flow>) -> Answered + Send + Sync + Unpin + 'static
+{
+}
+
+impl<F> Exchange for F where
+    F: Fn(Request<Incoming>, &Arc<Flow>) -> Answered + Send + Sync + Unpin + 'static
+{
+}
+
+// hyper's executor over the platform: each HTTP/2 stream spawned on the server's runtime
+#[derive(Clone)]
+struct Spawner {
+    runtime: Handle,
+}
+
+impl<F> hyper::rt::Executor<F> for Spawner
+where
+    F: Future + Send + 'static,
+    F::Output: Send + 'static,
+{
+    fn execute(&self, future: F) {
+        drop(platform::spawn(&self.runtime, future));
+    }
+}
+
+/// Serves `socket` as `options` says, each request handed to `exchange` with its connection's
+/// flow, until its client ends it, hyper fails it, or its flow's stop: in clear by hyper's
+/// HTTP/1.1; under TLS, once its handshake is done within `headers_timeout`, by HTTP/2 or HTTP/1.1
+/// as ALPN chose. A socket whose handshake does not end in time, or fails, is closed without a word.
+pub(crate) async fn serve<F: Exchange>(
     (socket, flow): (TcpStream, Arc<Flow>),
     (options, exchange): (WireOptions, F),
-) where
-    F: Fn(Request<Incoming>, &Arc<Flow>) -> Answered + Send + Sync + Unpin + 'static,
-{
+) {
     socket.set_nodelay(true).ok();
 
-    let WireOptions {
-        runtime,
-        platform,
-        headers_timeout,
-    } = options;
     let watched = Watched {
         socket,
         flow: Arc::clone(&flow),
     };
+    let Some(config) = options.tls.clone() else {
+        let served: BoxFuture<()> = Box::pin(serve_http1((watched, flow), (options, exchange)));
+
+        return served.await;
+    };
+    // * hyper's head timer arms only once hyper reads: the handshake has a deadline of its own
+    let accepted = unless_cancelled(
+        &flow.stop,
+        within(
+            &options.platform,
+            (
+                options.headers_timeout,
+                TlsAcceptor::from(config).accept(watched),
+            ),
+        ),
+    )
+    .await;
+    let Some(Some(Ok(secured))) = accepted else {
+        return;
+    };
+
+    // * each served as a future of its own, its socket's type named
+    let served: BoxFuture<()> = if secured.get_ref().1.alpn_protocol() == Some(H2) {
+        flow.is_http2.store(true, Ordering::SeqCst);
+        Box::pin(serve_http2((secured, flow), (options, exchange)))
+    } else {
+        Box::pin(serve_http1((secured, flow), (options, exchange)))
+    };
+
+    served.await;
+}
+
+// a socket's connection served by hyper's HTTP/1.1
+async fn serve_http1<S, F>((socket, flow): (S, Arc<Flow>), (options, exchange): (WireOptions, F))
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    F: Exchange,
+{
+    let WireOptions {
+        runtime,
+        platform,
+        headers_timeout,
+        ..
+    } = options;
     let serving = Arc::clone(&flow);
     let mut builder = http1::Builder::new();
 
@@ -410,7 +496,7 @@ pub(crate) async fn serve<F>(
         .keep_alive(true);
 
     let mut connection = builder.serve_connection(
-        TokioIo::new(watched),
+        TokioIo::new(socket),
         service_fn(move |request: Request<Incoming>| {
             serving.head_read();
             exchange(request, &serving)
@@ -446,7 +532,7 @@ pub(crate) async fn serve<F>(
 
     let parts = connection.into_parts();
     let has_read = !parts.read_buf.is_empty();
-    let mut socket = parts.io.into_inner().socket;
+    let mut socket = parts.io.into_inner();
 
     match outcome {
         // a head that did not come within its timeout, on a connection that answered none or with
@@ -464,4 +550,97 @@ pub(crate) async fn serve<F>(
         _ if flow.lingers.load(Ordering::SeqCst) => close_in_stages(socket, &platform).await,
         _ => {}
     }
+}
+
+/// What ends an HTTP/2 stream the transport ends itself: a reset of its reason, which hyper finds
+/// as this error's source.
+#[derive(Debug)]
+pub(crate) struct Reset(h2::Error);
+
+impl fmt::Display for Reset {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "the stream is reset: {}", self.0)
+    }
+}
+
+impl Error for Reset {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        Some(&self.0)
+    }
+}
+
+// what hyper is given of an exchange over HTTP/2: a response HTTP answers of its own resets its
+// stream instead, `PROTOCOL_ERROR`, nothing written; a cut resets it, as its socket would be cut
+fn reset_of(answered: Result<Response<AnswerBody>, Cut>) -> Result<Response<AnswerBody>, Reset> {
+    match answered {
+        Ok(response) if response.extensions().get::<Malformed>().is_some() => {
+            Err(Reset(h2::Reason::PROTOCOL_ERROR.into()))
+        }
+        Ok(response) => Ok(response),
+        Err(Cut) => Err(Reset(h2::Reason::INTERNAL_ERROR.into())),
+    }
+}
+
+// a session served by hyper's HTTP/2, its streams spawned through the platform; its server's stop
+// tells it so, GOAWAY, and ends it once what it answers went, or within its linger when it
+// answers nothing
+async fn serve_http2<S, F>((socket, flow): (S, Arc<Flow>), (options, exchange): (WireOptions, F))
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    F: Exchange,
+{
+    let WireOptions {
+        runtime, platform, ..
+    } = options;
+    let serving = Arc::clone(&flow);
+    let mut builder = http2::Builder::new(Spawner {
+        runtime: runtime.clone(),
+    });
+
+    builder
+        .timer(HyperTimer::on(runtime))
+        .max_header_list_size(u32::try_from(MAXIMUM_HEAD_BYTES).unwrap_or(u32::MAX));
+
+    let mut connection = pin!(builder.serve_connection(
+        TokioIo::new(socket),
+        service_fn(move |request: Request<Incoming>| {
+            serving.head_read();
+
+            let answered = exchange(request, &serving);
+            let streamed: BoxFuture<Result<Response<AnswerBody>, Reset>> =
+                Box::pin(async move { reset_of(answered.await) });
+
+            streamed
+        }),
+    ));
+
+    if unless_cancelled(
+        &flow.stop,
+        poll_fn(|context| connection.as_mut().poll(context)),
+    )
+    .await
+    .is_none()
+        && !flow.abort.is_cancelled()
+    {
+        // its end once aborted, or past its linger when it answers nothing
+        let ended = flow.abort.child_token();
+        let lingering = (!flow.is_answering())
+            .then(|| {
+                let ending = ended.clone();
+
+                platform
+                    .arm(Schedule::Once(LINGER), Box::new(move || ending.cancel()))
+                    .ok()
+            })
+            .flatten();
+
+        connection.as_mut().graceful_shutdown();
+        unless_cancelled(&ended, poll_fn(|context| connection.as_mut().poll(context))).await;
+
+        if let Some(timer) = lingering {
+            timer.cancel();
+        }
+    }
+
+    flow.stop_paces();
 }

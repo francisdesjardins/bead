@@ -47,7 +47,7 @@ mod websocket;
 
 /// The TLS a socket transport speaks, re-exported so that the config an application gives one is
 /// of the version Bead builds on.
-#[cfg(feature = "websocket")]
+#[cfg(any(feature = "websocket", feature = "http"))]
 pub use rustls;
 /// The runtime handle accepted by Bead's runtime options.
 pub use tokio::runtime::Handle;
