@@ -47,8 +47,7 @@ denied whole and a CI job of its own, each part it lacks a row of the support ma
 ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md),
 [0004](0004-one-behaviour-in-every-language.md)). Ahead, in this order:
 
-- **Rust's service client and its transports**: the client half of its service layer, in its core;
-  then WebSocket (RFC 6455) and HTTP/1.1 and HTTP/2 (RFC 9110, 9112, 9113) over sockets, with the
+- **Rust's transports**: WebSocket (RFC 6455) and HTTP/1.1 and HTTP/2 (RFC 9110, 9112, 9113) over sockets, with the
   interop both ways with the TypeScript and C# sides; then its broker bindings, MQTT 5 and AMQP 1.0;
   its gateway; and beadc's Rust target, with `examples/hello`'s Rust half, the lists of the
   procedures a server's transports take

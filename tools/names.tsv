@@ -259,8 +259,8 @@ ServerListener	-	-	ServerListener [record]	own: a listener the Rust side registe
 ServerOptions	IServerOptions [record]	ServerOptions [record]	ServerOptions [record]	same
 ServerSentEvent	IServerSentEvent [record]	ServerSentEvent [record]	-	same
 ServerTransportLike	IServerTransportLike [record]	IServerTransport [record]	ServerTransport [record]	rendered: like (0007)
-ServiceClient	IServiceClient [record], createServiceClient [function]	ServiceClient [record]	-	same
-ServiceClientOptions	IServiceClientOptions [record]	ServiceClientOptions [record]	-	same
+ServiceClient	IServiceClient [record], createServiceClient [function]	ServiceClient [record]	ServiceClient [record]	same
+ServiceClientOptions	IServiceClientOptions [record]	ServiceClientOptions [record]	ServiceClientOptions [record]	same
 ServiceManager	IServiceManager [record], createServiceManager [function]	ServiceManager [record]	ServiceManager [record]	same
 ServiceManagerClient	IServiceManagerClient [record]	IServiceManagerClient [record]	ServiceManagerClient [record]	same
 ServiceManagerOptions	IServiceManagerOptions [record]	ServiceManagerOptions [record]	ServiceManagerOptions [record]	same
