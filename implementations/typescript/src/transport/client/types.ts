@@ -32,7 +32,11 @@ export interface ITransportClientConnectOptions {
   timeout?: number | undefined;
 }
 
-/** What a connect over the network takes besides: where it goes. */
+/**
+ * What a connect over the network takes besides: where it goes, its host and its port named, as on
+ * every side; a connect that leaves either out is refused with a {@link ProgrammerError}, the state
+ * untouched.
+ */
 export interface ITransportClientAddressOptions extends ITransportClientConnectOptions {
   /** The host to reach. */
   host: string;

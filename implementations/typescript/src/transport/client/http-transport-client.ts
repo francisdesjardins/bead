@@ -101,12 +101,10 @@ interface IReading {
 
 /** What an omitted connect option resolves to. */
 export const CONNECT_DEFAULTS = Object.freeze({
-  host: 'localhost',
   pathname: '/bead',
-  port: 80,
   secured: false,
   timeout: 30_000,
-} satisfies IHTTPTransportClientConnectOptions);
+} satisfies Omit<IHTTPTransportClientConnectOptions, 'host' | 'port'>);
 
 /** How long a disconnect waits on the server before it lets the connection go all the same. */
 export const DISCONNECT_TIMEOUT = 5_000;
@@ -752,6 +750,12 @@ export const createHTTPTransportClient = (
       };
 
       return {
+        assertConnect: ({ host, port }) => {
+          // what its type requires, and a caller in JavaScript may still leave out
+          if (typeof host !== 'string' || typeof port !== 'number') {
+            throw new ProgrammerError('a connect names the host and the port it reaches');
+          }
+        },
         // * any field value, in each `POST`'s `Authorization`
         carries: isFieldValue,
         clock,

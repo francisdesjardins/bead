@@ -19,6 +19,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Breaking:** the TypeScript side's `IHTTPPolicyInit` is `IHTTPPolicyOptions`.
 - **Breaking:** the C# side's `WebSocketTransportStartOptions` and `HttpTransportStartOptions` are
   one `TransportServerStartOptions`, in `Bead.Core`.
+- **Breaking:** on the TypeScript side a WebSocket or HTTP client's connect names its `host` and its
+  `port`, as on the C# and Rust sides.
 
 ### Fixed
 

@@ -50,6 +50,7 @@ import {
   MAXIMUM_MESSAGE_BYTES,
   TRANSPORT_WEBSOCKET_BINARYTYPE,
   type IWebSocketConstructor,
+  type IWebSocketTransportClientConnectOptions,
   type WebSocketTransportClient,
 } from '../websocket-transport-client';
 import { createWebSocketTransportServer } from '../../server/websocket-transport-server';
@@ -332,6 +333,16 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
       });
 
       test('rejects with a ProgrammerError when connecting twice', async () => {
+        // no host or no port, which its type requires and a caller in JavaScript may still leave
+        // out: refused before anything moves
+        for (const given of [{ port }, { host }, {}]) {
+          await expect(
+            client.connect(given as unknown as IWebSocketTransportClientConnectOptions)
+          ).rejects.toThrow(
+            new ProgrammerError('a connect names the host and the port it reaches')
+          );
+        }
+        expect(client.isUninitialized()).toBe(true);
         await client.connect({ host, port });
         await expect(client.connect({ host, port })).rejects.toBeInstanceOf(ProgrammerError);
         expect(client.isOpen()).toBe(true);
