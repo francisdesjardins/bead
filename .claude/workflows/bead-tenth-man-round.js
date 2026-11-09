@@ -7,7 +7,11 @@ export const meta = {
   phases: [
     { title: 'Draft', detail: 'what holds today, what the standards ask, the change' },
     { title: 'Tenth Man', detail: 'one xhigh dissenter' },
-    { title: 'Revise', detail: 'each objection answered; the decisions for the user, if any' },
+    {
+      title: 'Revise',
+      detail:
+        'each objection answered: the design and its rationale; the decisions for the user, if any',
+    },
   ],
 };
 
@@ -69,13 +73,22 @@ const REVISED = {
   type: 'object',
   properties: {
     design: { type: 'string' },
+    rationale: { type: 'string' },
     accepted: { type: 'number' },
     partly: { type: 'number' },
     refused: { type: 'number' },
     summary_fr: { type: 'string' },
     decisions_for_the_user: { type: 'array', items: { type: 'string' } },
   },
-  required: ['design', 'accepted', 'partly', 'refused', 'summary_fr', 'decisions_for_the_user'],
+  required: [
+    'design',
+    'rationale',
+    'accepted',
+    'partly',
+    'refused',
+    'summary_fr',
+    'decisions_for_the_user',
+  ],
 };
 
 let draft = args.draft;
@@ -105,7 +118,10 @@ phase('Revise');
 const revised = await agent(
   `${COMMON}
 # Revise (effort high)
-Read ${draft} and the objections (also below). Answer each: accepted (and change the design), in part, or refused with its reason; verify each claim first. Write ${OUT}/design.md: the revised design whole, and its Tenth Man table (Objection | Answer) as it lands in ${RECORD}'s \`## The Tenth Man\`, under a heading of its own. List in \`decisions_for_the_user\` only a choice that no standard and no decision already taken settles, each with its options and your recommendation; an empty list when there is none. \`design\`: the path you wrote. \`summary_fr\`: the design in six lines, and the objections accepted, in part and refused, in French.
+Read ${draft} and the objections (also below). Answer each: accepted (and change the design), in part, or refused with its reason; verify each claim first. Write the revised design in two files, each stage of its implementation reading only what it needs:
+- ${OUT}/design.md, the change itself and nothing else: first what every stage shares, under \`## Shared\` (the spec's text, the behaviour, the names, the order of the commits); then one section for each stage that implements it, headed \`## Stage: <key>\` with the key \`bead-implement-both-sides\` runs it under: \`spec\` (the spec, the conformance cases by file, name and units, the records, the rows of \`docs/support.md\`, the CHANGELOG line), \`typescript\`, \`csharp\`, \`rust\`, or a stage of the design's own; each section its files and lines, its twin tests by name, and what it must not touch;
+- ${OUT}/rationale.md, the reasons beside it: what each side does today (file and line) and where they differ, the standards weighed (each named, the RFC and its section), the alternatives refused and why, and the Tenth Man table (Objection | Answer) as it lands in ${RECORD}'s \`## The Tenth Man\`, under a heading of its own.
+List in \`decisions_for_the_user\` only a choice that no standard and no decision already taken settles, each with its options and your recommendation; an empty list when there is none. \`design\` and \`rationale\`: the paths you wrote. \`summary_fr\`: the design in six lines, and the objections accepted, in part and refused, in French.
 The objections:
 ${JSON.stringify(dissent ? dissent.objections : [], null, 1)}`,
   { label: `revise:${SLUG}`, phase: 'Revise', effort: 'high', schema: REVISED }

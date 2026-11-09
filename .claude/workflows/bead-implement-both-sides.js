@@ -13,7 +13,11 @@ export const meta = {
 
 // args: { repo, scratch, venv, slug, design, branch, parts?, stages?, first?, together?,
 //         specEffort?, series?, suites?, notes? }
-// - design: the path of the settled design, the one source every stage reads;
+// - design: the path of the settled design, its `design.md`: a part every stage shares under
+//   `## Shared`, then a section a stage under `## Stage: <key>`, each stage reading the shared part
+//   and its own; its `rationale.md` beside it, the reasons and the Tenth Man's table, read where a
+//   stage needs a reason, and whole by the spec's, which writes the record; a design of one file,
+//   without those sections, is read for what it holds;
 // - parts: the stages to run, ['spec', 'typescript', 'csharp'] by default; 'rust', named here
 //   where the design reaches the Rust side, has a default task as the three do;
 // - stages: { <key>: { task, effort? } }, a stage of the design's own (a folder the four do not
@@ -28,7 +32,7 @@ export const meta = {
 // - suites: 'local' by default, every test suite run by the integration; 'ci' leaves the whole
 //   suites to GitHub's CI on the feature branch, which the session pushes once the series lands
 //   (the user, 2026-10-14: a push of a feature/* branch to save tokens and time), the integration
-//   running the fast gates, both builds and the tests of what changed;
+//   running the fast gates, every side's build and the tests of what changed;
 // - notes: what the stages need beyond the design, in a few lines.
 const required = (name) => {
   if (!args || !args[name]) {
@@ -48,6 +52,17 @@ const STAGES = args.stages || {};
 const OUT = `${SCRATCH}/${SLUG}`;
 const SUITES = args.suites || 'local';
 const TMP = `TMP=${SCRATCH}/tmp TEMP=${SCRATCH}/tmp`;
+const RATIONALE = DESIGN.replace(/[^/\\]*$/u, 'rationale.md');
+
+// what a stage reads of the design: the shared part and its own section, the reasons where it
+// needs one; the spec's stage writes the record, so it reads the reasons whole
+const readsOf = (key) => {
+  const reasons =
+    key === 'spec'
+      ? `${RATIONALE}, beside it, holds what the record keeps: today's state, the standards weighed, the alternatives refused and the Tenth Man's table; read it whole`
+      : `${RATIONALE}, beside it, holds today's state, the standards weighed and the Tenth Man's table: open it only where you need a reason`;
+  return `Read in ${DESIGN} the part every stage shares (\`## Shared\`) and your section (\`## Stage: ${key}\`), not the others'; ${reasons}. A design of one file, without those sections or that file, is read for what it holds for you.`;
+};
 
 const COMMON = `
 You work on Bead, at ${REPO}, on the branch \`${BRANCH}\`, checked out. You implement ${DESIGN}, the settled design: where it is silent, keep to the spec and the records, and say what you chose. CLAUDE.md's rules are injected; these are the ones a stage most often misses:
@@ -89,7 +104,7 @@ const effortOf = (key) => {
 };
 
 const run = (key, phaseTitle, beside) => {
-  return agent(`${COMMON}${beside}\n${taskOf(key)}`, {
+  return agent(`${COMMON}${readsOf(key)}\n${beside}\n${taskOf(key)}`, {
     label: `implement:${key}`,
     phase: phaseTitle,
     effort: effortOf(key),
@@ -138,7 +153,7 @@ phase('Integrate');
 const integration = await agent(
   `${COMMON}
 # Your task: integrate (effort high)
-Check that every side does what the design says, alike, as the conformance files and the twin tests prove, and that the records, the matrix and the CHANGELOG say what landed. Fix what is broken. Run every gate with \`${TMP}\`: ${GENERATE}, and check that nothing more moves; \`${VENV} spec/check.py\`; ${FORMAT}; \`node tools/check-links.mjs\`; \`node tools/check-versions.mjs\`; \`node tools/check-names.mjs\`; \`node tools/check-durations.mjs\`; \`node tools/check-details.mjs\`, as CI's Commits job runs them; \`node tools/check-examples.mjs\`; \`node --test "tools/__tests__/*.test.mjs"\` when \`tools/\` changed; \`yarn check\`; \`dotnet format Bead.slnx --verify-no-changes\`; from \`implementations/rust\`, CLAUDE.md's Rust gates but \`cargo test\`, which the suites below run; ${SUITE_GATES}; the gates of every stage the design names; the names check over every file \`git status --porcelain\` lists. Then ${args.series ? SERIES : PLAN} Return what you fixed, each gate's result, the test counts and the commits.
+Read ${DESIGN} whole, every stage's section; ${RATIONALE}, beside it where the round wrote one, where you need a reason. Check that every side does what the design says, alike, as the conformance files and the twin tests prove, and that the records, the matrix and the CHANGELOG say what landed. Fix what is broken. Run every gate with \`${TMP}\`: ${GENERATE}, and check that nothing more moves; \`${VENV} spec/check.py\`; ${FORMAT}; \`node tools/check-links.mjs\`; \`node tools/check-versions.mjs\`; \`node tools/check-names.mjs\`; \`node tools/check-durations.mjs\`; \`node tools/check-details.mjs\`, as CI's Commits job runs them; \`node tools/check-examples.mjs\`; \`node --test "tools/__tests__/*.test.mjs"\` when \`tools/\` changed; \`yarn check\`; \`dotnet format Bead.slnx --verify-no-changes\`; from \`implementations/rust\`, CLAUDE.md's Rust gates but \`cargo test\`, which the suites below run; ${SUITE_GATES}; the gates of every stage the design names; the names check over every file \`git status --porcelain\` lists. Then ${args.series ? SERIES : PLAN} Return what you fixed, each gate's result, the test counts and the commits.
 The reports:
 ${PARTS.map((key) => {
   return `## ${key}\n${reports[key] || '(no report)'}`;
