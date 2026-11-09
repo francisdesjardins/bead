@@ -58,7 +58,7 @@ export const ENVELOPE_KINDS = Object.freeze({
 });
 
 /** The reasons each refusal of the transport's own is marked with, in `bead-refusal`. */
-export const REFUSALS = Object.freeze({
+export const HTTP_REFUSALS = Object.freeze({
   BUSY: 'busy',
   CALL_WAITING: 'call-waiting',
   CONNECTION_UNKNOWN,
@@ -92,7 +92,7 @@ const PROTOCOL_ERROR = 0x1;
 
 // the 404 that tells a client its connection is gone
 export const UNKNOWN_CONNECTION: IEnd = Object.freeze({
-  reason: REFUSALS.CONNECTION_UNKNOWN,
+  reason: HTTP_REFUSALS.CONNECTION_UNKNOWN,
   status: 404,
 });
 

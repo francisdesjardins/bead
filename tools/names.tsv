@@ -1,4 +1,4 @@
-# alone: typescript 318, csharp 67, rust 78
+# alone: typescript 317, csharp 66, rust 78
 # concept	typescript	csharp	rust	class
 ACCEPT_TIMEOUT	ACCEPT_TIMEOUT [constant]	-	ACCEPT_TIMEOUT [constant]	same
 AccessRefusal	IAccessRefusal [record]	AccessRefusal [record]	AccessRefusal [record]	same
@@ -107,6 +107,7 @@ Health	IHealth [record]	Health [record]	Health [record]	same
 HealthCheck	IHealthCheck [record]	HealthCheck [record]	HealthCheck [record]	same
 HealthStatus	HealthStatus [choice]	HealthStatus [choice]	HealthStatus [choice]	same
 HEARTBEAT	HEARTBEAT [constant]	-	HEARTBEAT [constant]	same
+HTTP_REFUSALS	HTTP_REFUSALS [constant]	HttpRefusals [constant]	-	same
 HTTPBinding	IHTTPBinding [record], createHTTPBinding [function]	HttpBinding [record]	-	same
 HTTPCaller	IHTTPCaller [record], createHTTPCaller [function]	HttpCaller [record]	-	same
 HTTPCallerOptions	IHTTPCallerOptions [record]	HttpCallerOptions [record]	-	same
@@ -472,7 +473,6 @@ HttpProblems.PhraseOf	-	HttpProblems.PhraseOf [function]	-	alone
 HttpProblems.Refusal	-	HttpProblems.Refusal [function]	-	alone
 HttpProblems.StatusOf	-	HttpProblems.StatusOf [function]	-	alone
 HttpProblems.Tag	-	HttpProblems.Tag [constant]	-	alone
-HttpRefusals	-	HttpRefusals [constant]	-	alone
 HTTPRequester	IHTTPRequester [function type]	-	-	alone
 httpRequesterOf	httpRequesterOf [function]	-	-	alone
 HTTPRequestLike	IHTTPRequestLike [record]	-	-	alone
@@ -616,7 +616,6 @@ RedactedHeader	RedactedHeader [record]	-	-	alone
 Refusal	-	-	Refusal [choice]	alone
 REFUSAL_EVENT	REFUSAL_EVENT [constant]	-	-	alone
 REFUSAL_HEADER	REFUSAL_HEADER [constant]	-	-	alone
-REFUSALS	REFUSALS [constant]	-	-	alone
 RelayLeg	-	-	RelayLeg [record]	alone
 RelayRouter	-	-	RelayRouter [record]	alone
 RequestDescriptor	RequestDescriptor [record]	-	-	alone

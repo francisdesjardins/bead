@@ -13,7 +13,7 @@ import {
   type IEnd,
   type IExchangeIn,
   linesOf,
-  REFUSALS,
+  HTTP_REFUSALS,
   sendHead,
   UNKNOWN_CONNECTION,
 } from './http-server-fields';
@@ -135,7 +135,7 @@ const FIRST_BODY_BYTES = 65_536;
 // for before it sends a non-request again (spec 15.6)
 export const BUSY_EXCHANGES: IEnd = Object.freeze({
   headers: Object.freeze({ 'retry-after': '1' }),
-  reason: REFUSALS.BUSY,
+  reason: HTTP_REFUSALS.BUSY,
   status: 429,
 });
 
@@ -191,11 +191,11 @@ export const createHTTPRequestExchange = <Connection>(
     // ! a field that is no list is not combined (RFC 9110 §5.3): two are refused before either
     // could be taken for the other
     if (authorizations.length > 1) {
-      return (port.finish(exchange, { reason: REFUSALS.MALFORMED, status: 400 }), undefined);
+      return (port.finish(exchange, { reason: HTTP_REFUSALS.MALFORMED, status: 400 }), undefined);
     }
 
     if (Number.isFinite(declared) && declared > maximumBodyBytes) {
-      return (port.finish(exchange, { reason: REFUSALS.TOO_LARGE, status: 413 }), undefined);
+      return (port.finish(exchange, { reason: HTTP_REFUSALS.TOO_LARGE, status: 413 }), undefined);
     }
 
     // a bound on what one connection has under way, cancels included, well past what its
@@ -264,7 +264,7 @@ export const createHTTPRequestExchange = <Connection>(
 
           if (!port.isEnded(state)) {
             release();
-            endEarly({ reason: REFUSALS.TOO_SLOW, status: 408 });
+            endEarly({ reason: HTTP_REFUSALS.TOO_SLOW, status: 408 });
           }
         },
         // ! a millisecond at least, counted whole: Bead arms no timer for less (decision 0011)
@@ -324,11 +324,11 @@ export const createHTTPRequestExchange = <Connection>(
         unpace();
         release();
 
-        return (endEarly({ reason: REFUSALS.TOO_LARGE, status: 413 }), undefined);
+        return (endEarly({ reason: HTTP_REFUSALS.TOO_LARGE, status: 413 }), undefined);
       }
 
       if (isOverBudget) {
-        const busy = { headers: { 'retry-after': '1' }, reason: REFUSALS.BUSY, status: 503 };
+        const busy = { headers: { 'retry-after': '1' }, reason: HTTP_REFUSALS.BUSY, status: 503 };
 
         unpace();
         release();
@@ -382,7 +382,7 @@ export const createHTTPRequestExchange = <Connection>(
       if (prefix === undefined) {
         release();
 
-        return (endEarly({ reason: REFUSALS.MALFORMED, status: 400 }), undefined);
+        return (endEarly({ reason: HTTP_REFUSALS.MALFORMED, status: 400 }), undefined);
       }
 
       const { callId, kind } = prefix;

@@ -76,7 +76,7 @@ import {
   linesOf,
   listeningOf,
   preflightOf,
-  REFUSALS,
+  HTTP_REFUSALS,
   refuseMalformed,
   RESPONSE_HEADERS,
   sendHead,
@@ -120,7 +120,7 @@ export type {
   IHTTPServerLike,
   IHTTPTransportServerOptions,
 } from './types';
-export { ENVELOPE_KINDS, ENVELOPE_PREFIX, REFUSALS } from './http-server-fields';
+export { ENVELOPE_KINDS, ENVELOPE_PREFIX, HTTP_REFUSALS } from './http-server-fields';
 export { HTTP_POLICY_MEMBERS, httpPolicyOf } from './http-policy';
 export type { IHTTPPolicy, IHTTPPolicyInit, IHTTPPolicyOption } from './http-policy';
 export {
@@ -656,7 +656,9 @@ export const createHTTPTransportServer = (
         const wait = countOf(request, WAIT_HEADER);
 
         if (!connection.isListening) {
-          return (finish(exchange, { reason: REFUSALS.LISTEN_UNDECLARED, status: 409 }), undefined);
+          return (
+            finish(exchange, { reason: HTTP_REFUSALS.LISTEN_UNDECLARED, status: 409 }), undefined
+          );
         }
 
         if (
@@ -665,7 +667,7 @@ export const createHTTPTransportServer = (
           wait === undefined ||
           after > connection.sequence
         ) {
-          return (finish(exchange, { reason: REFUSALS.MALFORMED, status: 400 }), undefined);
+          return (finish(exchange, { reason: HTTP_REFUSALS.MALFORMED, status: 400 }), undefined);
         }
 
         const kept = connection.outbox.filter(({ sequence }) => {
@@ -745,7 +747,7 @@ export const createHTTPTransportServer = (
         // a connect carries no body, and says whether it listens in the one way; a socket already
         // gone reports no address
         if (hasBody(request) || address === undefined || isListening === undefined) {
-          return (finish(exchange, { reason: REFUSALS.MALFORMED, status: 400 }), undefined);
+          return (finish(exchange, { reason: HTTP_REFUSALS.MALFORMED, status: 400 }), undefined);
         }
 
         // none is drawn once a stop began, as none past the bounds: busy, told when to come back
@@ -755,7 +757,7 @@ export const createHTTPTransportServer = (
           drawn.size >= maximumConnections ||
           heldBy(address) >= maximumConnectionsPerAddress
         ) {
-          const busy = { headers: { 'retry-after': '1' }, reason: REFUSALS.BUSY, status: 503 };
+          const busy = { headers: { 'retry-after': '1' }, reason: HTTP_REFUSALS.BUSY, status: 503 };
 
           return (finish(exchange, busy), undefined);
         }
@@ -881,7 +883,7 @@ export const createHTTPTransportServer = (
             const { callId, kind } = prefix;
 
             if (layout < ENVELOPE_PREFIX.firstLayout || layout > ENVELOPE_PREFIX.lastLayout) {
-              return { reason: REFUSALS.MALFORMED, status: 400 };
+              return { reason: HTTP_REFUSALS.MALFORMED, status: 400 };
             }
 
             if (kind !== ENVELOPE_KINDS.REQUEST) {
@@ -892,11 +894,11 @@ export const createHTTPTransportServer = (
 
             // a client's call ids are odd, and none is 0
             if (callId % 2 === 0) {
-              return { reason: REFUSALS.MALFORMED, status: 400 };
+              return { reason: HTTP_REFUSALS.MALFORMED, status: 400 };
             }
 
             if (connection.waiting.has(callId)) {
-              return { reason: REFUSALS.CALL_WAITING, status: 409 };
+              return { reason: HTTP_REFUSALS.CALL_WAITING, status: 409 };
             }
 
             if (connection.waiting.size >= maximumWaitingExchanges) {
@@ -1013,11 +1015,11 @@ export const createHTTPTransportServer = (
         const { authority } = named;
 
         if (!isTakenHost(authority, hosts)) {
-          return (finish(exchange, { reason: REFUSALS.HOST, status: 403 }), undefined);
+          return (finish(exchange, { reason: HTTP_REFUSALS.HOST, status: 403 }), undefined);
         }
 
         if (targetOf(request)?.path !== pathname) {
-          return (finish(exchange, { reason: REFUSALS.PATH, status: 404 }), undefined);
+          return (finish(exchange, { reason: HTTP_REFUSALS.PATH, status: 404 }), undefined);
         }
 
         // an exchange from the server's own origin, by a host it takes by name, or one it was told;
@@ -1025,7 +1027,7 @@ export const createHTTPTransportServer = (
         const origin = headerOf(request, 'origin');
 
         if (!isTakenOrigin(origin, { host: ownAuthorityOf(authority, hosts), origins })) {
-          return (finish(exchange, { reason: REFUSALS.ORIGIN, status: 403 }), undefined);
+          return (finish(exchange, { reason: HTTP_REFUSALS.ORIGIN, status: 403 }), undefined);
         }
 
         // the origin the server answers CORS to, as it came: one `origins` names
@@ -1051,7 +1053,7 @@ export const createHTTPTransportServer = (
         if (request.method !== 'GET' && request.method !== 'POST' && request.method !== 'DELETE') {
           const refused = {
             headers: { allow: 'GET, POST, DELETE' },
-            reason: REFUSALS.METHOD,
+            reason: HTTP_REFUSALS.METHOD,
             status: 405,
           };
 
@@ -1062,14 +1064,14 @@ export const createHTTPTransportServer = (
 
         if (connectionToken === undefined && request.method === 'POST') {
           if (!isBeadBody(request)) {
-            return (finish(exchange, { reason: REFUSALS.TYPE, status: 415 }), undefined);
+            return (finish(exchange, { reason: HTTP_REFUSALS.TYPE, status: 415 }), undefined);
           }
 
           return (onConnect(exchange), undefined);
         }
 
         if (connectionToken === undefined || !TOKEN_PATTERN.test(connectionToken)) {
-          return (finish(exchange, { reason: REFUSALS.MALFORMED, status: 400 }), undefined);
+          return (finish(exchange, { reason: HTTP_REFUSALS.MALFORMED, status: 400 }), undefined);
         }
 
         // none is held once a stop began: an exchange learns its connection is gone, as the stop's
@@ -1092,7 +1094,7 @@ export const createHTTPTransportServer = (
         }
 
         if (!isBeadBody(request)) {
-          return (finish(exchange, { reason: REFUSALS.TYPE, status: 415 }), undefined);
+          return (finish(exchange, { reason: HTTP_REFUSALS.TYPE, status: 415 }), undefined);
         }
 
         return (receive(exchange, connection), undefined);

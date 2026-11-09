@@ -15,6 +15,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   §3.1), but by Kestrel on the C# side, which also refuses a `%00` or an octet past US-ASCII past a
   `#`, as Node's parser refuses that octet on the TypeScript side (spec 15.12, transcoding 3.6;
   decision 0049).
+- **Breaking:** the TypeScript side's `REFUSALS` is `HTTP_REFUSALS`.
 
 ### Fixed
 

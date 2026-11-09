@@ -286,6 +286,7 @@
   HTTPRequestListener	src/transport/server/types.ts
   HTTPTransportServer	src/transport/server/types.ts
   HTTP_POLICY_MEMBERS	src/transport/server/http-policy.ts
+  HTTP_REFUSALS	src/transport/server/http-server-fields.ts
   IDrawingRequest	src/transport/server/types.ts
   IDrawnConnection	src/transport/server/types.ts
   IHTTPPolicy	src/transport/server/http-policy.ts
@@ -307,7 +308,6 @@
   MINIMUM_BODY_BYTES_PER_SECOND	src/transport/server/http-transport-server.ts
   MINIMUM_SEND_BYTES_PER_SECOND	src/transport/server/server-bounds.ts
   PATHNAME	src/transport/server/http-transport-server.ts
-  REFUSALS	src/transport/server/http-server-fields.ts
   REFUSAL_HEADER	src/transport/shared/constants.ts
   SEND_GRACE_PERIOD	src/transport/server/server-bounds.ts
   SEQUENCE_HEADER	src/transport/shared/constants.ts
@@ -3354,8 +3354,8 @@ src/transport/server/http-server-fields.ts ENVELOPE_KINDS
   const ENVELOPE_KINDS: Readonly<{REQUEST: 16; RESULT: 17; FAILURE: 18; CANCEL: 22}>
 src/transport/server/http-server-fields.ts ENVELOPE_PREFIX
   const ENVELOPE_PREFIX: Readonly<{bytes: 8; firstLayout: 161; lastLayout: 175}>
-src/transport/server/http-server-fields.ts REFUSALS
-  const REFUSALS: Readonly<{BUSY: "busy"; CALL_WAITING: "call-waiting"; CONNECTION_UNKNOWN: "connection-unknown"; HOST: "host-refused"; LISTEN_UNDECLARED: "listen-undeclared"; MALFORMED: "malformed"; METHOD: "method-refused"; ORIGIN: "origin-refused"; PATH: "path-unknown"; TOO_LARGE: "too-large"; TOO_SLOW: "too-slow"; TYPE: "type-refused"}>
+src/transport/server/http-server-fields.ts HTTP_REFUSALS
+  const HTTP_REFUSALS: Readonly<{BUSY: "busy"; CALL_WAITING: "call-waiting"; CONNECTION_UNKNOWN: "connection-unknown"; HOST: "host-refused"; LISTEN_UNDECLARED: "listen-undeclared"; MALFORMED: "malformed"; METHOD: "method-refused"; ORIGIN: "origin-refused"; PATH: "path-unknown"; TOO_LARGE: "too-large"; TOO_SLOW: "too-slow"; TYPE: "type-refused"}>
 src/transport/server/http-transport-server.ts BODY_BYTES_BUDGET
   const BODY_BYTES_BUDGET: 268435456
 src/transport/server/http-transport-server.ts BODY_GRACE_PERIOD
