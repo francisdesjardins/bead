@@ -230,6 +230,10 @@ test.describe('createHTTPTransportServer, its edges', () => {
       statusOf(bead, { url: 'http://bead.example:8443/bead' }),
       statusOf({ ...bead, host: 'rebound.example' }, { url: 'https://bead.example/bead' }),
       statusOf({ ...bead, host: 'bad host' }, { url: 'http://localhost/bead?after=1' }),
+      // its scheme read in any case, and the target ended at its #
+      statusOf(bead, { url: 'HTTP://bead.example/bead' }),
+      statusOf(bead, { url: 'hTtPs://bead.example/bead#after' }),
+      statusOf(bead, { url: '/bead#/elsewhere' }),
       statusOf(bead, { url: 'http://rebound.example/bead' }),
       statusOf(bead, { url: 'http://bead.example' }),
       statusOf(bead, { url: 'http://bead.example?after=1' }),
@@ -239,7 +243,6 @@ test.describe('createHTTPTransportServer, its edges', () => {
       statusOf(bead, { url: 'http://a%41.test/bead' }),
       statusOf(bead, { url: 'http://127.0.0.1:/bead' }),
       statusOf(bead, { url: 'http://user@bead.example/bead' }),
-      statusOf(bead, { url: 'HTTP://bead.example/bead' }),
       statusOf(bead, { url: 'ftp://bead.example/bead' }),
       statusOf(
         { ...bead, host: ['bead.example', 'bead.example'] },
@@ -263,10 +266,12 @@ test.describe('createHTTPTransportServer, its edges', () => {
       [201, undefined],
       [201, undefined],
       [201, undefined],
+      [201, undefined],
+      [201, undefined],
+      [201, undefined],
       [403, REFUSALS.HOST],
       [404, REFUSALS.PATH],
       [404, REFUSALS.PATH],
-      [400, undefined],
       [400, undefined],
       [400, undefined],
       [400, undefined],
@@ -306,15 +311,24 @@ test.describe('createHTTPTransportServer, its edges', () => {
     await using started = await startTransport({ hosts: ['bead.example'] });
     const port = Number(new URL(started.url).port);
 
-    for (const target of ['http:///', 'HTTP://127.0.0.1/']) {
+    const answerOf = async (target: string) => {
       const { answer } = await rawAnswerOf(
         port,
         `POST ${target} HTTP/1.1\r\nHost: bead.example\r\nContent-Type: ${BEAD_MEDIA_TYPE}\r\nContent-Length: 0\r\n\r\n`
       );
 
-      expect(answer, target).toEqual([400, null]);
+      return answer;
+    };
+
+    // a target with no authority, or holding what a page's browser always percent-encodes
+    for (const target of ['http:///', '/be"ad', 'hTtP://127.0.0.1/be{}ad']) {
+      expect(await answerOf(target), target).toEqual([400, null]);
     }
     expect(namesOf(started.events, 'connection')).toEqual([]);
+    // its scheme in any case, and what follows its # neither its path nor its query
+    for (const target of ['HTTP://127.0.0.1/elsewhere', '/elsewhere#/bead']) {
+      expect(await answerOf(target), target).toEqual([404, REFUSALS.PATH]);
+    }
   });
 
   test('tells a header given empty from one absent: an empty token is malformed, an empty origin or encoding refused, an empty listen none', async () => {

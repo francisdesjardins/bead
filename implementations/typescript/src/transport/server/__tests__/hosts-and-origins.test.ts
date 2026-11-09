@@ -698,7 +698,7 @@ test.describe('hosts and origins', () => {
     expect(hasVisibleFields(['Host', 'bead.test', 'bead-after', '0 '])).toBe(false);
   });
 
-  test('isVisibleTarget takes visible ASCII and a percent-encoded octet, NUL in a query among them, and refuses each control character, SP, DEL and 0x80 to 0xFF, in a path or a query, and NUL percent-encoded in a path', () => {
+  test('isVisibleTarget takes visible ASCII and a percent-encoded octet, NUL in a query among them, ends a target at its #, and refuses each control character, SP, DEL and 0x80 to 0xFF, a character a browser always encodes where it stands, and NUL percent-encoded in a path', () => {
     const visible = Array.from({ length: 0x7f - 0x21 }, (_, index) => {
       return String.fromCodePoint(0x21 + index);
     }).join('');
@@ -710,13 +710,43 @@ test.describe('hosts and origins', () => {
         return String.fromCodePoint(0x7f + index);
       }),
     ];
+    const controls = others.filter((character) => {
+      return character < ' ' || character === '\u007F';
+    });
+    // what a page's browser always percent-encodes in a path, and in a query
+    const encodedInPath = ['"', '<', '>', '^', '`', '{', '}'];
+    const encodedInQuery = ['"', '<', '>'];
+    const without = (left: readonly string[]) => {
+      return Array.from(visible)
+        .filter((character) => {
+          return character !== '#' && !left.includes(character);
+        })
+        .join('');
+    };
 
-    // * the visible characters a URI leaves out are taken as they came, and a # opens no fragment
-    expect(isVisibleTarget(`/${visible}`)).toBe(true);
-    expect(isVisibleTarget(`/bead?${visible}`)).toBe(true);
+    // * a target ends at its #, and the characters a browser sends unencoded are taken as they came
+    expect(isVisibleTarget(`/${without(encodedInPath)}`)).toBe(true);
+    expect(isVisibleTarget(`/bead?${without(encodedInQuery)}`)).toBe(true);
+    expect(
+      isVisibleTarget(`http://127.0.0.1/${without(encodedInPath)}?${without(encodedInQuery)}`)
+    ).toBe(true);
+    expect(isVisibleTarget('/be\\ad|x?a\\b|c^d`e{}f')).toBe(true);
     expect(isVisibleTarget(undefined)).toBe(true);
     expect(isVisibleTarget('/a%01b%7F%FF?x=%00')).toBe(true);
     expect(isVisibleTarget('http://127.0.0.1/a%01?%00')).toBe(true);
+    // what follows a # is neither its path nor its query: no rule of either reaches it
+    expect(
+      [
+        `/bead#${visible}`,
+        '/bead#a b',
+        '/bead#\u00E9',
+        '/a#%00?x',
+        '/bead?x#<"',
+        'http://127.0.0.1/#{}',
+      ].filter((target) => {
+        return !isVisibleTarget(target);
+      })
+    ).toEqual([]);
     expect(
       others.filter((character) => {
         return [`/a${character}b`, `/bead?a${character}b`, `http://127.0.0.1/a${character}b`].some(
@@ -727,9 +757,39 @@ test.describe('hosts and origins', () => {
       })
     ).toEqual([]);
     expect(others).toHaveLength(33 + 129);
-    // a path whose percent-decoding holds NUL, in origin-form or absolute-form, a # no end of it
+    // a control character is the request-line's, past a # too
     expect(
-      ['/%00', '/be%00ad', '/a#%00?x', 'http://127.0.0.1/a%00b?x=1'].filter((target) => {
+      controls.filter((character) => {
+        return [`/bead#a${character}b`, `/bead?x#${character}`].some((target) => {
+          return isVisibleTarget(target);
+        });
+      })
+    ).toEqual([]);
+    expect(controls).toHaveLength(32 + 1);
+    // a character a browser always encodes where it stands, in origin-form or absolute-form, and
+    // those it sends unencoded in a query
+    expect(
+      encodedInPath.filter((character) => {
+        return [`/a${character}b`, `http://127.0.0.1/a${character}b`].some((target) => {
+          return isVisibleTarget(target);
+        });
+      })
+    ).toEqual([]);
+    expect(
+      encodedInQuery.filter((character) => {
+        return [`/bead?a${character}b`, `http://127.0.0.1/?a${character}b`].some((target) => {
+          return isVisibleTarget(target);
+        });
+      })
+    ).toEqual([]);
+    expect(
+      ['^', '`', '{', '}', '\\', '|'].filter((character) => {
+        return !isVisibleTarget(`/bead?a${character}b`);
+      })
+    ).toEqual([]);
+    // a path whose percent-decoding holds NUL, in origin-form or absolute-form
+    expect(
+      ['/%00', '/be%00ad', '/a%00#x', 'http://127.0.0.1/a%00b?x=1'].filter((target) => {
         return isVisibleTarget(target);
       })
     ).toEqual([]);
@@ -757,9 +817,30 @@ test.describe('hosts and origins', () => {
     expect(isTakenOrigin('http://bead.io', { host: 'BEAD.ıO', origins: [] })).toBe(false);
   });
 
-  test('refuses an absolute-form target without an authority or with an uppercase scheme', () => {
-    for (const target of ['http:///', 'HTTP://127.0.0.1/']) {
+  test('reads an absolute-form target’s scheme in any case, HTTP:// as http://, ends a target at its #, and refuses one without an authority', () => {
+    for (const target of ['http:///', 'HTTP:///', 'http://#x/', 'ftp://127.0.0.1/']) {
       expect(requestTargetOf(target), target).toBeUndefined();
     }
+    expect(
+      ['HTTP://127.0.0.1/bead?x=1', 'hTtP://127.0.0.1/bead?x=1', 'HTTPS://127.0.0.1/bead?x=1'].map(
+        (target) => {
+          return requestTargetOf(target);
+        }
+      )
+    ).toEqual(
+      Array.from({ length: 3 }, () => {
+        return { authority: '127.0.0.1', path: '/bead', query: 'x=1' };
+      })
+    );
+    expect(
+      ['/bead#x', '/bead?x=1#y?z', 'http://127.0.0.1#/bead', '/bead#'].map((target) => {
+        return requestTargetOf(target);
+      })
+    ).toEqual([
+      { authority: undefined, path: '/bead', query: '' },
+      { authority: undefined, path: '/bead', query: 'x=1' },
+      { authority: '127.0.0.1', path: '/', query: '' },
+      { authority: undefined, path: '/bead', query: '' },
+    ]);
   });
 });
