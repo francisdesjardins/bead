@@ -41,14 +41,15 @@ use crate::net::tls::{connect_tls, upgrade_config_of};
 use crate::platform::{self, Handle};
 use crate::router::types::{BoxFuture, RouterError, TransportMessage};
 use crate::transport::{
-    ClientListener, Connect, Listeners, ReadyState, RouterClientTransport, Sent, caught,
-    caught_future, is_field_value,
+    ClientListener, Connect, Listeners, RECONNECTION_CANCELLED, ReadyState, RouterClientTransport,
+    Sent, TransportClientDisconnectOptions, TransportClientReconnectOptions, attempting, caught,
+    caught_future, hold_reconnection, is_field_value,
 };
 use crate::websocket::connection::{
     CLOSE_TIMEOUT, Commands, Connection, ConnectionBounds, ConnectionHooks, Ended, Failed,
-    GOING_AWAY, MAXIMUM_MESSAGE_BYTES, Wire, config_of,
+    GOING_AWAY, MAXIMUM_MESSAGE_BYTES, NORMAL, Wire, config_of,
 };
-use crate::websocket::heartbeat::hold_heartbeat;
+use crate::websocket::heartbeat::{Heartbeat, HeartbeatHooks, hold_heartbeat};
 
 #[cfg(test)]
 mod tests;
@@ -248,6 +249,7 @@ impl Wire for ClientSocket {
 #[derive(Debug)]
 struct Settings {
     close_timeout: Duration,
+    heartbeat: Duration,
     maximum_message_bytes: u64,
     tls: Option<Arc<ClientConfig>>,
 }
@@ -262,11 +264,20 @@ struct Attempt {
     timer: Mutex<Option<Armed>>,
 }
 
-// the open connection: what it is asked by, and the credential its upgrade carried
+// the open connection: what it is asked by, its heartbeat, and the credential its upgrade carried
 struct Open {
     serial: u64,
     commands: Commands,
+    heartbeat: Heartbeat,
     carried: Option<String>,
+}
+
+// a close handshake under way on the open connection: what its close says, and its end to tell
+// its waiter of
+struct Disconnecting {
+    serial: u64,
+    is_clean: bool,
+    done: oneshot::Sender<()>,
 }
 
 struct ClientState {
@@ -277,6 +288,7 @@ struct ClientState {
     attempt: Option<Arc<Attempt>>,
     serial: u64,
     current: Option<Open>,
+    disconnecting: Option<Disconnecting>,
     // * paused whole by its router, a pause outlasting its connection (spec 15.12)
     is_paused: bool,
 }
@@ -331,6 +343,14 @@ struct Opened {
 /// `maximum_message_bytes` fails its connection with 1009, reported on `on_error` naming
 /// `maximumMessageBytes`, then its unclean close; a protocol error is reported alike, failed with
 /// 1002. A server gone without its closing handshake tells its unclean close alone.
+///
+/// Its connection is pinged every `heartbeat` on the platform's clock, and dropped, its close
+/// unclean and no error told, at the beat after a ping it left unanswered. Its disconnect closes
+/// with 1000 and waits on its server's answer `close_timeout` at most, then drops the socket, its
+/// close told as the disconnect said. Paused by its router, it reads no more of its socket, so
+/// TCP's window paces its server, a pause outlasting its connection; a close it begins reads on to
+/// its server's Close (spec 15.12). Its reconnection connects again with the options of its last
+/// connect, replacing an open connection without a close.
 #[derive(Clone)]
 pub struct WebSocketTransportClient {
     inner: Arc<ClientInner>,
@@ -762,9 +782,21 @@ impl ClientInner {
                     commands.pause();
                 }
 
+                // * a drop closes as a network does, and its end tells it
+                let (pinging, dropping) = (commands.clone(), commands.clone());
+                let heartbeat = Heartbeat::new(
+                    HeartbeatHooks {
+                        ping: Box::new(move || pinging.ping()),
+                        drop: Box::new(move || dropping.drop_now()),
+                    },
+                    (self.settings.heartbeat, &self.platform),
+                );
+                let answering = heartbeat.clone();
+
                 state.current = Some(Open {
                     serial,
                     commands,
+                    heartbeat,
                     carried: credential,
                 });
                 state.ready = ReadyState::Open;
@@ -780,7 +812,7 @@ impl ClientInner {
                                 inner.deliver(serial, (data, is_text));
                             }
                         }),
-                        answered: Box::new(|| {}),
+                        answered: Box::new(move || answering.answer()),
                     };
                     let ended = connection.run(hooks).await;
 
@@ -829,10 +861,12 @@ impl ClientInner {
         self.tell(|listener: &dyn ClientListener| listener.on_message(message.clone()));
     }
 
-    // * its end: its one error, then its close, unclean, told even when a listener of its error
-    // panics (spec 15.1); a connection dropped or replaced tells nothing
+    // * its end: told to the close under way, which tells its close as it said; or as a close of
+    // the server's or the network's, its one error first when this side failed it of its own, then
+    // its unclean close, told even when a listener of its error panics (spec 15.1); a connection
+    // dropped or replaced tells nothing
     fn ended(&self, serial: u64, ended: &Ended) {
-        {
+        let disconnecting = {
             let mut state = locked(&self.state);
 
             if state
@@ -843,13 +877,29 @@ impl ClientInner {
                 return;
             }
 
-            state.current = None;
+            if let Some(open) = state.current.take() {
+                open.heartbeat.stop();
+            }
 
-            if state.ready == ReadyState::Reconnecting {
+            let disconnecting = state
+                .disconnecting
+                .take_if(|disconnecting| disconnecting.serial == serial);
+
+            if disconnecting.is_none() && state.ready == ReadyState::Reconnecting {
                 return;
             }
 
             state.ready = ReadyState::Closed;
+            drop(state);
+
+            disconnecting
+        };
+
+        if let Some(Disconnecting { is_clean, done, .. }) = disconnecting {
+            self.tell(|listener: &dyn ClientListener| listener.on_close(is_clean, false));
+            done.send(()).ok();
+
+            return;
         }
 
         if let Some(failed) = &ended.failure {
@@ -860,20 +910,24 @@ impl ClientInner {
     }
 
     // gives up on the connect under way, and drops the open connection, its close going out going
-    // away, 1001, unwaited: what it ends tells nothing
+    // away, 1001, unwaited: what it ends tells nothing; a close under way settles, its close told
+    // to no one
     fn drop_all(&self) {
-        let (attempt, open) = {
+        let (attempt, open, disconnecting) = {
             let mut state = locked(&self.state);
             let attempt = state.attempt.take();
             let open = state.current.take();
+            let disconnecting = state.disconnecting.take();
 
-            if matches!(state.ready, ReadyState::Open | ReadyState::Connecting) {
+            if disconnecting.is_some()
+                || matches!(state.ready, ReadyState::Open | ReadyState::Connecting)
+            {
                 state.ready = ReadyState::Closed;
             }
 
             drop(state);
 
-            (attempt, open)
+            (attempt, open, disconnecting)
         };
 
         if let Some(attempt) = attempt {
@@ -881,9 +935,20 @@ impl ClientInner {
         }
 
         if let Some(open) = open {
-            open.commands.close(GOING_AWAY);
+            released(&open);
+        }
+
+        if let Some(disconnecting) = disconnecting {
+            disconnecting.done.send(()).ok();
         }
     }
+}
+
+// drops a connection this side let go of, without waiting on it: its close goes out going away,
+// 1001, and its close timeout drops one whose server never answers; its end tells nothing
+fn released(open: &Open) {
+    open.heartbeat.stop();
+    open.commands.close(GOING_AWAY);
 }
 
 impl WebSocketTransportClient {
@@ -910,7 +975,7 @@ impl WebSocketTransportClient {
             "a close timeout",
             options.close_timeout.unwrap_or(CLOSE_TIMEOUT),
         )?;
-        hold_heartbeat(options.heartbeat.unwrap_or(HEARTBEAT))?;
+        let heartbeat = hold_heartbeat(options.heartbeat.unwrap_or(HEARTBEAT))?;
         let maximum_message_bytes = hold_count(
             "maximumMessageBytes",
             options
@@ -932,6 +997,7 @@ impl WebSocketTransportClient {
                 given: options.clock.clone(),
                 settings: Settings {
                     close_timeout,
+                    heartbeat,
                     maximum_message_bytes,
                     tls: options.tls.clone(),
                 },
@@ -944,6 +1010,7 @@ impl WebSocketTransportClient {
                     attempt: None,
                     serial: 0,
                     current: None,
+                    disconnecting: None,
                     is_paused: false,
                 }),
                 listeners: Listeners::default(),
@@ -1025,10 +1092,200 @@ impl WebSocketTransportClient {
         Ok(outcome)
     }
 
+    /// Closes its connection and tells its close, which says it was clean as its options say: with
+    /// 1000, settling once its server answered or its close timeout passed; or, quick, at once, its
+    /// socket dropped, its close going out going away, 1001, unwaited. A dispose meanwhile drops the
+    /// socket, and no close is told. It ends closed. Its close starts as it is called, the future
+    /// only waiting for its end.
+    ///
+    /// # Errors
+    ///
+    /// A [`TransportError::ReadyState`] when it is not open, as the future's outcome.
+    pub fn disconnect(
+        &self,
+        options: &TransportClientDisconnectOptions,
+    ) -> BoxFuture<Result<(), TransportError>> {
+        let inner = &self.inner;
+        let is_clean = options.is_clean.unwrap_or(true);
+        let is_quick = options.is_quick.unwrap_or(false);
+        let (done, ended) = oneshot::channel();
+        let open = {
+            let mut state = locked(&inner.state);
+            let open = state
+                .current
+                .take()
+                .filter(|_| state.ready == ReadyState::Open);
+            let Some(open) = open else {
+                let refused = ReadyStateError::new(state.ready.name(), ReadyState::Open.name());
+
+                return Box::pin(async move { Err(TransportError::ReadyState(refused)) });
+            };
+
+            if is_quick {
+                // a connection dropped tells nothing of its end: this close tells it
+                state.ready = ReadyState::Closed;
+                drop(state);
+
+                open
+            } else {
+                // ! a socket that closes reads on to its peer's Close, so its handshake never waits
+                // on its own pause (RFC 6455 §7.1.1); its end settles this close
+                state.ready = ReadyState::Closing;
+                state.disconnecting = Some(Disconnecting {
+                    serial: open.serial,
+                    is_clean,
+                    done,
+                });
+                open.heartbeat.stop();
+                open.commands.close(NORMAL);
+                state.current = Some(open);
+                drop(state);
+
+                return Box::pin(async move {
+                    ended.await.ok();
+
+                    Ok(())
+                });
+            }
+        };
+
+        released(&open);
+        inner.tell(|listener: &dyn ClientListener| listener.on_close(is_clean, true));
+
+        Box::pin(async { Ok(()) })
+    }
+
     /// Lets go of its connection at once, its close going out going away, 1001, unwaited and told
-    /// to no listener, and of a connect under way, which fails.
+    /// to no listener; of a close under way, which settles telling none; and of a connect under
+    /// way, which fails. A reconnection under way is not stopped by it, only the attempt it is
+    /// making: cancel its signal.
     pub fn dispose(&self) {
         self.inner.drop_all();
+    }
+
+    /// Connects again with the options of the last connect its guard let through, replacing an
+    /// open connection without a close, and tells `on_reconnect` as it starts. The first attempt
+    /// goes at once, each next one after its delay; attempts that run out end it closed, with a
+    /// [`TransportError::Reconnect`]; a cancel stops them, ending it closed, and one after an
+    /// attempt opened disconnects, which tells a close.
+    ///
+    /// # Errors
+    ///
+    /// A [`TransportError`] for a reconnection under way, a client never connected, one connecting
+    /// or closing, a fixed delay out of bounds (spec 1.4), or a signal cancelled already: each
+    /// refused before anything moves, in that order.
+    pub fn reconnect(
+        &self,
+        options: &TransportClientReconnectOptions,
+    ) -> Result<BoxFuture<Result<(), TransportError>>, TransportError> {
+        let inner = &self.inner;
+        let (target, replaced) = {
+            let mut state = locked(&inner.state);
+
+            if state.ready == ReadyState::Reconnecting {
+                return Err(TransportError::Refused(ProgrammerError::new(
+                    "the transport client is already reconnecting",
+                )));
+            }
+
+            let Some(target) = state.last_connect.clone() else {
+                return Err(TransportError::Refused(ProgrammerError::new(
+                    "the transport client was never connected",
+                )));
+            };
+
+            if matches!(state.ready, ReadyState::Connecting | ReadyState::Closing) {
+                return Err(TransportError::Refused(ProgrammerError::new(format!(
+                    "the transport client cannot reconnect while {}",
+                    state.ready.said()
+                ))));
+            }
+
+            // * a fixed delay out of bounds refused as it is given, before anything moves
+            hold_reconnection(options)?;
+
+            // before the drop below, so a signal cancelled already leaves an open connection alone
+            if options
+                .signal
+                .as_ref()
+                .is_some_and(CancellationToken::is_cancelled)
+            {
+                return Err(TransportError::cancelled(RECONNECTION_CANCELLED));
+            }
+
+            // taken out as it turns to reconnecting, so its end, however soon, tells nothing
+            let replaced = state.current.take();
+
+            state.ready = ReadyState::Reconnecting;
+            drop(state);
+
+            (target, replaced)
+        };
+
+        // each listener within its guard, its panic reported; the connection replaced goes
+        // whatever a listener does
+        inner.tell(|listener: &dyn ClientListener| listener.on_reconnect());
+
+        if let Some(replaced) = replaced {
+            released(&replaced);
+        }
+
+        let (reply, outcome) = oneshot::channel();
+        let client = self.clone();
+        let options = options.clone();
+
+        drop(platform::spawn(&inner.runtime, async move {
+            let reconnected = client.reconnecting((target, options)).await;
+
+            if reconnected.is_err() {
+                locked(&client.inner.state).ready = ReadyState::Closed;
+            }
+
+            reply.send(reconnected).ok();
+        }));
+
+        Ok(Box::pin(async move {
+            outcome
+                .await
+                .unwrap_or_else(|_dropped| Err(TransportError::cancelled(RECONNECTION_CANCELLED)))
+        }))
+    }
+
+    async fn reconnecting(
+        &self,
+        (target, options): (
+            WebSocketTransportClientConnectOptions,
+            TransportClientReconnectOptions,
+        ),
+    ) -> Result<(), TransportError> {
+        let inner = &self.inner;
+
+        attempting((&inner.clock, &options), |signal| {
+            locked(&inner.state).is_attempting = true;
+
+            let connecting = self.connect(&WebSocketTransportClientConnectOptions {
+                signal,
+                ..target.clone()
+            });
+
+            locked(&inner.state).is_attempting = false;
+
+            connecting
+        })
+        .await?;
+
+        // the last attempt opened as its signal was cancelled: what it opened goes with it
+        if options
+            .signal
+            .as_ref()
+            .is_some_and(CancellationToken::is_cancelled)
+        {
+            drop(self.disconnect(&TransportClientDisconnectOptions::default()));
+
+            return Err(TransportError::cancelled(RECONNECTION_CANCELLED));
+        }
+
+        Ok(())
     }
 }
 

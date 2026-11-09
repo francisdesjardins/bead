@@ -2323,7 +2323,9 @@ crate::websocket::client
   struct WebSocketTransportClient #[cfg(feature = "websocket")]
     fn new(options: &WebSocketTransportClientOptions) -> Result<Self, ProgrammerError>
     fn connect(&self, options: &WebSocketTransportClientConnectOptions) -> Connect
+    fn disconnect(&self, options: &TransportClientDisconnectOptions) -> BoxFuture<Result<(), TransportError>>
     fn dispose(&self)
+    fn reconnect(&self, options: &TransportClientReconnectOptions) -> Result<BoxFuture<Result<(), TransportError>>, TransportError>
     implements Debug, RouterClientTransport
     derives Clone #[cfg(feature = "websocket")]
 crate::websocket::connection
