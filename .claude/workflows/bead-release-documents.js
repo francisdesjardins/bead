@@ -15,9 +15,12 @@ export const meta = {
   ],
 };
 
-// args: { repo, scratch, venv, slug, version, since?, notes?, serial? }
+// args: { repo, scratch, venv, slug, version, since?, regroup?, notes?, serial? }
 // - version: the release the documents are brought to, `0.4.0`;
 // - since: the last release's tag (`v0.3.0`), the newest `v*` by default;
+// - regroup: true has the plan regroup the records, merged, split out or renamed where clearer,
+//   what is hard to undo, at xhigh; without it the plan runs at high, every record keeps its
+//   file, and a regrouping it would recommend is named in the plan, for a run with `regroup`;
 // - notes: what the stages need beyond this, in a few lines;
 // - serial: one agent at a time, each batch rewritten then verified before the next, where the
 //   quota asks it; the batches run side by side otherwise.
@@ -36,6 +39,10 @@ const VERSION = required('version');
 const SINCE = args.since || 'the newest `v*` tag (`git tag --list "v*" --sort=-v:refname`)';
 const OUT = `${SCRATCH}/${SLUG}`;
 const TMP = `TMP=${SCRATCH}/tmp TEMP=${SCRATCH}/tmp`;
+const PLAN_EFFORT = args.regroup ? 'xhigh' : 'high';
+const REGROUP = args.regroup
+  ? 'a record to merge, split, move in the index or rename, and why it is clearer so. No record changes its number, and no number is given twice.'
+  : 'a record to move in the index, and why it is clearer so. No record is merged, split or renamed in this run: every record keeps its file, `moves` is empty, and a regrouping you would recommend is named in the plan, with why, for a run with `regroup`.';
 
 const COMMON = `
 You work on Bead, at ${REPO}, on its release branch for ${VERSION}, checked out. **The documents** are every tracked file that states what holds and where Bead goes: the decision records (\`docs/decisions/*.md\`) and their index, \`spec/spec.md\` and \`spec/debugging.md\`, \`docs/support.md\`, the READMEs (the root's, \`builder/\`'s, each implementation's, each example's), \`CLAUDE.md\` and \`.claude/workflows/README.md\`. Not the CHANGELOG's released sections, nor what a generator writes. CLAUDE.md's rules are injected; these are the ones this work turns on:
@@ -95,10 +102,11 @@ const VERDICT = {
 phase('Plan');
 const planned = await agent(
   `${COMMON}
-# Your task: the plan (effort xhigh)
-Start from what changed since ${SINCE}: the CHANGELOG's section for ${VERSION}, \`git log\` and \`git diff --stat\`, and the diff of each document. **The documents in scope** are those whose files changed since ${SINCE}; those that cite a record, a section of the spec or a file that changed; and those a grep finds stating as ahead what the CHANGELOG's section lists (\`ahead\`, \`yet\`, \`until\`, \`will\`, \`planned\`, \`to come\`, the names of what landed). Read those whole; leave the others, naming them in the plan as out of scope and why. For each document in scope, say what moves: the sentences that state as coming what ${VERSION} carries; what is past and leaves; what stays ahead; in the spec, what moves in form and what is a finding for the user; a record to merge, split, move in the index or rename, and why it is clearer so. No record changes its number, and no number is given twice.
+# Your task: the plan (effort ${PLAN_EFFORT})
+Start from what changed since ${SINCE}: the CHANGELOG's section for ${VERSION}, \`git log\` and \`git diff --stat\`, and the diff of each document. **The documents in scope** are those whose files changed since ${SINCE}; those that cite a record, a section of the spec or a file that changed; and those a grep finds stating as ahead what the CHANGELOG's section lists (\`ahead\`, \`yet\`, \`until\`, \`will\`, \`planned\`, \`to come\`, the names of what landed). Read those whole; leave the others, naming them in the plan as out of scope and why. For each document in scope, say what moves: the sentences that state as coming what ${VERSION} carries; what is past and leaves; what stays ahead; in the spec, what moves in form and what is a finding for the user; ${REGROUP}
 Write ${OUT}/plan.md: the plan, document by document, and the records' \`Where Bead goes\` as it is to read. Return \`moves\`, every record whose file changes, \`from\` and \`to\` as four digits and \`file\` a file name: a merged record, \`to\` its successor and \`file\` the successor's file; a renamed one, \`to\` its own number and \`file\` its new name; a part split out, \`from\` the record it leaves, \`to\` the next number never given and \`file\` its file; and \`batches\`: the documents in scope in as many batches as their weight needs, one to six, of about equal weight, the spec and its companion a batch of their own when either is in scope, its key \`spec\`, each a list of the file paths as they are now, with the task for its rewriter: the moves this plan asks of those documents, a record's merges and splits whole within one batch.`,
-  { label: 'plan', phase: 'Plan', effort: 'xhigh', schema: PLAN }
+  // * xhigh where the records regroup, what is hard to undo; high for the documents' tense alone
+  { label: 'plan', phase: 'Plan', effort: PLAN_EFFORT, schema: PLAN }
 );
 
 const MOVES = JSON.stringify(planned ? planned.moves : [], null, 1);
@@ -122,16 +130,16 @@ The plan is ${OUT}/plan.md; the records' moves (merged, renamed, split out):
 ${MOVES}
 The batch's documents as they are in the repository (${batch.documents.join(', ')}), and as rewritten, under ${OUT}/documents/. Its rewriter's report:
 ${report}
-Hold the rewrite to this, and fix under ${OUT}/documents/ what fails:
-- each decision, consequence, reason, cost, refused alternative and Tenth Man answer of the old records is in the new ones, or its leaving is a past the plan names;
-- in the spec and its companion, no requirement changed its meaning: \`git diff --word-diff\` of old against new, each changed MUST, SHOULD, MAY, value, order or scope put back and named in \`forTheUser\`;
-- each sentence in the present holds at HEAD, read in the code and the spec, not in the report;
-- nothing that ${VERSION} carries is still said as coming, and nothing still ahead is said as done;
-- no sentence narrates how things were, or how the document came to be;
+Your scope is the batch's diff against HEAD, each document's \`git diff --no-index --word-diff <its path> ${OUT}/documents/<its path>\` (a renamed record's against its old path): a sentence the rewrite left as it was is not yours to hold again. Hold the rewrite to this, and fix under ${OUT}/documents/ what fails:
+- nothing lost: each decision, consequence, reason, cost, refused alternative and Tenth Man answer the diff takes out of the old records is in the new ones, or its leaving is a past the plan names;
+- in the spec and its companion, no requirement changed its meaning: each changed MUST, SHOULD, MAY, value, order or scope put back and named in \`forTheUser\`;
+- each sentence the diff adds or changes in the present holds at HEAD, read in the code and the spec, not in the report;
+- nothing that ${VERSION} carries is still said as coming, and nothing still ahead is said as done: a grep of the new documents for what the CHANGELOG's section lists;
+- no sentence the diff adds narrates how things were, or how the document came to be;
 - every citation of a merged record names its successor, of a renamed one its new file name, and every link resolves once the files move; no number is given twice.
 Return \`holds\`, what you \`fixed\`, what you \`left\` for the integration, each with its file and line, and \`forTheUser\`.`,
     // * xhigh where a requirement's meaning could move unseen, the spec and its companion; high
-    // for the records and the READMEs, whose claims the verifier holds to the code
+    // for the records and the READMEs, whose changed claims the verifier holds to the code
     {
       label: `verify:${batch.key}`,
       phase: 'Verify',
@@ -155,7 +163,7 @@ const results = args.serial ? await serially(batches) : await pipeline(batches, 
 phase('Integrate');
 const integration = await agent(
   `${COMMON}
-# Your task: integrate (effort high)
+# Your task: integrate (effort medium)
 The plan is ${OUT}/plan.md; the records' moves (merged, renamed, split out):
 ${MOVES}
 The verified documents are under ${OUT}/documents/. The verdicts:
@@ -166,7 +174,8 @@ ${JSON.stringify(results.filter(Boolean), null, 1)}
 4. The CHANGELOG's section for ${VERSION}, under Changed: one line that the documents are brought to ${VERSION}, and, where records merged, each merged number and its successor, so that a reader of an earlier release finds each one.
 5. The gates: every generator of \`spec/generators/\` the README lists and \`${VENV} spec/check.py --write-units\`, which follows a renumbered key and acknowledges no text, then \`${VENV} spec/check.py\`, nothing moving but what a clause's move asks, each unit whose text moved a finding for the user; \`node tools/check-format.mjs\`, \`node tools/check-links.mjs\`, \`node tools/check-versions.mjs\` (a spec or companion that changed and whose version prepare did not move is a finding for the user: \`node tools/release.mjs prepare\` is run again with its move, never here); \`yarn check\` in \`implementations/typescript\` and in \`builder\` when a comment moved there; \`dotnet format Bead.slnx --verify-no-changes\` in \`implementations/dotnet\` when one moved there; the names check over every file \`git status --porcelain\` lists.
 Propose one commit, \`docs: the documents as of ${VERSION}\`, its body one or two lines and no attribution, in ${OUT}/commit.txt; run \`node tools/check-commits.mjs --message\` and the names check over it. Return what moved, the map, each gate's result, and every finding for the user, the verifiers' among them.`,
-  { label: 'integrate', phase: 'Integrate', effort: 'high' }
+  // * medium: the documents are verified, what is left is moving files, citations and gates
+  { label: 'integrate', phase: 'Integrate', effort: 'medium' }
 );
 
 return { plan: planned, verdicts: results, integration };
