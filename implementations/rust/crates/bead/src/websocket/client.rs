@@ -99,6 +99,8 @@ pub struct WebSocketTransportClientOptions {
     /// platform's clock, whatever it is given, since they bound what the platform's socket does
     /// (decision 0011).
     pub clock: Option<SharedClock>,
+    /// The tokio runtime it runs on, its time and IO drivers enabled: the current one when none.
+    pub runtime: Option<Handle>,
     /// How long a close it begins waits for its server's answer before it drops the socket:
     /// [`CLOSE_TIMEOUT`] when none; [`crate::NEVER`] waits without end, arming no timer.
     pub close_timeout: Option<Duration>,
@@ -956,10 +958,11 @@ impl WebSocketTransportClient {
     ///
     /// # Errors
     ///
-    /// A [`ProgrammerError`] outside a tokio runtime, or on one without its time or its IO driver;
-    /// for a close timeout or a heartbeat spec 1.4 does not hold; a bound of 0.
+    /// A [`ProgrammerError`] outside a tokio runtime, given none, or on one without its time or its
+    /// IO driver; for a close timeout or a heartbeat spec 1.4 does not hold; a bound of 0.
     pub fn new(options: &WebSocketTransportClientOptions) -> Result<Self, ProgrammerError> {
-        let runtime = platform::socket_runtime_of(None, "a WebSocket transport client")?;
+        let runtime =
+            platform::socket_runtime_of(options.runtime.as_ref(), "a WebSocket transport client")?;
         let platform: SharedClock = Arc::new(SystemClock::on(runtime.clone()));
 
         Self::on_platform((runtime, platform), options)

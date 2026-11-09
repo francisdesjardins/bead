@@ -968,3 +968,36 @@ async fn fails_a_send_before_it_connects() {
     );
     unconnected.dispose().await;
 }
+
+// this side's own: the client's runtime is its transport's, every layer on it
+#[test]
+fn hands_its_runtime_to_its_transport_every_layer_on_it() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .expect("a runtime");
+    let client = WebSocketClient::new(&WebSocketClientOptions {
+        client: Some(crate::client::ClientOptions {
+            runtime: Some(runtime.handle().clone()),
+            ..crate::client::ClientOptions::default()
+        }),
+        ..WebSocketClientOptions::default()
+    })
+    .expect("built outside any runtime, on the one given");
+    let served = runtime.block_on(served());
+
+    runtime.block_on(connect(&client, served.port));
+    assert_eq!(
+        runtime
+            .block_on(outcome_of(
+                call_of(&client, (&echo(), "a"), &RequestOptions::default()),
+                PATIENCE,
+            ))
+            .ok(),
+        Some("a".to_owned()),
+        "answered"
+    );
+    runtime.block_on(client.dispose());
+    runtime.block_on(served.server.dispose()).expect("stopped");
+}

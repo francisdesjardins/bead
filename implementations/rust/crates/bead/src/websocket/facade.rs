@@ -111,6 +111,14 @@ impl WebSocketServer {
             )));
         }
 
+        // * every layer on one runtime: the transport's own where its options name one, else the
+        // server's
+        if transport_options.runtime.is_none() {
+            transport_options
+                .runtime
+                .clone_from(&server_options.runtime);
+        }
+
         transport_options.maximum_message_bytes = Some(message_bytes_of(
             transport_options.maximum_message_bytes,
             &limits,
@@ -234,6 +242,14 @@ impl WebSocketClient {
         let limits = limits_of(&client_options.limits.clone().unwrap_or_default())?;
         let mut transport_options = options.transport.clone().unwrap_or_default();
 
+        // * every layer on one runtime: the transport's own where its options name one, else the
+        // client's
+        transport_options.runtime = Some(
+            transport_options
+                .runtime
+                .clone()
+                .unwrap_or_else(|| runtime.clone()),
+        );
         transport_options.maximum_message_bytes = Some(message_bytes_of(
             transport_options.maximum_message_bytes,
             &limits,

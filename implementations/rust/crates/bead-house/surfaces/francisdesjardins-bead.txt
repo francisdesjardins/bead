@@ -2306,6 +2306,7 @@ crate::websocket::client
   type CredentialProvider = Arc<dyn Fn(CancellationToken) -> BoxFuture<Result<String, CredentialProviderError>> + Send + Sync,> #[cfg(feature = "websocket")]
   struct WebSocketTransportClientOptions #[non_exhaustive] #[cfg(feature = "websocket")]
     pub clock: Option<SharedClock> #[cfg(feature = "websocket")]
+    pub runtime: Option<Handle> #[cfg(feature = "websocket")]
     pub close_timeout: Option<Duration> #[cfg(feature = "websocket")]
     pub heartbeat: Option<Duration> #[cfg(feature = "websocket")]
     pub maximum_message_bytes: Option<u64> #[cfg(feature = "websocket")]

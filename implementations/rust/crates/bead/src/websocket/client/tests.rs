@@ -3475,3 +3475,52 @@ async fn a_paused_connection_closes_cleanly() {
     );
     client.dispose();
 }
+
+// ── Its runtime ──────────────────────────────────────────────────────────────────────────────
+
+// this side's own, as its server's: a client built outside any runtime runs on the one it is given,
+// and none given refuses it as it is built
+#[test]
+fn runs_on_the_runtime_it_is_given_and_on_the_current_one_alone_when_given_none() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .expect("a runtime");
+
+    assert_eq!(
+        WebSocketTransportClient::new(&WebSocketTransportClientOptions::default())
+            .expect_err("no runtime")
+            .message(),
+        "a WebSocket transport client is built within a tokio runtime, or given its handle",
+        "none given, outside any runtime"
+    );
+
+    let client = WebSocketTransportClient::new(&WebSocketTransportClientOptions {
+        runtime: Some(runtime.handle().clone()),
+        ..WebSocketTransportClientOptions::default()
+    })
+    .expect("built outside any runtime, on the one given");
+    let server = runtime.block_on(async {
+        WebSocketTransportServer::new(&WebSocketTransportServerOptions::default())
+            .expect("a server")
+    });
+    let started = runtime
+        .block_on(server.start(&TransportServerStartOptions {
+            address: Some("127.0.0.1".to_owned()),
+            find_open_port: Some(true),
+            ..TransportServerStartOptions::default()
+        }))
+        .expect("started");
+
+    // its connect and its connection's tasks run on the runtime given
+    runtime
+        .block_on(client.connect(&WebSocketTransportClientConnectOptions::new(
+            "127.0.0.1",
+            started.port,
+        )))
+        .expect("connected");
+    assert_eq!(client.ready_state(), ReadyState::Open, "open");
+    runtime.block_on(client.close());
+    runtime.block_on(server.stop()).expect("stopped");
+}
