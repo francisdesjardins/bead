@@ -22,8 +22,7 @@
   [0045](0045-a-router-takes-what-its-application-makes-in-one-queue-behind-the-turn-that-tells-it.md)'s,
   and a connection's reads paced by what its router has not taken, on every side,
   [0046](0046-a-router-paces-each-connections-reads-by-what-it-has-not-taken.md)'s. Ahead: Rust's
-  service client, the client half of its service layer, in its core; then its transports over
-  sockets, WebSocket (RFC 6455) and HTTP/1.1 and HTTP/2 (RFC 9110, 9112, 9113), with the interop
+  transports over sockets, WebSocket (RFC 6455) and HTTP/1.1 and HTTP/2 (RFC 9110, 9112, 9113), with the interop
   both ways with the TypeScript and C# sides; then its broker bindings, MQTT 5 and AMQP 1.0; its
   gateway; and beadc's Rust target, with `examples/hello`'s Rust half and the validators of a
   blueprint's rules generated for it, or beadc refusing to generate them
@@ -125,10 +124,8 @@ plays**, deleting its rows ahead ([0004](0004-one-behaviour-in-every-language.md
 `spec/check.py`'s `SIDES` holding the side's twins, its reads and its counts, so a change that
 reaches across the languages lands on the three sides. Of the service layer, the core holds the
 descriptors, the failures' catalogue, the managers' requesters and resolvers and the server of one
-service, `ServiceServer`; its client half, the twin of `createServiceClient` and of
-`ServiceClient<TService>`, is ahead in the core, the matrix's open row `Rust's service client`.
-Ahead, in this order: Rust's service client, the client half of its service layer, in its core;
-then its transports over sockets, WebSocket (RFC 6455) and HTTP/1.1 and HTTP/2 (RFC 9110, 9112,
+service, `ServiceServer`, and its client half, `ServiceClient`, the twin of `createServiceClient`
+and of `ServiceClient<TService>`. Ahead, in this order: its transports over sockets, WebSocket (RFC 6455) and HTTP/1.1 and HTTP/2 (RFC 9110, 9112,
 9113), with the interop both ways with the TypeScript and C# sides; then its broker bindings,
 MQTT 5 and AMQP 1.0; its gateway; and beadc's Rust target, with `examples/hello`'s Rust half and
 the validators of a blueprint's rules generated for it, or beadc refusing to generate them
@@ -141,7 +138,7 @@ The Rust side is a partial side, under [0004](0004-one-behaviour-in-every-langua
 part it does not play is an open row of [the support matrix](../support.md), ahead with the stage
 that brings it, and, where a conformance file plays that part, a row of `spec/check.py`'s `AHEAD`:
 `Rust's transports over HTTP and WebSocket`, `Rust's gateway`, `Rust's broker bindings` and
-`Rust's beadc target`, each a row of the matrix and of `AHEAD`; `Rust's service client`,
+`Rust's beadc target`, each a row of the matrix and of `AHEAD`;
 `Rust's service manager over a router of the application's own` and `Rust's interop`, which no
 conformance file plays, rows of the matrix alone. **Its tests are told from its sources by a
 predicate**, since a suffix does not tell them, both being `.rs`: a module's
