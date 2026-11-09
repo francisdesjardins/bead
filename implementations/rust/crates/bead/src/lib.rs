@@ -18,6 +18,7 @@ mod duration;
 mod envelope;
 mod errors;
 mod failure;
+mod http_policy;
 mod identity;
 mod joined;
 pub mod json;
@@ -93,6 +94,7 @@ pub use errors::{
     ReconnectError, Refusal, ResolverError, TransportError,
 };
 pub use failure::{Failure, FailureOrigin, ProcedureAddress};
+pub use http_policy::{HttpPolicy, HttpPolicyOptions};
 pub use identity::{DeclarationWay, Deprecation, IdentityRefusal, Procedure};
 pub use joined::JoinedServerTransport;
 pub use jwt_verifier::{
@@ -183,7 +185,7 @@ pub mod internal {
         read_envelope, read_failure, read_header, read_prefix, write_envelope, write_header,
     };
     pub use crate::identity::{are_one_name, is_procedure_name};
-    pub use crate::judgement::{hosts, proxies};
+    pub use crate::judgement::{hosts, items, proxies};
     pub use crate::jwt_verifier::{ReadJwt, read_jwt, verify_jwt};
     pub use crate::router::types::{limits_of, session_key_of};
 }

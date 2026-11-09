@@ -110,6 +110,8 @@ crate
   use failure::Failure
   use failure::FailureOrigin
   use failure::ProcedureAddress
+  use http_policy::HttpPolicy
+  use http_policy::HttpPolicyOptions
   use identity::DeclarationWay
   use identity::Deprecation
   use identity::IdentityRefusal
@@ -1002,6 +1004,38 @@ crate::failure
     fn record(&self) -> FailureRecord
     implements Display, Error
     derives Clone, Debug
+crate::http_policy
+  struct HttpPolicyOptions #[non_exhaustive]
+    pub body_bytes_budget: Option<u64>
+    pub body_grace_period: Option<Duration>
+    pub headers_timeout: Option<Duration>
+    pub hosts: Option<Vec<String>>
+    pub maximum_body_bytes: Option<u64>
+    pub maximum_connections: Option<u64>
+    pub maximum_connections_per_address: Option<u64>
+    pub minimum_body_bytes_per_second: Option<u64>
+    pub minimum_send_bytes_per_second: Option<u64>
+    pub origins: Option<Vec<String>>
+    pub send_grace_period: Option<Duration>
+    pub trusted_proxies: Option<Vec<String>>
+    pub unnamed_proxies: Option<u64>
+    derives Clone, Debug, Default
+  struct HttpPolicy
+    fn of(options: &HttpPolicyOptions) -> Result<Self, ProgrammerError>
+    const fn body_bytes_budget(&self) -> Option<u64>
+    const fn body_grace_period(&self) -> Option<Duration>
+    const fn headers_timeout(&self) -> Option<Duration>
+    fn hosts(&self) -> Option<&[String]>
+    const fn maximum_body_bytes(&self) -> Option<u64>
+    const fn maximum_connections(&self) -> Option<u64>
+    const fn maximum_connections_per_address(&self) -> Option<u64>
+    const fn minimum_body_bytes_per_second(&self) -> Option<u64>
+    const fn minimum_send_bytes_per_second(&self) -> Option<u64>
+    fn origins(&self) -> Option<&[String]>
+    const fn send_grace_period(&self) -> Option<Duration>
+    fn trusted_proxies(&self) -> Option<&[String]>
+    const fn unnamed_proxies(&self) -> Option<u64>
+    derives Clone, Debug, Eq, PartialEq
 crate::identity
   enum IdentityRefusal #[non_exhaustive]
     OutOfItsRange
@@ -1072,6 +1106,7 @@ crate::json::to_value
   fn to_value<T: Serialize + ?Sized>(value: &T) -> Result<Value, JsonRefusal>
 crate::judgement
   mod hosts
+  mod items
   mod proxies
 crate::judgement::hosts
   const HOST_REFUSAL: &str
@@ -1100,12 +1135,41 @@ crate::judgement::hosts
   fn host_part_of(authority: &str) -> &str
   fn request_target_of(target: Option<&str>) -> Option<RequestTarget<'_>>
   fn is_well_formed_host(lines: &[&str], is_required: bool) -> bool
+  struct Authority<'a> #[non_exhaustive]
+    pub authority: Option<&'a str>
+    derives Clone, Copy, Debug, Eq, PartialEq
+  struct HostRequest<'a> #[non_exhaustive]
+    pub is_required: bool
+    pub target: Option<RequestTarget<'a>>
+    const fn new(is_required: bool, target: Option<RequestTarget<'a>>) -> Self
+    derives Clone, Copy, Debug
+  fn authority_of<'a>(host_lines: &[&'a str], request: &HostRequest<'a>) -> Option<Authority<'a>>
   fn is_taken_host(authority: Option<&str>, hosts: &[String]) -> bool
   fn own_authority_of<'a>(authority: Option<&'a str>, hosts: &[String]) -> Option<&'a str>
   fn is_taken_origin(origin: Option<&str>, taken: &TakenOrigins<'_>) -> bool
   fn is_listed_origin(origin: Option<&str>, origins: &[String]) -> bool
   fn assert_hosts(hosts: &[String]) -> Result<(), ProgrammerError>
   fn assert_origins(origins: &[String]) -> Result<(), ProgrammerError>
+crate::judgement::items
+  enum BareItem
+    Boolean(bool)
+    ByteSequence(Vec<u8>)
+    Date(i64)
+    Decimal(f64)
+    DisplayString(String)
+    Integer(i64)
+    String(String)
+    Token(String)
+    derives Clone, Debug, PartialEq
+  struct Parameter #[non_exhaustive]
+    pub key: String
+    pub value: BareItem
+    derives Clone, Debug, PartialEq
+  struct Item #[non_exhaustive]
+    pub bare_item: BareItem
+    pub parameters: Vec<Parameter>
+    derives Clone, Debug, PartialEq
+  fn parse_item(value: &str) -> Option<Item>
 crate::judgement::proxies
   const MAXIMUM_UNNAMED_PROXIES: u64
   struct TrustedProxies
@@ -2165,6 +2229,7 @@ crate::internal
   use crate::identity::are_one_name
   use crate::identity::is_procedure_name
   use crate::judgement::hosts
+  use crate::judgement::items
   use crate::judgement::proxies
   use crate::jwt_verifier::ReadJwt
   use crate::jwt_verifier::read_jwt

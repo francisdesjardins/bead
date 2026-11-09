@@ -194,10 +194,11 @@ crate's list of its public items anew, its diff the change's to review.
 ## Fuzzing and the bench
 
 `node ../../tools/fuzz.mjs build rust`, then `run rust
-envelope|payload-codecs|debug-filter|jwt|broker-parcel|proto-codecs`, fuzzes the side's six targets
-with cargo-fuzz on the nightly the tool pins by its date, on Linux or WSL; the transports' two come
-with them. [`fuzz.yml`](../../.github/workflows/fuzz.yml) runs the six every week, each ten minutes,
-its corpus kept between runs ([the root README](../../README.md#fuzzing)).
+envelope|payload-codecs|http-fields|debug-filter|jwt|broker-parcel|proto-codecs`, fuzzes the side's
+seven targets with cargo-fuzz on the nightly the tool pins by its date, on Linux or WSL;
+`ws-handshake` comes with the WebSocket handshake. [`fuzz.yml`](../../.github/workflows/fuzz.yml)
+runs the seven every week, each ten minutes, its corpus kept between runs ([the root
+README](../../README.md#fuzzing)).
 `crates/bead/tests/envelope_fuzz.rs` and `broker_parcel_fuzz.rs` feed the envelope readers and the
 parcel's seeded mutations of `spec/vectors.json` in the suite, from `bead::testing::mutations`, the
 generator every side shares. `node ../../tools/bench-release.mjs rust` runs bead-bench in fresh

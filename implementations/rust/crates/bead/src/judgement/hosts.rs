@@ -419,6 +419,61 @@ pub fn is_well_formed_host(lines: &[&str], is_required: bool) -> bool {
     }
 }
 
+/// A request's authority (spec 15.12), once HTTP took its form.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Authority<'a> {
+    /// The authority it names: none when it names none.
+    pub authority: Option<&'a str>,
+}
+
+/// What an HTTP/1 request's authority is read from beside its `Host`, as [`authority_of`] takes
+/// it.
+#[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
+pub struct HostRequest<'a> {
+    /// Whether it requires a `Host`, as an HTTP/1.1 request does and an HTTP/1.0 one does not.
+    pub is_required: bool,
+    /// Its target, as [`request_target_of`] reads it: none for one HTTP refuses.
+    pub target: Option<RequestTarget<'a>>,
+}
+
+impl<'a> HostRequest<'a> {
+    /// A request that requires a `Host` or not, of `target`.
+    #[must_use]
+    pub const fn new(is_required: bool, target: Option<RequestTarget<'a>>) -> Self {
+        Self {
+            is_required,
+            target,
+        }
+    }
+}
+
+/// An HTTP/1 request's authority (spec 15.12), from its `Host` field lines as they came and its
+/// target.
+///
+/// An absolute-form target's, its `Host` ignored but for being one line, or none where none is
+/// required; otherwise its `Host`, when [`is_well_formed_host`] takes it, and none when it has
+/// none. None for what HTTP answers 400 of its own.
+#[must_use]
+pub fn authority_of<'a>(
+    host_lines: &[&'a str],
+    request: &HostRequest<'a>,
+) -> Option<Authority<'a>> {
+    let target = request.target?;
+
+    if let Some(authority) = target.authority {
+        return (host_lines.len() == 1 || (host_lines.is_empty() && !request.is_required))
+            .then_some(Authority {
+                authority: Some(authority),
+            });
+    }
+
+    is_well_formed_host(host_lines, request.is_required).then(|| Authority {
+        authority: host_lines.first().map(|line| trimmed(line)),
+    })
+}
+
 /// Whether a request that names `authority` is taken (spec 15.12), by its host, its port aside,
 /// compared ASCII case-insensitively (RFC 9110 §4.2.3).
 ///

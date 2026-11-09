@@ -119,8 +119,8 @@ HTTPGateway	IHTTPGateway [record], createHTTPGateway [function]	HttpGateway [rec
 HTTPGatewayOptions	IHTTPGatewayOptions [record]	HttpGatewayOptions [record]	-	same
 HTTPGatewayStartOptions	IHTTPGatewayStartOptions [record]	HttpGatewayStartOptions [record]	-	same
 HttpPayload	HttpPayload [choice]	HttpPayload [record]	-	same
-HTTPPolicy	IHTTPPolicy [record]	HttpPolicy [record]	-	same
-HTTPPolicyOptions	IHTTPPolicyOptions [record]	HttpPolicyOptions [record]	-	same
+HTTPPolicy	IHTTPPolicy [record]	HttpPolicy [record]	HttpPolicy [record]	same
+HTTPPolicyOptions	IHTTPPolicyOptions [record]	HttpPolicyOptions [record]	HttpPolicyOptions [record]	same
 HttpRouteTemplate	IHttpRouteTemplate [record]	HttpRouteTemplate [record]	-	same
 HTTPServer	HTTPServer [record], createHTTPServer [function]	HttpServer [record]	-	same
 HTTPServerOptions	IHTTPServerOptions [record]	HttpServerOptions [record]	-	same

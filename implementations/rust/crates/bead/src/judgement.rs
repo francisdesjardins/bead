@@ -8,4 +8,5 @@
 //! conformance players reach it through `bead::internal`.
 
 pub mod hosts;
+pub mod items;
 pub mod proxies;

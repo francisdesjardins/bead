@@ -92,6 +92,7 @@ describe('the targets', () => {
     assert.deepEqual(TARGETS.rust, [
       'envelope',
       'payload-codecs',
+      'http-fields',
       'debug-filter',
       'jwt',
       'broker-parcel',
@@ -110,7 +111,7 @@ describe('the targets', () => {
       inputs: [],
       flags: [],
     });
-    assert.equal(argumentsOf(['run', 'rust', 'http-fields']), undefined);
+    assert.equal(argumentsOf(['run', 'rust', 'ws-handshake']), undefined);
   });
 
   test("keep each in its side's folder, and the blueprint's beside beadc", () => {

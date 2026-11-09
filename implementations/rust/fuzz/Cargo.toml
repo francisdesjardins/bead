@@ -41,6 +41,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "http-fields"
+path = "fuzz_targets/http_fields.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "debug-filter"
 path = "fuzz_targets/debug_filter.rs"
 test = false

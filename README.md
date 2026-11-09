@@ -748,10 +748,10 @@ written again, its writer refusing exactly what it documents, and what it writes
 same parcel and the same bytes; `proto-codecs`, the `proto` codecs over `spec/codecs.proto`'s
 `Probe` (spec 17.9), the first three bytes drawing a path, a depth and a number of unknown groups to
 wrap what reads, which its writer then refuses as nested past 100 or writes so that its reader takes
-it back. The Rust side fuzzes six of them, those its core holds, `envelope`, `payload-codecs`,
-`debug-filter`, `jwt`, `broker-parcel` and `proto-codecs`, with cargo-fuzz on the nightly
-`tools/fuzz.mjs` pins by its date, on Linux or WSL, from `implementations/rust/fuzz/`, `http-fields`
-and `ws-handshake` coming with its transports. The TypeScript side fuzzes a ninth, `blueprint`,
+it back. The Rust side fuzzes seven of them, those its core holds, `envelope`, `payload-codecs`,
+`http-fields`, `debug-filter`, `jwt`, `broker-parcel` and `proto-codecs`, with cargo-fuzz on the
+nightly `tools/fuzz.mjs` pins by its date, on Linux or WSL, from `implementations/rust/fuzz/`,
+`ws-handshake` coming with its WebSocket handshake. The TypeScript side fuzzes a ninth, `blueprint`,
 beadc's blueprint reader, its JSON, its schema and its rules, and its form written back and read
 again; beadc has no C# side, so it has no twin. A target lets its parser's documented refusal pass;
 any other exception or a panic, an input past 1 s, or memory past its bound, 256 MiB of its own on

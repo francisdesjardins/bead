@@ -24,17 +24,17 @@ use bead::{
     BrokerParticipantOptions, BrokerPublication, BrokerStart, BrokerSubscription,
     BrokerTransportClientConnectOptions, BrokerTransportClientOptions, BrokerTransportServer,
     BrokerTransportServerOptions, Call, CallError, ClientListener, ConnectionHandle, DebugEvent,
-    DestinationOptions, DurationRefusal, LIMIT_DEFAULTS, MemoryBroker, MemoryBrokerAdapter,
-    MemoryBrokerAdapterOptions, MemoryBrokerOptions, MemoryTransportClient,
-    MemoryTransportClientConnectOptions, MemoryTransportClientOptions, MemoryTransportServer,
-    MemoryTransportServerOptions, NEVER, Procedure, ProgrammerError, RawCodec, ReadyState, Refusal,
-    RelayLeg, RelayOptions, RelayRouter, RelayTarget, RequestDefaults, RequestDependencies,
-    RequestHeader, RequestOptions, ResolvedRequestOptions, RouterClient, RouterClientOptions,
-    RouterClientTransport, RouterError, RouterLimits, RouterLimitsOptions, RouterRequest,
-    RouterServer, RouterServerOptions, Sent, Server, ServerListener, ServerOptions,
-    ServerTransport, ServiceManager, ServiceManagerOptions, ServiceRouter, SessionManagerOptions,
-    SharedClock, TransportClientReconnectDelay, TransportClientReconnectOptions, TransportError,
-    TransportMessage,
+    DestinationOptions, DurationRefusal, HttpPolicy, HttpPolicyOptions, LIMIT_DEFAULTS,
+    MemoryBroker, MemoryBrokerAdapter, MemoryBrokerAdapterOptions, MemoryBrokerOptions,
+    MemoryTransportClient, MemoryTransportClientConnectOptions, MemoryTransportClientOptions,
+    MemoryTransportServer, MemoryTransportServerOptions, NEVER, Procedure, ProgrammerError,
+    RawCodec, ReadyState, Refusal, RelayLeg, RelayOptions, RelayRouter, RelayTarget,
+    RequestDefaults, RequestDependencies, RequestHeader, RequestOptions, ResolvedRequestOptions,
+    RouterClient, RouterClientOptions, RouterClientTransport, RouterError, RouterLimits,
+    RouterLimitsOptions, RouterRequest, RouterServer, RouterServerOptions, Sent, Server,
+    ServerListener, ServerOptions, ServerTransport, ServiceManager, ServiceManagerOptions,
+    ServiceRouter, SessionManagerOptions, SharedClock, TransportClientReconnectDelay,
+    TransportClientReconnectOptions, TransportError, TransportMessage,
 };
 use bytes::Bytes;
 use libtest_mimic::{Arguments, Failed, Trial};
@@ -49,7 +49,7 @@ const OTHER_TIMEOUT: Duration = Duration::from_secs(1);
 
 // the places this side plays, by the id the file keys them by; every other is ahead, with the
 // stage that brings it: its transports over HTTP and WebSocket, its broker bindings, its gateway
-const PLACES: [&str; 17] = [
+const PLACES: [&str; 21] = [
     "call.timeout",
     "serviceManager.defaultTimeout",
     "router.reservation",
@@ -67,6 +67,10 @@ const PLACES: [&str; 17] = [
     "brokerTransportServer.acceptTimeout",
     "brokerParticipant.bodyGracePeriod",
     "brokerParticipant.reconnectionDelay",
+    "httpTransportServer.maximumWait",
+    "httpTransportServer.sendGracePeriod",
+    "httpTransportServer.headersTimeout",
+    "httpTransportServer.bodyGracePeriod",
 ];
 
 // the ways of each place this side has, the others its rows excuse it from
@@ -95,15 +99,23 @@ fn ways_of(place: &str) -> &'static [&'static str] {
         "transportClient.reconnectionDelay" | "brokerParticipant.reconnectionDelay" => {
             &["function", "number"]
         }
+        "httpTransportServer.sendGracePeriod"
+        | "httpTransportServer.headersTimeout"
+        | "httpTransportServer.bodyGracePeriod" => &["policy"],
         _ => &[],
     }
 }
 
 // the ways of a place played that are ahead, each with the stage that brings it: a connect's
-// timeout over HTTP and WebSocket with Rust's transports over them
+// timeout over HTTP and WebSocket, and an HTTP server's options, with Rust's transports over them;
+// a gateway's with its gateway
 fn ahead_of(place: &str) -> &'static [&'static str] {
     match place {
         "transportClient.connectTimeout" => &["http", "webSocket"],
+        "httpTransportServer.maximumWait" => &["options"],
+        "httpTransportServer.sendGracePeriod"
+        | "httpTransportServer.headersTimeout"
+        | "httpTransportServer.bodyGracePeriod" => &["options", "gateway"],
         _ => &[],
     }
 }
@@ -1560,6 +1572,35 @@ async fn participant_reconnection_delay_by_number(given: Option<Duration>) -> Pl
     participant_reconnection_delay_of(TransportClientReconnectDelay::Fixed(given)).await
 }
 
+// ── An HTTP policy ───────────────────────────────────────────────────────────────────────────
+
+// an HTTP policy's member of its name, as it is made: what it holds of the duration given, a send's
+// grace and a head's timeout by their refusal alone; refused, no policy made
+fn policy_way(member: &str, given: Option<Duration>) -> Played {
+    let mut options = HttpPolicyOptions::default();
+
+    match member {
+        "sendGracePeriod" => options.send_grace_period = given,
+        "headersTimeout" => options.headers_timeout = given,
+        "bodyGracePeriod" => options.body_grace_period = given,
+        _ => return Err(format!("a policy has no member {member}")),
+    }
+
+    let policy = match HttpPolicy::of(&options) {
+        Ok(policy) => policy,
+        Err(refused) => return Ok(Observed::Refused(refused)),
+    };
+
+    if member == "bodyGracePeriod" {
+        return policy
+            .body_grace_period()
+            .map(Observed::Held)
+            .ok_or_else(|| "a grace given, none held".to_owned());
+    }
+
+    Ok(Observed::Taken)
+}
+
 // ── The table ────────────────────────────────────────────────────────────────────────────────
 
 async fn play_way((place, way): (&str, &str), given: Option<Duration>) -> Played {
@@ -1620,6 +1661,9 @@ async fn play_way((place, way): (&str, &str), given: Option<Duration>) -> Played
         ("brokerParticipant.reconnectionDelay", "number") => {
             participant_reconnection_delay_by_number(given).await
         }
+        ("httpTransportServer.sendGracePeriod", "policy") => policy_way("sendGracePeriod", given),
+        ("httpTransportServer.headersTimeout", "policy") => policy_way("headersTimeout", given),
+        ("httpTransportServer.bodyGracePeriod", "policy") => policy_way("bodyGracePeriod", given),
         _ => Err(format!("{place} has no way {way} here")),
     }
 }
