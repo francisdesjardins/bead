@@ -1936,12 +1936,13 @@ fn on_platform(
 }
 
 async fn disconnected(client: &WebSocketTransportClient) -> Result<(), TransportError> {
-    patience(
-        PATIENCE,
-        client.disconnect(&TransportClientDisconnectOptions::default()),
-    )
-    .await
-    .expect("the close within patience")
+    let disconnecting = client.disconnect(&TransportClientDisconnectOptions::default())?;
+
+    patience(PATIENCE, disconnecting)
+        .await
+        .expect("the close within patience");
+
+    Ok(())
 }
 
 async fn reconnected(
@@ -2013,7 +2014,9 @@ async fn rejects_a_connect_while_a_disconnect_is_pending() {
     settled(client.connect(&to(server.port))).await.unwrap();
 
     let _upgraded = server.next_upgraded().await;
-    let disconnecting = client.disconnect(&TransportClientDisconnectOptions::default());
+    let disconnecting = client
+        .disconnect(&TransportClientDisconnectOptions::default())
+        .unwrap();
     let refused = settled(client.connect(&to(server.port))).await;
 
     assert!(
@@ -2021,7 +2024,7 @@ async fn rejects_a_connect_while_a_disconnect_is_pending() {
         "{refused:?}"
     );
     client.dispose();
-    patience(PATIENCE, disconnecting).await.unwrap().unwrap();
+    patience(PATIENCE, disconnecting).await.unwrap();
 }
 
 // ── Its send ─────────────────────────────────────────────────────────────────────────────────
@@ -2222,13 +2225,15 @@ async fn emits_no_message_once_a_disconnect_has_begun() {
     socket.write_all(&frame_of(0x2, b"early")).await.unwrap();
     messages_within(&recorder, 1).await;
 
-    let disconnecting = client.disconnect(&TransportClientDisconnectOptions::default());
+    let disconnecting = client
+        .disconnect(&TransportClientDisconnectOptions::default())
+        .unwrap();
 
     // what comes once its close went out, then its server's answer
     assert_eq!(close_code_from(&mut socket).await, Some(1000), "its close");
     socket.write_all(&frame_of(0x2, b"late")).await.unwrap();
     socket.write_all(&close_frame(1000)).await.unwrap();
-    patience(PATIENCE, disconnecting).await.unwrap().unwrap();
+    patience(PATIENCE, disconnecting).await.unwrap();
 
     assert_eq!(
         recorder.messages(),
@@ -2287,12 +2292,14 @@ async fn emits_close_with_was_clean_true_and_was_quick_false_when_the_client_dis
     settled(client.connect(&to(server.port))).await.unwrap();
 
     let mut upgraded = server.next_upgraded().await;
-    let disconnecting = client.disconnect(&TransportClientDisconnectOptions::default());
+    let disconnecting = client
+        .disconnect(&TransportClientDisconnectOptions::default())
+        .unwrap();
     // its 1000, at the server's end too
     let code = upgraded.close_code().await;
 
     upgraded.ended().await;
-    patience(PATIENCE, disconnecting).await.unwrap().unwrap();
+    patience(PATIENCE, disconnecting).await.unwrap();
 
     assert_eq!(recorder.closes(), [(true, false)], "clean, not quick");
     assert!(is_state(&client, ReadyState::Closed), "closed");
@@ -2308,13 +2315,14 @@ async fn emits_close_with_was_clean_true_and_was_quick_true_when_the_client_quic
     settled(client.connect(&to(server.port))).await.unwrap();
     patience(
         PATIENCE,
-        client.disconnect(&TransportClientDisconnectOptions {
-            is_clean: Some(true),
-            is_quick: Some(true),
-        }),
+        client
+            .disconnect(&TransportClientDisconnectOptions {
+                is_clean: Some(true),
+                is_quick: Some(true),
+            })
+            .unwrap(),
     )
     .await
-    .unwrap()
     .unwrap();
 
     assert_eq!(recorder.closes(), [(true, true)], "clean and quick");
@@ -2351,10 +2359,12 @@ async fn dispose_during_a_disconnect_settles_it_without_a_close_and_the_client_c
 
     settled(client.connect(&to(server.port))).await.unwrap();
 
-    let disconnecting = client.disconnect(&TransportClientDisconnectOptions::default());
+    let disconnecting = client
+        .disconnect(&TransportClientDisconnectOptions::default())
+        .unwrap();
 
     client.dispose();
-    patience(PATIENCE, disconnecting).await.unwrap().unwrap();
+    patience(PATIENCE, disconnecting).await.unwrap();
 
     // dropped, not closed by a handshake
     assert!(recorder.closes().is_empty(), "no close");
@@ -2375,13 +2385,14 @@ async fn an_explicit_undefined_disconnect_option_falls_back_to_its_default() {
     settled(client.connect(&to(server.port))).await.unwrap();
     patience(
         PATIENCE,
-        client.disconnect(&TransportClientDisconnectOptions {
-            is_clean: None,
-            is_quick: None,
-        }),
+        client
+            .disconnect(&TransportClientDisconnectOptions {
+                is_clean: None,
+                is_quick: None,
+            })
+            .unwrap(),
     )
     .await
-    .unwrap()
     .unwrap();
 
     assert_eq!(recorder.closes(), [(true, false)], "its defaults");
@@ -2429,7 +2440,9 @@ async fn a_second_disconnect_rejected_leaves_the_first_for_dispose_to_settle_wit
 
     // the server never answers the first close
     let _socket = server.next().await;
-    let first = client.disconnect(&TransportClientDisconnectOptions::default());
+    let first = client
+        .disconnect(&TransportClientDisconnectOptions::default())
+        .unwrap();
 
     assert!(
         matches!(
@@ -2440,7 +2453,7 @@ async fn a_second_disconnect_rejected_leaves_the_first_for_dispose_to_settle_wit
     );
 
     client.dispose();
-    patience(PATIENCE, first).await.unwrap().unwrap();
+    patience(PATIENCE, first).await.unwrap();
 
     assert!(is_state(&client, ReadyState::Closed), "closed");
     // dropped without a handshake, as a dispose does: no close says otherwise
@@ -2562,7 +2575,9 @@ async fn rejects_while_a_disconnect_is_pending() {
     settled(client.connect(&to(server.port))).await.unwrap();
 
     let _upgraded = server.next_upgraded().await;
-    let disconnecting = client.disconnect(&TransportClientDisconnectOptions::default());
+    let disconnecting = client
+        .disconnect(&TransportClientDisconnectOptions::default())
+        .unwrap();
     let refused = client.reconnect(&TransportClientReconnectOptions::default());
 
     assert!(
@@ -2570,7 +2585,7 @@ async fn rejects_while_a_disconnect_is_pending() {
         "refused"
     );
     client.dispose();
-    patience(PATIENCE, disconnecting).await.unwrap().unwrap();
+    patience(PATIENCE, disconnecting).await.unwrap();
 }
 
 #[tokio::test]
@@ -2641,10 +2656,12 @@ async fn only_one_ready_state_is_true_at_a_time() {
     settled(connecting).await.unwrap();
     assert_eq!(client.ready_state(), ReadyState::Open, "open");
 
-    let disconnecting = client.disconnect(&TransportClientDisconnectOptions::default());
+    let disconnecting = client
+        .disconnect(&TransportClientDisconnectOptions::default())
+        .unwrap();
 
     assert_eq!(client.ready_state(), ReadyState::Closing, "closing");
-    patience(PATIENCE, disconnecting).await.unwrap().unwrap();
+    patience(PATIENCE, disconnecting).await.unwrap();
     assert_eq!(client.ready_state(), ReadyState::Closed, "closed");
 }
 
@@ -3122,12 +3139,14 @@ async fn drops_a_server_that_never_answers_its_disconnect_once_its_close_timeout
 
     let mut socket = server.next().await;
     let began = Instant::now();
-    let disconnecting = client.disconnect(&TransportClientDisconnectOptions::default());
+    let disconnecting = client
+        .disconnect(&TransportClientDisconnectOptions::default())
+        .unwrap();
 
     // it reads its close and answers nothing, its socket held open
     let sent = close_code_from(&mut socket).await;
 
-    patience(PATIENCE, disconnecting).await.unwrap().unwrap();
+    patience(PATIENCE, disconnecting).await.unwrap();
 
     assert!(
         began.elapsed() >= Duration::from_millis(150),
@@ -3154,7 +3173,9 @@ async fn waits_on_its_server_without_end_for_a_close_timeout_of_infinity_closing
     settled(client.connect(&to(server.port))).await.unwrap();
 
     let mut socket = server.next().await;
-    let disconnecting = client.disconnect(&TransportClientDisconnectOptions::default());
+    let disconnecting = client
+        .disconnect(&TransportClientDisconnectOptions::default())
+        .unwrap();
     let sent = close_code_from(&mut socket).await;
 
     // it answers nothing for longer than any close timeout of these tests
@@ -3174,7 +3195,7 @@ async fn waits_on_its_server_without_end_for_a_close_timeout_of_infinity_closing
     // its answer, then its end, as a server ends the closing handshake
     socket.write_all(&close_frame(1000)).await.unwrap();
     socket.shutdown().await.unwrap();
-    patience(PATIENCE, disconnecting).await.unwrap().unwrap();
+    patience(PATIENCE, disconnecting).await.unwrap();
 
     assert_eq!(told_of(&recorder), ["close: true false"], "clean");
     assert!(is_state(&client, ReadyState::Closed), "closed");
@@ -3301,7 +3322,9 @@ async fn stops_beating_once_disconnected_dropped_or_closed_by_its_server_and_pin
 
     assert_eq!(platform.dues().len(), 3, "three beating");
 
-    let disconnecting = disconnected_one.disconnect(&TransportClientDisconnectOptions::default());
+    let disconnecting = disconnected_one
+        .disconnect(&TransportClientDisconnectOptions::default())
+        .unwrap();
 
     dropped.dispose();
     upgraded[2].send(Message::Close(None));
@@ -3310,7 +3333,7 @@ async fn stops_beating_once_disconnected_dropped_or_closed_by_its_server_and_pin
     // those that closed beat no more, their timers gone
     assert!(platform.dues().is_empty(), "none beating");
     drop(upgraded);
-    patience(PATIENCE, disconnecting).await.unwrap().unwrap();
+    patience(PATIENCE, disconnecting).await.unwrap();
 
     // the server started its close handshake: no ping goes on it, and it is dropped all the same
     let mut raw = raw().await;
@@ -3418,10 +3441,12 @@ async fn a_paused_connection_closes_cleanly() {
     assert!(recorder.messages().is_empty(), "held");
 
     let began = Instant::now();
-    let disconnecting = client.disconnect(&TransportClientDisconnectOptions::default());
+    let disconnecting = client
+        .disconnect(&TransportClientDisconnectOptions::default())
+        .unwrap();
 
     upgraded.ended().await;
-    patience(PATIENCE, disconnecting).await.unwrap().unwrap();
+    patience(PATIENCE, disconnecting).await.unwrap();
 
     // it read its server's Close, its own pause opened: clean, long before its close timeout
     assert_eq!(recorder.closes(), [(true, false)], "clean");

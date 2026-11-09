@@ -1100,25 +1100,28 @@ impl WebSocketTransportClient {
     ///
     /// # Errors
     ///
-    /// A [`TransportError::ReadyState`] when it is not open, as the future's outcome.
+    /// A [`TransportError::ReadyState`] when it is not open, refused as it is called, nothing
+    /// changed.
     pub fn disconnect(
         &self,
         options: &TransportClientDisconnectOptions,
-    ) -> BoxFuture<Result<(), TransportError>> {
+    ) -> Result<BoxFuture<()>, TransportError> {
         let inner = &self.inner;
         let is_clean = options.is_clean.unwrap_or(true);
         let is_quick = options.is_quick.unwrap_or(false);
         let (done, ended) = oneshot::channel();
         let open = {
             let mut state = locked(&inner.state);
-            let open = state
-                .current
-                .take()
-                .filter(|_| state.ready == ReadyState::Open);
+            let open = if state.ready == ReadyState::Open {
+                state.current.take()
+            } else {
+                None
+            };
             let Some(open) = open else {
-                let refused = ReadyStateError::new(state.ready.name(), ReadyState::Open.name());
-
-                return Box::pin(async move { Err(TransportError::ReadyState(refused)) });
+                return Err(TransportError::ReadyState(ReadyStateError::new(
+                    state.ready.name(),
+                    ReadyState::Open.name(),
+                )));
             };
 
             if is_quick {
@@ -1141,18 +1144,16 @@ impl WebSocketTransportClient {
                 state.current = Some(open);
                 drop(state);
 
-                return Box::pin(async move {
+                return Ok(Box::pin(async move {
                     ended.await.ok();
-
-                    Ok(())
-                });
+                }));
             }
         };
 
         released(&open);
         inner.tell(|listener: &dyn ClientListener| listener.on_close(is_clean, true));
 
-        Box::pin(async { Ok(()) })
+        Ok(Box::pin(async {}))
     }
 
     /// Lets go of its connection at once, its close going out going away, 1001, unwaited and told
