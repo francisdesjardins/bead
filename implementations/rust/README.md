@@ -139,6 +139,22 @@ that measures real time, is exempted once, at its root, with its reason.
 serializer, which refuses a double that is not finite at any depth, where `serde_json`'s writes
 `null`.
 
+Each server transport takes the procedures it is given, by their addresses, `ProcedureAddress`
+(spec 9.11, decision 0048): `MemoryTransportServerOptions::procedures`, and a broker's
+`BrokerTransportServerOptions::procedures` on every name it serves, `procedures_by_name` giving a
+name its own list in place of it, for a connection its OPEN reached by that name. A request to any
+other that names no destination is answered as one to no resolver, `SERVICE_UNKNOWN` or
+`PROCEDURE_UNKNOWN`, before its credential, its admission and its payload, and counts under its
+procedure's series. None given, it takes every procedure; empty, none; an address of service 0 or
+of procedure 0, the only ones a `u16` holds out of range, is refused as the transport is built, a
+`ProgrammerError`, as is a list for a name the broker's transport does not serve, and one named
+twice is one (spec 9.12). Its router asks `ServerTransport::names_procedures`, `false` for a
+transport given no list, once as it is built, then `takes_procedure` of each request that names no
+destination, or never; a `JoinedServerTransport` names them when one of its transports does, and
+asks the transport that drew each handle. An application writes the lists by hand, as it writes
+its descriptors; beadc's Rust target, ahead, writes them, as the other sides' targets do. What a
+transport takes is no access: it grants none, and each procedure keeps its own admission.
+
 `crates/bead-protobuf/src`:
 
 | Module     | What it holds                                                                                                                                                                                                   |

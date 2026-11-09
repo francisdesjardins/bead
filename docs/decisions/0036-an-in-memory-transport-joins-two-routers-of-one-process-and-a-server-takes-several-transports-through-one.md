@@ -36,7 +36,7 @@ server, once"; C#'s `Server(IServerTransport transport, …)` and `RouterServer`
 second server: a second router, session manager and service manager, every service offered twice, a
 notification reaching the server it was offered on, a credential's session ended by its identifier
 (13.10) on one. The interop serves WebSocket and HTTP so, two servers and two offers. What a joining
-needs is per connection already: `carriesCredential(handle)` and `isSecure(handle)`,
+needs is per connection: `carriesCredential(handle)` and `isSecure(handle)`,
 `CarriesCredential` and `IsSecure`, and every event of a server's transport keyed by its handle.
 
 **A handle tells two types apart, never two transports of one type**: every handle reads

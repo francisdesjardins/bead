@@ -1,5 +1,1 @@
 #nullable enable
-Bead.Transport.WebSockets.WebSocketTransportServer.NamesProcedures() -> bool
-Bead.Transport.WebSockets.WebSocketTransportServer.TakesProcedure(string! connectionHandle, Bead.ProcedureAddress address) -> bool
-Bead.Transport.WebSockets.WebSocketTransportServerOptions.Procedures.get -> System.Collections.Generic.IReadOnlyCollection<Bead.ProcedureAddress>?
-Bead.Transport.WebSockets.WebSocketTransportServerOptions.Procedures.init -> void

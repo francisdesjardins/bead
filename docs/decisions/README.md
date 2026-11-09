@@ -50,8 +50,10 @@ denied whole and a CI job of its own, each part it lacks a row of the support ma
 - **Rust's service client and its transports**: the client half of its service layer, in its core;
   then WebSocket (RFC 6455) and HTTP/1.1 and HTTP/2 (RFC 9110, 9112, 9113) over sockets, with the
   interop both ways with the TypeScript and C# sides; then its broker bindings, MQTT 5 and AMQP 1.0;
-  its gateway; and beadc's Rust target, with `examples/hello`'s Rust half and the validators of a
-  blueprint's rules generated for it, or beadc refusing to generate them
+  its gateway; and beadc's Rust target, with `examples/hello`'s Rust half, the lists of the
+  procedures a server's transports take
+  ([0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md))
+  and the validators of a blueprint's rules generated for it, or beadc refusing to generate them
   ([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)),
   each stage under a record of its own
   ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md));
@@ -193,7 +195,7 @@ table.
 | [0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)              | A service's procedures are typed descriptors, served and called through one layer in each runtime                       | accepted |
 | [0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)                 | A `.proto` becomes one checked blueprint, and each language's server and client are generated from it alone             | accepted |
 | [0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)   | A procedure is also an HTTP route, which a gateway answers as one more client of its server, one connection an exchange | accepted |
-| [0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md) | One contract gives several packages, and a server's transport takes the procedures it is given                          | proposed |
+| [0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md) | One contract gives several packages, and a server's transport takes the procedures it is given                          | accepted |
 
 ### Transports and relays
 
@@ -266,7 +268,7 @@ table.
 
 ## Writing one
 
-The next decision is 0048. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
+The next decision is 0049. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
 the decision, not its subject. The title may grow with the record; the file's name stays, unless it
 would mislead.
 

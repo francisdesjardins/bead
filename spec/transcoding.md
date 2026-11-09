@@ -44,7 +44,7 @@ with the hash of its text. The why of each rule is in the decisions:
   the procedures an output's `gateway` selects, its routes, its document and its client (3.1, 11.1,
   12.1).
 
-**Version: 0.2.2**. Its conformance file repeats it as its `transcodingVersion`, and follows its
+**Version: 0.3.0**. Its conformance file repeats it as its `transcodingVersion`, and follows its
 schema in [`schemas/`](schemas/). It moves by `spec.md`'s rule, under a version of its own
 ([0008](../docs/decisions/0008-three-version-axes-and-names-qualified-by-their-owner.md)): the minor
 when a gateway that conforms to its last version must change to conform to this one, the patch when
@@ -761,7 +761,7 @@ a schema states: a field's proto name, an enum's number and a 64-bit integer as 
 ## 12. The generated client
 
 12.1. An output with `gateway` writes, beside its route table, a typed `<Service>HttpClient` of
-the procedures it selects, that calls each of them by its default `POST` route (section 3.1), its
+the procedures it selects, that calls each of them by its default `POST` route (section 3.2), its
 request whole and its result whole, whatever `google.api.http` rules the procedure also serves; a
 command, which no exchange answers, has none. Its surface maps name for name, each in its target's
 case: the client is made of its URL and its options, calls a procedure by the procedure's name,
