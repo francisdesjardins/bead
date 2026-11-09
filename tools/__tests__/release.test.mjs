@@ -666,6 +666,8 @@ describe('prepare', () => {
     );
     assert.match(read(root, 'spec/vectors.json'), /"specVersion": "0\.2\.0"/);
     assert.match(read(root, 'builder/package.json'), /"version": "0\.2\.0"/);
+    // a tree that holds no Bead page builds none
+    assert.ok(!ran.includes('node site/build.mjs'));
     // the blueprint's form is its own, which the move keeps: its key alone changes
     assert.equal(
       read(root, 'spec/interop-blueprint.json'),
@@ -695,6 +697,15 @@ describe('prepare', () => {
       () => prepared(releasing(), { moves: { spec: 'minor' }, absent: ['--version'] }),
       /py: no Python to run the generators/
     );
+  });
+
+  test('a tree that holds the Bead page builds it after its generators, the versions it states moved', () => {
+    const root = releasing();
+    write(root, { 'site/build.mjs': '' });
+    const { ran } = prepared(root, { moves: { spec: 'minor' } });
+    const built = ran.indexOf('node site/build.mjs');
+    assert.ok(built > ran.lastIndexOf('py spec/generators/make_vectors.py'));
+    assert.ok(built < ran.indexOf('py -c import jsonschema'));
   });
 
   test('run again, it writes nothing but the date, and refuses a line under [Unreleased]', () => {
