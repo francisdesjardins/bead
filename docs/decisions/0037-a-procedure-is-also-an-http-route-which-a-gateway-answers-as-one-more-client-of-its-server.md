@@ -8,15 +8,17 @@
   `spec/requirements.txt`; the places `gateway.timeout` and `gateway.heartbeat` of
   [`spec/durations.json`](../../spec/durations.json) and the way `gateway` of three of 15.12's; the
   front matter of [`spec/spec.md`](../../spec/spec.md); the builder's reading of `google.api.http`
-  and `idempotency_level`, its rules `HTTP_*`, its OpenAPI document, an output's `http: true` and
+  and `idempotency_level`, its rules `HTTP_*`, its OpenAPI document, an output's `gateway` and
   `beadc breaking`'s `HTTP`; each runtime's transcoding layer, its gateway and the HTTP client each
-  output with `http: true` writes, section 12; the interop over each gateway, each side's client
+  output with `gateway` writes, section 12; the interop over each gateway, each side's client
   against the other side's gateway and the two served documents compared byte for byte; and
   protobuf's conformance suite's JSON tests through each side's mapping. The in-memory transport and
   the joined transport a gateway calls through are
   [0036](0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md)'s;
   the blueprint's members and its outputs
   [0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)'s;
+  what an output's `gateway` selects, and its rule `GATEWAY_EMPTY`,
+  [0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md)'s;
   the companion's version axis
   [0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)'s; the binary payload
   [0031](0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)'s; the violations
@@ -212,15 +214,16 @@ are never kept alike in silence; one origin for `/bead` and `/api/…` comes fro
   route's `GET`, or a `get` rule on a marked method. Calls and streams are bounded apart, calls by
   `maximumExchanges` and `maximumExchangesPerAddress`, 10,000 and 256, since one lives a request,
   streams by 15.12's connections' bounds, 64 an address, since one lives as long as its reader.
-- **The document** (11): OpenAPI 3.1.1, one a blueprint, written once by the builder in the
-  blueprint's own form and embedded byte for byte in an output with `http: true`, served at
+- **The document** (11): OpenAPI 3.1.1, one a blueprint, or one of the procedures an output's
+  `gateway` selects, written once by the builder in the blueprint's own form and embedded byte for
+  byte in an output with `gateway`, served at
   `/openapi.json`; each schema the one form Bead writes, a `pattern` beside each `format` the base
   dialect only annotates, and what no schema carries said in its description. The blueprint's
   routes and messages' shapes are members under no feature, `requires` kept for what a target must
   play
   ([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)).
-- **A typed client of the default routes** (12), written by each output with `http: true` beside its
-  table, under the route table's contract 5, which stays beside a service file's 7, since a route
+- **A typed client of the default routes** (12), written by each output with `gateway` beside its
+  table, of the procedures it selects, under the route table's contract 5, which stays beside a service file's 7, since a route
   table calls no codec ([0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)),
   ([0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)),
   `<Service>HttpClient` over `fetch` or `HttpClient`, its surface name for name on both sides. It

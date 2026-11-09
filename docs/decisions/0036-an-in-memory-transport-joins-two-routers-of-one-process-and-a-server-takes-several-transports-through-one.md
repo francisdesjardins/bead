@@ -10,7 +10,8 @@
   guard and a stop
   [0023](0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md)'s,
   the credential a transport carries beside an envelope
-  [0010](0010-a-request-presents-a-credential-of-a-scheme.md)'s, and what a gateway of HTTP/JSON
+  [0010](0010-a-request-presents-a-credential-of-a-scheme.md)'s, the procedures a server's transport
+  takes [0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md)'s, and what a gateway of HTTP/JSON
   transcoding answers through them
   [0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)'s.
 
@@ -114,8 +115,11 @@ the C# side, one `IServerTransport` over several; `JoinedServerTransport` on the
   refuses, as it is built, two transports of one type, whose handles might be one; a server that
   serves two WebSocket listeners binds them in one transport, as each binds several addresses
   already;
-- **each connection's flags are its owner's**: whether it carries a credential and whether it is
-  secure are asked of the transport that drew its handle, and its `send` and `close` go to it;
+- **each connection's flags are its owner's**: whether it carries a credential, whether it is
+  secure and whether it takes a procedure, `takesProcedure`, are asked of the transport that drew its
+  handle, a handle it does not hold taking none, and its `send` and `close` go to it; the join names
+  procedures when a transport it joins does
+  ([0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md));
 - **its events are each transport's, forwarded**: a connection, a message, a listen, a close, a
   refusal and an error, each with its handle, in the order its transport told them, each listener
   called within 15.1's guard;
@@ -135,7 +139,8 @@ and a regression shows ([Measurement](../../README.md#measurement)).
 
 **Two transports of one type are never joined**: an application with two WebSocket listeners gives
 one transport both addresses. The join refuses the pair as it is built, before any handle could be
-given twice.
+given twice. Two transports of one type that take different procedures are two routers, each with
+its own server ([0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md)).
 
 **No conformance case holds either**: `spec/transports.json` plays HTTP and WebSocket over real
 sockets and a broker's transport over its brokers, the in-memory broker among them, and no case of

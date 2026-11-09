@@ -17,7 +17,9 @@
   suite are
   [0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)'s;
   what a request's rules are, the violations and their detail, and the validators beadc generates,
-  [0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)'s
+  [0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)'s;
+  what an output's `server`, `client` and `gateway` select, and the procedures a server's transport
+  takes, [0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md)'s
 
 ## Context
 
@@ -434,7 +436,10 @@ _Conformance:_ none. _Matrix:_ none; `Connect` outside `IClient` is a type's sha
   ([0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)),
   and 7 since a server class's commands are typed `BoundCommand` over `CommandOptions` and its
   notifiers `Notifier<TNotification>` on the C# side, and a catalogue takes its service's id and its
-  codes as two parameters on the TypeScript side; and 5 beside it,
+  codes as two parameters on the TypeScript side, and 8 since a file of the procedures a server's
+  transports take hands each transport its `procedures`
+  ([0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md));
+  and 5 beside it,
   `GENERATED_CODE_SUPPORTS_VERSION_5` of `./transcoding` and
   `GeneratedCode.SupportsVersion5`, for an output that writes a route table, which names the
   transcoding layer's types
@@ -1003,6 +1008,16 @@ What the layer refuses, as it is built or used:
 | a second client side over one Bead client, at another window                                       | `ProgrammerError`, item 8's                     | `InvalidOperationException`, item 8's                              |
 | an unlisted failure code answered                                                                  | sent as written; `ProgrammerError` reported     | no counterpart: the failure class holds its procedure's list alone |
 
+**A generated class is printed over its side's pick.** beadc writes a service's `<Svc>Procedures`
+whole, every procedure its output's `server`, `client` or `gateway` selects, and prints the server
+class and its types over those its `server` selects, the client class and its types over those its
+`client` selects, each pick a list the layer takes as it takes the whole
+([0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md)): an unexported frozen
+object on the TypeScript side, the internal lists `Served` and `Called` beside `All` on the C# side.
+A resolver of a procedure its server class does not serve is a type error on the TypeScript side,
+and an `ArgumentException` as `On` is called on the C# side, where the descriptors of one service
+share one type tag: a platform row of `docs/support.md`.
+
 **A call bound to its payload is a bound call, and it carries the guard.** The runtime's procedure
 takes its payload and gives a function of the call's options; that function is named, on the
 TypeScript and C# sides, and the guard sits on it alone:
@@ -1291,7 +1306,7 @@ doc holds one example that compiles, `client.services().get_request(…)` and
 **The TypeScript side's service layer is one entry**, `"./service": "./src/service/service.ts"` in
 `package.json`'s `exports`: `createServiceServer`, `createServiceClient`, `requestOf`, `commandOf`,
 `failuresOf`, `payloadCodecOf`, `PAYLOAD_CODECS`, `ProcedureKind`,
-`GENERATED_CODE_SUPPORTS_VERSION_6` and `_7`, the violations' `violationsOf`,
+`GENERATED_CODE_SUPPORTS_VERSION_6`, `_7` and `_8`, the violations' `violationsOf`,
 `violationsDetailOf`, `wordsOf` and `detailBoundOf`, `FailureError`, `ProgrammerError`, and their
 types. A generated
 service's file imports nothing else of Bead's but `./proto`'s codec and validators, where it binds
@@ -1322,10 +1337,14 @@ side, `HttpRoute`, `HttpRouteTemplate` and `HttpPayload` on the C# side
 ([0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md));
 7 for what a server's handles and a catalogue are typed by: on the C# side a server class's commands,
 `BoundCommand` and `CommandOptions`, and its notifiers, `Notifier<TNotification>`; on the
-TypeScript side a catalogue of two parameters, `failuresOf(serviceId, codes)`. An older constant
+TypeScript side a catalogue of two parameters, `failuresOf(serviceId, codes)`; 8 for the procedures
+a server's transports take, `SERVED_PROCEDURES` in `bead_served.ts` and `ServedProcedures` in
+`BeadServed.cs`, which hand each transport its `procedures`
+([0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md)): only that file
+names 8, every other keeping 7, as a file names the highest it needs. An older constant
 stays while the runtime still serves the code that names it: before 1.0.0, it goes once the code
 that names it no longer conforms through the runtime, and from 1.0.0 it stays for the whole major.
-The TypeScript and C# runtimes hold 5, 6 and 7: 5 for a route table, which calls no codec; 6 for a file that still
+The TypeScript and C# runtimes hold 5, 6, 7 and 8: 5 for a route table, which calls no codec; 6 for a file that still
 conforms, on the C# side one whose `…Commands` class holds no command and whose `…Notifiers` class
 holds no notifier, and on the TypeScript side one that makes no catalogue, while one that does fails
 at its type, `BoundCall` against `BoundCommand`, a `Func` against `Notifier<TNotification>`, an
