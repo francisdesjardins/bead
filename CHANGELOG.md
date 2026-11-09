@@ -11,6 +11,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - The Rust side's service client, `ServiceClient` and `ServiceClientOptions`, the twin of the other
   sides' (decision 0044).
+- The Rust side's transport over WebSocket (RFC 6455), client and server, the feature `websocket`
+  of its core, with `WebSocketServer` and `WebSocketClient` and the defaults the other sides
+  export; it plays `spec/transports.json`'s cases over WebSocket and its places of
+  `spec/durations.json` (decision 0049).
 
 ### Changed
 

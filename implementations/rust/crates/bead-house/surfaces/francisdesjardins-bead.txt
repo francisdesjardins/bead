@@ -323,6 +323,10 @@ crate
   use websocket::client::WebSocketTransportClientOptions #[cfg(feature = "websocket")]
   use websocket::connection::CLOSE_TIMEOUT #[cfg(feature = "websocket")]
   use websocket::connection::MAXIMUM_MESSAGE_BYTES #[cfg(feature = "websocket")]
+  use websocket::facade::WebSocketClient #[cfg(feature = "websocket")]
+  use websocket::facade::WebSocketClientOptions #[cfg(feature = "websocket")]
+  use websocket::facade::WebSocketServer #[cfg(feature = "websocket")]
+  use websocket::facade::WebSocketServerOptions #[cfg(feature = "websocket")]
   use websocket::server::TRANSPORT_WEBSOCKET #[cfg(feature = "websocket")]
   use websocket::server::WebSocketTransportServer #[cfg(feature = "websocket")]
   use websocket::server::WebSocketTransportServerOptions #[cfg(feature = "websocket")]
@@ -2325,12 +2329,46 @@ crate::websocket::client
     fn connect(&self, options: &WebSocketTransportClientConnectOptions) -> Connect
     fn disconnect(&self, options: &TransportClientDisconnectOptions) -> Result<BoxFuture<()>, TransportError>
     fn dispose(&self)
+    fn close(&self) -> BoxFuture<()>
     fn reconnect(&self, options: &TransportClientReconnectOptions) -> Result<BoxFuture<Result<(), TransportError>>, TransportError>
     implements Debug, RouterClientTransport
     derives Clone #[cfg(feature = "websocket")]
 crate::websocket::connection
   const CLOSE_TIMEOUT: Duration #[cfg(feature = "websocket")]
   const MAXIMUM_MESSAGE_BYTES: u64 #[cfg(feature = "websocket")]
+crate::websocket::facade
+  struct WebSocketServerOptions #[non_exhaustive] #[cfg(feature = "websocket")]
+    pub server: Option<ServerOptions> #[cfg(feature = "websocket")]
+    pub transport: Option<WebSocketTransportServerOptions> #[cfg(feature = "websocket")]
+    derives Clone, Debug, Default #[cfg(feature = "websocket")]
+  struct WebSocketServer #[cfg(feature = "websocket")]
+    fn new(options: &WebSocketServerOptions) -> Result<Self, ProgrammerError>
+    const fn server(&self) -> &Server
+    fn router(&self) -> &RouterServer
+    fn services(&self) -> &ServiceManagerServer
+    fn sessions(&self) -> &SessionManager
+    const fn transport(&self) -> &WebSocketTransportServer
+    fn gauges(&self) -> BoxFuture<Result<ServerGauges, ProgrammerError>>
+    fn health(&self) -> BoxFuture<Result<Health, ProgrammerError>>
+    fn dispose(&self) -> BoxFuture<Result<(), RouterError>>
+    implements Debug
+    derives Clone #[cfg(feature = "websocket")]
+  struct WebSocketClientOptions #[non_exhaustive] #[cfg(feature = "websocket")]
+    pub client: Option<ClientOptions> #[cfg(feature = "websocket")]
+    pub transport: Option<WebSocketTransportClientOptions> #[cfg(feature = "websocket")]
+    derives Clone, Debug, Default #[cfg(feature = "websocket")]
+  struct WebSocketClient #[cfg(feature = "websocket")]
+    fn new(options: &WebSocketClientOptions) -> Result<Self, ProgrammerError>
+    const fn client(&self) -> &Client
+    const fn router(&self) -> &RouterClient
+    const fn services(&self) -> &ServiceManagerClient
+    const fn transport(&self) -> &WebSocketTransportClient
+    fn connect(&self, options: &WebSocketTransportClientConnectOptions) -> Connect
+    fn disconnect(&self, options: &TransportClientDisconnectOptions) -> Result<BoxFuture<()>, TransportError>
+    fn reconnect(&self, options: &TransportClientReconnectOptions) -> Result<BoxFuture<Result<(), TransportError>>, TransportError>
+    fn dispose(&self) -> BoxFuture<()>
+    implements Debug
+    derives Clone #[cfg(feature = "websocket")]
 crate::websocket::server
   const TRANSPORT_WEBSOCKET: &str #[cfg(feature = "websocket")]
   struct WebSocketTransportServerOptions #[non_exhaustive] #[cfg(feature = "websocket")]

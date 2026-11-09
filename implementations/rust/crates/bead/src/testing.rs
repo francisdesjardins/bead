@@ -40,6 +40,8 @@ pub(crate) mod surface;
 mod tests;
 pub mod validations;
 pub mod vectors;
+#[cfg(feature = "websocket")]
+pub mod wire;
 
 #[cfg(test)]
 pub(crate) use platform::blocking;

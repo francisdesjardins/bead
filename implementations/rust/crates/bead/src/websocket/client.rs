@@ -1164,6 +1164,30 @@ impl WebSocketTransportClient {
         self.inner.drop_all();
     }
 
+    /// Closes its connection cleanly when it is open, as its disconnect does, telling its close,
+    /// then lets go of everything, as its dispose does; not open, it lets go at once. It starts as
+    /// it is called, the future only waiting for its end: where the memory and broker clients'
+    /// disconnect waits on nothing, this one's waits on its server's answer.
+    pub fn close(&self) -> BoxFuture<()> {
+        let Ok(closing) = self.disconnect(&TransportClientDisconnectOptions::default()) else {
+            self.inner.drop_all();
+
+            return Box::pin(async {});
+        };
+        let inner = Arc::clone(&self.inner);
+        let (done, ended) = oneshot::channel();
+
+        drop(platform::spawn(&self.inner.runtime, async move {
+            closing.await;
+            inner.drop_all();
+            done.send(()).ok();
+        }));
+
+        Box::pin(async move {
+            ended.await.ok();
+        })
+    }
+
     /// Connects again with the options of the last connect its guard let through, replacing an
     /// open connection without a close, and tells `on_reconnect` as it starts. The first attempt
     /// goes at once, each next one after its delay; attempts that run out end it closed, with a

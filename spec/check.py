@@ -221,7 +221,7 @@ SIDES = {
 AHEAD = {
     'Rust': {
         "Rust's transports over HTTP and WebSocket": {
-            'transports': ('http', 'websocket'),
+            'transports': ('http',),
             'units': (('spec', '15.10'), ('spec', '15.12.4')),
             'places': ('httpTransport', 'httpTransportClient'),
             'ways': (('transportClient.connectTimeout', 'http'), ('httpTransportServer.maximumWait', 'options'),

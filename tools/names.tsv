@@ -325,10 +325,10 @@ violationsOf	violationsOf [function]	Violations.Of [function]	violations_of [fun
 WARNING_RATIO	WARNING_RATIO [constant]	Health.WarningRatio [constant]	WARNING_RATIO [constant]	rendered: constant (0007)
 WEBSOCKET_REFUSALS	WEBSOCKET_REFUSALS [constant]	WebSocketRefusals [constant]	WEBSOCKET_REFUSALS [constant]	same
 WebSocketRefusals	-	-	WebSocketRefusals [record]	own: the type of the Rust side's constant of refusals, where the other sides hold a frozen object and a static class of constants (0044)
-WebSocketClient	WebSocketClient [record], createWebSocketClient [function]	WebSocketClient [record]	-	same
-WebSocketClientOptions	IWebSocketClientOptions [record]	WebSocketClientOptions [record]	-	same
-WebSocketServer	WebSocketServer [record], createWebSocketServer [function]	WebSocketServer [record]	-	same
-WebSocketServerOptions	IWebSocketServerOptions [record]	WebSocketServerOptions [record]	-	same
+WebSocketClient	WebSocketClient [record], createWebSocketClient [function]	WebSocketClient [record]	WebSocketClient [record]	same
+WebSocketClientOptions	IWebSocketClientOptions [record]	WebSocketClientOptions [record]	WebSocketClientOptions [record]	same
+WebSocketServer	WebSocketServer [record], createWebSocketServer [function]	WebSocketServer [record]	WebSocketServer [record]	same
+WebSocketServerOptions	IWebSocketServerOptions [record]	WebSocketServerOptions [record]	WebSocketServerOptions [record]	same
 WebSocketTransportClient	WebSocketTransportClient [record], createWebSocketTransportClient [function]	WebSocketTransportClient [record]	WebSocketTransportClient [record]	same
 WebSocketTransportClientConnectOptions	IWebSocketTransportClientConnectOptions [record]	WebSocketTransportClientConnectOptions [record]	WebSocketTransportClientConnectOptions [record]	same
 WebSocketTransportClientOptions	IWebSocketTransportClientOptions [record]	WebSocketTransportClientOptions [record]	WebSocketTransportClientOptions [record]	same

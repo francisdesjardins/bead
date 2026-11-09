@@ -190,6 +190,10 @@ pub use websocket::client::{
 #[cfg(feature = "websocket")]
 pub use websocket::connection::{CLOSE_TIMEOUT, MAXIMUM_MESSAGE_BYTES};
 #[cfg(feature = "websocket")]
+pub use websocket::facade::{
+    WebSocketClient, WebSocketClientOptions, WebSocketServer, WebSocketServerOptions,
+};
+#[cfg(feature = "websocket")]
 pub use websocket::server::{
     TRANSPORT_WEBSOCKET, WebSocketTransportServer, WebSocketTransportServerOptions,
 };
