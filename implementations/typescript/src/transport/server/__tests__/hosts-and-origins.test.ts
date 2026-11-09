@@ -833,14 +833,17 @@ test.describe('hosts and origins', () => {
       })
     );
     expect(
-      ['/bead#x', '/bead?x=1#y?z', 'http://127.0.0.1#/bead', '/bead#'].map((target) => {
-        return requestTargetOf(target);
-      })
+      ['/bead#x', '/bead?x=1#y?z', 'http://127.0.0.1#/bead', '/bead#', 'http://bead.test?x'].map(
+        (target) => {
+          return requestTargetOf(target);
+        }
+      )
     ).toEqual([
       { authority: undefined, path: '/bead', query: '' },
       { authority: undefined, path: '/bead', query: 'x=1' },
       { authority: '127.0.0.1', path: '/', query: '' },
       { authority: undefined, path: '/bead', query: '' },
+      { authority: 'bead.test', path: '/', query: 'x' },
     ]);
   });
 });

@@ -163,6 +163,8 @@ public sealed partial class HttpTransportServerTests
             await StatusOf("/be<ad HTTP/1.1", bead),
             await StatusOf("/bead?a\"b HTTP/1.1", bead),
             await StatusOf("/bead?a^b HTTP/1.1", bead),
+            // its path matched as it came, an octet percent-encoded not the letter it encodes
+            await StatusOf("/b%65ad HTTP/1.1", bead),
         };
 
         Assert.Equal(
@@ -199,6 +201,7 @@ public sealed partial class HttpTransportServerTests
                 (400, null),
                 (400, null),
                 (201, null),
+                (404, HttpRefusals.Path),
             ],
             statuses);
 

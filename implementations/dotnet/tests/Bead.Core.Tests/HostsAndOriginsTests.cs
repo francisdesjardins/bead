@@ -778,7 +778,7 @@ public sealed class HostsAndOriginsTests
             Assert.False(HostsAndOrigins.IsTakenTarget(target), target);
         }
 
-        foreach (var (target, rest) in new[] { ("/bead#x", "/bead"), ("/bead?x=1#y?z", "/bead?x=1"), ("http://127.0.0.1#/bead", "/"), ("/bead#", "/bead") })
+        foreach (var (target, rest) in new[] { ("/bead#x", "/bead"), ("/bead?x=1#y?z", "/bead?x=1"), ("http://127.0.0.1#/bead", "/"), ("/bead#", "/bead"), ("http://bead.test?x", "/?x") })
         {
             Assert.Equal(rest, HostsAndOrigins.TargetRestOf(target));
         }

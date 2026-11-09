@@ -251,6 +251,8 @@ test.describe('createHTTPTransportServer, its edges', () => {
       statusOf({ ...bead, host: '' }),
       statusOf(bead, { url: '/' }),
       statusOf({ ...bead, host: 'rebound.example' }, { url: 'http://bead.example/bead' }),
+      // its path matched as it came, an octet percent-encoded not the letter it encodes
+      statusOf(bead, { url: '/b%65ad' }),
     ]).toEqual([
       [201, undefined],
       [404, HTTP_REFUSALS.PATH],
@@ -281,6 +283,7 @@ test.describe('createHTTPTransportServer, its edges', () => {
       [403, HTTP_REFUSALS.HOST],
       [404, HTTP_REFUSALS.PATH],
       [201, undefined],
+      [404, HTTP_REFUSALS.PATH],
     ]);
 
     // HTTP/2's authority that is no host resets its stream, nothing written
