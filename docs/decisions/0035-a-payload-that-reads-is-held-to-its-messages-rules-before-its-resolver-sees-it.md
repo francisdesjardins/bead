@@ -139,8 +139,10 @@ counter. The TypeScript and C# runtimes hold 6 and 7, `GENERATED_CODE_SUPPORTS_V
 `GeneratedCode.SupportsVersion6` and `SupportsVersion7`, whose code calls the runtime codec
 of a schema
 ([0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)),
-and beside it 5, a route table's
-([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md));
+and beside them 5, a route table's
+([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)),
+and 8, the served file's, `bead_served.ts` and `BeadServed.cs`, which hand each transport of a
+server its procedures ([0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md));
 they hold neither 3 nor 4: code that names 3 judges no request by its rules, and code that names 4
 checks no required field, so neither conforms through a runtime.
 

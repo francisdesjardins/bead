@@ -1,6 +1,6 @@
 // ── Routes ────────────────────────────────────────────────────────────────────
 
-// A gateway's route table, as beadc writes it into an output with `http: true` (decision 0037,
+// A gateway's route table, as beadc writes it into an output with a `gateway` (decision 0037,
 // spec/transcoding.md 3): data alone, each procedure's descriptor, messages and routes, its default
 // ones first, then its rules.
 

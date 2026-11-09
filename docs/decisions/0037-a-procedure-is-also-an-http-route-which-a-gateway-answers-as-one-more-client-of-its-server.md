@@ -8,15 +8,17 @@
   `spec/requirements.txt`; the places `gateway.timeout` and `gateway.heartbeat` of
   [`spec/durations.json`](../../spec/durations.json) and the way `gateway` of three of 15.12's; the
   front matter of [`spec/spec.md`](../../spec/spec.md); the builder's reading of `google.api.http`
-  and `idempotency_level`, its rules `HTTP_*`, its OpenAPI document, an output's `http: true` and
+  and `idempotency_level`, its rules `HTTP_*`, its OpenAPI document, an output's `gateway` and
   `beadc breaking`'s `HTTP`; each runtime's transcoding layer, its gateway and the HTTP client each
-  output with `http: true` writes, section 12; the interop over each gateway, each side's client
+  output with `gateway` writes, section 12; the interop over each gateway, each side's client
   against the other side's gateway and the two served documents compared byte for byte; and
   protobuf's conformance suite's JSON tests through each side's mapping. The in-memory transport and
   the joined transport a gateway calls through are
   [0036](0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md)'s;
   the blueprint's members and its outputs
   [0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)'s;
+  what an output's `gateway` selects, and its rule `GATEWAY_EMPTY`,
+  [0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md)'s;
   the companion's version axis
   [0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)'s; the binary payload
   [0031](0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)'s; the violations
@@ -212,15 +214,16 @@ are never kept alike in silence; one origin for `/bead` and `/api/…` comes fro
   route's `GET`, or a `get` rule on a marked method. Calls and streams are bounded apart, calls by
   `maximumExchanges` and `maximumExchangesPerAddress`, 10,000 and 256, since one lives a request,
   streams by 15.12's connections' bounds, 64 an address, since one lives as long as its reader.
-- **The document** (11): OpenAPI 3.1.1, one a blueprint, written once by the builder in the
-  blueprint's own form and embedded byte for byte in an output with `http: true`, served at
+- **The document** (11): OpenAPI 3.1.1, one a blueprint, or one of the procedures an output's
+  `gateway` selects, written once by the builder in the blueprint's own form and embedded byte for
+  byte in an output with `gateway`, served at
   `/openapi.json`; each schema the one form Bead writes, a `pattern` beside each `format` the base
   dialect only annotates, and what no schema carries said in its description. The blueprint's
   routes and messages' shapes are members under no feature, `requires` kept for what a target must
   play
   ([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)).
-- **A typed client of the default routes** (12), written by each output with `http: true` beside its
-  table, under the route table's contract 5, which stays beside a service file's 7, since a route
+- **A typed client of the default routes** (12), written by each output with `gateway` beside its
+  table, of the procedures it selects, under the route table's contract 5, which stays beside a service file's 7, since a route
   table calls no codec ([0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)),
   ([0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)),
   `<Service>HttpClient` over `fetch` or `HttpClient`, its surface name for name on both sides. It
@@ -317,7 +320,7 @@ that holds:
 | Objection                                                                                                                                                                                                                                                                                                                                                                                                                                        | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | "A body the schema takes, the gateway takes" cannot hold under OpenAPI 3.1's dialect: `format` and `contentEncoding` are annotations there, and no digit pattern bounds a 64-bit range; with the builder's ajv the schema does not compile in strict mode (`unknown format "date-time"`), and without it takes `{"at":"nope"}`, a tenth fraction digit, year 0000, `"!!!"` as bytes and a 20-digit `int64`, each of which both libraries refuse. | Accepted. The gate is turned around: every body `writings` and `exchanges` hold Bead writing validates against the document, which holds since the gateway writes one form. Each well-known form carries a `pattern` beside its `format` or `contentEncoding`, of exactly what 5's reading takes — a Timestamp's four-digit year `0001` to `9999`, its 1 to 9 fraction digits, `Z` or an offset; a Duration; base64 of one alphabet — with no lookaround, and a 64-bit integer the count of its digits. What no schema carries — a day past its month's end, a 64-bit range — is stated in the companion and each schema's description, and the gate's readings leave those entries out by name; ajv compiles `format` as the annotation the dialect makes it. |
-| The `http` feature breaks every older reader through the schema anyway — 43 objects are `additionalProperties: false`, so an older reader refuses the new members before it reads `requires` — and makes a `requires` feature, JOSE's `crit`, one a target may ignore (`FEATURE_UNSERVED`), two meanings under one word; every C# assembly with a `proto` binding would embed a document no trimming drops, served or not.                       | Accepted. `requires` keeps what a target must play, `validate`; the routes and the messages' shapes are members of the blueprint under no feature, and no feature names what a target may leave unserved. The route table, the HTTP client and the embedded document come only in an output with `http: true`, an output's setting as `keepValidateOptions` is, never the blueprint's; a target without HTTP is refused such an output, `HTTP_UNGENERATED`. The closed schema is kept, 0022 stating that a member added breaks every older reader: fail-closed, a hand-written blueprint held as strictly as its schema holds any.                                                                                                                             |
+| The `http` feature breaks every older reader through the schema anyway — 43 objects are `additionalProperties: false`, so an older reader refuses the new members before it reads `requires` — and makes a `requires` feature, JOSE's `crit`, one a target may ignore (`FEATURE_UNSERVED`), two meanings under one word; every C# assembly with a `proto` binding would embed a document no trimming drops, served or not.                       | Accepted. `requires` keeps what a target must play, `validate`; the routes and the messages' shapes are members of the blueprint under no feature, and no feature names what a target may leave unserved. The route table, the HTTP client and the embedded document come only in an output with a `gateway`, an output's setting as `keepValidateOptions` is, never the blueprint's; a target without HTTP is refused such an output, `HTTP_UNGENERATED`. The closed schema is kept, 0022 stating that a member added breaks every older reader: fail-closed, a hand-written blueprint held as strictly as its schema holds any.                                                                                                                              |
 
 ### On a command over a gateway
 

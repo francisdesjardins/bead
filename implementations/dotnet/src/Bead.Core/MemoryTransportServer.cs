@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Collections.Frozen;
 
 namespace Bead;
 
@@ -10,6 +11,15 @@ public sealed record MemoryTransportServerOptions
     /// envelope; the system's clock when none.
     /// </summary>
     public TimeProvider? Clock { get; init; }
+
+    /// <summary>
+    /// The procedures each of its connections takes, by their addresses (spec 9.11): a request to
+    /// any other, which names no destination, is answered as one to no resolver,
+    /// <c>SERVICE_UNKNOWN</c> or <c>PROCEDURE_UNKNOWN</c>. None takes every procedure; empty, none.
+    /// An address of service 0 or of procedure 0 is an <see cref="ArgumentException"/> as the
+    /// transport is built, and one named twice is one (spec 9.12).
+    /// </summary>
+    public IReadOnlyCollection<ProcedureAddress>? Procedures { get; init; }
 
     /// <summary>
     /// Where it tells what comes to it, each in a turn of its own and in order: one of its own when
@@ -54,6 +64,8 @@ public sealed class MemoryTransportServer : IServerTransport, IAsyncDisposable
     // where what comes to it is told, one turn at a time, in order
     private readonly SerialScheduler _scheduler;
     private readonly Func<CancellationToken, Task>? _accepting;
+    // the procedures each of its connections takes; none, every one
+    private readonly FrozenSet<ProcedureAddress>? _procedures;
     // its ready state, and the guards around its start and its stop, as every transport server's
     private readonly TransportServerLife _life = new();
     // each connection held, by its handle; drawn and ended on its scheduler alone
@@ -63,9 +75,13 @@ public sealed class MemoryTransportServer : IServerTransport, IAsyncDisposable
     // how many connections were drawn, which ranks each, its handle by it
     private long _arrivals;
 
-    /// <summary>A transport server, not yet started.</summary>
+    /// <summary>
+    /// A transport server, not yet started: procedures it takes out of their range are an
+    /// <see cref="ArgumentException"/> (spec 9.12).
+    /// </summary>
     public MemoryTransportServer(MemoryTransportServerOptions? options = null)
     {
+        _procedures = ProceduresTaken.Of(options?.Procedures, ("an in-memory transport server", nameof(options)));
         _clock = options?.Clock ?? TimeProvider.System;
         _scheduler = options?.Scheduler ?? new SerialScheduler();
         _accepting = options?.Accepting;
@@ -274,6 +290,21 @@ public sealed class MemoryTransportServer : IServerTransport, IAsyncDisposable
     public bool IsSecure(string connectionHandle)
     {
         return true;
+    }
+
+    /// <summary>Whether it was given the procedures its connections take (spec 9.11).</summary>
+    public bool NamesProcedures()
+    {
+        return _procedures is not null;
+    }
+
+    /// <summary>
+    /// Whether a connection takes a procedure: one of those it was given, the same for every
+    /// connection; every one when it was given none (spec 9.11).
+    /// </summary>
+    public bool TakesProcedure(string connectionHandle, ProcedureAddress address)
+    {
+        return ProceduresTaken.Takes(_procedures, address);
     }
 
     /// <summary>

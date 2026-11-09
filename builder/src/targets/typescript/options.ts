@@ -34,7 +34,7 @@ export interface ITypeScriptOptions {
   /** Where the messages are, relative to the output's folder, with slashes, for `external`. */
   readonly messagesOut?: string;
   /**
-   * For an output with `http: true`: what its route table holds, and the module it imports its
+   * For an output with a `gateway`: what its route table holds, and the module it imports its
    * runtime from, as `runtime` names its own (decision 0037).
    */
   readonly http?: IHttpInput & { readonly runtime: string };

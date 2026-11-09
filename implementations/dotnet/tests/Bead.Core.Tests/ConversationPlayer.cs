@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Bead.Interop;
@@ -55,8 +56,8 @@ internal static class ConversationPlayer
     // never passes with what it asks left unplayed
     private static readonly HashSet<string> StepKeys =
     [
-        "advance", "carried", "carries", "close", "counted", "expect", "on", "open", "report", "secure",
-        "send", "token", "twoWay", "until", "wall",
+        "advance", "carried", "carries", "close", "counted", "expect", "on", "open", "procedures", "report",
+        "secure", "send", "token", "twoWay", "until", "wall",
     ];
 
     // the tellings a conversation's listener acts on, and the commands it calls
@@ -440,6 +441,37 @@ internal static class ConversationPlayer
             StringComparer.Ordinal);
     }
 
+    // the procedures an open's connection's transport takes (spec 9.11): none where it gives none,
+    // every one then taken
+    private static FrozenSet<ProcedureAddress>? ProceduresOf(JsonElement step)
+    {
+        if (!step.TryGetProperty("procedures", out var procedures))
+        {
+            return null;
+        }
+
+        return procedures.EnumerateArray().Select((address) =>
+        {
+            return new ProcedureAddress(address.GetProperty("serviceId").GetUInt16(), address.GetProperty("procedureId").GetUInt16());
+        }).ToFrozenSet();
+    }
+
+    // what each open of a conversation gives its connection's transport to take, in order
+    private static List<FrozenSet<ProcedureAddress>?> OpensProceduresOf(JsonElement conversation)
+    {
+        return [.. conversation.GetProperty("steps").EnumerateArray().Where((step) =>
+        {
+            return step.TryGetProperty("open", out _);
+        }).Select(ProceduresOf)];
+    }
+
+    // the procedures a real pair's one transport takes: those every open of the conversation gives,
+    // which CanStandFor holds to one list
+    private static FrozenSet<ProcedureAddress>? TakenOf(JsonElement conversation)
+    {
+        return OpensProceduresOf(conversation).FirstOrDefault();
+    }
+
     // definition
 
     /// <summary>
@@ -454,8 +486,18 @@ internal static class ConversationPlayer
         // the server's clock, which settles once its router and its resolvers are idle
         var clock = new SteppingClock(options.WallClock) { Settle = scheduler.WhenIdle };
         IPlayedTransport transport = (options.IsInMemory || options.IsOverBroker) && CanStandFor(conversation)
-            ? (options.IsOverBroker ? new BrokerPairTransport(scheduler, clock) : new InMemoryTransport(scheduler, clock))
-            : new ScriptedTransport { Clock = clock };
+            ? (options.IsOverBroker ? new BrokerPairTransport((scheduler, clock), TakenOf(conversation)) : new InMemoryTransport((scheduler, clock), TakenOf(conversation)))
+            : new ScriptedTransport
+            {
+                Clock = clock,
+
+                // * its router asks once, as it is built, before any open: a conversation that gives
+                // an open its procedures names them
+                IsNaming = steps.EnumerateArray().Any((step) =>
+                {
+                    return step.TryGetProperty("procedures", out _);
+                }),
+            };
 
         // what the server reported, each with the connection it came with
         var reports = new List<(string Report, string? ConnectionHandle)>();
@@ -535,7 +577,7 @@ internal static class ConversationPlayer
             return step.TryGetProperty("open", out _);
         }))
         {
-            await transport.Open(OnlyConnection, new Carrying(true, true, true));
+            await transport.Open(OnlyConnection, new Carrying(true, true, true, null));
         }
 
         try
@@ -554,7 +596,8 @@ internal static class ConversationPlayer
                     var carrying = new Carrying(
                         !step.TryGetProperty("twoWay", out var twoWay) || twoWay.GetBoolean(),
                         !step.TryGetProperty("carries", out var carries) || carries.GetBoolean(),
-                        !step.TryGetProperty("secure", out var secure) || secure.GetBoolean());
+                        !step.TryGetProperty("secure", out var secure) || secure.GetBoolean(),
+                        ProceduresOf(step));
 
                     await NothingMore();
                     await transport.Open(opened.GetString()!, carrying);
@@ -667,12 +710,22 @@ internal static class ConversationPlayer
     /// <summary>
     /// Whether a pair of the in-memory transport can stand for every connection a conversation
     /// opens: each carries the server's own envelopes back and is secure, as an in-memory one is;
-    /// and none is asked to carry a credential toward its client, which an in-memory one never
-    /// carries (spec 15.13).
+    /// none is asked to carry a credential toward its client, which an in-memory one never carries
+    /// (spec 15.13); and each takes the procedures every other takes, as one transport takes one
+    /// list for every connection it draws (spec 9.11).
     /// </summary>
     public static bool CanStandFor(JsonElement conversation)
     {
         var steps = conversation.GetProperty("steps").EnumerateArray().ToList();
+        var taken = OpensProceduresOf(conversation);
+
+        if (taken.Any((procedures) =>
+        {
+            return procedures is null != taken[0] is null || (procedures is not null && !procedures.SetEquals(taken[0]!));
+        }))
+        {
+            return false;
+        }
 
         return steps.All((step) =>
         {
@@ -685,8 +738,8 @@ internal static class ConversationPlayer
     }
 
     // what a connection opened carries: the server's own envelopes back, a credential beside an
-    // envelope, and whether it is secure
-    private readonly record struct Carrying(bool IsTwoWay, bool CarriesCredential, bool IsSecure);
+    // envelope, whether it is secure, and the procedures its transport takes, every one when none
+    private readonly record struct Carrying(bool IsTwoWay, bool CarriesCredential, bool IsSecure, FrozenSet<ProcedureAddress>? Procedures);
 
     // what the player plays its clients through: connections it opens by name, delivers to and
     // closes, and what the server sent on each, with the credential carried beside it
@@ -714,9 +767,9 @@ internal static class ConversationPlayer
     // a real pair of the in-memory transport: each connection a client of its own, the first named
     // on the port 50001, the next on 50002, both ends telling on the server's scheduler, so its idle
     // is the transport's too. A name opened again is a new connection, under the handle it drew
-    private sealed class InMemoryTransport(SerialScheduler scheduler, TimeProvider clock) : IPlayedTransport, IAsyncDisposable
+    private sealed class InMemoryTransport((SerialScheduler Scheduler, TimeProvider Clock) running, FrozenSet<ProcedureAddress>? procedures) : IPlayedTransport, IAsyncDisposable
     {
-        private readonly MemoryTransportServer _server = new(new MemoryTransportServerOptions { Clock = clock, Scheduler = scheduler });
+        private readonly MemoryTransportServer _server = new(new MemoryTransportServerOptions { Clock = running.Clock, Scheduler = running.Scheduler, Procedures = procedures });
 
         // what is sent on the scheduler, and taken on the test's
         private readonly Lock _gate = new();
@@ -762,7 +815,7 @@ internal static class ConversationPlayer
                 _ports[name] = port;
             }
 
-            var client = new MemoryTransportClient(new MemoryTransportClientOptions { Clock = clock, Scheduler = scheduler });
+            var client = new MemoryTransportClient(new MemoryTransportClientOptions { Clock = running.Clock, Scheduler = running.Scheduler });
             var drawn = new List<string>();
 
             void Drawn(string connectionHandle)
@@ -879,13 +932,14 @@ internal static class ConversationPlayer
         // by handle, what was sent on it and not yet taken, in order
         private readonly Dictionary<string, Queue<(ReadOnlyMemory<byte> Bytes, string? Carried)>> _sent = [];
 
-        public BrokerPairTransport(SerialScheduler scheduler, TimeProvider clock)
+        public BrokerPairTransport((SerialScheduler Scheduler, TimeProvider Clock) running, FrozenSet<ProcedureAddress>? procedures)
         {
+            var (scheduler, clock) = running;
             var broker = new MemoryBroker(new MemoryBrokerOptions { Clock = clock, Scheduler = scheduler });
 
             _serverParticipant = new BrokerParticipant(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "server" }), new BrokerParticipantOptions { Clock = clock, Scheduler = scheduler });
             _clientParticipant = new BrokerParticipant(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "client" }), new BrokerParticipantOptions { Clock = clock, Scheduler = scheduler });
-            _server = _serverParticipant.Server(new BrokerTransportServerOptions { Names = ["interop"] });
+            _server = _serverParticipant.Server(new BrokerTransportServerOptions { Names = ["interop"], Procedures = procedures });
         }
 
         public IServerTransport Server
@@ -1049,6 +1103,9 @@ internal static class ConversationPlayer
 
         public TimeProvider Clock { get; init; } = TimeProvider.System;
 
+        // whether it names the procedures its connections take, each its open's (spec 9.11)
+        public bool IsNaming { get; init; }
+
         public event Action<string>? Connection;
 
         public event Action<TransportMessage, string>? Message;
@@ -1196,6 +1253,19 @@ internal static class ConversationPlayer
             lock (_gate)
             {
                 return !_carrying.TryGetValue(connectionHandle, out var carrying) || carrying.IsSecure;
+            }
+        }
+
+        public bool NamesProcedures()
+        {
+            return IsNaming;
+        }
+
+        public bool TakesProcedure(string connectionHandle, ProcedureAddress address)
+        {
+            lock (_gate)
+            {
+                return !_carrying.TryGetValue(connectionHandle, out var carrying) || carrying.Procedures is null || carrying.Procedures.Contains(address);
             }
         }
 

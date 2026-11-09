@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { createRouterClient } from '../../../router/client/router-client';
 import { PAYLOAD_CODECS } from '../../../router/shared/payloads';
 import { createServiceManager } from '../../../router/shared/service-manager';
-import type { IProcedure } from '../../../router/shared/types';
+import type { IProcedure, IProcedureAddress } from '../../../router/shared/types';
 import { createServer } from '../../../server/server';
 import { createMemoryTransportClient } from '../../client/memory-transport-client';
 import { createWorkerTransportClient } from '../../client/worker-transport-client';
@@ -38,7 +38,8 @@ const turn = (): Promise<void> => {
 
 /**
  * A transport server of `type` the test drives: it tells what the test emits, says of each
- * connection what `flags` say, and records what it was asked to send, close and stop.
+ * connection what `flags` say, takes the procedures `takes` says when given, and records what it was
+ * asked to send, close and stop.
  */
 const createFake = (
   type: string,
@@ -48,12 +49,14 @@ const createFake = (
     ceilings = {},
     flags,
     stopping = Promise.resolve(),
+    takes,
   }: {
     anomalies?: string[];
     ceilings?: Record<string, number>;
     counts?: Record<string, number>;
     flags: { carriesCredential?: boolean; isSecure?: boolean; isTwoWay?: boolean };
     stopping?: Promise<void>;
+    takes?: (address: IProcedureAddress) => boolean;
   }
 ) => {
   const emitter = createEmitter<TransportServerEventMap>();
@@ -87,6 +90,18 @@ const createFake = (
             asked.push(['isTwoWay', connectionHandle]);
 
             return flags.isTwoWay === true;
+          },
+        }),
+    ...(takes === undefined
+      ? {}
+      : {
+          takesProcedure: (
+            connectionHandle: TransportServerConnectionHandle,
+            address: IProcedureAddress
+          ) => {
+            asked.push(['takesProcedure', connectionHandle]);
+
+            return takes(address);
           },
         }),
     close: (connectionHandle) => {
@@ -149,6 +164,53 @@ const createWorker = (clock?: ReturnType<typeof createTestClock>) => {
 // definition
 
 test.describe('joinTransports', () => {
+  // spec 9.11, 15.14
+  test('a joined transport answers whether a connection takes a procedure by the transport that drew its handle', () => {
+    const webSocket = createFake('WS', {
+      flags: {},
+      takes: ({ procedureId }) => {
+        return procedureId === 1;
+      },
+    });
+    const http = createFake('HTTP', { flags: {} });
+    const joined = joinTransports([webSocket.transport, http.transport]);
+    const byWebSocket = 'type=WS;ip=127.0.0.1;port=50001;ordinal=1';
+    const byHTTP = 'type=HTTP;ip=127.0.0.1;ordinal=1';
+
+    expect([
+      joined.takesProcedure?.(byWebSocket, { procedureId: 1, serviceId: 2 }),
+      joined.takesProcedure?.(byWebSocket, { procedureId: 2, serviceId: 2 }),
+      // * a transport that names none takes every procedure; a handle none drew, none
+      joined.takesProcedure?.(byHTTP, { procedureId: 2, serviceId: 2 }),
+      joined.takesProcedure?.('type=BROKER;participant=peer;ordinal=1', {
+        procedureId: 1,
+        serviceId: 2,
+      }),
+    ]).toEqual([true, false, true, false]);
+    expect(webSocket.asked).toEqual([
+      ['takesProcedure', byWebSocket],
+      ['takesProcedure', byWebSocket],
+    ]);
+    expect(http.asked).toEqual([]);
+  });
+
+  test('a joined transport asks of procedures only when one of its transports names them', () => {
+    const naming = createMemoryTransportServer({ procedures: [] });
+    const none = joinTransports([
+      createMemoryTransportServer(),
+      createFake('HTTP', { flags: {} }).transport,
+    ]);
+    const some = joinTransports([naming, createFake('HTTP', { flags: {} }).transport]);
+
+    expect(none.takesProcedure).toBeUndefined();
+    expect(
+      some.takesProcedure?.('type=MEMORY;ip=127.0.0.1;port=1;ordinal=1', {
+        procedureId: 1,
+        serviceId: 2,
+      })
+    ).toBe(false);
+  });
+
   // spec 15.14
   test('hands on each transport’s events with the handle it drew', async () => {
     using worker = createWorker();

@@ -396,7 +396,7 @@ test("reads keepValidateOptions, protovalidate's options kept in the messages an
   );
 });
 
-test("reads http's prefix, openapi's out, title, security and problemTypes, an output's http, httpRuntime and keepHttpOptions, and refuses each off its form", () => {
+test("reads http's prefix, openapi's out, title, security and problemTypes, an output's gateway, its runtime and keepHttpOptions, and refuses each off its form", () => {
   const folder = '/work';
   const read = (text: string): IConfig => {
     return parseConfig(`version: 1\nsource:\n  proto: [proto]\n${text}`, {
@@ -422,17 +422,16 @@ test("reads http's prefix, openapi's out, title, security and problemTypes, an o
     problemTypes: 'https://example.com/problems/',
   });
 
-  const [typescript] = read(output('    http: true\n    keepHttpOptions: true\n')).outputs ?? [];
+  const [typescript] = read(output('    gateway: {}\n    keepHttpOptions: true\n')).outputs ?? [];
 
   expect(typescript).toMatchObject({
-    http: true,
-    httpRuntime: '@francisdesjardins/bead/transcoding',
+    gateway: { runtime: '@francisdesjardins/bead/transcoding' },
     keepHttpOptions: true,
   });
-  expect(read(output('')).outputs?.[0]).not.toHaveProperty('httpRuntime');
+  expect(read(output('')).outputs?.[0]).not.toHaveProperty('gateway');
   expect(
-    read(output('    http: true\n    httpRuntime: ../runtime/transcoding\n')).outputs?.[0]
-  ).toMatchObject({ httpRuntime: '../runtime/transcoding' });
+    read(output('    gateway:\n      runtime: ../runtime/transcoding\n')).outputs?.[0]
+  ).toMatchObject({ gateway: { runtime: '../runtime/transcoding' } });
 
   for (const [text, refusal] of [
     ['http:\n  prefix: api\n', 'http.prefix is / and segments'],
@@ -445,8 +444,11 @@ test("reads http's prefix, openapi's out, title, security and problemTypes, an o
     ],
     ['openapi:\n  problemTypes: problems/\n', 'openapi.problemTypes is an absolute URI'],
     ['openapi:\n  out: ../openapi.json\n', 'openapi.out: ../openapi.json is outside the folder'],
-    [output('    http: yes\n'), 'outputs[0].http is true or false'],
-    [output('    httpRuntime: ../runtime\n'), 'outputs[0].httpRuntime names the route table'],
+    [output('    gateway:\n      runtime: /runtime\n'), 'outputs[0].gateway.runtime is a package'],
+    [
+      output('    gateway:\n      runtime: ../runtime.ts\n'),
+      'outputs[0].gateway.runtime: ../runtime.ts names no extension',
+    ],
     [
       output('    messages: external\n    messagesOut: gen/messages\n    keepHttpOptions: true\n'),
       'outputs[0].keepHttpOptions keeps google.api.http in the messages beadc generates, and only then',
@@ -455,5 +457,146 @@ test("reads http's prefix, openapi's out, title, security and problemTypes, an o
     expect(() => {
       return read(text);
     }, text).toThrow(refusal);
+  }
+});
+
+test("reads an output's server, its transports, client and gateway, each a selection or a list of them, in the order written", () => {
+  const [typescript, csharp] =
+    parseConfig(
+      [
+        'version: 1',
+        'source:',
+        '  proto: [proto]',
+        'outputs:',
+        '  - language: typescript',
+        '    out: gen/ts',
+        '    server:',
+        '      transports:',
+        '        webSocket: {}',
+        '        orders: { procedures: { include: [Shop/placeOrder, Shop/cancelOrder] } }',
+        '        none: { procedures: [] }',
+        '    gateway:',
+        '      procedures: { kind: [request], idempotencyLevel: [NO_SIDE_EFFECTS] }',
+        '  - language: csharp',
+        '    out: gen/cs',
+        '    server:',
+        '      procedures: [{ include: [Shop/*], exclude: [Shop/watch] }, { kind: [command] }]',
+        '    client: {}',
+        '',
+      ].join('\n'),
+      { folder: '/work', path: path.posix }
+    ).outputs ?? [];
+
+  expect(typescript).toMatchObject({
+    server: {
+      transports: [
+        { key: 'webSocket' },
+        {
+          key: 'orders',
+          procedures: [{ include: ['Shop/placeOrder', 'Shop/cancelOrder'] }],
+        },
+        { key: 'none', procedures: [] },
+      ],
+    },
+    gateway: {
+      procedures: [{ kind: ['request'], idempotencyLevel: ['NO_SIDE_EFFECTS'] }],
+      runtime: '@francisdesjardins/bead/transcoding',
+    },
+  });
+  expect(typescript).not.toHaveProperty('client');
+  expect(typescript?.server?.transports?.[0]).not.toHaveProperty('procedures');
+  expect(csharp).toMatchObject({
+    server: {
+      procedures: [{ include: ['Shop/*'], exclude: ['Shop/watch'] }, { kind: ['command'] }],
+    },
+    client: {},
+  });
+  expect(csharp?.server).not.toHaveProperty('transports');
+});
+
+test('refuses http and httpRuntime naming their successor, and a server, client or gateway off its form', () => {
+  const read = (language: string, keys: string): IConfig => {
+    return parseConfig(
+      `version: 1\nsource:\n  proto: [proto]\noutputs:\n  - language: ${language}\n    out: gen/x\n${keys}`,
+      { folder: '/work', path: path.posix }
+    );
+  };
+
+  for (const [language, keys, refusal] of [
+    [
+      'typescript',
+      '    http: true\n',
+      'outputs[0].http is no key beadc reads: said by gateway: {}, decision 0048',
+    ],
+    [
+      'csharp',
+      '    http: true\n',
+      'outputs[0].http is no key beadc reads: said by gateway: {}, decision 0048',
+    ],
+    [
+      'typescript',
+      '    httpRuntime: ../runtime\n',
+      'outputs[0].httpRuntime is no key beadc reads: said by gateway.runtime',
+    ],
+    [
+      'csharp',
+      '    gateway:\n      runtime: ../runtime\n',
+      'outputs[0].gateway.runtime, a key beadc does not read',
+    ],
+    [
+      'typescript',
+      '    server: true\n',
+      'outputs[0].server is a mapping of procedures and transports',
+    ],
+    [
+      'typescript',
+      '    server:\n      serves: {}\n',
+      'outputs[0].server.serves, a key beadc does not read',
+    ],
+    ['typescript', '    client: []\n', 'outputs[0].client is a mapping of procedures'],
+    [
+      'typescript',
+      '    server:\n      transports: [webSocket]\n',
+      'outputs[0].server.transports is a mapping',
+    ],
+    [
+      'typescript',
+      '    server:\n      transports:\n        WebSocket: {}\n',
+      'outputs[0].server.transports.WebSocket: a key is an ASCII lower-case letter',
+    ],
+    [
+      'typescript',
+      '    server:\n      transports:\n        admin:\n          transport: mqtt\n',
+      'outputs[0].server.transports.admin.transport, a key beadc does not read',
+    ],
+    [
+      'typescript',
+      '    client:\n      procedures: { effects: [none] }\n',
+      'outputs[0].client.procedures.effects, a key beadc does not read',
+    ],
+    [
+      'typescript',
+      '    client:\n      procedures: [{ kind: [query] }]\n',
+      'outputs[0].client.procedures[0].kind[0] is request, notifies or command',
+    ],
+    [
+      'typescript',
+      '    gateway:\n      procedures: { idempotencyLevel: [SAFE] }\n',
+      'outputs[0].gateway.procedures.idempotencyLevel[0] is NO_SIDE_EFFECTS, IDEMPOTENT or IDEMPOTENCY_UNKNOWN',
+    ],
+    [
+      'typescript',
+      '    server:\n      procedures: { include: [sayHello] }\n',
+      'outputs[0].server.procedures.include[0] is Service/procedure or Service/*',
+    ],
+    [
+      'typescript',
+      '    server:\n      procedures: { exclude: Hello/* }\n',
+      'outputs[0].server.procedures.exclude is a list of Service/procedure or Service/*',
+    ],
+  ] as const) {
+    expect(() => {
+      return read(language, keys);
+    }, keys).toThrow(refusal);
   }
 });

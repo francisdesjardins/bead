@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Collections.Frozen;
 using System.Globalization;
 using System.Net;
 using System.Net.WebSockets;
@@ -179,6 +180,16 @@ public sealed record WebSocketTransportServerOptions
     /// holds it.
     /// </summary>
     public TimeSpan HeadersTimeout { get; init; } = ServerBounds.HeadersTimeout;
+
+    /// <summary>
+    /// The procedures each of its connections takes, by their addresses (spec 9.11): a request to
+    /// any other, which names no destination, is answered as one to no resolver,
+    /// <c>SERVICE_UNKNOWN</c> or <c>PROCEDURE_UNKNOWN</c>, before its credential, its admission and
+    /// its payload. None takes every procedure; empty, none. An address of service 0 or of
+    /// procedure 0 is an <see cref="ArgumentException"/> as the transport is built, and one named
+    /// twice is one (spec 9.12).
+    /// </summary>
+    public IReadOnlyCollection<ProcedureAddress>? Procedures { get; init; }
 }
 
 /// <summary>Where a transport server listens.</summary>
@@ -232,6 +243,8 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     private readonly TimeProvider _clock;
     // the networks of the proxies it believes X-Forwarded-For from
     private readonly ProxyTrust _proxyTrust;
+    // the procedures each of its connections takes; none, every one
+    private readonly FrozenSet<ProcedureAddress>? _procedures;
     // each connection, and its end as the server tells it: gone from the handles, its close raised
     private readonly ConcurrentDictionary<string, Held> _connections = new();
     // its ready state, and the guards around its start and its stop, as every transport server's
@@ -255,7 +268,8 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     /// <summary>
     /// A transport server, not yet listening, its heartbeat and close timeout held: one no timer
     /// holds is an <see cref="ArgumentOutOfRangeException"/>; an entry of its hosts, origins or
-    /// trusted proxies none takes, an <see cref="ArgumentException"/> naming it.
+    /// trusted proxies none takes, an <see cref="ArgumentException"/> naming it; procedures it takes
+    /// out of their range, an <see cref="ArgumentException"/> (spec 9.12).
     /// </summary>
     public WebSocketTransportServer(WebSocketTransportServerOptions? options = null)
     {
@@ -265,6 +279,7 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         ServerBounds.AssertCount((nameof(WebSocketTransportServerOptions.MaximumConnectionsPerAddress), given.MaximumConnectionsPerAddress));
         ServerBounds.AssertCountOrNone((nameof(WebSocketTransportServerOptions.MinimumSendBytesPerSecond), given.MinimumSendBytesPerSecond));
         ServerBounds.AssertCount((nameof(WebSocketTransportServerOptions.MaximumUnsentBytes), given.MaximumUnsentBytes ?? 1));
+        _procedures = ProceduresTaken.Of(given.Procedures, ("a WebSocket transport server", nameof(options)));
         HostsAndOrigins.AssertHosts(given.Hosts, nameof(WebSocketTransportServerOptions.Hosts));
         HostsAndOrigins.AssertOrigins(given.Origins, nameof(WebSocketTransportServerOptions.Origins));
         _proxyTrust = Bead.TrustedProxies.TrustOf(
@@ -624,6 +639,21 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     public bool IsSecure(string connectionHandle)
     {
         return _isSecure;
+    }
+
+    /// <summary>Whether it was given the procedures its connections take (spec 9.11).</summary>
+    public bool NamesProcedures()
+    {
+        return _procedures is not null;
+    }
+
+    /// <summary>
+    /// Whether a connection takes a procedure: one of those it was given, the same for every
+    /// connection; every one when it was given none (spec 9.11).
+    /// </summary>
+    public bool TakesProcedure(string connectionHandle, ProcedureAddress address)
+    {
+        return ProceduresTaken.Takes(_procedures, address);
     }
 
     /// <summary>

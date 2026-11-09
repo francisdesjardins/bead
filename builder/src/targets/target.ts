@@ -13,6 +13,7 @@
 // dependencies
 
 import type { IBlueprint, IDeprecation, IServiceEntry } from '../model/blueprint.ts';
+import type { ICut } from '../model/selection.ts';
 import { beadcVersion } from '../version.ts';
 
 // types
@@ -42,9 +43,9 @@ export type SourceNames =
   | { readonly proto: ReadonlyMap<string, string> };
 
 /**
- * What an output with `http: true` writes beside its services (decision 0037): its routes' prefix,
- * the OpenAPI document it embeds, byte for byte the one `generate` writes, and the base of an
- * application failure's problem type, where `beadc.yaml` gives one.
+ * What an output with a `gateway` writes beside its services (decision 0037): its routes' prefix,
+ * the OpenAPI document it embeds, byte for byte the one `generate` writes of what its gateway
+ * selects, and the base of an application failure's problem type, where `beadc.yaml` gives one.
  */
 export interface IHttpInput {
   readonly prefix: string;
@@ -58,13 +59,18 @@ export interface ITargetInput {
   /** buf's set, a FileDescriptorSet, for a `.proto` source. */
   readonly set?: Uint8Array;
   readonly sources: SourceNames;
+  /**
+   * What the output holds of `blueprint` (decision 0048): the procedures its sides select, each
+   * class's pick, its gateway's and its transports'; none, every procedure, both classes whole.
+   */
+  readonly cut?: ICut;
 }
 
 /**
  * A target: one language's files, from a checked blueprint, and the features of `requires` it
  * generates, which `generate` holds a blueprint's to (FEATURE_UNGENERATED): a feature declared and
  * played by one side alone is never written; and whether it writes a route table, which an output
- * with `http: true` asks of it (HTTP_UNGENERATED).
+ * with a `gateway` asks of it (HTTP_UNGENERATED).
  */
 export interface ITarget<Options> {
   readonly name: string;

@@ -27,6 +27,7 @@ export type { IFailureCatalogue, IListedFailure, IListedFailureError } from './f
 export {
   GENERATED_CODE_SUPPORTS_VERSION_6,
   GENERATED_CODE_SUPPORTS_VERSION_7,
+  GENERATED_CODE_SUPPORTS_VERSION_8,
 } from './generated-code';
 export { createServiceClient } from './service-client';
 export type { IServiceClient, IServiceClientOptions } from './service-client';

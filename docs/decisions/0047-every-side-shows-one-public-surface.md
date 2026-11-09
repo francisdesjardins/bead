@@ -261,5 +261,5 @@ rendering, each side in its platform's form (D1); the TypeScript transport serve
 event of two values, `[connection: ITransportServerConnection<Socket, Request>, connectionHandle]`
 (D2); the TypeScript side's `WS` renamed `WebSocket`, its entries `./websocket-*`, the value `'WS'`
 kept (D3); the Rust service server's `command_of` and `notifier_of` (D4); `failuresOf(serviceId,
-codes)` in this minor, the TypeScript target writing contract 7 (D5); and a ratchet on the tuples
+codes)`, the TypeScript target writing contract 7 (D5); and a ratchet on the tuples
 of three elements or more a function takes, its pins only falling (D6).

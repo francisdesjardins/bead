@@ -10,9 +10,11 @@
 // as protoc's and gRPC's own files open, the namespace, each service, the rules of each message its
 // requests' rules reach (decision 0035), and once the contract with the runtime. A message is named from its descriptor as
 // protoc's C# generator names it: its file's namespace, then its enclosing messages, each followed
-// by `Types`, every name qualified from `global::`. An output with `http: true` writes `BeadHttp.cs`
-// besides, beside the first service's file, its route table and the document (`http.ts`, decision
-// 0037).
+// by `Types`, every name qualified from `global::`. An output holds the procedures its sides select,
+// each class printed over its own (decision 0048), and a service none selects is not written. An
+// output with a `gateway` writes `BeadHttp.cs` besides, beside the first service's file, its route
+// table and the document of what the gateway selects (`http.ts`, decision 0037); one whose server
+// names its transports, `BeadServed.cs`, beside it, the procedures each takes (`served.ts`).
 
 // dependencies
 
@@ -29,6 +31,7 @@ import {
   VALIDATE_FEATURE,
 } from '../../model/blueprint.ts';
 import { judgedMessagesOf, plansOf } from '../../model/rules.ts';
+import { cutOf } from '../../model/selection.ts';
 import { csharpPathOf, protocPin } from '../../protoc.ts';
 import { csharpNamespaceOf } from '../names.ts';
 import {
@@ -43,6 +46,7 @@ import {
 } from '../target.ts';
 import { HTTP_FILE, printCSharpHttp } from './http.ts';
 import type { ICSharpOptions } from './options.ts';
+import { printCSharpServed, SERVED_FILE } from './served.ts';
 import { printService } from './templates.ts';
 import { printCSharpValidators } from './validators.ts';
 
@@ -92,7 +96,10 @@ export const csharpTarget: ITarget<ICSharpOptions> = Object.freeze({
   features: new Set([LEGACY_REQUIRED_FEATURE, VALIDATE_FEATURE]),
   http: true,
   generate: (input: ITargetInput, options: ICSharpOptions): readonly IGeneratedFile[] => {
-    const { blueprint } = input;
+    // * what the output holds: every procedure, both classes whole, where no cut is given
+    const cut = input.cut ?? cutOf(input.blueprint, {});
+    const { blueprint } = cut;
+    const gateway = cut.gateway ?? blueprint;
     const set =
       input.set === undefined ? undefined : fromBinary(FileDescriptorSetSchema, input.set);
     const protoFiles = new Map(
@@ -174,7 +181,15 @@ export const csharpTarget: ITarget<ICSharpOptions> = Object.freeze({
         `#pragma warning disable CS0612, CS0618, ${DEPRECATION_ID} // a deprecated member, protobuf's or Bead's, is named by its own file`,
         ...(namespace === '' ? [] : ['', `namespace ${namespace};`]),
         ...services.flatMap((service) => {
-          return ['', ...printService(service, { messageOf, validators: validators.classes })];
+          return [
+            '',
+            ...printService(service, {
+              messageOf,
+              validators: validators.classes,
+              served: cut.served?.get(service.serviceName),
+              called: cut.called?.get(service.serviceName),
+            }),
+          ];
         }),
         ...validators.lines,
         '',
@@ -191,17 +206,34 @@ export const csharpTarget: ITarget<ICSharpOptions> = Object.freeze({
     const [first] = blueprint.services;
     const firstFile = [...files.values()][0];
 
-    if (options.http === undefined || first === undefined || firstFile === undefined) {
+    if (first === undefined || firstFile === undefined) {
       return written;
     }
 
-    // * the route table beside the first service's file, in its namespace
+    // * the route table and the procedures served beside the first service's file, in its namespace
     const folder = firstFile.name.includes('/')
       ? firstFile.name.slice(0, firstFile.name.lastIndexOf('/') + 1)
       : '';
+    const served =
+      cut.transports === undefined
+        ? []
+        : [
+            {
+              name: `${folder}${SERVED_FILE}`,
+              content: `${headerOf(blueprint, {
+                source: sourceNameOf(input.sources, first.proto?.file),
+                marker: GENERATED_MARKER,
+              })}${printCSharpServed({ transports: cut.transports, namespace: firstFile.namespace }).join('\n')}`,
+            },
+          ];
+
+    if (options.http === undefined) {
+      return [...written, ...served];
+    }
+
     const header = headerOf(blueprint, {
       source: sourceNameOf(input.sources, first.proto?.file),
-      ...(options.messages === Messages.GENERATE && blueprint.services.some(bindsMessages)
+      ...(options.messages === Messages.GENERATE && gateway.services.some(bindsMessages)
         ? {
             messages: `protoc ${protocPin().version}, for Google.Protobuf ${protocPin().googleProtobuf} or later`,
           }
@@ -215,13 +247,17 @@ export const csharpTarget: ITarget<ICSharpOptions> = Object.freeze({
       return protoFile === undefined ? (options.namespace ?? '') : namespaceOf(protoFile);
     };
     const lines = printCSharpHttp({
-      blueprint,
+      blueprint: gateway,
       http: options.http,
       namespace: firstFile.namespace,
       namespaceOf: namespaceOfService,
       messageOf,
     });
 
-    return [...written, { name: `${folder}${HTTP_FILE}`, content: `${header}${lines.join('\n')}` }];
+    return [
+      ...written,
+      { name: `${folder}${HTTP_FILE}`, content: `${header}${lines.join('\n')}` },
+      ...served,
+    ];
   },
 });

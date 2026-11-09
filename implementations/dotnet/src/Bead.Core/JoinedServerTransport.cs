@@ -9,7 +9,7 @@ namespace Bead;
 /// transport beside a WebSocket one, say, as the TypeScript side's <c>joinTransports</c>. Each
 /// handle is the one its transport drew, and the join refuses, as it is built, two transports of
 /// one type, whose handles might be one; each connection's flags, its sending, its closing, its
-/// pause and its resume are asked of the transport that drew it, known by its handle's type. Each transport's events are
+/// pause, its resume and the procedures it takes are asked of the transport that drew it, known by its handle's type. Each transport's events are
 /// told on, with its handle, in the order that transport told them, each listener within the
 /// join's guard; its stop stops every one, and settles once all have; its gauges are their sum. It
 /// starts nothing: an application starts each transport it joined, at its own address, and the
@@ -30,6 +30,8 @@ public sealed class JoinedServerTransport : IServerTransport, IAsyncDisposable
     // each transport's connections as its events told them, what it is counted by when it counts
     // nothing itself
     private readonly IReadOnlyList<ConcurrentDictionary<string, bool>> _told;
+    // whether any of its transports names the procedures its connections take, asked once
+    private readonly bool _namesProcedures;
 
     /// <summary>
     /// A join of <paramref name="transports"/>, each told on from now. None, one that names no type
@@ -71,6 +73,10 @@ public sealed class JoinedServerTransport : IServerTransport, IAsyncDisposable
 
         _transports = [.. transports];
         _byType = byType.ToFrozenDictionary(StringComparer.Ordinal);
+        _namesProcedures = _transports.Any((transport) =>
+        {
+            return transport.NamesProcedures();
+        });
         _listeners = new ListenerGuard((reason, connectionHandle) =>
         {
             Error?.Invoke(reason, connectionHandle ?? "");
@@ -195,6 +201,24 @@ public sealed class JoinedServerTransport : IServerTransport, IAsyncDisposable
     public bool IsSecure(string connectionHandle)
     {
         return OwnerOf(connectionHandle)?.IsSecure(connectionHandle) ?? false;
+    }
+
+    /// <summary>
+    /// Whether any of its transports names the procedures its connections take (spec 9.11), asked of
+    /// each once, as the join is built.
+    /// </summary>
+    public bool NamesProcedures()
+    {
+        return _namesProcedures;
+    }
+
+    /// <summary>
+    /// Whether a connection takes a procedure, as the transport that drew it says (spec 9.11, 15.14);
+    /// none for a handle none of them drew.
+    /// </summary>
+    public bool TakesProcedure(string connectionHandle, ProcedureAddress address)
+    {
+        return OwnerOf(connectionHandle)?.TakesProcedure(connectionHandle, address) ?? false;
     }
 
     /// <summary>

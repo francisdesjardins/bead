@@ -1,4 +1,7 @@
+import { createServer } from 'node:http';
 import { expect, test } from '@playwright/test';
+import { WebSocketServer } from 'ws';
+import type { IProcedureAddress } from '../../../router/shared/types';
 import * as clocks from '../../shared/clock';
 import * as constants from '../../shared/constants';
 import * as errors from '../../shared/errors';
@@ -6,18 +9,59 @@ import * as readyState from '../../shared/ready-state';
 import * as entry from '../transport-server';
 import { createTestClock } from '../../shared/__tests__/fixtures';
 import { noop } from '../../shared/noop';
+import { createHTTPTransportServer } from '../http-transport-server';
+import { createMemoryTransportServer } from '../memory-transport-server';
 import {
   createTransportServer,
   generateHandle,
   listenOn,
   ProgrammerError,
+  type ITransportServer,
   type ITransportServerAddress,
   type ITransportServerDefineOptions,
   type TransportServerConnectionHandle,
 } from '../transport-server';
+import { createWebSocketTransportServer } from '../websocket-transport-server';
+import { createWorkerTransportServer } from '../worker-transport-server';
 
 const A = generateHandle({ ip: '10.0.0.1', ordinal: 1, port: 1, type: 'WS' });
 const B = generateHandle({ ip: '10.0.0.2', ordinal: 2, port: 2, type: 'WS' });
+
+// every transport server of this package that takes one list of procedures, built with `procedures`:
+// none starts, so none listens
+const TAKING = Object.freeze({
+  http: (procedures?: readonly IProcedureAddress[]) => {
+    return createHTTPTransportServer({
+      createServer: (listener) => {
+        return createServer(listener);
+      },
+      procedures,
+    });
+  },
+  memory: (procedures?: readonly IProcedureAddress[]) => {
+    return createMemoryTransportServer({ procedures });
+  },
+  webSocket: (procedures?: readonly IProcedureAddress[]) => {
+    return createWebSocketTransportServer({ procedures, WebSocketServer });
+  },
+  worker: (procedures?: readonly IProcedureAddress[]) => {
+    return createWorkerTransportServer({
+      procedures,
+      scope: { addEventListener: noop, removeEventListener: noop },
+    });
+  },
+} satisfies Record<string, (procedures?: readonly IProcedureAddress[]) => ITransportServer>);
+
+// whether `server` takes each of `addresses` on a connection it never drew: one list stands for
+// every connection
+const takenBy = (
+  server: ITransportServer,
+  addresses: readonly IProcedureAddress[]
+): (boolean | undefined)[] => {
+  return addresses.map((address) => {
+    return server.takesProcedure?.(A, address);
+  });
+};
 
 test('draws another port for an occupied loopback in the platform bind failure', async () => {
   const reason = Object.assign(new Error('bind'), { code: 'EADDRINUSE' });
@@ -768,5 +812,126 @@ test.describe('createTransportServer', () => {
       connectionHandles: new Set([A, B]),
       counts: { connections: 2 },
     });
+  });
+});
+
+// spec 9.11, 9.12
+test.describe('the procedures a transport server takes', () => {
+  test('refuses procedures that name an id out of its range or service 0, as the transport is built (spec 9.12)', () => {
+    const refused = [
+      { procedureId: 1, serviceId: 0 },
+      { procedureId: 0, serviceId: 2 },
+      { procedureId: 1, serviceId: 65_536 },
+      { procedureId: 65_536, serviceId: 2 },
+      { procedureId: 1.5, serviceId: 2 },
+      { procedureId: -1, serviceId: 2 },
+      { procedureId: 1, serviceId: '2' },
+      { procedureId: Number.NaN, serviceId: 2 },
+    ] as unknown as IProcedureAddress[];
+
+    for (const [name, build] of Object.entries(TAKING)) {
+      for (const address of refused) {
+        expect(
+          () => {
+            return build([{ procedureId: 1, serviceId: 2 }, address]);
+          },
+          `${name} ${JSON.stringify(address)}`
+        ).toThrow(ProgrammerError);
+      }
+
+      // its bounds taken
+      expect(
+        takenBy(build([{ procedureId: 65_535, serviceId: 1 }]), [
+          { procedureId: 65_535, serviceId: 1 },
+        ]),
+        name
+      ).toEqual([true]);
+    }
+
+    expect(() => {
+      return createMemoryTransportServer({ procedures: [{ procedureId: 1, serviceId: 0 }] });
+    }).toThrow(
+      new ProgrammerError(
+        "an in-memory transport server takes 0/1, out of its range: a service and a procedure are from 1 to 65535, service 0 the protocol's (spec 9.12, 16.2, 16.3)"
+      )
+    );
+  });
+
+  test('takes an address named twice as one (spec 9.12)', () => {
+    for (const [name, build] of Object.entries(TAKING)) {
+      const server = build([
+        { procedureId: 1, serviceId: 2 },
+        { procedureId: 1, serviceId: 2 },
+        { procedureId: 2, serviceId: 2 },
+      ]);
+
+      expect(
+        takenBy(server, [
+          { procedureId: 1, serviceId: 2 },
+          { procedureId: 2, serviceId: 2 },
+          { procedureId: 3, serviceId: 2 },
+          { procedureId: 2, serviceId: 1 },
+        ]),
+        name
+      ).toEqual([true, true, false, false]);
+    }
+  });
+
+  test('a transport given no list takes every procedure, and one given an empty list takes none (spec 9.11)', () => {
+    for (const [name, build] of Object.entries(TAKING)) {
+      // * given none, it names none: its router never asks, and every procedure is taken
+      expect(build().takesProcedure, name).toBeUndefined();
+      expect(build(undefined).takesProcedure, name).toBeUndefined();
+      expect(
+        takenBy(build([]), [
+          { procedureId: 1, serviceId: 1 },
+          { procedureId: 65_535, serviceId: 65_535 },
+        ]),
+        name
+      ).toEqual([false, false]);
+    }
+
+    // the shared half has one only when its transport gives one, and asks it by the handle
+    const asked: [TransportServerConnectionHandle, IProcedureAddress][] = [];
+    const define = (takes: boolean) => {
+      return () => {
+        return {
+          defaults: { address: '0.0.0.0', findOpenPort: false, port: 80 },
+          type: 'WS' as const,
+          close: () => {
+            return Promise.resolve();
+          },
+          pause: noop,
+          resume: noop,
+          send: () => {
+            return Promise.resolve();
+          },
+          start: ({ address, port }: ITransportServerAddress) => {
+            return Promise.resolve({ address, port });
+          },
+          stop: () => {
+            return Promise.resolve();
+          },
+          ...(takes
+            ? {
+                takesProcedure: (
+                  connectionHandle: TransportServerConnectionHandle,
+                  address: IProcedureAddress
+                ) => {
+                  asked.push([connectionHandle, address]);
+
+                  return false;
+                },
+              }
+            : {}),
+        };
+      };
+    };
+
+    expect(createTransportServer(define(false)).takesProcedure).toBeUndefined();
+    expect(
+      createTransportServer(define(true)).takesProcedure?.(B, { procedureId: 1, serviceId: 2 })
+    ).toBe(false);
+    expect(asked).toEqual([[B, { procedureId: 1, serviceId: 2 }]]);
   });
 });

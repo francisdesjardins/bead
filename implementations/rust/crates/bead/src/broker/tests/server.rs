@@ -7,7 +7,7 @@
     reason = "a twin plays its sentence whole, as the other sides' twins do"
 )]
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use tokio::sync::oneshot;
@@ -20,15 +20,19 @@ use crate::broker::adapter::{
     BrokerAdapter, BrokerCapabilities, BrokerDelivery, BrokerError, BrokerListener,
     BrokerPublication, BrokerPublished, BrokerStart, BrokerSubscription,
 };
-use crate::broker::client::{BrokerTransportClientConnectOptions, BrokerTransportClientOptions};
+use crate::broker::client::{
+    BrokerTransportClient, BrokerTransportClientConnectOptions, BrokerTransportClientOptions,
+};
 use crate::broker::memory::{MemoryBrokerAdapter, MemoryBrokerAdapterOptions, TRANSPORT_BROKER};
 use crate::broker::parcel::{Parcel, encode_parcel, kinds, write_parcel};
 use crate::broker::participant::{BrokerParticipant, BrokerParticipantOptions, BrokerRefusedError};
-use crate::broker::server::BrokerTransportServerOptions;
+use crate::broker::server::{BrokerTransportServer, BrokerTransportServerOptions};
 use crate::call_session::{Carriage, uncarried_of};
 use crate::constants::{ProtocolCode, RouterSide};
 use crate::envelope::Credential;
-use crate::errors::{ProgrammerError, TransportError};
+use crate::errors::{ProgrammerError, Refusal, TransportError};
+use crate::failure::ProcedureAddress;
+use crate::identity::IdentityRefusal;
 use crate::router::types::{BoxFuture, ConnectionHandle, RouterError, TransportMessage};
 use crate::transport::{
     ReadyState, RouterClientTransport, ServerListener, ServerTransport,
@@ -164,7 +168,7 @@ impl BrokerAdapter for Holding {
     }
 }
 
-fn names_of(server: &crate::broker::server::BrokerTransportServer) -> Option<u64> {
+fn names_of(server: &BrokerTransportServer) -> Option<u64> {
     server
         .gauges()
         .and_then(|gauges| gauges.counts.get("names").copied())
@@ -1140,4 +1144,256 @@ async fn serves_its_name_again_in_its_group_once_a_connection_closes_as_its_brok
     assert_eq!(names_of(&server), Some(0), "left unheld");
     clients.stop().await;
     participant.stop().await;
+}
+
+// ── The procedures its connections take (spec 9.11, 9.12, 15.18) ──────────────────────────────
+
+// a procedure's address
+const fn address_of(service_id: u16, procedure_id: u16) -> ProcedureAddress {
+    ProcedureAddress {
+        service_id,
+        procedure_id,
+    }
+}
+
+// a server's transport serving `alpha` and `beta` on the pair's server participant, given
+// `options`' procedures, started, and a client of the pair's connected to each name, with the
+// handle the server drew for it
+struct ServedByName {
+    server: BrokerTransportServer,
+    clients: Vec<BrokerTransportClient>,
+    handles: BTreeMap<&'static str, ConnectionHandle>,
+}
+
+impl ServedByName {
+    async fn of(pair: &BrokerPair, options: &BrokerTransportServerOptions) -> Self {
+        let server = pair
+            .server_participant
+            .server(&BrokerTransportServerOptions {
+                names: vec!["alpha".to_owned(), "beta".to_owned()],
+                ..options.clone()
+            })
+            .expect("a server");
+        let told = Arc::new(ServerTold::default());
+        let mut clients = Vec::new();
+        let mut handles = BTreeMap::new();
+
+        server.listen(Arc::new(AtServer(Arc::clone(&told))));
+        server.start().await.expect("started");
+
+        for name in ["alpha", "beta"] {
+            let client = pair
+                .client_participant
+                .client(&BrokerTransportClientOptions::default())
+                .expect("a client");
+            let before = clients.len();
+
+            client
+                .connect(&BrokerTransportClientConnectOptions::new(name))
+                .await
+                .expect("connected");
+            until(
+                || locked(&told.opened).len() > before,
+                "the server tells the connection open",
+            )
+            .await;
+
+            let handle = locked(&told.opened).last().cloned().expect("told");
+
+            handles.insert(name, handle);
+            clients.push(client);
+        }
+
+        Self {
+            server,
+            clients,
+            handles,
+        }
+    }
+
+    // whether the connection reached by `name` takes each of `addresses`
+    fn takes(&self, (name, addresses): (&str, &[ProcedureAddress])) -> Vec<bool> {
+        let handle = self.handles.get(name).expect("a connection by that name");
+
+        addresses
+            .iter()
+            .map(|&address| self.server.takes_procedure(handle, address))
+            .collect()
+    }
+
+    async fn stop(&self) {
+        for client in &self.clients {
+            client
+                .disconnect(&TransportClientDisconnectOptions::default())
+                .ok();
+        }
+
+        self.server.stop().await.expect("stopped");
+    }
+}
+
+// spec 9.11, 15.18: the twin of "a broker’s server transport takes the procedures it is given on
+// every name it serves"
+#[tokio::test]
+async fn a_broker_s_server_transport_takes_the_procedures_it_is_given_on_every_name_it_serves() {
+    let pair = BrokerPair::of(&BrokerPairOptions::default()).await;
+    let served = ServedByName::of(
+        &pair,
+        &BrokerTransportServerOptions {
+            procedures: Some(vec![address_of(1, 1), address_of(1, 2)]),
+            ..BrokerTransportServerOptions::new(["unused"])
+        },
+    )
+    .await;
+    let asked = [address_of(1, 1), address_of(1, 2), address_of(1, 3)];
+
+    assert!(served.server.names_procedures(), "it names procedures");
+
+    for name in ["alpha", "beta"] {
+        assert_eq!(
+            served.takes((name, &asked)),
+            [true, true, false],
+            "a connection by {name} takes what it was given"
+        );
+    }
+
+    // * a handle it does not hold takes none
+    assert!(
+        !served.server.takes_procedure(
+            &Arc::from(format!(
+                "type={TRANSPORT_BROKER};participant=nobody;ordinal=9"
+            )),
+            address_of(1, 1)
+        ),
+        "a handle it does not hold takes nothing"
+    );
+
+    // given none, it names none, and each of its connections takes every procedure
+    assert!(!pair.server.names_procedures(), "given none, it names none");
+
+    served.stop().await;
+    pair.stop().await;
+}
+
+// spec 9.11, 15.18: the twin of "a broker’s server transport takes a name’s own procedures on a
+// connection its OPEN reached by that name"
+#[tokio::test]
+async fn a_broker_s_server_transport_takes_a_name_s_own_procedures_on_a_connection_its_open_reached_by_that_name()
+ {
+    let pair = BrokerPair::of(&BrokerPairOptions::default()).await;
+    let served = ServedByName::of(
+        &pair,
+        &BrokerTransportServerOptions {
+            procedures: Some(vec![address_of(1, 1)]),
+            procedures_by_name: Some(BTreeMap::from([(
+                "beta".to_owned(),
+                vec![address_of(2, 1)],
+            )])),
+            ..BrokerTransportServerOptions::new(["unused"])
+        },
+    )
+    .await;
+    let asked = [address_of(1, 1), address_of(2, 1)];
+
+    assert_eq!(
+        served.takes(("alpha", &asked)),
+        [true, false],
+        "a name without its own takes those given every name"
+    );
+    assert_eq!(
+        served.takes(("beta", &asked)),
+        [false, true],
+        "a name with its own takes them in their place"
+    );
+
+    served.stop().await;
+    pair.stop().await;
+
+    // a name's own, none given for every name: the other names take every procedure
+    let pair = BrokerPair::of(&BrokerPairOptions::default()).await;
+    let only = ServedByName::of(
+        &pair,
+        &BrokerTransportServerOptions {
+            procedures_by_name: Some(BTreeMap::from([("alpha".to_owned(), Vec::new())])),
+            ..BrokerTransportServerOptions::new(["unused"])
+        },
+    )
+    .await;
+
+    assert!(only.server.names_procedures(), "it names procedures");
+    assert_eq!(
+        only.takes(("alpha", &asked)),
+        [false, false],
+        "a name given none takes none"
+    );
+    assert_eq!(
+        only.takes(("beta", &asked)),
+        [true, true],
+        "a name given nothing of its own takes every procedure"
+    );
+
+    only.stop().await;
+    pair.stop().await;
+}
+
+// spec 9.12: the twin of "refuses procedures given for a name it does not serve, as the transport
+// is built (spec 9.12)"
+#[tokio::test]
+async fn refuses_procedures_given_for_a_name_it_does_not_serve_as_the_transport_is_built() {
+    let pair = BrokerPair::of(&BrokerPairOptions::default()).await;
+    let refused = pair
+        .server_participant
+        .server(&BrokerTransportServerOptions {
+            procedures_by_name: Some(BTreeMap::from([(
+                "gamma".to_owned(),
+                vec![address_of(1, 1)],
+            )])),
+            ..BrokerTransportServerOptions::new(["alpha"])
+        })
+        .expect_err("refused as it is built");
+
+    assert_eq!(
+        refused.message(),
+        "a broker's server transport takes procedures for gamma, a name it does not serve (spec 9.12)",
+        "said why"
+    );
+
+    // an address out of its range, for every name or for one, refused as a declaration's is
+    for options in [
+        BrokerTransportServerOptions {
+            procedures: Some(vec![address_of(0, 1)]),
+            ..BrokerTransportServerOptions::new(["alpha"])
+        },
+        BrokerTransportServerOptions {
+            procedures_by_name: Some(BTreeMap::from([(
+                "alpha".to_owned(),
+                vec![address_of(1, 0)],
+            )])),
+            ..BrokerTransportServerOptions::new(["alpha"])
+        },
+    ] {
+        let refused = pair
+            .server_participant
+            .server(&options)
+            .expect_err("refused as it is built");
+
+        assert_eq!(
+            refused.reason(),
+            Some(Refusal::Identity(IdentityRefusal::OutOfItsRange)),
+            "{options:?} refused, out of its range"
+        );
+    }
+
+    // a name it serves takes its own
+    pair.server_participant
+        .server(&BrokerTransportServerOptions {
+            procedures_by_name: Some(BTreeMap::from([(
+                "alpha".to_owned(),
+                vec![address_of(1, 1)],
+            )])),
+            ..BrokerTransportServerOptions::new(["alpha"])
+        })
+        .expect("a server");
+
+    pair.stop().await;
 }

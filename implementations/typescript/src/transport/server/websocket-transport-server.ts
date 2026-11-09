@@ -53,6 +53,7 @@ import {
   LOCALHOST,
   listenOn,
 } from './transport-server';
+import { takingOf } from './shared/procedures-taken';
 import { clientAddressOf, trustedProxiesOf } from './trusted-proxies';
 import type {
   IDrawingRequest,
@@ -74,6 +75,7 @@ import {
   toldOfHandshake,
 } from './websocket-handshake';
 
+export type { IProcedureAddress } from '../../router/shared/types';
 export { CLOSE_TIMEOUT, TRANSPORT_WEBSOCKET_BINARYTYPE } from '../shared/constants';
 export { HEARTBEAT } from '../shared/heartbeat';
 export { HOST_REFUSAL, ORIGIN_REFUSAL } from './hosts-and-origins';
@@ -250,6 +252,7 @@ export const createWebSocketTransportServer = (
     maximumUnsentBytes = MAXIMUM_UNSENT_BYTES,
     minimumSendBytesPerSecond = MINIMUM_SEND_BYTES_PER_SECOND,
     origins = [],
+    procedures,
     secure,
     sendGracePeriod: givenSendGracePeriod = SEND_GRACE_PERIOD,
     trustedProxies,
@@ -270,6 +273,7 @@ export const createWebSocketTransportServer = (
   assertHosts(hosts);
   assertOrigins(origins);
   const proxies = trustedProxiesOf(trustedProxies, { unnamedProxies });
+  const taking = takingOf(procedures, 'a WebSocket transport server');
   const judged = { hosts, origins };
 
   const decoder = new TextDecoder();
@@ -680,6 +684,7 @@ export const createWebSocketTransportServer = (
         defaults: START_DEFAULTS,
         secure,
         type: TRANSPORT_WEBSOCKET,
+        ...taking,
 
         start: async ({ address, findOpenPort, port, signal }) => {
           assertListeningAddress(address);

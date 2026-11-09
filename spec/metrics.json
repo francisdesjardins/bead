@@ -12,7 +12,7 @@
     "A duration is timed on the clock the server is given, which only an advance moves: a call that starts and ends between two advances takes 0 microseconds.",
     "clauses are the units of spec/debugging.md an entry checks: a clause, 7.3; a row of its table, counted from 1, 9.4.2."
   ],
-  "debuggingVersion": "0.6.0",
+  "debuggingVersion": "0.7.0",
   "mediaType": "text/plain; version=0.0.4; charset=utf-8",
   "wallClock": "2026-01-01T00:00:00Z",
   "expositions": [
@@ -390,7 +390,7 @@
       ]
     },
     {
-      "name": "a resolver declared makes its 62 series at 0, and one whose procedure notifies 28 more, as the side that notifies",
+      "name": "a resolver declared makes its 64 series at 0, and one whose procedure notifies 28 more, as the side that notifies",
       "clauses": [
         "7.2",
         "7.2.1",
@@ -646,6 +646,8 @@
         "# HELP bead_server_call_handled_total Each call this side answered, as it ended, by its outcome.",
         "# TYPE bead_server_call_handled_total counter",
         "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"result\"} 0",
+        "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"SERVICE_UNKNOWN\"} 0",
+        "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"PROCEDURE_UNKNOWN\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"SUBSCRIPTION_UNSUPPORTED\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"SESSION_REQUIRED\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"ACCESS_DENIED\"} 0",
@@ -663,6 +665,8 @@
         "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"closed\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"error\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"ticks\",type=\"request\",outcome=\"result\"} 0",
+        "bead_server_call_handled_total{service=\"1\",procedure=\"ticks\",type=\"request\",outcome=\"failure\",code=\"SERVICE_UNKNOWN\"} 0",
+        "bead_server_call_handled_total{service=\"1\",procedure=\"ticks\",type=\"request\",outcome=\"failure\",code=\"PROCEDURE_UNKNOWN\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"ticks\",type=\"request\",outcome=\"failure\",code=\"SUBSCRIPTION_UNSUPPORTED\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"ticks\",type=\"request\",outcome=\"failure\",code=\"SESSION_REQUIRED\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"ticks\",type=\"request\",outcome=\"failure\",code=\"ACCESS_DENIED\"} 0",
@@ -1459,6 +1463,8 @@
         "# HELP bead_server_call_handled_total Each call this side answered, as it ended, by its outcome.",
         "# TYPE bead_server_call_handled_total counter",
         "bead_server_call_handled_total{service=\"1\",procedure=\"clock\",type=\"command\",outcome=\"result\"} 1",
+        "bead_server_call_handled_total{service=\"1\",procedure=\"clock\",type=\"command\",outcome=\"failure\",code=\"SERVICE_UNKNOWN\"} 0",
+        "bead_server_call_handled_total{service=\"1\",procedure=\"clock\",type=\"command\",outcome=\"failure\",code=\"PROCEDURE_UNKNOWN\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"clock\",type=\"command\",outcome=\"failure\",code=\"SUBSCRIPTION_UNSUPPORTED\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"clock\",type=\"command\",outcome=\"failure\",code=\"SESSION_REQUIRED\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"clock\",type=\"command\",outcome=\"failure\",code=\"ACCESS_DENIED\"} 0",
@@ -1851,6 +1857,8 @@
         "# HELP bead_server_call_handled_total Each call this side answered, as it ended, by its outcome.",
         "# TYPE bead_server_call_handled_total counter",
         "bead_server_call_handled_total{service=\"2\",procedure=\"_OTHER\",type=\"request\",outcome=\"result\"} 1",
+        "bead_server_call_handled_total{service=\"2\",procedure=\"_OTHER\",type=\"request\",outcome=\"failure\",code=\"SERVICE_UNKNOWN\"} 0",
+        "bead_server_call_handled_total{service=\"2\",procedure=\"_OTHER\",type=\"request\",outcome=\"failure\",code=\"PROCEDURE_UNKNOWN\"} 0",
         "bead_server_call_handled_total{service=\"2\",procedure=\"_OTHER\",type=\"request\",outcome=\"failure\",code=\"SUBSCRIPTION_UNSUPPORTED\"} 0",
         "bead_server_call_handled_total{service=\"2\",procedure=\"_OTHER\",type=\"request\",outcome=\"failure\",code=\"SESSION_REQUIRED\"} 0",
         "bead_server_call_handled_total{service=\"2\",procedure=\"_OTHER\",type=\"request\",outcome=\"failure\",code=\"ACCESS_DENIED\"} 0",
@@ -1868,6 +1876,8 @@
         "bead_server_call_handled_total{service=\"2\",procedure=\"_OTHER\",type=\"request\",outcome=\"closed\"} 0",
         "bead_server_call_handled_total{service=\"2\",procedure=\"_OTHER\",type=\"request\",outcome=\"error\"} 0",
         "bead_server_call_handled_total{service=\"2\",procedure=\"tenth\",type=\"request\",outcome=\"result\"} 0",
+        "bead_server_call_handled_total{service=\"2\",procedure=\"tenth\",type=\"request\",outcome=\"failure\",code=\"SERVICE_UNKNOWN\"} 0",
+        "bead_server_call_handled_total{service=\"2\",procedure=\"tenth\",type=\"request\",outcome=\"failure\",code=\"PROCEDURE_UNKNOWN\"} 0",
         "bead_server_call_handled_total{service=\"2\",procedure=\"tenth\",type=\"request\",outcome=\"failure\",code=\"SUBSCRIPTION_UNSUPPORTED\"} 0",
         "bead_server_call_handled_total{service=\"2\",procedure=\"tenth\",type=\"request\",outcome=\"failure\",code=\"SESSION_REQUIRED\"} 0",
         "bead_server_call_handled_total{service=\"2\",procedure=\"tenth\",type=\"request\",outcome=\"failure\",code=\"ACCESS_DENIED\"} 0",
@@ -1885,6 +1895,8 @@
         "bead_server_call_handled_total{service=\"2\",procedure=\"tenth\",type=\"request\",outcome=\"closed\"} 0",
         "bead_server_call_handled_total{service=\"2\",procedure=\"tenth\",type=\"request\",outcome=\"error\"} 0",
         "bead_server_call_handled_total{service=\"10\",procedure=\"later\",type=\"request\",outcome=\"result\"} 0",
+        "bead_server_call_handled_total{service=\"10\",procedure=\"later\",type=\"request\",outcome=\"failure\",code=\"SERVICE_UNKNOWN\"} 0",
+        "bead_server_call_handled_total{service=\"10\",procedure=\"later\",type=\"request\",outcome=\"failure\",code=\"PROCEDURE_UNKNOWN\"} 0",
         "bead_server_call_handled_total{service=\"10\",procedure=\"later\",type=\"request\",outcome=\"failure\",code=\"SUBSCRIPTION_UNSUPPORTED\"} 0",
         "bead_server_call_handled_total{service=\"10\",procedure=\"later\",type=\"request\",outcome=\"failure\",code=\"SESSION_REQUIRED\"} 0",
         "bead_server_call_handled_total{service=\"10\",procedure=\"later\",type=\"request\",outcome=\"failure\",code=\"ACCESS_DENIED\"} 0",
@@ -2562,6 +2574,8 @@
         "# HELP bead_server_call_handled_total Each call this side answered, as it ended, by its outcome.",
         "# TYPE bead_server_call_handled_total counter",
         "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"result\"} 2",
+        "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"SERVICE_UNKNOWN\"} 0",
+        "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"PROCEDURE_UNKNOWN\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"SUBSCRIPTION_UNSUPPORTED\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"SESSION_REQUIRED\"} 1",
         "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"ACCESS_DENIED\"} 0",
@@ -3214,6 +3228,8 @@
         "# HELP bead_server_call_handled_total Each call this side answered, as it ended, by its outcome.",
         "# TYPE bead_server_call_handled_total counter",
         "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"result\"} 9",
+        "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"SERVICE_UNKNOWN\"} 0",
+        "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"PROCEDURE_UNKNOWN\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"SUBSCRIPTION_UNSUPPORTED\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"SESSION_REQUIRED\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"ACCESS_DENIED\"} 0",
@@ -3699,6 +3715,8 @@
         "# HELP bead_server_call_handled_total Each call this side answered, as it ended, by its outcome.",
         "# TYPE bead_server_call_handled_total counter",
         "bead_server_call_handled_total{service=\"1\",procedure=\"tens\",type=\"request\",outcome=\"result\"} 1",
+        "bead_server_call_handled_total{service=\"1\",procedure=\"tens\",type=\"request\",outcome=\"failure\",code=\"SERVICE_UNKNOWN\"} 0",
+        "bead_server_call_handled_total{service=\"1\",procedure=\"tens\",type=\"request\",outcome=\"failure\",code=\"PROCEDURE_UNKNOWN\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"tens\",type=\"request\",outcome=\"failure\",code=\"SUBSCRIPTION_UNSUPPORTED\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"tens\",type=\"request\",outcome=\"failure\",code=\"SESSION_REQUIRED\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"tens\",type=\"request\",outcome=\"failure\",code=\"ACCESS_DENIED\"} 0",
@@ -3716,6 +3734,8 @@
         "bead_server_call_handled_total{service=\"1\",procedure=\"tens\",type=\"request\",outcome=\"closed\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"tens\",type=\"request\",outcome=\"error\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"halves\",type=\"request\",outcome=\"result\"} 2",
+        "bead_server_call_handled_total{service=\"1\",procedure=\"halves\",type=\"request\",outcome=\"failure\",code=\"SERVICE_UNKNOWN\"} 0",
+        "bead_server_call_handled_total{service=\"1\",procedure=\"halves\",type=\"request\",outcome=\"failure\",code=\"PROCEDURE_UNKNOWN\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"halves\",type=\"request\",outcome=\"failure\",code=\"SUBSCRIPTION_UNSUPPORTED\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"halves\",type=\"request\",outcome=\"failure\",code=\"SESSION_REQUIRED\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"halves\",type=\"request\",outcome=\"failure\",code=\"ACCESS_DENIED\"} 0",
@@ -3733,6 +3753,8 @@
         "bead_server_call_handled_total{service=\"1\",procedure=\"halves\",type=\"request\",outcome=\"closed\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"halves\",type=\"request\",outcome=\"error\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"ages\",type=\"request\",outcome=\"result\"} 3",
+        "bead_server_call_handled_total{service=\"1\",procedure=\"ages\",type=\"request\",outcome=\"failure\",code=\"SERVICE_UNKNOWN\"} 0",
+        "bead_server_call_handled_total{service=\"1\",procedure=\"ages\",type=\"request\",outcome=\"failure\",code=\"PROCEDURE_UNKNOWN\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"ages\",type=\"request\",outcome=\"failure\",code=\"SUBSCRIPTION_UNSUPPORTED\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"ages\",type=\"request\",outcome=\"failure\",code=\"SESSION_REQUIRED\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"ages\",type=\"request\",outcome=\"failure\",code=\"ACCESS_DENIED\"} 0",
@@ -4172,6 +4194,8 @@
         "# HELP bead_server_call_handled_total Each call this side answered, as it ended, by its outcome.",
         "# TYPE bead_server_call_handled_total counter",
         "bead_server_call_handled_total{service=\"1\",procedure=\"ticks\",type=\"request\",outcome=\"result\"} 0",
+        "bead_server_call_handled_total{service=\"1\",procedure=\"ticks\",type=\"request\",outcome=\"failure\",code=\"SERVICE_UNKNOWN\"} 0",
+        "bead_server_call_handled_total{service=\"1\",procedure=\"ticks\",type=\"request\",outcome=\"failure\",code=\"PROCEDURE_UNKNOWN\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"ticks\",type=\"request\",outcome=\"failure\",code=\"SUBSCRIPTION_UNSUPPORTED\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"ticks\",type=\"request\",outcome=\"failure\",code=\"SESSION_REQUIRED\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"ticks\",type=\"request\",outcome=\"failure\",code=\"ACCESS_DENIED\"} 0",
@@ -4510,6 +4534,8 @@
         "# HELP bead_server_call_handled_total Each call this side answered, as it ended, by its outcome.",
         "# TYPE bead_server_call_handled_total counter",
         "bead_server_call_handled_total{service=\"1\",procedure=\"ticks\",type=\"request\",outcome=\"result\"} 0",
+        "bead_server_call_handled_total{service=\"1\",procedure=\"ticks\",type=\"request\",outcome=\"failure\",code=\"SERVICE_UNKNOWN\"} 0",
+        "bead_server_call_handled_total{service=\"1\",procedure=\"ticks\",type=\"request\",outcome=\"failure\",code=\"PROCEDURE_UNKNOWN\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"ticks\",type=\"request\",outcome=\"failure\",code=\"SUBSCRIPTION_UNSUPPORTED\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"ticks\",type=\"request\",outcome=\"failure\",code=\"SESSION_REQUIRED\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"ticks\",type=\"request\",outcome=\"failure\",code=\"ACCESS_DENIED\"} 0",
@@ -4822,6 +4848,8 @@
         "# HELP bead_server_call_handled_total Each call this side answered, as it ended, by its outcome.",
         "# TYPE bead_server_call_handled_total counter",
         "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"result\"} 2",
+        "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"SERVICE_UNKNOWN\"} 0",
+        "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"PROCEDURE_UNKNOWN\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"SUBSCRIPTION_UNSUPPORTED\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"SESSION_REQUIRED\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"ACCESS_DENIED\"} 0",
@@ -5075,6 +5103,8 @@
         "# HELP bead_server_call_handled_total Each call this side answered, as it ended, by its outcome.",
         "# TYPE bead_server_call_handled_total counter",
         "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"result\"} 0",
+        "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"SERVICE_UNKNOWN\"} 0",
+        "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"PROCEDURE_UNKNOWN\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"SUBSCRIPTION_UNSUPPORTED\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"SESSION_REQUIRED\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"ACCESS_DENIED\"} 0",
@@ -5328,6 +5358,8 @@
         "# HELP bead_server_call_handled_total Each call this side answered, as it ended, by its outcome.",
         "# TYPE bead_server_call_handled_total counter",
         "bead_server_call_handled_total{service=\"1\",procedure=\"getHTTPStatus\",type=\"request\",outcome=\"result\"} 0",
+        "bead_server_call_handled_total{service=\"1\",procedure=\"getHTTPStatus\",type=\"request\",outcome=\"failure\",code=\"SERVICE_UNKNOWN\"} 0",
+        "bead_server_call_handled_total{service=\"1\",procedure=\"getHTTPStatus\",type=\"request\",outcome=\"failure\",code=\"PROCEDURE_UNKNOWN\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"getHTTPStatus\",type=\"request\",outcome=\"failure\",code=\"SUBSCRIPTION_UNSUPPORTED\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"getHTTPStatus\",type=\"request\",outcome=\"failure\",code=\"SESSION_REQUIRED\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"getHTTPStatus\",type=\"request\",outcome=\"failure\",code=\"ACCESS_DENIED\"} 0",
@@ -5632,6 +5664,8 @@
         "# HELP bead_server_call_handled_total Each call this side answered, as it ended, by its outcome.",
         "# TYPE bead_server_call_handled_total counter",
         "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"result\"} 0",
+        "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"SERVICE_UNKNOWN\"} 0",
+        "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"PROCEDURE_UNKNOWN\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"SUBSCRIPTION_UNSUPPORTED\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"SESSION_REQUIRED\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"ACCESS_DENIED\"} 0",
@@ -5649,6 +5683,8 @@
         "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"closed\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"error\"} 0",
         "bead_server_call_handled_total{service=\"2\",procedure=\"echo\",type=\"request\",outcome=\"result\"} 0",
+        "bead_server_call_handled_total{service=\"2\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"SERVICE_UNKNOWN\"} 0",
+        "bead_server_call_handled_total{service=\"2\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"PROCEDURE_UNKNOWN\"} 0",
         "bead_server_call_handled_total{service=\"2\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"SUBSCRIPTION_UNSUPPORTED\"} 0",
         "bead_server_call_handled_total{service=\"2\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"SESSION_REQUIRED\"} 0",
         "bead_server_call_handled_total{service=\"2\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"ACCESS_DENIED\"} 0",
@@ -5962,6 +5998,8 @@
         "# HELP bead_server_call_handled_total Each call this side answered, as it ended, by its outcome.",
         "# TYPE bead_server_call_handled_total counter",
         "bead_server_call_handled_total{service=\"1\",procedure=\"getHTTPStatus\",type=\"request\",outcome=\"result\"} 0",
+        "bead_server_call_handled_total{service=\"1\",procedure=\"getHTTPStatus\",type=\"request\",outcome=\"failure\",code=\"SERVICE_UNKNOWN\"} 0",
+        "bead_server_call_handled_total{service=\"1\",procedure=\"getHTTPStatus\",type=\"request\",outcome=\"failure\",code=\"PROCEDURE_UNKNOWN\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"getHTTPStatus\",type=\"request\",outcome=\"failure\",code=\"SUBSCRIPTION_UNSUPPORTED\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"getHTTPStatus\",type=\"request\",outcome=\"failure\",code=\"SESSION_REQUIRED\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"getHTTPStatus\",type=\"request\",outcome=\"failure\",code=\"ACCESS_DENIED\"} 0",
@@ -5979,6 +6017,8 @@
         "bead_server_call_handled_total{service=\"1\",procedure=\"getHTTPStatus\",type=\"request\",outcome=\"closed\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"getHTTPStatus\",type=\"request\",outcome=\"error\"} 0",
         "bead_server_call_handled_total{service=\"2\",procedure=\"getHttpStatus\",type=\"request\",outcome=\"result\"} 0",
+        "bead_server_call_handled_total{service=\"2\",procedure=\"getHttpStatus\",type=\"request\",outcome=\"failure\",code=\"SERVICE_UNKNOWN\"} 0",
+        "bead_server_call_handled_total{service=\"2\",procedure=\"getHttpStatus\",type=\"request\",outcome=\"failure\",code=\"PROCEDURE_UNKNOWN\"} 0",
         "bead_server_call_handled_total{service=\"2\",procedure=\"getHttpStatus\",type=\"request\",outcome=\"failure\",code=\"SUBSCRIPTION_UNSUPPORTED\"} 0",
         "bead_server_call_handled_total{service=\"2\",procedure=\"getHttpStatus\",type=\"request\",outcome=\"failure\",code=\"SESSION_REQUIRED\"} 0",
         "bead_server_call_handled_total{service=\"2\",procedure=\"getHttpStatus\",type=\"request\",outcome=\"failure\",code=\"ACCESS_DENIED\"} 0",
@@ -6771,6 +6811,8 @@
         "# HELP bead_server_call_handled_total Each call this side answered, as it ended, by its outcome.",
         "# TYPE bead_server_call_handled_total counter",
         "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"result\"} 2",
+        "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"SERVICE_UNKNOWN\"} 0",
+        "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"PROCEDURE_UNKNOWN\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"SUBSCRIPTION_UNSUPPORTED\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"SESSION_REQUIRED\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"ACCESS_DENIED\"} 0",
@@ -6788,6 +6830,8 @@
         "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"closed\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"error\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"fail\",type=\"request\",outcome=\"result\"} 0",
+        "bead_server_call_handled_total{service=\"1\",procedure=\"fail\",type=\"request\",outcome=\"failure\",code=\"SERVICE_UNKNOWN\"} 0",
+        "bead_server_call_handled_total{service=\"1\",procedure=\"fail\",type=\"request\",outcome=\"failure\",code=\"PROCEDURE_UNKNOWN\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"fail\",type=\"request\",outcome=\"failure\",code=\"SUBSCRIPTION_UNSUPPORTED\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"fail\",type=\"request\",outcome=\"failure\",code=\"SESSION_REQUIRED\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"fail\",type=\"request\",outcome=\"failure\",code=\"ACCESS_DENIED\"} 0",
@@ -7222,6 +7266,8 @@
         "# HELP bead_server_call_handled_total Each call this side answered, as it ended, by its outcome.",
         "# TYPE bead_server_call_handled_total counter",
         "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"result\"} 0",
+        "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"SERVICE_UNKNOWN\"} 0",
+        "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"PROCEDURE_UNKNOWN\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"SUBSCRIPTION_UNSUPPORTED\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"SESSION_REQUIRED\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"ACCESS_DENIED\"} 0",
@@ -7239,6 +7285,8 @@
         "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"closed\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"error\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"fail\",type=\"request\",outcome=\"result\"} 0",
+        "bead_server_call_handled_total{service=\"1\",procedure=\"fail\",type=\"request\",outcome=\"failure\",code=\"SERVICE_UNKNOWN\"} 0",
+        "bead_server_call_handled_total{service=\"1\",procedure=\"fail\",type=\"request\",outcome=\"failure\",code=\"PROCEDURE_UNKNOWN\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"fail\",type=\"request\",outcome=\"failure\",code=\"SUBSCRIPTION_UNSUPPORTED\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"fail\",type=\"request\",outcome=\"failure\",code=\"SESSION_REQUIRED\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"fail\",type=\"request\",outcome=\"failure\",code=\"ACCESS_DENIED\"} 0",
@@ -7566,6 +7614,8 @@
         "# HELP bead_server_call_handled_total Each call this side answered, as it ended, by its outcome.",
         "# TYPE bead_server_call_handled_total counter",
         "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"result\"} 0",
+        "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"SERVICE_UNKNOWN\"} 0",
+        "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"PROCEDURE_UNKNOWN\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"SUBSCRIPTION_UNSUPPORTED\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"SESSION_REQUIRED\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"ACCESS_DENIED\"} 0",
@@ -7583,6 +7633,8 @@
         "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"closed\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"error\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"fail\",type=\"request\",outcome=\"result\"} 0",
+        "bead_server_call_handled_total{service=\"1\",procedure=\"fail\",type=\"request\",outcome=\"failure\",code=\"SERVICE_UNKNOWN\"} 0",
+        "bead_server_call_handled_total{service=\"1\",procedure=\"fail\",type=\"request\",outcome=\"failure\",code=\"PROCEDURE_UNKNOWN\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"fail\",type=\"request\",outcome=\"failure\",code=\"SUBSCRIPTION_UNSUPPORTED\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"fail\",type=\"request\",outcome=\"failure\",code=\"SESSION_REQUIRED\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"fail\",type=\"request\",outcome=\"failure\",code=\"ACCESS_DENIED\"} 0",
@@ -7969,6 +8021,8 @@
         "# HELP bead_server_call_handled_total Each call this side answered, as it ended, by its outcome.",
         "# TYPE bead_server_call_handled_total counter",
         "bead_server_call_handled_total{service=\"1\",procedure=\"login\",type=\"request\",outcome=\"result\"} 0",
+        "bead_server_call_handled_total{service=\"1\",procedure=\"login\",type=\"request\",outcome=\"failure\",code=\"SERVICE_UNKNOWN\"} 0",
+        "bead_server_call_handled_total{service=\"1\",procedure=\"login\",type=\"request\",outcome=\"failure\",code=\"PROCEDURE_UNKNOWN\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"login\",type=\"request\",outcome=\"failure\",code=\"SUBSCRIPTION_UNSUPPORTED\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"login\",type=\"request\",outcome=\"failure\",code=\"SESSION_REQUIRED\"} 0",
         "bead_server_call_handled_total{service=\"1\",procedure=\"login\",type=\"request\",outcome=\"failure\",code=\"ACCESS_DENIED\"} 0",
@@ -8240,7 +8294,8 @@
             "failure": {
               "code": 18,
               "scope": 0,
-              "relays": 0
+              "relays": 0,
+              "detail": "no service 9"
             }
           }
         },
@@ -8312,9 +8367,221 @@
             "failure": {
               "code": 19,
               "scope": 0,
-              "relays": 0
+              "relays": 0,
+              "detail": "no procedure 99 in service 1"
             }
           }
+        },
+        {
+          "counted": [
+            "bead_server_call_duration_seconds_bucket{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\",le=\"0.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\",le=\"1e-05\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\",le=\"5e-05\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\",le=\"0.0001\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\",le=\"0.0003\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\",le=\"0.0006\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\",le=\"0.0008\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\",le=\"0.001\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\",le=\"0.002\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\",le=\"0.003\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\",le=\"0.004\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\",le=\"0.005\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\",le=\"0.006\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\",le=\"0.008\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\",le=\"0.01\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\",le=\"0.013\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\",le=\"0.016\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\",le=\"0.02\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\",le=\"0.025\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\",le=\"0.03\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\",le=\"0.04\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\",le=\"0.05\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\",le=\"0.065\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\",le=\"0.08\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\",le=\"0.1\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\",le=\"0.13\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\",le=\"0.16\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\",le=\"0.2\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\",le=\"0.25\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\",le=\"0.3\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\",le=\"0.4\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\",le=\"0.5\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\",le=\"0.65\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\",le=\"0.8\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\",le=\"1.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\",le=\"2.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\",le=\"5.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\",le=\"10.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\",le=\"20.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\",le=\"50.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\",le=\"100.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\",le=\"+Inf\"} 1",
+            "bead_server_call_duration_seconds_count{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\"} 1",
+            "bead_server_call_handled_total{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\",outcome=\"failure\",code=\"PROCEDURE_UNKNOWN\"} 1",
+            "bead_server_call_started_total{service=\"_OTHER\",procedure=\"_OTHER\",type=\"request\"} 1"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "a request its connection's transport does not take counts PROCEDURE_UNKNOWN under its procedure, a procedure absent under _OTHER",
+      "clauses": [
+        "8.3",
+        "9.4.3"
+      ],
+      "steps": [
+        {
+          "open": "client",
+          "procedures": [
+            {
+              "serviceId": 1,
+              "procedureId": 1
+            }
+          ]
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 78 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 78 22"
+          },
+          "on": "client"
+        },
+        {
+          "counted": [
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"1e-05\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"5e-05\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.0001\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.0003\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.0006\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.0008\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.001\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.002\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.003\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.004\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.005\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.006\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.008\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.01\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.013\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.016\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.02\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.025\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.03\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.04\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.05\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.065\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.08\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.1\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.13\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.16\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.2\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.25\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.3\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.4\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.5\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.65\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.8\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"1.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"2.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"5.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"10.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"20.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"50.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"100.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"+Inf\"} 1",
+            "bead_server_call_duration_seconds_count{service=\"1\",procedure=\"echo\",type=\"request\"} 1",
+            "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"result\"} 1",
+            "bead_server_call_started_total{service=\"1\",procedure=\"echo\",type=\"request\"} 1"
+          ]
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 03  00 01 00 02 | 6E 75 6C 6C",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 3,
+            "failure": {
+              "code": 19,
+              "scope": 0,
+              "relays": 0,
+              "detail": "no procedure 2 in service 1"
+            }
+          },
+          "on": "client"
+        },
+        {
+          "counted": [
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"fail\",type=\"request\",le=\"0.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"fail\",type=\"request\",le=\"1e-05\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"fail\",type=\"request\",le=\"5e-05\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"fail\",type=\"request\",le=\"0.0001\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"fail\",type=\"request\",le=\"0.0003\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"fail\",type=\"request\",le=\"0.0006\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"fail\",type=\"request\",le=\"0.0008\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"fail\",type=\"request\",le=\"0.001\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"fail\",type=\"request\",le=\"0.002\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"fail\",type=\"request\",le=\"0.003\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"fail\",type=\"request\",le=\"0.004\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"fail\",type=\"request\",le=\"0.005\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"fail\",type=\"request\",le=\"0.006\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"fail\",type=\"request\",le=\"0.008\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"fail\",type=\"request\",le=\"0.01\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"fail\",type=\"request\",le=\"0.013\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"fail\",type=\"request\",le=\"0.016\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"fail\",type=\"request\",le=\"0.02\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"fail\",type=\"request\",le=\"0.025\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"fail\",type=\"request\",le=\"0.03\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"fail\",type=\"request\",le=\"0.04\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"fail\",type=\"request\",le=\"0.05\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"fail\",type=\"request\",le=\"0.065\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"fail\",type=\"request\",le=\"0.08\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"fail\",type=\"request\",le=\"0.1\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"fail\",type=\"request\",le=\"0.13\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"fail\",type=\"request\",le=\"0.16\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"fail\",type=\"request\",le=\"0.2\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"fail\",type=\"request\",le=\"0.25\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"fail\",type=\"request\",le=\"0.3\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"fail\",type=\"request\",le=\"0.4\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"fail\",type=\"request\",le=\"0.5\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"fail\",type=\"request\",le=\"0.65\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"fail\",type=\"request\",le=\"0.8\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"fail\",type=\"request\",le=\"1.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"fail\",type=\"request\",le=\"2.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"fail\",type=\"request\",le=\"5.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"fail\",type=\"request\",le=\"10.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"fail\",type=\"request\",le=\"20.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"fail\",type=\"request\",le=\"50.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"fail\",type=\"request\",le=\"100.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"fail\",type=\"request\",le=\"+Inf\"} 1",
+            "bead_server_call_duration_seconds_count{service=\"1\",procedure=\"fail\",type=\"request\"} 1",
+            "bead_server_call_handled_total{service=\"1\",procedure=\"fail\",type=\"request\",outcome=\"failure\",code=\"PROCEDURE_UNKNOWN\"} 1",
+            "bead_server_call_started_total{service=\"1\",procedure=\"fail\",type=\"request\"} 1"
+          ]
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 05  00 01 00 63 | 7B 7D",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 5,
+            "failure": {
+              "code": 19,
+              "scope": 0,
+              "relays": 0,
+              "detail": "no procedure 99 in service 1"
+            }
+          },
+          "on": "client"
         },
         {
           "counted": [
@@ -8775,7 +9042,8 @@
             "failure": {
               "code": 19,
               "scope": 0,
-              "relays": 0
+              "relays": 0,
+              "detail": "no procedure 99 in service 1"
             }
           }
         },

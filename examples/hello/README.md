@@ -147,7 +147,7 @@ runs all of it, on Node 26 and on 24.9, the floor the TypeScript half declares.
 
 ## Calling with the generated HTTP client
 
-Use the `gateway` port the server prints, on either side. Every output has `http: true`, so its
+Use the `gateway` port the server prints, on either side. Every output has `gateway: {}`, so its
 route table also exports `HelloHttpClient`. In the TypeScript project, a source file calls it with
 fetch:
 

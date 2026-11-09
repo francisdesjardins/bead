@@ -22,6 +22,9 @@ public sealed partial class ConsumerTests
     // the consumer, and the goldens, as this project copies them beside it
     private const string Consumer = "UseDeprecated.cs";
 
+    // the goldens as Bead.Goldens compiles them, which the split output's test references
+    private const string GoldensAssembly = "Bead.Goldens.dll";
+
     // ! the SDK's implicit usings, which a project of Microsoft.NET.Sdk holds unless it turns them off:
     // a golden's codec of a message calls the extension AsSpan, which System's using brings in
     private const string ImplicitUsings = """
@@ -61,9 +64,13 @@ public sealed partial class ConsumerTests
         }).Append(CSharpSyntaxTree.ParseText(ImplicitUsings, parsing, "GlobalUsings.g.cs", cancellationToken: TestContext.Current.CancellationToken));
         // * what this program runs on, as a consumer's build references it: the framework,
         // Bead.Core, Bead.Protobuf, Bead.Transcoding and Google.Protobuf among the platform's
-        // trusted assemblies
+        // trusted assemblies; never Bead.Goldens, the goldens this compilation compiles itself
         var references = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
             .Split(Path.PathSeparator)
+            .Where((path) =>
+            {
+                return Path.GetFileName(path) != GoldensAssembly;
+            })
             .Select((path) =>
             {
                 return MetadataReference.CreateFromFile(path);

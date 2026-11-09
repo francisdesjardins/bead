@@ -198,6 +198,9 @@
         },
         "secure": {
           "required": ["open"]
+        },
+        "procedures": {
+          "required": ["open"]
         }
       },
       "properties": {
@@ -264,6 +267,23 @@
         "secure": {
           "description": "false for a connection that reaches off the machine in the clear, neither over TLS nor within the machine.",
           "const": false
+        },
+        "procedures": {
+          "description": "The procedures the connection's transport takes, by service id and procedure id (section 9.11 of spec.md): absent, every one; empty, none.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["serviceId", "procedureId"],
+            "additionalProperties": false,
+            "properties": {
+              "serviceId": {
+                "$ref": "common.schema.json#/$defs/u16"
+              },
+              "procedureId": {
+                "$ref": "common.schema.json#/$defs/u16"
+              }
+            }
+          }
         }
       }
     },

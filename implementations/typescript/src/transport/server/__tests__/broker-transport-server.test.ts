@@ -7,7 +7,7 @@ import { createRouterServer } from '../../../router/server/router-server';
 import { CredentialScheme, ProtocolCode } from '../../../router/shared/constants';
 import { PAYLOAD_CODECS } from '../../../router/shared/payloads';
 import { createServiceManager } from '../../../router/shared/service-manager';
-import type { IProcedure } from '../../../router/shared/types';
+import type { IProcedure, IProcedureAddress } from '../../../router/shared/types';
 import { encodeParcel, ParcelKind, readParcel, writeParcel } from '../../shared/broker-parcel';
 import { createBrokerParticipant } from '../../shared/broker-participant';
 import { ProgrammerError } from '../../shared/errors';
@@ -35,6 +35,57 @@ const echo: IProcedure = {
 /** A turn of the event loop, past what the broker handed on in a later one. */
 const turn = (): Promise<void> => {
   return new Promise(setImmediate);
+};
+
+/**
+ * A broker's server transport over the in-memory broker, built with `options`, and a client that
+ * connects to one of its names, giving the handle its server drew.
+ */
+const createServed = async (
+  options: Parameters<typeof createBrokerTransportServer>[1]
+): Promise<{
+  connect: (name: string) => Promise<TransportServerConnectionHandle | undefined>;
+  server: ReturnType<typeof createBrokerTransportServer>;
+  stop: () => Promise<void>;
+}> => {
+  const clock = createTestClock(Date.UTC(2026, 10, 9));
+  const broker = createMemoryBroker({ clock });
+  const participant = createBrokerParticipant({ adapter: broker.adapter({ id: 'server' }), clock });
+  const ada = createBrokerParticipant({ adapter: broker.adapter({ id: 'ada' }), clock });
+  const server = participant.transportServer(options);
+  const opened: TransportServerConnectionHandle[] = [];
+
+  server.on('connection', (...[, connectionHandle]) => {
+    opened.push(connectionHandle);
+  });
+  await server.start();
+
+  return {
+    connect: async (name) => {
+      await ada.transportClient().connect({ server: name });
+      await turn();
+
+      return opened.at(-1);
+    },
+    server,
+    stop: async () => {
+      await Promise.all([participant.stop(), ada.stop()]);
+    },
+  };
+};
+
+/** Whether `handle` takes echo, then another procedure of its service, as `server` says. */
+const takenOn = (
+  server: ReturnType<typeof createBrokerTransportServer>,
+  handle: TransportServerConnectionHandle | undefined
+): (boolean | undefined)[] => {
+  return [
+    server.takesProcedure?.(handle ?? 'type=BROKER;participant=ada;ordinal=0', echo),
+    server.takesProcedure?.(handle ?? 'type=BROKER;participant=ada;ordinal=0', {
+      procedureId: 2,
+      serviceId: 2,
+    }),
+  ];
 };
 
 /** Turns until `isDone` holds, a hundred at most. */
@@ -84,6 +135,114 @@ const holdingOf = (adapter: IBrokerAdapter) => {
 // definition
 
 test.describe('createBrokerTransportServer', () => {
+  // spec 9.11, 15.18
+  test('a broker’s server transport takes the procedures it is given on every name it serves', async () => {
+    const served = await createServed({ names: ['orders', 'admin'], procedures: [echo] });
+    const unnamed = await createServed({ names: ['orders'], proceduresByName: {} });
+
+    try {
+      expect([
+        takenOn(served.server, await served.connect('orders')),
+        takenOn(served.server, await served.connect('admin')),
+        // * a handle it does not hold takes none
+        takenOn(served.server, 'type=BROKER;participant=nobody;ordinal=1'),
+      ]).toEqual([
+        [true, false],
+        [true, false],
+        [false, false],
+      ]);
+      // given none, by name or not, it names none: its router never asks
+      expect(unnamed.server.takesProcedure).toBeUndefined();
+    } finally {
+      await Promise.all([served.stop(), unnamed.stop()]);
+    }
+  });
+
+  test('a broker’s server transport takes a name’s own procedures on a connection its OPEN reached by that name', async () => {
+    const served = await createServed({
+      names: ['orders', 'admin', 'audit'],
+      proceduresByName: { admin: [{ procedureId: 2, serviceId: 2 }], audit: [] },
+    });
+    const fallen = await createServed({
+      names: ['orders', 'admin'],
+      procedures: [echo],
+      proceduresByName: { admin: [{ procedureId: 2, serviceId: 2 }] },
+    });
+
+    try {
+      expect([
+        // a name given none takes `procedures`, every one when none is given
+        takenOn(served.server, await served.connect('orders')),
+        takenOn(served.server, await served.connect('admin')),
+        takenOn(served.server, await served.connect('audit')),
+        takenOn(fallen.server, await fallen.connect('orders')),
+        takenOn(fallen.server, await fallen.connect('admin')),
+      ]).toEqual([
+        [true, true],
+        [false, true],
+        [false, false],
+        [true, false],
+        [false, true],
+      ]);
+    } finally {
+      await Promise.all([served.stop(), fallen.stop()]);
+    }
+  });
+
+  test('refuses procedures given for a name it does not serve, as the transport is built (spec 9.12)', () => {
+    const clock = createTestClock(Date.UTC(2026, 10, 9));
+    const broker = createMemoryBroker({ clock });
+    const participant = createBrokerParticipant({
+      adapter: broker.adapter({ id: 'server' }),
+      clock,
+    });
+
+    expect(() => {
+      return participant.transportServer({
+        names: ['orders'],
+        proceduresByName: { admin: [echo] },
+      });
+    }).toThrow(
+      new ProgrammerError(
+        "a broker's server transport takes procedures for admin, a name it does not serve (spec 9.12)"
+      )
+    );
+
+    for (const options of [
+      { names: ['orders'], procedures: [{ procedureId: 1, serviceId: 0 }] },
+      { names: ['orders'], proceduresByName: { orders: [{ procedureId: 0, serviceId: 2 }] } },
+    ]) {
+      expect(() => {
+        return participant.transportServer(options);
+      }, JSON.stringify(options)).toThrow(ProgrammerError);
+    }
+
+    // * refused before its names were reserved: they are free to serve
+    expect(participant.transportServer({ names: ['orders'] }).takesProcedure).toBeUndefined();
+  });
+
+  test('refuses procedures by name that are no record of lists, as a caller without types gives them', () => {
+    const clock = createTestClock(Date.UTC(2026, 10, 9));
+    const broker = createMemoryBroker({ clock });
+    const participant = createBrokerParticipant({
+      adapter: broker.adapter({ id: 'server' }),
+      clock,
+    });
+
+    for (const proceduresByName of [null, [echo], 'orders']) {
+      expect(() => {
+        return participant.transportServer({
+          names: ['orders'],
+          proceduresByName: proceduresByName as unknown as Record<string, IProcedureAddress[]>,
+        });
+      }, JSON.stringify(proceduresByName)).toThrow(
+        new ProgrammerError(
+          "a broker's server transport takes its procedures by name as a record of lists"
+        )
+      );
+    }
+  });
+
   test('draws a handle of its adapter type for each connection at its third leg, and gives none twice', async () => {
     const clock = createTestClock(Date.UTC(2026, 9, 26));
     const broker = createMemoryBroker({ clock });

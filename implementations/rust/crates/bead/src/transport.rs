@@ -19,6 +19,7 @@ use tokio_util::sync::CancellationToken;
 use crate::clock::{Schedule, SharedClock};
 use crate::duration::hold_delay;
 use crate::errors::{ConnectError, ProgrammerError, ReconnectError, TransportError};
+use crate::failure::ProcedureAddress;
 use crate::router::types::{BoxFuture, ConnectionHandle, Gauges, RouterError, TransportMessage};
 
 #[cfg(test)]
@@ -222,6 +223,24 @@ pub trait ServerTransport: Send + Sync + fmt::Debug {
     /// Whether a connection carries a credential beside an envelope the router sends.
     fn carries_credential(&self, _connection_handle: &ConnectionHandle) -> bool {
         false
+    }
+
+    /// Whether it names the procedures a connection of its takes (spec 9.11): false for one given
+    /// no list, whose connections take every procedure. Its router asks it once, as it is built,
+    /// and then asks [`ServerTransport::takes_procedure`] of each request that names no destination,
+    /// or never.
+    fn names_procedures(&self) -> bool {
+        false
+    }
+
+    /// Whether a connection takes the procedure at `address` (spec 9.11): a request to one it does
+    /// not take is answered as one to no resolver, `SERVICE_UNKNOWN` or `PROCEDURE_UNKNOWN`.
+    fn takes_procedure(
+        &self,
+        _connection_handle: &ConnectionHandle,
+        _address: ProcedureAddress,
+    ) -> bool {
+        true
     }
 
     /// Starts it.

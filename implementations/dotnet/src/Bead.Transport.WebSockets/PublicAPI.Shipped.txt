@@ -109,6 +109,7 @@ Bead.Transport.WebSockets.WebSocketTransportServer.Error -> System.Action<System
 Bead.Transport.WebSockets.WebSocketTransportServer.Gauges() -> Bead.Gauges!
 Bead.Transport.WebSockets.WebSocketTransportServer.IsSecure(string! connectionHandle) -> bool
 Bead.Transport.WebSockets.WebSocketTransportServer.Message -> System.Action<Bead.TransportMessage, string!>?
+Bead.Transport.WebSockets.WebSocketTransportServer.NamesProcedures() -> bool
 Bead.Transport.WebSockets.WebSocketTransportServer.Pause(string! connectionHandle) -> void
 Bead.Transport.WebSockets.WebSocketTransportServer.ReadyState.get -> Bead.ReadyState
 Bead.Transport.WebSockets.WebSocketTransportServer.Refusal -> System.Action<Bead.TransportServerRefusal!>?
@@ -117,6 +118,7 @@ Bead.Transport.WebSockets.WebSocketTransportServer.Send(Bead.TransportMessage me
 Bead.Transport.WebSockets.WebSocketTransportServer.Shutdown() -> System.Threading.Tasks.Task!
 Bead.Transport.WebSockets.WebSocketTransportServer.Start(Bead.Transport.WebSockets.WebSocketTransportStartOptions? options = null) -> System.Threading.Tasks.Task<Bead.TransportServerAddress>!
 Bead.Transport.WebSockets.WebSocketTransportServer.Stop() -> System.Threading.Tasks.Task!
+Bead.Transport.WebSockets.WebSocketTransportServer.TakesProcedure(string! connectionHandle, Bead.ProcedureAddress address) -> bool
 Bead.Transport.WebSockets.WebSocketTransportServer.Type.get -> string!
 Bead.Transport.WebSockets.WebSocketTransportServer.WebSocketTransportServer(Bead.Transport.WebSockets.WebSocketTransportServerOptions? options = null) -> void
 Bead.Transport.WebSockets.WebSocketTransportServerOptions
@@ -144,6 +146,8 @@ Bead.Transport.WebSockets.WebSocketTransportServerOptions.MinimumSendBytesPerSec
 Bead.Transport.WebSockets.WebSocketTransportServerOptions.MinimumSendBytesPerSecond.init -> void
 Bead.Transport.WebSockets.WebSocketTransportServerOptions.Origins.get -> System.Collections.Generic.IReadOnlyList<string!>!
 Bead.Transport.WebSockets.WebSocketTransportServerOptions.Origins.init -> void
+Bead.Transport.WebSockets.WebSocketTransportServerOptions.Procedures.get -> System.Collections.Generic.IReadOnlyCollection<Bead.ProcedureAddress>?
+Bead.Transport.WebSockets.WebSocketTransportServerOptions.Procedures.init -> void
 Bead.Transport.WebSockets.WebSocketTransportServerOptions.Secure.get -> bool?
 Bead.Transport.WebSockets.WebSocketTransportServerOptions.Secure.init -> void
 Bead.Transport.WebSockets.WebSocketTransportServerOptions.SendGracePeriod.get -> System.TimeSpan

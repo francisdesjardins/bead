@@ -165,6 +165,9 @@ pub(crate) struct ServerState {
     // owner, so a strong edge back would keep the owner of its own (decision 0044); the handle holds
     // the transport strongly, so it goes only once nothing holds the router
     transport: Weak<dyn ServerTransport>,
+    // whether its transport names the procedures a connection takes, asked once as it is built:
+    // its transport is asked of each request that names no destination then, never otherwise
+    names_procedures: bool,
     pub(crate) listener: Option<Weak<dyn ServerListener>>,
     // what each connection's transport handed it that no turn took yet, its bridge's count, which
     // its end resumes (decision 0046)
@@ -275,6 +278,17 @@ impl Side for ServerState {
         self.asked((connection_handle, |transport: &dyn ServerTransport| {
             transport.is_two_way(connection_handle)
         }))
+    }
+
+    fn takes_procedure(
+        &self,
+        connection_handle: &ConnectionHandle,
+        address: ProcedureAddress,
+    ) -> bool {
+        !self.names_procedures
+            || self.asked((connection_handle, |transport: &dyn ServerTransport| {
+                transport.takes_procedure(connection_handle, address)
+            }))
     }
 
     fn before_answer(&mut self, answer: BeforeAnswer) -> Option<Undo<Self>> {
@@ -1793,6 +1807,7 @@ impl RouterServer {
         let notifyings = Arc::new(Mutex::new(BTreeMap::new()));
         let resolvers = Resolvers::default();
         let disposal = Disposal::default();
+        let names_procedures = transport.names_procedures();
         let owner = Owner::spawn((&runtime, &clock), |weak: WeakOwner<ServerState>| {
             ServerState {
                 #[cfg(test)]
@@ -1812,6 +1827,7 @@ impl RouterServer {
                     )
                 },
                 transport: Arc::downgrade(&transport),
+                names_procedures,
                 listener: None,
                 intake: Arc::clone(&intake),
                 connections: Ordered::new(),

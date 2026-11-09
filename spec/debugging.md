@@ -26,9 +26,11 @@ that hold what of them a test can. The why of each rule is in the decisions:
 - [0035](../docs/decisions/0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md):
   a request its rules refuse, traced and counted (4.3, 4.4, 9.4, 9.6);
 - [0038](../docs/decisions/0038-over-a-broker-a-connection-is-placed-once-at-its-open-named-by-both-its-ends.md):
-  a connection's capability absent from its trace (13.7).
+  a connection's capability absent from its trace (13.7);
+- [0048](../docs/decisions/0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md):
+  a call its connection's transport does not take, counted under its procedure (7.6, 7.7, 8.3).
 
-**Version: 0.6.0**. Each of its conformance files repeats it as its `debuggingVersion`, and follows
+**Version: 0.7.0**. Each of its conformance files repeats it as its `debuggingVersion`, and follows
 its schema in [`schemas/`](schemas/). It moves by `spec.md`'s rule, under a version of its own
 ([0008](../docs/decisions/0008-three-version-axes-and-names-qualified-by-their-owner.md)): the minor
 when an implementation that conforms to its last version must change to conform to this one, the
@@ -289,19 +291,21 @@ families. A count never makes a series.
 
 7.6. The codes a family's exits can end with, by section 9's and section 10's tables:
 
-| Series                                                                | Its codes                                                                                                                                                                                                                                                                    |
-| --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| a procedure's in the server families                                  | 13: `SESSION_REQUIRED`, `ACCESS_DENIED`, `PAYLOAD_TOO_LARGE`, `CAPACITY_EXCEEDED`, `CREDENTIAL_UNSUPPORTED`, `SUBSCRIPTION_UNSUPPORTED`, `CHUNK_INVALID`, `CREDIT_EXCEEDED`, `PAYLOAD_UNDECODABLE`, `TRANSFER_STALLED`, `PAYLOAD_INVALID`, `PROCEDURE_FAILED`, `application` |
-| a procedure's in the client families, and `_OTHER`'s in both          | 25: section 8's 23, `application` and `_OTHER`, since a peer's answer, or a relay's, can carry any                                                                                                                                                                           |
-| a procedure's in the notification families, as the side that notifies | 25, as a procedure's in the client families, since its application ends a subscription with the failure it chooses (`spec.md` 11.7, item 2)                                                                                                                                  |
-| a procedure's in the notification families, as the side that hears    | 25, as a procedure's in the client families                                                                                                                                                                                                                                  |
+| Series                                                                | Its codes                                                                                                                                                                                                                                                                                                            |
+| --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| a procedure's in the server families                                  | 15: `SERVICE_UNKNOWN`, `PROCEDURE_UNKNOWN`, `SESSION_REQUIRED`, `ACCESS_DENIED`, `PAYLOAD_TOO_LARGE`, `CAPACITY_EXCEEDED`, `CREDENTIAL_UNSUPPORTED`, `SUBSCRIPTION_UNSUPPORTED`, `CHUNK_INVALID`, `CREDIT_EXCEEDED`, `PAYLOAD_UNDECODABLE`, `TRANSFER_STALLED`, `PAYLOAD_INVALID`, `PROCEDURE_FAILED`, `application` |
+| a procedure's in the client families, and `_OTHER`'s in both          | 25: section 8's 23, `application` and `_OTHER`, since a peer's answer, or a relay's, can carry any                                                                                                                                                                                                                   |
+| a procedure's in the notification families, as the side that notifies | 25, as a procedure's in the client families, since its application ends a subscription with the failure it chooses (`spec.md` 11.7, item 2)                                                                                                                                                                          |
+| a procedure's in the notification families, as the side that hears    | 25, as a procedure's in the client families                                                                                                                                                                                                                                                                          |
 
-A route refused, a header that does not read and a relayed call are `_OTHER`'s, which is why a
-procedure's server series take none of their codes.
+A destination refused, a header that does not read and a relayed call are `_OTHER`'s, which is why
+a procedure's server series take none of their codes. A route refused is `_OTHER`'s too, but for a
+request its connection's transport does not take, which is its procedure's (8.3): its series take
+`SERVICE_UNKNOWN` and `PROCEDURE_UNKNOWN` for it.
 
-7.7. So a procedure takes 62 series in the server families: 44 in the histogram, its 42 buckets, its
-`_sum` and its `_count`; 1 started; and 17 handled, `result`, `cancelled`, `closed` and `error`, and
-`failure` under each of its 13 codes. It takes 75 in the client families: 44, 1, and 30 handled,
+7.7. So a procedure takes 64 series in the server families: 44 in the histogram, its 42 buckets, its
+`_sum` and its `_count`; 1 started; and 19 handled, `result`, `cancelled`, `closed` and `error`, and
+`failure` under each of its 15 codes. It takes 75 in the client families: 44, 1, and 30 handled,
 `timeout` besides and 25 codes. It takes 28 in the notification families of the side that notifies,
 2 sent and 26 dropped, its 25 codes and none; and 27 in those of the side that hears, 1 heard and 26
 dropped, the same 26. `_OTHER` takes 74 series in the server families of a router and 75 in
@@ -344,14 +348,16 @@ makes requests and answers commands, a server's the reverse.
 together are OpenTelemetry's `rpc.method`. A call the side has no declaration for is `_OTHER` for
 both, as `rpc.method` is for a method its server does not recognize: a request whose header does not
 read, a service or a procedure unknown, a request that names a destination, a call made that carries
-no series. A relay counts the calls it relays under its server families' `_OTHER`, and their leg B,
-which carries none, as `_OTHER` in client families: `command` toward a connection of the relay's
-own, through its own router's `request`, in its registry; `request` through a router it calls, in
-that router's. No procedure is named `_OTHER`, which starts with no lower-case letter
-(`spec.md` 16.4); a registry given one keeps its series apart, its `service` a decimal. The
-notification families have no `_OTHER`: a notification sent, heard or ended belongs to a procedure
-its side declared. No label is ever a connection, a session, a call id, a destination or a
-credential.
+no series. A call its connection's transport does not take (`spec.md` 9.11) is its procedure's
+where its router declares it, as one past step 3 is (9.3), and ends `failure` with the code it was
+answered: its series tells it from an absent procedure's, which no peer can. A relay counts the
+calls it relays under its server families' `_OTHER`, and their leg B, which carries none, as
+`_OTHER` in client families: `command` toward a connection of the relay's own, through its own
+router's `request`, in its registry; `request` through a router it calls, in that router's. No
+procedure is named `_OTHER`, which starts with no lower-case letter (`spec.md` 16.4); a registry
+given one keeps its series apart, its `service` a decimal. The notification families have no
+`_OTHER`: a notification sent, heard or ended belongs to a procedure its side declared. No label is
+ever a connection, a session, a call id, a destination or a credential.
 
 8.4. `outcome` says how a call ended, `result`, `failure`, `timeout` (a call made alone),
 `cancelled`, `closed` or `error`, by section 9's exits, and what became of a notification, `sent` or

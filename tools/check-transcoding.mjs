@@ -58,14 +58,14 @@ const SIDES = Object.freeze({
       '    importExtension: none',
       '    runtime: ../../../service/service',
       '    protoRuntime: ../../../proto/proto',
-      '    http: true',
-      '    httpRuntime: ../../transcoding',
+      '    gateway:',
+      '      runtime: ../../transcoding',
     ],
   }),
   csharp: Object.freeze({
     folder: 'implementations/dotnet/tests/Bead.Transcoding.Tests/Generated',
     openapi: ['  out: generated/openapi.json'],
-    output: ['  - language: csharp', '    out: generated', '    http: true'],
+    output: ['  - language: csharp', '    out: generated', '    gateway: {}'],
   }),
 });
 

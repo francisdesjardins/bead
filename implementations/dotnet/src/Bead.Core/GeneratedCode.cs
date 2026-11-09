@@ -10,7 +10,7 @@ namespace Bead;
 public static class GeneratedCode
 {
     /// <summary>
-    /// The runtime carries what the route table of an output with <c>http: true</c> names (decision
+    /// The runtime carries what the route table of an output with a <c>gateway</c> names (decision
     /// 0037), beside the contract 6: <c>Bead.Transcoding</c>'s <c>HttpRoute</c>,
     /// <c>HttpRouteTemplate</c> and <c>HttpPayload</c>, which a gateway reads its routes and its
     /// messages' JSON by. A route table calls no codec.
@@ -38,4 +38,11 @@ public static class GeneratedCode
     /// its connection required, and a notifier's optional.
     /// </summary>
     public const bool SupportsVersion7 = true;
+
+    /// <summary>
+    /// The runtime carries a server transport's option <c>Procedures</c>, the addresses it takes,
+    /// which a generated <c>BeadServed.cs</c> gives each transport of a server, by the key
+    /// <c>beadc.yaml</c> names it (decision 0048), beside the contract 7.
+    /// </summary>
+    public const bool SupportsVersion8 = true;
 }

@@ -102,6 +102,7 @@ Gauges	IGauges [record]	Gauges [record]	Gauges [record]	same
 GENERATED_CODE_SUPPORTS_VERSION_5	GENERATED_CODE_SUPPORTS_VERSION_5 [constant]	-	-	own: the TypeScript runtime's counter of generated code, each runtime's its own (0018, 0022)
 GENERATED_CODE_SUPPORTS_VERSION_6	GENERATED_CODE_SUPPORTS_VERSION_6 [constant]	-	-	own: the TypeScript runtime's counter of generated code, each runtime's its own (0018, 0022)
 GENERATED_CODE_SUPPORTS_VERSION_7	GENERATED_CODE_SUPPORTS_VERSION_7 [constant]	-	-	own: the TypeScript runtime's counter of generated code, each runtime's its own (0018, 0022)
+GENERATED_CODE_SUPPORTS_VERSION_8	GENERATED_CODE_SUPPORTS_VERSION_8 [constant]	-	-	own: the TypeScript runtime's counter of generated code, each runtime's its own (0018, 0022)
 Health	IHealth [record]	Health [record]	Health [record]	same
 HealthCheck	IHealthCheck [record]	HealthCheck [record]	HealthCheck [record]	same
 HealthStatus	HealthStatus [choice]	HealthStatus [choice]	HealthStatus [choice]	same

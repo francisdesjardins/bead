@@ -129,6 +129,21 @@ copied and handed on in a later turn, a credential and the client's address besi
 `JoinedServerTransport`, each handle its own transport's, two of one type refused (spec 15.14): an
 in-memory transport beside a WebSocket one, say, its service offered once.
 
+Each server transport takes the procedures it is given, `Procedures`, by their addresses (spec
+9.11, decision 0048): a request to any other that names no destination is answered as one to no
+resolver, `SERVICE_UNKNOWN` or `PROCEDURE_UNKNOWN`, before its credential, its admission and its
+payload, and counts under its procedure's series. None given, it takes every procedure; empty,
+none; an address of service 0 or of procedure 0 is refused as the transport is built, and one named
+twice is one (spec 9.12). A broker's server transport also takes `ProceduresByName`, a name it
+serves to its own list, in place of `Procedures` for a connection its OPEN reached by that name. A
+join asks the transport that drew each connection, so two transports of one type that take
+different procedures, which a join does not take, are two servers. beadc writes the lists an
+output's `server.transports` names in `BeadServed.cs`, `ServedProcedures`, one property per key:
+
+```csharp
+await using var admin = new WebSocketTransportServer(new WebSocketTransportServerOptions { Procedures = ServedProcedures.Admin });
+```
+
 A broker's core lives in `Bead.Core` too, needing no framework (spec 15.16 to 15.24, decisions 0038
 to 0040): a broker is a transport, and Bead is never a network of its own. A `BrokerParticipant` is
 one link of a side to its broker, through an `IBrokerAdapter` of that broker's client, its id the
@@ -269,7 +284,7 @@ what only it shows; `AmqpTransportsTests` the cases over AMQP 1.0.
 place: each call goes through one more Bead client of the application's own server, across a
 `MemoryTransportServer` that server joined beside its WebSocket or HTTP one, so it meets the same
 router, admission, sessions and services, each offered once. It reads everything from the route
-table beadc writes in an output with `http: true`, `BeadHttp.cs`, whose `HttpRoutes.All`,
+table beadc writes in an output with a `gateway`, `BeadHttp.cs`, whose `HttpRoutes.All`,
 `OpenApiDocument` and `ProblemTypes` it is given; `Bead.Transcoding` is the layer it reads them
 with.
 

@@ -13,10 +13,15 @@ export const meta = {
 
 // args: { repo, scratch, venv, slug, design, branch, parts?, stages?, first?, together?,
 //         specEffort?, series?, suites?, notes? }
-// - design: the path of the settled design, the one source every stage reads;
-// - parts: the stages to run, ['spec', 'typescript', 'csharp'] by default;
-// - stages: { <key>: { task, effort? } }, a stage of the design's own (a folder the three do not
-//   cover) or one of the three replaced; each task says which files are the stage's alone;
+// - design: the path of the settled design, its `design.md`: a part every stage shares under
+//   `## Shared`, then a section a stage under `## Stage: <key>`, each stage reading the shared part
+//   and its own; its `rationale.md` beside it, the reasons and the Tenth Man's table, read where a
+//   stage needs a reason, and whole by the spec's, which writes the record; a design of one file,
+//   without those sections, is read for what it holds;
+// - parts: the stages to run, ['spec', 'typescript', 'csharp'] by default; 'rust', named here
+//   where the design reaches the Rust side, has a default task as the three do;
+// - stages: { <key>: { task, effort? } }, a stage of the design's own (a folder the four do not
+//   cover) or one of the four replaced; each task says which files are the stage's alone;
 // - first: the stages that run before the others, in order, ['spec'] by default;
 // - together: true runs every stage at once, when the design fixes every case they read;
 // - specEffort: 'high' by default, 'xhigh' for the spec's identity rules (CLAUDE.md, the agents' effort);
@@ -27,7 +32,7 @@ export const meta = {
 // - suites: 'local' by default, every test suite run by the integration; 'ci' leaves the whole
 //   suites to GitHub's CI on the feature branch, which the session pushes once the series lands
 //   (the user, 2026-10-14: a push of a feature/* branch to save tokens and time), the integration
-//   running the fast gates, both builds and the tests of what changed;
+//   running the fast gates, every side's build and the tests of what changed;
 // - notes: what the stages need beyond the design, in a few lines.
 const required = (name) => {
   if (!args || !args[name]) {
@@ -47,25 +52,43 @@ const STAGES = args.stages || {};
 const OUT = `${SCRATCH}/${SLUG}`;
 const SUITES = args.suites || 'local';
 const TMP = `TMP=${SCRATCH}/tmp TEMP=${SCRATCH}/tmp`;
+const RATIONALE = DESIGN.replace(/[^/\\]*$/u, 'rationale.md');
+
+// what a stage reads of the design: the shared part and its own section, the reasons where it
+// needs one; the spec's stage writes the record, so it reads the reasons whole
+const readsOf = (key) => {
+  const reasons =
+    key === 'spec'
+      ? `${RATIONALE}, beside it, holds what the record keeps: today's state, the standards weighed, the alternatives refused and the Tenth Man's table; read it whole`
+      : `${RATIONALE}, beside it, holds today's state, the standards weighed and the Tenth Man's table: open it only where you need a reason`;
+  return `Read in ${DESIGN} the part every stage shares (\`## Shared\`) and your section (\`## Stage: ${key}\`), not the others'; ${reasons}. A design of one file, without those sections or that file, is read for what it holds for you.`;
+};
 
 const COMMON = `
 You work on Bead, at ${REPO}, on the branch \`${BRANCH}\`, checked out. You implement ${DESIGN}, the settled design: where it is silent, keep to the spec and the records, and say what you chose. CLAUDE.md's rules are injected; these are the ones a stage most often misses:
 - **Do not stage, commit, branch or push.**
 - Temporary files go under ${OUT}/ and nowhere else; run builds and tests with \`${TMP}\`. \`${VENV}\` runs \`spec/check.py\` and the generators.
 - Run \`node .claude/local/check.mjs <file>\` from ${REPO} over every file you write, and never write a protected word.
-- Parity: a test on one side has its twin on the other, named by the same sentence (\`Underscored_sentence\` in C#); a difference that remains is a row of \`docs/support.md\` with the test that shows it.
+- Run a gate in the foreground, with a timeout that fits it (up to ten minutes); a run in the background only beside another you run at once, then one Monitor until-loop that waits on both, never sleeping and reading their output again and again.
+- Parity: a test on one side has its twin on the other, named by the same sentence (\`Underscored_sentence\` in C#, \`snake_case_sentence\` in Rust); a difference that remains is a row of \`docs/support.md\` with the test that shows it.
 ${args.notes ? `${args.notes}\n` : ''}`;
 
 const GENERATE = `regenerate every conformance file with \`${VENV}\` and each script of \`spec/generators/\` the README lists (never edit a generated file by hand)`;
 const FORMAT = "the root's format step (`node tools/check-format.mjs`)";
+// ! a side's interop drives the other side, which another stage is editing at the same time: it
+// runs once, in the integration, over the settled tree
+const INTEROP =
+  "The interop between the sides is the integration's, run once over the settled tree.";
 
 const DEFAULT_TASKS = {
   spec: `# Your task: the spec, the conformance, the records (effort ${args.specEffort || 'high'})
 Implement the design's text and conformance: \`spec/spec.md\` and \`spec/debugging.md\` as the design touches them, the generators and the conformance files (${GENERATE}), \`spec/units.txt\` and \`spec/debugging-units.txt\` (\`--write-units\` naming each unit whose text the design moves, and no other; a new unit given its status), the decision records (the round of the Tenth Man kept in its record), \`docs/support.md\`, \`CHANGELOG.md\` under \`[Unreleased]\`, the README's counts. These files are yours alone. Then: \`${VENV} spec/check.py\`, ${FORMAT} (fixing your files only), \`node tools/check-links.mjs\`, \`node tools/check-versions.mjs\`, the names check. Report the files, the cases and each gate's result.`,
   typescript: `# Your task: the TypeScript side (effort high)
-Implement the design under \`implementations/typescript/\` only, with its tests, one test file per module in the \`__tests__/\` folder beside it. While you work, run the test files of what you change (\`yarn test <files>\`); at the end, \`yarn check\` and the whole \`yarn test\` once, from that folder. Report the files, the tests by name and the results.`,
+Implement the design under \`implementations/typescript/\` only, with its tests, one test file per module in the \`__tests__/\` folder beside it. While you work, run the test files of what you change (\`yarn test <files>\`); at the end, \`yarn check\` and the whole suite once, from that folder, without the interop that drives the C# side, as CI's TypeScript job runs it: \`yarn test --grep-invert "the C# server of the interop service"\`. ${INTEROP} Report the files, the tests by name and the results.`,
   csharp: `# Your task: the C# side (effort high)
-Implement the design under \`implementations/dotnet/\` only, with its tests named as the TypeScript twins; decision 0007 holds. While you work, run the test project of what you change (\`dotnet test --project tests/<project>\`, \`--filter-method\` to narrow); at the end, \`dotnet format Bead.slnx --verify-no-changes\` and the whole \`dotnet test --solution Bead.slnx\` with \`BEAD_INTEROP_REQUIRED=1\` once, from that folder. Report the files, the tests by name and the results.`,
+Implement the design under \`implementations/dotnet/\` only, with its tests named as the TypeScript twins; decision 0007 holds. While you work, run the test project of what you change (\`dotnet test --project tests/<project>\`, \`--filter-method\` to narrow); at the end, from that folder, \`dotnet format Bead.slnx --verify-no-changes\`, \`dotnet build Bead.slnx\`, and the whole suite once without the interop, which starts the TypeScript side: every test project of \`tests/\` but \`Bead.Interop.Tests\`, each by \`dotnet test --project tests/<project>\`, \`BEAD_INTEROP_REQUIRED\` unset. ${INTEROP} Report the files, the tests by name and the results.`,
+  rust: `# Your task: the Rust side (effort high)
+Implement the design under \`implementations/rust/\` only, with its tests: a module's beside it (\`src/envelope.rs\` → \`src/envelope/tests.rs\`), the conformance players in a crate's \`tests/\`, named as the TypeScript twins; decision 0044 holds. While you work, run the package of what you change alone, never the whole workspace: \`cargo test -p <package> --all-features --locked <filter>\` (\`--test <player>\` for a file of \`tests/\`) and \`cargo clippy -p <package> --all-targets --all-features --locked\`, a package by its name (\`francisdesjardins-bead\`, \`francisdesjardins-bead-protobuf\`, …). A public item added or removed moves its crate's list, which \`BEAD_HOUSE_WRITE=1 cargo test -p francisdesjardins-bead-house\` writes anew; a \`.proto\` of \`bead-protobuf\`'s tests moved, \`node tools/check-protobuf.mjs --write\` writes their set again. At the end, CLAUDE.md's Rust gates once, from that folder: \`cargo fmt --all -- --check\`, \`cargo clippy --workspace --all-targets --all-features --locked\`, \`cargo clippy -p francisdesjardins-bead --lib --all-features --locked --target wasm32-unknown-unknown\`, \`cargo test --workspace --all-features --locked\`, \`cargo doc --workspace --no-deps --all-features --locked\`, \`cargo build --workspace --locked\` and \`cargo deny --locked check\`. The coverage and its floor are the integration's. Report the files, the tests by name and the results.`,
 };
 
 const taskOf = (key) => {
@@ -85,15 +108,23 @@ const effortOf = (key) => {
   return key === 'spec' ? args.specEffort || 'high' : 'high';
 };
 
+// * a stage's report on disk, its return a few lines: the integration reads the files
+const REPORTS = `${OUT}/reports`;
+const reportOf = (key) => {
+  return `${REPORTS}/${key}.md`;
+};
+const returnOf = (key) => {
+  return `Write your report whole to ${reportOf(key)}; return at most ten lines: what you did, each gate's verdict, and that path.`;
+};
+
 const run = (key, phaseTitle, beside) => {
-  return agent(`${COMMON}${beside}\n${taskOf(key)}`, {
+  return agent(`${COMMON}${readsOf(key)}\n${beside}\n${taskOf(key)}\n${returnOf(key)}`, {
     label: `implement:${key}`,
     phase: phaseTitle,
     effort: effortOf(key),
   });
 };
 
-const reports = {};
 const FIRST = args.together
   ? []
   : (args.first || ['spec']).filter((key) => {
@@ -105,42 +136,44 @@ if (FIRST.length > 0) {
   phase('First');
 }
 for (const key of FIRST) {
-  reports[key] = await run(key, 'First', '');
+  await run(key, 'First', '');
 }
 
 phase('Sides');
 const others = PARTS.filter((key) => {
   return !FIRST.includes(key);
 });
-const results = await parallel(
+await parallel(
   others.map((key) => {
     return () => {
       return run(key, 'Sides', others.length > 1 ? BESIDE : '');
     };
   })
 );
-others.forEach((key, index) => {
-  reports[key] = results[index];
-});
 
 // the commits: whole files proposed, or the design's series built and proven in a clone
 const PLAN = `propose the commits, whole files each, with Conventional Commit subjects and bodies of one or two lines (no attribution), in ${SCRATCH}/msgs/${SLUG}-<n>.txt, with the files in ${SCRATCH}/msgs/${SLUG}-files.txt as "<n> <path>" lines covering every changed file once; run \`node tools/check-commits.mjs --message\` and the names check over each.`;
-const SERIES = `build the design's commits, in its order, with its subjects, bodies of one or two lines and no attribution, in a clone of your own, never in the repository: \`git clone --no-hardlinks ${REPO} ${OUT}/series\`, a branch \`${BRANCH}\` there at the repository's HEAD, \`user.name\` and \`user.email\` copied from the repository's config. The repository keeps the end state in its working tree, unstaged, and its own git is never written. Each commit passes \`node tools/check-commits.mjs --message\` and the names check (\`node ${REPO}/.claude/local/check.mjs\` over the commit's files and its message, from the clone's root), then the fast gates its files touch and its build: \`spec/check.py\` when \`spec/\` or a cited test moved, ${FORMAT}, \`node tools/check-links.mjs\`, \`node tools/check-versions.mjs\`, \`yarn check\` when the TypeScript side moved, \`dotnet build Bead.slnx\` when the C# side moved. ! No test suite runs at a commit: the series' last tree equals the repository's working tree, blob for blob, which the gates above already ran over whole; an earlier commit is held to building and to its fast gates. A commit that is not green is fixed within its slice, or joined to the next, and the report says which and why.`;
+const SERIES = `build the design's commits, in its order, with its subjects, bodies of one or two lines and no attribution, in a clone of your own, never in the repository: \`git clone --no-hardlinks ${REPO} ${OUT}/series\`, a branch \`${BRANCH}\` there at the repository's HEAD, \`user.name\` and \`user.email\` copied from the repository's config. The repository keeps the end state in its working tree, unstaged, and its own git is never written. Each commit passes \`node tools/check-commits.mjs --message\` and the names check (\`node ${REPO}/.claude/local/check.mjs\` over the commit's files and its message, from the clone's root), then the fast gates its files touch and its build: \`spec/check.py\` when \`spec/\` or a cited test moved, ${FORMAT}, \`node tools/check-links.mjs\`, \`node tools/check-versions.mjs\`, \`yarn check\` when the TypeScript side moved, \`dotnet build Bead.slnx\` when the C# side moved, \`cargo build --workspace --all-targets --all-features --locked\` from \`implementations/rust\` when the Rust side moved. ! No test suite runs at a commit: the series' last tree equals the repository's working tree, blob for blob, which the gates above already ran over whole; an earlier commit is held to building and to its fast gates. A commit that is not green is fixed within its slice, or joined to the next, and the report says which and why.`;
 const SUITE_GATES =
   SUITES === 'ci'
-    ? "the tests of what changed, by file (`yarn test <files>`) and by project (`dotnet test --project tests/<project>`, the interop's with `BEAD_INTEROP_REQUIRED=1` when a transport or the interop moved), and `dotnet build Bead.slnx`: the whole suites are GitHub's CI's, on the feature branch the session pushes once the series lands; say so in the report"
-    : "`yarn test:coverage`, then each floor as CI holds it, from the root (`node tools/coverage-report.mjs implementations/typescript/coverage/coverage-final.json --under implementations/typescript/src --floor typescript`), with `yarn devtools:build` and `yarn test:devtools` when the DevTools panel changed; `dotnet test --solution Bead.slnx --coverage --coverage-output-format cobertura --results-directory TestResults/coverage` with `BEAD_INTEROP_REQUIRED=1` and no broker given, as CI's `.NET` job runs it, then `node ../../tools/coverage-report.mjs TestResults/coverage/*.cobertura.xml --under implementations/dotnet/src --floor csharp`; the suites that need a broker again under their fixture when a broker's adapter moved: MQTT 5's (`yarn test:mqtt`, `yarn test:demo --project unit --grep \"over MQTT 5\"`, `yarn test:browser --grep \"MQTT 5\"`, and `yarn devtools:build && yarn playground:build:file && yarn test:devtools --grep \"over MQTT 5\"`, as CI's `mqtt` job runs them) under `node tools/mqtt-broker.mjs run --` when an MQTT adapter's code or the DevTools hook's MQTT test moved, AMQP 1.0's (`yarn test:amqp`, `dotnet test --project tests/Bead.Transport.Amqp.Tests`, and the interop's with `--filter-trait \"transport=AMQP\"`, as CI's `amqp` job runs them) under `node tools/amqp-broker.mjs run --` when an AMQP adapter's code moved; `yarn install --immutable` in `examples/hello/typescript` when the TypeScript package's manifest moved; `yarn test` in `builder` when a copy it holds moved (the `.editorconfig` of the C# goldens)";
+    ? "the tests of what changed, by file (`yarn test <files>`), by project (`dotnet test --project tests/<project>`) and by Rust package (`cargo test -p <package> --all-features --locked`); the interop both ways when a transport or the interop moved (`dotnet test --project tests/Bead.Interop.Tests` with `BEAD_INTEROP_REQUIRED=1`, then `yarn test:interop`); and `dotnet build Bead.slnx`: the whole suites are GitHub's CI's, on the feature branch the session pushes once the series lands; say so in the report"
+    : "`yarn test:coverage`, then each floor as CI holds it, from the root (`node tools/coverage-report.mjs implementations/typescript/coverage/coverage-final.json --under implementations/typescript/src --floor typescript`), with `yarn devtools:build` and `yarn test:devtools` when the DevTools panel changed; `dotnet test --solution Bead.slnx --coverage --coverage-output-format cobertura --results-directory TestResults/coverage` with `BEAD_INTEROP_REQUIRED=1` and no broker given, as CI's `.NET` job runs it, then `node ../../tools/coverage-report.mjs TestResults/coverage/*.cobertura.xml --under implementations/dotnet/src --floor csharp`; from `implementations/rust`, the tests under the coverage CI's `rust` job measures, `cargo llvm-cov --workspace --all-features --locked --json --summary-only --ignore-filename-regex '(/tests\\.rs|/tests/.*|/testing\\.rs|/testing/.*)$' --output-path coverage/rust.json`, held to its floor in `tools/coverage-floors.json` by `node ../../tools/coverage-report.mjs coverage/rust.json --under implementations/rust/crates/bead/src --under implementations/rust/crates/bead-protobuf/src --floor rust`; the suites that need a broker again under their fixture when a broker's adapter moved: MQTT 5's (`yarn test:mqtt`, `yarn test:demo --project unit --grep \"over MQTT 5\"`, `yarn test:browser --grep \"MQTT 5\"`, and `yarn devtools:build && yarn playground:build:file && yarn test:devtools --grep \"over MQTT 5\"`, as CI's `mqtt` job runs them) under `node tools/mqtt-broker.mjs run --` when an MQTT adapter's code or the DevTools hook's MQTT test moved, AMQP 1.0's (`yarn test:amqp`, `dotnet test --project tests/Bead.Transport.Amqp.Tests`, and the interop's with `--filter-trait \"transport=AMQP\"`, as CI's `amqp` job runs them) under `node tools/amqp-broker.mjs run --` when an AMQP adapter's code moved; `yarn install --immutable` in `examples/hello/typescript` when the TypeScript package's manifest moved; `yarn test` in `builder` when a copy it holds moved (the `.editorconfig` of the C# goldens)";
 
 phase('Integrate');
 const integration = await agent(
   `${COMMON}
 # Your task: integrate (effort high)
-Check that both sides do what the design says, alike, as the conformance files and the twin tests prove, and that the records, the matrix and the CHANGELOG say what landed. Fix what is broken. Run every gate with \`${TMP}\`: ${GENERATE}, and check that nothing more moves; \`${VENV} spec/check.py\`; ${FORMAT}; \`node tools/check-links.mjs\`; \`node tools/check-versions.mjs\`; \`node tools/check-names.mjs\`; \`node tools/check-durations.mjs\`; \`node tools/check-details.mjs\`, as CI's Commits job runs them; \`node tools/check-examples.mjs\`; \`node --test "tools/__tests__/*.test.mjs"\` when \`tools/\` changed; \`yarn check\`; \`dotnet format Bead.slnx --verify-no-changes\`; ${SUITE_GATES}; the gates of every stage the design names; the names check over every file \`git status --porcelain\` lists. Then ${args.series ? SERIES : PLAN} Return what you fixed, each gate's result, the test counts and the commits.
-The reports:
-${PARTS.map((key) => {
-  return `## ${key}\n${reports[key] || '(no report)'}`;
-}).join('\n\n')}`,
+Read ${DESIGN} whole, every stage's section; ${RATIONALE}, beside it where the round wrote one, where you need a reason. Check that every side does what the design says, alike, as the conformance files and the twin tests prove, and that the records, the matrix and the CHANGELOG say what landed. Fix what is broken. The stages ran their suites without the interop between the sides: it runs here, once, over the settled tree, both ways, in the suites below. Run every gate with \`${TMP}\`: ${GENERATE}, and check that nothing more moves; \`${VENV} spec/check.py\`; ${FORMAT}; \`node tools/check-links.mjs\`; \`node tools/check-versions.mjs\`; \`node tools/check-names.mjs\`; \`node tools/check-durations.mjs\`; \`node tools/check-details.mjs\`, as CI's Commits job runs them; \`node tools/check-examples.mjs\`; \`node --test "tools/__tests__/*.test.mjs"\` when \`tools/\` changed; \`yarn check\`; \`dotnet format Bead.slnx --verify-no-changes\`; from \`implementations/rust\`, CLAUDE.md's Rust gates but \`cargo test\`, which the suites below run; ${SUITE_GATES}; the gates of every stage the design names; the names check over every file \`git status --porcelain\` lists. Then ${args.series ? SERIES : PLAN} Write your report whole to ${reportOf('integrate')}: what you fixed, each gate's result, the test counts and the commits. Return at most ten lines: what you fixed, each gate's verdict, the test counts, the commits, and that path.
+The stages' reports, read first: ${PARTS.map((key) => {
+    return reportOf(key);
+  }).join(', ')}.`,
   { label: `integrate:${SLUG}`, phase: 'Integrate', effort: 'high' }
 );
 
-return { reports, integration };
+return {
+  reports: PARTS.map((key) => {
+    return reportOf(key);
+  }),
+  integration: reportOf('integrate'),
+  summary: integration,
+};

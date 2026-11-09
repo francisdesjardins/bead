@@ -120,6 +120,27 @@ public interface IRouterServerTransport
     {
         return false;
     }
+
+    /// <summary>
+    /// Whether it names the procedures its connections take (spec 9.11), which its router asks once,
+    /// as it is built: one that does is asked <see cref="TakesProcedure"/> of each request that
+    /// names no destination, and one that does not never is. None does by default.
+    /// </summary>
+    bool NamesProcedures()
+    {
+        return false;
+    }
+
+    /// <summary>
+    /// Whether a connection takes a procedure (spec 9.11): a request to one it does not take, which
+    /// names no destination, is answered as one to no resolver, <c>SERVICE_UNKNOWN</c> or
+    /// <c>PROCEDURE_UNKNOWN</c> (spec 9.2, step 5). Asked only of a transport that
+    /// <see cref="NamesProcedures"/>; every one is taken by default.
+    /// </summary>
+    bool TakesProcedure(string connectionHandle, ProcedureAddress address)
+    {
+        return true;
+    }
 }
 
 /// <summary>How a server's router is built.</summary>
@@ -258,6 +279,10 @@ public sealed class RouterServer : IRouterLike, IDisposable
     // that connection (decision 0046)
     private readonly RouterIntake _intake;
 
+    // whether its transport names the procedures its connections take, asked once as it is built:
+    // its core asks the transport of each request only then (spec 9.11)
+    private readonly bool _namesProcedures;
+
     /// <summary>
     /// A server's router over <paramref name="transport"/>, on its transport's clock: one given that
     /// differs is an <see cref="ArgumentException"/>.
@@ -269,6 +294,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
         var clock = Clocks.Of((options?.Clock, transport.Clock), ("a server's router", "its transport"));
 
         Transport = transport;
+        _namesProcedures = transport.NamesProcedures();
         _intake = new RouterIntake(options?.Intake ?? IntakeLimits.Default);
         _notifications = new NotificationManager(options?.Pacing ?? PacingLimits.Default);
         _places = new SubscriptionPlaces(
@@ -1303,6 +1329,12 @@ public sealed class RouterServer : IRouterLike, IDisposable
         public bool IsSecure(string connectionHandle)
         {
             return server.Transport.IsSecure(connectionHandle);
+        }
+
+        // * a transport that names no procedures is never asked: every one is taken (spec 9.11)
+        public bool TakesProcedure(string connectionHandle, ProcedureAddress address)
+        {
+            return !server._namesProcedures || server.Transport.TakesProcedure(connectionHandle, address);
         }
 
         // a request that names a destination goes on through the relay

@@ -30,7 +30,7 @@
 
   <ItemGroup>
     <!-- what a gateway answers of spec/transcoding.proto, which Generated/ holds as beadc writes it,
-         its route table and its document among it, an output with http: true -->
+         its route table and its document among it, an output with a gateway -->
     <Content Include="../../../../spec/transcoding.json" Link="transcoding.json" CopyToOutputDirectory="PreserveNewest" />
     <!-- the companion, whose version the file repeats -->
     <Content Include="../../../../spec/transcoding.md" Link="transcoding.md" CopyToOutputDirectory="PreserveNewest" />

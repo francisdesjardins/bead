@@ -10,7 +10,7 @@ namespace Bead.Transcoding.Tests;
 /// <summary>
 /// What the tests read of <c>spec/transcoding.json</c> and of the code beadc generated of
 /// <c>spec/transcoding.proto</c> and <c>spec/transcoding-required.proto</c>, which it imports, into
-/// <c>Generated/</c>, an output with <c>http: true</c>: the file's root, a message by its full name,
+/// <c>Generated/</c>, an output with a <c>gateway</c>: the file's root, a message by its full name,
 /// a procedure's route by its name, and the mapping over the route table's messages.
 /// </summary>
 internal static class TranscodingFile

@@ -2,8 +2,9 @@
 //! its admission, its sessions, its services, each offered once — takes its connections from each:
 //! an in-memory transport beside a broker's, say. Each handle is the one its transport drew, and the
 //! join refuses, as it is built, two transports of one type, whose handles might be one; each
-//! connection's flags, its sending and its closing are asked of the transport that drew it, known
-//! by its handle's type; its pause and its resume of the transport whose events told it (spec
+//! connection's flags, the procedures it takes (spec 9.11), its sending and its closing are asked
+//! of the transport that drew it, known by its handle's type, and the join names procedures when
+//! one of its transports does; its pause and its resume of the transport whose events told it (spec
 //! 15.12). Each transport's events are told on, with its handle, in the order that transport told
 //! them, each listener within the join's guard; its stop stops every one, and settles once all
 //! have; its gauges are their sum. It starts nothing: an application starts each
@@ -16,6 +17,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 
 use crate::clock::SharedClock;
 use crate::errors::ProgrammerError;
+use crate::failure::ProcedureAddress;
 use crate::router::types::{BoxFuture, ConnectionHandle, Gauges, RouterError, TransportMessage};
 use crate::transport::{Listeners, Sent, ServerListener, ServerTransport, TransportServerRefusal};
 
@@ -34,6 +36,8 @@ struct JoinedInner {
     // each transport by the type its handles begin with
     by_type: HashMap<String, usize>,
     clock: Option<SharedClock>,
+    // whether one of its transports names the procedures its connections take, asked once
+    names_procedures: bool,
     listeners: Listeners<dyn ServerListener>,
     // each transport's connections as its events told them, what it is counted by when it counts
     // nothing itself
@@ -262,10 +266,14 @@ impl JoinedServerTransport {
             .iter()
             .map(|_| Mutex::new(BTreeSet::new()))
             .collect();
+        let names_procedures = transports
+            .iter()
+            .any(|transport| transport.names_procedures());
         let inner = Arc::new(JoinedInner {
             transports,
             by_type,
             clock,
+            names_procedures,
             listeners: Listeners::default(),
             told,
         });
@@ -352,6 +360,21 @@ impl ServerTransport for JoinedServerTransport {
         self.inner
             .owner_of(connection_handle)
             .is_some_and(|owner| owner.carries_credential(connection_handle))
+    }
+
+    fn names_procedures(&self) -> bool {
+        self.inner.names_procedures
+    }
+
+    // of the transport that drew it; false for a handle none of its transports holds
+    fn takes_procedure(
+        &self,
+        connection_handle: &ConnectionHandle,
+        address: ProcedureAddress,
+    ) -> bool {
+        self.inner
+            .owner_of(connection_handle)
+            .is_some_and(|owner| owner.takes_procedure(connection_handle, address))
     }
 
     // * it starts nothing: an application starts each transport it joined, where it listens

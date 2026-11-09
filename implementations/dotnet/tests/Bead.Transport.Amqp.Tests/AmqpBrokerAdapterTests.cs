@@ -2160,6 +2160,16 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
             var transfer = Assert.Single(TransfersTo((connection, AmqpMessages.AddressOf(topic))));
             var ending = connection.Frames.Count;
 
+            Func<ScriptedFrame, bool> isSending = (frame) =>
+            {
+                return frame.Performative is Attach { Role: false } attach && (attach.Target as Target)?.Address is null;
+            };
+
+            // ! held and counted before the END: the replacement sender may attach as its session
+            // ends or as the next publication asks for it, and either ATTACH must be the one held
+            _script.Holding = isSending;
+            var sending = connection.Frames.Count;
+
             await connection.End(transfer.Channel);
             await connection.Next(
                 (frame) =>
@@ -2168,13 +2178,6 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
                 },
                 from: ending);
 
-            Func<ScriptedFrame, bool> isSending = (frame) =>
-            {
-                return frame.Performative is Attach { Role: false } attach && (attach.Target as Target)?.Address is null;
-            };
-
-            _script.Holding = isSending;
-            var sending = connection.Frames.Count;
             var oversized = adapter.Publish(new BrokerPublication { ExpiresAfter = TimeSpan.FromSeconds(1), Payload = new byte[room], Topic = topic });
             var fitting = adapter.Publish(new BrokerPublication { Payload = (byte[])[2], Topic = topic });
             var attaching = await connection.Next(isSending, from: sending);

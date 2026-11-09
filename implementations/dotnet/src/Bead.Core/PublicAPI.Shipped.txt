@@ -229,6 +229,7 @@ Bead.BrokerTransportServer.Gauges() -> Bead.Gauges!
 Bead.BrokerTransportServer.IsSecure(string! connectionHandle) -> bool
 Bead.BrokerTransportServer.Message -> System.Action<Bead.TransportMessage, string!>?
 Bead.BrokerTransportServer.Names.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Bead.BrokerTransportServer.NamesProcedures() -> bool
 Bead.BrokerTransportServer.Pause(string! connectionHandle) -> void
 Bead.BrokerTransportServer.ReadyState.get -> Bead.ReadyState
 Bead.BrokerTransportServer.Refusal -> System.Action<Bead.TransportServerRefusal!>?
@@ -237,6 +238,7 @@ Bead.BrokerTransportServer.Send(Bead.TransportMessage message, string! connectio
 Bead.BrokerTransportServer.Shutdown() -> System.Threading.Tasks.Task!
 Bead.BrokerTransportServer.Start() -> System.Threading.Tasks.Task<Bead.TransportServerAddress>!
 Bead.BrokerTransportServer.Stop() -> System.Threading.Tasks.Task!
+Bead.BrokerTransportServer.TakesProcedure(string! connectionHandle, Bead.ProcedureAddress address) -> bool
 Bead.BrokerTransportServer.Type.get -> string!
 Bead.BrokerTransportServerOptions
 Bead.BrokerTransportServerOptions.<Clone>$() -> Bead.BrokerTransportServerOptions!
@@ -254,6 +256,10 @@ Bead.BrokerTransportServerOptions.MaximumUnsentBytes.get -> long?
 Bead.BrokerTransportServerOptions.MaximumUnsentBytes.init -> void
 Bead.BrokerTransportServerOptions.Names.get -> System.Collections.Generic.IReadOnlyList<string!>!
 Bead.BrokerTransportServerOptions.Names.init -> void
+Bead.BrokerTransportServerOptions.Procedures.get -> System.Collections.Generic.IReadOnlyCollection<Bead.ProcedureAddress>?
+Bead.BrokerTransportServerOptions.Procedures.init -> void
+Bead.BrokerTransportServerOptions.ProceduresByName.get -> System.Collections.Generic.IReadOnlyDictionary<string!, System.Collections.Generic.IReadOnlyCollection<Bead.ProcedureAddress>!>?
+Bead.BrokerTransportServerOptions.ProceduresByName.init -> void
 Bead.BrokerTransportServerOptions.Secure.get -> bool?
 Bead.BrokerTransportServerOptions.Secure.init -> void
 Bead.CallAddress
@@ -728,9 +734,11 @@ Bead.IRouterServerTransport.Connection -> System.Action<string!>?
 Bead.IRouterServerTransport.IsSecure(string! connectionHandle) -> bool
 Bead.IRouterServerTransport.IsTwoWay(string! connectionHandle) -> bool
 Bead.IRouterServerTransport.Message -> System.Action<Bead.TransportMessage, string!>?
+Bead.IRouterServerTransport.NamesProcedures() -> bool
 Bead.IRouterServerTransport.Pause(string! connectionHandle) -> void
 Bead.IRouterServerTransport.Resume(string! connectionHandle) -> void
 Bead.IRouterServerTransport.Send(Bead.TransportMessage message, string! connectionHandle) -> System.Threading.Tasks.Task!
+Bead.IRouterServerTransport.TakesProcedure(string! connectionHandle, Bead.ProcedureAddress address) -> bool
 Bead.IRouterTarget
 Bead.IRouterTarget.Carries(string! credential) -> bool
 Bead.IRouterTarget.IsSecure.get -> bool
@@ -795,11 +803,13 @@ Bead.JoinedServerTransport.IsTwoWay(string! connectionHandle) -> bool
 Bead.JoinedServerTransport.JoinedServerTransport(System.Collections.Generic.IReadOnlyList<Bead.IServerTransport!>! transports) -> void
 Bead.JoinedServerTransport.Listen -> System.Action<bool, string!>?
 Bead.JoinedServerTransport.Message -> System.Action<Bead.TransportMessage, string!>?
+Bead.JoinedServerTransport.NamesProcedures() -> bool
 Bead.JoinedServerTransport.Pause(string! connectionHandle) -> void
 Bead.JoinedServerTransport.Refusal -> System.Action<Bead.TransportServerRefusal!>?
 Bead.JoinedServerTransport.Resume(string! connectionHandle) -> void
 Bead.JoinedServerTransport.Send(Bead.TransportMessage message, string! connectionHandle) -> System.Threading.Tasks.Task!
 Bead.JoinedServerTransport.Shutdown() -> System.Threading.Tasks.Task!
+Bead.JoinedServerTransport.TakesProcedure(string! connectionHandle, Bead.ProcedureAddress address) -> bool
 Bead.JoinedServerTransport.Transports.get -> System.Collections.Generic.IReadOnlyList<Bead.IServerTransport!>!
 Bead.JoinedServerTransport.Type.get -> string?
 Bead.Judged
@@ -964,6 +974,7 @@ Bead.MemoryTransportServer.Gauges() -> Bead.Gauges!
 Bead.MemoryTransportServer.IsSecure(string! connectionHandle) -> bool
 Bead.MemoryTransportServer.MemoryTransportServer(Bead.MemoryTransportServerOptions? options = null) -> void
 Bead.MemoryTransportServer.Message -> System.Action<Bead.TransportMessage, string!>?
+Bead.MemoryTransportServer.NamesProcedures() -> bool
 Bead.MemoryTransportServer.Pause(string! connectionHandle) -> void
 Bead.MemoryTransportServer.ReadyState.get -> Bead.ReadyState
 Bead.MemoryTransportServer.Resume(string! connectionHandle) -> void
@@ -971,6 +982,7 @@ Bead.MemoryTransportServer.Send(Bead.TransportMessage message, string! connectio
 Bead.MemoryTransportServer.Shutdown() -> System.Threading.Tasks.Task!
 Bead.MemoryTransportServer.Start() -> System.Threading.Tasks.Task<Bead.TransportServerAddress>!
 Bead.MemoryTransportServer.Stop() -> System.Threading.Tasks.Task!
+Bead.MemoryTransportServer.TakesProcedure(string! connectionHandle, Bead.ProcedureAddress address) -> bool
 Bead.MemoryTransportServer.Type.get -> string!
 Bead.MemoryTransportServerOptions
 Bead.MemoryTransportServerOptions.<Clone>$() -> Bead.MemoryTransportServerOptions!
@@ -978,6 +990,8 @@ Bead.MemoryTransportServerOptions.Clock.get -> System.TimeProvider?
 Bead.MemoryTransportServerOptions.Clock.init -> void
 Bead.MemoryTransportServerOptions.Equals(Bead.MemoryTransportServerOptions? other) -> bool
 Bead.MemoryTransportServerOptions.MemoryTransportServerOptions() -> void
+Bead.MemoryTransportServerOptions.Procedures.get -> System.Collections.Generic.IReadOnlyCollection<Bead.ProcedureAddress>?
+Bead.MemoryTransportServerOptions.Procedures.init -> void
 Bead.MetricsExposition
 Bead.MetricsExposition.<Clone>$() -> Bead.MetricsExposition!
 Bead.MetricsExposition.ContentType.get -> string!
@@ -1887,6 +1901,7 @@ const Bead.BrokerRefusal.NoSubscriber = "no-subscriber" -> string!
 const Bead.GeneratedCode.SupportsVersion5 = true -> bool
 const Bead.GeneratedCode.SupportsVersion6 = true -> bool
 const Bead.GeneratedCode.SupportsVersion7 = true -> bool
+const Bead.GeneratedCode.SupportsVersion8 = true -> bool
 const Bead.Health.WarningRatio = 0.8 -> double
 const Bead.LimitDefaults.ChunkBytes = 1048576 -> int
 const Bead.LimitDefaults.MaximumAnsweringCalls = 64 -> int

@@ -15,7 +15,8 @@
 // names in each file it generated, the image each committed wrapper of beadc's names and the spec's
 // version in each blueprint beadc wrote outside spec/; moves each C# project's
 // PublicAPI.Unshipped.txt into its PublicAPI.Shipped.txt, a `*REMOVED*` line taking its symbol out;
-// every text changed before any is written; runs the generators; dates [Unreleased] as the version,
+// every text changed before any is written; runs the generators, then the Bead page's build where
+// the tree holds it; dates [Unreleased] as the version,
 // under a new empty one, and links it; then runs the gate as a release, spec/check.py and the
 // root's format check, naming one whose tool is absent; on a hotfix, which starts from main, takes
 // every waiver out of CI's `beadc breaking` step, each moot since the release main holds; and lists
@@ -404,6 +405,9 @@ export const benchOwed = (branch) => {
 // run read, never a gate of the release
 export const FUZZ = '.github/workflows/fuzz.yml';
 
+// the Bead page's build, which writes site/dist/index.html from site/src, the versions among it
+export const SITE_BUILD = 'site/build.mjs';
+
 // the line that owes the last fuzzing campaign's run its reading
 export const FUZZ_OWED = `owed by hand: the last run of ${FUZZ}, its findings read, each a case of its side's tests, as \`gh run list --workflow fuzz.yml --limit 1\` lists it`;
 
@@ -753,6 +757,10 @@ export const prepare = (root, options = {}) => {
     .sort();
   for (const name of generators) {
     run(python, [`spec/generators/${name}`]);
+  }
+  // the Bead page states the versions just moved: its build, plain Node, follows them
+  if (existsSync(join(root, SITE_BUILD))) {
+    run(process.execPath, [SITE_BUILD]);
   }
 
   // the checks: the gate is required; one whose tool is absent is named, with the CI job holding it

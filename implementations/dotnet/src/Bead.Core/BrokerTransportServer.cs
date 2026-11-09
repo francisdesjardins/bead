@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Globalization;
 
 namespace Bead;
@@ -39,6 +40,23 @@ public sealed record BrokerTransportServerOptions
     /// 15.22); its adapter's word when none.
     /// </summary>
     public bool? Secure { get; init; }
+
+    /// <summary>
+    /// The procedures each of its connections takes, by their addresses, on every name it serves
+    /// but those <see cref="ProceduresByName"/> gives (spec 9.11): a request to any other, which
+    /// names no destination, is answered as one to no resolver, <c>SERVICE_UNKNOWN</c> or
+    /// <c>PROCEDURE_UNKNOWN</c>. None takes every procedure; empty, none. An address of service 0
+    /// or of procedure 0 is an <see cref="ArgumentException"/> as the transport is built, and one
+    /// named twice is one (spec 9.12).
+    /// </summary>
+    public IReadOnlyCollection<ProcedureAddress>? Procedures { get; init; }
+
+    /// <summary>
+    /// The procedures a connection takes by the name its OPEN reached, in place of
+    /// <see cref="Procedures"/>, each list as it is (spec 9.11, 15.18): a name it does not serve is
+    /// an <see cref="ArgumentException"/> as the transport is built (spec 9.12).
+    /// </summary>
+    public IReadOnlyDictionary<string, IReadOnlyCollection<ProcedureAddress>>? ProceduresByName { get; init; }
 }
 
 /// <summary>
@@ -65,6 +83,9 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
     private readonly BrokerTransportServerOptions _options;
     private readonly long _maximumUnsentBytes;
     private readonly bool _isSecure;
+    // the procedures its connections take, on every name but those that have their own; none, every one
+    private readonly FrozenSet<ProcedureAddress>? _procedures;
+    private readonly FrozenDictionary<string, FrozenSet<ProcedureAddress>> _proceduresByName;
     private readonly TransportServerLife _life = new();
     private readonly ListenerGuard _listeners;
     private readonly Lock _gate = new();
@@ -98,6 +119,10 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
         {
             throw new ArgumentException($"a name served in a group needs an adapter that offers groups, and the adapter of {participant.Id} does not", nameof(options));
         }
+
+        // * the procedures it takes, checked before any name is served (spec 9.12)
+        _procedures = ProceduresTaken.Of(options.Procedures, ("a broker's server transport", nameof(options)));
+        _proceduresByName = ProceduresByNameOf(options);
 
         ServerBounds.AssertCount((nameof(BrokerTransportServerOptions.MaximumConnections), options.MaximumConnections));
         ServerBounds.AssertCount((nameof(BrokerTransportServerOptions.MaximumConnectionsPerAddress), options.MaximumConnectionsPerAddress));
@@ -432,6 +457,37 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
         return false;
     }
 
+    /// <summary>
+    /// Whether it was given the procedures its connections take, on every name or on one (spec
+    /// 9.11).
+    /// </summary>
+    public bool NamesProcedures()
+    {
+        return _procedures is not null || _proceduresByName.Count > 0;
+    }
+
+    /// <summary>
+    /// Whether a connection takes a procedure: by the procedures given for the name its OPEN
+    /// reached, else by <see cref="BrokerTransportServerOptions.Procedures"/>, every one when neither
+    /// was given (spec 9.11, 15.18); none for a connection it does not hold.
+    /// </summary>
+    public bool TakesProcedure(string connectionHandle, ProcedureAddress address)
+    {
+        string? name;
+
+        lock (_gate)
+        {
+            if (!_connections.TryGetValue(connectionHandle, out var connection))
+            {
+                return false;
+            }
+
+            name = connection.Name;
+        }
+
+        return ProceduresTaken.Takes(name is not null && _proceduresByName.TryGetValue(name, out var own) ? own : _procedures, address);
+    }
+
     /// <summary>Whether a connection is secure: its own leg and its peer's, as its OPEN said (spec 15.22).</summary>
     public bool IsSecure(string connectionHandle)
     {
@@ -565,7 +621,7 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
             return;
         }
 
-        Accept(open);
+        Accept(open, name);
     }
 
     /// <summary>
@@ -613,9 +669,29 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
         Error?.Invoke(reason, "");
     }
 
-    // in its participant's turn: an OPEN answered with an ACCEPT, its connection half-open, holding
-    // its place, its accept timeout armed on the clock given
-    private void Accept(BrokerParcel open)
+    // the procedures given for each name, each checked, and each a name it serves (spec 9.12)
+    private static FrozenDictionary<string, FrozenSet<ProcedureAddress>> ProceduresByNameOf(BrokerTransportServerOptions options)
+    {
+        var byName = new Dictionary<string, FrozenSet<ProcedureAddress>>(StringComparer.Ordinal);
+
+        foreach (var (name, procedures) in options.ProceduresByName ?? new Dictionary<string, IReadOnlyCollection<ProcedureAddress>>())
+        {
+            if (!options.Names.Contains(name, StringComparer.Ordinal))
+            {
+                throw new ArgumentException($"a broker's server transport takes procedures for {name}, a name it does not serve (spec 9.12)", nameof(options));
+            }
+
+            ArgumentNullException.ThrowIfNull(procedures, nameof(options));
+            byName[name] = ProceduresTaken.Of(procedures, ("a broker's server transport", nameof(options)))!;
+        }
+
+        return byName.ToFrozenDictionary(StringComparer.Ordinal);
+    }
+
+    // in its participant's turn: an OPEN to one of its names answered with an ACCEPT, its
+    // connection half-open, holding its place and the name it reached, its accept timeout armed on
+    // the clock given
+    private void Accept(BrokerParcel open, string name)
     {
         var connection = new BrokerConnection(_participant, new BrokerConnectionSetup
         {
@@ -626,6 +702,7 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
             PeerIncarnation = open.Incarnation!.Value,
             PeerBound = open.Bound!.Value,
             IsPeerSecure = open.Has(BrokerParcelFlags.Secure),
+            Name = name,
             Sent = 0,
             Awaited = 2,
             MaximumUnsentBytes = _maximumUnsentBytes,

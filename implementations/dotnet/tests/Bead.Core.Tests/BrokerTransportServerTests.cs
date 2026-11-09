@@ -792,4 +792,150 @@ public sealed class BrokerTransportServerTests
         Assert.Equal(ReadyState.Closed, server.ReadyState);
         Assert.Equal(4, calling.Calls.Count);
     }
+
+    // the procedures its connections take (spec 9.11, 9.12, 15.18)
+
+    // a server's transport serving alpha and beta on the pair's server participant, given the
+    // procedures of options, started, and a client of the pair's connected to each name, with the
+    // handle the server drew for it
+    private static async Task<(BrokerTransportServer Server, Dictionary<string, string> Handles)> ServedByNameOf(BrokerPair pair, BrokerTransportServerOptions options)
+    {
+        var server = pair.ServerParticipant.Server(options with { Names = ["alpha", "beta"] });
+        var opened = new ConcurrentQueue<string>();
+        var handles = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        server.Connection += opened.Enqueue;
+        await server.Start();
+
+        foreach (var name in new[] { "alpha", "beta" })
+        {
+            var before = opened.Count;
+            var client = pair.ClientParticipant.Client();
+
+            await client.Connect(new BrokerTransportClientConnectOptions { Server = name, CancellationToken = Cancelled });
+            await BrokerPair.Until(
+                () =>
+                {
+                    return opened.Count > before;
+                },
+                "the server tells the connection open");
+            handles[name] = opened.Last();
+        }
+
+        return (server, handles);
+    }
+
+    // spec 9.11, 15.18: the twin of "a broker’s server transport takes the procedures it is given on
+    // every name it serves"
+    [Fact]
+    public async Task A_broker_s_server_transport_takes_the_procedures_it_is_given_on_every_name_it_serves()
+    {
+        await using var pair = await BrokerPair.Of();
+        var (server, handles) = await ServedByNameOf(pair, new BrokerTransportServerOptions { Names = ["unused"], Procedures = [new ProcedureAddress(1, 1), new ProcedureAddress(1, 2)] });
+        ProcedureAddress[] asked = [new(1, 1), new(1, 2), new(1, 3)];
+
+        await using var _ = server;
+
+        Assert.True(server.NamesProcedures());
+
+        foreach (var name in new[] { "alpha", "beta" })
+        {
+            Assert.Equal([true, true, false], asked.Select((address) =>
+            {
+                return server.TakesProcedure(handles[name], address);
+            }));
+        }
+
+        // * a handle it does not hold takes none
+        Assert.False(server.TakesProcedure("type=BROKER;participant=nobody;ordinal=9", new ProcedureAddress(1, 1)));
+
+        // given none, it names none, and each of its connections takes every procedure
+        Assert.False(pair.Server.NamesProcedures());
+    }
+
+    // spec 9.11, 15.18: the twin of "a broker’s server transport takes a name’s own procedures on a
+    // connection its OPEN reached by that name"
+    [Fact]
+    public async Task A_broker_s_server_transport_takes_a_name_s_own_procedures_on_a_connection_its_OPEN_reached_by_that_name()
+    {
+        await using var pair = await BrokerPair.Of();
+        ProcedureAddress[] asked = [new(1, 1), new(2, 1)];
+
+        IEnumerable<bool> Takes(BrokerTransportServer server, string handle)
+        {
+            return asked.Select((address) =>
+            {
+                return server.TakesProcedure(handle, address);
+            });
+        }
+
+        var (server, handles) = await ServedByNameOf(pair, new BrokerTransportServerOptions
+        {
+            Names = ["unused"],
+            Procedures = [new ProcedureAddress(1, 1)],
+            ProceduresByName = new Dictionary<string, IReadOnlyCollection<ProcedureAddress>> { ["beta"] = [new ProcedureAddress(2, 1)] },
+        });
+
+        // * a name without its own takes those given every name; one with its own, them in their place
+        Assert.Equal([true, false], Takes(server, handles["alpha"]));
+        Assert.Equal([false, true], Takes(server, handles["beta"]));
+        await server.DisposeAsync();
+
+        // a name's own, none given for every name: the other names take every procedure
+        await using var other = await BrokerPair.Of();
+        var (only, onlyHandles) = await ServedByNameOf(other, new BrokerTransportServerOptions
+        {
+            Names = ["unused"],
+            ProceduresByName = new Dictionary<string, IReadOnlyCollection<ProcedureAddress>> { ["alpha"] = [] },
+        });
+
+        await using var _ = only;
+
+        Assert.True(only.NamesProcedures());
+        Assert.Equal([false, false], Takes(only, onlyHandles["alpha"]));
+        Assert.Equal([true, true], Takes(only, onlyHandles["beta"]));
+    }
+
+    // spec 9.12: the twin of "refuses procedures given for a name it does not serve, as the
+    // transport is built (spec 9.12)"
+    [Fact]
+    public async Task Refuses_procedures_given_for_a_name_it_does_not_serve_as_the_transport_is_built()
+    {
+        await using var pair = await BrokerPair.Of();
+
+        Assert.Equal(
+            "a broker's server transport takes procedures for gamma, a name it does not serve (spec 9.12) (Parameter 'options')",
+            Assert.Throws<ArgumentException>(() =>
+            {
+                return pair.ServerParticipant.Server(new BrokerTransportServerOptions
+                {
+                    Names = ["alpha"],
+                    ProceduresByName = new Dictionary<string, IReadOnlyCollection<ProcedureAddress>> { ["gamma"] = [new ProcedureAddress(1, 1)] },
+                });
+            }).Message);
+
+        // an address out of its range, for every name or for one, refused as a declaration's is
+        foreach (var (options, said) in new[]
+        {
+            (new BrokerTransportServerOptions { Names = ["alpha"], Procedures = [new ProcedureAddress(0, 1)] }, "0/1"),
+            (new BrokerTransportServerOptions { Names = ["alpha"], ProceduresByName = new Dictionary<string, IReadOnlyCollection<ProcedureAddress>> { ["alpha"] = [new ProcedureAddress(1, 0)] } }, "1/0"),
+        })
+        {
+            Assert.Equal(
+                $"a broker's server transport takes {said}, out of its range: a service and a procedure are from 1 to 65535, service 0 the protocol's (spec 9.12, 16.2, 16.3) (Parameter 'options')",
+                Assert.Throws<ArgumentException>(() =>
+                {
+                    return pair.ServerParticipant.Server(options);
+                }).Message);
+        }
+
+        // a name it serves takes its own, none of the names refused before reserved
+        await using var served = pair.ServerParticipant.Server(new BrokerTransportServerOptions
+        {
+            Names = ["alpha"],
+            ProceduresByName = new Dictionary<string, IReadOnlyCollection<ProcedureAddress>> { ["alpha"] = [new ProcedureAddress(1, 1)] },
+        });
+
+        Assert.True(served.NamesProcedures());
+    }
 }
