@@ -52,6 +52,14 @@ http = { version = "1.5.0", default-features = false, features = ["std"] }
 tungstenite = { version = "0.30.0", default-features = false, features = ["handshake"] }
 tokio-tungstenite = { version = "0.30.0", default-features = false, features = ["handshake"] }
 futures-util = { version = "0.3.34", default-features = false, features = ["sink", "std"] }
+# a host read as the URL Standard's host parser reads it, its domain to ASCII by UTS #46, as the
+# other sides' `URL` and `UrlHost` read one
+idna = { version = "1.1.0", default-features = false, features = ["std", "compiled_data"] }
+# TLS for the socket transports (RFC 8446, RFC 7301), on aws-lc-rs's provider, given to every
+# config by name, and a server's certificate verified by the platform's own verifier
+rustls = { version = "0.23.46", default-features = false, features = ["std", "aws_lc_rs", "tls12", "logging"] }
+tokio-rustls = { version = "0.26.6", default-features = false, features = ["aws_lc_rs", "tls12", "logging"] }
+rustls-platform-verifier = { version = "0.7.1", default-features = false }
 libtest-mimic = { version = "0.8.2" }
 syn = { version = "3.0.9", default-features = false, features = ["full", "parsing", "visit"] }
 proc-macro2 = { version = "1.0.107", default-features = false, features = ["span-locations"] }

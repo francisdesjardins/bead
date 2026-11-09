@@ -348,12 +348,15 @@ impl<S: Wire> Connection<S> {
         (socket, read): (S, Vec<u8>),
         (role, bounds): (Role, ConnectionBounds),
     ) -> (Self, Commands) {
-        let maximum = usize::try_from(bounds.maximum_message_bytes).unwrap_or(usize::MAX);
-        let config = WebSocketConfig::default()
-            .max_message_size(Some(maximum))
-            .max_frame_size(Some(maximum))
-            .accept_unmasked_frames(false);
+        let config = config_of(bounds.maximum_message_bytes);
         let socket = WebSocketStream::from_partially_read(socket, read, role, Some(config)).await;
+
+        Self::over(socket, bounds)
+    }
+
+    /// A connection over `socket`, its upgrade done by tungstenite under [`config_of`]'s config,
+    /// within `bounds`, and what the side asks of it by.
+    pub(crate) fn over(socket: WebSocketStream<S>, bounds: ConnectionBounds) -> (Self, Commands) {
         let (sender, receiver) = mpsc::unbounded_channel();
         let (ended, watched) = watch::channel(false);
         let shared = Arc::new(Shared {
@@ -707,6 +710,17 @@ impl<S: Wire> Connection<S> {
             failure: self.failure,
         }
     }
+}
+
+/// What tungstenite reads a connection under: no message nor frame past `maximum_message_bytes`, no
+/// frame of a client's unmasked.
+pub(crate) fn config_of(maximum_message_bytes: u64) -> WebSocketConfig {
+    let maximum = usize::try_from(maximum_message_bytes).unwrap_or(usize::MAX);
+
+    WebSocketConfig::default()
+        .max_message_size(Some(maximum))
+        .max_frame_size(Some(maximum))
+        .accept_unmasked_frames(false)
 }
 
 // a close frame of `code`, no reason

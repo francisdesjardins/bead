@@ -43,6 +43,10 @@ mod violations;
 #[cfg(feature = "websocket")]
 mod websocket;
 
+/// The TLS a socket transport speaks, re-exported so that the config an application gives one is
+/// of the version Bead builds on.
+#[cfg(feature = "websocket")]
+pub use rustls;
 /// The runtime handle accepted by Bead's runtime options.
 pub use tokio::runtime::Handle;
 /// The cancellation token accepted and handed by Bead's operations.
@@ -179,6 +183,11 @@ pub use violations::{
     violations_detail_of, violations_of, words_of,
 };
 #[cfg(feature = "websocket")]
+pub use websocket::client::{
+    CredentialProvider, CredentialProviderError, WebSocketTransportClient,
+    WebSocketTransportClientConnectOptions, WebSocketTransportClientOptions,
+};
+#[cfg(feature = "websocket")]
 pub use websocket::connection::{CLOSE_TIMEOUT, MAXIMUM_MESSAGE_BYTES};
 #[cfg(feature = "websocket")]
 pub use websocket::server::{
@@ -198,7 +207,7 @@ pub mod internal {
         read_envelope, read_failure, read_header, read_prefix, write_envelope, write_header,
     };
     pub use crate::identity::{are_one_name, is_procedure_name};
-    pub use crate::judgement::{handshake, head, hosts, items, proxies};
+    pub use crate::judgement::{handshake, head, hosts, items, proxies, security, url_host};
     pub use crate::jwt_verifier::{ReadJwt, read_jwt, verify_jwt};
     pub use crate::router::types::{limits_of, session_key_of};
 }

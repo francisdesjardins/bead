@@ -2012,6 +2012,101 @@ async fn takes_whatever_its_hosts_the_hosts_every_server_takes_and_any_page_of_i
     stopped(&server).await;
 }
 
+// the status line and the mark of an upgrade from each `(Host, Origin)`, on a server given `hosts`
+async fn answers_of(
+    hosts: &[&str],
+    upgrades: &[(&str, Option<&str>)],
+) -> Vec<(String, Option<String>)> {
+    let (server, _, port) = started(&judging(hosts, &[])).await;
+    let mut answers = Vec::new();
+
+    for (authority, origin) in upgrades {
+        let host = format!("Host: {authority}");
+        let origin = origin.map(|origin| format!("Origin: {origin}"));
+        let mut changes = vec![host.as_str()];
+
+        changes.extend(origin.as_deref());
+
+        let (text, _) = answer_of(port, &request_of("GET / HTTP/1.1", &changes)).await;
+        let status = text.split("\r\n").next().unwrap_or_default().to_owned();
+        let mark = text
+            .split("\r\n")
+            .find_map(|line| line.strip_prefix("bead-refusal: "))
+            .map(str::to_owned);
+
+        answers.push((status, mark));
+    }
+
+    stopped(&server).await;
+
+    answers
+}
+
+#[tokio::test]
+async fn reads_the_host_of_an_upgrade_as_it_came_an_idn_page_s_own_in_punycode_and_one_of_invalid_punycode_taken_or_refused_host_refused_never_a_500()
+ {
+    let taken = ("HTTP/1.1 101 Switching Protocols".to_owned(), None);
+    let refused = (
+        "HTTP/1.1 403 Forbidden".to_owned(),
+        Some("host-refused".to_owned()),
+    );
+    let not_own = (
+        "HTTP/1.1 403 Forbidden".to_owned(),
+        Some("origin-refused".to_owned()),
+    );
+    // a page on an IDN host, its Host and its Origin in punycode as a browser writes them both,
+    // and a Host of punycode that decodes to none, taken where every host is; under *, no page is
+    // the server's own by a host * alone takes (spec 15.12)
+    let page = (
+        "xn--bad-bma.test:8080",
+        Some("http://xn--bad-bma.test:8080"),
+    );
+
+    assert_eq!(
+        answers_of(
+            &["*"],
+            &[
+                page,
+                ("xn--a", Some("http://xn--a")),
+                ("xn--a", None),
+                ("xn--a.test", None),
+                ("xn---bad-cpa.test", None),
+            ],
+        )
+        .await,
+        [
+            not_own.clone(),
+            not_own,
+            taken.clone(),
+            taken.clone(),
+            taken.clone()
+        ],
+        "under *"
+    );
+    // hosts name an IDN host as the field carries it, in punycode, and none past them is taken
+    assert_eq!(
+        answers_of(
+            &["xn--bad-bma.test"],
+            &[
+                page,
+                ("XN--BAD-BMA.test:8080", None),
+                ("xn--a.test", None),
+                ("xn---bad-cpa.test", None),
+                ("xn--a", None),
+            ],
+        )
+        .await,
+        [
+            taken.clone(),
+            taken,
+            refused.clone(),
+            refused.clone(),
+            refused
+        ],
+        "named"
+    );
+}
+
 #[tokio::test]
 async fn refuses_as_it_is_built_a_hosts_entry_with_a_port_and_an_origins_entry_that_is_a_star_or_null()
  {

@@ -1,5 +1,6 @@
 crate
   mod json
+  use rustls #[cfg(feature = "websocket")]
   use tokio::runtime::Handle
   use tokio_util::sync::CancellationToken
   use broker::adapter::BrokerAdapter
@@ -315,6 +316,11 @@ crate
   use violations::violations_detail_of
   use violations::violations_of
   use violations::words_of
+  use websocket::client::CredentialProvider #[cfg(feature = "websocket")]
+  use websocket::client::CredentialProviderError #[cfg(feature = "websocket")]
+  use websocket::client::WebSocketTransportClient #[cfg(feature = "websocket")]
+  use websocket::client::WebSocketTransportClientConnectOptions #[cfg(feature = "websocket")]
+  use websocket::client::WebSocketTransportClientOptions #[cfg(feature = "websocket")]
   use websocket::connection::CLOSE_TIMEOUT #[cfg(feature = "websocket")]
   use websocket::connection::MAXIMUM_MESSAGE_BYTES #[cfg(feature = "websocket")]
   use websocket::server::TRANSPORT_WEBSOCKET #[cfg(feature = "websocket")]
@@ -1120,6 +1126,8 @@ crate::judgement
   mod hosts
   mod items
   mod proxies
+  mod security
+  mod url_host
 crate::judgement::handshake
   struct WebSocketRefusals #[non_exhaustive]
     pub busy: &'static str
@@ -1255,6 +1263,11 @@ crate::judgement::proxies
   fn assert_unnamed_proxies(count: u64) -> Result<(), ProgrammerError>
   fn trusted_proxies_of(entries: &[String], unnamed_proxies: Option<u64>) -> Result<TrustedProxies, ProgrammerError>
   fn client_address_of(remote: &str, options: &ClientAddressOptions<'_>) -> String
+crate::judgement::security
+  fn is_loopback_host(host: &str) -> bool
+  fn is_secure(is_tls: bool, host: Option<&str>) -> bool
+crate::judgement::url_host
+  fn url_host_of(input: &str) -> Option<String>
 crate::jwt_verifier
   enum JwtAlgorithm #[non_exhaustive]
     Es256
@@ -2284,6 +2297,35 @@ crate::violations
   fn violations_detail_of(judged: &Judged, maximum_bytes: usize) -> String
   fn words_of(violation: &Violation) -> Option<String>
   fn violations_of(failure: &Failure) -> ReadViolations
+crate::websocket::client
+  type CredentialProviderError = Box<dyn Error + Send + Sync> #[cfg(feature = "websocket")]
+  type CredentialProvider = Arc<dyn Fn(CancellationToken) -> BoxFuture<Result<String, CredentialProviderError>> + Send + Sync,> #[cfg(feature = "websocket")]
+  struct WebSocketTransportClientOptions #[non_exhaustive] #[cfg(feature = "websocket")]
+    pub clock: Option<SharedClock> #[cfg(feature = "websocket")]
+    pub close_timeout: Option<Duration> #[cfg(feature = "websocket")]
+    pub heartbeat: Option<Duration> #[cfg(feature = "websocket")]
+    pub maximum_message_bytes: Option<u64> #[cfg(feature = "websocket")]
+    pub tls: Option<Arc<ClientConfig>> #[cfg(feature = "websocket")]
+    derives Clone, Debug, Default #[cfg(feature = "websocket")]
+  struct WebSocketTransportClientConnectOptions #[non_exhaustive] #[cfg(feature = "websocket")]
+    pub host: String #[cfg(feature = "websocket")]
+    pub port: u16 #[cfg(feature = "websocket")]
+    pub pathname: Option<String> #[cfg(feature = "websocket")]
+    pub secured: Option<bool> #[cfg(feature = "websocket")]
+    pub timeout: Option<Duration> #[cfg(feature = "websocket")]
+    pub signal: Option<CancellationToken> #[cfg(feature = "websocket")]
+    pub credential: Option<String> #[cfg(feature = "websocket")]
+    pub credential_provider: Option<CredentialProvider> #[cfg(feature = "websocket")]
+    pub protocols: Option<Vec<String>> #[cfg(feature = "websocket")]
+    fn new<H: Into<String>>(host: H, port: u16) -> Self
+    implements Debug
+    derives Clone #[cfg(feature = "websocket")]
+  struct WebSocketTransportClient #[cfg(feature = "websocket")]
+    fn new(options: &WebSocketTransportClientOptions) -> Result<Self, ProgrammerError>
+    fn connect(&self, options: &WebSocketTransportClientConnectOptions) -> Connect
+    fn dispose(&self)
+    implements Debug, RouterClientTransport
+    derives Clone #[cfg(feature = "websocket")]
 crate::websocket::connection
   const CLOSE_TIMEOUT: Duration #[cfg(feature = "websocket")]
   const MAXIMUM_MESSAGE_BYTES: u64 #[cfg(feature = "websocket")]
@@ -2339,6 +2381,8 @@ crate::internal
   use crate::judgement::hosts
   use crate::judgement::items
   use crate::judgement::proxies
+  use crate::judgement::security
+  use crate::judgement::url_host
   use crate::jwt_verifier::ReadJwt
   use crate::jwt_verifier::read_jwt
   use crate::jwt_verifier::verify_jwt

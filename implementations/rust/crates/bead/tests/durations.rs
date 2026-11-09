@@ -34,8 +34,9 @@ use bead::{
     RouterLimitsOptions, RouterRequest, RouterServer, RouterServerOptions, Sent, Server,
     ServerListener, ServerOptions, ServerTransport, ServiceManager, ServiceManagerOptions,
     ServiceRouter, SessionManagerOptions, SharedClock, TransportClientReconnectDelay,
-    TransportClientReconnectOptions, TransportError, TransportMessage, WebSocketTransportServer,
-    WebSocketTransportServerOptions,
+    TransportClientReconnectOptions, TransportError, TransportMessage, WebSocketTransportClient,
+    WebSocketTransportClientConnectOptions, WebSocketTransportClientOptions,
+    WebSocketTransportServer, WebSocketTransportServerOptions,
 };
 use bytes::Bytes;
 use libtest_mimic::{Arguments, Failed, Trial};
@@ -102,29 +103,28 @@ fn ways_of(place: &str) -> &'static [&'static str] {
         ],
         "sessionManager.resetConnectionInactivityTimeout"
         | "sessionManager.resetSessionInactivityTimeout" => &["reset"],
-        "transportClient.connectTimeout" => &["memory", "broker"],
+        "transportClient.connectTimeout" => &["memory", "broker", "webSocket"],
         "transportClient.reconnectionDelay" | "brokerParticipant.reconnectionDelay" => {
             &["function", "number"]
         }
         "httpTransportServer.sendGracePeriod"
         | "httpTransportServer.headersTimeout"
         | "httpTransportServer.bodyGracePeriod" => &["policy"],
-        "webSocketTransport.closeTimeout" | "webSocketTransport.heartbeat" => &["server"],
+        "webSocketTransport.closeTimeout" | "webSocketTransport.heartbeat" => &["server", "client"],
         _ => &[],
     }
 }
 
 // the ways of a place played that are ahead, each with the stage that brings it: a connect's
-// timeout over HTTP and WebSocket, an HTTP server's options and a WebSocket client's, with Rust's
-// transports over them; a gateway's with its gateway
+// timeout over HTTP and an HTTP server's options, with Rust's transports over HTTP; a gateway's with
+// its gateway
 fn ahead_of(place: &str) -> &'static [&'static str] {
     match place {
-        "transportClient.connectTimeout" => &["http", "webSocket"],
+        "transportClient.connectTimeout" => &["http"],
         "httpTransportServer.maximumWait" => &["options"],
         "httpTransportServer.sendGracePeriod"
         | "httpTransportServer.headersTimeout"
         | "httpTransportServer.bodyGracePeriod" => &["options", "gateway"],
-        "webSocketTransport.closeTimeout" | "webSocketTransport.heartbeat" => &["client"],
         _ => &[],
     }
 }
@@ -1063,6 +1063,36 @@ async fn connect_timeout_by_memory(given: Option<Duration>) -> Played {
     }
 }
 
+// a WebSocket client's connect to a port nothing listens on: its timer armed as it was made, on
+// the client's clock
+async fn connect_timeout_by_web_socket(given: Option<Duration>) -> Played {
+    let clock = SteppingClock::new(epoch());
+    let mut options = WebSocketTransportClientOptions::default();
+
+    options.clock = Some(shared_of(&clock));
+
+    let client = WebSocketTransportClient::new(&options).map_err(|error| error.to_string())?;
+    let mut connect = WebSocketTransportClientConnectOptions::new("127.0.0.1", 9);
+
+    connect.timeout = given;
+
+    let connecting = client.connect(&connect);
+    let dues = clock.dues();
+
+    client.dispose();
+
+    match connecting.await {
+        Err(TransportError::Refused(refused)) => {
+            hold(dues.is_empty(), || {
+                "a refused connect armed a timer".to_owned()
+            })?;
+
+            Ok(Observed::Refused(refused))
+        }
+        _ => Ok(Observed::Held(due_of(&dues)?)),
+    }
+}
+
 // what a client's listener is told of its reconnections, counted
 struct Reconnects(Arc<AtomicUsize>);
 
@@ -1630,6 +1660,24 @@ fn web_socket_server_way(member: &str, given: Option<Duration>) -> Played {
     Ok(WebSocketTransportServer::new(&options).map_or_else(Observed::Refused, |_| Observed::Taken))
 }
 
+// a WebSocket transport client built with `member` given, where its refusal alone is observed, as
+// the other sides observe it
+fn web_socket_client_way(member: &str, given: Option<Duration>) -> Played {
+    let mut options = WebSocketTransportClientOptions::default();
+
+    match member {
+        "closeTimeout" => options.close_timeout = given,
+        "heartbeat" => options.heartbeat = given,
+        _ => {
+            return Err(format!(
+                "a WebSocket transport client has no member {member}"
+            ));
+        }
+    }
+
+    Ok(WebSocketTransportClient::new(&options).map_or_else(Observed::Refused, |_| Observed::Taken))
+}
+
 // ── The table ────────────────────────────────────────────────────────────────────────────────
 
 async fn play_way((place, way): (&str, &str), given: Option<Duration>) -> Played {
@@ -1671,6 +1719,9 @@ async fn play_way((place, way): (&str, &str), given: Option<Duration>) -> Played
         }
         ("transportClient.connectTimeout", "memory") => connect_timeout_by_memory(given).await,
         ("transportClient.connectTimeout", "broker") => connect_timeout_by_broker(given).await,
+        ("transportClient.connectTimeout", "webSocket") => {
+            connect_timeout_by_web_socket(given).await
+        }
         ("brokerParticipant.heartbeat", "options") => broker_heartbeat_by_options(given).await,
         ("brokerTransportServer.acceptTimeout", "options") => {
             accept_timeout_by_options(given).await
@@ -1700,6 +1751,10 @@ async fn play_way((place, way): (&str, &str), given: Option<Duration>) -> Played
             web_socket_server_way("headersTimeout", given)
         }
         ("webSocketTransport.heartbeat", "server") => web_socket_server_way("heartbeat", given),
+        ("webSocketTransport.closeTimeout", "client") => {
+            web_socket_client_way("closeTimeout", given)
+        }
+        ("webSocketTransport.heartbeat", "client") => web_socket_client_way("heartbeat", given),
         ("webSocketTransportServer.sendGracePeriod", "options") => {
             web_socket_server_way("sendGracePeriod", given)
         }

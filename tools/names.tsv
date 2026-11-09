@@ -65,6 +65,8 @@ ConnectionHandle	ConnectionHandle [scalar]	-	ConnectionHandle [scalar]	same
 ConnectionTarget	IConnectionTarget [record]	ConnectionTarget [record]	-	same
 Credential	Credential [choice]	Credential [record]	Credential [choice]	same
 Credentials	ICredentials [record]	Credentials [record]	Credentials [record]	same
+CredentialProvider	-	-	CredentialProvider [function type]	own: the function's type a WebSocket client's connect takes, which the other sides write in place, TypeScript's ({ signal }) => string | Promise<string> and C#'s Func<CancellationToken, ValueTask<string>> (0044)
+CredentialProviderError	-	-	CredentialProviderError [record]	own: a Result's error, where the other sides throw (0044)
 CredentialScheme	CredentialScheme [choice]	CredentialScheme [choice]	CredentialScheme [choice]	same
 CreditHeader	ICreditHeader [record]	CreditHeader [record]	CreditHeader [record]	same
 DebugDirection	DebugDirection [choice]	DebugDirection [choice]	DebugDirection [choice]	same
@@ -327,9 +329,9 @@ WebSocketClient	WebSocketClient [record], createWebSocketClient [function]	WebSo
 WebSocketClientOptions	IWebSocketClientOptions [record]	WebSocketClientOptions [record]	-	same
 WebSocketServer	WebSocketServer [record], createWebSocketServer [function]	WebSocketServer [record]	-	same
 WebSocketServerOptions	IWebSocketServerOptions [record]	WebSocketServerOptions [record]	-	same
-WebSocketTransportClient	WebSocketTransportClient [record], createWebSocketTransportClient [function]	WebSocketTransportClient [record]	-	same
-WebSocketTransportClientConnectOptions	IWebSocketTransportClientConnectOptions [record]	WebSocketTransportClientConnectOptions [record]	-	same
-WebSocketTransportClientOptions	IWebSocketTransportClientOptions [record]	WebSocketTransportClientOptions [record]	-	same
+WebSocketTransportClient	WebSocketTransportClient [record], createWebSocketTransportClient [function]	WebSocketTransportClient [record]	WebSocketTransportClient [record]	same
+WebSocketTransportClientConnectOptions	IWebSocketTransportClientConnectOptions [record]	WebSocketTransportClientConnectOptions [record]	WebSocketTransportClientConnectOptions [record]	same
+WebSocketTransportClientOptions	IWebSocketTransportClientOptions [record]	WebSocketTransportClientOptions [record]	WebSocketTransportClientOptions [record]	same
 WebSocketTransportServer	WebSocketTransportServer [record], createWebSocketTransportServer [function]	WebSocketTransportServer [record]	WebSocketTransportServer [record]	same
 WebSocketTransportServerOptions	IWebSocketTransportServerOptions [record]	WebSocketTransportServerOptions [record]	WebSocketTransportServerOptions [record]	same
 WithdrawnListener	-	-	WithdrawnListener [function type]	own: a listener the Rust side registers for an event the other sides emit (0044)

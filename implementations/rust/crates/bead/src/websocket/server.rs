@@ -41,6 +41,7 @@ use crate::judgement::hosts::{
 use crate::judgement::proxies::{
     ClientAddressOptions, TrustedProxies, client_address_of, trusted_proxies_of,
 };
+use crate::judgement::security::is_loopback_host;
 use crate::life::Life;
 use crate::net::bounds::{
     HEADERS_TIMEOUT, MINIMUM_SEND_BYTES_PER_SECOND, SEND_GRACE_PERIOD, SendPaceOptions, dropped_of,
@@ -434,15 +435,6 @@ fn told_of(
 
         told
     })
-}
-
-// whether `address`, what a server listens on, is the loopback: secure where nothing stands in
-// front of it (spec 13.4)
-fn is_loopback(address: &str) -> bool {
-    address == LOCALHOST
-        || address
-            .parse::<IpAddr>()
-            .is_ok_and(|parsed| parsed.is_loopback())
 }
 
 // a connection's client, as each of its messages is handed with it
@@ -1232,7 +1224,7 @@ impl ServerTransport for WebSocketTransportServer {
                 .inner
                 .settings
                 .secure
-                .unwrap_or_else(|| state.listens_on.as_deref().is_some_and(is_loopback))
+                .unwrap_or_else(|| state.listens_on.as_deref().is_some_and(is_loopback_host))
     }
 
     fn stop(&self) -> BoxFuture<Result<(), RouterError>> {
