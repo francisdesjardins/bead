@@ -21,9 +21,12 @@ use crate::testing::pair::{Pair, PairOptions, echo};
 use crate::testing::surface::Consumer;
 use crate::violations::{Judged, ReadViolations, Violation, violations_of};
 
-type TextDescriptor = Descriptor<TextCodec, TextCodec>;
+pub(super) type TextDescriptor = Descriptor<TextCodec, TextCodec>;
 
-fn init((id, name): (u16, &str), admission: AdmissionRule) -> DescriptorInit<TextCodec, TextCodec> {
+pub(super) fn init(
+    (id, name): (u16, &str),
+    admission: AdmissionRule,
+) -> DescriptorInit<TextCodec, TextCodec> {
     DescriptorInit {
         procedure: crate::identity::Procedure {
             service_id: 7,
@@ -41,18 +44,18 @@ fn init((id, name): (u16, &str), admission: AdmissionRule) -> DescriptorInit<Tex
     }
 }
 
-struct Greeter {
-    hello: TextDescriptor,
-    login: TextDescriptor,
-    shout: TextDescriptor,
-    whoami: TextDescriptor,
-    news: NotifyingDescriptor<TextCodec, TextCodec, TextCodec>,
-    clock: TextDescriptor,
-    guarded: TextDescriptor,
+pub(super) struct Greeter {
+    pub(super) hello: TextDescriptor,
+    pub(super) login: TextDescriptor,
+    pub(super) shout: TextDescriptor,
+    pub(super) whoami: TextDescriptor,
+    pub(super) news: NotifyingDescriptor<TextCodec, TextCodec, TextCodec>,
+    pub(super) clock: TextDescriptor,
+    pub(super) guarded: TextDescriptor,
 }
 
 impl Greeter {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         let hello = request_of(DescriptorInit {
             failures: vec![ListedFailure::new(
                 "NOBODY_TO_GREET",
@@ -72,7 +75,7 @@ impl Greeter {
         }
     }
 
-    fn procedures(&self) -> Vec<ServiceProcedure> {
+    pub(super) fn procedures(&self) -> Vec<ServiceProcedure> {
         vec![
             ServiceProcedure::from(&self.clock),
             ServiceProcedure::from(&self.guarded),
@@ -84,7 +87,7 @@ impl Greeter {
         ]
     }
 
-    fn service(&self, hook: AdmissionHook) -> ServiceServer {
+    pub(super) fn service(&self, hook: AdmissionHook) -> ServiceServer {
         ServiceServer::new(
             self.procedures(),
             &ServiceServerOptions {
@@ -96,18 +99,18 @@ impl Greeter {
     }
 }
 
-fn loud() -> AdmissionHook {
+pub(super) fn loud() -> AdmissionHook {
     AdmissionHook {
         admits: Arc::new(|_| true),
         detail: None,
     }
 }
 
-fn answer() -> ResolverCallback<TextCodec, TextCodec> {
+pub(super) fn answer() -> ResolverCallback<TextCodec, TextCodec> {
     Arc::new(|request, response| response.result(request.payload))
 }
 
-async fn pair() -> Pair {
+pub(super) async fn pair() -> Pair {
     Pair::connected(
         crate::testing::instants::new_year(),
         &PairOptions::default(),
@@ -717,9 +720,9 @@ async fn lists_the_procedures_without_a_resolver_which_the_router_answers_proced
     );
 }
 
-const NOT_EMPTY_DETAIL: &str = "{\"bounds\":{\"min_len\":\"1\"},\"message\":\"must be at least 1 characters\",\"ruleId\":\"string.min_len\"}\n{\"more\":0}";
+pub(super) const NOT_EMPTY_DETAIL: &str = "{\"bounds\":{\"min_len\":\"1\"},\"message\":\"must be at least 1 characters\",\"ruleId\":\"string.min_len\"}\n{\"more\":0}";
 
-fn not_empty() -> Validate<String> {
+pub(super) fn not_empty() -> Validate<String> {
     Arc::new(|value, _| {
         if !value.is_empty() {
             return Ok(Judged::default());

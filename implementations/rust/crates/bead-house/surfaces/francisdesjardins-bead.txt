@@ -269,6 +269,8 @@ crate
   use service::FailureCatalogue
   use service::ListedFailure
   use service::NotifyingDescriptor
+  use service::ServiceClient
+  use service::ServiceClientOptions
   use service::ServiceProcedure
   use service::ServiceServer
   use service::ServiceServerOptions
@@ -1926,6 +1928,18 @@ crate::service
     fn command_of<Req, Res>(&self, descriptor: &Descriptor<Req, Res>) -> Result<Command<Req, Res>, ProgrammerError> where Req: PayloadCodec, Res: PayloadCodec,
     fn notifier_of<Req, Res, Not>(&self, descriptor: &NotifyingDescriptor<Req, Res, Not>) -> Result<Notifier<Not>, ProgrammerError> where Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec,
     fn procedures_without_resolver(&self) -> Vec<Procedure>
+    implements Debug
+    derives Clone
+  struct ServiceClientOptions #[non_exhaustive]
+    pub fail_fast: Option<bool>
+    pub validates: Option<bool>
+    pub windows: Option<BTreeMap<String, u64>>
+    derives Clone, Debug, Default
+  struct ServiceClient
+    fn new(procedures: Vec<ServiceProcedure>, client: &Client, options: &ServiceClientOptions) -> Result<Self, ProgrammerError>
+    fn requester_of<Req, Res>(&self, descriptor: &Descriptor<Req, Res>) -> Result<Request<Req, Res>, ProgrammerError> where Req: PayloadCodec, Res: PayloadCodec,
+    fn notification_of<Req, Res, Not>(&self, descriptor: &NotifyingDescriptor<Req, Res, Not>) -> Result<Notification<Req, Res, Not>, ProgrammerError> where Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec,
+    fn on<Req, Res>(&self, descriptor: &Descriptor<Req, Res>, callback: ResolverCallback<Req, Res>) -> Result<(), ProgrammerError> where Req: PayloadCodec + Clone, Res: PayloadCodec + Clone, Req::Value: Clone + fmt::Debug + Sync, Res::Value: Clone + fmt::Debug + Sync,
     implements Debug
     derives Clone
 crate::session_token

@@ -1,20 +1,23 @@
 //! The service layer: a service's procedures as typed descriptors, one value each — its procedure,
 //! who may call it, the failures it answers and its payloads' codecs — its failures as a catalogue,
-//! and the server of one service, its resolvers registered by descriptor, offered on one server.
+//! the server of one service, its resolvers registered by descriptor, offered on one server, and
+//! its client side, over one client.
 
 use core::any::Any;
 use core::fmt;
 use core::num::NonZeroU16;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
+use crate::client::Client;
 use crate::constants::{ProcedureKind, ProtocolCode, RouterSide};
 use crate::errors::{CallError, ProgrammerError};
 use crate::failure::Failure;
 use crate::identity::Procedure;
 use crate::managers::service::{
-    Command, Lookup, NotificationResolverDependencies, NotificationResolverOf, Notifier,
-    RequestDependencies, RequestResolverDependencies, ResolverCallback, Validate,
+    Command, Lookup, Notification, NotificationDependencies, NotificationResolverDependencies,
+    NotificationResolverOf, Notifier, Request, RequestDependencies, RequestResolverDependencies,
+    ResolverCallback, ServiceManagerClient, Validate,
 };
 use crate::payloads::PayloadCodec;
 use crate::router::admissions::{BeforeRequest, require_session};
@@ -377,13 +380,53 @@ type CommandMaker =
 // what registers a resolver on the server offered, and gives its notifier, when it notifies
 type Binder = Arc<dyn Fn(&Server, &Bound) -> Result<Option<Made>, ProgrammerError> + Send + Sync>;
 
-/// A procedure of a service, as its server is told it: its descriptor, its types set aside.
+// how a client side makes what calls a procedure its server answers
+#[derive(Clone, Copy)]
+struct Making {
+    validates: bool,
+    fail_fast: bool,
+    // the window of its notification, when it notifies: none, unpaced
+    window: Option<u64>,
+}
+
+// what a client side made of a procedure its server answers: its requester, and its notification
+// when it notifies
+struct ClientMade {
+    requester: Made,
+    notification: Option<Made>,
+}
+
+// what makes a requester of a procedure its server answers, and its notification, as a client side
+// is built
+type ClientMaker =
+    Arc<dyn Fn(&ServiceManagerClient, Making) -> Result<ClientMade, ProgrammerError> + Send + Sync>;
+
+// what a requester of `init`'s procedure reads, writes and judges by: its rules when it validates
+fn requester_dependencies<Req: PayloadCodec + Clone, Res: PayloadCodec + Clone>(
+    init: &DescriptorInit<Req, Res>,
+    (validates, fail_fast): (bool, bool),
+) -> RequestDependencies<Req, Res> {
+    RequestDependencies {
+        request: init.request.clone(),
+        result: init.result.clone(),
+        validate: if validates {
+            init.validate.clone()
+        } else {
+            None
+        },
+        fail_fast,
+    }
+}
+
+/// A procedure of a service, as its server and its client side are told it: its descriptor, its
+/// types set aside.
 #[derive(Clone)]
 pub struct ServiceProcedure {
     procedure: Procedure,
     descriptor: Made,
     admission: AdmissionRule,
     command: Option<CommandMaker>,
+    client: Option<ClientMaker>,
 }
 
 impl fmt::Debug for ServiceProcedure {
@@ -396,8 +439,8 @@ impl fmt::Debug for ServiceProcedure {
     }
 }
 
-/// The procedure a descriptor describes: a request, or a command its server makes as it is
-/// offered.
+/// The procedure a descriptor describes: a request, whose requester a client side makes as it is
+/// built, or a command, whose requester its server makes as it is offered.
 impl<Req, Res> From<&Descriptor<Req, Res>> for ServiceProcedure
 where
     Req: PayloadCodec + Clone,
@@ -406,54 +449,95 @@ where
     Res::Value: Clone + fmt::Debug + Sync,
 {
     fn from(descriptor: &Descriptor<Req, Res>) -> Self {
-        let command =
-            (descriptor.procedure().procedure_kind == Some(ProcedureKind::Command)).then(|| {
-                let descriptor = descriptor.clone();
-                let maker: CommandMaker = Arc::new(
-                    move |server: &Server, (validates, fail_fast): (bool, bool)| {
-                        let init = &descriptor.init;
-                        let requester = server.services().get_command(
-                            &init.procedure,
-                            RequestDependencies {
-                                request: init.request.clone(),
-                                result: init.result.clone(),
-                                validate: if validates {
-                                    init.validate.clone()
-                                } else {
-                                    None
-                                },
-                                fail_fast,
-                            },
-                        )?;
+        let is_command = descriptor.procedure().procedure_kind == Some(ProcedureKind::Command);
+        let command = is_command.then(|| {
+            let descriptor = descriptor.clone();
+            let maker: CommandMaker = Arc::new(move |server: &Server, judging: (bool, bool)| {
+                let init = &descriptor.init;
+                let requester = server
+                    .services()
+                    .get_command(&init.procedure, requester_dependencies(init, judging))?;
 
-                        let made: Made = Arc::new(requester);
+                let made: Made = Arc::new(requester);
 
-                        Ok(made)
-                    },
-                );
-
-                maker
+                Ok(made)
             });
+
+            maker
+        });
+        let client = (!is_command).then(|| {
+            let descriptor = descriptor.clone();
+            let maker: ClientMaker =
+                Arc::new(move |services: &ServiceManagerClient, making: Making| {
+                    let init = &descriptor.init;
+                    let requester = services.get_request(
+                        &init.procedure,
+                        requester_dependencies(init, (making.validates, making.fail_fast)),
+                    )?;
+
+                    Ok(ClientMade {
+                        requester: Arc::new(requester),
+                        notification: None,
+                    })
+                });
+
+            maker
+        });
 
         Self {
             procedure: descriptor.procedure().clone(),
             descriptor: Arc::<DescriptorInit<Req, Res>>::clone(&descriptor.init),
             admission: descriptor.admission(),
             command,
+            client,
         }
     }
 }
 
-/// The procedure a notifying descriptor describes.
-impl<Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec>
-    From<&NotifyingDescriptor<Req, Res, Not>> for ServiceProcedure
+/// The procedure a notifying descriptor describes: its requester and its notification a client
+/// side makes as it is built.
+impl<Req, Res, Not> From<&NotifyingDescriptor<Req, Res, Not>> for ServiceProcedure
+where
+    Req: PayloadCodec + Clone,
+    Res: PayloadCodec + Clone,
+    Not: PayloadCodec + Clone,
+    Req::Value: Clone + fmt::Debug + Sync,
+    Res::Value: Clone + fmt::Debug + Sync,
+    Not::Value: Clone + fmt::Debug + Sync,
 {
     fn from(descriptor: &NotifyingDescriptor<Req, Res, Not>) -> Self {
+        let notifying = descriptor.clone();
+        let client: ClientMaker =
+            Arc::new(move |services: &ServiceManagerClient, making: Making| {
+                let init = &notifying.descriptor.init;
+                let judging = (making.validates, making.fail_fast);
+                let requester =
+                    services.get_request(&init.procedure, requester_dependencies(init, judging))?;
+                // * the notification's subscribing call is a requester of its own procedure,
+                // judged as the requester is
+                let notification = services.get_notification(
+                    &init.procedure,
+                    NotificationDependencies {
+                        window: making.window,
+                        ..NotificationDependencies::new(
+                            requester_dependencies(init, judging),
+                            (*notifying.notification).clone(),
+                        )
+                    },
+                )?;
+
+                Ok(ClientMade {
+                    requester: Arc::new(requester),
+                    notification: Some(Arc::new(notification)),
+                })
+            });
+
         Self {
             procedure: descriptor.descriptor.procedure().clone(),
             descriptor: Arc::<DescriptorInit<Req, Res>>::clone(&descriptor.descriptor.init),
             admission: descriptor.descriptor.admission(),
             command: None,
+            client: Some(client),
         }
     }
 }
@@ -883,4 +967,284 @@ impl ServiceServer {
             .map(|described| described.procedure.clone())
             .collect()
     }
+}
+
+// ── The client side of one service ───────────────────────────────────────────────────────────
+
+/// What a client side of a service is given besides its client, every member optional: the windows
+/// of its procedures that notify, and whether it validates.
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
+pub struct ServiceClientOptions {
+    /// Whether the judging of a request by its procedure's rules stops at its first violation,
+    /// protovalidate's `failFast` (spec 18.5): a requester's, and a command's before its resolver;
+    /// `false` when none.
+    pub fail_fast: Option<bool>,
+    /// Whether each requester judges a request's value by its procedure's rules before it is
+    /// written, a subscribing request among them, so that a call they refuse fails before it goes,
+    /// with `PAYLOAD_INVALID` (spec 18.2): `false` when none.
+    pub validates: Option<bool>,
+    /// The window of each procedure that notifies, by its name, above 0: its subscription paced at
+    /// it (spec 11.4). One not given goes unpaced; a window for a name that is no procedure of the
+    /// service that notifies is refused as the client side is built.
+    pub windows: Option<BTreeMap<String, u64>>,
+}
+
+// a procedure of the service, with what its client side made of it: none for a command
+struct Held {
+    described: ServiceProcedure,
+    made: Option<ClientMade>,
+}
+
+struct ClientInner {
+    services: ServiceManagerClient,
+    fail_fast: bool,
+    procedures: Vec<Held>,
+    // the commands given their resolver, by name
+    answered: Mutex<BTreeSet<String>>,
+}
+
+/// The client side of one service, over one client.
+///
+/// A requester of each procedure its server answers and a notification of each that notifies, each
+/// made once, as it is built, at the window its options give; and the resolver of each command it
+/// answers, by [`ServiceClient::on`].
+#[derive(Clone)]
+pub struct ServiceClient {
+    inner: Arc<ClientInner>,
+}
+
+impl fmt::Debug for ServiceClient {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ServiceClient")
+            .finish_non_exhaustive()
+    }
+}
+
+impl ServiceClient {
+    /// The client side of the service of `procedures`, over `client`: each requester and each
+    /// notification made now, declared to its router.
+    ///
+    /// # Errors
+    ///
+    /// A [`ProgrammerError`] for a window given for a name that is no procedure of the service that
+    /// notifies; then for a window of 0, or a procedure its client's services hold already at
+    /// another window, a second client side over one client; then for a procedure its router
+    /// refuses to declare.
+    pub fn new(
+        procedures: Vec<ServiceProcedure>,
+        client: &Client,
+        options: &ServiceClientOptions,
+    ) -> Result<Self, ProgrammerError> {
+        let windows = options.windows.clone().unwrap_or_default();
+
+        if let Some(name) = windows.keys().find(|name| {
+            !procedures.iter().any(|described| {
+                described.procedure.procedure_kind == Some(ProcedureKind::Notifies)
+                    && described.procedure.procedure_name == **name
+            })
+        }) {
+            return Err(ProgrammerError::new(format!(
+                "a window is given for {name}, which is no procedure of this service that notifies"
+            )));
+        }
+
+        let services = client.services().clone();
+        let fail_fast = options.fail_fast.unwrap_or(false);
+        let validates = options.validates.unwrap_or(false);
+        let mut held = Vec::with_capacity(procedures.len());
+
+        // * each requester and notification made once, as the client side is built (decision 0013)
+        for described in procedures {
+            let made = match &described.client {
+                Some(make) => Some(make(
+                    &services,
+                    Making {
+                        validates,
+                        fail_fast,
+                        window: windows.get(&described.procedure.procedure_name).copied(),
+                    },
+                )?),
+                None => None,
+            };
+
+            held.push(Held { described, made });
+        }
+
+        Ok(Self {
+            inner: Arc::new(ClientInner {
+                services,
+                fail_fast,
+                procedures: held,
+                answered: Mutex::new(BTreeSet::new()),
+            }),
+        })
+    }
+
+    // what the client side holds of `descriptor`'s procedure, the same descriptor, refused otherwise
+    fn held<Req: PayloadCodec, Res: PayloadCodec>(
+        &self,
+        descriptor: &Descriptor<Req, Res>,
+    ) -> Result<&Held, ProgrammerError> {
+        let identity: Made = Arc::<DescriptorInit<Req, Res>>::clone(&descriptor.init);
+
+        self.inner
+            .procedures
+            .iter()
+            .find(|held| Arc::ptr_eq(&held.described.descriptor, &identity))
+            .ok_or_else(|| {
+                ProgrammerError::new(format!(
+                    "{} is no procedure of this service",
+                    descriptor.procedure().procedure_name
+                ))
+            })
+    }
+
+    /// The requester of the procedure `descriptor` describes, made as the client side was built:
+    /// one of a procedure that notifies, by its [`NotifyingDescriptor::descriptor`], opens no
+    /// subscription (spec 11.2), which its notification's registrations do.
+    ///
+    /// # Errors
+    ///
+    /// A [`ProgrammerError`] for a descriptor other than the one this client side was built with,
+    /// or one of a command, which its server calls.
+    pub fn requester_of<Req, Res>(
+        &self,
+        descriptor: &Descriptor<Req, Res>,
+    ) -> Result<Request<Req, Res>, ProgrammerError>
+    where
+        Req: PayloadCodec,
+        Res: PayloadCodec,
+    {
+        self.held(descriptor)?
+            .made
+            .as_ref()
+            .and_then(|made| made.requester.downcast_ref::<Request<Req, Res>>())
+            .cloned()
+            .ok_or_else(|| {
+                ProgrammerError::new(format!(
+                    "{} is no procedure this service's server answers",
+                    descriptor.procedure().procedure_name
+                ))
+            })
+    }
+
+    /// The notification of the procedure `descriptor` describes, at the window the options gave
+    /// it, or none.
+    ///
+    /// # Errors
+    ///
+    /// A [`ProgrammerError`] for a descriptor other than the one this client side was built with.
+    pub fn notification_of<Req, Res, Not>(
+        &self,
+        descriptor: &NotifyingDescriptor<Req, Res, Not>,
+    ) -> Result<Notification<Req, Res, Not>, ProgrammerError>
+    where
+        Req: PayloadCodec,
+        Res: PayloadCodec,
+        Not: PayloadCodec,
+    {
+        self.held(&descriptor.descriptor)?
+            .made
+            .as_ref()
+            .and_then(|made| made.notification.as_ref())
+            .and_then(|made| made.downcast_ref::<Notification<Req, Res, Not>>())
+            .cloned()
+            .ok_or_else(|| {
+                ProgrammerError::new(format!(
+                    "{} is no procedure of this service that notifies",
+                    descriptor.descriptor.procedure().procedure_name
+                ))
+            })
+    }
+
+    /// Registers `callback` as the resolver of the command `descriptor` describes, its admission
+    /// its rule's: a call in no session refused `SESSION_REQUIRED` for a session's; and its request
+    /// judged by its rules before it, always.
+    ///
+    /// # Errors
+    ///
+    /// A [`ProgrammerError`] for a descriptor of no command this client side was built with, a
+    /// command admitted by a hook, which a client side is given none of, one given its resolver
+    /// already, or one its router refuses.
+    pub fn on<Req, Res>(
+        &self,
+        descriptor: &Descriptor<Req, Res>,
+        callback: ResolverCallback<Req, Res>,
+    ) -> Result<(), ProgrammerError>
+    where
+        Req: PayloadCodec + Clone,
+        Res: PayloadCodec + Clone,
+        Req::Value: Clone + fmt::Debug + Sync,
+        Res::Value: Clone + fmt::Debug + Sync,
+    {
+        let init = &descriptor.init;
+        let name = &init.procedure.procedure_name;
+
+        if !self.held(descriptor).is_ok_and(|held| {
+            held.described.procedure.procedure_kind == Some(ProcedureKind::Command)
+        }) {
+            return Err(ProgrammerError::new(format!(
+                "{name} is no command this service's client answers"
+            )));
+        }
+
+        if let AdmissionRule::Hook(hook) = init.admission {
+            return Err(ProgrammerError::new(format!(
+                "{name} is admitted by the hook {hook}, which a client side is given none of"
+            )));
+        }
+
+        if !locked_answered(&self.inner.answered).insert(name.clone()) {
+            return Err(ProgrammerError::new(format!(
+                "{name} is already a registered resolver"
+            )));
+        }
+
+        // * a client's router resolves a command's credential to a session as a server does, so a
+        // session's rule is the same on both ends of a call, its refusal the client's
+        let before_request = (init.admission == AdmissionRule::Session).then(|| {
+            BeforeRequest::new(
+                |request: &AdmissionRequest| request.session.is_some(),
+                Some(Failure::protocol(
+                    ProtocolCode::SESSION_REQUIRED,
+                    RouterSide::Client,
+                )),
+            )
+        });
+        let registered = self
+            .inner
+            .services
+            .get_command_resolver(
+                &init.procedure,
+                RequestResolverDependencies {
+                    request: init.request.clone(),
+                    result: init.result.clone(),
+                    before_request,
+                    // * a command is judged as a server's request is, before its resolver, always
+                    validate: init.validate.clone(),
+                    fail_fast: self.inner.fail_fast,
+                },
+            )
+            .and_then(|resolver| {
+                resolver.register(
+                    (
+                        callback,
+                        Some(init.failures.iter().map(ListedFailure::code).collect()),
+                    ),
+                    false,
+                )
+            });
+
+        if registered.is_err() {
+            locked_answered(&self.inner.answered).remove(name);
+        }
+
+        registered
+    }
+}
+
+fn locked_answered(answered: &Mutex<BTreeSet<String>>) -> MutexGuard<'_, BTreeSet<String>> {
+    answered.lock().unwrap_or_else(PoisonError::into_inner)
 }

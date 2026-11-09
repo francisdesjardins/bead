@@ -152,8 +152,8 @@ pub use server::{
 };
 pub use service::{
     AdmissionHook, AdmissionRule, Descriptor, DescriptorInit, FailureCatalogue, ListedFailure,
-    NotifyingDescriptor, ServiceProcedure, ServiceServer, ServiceServerOptions, command_of,
-    failures_of, notifying_of, request_of,
+    NotifyingDescriptor, ServiceClient, ServiceClientOptions, ServiceProcedure, ServiceServer,
+    ServiceServerOptions, command_of, failures_of, notifying_of, request_of,
 };
 pub use session_token::{SessionToken, SessionTokenDrawError};
 pub use transport::{

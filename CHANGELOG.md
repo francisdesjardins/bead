@@ -7,6 +7,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- The Rust side's service client, `ServiceClient` and `ServiceClientOptions`, the twin of the other
+  sides' (decision 0044).
+
 ### Changed
 
 - **Breaking:** a request's target is read as a page's browser writes it, on every side: `"`, `<`
