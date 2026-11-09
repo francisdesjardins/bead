@@ -128,4 +128,10 @@ ${JSON.stringify(dissent ? dissent.objections : [], null, 1)}`,
   { label: `revise:${SLUG}`, phase: 'Revise', effort: 'high', schema: REVISED }
 );
 
-return { draft, objections: dissent ? dissent.objections : null, revised };
+// * the paths, the counts, the summary and the decisions: the objections stay in their file
+return {
+  draft,
+  objections: `${OUT}/objections.md`,
+  raised: dissent ? dissent.objections.length : null,
+  ...revised,
+};

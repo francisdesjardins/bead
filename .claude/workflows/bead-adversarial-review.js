@@ -76,7 +76,7 @@ const review = (lens) => {
     `${COMMON}
 # Your task: review through one lens (effort ${EFFORT})
 The lens: ${lens.focus}.
-Be adversarial: look for what is wrong, missing or inconsistent, and what a reader, a peer or an attacker would trip on; say what you looked at and found sound as well, so that the silence means something. For each finding: an id (\`${lens.key}-<n>\`), what is wrong, the evidence (file and line, the probe and its output, under ${OUT}/probes-${lens.key}/), the severity you propose (blocker: the version cannot ship with it; major: it ships only fixed or declared, a row of the matrix or an open point; minor), and the remedy. Write ${OUT}/${lens.key}.md and return a summary of fifteen lines.`,
+Be adversarial: look for what is wrong, missing or inconsistent, and what a reader, a peer or an attacker would trip on; say what you looked at and found sound as well, so that the silence means something. For each finding: an id (\`${lens.key}-<n>\`), what is wrong, the evidence (file and line, the probe and its output, under ${OUT}/probes-${lens.key}/), the severity you propose (blocker: the version cannot ship with it; major: it ships only fixed or declared, a row of the matrix or an open point; minor), and the remedy. Write ${OUT}/${lens.key}.md, your report whole, and return at most ten lines: what you looked at, the findings' count by severity, and that path.`,
     { label: `review:${lens.key}`, phase: 'Review', effort: EFFORT }
   );
 };
@@ -84,7 +84,7 @@ const verify = (summary, lens) => {
   return agent(
     `${COMMON}
 # Your task: verify one lens's findings (effort xhigh)
-Read ${OUT}/${lens.key}.md. Put each finding to the code and the text it cites, and rerun its proof under ${OUT}/verify-${lens.key}/: give it a verdict, confirmed, partly or refuted, and a severity, blocker, major or minor, which may differ from the reviewer's. Refute what does not hold; default to refuted when the evidence does not reproduce. Write ${OUT}/${lens.key}-verdicts.md (a table, Id | Verdict | Severity | In short, then a section per finding) and return its table.
+Read ${OUT}/${lens.key}.md. Put each finding to the code and the text it cites, and rerun its proof under ${OUT}/verify-${lens.key}/: give it a verdict, confirmed, partly or refuted, and a severity, blocker, major or minor, which may differ from the reviewer's. Refute what does not hold; default to refuted when the evidence does not reproduce. Write ${OUT}/${lens.key}-verdicts.md (a table, Id | Verdict | Severity | In short, then a section per finding) and return at most ten lines: the counts by verdict and by severity, and that path.
 The reviewer's summary:
 ${summary || '(no summary)'}`,
     { label: `verify:${lens.key}`, phase: 'Verify', effort: 'xhigh' }
@@ -99,7 +99,8 @@ const serially = async () => {
   return tables;
 };
 
-const reviewed = args.serial ? await serially() : await pipeline(LENSES, review, verify);
+// * each lens's findings and verdicts on disk, which the synthesis reads
+await (args.serial ? serially() : pipeline(LENSES, review, verify));
 
 phase('Synthesize');
 const synthesis = await agent(
@@ -109,13 +110,7 @@ Read each lens's file and its verdicts in ${OUT}/ (${LENSES.map((lens) => {
     return lens.key;
   }).join(
     ', '
-  )}). Write ${OUT}/review.md: the verdict first (can it ship, and under what conditions); what was looked at and found sound; then the findings kept, confirmed or partly, at the verifier's severity, duplicates across lenses merged under one id (B, M, m by severity, numbered), each with its evidence in short, its remedy and the lens files that hold the rest; the refuted ones listed at the end, each with why. Return, in French, the verdict in five lines, the counts by severity, and each blocker and major in one line.
-The verifiers' tables:
-${reviewed
-  .map((table, index) => {
-    return `## ${LENSES[index].key}\n${table || '(no verdicts)'}`;
-  })
-  .join('\n\n')}`,
+  )}). Write ${OUT}/review.md: the verdict first (can it ship, and under what conditions); what was looked at and found sound; then the findings kept, confirmed or partly, at the verifier's severity, duplicates across lenses merged under one id (B, M, m by severity, numbered), each with its evidence in short, its remedy and the lens files that hold the rest; the refuted ones listed at the end, each with why. Return, in French, the verdict in five lines, the counts by severity, and each blocker and major in one line.`,
   { label: `synthesize:${SLUG}`, phase: 'Synthesize', effort: 'xhigh' }
 );
 

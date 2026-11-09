@@ -93,8 +93,8 @@ const VERDICT = {
   properties: {
     batch: { type: 'string' },
     holds: { type: 'boolean' },
-    fixed: { type: 'array', items: { type: 'string' } },
-    left: { type: 'array', items: { type: 'string' } },
+    fixed: { type: 'number' },
+    left: { type: 'number' },
     forTheUser: { type: 'array', items: { type: 'string' } },
   },
   required: ['batch', 'holds', 'fixed', 'left', 'forTheUser'],
@@ -112,6 +112,15 @@ Write ${OUT}/plan.md: the plan, document by document, and the records' \`Where B
 
 const MOVES = JSON.stringify(planned ? planned.moves : [], null, 1);
 
+// * a stage's report on disk, its return a few lines: the next stage reads the file
+const REPORTS = `${OUT}/reports`;
+const rewritten = (batch) => {
+  return `${REPORTS}/rewrite-${batch.key}.md`;
+};
+const verified = (batch) => {
+  return `${REPORTS}/verify-${batch.key}.md`;
+};
+
 const rewrite = (batch) => {
   return agent(
     `${COMMON}
@@ -119,7 +128,7 @@ const rewrite = (batch) => {
 The plan is ${OUT}/plan.md; the records' moves (merged, renamed, split out):
 ${MOVES}
 Your documents: ${batch.documents.join(', ')}. ${batch.task}
-Write each as it is to read at ${VERSION} under ${OUT}/documents/, at its path from the repository's root (a renamed record at its new file name, a merged one as its short file naming its successor, a part split out at its new file), and leave the repository as it is: the integration moves the files. A citation of a merged record, in yours, names its successor; of a renamed one, its new file name. Hold each sentence you state in the present to the code and the spec at the release branch's HEAD, reading the code; a claim that does not hold is fixed, never kept. Run \`node .claude/local/check.mjs\` over each file. Report, document by document, what moved, what you took out and why, every claim you checked, and, for the spec, each requirement you left for the user.`,
+Write each as it is to read at ${VERSION} under ${OUT}/documents/, at its path from the repository's root (a renamed record at its new file name, a merged one as its short file naming its successor, a part split out at its new file), and leave the repository as it is: the integration moves the files. A citation of a merged record, in yours, names its successor; of a renamed one, its new file name. Hold each sentence you state in the present to the code and the spec at the release branch's HEAD, reading the code; a claim that does not hold is fixed, never kept. Run \`node .claude/local/check.mjs\` over each file. Write your report whole to ${rewritten(batch)}: document by document, what moved, what you took out and why, every claim you checked, and, for the spec, each requirement you left for the user. Return at most ten lines: what you did, the checks' verdicts, and that path.`,
     { label: `rewrite:${batch.key}`, phase: 'Rewrite', effort: 'high' }
   );
 };
@@ -129,7 +138,7 @@ const verify = (report, batch) => {
 # Your task: verify batch ${batch.key} (effort ${batch.key === 'spec' ? 'xhigh' : 'high'})
 The plan is ${OUT}/plan.md; the records' moves (merged, renamed, split out):
 ${MOVES}
-The batch's documents as they are in the repository (${batch.documents.join(', ')}), and as rewritten, under ${OUT}/documents/. Its rewriter's report:
+The batch's documents as they are in the repository (${batch.documents.join(', ')}), and as rewritten, under ${OUT}/documents/. Its rewriter's report is ${rewritten(batch)}, in short:
 ${report}
 Your scope is the batch's diff against HEAD, each document's \`git diff --no-index --word-diff <its path> ${OUT}/documents/<its path>\` (a renamed record's against its old path): a sentence the rewrite left as it was is not yours to hold again. Hold the rewrite to this, and fix under ${OUT}/documents/ what fails:
 - nothing lost: each decision, consequence, reason, cost, refused alternative and Tenth Man answer the diff takes out of the old records is in the new ones, or its leaving is a past the plan names;
@@ -138,7 +147,7 @@ Your scope is the batch's diff against HEAD, each document's \`git diff --no-ind
 - nothing that ${VERSION} carries is still said as coming, and nothing still ahead is said as done: a grep of the new documents for what the CHANGELOG's section lists;
 - no sentence the diff adds narrates how things were, or how the document came to be;
 - every citation of a merged record names its successor, of a renamed one its new file name, and every link resolves once the files move; no number is given twice.
-Return \`holds\`, what you \`fixed\`, what you \`left\` for the integration, each with its file and line, and \`forTheUser\`.`,
+Write your verdict whole to ${verified(batch)}: whether the batch holds, what you fixed, and what you left for the integration, each with its file and line, and what is for the user. Return \`holds\`, the counts \`fixed\` and \`left\`, and \`forTheUser\`, a line each.`,
     // * xhigh where a requirement's meaning could move unseen, the spec and its companion; high
     // for the records and the READMEs, whose changed claims the verifier holds to the code
     {
@@ -167,16 +176,27 @@ const integration = await agent(
 # Your task: integrate (effort medium)
 The plan is ${OUT}/plan.md; the records' moves (merged, renamed, split out):
 ${MOVES}
-The verified documents are under ${OUT}/documents/. The verdicts:
-${JSON.stringify(results.filter(Boolean), null, 1)}
+The verified documents are under ${OUT}/documents/. The verdicts, with what each verifier left for you, read first: ${batches
+    .map((batch) => {
+      return verified(batch);
+    })
+    .join(', ')}.
 1. Move the documents into the repository: \`git mv\` a renamed record, so its history follows, then write its content; write a merged record's file as its short note naming its successor, never removing it; write each other document over its path.
 2. Move every citation of a moved record across the repository, outside the released sections of the CHANGELOG: a link's target and text, a bare number (\`0017\`, \`[0017]\`, \`decision 0017\`, \`decisions 0017 and 0022\`) in prose, code comments, tests, the spec, the workflows, the READMEs, \`CLAUDE.md\` and \`docs/support.md\`. A merged record's citation names its successor where it means the decision as it holds; a renamed one's link takes its new file. Then grep every merged number and read each hit left: a released CHANGELOG section's, the merged record's own short file, or a citation that rightly names the decision as it was.
 3. The records' index, \`docs/decisions/README.md\`: its tables and their themes, \`Where Bead goes\` as the plan writes it, and "The next decision is …".
 4. The CHANGELOG's section for ${VERSION}, under Changed: one line that the documents are brought to ${VERSION}, and, where records merged, each merged number and its successor, so that a reader of an earlier release finds each one.
 5. The gates: every generator of \`spec/generators/\` the README lists and \`${VENV} spec/check.py --write-units\`, which follows a renumbered key and acknowledges no text, then \`${VENV} spec/check.py\`, nothing moving but what a clause's move asks, each unit whose text moved a finding for the user; \`node tools/check-format.mjs\`, \`node tools/check-links.mjs\`, \`node tools/check-versions.mjs\` (a spec or companion that changed and whose version prepare did not move is a finding for the user: \`node tools/release.mjs prepare\` is run again with its move, never here); \`yarn check\` in \`implementations/typescript\` and in \`builder\` when a comment moved there; \`dotnet format Bead.slnx --verify-no-changes\` in \`implementations/dotnet\` when one moved there; the names check over every file \`git status --porcelain\` lists.
-Propose one commit, \`docs: the documents as of ${VERSION}\`, its body one or two lines and no attribution, in ${OUT}/commit.txt; run \`node tools/check-commits.mjs --message\` and the names check over it. Return what moved, the map, each gate's result, and every finding for the user, the verifiers' among them.`,
+Propose one commit, \`docs: the documents as of ${VERSION}\`, its body one or two lines and no attribution, in ${OUT}/commit.txt; run \`node tools/check-commits.mjs --message\` and the names check over it. Write your report whole to ${REPORTS}/integrate.md: what moved, the map, each gate's result, and every finding for the user, the verifiers' among them. Return at most ten lines: what moved, in counts, each gate's verdict and that path, then each finding for the user, a line each.`,
   // * medium: the documents are verified, what is left is moving files, citations and gates
   { label: 'integrate', phase: 'Integrate', effort: 'medium' }
 );
 
-return { plan: planned, verdicts: results, integration };
+// * the paths, the counts and what is for the user: the plan and the reports stay in their files
+return {
+  plan: `${OUT}/plan.md`,
+  moves: planned ? planned.moves.length : null,
+  verdicts: results.filter(Boolean),
+  reports: REPORTS,
+  integration: `${REPORTS}/integrate.md`,
+  summary: integration,
+};

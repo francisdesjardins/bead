@@ -7,6 +7,12 @@ outside the clone; one that implements or integrates, `bead-implement-both-sides
 `bead-builder-design` writes its design to `out`, under the clone's `.claude/local/` by default.
 Staging and committing stay with the session, and the decisions with the user.
 
+Each stage writes its report whole to disk, `<scratch>/<slug>/reports/<key>.md` or the file it is
+there to write (a draft, the objections, a design, a lens's findings), and returns ten lines at
+most: what it did, the gates' verdicts, where its report is. A later stage reads the files. A
+workflow returns the paths, the counts, its French summary where it has one and the decisions for
+the user, never a whole plan, a stage's report or the objections themselves.
+
 A change that reaches across the languages runs a round of the Tenth Man, then the user decides,
 then the design is implemented. A freeze runs an adversarial review first, and a release brings its documents to itself.
 

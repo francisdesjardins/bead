@@ -108,15 +108,23 @@ const effortOf = (key) => {
   return key === 'spec' ? args.specEffort || 'high' : 'high';
 };
 
+// * a stage's report on disk, its return a few lines: the integration reads the files
+const REPORTS = `${OUT}/reports`;
+const reportOf = (key) => {
+  return `${REPORTS}/${key}.md`;
+};
+const returnOf = (key) => {
+  return `Write your report whole to ${reportOf(key)}; return at most ten lines: what you did, each gate's verdict, and that path.`;
+};
+
 const run = (key, phaseTitle, beside) => {
-  return agent(`${COMMON}${readsOf(key)}\n${beside}\n${taskOf(key)}`, {
+  return agent(`${COMMON}${readsOf(key)}\n${beside}\n${taskOf(key)}\n${returnOf(key)}`, {
     label: `implement:${key}`,
     phase: phaseTitle,
     effort: effortOf(key),
   });
 };
 
-const reports = {};
 const FIRST = args.together
   ? []
   : (args.first || ['spec']).filter((key) => {
@@ -128,23 +136,20 @@ if (FIRST.length > 0) {
   phase('First');
 }
 for (const key of FIRST) {
-  reports[key] = await run(key, 'First', '');
+  await run(key, 'First', '');
 }
 
 phase('Sides');
 const others = PARTS.filter((key) => {
   return !FIRST.includes(key);
 });
-const results = await parallel(
+await parallel(
   others.map((key) => {
     return () => {
       return run(key, 'Sides', others.length > 1 ? BESIDE : '');
     };
   })
 );
-others.forEach((key, index) => {
-  reports[key] = results[index];
-});
 
 // the commits: whole files proposed, or the design's series built and proven in a clone
 const PLAN = `propose the commits, whole files each, with Conventional Commit subjects and bodies of one or two lines (no attribution), in ${SCRATCH}/msgs/${SLUG}-<n>.txt, with the files in ${SCRATCH}/msgs/${SLUG}-files.txt as "<n> <path>" lines covering every changed file once; run \`node tools/check-commits.mjs --message\` and the names check over each.`;
@@ -158,12 +163,17 @@ phase('Integrate');
 const integration = await agent(
   `${COMMON}
 # Your task: integrate (effort high)
-Read ${DESIGN} whole, every stage's section; ${RATIONALE}, beside it where the round wrote one, where you need a reason. Check that every side does what the design says, alike, as the conformance files and the twin tests prove, and that the records, the matrix and the CHANGELOG say what landed. Fix what is broken. The stages ran their suites without the interop between the sides: it runs here, once, over the settled tree, both ways, in the suites below. Run every gate with \`${TMP}\`: ${GENERATE}, and check that nothing more moves; \`${VENV} spec/check.py\`; ${FORMAT}; \`node tools/check-links.mjs\`; \`node tools/check-versions.mjs\`; \`node tools/check-names.mjs\`; \`node tools/check-durations.mjs\`; \`node tools/check-details.mjs\`, as CI's Commits job runs them; \`node tools/check-examples.mjs\`; \`node --test "tools/__tests__/*.test.mjs"\` when \`tools/\` changed; \`yarn check\`; \`dotnet format Bead.slnx --verify-no-changes\`; from \`implementations/rust\`, CLAUDE.md's Rust gates but \`cargo test\`, which the suites below run; ${SUITE_GATES}; the gates of every stage the design names; the names check over every file \`git status --porcelain\` lists. Then ${args.series ? SERIES : PLAN} Return what you fixed, each gate's result, the test counts and the commits.
-The reports:
-${PARTS.map((key) => {
-  return `## ${key}\n${reports[key] || '(no report)'}`;
-}).join('\n\n')}`,
+Read ${DESIGN} whole, every stage's section; ${RATIONALE}, beside it where the round wrote one, where you need a reason. Check that every side does what the design says, alike, as the conformance files and the twin tests prove, and that the records, the matrix and the CHANGELOG say what landed. Fix what is broken. The stages ran their suites without the interop between the sides: it runs here, once, over the settled tree, both ways, in the suites below. Run every gate with \`${TMP}\`: ${GENERATE}, and check that nothing more moves; \`${VENV} spec/check.py\`; ${FORMAT}; \`node tools/check-links.mjs\`; \`node tools/check-versions.mjs\`; \`node tools/check-names.mjs\`; \`node tools/check-durations.mjs\`; \`node tools/check-details.mjs\`, as CI's Commits job runs them; \`node tools/check-examples.mjs\`; \`node --test "tools/__tests__/*.test.mjs"\` when \`tools/\` changed; \`yarn check\`; \`dotnet format Bead.slnx --verify-no-changes\`; from \`implementations/rust\`, CLAUDE.md's Rust gates but \`cargo test\`, which the suites below run; ${SUITE_GATES}; the gates of every stage the design names; the names check over every file \`git status --porcelain\` lists. Then ${args.series ? SERIES : PLAN} Write your report whole to ${reportOf('integrate')}: what you fixed, each gate's result, the test counts and the commits. Return at most ten lines: what you fixed, each gate's verdict, the test counts, the commits, and that path.
+The stages' reports, read first: ${PARTS.map((key) => {
+    return reportOf(key);
+  }).join(', ')}.`,
   { label: `integrate:${SLUG}`, phase: 'Integrate', effort: 'high' }
 );
 
-return { reports, integration };
+return {
+  reports: PARTS.map((key) => {
+    return reportOf(key);
+  }),
+  integration: reportOf('integrate'),
+  summary: integration,
+};
