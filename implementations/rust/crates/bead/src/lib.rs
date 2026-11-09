@@ -22,6 +22,7 @@ mod identity;
 mod joined;
 pub mod json;
 mod jwt_verifier;
+mod life;
 mod managers;
 mod memory;
 mod metrics;
@@ -160,7 +161,8 @@ pub use transport::{
     CONNECT_TIMEOUT, ClientListener, Connect, ListenerId, RECONNECT_DEFAULTS, ReadyState,
     RouterClientTransport, Sent, ServerListener, ServerTransport, TransportClientDisconnectOptions,
     TransportClientReconnectDelay, TransportClientReconnectDelayResolver,
-    TransportClientReconnectOptions, TransportServerClient, TransportServerRefusal, is_field_value,
+    TransportClientReconnectOptions, TransportServerAddress, TransportServerClient,
+    TransportServerRefusal, TransportServerStartOptions, is_field_value,
 };
 pub use violations::{
     CLOSING_BYTES, Judged, ReadViolations, Violation, ViolationHolder, detail_bound_of,

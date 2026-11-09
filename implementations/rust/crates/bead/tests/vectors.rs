@@ -495,10 +495,6 @@ impl ServerTransport for Recording {
         true
     }
 
-    fn start(&self) -> BoxFuture<Result<(), RouterError>> {
-        Box::pin(async { Ok(()) })
-    }
-
     fn stop(&self) -> BoxFuture<Result<(), RouterError>> {
         Box::pin(async { Ok(()) })
     }

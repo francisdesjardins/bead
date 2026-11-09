@@ -301,11 +301,11 @@ TransportClientReconnectDelayResolver	TransportClientReconnectDelayResolver [fun
 TransportClientReconnectOptions	ITransportClientReconnectOptions [record]	TransportClientReconnectOptions [record]	TransportClientReconnectOptions [record]	same
 TransportError	-	-	TransportError [choice]	own: a Result's error, where the other sides throw (0044)
 TransportMessage	ITransportMessage [record]	TransportMessage [record]	TransportMessage [record]	same
-TransportServerAddress	ITransportServerAddress [record]	TransportServerAddress [record]	-	same
+TransportServerAddress	ITransportServerAddress [record]	TransportServerAddress [record]	TransportServerAddress [record]	same
 TransportServerClient	ITransportServerClient [record]	TransportServerClient [record]	TransportServerClient [record]	same
 TransportServerConnection	ITransportServerConnection [record]	-	-	own: what a connection's platform opened it with, which the other sides do not hand (0007)
 TransportServerRefusal	ITransportServerRefusal [record]	TransportServerRefusal [record]	TransportServerRefusal [record]	same
-TransportServerStartOptions	ITransportServerStartOptions [record]	TransportServerStartOptions [record]	-	same
+TransportServerStartOptions	ITransportServerStartOptions [record]	TransportServerStartOptions [record]	TransportServerStartOptions [record]	same
 UnregisterNotificationOptions	IUnregisterNotificationOptions [record]	-	UnregisterNotificationOptions [record]	same
 utf8Length	utf8Length [function]	Validators.Utf8Length [function]	-	rendered: of (0007, 0044)
 ValidateOptions	IValidateOptions [record]	ValidateOptions [record]	ValidateOptions [record]	same

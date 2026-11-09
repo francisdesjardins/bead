@@ -377,11 +377,6 @@ impl ServerTransport for JoinedServerTransport {
             .is_some_and(|owner| owner.takes_procedure(connection_handle, address))
     }
 
-    // * it starts nothing: an application starts each transport it joined, where it listens
-    fn start(&self) -> BoxFuture<Result<(), RouterError>> {
-        Box::pin(async { Ok(()) })
-    }
-
     // every transport it joined, settled once all have, failing as the first that refused its stop
     fn stop(&self) -> BoxFuture<Result<(), RouterError>> {
         let stopping: Vec<BoxFuture<Result<(), RouterError>>> = self

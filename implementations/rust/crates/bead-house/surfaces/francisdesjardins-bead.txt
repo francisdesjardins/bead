@@ -294,8 +294,10 @@ crate
   use transport::TransportClientReconnectDelay
   use transport::TransportClientReconnectDelayResolver
   use transport::TransportClientReconnectOptions
+  use transport::TransportServerAddress
   use transport::TransportServerClient
   use transport::TransportServerRefusal
+  use transport::TransportServerStartOptions
   use transport::is_field_value
   use violations::CLOSING_BYTES
   use violations::Judged
@@ -519,6 +521,8 @@ crate::broker::server
     fn new(participant: &BrokerParticipant, options: &BrokerTransportServerOptions) -> Result<Self, ProgrammerError>
     fn names(&self) -> &[String]
     fn ready_state(&self) -> ReadyState
+    fn start(&self) -> BoxFuture<Result<TransportServerAddress, RouterError>>
+    fn dispose(&self) -> BoxFuture<Result<(), RouterError>>
     fn clients(&self) -> Vec<TransportServerClient>
     implements Debug, ServerTransport
     derives Clone
@@ -1359,6 +1363,8 @@ crate::memory
   struct MemoryTransportServer
     fn new(options: &MemoryTransportServerOptions) -> Result<Self, ProgrammerError>
     fn ready_state(&self) -> ReadyState
+    fn start(&self) -> BoxFuture<Result<TransportServerAddress, RouterError>>
+    fn dispose(&self) -> BoxFuture<Result<(), RouterError>>
     fn clients(&self) -> Vec<TransportServerClient>
     implements Debug, ServerTransport
     derives Clone
@@ -1985,6 +1991,17 @@ crate::transport
     pub last_activity: Option<SystemTime>
     pub transport_type: &'static str
     derives Clone, Debug, Eq, PartialEq
+  struct TransportServerStartOptions #[non_exhaustive]
+    pub address: Option<String>
+    pub port: Option<u16>
+    pub find_open_port: Option<bool>
+    pub signal: Option<CancellationToken>
+    derives Clone, Debug, Default
+  struct TransportServerAddress #[non_exhaustive]
+    pub address: String
+    pub port: u16
+    fn new<A: Into<String>>(address: A, port: u16) -> Self
+    derives Clone, Debug, Eq, PartialEq
   trait ServerListener: Send + Sync
     fn on_connection(&self, _connection_handle: &ConnectionHandle)
     fn on_message(&self, _message: TransportMessage, _connection_handle: &ConnectionHandle)
@@ -2005,7 +2022,6 @@ crate::transport
     fn carries_credential(&self, _connection_handle: &ConnectionHandle) -> bool
     fn names_procedures(&self) -> bool
     fn takes_procedure(&self, _connection_handle: &ConnectionHandle, _address: ProcedureAddress) -> bool
-    fn start(&self) -> BoxFuture<Result<(), RouterError>>
     fn stop(&self) -> BoxFuture<Result<(), RouterError>>
     fn gauges(&self) -> Option<Gauges>
     fn transport_type(&self) -> Option<&str>

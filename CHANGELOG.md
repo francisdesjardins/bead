@@ -26,6 +26,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   one `TransportServerStartOptions`, in `Bead.Core`.
 - **Breaking:** on the TypeScript side a WebSocket or HTTP client's connect names its `host` and its
   `port`, as on the C# and Rust sides.
+- **Breaking:** on the Rust side a server transport's `start` leaves `ServerTransport`: each server
+  starts itself and gives the `TransportServerAddress` it listens at.
 
 ### Fixed
 

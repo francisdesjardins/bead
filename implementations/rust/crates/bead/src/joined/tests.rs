@@ -214,10 +214,6 @@ impl ServerTransport for Paired {
             .is_none_or(|taking| taking.contains(&address))
     }
 
-    fn start(&self) -> BoxFuture<Result<(), RouterError>> {
-        Box::pin(async { Ok(()) })
-    }
-
     fn stop(&self) -> BoxFuture<Result<(), RouterError>> {
         locked(&self.calls).push("shutdown".to_owned());
 
@@ -275,10 +271,6 @@ impl ServerTransport for Silent {
 
     fn resume(&self, _connection_handle: &ConnectionHandle) {
         locked(&self.calls).push("resume".to_owned());
-    }
-
-    fn start(&self) -> BoxFuture<Result<(), RouterError>> {
-        Box::pin(async { Ok(()) })
     }
 
     fn stop(&self) -> BoxFuture<Result<(), RouterError>> {

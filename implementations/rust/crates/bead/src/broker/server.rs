@@ -16,8 +16,6 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::SystemTime;
 
-use tokio::sync::watch;
-
 use crate::broker::adapter::{BrokerCapabilities, BrokerError, BrokerSubscription};
 use crate::broker::client::MAXIMUM_UNSENT_BYTES;
 use crate::broker::memory::TRANSPORT_BROKER;
@@ -33,10 +31,11 @@ use crate::duration::hold_finite;
 use crate::errors::ProgrammerError;
 use crate::failure::ProcedureAddress;
 use crate::identity::procedures_taken_of;
+use crate::life::Life;
 use crate::router::types::{BoxFuture, ConnectionHandle, Gauges, RouterError, TransportMessage};
 use crate::transport::{
-    Listeners, ReadyState, Sent, ServerListener, ServerTransport, TransportServerClient,
-    TransportServerRefusal,
+    Listeners, ReadyState, Sent, ServerListener, ServerTransport, TransportServerAddress,
+    TransportServerClient, TransportServerRefusal, tell_server,
 };
 
 /// The connections a server's transport holds at once by default, half-open ones among them
@@ -123,7 +122,6 @@ struct HeldConnection {
 }
 
 struct ServerState {
-    ready: ReadyState,
     // every connection held, half-open ones among them, by its pair
     held: HashMap<Pair, HeldConnection>,
     // those its router was told of, by their handle
@@ -135,7 +133,6 @@ struct ServerState {
     // whether it left its names while it holds its bound, served in a group
     is_full: bool,
     arrivals: u64,
-    stopped: Option<watch::Receiver<bool>>,
 }
 
 pub(crate) struct ServerInner {
@@ -153,6 +150,7 @@ pub(crate) struct ServerInner {
     // its OPEN reached
     procedures: Option<BTreeSet<ProcedureAddress>>,
     procedures_by_name: BTreeMap<String, BTreeSet<ProcedureAddress>>,
+    life: Life,
     state: Mutex<ServerState>,
     listeners: Listeners<dyn ServerListener>,
 }
@@ -197,20 +195,7 @@ impl ServerInner {
         &self,
         (call, connection_handle): (C, Option<&ConnectionHandle>),
     ) {
-        let listeners = self.listeners.all();
-
-        self.listeners.each((
-            |listener: &(dyn ServerListener + 'static)| call(listener),
-            |error: RouterError| {
-                for heard in &listeners {
-                    // ! a listener of errors that panics would loop: its panic is dropped
-                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        heard.on_error(&error, connection_handle);
-                    }))
-                    .ok();
-                }
-            },
-        ));
+        tell_server(&self.listeners, (call, connection_handle));
     }
 
     /// What it reports of its own, with the connection it came on, or none.
@@ -228,7 +213,39 @@ impl ServerInner {
     }
 
     fn ready(&self) -> ReadyState {
-        locked(&self.state).ready
+        self.life.ready_state()
+    }
+
+    // its stop's body, in its participant's turn: its names let go, then each connection closed
+    // with 1001; settled once its broker let each name go
+    fn stopping(self: &Arc<Self>) -> BoxFuture<Result<(), RouterError>> {
+        let server = Arc::clone(self);
+        let closing = self.participant.run(move |state: &mut ParticipantState| {
+            // * all let go at once, each unsubscription before its CLOSEs in this turn, a name
+            // counted until its UNSUBACK came: its broker's word (spec 15.21)
+            let leaving: Vec<BoxFuture<()>> = server
+                .asked()
+                .into_iter()
+                .map(|name| server.leave_one(name))
+                .collect();
+            let held: Vec<Pair> = locked(&server.state).held.keys().copied().collect();
+
+            for pair in held {
+                state.close(pair, (crate::broker::parcel::codes::GOING_AWAY, false));
+            }
+
+            leaving
+        });
+
+        Box::pin(async move {
+            if let Ok(leaving) = closing.await {
+                for left in leaving {
+                    left.await;
+                }
+            }
+
+            Ok(())
+        })
     }
 
     /// In its participant's turn: an OPEN, or what came to `name`, one of its names, judged in the
@@ -297,7 +314,7 @@ impl ServerInner {
                 .count();
 
             is_stopping
-                || held.ready != ReadyState::Open
+                || self.ready() != ReadyState::Open
                 || u64::try_from(held.held.len()).unwrap_or(u64::MAX) >= self.maximum_connections
                 || u64::try_from(of_id).unwrap_or(u64::MAX) >= self.maximum_per_address
         };
@@ -416,7 +433,7 @@ impl ServerInner {
     pub(crate) fn relink(self: &Arc<Self>) -> BoxFuture<Result<(), BrokerError>> {
         let state = locked(&self.state);
 
-        if !matches!(state.ready, ReadyState::Open | ReadyState::Connecting) || state.is_full {
+        if !matches!(self.ready(), ReadyState::Open | ReadyState::Connecting) || state.is_full {
             return Box::pin(async { Ok(()) });
         }
 
@@ -623,7 +640,7 @@ impl ServerInner {
 
             state.subscribed.remove(&name);
 
-            !state.is_full && state.ready == ReadyState::Open && config.is_linked()
+            !state.is_full && self.ready() == ReadyState::Open && config.is_linked()
         };
 
         config.name_changed((&name, false, self.is_in_group.then_some(name.as_str())));
@@ -649,8 +666,9 @@ impl ServerInner {
             }
 
             state.is_full = false;
+            drop(state);
 
-            state.ready == ReadyState::Open
+            self.ready() == ReadyState::Open
         };
 
         if is_served && self.participant.is_linked() {
@@ -884,6 +902,7 @@ impl BrokerTransportServer {
             procedures_by_name.insert(name.clone(), procedures_taken_of(procedures, taken)?);
         }
 
+        let covering = participant.clone();
         let inner = Arc::new_cyclic(|me| ServerInner {
             me: Weak::clone(me),
             participant: participant.clone(),
@@ -898,15 +917,14 @@ impl BrokerTransportServer {
             is_secure: options.secure.unwrap_or_else(|| adapter.is_secure()),
             procedures,
             procedures_by_name,
+            life: Life::new(Box::new(move |future| covering.cover(future))),
             state: Mutex::new(ServerState {
-                ready: ReadyState::Uninitialized,
                 held: HashMap::new(),
                 handles: HashMap::new(),
                 subscribed: BTreeSet::new(),
                 joining: BTreeSet::new(),
                 is_full: false,
                 arrivals: 0,
-                stopped: None,
             }),
             listeners: Listeners::default(),
         });
@@ -926,6 +944,54 @@ impl BrokerTransportServer {
     #[must_use]
     pub fn ready_state(&self) -> ReadyState {
         self.inner.ready()
+    }
+
+    /// Starts it, and gives where: its participant's id, port 0, since it serves no port. Its
+    /// participant started where it was not, linked anew where its link was taken over or its stop
+    /// settled, and its names served, each subscribed; settles once its broker holds each.
+    ///
+    /// # Errors
+    ///
+    /// A [`ProgrammerError`] once its participant is disposed, its state kept, before anything
+    /// else (spec 15.21), then once it is disposed itself (decision 0003); then unless
+    /// Uninitialized or Closed, a second start even while the first is under way. What its
+    /// participant's start fails with, or a name its broker refused, ending Closed.
+    pub fn start(&self) -> BoxFuture<Result<TransportServerAddress, RouterError>> {
+        // ! its participant disposed: its application's misuse, its state kept (spec 15.21)
+        if self.inner.participant.is_disposed() {
+            let disposed = self.inner.participant.config().disposed_refusal();
+
+            return Box::pin(async move { Err(RouterError::Other(Arc::new(disposed))) });
+        }
+
+        let server = Arc::clone(&self.inner);
+
+        self.inner.life.start(move || {
+            let starting = server.participant.start();
+            let id = server.participant.id().to_owned();
+
+            Box::pin(async move {
+                match starting.await {
+                    Ok(()) => server.relink().await,
+                    Err(error) => Err(error),
+                }
+                .map(|()| TransportServerAddress::new(id, 0))
+                .map_err(|error| RouterError::Other(Arc::new(error)))
+            })
+        })
+    }
+
+    /// Stops it, as its stop does, then ends it for good: a start after it is its application's
+    /// misuse (decision 0003); a later dispose settles with the first. Its participant is its
+    /// application's to dispose.
+    ///
+    /// # Errors
+    ///
+    /// What its stop is refused with: a dispose while it starts, say.
+    pub fn dispose(&self) -> BoxFuture<Result<(), RouterError>> {
+        let server = Arc::clone(&self.inner);
+
+        self.inner.life.dispose(move || server.stopping())
     }
 
     /// The connections its router was told of, in the order they came: each its handle, its peer
@@ -1108,151 +1174,13 @@ impl ServerTransport for BrokerTransportServer {
             })
     }
 
-    // its participant started where it was not, linked anew where its link was taken over or its
-    // stop settled, and its names served, each subscribed; settles once its broker holds each,
-    // failing on a name its broker refused. Its participant disposed, it is refused first, its state
-    // kept (spec 15.21)
-    fn start(&self) -> BoxFuture<Result<(), RouterError>> {
-        if self.inner.participant.is_disposed() {
-            let disposed = self.inner.participant.config().disposed_refusal();
-
-            return Box::pin(async move { Err(RouterError::Other(Arc::new(disposed))) });
-        }
-
-        let refused = {
-            let mut state = locked(&self.inner.state);
-
-            if matches!(state.ready, ReadyState::Uninitialized | ReadyState::Closed) {
-                state.ready = ReadyState::Connecting;
-
-                None
-            } else {
-                Some(state.ready)
-            }
-        };
-
-        if let Some(ready) = refused {
-            return Box::pin(async move {
-                Err(RouterError::Other(Arc::new(ProgrammerError::new(format!(
-                    "the transport server is already {}",
-                    ready.said()
-                )))))
-            });
-        }
-
-        let server = Arc::clone(&self.inner);
-        let starting = self.inner.participant.start();
-        let (reply, started) = tokio::sync::oneshot::channel();
-
-        self.inner.participant.cover(async move {
-            let outcome = match starting.await {
-                Ok(()) => server.relink().await,
-                Err(error) => Err(error),
-            };
-
-            locked(&server.state).ready = if outcome.is_ok() {
-                ReadyState::Open
-            } else {
-                ReadyState::Closed
-            };
-            reply.send(outcome).ok();
-        });
-
-        Box::pin(async move {
-            started
-                .await
-                .unwrap_or_else(|_dropped| Err(BrokerError::failed("the participant is gone")))
-                .map_err(|error| RouterError::Other(Arc::new(error)))
-        })
-    }
-
-    // no OPEN taken from now, one that comes refused 503; its names let go, each unsubscription
-    // handed before each connection's CLOSE of 1001, its close told unclean, settling once its
-    // broker let each go; its participant's link kept (spec 15.21).
-    // A stop while it starts is refused, as the other sides' transport server life refuses one
+    // its stop, its life's: no OPEN taken from now, one that comes refused 503; its names let go,
+    // each unsubscription handed before each connection's CLOSE of 1001, its close told unclean,
+    // settling once its broker let each go; its participant's link kept (spec 15.21)
     fn stop(&self) -> BoxFuture<Result<(), RouterError>> {
-        let (stopping, stopped) = {
-            let mut state = locked(&self.inner.state);
-
-            if let Some(stopped) = &state.stopped {
-                let mut stopped = stopped.clone();
-
-                return Box::pin(async move {
-                    stopped.wait_for(|is_stopped| *is_stopped).await.ok();
-
-                    Ok(())
-                });
-            }
-
-            match state.ready {
-                ReadyState::Uninitialized | ReadyState::Closed => {
-                    return Box::pin(async { Ok(()) });
-                }
-                ReadyState::Connecting => {
-                    return Box::pin(async {
-                        Err(RouterError::Other(Arc::new(ProgrammerError::new(
-                            "the transport server is starting",
-                        ))))
-                    });
-                }
-                ReadyState::Open | ReadyState::Closing | ReadyState::Reconnecting => {}
-            }
-
-            state.ready = ReadyState::Closing;
-
-            let (stopping, stopped) = watch::channel(false);
-
-            state.stopped = Some(stopped.clone());
-            drop(state);
-
-            (stopping, stopped)
-        };
-        let server = Arc::clone(&self.inner);
-        let closing = self
-            .inner
-            .participant
-            .run(move |state: &mut ParticipantState| {
-                // * all let go at once, each unsubscription before its CLOSEs in this turn, a name
-                // counted until its UNSUBACK came: its broker's word (spec 15.21)
-                let leaving: Vec<BoxFuture<()>> = server
-                    .asked()
-                    .into_iter()
-                    .map(|name| server.leave_one(name))
-                    .collect();
-                let held: Vec<Pair> = locked(&server.state).held.keys().copied().collect();
-
-                for pair in held {
-                    state.close(pair, (crate::broker::parcel::codes::GOING_AWAY, false));
-                }
-
-                leaving
-            });
         let server = Arc::clone(&self.inner);
 
-        self.inner.participant.cover(async move {
-            if let Ok(leaving) = closing.await {
-                for left in leaving {
-                    left.await;
-                }
-            }
-
-            {
-                let mut state = locked(&server.state);
-
-                state.ready = ReadyState::Closed;
-                state.stopped = None;
-            }
-
-            stopping.send_replace(true);
-        });
-
-        let mut stopped = stopped;
-
-        Box::pin(async move {
-            stopped.wait_for(|is_stopped| *is_stopped).await.ok();
-
-            Ok(())
-        })
+        self.inner.life.stop(move || server.stopping())
     }
 
     fn gauges(&self) -> Option<Gauges> {

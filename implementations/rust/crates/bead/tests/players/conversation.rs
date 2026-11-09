@@ -214,10 +214,6 @@ impl ServerTransport for Scripted {
             .is_none_or(|taken| taken.contains(&address))
     }
 
-    fn start(&self) -> BoxFuture<Result<(), RouterError>> {
-        Box::pin(async { Ok(()) })
-    }
-
     fn stop(&self) -> BoxFuture<Result<(), RouterError>> {
         Box::pin(async { Ok(()) })
     }
@@ -390,6 +386,17 @@ impl Connections {
             Self::InMemory(memory) => Arc::new(memory.server.clone()),
             Self::OverBroker(broker) => Arc::new(broker.transport.clone()),
         }
+    }
+
+    // its transport started, where it starts: a scripted one is open as it is made
+    async fn start(&self) -> Result<(), String> {
+        let started = match self {
+            Self::Scripted(_) => return Ok(()),
+            Self::InMemory(memory) => memory.server.start(),
+            Self::OverBroker(broker) => broker.transport.start(),
+        };
+
+        started.await.map(drop).map_err(|error| error.to_string())
     }
 
     async fn open(
@@ -1215,7 +1222,7 @@ pub(crate) async fn play(conversation: &Value, options: &PlayOptions) -> Result<
         listen((&server, &interop), (&telling, &command))?;
     }
 
-    transport.start().await.map_err(|error| error.to_string())?;
+    connections.start().await?;
 
     let played = play_steps(
         (steps, &mut connections),

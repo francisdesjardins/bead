@@ -67,10 +67,6 @@ impl ServerTransport for Clockless<ScriptedServer> {
         self.0.resume(handle);
     }
 
-    fn start(&self) -> BoxFuture<Result<(), RouterError>> {
-        self.0.start()
-    }
-
     fn stop(&self) -> BoxFuture<Result<(), RouterError>> {
         self.0.stop()
     }
