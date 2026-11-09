@@ -34,6 +34,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The C# side's HTTP transport server matches its pathname against the target as it came, as the
   TypeScript side does, where Kestrel's decoded path let `/b%65ad` reach `/bead`; and its gateway
   keeps the query of an absolute-form target that names no path, `http://bead.test?x`.
+- A publication over AMQP 1.0 asked as its broker ends its sending session, or detaches its sender,
+  goes on another that it begins, on the C# side, where it could be refused with nothing sent
+  (spec 15.33).
 
 ## [0.11.0] - 2026-11-09
 
