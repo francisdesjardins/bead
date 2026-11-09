@@ -20,6 +20,16 @@ name = "bead"
 [features]
 # the test kit, bead::testing, which the tests alone reach: no API (decision 0044)
 testing = ["serde/derive", "dep:sha1"]
+# the WebSocket transport, server and client, over tokio's sockets (decision 0049)
+websocket = [
+  "tokio/net",
+  "tokio/io-util",
+  "dep:socket2",
+  "dep:http",
+  "dep:tungstenite",
+  "dep:tokio-tungstenite",
+  "dep:futures-util",
+]
 
 [dependencies]
 tokio = { workspace = true, features = ["rt", "sync", "time"] }
@@ -36,10 +46,16 @@ getrandom = { workspace = true }
 httparse = { workspace = true }
 # the test kit's alone: the order of the seeds its mutations draw from, by their SHA-1
 sha1 = { workspace = true, optional = true }
+# the WebSocket transport's alone
+socket2 = { workspace = true, optional = true }
+http = { workspace = true, optional = true }
+tungstenite = { workspace = true, optional = true }
+tokio-tungstenite = { workspace = true, optional = true }
+futures-util = { workspace = true, optional = true }
 
 [dev-dependencies]
 # the crate itself, with its test kit: one copy of bead for the unit tests and the players
-bead = { package = "francisdesjardins-bead", path = ".", features = ["testing"] }
+bead = { package = "francisdesjardins-bead", path = ".", features = ["testing", "websocket"] }
 bead-interop = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 libtest-mimic = { workspace = true }

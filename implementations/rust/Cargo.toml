@@ -43,6 +43,15 @@ getrandom = { version = "0.4.3", default-features = false }
 # RFC 9112 §2-§5's head, read by the WebSocket server and the fuzz targets: the version
 # tungstenite's own lock takes
 httparse = { version = "1.10.1", default-features = false, features = ["std"] }
+# the socket transports' (decision 0049): a listener's IPV6_V6ONLY and a socket dropped with
+# SO_LINGER 0; the request and response types and their status codes; RFC 6455's frames, masking,
+# ping and close over tokio, the handshake's head read and written by Bead; and the Stream and Sink
+# a WebSocket's connection is driven by
+socket2 = { version = "0.6.5", default-features = false }
+http = { version = "1.5.0", default-features = false, features = ["std"] }
+tungstenite = { version = "0.30.0", default-features = false, features = ["handshake"] }
+tokio-tungstenite = { version = "0.30.0", default-features = false, features = ["handshake"] }
+futures-util = { version = "0.3.34", default-features = false, features = ["sink", "std"] }
 libtest-mimic = { version = "0.8.2" }
 syn = { version = "3.0.9", default-features = false, features = ["full", "parsing", "visit"] }
 proc-macro2 = { version = "1.0.107", default-features = false, features = ["span-locations"] }

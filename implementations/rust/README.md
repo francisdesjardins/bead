@@ -26,14 +26,18 @@ MinGW-w64's `dlltool` on the `PATH`, which `windows-sys` asks of it. From this f
 ```sh
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features --locked
-cargo clippy -p francisdesjardins-bead --lib --all-features --locked --target wasm32-unknown-unknown
+cargo clippy -p francisdesjardins-bead --lib --locked
+cargo clippy -p francisdesjardins-bead --lib --features websocket --locked
+cargo clippy -p francisdesjardins-bead --lib --features testing --locked --target wasm32-unknown-unknown
 cargo test --workspace --all-features --locked
 cargo doc --workspace --no-deps --all-features --locked
 cargo build --workspace --locked
 cargo deny --locked check
 ```
 
-The second clippy checks the core for the browser's WebAssembly, never runs it: what the core links
+The second and the third lint the core's library with no feature and with each socket transport's
+alone, `websocket` (decision 0049), so that each builds on its own. The fourth checks the core for
+the browser's WebAssembly, never runs it, by its features, no socket among them: what the core links
 builds there, and `.cargo/config.toml` gives getrandom its `unsupported` backend on that target
 alone, so that no dependency is added for it.
 

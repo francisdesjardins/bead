@@ -28,6 +28,8 @@ mod life;
 mod managers;
 mod memory;
 mod metrics;
+#[cfg(feature = "websocket")]
+mod net;
 mod ordered;
 mod owner;
 mod payloads;
@@ -38,6 +40,8 @@ mod service;
 mod session_token;
 mod transport;
 mod violations;
+#[cfg(feature = "websocket")]
+mod websocket;
 
 /// The runtime handle accepted by Bead's runtime options.
 pub use tokio::runtime::Handle;
@@ -125,6 +129,8 @@ pub use metrics::{
     MetricsRegistry, MetricsRegistryOptions, NotificationSeries, ProcedureSeries, ResolverSeries,
     RouterMetrics,
 };
+#[cfg(feature = "websocket")]
+pub use net::bounds::{HEADERS_TIMEOUT, MINIMUM_SEND_BYTES_PER_SECOND, SEND_GRACE_PERIOD};
 pub use payloads::{CodecRefusal, JsonCodec, JsonOf, PayloadCodec, RawCodec, TextCodec};
 pub use router::admissions::{
     BeforeRequest, require_credential, require_session, share_leg_b_session,
@@ -171,6 +177,12 @@ pub use transport::{
 pub use violations::{
     CLOSING_BYTES, Judged, ReadViolations, Violation, ViolationHolder, detail_bound_of,
     violations_detail_of, violations_of, words_of,
+};
+#[cfg(feature = "websocket")]
+pub use websocket::connection::{CLOSE_TIMEOUT, MAXIMUM_MESSAGE_BYTES};
+#[cfg(feature = "websocket")]
+pub use websocket::server::{
+    TRANSPORT_WEBSOCKET, WebSocketTransportServer, WebSocketTransportServerOptions,
 };
 
 /// What the workspace's own members â€” the interop service, the bench, the conformance players and

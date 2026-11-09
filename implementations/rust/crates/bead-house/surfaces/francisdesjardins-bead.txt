@@ -189,6 +189,9 @@ crate
   use metrics::ProcedureSeries
   use metrics::ResolverSeries
   use metrics::RouterMetrics
+  use net::bounds::HEADERS_TIMEOUT #[cfg(feature = "websocket")]
+  use net::bounds::MINIMUM_SEND_BYTES_PER_SECOND #[cfg(feature = "websocket")]
+  use net::bounds::SEND_GRACE_PERIOD #[cfg(feature = "websocket")]
   use payloads::CodecRefusal
   use payloads::JsonCodec
   use payloads::JsonOf
@@ -312,6 +315,11 @@ crate
   use violations::violations_detail_of
   use violations::violations_of
   use violations::words_of
+  use websocket::connection::CLOSE_TIMEOUT #[cfg(feature = "websocket")]
+  use websocket::connection::MAXIMUM_MESSAGE_BYTES #[cfg(feature = "websocket")]
+  use websocket::server::TRANSPORT_WEBSOCKET #[cfg(feature = "websocket")]
+  use websocket::server::WebSocketTransportServer #[cfg(feature = "websocket")]
+  use websocket::server::WebSocketTransportServerOptions #[cfg(feature = "websocket")]
   mod internal #[doc(hidden)]
 crate::broker::adapter
   enum BrokerDelivery #[non_exhaustive]
@@ -1615,6 +1623,10 @@ crate::metrics
     fn declare_resolver(&self, procedure: &Procedure, notifies: bool) -> Result<ResolverSeries, ProgrammerError>
     fn declare_notification(&self, procedure: &Procedure) -> Result<NotificationSeries, ProgrammerError>
     derives Clone, Debug
+crate::net::bounds
+  const MINIMUM_SEND_BYTES_PER_SECOND: u64 #[cfg(feature = "websocket")]
+  const SEND_GRACE_PERIOD: Duration #[cfg(feature = "websocket")]
+  const HEADERS_TIMEOUT: Duration #[cfg(feature = "websocket")]
 crate::payloads
   struct CodecRefusal
     fn new<R: Into<String>>(reason: R) -> Self
@@ -2272,6 +2284,31 @@ crate::violations
   fn violations_detail_of(judged: &Judged, maximum_bytes: usize) -> String
   fn words_of(violation: &Violation) -> Option<String>
   fn violations_of(failure: &Failure) -> ReadViolations
+crate::websocket::connection
+  const CLOSE_TIMEOUT: Duration #[cfg(feature = "websocket")]
+  const MAXIMUM_MESSAGE_BYTES: u64 #[cfg(feature = "websocket")]
+crate::websocket::server
+  const TRANSPORT_WEBSOCKET: &str #[cfg(feature = "websocket")]
+  struct WebSocketTransportServerOptions #[non_exhaustive] #[cfg(feature = "websocket")]
+    pub clock: Option<SharedClock> #[cfg(feature = "websocket")]
+    pub runtime: Option<Handle> #[cfg(feature = "websocket")]
+    pub close_timeout: Option<Duration> #[cfg(feature = "websocket")]
+    pub headers_timeout: Option<Duration> #[cfg(feature = "websocket")]
+    pub hosts: Option<Vec<String>> #[cfg(feature = "websocket")]
+    pub maximum_message_bytes: Option<u64> #[cfg(feature = "websocket")]
+    pub maximum_connections: Option<u64> #[cfg(feature = "websocket")]
+    pub maximum_connections_per_address: Option<u64> #[cfg(feature = "websocket")]
+    pub origins: Option<Vec<String>> #[cfg(feature = "websocket")]
+    pub secure: Option<bool> #[cfg(feature = "websocket")]
+    derives Clone, Debug, Default #[cfg(feature = "websocket")]
+  struct WebSocketTransportServer #[cfg(feature = "websocket")]
+    fn new(options: &WebSocketTransportServerOptions) -> Result<Self, ProgrammerError>
+    fn ready_state(&self) -> ReadyState
+    fn start(&self, options: &TransportServerStartOptions) -> BoxFuture<Result<TransportServerAddress, RouterError>>
+    fn dispose(&self) -> BoxFuture<Result<(), RouterError>>
+    fn clients(&self) -> Vec<TransportServerClient>
+    implements Debug, ServerTransport
+    derives Clone #[cfg(feature = "websocket")]
 crate::internal
   use crate::credentials::JWT_LIMIT_BYTES
   use crate::duration::hold

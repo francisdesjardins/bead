@@ -34,7 +34,8 @@ use bead::{
     RouterLimitsOptions, RouterRequest, RouterServer, RouterServerOptions, Sent, Server,
     ServerListener, ServerOptions, ServerTransport, ServiceManager, ServiceManagerOptions,
     ServiceRouter, SessionManagerOptions, SharedClock, TransportClientReconnectDelay,
-    TransportClientReconnectOptions, TransportError, TransportMessage,
+    TransportClientReconnectOptions, TransportError, TransportMessage, WebSocketTransportServer,
+    WebSocketTransportServerOptions,
 };
 use bytes::Bytes;
 use libtest_mimic::{Arguments, Failed, Trial};
@@ -49,7 +50,7 @@ const OTHER_TIMEOUT: Duration = Duration::from_secs(1);
 
 // the places this side plays, by the id the file keys them by; every other is ahead, with the
 // stage that brings it: its transports over HTTP and WebSocket, its broker bindings, its gateway
-const PLACES: [&str; 21] = [
+const PLACES: [&str; 23] = [
     "call.timeout",
     "serviceManager.defaultTimeout",
     "router.reservation",
@@ -71,6 +72,8 @@ const PLACES: [&str; 21] = [
     "httpTransportServer.sendGracePeriod",
     "httpTransportServer.headersTimeout",
     "httpTransportServer.bodyGracePeriod",
+    "webSocketTransport.closeTimeout",
+    "webSocketTransportServer.headersTimeout",
 ];
 
 // the ways of each place this side has, the others its rows excuse it from
@@ -84,7 +87,8 @@ fn ways_of(place: &str) -> &'static [&'static str] {
         | "server.connectionInactivityTimeout"
         | "brokerParticipant.heartbeat"
         | "brokerTransportServer.acceptTimeout"
-        | "brokerParticipant.bodyGracePeriod" => &["options"],
+        | "brokerParticipant.bodyGracePeriod"
+        | "webSocketTransportServer.headersTimeout" => &["options"],
         "router.reservation" => &["reserve", "cancel"],
         "relay.timeout" => &["relay", "register"],
         "session.inactivityTimeouts" => &[
@@ -102,20 +106,25 @@ fn ways_of(place: &str) -> &'static [&'static str] {
         "httpTransportServer.sendGracePeriod"
         | "httpTransportServer.headersTimeout"
         | "httpTransportServer.bodyGracePeriod" => &["policy"],
+        "webSocketTransport.closeTimeout" => &["server"],
         _ => &[],
     }
 }
 
 // the ways of a place played that are ahead, each with the stage that brings it: a connect's
-// timeout over HTTP and WebSocket, and an HTTP server's options, with Rust's transports over them;
-// a gateway's with its gateway
+// timeout over HTTP and WebSocket, an HTTP server's options and a WebSocket client's, with Rust's
+// transports over them; a gateway's with its gateway
 fn ahead_of(place: &str) -> &'static [&'static str] {
     match place {
         "transportClient.connectTimeout" => &["http", "webSocket"],
-        "httpTransportServer.maximumWait" => &["options"],
+        "httpTransportServer.maximumWait" | "webSocketTransportServer.sendGracePeriod" => {
+            &["options"]
+        }
         "httpTransportServer.sendGracePeriod"
         | "httpTransportServer.headersTimeout"
         | "httpTransportServer.bodyGracePeriod" => &["options", "gateway"],
+        "webSocketTransport.closeTimeout" => &["client"],
+        "webSocketTransport.heartbeat" => &["client", "server"],
         _ => &[],
     }
 }
@@ -1601,6 +1610,24 @@ fn policy_way(member: &str, given: Option<Duration>) -> Played {
     Ok(Observed::Taken)
 }
 
+// a WebSocket transport server built with `member` given, where its refusal alone is observed, as
+// the other sides observe it
+fn web_socket_server_way(member: &str, given: Option<Duration>) -> Played {
+    let mut options = WebSocketTransportServerOptions::default();
+
+    match member {
+        "closeTimeout" => options.close_timeout = given,
+        "headersTimeout" => options.headers_timeout = given,
+        _ => {
+            return Err(format!(
+                "a WebSocket transport server has no member {member}"
+            ));
+        }
+    }
+
+    Ok(WebSocketTransportServer::new(&options).map_or_else(Observed::Refused, |_| Observed::Taken))
+}
+
 // ── The table ────────────────────────────────────────────────────────────────────────────────
 
 async fn play_way((place, way): (&str, &str), given: Option<Duration>) -> Played {
@@ -1664,6 +1691,12 @@ async fn play_way((place, way): (&str, &str), given: Option<Duration>) -> Played
         ("httpTransportServer.sendGracePeriod", "policy") => policy_way("sendGracePeriod", given),
         ("httpTransportServer.headersTimeout", "policy") => policy_way("headersTimeout", given),
         ("httpTransportServer.bodyGracePeriod", "policy") => policy_way("bodyGracePeriod", given),
+        ("webSocketTransport.closeTimeout", "server") => {
+            web_socket_server_way("closeTimeout", given)
+        }
+        ("webSocketTransportServer.headersTimeout", "options") => {
+            web_socket_server_way("headersTimeout", given)
+        }
         _ => Err(format!("{place} has no way {way} here")),
     }
 }

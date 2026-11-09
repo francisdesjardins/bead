@@ -318,7 +318,9 @@ Its [README](implementations/rust/README.md) describes its crates and its module
 cd implementations/rust
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features --locked
-cargo clippy -p francisdesjardins-bead --lib --all-features --locked --target wasm32-unknown-unknown
+cargo clippy -p francisdesjardins-bead --lib --locked
+cargo clippy -p francisdesjardins-bead --lib --features websocket --locked
+cargo clippy -p francisdesjardins-bead --lib --features testing --locked --target wasm32-unknown-unknown
 cargo test --workspace --all-features --locked
 cargo doc --workspace --no-deps --all-features --locked
 cargo build --workspace --locked

@@ -49,6 +49,43 @@ pub(crate) fn runtime_of(
     Ok(runtime)
 }
 
+/// The runtime a socket transport runs on: [`runtime_of`]'s, its IO driver checked besides, as its
+/// time driver is (decision 0049); `subject` names the transport in the refusal.
+#[cfg(feature = "websocket")]
+pub(crate) fn socket_runtime_of(
+    given: Option<&Handle>,
+    subject: &'static str,
+) -> Result<Handle, ProgrammerError> {
+    let runtime = runtime_of(given, subject)?;
+    // a socket of the loopback's, bound and dropped: none bound, the IO driver is not judged here,
+    // and the transport's own bind meets whatever stands in its way
+    let Ok(socket) = std::net::UdpSocket::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+        .or_else(|_absent| std::net::UdpSocket::bind((std::net::Ipv6Addr::LOCALHOST, 0)))
+    else {
+        return Ok(runtime);
+    };
+    let entered = runtime.enter();
+    // ! what tokio panics as a socket is registered on a runtime without its IO driver is caught
+    // here, once, as the transport is built, never inside a later call
+    let registered = std::panic::catch_unwind(|| {
+        socket
+            .set_nonblocking(true)
+            .ok()
+            .and_then(|()| tokio::net::UdpSocket::from_std(socket).ok())
+            .map(drop)
+    });
+
+    drop(entered);
+
+    if registered.is_err() {
+        return Err(ProgrammerError::new(format!(
+            "{subject}'s runtime enables tokio's IO driver"
+        )));
+    }
+
+    Ok(runtime)
+}
+
 /// Spawns `future` on `runtime`.
 #[inline]
 pub(crate) fn spawn<F>(runtime: &Handle, future: F) -> JoinHandle<F::Output>

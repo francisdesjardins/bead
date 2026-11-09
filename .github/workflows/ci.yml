@@ -243,7 +243,8 @@ jobs:
   # ── Rust ─────────────────────────────────────────────────────────────────────
   # The Rust side's own gate (decision 0044): its toolchain from its rust-toolchain.toml, a warning
   # an error by its .cargo/config.toml, `[build] warnings = "deny"`; its format, its lints, the
-  # core's lints on the browser's WebAssembly target, its documentation, a build on the default
+  # core's library linted with no feature and with each socket transport's alone, the core's lints
+  # on the browser's WebAssembly target, its documentation, a build on the default
   # features alone, where what the test kit alone reaches is left out, its dependencies' advisories,
   # licences, bans and sources, then its tests, bead-house's holding each library crate's public
   # surface to its list, and its conformance players under coverage, lines and regions on the pinned
@@ -293,11 +294,18 @@ jobs:
         run: cargo fmt --all -- --check
       - if: matrix.os == 'ubuntu-26.04'
         run: cargo clippy --workspace --all-targets --all-features --locked
-      # the core checked for the browser's WebAssembly, never run, the target rust-toolchain.toml's:
-      # what it links builds there, its spawning and its time through crate::platform and the clock
-      # alone; getrandom's backend for the target is .cargo/config.toml's
+      # the core's library linted with no feature, then with each socket transport's alone, so
+      # that each builds on its own (decision 0049)
       - if: matrix.os == 'ubuntu-26.04'
-        run: cargo clippy -p francisdesjardins-bead --lib --all-features --locked --target wasm32-unknown-unknown
+        run: cargo clippy -p francisdesjardins-bead --lib --locked
+      - if: matrix.os == 'ubuntu-26.04'
+        run: cargo clippy -p francisdesjardins-bead --lib --features websocket --locked
+      # the core checked for the browser's WebAssembly, never run, the target rust-toolchain.toml's,
+      # by its features, no socket among them, which mio refuses there: what it links builds there,
+      # its spawning and its time through crate::platform and the clock alone; getrandom's backend
+      # for the target is .cargo/config.toml's
+      - if: matrix.os == 'ubuntu-26.04'
+        run: cargo clippy -p francisdesjardins-bead --lib --features testing --locked --target wasm32-unknown-unknown
       - if: matrix.os == 'ubuntu-26.04'
         run: cargo doc --workspace --no-deps --all-features --locked
       # the default features alone: what the test kit alone reaches is cfg'd out, or a warning
