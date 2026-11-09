@@ -12,6 +12,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The Rust side's service client, `ServiceClient` and `ServiceClientOptions`, the twin of the other
   sides' (decision 0044).
 
+### Fixed
+
+- A publication over AMQP 1.0 asked as its broker ends its sending session, or detaches its sender,
+  goes on another that it begins, on the C# side, where it could be refused with nothing sent
+  (spec 15.33).
+
 ## [0.11.0] - 2026-11-09
 
 ### Added
