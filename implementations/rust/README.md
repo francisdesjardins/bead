@@ -28,6 +28,7 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features --locked
 cargo clippy -p francisdesjardins-bead --lib --locked
 cargo clippy -p francisdesjardins-bead --lib --features websocket --locked
+cargo clippy -p francisdesjardins-bead --lib --features http --locked
 cargo clippy -p francisdesjardins-bead --lib --features testing --locked --target wasm32-unknown-unknown
 cargo test --workspace --all-features --locked
 cargo doc --workspace --no-deps --all-features --locked
@@ -35,11 +36,11 @@ cargo build --workspace --locked
 cargo deny --locked check
 ```
 
-The second and the third lint the core's library with no feature and with each socket transport's
-alone, `websocket` (decision 0049), so that each builds on its own. The fourth checks the core for
-the browser's WebAssembly, never runs it, by its features, no socket among them: what the core links
-builds there, and `.cargo/config.toml` gives getrandom its `unsupported` backend on that target
-alone, so that no dependency is added for it.
+The second, the third and the fourth lint the core's library with no feature and with each socket
+transport's alone, `websocket` and `http` (decision 0049), so that each builds on its own. The fifth
+checks the core for the browser's WebAssembly, never runs it, by its features, no socket among them:
+what the core links builds there, and `.cargo/config.toml` gives getrandom its `unsupported` backend
+on that target alone, so that no dependency is added for it.
 
 Every warning of rustc, clippy and rustdoc is an error, by `.cargo/config.toml`'s `[build] warnings
 = "deny"`, as `TreatWarningsAsErrors` is on the C# side; `CARGO_BUILD_WARNINGS=warn` releases one

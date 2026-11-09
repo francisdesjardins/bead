@@ -10,6 +10,8 @@ use std::time::SystemTime;
 use crate::errors::ProgrammerError;
 use crate::platform::Handle;
 
+#[cfg(feature = "http")]
+pub(crate) use native::HyperTimer;
 pub use native::SystemClock;
 
 #[cfg(test)]
@@ -202,6 +204,60 @@ mod native {
             Ok(Arc::new(SystemTimer {
                 task: Mutex::new(Some(task.abort_handle())),
             }))
+        }
+    }
+
+    /// hyper's timer over the platform's clock (decision 0011): a connection's head bounded on the
+    /// runtime the transport runs on, by tokio's timers, as [`SystemClock`]'s are, whatever clock
+    /// the transport is given; never hyper-util's, which finds its runtime by itself.
+    #[cfg(feature = "http")]
+    #[derive(Debug, Clone)]
+    pub(crate) struct HyperTimer {
+        handle: Handle,
+    }
+
+    #[cfg(feature = "http")]
+    impl HyperTimer {
+        /// The timer of the runtime `handle` names, its time driver checked as the transport was
+        /// built.
+        pub(crate) const fn on(handle: Handle) -> Self {
+            Self { handle }
+        }
+    }
+
+    /// A sleep of [`HyperTimer`]'s: tokio's.
+    #[cfg(feature = "http")]
+    struct HyperSleep(core::pin::Pin<Box<tokio::time::Sleep>>);
+
+    #[cfg(feature = "http")]
+    impl Future for HyperSleep {
+        type Output = ();
+
+        fn poll(
+            self: core::pin::Pin<&mut Self>,
+            context: &mut core::task::Context<'_>,
+        ) -> core::task::Poll<()> {
+            self.get_mut().0.as_mut().poll(context)
+        }
+    }
+
+    #[cfg(feature = "http")]
+    impl hyper::rt::Sleep for HyperSleep {}
+
+    #[cfg(feature = "http")]
+    impl hyper::rt::Timer for HyperTimer {
+        fn sleep(&self, duration: Duration) -> core::pin::Pin<Box<dyn hyper::rt::Sleep>> {
+            let _entered = self.handle.enter();
+
+            Box::pin(HyperSleep(Box::pin(tokio::time::sleep(duration))))
+        }
+
+        fn sleep_until(&self, deadline: Instant) -> core::pin::Pin<Box<dyn hyper::rt::Sleep>> {
+            let _entered = self.handle.enter();
+
+            Box::pin(HyperSleep(Box::pin(tokio::time::sleep_until(
+                tokio::time::Instant::from_std(deadline),
+            ))))
         }
     }
 }

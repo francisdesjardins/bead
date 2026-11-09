@@ -66,3 +66,121 @@ fn builds_a_policy_of_its_members_checked_once_and_frozen_and_refuses_one_that_d
         HttpPolicy::of(&refused).expect_err(&format!("{refused:?}"));
     }
 }
+
+// * a policy no `HttpPolicy::of` built, which the other sides refuse, is none here: the type is
+// its proof
+#[cfg(feature = "http")]
+#[tokio::test]
+async fn gives_a_listener_its_members_from_its_policy_and_refuses_one_given_in_it_and_beside_it() {
+    use crate::http::server::{HttpTransportServer, HttpTransportServerOptions};
+    use crate::transport::ServerTransport;
+
+    let policy = HttpPolicy::of(&HttpPolicyOptions {
+        hosts: Some(vec!["api.example".to_owned()]),
+        maximum_body_bytes: Some(1_024),
+        ..HttpPolicyOptions::default()
+    })
+    .expect("a policy");
+    let given = |options: HttpTransportServerOptions| options.with_policy();
+    let taken = given(HttpTransportServerOptions {
+        pathname: Some("/bead".to_owned()),
+        policy: Some(policy.clone()),
+        ..HttpTransportServerOptions::default()
+    })
+    .expect("taken");
+
+    assert_eq!(
+        (
+            taken.hosts,
+            taken.maximum_body_bytes,
+            taken.pathname,
+            taken.policy
+        ),
+        (
+            Some(vec!["api.example".to_owned()]),
+            Some(1_024),
+            Some("/bead".to_owned()),
+            None
+        ),
+        "its members in their places"
+    );
+
+    // a member the policy gives none of is the listener's own, beside a policy or with none
+    for with in [Some(policy.clone()), None] {
+        let taken = given(HttpTransportServerOptions {
+            origins: Some(vec!["https://app.example".to_owned()]),
+            policy: with,
+            ..HttpTransportServerOptions::default()
+        })
+        .expect("taken");
+
+        assert_eq!(
+            taken.origins,
+            Some(vec!["https://app.example".to_owned()]),
+            "its own"
+        );
+    }
+
+    let refused = given(HttpTransportServerOptions {
+        hosts: Some(vec!["other.example".to_owned()]),
+        policy: Some(policy.clone()),
+        ..HttpTransportServerOptions::default()
+    })
+    .expect_err("given twice");
+
+    assert_eq!(
+        refused.to_string(),
+        "hosts is given in the policy and beside it: give it once",
+        "its words"
+    );
+
+    // a member given beside its policy is given, at its default as at any other value
+    let proxied = HttpPolicy::of(&HttpPolicyOptions {
+        unnamed_proxies: Some(1),
+        ..HttpPolicyOptions::default()
+    })
+    .expect("a policy");
+
+    assert_eq!(
+        given(HttpTransportServerOptions {
+            policy: Some(proxied.clone()),
+            ..HttpTransportServerOptions::default()
+        })
+        .expect("taken")
+        .unnamed_proxies,
+        Some(1),
+        "the policy's"
+    );
+    assert_eq!(
+        given(HttpTransportServerOptions {
+            policy: Some(proxied),
+            unnamed_proxies: Some(0),
+            ..HttpTransportServerOptions::default()
+        })
+        .expect_err("given twice")
+        .to_string(),
+        "unnamedProxies is given in the policy and beside it: give it once",
+        "at its default"
+    );
+
+    // the HTTP transport takes one, as a gateway does
+    assert_eq!(
+        HttpTransportServer::new(&HttpTransportServerOptions {
+            policy: Some(policy.clone()),
+            ..HttpTransportServerOptions::default()
+        })
+        .expect("built")
+        .transport_type(),
+        Some("HTTP"),
+        "built on it"
+    );
+    assert!(
+        HttpTransportServer::new(&HttpTransportServerOptions {
+            maximum_body_bytes: Some(2_048),
+            policy: Some(policy),
+            ..HttpTransportServerOptions::default()
+        })
+        .is_err(),
+        "refused, given twice"
+    );
+}

@@ -172,6 +172,12 @@ impl SendPace {
         }
     }
 
+    /// Whether it still judges what waits.
+    #[cfg(feature = "http")]
+    pub(crate) fn is_running(&self) -> bool {
+        locked(&self.inner.state).timer.is_some()
+    }
+
     /// Nothing more is judged: the socket is gone, or done.
     pub(crate) fn stop(&self) {
         let timer = {

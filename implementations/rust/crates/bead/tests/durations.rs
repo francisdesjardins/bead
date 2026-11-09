@@ -24,17 +24,18 @@ use bead::{
     BrokerParticipantOptions, BrokerPublication, BrokerStart, BrokerSubscription,
     BrokerTransportClientConnectOptions, BrokerTransportClientOptions, BrokerTransportServer,
     BrokerTransportServerOptions, Call, CallError, ClientListener, ConnectionHandle, DebugEvent,
-    DestinationOptions, DurationRefusal, HttpPolicy, HttpPolicyOptions, LIMIT_DEFAULTS,
-    MemoryBroker, MemoryBrokerAdapter, MemoryBrokerAdapterOptions, MemoryBrokerOptions,
-    MemoryTransportClient, MemoryTransportClientConnectOptions, MemoryTransportClientOptions,
-    MemoryTransportServer, MemoryTransportServerOptions, NEVER, Procedure, ProgrammerError,
-    RawCodec, ReadyState, Refusal, RelayLeg, RelayOptions, RelayRouter, RelayTarget,
-    RequestDefaults, RequestDependencies, RequestHeader, RequestOptions, ResolvedRequestOptions,
-    RouterClient, RouterClientOptions, RouterClientTransport, RouterError, RouterLimits,
-    RouterLimitsOptions, RouterRequest, RouterServer, RouterServerOptions, Sent, Server,
-    ServerListener, ServerOptions, ServerTransport, ServiceManager, ServiceManagerOptions,
-    ServiceRouter, SessionManagerOptions, SharedClock, TransportClientReconnectDelay,
-    TransportClientReconnectOptions, TransportError, TransportMessage, WebSocketTransportClient,
+    DestinationOptions, DurationRefusal, HttpPolicy, HttpPolicyOptions, HttpTransportServer,
+    HttpTransportServerOptions, LIMIT_DEFAULTS, MemoryBroker, MemoryBrokerAdapter,
+    MemoryBrokerAdapterOptions, MemoryBrokerOptions, MemoryTransportClient,
+    MemoryTransportClientConnectOptions, MemoryTransportClientOptions, MemoryTransportServer,
+    MemoryTransportServerOptions, NEVER, Procedure, ProgrammerError, RawCodec, ReadyState, Refusal,
+    RelayLeg, RelayOptions, RelayRouter, RelayTarget, RequestDefaults, RequestDependencies,
+    RequestHeader, RequestOptions, ResolvedRequestOptions, RouterClient, RouterClientOptions,
+    RouterClientTransport, RouterError, RouterLimits, RouterLimitsOptions, RouterRequest,
+    RouterServer, RouterServerOptions, Sent, Server, ServerListener, ServerOptions,
+    ServerTransport, ServiceManager, ServiceManagerOptions, ServiceRouter, SessionManagerOptions,
+    SharedClock, TransportClientReconnectDelay, TransportClientReconnectOptions, TransportError,
+    TransportMessage, TransportServerStartOptions, WebSocketTransportClient,
     WebSocketTransportClientConnectOptions, WebSocketTransportClientOptions,
     WebSocketTransportServer, WebSocketTransportServerOptions,
 };
@@ -109,7 +110,7 @@ fn ways_of(place: &str) -> &'static [&'static str] {
         }
         "httpTransportServer.sendGracePeriod"
         | "httpTransportServer.headersTimeout"
-        | "httpTransportServer.bodyGracePeriod" => &["policy"],
+        | "httpTransportServer.bodyGracePeriod" => &["options", "policy"],
         "webSocketTransport.closeTimeout" | "webSocketTransport.heartbeat" => &["server", "client"],
         _ => &[],
     }
@@ -124,7 +125,7 @@ fn ahead_of(place: &str) -> &'static [&'static str] {
         "httpTransportServer.maximumWait" => &["options"],
         "httpTransportServer.sendGracePeriod"
         | "httpTransportServer.headersTimeout"
-        | "httpTransportServer.bodyGracePeriod" => &["options", "gateway"],
+        | "httpTransportServer.bodyGracePeriod" => &["gateway"],
         _ => &[],
     }
 }
@@ -1640,6 +1641,112 @@ fn policy_way(member: &str, given: Option<Duration>) -> Played {
     Ok(Observed::Taken)
 }
 
+// an HTTP transport server on a stepping clock, its body's grace as `given`, connected to: the due
+// of the pace a body is held to, armed as its exchange's head is read, before a byte of it came;
+// refused, as it is built
+async fn http_body_grace_period_by_options(given: Option<Duration>) -> Played {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let clock = SteppingClock::new(epoch());
+    let mut options = HttpTransportServerOptions::default();
+
+    options.body_grace_period = given;
+    options.clock = Some(shared_of(&clock));
+
+    let server = match HttpTransportServer::new(&options) {
+        Ok(server) => server,
+        Err(refused) => return Ok(Observed::Refused(refused)),
+    };
+    let mut start = TransportServerStartOptions::default();
+
+    start.address = Some("127.0.0.1".to_owned());
+    start.find_open_port = Some(true);
+
+    let port = server
+        .start(&start)
+        .await
+        .map_err(|error| error.to_string())?
+        .port;
+    let head = |fields: &str| {
+        format!(
+            "POST /bead HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/prs.bead\r\n{fields}\r\n"
+        )
+    };
+    let mut connect = tokio::net::TcpStream::connect(("127.0.0.1", port))
+        .await
+        .map_err(|error| error.to_string())?;
+    let mut answer = Vec::new();
+
+    connect
+        .write_all(head("Content-Length: 0\r\n").as_bytes())
+        .await
+        .map_err(|error| error.to_string())?;
+
+    while !answer.windows(4).any(|window| window == b"\r\n\r\n") {
+        let mut chunk = [0_u8; 1_024];
+        let read = connect
+            .read(&mut chunk)
+            .await
+            .map_err(|error| error.to_string())?;
+
+        hold(read > 0, || "the connect's answer cut".to_owned())?;
+        answer.extend_from_slice(chunk.get(..read).unwrap_or_default());
+    }
+
+    let token = String::from_utf8_lossy(&answer)
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("bead-connection-token: ")
+                .map(str::to_owned)
+        })
+        .ok_or_else(|| "a connect drew no token".to_owned())?;
+    let mut exchange = tokio::net::TcpStream::connect(("127.0.0.1", port))
+        .await
+        .map_err(|error| error.to_string())?;
+
+    exchange
+        .write_all(
+            head(&format!(
+                "bead-connection-token: {token}\r\nContent-Length: 16\r\n"
+            ))
+            .as_bytes(),
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+
+    for _ in 0..1_000 {
+        if !clock.dues().is_empty() {
+            break;
+        }
+
+        bead::testing::rest(Duration::from_millis(5)).await;
+    }
+
+    let due = due_of(&clock.dues());
+
+    drop(exchange);
+    server.stop().await.map_err(|error| error.to_string())?;
+
+    Ok(Observed::Held(due?))
+}
+
+// an HTTP transport server built with `member` given, where its refusal alone is observed, as the
+// other sides observe it
+fn http_server_way(member: &str, given: Option<Duration>) -> Played {
+    let mut options = HttpTransportServerOptions::default();
+
+    match member {
+        "sendGracePeriod" => options.send_grace_period = given,
+        "headersTimeout" => options.headers_timeout = given,
+        "bodyGracePeriod" => options.body_grace_period = given,
+        _ => {
+            return Err(format!("an HTTP transport server has no member {member}"));
+        }
+    }
+
+    Ok(HttpTransportServer::new(&options).map_or_else(Observed::Refused, |_| Observed::Taken))
+}
+
 // a WebSocket transport server built with `member` given, where its refusal alone is observed, as
 // the other sides observe it
 fn web_socket_server_way(member: &str, given: Option<Duration>) -> Played {
@@ -1742,6 +1849,15 @@ async fn play_way((place, way): (&str, &str), given: Option<Duration>) -> Played
             participant_reconnection_delay_by_number(given).await
         }
         ("httpTransportServer.sendGracePeriod", "policy") => policy_way("sendGracePeriod", given),
+        ("httpTransportServer.sendGracePeriod", "options") => {
+            http_server_way("sendGracePeriod", given)
+        }
+        ("httpTransportServer.headersTimeout", "options") => {
+            http_server_way("headersTimeout", given)
+        }
+        ("httpTransportServer.bodyGracePeriod", "options") => {
+            http_body_grace_period_by_options(given).await
+        }
         ("httpTransportServer.headersTimeout", "policy") => policy_way("headersTimeout", given),
         ("httpTransportServer.bodyGracePeriod", "policy") => policy_way("bodyGracePeriod", given),
         ("webSocketTransport.closeTimeout", "server") => {

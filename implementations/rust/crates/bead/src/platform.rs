@@ -51,7 +51,7 @@ pub(crate) fn runtime_of(
 
 /// The runtime a socket transport runs on: [`runtime_of`]'s, its IO driver checked besides, as its
 /// time driver is (decision 0049); `subject` names the transport in the refusal.
-#[cfg(feature = "websocket")]
+#[cfg(any(feature = "websocket", feature = "http"))]
 pub(crate) fn socket_runtime_of(
     given: Option<&Handle>,
     subject: &'static str,

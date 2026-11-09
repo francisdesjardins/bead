@@ -5,25 +5,20 @@
 //! its socket, what it read past the head first, to tungstenite.
 
 use core::fmt;
-use core::future::{Future, poll_fn};
-use core::pin::pin;
-use core::task::Poll;
 use core::time::Duration;
 use std::collections::{BTreeSet, HashMap};
 use std::io;
-use std::net::{IpAddr, SocketAddr};
+use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
 
 use bytes::Bytes;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::oneshot;
-use tokio_util::sync::CancellationToken;
+use tokio::net::TcpStream;
 use tungstenite::protocol::Role;
 
-use crate::clock::{Schedule, SharedClock, SystemClock};
+use crate::clock::{SharedClock, SystemClock};
 use crate::constants::{ProtocolCode, RouterSide};
 use crate::duration::{hold, hold_finite};
 use crate::errors::ProgrammerError;
@@ -31,13 +26,11 @@ use crate::failure::Failure;
 use crate::failure::ProcedureAddress;
 use crate::identity::procedures_taken_of;
 use crate::judgement::handshake::{
-    AnswerField, HandshakeRefusal, HandshakeRequest, HandshakeTaken, busy_handshake,
-    refusal_of_handshake, told_of_handshake,
+    HandshakeRefusal, HandshakeRequest, HandshakeTaken, busy_handshake, refusal_of_handshake,
+    told_of_handshake,
 };
 use crate::judgement::head::{Head, HeadRead, read_head};
-use crate::judgement::hosts::{
-    assert_hosts, assert_listening_address, assert_origins, credential_of,
-};
+use crate::judgement::hosts::{assert_hosts, assert_origins, credential_of};
 use crate::judgement::proxies::{
     ClientAddressOptions, TrustedProxies, client_address_of, trusted_proxies_of,
 };
@@ -48,8 +41,8 @@ use crate::net::bounds::{
     hold_count,
 };
 use crate::net::linger::close_in_stages;
-use crate::net::loopbacks::{LOCALHOST, LoopbackBinding, bind_loopbacks, listener_on};
-use crate::platform::{self, Handle, JoinHandle};
+use crate::net::listening::{Bound, Listening, accepting, answer_of, bind, unmarked, within};
+use crate::platform::{self, Handle};
 use crate::router::types::{BoxFuture, ConnectionHandle, Gauges, RouterError, TransportMessage};
 use crate::transport::{
     Listeners, ReadyState, Sent, ServerListener, ServerTransport, TransportServerAddress,
@@ -70,9 +63,6 @@ mod tests;
 
 /// The type every handle a WebSocket transport server draws begins with (spec 15.1).
 pub const TRANSPORT_WEBSOCKET: &str = "WS";
-
-// the port a start names none of listens on, HTTP's
-const PORT: u16 = 80;
 
 // what a head is read by at once
 const READ_BYTES: usize = 4_096;
@@ -169,13 +159,6 @@ struct Held {
     last_activity: Option<SystemTime>,
 }
 
-// one address it listens on: whether that listener still serves what comes, and its accepting
-struct Listening {
-    serving: Arc<AtomicBool>,
-    stop: CancellationToken,
-    task: JoinHandle<()>,
-}
-
 #[derive(Default)]
 struct ServerState {
     connections: HashMap<ConnectionHandle, Held>,
@@ -253,163 +236,6 @@ impl fmt::Debug for WebSocketTransportServer {
     }
 }
 
-// what an io error stands for, as a start reports it
-fn io_error(error: io::Error) -> RouterError {
-    RouterError::Other(Arc::new(error))
-}
-
-fn misuse(error: ProgrammerError) -> RouterError {
-    RouterError::Other(Arc::new(error))
-}
-
-/// `future`'s output, or none once `token` is cancelled first.
-async fn unless_cancelled<F: Future>(token: &CancellationToken, future: F) -> Option<F::Output> {
-    let mut cancelled = pin!(token.cancelled());
-    let mut future = pin!(future);
-
-    poll_fn(|context| {
-        if cancelled.as_mut().poll(context).is_ready() {
-            return Poll::Ready(None);
-        }
-
-        future.as_mut().poll(context).map(Some)
-    })
-    .await
-}
-
-/// `future`'s output, or none once `timeout` passed on `clock` first.
-async fn within<F: Future>(
-    clock: &SharedClock,
-    (timeout, future): (Duration, F),
-) -> Option<F::Output> {
-    let (woken, wait) = oneshot::channel::<()>();
-    let mut woken = Some(woken);
-    let timer = clock
-        .arm(
-            Schedule::Once(timeout),
-            Box::new(move || {
-                if let Some(woken) = woken.take() {
-                    woken.send(()).ok();
-                }
-            }),
-        )
-        .ok();
-    let mut wait = pin!(wait);
-    let mut future = pin!(future);
-    let outcome = poll_fn(|context| {
-        if let Poll::Ready(output) = future.as_mut().poll(context) {
-            return Poll::Ready(Some(output));
-        }
-
-        // a clock that arms no timer waits without end
-        if timer.is_some() && wait.as_mut().poll(context).is_ready() {
-            return Poll::Ready(None);
-        }
-
-        Poll::Pending
-    })
-    .await;
-
-    if let Some(timer) = timer {
-        timer.cancel();
-    }
-
-    outcome
-}
-
-/// An instant as an HTTP date, its IMF-fixdate (RFC 9110 §5.6.7).
-#[expect(
-    clippy::arithmetic_side_effects,
-    reason = "a day's civil date: each operand is bounded by the days since the epoch, divided down"
-)]
-fn http_date(instant: SystemTime) -> String {
-    const DAYS: [&str; 7] = ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"];
-    const MONTHS: [&str; 12] = [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-    ];
-
-    let seconds = instant
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |since| since.as_secs());
-    let days = seconds / 86_400;
-    let of_day = seconds % 86_400;
-    // the civil date of a day since the epoch, by Howard Hinnant's algorithm
-    let shifted = days.saturating_add(719_468);
-    let era = shifted / 146_097;
-    let of_era = shifted % 146_097;
-    let year_of_era = (of_era - of_era / 1_460 + of_era / 36_524 - of_era / 146_096) / 365;
-    let of_year = of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
-    let month_index = (5 * of_year + 2) / 153;
-    let day = of_year - (153 * month_index + 2) / 5 + 1;
-    let month = if month_index < 10 {
-        month_index + 3
-    } else {
-        month_index - 9
-    };
-    let year = year_of_era + era * 400 + u64::from(month <= 2);
-    let weekday = DAYS
-        .get(usize::try_from(days % 7).unwrap_or(0))
-        .copied()
-        .unwrap_or_default();
-    let month_name = MONTHS
-        .get(usize::try_from(month.saturating_sub(1)).unwrap_or(0))
-        .copied()
-        .unwrap_or_default();
-
-    format!(
-        "{weekday}, {day:02} {month_name} {year} {:02}:{:02}:{:02} GMT",
-        of_day / 3_600,
-        of_day % 3_600 / 60,
-        of_day % 60
-    )
-}
-
-/// An answer's head: its status line, its date when it has one, then `fields` in their order.
-fn answer_of(status: u16, (date, fields): (Option<String>, &[AnswerField])) -> String {
-    let reason = http::StatusCode::from_u16(status)
-        .ok()
-        .and_then(|code| code.canonical_reason())
-        .unwrap_or_default();
-    let mut answer = format!("HTTP/1.1 {status} {reason}\r\n");
-
-    if let Some(date) = date {
-        answer.push_str("date: ");
-        answer.push_str(&date);
-        answer.push_str("\r\n");
-    }
-
-    for field in fields {
-        answer.push_str(field.name);
-        answer.push_str(": ");
-        answer.push_str(field.value);
-        answer.push_str("\r\n");
-    }
-
-    answer.push_str("\r\n");
-    answer
-}
-
-// what HTTP answers of its own, unmarked, its connection closed: a head past its bounds, one that
-// does not read, or one that did not come within its timeout
-fn unmarked(status: u16) -> String {
-    answer_of(
-        status,
-        (
-            None,
-            &[
-                AnswerField {
-                    name: "connection",
-                    value: "close",
-                },
-                AnswerField {
-                    name: "content-length",
-                    value: "0",
-                },
-            ],
-        ),
-    )
-}
-
 // the values of each line of the field `name`, as they came
 fn lines_of<'a>(fields: &[&'a str], name: &str) -> Vec<&'a str> {
     fields
@@ -476,91 +302,37 @@ impl ServerInner {
         self: &Arc<Self>,
         options: &TransportServerStartOptions,
     ) -> Result<TransportServerAddress, RouterError> {
-        let address = options
-            .address
-            .clone()
-            .unwrap_or_else(|| LOCALHOST.to_owned());
-
-        assert_listening_address(&address).map_err(misuse)?;
-
-        if options
-            .signal
-            .as_ref()
-            .is_some_and(CancellationToken::is_cancelled)
-        {
-            return Err(RouterError::Other(Arc::new(
-                crate::errors::TransportError::cancelled("the start was cancelled"),
-            )));
-        }
-
-        let port = options.port.unwrap_or(PORT);
-        let find_open_port = options.find_open_port.unwrap_or(false);
-        let (bound, reported) = if address == LOCALHOST {
-            let bound = bind_loopbacks(
-                |addresses: &[IpAddr], port| {
-                    addresses
-                        .iter()
-                        .map(|address| listener_on(*address, port))
-                        .collect::<io::Result<Vec<_>>>()
-                },
-                &LoopbackBinding::new(port, find_open_port),
-            )
-            .map_err(io_error)?;
-
-            (bound.started, bound.address.to_owned())
-        } else {
-            let ip: IpAddr = address.parse().map_err(|_unparsed| {
-                misuse(ProgrammerError::new(format!(
-                    "a server listens on an IP address, or on localhost, not \"{address}\""
-                )))
-            })?;
-            let listener =
-                listener_on(ip, if find_open_port { 0 } else { port }).map_err(io_error)?;
-
-            (vec![listener], address)
-        };
-        let port = bound
-            .first()
-            .map(std::net::TcpListener::local_addr)
-            .transpose()
-            .map_err(io_error)?
-            .map_or(port, |local| local.port());
-        let listeners = {
-            let _entered = self.runtime.enter();
-
-            bound
-                .into_iter()
-                .map(TcpListener::from_std)
-                .collect::<io::Result<Vec<_>>>()
-                .map_err(io_error)?
-        };
+        let Bound { listeners, address } = bind(&self.runtime, options)?;
         let listening: Vec<Listening> = listeners
             .into_iter()
             .map(|listener| {
-                let serving = Arc::new(AtomicBool::new(true));
-                let stop = CancellationToken::new();
-                let task = platform::spawn(
-                    &self.runtime,
-                    accept(
-                        (Weak::clone(&self.me), listener),
-                        (Arc::clone(&serving), stop.clone()),
-                    ),
-                );
+                let server = Weak::clone(&self.me);
 
-                Listening {
-                    serving,
-                    stop,
-                    task,
-                }
+                accepting(
+                    &self.runtime,
+                    (listener, move |accepted, serving: &Arc<AtomicBool>| {
+                        let Some(inner) = server.upgrade() else {
+                            return false;
+                        };
+                        let runtime = inner.runtime.clone();
+
+                        drop(platform::spawn(
+                            &runtime,
+                            inner.serve(accepted, Arc::clone(serving)),
+                        ));
+
+                        true
+                    }),
+                )
             })
             .collect();
         let mut state = locked(&self.state);
 
         state.listening.extend(listening);
-        state.listens_on = Some(reported.clone());
+        state.listens_on = Some(address.address.clone());
         drop(state);
 
-        Ok(TransportServerAddress::new(reported, port))
+        Ok(address)
     }
 
     // its stop's body: no upgrade served from now, each listener let go, then each connection
@@ -580,8 +352,7 @@ impl ServerInner {
         };
 
         for listener in &listening {
-            listener.serving.store(false, Ordering::SeqCst);
-            listener.stop.cancel();
+            listener.let_go();
         }
 
         for commands in &held {
@@ -590,7 +361,7 @@ impl ServerInner {
 
         Box::pin(async move {
             for listener in listening {
-                listener.task.await.ok();
+                listener.ended().await;
             }
 
             for commands in held {
@@ -763,7 +534,7 @@ impl ServerInner {
             refusal: reason,
             status,
         } = refusal;
-        let date = reason.map(|_| http_date(self.clock.wall()));
+        let date = reason.map(|_| httpdate::fmt_http_date(self.clock.wall()));
 
         self.answer(socket, answer_of(status, (date, &fields)))
             .await;
@@ -942,32 +713,6 @@ impl ServerInner {
             |listener: &dyn ServerListener| listener.on_close(is_clean, handle),
             Some(handle),
         ));
-    }
-}
-
-// accepts what comes to `listener` until its stop, each socket served by a task of its own
-async fn accept(
-    (server, listener): (Weak<ServerInner>, TcpListener),
-    (serving, stop): (Arc<AtomicBool>, CancellationToken),
-) {
-    while let Some(accepted) = unless_cancelled(&stop, listener.accept()).await {
-        let Some(inner) = server.upgrade() else {
-            return;
-        };
-
-        match accepted {
-            Ok((socket, peer)) => {
-                let runtime = inner.runtime.clone();
-
-                drop(platform::spawn(
-                    &runtime,
-                    inner.serve((socket, peer), Arc::clone(&serving)),
-                ));
-            }
-            // a socket gone before it was taken, or the system short of descriptors: the next is
-            // taken in a later turn
-            Err(_) => platform::yield_now().await,
-        }
     }
 }
 

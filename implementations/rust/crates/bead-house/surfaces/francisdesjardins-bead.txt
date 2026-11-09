@@ -111,6 +111,15 @@ crate
   use failure::Failure
   use failure::FailureOrigin
   use failure::ProcedureAddress
+  use http::fields::HTTP_REFUSALS #[cfg(feature = "http")]
+  use http::fields::HttpRefusals #[cfg(feature = "http")]
+  use http::server::BODY_BYTES_BUDGET #[cfg(feature = "http")]
+  use http::server::HttpTransportServer #[cfg(feature = "http")]
+  use http::server::HttpTransportServerOptions #[cfg(feature = "http")]
+  use http::server::MAXIMUM_BODY_BYTES #[cfg(feature = "http")]
+  use http::server::MAXIMUM_WAITING_EXCHANGES #[cfg(feature = "http")]
+  use http::server::PATHNAME #[cfg(feature = "http")]
+  use http::server::TRANSPORT_HTTP #[cfg(feature = "http")]
   use http_policy::HttpPolicy
   use http_policy::HttpPolicyOptions
   use identity::DeclarationWay
@@ -190,9 +199,9 @@ crate
   use metrics::ProcedureSeries
   use metrics::ResolverSeries
   use metrics::RouterMetrics
-  use net::bounds::HEADERS_TIMEOUT #[cfg(feature = "websocket")]
-  use net::bounds::MINIMUM_SEND_BYTES_PER_SECOND #[cfg(feature = "websocket")]
-  use net::bounds::SEND_GRACE_PERIOD #[cfg(feature = "websocket")]
+  use net::bounds::HEADERS_TIMEOUT #[cfg(any(feature = "websocket", feature = "http"))]
+  use net::bounds::MINIMUM_SEND_BYTES_PER_SECOND #[cfg(any(feature = "websocket", feature = "http"))]
+  use net::bounds::SEND_GRACE_PERIOD #[cfg(any(feature = "websocket", feature = "http"))]
   use payloads::CodecRefusal
   use payloads::JsonCodec
   use payloads::JsonOf
@@ -1024,6 +1033,58 @@ crate::failure
     fn record(&self) -> FailureRecord
     implements Display, Error
     derives Clone, Debug
+crate::http::fields
+  struct HttpRefusals #[non_exhaustive] #[cfg(feature = "http")]
+    pub busy: &'static str #[cfg(feature = "http")]
+    pub call_waiting: &'static str #[cfg(feature = "http")]
+    pub connection_unknown: &'static str #[cfg(feature = "http")]
+    pub host: &'static str #[cfg(feature = "http")]
+    pub listen_undeclared: &'static str #[cfg(feature = "http")]
+    pub malformed: &'static str #[cfg(feature = "http")]
+    pub method: &'static str #[cfg(feature = "http")]
+    pub origin: &'static str #[cfg(feature = "http")]
+    pub path: &'static str #[cfg(feature = "http")]
+    pub too_large: &'static str #[cfg(feature = "http")]
+    pub too_slow: &'static str #[cfg(feature = "http")]
+    pub type_refused: &'static str #[cfg(feature = "http")]
+    derives Clone, Copy, Debug, Eq, PartialEq #[cfg(feature = "http")]
+  const HTTP_REFUSALS: HttpRefusals #[cfg(feature = "http")]
+crate::http::server
+  const TRANSPORT_HTTP: &str #[cfg(feature = "http")]
+  const BODY_BYTES_BUDGET: u64 #[cfg(feature = "http")]
+  const MAXIMUM_BODY_BYTES: u64 #[cfg(feature = "http")]
+  const MAXIMUM_WAITING_EXCHANGES: u64 #[cfg(feature = "http")]
+  const PATHNAME: &str #[cfg(feature = "http")]
+  struct HttpTransportServerOptions #[non_exhaustive] #[cfg(feature = "http")]
+    pub clock: Option<SharedClock> #[cfg(feature = "http")]
+    pub runtime: Option<Handle> #[cfg(feature = "http")]
+    pub procedures: Option<Vec<ProcedureAddress>> #[cfg(feature = "http")]
+    pub policy: Option<HttpPolicy> #[cfg(feature = "http")]
+    pub body_bytes_budget: Option<u64> #[cfg(feature = "http")]
+    pub body_grace_period: Option<Duration> #[cfg(feature = "http")]
+    pub headers_timeout: Option<Duration> #[cfg(feature = "http")]
+    pub hosts: Option<Vec<String>> #[cfg(feature = "http")]
+    pub maximum_body_bytes: Option<u64> #[cfg(feature = "http")]
+    pub maximum_connections: Option<u64> #[cfg(feature = "http")]
+    pub maximum_connections_per_address: Option<u64> #[cfg(feature = "http")]
+    pub maximum_waiting_exchanges: Option<u64> #[cfg(feature = "http")]
+    pub minimum_body_bytes_per_second: Option<u64> #[cfg(feature = "http")]
+    pub minimum_send_bytes_per_second: Option<u64> #[cfg(feature = "http")]
+    pub origins: Option<Vec<String>> #[cfg(feature = "http")]
+    pub pathname: Option<String> #[cfg(feature = "http")]
+    pub secure: Option<bool> #[cfg(feature = "http")]
+    pub send_grace_period: Option<Duration> #[cfg(feature = "http")]
+    pub trusted_proxies: Option<Vec<String>> #[cfg(feature = "http")]
+    pub unnamed_proxies: Option<u64> #[cfg(feature = "http")]
+    derives Clone, Debug, Default #[cfg(feature = "http")]
+  struct HttpTransportServer #[cfg(feature = "http")]
+    fn new(options: &HttpTransportServerOptions) -> Result<Self, ProgrammerError>
+    fn ready_state(&self) -> ReadyState
+    fn start(&self, options: &TransportServerStartOptions) -> BoxFuture<Result<TransportServerAddress, RouterError>>
+    fn dispose(&self) -> BoxFuture<Result<(), RouterError>>
+    fn clients(&self) -> Vec<TransportServerClient>
+    implements Debug, ServerTransport
+    derives Clone #[cfg(feature = "http")]
 crate::http_policy
   struct HttpPolicyOptions #[non_exhaustive]
     pub body_bytes_budget: Option<u64>
@@ -1641,9 +1702,9 @@ crate::metrics
     fn declare_notification(&self, procedure: &Procedure) -> Result<NotificationSeries, ProgrammerError>
     derives Clone, Debug
 crate::net::bounds
-  const MINIMUM_SEND_BYTES_PER_SECOND: u64 #[cfg(feature = "websocket")]
-  const SEND_GRACE_PERIOD: Duration #[cfg(feature = "websocket")]
-  const HEADERS_TIMEOUT: Duration #[cfg(feature = "websocket")]
+  const MINIMUM_SEND_BYTES_PER_SECOND: u64 #[cfg(any(feature = "websocket", feature = "http"))]
+  const SEND_GRACE_PERIOD: Duration #[cfg(any(feature = "websocket", feature = "http"))]
+  const HEADERS_TIMEOUT: Duration #[cfg(any(feature = "websocket", feature = "http"))]
 crate::payloads
   struct CodecRefusal
     fn new<R: Into<String>>(reason: R) -> Self

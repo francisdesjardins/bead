@@ -4,6 +4,9 @@
 
 pub(crate) mod bounds;
 pub(crate) mod linger;
+pub(crate) mod listening;
 pub(crate) mod loopbacks;
+#[cfg(feature = "websocket")]
 pub(crate) mod racing;
+#[cfg(feature = "websocket")]
 pub(crate) mod tls;

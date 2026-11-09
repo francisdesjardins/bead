@@ -18,6 +18,8 @@ mod duration;
 mod envelope;
 mod errors;
 mod failure;
+#[cfg(feature = "http")]
+mod http;
 mod http_policy;
 mod identity;
 mod joined;
@@ -28,7 +30,7 @@ mod life;
 mod managers;
 mod memory;
 mod metrics;
-#[cfg(feature = "websocket")]
+#[cfg(any(feature = "websocket", feature = "http"))]
 mod net;
 mod ordered;
 mod owner;
@@ -102,6 +104,13 @@ pub use errors::{
     ReconnectError, Refusal, ResolverError, TransportError,
 };
 pub use failure::{Failure, FailureOrigin, ProcedureAddress};
+#[cfg(feature = "http")]
+pub use http::fields::{HTTP_REFUSALS, HttpRefusals};
+#[cfg(feature = "http")]
+pub use http::server::{
+    BODY_BYTES_BUDGET, HttpTransportServer, HttpTransportServerOptions, MAXIMUM_BODY_BYTES,
+    MAXIMUM_WAITING_EXCHANGES, PATHNAME, TRANSPORT_HTTP,
+};
 pub use http_policy::{HttpPolicy, HttpPolicyOptions};
 pub use identity::{DeclarationWay, Deprecation, IdentityRefusal, Procedure};
 pub use joined::JoinedServerTransport;
@@ -133,7 +142,7 @@ pub use metrics::{
     MetricsRegistry, MetricsRegistryOptions, NotificationSeries, ProcedureSeries, ResolverSeries,
     RouterMetrics,
 };
-#[cfg(feature = "websocket")]
+#[cfg(any(feature = "websocket", feature = "http"))]
 pub use net::bounds::{HEADERS_TIMEOUT, MINIMUM_SEND_BYTES_PER_SECOND, SEND_GRACE_PERIOD};
 pub use payloads::{CodecRefusal, JsonCodec, JsonOf, PayloadCodec, RawCodec, TextCodec};
 pub use router::admissions::{

@@ -8,12 +8,14 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::Notify;
 use tokio_tungstenite::WebSocketStream;
+use tokio_util::sync::CancellationToken;
 use tungstenite::protocol::Message;
 use tungstenite::protocol::frame::CloseFrame;
 use tungstenite::protocol::frame::coding::CloseCode;
 
 use super::*;
 use crate::NEVER;
+use crate::platform::JoinHandle;
 use crate::testing::{Instant, SteppingClock, patience, rest};
 
 const PATIENCE: Duration = Duration::from_secs(10);

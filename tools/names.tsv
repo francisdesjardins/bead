@@ -1,4 +1,4 @@
-# alone: typescript 306, csharp 61, rust 78
+# alone: typescript 301, csharp 61, rust 78
 # concept	typescript	csharp	rust	class
 ACCEPT_TIMEOUT	ACCEPT_TIMEOUT [constant]	-	ACCEPT_TIMEOUT [constant]	same
 AccessRefusal	IAccessRefusal [record]	AccessRefusal [record]	AccessRefusal [record]	same
@@ -111,7 +111,7 @@ Health	IHealth [record]	Health [record]	Health [record]	same
 HealthCheck	IHealthCheck [record]	HealthCheck [record]	HealthCheck [record]	same
 HealthStatus	HealthStatus [choice]	HealthStatus [choice]	HealthStatus [choice]	same
 HEARTBEAT	HEARTBEAT [constant]	-	HEARTBEAT [constant]	same
-HTTP_REFUSALS	HTTP_REFUSALS [constant]	HttpRefusals [constant]	-	same
+HTTP_REFUSALS	HTTP_REFUSALS [constant]	HttpRefusals [constant]	HTTP_REFUSALS [constant]	same
 HTTPBinding	IHTTPBinding [record], createHTTPBinding [function]	HttpBinding [record]	-	same
 HTTPCaller	IHTTPCaller [record], createHTTPCaller [function]	HttpCaller [record]	-	same
 HTTPCallerOptions	IHTTPCallerOptions [record]	HttpCallerOptions [record]	-	same
@@ -125,14 +125,15 @@ HTTPGatewayStartOptions	IHTTPGatewayStartOptions [record]	HttpGatewayStartOption
 HttpPayload	HttpPayload [choice]	HttpPayload [record]	-	same
 HTTPPolicy	IHTTPPolicy [record]	HttpPolicy [record]	HttpPolicy [record]	same
 HTTPPolicyOptions	IHTTPPolicyOptions [record]	HttpPolicyOptions [record]	HttpPolicyOptions [record]	same
+HttpRefusals	-	-	HttpRefusals [record]	own: the type of the Rust side's constant of refusals, where the other sides hold a frozen object and a static class of constants (0044)
 HttpRouteTemplate	IHttpRouteTemplate [record]	HttpRouteTemplate [record]	-	same
 HTTPServer	HTTPServer [record], createHTTPServer [function]	HttpServer [record]	-	same
 HTTPServerOptions	IHTTPServerOptions [record]	HttpServerOptions [record]	-	same
 HTTPTransportClient	HTTPTransportClient [record], createHTTPTransportClient [function]	HttpTransportClient [record]	-	same
 HTTPTransportClientConnectOptions	IHTTPTransportClientConnectOptions [record]	HttpTransportClientConnectOptions [record]	-	same
 HTTPTransportClientOptions	IHTTPTransportClientOptions [record]	HttpTransportClientOptions [record]	-	same
-HTTPTransportServer	HTTPTransportServer [record], createHTTPTransportServer [function]	HttpTransportServer [record]	-	same
-HTTPTransportServerOptions	IHTTPTransportServerOptions [record]	HttpTransportServerOptions [record]	-	same
+HTTPTransportServer	HTTPTransportServer [record], createHTTPTransportServer [function]	HttpTransportServer [record]	HttpTransportServer [record]	same
+HTTPTransportServerOptions	IHTTPTransportServerOptions [record]	HttpTransportServerOptions [record]	HttpTransportServerOptions [record]	same
 IdentityRefusal	-	-	IdentityRefusal [choice]	own: a Result's error, where the other sides throw (0044)
 INTAKE_DEFAULTS	INTAKE_DEFAULTS [constant]	-	INTAKE_DEFAULTS [constant]	same
 IntakeLimits	IIntakeLimits [record]	IntakeLimits [record]	IntakeLimits [record]	same
@@ -348,7 +349,7 @@ Arose	Arose [choice]	-	-	alone
 BEAD_BATCH_MEDIA_TYPE	BEAD_BATCH_MEDIA_TYPE [constant]	-	-	alone
 BEAD_MEDIA_TYPE	BEAD_MEDIA_TYPE [constant]	-	-	alone
 BeadServer	-	IBeadServer [record]	-	alone
-BODY_BYTES_BUDGET	BODY_BYTES_BUDGET [constant]	-	-	alone
+BODY_BYTES_BUDGET	BODY_BYTES_BUDGET [constant]	-	BODY_BYTES_BUDGET [constant]	same
 BROKER_DELIVERIES	BROKER_DELIVERIES [constant]	-	-	alone
 BROKER_PUBLISHED	BROKER_PUBLISHED [constant]	-	-	alone
 BrokerAnswers	IBrokerAnswers [record]	-	-	alone
@@ -540,7 +541,7 @@ LOCALHOST	LOCALHOST [constant]	-	-	alone
 LOCALHOST_DRAWS	LOCALHOST_DRAWS [constant]	-	-	alone
 matchesPattern	matchesPattern [function]	-	-	alone
 matchesTemplate	matchesTemplate [function]	-	-	alone
-MAXIMUM_BODY_BYTES	MAXIMUM_BODY_BYTES [constant]	-	-	alone
+MAXIMUM_BODY_BYTES	MAXIMUM_BODY_BYTES [constant]	-	MAXIMUM_BODY_BYTES [constant]	same
 MAXIMUM_DEPTH	MAXIMUM_DEPTH [constant]	-	-	alone
 MAXIMUM_EXCHANGES	MAXIMUM_EXCHANGES [constant]	-	-	alone
 MAXIMUM_EXCHANGES_PER_ADDRESS	MAXIMUM_EXCHANGES_PER_ADDRESS [constant]	-	-	alone
@@ -548,7 +549,7 @@ MAXIMUM_MESSAGE_SIZE	MAXIMUM_MESSAGE_SIZE [constant]	-	-	alone
 MAXIMUM_OUTBOX_BYTES	MAXIMUM_OUTBOX_BYTES [constant]	-	-	alone
 MAXIMUM_PACKET_SIZE	MAXIMUM_PACKET_SIZE [constant]	-	-	alone
 MAXIMUM_WAIT	MAXIMUM_WAIT [constant]	-	-	alone
-MAXIMUM_WAITING_EXCHANGES	MAXIMUM_WAITING_EXCHANGES [constant]	-	-	alone
+MAXIMUM_WAITING_EXCHANGES	MAXIMUM_WAITING_EXCHANGES [constant]	-	MAXIMUM_WAITING_EXCHANGES [constant]	same
 MEMORY_ADDRESS	-	-	MEMORY_ADDRESS [constant]	alone
 MEMORY_BROKER_FAULTS	MEMORY_BROKER_FAULTS [constant]	-	-	alone
 MemoryAcceptOptions	IMemoryAcceptOptions [record]	-	-	alone
@@ -577,7 +578,7 @@ Pacing	IPacing [record]	-	-	alone
 PARCEL_VERDICTS	PARCEL_VERDICTS [constant]	-	-	alone
 parseTemplate	parseTemplate [function]	-	-	alone
 PARTICIPANT_PORT	PARTICIPANT_PORT [constant]	-	-	alone
-PATHNAME	PATHNAME [constant]	-	-	alone
+PATHNAME	PATHNAME [constant]	-	PATHNAME [constant]	same
 Pattern.Matches	-	Pattern.Matches [function]	-	alone
 PAYLOAD_CODECS	PAYLOAD_CODECS [constant]	-	-	alone
 payloadCodecOf	payloadCodecOf [function]	-	-	alone
@@ -705,7 +706,7 @@ TracedError	-	-	TracedError [record]	alone
 TracedValue	-	-	TracedValue [record]	alone
 TRANSPORT_AMQP	TRANSPORT_AMQP [constant]	-	-	alone
 TRANSPORT_CLIENT_EVENTS	TRANSPORT_CLIENT_EVENTS [choice]	-	-	alone
-TRANSPORT_HTTP	TRANSPORT_HTTP [constant]	-	-	alone
+TRANSPORT_HTTP	TRANSPORT_HTTP [constant]	-	TRANSPORT_HTTP [constant]	same
 TRANSPORT_MQTT	TRANSPORT_MQTT [constant]	-	-	alone
 TRANSPORT_SERVER_EVENTS	TRANSPORT_SERVER_EVENTS [choice]	-	-	alone
 TRANSPORT_WEBSOCKET_BINARYTYPE	TRANSPORT_WEBSOCKET_BINARYTYPE [constant]	-	-	alone

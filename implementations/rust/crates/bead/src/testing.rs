@@ -40,7 +40,7 @@ pub(crate) mod surface;
 mod tests;
 pub mod validations;
 pub mod vectors;
-#[cfg(feature = "websocket")]
+#[cfg(any(feature = "websocket", feature = "http"))]
 pub mod wire;
 
 #[cfg(test)]

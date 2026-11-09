@@ -32,6 +32,18 @@ websocket = [
   "dep:rustls",
   "dep:tokio-rustls",
   "dep:rustls-platform-verifier",
+  "dep:httpdate",
+]
+# the HTTP transport's server over tokio's sockets, on hyper's HTTP/1.1 (decision 0049)
+http = [
+  "tokio/net",
+  "tokio/io-util",
+  "dep:socket2",
+  "dep:http",
+  "dep:hyper",
+  "dep:hyper-util",
+  "dep:http-body-util",
+  "dep:httpdate",
 ]
 
 [dependencies]
@@ -51,19 +63,26 @@ httparse = { workspace = true }
 idna = { workspace = true }
 # the test kit's alone: the order of the seeds its mutations draw from, by their SHA-1
 sha1 = { workspace = true, optional = true }
-# the WebSocket transport's alone
+# both socket transports': a listener's socket, the request and response types, and the date both
+# servers write
 socket2 = { workspace = true, optional = true }
 http = { workspace = true, optional = true }
+httpdate = { workspace = true, optional = true }
+# the WebSocket transport's alone
 tungstenite = { workspace = true, optional = true }
 tokio-tungstenite = { workspace = true, optional = true }
 futures-util = { workspace = true, optional = true }
 rustls = { workspace = true, optional = true }
 tokio-rustls = { workspace = true, optional = true }
 rustls-platform-verifier = { workspace = true, optional = true }
+# the HTTP transport's alone
+hyper = { workspace = true, optional = true, features = ["server", "http1"] }
+hyper-util = { workspace = true, optional = true, features = ["tokio"] }
+http-body-util = { workspace = true, optional = true }
 
 [dev-dependencies]
 # the crate itself, with its test kit: one copy of bead for the unit tests and the players
-bead = { package = "francisdesjardins-bead", path = ".", features = ["testing", "websocket"] }
+bead = { package = "francisdesjardins-bead", path = ".", features = ["testing", "websocket", "http"] }
 bead-interop = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 libtest-mimic = { workspace = true }

@@ -300,6 +300,8 @@ jobs:
         run: cargo clippy -p francisdesjardins-bead --lib --locked
       - if: matrix.os == 'ubuntu-26.04'
         run: cargo clippy -p francisdesjardins-bead --lib --features websocket --locked
+      - if: matrix.os == 'ubuntu-26.04'
+        run: cargo clippy -p francisdesjardins-bead --lib --features http --locked
       # the core checked for the browser's WebAssembly, never run, the target rust-toolchain.toml's,
       # by its features, no socket among them, which mio refuses there: what it links builds there,
       # its spawning and its time through crate::platform and the clock alone; getrandom's backend
