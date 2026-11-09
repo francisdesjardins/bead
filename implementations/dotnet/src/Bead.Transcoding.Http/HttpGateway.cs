@@ -1534,20 +1534,14 @@ public sealed class HttpGateway : IAsyncDisposable
         return IsHttp1(context.Request) ? HostsAndOrigins.TargetAuthorityOf(context.Features.Get<IHttpRequestFeature>()?.RawTarget) : null;
     }
 
-    // a request's target as it came (3.6): an absolute-form target's path and query, its authority aside
+    // a request's target as it came (3.6): an absolute-form target's path and query, its authority
+    // aside, ended at its first # (spec 15.12)
+    // ! never Request.Path nor Request.QueryString, which keep a # and what follows it
     private static string RawTargetOf(HttpContext context)
     {
         var raw = context.Features.Get<IHttpRequestFeature>()?.RawTarget ?? (context.Request.Path + context.Request.QueryString).ToString();
 
-        if (raw.StartsWith('/'))
-        {
-            return raw;
-        }
-
-        var scheme = raw.IndexOf("://", StringComparison.Ordinal);
-        var slash = scheme < 0 ? -1 : raw.IndexOf('/', scheme + 3);
-
-        return slash < 0 ? "/" : raw[slash..];
+        return HostsAndOrigins.TargetRestOf(raw);
     }
 
     private string? AddressOf(HttpContext context)

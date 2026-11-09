@@ -16,6 +16,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `#`, as Node's parser refuses that octet on the TypeScript side (spec 15.12, transcoding 3.6;
   decision 0049).
 
+### Fixed
+
+- The C# side's HTTP transport server matches its pathname against the target as it came, as the
+  TypeScript side does, where Kestrel's decoded path let `/b%65ad` reach `/bead`; and its gateway
+  keeps the query of an absolute-form target that names no path, `http://bead.test?x`.
+
 ## [0.11.0] - 2026-11-09
 
 ### Added

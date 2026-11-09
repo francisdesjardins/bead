@@ -155,6 +155,14 @@ public sealed partial class HttpTransportServerTests
             await StatusOf("http://bead.example HTTP/1.1", bead),
             await StatusOf("http://bead.example?after=1 HTTP/1.1", bead),
             await StatusOf("/bead HTTP/1.1", $"Content-Type: {HttpTransport.MediaType}\r\n"),
+            // a target ends at its #, what follows it neither its path nor its query, a character a
+            // browser encodes among it; one such character before it makes the request-line invalid
+            await StatusOf("/bead#x HTTP/1.1", bead),
+            await StatusOf("/bead#<\" HTTP/1.1", bead),
+            await StatusOf("http://bead.example/bead#/elsewhere HTTP/1.1", bead),
+            await StatusOf("/be<ad HTTP/1.1", bead),
+            await StatusOf("/bead?a\"b HTTP/1.1", bead),
+            await StatusOf("/bead?a^b HTTP/1.1", bead),
         };
 
         Assert.Equal(
@@ -185,6 +193,12 @@ public sealed partial class HttpTransportServerTests
                 (404, HttpRefusals.Path),
                 (404, HttpRefusals.Path),
                 (400, null),
+                (201, null),
+                (201, null),
+                (201, null),
+                (400, null),
+                (400, null),
+                (201, null),
             ],
             statuses);
 
