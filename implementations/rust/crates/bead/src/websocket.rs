@@ -3,4 +3,5 @@
 //! connection either end runs.
 
 pub(crate) mod connection;
+pub(crate) mod heartbeat;
 pub(crate) mod server;

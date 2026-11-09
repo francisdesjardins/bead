@@ -144,6 +144,7 @@ pub(crate) enum Failed {
 
 enum Command {
     Send(Bytes),
+    Ping,
     Close(u16),
     Drop,
     Resume,
@@ -211,6 +212,16 @@ impl Commands {
         if self.sender.send(Command::Send(bytes)).is_err() && self.pacing.is_some() {
             self.shared.unsent.fetch_sub(length, Ordering::SeqCst);
         }
+    }
+
+    /// Pings its peer, behind what was sent before, unless it closes.
+    pub(crate) fn ping(&self) {
+        self.sender.send(Command::Ping).ok();
+    }
+
+    /// Drops it at once, its close unclean, no error told: its heartbeat's word.
+    pub(crate) fn drop_now(&self) {
+        self.sender.send(Command::Drop).ok();
     }
 
     /// Closes it with `code`, behind what was sent before it, then waits for its peer's answer
@@ -546,6 +557,11 @@ impl<S: Wire> Connection<S> {
                     self.queue.push_back((Message::Binary(bytes), length));
                 } else {
                     self.taken(length);
+                }
+            }
+            Command::Ping => {
+                if self.closing == Closing::No && self.writing != Writing::Broken {
+                    self.queue.push_back((Message::Ping(Bytes::new()), 0));
                 }
             }
             Command::Close(code) => self.close(code),

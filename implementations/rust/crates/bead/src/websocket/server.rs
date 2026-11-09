@@ -9,7 +9,7 @@ use core::future::{Future, poll_fn};
 use core::pin::pin;
 use core::task::Poll;
 use core::time::Duration;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::io;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -28,6 +28,8 @@ use crate::constants::{ProtocolCode, RouterSide};
 use crate::duration::{hold, hold_finite};
 use crate::errors::ProgrammerError;
 use crate::failure::Failure;
+use crate::failure::ProcedureAddress;
+use crate::identity::procedures_taken_of;
 use crate::judgement::handshake::{
     AnswerField, HandshakeRefusal, HandshakeRequest, HandshakeTaken, busy_handshake,
     refusal_of_handshake, told_of_handshake,
@@ -36,8 +38,14 @@ use crate::judgement::head::{Head, HeadRead, read_head};
 use crate::judgement::hosts::{
     assert_hosts, assert_listening_address, assert_origins, credential_of,
 };
+use crate::judgement::proxies::{
+    ClientAddressOptions, TrustedProxies, client_address_of, trusted_proxies_of,
+};
 use crate::life::Life;
-use crate::net::bounds::{HEADERS_TIMEOUT, dropped_of, hold_count};
+use crate::net::bounds::{
+    HEADERS_TIMEOUT, MINIMUM_SEND_BYTES_PER_SECOND, SEND_GRACE_PERIOD, SendPaceOptions, dropped_of,
+    hold_count,
+};
 use crate::net::linger::close_in_stages;
 use crate::net::loopbacks::{LOCALHOST, LoopbackBinding, bind_loopbacks, listener_on};
 use crate::platform::{self, Handle, JoinHandle};
@@ -46,11 +54,15 @@ use crate::transport::{
     Listeners, ReadyState, Sent, ServerListener, ServerTransport, TransportServerAddress,
     TransportServerClient, TransportServerRefusal, TransportServerStartOptions, tell_server,
 };
+use crate::websocket::connection::Pacing;
 use crate::websocket::connection::{
     CLOSE_TIMEOUT, Commands, Connection, ConnectionBounds, ConnectionHooks, Ended, Failed,
     GOING_AWAY, MAXIMUM_MESSAGE_BYTES, NORMAL,
 };
-use crate::{MAXIMUM_CONNECTIONS, MAXIMUM_CONNECTIONS_PER_ADDRESS};
+use crate::websocket::heartbeat::{Heartbeat, HeartbeatHooks, hold_heartbeat};
+use crate::{
+    HEARTBEAT, MAXIMUM_CONNECTIONS, MAXIMUM_CONNECTIONS_PER_ADDRESS, MAXIMUM_UNSENT_BYTES,
+};
 
 #[cfg(test)]
 mod tests;
@@ -103,6 +115,30 @@ pub struct WebSocketTransportServerOptions {
     /// stands in front of it (spec 13.4): by the address it listens on when none, the loopback
     /// secure and any other not.
     pub secure: Option<bool>,
+    /// How often each connection is pinged, past which one that left a ping unanswered is dropped,
+    /// its close unclean, no error told: [`HEARTBEAT`] when none; [`crate::NEVER`] beats none. On
+    /// the platform's clock, whatever clock it is given.
+    pub heartbeat: Option<Duration>,
+    /// What may wait for one connection's socket, past which the connection is dropped, its close
+    /// unclean, and reported naming the bound (spec 15.12): [`MAXIMUM_UNSENT_BYTES`] when none.
+    pub maximum_unsent_bytes: Option<u64>,
+    /// The slowest, in bytes a second, a socket may take what waits for it once its grace passed,
+    /// past which its connection is dropped and reported (spec 15.12):
+    /// [`MINIMUM_SEND_BYTES_PER_SECOND`] when none; 0 holds none.
+    pub minimum_send_bytes_per_second: Option<u64>,
+    /// The least time an envelope is given to be taken by its socket: [`SEND_GRACE_PERIOD`] when
+    /// none; never is refused.
+    pub send_grace_period: Option<Duration>,
+    /// The procedures each of its connections takes, by their addresses (spec 9.11): a request to
+    /// any other is answered as one to no resolver. Every procedure when none; none when empty.
+    pub procedures: Option<Vec<ProcedureAddress>>,
+    /// The proxies whose `X-Forwarded-For` it believes, each an IP address or a network in CIDR
+    /// (spec 15.12): a connection and a refusal name the client's address the walk reaches. None
+    /// trusts no proxy, the loopback among them.
+    pub trusted_proxies: Option<Vec<String>>,
+    /// The proxies on every path to it that `trusted_proxies` does not name, 8 at most: 0 when
+    /// none.
+    pub unnamed_proxies: Option<u64>,
 }
 
 // what it was built with, held
@@ -116,6 +152,11 @@ struct Settings {
     maximum_connections: u64,
     maximum_per_address: u64,
     secure: Option<bool>,
+    heartbeat: Duration,
+    pacing: Pacing,
+    // the procedures a connection takes, every one when none
+    procedures: Option<BTreeSet<ProcedureAddress>>,
+    proxies: TrustedProxies,
 }
 
 // a connection it holds
@@ -186,6 +227,15 @@ pub(crate) struct ServerInner {
 /// `maximumMessageBytes`, then dropped at its peer's end or its close timeout, unclean; a protocol
 /// error is reported alike, failed with 1002. A peer that drops without its closing handshake tells
 /// its unclean close alone. A close is clean when its peer's carried 1000.
+///
+/// Each connection is pinged every `heartbeat`, and dropped, unclean and with no error told, when
+/// it left a ping unanswered. What waits for its socket is held to its pace and to
+/// `maximum_unsent_bytes` (spec 15.12): a connection behind either is dropped, unclean, and reported
+/// on `on_error` naming the bound and its value. A connection its router paused reads no more of
+/// its socket, so TCP's window paces its peer, and reads on once resumed; one this side closes reads
+/// on to its peer's close, dropping what comes (spec 15.12). A connection, and a refusal, name the
+/// client's address behind the proxies `trusted_proxies` names and `unnamed_proxies` counts, the
+/// upgrade's `X-Forwarded-For` entry the walk reaches, else its socket's.
 ///
 /// Its stop refuses what comes 503, closes each connection with 1001, and settles once each ended.
 #[derive(Clone)]
@@ -642,9 +692,18 @@ impl ServerInner {
             HeadCame::TimedOut => return self.answer(socket, unmarked(408)).await,
             HeadCame::Gone => return,
         };
-        let address = peer.ip().to_canonical().to_string();
-        let port = peer.port();
         let fields = head.fields();
+        let forwarded = lines_of(&fields, "x-forwarded-for").join(", ");
+        // the client's address: the socket's, or, behind the proxies it names and counts, the
+        // `X-Forwarded-For` entry of its upgrade the walk reaches (spec 15.12)
+        let address = client_address_of(
+            &peer.ip().to_string(),
+            &ClientAddressOptions {
+                forwarded: (!forwarded.is_empty()).then_some(forwarded.as_str()),
+                trusted_proxies: Some(&self.settings.proxies),
+            },
+        );
+        let port = peer.port();
         let request = HandshakeRequest {
             http_version: head.http_version,
             method: Some(&head.method),
@@ -758,7 +817,7 @@ impl ServerInner {
         let bounds = ConnectionBounds {
             maximum_message_bytes: self.settings.maximum_message_bytes,
             close_timeout: self.settings.close_timeout,
-            pacing: None,
+            pacing: Some(self.settings.pacing),
             platform: Arc::clone(&self.platform),
         };
         let (connection, commands) = Connection::open((socket, read), (Role::Server, bounds)).await;
@@ -801,15 +860,29 @@ impl ServerInner {
             Some(&handle),
         ));
 
+        // a connection that is closing has its close handshake, bounded by its close timeout, to
+        // end it
+        let pinging = commands.clone();
+        let dropping = commands.clone();
+        let heartbeat = Heartbeat::new(
+            HeartbeatHooks {
+                ping: Box::new(move || pinging.ping()),
+                drop: Box::new(move || dropping.drop_now()),
+            },
+            (self.settings.heartbeat, &self.platform),
+        );
+        let answering = heartbeat.clone();
         let delivering = Arc::clone(&self);
         let delivered = Arc::clone(&handle);
         let hooks = ConnectionHooks {
             deliver: Box::new(move |data: Bytes, is_text: bool| {
                 delivering.deliver((&delivered, &peer), (data, is_text));
             }),
-            answered: Box::new(|| {}),
+            answered: Box::new(move || answering.answer()),
         };
         let ended = connection.run(hooks).await;
+
+        heartbeat.stop();
 
         self.ended(&handle, &ended);
     }
@@ -918,6 +991,17 @@ impl WebSocketTransportServer {
     pub fn new(options: &WebSocketTransportServerOptions) -> Result<Self, ProgrammerError> {
         let runtime =
             platform::socket_runtime_of(options.runtime.as_ref(), "a WebSocket transport server")?;
+        let platform: SharedClock = Arc::new(SystemClock::on(runtime.clone()));
+
+        Self::on_platform((runtime, platform), options)
+    }
+
+    // a server on `runtime`, its timers that bound the platform's socket on `platform`: the
+    // platform's clock, but in a test
+    fn on_platform(
+        (runtime, platform): (Handle, SharedClock),
+        options: &WebSocketTransportServerOptions,
+    ) -> Result<Self, ProgrammerError> {
         let close_timeout = hold(
             "a close timeout",
             options.close_timeout.unwrap_or(CLOSE_TIMEOUT),
@@ -944,11 +1028,28 @@ impl WebSocketTransportServer {
         )?;
         let hosts = options.hosts.clone().unwrap_or_default();
         let origins = options.origins.clone().unwrap_or_default();
+        let heartbeat = hold_heartbeat(options.heartbeat.unwrap_or(HEARTBEAT))?;
+        let maximum_unsent_bytes = hold_count(
+            "maximumUnsentBytes",
+            options.maximum_unsent_bytes.unwrap_or(MAXIMUM_UNSENT_BYTES),
+        )?;
+        let send_grace_period = hold_finite(
+            "sendGracePeriod",
+            options.send_grace_period.unwrap_or(SEND_GRACE_PERIOD),
+        )?;
+        let procedures = options
+            .procedures
+            .as_deref()
+            .map(|procedures| procedures_taken_of(procedures, "a WebSocket transport server"))
+            .transpose()?;
+        let proxies = trusted_proxies_of(
+            options.trusted_proxies.as_deref().unwrap_or_default(),
+            options.unnamed_proxies,
+        )?;
 
         assert_hosts(&hosts)?;
         assert_origins(&origins)?;
 
-        let platform: SharedClock = Arc::new(SystemClock::on(runtime.clone()));
         let clock = options
             .clock
             .clone()
@@ -969,6 +1070,18 @@ impl WebSocketTransportServer {
                 maximum_connections,
                 maximum_per_address,
                 secure: options.secure,
+                heartbeat,
+                pacing: Pacing {
+                    maximum_unsent_bytes,
+                    pace: SendPaceOptions {
+                        minimum_send_bytes_per_second: options
+                            .minimum_send_bytes_per_second
+                            .unwrap_or(MINIMUM_SEND_BYTES_PER_SECOND),
+                        send_grace_period,
+                    },
+                },
+                procedures,
+                proxies,
             },
             life: Life::new(Box::new(move |future| {
                 drop(platform::spawn(&covering, future));
@@ -1168,9 +1281,34 @@ impl ServerTransport for WebSocketTransportServer {
             "largestAddressConnections",
             self.inner.settings.maximum_per_address,
         );
+        gauges.ceilings.insert(
+            "largestUnsentBytes",
+            self.inner.settings.pacing.maximum_unsent_bytes,
+        );
         gauges.connection_handles.extend(handles);
 
         Some(gauges)
+    }
+
+    fn names_procedures(&self) -> bool {
+        self.inner.settings.procedures.is_some()
+    }
+
+    // false for a handle it does not hold
+    fn takes_procedure(
+        &self,
+        connection_handle: &ConnectionHandle,
+        address: ProcedureAddress,
+    ) -> bool {
+        locked(&self.inner.state)
+            .connections
+            .contains_key(connection_handle)
+            && self
+                .inner
+                .settings
+                .procedures
+                .as_ref()
+                .is_none_or(|procedures| procedures.contains(&address))
     }
 
     fn transport_type(&self) -> Option<&str> {

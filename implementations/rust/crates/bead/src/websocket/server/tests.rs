@@ -2364,3 +2364,589 @@ async fn names_a_connection_to_its_listeners_by_its_handle_and_nothing_of_its_cr
     );
     stopped(&server).await;
 }
+
+// ── Its pace: its heartbeat, its sends and its pause ───────────────────────────────────────────
+
+// a server of `options` whose timers that bound the platform's socket run on `platform`, started
+// on the IPv4 loopback
+async fn started_on(
+    platform: SharedClock,
+    options: &WebSocketTransportServerOptions,
+) -> (WebSocketTransportServer, Arc<Recorder>, u16) {
+    let runtime = platform::runtime_of(None, "a test").unwrap();
+    let server = WebSocketTransportServer::on_platform((runtime, platform), options).unwrap();
+    let recorder = recorded(&server);
+    let bound = patience(PATIENCE, server.start(&on_loopback()))
+        .await
+        .unwrap()
+        .unwrap();
+
+    (server, recorder, bound.port)
+}
+
+// a client whose frames are read, so it answers each ping, until its server closes it
+fn reading(mut client: Client) -> JoinHandle<()> {
+    crate::testing::spawn(async move { while let Some(Ok(_)) = client.next().await {} })
+}
+
+fn message_of(bytes: Vec<u8>) -> TransportMessage {
+    TransportMessage {
+        data: Bytes::from(bytes),
+        ..TransportMessage::default()
+    }
+}
+
+#[tokio::test]
+async fn a_websocket_server_transport_takes_the_procedures_it_is_given() {
+    let address = |service_id: u16, procedure_id: u16| ProcedureAddress {
+        service_id,
+        procedure_id,
+    };
+    let (server, recorder, port) = started(&WebSocketTransportServerOptions {
+        procedures: Some(vec![address(2, 1)]),
+        ..WebSocketTransportServerOptions::default()
+    })
+    .await;
+    let _client = client(port).await;
+    let handle = recorder.connections(1).await.remove(0);
+
+    assert!(server.names_procedures(), "it names them");
+    assert_eq!(
+        [
+            server.takes_procedure(&handle, address(2, 1)),
+            server.takes_procedure(&handle, address(2, 2)),
+            server.takes_procedure(&handle, address(3, 1)),
+        ],
+        [true, false, false],
+        "the one it was given"
+    );
+    // given none, it names none: its router never asks
+    assert!(
+        !WebSocketTransportServer::new(&WebSocketTransportServerOptions::default())
+            .unwrap()
+            .names_procedures(),
+        "none named"
+    );
+    stopped(&server).await;
+}
+
+#[tokio::test]
+async fn pings_each_connection_every_heartbeat_and_drops_one_that_left_a_ping_unanswered() {
+    let stepping = SteppingClock::new(SystemTime::UNIX_EPOCH);
+    let (server, recorder, port) = started_on(
+        Arc::<SteppingClock>::clone(&stepping),
+        &WebSocketTransportServerOptions {
+            heartbeat: Some(Duration::from_millis(20)),
+            ..WebSocketTransportServerOptions::default()
+        },
+    )
+    .await;
+    let answering = reading(client(port).await);
+    let (mut silent, _) = upgraded(port).await;
+    let handles = recorder.connections(2).await;
+
+    // a beat: each pinged
+    stepping.tick(Duration::from_millis(20));
+
+    let mut ping = [0_u8; 2];
+
+    patience(PATIENCE, silent.read_exact(&mut ping))
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(ping, [0x89, 0x00], "an empty ping");
+
+    // the answering one's pong read before the next beat
+    rest(Duration::from_millis(200)).await;
+    stepping.tick(Duration::from_millis(20));
+
+    assert_eq!(
+        recorder.closes(1).await,
+        vec![(false, Arc::clone(&handles[1]))],
+        "the silent one dropped, unclean"
+    );
+    assert_eq!(recorder.count(|told| told.errors.len()), 0, "no error");
+    assert_eq!(server.clients().len(), 1, "the answering one kept");
+    stopped(&server).await;
+    answering.await.unwrap();
+}
+
+#[tokio::test]
+async fn keeps_the_clients_that_answer_its_pings_and_drops_one_that_does_not_on_the_wire() {
+    // beats wide enough that a pong never misses one on a loaded machine
+    let (server, recorder, port) = started(&WebSocketTransportServerOptions {
+        heartbeat: Some(Duration::from_millis(200)),
+        ..WebSocketTransportServerOptions::default()
+    })
+    .await;
+    let answering = reading(client(port).await);
+    let (_silent, _) = upgraded(port).await;
+    let handles = recorder.connections(2).await;
+
+    assert_eq!(
+        recorder.closes(1).await,
+        vec![(false, Arc::clone(&handles[1]))],
+        "the silent one dropped"
+    );
+
+    rest(Duration::from_millis(600)).await;
+
+    assert_eq!(
+        server
+            .clients()
+            .iter()
+            .map(|client| Arc::clone(&client.connection_handle))
+            .collect::<Vec<_>>(),
+        vec![Arc::clone(&handles[0])],
+        "the answering one kept"
+    );
+    stopped(&server).await;
+    answering.await.unwrap();
+}
+
+#[tokio::test]
+async fn beats_every_30_seconds_when_told_nothing() {
+    let stepping = SteppingClock::new(SystemTime::UNIX_EPOCH);
+    let (server, recorder, port) = started_on(
+        Arc::<SteppingClock>::clone(&stepping),
+        &WebSocketTransportServerOptions::default(),
+    )
+    .await;
+    let reader = reading(client(port).await);
+
+    recorder.connections(1).await;
+
+    assert_eq!(HEARTBEAT, Duration::from_secs(30), "its default");
+    assert_eq!(stepping.dues(), vec![HEARTBEAT], "one beat armed");
+    stopped(&server).await;
+    reader.await.unwrap();
+}
+
+#[tokio::test]
+async fn beats_nothing_with_a_heartbeat_of_never() {
+    for (heartbeat, dues) in [
+        (Duration::from_millis(200), vec![Duration::from_millis(200)]),
+        (NEVER, vec![]),
+    ] {
+        let stepping = SteppingClock::new(SystemTime::UNIX_EPOCH);
+        let (server, recorder, port) = started_on(
+            Arc::<SteppingClock>::clone(&stepping),
+            &WebSocketTransportServerOptions {
+                heartbeat: Some(heartbeat),
+                ..WebSocketTransportServerOptions::default()
+            },
+        )
+        .await;
+        let reader = reading(client(port).await);
+
+        recorder.connections(1).await;
+
+        assert_eq!(stepping.dues(), dues, "beats of {heartbeat:?}");
+        stopped(&server).await;
+        reader.await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn takes_a_client_s_address_from_x_forwarded_for_only_from_a_proxy_it_names_and_names_its_connection_by_it()
+ {
+    for (trusted, named) in [("127.0.0.1", "203.0.113.7"), ("192.0.2.0/24", "127.0.0.1")] {
+        let (server, recorder, port) = started(&WebSocketTransportServerOptions {
+            clock: Some(dated()),
+            hosts: Some(vec!["bead.test".to_owned()]),
+            trusted_proxies: Some(vec![trusted.to_owned()]),
+            ..WebSocketTransportServerOptions::default()
+        })
+        .await;
+        let mut socket = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        let local_port = socket.local_addr().unwrap().port();
+
+        socket
+            .write_all(
+                request_of(
+                    "GET / HTTP/1.1",
+                    &["X-Forwarded-For: 198.51.100.1, 203.0.113.7"],
+                )
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+        read_head_of(&mut socket).await;
+        socket
+            .write_all(&masked_frame(0x2, (&[1], true)))
+            .await
+            .unwrap();
+
+        let handle = recorder.connections(1).await.remove(0);
+        let (message, _) = recorder.messages(1).await.remove(0);
+
+        assert_eq!(
+            *handle,
+            format!("type=WS;ip={named};port={local_port};ordinal=1"),
+            "behind {trusted}"
+        );
+        assert_eq!(message.address.as_deref(), Some(named), "its envelopes'");
+
+        // and a refusal names it alike
+        let mut refused = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+
+        refused
+            .write_all(
+                request_of(
+                    "POST / HTTP/1.1",
+                    &["X-Forwarded-For: 198.51.100.1, 203.0.113.7"],
+                )
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+        read_head_of(&mut refused).await;
+
+        assert_eq!(
+            recorder.refusals()[0].address.as_deref(),
+            Some(named),
+            "its refusal's"
+        );
+        stopped(&server).await;
+    }
+}
+
+#[tokio::test]
+async fn refuses_as_it_is_built_a_trusted_proxies_entry_that_is_a_name_or_a_network_of_prefix_0_or_an_unnamed_proxies_past_8()
+ {
+    for (trusted_proxies, unnamed_proxies) in [
+        (vec!["proxy.test".to_owned()], None),
+        (vec!["0.0.0.0/0".to_owned()], None),
+        (vec![], Some(9)),
+    ] {
+        assert!(
+            WebSocketTransportServer::new(&WebSocketTransportServerOptions {
+                trusted_proxies: Some(trusted_proxies.clone()),
+                unnamed_proxies,
+                ..WebSocketTransportServerOptions::default()
+            })
+            .is_err(),
+            "{trusted_proxies:?}, {unnamed_proxies:?} refused"
+        );
+    }
+}
+
+#[tokio::test]
+async fn keeps_a_client_that_reads_through_a_burst_of_answers_each_of_a_chunk() {
+    let (server, recorder, port) = started(&WebSocketTransportServerOptions {
+        send_grace_period: Some(Duration::from_millis(100)),
+        ..WebSocketTransportServerOptions::default()
+    })
+    .await;
+    let mut client = client(port).await;
+    let handle = recorder.connections(1).await.remove(0);
+
+    for index in 0..64_u8 {
+        server
+            .send(message_of(vec![index; 65_536]), &handle)
+            .unwrap();
+    }
+
+    for index in 0..64_u8 {
+        assert_eq!(
+            next_of(&mut client).await.unwrap().unwrap(),
+            binary(&vec![index; 65_536]),
+            "chunk {index}"
+        );
+    }
+
+    rest(Duration::from_millis(1_200)).await;
+
+    assert_eq!(recorder.count(|told| told.closes.len()), 0, "kept");
+    assert_eq!(
+        recorder.count(|told| told.errors.len()),
+        0,
+        "nothing reported"
+    );
+    stopped(&server).await;
+}
+
+// spec 15.12.11 and 15.12.12
+#[tokio::test]
+async fn drops_a_client_that_stops_reading_once_its_socket_holds_what_waits_for_it_past_its_deadline_and_reports_it()
+ {
+    let (server, recorder, port) = started(&WebSocketTransportServerOptions {
+        maximum_unsent_bytes: Some(1 << 30),
+        minimum_send_bytes_per_second: Some(1_000_000_000),
+        send_grace_period: Some(Duration::from_millis(100)),
+        heartbeat: Some(NEVER),
+        ..WebSocketTransportServerOptions::default()
+    })
+    .await;
+    // a client that reads nothing past its 101
+    let (_socket, _) = upgraded(port).await;
+    let handle = recorder.connections(1).await.remove(0);
+
+    for _ in 0..64 {
+        server.send(message_of(vec![0; 1 << 20]), &handle).unwrap();
+    }
+
+    assert_eq!(
+        recorder.errors(1).await,
+        vec![(
+            format!(
+                "{handle} is dropped: what waits for its socket was not taken by its deadline, at minimumSendBytesPerSecond 1000000000 past sendGracePeriod 100 ms"
+            ),
+            Some(Arc::clone(&handle))
+        )],
+        "reported, naming its pace"
+    );
+    assert_eq!(recorder.closes(1).await, vec![(false, handle)], "unclean");
+    assert_eq!(
+        recorder.order()[recorder.order().len() - 2..],
+        ["error", "close"],
+        "its error first"
+    );
+    stopped(&server).await;
+}
+
+// spec 15.12.13
+#[tokio::test]
+async fn drops_a_client_once_what_waits_for_it_would_pass_maximum_unsent_bytes_the_bytes_it_holds_never_past_them_its_close_unclean_and_reports_it()
+ {
+    let (server, recorder, port) = started(&WebSocketTransportServerOptions {
+        maximum_unsent_bytes: Some(1_000),
+        ..WebSocketTransportServerOptions::default()
+    })
+    .await;
+    let mut client = client(port).await;
+    let handle = recorder.connections(1).await.remove(0);
+
+    // * both within one turn: the first still waits as the second comes
+    server.send(message_of(vec![1; 600]), &handle).unwrap();
+
+    assert_eq!(
+        server.gauges().unwrap().counts.get("unsentBytes"),
+        Some(&600),
+        "what waits"
+    );
+
+    server.send(message_of(vec![2; 600]), &handle).unwrap();
+
+    assert_eq!(
+        server.gauges().unwrap().ceilings.get("largestUnsentBytes"),
+        Some(&1_000),
+        "its bound"
+    );
+
+    let mut received = Vec::new();
+
+    while let Some(Ok(message)) = next_of(&mut client).await {
+        received.push(message);
+    }
+
+    assert!(
+        received.iter().all(|message| *message != binary(&[2; 600])),
+        "the second never sent"
+    );
+    assert_eq!(
+        recorder.errors(1).await,
+        vec![(
+            format!(
+                "{handle} is dropped: what waits for its socket would pass maximumUnsentBytes, 1000 bytes"
+            ),
+            Some(Arc::clone(&handle))
+        )],
+        "reported, naming its bound"
+    );
+    assert_eq!(recorder.closes(1).await, vec![(false, handle)], "unclean");
+    stopped(&server).await;
+}
+
+#[tokio::test]
+async fn closes_with_1009_and_drops_behind_maximum_unsent_bytes_a_connection_whose_error_listener_throws_telling_its_close_all_the_same()
+ {
+    struct Throwing;
+
+    impl ServerListener for Throwing {
+        fn on_error(&self, _error: &RouterError, _connection_handle: Option<&ConnectionHandle>) {
+            panic!("an error listener that throws");
+        }
+    }
+
+    let server = WebSocketTransportServer::new(&WebSocketTransportServerOptions {
+        maximum_message_bytes: Some(8),
+        maximum_unsent_bytes: Some(1_000),
+        ..WebSocketTransportServerOptions::default()
+    })
+    .unwrap();
+
+    server.listen(Arc::new(Throwing));
+
+    let recorder = recorded(&server);
+    let port = server.start(&on_loopback()).await.unwrap().port;
+    // past its message bound
+    let mut first = client(port).await;
+
+    first.send(binary(&[0; 9])).await.unwrap();
+
+    while let Some(Ok(_)) = next_of(&mut first).await {}
+
+    assert_eq!(recorder.closes(1).await.len(), 1, "its close told");
+
+    // past what may wait for it
+    let second = reading(client(port).await);
+    let handle = recorder.connections(2).await.remove(1);
+
+    server.send(message_of(vec![1; 600]), &handle).unwrap();
+    server.send(message_of(vec![2; 600]), &handle).unwrap();
+
+    assert_eq!(
+        recorder.closes(2).await[1],
+        (false, handle),
+        "its close told all the same"
+    );
+    stopped(&server).await;
+    second.await.unwrap();
+}
+
+#[tokio::test]
+async fn refuses_a_maximum_unsent_bytes_a_minimum_send_bytes_per_second_or_a_send_grace_period_it_cannot_hold_as_it_is_built()
+ {
+    for (options, refusal) in [
+        (
+            WebSocketTransportServerOptions {
+                maximum_unsent_bytes: Some(0),
+                ..WebSocketTransportServerOptions::default()
+            },
+            "maximumUnsentBytes",
+        ),
+        (
+            WebSocketTransportServerOptions {
+                send_grace_period: Some(NEVER),
+                ..WebSocketTransportServerOptions::default()
+            },
+            "sendGracePeriod",
+        ),
+        (
+            WebSocketTransportServerOptions {
+                send_grace_period: Some(Duration::ZERO),
+                ..WebSocketTransportServerOptions::default()
+            },
+            "sendGracePeriod",
+        ),
+    ] {
+        let refused = WebSocketTransportServer::new(&options)
+            .unwrap_err()
+            .to_string();
+
+        assert!(refused.starts_with(refusal), "{refusal}: {refused}");
+    }
+
+    // a rate of 0 holds none
+    assert!(
+        WebSocketTransportServer::new(&WebSocketTransportServerOptions {
+            minimum_send_bytes_per_second: Some(0),
+            ..WebSocketTransportServerOptions::default()
+        })
+        .is_ok(),
+        "0 taken"
+    );
+}
+
+// spec 15.12.17
+#[tokio::test]
+async fn reads_no_message_of_a_paused_connection_holds_the_rest_of_its_read_and_hands_it_in_order_once_resumed()
+ {
+    struct Pausing {
+        server: Mutex<Option<WebSocketTransportServer>>,
+        heard: Mutex<Vec<u32>>,
+    }
+
+    impl ServerListener for Pausing {
+        fn on_message(&self, message: TransportMessage, connection_handle: &ConnectionHandle) {
+            let mut heard = self.heard.lock().unwrap();
+
+            heard.push(u32::from_be_bytes(message.data[..4].try_into().unwrap()));
+
+            // * a router at its bound pauses within the hand
+            if heard.len() == 3
+                && let Some(server) = self.server.lock().unwrap().as_ref()
+            {
+                server.pause(connection_handle);
+            }
+        }
+    }
+
+    let (server, recorder, port) = started(&WebSocketTransportServerOptions {
+        heartbeat: Some(NEVER),
+        ..WebSocketTransportServerOptions::default()
+    })
+    .await;
+    let pausing = Arc::new(Pausing {
+        server: Mutex::new(Some(server.clone())),
+        heard: Mutex::new(Vec::new()),
+    });
+
+    server.listen(Arc::<Pausing>::clone(&pausing));
+
+    let mut client = client(port).await;
+    let handle = recorder.connections(1).await.remove(0);
+
+    for index in 0..2_000_u32 {
+        client.feed(binary(&index.to_be_bytes())).await.unwrap();
+    }
+
+    client.flush().await.unwrap();
+    recorder.messages(3).await;
+    rest(Duration::from_millis(100)).await;
+
+    assert_eq!(pausing.heard.lock().unwrap().len(), 3, "read no more");
+
+    server.resume(&handle);
+    recorder.messages(2_000).await;
+
+    assert_eq!(
+        *pausing.heard.lock().unwrap(),
+        (0..2_000).collect::<Vec<u32>>(),
+        "each, in order"
+    );
+    pausing.server.lock().unwrap().take();
+    stopped(&server).await;
+}
+
+// spec 15.12.17; RFC 6455 §7.1.1
+#[tokio::test]
+async fn a_paused_connection_closes_cleanly() {
+    let (server, recorder, port) = started(&WebSocketTransportServerOptions {
+        close_timeout: Some(Duration::from_secs(2)),
+        heartbeat: Some(NEVER),
+        ..WebSocketTransportServerOptions::default()
+    })
+    .await;
+    let mut client = client(port).await;
+    let handle = recorder.connections(1).await.remove(0);
+
+    server.pause(&handle);
+    client.send(binary(&[0; 4])).await.unwrap();
+    rest(Duration::from_millis(50)).await;
+
+    let begun = Instant::now();
+    let closing = server.close(&handle);
+
+    // a pause its router asks as it closes is let be
+    server.pause(&handle);
+
+    while let Some(Ok(_)) = next_of(&mut client).await {}
+
+    assert!(patience(PATIENCE, closing).await.unwrap(), "closed");
+    // * it read its peer's Close, its own pause opened: clean, long before its close timeout
+    assert_eq!(recorder.closes(1).await, vec![(true, handle)], "clean");
+    assert!(
+        begun.elapsed() < Duration::from_millis(1_500),
+        "before its timeout"
+    );
+    // what it held dropped with it
+    assert_eq!(
+        recorder.count(|told| told.messages.len()),
+        0,
+        "nothing handed"
+    );
+    stopped(&server).await;
+}

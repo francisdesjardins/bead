@@ -2300,6 +2300,13 @@ crate::websocket::server
     pub maximum_connections_per_address: Option<u64> #[cfg(feature = "websocket")]
     pub origins: Option<Vec<String>> #[cfg(feature = "websocket")]
     pub secure: Option<bool> #[cfg(feature = "websocket")]
+    pub heartbeat: Option<Duration> #[cfg(feature = "websocket")]
+    pub maximum_unsent_bytes: Option<u64> #[cfg(feature = "websocket")]
+    pub minimum_send_bytes_per_second: Option<u64> #[cfg(feature = "websocket")]
+    pub send_grace_period: Option<Duration> #[cfg(feature = "websocket")]
+    pub procedures: Option<Vec<ProcedureAddress>> #[cfg(feature = "websocket")]
+    pub trusted_proxies: Option<Vec<String>> #[cfg(feature = "websocket")]
+    pub unnamed_proxies: Option<u64> #[cfg(feature = "websocket")]
     derives Clone, Debug, Default #[cfg(feature = "websocket")]
   struct WebSocketTransportServer #[cfg(feature = "websocket")]
     fn new(options: &WebSocketTransportServerOptions) -> Result<Self, ProgrammerError>
