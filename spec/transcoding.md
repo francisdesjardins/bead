@@ -761,7 +761,7 @@ a schema states: a field's proto name, an enum's number and a 64-bit integer as 
 ## 12. The generated client
 
 12.1. An output with `gateway` writes, beside its route table, a typed `<Service>HttpClient` of
-the procedures it selects, that calls each of them by its default `POST` route (section 3.1), its
+the procedures it selects, that calls each of them by its default `POST` route (section 3.2), its
 request whole and its result whole, whatever `google.api.http` rules the procedure also serves; a
 command, which no exchange answers, has none. Its surface maps name for name, each in its target's
 case: the client is made of its URL and its options, calls a procedure by the procedure's name,

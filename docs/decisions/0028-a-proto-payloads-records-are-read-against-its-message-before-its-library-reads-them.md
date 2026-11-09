@@ -195,9 +195,10 @@ codec of its message's schema, `protoCodecOf(FooSchema)` of `@francisdesjardins/
 them, then reads at 17.9.3's bound and judges the message's required fields
 ([0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)). 3 is the contract whose code first called the check, since generated code that
 calls it needs an export a runtime without it lacks, which is what moves the counter. **The runtimes
-hold 5, 6 and 7**, on the TypeScript and C# sides, 5 for a route table ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)), 6 since a service's
-generated file calls the runtime codec ([0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)) and 7 for what a server's handles
-and a catalogue are typed by ([0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)), and none older: they hold no
+hold 5, 6, 7 and 8**, on the TypeScript and C# sides, 5 for a route table ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)), 6 since a service's
+generated file calls the runtime codec ([0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)), 7 for what a server's handles
+and a catalogue are typed by ([0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)) and 8 for the file of the procedures a server's
+transports take ([0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md)), and none older: they hold no
 `GENERATED_CODE_SUPPORTS_VERSION_2`, `_3` or `_4` and no `GeneratedCode.SupportsVersion2`,
 `SupportsVersion3` or `SupportsVersion4`, so code that names 2, 3 or 4, an earlier beadc's, fails its
 type-check and its build until it is regenerated. On the Rust side, whose beadc target is ahead,

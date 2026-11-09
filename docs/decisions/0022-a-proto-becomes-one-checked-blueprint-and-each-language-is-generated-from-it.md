@@ -296,11 +296,10 @@ it selects
 ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md),
 [0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md)),
 and embeds the OpenAPI document of them byte for byte, in the blueprint's own form, the one
-`beadc.yaml`'s `openapi:` writes of the blueprint where it selects every procedure; `http: true` and
-`httpRuntime` are said by `gateway: {}` and `gateway.runtime`, and refused naming them; any other
-output writes neither and embeds nothing, so no assembly
-carries a document it never serves, and a target that generates no HTTP is refused such an output,
-`HTTP_UNGENERATED`.
+`beadc.yaml`'s `openapi:` writes of the blueprint where it selects every procedure; any other
+output writes neither and embeds nothing, so no assembly carries a document it never serves, and a
+target that generates no HTTP is refused such an output, `HTTP_UNGENERATED`. An output's `http` and
+`httpRuntime` are refused, naming `gateway: {}` and `gateway.runtime` (0048).
 
 **Generated code passes its language's gates but its formatter.** `*_bead.ts` passes oxlint, its
 type-aware half included, and the types, and stays out of oxfmt; the C# passes the build's

@@ -32,6 +32,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   names contract 8.
 - A procedure's series in the server families take `SERVICE_UNKNOWN` and `PROCEDURE_UNKNOWN` among
   their codes, 15 of them: a procedure takes 64 series there (debugging 7.6, 7.7).
+- The documents are brought to 0.11.0: the records, the spec and its companions in form, the
+  READMEs and the support matrix state what holds and where Bead goes. Decision 0048 is accepted.
 
 ### Removed
 

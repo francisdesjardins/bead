@@ -18,7 +18,7 @@ then the design is implemented. A freeze runs an adversarial review first, and a
 
 A small change, CLAUDE.md's small round (one behaviour, a few files on each side, no new record),
 runs `bead-tenth-man-round` with `small: true`: no Draft stage, the Tenth Man meets `subject` as it
-is written, so the subject is then the proposal whole (what each side does today by file and line,
+is written, so the subject is then the proposal whole (what each side does, by file and line,
 the standards, the change on each side, the twin tests), and Revise writes the design. Every other
 change, and one whose subject is still a question, has its draft.
 
