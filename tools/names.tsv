@@ -1,4 +1,4 @@
-# alone: typescript 315, csharp 63, rust 78
+# alone: typescript 312, csharp 61, rust 78
 # concept	typescript	csharp	rust	class
 ACCEPT_TIMEOUT	ACCEPT_TIMEOUT [constant]	-	ACCEPT_TIMEOUT [constant]	same
 AccessRefusal	IAccessRefusal [record]	AccessRefusal [record]	AccessRefusal [record]	same
@@ -112,6 +112,8 @@ HTTPBinding	IHTTPBinding [record], createHTTPBinding [function]	HttpBinding [rec
 HTTPCaller	IHTTPCaller [record], createHTTPCaller [function]	HttpCaller [record]	-	same
 HTTPCallerOptions	IHTTPCallerOptions [record]	HttpCallerOptions [record]	-	same
 HTTPCallOptions	IHTTPCallOptions [record]	HttpCallOptions [record]	-	same
+HTTPClient	HTTPClient [record], createHTTPClient [function]	BeadHttpClient [record]	-	rendered: platform (0049)
+HTTPClientOptions	IHTTPClientOptions [record]	BeadHttpClientOptions [record]	-	rendered: platform (0049)
 HTTPEvent	HTTPEvent [choice]	HttpEvent [record]	-	same
 HTTPGateway	IHTTPGateway [record], createHTTPGateway [function]	HttpGateway [record]	-	same
 HTTPGatewayOptions	IHTTPGatewayOptions [record]	HttpGatewayOptions [record]	-	same
@@ -336,8 +338,6 @@ AnswerTarget	-	AnswerTarget [record]	-	alone
 Arose	Arose [choice]	-	-	alone
 BEAD_BATCH_MEDIA_TYPE	BEAD_BATCH_MEDIA_TYPE [constant]	-	-	alone
 BEAD_MEDIA_TYPE	BEAD_MEDIA_TYPE [constant]	-	-	alone
-BeadHttpClient	-	BeadHttpClient [record]	-	alone
-BeadHttpClientOptions	-	BeadHttpClientOptions [record]	-	alone
 BeadServer	-	IBeadServer [record]	-	alone
 BODY_BYTES_BUDGET	BODY_BYTES_BUDGET [constant]	-	-	alone
 BROKER_DELIVERIES	BROKER_DELIVERIES [constant]	-	-	alone
@@ -385,7 +385,6 @@ CONNECTION_TOKEN_HEADER	CONNECTION_TOKEN_HEADER [constant]	-	-	alone
 CONNECTION_UNKNOWN	CONNECTION_UNKNOWN [constant]	-	-	alone
 ConnectParameters	ConnectParameters [record]	-	-	alone
 CREATED_EVENT	CREATED_EVENT [constant]	-	-	alone
-createHTTPClient	createHTTPClient [function]	-	-	alone
 createNotificationManager	createNotificationManager [function]	-	-	alone
 createTimers	createTimers [function]	-	-	alone
 createTransportClient	createTransportClient [function]	-	-	alone
@@ -454,9 +453,7 @@ HEADERS_TIMEOUT	HEADERS_TIMEOUT [constant]	-	-	alone
 HookName	HookName [record]	-	-	alone
 HOST_REFUSAL	HOST_REFUSAL [constant]	-	-	alone
 HTTP_POLICY_MEMBERS	HTTP_POLICY_MEMBERS [constant]	-	-	alone
-HTTPClient	HTTPClient [record]	-	-	alone
 HTTPClientConnection	IHTTPClientConnection [record]	-	-	alone
-HTTPClientOptions	IHTTPClientOptions [record]	-	-	alone
 HttpEncoding	-	HttpEncoding [choice]	-	alone
 HttpEvents	-	HttpEvents [record]	-	alone
 HttpGatewayEndpoints.MapBeadGateway	-	HttpGatewayEndpoints.MapBeadGateway [function]	-	alone
