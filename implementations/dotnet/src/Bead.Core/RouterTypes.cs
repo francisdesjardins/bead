@@ -548,6 +548,16 @@ internal interface IRouterCorePort
     }
 
     /// <summary>
+    /// Whether a connection's transport takes a procedure (spec 9.11), asked of each request that
+    /// names no destination: a resolver of one it does not take is none (spec 9.2, step 5). Every
+    /// one is taken by default.
+    /// </summary>
+    bool TakesProcedure(string connectionHandle, ProcedureAddress address)
+    {
+        return true;
+    }
+
+    /// <summary>
     /// Whether a connection's transport carries <paramref name="credential"/> beside an envelope the
     /// side sends on it (spec 15.1): a call presenting <see cref="CredentialScheme.Elsewhere"/> over
     /// one that cannot carry its credential fails before it goes. None carries one by default.

@@ -68,8 +68,8 @@ internal static class MetricsCodes
     // by a protocol code's number, its index; -1 for a number section 8 names none of
     private static readonly int[] ByNumber = IndexOfNumbers();
 
-    /// <summary>The 13 codes of a procedure's series in the server families, by their indices.</summary>
-    public static readonly int[] Server = [IndexOf(22), IndexOf(32), IndexOf(33), IndexOf(34), IndexOf(35), IndexOf(36), IndexOf(48), IndexOf(49), IndexOf(50), IndexOf(51), IndexOf(52), IndexOf(64), Application];
+    /// <summary>The 15 codes of a procedure's series in the server families, by their indices.</summary>
+    public static readonly int[] Server = [IndexOf(18), IndexOf(19), IndexOf(22), IndexOf(32), IndexOf(33), IndexOf(34), IndexOf(35), IndexOf(36), IndexOf(48), IndexOf(49), IndexOf(50), IndexOf(51), IndexOf(52), IndexOf(64), Application];
 
     /// <summary>Every one of the 25, by its index.</summary>
     public static readonly int[] Every = [.. Enumerable.Range(0, Names.Length)];
@@ -193,7 +193,7 @@ internal sealed class CallTable
         Columns = columns;
     }
 
-    /// <summary>A procedure's, in the server families: 17 columns, 13 codes.</summary>
+    /// <summary>A procedure's, in the server families: 19 columns, 15 codes.</summary>
     public static CallTable ServerProcedure { get; } = new((Answered, MetricsCodes.Server));
 
     /// <summary><c>_OTHER</c>'s, in the server families: 29 columns, every code.</summary>

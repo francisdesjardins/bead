@@ -1,1 +1,16 @@
 #nullable enable
+const Bead.GeneratedCode.SupportsVersion8 = true -> bool
+Bead.BrokerTransportServer.NamesProcedures() -> bool
+Bead.BrokerTransportServer.TakesProcedure(string! connectionHandle, Bead.ProcedureAddress address) -> bool
+Bead.BrokerTransportServerOptions.Procedures.get -> System.Collections.Generic.IReadOnlyCollection<Bead.ProcedureAddress>?
+Bead.BrokerTransportServerOptions.Procedures.init -> void
+Bead.BrokerTransportServerOptions.ProceduresByName.get -> System.Collections.Generic.IReadOnlyDictionary<string!, System.Collections.Generic.IReadOnlyCollection<Bead.ProcedureAddress>!>?
+Bead.BrokerTransportServerOptions.ProceduresByName.init -> void
+Bead.IRouterServerTransport.NamesProcedures() -> bool
+Bead.IRouterServerTransport.TakesProcedure(string! connectionHandle, Bead.ProcedureAddress address) -> bool
+Bead.JoinedServerTransport.NamesProcedures() -> bool
+Bead.JoinedServerTransport.TakesProcedure(string! connectionHandle, Bead.ProcedureAddress address) -> bool
+Bead.MemoryTransportServer.NamesProcedures() -> bool
+Bead.MemoryTransportServer.TakesProcedure(string! connectionHandle, Bead.ProcedureAddress address) -> bool
+Bead.MemoryTransportServerOptions.Procedures.get -> System.Collections.Generic.IReadOnlyCollection<Bead.ProcedureAddress>?
+Bead.MemoryTransportServerOptions.Procedures.init -> void

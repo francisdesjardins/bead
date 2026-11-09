@@ -841,10 +841,18 @@ internal sealed partial class RouterCore : IDisposable
             return;
         }
 
+        // ! step 5 of section 9.2: a resolver its connection's transport does not take is none, its
+        // series kept (spec 9.11; spec/debugging.md 8.3); one that names a destination is its relay's,
+        // whatever its connection's transport takes
+        if (header.DestinationId is null && resolver is not null && !_port.TakesProcedure(connectionHandle, new ProcedureAddress(header.ServiceId, header.ProcedureId)))
+        {
+            resolver = null;
+        }
+
         if (resolver is null)
         {
             Refuse(
-                _services.ContainsKey(header.ServiceId)
+                IsServiceKnown(header.ServiceId, connectionHandle)
                     ? ProtocolFailureOf(ProtocolCode.ProcedureUnknown, $"no procedure {header.ProcedureId} in service {header.ServiceId}")
                     : ProtocolFailureOf(ProtocolCode.ServiceUnknown, $"no service {header.ServiceId}"),
                 dispatched);
@@ -854,6 +862,23 @@ internal sealed partial class RouterCore : IDisposable
 
         _handlers.AddOrUpdate(header, resolver);
         Resolve(resolver, new Arrival(target, answering, payload) { Arrived = arrived, TransportCredential = carried, From = (message.Address, message.Port) });
+    }
+
+    // whether a service is known on a connection (spec 9.11): a resolver of it registered whose
+    // address its transport takes, the registry's procedures of it asked in the order of their ids,
+    // on a refusal's path alone, until one is taken
+    private bool IsServiceKnown(ushort serviceId, string connectionHandle)
+    {
+        return _services.ContainsKey(serviceId) && _resolvers.Keys.Where((address) =>
+        {
+            return address.ServiceId == serviceId;
+        }).OrderBy((address) =>
+        {
+            return address.ProcedureId;
+        }).Any((address) =>
+        {
+            return _port.TakesProcedure(connectionHandle, address);
+        });
     }
 
     // whether a request whose credential resolves is still its call's: a cancel, its connection

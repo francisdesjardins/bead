@@ -7,7 +7,9 @@ using System.Net.WebSockets;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Threading.Channels;
+using Bead.Interop;
 using Bead.Tests;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting.Server;
@@ -66,6 +68,12 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     private int _port;
 
     // helpers
+
+    // a call of the interop service's generated client, its payload a JSON string
+    private static Task<JsonElement> Called(Func<JsonElement, BoundCall<JsonElement>> requester)
+    {
+        return requester(JsonSerializer.SerializeToElement("x"))().WaitAsync(Patience, Cancelled);
+    }
 
     private static CancellationToken Cancelled
     {
@@ -3700,5 +3708,41 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             return server.Start(Loopback with { CancellationToken = Cancelled });
         })).Message);
         Assert.Equal(ReadyState.Closed, server.ReadyState);
+    }
+
+    // spec 9.11: the twin of "a WebSocket server transport takes the procedures it is given"
+    [Fact]
+    public async Task A_WebSocket_server_transport_takes_the_procedures_it_is_given()
+    {
+        var transport = new WebSocketTransportServer(new WebSocketTransportServerOptions { Procedures = [InteropProcedures.Echo.Procedure.Address] });
+        await using var server = new Server<string>(transport);
+        await using var client = new WebSocketClient();
+
+        var interop = new InteropClient(client);
+
+        InteropHandlers.Offer(server);
+
+        var port = (await transport.Start(new WebSocketTransportStartOptions { Address = "127.0.0.1", FindOpenPort = true, CancellationToken = Cancelled })).Port;
+
+        await client.Connect(new WebSocketTransportClientConnectOptions { Host = "127.0.0.1", Port = port, CancellationToken = Cancelled });
+
+        Assert.True(transport.NamesProcedures());
+        Assert.Equal("\"x\"", (await Called(interop.Echo)).GetRawText());
+
+        // * one it does not take is answered as one to no resolver, its service known by echo
+        var refused = await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return Called(interop.Fail);
+        });
+
+        Assert.Equal(((ushort)ProtocolCode.ProcedureUnknown, "no procedure 2 in service 1"), (refused.Code, refused.Failure.Detail));
+
+        // an address out of its range refused as it is built (spec 9.12)
+        Assert.Equal(
+            "a WebSocket transport server takes 0/1, out of its range: a service and a procedure are from 1 to 65535, service 0 the protocol's (spec 9.12, 16.2, 16.3) (Parameter 'options')",
+            Assert.Throws<ArgumentException>(() =>
+            {
+                return new WebSocketTransportServer(new WebSocketTransportServerOptions { Procedures = [new ProcedureAddress(0, 1)] });
+            }).Message);
     }
 }
