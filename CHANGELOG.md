@@ -17,6 +17,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   decision 0049).
 - **Breaking:** the TypeScript side's `REFUSALS` is `HTTP_REFUSALS`.
 - **Breaking:** the TypeScript side's `IHTTPPolicyInit` is `IHTTPPolicyOptions`.
+- **Breaking:** the C# side's `WebSocketTransportStartOptions` and `HttpTransportStartOptions` are
+  one `TransportServerStartOptions`, in `Bead.Core`.
 
 ### Fixed
 

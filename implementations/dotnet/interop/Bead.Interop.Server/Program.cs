@@ -93,8 +93,8 @@ foreach (var transport in brokerTransports)
     await transport.Start();
 }
 
-var address = await server.Transport.Start(new WebSocketTransportStartOptions { Address = "127.0.0.1", Port = port, FindOpenPort = port == 0 });
-var httpAddress = await httpServer.Transport.Start(new HttpTransportStartOptions { Address = "127.0.0.1", FindOpenPort = true });
+var address = await server.Transport.Start(new TransportServerStartOptions { Address = "127.0.0.1", Port = port, FindOpenPort = port == 0 });
+var httpAddress = await httpServer.Transport.Start(new TransportServerStartOptions { Address = "127.0.0.1", FindOpenPort = true });
 await using var transcoding = await TranscodingService.Start();
 await using var gateway = new HttpGateway(new HttpGatewayOptions
 {

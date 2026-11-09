@@ -1,4 +1,4 @@
-# alone: typescript 316, csharp 65, rust 78
+# alone: typescript 315, csharp 63, rust 78
 # concept	typescript	csharp	rust	class
 ACCEPT_TIMEOUT	ACCEPT_TIMEOUT [constant]	-	ACCEPT_TIMEOUT [constant]	same
 AccessRefusal	IAccessRefusal [record]	AccessRefusal [record]	AccessRefusal [record]	same
@@ -303,6 +303,7 @@ TransportServerAddress	ITransportServerAddress [record]	TransportServerAddress [
 TransportServerClient	ITransportServerClient [record]	TransportServerClient [record]	TransportServerClient [record]	same
 TransportServerConnection	ITransportServerConnection [record]	-	-	own: what a connection's platform opened it with, which the other sides do not hand (0007)
 TransportServerRefusal	ITransportServerRefusal [record]	TransportServerRefusal [record]	TransportServerRefusal [record]	same
+TransportServerStartOptions	ITransportServerStartOptions [record]	TransportServerStartOptions [record]	-	same
 UnregisterNotificationOptions	IUnregisterNotificationOptions [record]	-	UnregisterNotificationOptions [record]	same
 utf8Length	utf8Length [function]	Validators.Utf8Length [function]	-	rendered: of (0007, 0044)
 ValidateOptions	IValidateOptions [record]	ValidateOptions [record]	ValidateOptions [record]	same
@@ -486,7 +487,6 @@ HTTPSubscriber	IHTTPSubscriber [function type]	-	-	alone
 httpSubscriberOf	httpSubscriberOf [function]	-	-	alone
 HttpTemplate	-	HttpTemplate [record]	-	alone
 HttpTransport	-	HttpTransport [constant]	-	alone
-HttpTransportStartOptions	-	HttpTransportStartOptions [record]	-	alone
 HttpVariable	-	HttpVariable [record]	-	alone
 IDLE_TIMEOUT	IDLE_TIMEOUT [constant]	-	-	alone
 INACTIVITY_TIMEOUT	INACTIVITY_TIMEOUT [constant]	-	-	alone
@@ -740,7 +740,6 @@ TransportServerOnMessageCallback	TransportServerOnMessageCallback [record]	-	-	a
 TransportServerOnRefusalCallback	TransportServerOnRefusalCallback [record]	-	-	alone
 TransportServerOptions	ITransportServerOptions [record]	-	-	alone
 TransportServerResolvedStartOptions	TransportServerResolvedStartOptions [record]	-	-	alone
-TransportServerStartOptions	ITransportServerStartOptions [record]	-	-	alone
 TransportServerToldEvent	TransportServerToldEvent [record]	-	-	alone
 TransportTypes	-	TransportTypes [constant]	-	alone
 Unsubscribe	-	-	Unsubscribe [function type]	alone
@@ -767,7 +766,6 @@ WebSocketConstructor	IWebSocketConstructor [record]	-	-	alone
 WebSocketLike	IWebSocketLike [record]	-	-	alone
 WebSocketServerConstructor	IWebSocketServerConstructor [record]	-	-	alone
 WebSocketServerLike	IWebSocketServerLike [record]	-	-	alone
-WebSocketTransportStartOptions	-	WebSocketTransportStartOptions [record]	-	alone
 WINDOW	WINDOW [constant]	-	-	alone
 WORKER_MESSAGES	WORKER_MESSAGES [constant]	-	-	alone
 WorkerChannelLike	IWorkerChannelLike [record]	-	-	alone

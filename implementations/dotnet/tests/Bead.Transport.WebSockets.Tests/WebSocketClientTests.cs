@@ -78,7 +78,7 @@ public sealed class WebSocketClientTests : IAsyncLifetime
 
     public async ValueTask InitializeAsync()
     {
-        _port = (await _transport.Start(new WebSocketTransportStartOptions { Address = "127.0.0.1", FindOpenPort = true, CancellationToken = Cancelled })).Port;
+        _port = (await _transport.Start(new TransportServerStartOptions { Address = "127.0.0.1", FindOpenPort = true, CancellationToken = Cancelled })).Port;
         await _client.Connect(new WebSocketTransportClientConnectOptions { Host = "127.0.0.1", Port = _port, CancellationToken = Cancelled });
     }
 

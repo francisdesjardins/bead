@@ -27,7 +27,7 @@ public sealed class WebSocketServerTests
     // bytes by the tens of megabytes, on a machine that may be slow: the clock is no part of it
     private static readonly TimeSpan Generous = TimeSpan.FromSeconds(30);
 
-    private static readonly WebSocketTransportStartOptions Loopback = new() { Address = Host, FindOpenPort = true };
+    private static readonly TransportServerStartOptions Loopback = new() { Address = Host, FindOpenPort = true };
 
     // envelopes of 1 024 bytes, a window of 8 KiB
     private static readonly RouterLimits Small = new() { ChunkBytes = 1_024, MaximumEnvelopeBytes = 1_024, WindowBytes = 8_192 };
@@ -1242,7 +1242,7 @@ public sealed class WebSocketServerTests
     {
         // a server on every address, each socket bound to one address and port of the loopback
         var server = new WebSocketServer<string>();
-        var port = (await server.Transport.Start(new WebSocketTransportStartOptions { Address = "0.0.0.0", FindOpenPort = true, CancellationToken = Cancelled })).Port;
+        var port = (await server.Transport.Start(new TransportServerStartOptions { Address = "0.0.0.0", FindOpenPort = true, CancellationToken = Cancelled })).Port;
         var localPort = new StrongBox<int>(0);
         using var aliceHandshakes = new SamePort(localPort);
         using var otherHandshakes = new SamePort(localPort);

@@ -44,9 +44,9 @@ public sealed class TransportsTests
 
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
 
-    private static readonly HttpTransportStartOptions Loopback = new() { Address = Host, FindOpenPort = true };
+    private static readonly TransportServerStartOptions Loopback = new() { Address = Host, FindOpenPort = true };
 
-    private static readonly WebSocketTransportStartOptions WebSocketLoopback = new() { Address = Host, FindOpenPort = true };
+    private static readonly TransportServerStartOptions WebSocketLoopback = new() { Address = Host, FindOpenPort = true };
 
     // what masks each frame the peer writes, as a client's must be: RFC 6455's own example (section 5.7)
     private static readonly byte[] MaskingKey = [0x37, 0xFA, 0x21, 0x3D];
