@@ -165,6 +165,16 @@ fn on_loopback() -> TransportServerStartOptions {
     }
 }
 
+// the options of a server whose close waits 100 ms on its peer: a stop does not wait out the
+// default's 5 s on a raw peer that never answers its 1001, where the close timeout is not what a
+// test holds
+fn briefly_closing() -> WebSocketTransportServerOptions {
+    WebSocketTransportServerOptions {
+        close_timeout: Some(Duration::from_millis(100)),
+        ..WebSocketTransportServerOptions::default()
+    }
+}
+
 fn dated_at() -> SystemTime {
     SystemTime::UNIX_EPOCH.checked_add(DATED).unwrap()
 }
@@ -367,8 +377,7 @@ fn binary(bytes: &[u8]) -> Message {
 
 #[tokio::test]
 async fn starts_uninitialized_and_is_open_once_listening_on_a_port_the_system_picked() {
-    let server =
-        WebSocketTransportServer::new(&WebSocketTransportServerOptions::default()).unwrap();
+    let server = WebSocketTransportServer::new(&briefly_closing()).unwrap();
 
     assert_eq!(server.ready_state(), ReadyState::Uninitialized, "before");
 
@@ -387,8 +396,8 @@ async fn starts_uninitialized_and_is_open_once_listening_on_a_port_the_system_pi
 
 #[tokio::test]
 async fn fails_on_a_port_taken_ending_closed_and_starts_again_on_a_free_one_and_after_a_stop() {
-    let (server, _, port) = started(&WebSocketTransportServerOptions::default()).await;
-    let other = WebSocketTransportServer::new(&WebSocketTransportServerOptions::default()).unwrap();
+    let (server, _, port) = started(&briefly_closing()).await;
+    let other = WebSocketTransportServer::new(&briefly_closing()).unwrap();
     let taken = TransportServerStartOptions {
         address: Some("127.0.0.1".to_owned()),
         port: Some(port),
@@ -420,7 +429,7 @@ async fn fails_on_a_port_taken_ending_closed_and_starts_again_on_a_free_one_and_
 
 #[tokio::test]
 async fn refuses_a_second_start_and_keeps_serving() {
-    let (server, recorder, port) = started(&WebSocketTransportServerOptions::default()).await;
+    let (server, recorder, port) = started(&briefly_closing()).await;
 
     assert_eq!(
         server.start(&on_loopback()).await.unwrap_err().to_string(),
@@ -440,8 +449,7 @@ async fn refuses_a_second_start_and_keeps_serving() {
 
 #[tokio::test]
 async fn refuses_a_second_start_while_the_first_is_still_starting() {
-    let server =
-        WebSocketTransportServer::new(&WebSocketTransportServerOptions::default()).unwrap();
+    let server = WebSocketTransportServer::new(&briefly_closing()).unwrap();
     let first = server.start(&on_loopback());
     let second = server.start(&on_loopback()).await.unwrap_err();
 
@@ -457,8 +465,7 @@ async fn refuses_a_second_start_while_the_first_is_still_starting() {
 
 #[tokio::test]
 async fn refuses_a_stop_while_starting_and_stops_once_started() {
-    let server =
-        WebSocketTransportServer::new(&WebSocketTransportServerOptions::default()).unwrap();
+    let server = WebSocketTransportServer::new(&briefly_closing()).unwrap();
     let starting = server.start(&on_loopback());
 
     assert_eq!(
@@ -474,7 +481,7 @@ async fn refuses_a_stop_while_starting_and_stops_once_started() {
 
 #[tokio::test]
 async fn refuses_a_start_once_disposed_its_state_kept_and_disposes_once_stopping_it_first() {
-    let (server, _, port) = started(&WebSocketTransportServerOptions::default()).await;
+    let (server, _, port) = started(&briefly_closing()).await;
 
     patience(PATIENCE, server.dispose()).await.unwrap().unwrap();
 
@@ -496,8 +503,7 @@ async fn refuses_a_start_once_disposed_its_state_kept_and_disposes_once_stopping
 #[tokio::test]
 async fn stops_at_once_when_never_started_stops_twice_then_starts_again_on_a_new_port_and_accepts()
 {
-    let server =
-        WebSocketTransportServer::new(&WebSocketTransportServerOptions::default()).unwrap();
+    let server = WebSocketTransportServer::new(&briefly_closing()).unwrap();
     let recorder = recorded(&server);
 
     stopped(&server).await;
@@ -525,7 +531,7 @@ async fn stops_at_once_when_never_started_stops_twice_then_starts_again_on_a_new
 
 #[tokio::test]
 async fn shares_a_stop_already_in_progress() {
-    let (server, recorder, port) = started(&WebSocketTransportServerOptions::default()).await;
+    let (server, recorder, port) = started(&briefly_closing()).await;
     let mut client = client(port).await;
 
     recorder.connections(1).await;
@@ -557,7 +563,7 @@ async fn a_stop_reentered_from_a_close_listener_shares_the_stop_in_progress() {
         }
     }
 
-    let (server, recorder, port) = started(&WebSocketTransportServerOptions::default()).await;
+    let (server, recorder, port) = started(&briefly_closing()).await;
     let restopping = Arc::new(Restopping {
         server: Mutex::new(Some(server.clone())),
         stops: Mutex::new(Vec::new()),
@@ -588,8 +594,7 @@ async fn a_stop_reentered_from_a_close_listener_shares_the_stop_in_progress() {
 
 #[tokio::test]
 async fn an_abort_before_listening_rejects_the_start_closes_what_was_opened_and_can_start_again() {
-    let server =
-        WebSocketTransportServer::new(&WebSocketTransportServerOptions::default()).unwrap();
+    let server = WebSocketTransportServer::new(&briefly_closing()).unwrap();
     let signal = CancellationToken::new();
 
     signal.cancel();
@@ -612,8 +617,7 @@ async fn an_abort_before_listening_rejects_the_start_closes_what_was_opened_and_
 
 #[tokio::test]
 async fn refuses_to_start_on_an_address_that_is_no_bare_ip_address_ending_closed() {
-    let server =
-        WebSocketTransportServer::new(&WebSocketTransportServerOptions::default()).unwrap();
+    let server = WebSocketTransportServer::new(&briefly_closing()).unwrap();
 
     for (address, refusal) in [
         (
@@ -645,8 +649,7 @@ async fn refuses_to_start_on_an_address_that_is_no_bare_ip_address_ending_closed
 #[tokio::test]
 async fn listens_on_localhost_when_given_no_address_both_loopbacks_on_one_port_reached_by_127_0_0_1_by_the_ipv6_loopback_and_by_localhost_reports_localhost_and_is_secure_there()
  {
-    let server =
-        WebSocketTransportServer::new(&WebSocketTransportServerOptions::default()).unwrap();
+    let server = WebSocketTransportServer::new(&briefly_closing()).unwrap();
     let recorder = recorded(&server);
     let bound = server
         .start(&TransportServerStartOptions {
@@ -698,8 +701,7 @@ async fn refuses_to_start_on_localhost_when_another_socket_holds_the_other_loopb
         return;
     };
     let port = holder.local_addr().unwrap().port();
-    let server =
-        WebSocketTransportServer::new(&WebSocketTransportServerOptions::default()).unwrap();
+    let server = WebSocketTransportServer::new(&briefly_closing()).unwrap();
     let refused = server
         .start(&TransportServerStartOptions {
             port: Some(port),
@@ -726,8 +728,7 @@ async fn refuses_to_start_on_localhost_when_another_socket_holds_the_other_loopb
 #[tokio::test]
 async fn is_secure_on_the_ipv6_loopback_or_an_address_in_127_0_0_0_8_and_not_on_a_wildcard() {
     for (address, is_secure) in [("127.0.0.1", true), ("::1", true), ("0.0.0.0", false)] {
-        let server =
-            WebSocketTransportServer::new(&WebSocketTransportServerOptions::default()).unwrap();
+        let server = WebSocketTransportServer::new(&briefly_closing()).unwrap();
         let recorder = recorded(&server);
         let Ok(bound) = server
             .start(&TransportServerStartOptions {
@@ -768,7 +769,7 @@ async fn is_secure_as_its_application_says_what_stands_in_front_of_it_whatever_i
     for (secure, is_secure) in [(Some(false), false), (Some(true), true), (None, true)] {
         let (server, recorder, port) = started(&WebSocketTransportServerOptions {
             secure,
-            ..WebSocketTransportServerOptions::default()
+            ..briefly_closing()
         })
         .await;
         let _client = client(port).await;
@@ -789,8 +790,7 @@ async fn is_secure_as_its_application_says_what_stands_in_front_of_it_whatever_i
 
 #[tokio::test]
 async fn names_a_client_that_comes_over_ipv4_to_a_dual_stack_listener_by_its_ipv4_address() {
-    let server =
-        WebSocketTransportServer::new(&WebSocketTransportServerOptions::default()).unwrap();
+    let server = WebSocketTransportServer::new(&briefly_closing()).unwrap();
     let recorder = recorded(&server);
     let Ok(bound) = server
         .start(&TransportServerStartOptions {
@@ -844,7 +844,7 @@ async fn meets_a_connection_already_registered_and_can_send_to_it() {
         }
     }
 
-    let (server, recorder, port) = started(&WebSocketTransportServerOptions::default()).await;
+    let (server, recorder, port) = started(&briefly_closing()).await;
     let greeting = Arc::new(Greeting {
         server: Mutex::new(Some(server.clone())),
         is_registered: Mutex::new(None),
@@ -883,8 +883,7 @@ async fn keeps_a_connection_whose_connection_listener_throws_its_messages_heard_
         }
     }
 
-    let server =
-        WebSocketTransportServer::new(&WebSocketTransportServerOptions::default()).unwrap();
+    let server = WebSocketTransportServer::new(&briefly_closing()).unwrap();
 
     server.listen(Arc::new(Throwing));
 
@@ -931,7 +930,7 @@ async fn delivers_binary_with_its_connection_s_address_and_port_stamping_the_act
  {
     let (server, recorder, port) = started(&WebSocketTransportServerOptions {
         clock: Some(dated()),
-        ..WebSocketTransportServerOptions::default()
+        ..briefly_closing()
     })
     .await;
     let mut client = client(port).await;
@@ -981,8 +980,7 @@ async fn hears_the_next_message_after_a_message_listener_throws_the_throw_report
         }
     }
 
-    let server =
-        WebSocketTransportServer::new(&WebSocketTransportServerOptions::default()).unwrap();
+    let server = WebSocketTransportServer::new(&briefly_closing()).unwrap();
 
     server.listen(Arc::new(Throwing));
 
@@ -1017,7 +1015,7 @@ async fn hears_the_next_message_after_a_message_listener_throws_the_throw_report
 
 #[tokio::test]
 async fn delivers_a_message_sent_in_frames_as_one_and_names_its_connection() {
-    let (server, recorder, port) = started(&WebSocketTransportServerOptions::default()).await;
+    let (server, recorder, port) = started(&briefly_closing()).await;
     let (mut socket, head) = upgraded(port).await;
 
     assert!(
@@ -1044,7 +1042,7 @@ async fn delivers_a_message_sent_in_frames_as_one_and_names_its_connection() {
 
 #[tokio::test]
 async fn emits_connection_before_a_frame_that_arrived_with_the_upgrade_request() {
-    let (server, recorder, port) = started(&WebSocketTransportServerOptions::default()).await;
+    let (server, recorder, port) = started(&briefly_closing()).await;
     let mut socket = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
     let mut request = request_of("GET / HTTP/1.1", &["Host: 127.0.0.1"]).into_bytes();
 
@@ -1069,7 +1067,7 @@ async fn emits_connection_before_a_frame_that_arrived_with_the_upgrade_request()
 
 #[tokio::test]
 async fn sends_to_a_connection_in_order_one_message_at_a_time() {
-    let (server, recorder, port) = started(&WebSocketTransportServerOptions::default()).await;
+    let (server, recorder, port) = started(&briefly_closing()).await;
     let mut client = client(port).await;
     let handle = recorder.connections(1).await.remove(0);
 
@@ -1098,7 +1096,7 @@ async fn sends_to_a_connection_in_order_one_message_at_a_time() {
 
 #[tokio::test]
 async fn resolves_a_send_for_a_handle_nobody_holds() {
-    let (server, _, _) = started(&WebSocketTransportServerOptions::default()).await;
+    let (server, _, _) = started(&briefly_closing()).await;
     let sent = server.send(
         TransportMessage {
             data: Bytes::from_static(&[1]),
@@ -1152,7 +1150,7 @@ async fn closes_one_connection_which_is_gone_once_it_resolves() {
 
 #[tokio::test]
 async fn resolves_false_closing_a_handle_nobody_holds() {
-    let (server, _, _) = started(&WebSocketTransportServerOptions::default()).await;
+    let (server, _, _) = started(&briefly_closing()).await;
 
     assert!(
         !server
@@ -1165,7 +1163,7 @@ async fn resolves_false_closing_a_handle_nobody_holds() {
 
 #[tokio::test]
 async fn counts_the_connections_it_holds_and_gives_their_handles() {
-    let (server, recorder, port) = started(&WebSocketTransportServerOptions::default()).await;
+    let (server, recorder, port) = started(&briefly_closing()).await;
     let _first = client(port).await;
     let _second = client(port).await;
     let handles = recorder.connections(2).await;
@@ -1207,7 +1205,7 @@ async fn counts_the_connections_it_holds_and_gives_their_handles() {
 #[tokio::test]
 async fn names_each_connection_by_its_peer_s_port_and_the_rank_it_came_at_and_gives_no_handle_twice()
  {
-    let (server, recorder, port) = started(&WebSocketTransportServerOptions::default()).await;
+    let (server, recorder, port) = started(&briefly_closing()).await;
     let first = client(port).await;
     let second = client(port).await;
     let handles = recorder.connections(2).await;
@@ -1243,7 +1241,7 @@ async fn names_each_connection_by_its_peer_s_port_and_the_rank_it_came_at_and_gi
 
 #[tokio::test]
 async fn answers_a_close_at_once_and_says_it_was_clean() {
-    let (server, recorder, port) = started(&WebSocketTransportServerOptions::default()).await;
+    let (server, recorder, port) = started(&briefly_closing()).await;
     let mut client = client(port).await;
     let handle = recorder.connections(1).await.remove(0);
 
@@ -1272,7 +1270,7 @@ async fn answers_a_close_at_once_and_says_it_was_clean() {
 
 #[tokio::test]
 async fn tells_a_close_from_its_peer_with_no_status_code_unclean_as_it_reads_1005() {
-    let (server, recorder, port) = started(&WebSocketTransportServerOptions::default()).await;
+    let (server, recorder, port) = started(&briefly_closing()).await;
     let mut client = client(port).await;
     let handle = recorder.connections(1).await.remove(0);
 
@@ -1287,7 +1285,7 @@ async fn tells_a_close_from_its_peer_with_no_status_code_unclean_as_it_reads_100
 
 #[tokio::test]
 async fn emits_error_with_the_handle_then_that_connection_s_close_on_a_protocol_error() {
-    let (server, recorder, port) = started(&WebSocketTransportServerOptions::default()).await;
+    let (server, recorder, port) = started(&briefly_closing()).await;
     let (mut socket, _) = upgraded(port).await;
     let handle = recorder.connections(1).await.remove(0);
 
@@ -1325,7 +1323,7 @@ async fn emits_error_with_the_handle_then_that_connection_s_close_on_a_protocol_
 #[tokio::test]
 async fn tells_a_peer_that_drops_without_its_closing_handshake_by_its_unclean_close_alone_no_error()
 {
-    let (server, recorder, port) = started(&WebSocketTransportServerOptions::default()).await;
+    let (server, recorder, port) = started(&briefly_closing()).await;
     let (socket, _) = upgraded(port).await;
     let handle = recorder.connections(1).await.remove(0);
 
@@ -1341,7 +1339,7 @@ async fn fails_with_1009_a_message_past_its_bound_telling_one_error_that_names_m
  {
     let (server, recorder, port) = started(&WebSocketTransportServerOptions {
         maximum_message_bytes: Some(8),
-        ..WebSocketTransportServerOptions::default()
+        ..briefly_closing()
     })
     .await;
     let mut client = client(port).await;
@@ -1388,7 +1386,7 @@ async fn fails_with_1009_a_message_past_its_bound_telling_one_error_that_names_m
 
 #[tokio::test]
 async fn closes_with_1009_a_message_past_an_envelope_s_limit_16_778_240_bytes_when_told_no_bound() {
-    let (server, recorder, port) = started(&WebSocketTransportServerOptions::default()).await;
+    let (server, recorder, port) = started(&briefly_closing()).await;
     let mut client = client(port).await;
     let handle = recorder.connections(1).await.remove(0);
     let past = usize::try_from(MAXIMUM_MESSAGE_BYTES).unwrap() + 1;
@@ -1570,7 +1568,7 @@ async fn stamps_the_activity_on_its_clock_and_bounds_a_close_on_the_real_one_whi
 #[tokio::test]
 async fn stop_closes_every_connection_with_1001_each_telling_its_close_before_it_resolves_and_stops_listening()
  {
-    let (server, recorder, port) = started(&WebSocketTransportServerOptions::default()).await;
+    let (server, recorder, port) = started(&briefly_closing()).await;
     let mut first = client(port).await;
     let mut second = client(port).await;
 
@@ -1610,7 +1608,7 @@ async fn stop_closes_every_connection_with_1001_each_telling_its_close_before_it
 
 #[tokio::test]
 async fn dispose_stops_it_closing_with_1001_and_refusing_what_comes_after() {
-    let (server, recorder, port) = started(&WebSocketTransportServerOptions::default()).await;
+    let (server, recorder, port) = started(&briefly_closing()).await;
     let mut client = client(port).await;
 
     recorder.connections(1).await;
@@ -1641,7 +1639,7 @@ async fn dispose_stops_it_closing_with_1001_and_refusing_what_comes_after() {
 
 #[tokio::test]
 async fn stops_without_waiting_on_a_peer_that_never_finished_its_http_request() {
-    let (server, _, port) = started(&WebSocketTransportServerOptions::default()).await;
+    let (server, _, port) = started(&briefly_closing()).await;
     let mut socket = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
 
     socket
@@ -1661,7 +1659,7 @@ async fn stops_without_waiting_on_a_peer_that_never_finished_its_http_request() 
 async fn answers_408_a_head_that_did_not_come_within_its_headers_timeout_unmarked() {
     let (server, recorder, port) = started(&WebSocketTransportServerOptions {
         headers_timeout: Some(Duration::from_millis(100)),
-        ..WebSocketTransportServerOptions::default()
+        ..briefly_closing()
     })
     .await;
 
@@ -1685,7 +1683,7 @@ fn judging(hosts: &[&str], origins: &[&str]) -> WebSocketTransportServerOptions 
         clock: Some(dated()),
         hosts: Some(hosts.iter().map(|host| (*host).to_owned()).collect()),
         origins: Some(origins.iter().map(|origin| (*origin).to_owned()).collect()),
-        ..WebSocketTransportServerOptions::default()
+        ..briefly_closing()
     }
 }
 
@@ -2038,14 +2036,14 @@ async fn refuses_a_maximum_connections_or_a_maximum_connections_per_address_that
         (
             WebSocketTransportServerOptions {
                 maximum_connections: Some(0),
-                ..WebSocketTransportServerOptions::default()
+                ..briefly_closing()
             },
             "maximumConnections is a whole number above 0, not 0",
         ),
         (
             WebSocketTransportServerOptions {
                 maximum_connections_per_address: Some(0),
-                ..WebSocketTransportServerOptions::default()
+                ..briefly_closing()
             },
             "maximumConnectionsPerAddress is a whole number above 0, not 0",
         ),
@@ -2098,7 +2096,7 @@ async fn bounds_its_connections_and_those_of_one_address_refusing_an_upgrade_pas
             clock: Some(dated()),
             maximum_connections,
             maximum_connections_per_address,
-            ..WebSocketTransportServerOptions::default()
+            ..briefly_closing()
         })
         .await;
         let mut first = client(port).await;
@@ -2132,7 +2130,7 @@ async fn bounds_its_connections_and_those_of_one_address_refusing_an_upgrade_pas
 async fn takes_no_more_upgrades_than_its_places_when_they_cross() {
     let (server, recorder, port) = started(&WebSocketTransportServerOptions {
         maximum_connections: Some(3),
-        ..WebSocketTransportServerOptions::default()
+        ..briefly_closing()
     })
     .await;
     let answers = futures_util::future::join_all((0..8).map(|_| async move {
@@ -2289,7 +2287,7 @@ async fn refuses_as_it_would_though_a_refusal_listener_throws_the_throw_reported
 #[tokio::test]
 async fn hands_every_envelope_of_a_connection_its_upgrade_s_authorization_as_it_came_and_trimmed_and_carries_none_toward_its_client()
  {
-    let (server, recorder, port) = started(&WebSocketTransportServerOptions::default()).await;
+    let (server, recorder, port) = started(&briefly_closing()).await;
 
     for (given, carried) in [
         (Some("Bearer a.b.c"), Some("Bearer a.b.c")),
@@ -2325,7 +2323,7 @@ async fn carries_no_credential_from_an_upgrade_that_carries_an_origin_its_own_or
  {
     let (server, recorder, port) = started(&WebSocketTransportServerOptions {
         origins: Some(vec!["https://bead.example".to_owned()]),
-        ..WebSocketTransportServerOptions::default()
+        ..briefly_closing()
     })
     .await;
 
@@ -2353,7 +2351,7 @@ async fn carries_no_credential_from_an_upgrade_that_carries_an_origin_its_own_or
 
 #[tokio::test]
 async fn names_a_connection_to_its_listeners_by_its_handle_and_nothing_of_its_credential() {
-    let (server, recorder, port) = started(&WebSocketTransportServerOptions::default()).await;
+    let (server, recorder, port) = started(&briefly_closing()).await;
     let _client = client_with(port, &[("authorization", "Bearer secret")]).await;
     let handle = recorder.connections(1).await.remove(0);
 
@@ -2404,7 +2402,7 @@ async fn a_websocket_server_transport_takes_the_procedures_it_is_given() {
     };
     let (server, recorder, port) = started(&WebSocketTransportServerOptions {
         procedures: Some(vec![address(2, 1)]),
-        ..WebSocketTransportServerOptions::default()
+        ..briefly_closing()
     })
     .await;
     let _client = client(port).await;
@@ -2422,7 +2420,7 @@ async fn a_websocket_server_transport_takes_the_procedures_it_is_given() {
     );
     // given none, it names none: its router never asks
     assert!(
-        !WebSocketTransportServer::new(&WebSocketTransportServerOptions::default())
+        !WebSocketTransportServer::new(&briefly_closing())
             .unwrap()
             .names_procedures(),
         "none named"
@@ -2437,7 +2435,7 @@ async fn pings_each_connection_every_heartbeat_and_drops_one_that_left_a_ping_un
         Arc::<SteppingClock>::clone(&stepping),
         &WebSocketTransportServerOptions {
             heartbeat: Some(Duration::from_millis(20)),
-            ..WebSocketTransportServerOptions::default()
+            ..briefly_closing()
         },
     )
     .await;
@@ -2477,7 +2475,7 @@ async fn keeps_the_clients_that_answer_its_pings_and_drops_one_that_does_not_on_
     // beats wide enough that a pong never misses one on a loaded machine
     let (server, recorder, port) = started(&WebSocketTransportServerOptions {
         heartbeat: Some(Duration::from_millis(200)),
-        ..WebSocketTransportServerOptions::default()
+        ..briefly_closing()
     })
     .await;
     let answering = reading(client(port).await);
@@ -2508,11 +2506,8 @@ async fn keeps_the_clients_that_answer_its_pings_and_drops_one_that_does_not_on_
 #[tokio::test]
 async fn beats_every_30_seconds_when_told_nothing() {
     let stepping = SteppingClock::new(SystemTime::UNIX_EPOCH);
-    let (server, recorder, port) = started_on(
-        Arc::<SteppingClock>::clone(&stepping),
-        &WebSocketTransportServerOptions::default(),
-    )
-    .await;
+    let (server, recorder, port) =
+        started_on(Arc::<SteppingClock>::clone(&stepping), &briefly_closing()).await;
     let reader = reading(client(port).await);
 
     recorder.connections(1).await;
@@ -2534,7 +2529,7 @@ async fn beats_nothing_with_a_heartbeat_of_never() {
             Arc::<SteppingClock>::clone(&stepping),
             &WebSocketTransportServerOptions {
                 heartbeat: Some(heartbeat),
-                ..WebSocketTransportServerOptions::default()
+                ..briefly_closing()
             },
         )
         .await;
@@ -2556,7 +2551,7 @@ async fn takes_a_client_s_address_from_x_forwarded_for_only_from_a_proxy_it_name
             clock: Some(dated()),
             hosts: Some(vec!["bead.test".to_owned()]),
             trusted_proxies: Some(vec![trusted.to_owned()]),
-            ..WebSocketTransportServerOptions::default()
+            ..briefly_closing()
         })
         .await;
         let mut socket = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
@@ -2624,7 +2619,7 @@ async fn refuses_as_it_is_built_a_trusted_proxies_entry_that_is_a_name_or_a_netw
             WebSocketTransportServer::new(&WebSocketTransportServerOptions {
                 trusted_proxies: Some(trusted_proxies.clone()),
                 unnamed_proxies,
-                ..WebSocketTransportServerOptions::default()
+                ..briefly_closing()
             })
             .is_err(),
             "{trusted_proxies:?}, {unnamed_proxies:?} refused"
@@ -2636,7 +2631,7 @@ async fn refuses_as_it_is_built_a_trusted_proxies_entry_that_is_a_name_or_a_netw
 async fn keeps_a_client_that_reads_through_a_burst_of_answers_each_of_a_chunk() {
     let (server, recorder, port) = started(&WebSocketTransportServerOptions {
         send_grace_period: Some(Duration::from_millis(100)),
-        ..WebSocketTransportServerOptions::default()
+        ..briefly_closing()
     })
     .await;
     let mut client = client(port).await;
@@ -2676,7 +2671,7 @@ async fn drops_a_client_that_stops_reading_once_its_socket_holds_what_waits_for_
         minimum_send_bytes_per_second: Some(1_000_000_000),
         send_grace_period: Some(Duration::from_millis(100)),
         heartbeat: Some(NEVER),
-        ..WebSocketTransportServerOptions::default()
+        ..briefly_closing()
     })
     .await;
     // a client that reads nothing past its 101
@@ -2712,7 +2707,7 @@ async fn drops_a_client_once_what_waits_for_it_would_pass_maximum_unsent_bytes_t
  {
     let (server, recorder, port) = started(&WebSocketTransportServerOptions {
         maximum_unsent_bytes: Some(1_000),
-        ..WebSocketTransportServerOptions::default()
+        ..briefly_closing()
     })
     .await;
     let mut client = client(port).await;
@@ -2773,7 +2768,7 @@ async fn closes_with_1009_and_drops_behind_maximum_unsent_bytes_a_connection_who
     let server = WebSocketTransportServer::new(&WebSocketTransportServerOptions {
         maximum_message_bytes: Some(8),
         maximum_unsent_bytes: Some(1_000),
-        ..WebSocketTransportServerOptions::default()
+        ..briefly_closing()
     })
     .unwrap();
 
@@ -2813,21 +2808,21 @@ async fn refuses_a_maximum_unsent_bytes_a_minimum_send_bytes_per_second_or_a_sen
         (
             WebSocketTransportServerOptions {
                 maximum_unsent_bytes: Some(0),
-                ..WebSocketTransportServerOptions::default()
+                ..briefly_closing()
             },
             "maximumUnsentBytes",
         ),
         (
             WebSocketTransportServerOptions {
                 send_grace_period: Some(NEVER),
-                ..WebSocketTransportServerOptions::default()
+                ..briefly_closing()
             },
             "sendGracePeriod",
         ),
         (
             WebSocketTransportServerOptions {
                 send_grace_period: Some(Duration::ZERO),
-                ..WebSocketTransportServerOptions::default()
+                ..briefly_closing()
             },
             "sendGracePeriod",
         ),
@@ -2843,7 +2838,7 @@ async fn refuses_a_maximum_unsent_bytes_a_minimum_send_bytes_per_second_or_a_sen
     assert!(
         WebSocketTransportServer::new(&WebSocketTransportServerOptions {
             minimum_send_bytes_per_second: Some(0),
-            ..WebSocketTransportServerOptions::default()
+            ..briefly_closing()
         })
         .is_ok(),
         "0 taken"
@@ -2876,7 +2871,7 @@ async fn reads_no_message_of_a_paused_connection_holds_the_rest_of_its_read_and_
 
     let (server, recorder, port) = started(&WebSocketTransportServerOptions {
         heartbeat: Some(NEVER),
-        ..WebSocketTransportServerOptions::default()
+        ..briefly_closing()
     })
     .await;
     let pausing = Arc::new(Pausing {
