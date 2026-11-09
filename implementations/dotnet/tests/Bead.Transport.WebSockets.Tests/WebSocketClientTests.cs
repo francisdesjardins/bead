@@ -55,15 +55,17 @@ public sealed class WebSocketClientTests : IAsyncLifetime
             new RequestDependencies<JsonElement, JsonElement> { Serializer = new JsonPayloads() });
     }
 
-    // the next request the client's router sends, gone out: what a test cancels, stops or replaces
-    // after, never a delay that a loaded runner outlasts
+    // the next request the client's router sends, read by the server's router: what a test cancels,
+    // stops or replaces after, never a delay that a loaded runner outlasts
+    // ! the server's read, not the client's Tx: a Tx is handed to the socket, whose send a dispose
+    // that follows at once can still fail with the transport's own refusal
     private Task RequestSent()
     {
         var sent = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        _client.Router.Debug += (direction, envelope) =>
+        _server.Router.Debug += (direction, envelope) =>
         {
-            if (direction == DebugDirection.Tx && envelope.Header is RequestHeader)
+            if (direction == DebugDirection.Rx && envelope.Header is RequestHeader)
             {
                 sent.TrySetResult();
             }
