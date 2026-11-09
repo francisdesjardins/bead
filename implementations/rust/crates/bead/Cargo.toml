@@ -32,6 +32,8 @@ p256 = { workspace = true }
 hmac = { workspace = true }
 sha2 = { workspace = true }
 getrandom = { workspace = true }
+# a request's head, read by the judgement under its bounds (decision 0049)
+httparse = { workspace = true }
 # the test kit's alone: the order of the seeds its mutations draw from, by their SHA-1
 sha1 = { workspace = true, optional = true }
 

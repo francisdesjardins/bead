@@ -117,6 +117,8 @@ crate
   use identity::IdentityRefusal
   use identity::Procedure
   use joined::JoinedServerTransport
+  use judgement::handshake::WEBSOCKET_REFUSALS
+  use judgement::handshake::WebSocketRefusals
   use jwt_verifier::JwtAgainst
   use jwt_verifier::JwtAlgorithm
   use jwt_verifier::JwtKey
@@ -1105,9 +1107,69 @@ crate::json
 crate::json::to_value
   fn to_value<T: Serialize + ?Sized>(value: &T) -> Result<Value, JsonRefusal>
 crate::judgement
+  mod handshake
+  mod head
   mod hosts
   mod items
   mod proxies
+crate::judgement::handshake
+  struct WebSocketRefusals #[non_exhaustive]
+    pub busy: &'static str
+    pub host: &'static str
+    pub malformed: &'static str
+    pub method: &'static str
+    pub origin: &'static str
+    pub upgrade: &'static str
+    pub version: &'static str
+    derives Clone, Copy, Debug, Eq, PartialEq
+  const WEBSOCKET_REFUSALS: WebSocketRefusals
+  struct AnswerField #[non_exhaustive]
+    pub name: &'static str
+    pub value: &'static str
+    derives Clone, Copy, Debug, Eq, PartialEq
+  struct HandshakeRefusal #[non_exhaustive]
+    pub fields: Vec<AnswerField>
+    pub refusal: Option<&'static str>
+    pub status: u16
+    derives Clone, Debug, Eq, PartialEq
+  struct HandshakeRequest<'a> #[non_exhaustive]
+    pub http_version: &'a str
+    pub method: Option<&'a str>
+    pub raw_fields: &'a [&'a str]
+    pub target: Option<&'a str>
+    const fn new(http_version: &'a str, raw_fields: &'a [&'a str]) -> Self
+    derives Clone, Copy, Debug
+  struct HandshakeTaken<'a> #[non_exhaustive]
+    pub hosts: &'a [String]
+    pub origins: &'a [String]
+    const fn new(hosts: &'a [String], origins: &'a [String]) -> Self
+    derives Clone, Copy, Debug
+  struct HandshakeTold #[non_exhaustive]
+    pub authority: Option<String>
+    pub origin: Option<String>
+    derives Clone, Debug, Eq, PartialEq
+  fn malformed_handshake() -> HandshakeRefusal
+  fn busy_handshake() -> HandshakeRefusal
+  fn host_malformed() -> HandshakeRefusal
+  fn told_of_handshake(request: &HandshakeRequest<'_>) -> HandshakeTold
+  fn refusal_of_handshake(request: &HandshakeRequest<'_>, taken: &HandshakeTaken<'_>) -> Option<HandshakeRefusal>
+crate::judgement::head
+  const MAXIMUM_HEAD_BYTES: usize
+  const MAXIMUM_HEAD_FIELDS: usize
+  struct Head #[non_exhaustive]
+    pub method: String
+    pub target: String
+    pub http_version: &'static str
+    pub raw_fields: Vec<String>
+    pub length: usize
+    fn fields(&self) -> Vec<&str>
+    derives Clone, Debug, Eq, PartialEq
+  enum HeadRead #[non_exhaustive]
+    Partial
+    Whole(Head)
+    Refused(u16)
+    derives Clone, Debug, Eq, PartialEq
+  fn read_head(bytes: &[u8]) -> HeadRead
 crate::judgement::hosts
   const HOST_REFUSAL: &str
   const ORIGIN_REFUSAL: &str
@@ -2228,6 +2290,8 @@ crate::internal
   use crate::envelope::write_header
   use crate::identity::are_one_name
   use crate::identity::is_procedure_name
+  use crate::judgement::handshake
+  use crate::judgement::head
   use crate::judgement::hosts
   use crate::judgement::items
   use crate::judgement::proxies

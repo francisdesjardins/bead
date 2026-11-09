@@ -97,6 +97,7 @@ pub use failure::{Failure, FailureOrigin, ProcedureAddress};
 pub use http_policy::{HttpPolicy, HttpPolicyOptions};
 pub use identity::{DeclarationWay, Deprecation, IdentityRefusal, Procedure};
 pub use joined::JoinedServerTransport;
+pub use judgement::handshake::{WEBSOCKET_REFUSALS, WebSocketRefusals};
 pub use jwt_verifier::{
     JwtAgainst, JwtAlgorithm, JwtKey, JwtRefusal, JwtSessionIdentifier, JwtVerdict,
 };
@@ -185,7 +186,7 @@ pub mod internal {
         read_envelope, read_failure, read_header, read_prefix, write_envelope, write_header,
     };
     pub use crate::identity::{are_one_name, is_procedure_name};
-    pub use crate::judgement::{hosts, items, proxies};
+    pub use crate::judgement::{handshake, head, hosts, items, proxies};
     pub use crate::jwt_verifier::{ReadJwt, read_jwt, verify_jwt};
     pub use crate::router::types::{limits_of, session_key_of};
 }

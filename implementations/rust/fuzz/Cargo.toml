@@ -62,6 +62,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "ws-handshake"
+path = "fuzz_targets/ws_handshake.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "broker-parcel"
 path = "fuzz_targets/broker_parcel.rs"
 test = false

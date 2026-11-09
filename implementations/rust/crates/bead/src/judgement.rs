@@ -7,6 +7,8 @@
 //! Always built, whatever the features: the transports judge by it, and the fuzz targets and the
 //! conformance players reach it through `bead::internal`.
 
+pub mod handshake;
+pub mod head;
 pub mod hosts;
 pub mod items;
 pub mod proxies;

@@ -315,7 +315,8 @@ violationsDetailOf	violationsDetailOf [function]	Violations.DetailOf [function]	
 ViolationSink	IViolationSink [record]	IViolationSink [record]	-	same
 violationsOf	violationsOf [function]	Violations.Of [function]	violations_of [function]	rendered: of (0007, 0044)
 WARNING_RATIO	WARNING_RATIO [constant]	Health.WarningRatio [constant]	WARNING_RATIO [constant]	rendered: constant (0007)
-WEBSOCKET_REFUSALS	WEBSOCKET_REFUSALS [constant]	WebSocketRefusals [constant]	-	same
+WEBSOCKET_REFUSALS	WEBSOCKET_REFUSALS [constant]	WebSocketRefusals [constant]	WEBSOCKET_REFUSALS [constant]	same
+WebSocketRefusals	-	-	WebSocketRefusals [record]	own: the type of the Rust side's constant of refusals, where the other sides hold a frozen object and a static class of constants (0044)
 WebSocketClient	WebSocketClient [record], createWebSocketClient [function]	WebSocketClient [record]	-	same
 WebSocketClientOptions	IWebSocketClientOptions [record]	WebSocketClientOptions [record]	-	same
 WebSocketServer	WebSocketServer [record], createWebSocketServer [function]	WebSocketServer [record]	-	same
