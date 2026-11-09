@@ -1,4 +1,4 @@
-# alone: typescript 317, csharp 66, rust 78
+# alone: typescript 316, csharp 65, rust 78
 # concept	typescript	csharp	rust	class
 ACCEPT_TIMEOUT	ACCEPT_TIMEOUT [constant]	-	ACCEPT_TIMEOUT [constant]	same
 AccessRefusal	IAccessRefusal [record]	AccessRefusal [record]	AccessRefusal [record]	same
@@ -118,6 +118,7 @@ HTTPGatewayOptions	IHTTPGatewayOptions [record]	HttpGatewayOptions [record]	-	sa
 HTTPGatewayStartOptions	IHTTPGatewayStartOptions [record]	HttpGatewayStartOptions [record]	-	same
 HttpPayload	HttpPayload [choice]	HttpPayload [record]	-	same
 HTTPPolicy	IHTTPPolicy [record]	HttpPolicy [record]	-	same
+HTTPPolicyOptions	IHTTPPolicyOptions [record]	HttpPolicyOptions [record]	-	same
 HttpRouteTemplate	IHttpRouteTemplate [record]	HttpRouteTemplate [record]	-	same
 HTTPServer	HTTPServer [record], createHTTPServer [function]	HttpServer [record]	-	same
 HTTPServerOptions	IHTTPServerOptions [record]	HttpServerOptions [record]	-	same
@@ -461,10 +462,8 @@ HttpGatewayEndpoints.MapBeadGateway	-	HttpGatewayEndpoints.MapBeadGateway [funct
 HTTPGatewayEventMap	HTTPGatewayEventMap [record]	-	-	alone
 HttpMethod	HttpMethod [choice]	-	-	alone
 HttpPath	-	HttpPath [record]	-	alone
-HTTPPolicyInit	IHTTPPolicyInit [record]	-	-	alone
 httpPolicyOf	httpPolicyOf [function]	-	-	alone
 HTTPPolicyOption	IHTTPPolicyOption [record]	-	-	alone
-HttpPolicyOptions	-	HttpPolicyOptions [record]	-	alone
 HttpProblem	-	HttpProblem [record]	-	alone
 HttpProblems.MediaType	-	HttpProblems.MediaType [constant]	-	alone
 HttpProblems.Of	-	HttpProblems.Of [function]	-	alone

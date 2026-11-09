@@ -18,7 +18,7 @@ import { assertTrustedProxies, assertUnnamedProxies } from './trusted-proxies';
  * What an HTTP policy is made of, each member as the HTTP transport's option of its name takes it
  * and its default where none is given (spec 15.12).
  */
-export interface IHTTPPolicyInit {
+export interface IHTTPPolicyOptions {
   readonly bodyBytesBudget?: number | undefined;
   readonly bodyGracePeriod?: number | undefined;
   readonly headersTimeout?: number | undefined;
@@ -35,7 +35,7 @@ export interface IHTTPPolicyInit {
 }
 
 /** An HTTP policy, checked as it was built and frozen: what {@link httpPolicyOf} gives. */
-export interface IHTTPPolicy extends IHTTPPolicyInit {
+export interface IHTTPPolicy extends IHTTPPolicyOptions {
   readonly [POLICY]: true;
 }
 
@@ -64,7 +64,7 @@ export const HTTP_POLICY_MEMBERS = Object.freeze([
   'sendGracePeriod',
   'trustedProxies',
   'unnamedProxies',
-] as const satisfies readonly (keyof IHTTPPolicyInit)[]);
+] as const satisfies readonly (keyof IHTTPPolicyOptions)[]);
 
 // the counts above 0, the rates from 0, and the durations of section 1.4, finite
 const COUNTS = Object.freeze([
@@ -92,7 +92,7 @@ const DURATIONS = Object.freeze(['bodyGracePeriod', 'headersTimeout', 'sendGrace
  * const transport = createHTTPTransportServer({ createServer, policy });
  * const gateway = createHTTPGateway({ policy, routes: HTTP_ROUTES, transport: memory });
  */
-export const httpPolicyOf = (init: IHTTPPolicyInit = {}): IHTTPPolicy => {
+export const httpPolicyOf = (init: IHTTPPolicyOptions = {}): IHTTPPolicy => {
   const { hosts, origins, trustedProxies, unnamedProxies } = init;
 
   assertHosts(hosts);

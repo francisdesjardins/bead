@@ -290,8 +290,8 @@
   IDrawingRequest	src/transport/server/types.ts
   IDrawnConnection	src/transport/server/types.ts
   IHTTPPolicy	src/transport/server/http-policy.ts
-  IHTTPPolicyInit	src/transport/server/http-policy.ts
   IHTTPPolicyOption	src/transport/server/http-policy.ts
+  IHTTPPolicyOptions	src/transport/server/http-policy.ts
   IHTTPRequestLike	src/transport/server/types.ts
   IHTTPResponseLike	src/transport/server/types.ts
   IHTTPServerLike	src/transport/server/types.ts
@@ -2806,7 +2806,7 @@ src/transcoding/http-gateway.ts IHTTPGateway
     start: (options?: IHTTPGatewayStartOptions) => Promise<{address: string; port: number}>
     stop: () => Promise<void>
 src/transcoding/http-gateway.ts IHTTPGatewayOptions
-  interface IHTTPGatewayOptions extends IHTTPPolicyInit, IHTTPPolicyOption
+  interface IHTTPGatewayOptions extends IHTTPPolicyOptions, IHTTPPolicyOption
     readonly authorization?: 'bearer-jwt' | 'elsewhere' | undefined
     readonly challenge?: string | undefined
     readonly clock?: IClock | undefined
@@ -3315,23 +3315,8 @@ src/transport/server/hosts-and-origins.ts ORIGIN_REFUSAL
 src/transport/server/http-policy.ts HTTP_POLICY_MEMBERS
   const HTTP_POLICY_MEMBERS: readonly ["bodyBytesBudget", "bodyGracePeriod", "headersTimeout", "hosts", "maximumBodyBytes", "maximumConnections", "maximumConnectionsPerAddress", "minimumBodyBytesPerSecond", "minimumSendBytesPerSecond", "origins", "sendGracePeriod", "trustedProxies", "unnamedProxies"]
 src/transport/server/http-policy.ts IHTTPPolicy
-  interface IHTTPPolicy extends IHTTPPolicyInit
+  interface IHTTPPolicy extends IHTTPPolicyOptions
     readonly [POLICY]: true
-    readonly bodyBytesBudget?: number | undefined
-    readonly bodyGracePeriod?: number | undefined
-    readonly headersTimeout?: number | undefined
-    readonly hosts?: readonly string[] | undefined
-    readonly maximumBodyBytes?: number | undefined
-    readonly maximumConnections?: number | undefined
-    readonly maximumConnectionsPerAddress?: number | undefined
-    readonly minimumBodyBytesPerSecond?: number | undefined
-    readonly minimumSendBytesPerSecond?: number | undefined
-    readonly origins?: readonly string[] | undefined
-    readonly sendGracePeriod?: number | undefined
-    readonly trustedProxies?: readonly string[] | undefined
-    readonly unnamedProxies?: number | undefined
-src/transport/server/http-policy.ts IHTTPPolicyInit
-  interface IHTTPPolicyInit
     readonly bodyBytesBudget?: number | undefined
     readonly bodyGracePeriod?: number | undefined
     readonly headersTimeout?: number | undefined
@@ -3348,8 +3333,23 @@ src/transport/server/http-policy.ts IHTTPPolicyInit
 src/transport/server/http-policy.ts IHTTPPolicyOption
   interface IHTTPPolicyOption
     readonly policy?: IHTTPPolicy | undefined
+src/transport/server/http-policy.ts IHTTPPolicyOptions
+  interface IHTTPPolicyOptions
+    readonly bodyBytesBudget?: number | undefined
+    readonly bodyGracePeriod?: number | undefined
+    readonly headersTimeout?: number | undefined
+    readonly hosts?: readonly string[] | undefined
+    readonly maximumBodyBytes?: number | undefined
+    readonly maximumConnections?: number | undefined
+    readonly maximumConnectionsPerAddress?: number | undefined
+    readonly minimumBodyBytesPerSecond?: number | undefined
+    readonly minimumSendBytesPerSecond?: number | undefined
+    readonly origins?: readonly string[] | undefined
+    readonly sendGracePeriod?: number | undefined
+    readonly trustedProxies?: readonly string[] | undefined
+    readonly unnamedProxies?: number | undefined
 src/transport/server/http-policy.ts httpPolicyOf
-  const httpPolicyOf(init: IHTTPPolicyInit = {}): IHTTPPolicy
+  const httpPolicyOf(init: IHTTPPolicyOptions = {}): IHTTPPolicy
 src/transport/server/http-server-fields.ts ENVELOPE_KINDS
   const ENVELOPE_KINDS: Readonly<{REQUEST: 16; RESULT: 17; FAILURE: 18; CANCEL: 22}>
 src/transport/server/http-server-fields.ts ENVELOPE_PREFIX

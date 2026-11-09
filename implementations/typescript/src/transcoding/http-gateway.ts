@@ -53,8 +53,8 @@ import {
 import {
   httpPolicyOf,
   type IHTTPPolicy,
-  type IHTTPPolicyInit,
   type IHTTPPolicyOption,
+  type IHTTPPolicyOptions,
   withPolicy,
 } from '../transport/server/http-policy';
 import {
@@ -119,7 +119,7 @@ import {
  * in-memory transport its connections cross, its document, and its gates and bounds, one by one or
  * as one policy, which the HTTP transport takes too.
  */
-export interface IHTTPGatewayOptions extends IHTTPPolicyInit, IHTTPPolicyOption {
+export interface IHTTPGatewayOptions extends IHTTPPolicyOptions, IHTTPPolicyOption {
   /**
    * What a call presents of a request's `authorization` (2.4): `elsewhere`, the field whole, by
    * default; `bearer-jwt`, a `Bearer` token as a `JWT`.

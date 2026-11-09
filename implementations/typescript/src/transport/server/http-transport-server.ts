@@ -122,7 +122,7 @@ export type {
 } from './types';
 export { ENVELOPE_KINDS, ENVELOPE_PREFIX, HTTP_REFUSALS } from './http-server-fields';
 export { HTTP_POLICY_MEMBERS, httpPolicyOf } from './http-policy';
-export type { IHTTPPolicy, IHTTPPolicyInit, IHTTPPolicyOption } from './http-policy';
+export type { IHTTPPolicy, IHTTPPolicyOption, IHTTPPolicyOptions } from './http-policy';
 export {
   HEADERS_TIMEOUT,
   MAXIMUM_CONNECTIONS,
