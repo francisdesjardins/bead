@@ -23,8 +23,10 @@
   and a connection's reads paced by what its router has not taken, on every side,
   [0046](0046-a-router-paces-each-connections-reads-by-what-it-has-not-taken.md)'s. Ahead: Rust's
   service client, the client half of its service layer, in its core; then its transports over
-  sockets, WebSocket (RFC 6455) and HTTP/1.1 and HTTP/2 (RFC 9110, 9112, 9113), with the interop
-  both ways with the TypeScript and C# sides; then its broker bindings, MQTT 5 and AMQP 1.0; its
+  sockets, WebSocket (RFC 6455) and HTTP/1.1 and HTTP/2 (RFC 9110, 9112, 9113), features of its
+  core, with the interop both ways with the TypeScript and C# sides, under
+  [0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md);
+  then its broker bindings, MQTT 5 and AMQP 1.0; its
   gateway; and beadc's Rust target, with `examples/hello`'s Rust half and the validators of a
   blueprint's rules generated for it, or beadc refusing to generate them
   ([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)),
@@ -129,7 +131,10 @@ service, `ServiceServer`; its client half, the twin of `createServiceClient` and
 `ServiceClient<TService>`, is ahead in the core, the matrix's open row `Rust's service client`.
 Ahead, in this order: Rust's service client, the client half of its service layer, in its core;
 then its transports over sockets, WebSocket (RFC 6455) and HTTP/1.1 and HTTP/2 (RFC 9110, 9112,
-9113), with the interop both ways with the TypeScript and C# sides; then its broker bindings,
+9113), the features `websocket` and `http` of its core, with the interop both ways with the
+TypeScript and C# sides, under
+[0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md);
+then its broker bindings,
 MQTT 5 and AMQP 1.0; its gateway; and beadc's Rust target, with `examples/hello`'s Rust half and
 the validators of a blueprint's rules generated for it, or beadc refusing to generate them
 ([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)),
@@ -157,8 +162,7 @@ comment on a source's item never stands for a twin.
   Rust's unit of dependency and of `forbid(unsafe_code)`, as an assembly is .NET's. `bead` is
   `Bead.Core`'s twin, `bead-protobuf` `Bead.Protobuf`'s, `bead-interop` the interop service's;
   `bead-house`, dev only, holds the house's own checks. The crates of the stages ahead are named
-  already, so no rename follows: `bead-transport-websocket`, `bead-transport-http`,
-  `bead-transport-mqtt`, `bead-transport-amqp`, `bead-transcoding`, `bead-transcoding-http`,
+  already, so no rename follows: `bead-transport-mqtt`, `bead-transport-amqp`, `bead-transcoding`, `bead-transcoding-http`,
   `bead-interop-server`; a part that needs the core's inside and ships to applications, a transport,
   comes instead as a feature of the core ([0047](0047-every-side-shows-one-public-surface.md)).
 - **Packages qualified by their owner, libraries short**, as NuGet's `FrancisDesjardins.Bead.*`
@@ -571,8 +575,10 @@ its own, `not its type`, as a codec an application writes does (spec 17.2), serd
 the type is the application's, and the matrix's row says so. Its other refusals say 17.2's words.
 
 **A `JWT`'s verification** on RustCrypto: ES256 by `p256`, its signature R‖S's 64 bytes and nothing
-else, HS256 by `hmac`'s constant-time check; pure Rust, so no C toolchain on Windows and
-`forbid(unsafe_code)` costs nothing. base64url by Bead's own strict decoder. An `OPAQUE` token's
+else, HS256 by `hmac`'s constant-time check; pure Rust, so the core with no feature needs no C toolchain
+on Windows, its socket transports' TLS, aws-lc-rs, alone built by the platform's C compiler
+([0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)),
+and `forbid(unsafe_code)` costs nothing. base64url by Bead's own strict decoder. An `OPAQUE` token's
 bytes by `getrandom`, the system's source. **No `thiserror`**: a dozen error types, each a short
 hand-written `Display`. **No `tracing`** in the core; an optional bridge from the Rust side's trace
 to `tracing` is ahead. **No credential in a string** (spec 15.1): a type that holds a credential, a
@@ -698,8 +704,11 @@ byte, and **always built**: no Cargo feature leaves debugging out, which would b
 ### The CI job, fuzz and bench
 
 CI's `rust` job ([0006](0006-a-rule-has-its-gate.md)), on Linux: `cargo fmt --check`, `cargo clippy
---workspace --all-targets --all-features --locked`, the browser target's `cargo clippy -p
-francisdesjardins-bead --lib --all-features --locked --target wasm32-unknown-unknown`, `cargo doc`,
+--workspace --all-targets --all-features --locked`, the core's lib linted with no feature, with
+`websocket` alone and with `http` alone (`cargo clippy -p francisdesjardins-bead --lib --locked`,
+`--features websocket`, `--features http`), the browser target's `cargo clippy -p
+francisdesjardins-bead --lib --features testing --locked --target wasm32-unknown-unknown`, by its
+features, no socket among them ([0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)), `cargo doc`,
 a build on the default features alone, `cargo deny --locked check`, the tests under coverage held to
 the floor, and the fuzz targets built on the dated nightly, never run; on Windows, `cargo test
 --workspace --all-features --locked`, as the user's MSVC toolchain builds it. The registry and the
