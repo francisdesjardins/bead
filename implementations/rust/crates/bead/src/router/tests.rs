@@ -67,6 +67,7 @@ mod router_core_lifecycle;
 mod router_core_outcomes;
 mod router_core_peer_calls;
 mod router_core_placement;
+mod router_core_procedures_taken;
 mod router_core_requester;
 mod router_core_rest;
 mod router_core_sending_edges;
@@ -1321,6 +1322,7 @@ mod intake {
         let memory = MemoryTransportServer::new(&MemoryTransportServerOptions {
             clock: Some(shared),
             runtime: None,
+            procedures: None,
         })
         .expect("a server");
         let router = RouterServer::new(Arc::new(memory.clone()), &intake_of((4, 1_048_576)))

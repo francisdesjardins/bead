@@ -3,6 +3,7 @@
 //! are one.
 
 use core::fmt;
+use std::collections::BTreeSet;
 
 use crate::constants::ProcedureKind;
 use crate::errors::{ProgrammerError, Refusal};
@@ -200,6 +201,41 @@ pub(crate) fn check_declaration(procedure: &Procedure) -> Result<(), ProgrammerE
     }
 
     Ok(())
+}
+
+/// Refuses, as a server's transport is built, the procedures it is given to take (spec 9.12): an
+/// address of service 0 or of procedure 0, outside 16.2's ranges or the protocol's (16.3), as
+/// 16.10 refuses a declaration; an address named twice is one. `transport` names it in the refusal.
+///
+/// # Errors
+///
+/// A [`ProgrammerError`] whose reason is [`IdentityRefusal::OutOfItsRange`].
+pub(crate) fn procedures_taken_of(
+    procedures: &[ProcedureAddress],
+    transport: &str,
+) -> Result<BTreeSet<ProcedureAddress>, ProgrammerError> {
+    let mut taken = BTreeSet::new();
+
+    for &address in procedures {
+        let ProcedureAddress {
+            service_id,
+            procedure_id,
+        } = address;
+
+        if service_id == 0 || procedure_id == 0 {
+            return Err(ProgrammerError::refused(
+                Refusal::Identity(IdentityRefusal::OutOfItsRange),
+                format!(
+                    "{transport} takes {service_id}/{procedure_id}, {}: a service and a procedure are from 1 to 65535, service 0 the protocol's (spec 9.12, 16.2, 16.3)",
+                    IdentityRefusal::OutOfItsRange
+                ),
+            ));
+        }
+
+        taken.insert(address);
+    }
+
+    Ok(taken)
 }
 
 // how a refusal names a procedure's kind

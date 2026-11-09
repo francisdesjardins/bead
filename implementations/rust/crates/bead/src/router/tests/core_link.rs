@@ -64,6 +64,7 @@ impl Link {
         let memory = MemoryTransportServer::new(&MemoryTransportServerOptions {
             clock: Some(Arc::clone(&shared)),
             runtime: None,
+            procedures: None,
         })
         .expect("a server transport");
         let server = RouterServer::new(Arc::new(memory.clone()), &RouterServerOptions::default())

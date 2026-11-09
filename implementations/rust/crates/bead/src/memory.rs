@@ -7,7 +7,7 @@
 
 use core::fmt;
 use core::time::Duration;
-use std::collections::VecDeque;
+use std::collections::{BTreeSet, VecDeque};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::SystemTime;
 
@@ -19,6 +19,8 @@ use tokio_util::sync::CancellationToken;
 use crate::clock::{Schedule, SharedClock, SystemClock, Timer};
 use crate::duration::hold;
 use crate::errors::{ConnectError, ProgrammerError, ReadyStateError, TransportError};
+use crate::failure::ProcedureAddress;
+use crate::identity::procedures_taken_of;
 use crate::ordered::Ordered;
 use crate::owner::{Owner, WeakOwner};
 use crate::platform::runtime_of;
@@ -69,6 +71,9 @@ pub struct MemoryTransportServerOptions {
     pub clock: Option<SharedClock>,
     /// The runtime its later turns run on: the current one when none.
     pub runtime: Option<Handle>,
+    /// The procedures each of its connections takes, by their addresses (spec 9.11): a request to
+    /// any other is answered as one to no resolver. Every procedure when none; none when empty.
+    pub procedures: Option<Vec<ProcedureAddress>>,
 }
 
 // a connection held, as the server keeps it: what its client sent while its router paused it held
@@ -92,6 +97,8 @@ struct ServerState {
 
 struct ServerInner {
     given: Option<SharedClock>,
+    // the procedures its connections take, every one when none
+    procedures: Option<BTreeSet<ProcedureAddress>>,
     clock: SharedClock,
     pipe: Owner<Pipe>,
     state: Mutex<ServerState>,
@@ -283,8 +290,14 @@ impl MemoryTransportServer {
     ///
     /// # Errors
     ///
-    /// A [`ProgrammerError`] outside a tokio runtime, given none, or on one without its time driver.
+    /// A [`ProgrammerError`] outside a tokio runtime, given none, or on one without its time driver,
+    /// or for procedures that name service 0 or an id 0 (spec 9.12).
     pub fn new(options: &MemoryTransportServerOptions) -> Result<Self, ProgrammerError> {
+        let procedures = options
+            .procedures
+            .as_deref()
+            .map(|procedures| procedures_taken_of(procedures, "an in-memory transport server"))
+            .transpose()?;
         let runtime = runtime_of(options.runtime.as_ref(), "an in-memory transport")?;
         let clock: SharedClock = match &options.clock {
             Some(clock) => Arc::clone(clock),
@@ -295,6 +308,7 @@ impl MemoryTransportServer {
         Ok(Self {
             inner: Arc::new(ServerInner {
                 given: options.clock.clone(),
+                procedures,
                 clock,
                 pipe,
                 state: Mutex::new(ServerState {
@@ -440,6 +454,22 @@ impl ServerTransport for MemoryTransportServer {
 
     fn is_secure(&self, _connection_handle: &ConnectionHandle) -> bool {
         true
+    }
+
+    fn names_procedures(&self) -> bool {
+        self.inner.procedures.is_some()
+    }
+
+    // every connection of its takes the one list it was given
+    fn takes_procedure(
+        &self,
+        _connection_handle: &ConnectionHandle,
+        address: ProcedureAddress,
+    ) -> bool {
+        self.inner
+            .procedures
+            .as_ref()
+            .is_none_or(|procedures| procedures.contains(&address))
     }
 
     fn transport_type(&self) -> Option<&str> {

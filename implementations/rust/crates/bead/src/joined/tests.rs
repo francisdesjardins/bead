@@ -26,6 +26,7 @@ use crate::client::{Client, ClientOptions};
 use crate::clock::SharedClock;
 use crate::debug::DebugDirection;
 use crate::duration::NEVER;
+use crate::failure::ProcedureAddress;
 use crate::managers::service::{
     DebugEvent, RequestDependencies, RequestOptions, RequestResolverDependencies, Response,
     TracedError,
@@ -65,6 +66,8 @@ struct Paired {
     is_carrying: bool,
     is_both_ways: bool,
     held: Option<Gauges>,
+    // the procedures its connection takes, every one when none
+    taking: Option<Vec<ProcedureAddress>>,
     calls: Mutex<Vec<String>>,
     listeners: Listeners<dyn ServerListener>,
 }
@@ -88,6 +91,7 @@ impl Default for Paired {
             is_carrying: false,
             is_both_ways: true,
             held: None,
+            taking: None,
             calls: Mutex::default(),
             listeners: Listeners::default(),
         }
@@ -191,6 +195,25 @@ impl ServerTransport for Paired {
         self.is_carrying
     }
 
+    fn names_procedures(&self) -> bool {
+        self.taking.is_some()
+    }
+
+    fn takes_procedure(
+        &self,
+        connection_handle: &ConnectionHandle,
+        address: ProcedureAddress,
+    ) -> bool {
+        locked(&self.calls).push(format!(
+            "takes {}/{} {connection_handle}",
+            address.service_id, address.procedure_id
+        ));
+
+        self.taking
+            .as_ref()
+            .is_none_or(|taking| taking.contains(&address))
+    }
+
     fn start(&self) -> BoxFuture<Result<(), RouterError>> {
         Box::pin(async { Ok(()) })
     }
@@ -272,6 +295,7 @@ async fn memory_on(clock: &SharedClock) -> MemoryTransportServer {
     let server = MemoryTransportServer::new(&MemoryTransportServerOptions {
         clock: Some(Arc::clone(clock)),
         runtime: None,
+        procedures: None,
     })
     .expect("a server");
 
@@ -721,6 +745,7 @@ async fn refuses_to_join_two_transports_of_one_type() {
     let elsewhere = MemoryTransportServer::new(&MemoryTransportServerOptions {
         clock: Some(Arc::clone(&shared)),
         runtime: None,
+        procedures: None,
     })
     .expect("a server");
     let other: SharedClock = SteppingClock::new(january_first());
@@ -1065,4 +1090,111 @@ async fn a_joined_transport_pauses_the_connection_on_the_transport_that_drew_it(
     joined.pause(&Arc::from("type=HTTP;ip=127.0.0.1;port=50003;ordinal=1"));
 
     assert_eq!(paired.calls().len(), 2, "none asked");
+}
+
+// a procedure's address
+const fn address_of(service_id: u16, procedure_id: u16) -> ProcedureAddress {
+    ProcedureAddress {
+        service_id,
+        procedure_id,
+    }
+}
+
+// spec 9.11, 15.14: the twin of "a joined transport answers whether a connection takes a procedure
+// by the transport that drew its handle"
+#[tokio::test]
+async fn a_joined_transport_answers_whether_a_connection_takes_a_procedure_by_the_transport_that_drew_its_handle()
+ {
+    let clock = SteppingClock::new(january_first());
+    let shared: SharedClock = Arc::<SteppingClock>::clone(&clock);
+    let memory = MemoryTransportServer::new(&MemoryTransportServerOptions {
+        clock: Some(Arc::clone(&shared)),
+        runtime: None,
+        procedures: Some(vec![address_of(1, 1)]),
+    })
+    .expect("a server");
+    let paired = Arc::new(Paired {
+        taking: Some(vec![address_of(1, 2)]),
+        ..Paired::default()
+    });
+    let joined = JoinedServerTransport::new(vec![Arc::new(memory), Arc::<Paired>::clone(&paired)])
+        .expect("a join");
+    let local: ConnectionHandle = Arc::from("type=MEMORY;ip=local;ordinal=1");
+    let socket: ConnectionHandle = Arc::from(SOCKET);
+
+    // * each asked of the transport that drew it, by its handle's type
+    assert!(
+        joined.takes_procedure(&local, address_of(1, 1)),
+        "the in-memory one takes 1/1"
+    );
+    assert!(
+        !joined.takes_procedure(&local, address_of(1, 2)),
+        "the in-memory one does not take 1/2"
+    );
+    assert!(
+        joined.takes_procedure(&socket, address_of(1, 2)),
+        "the WebSocket-typed one takes 1/2"
+    );
+    assert!(
+        !joined.takes_procedure(&socket, address_of(1, 1)),
+        "the WebSocket-typed one does not take 1/1"
+    );
+    assert_eq!(
+        paired.calls(),
+        [format!("takes 1/2 {SOCKET}"), format!("takes 1/1 {SOCKET}")],
+        "the other asked of its own connection alone"
+    );
+
+    // a handle no transport of it drew takes none, and is asked of none
+    assert!(
+        !joined.takes_procedure(
+            &Arc::from("type=HTTP;ip=127.0.0.1;port=50003;ordinal=1"),
+            address_of(1, 1)
+        ),
+        "a handle of no transport of it takes nothing"
+    );
+    assert_eq!(paired.calls().len(), 2, "none asked");
+}
+
+// spec 9.11, 15.14: the twin of "a joined transport asks of procedures only when one of its
+// transports names them"
+#[tokio::test]
+async fn a_joined_transport_asks_of_procedures_only_when_one_of_its_transports_names_them() {
+    let clock = SteppingClock::new(january_first());
+    let shared: SharedClock = Arc::<SteppingClock>::clone(&clock);
+    let memory = memory_on(&shared).await;
+    let unnamed =
+        JoinedServerTransport::new(vec![Arc::new(memory.clone()), Arc::new(Paired::default())])
+            .expect("a join");
+
+    assert!(
+        !unnamed.names_procedures(),
+        "none of its transports names procedures"
+    );
+
+    let named = JoinedServerTransport::new(vec![
+        Arc::new(memory),
+        Arc::new(Paired {
+            taking: Some(Vec::new()),
+            ..Paired::default()
+        }),
+    ])
+    .expect("a join");
+
+    assert!(
+        named.names_procedures(),
+        "one of its transports names procedures"
+    );
+    // * the one that names none takes every procedure, as it would alone
+    assert!(
+        named.takes_procedure(
+            &Arc::from("type=MEMORY;ip=local;ordinal=1"),
+            address_of(9, 9)
+        ),
+        "the in-memory one takes every procedure"
+    );
+    assert!(
+        !named.takes_procedure(&Arc::from(SOCKET), address_of(9, 9)),
+        "the WebSocket-typed one, given none, takes none"
+    );
 }

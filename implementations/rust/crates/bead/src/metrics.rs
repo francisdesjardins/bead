@@ -140,8 +140,11 @@ const LES: [&str; 42] = [
 
 const MICROSECONDS_PER_SECOND: u64 = 1_000_000;
 
-// the codes a procedure's series in the server families can end with (7.6)
-const ANSWERED_CODES: [ProtocolCode; 12] = [
+// the codes a procedure's series in the server families can end with (7.6), in their order: a route
+// refused among them, for a request its connection's transport does not take (8.3)
+const ANSWERED_CODES: [ProtocolCode; 14] = [
+    ProtocolCode::SERVICE_UNKNOWN,
+    ProtocolCode::PROCEDURE_UNKNOWN,
     ProtocolCode::SUBSCRIPTION_UNSUPPORTED,
     ProtocolCode::SESSION_REQUIRED,
     ProtocolCode::ACCESS_DENIED,

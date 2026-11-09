@@ -17,7 +17,7 @@ use bead_house::{
 // record of the call and none joins it (decision 0044)
 const WIDE_TUPLES: [(&str, usize); 4] = [
     ("benches", 2),
-    ("crates/bead", 76),
+    ("crates/bead", 75),
     ("crates/bead-house", 2),
     ("crates/bead-interop", 3),
 ];

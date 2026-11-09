@@ -28,7 +28,7 @@ use crate::envelope::{
     read_prefix, write_envelope,
 };
 use crate::errors::{CallError, CapacityError, ProgrammerError, ResolverError};
-use crate::failure::Failure;
+use crate::failure::{Failure, ProcedureAddress};
 use crate::metrics::{CallEnding, ProcedureSeries, ResolverSeries, RouterMetrics};
 use crate::owner::{Deferral, Job, Owned, WeakOwner};
 use crate::router::parts::{
@@ -352,6 +352,16 @@ pub(crate) trait Side: Sized + Send + 'static {
 
     /// Whether a connection carries both ways.
     fn is_two_way(&self, _connection_handle: &ConnectionHandle) -> bool {
+        true
+    }
+
+    /// Whether a connection's transport takes the procedure at `address` (spec 9.11), asked of a
+    /// request that names no destination: every one, unless its transport names them.
+    fn takes_procedure(
+        &self,
+        _connection_handle: &ConnectionHandle,
+        _address: ProcedureAddress,
+    ) -> bool {
         true
     }
 
@@ -2329,23 +2339,35 @@ fn receive_request<S: Side>(
         .destination_id
         .and_then(|destination_id| state.handler_of_destination(destination_id));
     let is_destination = destination.is_some();
-    let handler = destination.or_else(|| registered.map(|registered| registered.handler));
+    // ! a resolver its connection's transport does not take is none, its series kept (spec 9.11;
+    // debugging 8.3)
+    let address = ProcedureAddress {
+        service_id: header.service_id,
+        procedure_id: header.procedure_id,
+    };
+    let handler = destination.or_else(|| {
+        registered
+            .filter(|_| state.takes_procedure(handle, address))
+            .map(|registered| registered.handler)
+    });
 
     let Some(handler) = handler else {
-        let core = state.core();
         let failure = if let Some(destination_id) = header.destination_id {
-            core.failure(ProtocolCode::DESTINATION_UNKNOWN)
+            state
+                .core()
+                .failure(ProtocolCode::DESTINATION_UNKNOWN)
                 .saying(format!(
                     "this peer relays nothing, to {destination_id} or elsewhere"
                 ))
-        } else if !locked(&core.resolvers)
-            .keys()
-            .any(|&(service, _)| service == header.service_id)
-        {
-            core.failure(ProtocolCode::SERVICE_UNKNOWN)
+        } else if !is_service_known(state, (handle, header.service_id)) {
+            state
+                .core()
+                .failure(ProtocolCode::SERVICE_UNKNOWN)
                 .saying(format!("no service {}", header.service_id))
         } else {
-            core.failure(ProtocolCode::PROCEDURE_UNKNOWN)
+            state
+                .core()
+                .failure(ProtocolCode::PROCEDURE_UNKNOWN)
                 .saying(format!(
                     "no procedure {} in service {}",
                     header.procedure_id, header.service_id
@@ -2413,6 +2435,33 @@ fn receive_request<S: Side>(
         state,
         ((dispatch, payload, handler), (carried, is_forwarded)),
     );
+}
+
+// whether a service is known on a connection (spec 9.11): a resolver of it registered whose
+// address its transport takes, the registry's procedures of it scanned on a refusal's path alone
+#[expect(
+    clippy::needless_collect,
+    reason = "the registry's lock let go before its transport is asked, whose code may register a resolver"
+)]
+fn is_service_known<S: Side>(
+    state: &mut S,
+    (handle, service_id): (&ConnectionHandle, u16),
+) -> bool {
+    let procedures: Vec<u16> = locked(&state.core().resolvers)
+        .keys()
+        .filter(|&&(service, _)| service == service_id)
+        .map(|&(_, procedure)| procedure)
+        .collect();
+
+    procedures.into_iter().any(|procedure_id| {
+        state.takes_procedure(
+            handle,
+            ProcedureAddress {
+                service_id,
+                procedure_id,
+            },
+        )
+    })
 }
 
 // a destination's handler as the core hands it a request: with what the request came with

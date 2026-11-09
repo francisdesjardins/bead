@@ -89,6 +89,7 @@ impl Pair {
         let memory = MemoryTransportServer::new(&MemoryTransportServerOptions {
             clock: Some(Arc::clone(&shared)),
             runtime: None,
+            procedures: None,
         })
         .map_err(|error| error.to_string())?;
         let drawn = Arc::new(Mutex::new(None));

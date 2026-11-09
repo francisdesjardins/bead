@@ -12,7 +12,7 @@
 use core::fmt;
 use core::sync::atomic::{AtomicBool, Ordering};
 use core::time::Duration;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::SystemTime;
 
@@ -31,6 +31,8 @@ use crate::broker::sequence::fits;
 use crate::clock::{Schedule, SharedClock, Timer};
 use crate::duration::hold_finite;
 use crate::errors::ProgrammerError;
+use crate::failure::ProcedureAddress;
+use crate::identity::procedures_taken_of;
 use crate::router::types::{BoxFuture, ConnectionHandle, Gauges, RouterError, TransportMessage};
 use crate::transport::{
     Listeners, ReadyState, Sent, ServerListener, ServerTransport, TransportServerClient,
@@ -78,6 +80,12 @@ pub struct BrokerTransportServerOptions {
     /// Whether its own leg is secure, as its application says of what stands in front of it (spec
     /// 15.22); its adapter's word when none.
     pub secure: Option<bool>,
+    /// The procedures each of its connections takes, by their addresses (spec 9.11): a request to
+    /// any other is answered as one to no resolver. Every procedure when none; none when empty.
+    pub procedures: Option<Vec<ProcedureAddress>>,
+    /// The procedures a connection takes by the name its OPEN reached, each a name it serves, in
+    /// place of `procedures` for that name's connections (spec 9.11, 15.16, 15.18).
+    pub procedures_by_name: Option<BTreeMap<String, Vec<ProcedureAddress>>>,
 }
 
 impl BrokerTransportServerOptions {
@@ -92,6 +100,8 @@ impl BrokerTransportServerOptions {
             maximum_unsent_bytes: None,
             accept_timeout: None,
             secure: None,
+            procedures: None,
+            procedures_by_name: None,
         }
     }
 }
@@ -100,6 +110,8 @@ impl BrokerTransportServerOptions {
 // participant reads
 struct HeldConnection {
     peer_id: String,
+    // the name its OPEN reached, which says the procedures it takes
+    name: String,
     opener: u64,
     is_peer_secure: bool,
     room: u64,
@@ -137,6 +149,10 @@ pub(crate) struct ServerInner {
     maximum_unsent: u64,
     accept_timeout: Duration,
     is_secure: bool,
+    // the procedures a connection takes, every one when none, and in place of them, by the name
+    // its OPEN reached
+    procedures: Option<BTreeSet<ProcedureAddress>>,
+    procedures_by_name: BTreeMap<String, BTreeSet<ProcedureAddress>>,
     state: Mutex<ServerState>,
     listeners: Listeners<dyn ServerListener>,
 }
@@ -292,7 +308,7 @@ impl ServerInner {
             return;
         }
 
-        self.accept(state, &open);
+        self.accept(state, (&open, name));
     }
 
     // an OPEN refused, to the inbox it names, and told (spec 15.1)
@@ -320,7 +336,7 @@ impl ServerInner {
 
     // an OPEN answered with an ACCEPT, its connection half-open, holding its place, its accept
     // timeout armed on the clock given
-    fn accept(self: &Arc<Self>, state: &mut ParticipantState, open: &Parcel) {
+    fn accept(self: &Arc<Self>, state: &mut ParticipantState, (open, name): (&Parcel, &str)) {
         let Some(acceptor) = state.draw_half() else {
             self.refuse(state, (open, 503));
 
@@ -376,6 +392,7 @@ impl ServerInner {
                 pair,
                 HeldConnection {
                     peer_id,
+                    name: name.to_owned(),
                     opener: open.opener,
                     is_peer_secure,
                     room,
@@ -798,8 +815,9 @@ impl BrokerTransportServer {
     /// # Errors
     ///
     /// A [`ProgrammerError`] for no name, a name that is no token, one another of its participant's
-    /// server transports serves, a group its adapter does not offer, a bound under 1, or an accept
-    /// timeout spec 1.4 does not hold.
+    /// server transports serves, a group its adapter does not offer, a bound under 1, an accept
+    /// timeout spec 1.4 does not hold, procedures that name service 0 or an id 0, or procedures
+    /// given for a name it does not serve (spec 9.12).
     pub fn new(
         participant: &BrokerParticipant,
         options: &BrokerTransportServerOptions,
@@ -848,6 +866,24 @@ impl BrokerTransportServer {
             }
         }
 
+        let taken = "a broker's server transport";
+        let procedures = options
+            .procedures
+            .as_deref()
+            .map(|procedures| procedures_taken_of(procedures, taken))
+            .transpose()?;
+        let mut procedures_by_name = BTreeMap::new();
+
+        for (name, procedures) in options.procedures_by_name.iter().flatten() {
+            if !names.contains(name) {
+                return Err(ProgrammerError::new(format!(
+                    "{taken} takes procedures for {name}, a name it does not serve (spec 9.12)"
+                )));
+            }
+
+            procedures_by_name.insert(name.clone(), procedures_taken_of(procedures, taken)?);
+        }
+
         let inner = Arc::new_cyclic(|me| ServerInner {
             me: Weak::clone(me),
             participant: participant.clone(),
@@ -860,6 +896,8 @@ impl BrokerTransportServer {
             maximum_unsent: options.maximum_unsent_bytes.unwrap_or(MAXIMUM_UNSENT_BYTES),
             accept_timeout,
             is_secure: options.secure.unwrap_or_else(|| adapter.is_secure()),
+            procedures,
+            procedures_by_name,
             state: Mutex::new(ServerState {
                 ready: ReadyState::Uninitialized,
                 held: HashMap::new(),
@@ -1041,6 +1079,33 @@ impl ServerTransport for BrokerTransportServer {
     // nothing is carried toward a client (spec 15.22)
     fn carries_credential(&self, _connection_handle: &ConnectionHandle) -> bool {
         false
+    }
+
+    fn names_procedures(&self) -> bool {
+        self.inner.procedures.is_some() || !self.inner.procedures_by_name.is_empty()
+    }
+
+    // by the name its OPEN reached: that name's procedures, else those given every name; false for
+    // a handle it does not hold
+    fn takes_procedure(
+        &self,
+        connection_handle: &ConnectionHandle,
+        address: ProcedureAddress,
+    ) -> bool {
+        let inner = &self.inner;
+        let state = locked(&inner.state);
+
+        state
+            .handles
+            .get(connection_handle)
+            .and_then(|pair| state.held.get(pair))
+            .is_some_and(|held| {
+                inner
+                    .procedures_by_name
+                    .get(&held.name)
+                    .or(inner.procedures.as_ref())
+                    .is_none_or(|procedures| procedures.contains(&address))
+            })
     }
 
     // its participant started where it was not, linked anew where its link was taken over or its
