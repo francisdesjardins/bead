@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-09
+
 ### Added
 
 - One `.proto` gives several packages: an output of `beadc.yaml` holds what its `server`, `client`
@@ -22,6 +24,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The spec moves to 0.12.0 (`spec-v0.12.0`), its companion, `spec/debugging.md`, to 0.7.0
+  (`debugging-v0.7.0`), and the transcoding's companion, `spec/transcoding.md`, to 0.3.0
+  (`transcoding-v0.3.0`).
 - Spec 9.2's step 5 states its details, `no service 9` and `no procedure 99 in service 1`, and the
   conversations compare them. Generated code that writes the procedures a server's transports take
   names contract 8.
@@ -2526,7 +2531,8 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
   workflows.
 - The licence, Apache-2.0.
 
-[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.10.0...develop
+[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.11.0...develop
+[0.11.0]: https://github.com/francisdesjardins/bead/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/francisdesjardins/bead/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/francisdesjardins/bead/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/francisdesjardins/bead/compare/v0.7.0...v0.8.0

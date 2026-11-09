@@ -116,6 +116,7 @@ Bead.Transport.Http.HttpTransportServer.IsSecure(string! connectionHandle) -> bo
 Bead.Transport.Http.HttpTransportServer.IsTwoWay(string! connectionHandle) -> bool
 Bead.Transport.Http.HttpTransportServer.Listen -> System.Action<bool, string!>?
 Bead.Transport.Http.HttpTransportServer.Message -> System.Action<Bead.TransportMessage, string!>?
+Bead.Transport.Http.HttpTransportServer.NamesProcedures() -> bool
 Bead.Transport.Http.HttpTransportServer.Pause(string! connectionHandle) -> void
 Bead.Transport.Http.HttpTransportServer.ReadyState.get -> Bead.ReadyState
 Bead.Transport.Http.HttpTransportServer.Refusal -> System.Action<Bead.TransportServerRefusal!>?
@@ -124,6 +125,7 @@ Bead.Transport.Http.HttpTransportServer.Send(Bead.TransportMessage message, stri
 Bead.Transport.Http.HttpTransportServer.Shutdown() -> System.Threading.Tasks.Task!
 Bead.Transport.Http.HttpTransportServer.Start(Bead.Transport.Http.HttpTransportStartOptions? options = null) -> System.Threading.Tasks.Task<Bead.TransportServerAddress>!
 Bead.Transport.Http.HttpTransportServer.Stop() -> System.Threading.Tasks.Task!
+Bead.Transport.Http.HttpTransportServer.TakesProcedure(string! connectionHandle, Bead.ProcedureAddress address) -> bool
 Bead.Transport.Http.HttpTransportServer.Type.get -> string!
 Bead.Transport.Http.HttpTransportServerOptions
 Bead.Transport.Http.HttpTransportServerOptions.<Clone>$() -> Bead.Transport.Http.HttpTransportServerOptions!
@@ -167,6 +169,8 @@ Bead.Transport.Http.HttpTransportServerOptions.Pathname.get -> string!
 Bead.Transport.Http.HttpTransportServerOptions.Pathname.init -> void
 Bead.Transport.Http.HttpTransportServerOptions.Policy.get -> Bead.HttpPolicy?
 Bead.Transport.Http.HttpTransportServerOptions.Policy.init -> void
+Bead.Transport.Http.HttpTransportServerOptions.Procedures.get -> System.Collections.Generic.IReadOnlyCollection<Bead.ProcedureAddress>?
+Bead.Transport.Http.HttpTransportServerOptions.Procedures.init -> void
 Bead.Transport.Http.HttpTransportServerOptions.Secure.get -> bool?
 Bead.Transport.Http.HttpTransportServerOptions.Secure.init -> void
 Bead.Transport.Http.HttpTransportServerOptions.SendGracePeriod.get -> System.TimeSpan

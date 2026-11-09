@@ -44,7 +44,7 @@ with the hash of its text. The why of each rule is in the decisions:
   the procedures an output's `gateway` selects, its routes, its document and its client (3.1, 11.1,
   12.1).
 
-**Version: 0.2.2**. Its conformance file repeats it as its `transcodingVersion`, and follows its
+**Version: 0.3.0**. Its conformance file repeats it as its `transcodingVersion`, and follows its
 schema in [`schemas/`](schemas/). It moves by `spec.md`'s rule, under a version of its own
 ([0008](../docs/decisions/0008-three-version-axes-and-names-qualified-by-their-owner.md)): the minor
 when a gateway that conforms to its last version must change to conform to this one, the patch when
