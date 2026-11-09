@@ -70,7 +70,7 @@ export const MAXIMUM_MESSAGE_BYTES = 16_778_240;
 
 /** What an omitted connect option resolves to. */
 export const CONNECT_DEFAULTS = Object.freeze({
-  pathname: '',
+  pathname: '/',
   secured: false,
   timeout: 30_000,
 } satisfies Omit<IWebSocketTransportClientConnectOptions, 'host' | 'port'>);

@@ -421,7 +421,7 @@ export interface IWebSocketTransportClientConnectOptions extends ITransportClien
    * failure while the attempt's signal stays live.
    */
   credentialProvider?: ((options: { signal: AbortSignal }) => string | Promise<string>) | undefined;
-  /** Prefixed with a single leading slash. */
+  /** The path the server listens on, prefixed with a single leading slash; `/` by default. */
   pathname?: string | undefined;
   /** The subprotocols offered in the handshake. */
   protocols?: string[] | undefined;

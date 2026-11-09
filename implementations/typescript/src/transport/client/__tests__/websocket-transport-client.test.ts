@@ -45,6 +45,7 @@ import {
 } from '../../shared/__tests__/fixtures';
 import {
   CLOSE_TIMEOUT,
+  CONNECT_DEFAULTS,
   createWebSocketTransportClient,
   HEARTBEAT,
   MAXIMUM_MESSAGE_BYTES,
@@ -2806,6 +2807,8 @@ test.describe('WebSocketTransportClient, heartbeat', () => {
         return delay;
       })
     ).toEqual([HEARTBEAT]);
+    // asks for the root over ws within 30 seconds, and names no host nor port of its own
+    expect(CONNECT_DEFAULTS).toEqual({ pathname: '/', secured: false, timeout: 30_000 });
 
     await client.disconnect();
   });
