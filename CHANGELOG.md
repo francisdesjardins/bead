@@ -7,6 +7,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** a request's target is read as a page's browser writes it, on every side: `"`, `<`
+  or `>` in its path or its query, or `^`, `` ` ``, `{` or `}` in its path, answered 400 unmarked
+  (RFC 9112 §3); a `#` ends it; and an absolute-form target's scheme is read in any case (RFC 3986
+  §3.1), but by Kestrel on the C# side, which also refuses a `%00` or an octet past US-ASCII past a
+  `#`, as Node's parser refuses that octet on the TypeScript side (spec 15.12, transcoding 3.6;
+  decision 0049).
+
 ## [0.11.0] - 2026-11-09
 
 ### Added
