@@ -128,6 +128,10 @@ export const RULES = Object.freeze({
   HTTP_ROUTE_OVERLAP: { level: Level.GENERATE, severity: Severity.ERROR },
   HTTP_ROUTE_RESERVED: { level: Level.GENERATE, severity: Severity.ERROR },
   HTTP_UNGENERATED: { level: Level.GENERATE, severity: Severity.ERROR },
+  // and what an output's server, client and gateway select (decision 0048)
+  SELECTOR_UNMATCHED: { level: Level.GENERATE, severity: Severity.ERROR },
+  SELECTION_EMPTY: { level: Level.GENERATE, severity: Severity.ERROR },
+  GATEWAY_EMPTY: { level: Level.GENERATE, severity: Severity.ERROR },
   SPEC_VERSION_NEWER: { level: Level.BLUEPRINT, severity: Severity.WARNING },
   // between two blueprints, by id: what a peer of the earlier meets
   SERVICE_NO_DELETE: { level: Level.BREAKING, severity: Severity.ERROR, category: Category.WIRE },

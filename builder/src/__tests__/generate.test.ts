@@ -34,6 +34,7 @@ const MESSAGES = fileURLToPath(new URL('../../test/messages/', import.meta.url))
 const OPTIONS = fileURLToPath(new URL('../../proto/bead/options.proto', import.meta.url));
 const VALIDATE = fileURLToPath(new URL('../../proto/buf/validate/validate.proto', import.meta.url));
 const MESSAGES_PROTO = 'bead/messages/v1/messages.proto';
+const SUBSETS = fileURLToPath(new URL('../../test/golden/subsets.blueprint.json', import.meta.url));
 
 // a project in the running test's output folder: its beadc.yaml and its files, by their paths
 const projectOf = (yaml: string, files: Readonly<Record<string, string>> = {}): string => {
@@ -710,7 +711,7 @@ test("two rules of one method that tie are HTTP_ROUTE_OVERLAP, and a rule at /op
       'outputs:',
       '  - language: typescript',
       '    out: gen/ts',
-      '    http: true',
+      '    gateway: {}',
       '',
     ].join('\n'),
     [
@@ -755,7 +756,7 @@ test("two rules of one method that tie are HTTP_ROUTE_OVERLAP, and a rule at /op
   expect(existsSync(join(folder, 'gen'))).toBe(false);
 });
 
-test("an output with http: true whose target writes no route table is HTTP_UNGENERATED; both of beadc's write one", () => {
+test("an output with a gateway whose target writes no route table is HTTP_UNGENERATED; both of beadc's write one", () => {
   const folder = routedProject(
     [
       'version: 1',
@@ -764,7 +765,7 @@ test("an output with http: true whose target writes no route table is HTTP_UNGEN
       'outputs:',
       '  - language: typescript',
       '    out: gen/ts',
-      '    http: true',
+      '    gateway: {}',
       '  - language: csharp',
       '    out: gen/cs',
       '    messages: external',
@@ -787,12 +788,12 @@ test("an output with http: true whose target writes no route table is HTTP_UNGEN
     [
       'HTTP_UNGENERATED',
       'beadc.yaml',
-      'outputs[0] asks http: true of the elsewhere target, which writes no route table: take http out of it, or give HTTP to an output whose target writes one',
+      'outputs[0] asks a gateway of the elsewhere target, which writes no route table: take gateway out of it, or give it to an output whose target writes one',
     ],
   ]);
 });
 
-test('writes the document openapi.out names, and embeds it byte for byte in each output with http: true, its route table beside it; --check holds them, and clean takes a route table out', () => {
+test('writes the document openapi.out names, and embeds it byte for byte in each output with gateway: {}, its route table beside it; --check holds them, and clean takes a route table out', () => {
   const yaml = (http: boolean): string => {
     return [
       'version: 1',
@@ -805,11 +806,11 @@ test('writes the document openapi.out names, and embeds it byte for byte in each
       'outputs:',
       '  - language: typescript',
       '    out: gen/ts',
-      ...(http ? ['    http: true'] : []),
+      ...(http ? ['    gateway: {}'] : []),
       '  - language: csharp',
       '    out: gen/cs',
       '    messages: external',
-      ...(http ? ['    http: true'] : []),
+      ...(http ? ['    gateway: {}'] : []),
       'clean: true',
       '',
     ].join('\n');
@@ -839,10 +840,393 @@ test('writes the document openapi.out names, and embeds it byte for byte in each
   );
   expect(findingsOf(folder)).toEqual([]);
 
-  // * http taken off: the route tables are a run's no longer, and clean takes them out
+  // * the gateway taken off: the route tables are a run's no longer, and clean takes them out
   writeFileSync(join(folder, 'beadc.yaml'), yaml(false));
   expect(findingsOf(folder)).toEqual([
     'gen/ts/bead_http.ts: proto/x/v1/x.proto no longer gives it: beadc generate takes it out, under clean',
     'gen/cs/X/V1/BeadHttp.cs: proto/x/v1/x.proto no longer gives it: beadc generate takes it out, under clean',
+  ]);
+});
+
+// ── An output's server, client and gateway (decision 0048) ───────────────────
+
+// a project of the subsets' blueprint, Shop split, Auth beside it, and the outputs `lines` writes
+const subsetsProject = (lines: readonly string[]): string => {
+  return projectOf(
+    [
+      'version: 1',
+      'source:',
+      '  blueprint: shop.blueprint.json',
+      'outputs:',
+      ...lines,
+      'clean: true',
+      '',
+    ].join('\n'),
+    { 'shop.blueprint.json': SUBSETS }
+  );
+};
+
+const SPLIT = [
+  '  - language: typescript',
+  '    out: gen/ts',
+  '    server:',
+  '      procedures: { include: [Shop/placeOrder, Shop/cancelOrder, Shop/watchOrders, Shop/refreshCatalogue] }',
+  '      transports:',
+  '        webSocket: {}',
+  '        orders: { procedures: { include: [Shop/placeOrder, Shop/cancelOrder] } }',
+  '        none: { procedures: [] }',
+  '    client:',
+  '      procedures: { include: [Shop/listOrders, Shop/audit, Shop/watchOrders, Shop/refreshCatalogue] }',
+  '    gateway:',
+  '      procedures: { include: [Shop/*], idempotencyLevel: [IDEMPOTENT] }',
+  '  - language: csharp',
+  '    out: gen/cs',
+  '    namespace: Shop.V1',
+  '    server:',
+  '      procedures: { include: [Shop/placeOrder, Shop/cancelOrder, Shop/watchOrders, Shop/refreshCatalogue] }',
+  '      transports:',
+  '        webSocket: {}',
+  '        orders: { procedures: { include: [Shop/placeOrder, Shop/cancelOrder] } }',
+  '        none: { procedures: [] }',
+  '    client:',
+  '      procedures: { include: [Shop/listOrders, Shop/audit, Shop/watchOrders, Shop/refreshCatalogue] }',
+  '    gateway:',
+  '      procedures: { include: [Shop/*], idempotencyLevel: [IDEMPOTENT] }',
+];
+
+const textOf = (folder: string, path: string): string => {
+  return readFileSync(join(folder, ...path.split('/')), 'utf8');
+};
+
+test('an output that serves and calls one service prints its server class over what it serves and its client class over what it calls', () => {
+  const folder = subsetsProject(SPLIT);
+
+  generate(folder);
+
+  const typescript = textOf(folder, 'gen/ts/shop_bead.ts');
+  const csharp = textOf(folder, 'gen/cs/ShopBead.cs');
+
+  // * the union in the constant, each side over its pick
+  expect(typescript).toContain('export const ShopProcedures = Object.freeze({');
+  expect(typescript).toContain(
+    'const ShopServed = Object.freeze({ placeOrder: ShopProcedures.placeOrder, cancelOrder: ShopProcedures.cancelOrder, watchOrders: ShopProcedures.watchOrders, refreshCatalogue: ShopProcedures.refreshCatalogue });'
+  );
+  expect(typescript).toContain(
+    'const ShopCalled = Object.freeze({ listOrders: ShopProcedures.listOrders, watchOrders: ShopProcedures.watchOrders, refreshCatalogue: ShopProcedures.refreshCatalogue, audit: ShopProcedures.audit });'
+  );
+  expect(typescript).toContain('ServiceResolvers<typeof ShopServed>');
+  expect(typescript).toContain('IServiceClientOptions<typeof ShopCalled>');
+  expect(typescript).toContain(
+    'createServiceServer<typeof ShopServed, Data>(ShopServed, options);'
+  );
+  expect(typescript).toContain('createServiceClient(ShopCalled, client, options);');
+  // * the hook of audit, called and not served, is no server's: its options are optional
+  expect(typescript).toContain('public constructor(options?: ShopServerOptions) {');
+  expect(typescript).toContain('public readonly listOrders: ');
+  expect(typescript).not.toContain('public readonly placeOrder: ');
+  expect(csharp).toContain(
+    'internal static global::System.Collections.Generic.IReadOnlyList<global::Bead.IServiceProcedure<ShopProcedures>> Served { get; } ='
+  );
+  expect(csharp).toContain(
+    ': this(new global::Bead.ServiceServer<ShopProcedures, TData>(ShopProcedures.Served))'
+  );
+  expect(csharp).toContain('_service = new(ShopProcedures.Called, client, options);');
+  expect(csharp).toContain(
+    'public sealed class ShopAdmissions : global::Bead.IServiceAdmissions<ShopProcedures>'
+  );
+  expect(csharp).not.toContain('Auditor');
+  expect(csharp).not.toContain(
+    'public global::System.Func<global::System.Text.Json.JsonElement, global::Bead.BoundCall<global::System.Text.Json.JsonElement>> PlaceOrder { get; }'
+  );
+  // * a service none selects is not written
+  expect(existsSync(join(folder, 'gen', 'ts', 'auth_bead.ts'))).toBe(false);
+  expect(existsSync(join(folder, 'gen', 'cs', 'AuthBead.cs'))).toBe(false);
+  expect(findingsOf(folder)).toEqual([]);
+});
+
+test('an output that names one side writes that side alone, and one that names neither writes both whole', () => {
+  const folder = subsetsProject([
+    '  - language: typescript',
+    '    out: gen/client',
+    '    client:',
+    '      procedures: { include: [Auth/signUp] }',
+    '  - language: csharp',
+    '    out: gen/server',
+    '    namespace: Shop.V1',
+    '    server: {}',
+    '  - language: typescript',
+    '    out: gen/whole',
+  ]);
+
+  generate(folder);
+
+  const client = textOf(folder, 'gen/client/auth_bead.ts');
+  const server = textOf(folder, 'gen/server/ShopBead.cs');
+  const whole = textOf(folder, 'gen/whole/shop_bead.ts');
+
+  expect(client).toContain('export class AuthClient {');
+  expect(client).not.toContain('AuthServer');
+  expect(client).not.toContain('AuthResolvers');
+  expect(existsSync(join(folder, 'gen', 'client', 'shop_bead.ts'))).toBe(false);
+  expect(server).toContain('public sealed class ShopServer<TData>');
+  expect(server).not.toContain('ShopClient');
+  expect(server).not.toContain('ShopWindows');
+  expect(server).not.toContain('internal static');
+  expect(whole).toContain('export class ShopServer<Data = unknown> {');
+  expect(whole).toContain('export class ShopClient {');
+  expect(whole).not.toContain('ShopServed');
+});
+
+test('a gateway writes the route table, the document and the HTTP client of its selection alone', () => {
+  const folder = subsetsProject(SPLIT);
+
+  writeFileSync(
+    join(folder, 'beadc.yaml'),
+    `${readFileSync(join(folder, 'beadc.yaml'), 'utf8')}openapi:\n  out: gen/openapi.json\n`
+  );
+  generate(folder);
+
+  const whole = JSON.parse(textOf(folder, 'gen/openapi.json')) as { paths: object };
+  const table = textOf(folder, 'gen/ts/bead_http.ts');
+  const routes = textOf(folder, 'gen/cs/BeadHttp.cs');
+  const embedded = JSON.parse(
+    JSON.parse(/^export const OPENAPI_DOCUMENT = (".*");$/mu.exec(table)?.[1] ?? '""') as string
+  ) as { paths: object };
+
+  // * openapi.out is the whole blueprint's; the gateway's, its two readers'
+  expect(Object.keys(whole.paths)).toEqual([
+    '/api/Auth/signUp',
+    '/api/Shop/audit',
+    '/api/Shop/cancelOrder',
+    '/api/Shop/listOrders',
+    '/api/Shop/placeOrder',
+    '/api/Shop/watchOrders',
+  ]);
+  expect(Object.keys(embedded.paths)).toEqual(['/api/Shop/listOrders', '/api/Shop/watchOrders']);
+  expect(table).toContain('ShopProcedures.listOrders');
+  expect(table).not.toContain('ShopProcedures.placeOrder');
+  expect(table).toContain('listOrders');
+  expect(table).not.toContain('signUp');
+  expect(routes).toContain('public sealed class ShopHttpClient');
+  expect(routes).toContain('ListOrders(');
+  expect(routes).toContain('SubscribeWatchOrders(');
+  expect(routes).not.toContain('PlaceOrder(');
+  expect(routes).not.toContain('AuthHttpClient');
+  expect(findingsOf(folder)).toEqual([]);
+});
+
+test("each transport of a server takes its selection's requests and notifications", () => {
+  const folder = subsetsProject(SPLIT);
+
+  generate(folder);
+
+  const typescript = textOf(folder, 'gen/ts/bead_served.ts');
+  const csharp = textOf(folder, 'gen/cs/BeadServed.cs');
+
+  // * every request and notification the server holds, its command never; one key in its order
+  expect(typescript).toContain(
+    [
+      'export const SERVED_PROCEDURES = Object.freeze({',
+      '  /**',
+      '   * The procedures the transport `webSocket` takes: Shop/placeOrder, Shop/cancelOrder, Shop/watchOrders.',
+      '   */',
+      '  webSocket: Object.freeze([',
+      '    Object.freeze({ serviceId: 1, procedureId: 1 }),',
+      '    Object.freeze({ serviceId: 1, procedureId: 2 }),',
+      '    Object.freeze({ serviceId: 1, procedureId: 4 }),',
+      '  ]),',
+    ].join('\n')
+  );
+  expect(typescript).toContain('void GENERATED_CODE_SUPPORTS_VERSION_8;');
+  expect(csharp).toContain(
+    [
+      '    public static global::System.Collections.Generic.IReadOnlyList<global::Bead.ProcedureAddress> Orders { get; } =',
+      '    [',
+      '        new(1, 1),',
+      '        new(1, 2),',
+      '    ];',
+    ].join('\n')
+  );
+  expect(csharp).toContain(
+    'private const bool Supported = global::Bead.GeneratedCode.SupportsVersion8;'
+  );
+  // * every other file keeps the contract it needs
+  expect(textOf(folder, 'gen/ts/shop_bead.ts')).toContain('GENERATED_CODE_SUPPORTS_VERSION_7');
+  expect(textOf(folder, 'gen/cs/ShopBead.cs')).toContain('SupportsVersion7;');
+  expect(findingsOf(folder)).toEqual([]);
+
+  // * the transports taken off: their files are a run's no longer, and clean takes them out
+  writeFileSync(
+    join(folder, 'beadc.yaml'),
+    readFileSync(join(folder, 'beadc.yaml'), 'utf8').replaceAll(
+      /^ {6}transports:\n(?: {8}.+\n)+/gmu,
+      ''
+    )
+  );
+  expect(findingsOf(folder)).toEqual([
+    'gen/ts/bead_served.ts: shop.blueprint.json no longer gives it: beadc generate takes it out, under clean',
+    'gen/cs/BeadServed.cs: shop.blueprint.json no longer gives it: beadc generate takes it out, under clean',
+  ]);
+});
+
+test('an empty procedures writes an empty list', () => {
+  const folder = subsetsProject(SPLIT);
+
+  generate(folder);
+
+  expect(textOf(folder, 'gen/ts/bead_served.ts')).toContain(
+    '  /**\n   * The procedures the transport `none` takes: none.\n   */\n  none: Object.freeze([]),\n'
+  );
+  expect(textOf(folder, 'gen/cs/BeadServed.cs')).toContain(
+    '    /// <summary>The procedures the transport <c>none</c> takes: none.</summary>\n    public static global::System.Collections.Generic.IReadOnlyList<global::Bead.ProcedureAddress> None { get; } = [];\n'
+  );
+});
+
+test('the TypeScript and C# targets write the same addresses for one cut', () => {
+  const folder = subsetsProject(SPLIT);
+
+  generate(folder);
+
+  const typescript = [
+    ...textOf(folder, 'gen/ts/bead_served.ts').matchAll(
+      /(?:^ {2}(\w+): Object\.freeze\(\[|serviceId: (\d+), procedureId: (\d+))/gmu
+    ),
+  ].map((match) => {
+    return match[1] ?? `${String(match[2])}/${String(match[3])}`;
+  });
+  const csharp = [
+    ...textOf(folder, 'gen/cs/BeadServed.cs').matchAll(
+      /(?:ProcedureAddress> (\w+) \{|new\((\d+), (\d+)\))/gu
+    ),
+  ].map((match) => {
+    return match[1] === undefined
+      ? `${String(match[2])}/${String(match[3])}`
+      : `${match[1].slice(0, 1).toLowerCase()}${match[1].slice(1)}`;
+  });
+
+  expect(typescript).toEqual(['webSocket', '1/1', '1/2', '1/4', 'orders', '1/1', '1/2', 'none']);
+  expect(csharp).toEqual(typescript);
+});
+
+test('a selector that names nothing it can hold is SELECTOR_UNMATCHED, the Bead form where one is near; a selection that selects none SELECTION_EMPTY; a gateway that selects no route GATEWAY_EMPTY', () => {
+  const folder = subsetsProject([
+    '  - language: typescript',
+    '    out: gen/ts',
+    '    server:',
+    '      procedures: [{ include: [Shop/placeOrder, Shop/refreshCatalogue] }, { include: [Shop/PlaceOrder] }]',
+    '      transports:',
+    '        orders: { procedures: { include: [Shop/refreshCatalogue, Shop/listOrders] } }',
+    '        readers: { procedures: { include: [Shop/*], kind: [notifies] } }',
+    '    client:',
+    '      procedures: { include: [shop.v1.ShopService/ListOrders, Nowhere/*], exclude: [Auth/signIn] }',
+    '    gateway:',
+    '      procedures: { include: [Shop/refreshCatalogue] }',
+    '  - language: csharp',
+    '    out: gen/cs',
+    '    namespace: Shop.V1',
+    '    server:',
+    '      procedures: []',
+    '    gateway:',
+    '      procedures: []',
+    '  - language: csharp',
+    '    out: gen/commands',
+    '    namespace: Shop.V1',
+    '    client:',
+    '      procedures: { include: [Shop/*], kind: [command], idempotencyLevel: [IDEMPOTENT] }',
+  ]);
+  const config = configOf(folder);
+  const checked = checkedOf(config);
+
+  expect(checked.diagnostics).toEqual([]);
+  expect(
+    ungeneratedOf(config, { checked }).map((diagnostic) => {
+      return [diagnostic.rule, diagnostic.file, diagnostic.message];
+    })
+  ).toEqual(
+    [
+      [
+        'SELECTOR_UNMATCHED',
+        'outputs[0].server.procedures[1].include[0]: Shop/PlaceOrder names no procedure of the blueprint: Shop/placeOrder?',
+      ],
+      [
+        'SELECTOR_UNMATCHED',
+        'outputs[0].server.transports.orders.procedures[0].include[0]: Shop/refreshCatalogue names no request and no procedure that notifies its server holds: a transport takes neither a command nor a procedure its server does not hold',
+      ],
+      [
+        'SELECTOR_UNMATCHED',
+        'outputs[0].server.transports.orders.procedures[0].include[1]: Shop/listOrders names no request and no procedure that notifies its server holds: a transport takes neither a command nor a procedure its server does not hold',
+      ],
+      [
+        'SELECTION_EMPTY',
+        'outputs[0].server.transports.orders.procedures selects no procedure: write procedures: [] for none',
+      ],
+      [
+        'SELECTION_EMPTY',
+        'outputs[0].server.transports.readers.procedures selects no procedure: write procedures: [] for none',
+      ],
+      [
+        'SELECTOR_UNMATCHED',
+        'outputs[0].client.procedures[0].include[0]: shop.v1.ShopService/ListOrders names no procedure of the blueprint',
+      ],
+      [
+        'SELECTOR_UNMATCHED',
+        'outputs[0].client.procedures[0].include[1]: Nowhere/* names no procedure of the blueprint',
+      ],
+      [
+        'SELECTOR_UNMATCHED',
+        'outputs[0].client.procedures[0].exclude[0]: Auth/signIn names no procedure of the blueprint',
+      ],
+      [
+        'SELECTION_EMPTY',
+        'outputs[0].client.procedures selects no procedure: write procedures: [] for none',
+      ],
+      [
+        'SELECTOR_UNMATCHED',
+        'outputs[0].gateway.procedures[0].include[0]: Shop/refreshCatalogue names a command, which a gateway does not answer (transcoding 2.6)',
+      ],
+      [
+        'GATEWAY_EMPTY',
+        'outputs[0].gateway selects no request and no procedure that notifies: it would serve no route; take gateway out of it, or select one',
+      ],
+      [
+        'GATEWAY_EMPTY',
+        'outputs[1].gateway selects no request and no procedure that notifies: it would serve no route; take gateway out of it, or select one',
+      ],
+      [
+        'SELECTION_EMPTY',
+        'outputs[2].client.procedures selects no procedure: write procedures: [] for none',
+      ],
+    ].map(([rule, message]) => {
+      return [rule, 'beadc.yaml', message];
+    })
+  );
+});
+
+test("a selector copied from the .proto is SELECTOR_UNMATCHED, its service's full name and its rpc's name read as the Bead form", () => {
+  const folder = routedProject(
+    [
+      'version: 1',
+      'source:',
+      '  proto: [proto]',
+      'outputs:',
+      '  - language: typescript',
+      '    out: gen/ts',
+      '    client:',
+      '      procedures: { include: [x.v1.XService/One, x.v1.xservice/*] }',
+      '',
+    ].join('\n'),
+    [['One', '/v1/{name}']]
+  );
+  const config = configOf(folder);
+  const checked = checkedOf(config);
+
+  expect(
+    ungeneratedOf(config, { checked }).map((diagnostic) => {
+      return diagnostic.message;
+    })
+  ).toEqual([
+    'outputs[0].client.procedures[0].include[0]: x.v1.XService/One names no procedure of the blueprint: X/one?',
+    'outputs[0].client.procedures[0].include[1]: x.v1.xservice/* names no procedure of the blueprint: X/*?',
+    'outputs[0].client.procedures selects no procedure: write procedures: [] for none',
   ]);
 });

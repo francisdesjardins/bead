@@ -16,6 +16,7 @@ import { beadcVersion } from '../../../version.ts';
 import { type IGeneratedFile, type ITargetInput, Messages } from '../../target.ts';
 import { csharpTarget, GENERATED_MARKER } from '../csharp.ts';
 import type { ICSharpOptions } from '../options.ts';
+import { SUBSETS_GOLDEN, SUBSETS_NAMESPACE, subsetsOf } from '../../__tests__/subsets.ts';
 
 const BUILDER = fileURLToPath(new URL('../../../../', import.meta.url));
 const INTEROP = new URL('../../../../../spec/interop-blueprint.json', import.meta.url);
@@ -32,7 +33,7 @@ const FIXTURES = fileURLToPath(new URL('../../../../test/fixtures/', import.meta
 const MESSAGES = fileURLToPath(new URL('../../../../test/messages/', import.meta.url));
 const COMMENTS_PROTO = 'bead/comments/v1/comments.proto';
 const MESSAGES_PROTO = 'bead/messages/v1/messages.proto';
-// spec/transcoding.proto's output with http: true, a golden folder of its own
+// spec/transcoding.proto's output with a gateway, a golden folder of its own
 const SPEC = fileURLToPath(new URL('../../../../../spec/', import.meta.url));
 const TRANSCODING_PROTO = 'transcoding.proto';
 const HTTP_GOLDEN = 'transcoding/';
@@ -162,6 +163,7 @@ test("writes the comments fixture's and the messages fixture's goldens byte for 
         return (
           name.endsWith('.cs') &&
           !name.startsWith(HTTP_GOLDEN) &&
+          !name.startsWith(SUBSETS_GOLDEN) &&
           (protoc || name.endsWith('Bead.cs'))
         );
       })
@@ -175,7 +177,7 @@ test("writes the comments fixture's and the messages fixture's goldens byte for 
   }
 });
 
-test("writes spec/transcoding.proto's output with http: true as its goldens byte for byte: its route table, the document a UTF-8 literal of beadc's own bytes", () => {
+test("writes spec/transcoding.proto's output with a gateway as its goldens byte for byte: its route table, the document a UTF-8 literal of beadc's own bytes", () => {
   const checked = checkRoots([SPEC], { files: [TRANSCODING_PROTO] });
 
   expect(hasError(checked.diagnostics)).toBe(false);
@@ -245,6 +247,44 @@ test("writes spec/transcoding.proto's output with http: true as its goldens byte
   );
 });
 
+test("writes the split output of the subsets' blueprint as its goldens byte for byte: each class over its pick, the gateway's routes and each transport's procedures", () => {
+  const { input, http } = subsetsOf();
+  const written = csharpTarget.generate(input, {
+    namespace: SUBSETS_NAMESPACE,
+    messages: Messages.GENERATE,
+    http,
+  });
+
+  if (process.env['BEADC_WRITE_GOLDEN'] === '1') {
+    for (const file of written) {
+      mkdirSync(dirname(join(GOLDEN, SUBSETS_GOLDEN, file.name)), { recursive: true });
+      writeFileSync(join(GOLDEN, SUBSETS_GOLDEN, file.name), file.content);
+    }
+  }
+
+  expect(
+    written
+      .map((file) => {
+        return file.name;
+      })
+      .sort()
+  ).toEqual(['BeadHttp.cs', 'BeadServed.cs', 'ShopBead.cs']);
+  expect(filesUnder(join(GOLDEN, SUBSETS_GOLDEN)).sort()).toEqual([
+    'BeadHttp.cs',
+    'BeadServed.cs',
+    'ShopBead.cs',
+  ]);
+
+  for (const file of written) {
+    expect(file.content, file.name).toBe(
+      today(
+        readFileSync(join(GOLDEN, SUBSETS_GOLDEN, file.name), 'utf8'),
+        input.blueprint.specVersion
+      )
+    );
+  }
+});
+
 test("the goldens' .editorconfig is implementations/dotnet's, byte for byte", () => {
   expect(readFileSync(join(GOLDEN, '.editorconfig'), 'utf8')).toBe(
     readFileSync(EDITORCONFIG, 'utf8')
@@ -252,7 +292,7 @@ test("the goldens' .editorconfig is implementations/dotnet's, byte for byte", ()
 });
 
 test("an accepted case's output differs from the interop's by its patch alone: SPEC_VERSION_NEWER's header, NOTIFICATION_RESULT's codec and the types it writes", () => {
-  // * an HTTP member writes no line of a service's file: a route table's, under http: true
+  // * an HTTP member writes no line of a service's file: a route table's, under a gateway
   const accepted = blueprintCases().filter((each) => {
     return (
       !each.rule.startsWith('HTTP_') &&

@@ -5,7 +5,9 @@
 // which the service layer's options take typed by the service; the sealed classes its server and its
 // client hold, a member a command, a procedure that notifies or its notification; a server class
 // where only resolvers are written; and a client class holding a requester of each procedure by its
-// rpc's name. A `proto` codec has `Bead.Protobuf` check a payload's records by its message's
+// rpc's name. Each class and the records it holds are printed over the procedures its side holds,
+// an internal list beside `All` where it holds less than the service, and a side that holds none
+// is not printed (decision 0048). A `proto` codec has `Bead.Protobuf` check a payload's records by its message's
 // descriptor before Google.Protobuf reads it (decision 0028), and a request whose message holds rules
 // is judged by the runtime's validator of its class of rules (decision 0035). The file's contract
 // with the runtime follows its services. Every type is qualified from `global::`, so no type of the namespace takes
@@ -34,6 +36,10 @@ export interface ICSharpTemplateOptions {
   readonly messageOf: (fullName: string) => string;
   /** The class of rules of each message a request's rules reach, by its full name. */
   readonly validators: ReadonlyMap<string, string>;
+  /** The procedures its server class holds, by their names; none, no server class. */
+  readonly served: ReadonlySet<string> | undefined;
+  /** The procedures its client class holds, by their names; none, no client class. */
+  readonly called: ReadonlySet<string> | undefined;
 }
 
 // a member of a record or a holder: its documentation's lines, then its declaration
@@ -247,7 +253,11 @@ const statementOf = (
 
 // definition
 
-/** Prints `service` as lines of C#, in the file's namespace. */
+/**
+ * Prints `service` as lines of C#, in the file's namespace: its server class and the records it
+ * holds over the procedures `options.served` names, its client class and its own over those
+ * `options.called` names, each side left out where it names none (decision 0048).
+ */
 export const printService = (service: IServiceEntry, options: ICSharpTemplateOptions): string[] => {
   const name = service.serviceName;
   const shown = `<c>${service.proto?.fullName ?? name}</c>`;
@@ -258,7 +268,29 @@ export const printService = (service: IServiceEntry, options: ICSharpTemplateOpt
       return [failure.failureName, failure] as const;
     })
   );
-  const answered = service.procedures.filter((procedure) => {
+  // * each side's pick: none where it is not written; `All` where it holds the service whole, an
+  // internal list beside it otherwise, which its class is built over
+  const pickOf = (
+    names: ReadonlySet<string> | undefined,
+    pick: string
+  ): { readonly held: readonly IProcedureEntry[]; readonly of: string } | undefined => {
+    if (names === undefined || names.size === 0) {
+      return undefined;
+    }
+
+    const held = service.procedures.filter((procedure) => {
+      return names.has(procedure.procedureName);
+    });
+
+    return { held, of: held.length === service.procedures.length ? 'All' : pick };
+  };
+  const servedPick = pickOf(options.served, 'Served');
+  const calledPick = pickOf(options.called, 'Called');
+  const served = servedPick?.held ?? [];
+  const called = calledPick?.held ?? [];
+  const servedOf = servedPick?.of ?? 'All';
+  const calledOf = calledPick?.of ?? 'All';
+  const answered = called.filter((procedure) => {
     return procedure.procedureKind !== 'command';
   });
   // a procedure's own deprecation, or its service's, which a blueprint written by hand may give alone
@@ -268,15 +300,18 @@ export const printService = (service: IServiceEntry, options: ICSharpTemplateOpt
   // * every type the file declares for a deprecated service is marked, as protoc's C# generator
   // marks a deprecated message's nested types through it
   const serviceMark = obsoleteOf(service.deprecation, '');
-  const commands = service.procedures.filter((procedure) => {
+  const commands = served.filter((procedure) => {
     return procedure.procedureKind === 'command';
   });
-  const notifying = service.procedures.filter((procedure) => {
+  const notifying = served.filter((procedure) => {
+    return procedure.procedureKind === 'notifies';
+  });
+  const notified = called.filter((procedure) => {
     return procedure.procedureKind === 'notifies';
   });
   const hooks = [
     ...new Set(
-      service.procedures.flatMap((procedure) => {
+      served.flatMap((procedure) => {
         return typeof procedure.admission === 'object' ? [procedure.admission.hook] : [];
       })
     ),
@@ -454,6 +489,20 @@ export const printService = (service: IServiceEntry, options: ICSharpTemplateOpt
       return `${INDENT}${INDENT}${upperFirst(procedure.procedureName)},`;
     }),
     `${INDENT}];`,
+    ...[servedPick, calledPick].flatMap((pick) => {
+      return pick === undefined || pick.of === 'All'
+        ? []
+        : [
+            '',
+            `${INDENT}/// <summary>The procedures its ${pick === servedPick ? 'server' : 'client'} side holds, in their ids' order: what that side is built over.</summary>`,
+            `${INDENT}internal static global::System.Collections.Generic.IReadOnlyList<global::Bead.IServiceProcedure<${procedures}>> ${pick.of} { get; } =`,
+            `${INDENT}[`,
+            ...pick.held.map((procedure) => {
+              return `${INDENT}${INDENT}${upperFirst(procedure.procedureName)},`;
+            }),
+            `${INDENT}];`,
+          ];
+    }),
     '}'
   );
 
@@ -524,269 +573,278 @@ export const printService = (service: IServiceEntry, options: ICSharpTemplateOpt
   );
 
   // * the records the layer's options take, typed by the service, and the classes its sides hold
-  classOf(
-    {
-      type: `${name}Admissions`,
-      doc:
-        hooks.length === 0
-          ? `The hooks of ${shown}: none, since no procedure names one.`
-          : `The hooks of ${shown}, each by the name its procedures give it: every one is required.`,
-      record: {
-        entry: 'global::Bead.AdmissionHook',
-        names: hooks.map((hook) => {
-          return [hook, upperFirst(hook)] as const;
-        }),
+  if (servedPick !== undefined) {
+    classOf(
+      {
+        type: `${name}Admissions`,
+        doc:
+          hooks.length === 0
+            ? `The hooks of ${shown}: none, since no procedure names one.`
+            : `The hooks of ${shown}, each by the name its procedures give it: every one is required.`,
+        record: {
+          entry: 'global::Bead.AdmissionHook',
+          names: hooks.map((hook) => {
+            return [hook, upperFirst(hook)] as const;
+          }),
+        },
       },
-    },
-    hooks.map((hook) => {
-      const admitted = service.procedures
-        .filter((procedure) => {
-          return typeof procedure.admission === 'object' && procedure.admission.hook === hook;
-        })
-        .map((procedure) => {
-          return `<c>${procedure.procedureName}</c>`;
-        })
-        .join(', ');
+      hooks.map((hook) => {
+        const admitted = served
+          .filter((procedure) => {
+            return typeof procedure.admission === 'object' && procedure.admission.hook === hook;
+          })
+          .map((procedure) => {
+            return `<c>${procedure.procedureName}</c>`;
+          })
+          .join(', ');
 
-      return {
-        doc: [
-          `${INDENT}/// <summary>The hook <c>${hook}</c>, which admits a call to ${admitted}.</summary>`,
-        ],
-        declaration: `public required global::Bead.AdmissionHook ${upperFirst(hook)} { get; init; }`,
-      };
-    })
-  );
-  classOf(
-    {
-      type: `${name}Commands`,
-      doc: `The requester of each command of ${shown}, its server's, by its rpc's name.`,
-    },
-    commands.map((procedure) => {
-      return {
-        doc: requesterDocOf(procedure, INDENT),
-        declaration: `public required ${requesterOf(procedure)} ${upperFirst(procedure.procedureName)} ${accessorsOf(deprecationOf(procedure))}`,
-      };
-    })
-  );
-  classOf(
-    {
-      type: `${name}Notifiers`,
-      doc: `What notifies the subscribers of each procedure of ${shown} that notifies.`,
-    },
-    notifying.map((procedure) => {
-      return {
-        doc: [
-          `${INDENT}/// <summary>Notifies the subscribers of <c>${procedure.procedureName}</c>.</summary>`,
-        ],
-        declaration: `public required global::Bead.Notifier<${notifiedOf(procedure)}> ${upperFirst(procedure.procedureName)} ${accessorsOf(deprecationOf(procedure))}`,
-      };
-    })
-  );
-  classOf(
-    {
-      type: `${name}Windows`,
-      doc: `The window each procedure of ${shown} that notifies is asked for; none, unpaced.`,
-      record: {
-        entry: 'int?',
-        names: notifying.map((procedure) => {
-          return [procedure.procedureName, upperFirst(procedure.procedureName)] as const;
-        }),
-      },
-    },
-    notifying.map((procedure) => {
-      return {
-        doc: [
-          `${INDENT}/// <summary>The window of <c>${procedure.procedureName}</c>, a whole number above 0.</summary>`,
-          ...obsoleteOf(deprecationOf(procedure), INDENT),
-        ],
-        declaration: `public int? ${upperFirst(procedure.procedureName)} { get; init; }`,
-      };
-    })
-  );
-  classOf(
-    {
-      type: `${name}Notifications`,
-      doc: `The notification of each procedure of ${shown} that notifies.`,
-    },
-    notifying.map((procedure) => {
-      return {
-        doc: [
-          `${INDENT}/// <summary>The notification of <c>${procedure.procedureName}</c>.</summary>`,
-        ],
-        declaration: `public required global::Bead.INotification<${typeOf(procedure.request)}, ${notifiedOf(procedure)}> ${upperFirst(procedure.procedureName)} ${accessorsOf(deprecationOf(procedure))}`,
-      };
-    })
-  );
-
-  // * the server: the layer's members, its options the layer's, typed by the service
-  const server = `${name}Server`;
-  const layer = `global::Bead.ServiceServer<${procedures}, TData>`;
-  const serverOptions = `global::Bead.ServiceServerOptions<${procedures}>`;
-  const holders = [
-    ...statementOf('Command = ', {
-      value: initializerOf(`${name}Commands`, {
-        members: commands.map((procedure) => {
-          const rpc = upperFirst(procedure.procedureName);
-
-          return [rpc, `_service.CommandOf(${procedures}.${rpc})`] as const;
-        }),
-        indent: `${INDENT}${INDENT}`,
-      }),
-      indent: `${INDENT}${INDENT}`,
-    }),
-    ...statementOf('Notify = ', {
-      value: initializerOf(`${name}Notifiers`, {
-        members: notifying.map((procedure) => {
-          const rpc = upperFirst(procedure.procedureName);
-
-          return [rpc, `_service.NotifierOf(${procedures}.${rpc})`] as const;
-        }),
-        indent: `${INDENT}${INDENT}`,
-      }),
-      indent: `${INDENT}${INDENT}`,
-    }),
-  ];
-
-  lines.push(
-    '',
-    `/// <summary>The server side of ${shown}, offered on one Bead server: only its resolvers are written.</summary>`,
-    '/// <typeparam name="TData">What a session of its server keeps.</typeparam>',
-    ...serviceMark,
-    `public sealed class ${server}<TData>`,
-    '{',
-    `${INDENT}private readonly ${layer} _service;`,
-    ''
-  );
-
-  if (hooks.length > 0) {
-    lines.push(
-      `${INDENT}/// <summary>The server side of ${shown}, given the layer's options, its hooks among them, required since a procedure names one: ${hooks.join(', ')}.</summary>`,
-      `${INDENT}public ${server}(${serverOptions} options)`,
-      `${INDENT}{`,
-      `${INDENT}${INDENT}_service = new(${procedures}.All, options);`,
-      ...holders,
-      `${INDENT}}`
+        return {
+          doc: [
+            `${INDENT}/// <summary>The hook <c>${hook}</c>, which admits a call to ${admitted}.</summary>`,
+          ],
+          declaration: `public required global::Bead.AdmissionHook ${upperFirst(hook)} { get; init; }`,
+        };
+      })
     );
-  } else {
-    lines.push(
-      `${INDENT}/// <summary>The server side of ${shown}, whose procedures name no hook.</summary>`,
-      `${INDENT}public ${server}()`,
-      `${INDENT}${INDENT}: this(new ${layer}(${procedures}.All))`,
-      `${INDENT}{`,
-      `${INDENT}}`,
-      '',
-      `${INDENT}/// <summary>The server side of ${shown}, given the layer's options, which name no hook.</summary>`,
-      `${INDENT}public ${server}(${serverOptions} options)`,
-      `${INDENT}${INDENT}: this(new ${layer}(${procedures}.All, options))`,
-      `${INDENT}{`,
-      `${INDENT}}`,
-      '',
-      `${INDENT}private ${server}(${layer} service)`,
-      `${INDENT}{`,
-      `${INDENT}${INDENT}_service = service;`,
-      ...holders,
-      `${INDENT}}`
+    classOf(
+      {
+        type: `${name}Commands`,
+        doc: `The requester of each command of ${shown}, its server's, by its rpc's name.`,
+      },
+      commands.map((procedure) => {
+        return {
+          doc: requesterDocOf(procedure, INDENT),
+          declaration: `public required ${requesterOf(procedure)} ${upperFirst(procedure.procedureName)} ${accessorsOf(deprecationOf(procedure))}`,
+        };
+      })
+    );
+    classOf(
+      {
+        type: `${name}Notifiers`,
+        doc: `What notifies the subscribers of each procedure of ${shown} that notifies.`,
+      },
+      notifying.map((procedure) => {
+        return {
+          doc: [
+            `${INDENT}/// <summary>Notifies the subscribers of <c>${procedure.procedureName}</c>.</summary>`,
+          ],
+          declaration: `public required global::Bead.Notifier<${notifiedOf(procedure)}> ${upperFirst(procedure.procedureName)} ${accessorsOf(deprecationOf(procedure))}`,
+        };
+      })
     );
   }
 
-  lines.push(
-    '',
-    `${INDENT}/// <summary>The requester of each command, made as the service is offered.</summary>`,
-    `${INDENT}public ${name}Commands Command { get; }`,
-    '',
-    `${INDENT}/// <summary>Notifies each procedure's subscribers.</summary>`,
-    `${INDENT}public ${name}Notifiers Notify { get; }`,
-    '',
-    `${INDENT}/// <summary>Registers a request's resolver, before or after the offer.</summary>`,
-    `${INDENT}public void On<TRequest, TResult, TFailure>(`,
-    `${INDENT}${INDENT}global::Bead.RequestProcedure<${procedures}, TRequest, TResult, TFailure> procedure,`,
-    `${INDENT}${INDENT}global::Bead.ServiceResolverCallback<TRequest, TResult, TFailure> callback)`,
-    `${INDENT}${INDENT}where TFailure : global::Bead.IApplicationFailure`,
-    `${INDENT}{`,
-    `${INDENT}${INDENT}_service.On(procedure, callback);`,
-    `${INDENT}}`,
-    '',
-    `${INDENT}/// <summary>Registers the resolver of a procedure that notifies, before or after the offer.</summary>`,
-    `${INDENT}public void On<TRequest, TResult, TNotification, TFailure>(`,
-    `${INDENT}${INDENT}global::Bead.RequestProcedure<${procedures}, TRequest, TResult, TNotification, TFailure> procedure,`,
-    `${INDENT}${INDENT}global::Bead.ServiceNotificationResolverCallback<TRequest, TResult, TFailure> callback)`,
-    `${INDENT}${INDENT}where TFailure : global::Bead.IApplicationFailure`,
-    `${INDENT}{`,
-    `${INDENT}${INDENT}_service.On(procedure, callback);`,
-    `${INDENT}}`,
-    '',
-    `${INDENT}/// <summary>Offers every resolver, now and later, on <paramref name="server"/>, once.</summary>`,
-    `${INDENT}public void Offer(global::Bead.IBeadServer<TData> server)`,
-    `${INDENT}{`,
-    `${INDENT}${INDENT}_service.Offer(server);`,
-    `${INDENT}}`,
-    '',
-    `${INDENT}/// <summary>The procedures a client calls that no resolver answers yet.</summary>`,
-    `${INDENT}public global::System.Collections.Generic.IReadOnlyList<global::Bead.Procedure> ProceduresWithoutResolver()`,
-    `${INDENT}{`,
-    `${INDENT}${INDENT}return _service.ProceduresWithoutResolver();`,
-    `${INDENT}}`,
-    '}'
-  );
-
-  // * the client: a requester of each procedure its server answers, by its rpc's name
-  const client = `${name}Client`;
-
-  lines.push(
-    '',
-    `/// <summary>The client side of ${shown}, over one Bead client: a requester of each procedure its server answers, by its name.</summary>`,
-    ...serviceMark,
-    `public sealed class ${client}`,
-    '{',
-    `${INDENT}private readonly global::Bead.ServiceClient<${procedures}> _service;`,
-    '',
-    `${INDENT}/// <summary>The client side of ${shown}, over its Bead client, given the layer's options: the windows of its notifications, and whether it validates.</summary>`,
-    `${INDENT}public ${client}(global::Bead.IClient client, global::Bead.ServiceClientOptions<${procedures}>? options = null)`,
-    `${INDENT}{`,
-    `${INDENT}${INDENT}_service = new(${procedures}.All, client, options);`,
-    ...answered.map((procedure) => {
-      const rpc = upperFirst(procedure.procedureName);
-
-      return `${INDENT}${INDENT}${rpc} = _service.RequesterOf(${procedures}.${rpc});`;
-    }),
-    ...statementOf('Notifications = ', {
-      value: initializerOf(`${name}Notifications`, {
-        members: notifying.map((procedure) => {
-          const rpc = upperFirst(procedure.procedureName);
-
-          return [rpc, `_service.NotificationOf(${procedures}.${rpc})`] as const;
-        }),
-        indent: `${INDENT}${INDENT}`,
-      }),
-      indent: `${INDENT}${INDENT}`,
-    }),
-    `${INDENT}}`
-  );
-
-  for (const procedure of answered) {
-    lines.push(
-      '',
-      ...requesterDocOf(procedure, INDENT),
-      ...obsoleteOf(deprecationOf(procedure), INDENT),
-      `${INDENT}public ${requesterOf(procedure)} ${upperFirst(procedure.procedureName)} { get; }`
+  if (calledPick !== undefined) {
+    classOf(
+      {
+        type: `${name}Windows`,
+        doc: `The window each procedure of ${shown} that notifies is asked for; none, unpaced.`,
+        record: {
+          entry: 'int?',
+          names: notified.map((procedure) => {
+            return [procedure.procedureName, upperFirst(procedure.procedureName)] as const;
+          }),
+        },
+      },
+      notified.map((procedure) => {
+        return {
+          doc: [
+            `${INDENT}/// <summary>The window of <c>${procedure.procedureName}</c>, a whole number above 0.</summary>`,
+            ...obsoleteOf(deprecationOf(procedure), INDENT),
+          ],
+          declaration: `public int? ${upperFirst(procedure.procedureName)} { get; init; }`,
+        };
+      })
+    );
+    classOf(
+      {
+        type: `${name}Notifications`,
+        doc: `The notification of each procedure of ${shown} that notifies.`,
+      },
+      notified.map((procedure) => {
+        return {
+          doc: [
+            `${INDENT}/// <summary>The notification of <c>${procedure.procedureName}</c>.</summary>`,
+          ],
+          declaration: `public required global::Bead.INotification<${typeOf(procedure.request)}, ${notifiedOf(procedure)}> ${upperFirst(procedure.procedureName)} ${accessorsOf(deprecationOf(procedure))}`,
+        };
+      })
     );
   }
 
-  lines.push(
-    '',
-    `${INDENT}/// <summary>The notification of each procedure that notifies, at the window its options gave, or unpaced.</summary>`,
-    `${INDENT}public ${name}Notifications Notifications { get; }`,
-    '',
-    `${INDENT}/// <summary>Registers the resolver of a command it answers.</summary>`,
-    `${INDENT}public void On<TRequest, TResult, TFailure>(`,
-    `${INDENT}${INDENT}global::Bead.CommandProcedure<${procedures}, TRequest, TResult, TFailure> procedure,`,
-    `${INDENT}${INDENT}global::Bead.ServiceResolverCallback<TRequest, TResult, TFailure> callback)`,
-    `${INDENT}${INDENT}where TFailure : global::Bead.IApplicationFailure`,
-    `${INDENT}{`,
-    `${INDENT}${INDENT}_service.On(procedure, callback);`,
-    `${INDENT}}`,
-    '}'
-  );
+  if (servedPick !== undefined) {
+    // * the server: the layer's members, its options the layer's, typed by the service
+    const server = `${name}Server`;
+    const layer = `global::Bead.ServiceServer<${procedures}, TData>`;
+    const serverOptions = `global::Bead.ServiceServerOptions<${procedures}>`;
+    const holders = [
+      ...statementOf('Command = ', {
+        value: initializerOf(`${name}Commands`, {
+          members: commands.map((procedure) => {
+            const rpc = upperFirst(procedure.procedureName);
+
+            return [rpc, `_service.CommandOf(${procedures}.${rpc})`] as const;
+          }),
+          indent: `${INDENT}${INDENT}`,
+        }),
+        indent: `${INDENT}${INDENT}`,
+      }),
+      ...statementOf('Notify = ', {
+        value: initializerOf(`${name}Notifiers`, {
+          members: notifying.map((procedure) => {
+            const rpc = upperFirst(procedure.procedureName);
+
+            return [rpc, `_service.NotifierOf(${procedures}.${rpc})`] as const;
+          }),
+          indent: `${INDENT}${INDENT}`,
+        }),
+        indent: `${INDENT}${INDENT}`,
+      }),
+    ];
+
+    lines.push(
+      '',
+      `/// <summary>The server side of ${shown}, offered on one Bead server: only its resolvers are written.</summary>`,
+      '/// <typeparam name="TData">What a session of its server keeps.</typeparam>',
+      ...serviceMark,
+      `public sealed class ${server}<TData>`,
+      '{',
+      `${INDENT}private readonly ${layer} _service;`,
+      ''
+    );
+
+    if (hooks.length > 0) {
+      lines.push(
+        `${INDENT}/// <summary>The server side of ${shown}, given the layer's options, its hooks among them, required since a procedure names one: ${hooks.join(', ')}.</summary>`,
+        `${INDENT}public ${server}(${serverOptions} options)`,
+        `${INDENT}{`,
+        `${INDENT}${INDENT}_service = new(${procedures}.${servedOf}, options);`,
+        ...holders,
+        `${INDENT}}`
+      );
+    } else {
+      lines.push(
+        `${INDENT}/// <summary>The server side of ${shown}, whose procedures name no hook.</summary>`,
+        `${INDENT}public ${server}()`,
+        `${INDENT}${INDENT}: this(new ${layer}(${procedures}.${servedOf}))`,
+        `${INDENT}{`,
+        `${INDENT}}`,
+        '',
+        `${INDENT}/// <summary>The server side of ${shown}, given the layer's options, which name no hook.</summary>`,
+        `${INDENT}public ${server}(${serverOptions} options)`,
+        `${INDENT}${INDENT}: this(new ${layer}(${procedures}.${servedOf}, options))`,
+        `${INDENT}{`,
+        `${INDENT}}`,
+        '',
+        `${INDENT}private ${server}(${layer} service)`,
+        `${INDENT}{`,
+        `${INDENT}${INDENT}_service = service;`,
+        ...holders,
+        `${INDENT}}`
+      );
+    }
+
+    lines.push(
+      '',
+      `${INDENT}/// <summary>The requester of each command, made as the service is offered.</summary>`,
+      `${INDENT}public ${name}Commands Command { get; }`,
+      '',
+      `${INDENT}/// <summary>Notifies each procedure's subscribers.</summary>`,
+      `${INDENT}public ${name}Notifiers Notify { get; }`,
+      '',
+      `${INDENT}/// <summary>Registers a request's resolver, before or after the offer.</summary>`,
+      `${INDENT}public void On<TRequest, TResult, TFailure>(`,
+      `${INDENT}${INDENT}global::Bead.RequestProcedure<${procedures}, TRequest, TResult, TFailure> procedure,`,
+      `${INDENT}${INDENT}global::Bead.ServiceResolverCallback<TRequest, TResult, TFailure> callback)`,
+      `${INDENT}${INDENT}where TFailure : global::Bead.IApplicationFailure`,
+      `${INDENT}{`,
+      `${INDENT}${INDENT}_service.On(procedure, callback);`,
+      `${INDENT}}`,
+      '',
+      `${INDENT}/// <summary>Registers the resolver of a procedure that notifies, before or after the offer.</summary>`,
+      `${INDENT}public void On<TRequest, TResult, TNotification, TFailure>(`,
+      `${INDENT}${INDENT}global::Bead.RequestProcedure<${procedures}, TRequest, TResult, TNotification, TFailure> procedure,`,
+      `${INDENT}${INDENT}global::Bead.ServiceNotificationResolverCallback<TRequest, TResult, TFailure> callback)`,
+      `${INDENT}${INDENT}where TFailure : global::Bead.IApplicationFailure`,
+      `${INDENT}{`,
+      `${INDENT}${INDENT}_service.On(procedure, callback);`,
+      `${INDENT}}`,
+      '',
+      `${INDENT}/// <summary>Offers every resolver, now and later, on <paramref name="server"/>, once.</summary>`,
+      `${INDENT}public void Offer(global::Bead.IBeadServer<TData> server)`,
+      `${INDENT}{`,
+      `${INDENT}${INDENT}_service.Offer(server);`,
+      `${INDENT}}`,
+      '',
+      `${INDENT}/// <summary>The procedures a client calls that no resolver answers yet.</summary>`,
+      `${INDENT}public global::System.Collections.Generic.IReadOnlyList<global::Bead.Procedure> ProceduresWithoutResolver()`,
+      `${INDENT}{`,
+      `${INDENT}${INDENT}return _service.ProceduresWithoutResolver();`,
+      `${INDENT}}`,
+      '}'
+    );
+  }
+
+  if (calledPick !== undefined) {
+    // * the client: a requester of each procedure its server answers, by its rpc's name
+    const client = `${name}Client`;
+
+    lines.push(
+      '',
+      `/// <summary>The client side of ${shown}, over one Bead client: a requester of each procedure its server answers, by its name.</summary>`,
+      ...serviceMark,
+      `public sealed class ${client}`,
+      '{',
+      `${INDENT}private readonly global::Bead.ServiceClient<${procedures}> _service;`,
+      '',
+      `${INDENT}/// <summary>The client side of ${shown}, over its Bead client, given the layer's options: the windows of its notifications, and whether it validates.</summary>`,
+      `${INDENT}public ${client}(global::Bead.IClient client, global::Bead.ServiceClientOptions<${procedures}>? options = null)`,
+      `${INDENT}{`,
+      `${INDENT}${INDENT}_service = new(${procedures}.${calledOf}, client, options);`,
+      ...answered.map((procedure) => {
+        const rpc = upperFirst(procedure.procedureName);
+
+        return `${INDENT}${INDENT}${rpc} = _service.RequesterOf(${procedures}.${rpc});`;
+      }),
+      ...statementOf('Notifications = ', {
+        value: initializerOf(`${name}Notifications`, {
+          members: notified.map((procedure) => {
+            const rpc = upperFirst(procedure.procedureName);
+
+            return [rpc, `_service.NotificationOf(${procedures}.${rpc})`] as const;
+          }),
+          indent: `${INDENT}${INDENT}`,
+        }),
+        indent: `${INDENT}${INDENT}`,
+      }),
+      `${INDENT}}`
+    );
+
+    for (const procedure of answered) {
+      lines.push(
+        '',
+        ...requesterDocOf(procedure, INDENT),
+        ...obsoleteOf(deprecationOf(procedure), INDENT),
+        `${INDENT}public ${requesterOf(procedure)} ${upperFirst(procedure.procedureName)} { get; }`
+      );
+    }
+
+    lines.push(
+      '',
+      `${INDENT}/// <summary>The notification of each procedure that notifies, at the window its options gave, or unpaced.</summary>`,
+      `${INDENT}public ${name}Notifications Notifications { get; }`,
+      '',
+      `${INDENT}/// <summary>Registers the resolver of a command it answers.</summary>`,
+      `${INDENT}public void On<TRequest, TResult, TFailure>(`,
+      `${INDENT}${INDENT}global::Bead.CommandProcedure<${procedures}, TRequest, TResult, TFailure> procedure,`,
+      `${INDENT}${INDENT}global::Bead.ServiceResolverCallback<TRequest, TResult, TFailure> callback)`,
+      `${INDENT}${INDENT}where TFailure : global::Bead.IApplicationFailure`,
+      `${INDENT}{`,
+      `${INDENT}${INDENT}_service.On(procedure, callback);`,
+      `${INDENT}}`,
+      '}'
+    );
+  }
 
   return lines;
 };

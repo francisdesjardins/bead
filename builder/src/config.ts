@@ -3,9 +3,10 @@
 // `beadc.yaml`, at a project's root: its `version`, its `source` — `.proto` roots, or a blueprint —
 // where `beadc blueprint` writes, the `outputs` `beadc generate` writes, a language and a folder
 // each, TypeScript or C#, and whether `generate` takes out what it no longer writes, `clean`, buf's
-// opt-in, off unless set; its HTTP prefix, the OpenAPI document `generate` writes, and each
-// output's `http: true` (decision 0037). Every path stays under the folder that holds it, since the image sees
-// nothing else; no output's folder holds another's, or another's messages, nor lies in one; a key
+// opt-in, off unless set; its HTTP prefix, the OpenAPI document `generate` writes (decision 0037),
+// and each output's `server`, `client` and `gateway`, each its own selection of procedures, and the
+// procedures each transport of its server takes (decision 0048). Every path stays under the folder
+// that holds it, since the image sees nothing else; no output's folder holds another's, or another's messages, nor lies in one; a key
 // beadc does not read is refused, never left unchecked. An earlier release's, which `beadc breaking`
 // compares against, is read for its `version`, its `source` and its `blueprint` alone.
 
@@ -18,7 +19,17 @@ import nodePath, { type PlatformPath } from 'node:path';
 import { parse } from 'yaml';
 
 import { InputError } from './diagnostics.ts';
+import type { ProcedureKind } from './model/blueprint.ts';
 import { DEFAULT_PREFIX, PREFIX } from './model/routes.ts';
+import {
+  type IdempotencyLevelName,
+  type ISelection,
+  type IServerSide,
+  type ISide,
+  type ITransportSide,
+  SELECTOR,
+  type Selections,
+} from './model/selection.ts';
 import { NAMESPACE } from './targets/csharp/options.ts';
 import { Messages } from './targets/target.ts';
 import {
@@ -51,15 +62,17 @@ export interface ITypeScriptOutput {
    * that runs protovalidate on its own; off, they go (decision 0035).
    */
   readonly keepValidateOptions?: boolean;
-  /**
-   * Whether it writes its route table and embeds the OpenAPI document, for a gateway (decision
-   * 0037); off, it writes neither.
-   */
-  readonly http?: boolean;
-  /** The module the route table imports its runtime from, under `http`, as `runtime` names one. */
-  readonly httpRuntime?: string;
   /** Whether the messages it generates keep `google.api.http` and its import; off, they go. */
   readonly keepHttpOptions?: boolean;
+  /** What its server class holds, and what each transport of it takes (decision 0048). */
+  readonly server?: IServerSide;
+  /** What its client class holds. */
+  readonly client?: ISide;
+  /**
+   * What its route table, its document and its HTTP client hold, for a gateway (decision 0037),
+   * and the module the route table imports its runtime from, as `runtime` names one; none without.
+   */
+  readonly gateway?: ISide & { readonly runtime: string };
 }
 
 /** A C# output: its folder, the namespace of a blueprint's services, and its messages. */
@@ -71,10 +84,14 @@ export interface ICSharpOutput {
   readonly messages: Messages;
   /** As a TypeScript output's: protovalidate's options kept in the messages it generates. */
   readonly keepValidateOptions?: boolean;
-  /** As a TypeScript output's: its route table and the document, for a gateway. */
-  readonly http?: boolean;
   /** As a TypeScript output's: `google.api.http` kept in the messages it generates. */
   readonly keepHttpOptions?: boolean;
+  /** As a TypeScript output's: its server class, and each transport of it. */
+  readonly server?: IServerSide;
+  /** As a TypeScript output's: its client class. */
+  readonly client?: ISide;
+  /** As a TypeScript output's: its route table, its document and its HTTP client, for a gateway. */
+  readonly gateway?: ISide;
 }
 
 /** What `beadc.yaml`'s `http` says of every route: the default routes' prefix (transcoding 3.3). */
@@ -151,9 +168,10 @@ const TYPESCRIPT_KEYS = new Set([
   'messages',
   'messagesOut',
   'keepValidateOptions',
-  'http',
-  'httpRuntime',
   'keepHttpOptions',
+  'server',
+  'client',
+  'gateway',
 ]);
 const CSHARP_KEYS = new Set([
   'language',
@@ -161,9 +179,28 @@ const CSHARP_KEYS = new Set([
   'namespace',
   'messages',
   'keepValidateOptions',
-  'http',
   'keepHttpOptions',
+  'server',
+  'client',
+  'gateway',
 ]);
+// an output's keys a later beadc reads under another, refused naming it (decision 0048)
+const SUCCEEDED: Readonly<Record<string, string>> = Object.freeze({
+  http: 'said by gateway: {}, decision 0048',
+  httpRuntime: 'said by gateway.runtime',
+});
+const SERVER_KEYS = new Set(['procedures', 'transports']);
+const SIDE_KEYS = new Set(['procedures']);
+const TYPESCRIPT_GATEWAY_KEYS = new Set(['procedures', 'runtime']);
+const SELECTION_KEYS = new Set(['include', 'exclude', 'kind', 'idempotencyLevel']);
+const KINDS: readonly string[] = Object.freeze(['request', 'notifies', 'command']);
+const LEVELS: readonly string[] = Object.freeze([
+  'NO_SIDE_EFFECTS',
+  'IDEMPOTENT',
+  'IDEMPOTENCY_UNKNOWN',
+]);
+// a key of server.transports: the member of SERVED_PROCEDURES the application hands a transport
+const TRANSPORT_KEY = /^[a-z][A-Za-z0-9]*$/u;
 // ! read as each output is, never as the module loads: target.ts and this module import each other
 // through the targets' own imports, so Messages may not be there yet
 const messagesOf = (): readonly unknown[] => {
@@ -332,19 +369,12 @@ export const parseConfig = (
 
     return { keepValidateOptions: keeps };
   };
-  // whether an output writes its route table, and keeps google.api.http in the messages it generates
-  const httpOf = (
+  // whether an output keeps google.api.http in the messages it generates
+  const keepHttpOf = (
     given: Record<string, unknown>,
     details: { readonly key: string; readonly messages: unknown }
-  ): { http?: boolean; keepHttpOptions?: boolean } => {
-    const http = given['http'];
+  ): { keepHttpOptions?: boolean } => {
     const keeps = given['keepHttpOptions'];
-
-    if (http !== undefined && typeof http !== 'boolean') {
-      return refuse(
-        `${details.key}.http is true or false: whether it writes its route table and the document`
-      );
-    }
 
     if (keeps !== undefined && typeof keeps !== 'boolean') {
       return refuse(`${details.key}.keepHttpOptions is true or false`);
@@ -356,9 +386,196 @@ export const parseConfig = (
       );
     }
 
+    return keeps === undefined ? {} : { keepHttpOptions: keeps };
+  };
+  // a mapping of `keys` alone, at `key`
+  const mappingOf = (
+    given: unknown,
+    details: { readonly key: string; readonly keys: ReadonlySet<string>; readonly holds: string }
+  ): Record<string, unknown> => {
+    if (!isRecord(given)) {
+      return refuse(`${details.key} is a mapping of ${details.holds}`);
+    }
+
+    for (const name of Object.keys(given)) {
+      if (!details.keys.has(name)) {
+        refuse(`${details.key}.${name}, a key beadc does not read`);
+      }
+    }
+
+    return given;
+  };
+  // a list of texts at `key`, each held to `isOf`, `what` saying what one is
+  const listOf = (
+    given: unknown,
+    details: {
+      readonly key: string;
+      readonly isOf: (text: string) => boolean;
+      readonly what: string;
+    }
+  ): string[] => {
+    if (!Array.isArray(given)) {
+      return refuse(`${details.key} is a list of ${details.what}`);
+    }
+
+    return given.map((each: unknown, at) => {
+      if (typeof each !== 'string' || !details.isOf(each)) {
+        return refuse(`${details.key}[${String(at)}] is ${details.what}`);
+      }
+
+      return each;
+    });
+  };
+  // one selection: include and exclude, Service/procedure or Service/*; kind; idempotencyLevel
+  const selectionOf = (given: unknown, key: string): ISelection => {
+    const selection = mappingOf(given, {
+      key,
+      keys: SELECTION_KEYS,
+      holds: 'include, exclude, kind and idempotencyLevel',
+    });
+    const selectorsOf = (list: 'include' | 'exclude'): Partial<Record<typeof list, string[]>> => {
+      return list in selection
+        ? {
+            [list]: listOf(selection[list], {
+              key: `${key}.${list}`,
+              isOf: (text) => {
+                return SELECTOR.test(text);
+              },
+              what: 'Service/procedure or Service/*, by their Bead names',
+            }),
+          }
+        : {};
+    };
+
     return {
-      ...(http === true ? { http } : {}),
-      ...(keeps === undefined ? {} : { keepHttpOptions: keeps }),
+      ...selectorsOf('include'),
+      ...selectorsOf('exclude'),
+      ...('kind' in selection
+        ? {
+            kind: listOf(selection['kind'], {
+              key: `${key}.kind`,
+              isOf: (text) => {
+                return KINDS.includes(text);
+              },
+              what: 'request, notifies or command',
+            }) as ProcedureKind[],
+          }
+        : {}),
+      ...('idempotencyLevel' in selection
+        ? {
+            idempotencyLevel: listOf(selection['idempotencyLevel'], {
+              key: `${key}.idempotencyLevel`,
+              isOf: (text) => {
+                return LEVELS.includes(text);
+              },
+              what: 'NO_SIDE_EFFECTS, IDEMPOTENT or IDEMPOTENCY_UNKNOWN',
+            }) as IdempotencyLevelName[],
+          }
+        : {}),
+    };
+  };
+  // `procedures`: one selection, or a list of them; `[]` none
+  const proceduresOf = (
+    given: Record<string, unknown>,
+    key: string
+  ): { procedures?: Selections } => {
+    if (!('procedures' in given)) {
+      return {};
+    }
+
+    const procedures = given['procedures'];
+
+    return {
+      procedures: Array.isArray(procedures)
+        ? procedures.map((each: unknown, at) => {
+            return selectionOf(each, `${key}.procedures[${String(at)}]`);
+          })
+        : [selectionOf(procedures, `${key}.procedures`)],
+    };
+  };
+  // a server's transports, each under the key the application hands it its procedures by
+  const transportsOf = (
+    server: Record<string, unknown>,
+    key: string
+  ): { transports?: readonly ITransportSide[] } => {
+    if (!('transports' in server)) {
+      return {};
+    }
+
+    const transports = server['transports'];
+
+    if (!isRecord(transports)) {
+      return refuse(
+        `${key}.transports is a mapping: each key the one the application hands a transport its procedures under, each value a mapping of procedures`
+      );
+    }
+
+    return {
+      transports: Object.entries(transports).map(([name, value]) => {
+        const at = `${key}.transports.${name}`;
+
+        if (!TRANSPORT_KEY.test(name)) {
+          refuse(
+            `${at}: a key is an ASCII lower-case letter, then ASCII letters and digits, the member of SERVED_PROCEDURES and ServedProcedures the application hands a transport`
+          );
+        }
+
+        return {
+          key: name,
+          ...proceduresOf(
+            mappingOf(value ?? {}, { key: at, keys: SIDE_KEYS, holds: 'procedures' }),
+            at
+          ),
+        };
+      }),
+    };
+  };
+  // an output's server, client and gateway, each its own selection, its server's transports, and a
+  // TypeScript gateway's runtime as given; `http` and `httpRuntime` refused, naming their successor
+  const sidesOf = (
+    given: Record<string, unknown>,
+    key: string
+  ): { server?: IServerSide; client?: ISide; gateway?: ISide; runtime?: unknown } => {
+    for (const [name, successor] of Object.entries(SUCCEEDED)) {
+      if (name in given) {
+        refuse(`${key}.${name} is no key beadc reads: ${successor}`);
+      }
+    }
+
+    const typescript = given['language'] === 'typescript';
+    const server =
+      'server' in given
+        ? mappingOf(given['server'], {
+            key: `${key}.server`,
+            keys: SERVER_KEYS,
+            holds: 'procedures and transports',
+          })
+        : undefined;
+    const client =
+      'client' in given
+        ? mappingOf(given['client'], { key: `${key}.client`, keys: SIDE_KEYS, holds: 'procedures' })
+        : undefined;
+    const gateway =
+      'gateway' in given
+        ? mappingOf(given['gateway'], {
+            key: `${key}.gateway`,
+            keys: typescript ? TYPESCRIPT_GATEWAY_KEYS : SIDE_KEYS,
+            holds: typescript ? 'procedures and runtime' : 'procedures',
+          })
+        : undefined;
+
+    return {
+      ...(server === undefined
+        ? {}
+        : {
+            server: {
+              ...proceduresOf(server, `${key}.server`),
+              ...transportsOf(server, `${key}.server`),
+            },
+          }),
+      ...(client === undefined ? {} : { client: proceduresOf(client, `${key}.client`) }),
+      ...(gateway === undefined ? {} : { gateway: proceduresOf(gateway, `${key}.gateway`) }),
+      ...(gateway !== undefined && 'runtime' in gateway ? { runtime: gateway['runtime'] } : {}),
     };
   };
   // a C# output, its keys read or refused: a namespace for a blueprint's services, and only then
@@ -367,6 +584,8 @@ export const parseConfig = (
     const fromBlueprint = isRecord(source) && 'blueprint' in source;
     const namespace = given['namespace'];
     const messages = given['messages'] ?? Messages.GENERATE;
+
+    const sides = sidesOf(given, key);
 
     for (const name of Object.keys(given)) {
       if (!CSHARP_KEYS.has(name)) {
@@ -400,7 +619,10 @@ export const parseConfig = (
       ...(typeof namespace === 'string' ? { namespace } : {}),
       messages: messages as Messages,
       ...keepsOf(given, { key, messages }),
-      ...httpOf(given, { key, messages }),
+      ...keepHttpOf(given, { key, messages }),
+      ...(sides.server === undefined ? {} : { server: sides.server }),
+      ...(sides.client === undefined ? {} : { client: sides.client }),
+      ...(sides.gateway === undefined ? {} : { gateway: sides.gateway }),
     };
   };
   // each output, its keys read or refused, its folders under this one
@@ -419,6 +641,8 @@ export const parseConfig = (
       return refuse(`${key}.language: typescript or csharp, the targets of this beadc`);
     }
 
+    const sides = sidesOf(given, key);
+
     for (const name of Object.keys(given)) {
       if (!TYPESCRIPT_KEYS.has(name)) {
         refuse(`${key}.${name}, a key beadc does not read`);
@@ -428,7 +652,7 @@ export const parseConfig = (
     const importExtension = given['importExtension'] ?? 'ts';
     const runtime = given['runtime'] ?? DEFAULT_RUNTIME;
     const protoRuntime = given['protoRuntime'] ?? DEFAULT_PROTO_RUNTIME;
-    const httpRuntime = given['httpRuntime'] ?? DEFAULT_HTTP_RUNTIME;
+    const httpRuntime = sides.runtime ?? DEFAULT_HTTP_RUNTIME;
     const messages = given['messages'] ?? Messages.GENERATE;
 
     if (!(IMPORT_EXTENSIONS as readonly unknown[]).includes(importExtension)) {
@@ -452,15 +676,11 @@ export const parseConfig = (
     }
 
     if (!isText(httpRuntime) || path.isAbsolute(httpRuntime)) {
-      return refuse(`${key}.httpRuntime is a package's name, or a path relative to out`);
+      return refuse(`${key}.gateway.runtime is a package's name, or a path relative to out`);
     }
 
     if (RELATIVE.test(httpRuntime) && EXTENSION.test(httpRuntime)) {
-      refuse(`${key}.httpRuntime: ${httpRuntime} names no extension; importExtension gives it`);
-    }
-
-    if ('httpRuntime' in given && given['http'] !== true) {
-      refuse(`${key}.httpRuntime names the route table's runtime, which only http: true writes`);
+      refuse(`${key}.gateway.runtime: ${httpRuntime} names no extension; importExtension gives it`);
     }
 
     if (!messagesOf().includes(messages)) {
@@ -477,13 +697,17 @@ export const parseConfig = (
       importExtension: importExtension as ImportExtension,
       runtime,
       protoRuntime,
-      ...(given['http'] === true ? { httpRuntime } : {}),
       messages: messages as Messages,
       ...('messagesOut' in given
         ? { messagesOut: resolved(given['messagesOut'], `${key}.messagesOut`) }
         : {}),
       ...keepsOf(given, { key, messages }),
-      ...httpOf(given, { key, messages }),
+      ...keepHttpOf(given, { key, messages }),
+      ...(sides.server === undefined ? {} : { server: sides.server }),
+      ...(sides.client === undefined ? {} : { client: sides.client }),
+      ...(sides.gateway === undefined
+        ? {}
+        : { gateway: { ...sides.gateway, runtime: httpRuntime } }),
     };
   };
   const outputsOf = (): { outputs?: readonly Output[] } => {
@@ -646,12 +870,12 @@ export const parseConfig = (
   };
 };
 
-/** Whether `config` asks for HTTP: an output with `http: true`, or the OpenAPI document written. */
+/** Whether `config` asks for HTTP: an output with a `gateway`, or the OpenAPI document written. */
 export const asksHttp = (config: Pick<IConfig, 'openapi' | 'outputs'>): boolean => {
   return (
     config.openapi?.out !== undefined ||
     (config.outputs ?? []).some((output) => {
-      return output.http === true;
+      return output.gateway !== undefined;
     })
   );
 };

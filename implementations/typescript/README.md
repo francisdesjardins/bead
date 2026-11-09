@@ -1474,7 +1474,7 @@ over rhea's `container.listen`, and need none.
 place: each call goes through one more Bead client of the application's own server, across an
 in-memory transport that server joined beside its WebSocket or HTTP one, so it meets the same
 router, admission, sessions and services, each offered once. It reads everything from the route
-table beadc writes in an output with `http: true`, `bead_http.ts`, whose `HTTP_ROUTES`,
+table beadc writes in an output with a `gateway`, `bead_http.ts`, whose `HTTP_ROUTES`,
 `OPENAPI_DOCUMENT` and `HTTP_PROBLEM_TYPES` it is given; `transcoding` is the layer it reads them
 with, together with the generated HTTP client's caller.
 

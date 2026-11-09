@@ -284,7 +284,7 @@ what only it shows; `AmqpTransportsTests` the cases over AMQP 1.0.
 place: each call goes through one more Bead client of the application's own server, across a
 `MemoryTransportServer` that server joined beside its WebSocket or HTTP one, so it meets the same
 router, admission, sessions and services, each offered once. It reads everything from the route
-table beadc writes in an output with `http: true`, `BeadHttp.cs`, whose `HttpRoutes.All`,
+table beadc writes in an output with a `gateway`, `BeadHttp.cs`, whose `HttpRoutes.All`,
 `OpenApiDocument` and `ProblemTypes` it is given; `Bead.Transcoding` is the layer it reads them
 with.
 

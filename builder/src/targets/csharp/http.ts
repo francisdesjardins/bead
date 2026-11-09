@@ -1,6 +1,6 @@
 // ── HTTP ──────────────────────────────────────────────────────────────────────
 
-// What the C# target prints for an output with `http: true` (decision 0037): one `BeadHttp.cs`,
+// What the C# target prints for an output with a `gateway` (decision 0037): one `BeadHttp.cs`,
 // beside the first service's `*Bead.cs`, in its namespace, a static class `HttpRoutes`: `All`, the
 // route table as data, each procedure a client calls by its descriptor's `Procedure`, its messages'
 // `Descriptor`s, which the transcoding layer reads their JSON by, whether it is marked
@@ -33,7 +33,7 @@ export interface ICSharpHttpOptions {
 
 // constants
 
-/** The file an output with `http: true` writes its route table in. */
+/** The file an output with a `gateway` writes its route table in. */
 export const HTTP_FILE = 'BeadHttp.cs';
 
 const INDENT = '    ';

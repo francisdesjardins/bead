@@ -2,8 +2,11 @@
 
 // `beadc generate`, once `check` passed over `beadc.yaml`'s source (decision 0022): for a `.proto`
 // source, the blueprint `beadc.yaml` names and the editor's copy of Bead's options; the OpenAPI
-// document `beadc.yaml`'s `openapi.out` names (decision 0037); then each output, its messages first,
-// then its target's files, its route table and the document embedded where it says `http: true`. Every file is encoded whole and moved over
+// document `beadc.yaml`'s `openapi.out` names, the whole blueprint's (decision 0037); then each
+// output, its messages first, then its target's files over what its `server`, `client` and
+// `gateway` select (decision 0048), its route table and the document of what its gateway selects
+// embedded where it names one, and the procedures each transport of its server takes where it
+// names them. Every file is encoded whole and moved over
 // the one it replaces, as `beadc blueprint` writes; a file outside its output's folder, and two
 // files at one path, compared as a system that folds case compares them, are refused before
 // anything is written. Under `clean`, buf's opt-in, protoc never removing a file, a file of an
@@ -36,11 +39,12 @@ import { dirname, join, relative, sep } from 'node:path';
 
 import type { IChecked } from './check.ts';
 import { OPTIONS_ROOT } from './compile.ts';
-import { asksHttp, CONFIG_FILE, type IConfig, isInside, type Output } from './config.ts';
+import { CONFIG_FILE, type IConfig, isInside, type Output } from './config.ts';
 import { diagnosticOf, type IDiagnostic, InputError, type IPlace } from './diagnostics.ts';
 import { generateMessages } from './messages.ts';
 import type { IBlueprint } from './model/blueprint.ts';
 import { formOf } from './model/form.ts';
+import { cutOf, type ICut, selectionFindingsOf } from './model/selection.ts';
 import {
   DEFAULT_PREFIX,
   DOCUMENT_PATH,
@@ -120,9 +124,9 @@ export const EDITOR_COPY = '.beadc/include';
 /** The folders the walk of an output's folder never enters: a build's, and a package manager's. */
 export const UNWALKED: ReadonlySet<string> = new Set(['bin', 'obj', 'node_modules']);
 
-// what a TypeScript output's folder holds of beadc's: its services, its route table, and its messages
-// when it writes them
-const SERVICES = /(?:_bead\.ts|(?:^|[\\/])bead_http\.ts)$/u;
+// what a TypeScript output's folder holds of beadc's: its services, its route table, the procedures
+// its transports take, and its messages when it writes them
+const SERVICES = /(?:_bead\.ts|(?:^|[\\/])bead_(?:http|served)\.ts)$/u;
 const MESSAGES = /_pb\.ts$/u;
 
 // a C# file, and the first line of a file beadc's targets write
@@ -197,7 +201,10 @@ const sourceOf = (content: string): string | undefined => {
     });
 };
 
-/** The document `config` asks of `blueprint`: its routes' prefix, its title and its security scheme. */
+/**
+ * The document `config` asks of `blueprint`, the whole one's for `openapi.out`, a gateway's view of
+ * it for an output: its routes' prefix, its title and its security scheme.
+ */
 export const documentTextOf = (blueprint: IBlueprint, config: IConfig): string => {
   const { openapi } = config;
 
@@ -208,23 +215,23 @@ export const documentTextOf = (blueprint: IBlueprint, config: IConfig): string =
   });
 };
 
-// one output's files, under its folder, a temporary folder made under the project's `folder`
+// one output's files, under its folder, a temporary folder made under the project's `folder`: its
+// messages of the whole blueprint, its target's files of what its sides select
 const outputFilesOf = (
   output: Output,
   details: {
     readonly input: ITargetInput;
     readonly folder: string;
-    readonly http: IHttpInput;
+    readonly http: IHttpInput | undefined;
   }
 ): readonly IGeneratedFile[] => {
-  const { input, folder } = details;
+  const { input, folder, http } = details;
   const messages = input.set !== undefined && output.messages === Messages.GENERATE;
   const set = input.set;
   const keeps = {
     ...(output.keepValidateOptions === true ? { keepValidateOptions: true } : {}),
     ...(output.keepHttpOptions === true ? { keepHttpOptions: true } : {}),
   };
-  const http = output.http === true ? details.http : undefined;
 
   if (output.language === 'csharp') {
     return [
@@ -258,7 +265,7 @@ const outputFilesOf = (
       ...(messagesOut === '' ? {} : { messagesOut }),
       ...(http === undefined
         ? {}
-        : { http: { ...http, runtime: output.httpRuntime ?? DEFAULT_HTTP_RUNTIME } }),
+        : { http: { ...http, runtime: output.gateway?.runtime ?? DEFAULT_HTTP_RUNTIME } }),
     }),
   ];
 };
@@ -394,24 +401,38 @@ export const planOf = (config: IConfig, checked: IChecked): IPlan => {
     config.blueprint === undefined
       ? []
       : [{ path: config.blueprint, content: formOf(blueprint), source: configSource }];
-  // * one document a blueprint: the file `openapi.out` names and every output's embedding, one text
-  const http: IHttpInput = {
-    prefix: config.http?.prefix ?? DEFAULT_PREFIX,
-    document: asksHttp(config) ? documentTextOf(blueprint, config) : '',
-    ...(config.openapi?.problemTypes === undefined
-      ? {}
-      : { problemTypes: config.openapi.problemTypes }),
+  // * the whole blueprint's document at `openapi.out`; each gateway embeds the document of what it
+  // selects
+  const httpOf = (cut: ICut): IHttpInput | undefined => {
+    return cut.gateway === undefined
+      ? undefined
+      : {
+          prefix: config.http?.prefix ?? DEFAULT_PREFIX,
+          document: documentTextOf(cut.gateway, config),
+          ...(config.openapi?.problemTypes === undefined
+            ? {}
+            : { problemTypes: config.openapi.problemTypes }),
+        };
   };
 
   if (config.openapi?.out !== undefined) {
-    files.push({ path: config.openapi.out, content: http.document, source: configSource });
+    files.push({
+      path: config.openapi.out,
+      content: documentTextOf(blueprint, config),
+      source: configSource,
+    });
   }
   const stale: IStaleFile[] = [];
   const left: IStaleFile[] = [];
 
   for (const output of config.outputs ?? []) {
     const messages = input.set !== undefined && output.messages === Messages.GENERATE;
-    const written = outputFilesOf(output, { input, folder: config.folder, http }).map((file) => {
+    const cut = cutOf(blueprint, output);
+    const written = outputFilesOf(output, {
+      input: { ...input, cut },
+      folder: config.folder,
+      http: httpOf(cut),
+    }).map((file) => {
       const path = join(output.out, ...file.name.split('/'));
       const source = sourceOf(file.content);
 
@@ -614,9 +635,11 @@ const routeFindingsOf = (
 /**
  * What `generate` holds `checked`'s blueprint to before a file is written: each feature it requires
  * that an output's target does not generate, a FEATURE_UNGENERATED, since a rule declared and played
- * by one side alone is never written (decision 0035); each output with `http: true` whose target
- * writes no route table, an HTTP_UNGENERATED; and the routes one gateway serves, HTTP_ROUTE_OVERLAP's
- * and HTTP_ROUTE_RESERVED's (decision 0037).
+ * by one side alone is never written (decision 0035); each output with a `gateway` whose target
+ * writes no route table, an HTTP_UNGENERATED; the routes one gateway serves, HTTP_ROUTE_OVERLAP's
+ * and HTTP_ROUTE_RESERVED's, held over the whole blueprint, as `openapi.out`'s document serves
+ * every route (decision 0037); and what each output's sides select, SELECTOR_UNMATCHED,
+ * SELECTION_EMPTY and GATEWAY_EMPTY (decision 0048).
  */
 export const ungeneratedOf = (
   config: IConfig,
@@ -651,11 +674,11 @@ export const ungeneratedOf = (
   const http = (config.outputs ?? []).flatMap((output, at) => {
     const target = targets[output.language];
 
-    return output.http !== true || target === undefined || target.http
+    return output.gateway === undefined || target === undefined || target.http
       ? []
       : [
           diagnosticOf('HTTP_UNGENERATED', {
-            message: `outputs[${String(at)}] asks http: true of the ${target.name} target, which writes no route table: take http out of it, or give HTTP to an output whose target writes one`,
+            message: `outputs[${String(at)}] asks a gateway of the ${target.name} target, which writes no route table: take gateway out of it, or give it to an output whose target writes one`,
             place: { file: CONFIG_FILE },
           }),
         ];
@@ -667,7 +690,18 @@ export const ungeneratedOf = (
     },
   });
 
-  return [...features, ...http, ...routes];
+  const selections = (config.outputs ?? []).flatMap((output, at) => {
+    return selectionFindingsOf(blueprint, { sides: output, key: `outputs[${String(at)}]` }).map(
+      (finding) => {
+        return diagnosticOf(finding.rule, {
+          message: finding.message,
+          place: { file: CONFIG_FILE },
+        });
+      }
+    );
+  });
+
+  return [...features, ...http, ...routes, ...selections];
 };
 
 /**

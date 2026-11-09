@@ -194,6 +194,15 @@
       "bead.core": {
         "type": "Project"
       },
+      "bead.goldens": {
+        "type": "Project",
+        "dependencies": {
+          "Bead.Core": "[0.10.0, )",
+          "Bead.Protobuf": "[0.10.0, )",
+          "Bead.Transcoding": "[0.10.0, )",
+          "Google.Protobuf": "[3.36.2, )"
+        }
+      },
       "bead.protobuf": {
         "type": "Project",
         "dependencies": {

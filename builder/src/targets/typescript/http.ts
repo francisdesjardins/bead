@@ -1,6 +1,6 @@
 // ── HTTP ──────────────────────────────────────────────────────────────────────
 
-// What the TypeScript target prints for an output with `http: true` (decision 0037): one
+// What the TypeScript target prints for an output with a `gateway` (decision 0037): one
 // `bead_http.ts` at the output's root, its route table as data, each procedure a client calls by
 // its descriptor, its messages' schemas, which the transcoding layer reads their JSON by over
 // protobuf-es's reflection, whether it is marked `NO_SIDE_EFFECTS`, its service's catalogue, and its
@@ -34,7 +34,7 @@ export interface IHttpTemplateOptions {
 
 // constants
 
-/** The file an output with `http: true` writes its route table in, at its root. */
+/** The file an output with a `gateway` writes its route table in, at its root. */
 export const HTTP_FILE = 'bead_http.ts';
 
 // a text as a single-quoted literal, the TypeScript side's own quotes
