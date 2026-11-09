@@ -13,6 +13,9 @@ public sealed class MemoryTransportServerTests
 {
     // constants
 
+    // a connection's handle, which a server given a list answers of alike
+    private const string First = "type=MEMORY;ip=local;ordinal=1";
+
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
 
     // helpers
@@ -583,5 +586,81 @@ public sealed class MemoryTransportServerTests
         })).Message);
         Assert.Equal(ReadyState.Closed, server.ReadyState);
         Assert.Equal(1, Volatile.Read(ref closed));
+    }
+
+    // the procedures its connections take (spec 9.11, 9.12)
+
+    // spec 9.12: the twin of "refuses procedures that name an id out of its range or service 0, as
+    // the transport is built (spec 9.12)"
+    [Fact]
+    public void Refuses_procedures_that_name_an_id_out_of_its_range_or_service_0_as_the_transport_is_built()
+    {
+        foreach (var (address, said) in new[] { (new ProcedureAddress(0, 1), "0/1"), (new ProcedureAddress(1, 0), "1/0"), (new ProcedureAddress(0, 0), "0/0") })
+        {
+            var refused = Assert.Throws<ArgumentException>(() =>
+            {
+                return new MemoryTransportServer(new MemoryTransportServerOptions { Procedures = [new ProcedureAddress(1, 1), address] });
+            });
+
+            Assert.Equal(
+                $"an in-memory transport server takes {said}, out of its range: a service and a procedure are from 1 to 65535, service 0 the protocol's (spec 9.12, 16.2, 16.3) (Parameter 'options')",
+                refused.Message);
+        }
+
+        var bounds = new MemoryTransportServer(new MemoryTransportServerOptions { Procedures = [new ProcedureAddress(1, 1), new ProcedureAddress(65_535, 65_535)] });
+
+        Assert.True(bounds.TakesProcedure(First, new ProcedureAddress(65_535, 65_535)));
+    }
+
+    // spec 9.12: the twin of "takes an address named twice as one (spec 9.12)"
+    [Fact]
+    public void Takes_an_address_named_twice_as_one()
+    {
+        var server = new MemoryTransportServer(new MemoryTransportServerOptions { Procedures = [new ProcedureAddress(1, 1), new ProcedureAddress(1, 1)] });
+
+        Assert.True(server.NamesProcedures());
+        Assert.True(server.TakesProcedure(First, new ProcedureAddress(1, 1)));
+        Assert.False(server.TakesProcedure(First, new ProcedureAddress(1, 2)));
+    }
+
+    // spec 9.11: the twin of "a transport given no list takes every procedure, and one given an
+    // empty list takes none (spec 9.11)"
+    [Fact]
+    public async Task A_transport_given_no_list_takes_every_procedure_and_one_given_an_empty_list_takes_none()
+    {
+        var every = new MemoryTransportServer();
+        var none = new MemoryTransportServer(new MemoryTransportServerOptions { Procedures = [] });
+        ProcedureAddress[] asked = [new(1, 1), new(9, 99)];
+
+        // * given no list, it names none, and its router never asks
+        Assert.False(every.NamesProcedures());
+        Assert.All(asked, (address) =>
+        {
+            Assert.True(every.TakesProcedure(First, address));
+        });
+        Assert.True(none.NamesProcedures());
+        Assert.All(asked, (address) =>
+        {
+            Assert.False(none.TakesProcedure(First, address));
+        });
+
+        // through a server of the interop service, each request it takes none of answered as one
+        // to no resolver
+        var transport = new MemoryTransportServer(new MemoryTransportServerOptions { Procedures = [] });
+        await using var server = new Server<string>(transport);
+        await using var caller = new MemoryTransportClient();
+        await using var linked = new ServiceLink.LinkedClient(new RouterClient(caller));
+
+        InteropHandlers.Offer(server);
+        await transport.Start();
+        await caller.Connect(new MemoryTransportClientConnectOptions { Server = transport, CancellationToken = Cancelled });
+
+        var refused = await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return new InteropClient(linked).Echo(JsonOf("x"))().WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.Equal((ushort)ProtocolCode.ServiceUnknown, refused.Code);
+        Assert.Equal("no service 1", refused.Failure.Detail);
     }
 }

@@ -15,7 +15,9 @@ use super::{
 use crate::client::ClientOptions;
 use crate::clock::SharedClock;
 use crate::duration::{DurationRefusal, NEVER};
-use crate::errors::{Refusal, TransportError};
+use crate::errors::{ProgrammerError, Refusal, TransportError};
+use crate::failure::ProcedureAddress;
+use crate::identity::IdentityRefusal;
 use crate::managers::service::{
     RequestDependencies, RequestOptions, RequestResolverDependencies, Response,
 };
@@ -150,6 +152,7 @@ impl Ends {
         let server = MemoryTransportServer::new(&MemoryTransportServerOptions {
             clock: Some(Arc::clone(&shared)),
             runtime: None,
+            procedures: None,
         })
         .expect("a server");
         let at_server: Told = Arc::default();
@@ -657,6 +660,7 @@ async fn closes_each_connection_as_it_stops_and_takes_no_connect_after() {
     let server = MemoryTransportServer::new(&MemoryTransportServerOptions {
         clock: Some(Arc::clone(&shared)),
         runtime: None,
+        procedures: None,
     })
     .expect("a server");
     let client_of = || {
@@ -878,6 +882,7 @@ async fn never_started() -> (Arc<SteppingClock>, MemoryTransportClient) {
     let server = MemoryTransportServer::new(&MemoryTransportServerOptions {
         clock: Some(Arc::clone(&shared)),
         runtime: None,
+        procedures: None,
     })
     .expect("a server");
     let client = MemoryTransportClient::new(&MemoryTransportClientOptions {
@@ -1859,6 +1864,7 @@ async fn calls_each_listener_though_one_throws_reporting_the_throw_with_its_conn
     let server = MemoryTransportServer::new(&MemoryTransportServerOptions {
         clock: Some(Arc::clone(&shared)),
         runtime: None,
+        procedures: None,
     })
     .expect("a server");
     let client = MemoryTransportClient::new(&MemoryTransportClientOptions {
@@ -2059,4 +2065,104 @@ fn message_of_bytes(bytes: &[u8]) -> TransportMessage {
         data: Bytes::copy_from_slice(bytes),
         ..TransportMessage::default()
     }
+}
+
+// ── The procedures its connections take (spec 9.11, 9.12) ────────────────────────────────────
+
+// a procedure's address
+const fn address_of(service_id: u16, procedure_id: u16) -> ProcedureAddress {
+    ProcedureAddress {
+        service_id,
+        procedure_id,
+    }
+}
+
+// a server not started, on a clock of its own, given `procedures`
+fn taking(
+    procedures: Option<Vec<ProcedureAddress>>,
+) -> Result<MemoryTransportServer, ProgrammerError> {
+    let clock: SharedClock = SteppingClock::new(crate::testing::instants::new_year());
+
+    MemoryTransportServer::new(&MemoryTransportServerOptions {
+        clock: Some(clock),
+        runtime: None,
+        procedures,
+    })
+}
+
+// spec 9.12: the twin of "refuses procedures that name an id out of its range or service 0, as the
+// transport is built (spec 9.12)"
+#[tokio::test]
+async fn refuses_procedures_that_name_an_id_out_of_its_range_or_service_0_as_the_transport_is_built()
+ {
+    for (address, said) in [
+        (address_of(0, 1), "0/1"),
+        (address_of(1, 0), "1/0"),
+        (address_of(0, 0), "0/0"),
+    ] {
+        let refused =
+            taking(Some(vec![address_of(1, 1), address])).expect_err("refused as it is built");
+
+        assert_eq!(
+            (refused.reason(), refused.message()),
+            (
+                Some(Refusal::Identity(IdentityRefusal::OutOfItsRange)),
+                format!(
+                    "an in-memory transport server takes {said}, out of its range: a service and a procedure are from 1 to 65535, service 0 the protocol's (spec 9.12, 16.2, 16.3)"
+                )
+                .as_str()
+            ),
+            "{said} refused, as a declaration out of its range is"
+        );
+    }
+
+    let bounds = taking(Some(vec![address_of(1, 1), address_of(65_535, 65_535)]))
+        .expect("each id from 1 to 65535 taken");
+
+    assert!(
+        bounds.takes_procedure(&Arc::from(FIRST), address_of(65_535, 65_535)),
+        "the last address taken"
+    );
+}
+
+// spec 9.12: the twin of "takes an address named twice as one (spec 9.12)"
+#[tokio::test]
+async fn takes_an_address_named_twice_as_one() {
+    let server = taking(Some(vec![address_of(1, 1), address_of(1, 1)])).expect("built");
+    let handle: ConnectionHandle = Arc::from(FIRST);
+
+    assert!(server.names_procedures(), "it names procedures");
+    assert!(
+        server.takes_procedure(&handle, address_of(1, 1)),
+        "the address named twice taken"
+    );
+    assert!(
+        !server.takes_procedure(&handle, address_of(1, 2)),
+        "no other taken"
+    );
+}
+
+// spec 9.11: the twin of "a transport given no list takes every procedure, and one given an empty
+// list takes none (spec 9.11)"
+#[tokio::test]
+async fn a_transport_given_no_list_takes_every_procedure_and_one_given_an_empty_list_takes_none() {
+    let handle: ConnectionHandle = Arc::from(FIRST);
+    let every = taking(None).expect("built");
+    let none = taking(Some(Vec::new())).expect("built");
+
+    // * given no list, it names none, and its router never asks
+    assert!(!every.names_procedures(), "given no list, it names none");
+    assert!(
+        [address_of(1, 1), address_of(9, 99)]
+            .into_iter()
+            .all(|address| every.takes_procedure(&handle, address)),
+        "given no list, every procedure taken"
+    );
+    assert!(none.names_procedures(), "given an empty list, it names it");
+    assert!(
+        [address_of(1, 1), address_of(9, 99)]
+            .into_iter()
+            .all(|address| !none.takes_procedure(&handle, address)),
+        "given an empty list, none taken"
+    );
 }

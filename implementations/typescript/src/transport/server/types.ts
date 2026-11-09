@@ -1,6 +1,7 @@
 // dependencies
 
 import type { Server } from 'node:http';
+import type { IProcedureAddress } from '../../router/shared/types';
 import type { IClock } from '../shared/clock';
 import type {
   CLOSE_EVENT,
@@ -114,6 +115,15 @@ export interface ITransportServerOptions {
    * The clock its timers run on, and the layers built on it with it; the platform's when not given.
    */
   clock?: IClock | undefined;
+  /**
+   * The procedures each of its connections takes (spec 9.11), by their addresses: its router answers
+   * a request that names no destination to any other as one to no resolver, `SERVICE_UNKNOWN` or
+   * `PROCEDURE_UNKNOWN`, before anything else of it is read. Every procedure when not given, none
+   * when empty; an address named twice is one. A service id or a procedure id that is not a whole
+   * number from 1 to 65535, service 0 among them, is a {@link ProgrammerError} as the server is built
+   * (9.12). It grants no access: each procedure it takes keeps its own admission.
+   */
+  procedures?: readonly IProcedureAddress[] | undefined;
 }
 
 export interface ITransportServerStartOptions {
@@ -235,6 +245,15 @@ export interface ITransportServer<
    */
   stop(): Promise<void>;
   /**
+   * Whether a connection takes a procedure (spec 9.11), which its router asks of each request that
+   * names no destination: present only on a server given `procedures`, so a router over one given
+   * none never asks.
+   */
+  takesProcedure?(
+    connectionHandle: TransportServerConnectionHandle,
+    address: IProcedureAddress
+  ): boolean;
+  /**
    * What `await using` calls: {@link ITransportServer.stop}, then final, a start after it a
    * {@link ProgrammerError}, its state kept; a later dispose settles with the first (decision
    * 0003).
@@ -283,6 +302,14 @@ export interface ITransportServerImplementation<Socket = unknown> {
     options: TransportServerResolvedStartOptions & { signal?: AbortSignal | undefined }
   ): Promise<ITransportServerAddress>;
   stop(): Promise<void>;
+  /**
+   * Whether a connection takes a procedure, as {@link ITransportServer.takesProcedure} says: given
+   * only by a transport given procedures, the server then answering by it.
+   */
+  takesProcedure?(
+    connectionHandle: TransportServerConnectionHandle,
+    address: IProcedureAddress
+  ): boolean;
 }
 
 /** What {@link createTransportServer} gives its transport beside the server and its registry. */
@@ -934,6 +961,18 @@ export interface IBrokerTransportServerOptions {
   /** The names it serves, each a token, as a host name stands for the servers behind it. */
   names: readonly string[];
   /**
+   * The procedures each of its connections takes (spec 9.11), as a server transport's `procedures`
+   * says, on every name it serves that {@link IBrokerTransportServerOptions.proceduresByName} gives
+   * none: every procedure when not given, none when empty.
+   */
+  procedures?: readonly IProcedureAddress[] | undefined;
+  /**
+   * The procedures a connection takes by the name its OPEN reached (spec 9.11, 15.18), in place of
+   * `procedures` on that name. A name it does not serve is a {@link ProgrammerError} as the server is
+   * built, as is an address out of 16.2's ranges in any list (9.12).
+   */
+  proceduresByName?: Readonly<Record<string, readonly IProcedureAddress[]>> | undefined;
+  /**
    * What its application says of its own leg (spec 13.4): `false` leaves each connection in the
    * clear; when not given, one is secure while its own leg and its peer's are.
    */
@@ -981,6 +1020,10 @@ export interface IJoinableTransportServer {
     connectionHandle: TransportServerConnectionHandle
   ): Promise<void>;
   stop(): Promise<void>;
+  takesProcedure?(
+    connectionHandle: TransportServerConnectionHandle,
+    address: IProcedureAddress
+  ): boolean;
 }
 
 /**
@@ -1020,6 +1063,15 @@ export interface IJoinedTransportServer<
     connectionHandle: TransportServerConnectionHandle
   ): Promise<void>;
   /**
+   * Whether a connection takes a procedure (spec 9.11), as the transport that drew the handle says,
+   * every procedure without it; `false` for a handle none of them drew. Present only when one of its
+   * transports has it, so a router over a join none of whose transports names procedures never asks.
+   */
+  takesProcedure?(
+    connectionHandle: TransportServerConnectionHandle,
+    address: IProcedureAddress
+  ): boolean;
+  /**
    * Stops every transport it joins, and settles once each has: rejected with the first that
    * rejected, in their order, once the others settled.
    */
@@ -1036,7 +1088,10 @@ export interface IJoinedTransportServer<
 
 // types
 
-/** An in-memory transport server's options: the clock it runs on, and nothing else to bound. */
+/**
+ * An in-memory transport server's options: the clock it runs on, and the procedures it takes;
+ * nothing to bound.
+ */
 export type IMemoryTransportServerOptions = ITransportServerOptions;
 
 /**

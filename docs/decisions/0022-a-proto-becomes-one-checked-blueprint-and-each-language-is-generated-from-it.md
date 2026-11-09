@@ -16,7 +16,10 @@
   [0006](0006-a-rule-has-its-gate.md)'s, its names and its options' number
   [0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)'s; what a gateway answers of
   a blueprint's routes, the rules beadc holds them to and the OpenAPI document it writes of them
-  [0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)'s
+  [0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)'s;
+  an output's `server`, `client` and `gateway`, what each selects, its three rules and the
+  procedures each transport of its server takes
+  [0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md)'s
 
 ## Context
 
@@ -245,9 +248,12 @@ hook, and when none does, optional in TypeScript and in C# a constructor of thei
 that takes none. A client class takes its Bead client, then the layer's options, optional; it holds
 a requester of each procedure its server answers, under the procedure's name, its notifications
 under `notifications`, at the windows its caller gives, unpaced by default
-([0002](0002-a-subscription-goes-at-its-clients-pace.md)), and `on` for the commands it answers. A
+([0002](0002-a-subscription-goes-at-its-clients-pace.md)), and `on` for the commands it answers.
+Each class holds what its output's `server` or `client` selects, and an output that names neither
+writes both whole ([0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md)). A
 file names its runtime's contract, `GENERATED_CODE_SUPPORTS_VERSION_7` or
-`GeneratedCode.SupportsVersion7`, each runtime's counter its own, and a route table 5,
+`GeneratedCode.SupportsVersion7`, each runtime's counter its own, the file of the procedures a
+server's transports take 8, and a route table 5,
 `./transcoding`'s `GENERATED_CODE_SUPPORTS_VERSION_5` or `GeneratedCode.SupportsVersion5`, each
 runtime carrying its own and 5
 ([0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)); a
@@ -284,11 +290,15 @@ with protoc-gen-es's, a `.cs` with protoc's at the path protoc gives its source,
 under `clean` the generated files' kinds in an output's folder are beadc's alone, and a project's
 own files stay, where buf's `clean` empties the folder. Messages are the stock generators' —
 protoc-gen-es with `erasable_syntax=true`, run in beadc's process, and protoc's C# generator over
-buf's set — or `external`, a project's own generator writing them. An output with `http: true`, as
-`keepValidateOptions` is an output's, writes its route table and its HTTP client
-([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)),
-and embeds the OpenAPI document byte for byte, the one `beadc.yaml`'s `openapi:` writes of the
-blueprint, in the blueprint's own form; any other writes neither and embeds nothing, so no assembly
+buf's set — or `external`, a project's own generator writing them. An output with `gateway`, as
+`keepValidateOptions` is an output's, writes its route table and its HTTP client of the procedures
+it selects
+([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md),
+[0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md)),
+and embeds the OpenAPI document of them byte for byte, in the blueprint's own form, the one
+`beadc.yaml`'s `openapi:` writes of the blueprint where it selects every procedure; `http: true` and
+`httpRuntime` are said by `gateway: {}` and `gateway.runtime`, and refused naming them; any other
+output writes neither and embeds nothing, so no assembly
 carries a document it never serves, and a target that generates no HTTP is refused such an output,
 `HTTP_UNGENERATED`.
 

@@ -13,6 +13,7 @@ import { ProgrammerError } from '../shared/errors';
 import { createHold, type IHold } from '../shared/hold';
 import { transferableOf } from '../shared/transferable';
 import type { ITransportMessage, IWorkerMessageEventLike, IWorkerPortLike } from '../shared/types';
+import { takingOf } from './shared/procedures-taken';
 import { createTransportServer, generateHandle } from './transport-server';
 import type {
   ITransportServerClientAware,
@@ -21,6 +22,7 @@ import type {
   WorkerTransportServer,
 } from './types';
 
+export type { IProcedureAddress } from '../../router/shared/types';
 export { TRANSPORT_WORKER, WORKER_MESSAGES } from '../shared/constants';
 export type { IWorkerMessageEventLike, IWorkerPortLike } from '../shared/types';
 export type {
@@ -63,8 +65,11 @@ export const START_DEFAULTS = Object.freeze({
  */
 export const createWorkerTransportServer = ({
   clock,
+  procedures,
   scope,
 }: IWorkerTransportServerOptions): WorkerTransportServer => {
+  const taking = takingOf(procedures, 'a worker transport server');
+
   return createTransportServer<IWorkerPortLike, undefined>((server, connections, { tell }) => {
     let ordinal = 0;
     // what each connection holds while its router paused it, without bound: its peer is its
@@ -150,6 +155,7 @@ export const createWorkerTransportServer = ({
       defaults: START_DEFAULTS,
       isSecure: true,
       type: TRANSPORT_WORKER,
+      ...taking,
 
       close: (connection) => {
         connection.socket.postMessage(WORKER_MESSAGES.CLOSE);

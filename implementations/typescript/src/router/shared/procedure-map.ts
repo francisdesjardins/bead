@@ -15,6 +15,11 @@ export interface IProcedureMap<Value> {
   has(address: IProcedureAddress): boolean;
   /** Whether anything is kept for a procedure of `serviceId`. */
   hasService(serviceId: ServiceId): boolean;
+  /**
+   * Whether anything is kept for a procedure of `serviceId` whose address `isTaken` takes: its
+   * procedures scanned, until one is.
+   */
+  hasServiceTaken(serviceId: ServiceId, isTaken: (address: IProcedureAddress) => boolean): boolean;
   set(address: IProcedureAddress, value: Value): void;
   /** What is kept, every procedure's, by service. */
   values(): Value[];
@@ -51,6 +56,16 @@ export const createProcedureMap = <Value>(): IProcedureMap<Value> => {
     },
     hasService: (serviceId) => {
       return services.has(serviceId);
+    },
+    hasServiceTaken: (serviceId, isTaken) => {
+      return (
+        services
+          .get(serviceId)
+          ?.keys()
+          .some((procedureId) => {
+            return isTaken({ procedureId, serviceId });
+          }) === true
+      );
     },
     set: ({ procedureId, serviceId }, value) => {
       const procedures = services.get(serviceId) ?? new Map<ProcedureId, Value>();

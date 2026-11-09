@@ -29,6 +29,8 @@ import { gaugesOf } from '../shared/gauges';
 import { transferableOf } from '../shared/transferable';
 import type { IBrokerPeer } from '../shared/types';
 import { assertCount, MAXIMUM_CONNECTIONS, MAXIMUM_CONNECTIONS_PER_ADDRESS } from './server-bounds';
+import type { IProcedureAddress } from '../../router/shared/types';
+import { type IProceduresTaken, proceduresTakenOf } from './shared/procedures-taken';
 import { createTransportServer } from './transport-server';
 import type {
   BrokerTransportServer,
@@ -37,21 +39,27 @@ import type {
   TransportServerConnectionHandle,
 } from './types';
 
+export type { IProcedureAddress } from '../../router/shared/types';
 export { TRANSPORT_BROKER } from '../shared/constants';
 export { MAXIMUM_CONNECTIONS, MAXIMUM_CONNECTIONS_PER_ADDRESS } from './server-bounds';
 export type { BrokerTransportServer, IBrokerTransportServerOptions } from './types';
 
 // interfaces
 
-// a connection this transport holds, half-open until its third leg draws its handle
+// a connection this transport holds, half-open until its third leg draws its handle, and the name
+// its OPEN reached
 interface IHeld {
   connection?: IBrokerConnection | undefined;
   handle?: TransportServerConnectionHandle | undefined;
+  readonly name: string;
   readonly peer: IBrokerPeer;
   timer?: TimeoutId | undefined;
 }
 
 // constants
+
+// how a refusal of what it takes names it
+const TRANSPORT = "a broker's server transport";
 
 /** How long a half-open connection waits for its client's first parcel, by default (spec 15.23). */
 export const ACCEPT_TIMEOUT = 30_000;
@@ -70,6 +78,46 @@ const hexOf = (bytes: Uint8Array): string => {
   }).join('');
 };
 
+/**
+ * What each name served takes (spec 9.11), checked as the transport is built (9.12): a name it does
+ * not serve, or an address out of 16.2's ranges, is a {@link ProgrammerError}.
+ */
+const takenByNameOf = (
+  proceduresByName: IBrokerTransportServerOptions['proceduresByName'],
+  names: readonly string[]
+): ReadonlyMap<string, IProceduresTaken> => {
+  // a caller without types may give anything
+  const given: unknown = proceduresByName;
+
+  if (given === undefined) {
+    return new Map();
+  }
+
+  if (typeof given !== 'object' || given === null || Array.isArray(given)) {
+    throw new ProgrammerError(`${TRANSPORT} takes its procedures by name as a record of lists`);
+  }
+
+  const taken = new Map<string, IProceduresTaken>();
+
+  for (const [name, procedures] of Object.entries(
+    given as Readonly<Record<string, readonly IProcedureAddress[] | undefined>>
+  )) {
+    if (!names.includes(name)) {
+      throw new ProgrammerError(
+        `${TRANSPORT} takes procedures for ${name}, a name it does not serve (spec 9.12)`
+      );
+    }
+
+    const listed = proceduresTakenOf(procedures, TRANSPORT);
+
+    if (listed !== undefined) {
+      taken.set(name, listed);
+    }
+  }
+
+  return taken;
+};
+
 // definition
 
 /**
@@ -79,7 +127,7 @@ const hexOf = (bytes: Uint8Array): string => {
  * or once its stop or its participant's began 503, each told, its address the id the OPEN claims —
  * and any other answered
  * by an ACCEPT, half-open until the opener's first parcel naming both halves, which draws its handle,
- * `type=BROKER;participant=<id>;ordinal=n`, and tells its router; one whose third leg does not come
+ * its adapter's type first, `type=MQTT;participant=<id>;ordinal=n`, and tells its router; one whose third leg does not come
  * within `acceptTimeout` is forgotten, telling nothing. In a group, it lets its names go while it
  * holds `maximumConnections`. It carries no credential toward its client, and a connection is secure
  * while its own leg and its peer's are, its own as `secure` says where given, its ACCEPT marked so.
@@ -90,7 +138,9 @@ const hexOf = (bytes: Uint8Array): string => {
  * once its participant is disposed is a {@link ProgrammerError}, its state kept (spec 15.21). A
  * connection its router paused is held by its participant, in order, its CLOSE behind what it
  * holds, to `maximumHeldEnvelopeBytes`, past which that connection alone is lost: nothing of a pause
- * reaches its peer over a broker, whose link carries other connections (spec 15.12, 15.23).
+ * reaches its peer over a broker, whose link carries other connections (spec 15.12, 15.23). Each
+ * connection takes the procedures `proceduresByName` gives the name its OPEN reached, else
+ * `procedures`, else every one (spec 9.11).
  *
  * @example
  * const transport = createBrokerTransportServer(participant, { names: ['interop'] });
@@ -108,6 +158,8 @@ export const createBrokerTransportServer = (
     maximumConnectionsPerAddress = MAXIMUM_CONNECTIONS_PER_ADDRESS,
     maximumUnsentBytes = MAXIMUM_UNSENT_BYTES,
     names,
+    procedures,
+    proceduresByName,
     secure,
   } = options;
   const acceptTimeout = assertHeldFinite('acceptTimeout', options.acceptTimeout ?? ACCEPT_TIMEOUT);
@@ -133,6 +185,10 @@ export const createBrokerTransportServer = (
       `a name served in a group needs an adapter that offers groups, and the adapter of ${port.id} does not`
     );
   }
+
+  // * what it takes, refused before its names are reserved (spec 9.12)
+  const taken = proceduresTakenOf(procedures, TRANSPORT);
+  const takenByName = takenByNameOf(proceduresByName, names);
 
   port.reserve(names);
 
@@ -209,7 +265,7 @@ export const createBrokerTransportServer = (
         ]);
       };
 
-      const accept = (open: IParcel, key: string): void => {
+      const accept = (open: IParcel, { key, name }: { key: string; name: string }): void => {
         const id = open.id ?? '';
         const peer: IBrokerPeer = Object.freeze({
           bound: open.bound ?? LEAST_RECEIVE_BOUND,
@@ -217,7 +273,7 @@ export const createBrokerTransportServer = (
           incarnation: open.incarnation ?? new Uint8Array(),
           isSecure: ((open.flags ?? 0) & ParcelFlag.SECURE) !== 0,
         });
-        const entry: IHeld = { peer };
+        const entry: IHeld = { name, peer };
 
         held.set(key, entry);
         entry.connection = port.connect(
@@ -295,8 +351,9 @@ export const createBrokerTransportServer = (
         replace();
       };
 
-      // * an OPEN judged in its order (spec 15.18): its layout, its id and bound, then its place
-      const offer = (open: IParcel): void => {
+      // * an OPEN to `name` judged in its order (spec 15.18): its layout, its id and bound, then its
+      // place
+      const offer = (open: IParcel, name: string): void => {
         if (open.layout !== PARCEL_LAYOUT) {
           refuse(open, 426);
 
@@ -330,7 +387,7 @@ export const createBrokerTransportServer = (
           return;
         }
 
-        accept(open, key);
+        accept(open, { key, name });
 
         return;
       };
@@ -347,6 +404,23 @@ export const createBrokerTransportServer = (
         isSecure: port.isSecure,
         secure,
         type: port.adapter.type,
+        // * by the name its OPEN reached, else every name's; present only when it was given any
+        // (spec 9.11)
+        ...(taken === undefined && takenByName.size === 0
+          ? {}
+          : {
+              takesProcedure: (connectionHandle, address) => {
+                const entry = entryOf(connectionHandle);
+
+                if (entry === undefined) {
+                  return false;
+                }
+
+                const listed = takenByName.get(entry.name) ?? taken;
+
+                return listed === undefined || listed.has(address);
+              },
+            }),
 
         // ! its participant outranks it: once disposed, a start over it is a misuse, its state kept
         // (spec 15.21)
@@ -422,7 +496,11 @@ export const createBrokerTransportServer = (
           await port.linked({ isStart: true, signal });
 
           for (const name of served) {
-            port.serve(name, { offer });
+            port.serve(name, {
+              offer: (open) => {
+                offer(open, name);
+              },
+            });
           }
 
           isServing = true;

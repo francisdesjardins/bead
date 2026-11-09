@@ -6,8 +6,11 @@
 // member names, at its path under the output whichever the source, as protoc and buf write a file
 // at the path its descriptor names, or `<name>_bead.ts` at the output's root for a service with no
 // `proto` member; each under beadc's header, and `/* eslint-disable */` where it marks a deprecation
-// or names a message protobuf deprecates. An output with `http: true` writes `bead_http.ts` besides,
-// at its root, its route table and the document (`http.ts`, decision 0037).
+// or names a message protobuf deprecates. An output holds the procedures its sides select, each
+// class printed over its own (decision 0048), and a service none selects is not written. An output
+// with a `gateway` writes `bead_http.ts` besides, at its root, its route table and the document of
+// what the gateway selects (`http.ts`, decision 0037); one whose server names its transports,
+// `bead_served.ts`, the procedures each takes (`served.ts`).
 
 // dependencies
 
@@ -21,6 +24,7 @@ import {
   VALIDATE_FEATURE,
 } from '../../model/blueprint.ts';
 import { judgedMessagesOf, plansOf } from '../../model/rules.ts';
+import { cutOf } from '../../model/selection.ts';
 import { beadcVersion, PROTOBUF_FLOOR, protocGenEsVersion } from '../../version.ts';
 import {
   bindsMessages,
@@ -34,6 +38,7 @@ import {
 } from '../target.ts';
 import { HTTP_FILE, printHttp } from './http.ts';
 import type { ITypeScriptOptions } from './options.ts';
+import { printServed, SERVED_FILE } from './served.ts';
 import { printService } from './templates.ts';
 import { printValidators } from './validators.ts';
 
@@ -106,7 +111,10 @@ export const typescriptTarget: ITarget<ITypeScriptOptions> = Object.freeze({
   features: new Set([LEGACY_REQUIRED_FEATURE, VALIDATE_FEATURE]),
   http: true,
   generate: (input: ITargetInput, options: ITypeScriptOptions): readonly IGeneratedFile[] => {
-    const { blueprint } = input;
+    // * what the output holds: every procedure, both classes whole, where no cut is given
+    const cut = input.cut ?? cutOf(input.blueprint, {});
+    const { blueprint } = cut;
+    const gateway = cut.gateway ?? blueprint;
     const set =
       input.set === undefined ? undefined : fromBinary(FileDescriptorSetSchema, input.set);
     // ! protoplugin changes the extension of a relative import that ends in `.js` alone
@@ -165,7 +173,15 @@ export const typescriptTarget: ITarget<ITypeScriptOptions> = Object.freeze({
           });
 
           for (const service of services) {
-            printService(f, { service, runtime, protoRuntime, messageOf, validators });
+            printService(f, {
+              service,
+              runtime,
+              protoRuntime,
+              messageOf,
+              validators,
+              served: cut.served?.get(service.serviceName),
+              called: cut.called?.get(service.serviceName),
+            });
           }
 
           f.print();
@@ -175,7 +191,16 @@ export const typescriptTarget: ITarget<ITypeScriptOptions> = Object.freeze({
           f.print('void ', f.import('GENERATED_CODE_SUPPORTS_VERSION_7', runtime), ';');
         }
 
-        // * an output with http: true: its route table and the document, over every service
+        // * an output whose server names its transports: the procedures each takes, beside the
+        // services it writes, as the C# target writes them beside its first service's file
+        if (cut.transports !== undefined && blueprint.services.length > 0) {
+          printServed(schema.generateFile(SERVED_FILE), {
+            transports: cut.transports,
+            runtime,
+          });
+        }
+
+        // * an output with a gateway: its route table and the document, of what it selects
         if (options.http !== undefined) {
           const f = schema.generateFile(HTTP_FILE);
           const httpRuntime = RELATIVE.test(options.http.runtime)
@@ -183,7 +208,7 @@ export const typescriptTarget: ITarget<ITypeScriptOptions> = Object.freeze({
             : options.http.runtime;
 
           if (
-            blueprint.services.some((service) => {
+            gateway.services.some((service) => {
               return (
                 marksDeprecation(service) ||
                 boundOf(service).some((fullName) => {
@@ -196,7 +221,7 @@ export const typescriptTarget: ITarget<ITypeScriptOptions> = Object.freeze({
           }
 
           printHttp(f, {
-            blueprint,
+            blueprint: gateway,
             http: options.http,
             runtime: httpRuntime,
             messageOf,
@@ -229,9 +254,15 @@ export const typescriptTarget: ITarget<ITypeScriptOptions> = Object.freeze({
     }
 
     return response.file.map((file) => {
-      // * the route table is every service's, its header the first's
-      const held = file.name === HTTP_FILE ? blueprint.services : (files.get(file.name) ?? []);
-      const [service] = held;
+      // * the route table is its gateway's services', its header the first's; the procedures
+      // served are the first service's, and bind no message
+      const held =
+        file.name === HTTP_FILE
+          ? gateway.services
+          : file.name === SERVED_FILE
+            ? []
+            : (files.get(file.name) ?? []);
+      const [service] = file.name === SERVED_FILE ? blueprint.services : held;
       const header = headerOf(blueprint, {
         source: sourceNameOf(input.sources, service?.proto?.file),
         ...(options.messages === Messages.GENERATE && held.some(bindsMessages)

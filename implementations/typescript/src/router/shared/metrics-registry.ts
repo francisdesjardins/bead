@@ -265,8 +265,10 @@ const CODE_NAMES: ReadonlyMap<number, string> = new Map(CODES);
 
 // the codes a procedure's series in the server families can end with (7.6), in the order of their
 // numbers, application last: a route refused, a header that does not read and a relayed call are
-// _OTHER's
+// _OTHER's, but a request its connection's transport does not take, which is its procedure's (8.3)
 const ANSWERED_CODES: ReadonlySet<number> = new Set([
+  ProtocolCode.SERVICE_UNKNOWN,
+  ProtocolCode.PROCEDURE_UNKNOWN,
   ProtocolCode.SUBSCRIPTION_UNSUPPORTED,
   ProtocolCode.SESSION_REQUIRED,
   ProtocolCode.ACCESS_DENIED,
@@ -408,7 +410,7 @@ const EVERY_CODE: readonly [number, string][] = Object.freeze([
 
 // the layouts of the call families' series (7.6)
 const LAYOUTS = Object.freeze({
-  // a procedure's in the server families: its 13 codes
+  // a procedure's in the server families: its 15 codes
   answered: layoutOf({
     codes: [
       ...CODES.filter(([code]) => {

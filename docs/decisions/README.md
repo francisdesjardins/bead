@@ -187,12 +187,13 @@ table.
 
 ### Services and their names
 
-| #                                                                                                          | Decision                                                                                                                | Status   |
-| ---------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | -------- |
-| [0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md)                                | Ids are for life, a procedure's name takes one ASCII form, and every side refuses a declaration off them as it is made  | accepted |
-| [0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)            | A service's procedures are typed descriptors, served and called through one layer in each runtime                       | accepted |
-| [0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)               | A `.proto` becomes one checked blueprint, and each language's server and client are generated from it alone             | accepted |
-| [0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md) | A procedure is also an HTTP route, which a gateway answers as one more client of its server, one connection an exchange | accepted |
+| #                                                                                                            | Decision                                                                                                                | Status   |
+| ------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- | -------- |
+| [0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md)                                  | Ids are for life, a procedure's name takes one ASCII form, and every side refuses a declaration off them as it is made  | accepted |
+| [0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)              | A service's procedures are typed descriptors, served and called through one layer in each runtime                       | accepted |
+| [0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)                 | A `.proto` becomes one checked blueprint, and each language's server and client are generated from it alone             | accepted |
+| [0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)   | A procedure is also an HTTP route, which a gateway answers as one more client of its server, one connection an exchange | accepted |
+| [0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md) | One contract gives several packages, and a server's transport takes the procedures it is given                          | proposed |
 
 ### Transports and relays
 

@@ -277,6 +277,7 @@ async fn routers_never_disposed_over_the_in_memory_transport_end_once_nothing_ho
             &crate::memory::MemoryTransportServerOptions {
                 clock: Some(Arc::clone(&shared)),
                 runtime: None,
+                procedures: None,
             },
         )
         .expect("a server transport");

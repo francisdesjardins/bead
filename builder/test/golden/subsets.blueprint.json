@@ -1,0 +1,158 @@
+{
+  "format": "bead-blueprint/1",
+  "requires": [],
+  "reservedServices": {
+    "ids": [],
+    "names": []
+  },
+  "services": [
+    {
+      "description": "A shop, split between packages: its orders served, its readers called over a gateway.",
+      "failures": [
+        {
+          "code": 1,
+          "description": "No such order.",
+          "failureName": "NOT_FOUND"
+        }
+      ],
+      "procedures": [
+        {
+          "admission": "none",
+          "description": "Places an order.",
+          "failures": [],
+          "procedureId": 1,
+          "procedureKind": "request",
+          "procedureName": "placeOrder",
+          "request": {
+            "encoding": "json"
+          },
+          "result": {
+            "encoding": "json"
+          }
+        },
+        {
+          "admission": "none",
+          "description": "Cancels an order.",
+          "failures": [
+            "NOT_FOUND"
+          ],
+          "procedureId": 2,
+          "procedureKind": "request",
+          "procedureName": "cancelOrder",
+          "request": {
+            "encoding": "json"
+          },
+          "result": {
+            "encoding": "json"
+          }
+        },
+        {
+          "admission": "none",
+          "description": "Lists the orders.",
+          "failures": [],
+          "http": {
+            "idempotencyLevel": "IDEMPOTENT",
+            "rules": []
+          },
+          "procedureId": 3,
+          "procedureKind": "request",
+          "procedureName": "listOrders",
+          "request": {
+            "encoding": "json"
+          },
+          "result": {
+            "encoding": "json"
+          }
+        },
+        {
+          "admission": "none",
+          "description": "Notifies each order placed.",
+          "failures": [],
+          "http": {
+            "idempotencyLevel": "IDEMPOTENT",
+            "rules": []
+          },
+          "notification": {
+            "encoding": "json"
+          },
+          "procedureId": 4,
+          "procedureKind": "notifies",
+          "procedureName": "watchOrders",
+          "request": {
+            "encoding": "json"
+          },
+          "result": {
+            "encoding": "json"
+          }
+        },
+        {
+          "admission": "none",
+          "description": "Asks a client to refresh its catalogue.",
+          "failures": [],
+          "procedureId": 5,
+          "procedureKind": "command",
+          "procedureName": "refreshCatalogue",
+          "request": {
+            "encoding": "json"
+          },
+          "result": {
+            "encoding": "json"
+          }
+        },
+        {
+          "admission": {
+            "hook": "auditor"
+          },
+          "description": "Audits the orders, for an auditor.",
+          "failures": [],
+          "procedureId": 6,
+          "procedureKind": "request",
+          "procedureName": "audit",
+          "request": {
+            "encoding": "json"
+          },
+          "result": {
+            "encoding": "json"
+          }
+        }
+      ],
+      "reserved": {
+        "failureCodes": [],
+        "procedureIds": [],
+        "procedureNames": []
+      },
+      "serviceId": 1,
+      "serviceName": "Shop",
+      "serviceRevision": 1
+    },
+    {
+      "description": "Its accounts, which the split output selects none of.",
+      "failures": [],
+      "procedures": [
+        {
+          "admission": "none",
+          "description": "Opens an account.",
+          "failures": [],
+          "procedureId": 1,
+          "procedureKind": "request",
+          "procedureName": "signUp",
+          "request": {
+            "encoding": "json"
+          },
+          "result": {
+            "encoding": "json"
+          }
+        }
+      ],
+      "reserved": {
+        "failureCodes": [],
+        "procedureIds": [],
+        "procedureNames": []
+      },
+      "serviceId": 2,
+      "serviceName": "Auth",
+      "serviceRevision": 1
+    }
+  ],
+  "specVersion": "0.11.0"
+}

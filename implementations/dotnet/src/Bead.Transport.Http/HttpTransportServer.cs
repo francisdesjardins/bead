@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Buffers.Text;
+using System.Collections.Frozen;
 using System.Globalization;
 using System.IO.Pipelines;
 using System.Net;
@@ -403,6 +404,16 @@ public sealed record HttpTransportServerOptions
     /// </summary>
     public HttpPolicy? Policy { get; init; }
 
+    /// <summary>
+    /// The procedures each of its connections takes, by their addresses (spec 9.11): a request to
+    /// any other, which names no destination, is answered as one to no resolver,
+    /// <c>SERVICE_UNKNOWN</c> or <c>PROCEDURE_UNKNOWN</c>, before its credential, its admission and
+    /// its payload. None takes every procedure; empty, none. An address of service 0 or of
+    /// procedure 0 is an <see cref="ArgumentException"/> as the transport is built, and one named
+    /// twice is one (spec 9.12).
+    /// </summary>
+    public IReadOnlyCollection<ProcedureAddress>? Procedures { get; init; }
+
     // ! the members a policy may give that this record was given, each init marking its own: a with
     // expression copies them, so a record built from another keeps what that one was given
     private readonly HttpPolicyMembers _given;
@@ -530,6 +541,9 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
     // the networks of the proxies it believes X-Forwarded-For from
     private readonly ProxyTrust _proxyTrust;
 
+    // the procedures each of its connections takes; none, every one
+    private readonly FrozenSet<ProcedureAddress>? _procedures;
+
     // what the transport holds, under its lock: the connections by handle and by token, how many
     // each address holds, the exchanges under way, and the bytes of body being read
     private readonly Lock _gate = new();
@@ -560,12 +574,14 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
     /// A transport server, not yet listening, its durations held. A bound not above 0, or a timeout
     /// that is not from 1 to <see cref="Clocks.LongestTimer"/> milliseconds — infinite aside, but for
     /// the longest wait — is an <see cref="ArgumentOutOfRangeException"/> naming it; an entry of its
-    /// hosts, origins or trusted proxies none takes, an <see cref="ArgumentException"/> naming it.
+    /// hosts, origins or trusted proxies none takes, an <see cref="ArgumentException"/> naming it;
+    /// procedures it takes out of their range, an <see cref="ArgumentException"/> (spec 9.12).
     /// </summary>
     public HttpTransportServer(HttpTransportServerOptions? options = null)
     {
         var given = (options ?? new HttpTransportServerOptions()).PolicyApplied();
 
+        _procedures = ProceduresTaken.Of(given.Procedures, ("an HTTP transport server", nameof(options)));
         HostsAndOrigins.AssertHosts(given.Hosts, nameof(HttpTransportServerOptions.Hosts));
         HostsAndOrigins.AssertOrigins(given.Origins, nameof(HttpTransportServerOptions.Origins));
         _proxyTrust = Bead.TrustedProxies.TrustOf(
@@ -1011,6 +1027,21 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
     public bool IsSecure(string connectionHandle)
     {
         return _isSecure;
+    }
+
+    /// <summary>Whether it was given the procedures its connections take (spec 9.11).</summary>
+    public bool NamesProcedures()
+    {
+        return _procedures is not null;
+    }
+
+    /// <summary>
+    /// Whether a connection takes a procedure: one of those it was given, the same for every
+    /// connection; every one when it was given none (spec 9.11).
+    /// </summary>
+    public bool TakesProcedure(string connectionHandle, ProcedureAddress address)
+    {
+        return ProceduresTaken.Takes(_procedures, address);
     }
 
     /// <summary>

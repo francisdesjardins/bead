@@ -55,6 +55,9 @@ internal sealed record BrokerConnectionSetup
     /// <summary>Whether the peer's own leg is secure, as its OPEN or its ACCEPT said.</summary>
     public required bool IsPeerSecure { get; init; }
 
+    /// <summary>The name its OPEN reached, a server's end's (spec 15.18); none for a client's.</summary>
+    public string? Name { get; init; }
+
     /// <summary>The last sequence this end sent: a client's OPEN, 1; none yet, 0, for a server's, whose ACCEPT it publishes.</summary>
     public required ulong Sent { get; init; }
 
@@ -143,6 +146,15 @@ internal sealed class BrokerConnection
         get
         {
             return _setup.IsPeerSecure;
+        }
+    }
+
+    // the name its OPEN reached, a server's end's; none for a client's
+    public string? Name
+    {
+        get
+        {
+            return _setup.Name;
         }
     }
 

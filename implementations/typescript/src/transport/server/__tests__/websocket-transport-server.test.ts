@@ -285,6 +285,37 @@ test('@francisdesjardins/bead/websocket-transport-server re-exports the WebSocke
   expect(TRANSPORT_WEBSOCKET_BINARYTYPE).toBe(constants.TRANSPORT_WEBSOCKET_BINARYTYPE);
 });
 
+// spec 9.11
+test('a WebSocket server transport takes the procedures it is given', async () => {
+  const server = createWebSocketTransportServer({
+    procedures: [{ procedureId: 1, serviceId: 2 }],
+    WebSocketServer,
+  });
+  const { port } = await server.start({ address: host, findOpenPort: true });
+  const connection = nextServerEvent(server, 'connection');
+  const [, TrackedWsWebSocket] = IMPLEMENTATIONS[1];
+  const socket = new TrackedWsWebSocket(`ws://${host}:${String(port)}`);
+
+  try {
+    socket.addEventListener('error', () => {});
+    await once(socket, 'open');
+
+    const [, connectionHandle] = await connection;
+
+    expect([
+      server.takesProcedure?.(connectionHandle, { procedureId: 1, serviceId: 2 }),
+      server.takesProcedure?.(connectionHandle, { procedureId: 2, serviceId: 2 }),
+      server.takesProcedure?.(connectionHandle, { procedureId: 1, serviceId: 3 }),
+    ]).toEqual([true, false, false]);
+    // given none, it names none: its router never asks
+    expect(createWebSocketTransportServer({ WebSocketServer }).takesProcedure).toBeUndefined();
+  } finally {
+    socket.close();
+    await server.stop();
+    await allClosed();
+  }
+});
+
 for (const [label, Tracked] of IMPLEMENTATIONS) {
   test.describe(`with a client on ${label}`, () => {
     let server: WebSocketTransportServer;

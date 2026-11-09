@@ -5,7 +5,7 @@
 //! the same files.
 
 use core::time::Duration;
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::SystemTime;
 
@@ -18,10 +18,11 @@ use bead::{
     CredentialScheme, DebugDirection, EnvelopeKind, MemoryBroker, MemoryBrokerAdapterOptions,
     MemoryBrokerOptions, MemoryTransportClient, MemoryTransportClientConnectOptions,
     MemoryTransportClientOptions, MemoryTransportServer, MemoryTransportServerOptions,
-    MetricsRegistry, NEVER, PacingLimitsOptions, RelayOptions, RouterClientTransport, RouterError,
-    RouterLimitsOptions, RouterSide, Sent, Server, ServerListener, ServerOptions, ServerTransport,
-    SharedClock, TracedEnvelope, TransportClientDisconnectOptions, TransportMessage,
-    require_credential, require_session, share_leg_b_session,
+    MetricsRegistry, NEVER, PacingLimitsOptions, ProcedureAddress, RelayOptions,
+    RouterClientTransport, RouterError, RouterLimitsOptions, RouterSide, Sent, Server,
+    ServerListener, ServerOptions, ServerTransport, SharedClock, TracedEnvelope,
+    TransportClientDisconnectOptions, TransportMessage, require_credential, require_session,
+    share_leg_b_session,
 };
 use bytes::Bytes;
 use serde_json::{Map, Value, json};
@@ -31,9 +32,23 @@ const ONLY_CONNECTION: &str = "connection";
 
 // ! every key of a step this player reads: one it does not know fails the step, rather than pass it
 // unplayed
-const STEP_KEYS: [&str; 15] = [
-    "advance", "carried", "carries", "close", "counted", "expect", "on", "open", "report",
-    "secure", "send", "token", "twoWay", "until", "wall",
+const STEP_KEYS: [&str; 16] = [
+    "advance",
+    "carried",
+    "carries",
+    "close",
+    "counted",
+    "expect",
+    "on",
+    "open",
+    "procedures",
+    "report",
+    "secure",
+    "send",
+    "token",
+    "twoWay",
+    "until",
+    "wall",
 ];
 
 // how many times an until settles the side and looks again for its timer
@@ -78,6 +93,8 @@ struct Script {
     one_way: HashSet<ConnectionHandle>,
     carrying_none: HashSet<ConnectionHandle>,
     in_the_clear: HashSet<ConnectionHandle>,
+    // the procedures each connection's open gave its transport, every one for a connection absent
+    taking: HashMap<ConnectionHandle, BTreeSet<ProcedureAddress>>,
     sent: HashMap<ConnectionHandle, VecDeque<SentEnvelope>>,
 }
 
@@ -108,11 +125,14 @@ impl Script {
 
 /// A transport server of the connections a conversation names, each under a handle of its own: it
 /// records what it sends on each, with the credential it is given beside it, delivers what it is
-/// given, and says what each carries, as its open declared.
+/// given, and says what each carries and the procedures it takes, as its open declared; it names
+/// procedures when an open of its conversation gives them, which its router asks once, as it is
+/// built.
 #[derive(Default)]
 struct Scripted {
     script: Mutex<Script>,
     listeners: Mutex<Vec<Arc<dyn ServerListener>>>,
+    names_procedures: bool,
 }
 
 impl core::fmt::Debug for Scripted {
@@ -177,6 +197,21 @@ impl ServerTransport for Scripted {
         !locked(&self.script)
             .carrying_none
             .contains(connection_handle)
+    }
+
+    fn names_procedures(&self) -> bool {
+        self.names_procedures
+    }
+
+    fn takes_procedure(
+        &self,
+        connection_handle: &ConnectionHandle,
+        address: ProcedureAddress,
+    ) -> bool {
+        locked(&self.script)
+            .taking
+            .get(connection_handle)
+            .is_none_or(|taken| taken.contains(&address))
     }
 
     fn start(&self) -> BoxFuture<Result<(), RouterError>> {
@@ -255,7 +290,7 @@ fn participant_options(clock: &SharedClock) -> BrokerParticipantOptions {
 }
 
 impl OverBroker {
-    fn of(clock: &SharedClock) -> Result<Self, String> {
+    fn of(clock: &SharedClock, procedures: Option<Vec<ProcedureAddress>>) -> Result<Self, String> {
         let mut options = MemoryBrokerOptions::default();
 
         options.clock = Some(Arc::clone(clock));
@@ -268,8 +303,12 @@ impl OverBroker {
         );
         let server = BrokerParticipant::new(adapter, &participant_options(clock))
             .map_err(|error| error.to_string())?;
+        let mut transport_options = BrokerTransportServerOptions::new(["interop"]);
+
+        transport_options.procedures = procedures;
+
         let transport = server
-            .server(&BrokerTransportServerOptions::new(["interop"]))
+            .server(&transport_options)
             .map_err(|error| error.to_string())?;
         let drawn = Arc::new(Mutex::new(None));
 
@@ -356,7 +395,10 @@ impl Connections {
     async fn open(
         &mut self,
         (name, clock): (&str, &SteppingClock),
-        (carries_credential, is_secure, is_two_way): (bool, bool, bool),
+        ((carries_credential, is_secure, is_two_way), procedures): (
+            (bool, bool, bool),
+            Option<BTreeSet<ProcedureAddress>>,
+        ),
     ) -> Result<(), String> {
         match self {
             Self::OverBroker(broker) => broker.open((name, clock)).await,
@@ -399,6 +441,11 @@ impl Connections {
                     }
 
                     script.opened.push(Arc::clone(&handle));
+
+                    // each connection takes what its open gave its transport
+                    if let Some(procedures) = procedures {
+                        script.taking.insert(Arc::clone(&handle), procedures);
+                    }
 
                     handle
                 };
@@ -968,21 +1015,72 @@ fn listen(
 /// 15.13): every one secure and two-way, and none a request its server sends expects carried toward
 /// its client.
 pub(crate) fn is_played_in_memory(conversation: &Value) -> bool {
-    conversation
+    // * one transport of a pair takes one list for every connection it draws: a conversation whose
+    // opens give their connections different lists is the scripted transport's alone
+    shared_procedures_of(conversation).is_ok()
+        && conversation
+            .get("steps")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .all(|step| {
+                step.get("secure") != Some(&Value::Bool(false))
+                    && step.get("twoWay") != Some(&Value::Bool(false))
+                    && !(step
+                        .get("expect")
+                        .and_then(|expect| expect.get("kind"))
+                        .and_then(Value::as_u64)
+                        == Some(u64::from(EnvelopeKind::Request.byte()))
+                        && step.get("carried").is_some())
+            })
+}
+
+// the procedures an open gives its connection's transport (spec 9.11): every one when it names none
+fn procedures_of(step: &Value) -> Result<Option<Vec<ProcedureAddress>>, String> {
+    let Some(procedures) = step.get("procedures") else {
+        return Ok(None);
+    };
+    let id_of = |address: &Value, key: &str| {
+        address
+            .get(key)
+            .and_then(Value::as_u64)
+            .and_then(|id| u16::try_from(id).ok())
+            .ok_or_else(|| format!("a procedure's address holds its {key}: {address}"))
+    };
+
+    procedures
+        .as_array()
+        .ok_or("procedures is a list of addresses")?
+        .iter()
+        .map(|address| {
+            Ok(ProcedureAddress {
+                service_id: id_of(address, "serviceId")?,
+                procedure_id: id_of(address, "procedureId")?,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()
+        .map(Some)
+}
+
+// the one list every open of a conversation gives its connection's transport, which a pair's
+// transport is built with; refused for opens that give different ones
+fn shared_procedures_of(conversation: &Value) -> Result<Option<Vec<ProcedureAddress>>, String> {
+    let opens: Vec<&Value> = conversation
         .get("steps")
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
-        .all(|step| {
-            step.get("secure") != Some(&Value::Bool(false))
-                && step.get("twoWay") != Some(&Value::Bool(false))
-                && !(step
-                    .get("expect")
-                    .and_then(|expect| expect.get("kind"))
-                    .and_then(Value::as_u64)
-                    == Some(u64::from(EnvelopeKind::Request.byte()))
-                    && step.get("carried").is_some())
-        })
+        .filter(|step| step.get("open").is_some())
+        .collect();
+    let first = opens.first().map_or(Ok(None), |step| procedures_of(step))?;
+
+    for step in opens {
+        if procedures_of(step)? != first {
+            return Err("its opens give their connections different procedures".to_owned());
+        }
+    }
+
+    Ok(first)
 }
 
 // `send` with each token it names, `<name>`, as the 16 bytes a step before kept under that name
@@ -1046,11 +1144,15 @@ pub(crate) async fn play(conversation: &Value, options: &PlayOptions) -> Result<
     }
 
     let mut connections = if options.over_broker {
-        Connections::OverBroker(Box::new(OverBroker::of(&shared)?))
+        Connections::OverBroker(Box::new(OverBroker::of(
+            &shared,
+            shared_procedures_of(conversation)?,
+        )?))
     } else if options.in_memory {
         let mut server_options = MemoryTransportServerOptions::default();
 
         server_options.clock = Some(Arc::clone(&shared));
+        server_options.procedures = shared_procedures_of(conversation)?;
 
         let server =
             MemoryTransportServer::new(&server_options).map_err(|error| error.to_string())?;
@@ -1070,7 +1172,10 @@ pub(crate) async fn play(conversation: &Value, options: &PlayOptions) -> Result<
             drawn,
         }))
     } else {
-        Connections::Scripted(Arc::new(Scripted::default()))
+        Connections::Scripted(Arc::new(Scripted {
+            names_procedures: steps.iter().any(|step| step.get("procedures").is_some()),
+            ..Scripted::default()
+        }))
     };
     let limits = limits_of(conversation)?;
     let mut server_options = ServerOptions::default();
@@ -1165,7 +1270,7 @@ async fn play_steps(
 
     if steps.iter().all(|step| step.get("open").is_none()) {
         connections
-            .open((ONLY_CONNECTION, clock), (true, true, true))
+            .open((ONLY_CONNECTION, clock), ((true, true, true), None))
             .await?;
     }
 
@@ -1202,7 +1307,11 @@ async fn play_steps(
                 step.get("twoWay") != Some(&Value::Bool(false)),
             );
 
-            connections.open((name, clock), flags).await?;
+            let procedures = procedures_of(step).map_err(|why| format!("{at}: {why}"))?;
+
+            connections
+                .open((name, clock), (flags, procedures.map(BTreeSet::from_iter)))
+                .await?;
             clock.settle().await;
         }
 

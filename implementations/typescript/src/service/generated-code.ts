@@ -34,3 +34,15 @@ export const GENERATED_CODE_SUPPORTS_VERSION_6 = true;
  * void GENERATED_CODE_SUPPORTS_VERSION_7;
  */
 export const GENERATED_CODE_SUPPORTS_VERSION_7 = true;
+
+/**
+ * Beside the contract 7, a server transport's option `procedures`, the addresses it takes, which
+ * a generated `bead_served.ts` gives each transport of a server, by the key `beadc.yaml` names it
+ * (decision 0048).
+ *
+ * @example
+ * import { GENERATED_CODE_SUPPORTS_VERSION_8 } from '@francisdesjardins/bead/service';
+ *
+ * void GENERATED_CODE_SUPPORTS_VERSION_8;
+ */
+export const GENERATED_CODE_SUPPORTS_VERSION_8 = true;

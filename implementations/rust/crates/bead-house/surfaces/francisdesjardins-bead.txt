@@ -509,6 +509,8 @@ crate::broker::server
     pub maximum_unsent_bytes: Option<u64>
     pub accept_timeout: Option<Duration>
     pub secure: Option<bool>
+    pub procedures: Option<Vec<ProcedureAddress>>
+    pub procedures_by_name: Option<BTreeMap<String, Vec<ProcedureAddress>>>
     fn new<N: Into<String>, I: IntoIterator<Item = N>>(names: I) -> Self
     derives Clone, Debug
   struct BrokerTransportServer
@@ -1350,6 +1352,7 @@ crate::memory
   struct MemoryTransportServerOptions #[non_exhaustive]
     pub clock: Option<SharedClock>
     pub runtime: Option<Handle>
+    pub procedures: Option<Vec<ProcedureAddress>>
     derives Clone, Debug, Default
   struct MemoryTransportServer
     fn new(options: &MemoryTransportServerOptions) -> Result<Self, ProgrammerError>
@@ -1986,6 +1989,8 @@ crate::transport
     fn is_two_way(&self, _connection_handle: &ConnectionHandle) -> bool
     fn is_secure(&self, _connection_handle: &ConnectionHandle) -> bool
     fn carries_credential(&self, _connection_handle: &ConnectionHandle) -> bool
+    fn names_procedures(&self) -> bool
+    fn takes_procedure(&self, _connection_handle: &ConnectionHandle, _address: ProcedureAddress) -> bool
     fn start(&self) -> BoxFuture<Result<(), RouterError>>
     fn stop(&self) -> BoxFuture<Result<(), RouterError>>
     fn gauges(&self) -> Option<Gauges>

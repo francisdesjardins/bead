@@ -41,6 +41,7 @@ import type {
   IDestinationHandler,
   IFailure,
   IHandedRequestHeader,
+  IProcedureAddress,
   IRequestHandler,
   IRequestResolver,
   IRequestResolverProps,
@@ -209,6 +210,8 @@ export const createRouterCore = <Handle extends string>(
   options?: IRouterCoreOptions
 ): IRouterCore<Handle> => {
   const { failures } = port;
+  // * read once, as the core is built: a port that names no procedures is never asked (spec 9.11)
+  const takesProcedure = port.takesProcedure?.bind(port);
   const clock = options?.clock ?? PLATFORM_CLOCK;
   const metrics = options?.metrics;
   const limits = limitsOf(options?.limits);
@@ -1282,13 +1285,27 @@ export const createRouterCore = <Handle extends string>(
       return (refuse({ ...failures.destinationUnknown, detail }, dispatched), undefined);
     }
 
-    if (resolver === undefined) {
-      const unknown = !resolvers.hasService(serviceId)
-        ? { ...failures.serviceUnknown, detail: `no service ${String(serviceId)}` }
-        : {
+    // ! on a connection whose transport names procedures, one it does not take has no resolver, and
+    // its service is known only by a resolver whose address it takes: nothing of the answer tells
+    // either from one absent (spec 9.2, step 5; 9.11)
+    const isTaken =
+      destinationId !== undefined || takesProcedure === undefined
+        ? undefined
+        : (address: IProcedureAddress): boolean => {
+            return takesProcedure(connectionHandle, address);
+          };
+
+    if (resolver === undefined || isTaken?.({ procedureId, serviceId }) === false) {
+      const isServiceKnown =
+        isTaken === undefined
+          ? resolvers.hasService(serviceId)
+          : resolvers.hasServiceTaken(serviceId, isTaken);
+      const unknown = isServiceKnown
+        ? {
             ...failures.procedureUnknown,
             detail: `no procedure ${String(procedureId)} in service ${String(serviceId)}`,
-          };
+          }
+        : { ...failures.serviceUnknown, detail: `no service ${String(serviceId)}` };
 
       return (refuse(unknown, dispatched), undefined);
     }

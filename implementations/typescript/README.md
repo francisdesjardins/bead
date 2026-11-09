@@ -1252,6 +1252,17 @@ Two transports of one type, whose handles might be one, are refused as the join 
 transport binds both addresses. The join starts nothing: each transport is started where it
 listens, and one port for two still comes from a proxy in front.
 
+Each server transport takes the procedures it is given, its option `procedures`, by their
+addresses (spec 9.11, decision 0048): its router answers a request that names no destination to any
+other as one to no resolver, `SERVICE_UNKNOWN` or `PROCEDURE_UNKNOWN`, before its credential, its
+admission or its payload, so nothing of the answer tells a procedure left out from one absent. Given
+none, it takes every procedure, and its router never asks; given `[]`, none. An address out of
+16.2's ranges, service 0 among them, is refused as the transport is built, and one named twice is
+one. A join asks the transport that drew each handle, so one server answers its readers over
+WebSocket and its whole service in memory; beadc's `bead_served.ts` gives each transport its list,
+`SERVED_PROCEDURES`, under the keys an output's `server.transports` names. What a transport takes is
+no access: it grants none, and each procedure keeps its own admission.
+
 ### Over a broker
 
 `broker-participant`, `broker-transport-client`, `broker-transport-server` and `memory-broker` carry
@@ -1262,7 +1273,9 @@ that broker's client; its id is the identity the broker authenticates the link b
 `bead/i/<id>`, takes every parcel of its connections. `participant.transportServer({ names })`
 serves names, each a server's topic, `bead/s/<name>`, alone or, with `group: true`, in a group its
 broker places each OPEN with; `participant.transportClient()` holds one connection at a time,
-`connect({ server })` opening it through a name.
+`connect({ server })` opening it through a name. A server's transport takes `procedures` on every
+name it serves, and `proceduresByName` gives a name its own, in place of them, on each connection
+its OPEN reached by that name (spec 9.11); a name it does not serve is refused as it is built.
 
 ```ts
 const broker = createMemoryBroker();
@@ -1461,7 +1474,7 @@ over rhea's `container.listen`, and need none.
 place: each call goes through one more Bead client of the application's own server, across an
 in-memory transport that server joined beside its WebSocket or HTTP one, so it meets the same
 router, admission, sessions and services, each offered once. It reads everything from the route
-table beadc writes in an output with `http: true`, `bead_http.ts`, whose `HTTP_ROUTES`,
+table beadc writes in an output with a `gateway`, `bead_http.ts`, whose `HTTP_ROUTES`,
 `OPENAPI_DOCUMENT` and `HTTP_PROBLEM_TYPES` it is given; `transcoding` is the layer it reads them
 with, together with the generated HTTP client's caller.
 

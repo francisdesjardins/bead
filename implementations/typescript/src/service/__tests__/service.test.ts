@@ -17,6 +17,7 @@ test.describe('the service entry', () => {
       'FailureError',
       'GENERATED_CODE_SUPPORTS_VERSION_6',
       'GENERATED_CODE_SUPPORTS_VERSION_7',
+      'GENERATED_CODE_SUPPORTS_VERSION_8',
       'PAYLOAD_CODECS',
       'ProcedureKind',
       'ProgrammerError',

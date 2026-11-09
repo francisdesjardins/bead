@@ -1,1 +1,5 @@
 #nullable enable
+Bead.Transport.Http.HttpTransportServer.NamesProcedures() -> bool
+Bead.Transport.Http.HttpTransportServer.TakesProcedure(string! connectionHandle, Bead.ProcedureAddress address) -> bool
+Bead.Transport.Http.HttpTransportServerOptions.Procedures.get -> System.Collections.Generic.IReadOnlyCollection<Bead.ProcedureAddress>?
+Bead.Transport.Http.HttpTransportServerOptions.Procedures.init -> void

@@ -128,6 +128,24 @@ def opened(connection, two_way=True):
     return {'open': connection, **({} if two_way else {'twoWay': False})}
 
 
+def opened_as(connection, procedures=None, **declared):
+    """A connection opened as it declares: carries and secure, and procedures, the addresses its
+    transport takes (9.11), each a service id and a procedure id; absent, every one; empty, none."""
+    taken = {} if procedures is None else {
+        'procedures': [{'serviceId': service_id, 'procedureId': procedure_id} for service_id, procedure_id in procedures]}
+    return {'open': connection, **declared, **taken}
+
+
+def no_service(service_id):
+    # SERVICE_UNKNOWN's detail (9.2, step 5)
+    return f'no service {service_id}'
+
+
+def no_procedure(procedure_id, service_id=SERVICE_ID):
+    # PROCEDURE_UNKNOWN's detail (9.2, step 5)
+    return f'no procedure {procedure_id} in service {service_id}'
+
+
 def refusal(call_id, code, scope=PROTOCOL):
     return {'send': f'A1 12 00 02  {word(call_id, 4)} | {word(code, 2)} 00 {scope:02X}'}
 
@@ -840,11 +858,11 @@ conversations = [
     ('fail answers with its own failure, of the application', ['9.5'], None, [
         json_request(3, 'fail', 'null'), failure(3, ON_PURPOSE, APPLICATION, detail=FAILS_ON_PURPOSE)]),
     ('a service unknown is answered SERVICE_UNKNOWN', ['9.2.5'], None, [
-        json_request(1, 1, '{}', service_id=9), failure(1, SERVICE_UNKNOWN)]),
+        json_request(1, 1, '{}', service_id=9), failure(1, SERVICE_UNKNOWN, detail=no_service(9))]),
     ('a request to service 0 is read, and answered SERVICE_UNKNOWN by routing', ['4.7', '9.2.5'], None, [
-        json_request(1, 1, '{}', service_id=0), failure(1, SERVICE_UNKNOWN)]),
+        json_request(1, 1, '{}', service_id=0), failure(1, SERVICE_UNKNOWN, detail=no_service(0))]),
     ('a procedure unknown, in a service known, is answered PROCEDURE_UNKNOWN', ['9.2.5'], None, [
-        json_request(1, 99, '{}'), failure(1, PROCEDURE_UNKNOWN)]),
+        json_request(1, 99, '{}'), failure(1, PROCEDURE_UNKNOWN, detail=no_procedure(99))]),
     ('an admission that refuses is answered with its refusal', ['9.2.6'], None, [
         json_request(1, 'denied', 'null'), failure(1, ACCESS_DENIED, detail=ADMITS_NOBODY)]),
     ('a request with a destination, to a server that relays nothing, is answered DESTINATION_UNKNOWN', ['9.2.4', '14.1'], None, [
@@ -1044,7 +1062,7 @@ conversations = [
          presenting(1, 'echo', '"x"', '00 04 00 00'), failure(1, CREDENTIAL_UNSUPPORTED, detail=SCHEMES_TAKEN),
          presenting(3, 'whoami', 'null', 'FF FF 00 02  01 02  00 00'),
          failure(3, CREDENTIAL_UNSUPPORTED, detail=SCHEMES_TAKEN),
-         presenting(5, 99, '{}', '00 07 00 00'), failure(5, PROCEDURE_UNKNOWN)]),
+         presenting(5, 99, '{}', '00 07 00 00'), failure(5, PROCEDURE_UNKNOWN, detail=no_procedure(99))]),
     # a.b.c reads as no token (13.8, step 1): a credential that came and does not hold
     ('a JWT that does not verify is refused SESSION_REQUIRED, whatever its procedure requires, its detail saying one came and did not hold',
      ['9.2.6', '13.8.1'], None, [
@@ -1380,9 +1398,6 @@ def credentials_through_a_relay():
     def logged_in_as_ada(call_id=1):
         return [on(login(call_id, 'ada'), 'client'), on(named(result(call_id, '"ada"', OPENED), 'ada'), 'client')]
 
-    def opened_as(connection, **declared):
-        return {'open': connection, **declared}
-
     def refused_with(call_id, code, detail=None):
         return on(failure(call_id, code, detail=detail), 'client')
 
@@ -1554,6 +1569,94 @@ def credentials_through_a_relay():
 
 conversations += credentials_through_a_relay()
 
+
+def procedures_taken_conversations():
+    """9.11: a server's transport that takes only the procedures its application names, each
+    connection it draws answered at step 5 of 9.2, as one to no resolver, for any other."""
+
+    def address(procedure):
+        return SERVICE_ID, PROCEDURES[procedure]
+
+    def at(connection, *steps):
+        return [on(step, connection) for step in steps]
+
+    # a scheme to come, and a JWT that does not read, a.b.c, which no key verifies
+    to_come, unread = '00 04 00 00', '00 02 00 05  61 2E 62 2E 63  00 00 00'
+
+    return [
+        ('a request to a procedure its connection\'s transport does not take, of a service it takes another of, is answered PROCEDURE_UNKNOWN as one absent',
+         ['9.2.5', '9.11'], None, [
+             opened_as('client', [address('echo')]),
+             *at('client', json_request(1, 'echo', '"x"'), result(1, '"x"'),
+                 json_request(3, 'fail', 'null'), failure(3, PROCEDURE_UNKNOWN, detail=no_procedure(PROCEDURES['fail'])),
+                 json_request(5, 99, '{}'), failure(5, PROCEDURE_UNKNOWN, detail=no_procedure(99)))]),
+        ('a connection whose transport names no procedures reaches what another connection\'s transport does not take',
+         ['9.11'], None, [
+             opened_as('reader', [address('echo')]), opened('client'),
+             *at('reader', json_request(1, 'fail', 'null'),
+                 failure(1, PROCEDURE_UNKNOWN, detail=no_procedure(PROCEDURES['fail']))),
+             *at('client', json_request(1, 'fail', 'null'), failure(1, ON_PURPOSE, APPLICATION, detail=FAILS_ON_PURPOSE))]),
+        # a service is known on a connection by a resolver its transport takes, never by one it does not
+        ('a request to a service its connection\'s transport takes no procedure of is answered SERVICE_UNKNOWN, as a service absent',
+         ['9.2.5', '9.11'], None, [
+             opened_as('stranger', [(2, 1)]),
+             *at('stranger', json_request(1, 'echo', '"x"'), failure(1, SERVICE_UNKNOWN, detail=no_service(SERVICE_ID)),
+                 json_request(3, 99, '{}'), failure(3, SERVICE_UNKNOWN, detail=no_service(SERVICE_ID)),
+                 json_request(5, 1, '{}', service_id=9), failure(5, SERVICE_UNKNOWN, detail=no_service(9)))]),
+        ('a transport that takes only procedures no resolver answers shows none of their service: a request to a resolver of it is answered SERVICE_UNKNOWN',
+         ['9.2.5', '9.11'], None, [
+             opened_as('client', [(SERVICE_ID, 99)]),
+             *at('client', json_request(1, 'echo', '"x"'), failure(1, SERVICE_UNKNOWN, detail=no_service(SERVICE_ID)),
+                 json_request(3, 99, '{}'), failure(3, SERVICE_UNKNOWN, detail=no_service(SERVICE_ID)))]),
+        ('a transport given no procedure takes none: every request that names no destination is answered SERVICE_UNKNOWN',
+         ['9.2.5', '9.11'], None, [
+             opened_as('client', []),
+             *at('client', json_request(1, 'echo', '"x"'), failure(1, SERVICE_UNKNOWN, detail=no_service(SERVICE_ID)),
+                 json_request(3, 99, '{}'), failure(3, SERVICE_UNKNOWN, detail=no_service(SERVICE_ID)),
+                 json_request(5, 1, '{}', service_id=9), failure(5, SERVICE_UNKNOWN, detail=no_service(9)))]),
+        # whoami, whose credential step 6 would resolve, is answered at step 5 first: no scheme it
+        # presents is named, and no JWT read
+        ('a request its connection\'s transport does not take is answered before its credential: a scheme to come is answered PROCEDURE_UNKNOWN, never CREDENTIAL_UNSUPPORTED, and a JWT is not verified',
+         ['9.2.5', '9.2.6', '9.11'], None, [
+             opened_as('client', [address('echo')]),
+             *at('client', presenting(1, 'whoami', 'null', to_come),
+                 failure(1, PROCEDURE_UNKNOWN, detail=no_procedure(PROCEDURES['whoami'])),
+                 presenting(3, 'whoami', 'null', unread),
+                 failure(3, PROCEDURE_UNKNOWN, detail=no_procedure(PROCEDURES['whoami'])),
+                 presenting(5, 'echo', '"x"', to_come), failure(5, CREDENTIAL_UNSUPPORTED, detail=SCHEMES_TAKEN))]),
+        ('past the calls its connection has its server answer at once, a request its transport does not take is answered CAPACITY_EXCEEDED: the bound comes first',
+         ['9.2.3', '9.2.5', '9.11'], {'maximumAnsweringCalls': 1}, [
+             opened_as('client', [address('slow')]),
+             *at('client', json_request(1, 'slow', SLOW),
+                 json_request(3, 'fail', 'null'), failure(3, CAPACITY_EXCEEDED), cancel(1),
+                 json_request(5, 'fail', 'null'), failure(5, PROCEDURE_UNKNOWN, detail=no_procedure(PROCEDURES['fail'])))]),
+        ('a request that names a destination, to a server that relays nothing, is answered DESTINATION_UNKNOWN whatever its connection\'s transport takes',
+         ['9.2.4', '9.11'], None, [
+             opened_as('client', [address('echo')]),
+             *at('client', json_request(1, 'fail', 'null', flags=0x02, words=4, tail='00 00 00 05'),
+                 failure(1, DESTINATION_UNKNOWN))]),
+        sharing_leg_b(('a request that names a destination crosses the relay whatever its connection\'s transport takes',
+         ['9.11', '14.2'], None, [
+             opened_as('client', [address('login')]), opened('device'), *logged_in(), *registered(),
+             *at('client', json_request(3, 'echo', '"x"'),
+                 failure(3, PROCEDURE_UNKNOWN, detail=no_procedure(PROCEDURES['echo'])),
+                 relayed(5, 'echo', '"y"')),
+             leg_b(2, 'echo', '"y"'), on(answer(2, '"y"'), 'device'), on(result(5, '"y"'), 'client')])),
+        ('a request that opens a transfer to a procedure its connection\'s transport does not take is answered PROCEDURE_UNKNOWN, its transfer given no credit',
+         ['9.2.5', '9.11', '12.3'], CHUNKED, [
+             opened_as('client', [address('bytes')]),
+             *at('client', opening(1, 'echo', LONG[:44], 300),
+                 failure(1, PROCEDURE_UNKNOWN, detail=no_procedure(PROCEDURES['echo'])))]),
+        ('a request to a procedure that notifies, which its connection\'s transport does not take, opens no subscription',
+         ['9.2.5', '9.11', '11.2'], None, [
+             opened_as('client', [address('tick')]),
+             *at('client', subscribe(1), failure(1, PROCEDURE_UNKNOWN, detail=no_procedure(PROCEDURES['ticks'])),
+                 tick(3, 1), result(3, 'null'))]),
+    ]
+
+
+conversations += procedures_taken_conversations()
+
 # a token a send presents is one an earlier step named
 for name, _, _, *rest in conversations:
     tokens = set()
@@ -1594,7 +1697,7 @@ document = {
         'expect is the next envelope the server sends: its kind, its call id, and its payload or its failure; a request, its flags, its service and its procedure too, and credential, the CREDENTIAL block it presents, as vectors.json writes a header\'s, a JWT\'s token a character a byte; none, it presents none. A failure compares its code, its scope and the relays it crossed, and its detail where it gives one, the detail the spec states; elsewhere its detail is informative. credential, on an answer, is the scheme of the CREDENTIAL block it carried, what it announced: OPAQUE for a session\'s token, which is random, NONE for its end; none, it carried no block. A result that opens a transfer gives its total too; a chunk, its offset, whether it is the last, and its payload; a credit, paced, whether it is PACED, and its end.',
         'report is the next thing the server reports to its application: a protocol code, or exception for an error that carries none.',
         'A step may move time, on the clock the server is given (decision 0011): until timer waits, on the real clock and within a patience, for a timer armed on it, due exactly that many milliseconds from now; advance steps it that many milliseconds from due to due, as spec/clocks.json states and holds the test clocks of both sides to, and follows an until timer since the last send, expect or advance; wall moves the wall clock alone, forward or back. wallClock is where the wall clock starts.',
-        'A conversation that opens its connections, open, plays them all at once: every other step names its connection, on, but a step that moves time, which is the server\'s, and each connection has its own expectations; one that opens none plays one connection, opened before its first step. twoWay false beside open declares a connection that carries nothing back, as an HTTP client that does not listen; carries false, one whose transport carries no credential beside an envelope it sends, as a WebSocket\'s toward its client or a listen\'s batch; secure false, one that reaches off the machine in the clear, neither over TLS nor within the machine. By default a connection carries a credential and is secure. A connection closed and opened again is a new connection under the same name.',
+        'A conversation that opens its connections, open, plays them all at once: every other step names its connection, on, but a step that moves time, which is the server\'s, and each connection has its own expectations; one that opens none plays one connection, opened before its first step. twoWay false beside open declares a connection that carries nothing back, as an HTTP client that does not listen; carries false, one whose transport carries no credential beside an envelope it sends, as a WebSocket\'s toward its client or a listen\'s batch; secure false, one that reaches off the machine in the clear, neither over TLS nor within the machine. By default a connection carries a credential and is secure. procedures beside open declares the procedures that connection\'s transport takes, by service id and procedure id (section 9.11): absent, every one; empty, none. A connection closed and opened again is a new connection under the same name.',
         'Before each send, after close, and at the end, nothing more was sent or reported: what a conversation does not expect, a server does not do.',
         'limits, where given, are the server\'s limits, by the names section 12.2 gives them, in milliseconds for a time; any other is its default. pacing, where given, bounds the queues of its paced subscriptions. relay, where given, sets the options of the server\'s relay: verifies true has it verify what it forwards (decision 0010); beforeRoute names its admission, requireCredential by default, shareLegBSession or requireSession.',
         'listener, where given, is what the server\'s application does from within a telling: on the first telling of its kind on a connection, and once, it calls command, a command of the interop service\'s, on that connection, with the clock\'s question as its payload, and lets its answer go. telling report is a report it hears with that connection; read, its debug listener hearing an envelope read on it.',

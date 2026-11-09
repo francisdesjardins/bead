@@ -418,6 +418,47 @@ public sealed class JoinedServerTransportTests
         Assert.Equal((2L, 0), (gauges.Transport.Counts["connections"], gauges.Router.Orphans));
     }
 
+    // spec 9.11, 15.14: the twin of "a joined transport answers whether a connection takes a
+    // procedure by the transport that drew its handle"
+    [Fact]
+    public async Task A_joined_transport_answers_whether_a_connection_takes_a_procedure_by_the_transport_that_drew_its_handle()
+    {
+        await using var memory = new MemoryTransportServer(new MemoryTransportServerOptions { Procedures = [new ProcedureAddress(1, 1)] });
+        var paired = new PairedTransport(new SerialScheduler()) { Taking = [new ProcedureAddress(1, 2)] };
+        await using var joined = new JoinedServerTransport([memory, paired]);
+        const string local = "type=MEMORY;ip=local;ordinal=1";
+
+        // * each asked of the transport that drew it, by its handle's type
+        Assert.True(joined.TakesProcedure(local, new ProcedureAddress(1, 1)));
+        Assert.False(joined.TakesProcedure(local, new ProcedureAddress(1, 2)));
+        Assert.True(joined.TakesProcedure(Socket, new ProcedureAddress(1, 2)));
+        Assert.False(joined.TakesProcedure(Socket, new ProcedureAddress(1, 1)));
+        Assert.Equal([$"takes 1/2 {Socket}", $"takes 1/1 {Socket}"], paired.Calls);
+
+        // a handle no transport of it drew takes none, and is asked of none
+        Assert.False(joined.TakesProcedure("type=HTTP;ip=127.0.0.1;port=50003;ordinal=1", new ProcedureAddress(1, 1)));
+        Assert.Equal(2, paired.Calls.Count);
+    }
+
+    // spec 9.11, 15.14: the twin of "a joined transport asks of procedures only when one of its
+    // transports names them"
+    [Fact]
+    public async Task A_joined_transport_asks_of_procedures_only_when_one_of_its_transports_names_them()
+    {
+        await using var memory = new MemoryTransportServer();
+        await using var unnamed = new JoinedServerTransport([memory, new PairedTransport(new SerialScheduler())]);
+
+        Assert.False(unnamed.NamesProcedures());
+
+        await using var named = new JoinedServerTransport([new MemoryTransportServer(), new PairedTransport(new SerialScheduler()) { Taking = [] }]);
+
+        Assert.True(named.NamesProcedures());
+
+        // * the one that names none takes every procedure, as it would alone
+        Assert.True(named.TakesProcedure("type=MEMORY;ip=local;ordinal=1", new ProcedureAddress(9, 9)));
+        Assert.False(named.TakesProcedure(Socket, new ProcedureAddress(9, 9)));
+    }
+
     // a WebSocket-typed transport of the tests' own, its one connection paired with a client end:
     // its flags as a test sets them, each envelope handed on in a turn of the scheduler given, and
     // each of its calls recorded
@@ -467,6 +508,9 @@ public sealed class JoinedServerTransportTests
 
         public Gauges? Held { get; init; }
 
+        // the procedures its connection takes, each ask recorded; none, every one, and never asked
+        public IReadOnlyList<ProcedureAddress>? Taking { get; init; }
+
         public ClientEnd Client { get; }
 
         public List<string> Calls { get; } = [];
@@ -514,6 +558,21 @@ public sealed class JoinedServerTransportTests
         public bool IsTwoWay(string connectionHandle)
         {
             return IsBothWays;
+        }
+
+        public bool NamesProcedures()
+        {
+            return Taking is not null;
+        }
+
+        public bool TakesProcedure(string connectionHandle, ProcedureAddress address)
+        {
+            lock (Calls)
+            {
+                Calls.Add($"takes {address.ServiceId}/{address.ProcedureId} {connectionHandle}");
+            }
+
+            return Taking is null || Taking.Contains(address);
         }
 
         public Gauges? Gauges()

@@ -18,6 +18,7 @@ import type {
   IMemoryPeerLike,
   ITransportMessage,
 } from '../shared/types';
+import { takingOf } from './shared/procedures-taken';
 import { createTransportServer, generateHandle } from './transport-server';
 import type {
   IMemoryTransportServerOptions,
@@ -26,6 +27,7 @@ import type {
   MemoryTransportServer,
 } from './types';
 
+export type { IProcedureAddress } from '../../router/shared/types';
 export { TRANSPORT_MEMORY } from '../shared/constants';
 export type {
   IMemoryAcceptOptions,
@@ -69,6 +71,7 @@ export const START_DEFAULTS = Object.freeze({
 export const createMemoryTransportServer = (
   options?: IMemoryTransportServerOptions
 ): MemoryTransportServer => {
+  const taking = takingOf(options?.procedures, 'an in-memory transport server');
   // `accept` reaches the registry and `tell`, which only `define` is handed: replaced by it, which
   // `createTransportServer` calls before it returns
   let acceptOf = (
@@ -187,6 +190,7 @@ export const createMemoryTransportServer = (
         defaults: START_DEFAULTS,
         isSecure: true,
         type: TRANSPORT_MEMORY,
+        ...taking,
 
         // * its close told in a later turn, after what it sent before, so no router is entered
         // again from its own call; settled once told

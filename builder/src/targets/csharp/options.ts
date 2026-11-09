@@ -19,7 +19,7 @@ export interface ICSharpOptions {
    */
   readonly namespace?: string;
   readonly messages: Messages;
-  /** For an output with `http: true`: what its route table holds (decision 0037). */
+  /** For an output with a `gateway`: what its route table holds (decision 0037). */
   readonly http?: IHttpInput;
 }
 

@@ -17,6 +17,10 @@ import {
 } from '../../../transport/client/memory-transport-client';
 import type { BrokerTransportClient } from '../../../transport/client/types';
 import { createMemoryTransportServer } from '../../../transport/server/memory-transport-server';
+import {
+  type IProceduresTaken,
+  proceduresTakenOf,
+} from '../../../transport/server/shared/procedures-taken';
 import type { TransportServerConnectionHandle } from '../../../transport/server/types';
 import {
   createBrokerParticipant,
@@ -33,7 +37,7 @@ import {
 import type { Data, ITransportMessage } from '../../../transport/shared/types';
 import { bytesOf } from '../../shared/envelope';
 import type { IMetricsRegistry } from '../../shared/metrics-registry';
-import type { RouterLimitsOptions } from '../../shared/types';
+import type { IProcedureAddress, RouterLimitsOptions } from '../../shared/types';
 import { fromHexadecimal } from '../../shared/__tests__/vectors';
 import {
   EnvelopeKind,
@@ -73,6 +77,11 @@ export interface IStep {
   expect?: IExpected;
   on?: string;
   open?: string;
+  /**
+   * Beside an open, the procedures its connection's transport takes (spec 9.11): every one when
+   * absent, none when empty.
+   */
+  procedures?: IProcedureAddress[];
   report?: number | 'exception';
   /** Beside an open, false for a connection that reaches off the machine in the clear. */
   secure?: false;
@@ -114,6 +123,14 @@ interface ISent {
   credential: string | undefined;
 }
 
+/** What an open declares of its connection: what it carries, and the procedures it takes. */
+interface IOpenFlags {
+  carriesCredential: boolean;
+  isSecure: boolean;
+  isTwoWay: boolean;
+  procedures: readonly IProcedureAddress[] | undefined;
+}
+
 // constants
 
 // the connection a conversation that opens none plays, opened before its first step
@@ -146,6 +163,7 @@ const STEP_KEYS: ReadonlySet<string> = new Set([
   'expect',
   'on',
   'open',
+  'procedures',
   'report',
   'secure',
   'send',
@@ -162,9 +180,11 @@ const STEP_KEYS: ReadonlySet<string> = new Set([
  * connection opened again under the same name under a new one, its ordinal the next, as every
  * transport draws a handle it never gave (spec 15.1): it records what it sends on each, with the
  * credential it is given beside it, delivers what it is given, with what its transport carried, and
- * says what each carries — a credential, and whether in the clear, as its open declared.
+ * says what each carries — a credential, and whether in the clear, as its open declared — and, when
+ * `namesProcedures`, the procedures each takes, as its open gave them, every one where it gave none:
+ * a router asks as it is built, before any open, whether its transport names any.
  */
-const createScriptedConnections = () => {
+const createScriptedConnections = (namesProcedures: boolean) => {
   const emitter = createEmitter<{
     close: [wasClean: boolean, connectionHandle: TransportServerConnectionHandle];
     connection: [
@@ -184,6 +204,7 @@ const createScriptedConnections = () => {
   const oneWay = new Set<TransportServerConnectionHandle>();
   const carryingNone = new Set<TransportServerConnectionHandle>();
   const inTheClear = new Set<TransportServerConnectionHandle>();
+  const taken = new Map<TransportServerConnectionHandle, IProceduresTaken>();
   const sent = new Map<TransportServerConnectionHandle, ISent[]>();
   // the handle of the connection `name` opened last, its ordinal how many it opened: the first
   // named on the port 50001, the next on 50002
@@ -238,6 +259,16 @@ const createScriptedConnections = () => {
 
       return Promise.resolve();
     },
+    ...(namesProcedures
+      ? {
+          takesProcedure: (
+            connectionHandle: TransportServerConnectionHandle,
+            address: IProcedureAddress
+          ) => {
+            return taken.get(connectionHandle)?.has(address) ?? true;
+          },
+        }
+      : {}),
   };
 
   return {
@@ -269,11 +300,7 @@ const createScriptedConnections = () => {
     },
     open: (
       name: string,
-      {
-        carriesCredential,
-        isSecure,
-        isTwoWay,
-      }: { carriesCredential: boolean; isSecure: boolean; isTwoWay: boolean }
+      { carriesCredential, isSecure, isTwoWay, procedures }: IOpenFlags
     ): void => {
       // * a name opened before opens a new connection, under a handle never given
       const count = (opens.get(name) ?? 0) + 1;
@@ -296,6 +323,14 @@ const createScriptedConnections = () => {
         } else {
           set.add(handle);
         }
+      }
+
+      const takes = proceduresTakenOf(procedures, 'a scripted connection');
+
+      if (takes === undefined) {
+        taken.delete(handle);
+      } else {
+        taken.set(handle, takes);
       }
 
       opened.add(handle);
@@ -327,10 +362,14 @@ const createScriptedConnections = () => {
 /**
  * The connections a conversation names over a real in-memory transport server on `clock`, a client
  * of it for each, from `127.0.0.1` and a port of its own, as the scripted transport names them: what
- * each client's transport hears, with what came beside it, kept for the steps that expect it.
+ * each client's transport hears, with what came beside it, kept for the steps that expect it. Its
+ * transport takes `procedures`, the list every open gives.
  */
-const createMemoryConnections = (clock: TestClock) => {
-  const transport = createMemoryTransportServer({ clock });
+const createMemoryConnections = (
+  clock: TestClock,
+  procedures: readonly IProcedureAddress[] | undefined
+) => {
+  const transport = createMemoryTransportServer({ clock, procedures });
   const clients = new Map<string, MemoryTransportClient>();
   const ports = new Map<string, number>();
   // the handle the server drew for each name's connection, the one it opened last
@@ -383,10 +422,7 @@ const createMemoryConnections = (clock: TestClock) => {
     },
     // a pair of it stands for a connection secure and two-way alone, which carries no credential
     // toward its client
-    open: async (
-      name: string,
-      _flags: { carriesCredential: boolean; isSecure: boolean; isTwoWay: boolean }
-    ): Promise<void> => {
+    open: async (name: string, _flags: IOpenFlags): Promise<void> => {
       const port = ports.get(name) ?? 50_001 + ports.size;
       const client = clients.get(name) ?? createMemoryTransportClient({ clock });
 
@@ -428,8 +464,12 @@ const createMemoryConnections = (clock: TestClock) => {
  * transport over the in-memory broker on `clock`, serving `interop`, and for each name a participant
  * of its own, its id the name, a broker client transport over it; what each client's transport
  * hears kept for the steps that expect it. The whole router runs over parcels, sequences and parts.
+ * Its transport takes `procedures`, the list every open gives.
  */
-const createBrokerConnections = (clock: TestClock) => {
+const createBrokerConnections = (
+  clock: TestClock,
+  procedures: readonly IProcedureAddress[] | undefined
+) => {
   const broker = createMemoryBroker({ clock });
   // ! no heartbeat: its PINGs, on the platform's timer, would cross what a step counts
   const server = createBrokerParticipant({
@@ -437,7 +477,7 @@ const createBrokerConnections = (clock: TestClock) => {
     clock,
     heartbeat: Infinity,
   });
-  const transport = server.transportServer({ names: ['interop'] });
+  const transport = server.transportServer({ names: ['interop'], procedures });
   const participants = new Map<string, IBrokerParticipant>();
   const clients = new Map<string, BrokerTransportClient>();
   const handles = new Map<string, TransportServerConnectionHandle>();
@@ -496,10 +536,7 @@ const createBrokerConnections = (clock: TestClock) => {
     },
     // a broker pair stands for a connection secure and two-way alone, which carries no credential
     // toward its client; its server told once its third leg came
-    open: async (
-      name: string,
-      _flags: { carriesCredential: boolean; isSecure: boolean; isTwoWay: boolean }
-    ): Promise<void> => {
+    open: async (name: string, _flags: IOpenFlags): Promise<void> => {
       const participant =
         participants.get(name) ??
         createBrokerParticipant({
@@ -547,18 +584,45 @@ const createBrokerConnections = (clock: TestClock) => {
 };
 
 /**
- * Whether a pair of the in-memory transport stands for each connection `conversation` opens (spec
- * 15.13): every one secure and two-way, and none a request its server sends expects carried toward
- * its client, which an in-memory one never carries.
+ * The procedures each connection of `conversation` takes, as its opens give them, written as JSON
+ * writes them: none when it opens none, `undefined` standing for every procedure.
  */
-export const isPlayedInMemory = ({ steps }: IConversation): boolean => {
-  return steps.every((step) => {
-    return (
-      step.secure !== false &&
-      step.twoWay !== false &&
-      !(step.expect?.kind === EnvelopeKind.REQUEST && step.carried !== undefined)
-    );
-  });
+const proceduresOfOpens = ({ steps }: IConversation): Set<string | undefined> => {
+  return new Set(
+    steps
+      .filter((step) => {
+        return step.open !== undefined;
+      })
+      .map(({ procedures }) => {
+        return procedures === undefined ? undefined : JSON.stringify(procedures);
+      })
+  );
+};
+
+/** The one list of procedures every open of `conversation` gives: `undefined` for every procedure. */
+const proceduresOf = (conversation: IConversation): IProcedureAddress[] | undefined => {
+  return conversation.steps.find((step) => {
+    return step.open !== undefined;
+  })?.procedures;
+};
+
+/**
+ * Whether a pair of the in-memory transport stands for each connection `conversation` opens (spec
+ * 15.13): every one secure and two-way, none a request its server sends expects carried toward its
+ * client, which an in-memory one never carries, and every one taking the same procedures, which one
+ * transport takes for every connection it draws (spec 9.11).
+ */
+export const isPlayedInMemory = (conversation: IConversation): boolean => {
+  return (
+    proceduresOfOpens(conversation).size <= 1 &&
+    conversation.steps.every((step) => {
+      return (
+        step.secure !== false &&
+        step.twoWay !== false &&
+        !(step.expect?.kind === EnvelopeKind.REQUEST && step.carried !== undefined)
+      );
+    })
+  );
 };
 
 /**
@@ -696,10 +760,14 @@ export const playConversation = async (
   }
 
   const connections = overBroker
-    ? createBrokerConnections(clock)
+    ? createBrokerConnections(clock, proceduresOf(conversation))
     : inMemory
-      ? createMemoryConnections(clock)
-      : createScriptedConnections();
+      ? createMemoryConnections(clock, proceduresOf(conversation))
+      : createScriptedConnections(
+          steps.some((step) => {
+            return step.procedures !== undefined;
+          })
+        );
   const relayOptions: IRelayOptions = {
     ...(relay?.beforeRoute === undefined ? {} : { beforeRoute: ADMISSIONS[relay.beforeRoute] }),
     ...(relay?.verifies === undefined ? {} : { verifies: relay.verifies }),
@@ -787,6 +855,7 @@ export const playConversation = async (
       carriesCredential: true,
       isSecure: true,
       isTwoWay: true,
+      procedures: undefined,
     });
   }
 
@@ -811,6 +880,7 @@ export const playConversation = async (
           carriesCredential: step.carries !== false,
           isSecure: step.secure !== false,
           isTwoWay: step.twoWay !== false,
+          procedures: step.procedures,
         });
         await settled();
       }

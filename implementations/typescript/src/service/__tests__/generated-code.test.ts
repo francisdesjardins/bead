@@ -3,6 +3,7 @@ import * as transcoding from '../../transcoding/transcoding';
 import {
   GENERATED_CODE_SUPPORTS_VERSION_6,
   GENERATED_CODE_SUPPORTS_VERSION_7,
+  GENERATED_CODE_SUPPORTS_VERSION_8,
 } from '../generated-code';
 import * as service from '../service';
 
@@ -20,16 +21,18 @@ const contractsOf = (entry: Record<string, unknown>): string[] => {
 // definition
 
 test.describe('the contract with generated code', () => {
-  test('holds the constants of the contracts this runtime supports, 5, 6 and 7, and no other', () => {
-    expect([GENERATED_CODE_SUPPORTS_VERSION_6, GENERATED_CODE_SUPPORTS_VERSION_7]).toEqual([
-      true,
-      true,
-    ]);
+  test('holds the constants of the contracts this runtime supports, 5, 6, 7 and 8, and no other', () => {
+    expect([
+      GENERATED_CODE_SUPPORTS_VERSION_6,
+      GENERATED_CODE_SUPPORTS_VERSION_7,
+      GENERATED_CODE_SUPPORTS_VERSION_8,
+    ]).toEqual([true, true, true]);
     expect(transcoding.GENERATED_CODE_SUPPORTS_VERSION_5).toBe(true);
     // * 4 goes: code that names it reads a required field unset, which no longer conforms
     expect(contractsOf(service)).toEqual([
       'GENERATED_CODE_SUPPORTS_VERSION_6',
       'GENERATED_CODE_SUPPORTS_VERSION_7',
+      'GENERATED_CODE_SUPPORTS_VERSION_8',
     ]);
     expect(contractsOf(transcoding)).toEqual(['GENERATED_CODE_SUPPORTS_VERSION_5']);
   });

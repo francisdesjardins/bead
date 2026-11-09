@@ -21,6 +21,7 @@ import {
   type ITypeScriptOptions,
 } from '../options.ts';
 import { typescriptTarget } from '../typescript.ts';
+import { SUBSETS_GOLDEN, subsetsOf } from '../../__tests__/subsets.ts';
 
 const BUILDER = fileURLToPath(new URL('../../../../', import.meta.url));
 const INTEROP = new URL('../../../../../spec/interop-blueprint.json', import.meta.url);
@@ -38,6 +39,13 @@ const COMMENTS_PROTO = 'bead/comments/v1/comments.proto';
 const CONSUMER = fileURLToPath(
   new URL('../../../../test/consumer/use-deprecated.ts', import.meta.url)
 );
+// a consumer of the split output's server and client, which `yarn type-check` compiles
+const SUBSETS_CONSUMER = fileURLToPath(
+  new URL('../../../../test/consumer/use-subsets.ts', import.meta.url)
+);
+const CONSUMER_CONFIG = fileURLToPath(
+  new URL('../../../../test/consumer/tsconfig.json', import.meta.url)
+);
 const NO_DEPRECATED = fileURLToPath(
   new URL('../../../../test/consumer/no-deprecated.oxlintrc.json', import.meta.url)
 );
@@ -45,7 +53,7 @@ const OXLINT = fileURLToPath(
   new URL('../../../../node_modules/oxlint/bin/oxlint', import.meta.url)
 );
 const MESSAGES_PROTO = 'bead/messages/v1/messages.proto';
-// spec/transcoding.proto's output with http: true, a golden folder of its own, and its document
+// spec/transcoding.proto's output with a gateway, a golden folder of its own, and its document
 const SPEC = fileURLToPath(new URL('../../../../../spec/', import.meta.url));
 const TRANSCODING_PROTO = 'transcoding.proto';
 const HTTP_GOLDEN = 'transcoding/';
@@ -177,7 +185,11 @@ test("writes the comments fixture's and the messages fixture's goldens byte for 
   ).toEqual(
     filesUnder(GOLDEN)
       .filter((name) => {
-        return !GOLDEN_CONFIGS.has(name) && !name.startsWith(HTTP_GOLDEN);
+        return (
+          !GOLDEN_CONFIGS.has(name) &&
+          !name.startsWith(HTTP_GOLDEN) &&
+          !name.startsWith(SUBSETS_GOLDEN)
+        );
       })
       .sort()
   );
@@ -189,7 +201,7 @@ test("writes the comments fixture's and the messages fixture's goldens byte for 
   }
 });
 
-test("writes spec/transcoding.proto's output with http: true as its goldens byte for byte: its route table, the document embedded as beadc writes it", () => {
+test("writes spec/transcoding.proto's output with a gateway as its goldens byte for byte: its route table, the document embedded as beadc writes it", () => {
   // * the spec's own .proto, its warnings the gateway's gates answer, no error
   const checked = checkRoots([SPEC], { files: [TRANSCODING_PROTO] });
 
@@ -249,8 +261,97 @@ test("writes spec/transcoding.proto's output with http: true as its goldens byte
   expect(JSON.parse(embedded)).toBe(document);
 });
 
+test("writes the split output of the subsets' blueprint as its goldens byte for byte: each class over its pick, the gateway's routes and each transport's procedures", () => {
+  const { input, http } = subsetsOf();
+  const written = typescriptTarget.generate(input, {
+    ...DEFAULTS,
+    http: { ...http, runtime: DEFAULT_HTTP_RUNTIME },
+  });
+
+  if (process.env['BEADC_WRITE_GOLDEN'] === '1') {
+    for (const file of written) {
+      mkdirSync(dirname(join(GOLDEN, SUBSETS_GOLDEN, file.name)), { recursive: true });
+      writeFileSync(join(GOLDEN, SUBSETS_GOLDEN, file.name), file.content);
+    }
+  }
+
+  expect(
+    written
+      .map((file) => {
+        return file.name;
+      })
+      .sort()
+  ).toEqual(['bead_http.ts', 'bead_served.ts', 'shop_bead.ts']);
+  expect(filesUnder(join(GOLDEN, SUBSETS_GOLDEN)).sort()).toEqual([
+    'bead_http.ts',
+    'bead_served.ts',
+    'shop_bead.ts',
+  ]);
+
+  for (const file of written) {
+    expect(file.content, file.name).toBe(
+      today(
+        readFileSync(join(GOLDEN, SUBSETS_GOLDEN, file.name), 'utf8'),
+        input.blueprint.specVersion
+      )
+    );
+  }
+});
+
+test('a server class refuses a resolver of a procedure it does not serve', () => {
+  const tsc = fileURLToPath(
+    new URL('../../../../node_modules/typescript-7/bin/tsc', import.meta.url)
+  );
+  const consumer = readFileSync(SUBSETS_CONSUMER, 'utf8');
+  const expected =
+    "  // @ts-expect-error listOrders is called here, not served\n  server.on('listOrders', ";
+  // * the consumer as the goldens' type-check compiles it: each expected error is one
+  const compiled = spawnSync(process.execPath, [tsc, '-p', CONSUMER_CONFIG, '--noEmit'], {
+    encoding: 'utf8',
+  });
+
+  expect(consumer).toContain(expected);
+  expect(compiled.stdout, compiled.stderr).toBe('');
+  expect(compiled.status).toBe(0);
+
+  // * the same use without its directive, beside it: the name is refused
+  const folder = test.info().outputPath('consumer');
+  const probe = join(folder, 'use-subsets.ts');
+
+  mkdirSync(folder, { recursive: true });
+  writeFileSync(
+    probe,
+    consumer
+      .replace(expected, "  server.on('listOrders', ")
+      .replaceAll(
+        "'../golden/typescript/subsets/",
+        `'${relative(folder, join(GOLDEN, SUBSETS_GOLDEN)).split(sep).join('/')}/`
+      )
+  );
+  writeFileSync(
+    join(folder, 'tsconfig.json'),
+    JSON.stringify({
+      extends: relative(folder, CONSUMER_CONFIG).split(sep).join('/'),
+      include: ['use-subsets.ts'],
+    })
+  );
+
+  const refused = spawnSync(
+    process.execPath,
+    [tsc, '-p', join(folder, 'tsconfig.json'), '--noEmit', '--pretty', 'false'],
+    { encoding: 'utf8' }
+  );
+
+  // * one error, the resolver's name: no other line of the probe moved
+  expect(refused.status).not.toBe(0);
+  expect(refused.stdout.match(/error TS\d+/gu)).toHaveLength(1);
+  expect(refused.stdout).toMatch(
+    /use-subsets\.ts\(\d+,\d+\): error TS2345: Argument of type '"listOrders"' is not assignable/u
+  );
+});
+
 test("an accepted case's output differs from the interop's by its patch alone: SPEC_VERSION_NEWER's header, NOTIFICATION_RESULT's codec", () => {
-  // * an HTTP member writes no line of a service's file: a route table's, under http: true
+  // * an HTTP member writes no line of a service's file: a route table's, under a gateway
   const accepted = blueprintCases().filter((each) => {
     return (
       !each.rule.startsWith('HTTP_') &&

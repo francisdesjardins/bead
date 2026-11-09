@@ -12,6 +12,7 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.Json;
+using Bead.Interop;
 using Bead.Tests;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Time.Testing;
@@ -75,6 +76,12 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
     private int _port;
 
     // helpers
+
+    // a call of the interop service's generated client, its payload a JSON string
+    private static Task<JsonElement> Called(Func<JsonElement, BoundCall<JsonElement>> requester)
+    {
+        return requester(JsonSerializer.SerializeToElement("x"))().WaitAsync(Patience, Cancelled);
+    }
 
     private static CancellationToken Cancelled
     {
@@ -4621,5 +4628,42 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
             return server.Start(Loopback with { CancellationToken = Cancelled });
         })).Message);
         Assert.Equal(ReadyState.Closed, server.ReadyState);
+    }
+
+    // spec 9.11: the twin of "an HTTP server transport takes the procedures it is given"
+    [Fact]
+    public async Task An_HTTP_server_transport_takes_the_procedures_it_is_given()
+    {
+        var transport = new HttpTransportServer(new HttpTransportServerOptions { Procedures = [InteropProcedures.Echo.Procedure.Address] });
+        await using var server = new Server<string>(transport);
+        await using var client = new BeadHttpClient(new BeadHttpClientOptions { Transport = new HttpTransportClientOptions { IsListening = false } });
+
+        var interop = new InteropClient(client);
+
+        InteropHandlers.Offer(server);
+
+        var port = (await transport.Start(Loopback with { CancellationToken = Cancelled })).Port;
+
+        await client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = port, CancellationToken = Cancelled });
+
+        Assert.True(transport.NamesProcedures());
+        Assert.Equal("\"x\"", (await Called(interop.Echo)).GetRawText());
+
+        // * one it does not take is answered as one to no resolver, its service known by echo
+        var refused = await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return Called(interop.Fail);
+        });
+
+        Assert.Equal(((ushort)ProtocolCode.ProcedureUnknown, "no procedure 2 in service 1"), (refused.Code, refused.Failure.Detail));
+
+        // an address out of its range refused as it is built (spec 9.12)
+        Assert.Equal(
+            "an HTTP transport server takes 1/0, out of its range: a service and a procedure are from 1 to 65535, service 0 the protocol's (spec 9.12, 16.2, 16.3) (Parameter 'options')",
+            Assert.Throws<ArgumentException>(() =>
+            {
+                return new HttpTransportServer(new HttpTransportServerOptions { Procedures = [new ProcedureAddress(1, 0)] });
+            }).Message);
+        await client.Disconnect().WaitAsync(Patience, Cancelled);
     }
 }
