@@ -7,6 +7,32 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- One `.proto` gives several packages: an output of `beadc.yaml` holds what its `server`, `client`
+  and `gateway` select, by `include` and `exclude` of `Service/procedure` or `Service/*`, by `kind`
+  and by `idempotencyLevel`, each class printed over its own selection, and the procedures each
+  transport of its server takes, `SERVED_PROCEDURES` and `ServedProcedures`, under three new rules of
+  `generate`, `SELECTOR_UNMATCHED`, `SELECTION_EMPTY` and `GATEWAY_EMPTY` (decision 0048).
+- A server's transport takes the procedures it is given, `procedures`, and a broker's per name,
+  `proceduresByName`, on every side: a request to any other is answered as one to no resolver,
+  `SERVICE_UNKNOWN` or `PROCEDURE_UNKNOWN` (spec 9.2, step 5; 9.11), before its credential, its
+  admission and its payload, and counts under its procedure's series (debugging 8.3). Nothing new
+  goes on the wire.
+
+### Changed
+
+- Spec 9.2's step 5 states its details, `no service 9` and `no procedure 99 in service 1`, and the
+  conversations compare them. Generated code that writes the procedures a server's transports take
+  names contract 8.
+- A procedure's series in the server families take `SERVICE_UNKNOWN` and `PROCEDURE_UNKNOWN` among
+  their codes, 15 of them: a procedure takes 64 series there (debugging 7.6, 7.7).
+
+### Removed
+
+- **Breaking:** `beadc.yaml`'s `http: true` and `httpRuntime`, said by `gateway: {}` and
+  `gateway.runtime`.
+
 ## [0.10.0] - 2026-11-05
 
 ### Added

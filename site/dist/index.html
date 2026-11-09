@@ -1341,7 +1341,7 @@ footer {
     <li>12 bytes for a request</li>
     <li>payloads past one envelope</li>
     <li>23 failure codes</li>
-    <li>407 units in the spec</li>
+    <li>409 units in the spec</li>
     <li>no required dependency on the TypeScript side</li>
   </ul>
   <p class="space">
@@ -2235,7 +2235,9 @@ message CountDownRequest {
     <code>JoinedServerTransport</code> on the C# side, gives one router, one admission, one handling
     of sessions, and each service offered once, whatever the call’s transport. Each connection
     stays its transport’s. That is how the <a href="#transcodage">HTTP/JSON gateway</a> calls its
-    application’s server.
+    application’s server. Each transport takes the procedures it is given, every one by default: a
+    request to any other is answered as one to no procedure, <code>PROCEDURE_UNKNOWN</code> or
+    <code>SERVICE_UNKNOWN</code>, before its credential is read (§9.11).
   </p>
   <figure class="figure">
     <figcaption>A server, its connections from two joined transports</figcaption>
@@ -2379,8 +2381,9 @@ offerHello(server);
       <code>update_mask</code> gets one from its body’s keys, as AIP-134 has it.
     </p>
     <p>
-      <code>beadc</code> writes each side’s route table and one OpenAPI 3.1.1 document per
-      blueprint, the same bytes whatever writes it. The gateway serves it at
+      <code>beadc</code> writes each side’s route table and one OpenAPI 3.1.1 document of the
+      procedures an output’s <code>gateway</code> selects, the whole blueprint by default, the same
+      bytes whatever writes it. The gateway serves it at
       <code>/openapi.json</code>, with an <code>etag</code>. A payload’s rules are written there in
       JSON Schema 2020-12’s words. The detail is in the companion’s §3, §4 and §11.
     </p>
@@ -2473,9 +2476,9 @@ data: {"code":2,"scope":"application","status":400,"title":"COUNTED","type":"htt
   </details>
   <h3 id="transcodage-client">The client beadc writes</h3>
   <p>
-    With <code>http: true</code>, <code>beadc</code> also writes a typed client of the default
-    routes, over <code>fetch</code> on the TypeScript side and over <code>HttpClient</code> on the C#
-    side. It reads each problem as a Bead failure, and a stream as an async sequence. The interop
+    With <code>gateway</code>, <code>beadc</code> also writes a typed client of the default
+    routes of the procedures it selects, over <code>fetch</code> on the TypeScript side and over
+    <code>HttpClient</code> on the C# side. It reads each problem as a Bead failure, and a stream as an async sequence. The interop
     calls each side’s gateway with the other side’s client.
   </p>
 </section>
@@ -3106,13 +3109,13 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
   <details class="more">
     <summary>The conformance files, in figures</summary>
     <ul>
-      <li><strong>The units</strong>: 407 for the specification,
+      <li><strong>The units</strong>: 409 for the specification,
         184 for debugging and 193 for
         transcoding, each held by the sha256 fingerprint of its text.</li>
       <li><strong>The vectors</strong>: 460, in 16
         groups, each header’s bytes and what a reader refuses, a JWT’s verdicts and a broker’s
         parcels.</li>
-      <li><strong>The conversations</strong>: 178 exchanges between clients
+      <li><strong>The conversations</strong>: 189 exchanges between clients
         and the interop server, relays included.</li>
       <li><strong>The transports’ cases</strong>: 255 exchanges over HTTP,
         WebSocket and a broker, written byte by byte.</li>
@@ -3425,7 +3428,7 @@ disallowed-methods = [
     <li>12 octets pour une requête</li>
     <li>des charges au-delà d’une enveloppe</li>
     <li>23 codes d’échec</li>
-    <li>407 unités dans la spécification</li>
+    <li>409 unités dans la spécification</li>
     <li>aucune dépendance obligatoire côté TypeScript</li>
   </ul>
   <p class="space">
@@ -4340,7 +4343,10 @@ message CountDownRequest {
     <code>JoinedServerTransport</code> côté C#, donne un seul routeur, une admission, une gestion
     des sessions, et chaque service offert une fois, quel que soit le transport de l’appel. Chaque
     connexion reste celle de son transport. C’est par là que la
-    <a href="#transcodage">passerelle HTTP/JSON</a> appelle le serveur de son application.
+    <a href="#transcodage">passerelle HTTP/JSON</a> appelle le serveur de son application. Chaque
+    transport prend les procédures qu’on lui donne, toutes par défaut : une requête à toute autre
+    reçoit la réponse faite à une procédure absente, <code>PROCEDURE_UNKNOWN</code> ou
+    <code>SERVICE_UNKNOWN</code>, avant que son justificatif soit lu (§9.11).
   </p>
   <figure class="figure">
     <figcaption>Un serveur, ses connexions de deux transports joints</figcaption>
@@ -4488,8 +4494,9 @@ offerHello(server);
       veut AIP-134.
     </p>
     <p>
-      <code>beadc</code> écrit la table des routes de chaque côté et un document OpenAPI 3.1.1 par
-      blueprint, les mêmes octets quel que soit ce qui l’écrit. La passerelle le sert à
+      <code>beadc</code> écrit la table des routes de chaque côté et un document OpenAPI 3.1.1 des
+      procédures que choisit la <code>gateway</code> d’une sortie, tout le blueprint par défaut, les
+      mêmes octets quel que soit ce qui l’écrit. La passerelle le sert à
       <code>/openapi.json</code>, avec un <code>etag</code>. Les règles d’une charge y sont écrites
       dans les mots de JSON Schema 2020-12. Les détails sont aux §3, §4 et §11 du compagnon.
     </p>
@@ -4584,8 +4591,9 @@ data: {"code":2,"scope":"application","status":400,"title":"COUNTED","type":"htt
   </details>
   <h3 id="transcodage-client">Le client qu’écrit beadc</h3>
   <p>
-    Avec <code>http: true</code>, <code>beadc</code> écrit aussi un client typé des routes par
-    défaut, sur <code>fetch</code> côté TypeScript et sur <code>HttpClient</code> côté C#. Il lit
+    Avec <code>gateway</code>, <code>beadc</code> écrit aussi un client typé des routes par
+    défaut des procédures qu’elle choisit, sur <code>fetch</code> côté TypeScript et sur
+    <code>HttpClient</code> côté C#. Il lit
     chaque problème comme un échec Bead, et un flux comme une suite asynchrone. L’interop appelle
     la passerelle de chaque côté avec le client de l’autre.
   </p>
@@ -5232,13 +5240,13 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
   <details class="more">
     <summary>Les fichiers de conformance, en chiffres</summary>
     <ul>
-      <li><strong>Les unités</strong> : 407 pour la spécification,
+      <li><strong>Les unités</strong> : 409 pour la spécification,
         184 pour le débogage et 193 pour le
         transcodage, chacune tenue par l’empreinte sha256 de son texte.</li>
       <li><strong>Les vecteurs</strong> : 460, en 16
         groupes, les octets de chaque en-tête et ce qu’un lecteur refuse, les verdicts d’un JWT et
         les parcelles d’un courtier.</li>
-      <li><strong>Les conversations</strong> : 178 échanges entre des clients
+      <li><strong>Les conversations</strong> : 189 échanges entre des clients
         et le serveur d’interop, relais compris.</li>
       <li><strong>Les cas des transports</strong> : 255 échanges HTTP,
         WebSocket et sur un courtier, écrits octet par octet.</li>

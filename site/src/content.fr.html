@@ -919,7 +919,10 @@
     <code>JoinedServerTransport</code> côté C#, donne un seul routeur, une admission, une gestion
     des sessions, et chaque service offert une fois, quel que soit le transport de l’appel. Chaque
     connexion reste celle de son transport. C’est par là que la
-    <a href="#transcodage">passerelle HTTP/JSON</a> appelle le serveur de son application.
+    <a href="#transcodage">passerelle HTTP/JSON</a> appelle le serveur de son application. Chaque
+    transport prend les procédures qu’on lui donne, toutes par défaut : une requête à toute autre
+    reçoit la réponse faite à une procédure absente, <code>PROCEDURE_UNKNOWN</code> ou
+    <code>SERVICE_UNKNOWN</code>, avant que son justificatif soit lu (§9.11).
   </p>
   <figure class="figure">
     <figcaption>Un serveur, ses connexions de deux transports joints</figcaption>
@@ -1047,8 +1050,9 @@
       veut AIP-134.
     </p>
     <p>
-      <code>beadc</code> écrit la table des routes de chaque côté et un document OpenAPI 3.1.1 par
-      blueprint, les mêmes octets quel que soit ce qui l’écrit. La passerelle le sert à
+      <code>beadc</code> écrit la table des routes de chaque côté et un document OpenAPI 3.1.1 des
+      procédures que choisit la <code>gateway</code> d’une sortie, tout le blueprint par défaut, les
+      mêmes octets quel que soit ce qui l’écrit. La passerelle le sert à
       <code>/openapi.json</code>, avec un <code>etag</code>. Les règles d’une charge y sont écrites
       dans les mots de JSON Schema 2020-12. Les détails sont aux §3, §4 et §11 du compagnon.
     </p>
@@ -1106,8 +1110,9 @@
   </details>
   <h3 id="transcodage-client">Le client qu’écrit beadc</h3>
   <p>
-    Avec <code>http: true</code>, <code>beadc</code> écrit aussi un client typé des routes par
-    défaut, sur <code>fetch</code> côté TypeScript et sur <code>HttpClient</code> côté C#. Il lit
+    Avec <code>gateway</code>, <code>beadc</code> écrit aussi un client typé des routes par
+    défaut des procédures qu’elle choisit, sur <code>fetch</code> côté TypeScript et sur
+    <code>HttpClient</code> côté C#. Il lit
     chaque problème comme un échec Bead, et un flux comme une suite asynchrone. L’interop appelle
     la passerelle de chaque côté avec le client de l’autre.
   </p>
