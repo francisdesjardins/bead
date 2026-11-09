@@ -30,10 +30,10 @@ CODE_ORDER = {None: -1, **{name: number for number, name in CODES.items()}, APPL
 
 # 7.6: the codes a family's exits can end with
 EVERY_CODE = [*CODES.values(), APPLICATION, OTHER]
-SERVER_CODES = ['SESSION_REQUIRED', 'ACCESS_DENIED', 'PAYLOAD_TOO_LARGE', 'CAPACITY_EXCEEDED', 'CREDENTIAL_UNSUPPORTED',
+SERVER_CODES = ['SERVICE_UNKNOWN', 'PROCEDURE_UNKNOWN', 'SESSION_REQUIRED', 'ACCESS_DENIED', 'PAYLOAD_TOO_LARGE', 'CAPACITY_EXCEEDED', 'CREDENTIAL_UNSUPPORTED',
                 'SUBSCRIPTION_UNSUPPORTED', 'CHUNK_INVALID', 'CREDIT_EXCEEDED', 'PAYLOAD_UNDECODABLE', 'TRANSFER_STALLED',
                 'PAYLOAD_INVALID', 'PROCEDURE_FAILED', APPLICATION]
-assert len(EVERY_CODE) == 25 and len(SERVER_CODES) == 13
+assert len(EVERY_CODE) == 25 and len(SERVER_CODES) == 15
 
 # 11.3: A66's bounds, in microseconds, each with its le, OpenMetrics' canonical number for it
 BOUNDS = [
@@ -262,9 +262,9 @@ def series_count(registry):
     return sum(len(series) for series in registry.families().values())
 
 
-# the record's counts (7.7): 62, 75, 28, 27, and _OTHER's 74 and 75
-for way, router, notifies, expected in (('resolver', 'server', False, 62), ('requester', 'client', False, 75),
-                                        ('resolver', 'server', True, 62 + 28), ('notification', 'client', False, 27)):
+# the record's counts (7.7): 64, 75, 28, 27, and _OTHER's 74 and 75
+for way, router, notifies, expected in (('resolver', 'server', False, 64), ('requester', 'client', False, 75),
+                                        ('resolver', 'server', True, 64 + 28), ('notification', 'client', False, 27)):
     counted = Registry()
     counted.declare(router, way, (1, 1), 'p', notifies)
     assert series_count(counted) == expected, (way, series_count(counted))
@@ -384,7 +384,7 @@ EXPOSITIONS = [
      None, ['server'], [], []),
     ('a registry given to a client\'s router makes its _OTHER series at 0: request among its client families, command among its server families',
      [MADE_AHEAD, ROLES, LABELED, ORDERED], None, ['client'], [], []),
-    ('a resolver declared makes its 62 series at 0, and one whose procedure notifies 28 more, as the side that notifies',
+    ('a resolver declared makes its 64 series at 0, and one whose procedure notifies 28 more, as the side that notifies',
      [DECLARED, AS_RESOLVER, MADE_AHEAD, CODES_OF, CODES_SERVER, CODES_NOTIFIER, SERIES_COUNTS, GROUPED, ORDERED], None,
      ['server'], [resolver(SERVER, 1, 1, 'echo'), resolver(SERVER, 1, 10, 'ticks', notifies=True)], []),
     ('a requester declared makes its 75 series at 0, and a notification registered 27, as the side that hears',
@@ -636,6 +636,12 @@ EXITS = [
      'a service unknown is answered SERVICE_UNKNOWN', {2: answered_whole(None, 'failure', 'SERVICE_UNKNOWN')}),
     ('a procedure unknown counts under _OTHER', [LABELED, ROUTE],
      'a procedure unknown, in a service known, is answered PROCEDURE_UNKNOWN', {2: answered_whole(None, 'failure', 'PROCEDURE_UNKNOWN')}),
+    # the conversation's first step opens its connection, whose transport takes echo alone
+    ('a request its connection\'s transport does not take counts PROCEDURE_UNKNOWN under its procedure, a procedure absent under _OTHER',
+     [LABELED, ROUTE],
+     'a request to a procedure its connection\'s transport does not take, of a service it takes another of, is answered PROCEDURE_UNKNOWN as one absent',
+     {3: answered_whole('echo', 'result'), 5: answered_whole('fail', 'failure', 'PROCEDURE_UNKNOWN'),
+      7: answered_whole(None, 'failure', 'PROCEDURE_UNKNOWN')}),
     ('a request that names a destination, to a server that relays nothing, counts under _OTHER', [LABELED, ROUTE],
      'a request with a destination, to a server that relays nothing, is answered DESTINATION_UNKNOWN',
      {2: answered_whole(None, 'failure', 'DESTINATION_UNKNOWN')}),

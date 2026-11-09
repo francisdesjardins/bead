@@ -39,7 +39,10 @@ with the hash of its text. The why of each rule is in the decisions:
   and [0030](../docs/decisions/0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-and-counts.md):
   the hosts, the origins and the proxies its gates take (10.1);
 - [0022](../docs/decisions/0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md):
-  the blueprint its routes come from, and the document its builder writes (3.9, 11).
+  the blueprint its routes come from, and the document its builder writes (3.9, 11);
+- [0048](../docs/decisions/0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md):
+  the procedures an output's `gateway` selects, its routes, its document and its client (3.1, 11.1,
+  12.1).
 
 **Version: 0.2.2**. Its conformance file repeats it as its `transcodingVersion`, and follows its
 schema in [`schemas/`](schemas/). It moves by `spec.md`'s rule, under a version of its own
@@ -122,8 +125,9 @@ A route is a method and a template, `http.proto`'s
 a template is a path of segments, each a literal, `*`, `**` or a variable, and an optional verb
 after a `:`.
 
-3.1. A gateway answers each procedure of its definitions that a client calls, of the kind
-`request` or `notifies` (section 16.11 of `spec.md`), and no `command`.
+3.1. A gateway answers each procedure of its definitions, or of those an output's `gateway`
+selects, that a client calls, of the kind `request` or `notifies` (section 16.11 of `spec.md`), and
+no `command`.
 
 3.2. A gateway MUST answer, for each procedure a client calls, `POST` at its default route: its
 prefix, `/`, its service's name, `/`, its procedure's name, as its definitions write them, matched
@@ -692,9 +696,10 @@ admission, which every route meets alike.
 
 ## 11. The document
 
-11.1. A builder writes one OpenAPI document of a blueprint, once, in the blueprint's own form —
-its members sorted as RFC 8785 sorts them, two spaces of indentation, a final line feed, in UTF-8 —
-so that one blueprint gives one sequence of bytes, whatever writes it. A gateway MUST serve the
+11.1. A builder writes one OpenAPI document of a blueprint, or of the procedures an output's
+`gateway` selects, once, in the blueprint's own form — its members sorted as RFC 8785 sorts them,
+two spaces of indentation, a final line feed, in UTF-8 — so that one blueprint gives one sequence
+of bytes, whatever writes it. A gateway MUST serve the
 bytes its builder wrote, as they are, at `/openapi.json`, to a `GET` and a `HEAD`, through the gates
 of section 10.1, unless its options say it serves none: `application/json`, `cache-control:
 no-cache`, and an `etag` of their sha256, its 64 lower-case hexadecimal digits between quotation
@@ -755,11 +760,11 @@ a schema states: a field's proto name, an enum's number and a 64-bit integer as 
 
 ## 12. The generated client
 
-12.1. An output with `http: true` writes, beside its route table, a typed `<Service>HttpClient`
-that calls each procedure of its service by its default `POST` route (section 3.1), its request
-whole and its result whole, whatever `google.api.http` rules the procedure also serves; a command,
-which no exchange answers, has none. Its surface maps name for name, each in its target's case:
-the client is made of its URL and its options, calls a procedure by the procedure's name,
+12.1. An output with `gateway` writes, beside its route table, a typed `<Service>HttpClient` of
+the procedures it selects, that calls each of them by its default `POST` route (section 3.1), its
+request whole and its result whole, whatever `google.api.http` rules the procedure also serves; a
+command, which no exchange answers, has none. Its surface maps name for name, each in its target's
+case: the client is made of its URL and its options, calls a procedure by the procedure's name,
 `sayHello`, its request and its options given, and calls one that notifies by `subscribe` and the
 procedure's name, `subscribeCountDown`. The names `<Service>HttpClient` and `subscribe<Procedure>`,
 in a target's case, are a target's own, which beadc keeps a blueprint's names from (its rule

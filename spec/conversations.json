@@ -8,7 +8,7 @@
     "expect is the next envelope the server sends: its kind, its call id, and its payload or its failure; a request, its flags, its service and its procedure too, and credential, the CREDENTIAL block it presents, as vectors.json writes a header's, a JWT's token a character a byte; none, it presents none. A failure compares its code, its scope and the relays it crossed, and its detail where it gives one, the detail the spec states; elsewhere its detail is informative. credential, on an answer, is the scheme of the CREDENTIAL block it carried, what it announced: OPAQUE for a session's token, which is random, NONE for its end; none, it carried no block. A result that opens a transfer gives its total too; a chunk, its offset, whether it is the last, and its payload; a credit, paced, whether it is PACED, and its end.",
     "report is the next thing the server reports to its application: a protocol code, or exception for an error that carries none.",
     "A step may move time, on the clock the server is given (decision 0011): until timer waits, on the real clock and within a patience, for a timer armed on it, due exactly that many milliseconds from now; advance steps it that many milliseconds from due to due, as spec/clocks.json states and holds the test clocks of both sides to, and follows an until timer since the last send, expect or advance; wall moves the wall clock alone, forward or back. wallClock is where the wall clock starts.",
-    "A conversation that opens its connections, open, plays them all at once: every other step names its connection, on, but a step that moves time, which is the server's, and each connection has its own expectations; one that opens none plays one connection, opened before its first step. twoWay false beside open declares a connection that carries nothing back, as an HTTP client that does not listen; carries false, one whose transport carries no credential beside an envelope it sends, as a WebSocket's toward its client or a listen's batch; secure false, one that reaches off the machine in the clear, neither over TLS nor within the machine. By default a connection carries a credential and is secure. A connection closed and opened again is a new connection under the same name.",
+    "A conversation that opens its connections, open, plays them all at once: every other step names its connection, on, but a step that moves time, which is the server's, and each connection has its own expectations; one that opens none plays one connection, opened before its first step. twoWay false beside open declares a connection that carries nothing back, as an HTTP client that does not listen; carries false, one whose transport carries no credential beside an envelope it sends, as a WebSocket's toward its client or a listen's batch; secure false, one that reaches off the machine in the clear, neither over TLS nor within the machine. By default a connection carries a credential and is secure. procedures beside open declares the procedures that connection's transport takes, by service id and procedure id (section 9.11): absent, every one; empty, none. A connection closed and opened again is a new connection under the same name.",
     "Before each send, after close, and at the end, nothing more was sent or reported: what a conversation does not expect, a server does not do.",
     "limits, where given, are the server's limits, by the names section 12.2 gives them, in milliseconds for a time; any other is its default. pacing, where given, bounds the queues of its paced subscriptions. relay, where given, sets the options of the server's relay: verifies true has it verify what it forwards (decision 0010); beforeRoute names its admission, requireCredential by default, shareLegBSession or requireSession.",
     "listener, where given, is what the server's application does from within a telling: on the first telling of its kind on a connection, and once, it calls command, a command of the interop service's, on that connection, with the clock's question as its payload, and lets its answer go. telling report is a report it hears with that connection; read, its debug listener hearing an envelope read on it.",
@@ -76,7 +76,8 @@
             "failure": {
               "code": 18,
               "scope": 0,
-              "relays": 0
+              "relays": 0,
+              "detail": "no service 9"
             }
           }
         }
@@ -99,7 +100,8 @@
             "failure": {
               "code": 18,
               "scope": 0,
-              "relays": 0
+              "relays": 0,
+              "detail": "no service 0"
             }
           }
         }
@@ -121,7 +123,8 @@
             "failure": {
               "code": 19,
               "scope": 0,
-              "relays": 0
+              "relays": 0,
+              "detail": "no procedure 99 in service 1"
             }
           }
         }
@@ -4036,7 +4039,8 @@
             "failure": {
               "code": 19,
               "scope": 0,
-              "relays": 0
+              "relays": 0,
+              "detail": "no procedure 99 in service 1"
             }
           }
         }
@@ -9490,6 +9494,657 @@
             "kind": 17,
             "callId": 9,
             "payload": "22 7A 22"
+          },
+          "on": "client"
+        }
+      ]
+    },
+    {
+      "name": "a request to a procedure its connection's transport does not take, of a service it takes another of, is answered PROCEDURE_UNKNOWN as one absent",
+      "clauses": [
+        "9.2.5",
+        "9.11"
+      ],
+      "steps": [
+        {
+          "open": "client",
+          "procedures": [
+            {
+              "serviceId": 1,
+              "procedureId": 1
+            }
+          ]
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 78 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 78 22"
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 03  00 01 00 02 | 6E 75 6C 6C",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 3,
+            "failure": {
+              "code": 19,
+              "scope": 0,
+              "relays": 0,
+              "detail": "no procedure 2 in service 1"
+            }
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 05  00 01 00 63 | 7B 7D",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 5,
+            "failure": {
+              "code": 19,
+              "scope": 0,
+              "relays": 0,
+              "detail": "no procedure 99 in service 1"
+            }
+          },
+          "on": "client"
+        }
+      ]
+    },
+    {
+      "name": "a connection whose transport names no procedures reaches what another connection's transport does not take",
+      "clauses": [
+        "9.11"
+      ],
+      "steps": [
+        {
+          "open": "reader",
+          "procedures": [
+            {
+              "serviceId": 1,
+              "procedureId": 1
+            }
+          ]
+        },
+        {
+          "open": "client"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 02 | 6E 75 6C 6C",
+          "on": "reader"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 19,
+              "scope": 0,
+              "relays": 0,
+              "detail": "no procedure 2 in service 1"
+            }
+          },
+          "on": "reader"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 02 | 6E 75 6C 6C",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 7,
+              "scope": 1,
+              "relays": 0,
+              "detail": "this procedure fails, on purpose"
+            }
+          },
+          "on": "client"
+        }
+      ]
+    },
+    {
+      "name": "a request to a service its connection's transport takes no procedure of is answered SERVICE_UNKNOWN, as a service absent",
+      "clauses": [
+        "9.2.5",
+        "9.11"
+      ],
+      "steps": [
+        {
+          "open": "stranger",
+          "procedures": [
+            {
+              "serviceId": 2,
+              "procedureId": 1
+            }
+          ]
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 78 22",
+          "on": "stranger"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 18,
+              "scope": 0,
+              "relays": 0,
+              "detail": "no service 1"
+            }
+          },
+          "on": "stranger"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 03  00 01 00 63 | 7B 7D",
+          "on": "stranger"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 3,
+            "failure": {
+              "code": 18,
+              "scope": 0,
+              "relays": 0,
+              "detail": "no service 1"
+            }
+          },
+          "on": "stranger"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 05  00 09 00 01 | 7B 7D",
+          "on": "stranger"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 5,
+            "failure": {
+              "code": 18,
+              "scope": 0,
+              "relays": 0,
+              "detail": "no service 9"
+            }
+          },
+          "on": "stranger"
+        }
+      ]
+    },
+    {
+      "name": "a transport that takes only procedures no resolver answers shows none of their service: a request to a resolver of it is answered SERVICE_UNKNOWN",
+      "clauses": [
+        "9.2.5",
+        "9.11"
+      ],
+      "steps": [
+        {
+          "open": "client",
+          "procedures": [
+            {
+              "serviceId": 1,
+              "procedureId": 99
+            }
+          ]
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 78 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 18,
+              "scope": 0,
+              "relays": 0,
+              "detail": "no service 1"
+            }
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 03  00 01 00 63 | 7B 7D",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 3,
+            "failure": {
+              "code": 18,
+              "scope": 0,
+              "relays": 0,
+              "detail": "no service 1"
+            }
+          },
+          "on": "client"
+        }
+      ]
+    },
+    {
+      "name": "a transport given no procedure takes none: every request that names no destination is answered SERVICE_UNKNOWN",
+      "clauses": [
+        "9.2.5",
+        "9.11"
+      ],
+      "steps": [
+        {
+          "open": "client",
+          "procedures": []
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 78 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 18,
+              "scope": 0,
+              "relays": 0,
+              "detail": "no service 1"
+            }
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 03  00 01 00 63 | 7B 7D",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 3,
+            "failure": {
+              "code": 18,
+              "scope": 0,
+              "relays": 0,
+              "detail": "no service 1"
+            }
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 05  00 09 00 01 | 7B 7D",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 5,
+            "failure": {
+              "code": 18,
+              "scope": 0,
+              "relays": 0,
+              "detail": "no service 9"
+            }
+          },
+          "on": "client"
+        }
+      ]
+    },
+    {
+      "name": "a request its connection's transport does not take is answered before its credential: a scheme to come is answered PROCEDURE_UNKNOWN, never CREDENTIAL_UNSUPPORTED, and a JWT is not verified",
+      "clauses": [
+        "9.2.5",
+        "9.2.6",
+        "9.11"
+      ],
+      "steps": [
+        {
+          "open": "client",
+          "procedures": [
+            {
+              "serviceId": 1,
+              "procedureId": 1
+            }
+          ]
+        },
+        {
+          "send": "A1 10 08 04  00 00 00 01  00 01 00 0E  00 04 00 00 | 6E 75 6C 6C",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 19,
+              "scope": 0,
+              "relays": 0,
+              "detail": "no procedure 14 in service 1"
+            }
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 08 06  00 00 00 03  00 01 00 0E  00 02 00 05  61 2E 62 2E 63  00 00 00 | 6E 75 6C 6C",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 3,
+            "failure": {
+              "code": 19,
+              "scope": 0,
+              "relays": 0,
+              "detail": "no procedure 14 in service 1"
+            }
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 08 04  00 00 00 05  00 01 00 01  00 04 00 00 | 22 78 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 5,
+            "failure": {
+              "code": 36,
+              "scope": 0,
+              "relays": 0,
+              "detail": "OPAQUE, JWT, ELSEWHERE"
+            }
+          },
+          "on": "client"
+        }
+      ]
+    },
+    {
+      "name": "past the calls its connection has its server answer at once, a request its transport does not take is answered CAPACITY_EXCEEDED: the bound comes first",
+      "clauses": [
+        "9.2.3",
+        "9.2.5",
+        "9.11"
+      ],
+      "limits": {
+        "maximumAnsweringCalls": 1
+      },
+      "steps": [
+        {
+          "open": "client",
+          "procedures": [
+            {
+              "serviceId": 1,
+              "procedureId": 3
+            }
+          ]
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 03 | 7B 22 6D 69 6C 6C 69 73 65 63 6F 6E 64 73 22 3A 33 36 30 30 30 30 30 7D",
+          "on": "client"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 03  00 01 00 02 | 6E 75 6C 6C",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 3,
+            "failure": {
+              "code": 35,
+              "scope": 0,
+              "relays": 0
+            }
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 16 00 02  00 00 00 01",
+          "on": "client"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 05  00 01 00 02 | 6E 75 6C 6C",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 5,
+            "failure": {
+              "code": 19,
+              "scope": 0,
+              "relays": 0,
+              "detail": "no procedure 2 in service 1"
+            }
+          },
+          "on": "client"
+        }
+      ]
+    },
+    {
+      "name": "a request that names a destination, to a server that relays nothing, is answered DESTINATION_UNKNOWN whatever its connection's transport takes",
+      "clauses": [
+        "9.2.4",
+        "9.11"
+      ],
+      "steps": [
+        {
+          "open": "client",
+          "procedures": [
+            {
+              "serviceId": 1,
+              "procedureId": 1
+            }
+          ]
+        },
+        {
+          "send": "A1 10 02 04  00 00 00 01  00 01 00 02  00 00 00 05 | 6E 75 6C 6C",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 16,
+              "scope": 0,
+              "relays": 0
+            }
+          },
+          "on": "client"
+        }
+      ]
+    },
+    {
+      "name": "a request that names a destination crosses the relay whatever its connection's transport takes",
+      "clauses": [
+        "9.11",
+        "14.2"
+      ],
+      "relay": {
+        "beforeRoute": "shareLegBSession"
+      },
+      "steps": [
+        {
+          "open": "client",
+          "procedures": [
+            {
+              "serviceId": 1,
+              "procedureId": 12
+            }
+          ]
+        },
+        {
+          "open": "device"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 7D",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 61 64 61 22",
+            "credential": "OPAQUE"
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 7D",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "31 32"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 03  00 01 00 01 | 22 78 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 3,
+            "failure": {
+              "code": 19,
+              "scope": 0,
+              "relays": 0,
+              "detail": "no procedure 1 in service 1"
+            }
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 02 04  00 00 00 05  00 01 00 01  00 00 00 0C | 22 79 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 16,
+            "callId": 2,
+            "flags": 0,
+            "serviceId": 1,
+            "procedureId": 1,
+            "payload": "22 79 22"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 11 00 02  00 00 00 02 | 22 79 22",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 5,
+            "payload": "22 79 22"
+          },
+          "on": "client"
+        }
+      ]
+    },
+    {
+      "name": "a request that opens a transfer to a procedure its connection's transport does not take is answered PROCEDURE_UNKNOWN, its transfer given no credit",
+      "clauses": [
+        "9.2.5",
+        "9.11",
+        "12.3"
+      ],
+      "limits": {
+        "chunkBytes": 64,
+        "windowBytes": 128
+      },
+      "steps": [
+        {
+          "open": "client",
+          "procedures": [
+            {
+              "serviceId": 1,
+              "procedureId": 7
+            }
+          ]
+        },
+        {
+          "send": "A1 10 04 05  00 00 00 01  00 01 00 01  00 00 00 00 00 00 01 2C | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 19,
+              "scope": 0,
+              "relays": 0,
+              "detail": "no procedure 1 in service 1"
+            }
+          },
+          "on": "client"
+        }
+      ]
+    },
+    {
+      "name": "a request to a procedure that notifies, which its connection's transport does not take, opens no subscription",
+      "clauses": [
+        "9.2.5",
+        "9.11",
+        "11.2"
+      ],
+      "steps": [
+        {
+          "open": "client",
+          "procedures": [
+            {
+              "serviceId": 1,
+              "procedureId": 11
+            }
+          ]
+        },
+        {
+          "send": "A1 10 10 03  00 00 00 01  00 01 00 0A | 6E 75 6C 6C",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 19,
+              "scope": 0,
+              "relays": 0,
+              "detail": "no procedure 10 in service 1"
+            }
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 03  00 01 00 0B | 7B 22 76 61 6C 75 65 22 3A 31 7D",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "6E 75 6C 6C"
           },
           "on": "client"
         }

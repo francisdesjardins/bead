@@ -91,7 +91,9 @@ to one meaning of `advance`. The why of each rule is in the decisions:
   and a publisher's order in the in-memory broker, sections 9.0, 9.1 and 15.24;
 - [0046](../docs/decisions/0046-a-router-paces-each-connections-reads-by-what-it-has-not-taken.md):
   a connection's reads paced by what its router has not taken, sections 15.5 to 15.7, 15.12, 15.19
-  and 15.23.
+  and 15.23;
+- [0048](../docs/decisions/0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md):
+  the procedures a server's transport takes, sections 9.2, 9.11, 9.12, 15.1 and 15.14.
 
 **Version: 0.11.0**, of layout `0xA1`, its broker parcels of layout `0xB1`. Each of its
 conformance files repeats it as its `specVersion`, and follows its schema in
@@ -396,8 +398,10 @@ first that applies:
    place, which sections 11.3, 11.10 and 12.9 bound.
 4. A destination, named to a receiver that relays nothing (section 14.1): answered with
    `DESTINATION_UNKNOWN`.
-5. No resolver for its service: `SERVICE_UNKNOWN`; for its procedure in a service known:
-   `PROCEDURE_UNKNOWN`.
+5. No resolver for its service among those its connection's transport takes (section 9.11):
+   `SERVICE_UNKNOWN`; for its procedure in a service known there: `PROCEDURE_UNKNOWN`. Its
+   detail SHOULD be `no service <service id>`, or `no procedure <procedure id> in service
+   <service id>`, each id in decimal: `no service 9`, `no procedure 99 in service 1`.
 6. Its credential, then its admission, in this order, which read its header, never its payload,
    each refusal told as section 13.12 says:
    1. a credential scheme the receiver takes none of — one to come, or one it has no verifier for:
@@ -496,6 +500,30 @@ inactivity counts instead. Past it, the call ends, and is cancelled.
 answer is ended as cancelled — its resolver told, or, while its credential resolves (section 9.2),
 its verifier, by the call's signal — and answered by nothing. What a verifier settles to then is
 dropped in silence (section 10.2).
+
+9.11. A server's transport MAY take only the procedures its application names, by their
+addresses — a service id and a procedure id each (section 16.7) — so that a connection it draws
+reaches no other, as an origin server that hides a resource answers 404
+([RFC 9110 §15.5.4](https://www.rfc-editor.org/rfc/rfc9110#section-15.5.4)). A service is known
+on such a connection when its side registered a resolver of it whose address the transport
+takes; a request that names no destination reaches only those resolvers, and any other is
+answered at step 5 of section 9.2 as one to no resolver: `SERVICE_UNKNOWN` for a service not
+known there, `PROCEDURE_UNKNOWN` otherwise, with the detail that step gives, so that nothing of
+the answer tells a procedure left out from one absent, nor a service whose every procedure is
+left out from one absent. Such a request takes its place among the calls its connection has
+answered (step 3), and nothing of it is read past its header: its credential is not resolved,
+its admission not asked, its transfer given no credit, its payload not read, and the subscription
+it would open is not opened. A transport given no list takes every procedure; one given an
+empty list takes none. A transport over a broker MAY take its procedures per name it serves
+(section 15.16), each connection what the name its OPEN reached takes (section 15.18). A request
+that names a destination is its relay's (section 14.3), whatever its connection's transport
+takes. What a transport takes is no access: it grants none, withdraws no session, and each
+procedure it takes keeps its own admission (step 6).
+
+9.12. A side MUST refuse, as a server's transport is built, an address outside section 16.2's
+ranges or of service 0 (section 16.3) among the procedures it takes, as section 16.10 refuses a
+declaration, and procedures given for a name a transport over a broker does not serve; an
+address named twice is one.
 
 ## 10. Cancel and reservation
 
@@ -1238,8 +1266,10 @@ sends — a client's over HTTP, in memory or over a broker any field value, over
 its upgrade carried, compared in constant time; a Web Worker's none, nor a server's toward its
 client (sections 15.2, 15.9, 15.13, 15.22) — and whether it is secure — under TLS, on the loopback,
 or never leaving the machine — so that a side fails before it goes a call whose credential it cannot
-carry (section 13.4). No failure's detail, event, trace or log carries that credential, nor a
-header's: only its credential scheme.
+carry (section 13.4). A server's transport says, too, whether a connection of its takes a
+procedure (section 9.11), which its router asks of each request that names no destination. No
+failure's detail, event, trace or log carries that credential, nor a header's: only its credential
+scheme.
 
 ### WebSocket
 
@@ -1804,10 +1834,10 @@ connection it holds and takes no connect; a client's connect then fails before a
 
 15.14. A server MAY take its connections from several transports through one that joins them. A
 joined transport hands on each transport's events with the handle that transport drew, and each
-connection's sending, closing, credential and security are its own transport's. It MUST refuse to
-join two transports whose handles might be one. Its stop stops each, and its bounds and its gauges
-reach each, as section 15.1 has a transport's. It serves no port of its own: one port for two
-transports comes from a proxy in front of them.
+connection's sending, closing, credential, security and the procedures it takes are its own
+transport's. It MUST refuse to join two transports whose handles might be one. Its stop stops each,
+and its bounds and its gauges reach each, as section 15.1 has a transport's. It serves no port of its
+own: one port for two transports comes from a proxy in front of them.
 
 ### A connect
 
