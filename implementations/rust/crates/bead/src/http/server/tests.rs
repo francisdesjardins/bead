@@ -11,6 +11,9 @@ use crate::http::peer::*;
 use crate::router::types::LIMIT_DEFAULTS;
 use crate::testing::{patience, rest};
 
+mod life;
+mod listens;
+
 // a refusal's status and mark, and what it tells of its request: its authority and its origin
 type Mark<'a> = (u16, &'a str);
 type Told<'a> = (Option<&'a str>, Option<&'a str>);
@@ -155,6 +158,20 @@ fn keeps_its_constants_in_step_with_the_router_s() {
         "its bounds"
     );
     assert_eq!(PATHNAME, "/bead", "its path");
+    assert_eq!(
+        MAXIMUM_OUTBOX_BYTES,
+        2 * LIMIT_DEFAULTS.maximum_envelope_bytes,
+        "two of a router's largest envelopes"
+    );
+    assert_eq!(
+        [EXCHANGE_TIMEOUT, INACTIVITY_TIMEOUT, MAXIMUM_WAIT],
+        [
+            Duration::from_secs(300),
+            Duration::from_secs(300),
+            Duration::from_secs(30)
+        ],
+        "its timers"
+    );
 }
 
 // spec 9.11
@@ -1163,6 +1180,10 @@ async fn hands_on_a_request_whose_message_listener_throws_its_answer_still_writt
     started.stop().await;
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "each option refused written whole, as the other sides' twins write them"
+)]
 #[test]
 fn refuses_options_it_cannot_hold() {
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -1207,10 +1228,69 @@ fn refuses_options_it_cannot_hold() {
                 ..HttpTransportServerOptions::default()
             },
         ),
+        (
+            "exchangeTimeout",
+            HttpTransportServerOptions {
+                exchange_timeout: Some(Duration::from_millis(2_147_483_648)),
+                ..HttpTransportServerOptions::default()
+            },
+        ),
+        (
+            "exchangeTimeout",
+            HttpTransportServerOptions {
+                exchange_timeout: Some(Duration::from_micros(500)),
+                ..HttpTransportServerOptions::default()
+            },
+        ),
+        (
+            "inactivityTimeout",
+            HttpTransportServerOptions {
+                inactivity_timeout: Some(Duration::ZERO),
+                ..HttpTransportServerOptions::default()
+            },
+        ),
+        (
+            "maximumWait",
+            HttpTransportServerOptions {
+                maximum_wait: Some(Duration::from_micros(500)),
+                ..HttpTransportServerOptions::default()
+            },
+        ),
+        (
+            "maximumWait",
+            HttpTransportServerOptions {
+                maximum_wait: Some(NEVER),
+                ..HttpTransportServerOptions::default()
+            },
+        ),
+        (
+            "maximumOutboxBytes",
+            HttpTransportServerOptions {
+                maximum_outbox_bytes: Some(0),
+                ..HttpTransportServerOptions::default()
+            },
+        ),
     ] {
         let refused = HttpTransportServer::new(&options).expect_err(name);
 
         assert!(refused.to_string().starts_with(name), "{refused}");
+    }
+
+    for (exchange_timeout, inactivity_timeout, maximum_wait) in [
+        (NEVER, NEVER, None),
+        (
+            Duration::from_millis(1),
+            Duration::from_millis(1),
+            Some(Duration::from_millis(1)),
+        ),
+    ] {
+        HttpTransportServer::new(&HttpTransportServerOptions {
+            exchange_timeout: Some(exchange_timeout),
+            inactivity_timeout: Some(inactivity_timeout),
+            maximum_wait,
+            ..HttpTransportServerOptions::default()
+        })
+        .expect("taken");
     }
 }
 
@@ -2094,7 +2174,7 @@ fn refuses_a_headers_timeout_a_send_grace_period_a_body_grace_period_a_minimum_s
         (
             "sendGracePeriod",
             HttpTransportServerOptions {
-                send_grace_period: Some(crate::NEVER),
+                send_grace_period: Some(NEVER),
                 ..HttpTransportServerOptions::default()
             },
         ),

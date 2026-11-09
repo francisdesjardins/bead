@@ -48,6 +48,7 @@ pub(crate) struct Told {
     pub(crate) closes: Vec<(bool, ConnectionHandle)>,
     pub(crate) refusals: Vec<TransportServerRefusal>,
     pub(crate) errors: Vec<(String, Option<ConnectionHandle>)>,
+    pub(crate) listens: Vec<(bool, ConnectionHandle)>,
 }
 
 /// What hears a server's events.
@@ -138,6 +139,12 @@ impl ServerListener for Recorder {
     fn on_close(&self, was_clean: bool, connection_handle: &ConnectionHandle) {
         self.record(("close", |told: &mut Told| {
             told.closes.push((was_clean, Arc::clone(connection_handle)));
+        }));
+    }
+
+    fn on_listen(&self, is_held: bool, connection_handle: &ConnectionHandle) {
+        self.record(("listen", |told: &mut Told| {
+            told.listens.push((is_held, Arc::clone(connection_handle)));
         }));
     }
 
@@ -647,4 +654,65 @@ impl Drop for Pumped {
     fn drop(&mut self) {
         self.pumping.abort();
     }
+}
+
+/// A connect whose client says it listens: the handle its server drew, and its token.
+pub(crate) async fn connect_listening(started: &Started) -> (ConnectionHandle, String) {
+    let response = posted(
+        started.port,
+        &Post {
+            fields: vec!["bead-listen: ?1".to_owned()],
+            ..Post::default()
+        },
+    )
+    .await;
+
+    assert_eq!(response.head.status, 201, "a connect drawn");
+
+    let token = response.head.fields[CONNECTION_TOKEN_HEADER].clone();
+    let handle = Arc::clone(
+        &started
+            .server
+            .clients()
+            .last()
+            .expect("the connection drawn")
+            .connection_handle,
+    );
+
+    (handle, token)
+}
+
+/// A listen on `token`'s connection, its `bead-after` and its `bead-wait` as given, each left out
+/// where none.
+pub(crate) async fn listen_of(
+    port: u16,
+    (token, (after, wait)): (&str, (Option<&str>, Option<&str>)),
+) -> Exchange {
+    let token_field = format!("{CONNECTION_TOKEN_HEADER}: {token}");
+    let after_field = after.map(|after| format!("bead-after: {after}"));
+    let wait_field = wait.map(|wait| format!("bead-wait: {wait}"));
+    let fields: Vec<&str> = [
+        Some(token_field.as_str()),
+        after_field.as_deref(),
+        wait_field.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+
+    exchange_of(port, head_of(("GET", "/bead"), (port, &fields)).as_bytes()).await
+}
+
+/// What a listen brings back of `envelopes`: each after its length in 4 bytes.
+pub(crate) fn batch_of(envelopes: &[&[u8]]) -> Vec<u8> {
+    envelopes
+        .iter()
+        .flat_map(|envelope| {
+            u32::try_from(envelope.len())
+                .unwrap()
+                .to_be_bytes()
+                .into_iter()
+                .chain(envelope.iter().copied())
+        })
+        .collect()
 }

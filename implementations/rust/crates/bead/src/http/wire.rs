@@ -54,6 +54,7 @@ pub(crate) struct Flow {
     lingers: AtomicBool,
     heads: AtomicU64,
     answered: AtomicU64,
+    settled: AtomicU64,
     stop: CancellationToken,
     abort: CancellationToken,
     // the paces its answers are held to, each until it judges nothing waits
@@ -111,8 +112,10 @@ impl Flow {
         }
     }
 
+    // * a head read whose answer hyper has not let go of yet: one handed to it, unwritten, among
+    // them
     fn is_answering(&self) -> bool {
-        self.heads.load(Ordering::SeqCst) > self.answered.load(Ordering::SeqCst)
+        self.heads.load(Ordering::SeqCst) > self.settled.load(Ordering::SeqCst)
     }
 }
 
@@ -214,6 +217,8 @@ pub(crate) struct AnswerBody {
     carried: Carried,
     is_whole: bool,
     closed: Option<Closed>,
+    // the flow it settles as hyper lets it go
+    flow: Option<Arc<Flow>>,
 }
 
 impl fmt::Debug for AnswerBody {
@@ -235,6 +240,7 @@ impl AnswerBody {
             is_whole: bytes.is_none(),
             carried: Carried::Whole(bytes),
             closed: None,
+            flow: None,
         }
     }
 
@@ -247,9 +253,16 @@ impl AnswerBody {
                 carried: Carried::Streamed(receiver),
                 is_whole: false,
                 closed: None,
+                flow: None,
             },
             sender,
         )
+    }
+
+    /// Itself, settling `flow` as hyper lets it go.
+    pub(crate) fn settling(mut self, flow: &Arc<Flow>) -> Self {
+        self.flow = Some(Arc::clone(flow));
+        self
     }
 
     /// Itself, telling `closed` whether it was taken whole once hyper lets it go.
@@ -269,6 +282,10 @@ impl AnswerBody {
 
 impl Drop for AnswerBody {
     fn drop(&mut self) {
+        if let Some(flow) = self.flow.take() {
+            flow.settled.fetch_add(1, Ordering::SeqCst);
+        }
+
         if let Some(closed) = self.closed.take() {
             closed(self.is_whole);
         }

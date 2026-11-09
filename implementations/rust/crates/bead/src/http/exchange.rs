@@ -13,7 +13,8 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::clock::Timer;
 use crate::http::fields::{
-    BEAD_MEDIA_TYPE, ENVELOPE_PREFIX_BYTES, End, REFUSAL_HEADER, RESPONSE_FIELDS,
+    BEAD_BATCH_MEDIA_TYPE, BEAD_MEDIA_TYPE, ENVELOPE_PREFIX_BYTES, End, REFUSAL_HEADER,
+    RESPONSE_FIELDS, SEQUENCE_HEADER,
 };
 use crate::http::wire::{AnswerBody, Closed, Flow, Piece, piece_of, response_of};
 use crate::router::types::ConnectionHandle;
@@ -203,6 +204,8 @@ impl Responder {
     }
 
     fn body_of(&mut self, body: AnswerBody) -> AnswerBody {
+        let body = body.settling(&self.flow);
+
         match self.closed.take() {
             Some(closed) => body.telling(closed),
             None => body,
@@ -277,6 +280,21 @@ impl Responder {
         }
     }
 
+    /// Writes what a listen brings back: `batch`, each envelope after its length, the first
+    /// numbered `first` (spec 15.9).
+    pub(crate) fn batch(&mut self, (batch, first): (Bytes, u64)) {
+        if self.head.is_some() {
+            let fields = self.fields_of(
+                &End::of(200)
+                    .with(("content-type", BEAD_BATCH_MEDIA_TYPE.to_owned()))
+                    .with((SEQUENCE_HEADER, first.to_string())),
+            );
+            let body = self.body_of(AnswerBody::whole(Some(batch)));
+
+            self.send_head(response_of(200, (&fields, body)));
+        }
+    }
+
     /// Cuts it: past its head, its body ends before its end; before, its socket ends with nothing
     /// written.
     pub(crate) fn cut(&mut self) {
@@ -313,6 +331,8 @@ pub(crate) struct ExchangeState {
     pub(crate) received: u64,
     /// Its body's pace: the timer its rate is judged by.
     pub(crate) slow: Option<Arc<dyn Timer>>,
+    /// Ends its connection, as lost, once its request waited past its timeout for its answer.
+    pub(crate) timer: Option<Arc<dyn Timer>>,
     /// Its body read whole, until it is handed on.
     pub(crate) envelope: Option<Bytes>,
     /// The credential its request carries.

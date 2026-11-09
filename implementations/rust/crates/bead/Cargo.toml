@@ -42,7 +42,6 @@ http = [
   "dep:http",
   "dep:hyper",
   "dep:hyper-util",
-  "dep:http-body-util",
   "dep:httpdate",
 ]
 
@@ -78,7 +77,6 @@ rustls-platform-verifier = { workspace = true, optional = true }
 # the HTTP transport's alone
 hyper = { workspace = true, optional = true, features = ["server", "http1"] }
 hyper-util = { workspace = true, optional = true, features = ["tokio"] }
-http-body-util = { workspace = true, optional = true }
 
 [dev-dependencies]
 # the crate itself, with its test kit: one copy of bead for the unit tests and the players

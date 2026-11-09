@@ -2,11 +2,18 @@
 //! and `HttpTransportServerTests.ServerFields`.
 
 use core::fmt::Write as _;
+use core::time::Duration;
 use std::net::SocketAddr;
+use std::sync::Arc;
+use std::time::SystemTime;
 
-use crate::http::fields::HTTP_REFUSALS;
+use crate::NEVER;
+use crate::constants::EnvelopeKind;
+use crate::http::fields::{HTTP_REFUSALS, LISTEN_HEADER, SEQUENCE_HEADER};
 use crate::http::peer::*;
 use crate::http::server::{HttpTransportServerOptions, judged};
+use crate::testing::SteppingClock;
+use crate::testing::wire::ResponseHead;
 
 /// The fields every response on the path carries but HTTP's own 400, and the one CORS names.
 const PATH_FIELDS: [&str; 4] = [
@@ -841,4 +848,378 @@ async fn answers_400_unmarked_with_none_of_the_path_s_fields_a_field_holding_a_c
         );
         started.stop().await;
     }
+}
+
+// a request of `fields`, each a line, as hyper hands one on
+fn request_of(fields: &[(&str, &str)]) -> ::http::request::Parts {
+    let mut request = ::http::Request::post("/bead");
+
+    for (name, value) in fields {
+        request = request.header(*name, *value);
+    }
+
+    request.body(()).unwrap().into_parts().0
+}
+
+// the fields `parts` carries, as the transport reads them
+const fn read_of(parts: &::http::request::Parts) -> super::Request<'_> {
+    super::Request {
+        is_http1: true,
+        is_http11: true,
+        method: &parts.method,
+        uri: &parts.uri,
+        headers: &parts.headers,
+    }
+}
+
+#[test]
+fn reads_a_field_by_its_first_line_or_all_of_them_a_count_and_a_listen_as_rfc_9651_items_and_a_body_as_its_length_or_its_coding_says()
+ {
+    let counted = |values: &[&str]| {
+        let lines: Vec<(&str, &str)> = values.iter().map(|value| ("bead-after", *value)).collect();
+
+        read_of(&request_of(&lines)).count_of(("bead-after", false))
+    };
+    let listening = |values: &[&str]| {
+        let lines: Vec<(&str, &str)> = values.iter().map(|value| (LISTEN_HEADER, *value)).collect();
+
+        read_of(&request_of(&lines)).listening()
+    };
+    let twice = request_of(&[("Authorization", BEARER), ("authorization", "Basic")]);
+
+    assert_eq!(
+        read_of(&twice).header_of("authorization"),
+        Some(BEARER),
+        "its first"
+    );
+    assert_eq!(
+        read_of(&twice).lines_of("authorization"),
+        vec![BEARER, "Basic"],
+        "all of them"
+    );
+    assert_eq!(
+        [
+            counted(&["3"]),
+            counted(&["0;p=1"]),
+            counted(&[]),
+            counted(&["-1"]),
+            counted(&["1", "2"])
+        ],
+        [Some(3), Some(0), Some(0), None, None],
+        "counts"
+    );
+    assert_eq!(
+        read_of(&request_of(&[])).count_of(("bead-after", true)),
+        None,
+        "one required"
+    );
+    assert_eq!(
+        [
+            listening(&["?1"]),
+            listening(&["?0"]),
+            listening(&[]),
+            listening(&["1"])
+        ],
+        [Some(true), Some(false), Some(false), None],
+        "listens"
+    );
+    assert_eq!(
+        [
+            vec![("Content-Length", "0")],
+            vec![("Content-Length", "8")],
+            vec![("Transfer-Encoding", "chunked")],
+            vec![],
+        ]
+        .map(|fields| read_of(&request_of(&fields)).has_body()),
+        [false, true, true, false],
+        "bodies"
+    );
+}
+
+// spec 15.6, 15.9
+#[tokio::test]
+async fn reads_a_listen_s_counts_from_bead_after_and_bead_wait_a_field_given_as_several_lines_joined_and_refuses_400_a_listen_without_bead_after_whatever_its_target_holds()
+ {
+    let clock = SteppingClock::new(SystemTime::UNIX_EPOCH);
+    let started = started(&HttpTransportServerOptions {
+        clock: Some(Arc::<SteppingClock>::clone(&clock)),
+        inactivity_timeout: Some(NEVER),
+        ..HttpTransportServerOptions::default()
+    })
+    .await;
+    let port = started.port;
+    let (handle, token) = connect_listening(&started).await;
+    let notification = envelope_of(EnvelopeKind::Notification.byte(), (1, 0));
+    let token_field = format!("{CONNECTION_TOKEN_HEADER}: {token}");
+    // a listen at `target`, its fields besides its token
+    let at = async |target: &str, fields: &[&str]| {
+        let mut lines = vec![token_field.as_str()];
+
+        lines.extend_from_slice(fields);
+        exchange_of(port, head_of(("GET", target), (port, &lines)).as_bytes()).await
+    };
+
+    started.send(&notification, &handle).await.unwrap();
+
+    // Items of RFC 9651 whose bare item is an Integer of 0 or more, each field's lines joined
+    // before they are read: two lines are a list, which no Item is
+    let mut refused = Vec::new();
+
+    for fields in [
+        &["bead-after: 0", "bead-after: 0", "bead-wait: 0"][..],
+        &["bead-after: 0", "bead-wait: 0", "bead-wait: 1"],
+        &["bead-after: 0, 0"],
+        &["bead-after:"],
+        &["bead-after: 1.0"],
+        &["bead-after: \"1\""],
+        &["bead-after: -1"],
+        &["bead-after: 0", "bead-wait: ?1"],
+        &["bead-after: 0;X=1"],
+        // without bead-after, its counts in the query or not
+        &["bead-wait: 0"],
+    ] {
+        refused.push(refusal_of(
+            &at("/bead", fields).await.head(PATIENCE).await.unwrap(),
+        ));
+    }
+
+    refused.push(refusal_of(
+        &at("/bead?after=0&wait=0", &[])
+            .await
+            .head(PATIENCE)
+            .await
+            .unwrap(),
+    ));
+
+    assert_eq!(
+        refused,
+        vec![(400, Some(HTTP_REFUSALS.malformed.to_owned())); 11],
+        "each refused"
+    );
+
+    // with it, whatever its query: its parameters ignored, -0 read as 0
+    let batch = batch_of(&[&notification]);
+
+    for (target, fields) in [
+        (
+            "/bead?after=5&x=1",
+            &["bead-after: -0;x=1", "bead-wait: 0;y=\"a;b\""][..],
+        ),
+        ("/bead?after=5&x=1", &["bead-after: 0", "bead-wait: 0"]),
+        ("/bead?", &["bead-after: 0", "bead-wait: 0"]),
+        ("/bead", &["bead-after: 0"]),
+    ] {
+        let response = at(target, fields).await.response(PATIENCE).await.unwrap();
+
+        assert_eq!(
+            (
+                response.head.status,
+                response.head.fields.get(SEQUENCE_HEADER).cloned(),
+                response.body
+            ),
+            (200, Some("1".to_owned()), batch.clone()),
+            "{target} with {fields:?}"
+        );
+    }
+
+    assert_eq!(
+        refusal_of(
+            &at("/bead", &["bead-after: 1;x=1", "bead-wait: 0;y=\"a;b\""])
+                .await
+                .head(PATIENCE)
+                .await
+                .unwrap()
+        ),
+        (204, None),
+        "acknowledged"
+    );
+
+    // a bead-wait left out is 0, answered at once; one given, held as long
+    assert_eq!(
+        refusal_of(
+            &at("/bead?", &["bead-after: 1"])
+                .await
+                .head(PATIENCE)
+                .await
+                .unwrap()
+        ),
+        (204, None),
+        "at once"
+    );
+    assert!(clock.dues().is_empty(), "no timer armed");
+
+    let waiting = at("/bead", &["bead-after: 1", "bead-wait: 500"]).await;
+
+    until(|| clock.dues() == [Duration::from_millis(500)]).await;
+    clock.advance(Duration::from_millis(500)).await;
+
+    assert_eq!(
+        refusal_of(&waiting.head(PATIENCE).await.unwrap()),
+        (204, None),
+        "held as long"
+    );
+    assert!(started.recorder.told().closes.is_empty(), "nothing closed");
+    started.stop().await;
+}
+
+// spec 15.4, 15.9, 15.12
+#[expect(
+    clippy::too_many_lines,
+    reason = "every answer it writes to a page, each read, as the other sides' twins read them"
+)]
+#[tokio::test]
+async fn names_an_origin_it_names_on_every_answer_it_writes_to_it_once_that_origin_is_judged_a_batch_and_a_refusal_among_them_and_exposes_every_field()
+ {
+    let started = started(&HttpTransportServerOptions {
+        origins: Some(vec![PAGE.to_owned()]),
+        ..HttpTransportServerOptions::default()
+    })
+    .await;
+    let port = started.port;
+    let origin = format!("Origin: {PAGE}");
+    let named = |head: &ResponseHead| {
+        let field = |name: &str| head.fields.get(name).cloned();
+
+        (
+            field("access-control-allow-origin"),
+            field("access-control-expose-headers"),
+            field("access-control-allow-credentials"),
+            field("access-control-allow-methods"),
+            field("cache-control"),
+            field("vary"),
+        )
+    };
+    let expected = (
+        Some(PAGE.to_owned()),
+        Some("*".to_owned()),
+        None,
+        None,
+        Some("no-store".to_owned()),
+        Some("Origin".to_owned()),
+    );
+    let mut answers = Vec::new();
+
+    // a connect that listens, its token read
+    let drawn = posted(
+        port,
+        &Post {
+            fields: vec![origin.clone(), format!("{LISTEN_HEADER}: ?1")],
+            ..Post::default()
+        },
+    )
+    .await;
+    let token = drawn.head.fields[CONNECTION_TOKEN_HEADER].clone();
+    let handle = Arc::clone(&started.server.clients()[0].connection_handle);
+
+    answers.push((drawn.head.status, named(&drawn.head)));
+
+    // a request with its Authorization, its head going as it is handed on, then answered
+    let request = posting(
+        port,
+        &Post {
+            token: Some(&token),
+            fields: vec![origin.clone(), format!("Authorization: {BEARER}")],
+            body: envelope_of(REQUEST, (1, 0)),
+            ..Post::default()
+        },
+    )
+    .await;
+    let head = request.head(PATIENCE).await.unwrap();
+
+    answers.push((head.status, named(&head)));
+    started
+        .send(&envelope_of(RESULT, (1, 0)), &handle)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        request.response(PATIENCE).await.unwrap().body,
+        envelope_of(RESULT, (1, 0)),
+        "its answer"
+    );
+
+    // a result handed on, 204
+    let other = posted(
+        port,
+        &Post {
+            token: Some(&token),
+            fields: vec![origin.clone()],
+            body: envelope_of(RESULT, (5, 0)),
+            ..Post::default()
+        },
+    )
+    .await;
+
+    answers.push((other.head.status, named(&other.head)));
+
+    // a batch, and an empty listen
+    started
+        .send(
+            &envelope_of(EnvelopeKind::Notification.byte(), (1, 0)),
+            &handle,
+        )
+        .await
+        .unwrap();
+
+    let token_field = format!("{CONNECTION_TOKEN_HEADER}: {token}");
+
+    for after in ["bead-after: 0", "bead-after: 1"] {
+        let listen = exchange_of(
+            port,
+            head_of(
+                ("GET", "/bead"),
+                (port, &[&origin, &token_field, after, "bead-wait: 0"]),
+            )
+            .as_bytes(),
+        )
+        .await
+        .response(PATIENCE)
+        .await
+        .unwrap();
+
+        answers.push((listen.head.status, named(&listen.head)));
+    }
+
+    // refusals once the origin is judged: an OPTIONS that is no preflight, a body of another type,
+    // a method it does not take, a token that is none
+    let typed = format!("Content-Type: {BEAD_MEDIA_TYPE}");
+    let unknown = format!("{CONNECTION_TOKEN_HEADER}: not-a-token");
+
+    for request in [
+        head_of(("OPTIONS", "/bead"), (port, &[&origin])),
+        head_of(
+            ("POST", "/bead"),
+            (
+                port,
+                &[
+                    &origin,
+                    &token_field,
+                    "Content-Type: text/plain",
+                    "Content-Length: 0",
+                ],
+            ),
+        ),
+        head_of(("PUT", "/bead"), (port, &[&origin, "Content-Length: 0"])),
+        head_of(
+            ("POST", "/bead"),
+            (port, &[&origin, &typed, &unknown, "Content-Length: 0"]),
+        ),
+    ] {
+        let answer = exchange_of(port, request.as_bytes())
+            .await
+            .response(PATIENCE)
+            .await
+            .unwrap();
+
+        answers.push((answer.head.status, named(&answer.head)));
+    }
+
+    assert_eq!(
+        answers,
+        [201, 200, 204, 200, 204, 405, 415, 405, 400]
+            .map(|status| (status, expected.clone()))
+            .to_vec(),
+        "each named"
+    );
+    started.stop().await;
 }

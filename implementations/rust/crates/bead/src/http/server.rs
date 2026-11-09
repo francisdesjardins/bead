@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::SystemTime;
 
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use hyper::body::Body as _;
 use hyper::body::Incoming;
 use hyper::{Method, Request, Response, Version};
@@ -25,13 +25,14 @@ use tokio::sync::oneshot;
 use crate::base64url;
 use crate::broker::participant::{BODY_GRACE_PERIOD, MINIMUM_BODY_BYTES_PER_SECOND};
 use crate::clock::{Schedule, SharedClock, SystemClock, Timer};
-use crate::duration::hold_finite;
+use crate::duration::{NEVER, hold, hold_finite};
 use crate::errors::ProgrammerError;
 use crate::failure::ProcedureAddress;
 use crate::http::exchange::{BodyBuffer, ExchangeState, Facts, Prefix, Responder};
 use crate::http::fields::{
-    CANCEL, CONNECTION_TOKEN_HEADER, End, FAILURE, FIRST_LAYOUT, HTTP_REFUSALS, LAST_LAYOUT,
-    LISTEN_HEADER, REQUEST, RESULT, Request as Fields, busy, path_of, unknown_connection,
+    AFTER_HEADER, CANCEL, CONNECTION_TOKEN_HEADER, End, FAILURE, FIRST_LAYOUT, HTTP_REFUSALS,
+    LAST_LAYOUT, LISTEN_HEADER, REQUEST, RESULT, Request as Fields, WAIT_HEADER, busy, path_of,
+    unknown_connection,
 };
 use crate::http::wire::{AnswerBody, Answered, Cut, Flow, WireOptions, response_of, serve};
 use crate::http_policy::HttpPolicy;
@@ -77,6 +78,22 @@ pub const MAXIMUM_WAITING_EXCHANGES: u64 = 64;
 /// The path the transport answers on, by default.
 pub const PATHNAME: &str = "/bead";
 
+/// How long a request handed on waits for its answer, by default: 5 minutes.
+pub const EXCHANGE_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// How long a connection may go with no exchange under way, by default: 5 minutes.
+pub const INACTIVITY_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// The bytes one connection's outbox holds, by default: two of the largest envelopes.
+pub const MAXIMUM_OUTBOX_BYTES: u64 = 33_556_480;
+
+/// The longest a listen waits for something to bring back, by default: 30 seconds, under the 60 an
+/// intermediary such as nginx gives a request.
+pub const MAXIMUM_WAIT: Duration = Duration::from_secs(30);
+
+// the length before each envelope of a batch
+const LENGTH_BYTES: usize = 4;
+
 /// How long a cancel that came before its request buries that call id: 5 seconds, the least a
 /// requester reserves one for. A request that comes later still runs, and its answer is dropped as
 /// late by its requester.
@@ -115,12 +132,18 @@ pub struct HttpTransportServerOptions {
     /// How long a body comes, from its head, before its rate is held:
     /// [`crate::BODY_GRACE_PERIOD`] when none; never is refused.
     pub body_grace_period: Option<Duration>,
+    /// How long a request handed on waits for its answer, past which its connection is closed, as
+    /// lost: [`EXCHANGE_TIMEOUT`] when none; [`crate::NEVER`] waits without end, arming no timer.
+    pub exchange_timeout: Option<Duration>,
     /// How long a request's head may take to come whole, past which it is answered 408:
     /// [`HEADERS_TIMEOUT`] when none; never is refused.
     pub headers_timeout: Option<Duration>,
     /// The hosts it takes besides those every server takes, the loopback's and its own (spec
     /// 15.12); `*` takes any. None when none.
     pub hosts: Option<Vec<String>>,
+    /// How long a connection may go with no exchange under way, a listen among them, past which it
+    /// is closed, as lost: [`INACTIVITY_TIMEOUT`] when none; [`crate::NEVER`] waits without end.
+    pub inactivity_timeout: Option<Duration>,
     /// The largest body it reads, past which it refuses an exchange 413 `too-large`:
     /// [`MAXIMUM_BODY_BYTES`] when none.
     pub maximum_body_bytes: Option<u64>,
@@ -130,6 +153,13 @@ pub struct HttpTransportServerOptions {
     /// The connections one client address holds at once: [`MAXIMUM_CONNECTIONS_PER_ADDRESS`]
     /// when none.
     pub maximum_connections_per_address: Option<u64>,
+    /// What one connection's outbox holds of what the server sent of its own, past which the
+    /// connection is dropped, its client behind, and reported (spec 15.9):
+    /// [`MAXIMUM_OUTBOX_BYTES`] when none.
+    pub maximum_outbox_bytes: Option<u64>,
+    /// The longest a listen waits for something to bring back, whatever its `bead-wait`:
+    /// [`MAXIMUM_WAIT`] when none; never is refused.
+    pub maximum_wait: Option<Duration>,
     /// The requests one connection has waiting at once, past which one is refused 429 `busy`, and
     /// half the exchanges it has under way at once: [`MAXIMUM_WAITING_EXCHANGES`] when none.
     pub maximum_waiting_exchanges: Option<u64>,
@@ -285,6 +315,10 @@ struct Settings {
     maximum_waiting_exchanges: u64,
     minimum_body_bytes_per_second: u64,
     pathname: String,
+    exchange_timeout: Duration,
+    inactivity_timeout: Duration,
+    maximum_outbox_bytes: u64,
+    maximum_wait: Duration,
 }
 
 // what a connection's gate holds while its router paused it, or while it holds anything: the
@@ -297,6 +331,7 @@ struct Gate {
 
 // a connection it drew, which nothing outside the transport reaches: what its registry holds for
 // it, as a socket transport's holds its socket
+#[derive(Default)]
 struct Drawn {
     address: String,
     port: u16,
@@ -312,6 +347,42 @@ struct Drawn {
     waiting: HashMap<u32, u64>,
     last_activity: Option<SystemTime>,
     gate: Gate,
+    // its timer while no exchange is under way
+    idle: Option<Arc<dyn Timer>>,
+    // the listen held, when one is
+    listen: Option<u64>,
+    // what the server sent of its own and no listen acknowledged yet, in order, each numbered
+    outbox: VecDeque<(u64, Bytes)>,
+    outbox_bytes: u64,
+    // the number of the last envelope put in its outbox; the first is 1
+    sequence: u64,
+}
+
+// a listen held until something comes for it, or its wait is over
+struct Listen {
+    connection: ConnectionHandle,
+    responder: Responder,
+    timer: Option<Arc<dyn Timer>>,
+    flow: Arc<Flow>,
+    // whether hyper took its batch, which its pace reads
+    taken: Arc<AtomicBool>,
+}
+
+// what a listen's future holds of it until its head: a future dropped first ends its listen
+struct ListenGuard {
+    server: Weak<ServerInner>,
+    id: u64,
+    is_open: bool,
+}
+
+impl Drop for ListenGuard {
+    fn drop(&mut self) {
+        if self.is_open
+            && let Some(inner) = self.server.upgrade()
+        {
+            inner.listen_closed(self.id);
+        }
+    }
 }
 
 #[derive(Default)]
@@ -321,6 +392,8 @@ struct ServerState {
     // the connections each address holds; an address that holds none is not kept
     per_address: HashMap<String, u64>,
     exchanges: HashMap<u64, ExchangeState>,
+    // the listens under way, each until its response closes
+    listens: HashMap<u64, Listen>,
     next_exchange: u64,
     // the rank of the last connection drawn, across its starts: no handle is given twice
     ordinal: u64,
@@ -361,6 +434,7 @@ enum Told {
     Message(TransportMessage, ConnectionHandle),
     Close(bool, ConnectionHandle),
     Refusal(TransportServerRefusal),
+    Listen(bool, ConnectionHandle),
     // a connection dropped behind a bound: its error, then its close, unclean, told all the same
     Dropped(RouterError, ConnectionHandle),
 }
@@ -399,7 +473,20 @@ pub(crate) struct ServerInner {
 /// `origins` names, it answers CORS (spec 15.12): its preflight 204, and every answer once its
 /// origin is judged naming it and exposing every field, no credential allowed. An exchange lost —
 /// its response closed before the transport ended it — closes the connection, as a socket that
-/// drops does.
+/// drops does; so do a request unanswered past `exchange_timeout` and a connection idle past
+/// `inactivity_timeout`, on its clock.
+///
+/// What the server sends of its own reaches a client that said at connect that it listens —
+/// `bead-listen: ?1`, which the 201 says back (spec 15.9). It waits in the connection's outbox,
+/// numbered, until a listen — a `GET` with the token, its `bead-after` and `bead-wait` — brings back
+/// all that waits, in a batch of `application/prs.bead-batch`, the number of its first in
+/// `bead-sequence`; the next listen acknowledges by `bead-after` what its client heard whole, and
+/// what it did not comes again. A listen waits up to `bead-wait` milliseconds, 0 when left out, no
+/// longer than `maximum_wait`, for something to bring back; a second takes the first's place. Each
+/// listen held, once past its refusals, is told on `on_listen` held, and its end, while its
+/// connection stands, not held. An outbox past `maximum_outbox_bytes` drops its connection,
+/// reported on `on_error`. A connection whose client does not listen carries answers alone:
+/// anything else is refused as it is sent.
 ///
 /// A body is read to `maximum_body_bytes`, at `minimum_body_bytes_per_second` once
 /// `body_grace_period` passed, refused 413 `too-large` past the one and 408 `too-slow` behind the
@@ -413,6 +500,11 @@ pub(crate) struct ServerInner {
 /// it is handed on, as its router resumes it. An answer is held to `minimum_send_bytes_per_second`
 /// past `send_grace_period`: one its socket holds past its deadline is lost, its connection
 /// dropped and reported on `on_error` naming the bound.
+///
+/// Its stop closes each connection, unclean: each exchange still waiting is told by the marked 404
+/// until its request is handed on, then cut past its head, and each listen held is answered the
+/// marked 404; an exchange that comes as it stops learns its connection is gone, and a connect is
+/// refused 503 `busy`.
 #[derive(Clone)]
 pub struct HttpTransportServer {
     inner: Arc<ServerInner>,
@@ -446,7 +538,7 @@ fn is_token(token: &str) -> bool {
 
 // what HTTP refuses of its own (RFC 9112 §3.2, §3.2.2; RFC 9110 §5.5), as HTTP answers it,
 // unmarked, with none of the path's fields
-fn malformed() -> Response<AnswerBody> {
+fn malformed(flow: &Arc<Flow>) -> Response<AnswerBody> {
     response_of(
         400,
         (
@@ -454,7 +546,7 @@ fn malformed() -> Response<AnswerBody> {
                 ("connection", "close".to_owned()),
                 ("content-length", "0".to_owned()),
             ],
-            AnswerBody::whole(None),
+            AnswerBody::whole(None).settling(flow),
         ),
     )
 }
@@ -555,6 +647,13 @@ impl ServerInner {
                     &self.listeners,
                     (
                         |listener: &dyn ServerListener| listener.on_close(is_clean, &handle),
+                        Some(&handle),
+                    ),
+                ),
+                Told::Listen(is_held, handle) => tell_server(
+                    &self.listeners,
+                    (
+                        |listener: &dyn ServerListener| listener.on_listen(is_held, &handle),
                         Some(&handle),
                     ),
                 ),
@@ -724,7 +823,7 @@ impl ServerInner {
             .is_some_and(|raw| has_visible_fields(&raw))
             && is_visible_target(Some(&target));
         let Some(authority) = is_visible.then(|| fields.authority(&target)).flatten() else {
-            return ready(malformed());
+            return ready(malformed(&flow));
         };
         let authority = authority.authority.map(str::to_owned);
         let facts = Facts {
@@ -839,7 +938,7 @@ impl ServerInner {
         }
 
         if method == Method::GET {
-            return self.listen_on(&handle, (&facts, Answering::of(listed, flow)));
+            return self.listen_on(&handle, ((fields, &facts), Answering::of(listed, flow)));
         }
 
         if !fields.is_bead_body() {
@@ -867,24 +966,285 @@ impl ServerInner {
         )
     }
 
-    // a listen: refused 409 where its connect declared none, and 400 where one did, no outbox
-    // kept to bring back
+    // a listen: what it acknowledges goes, and it brings back what is left — at once, or once
+    // something comes within its wait. One listen at a time: a second ends the first, empty, and
+    // takes its place. A listen its client loses closes nothing: what it carried comes again
     fn listen_on(
-        &self,
+        self: Arc<Self>,
         handle: &ConnectionHandle,
-        (facts, answering): (&Facts, Answering),
+        ((fields, facts), answering): ((&Fields<'_>, &Facts), Answering),
     ) -> Answered {
-        let is_listening = locked(&self.state)
-            .drawn
-            .get(handle)
-            .is_some_and(|drawn| drawn.is_listening);
-        let end = if is_listening {
-            End::refused(400, HTTP_REFUSALS.malformed)
-        } else {
-            End::refused(409, HTTP_REFUSALS.listen_undeclared)
+        let after = fields.count_of((AFTER_HEADER, true));
+        let wait = fields.count_of((WAIT_HEADER, false));
+        let Answering { listed, flow } = answering;
+        let mut state = locked(&self.state);
+        let Some(drawn) = state.drawn.get_mut(handle) else {
+            drop(state);
+
+            return self.finished((facts, Answering::of(listed, flow)), &unknown_connection());
         };
 
-        self.finished((facts, answering), &end)
+        if !drawn.is_listening {
+            drop(state);
+
+            return self.finished(
+                (facts, Answering::of(listed, flow)),
+                &End::refused(409, HTTP_REFUSALS.listen_undeclared),
+            );
+        }
+
+        let asked = after
+            .zip(wait)
+            .filter(|(after, _)| !facts.has_body && *after <= drawn.sequence);
+        let Some((after, wait)) = asked else {
+            drop(state);
+
+            return self.finished(
+                (facts, Answering::of(listed, flow)),
+                &End::refused(400, HTTP_REFUSALS.malformed),
+            );
+        };
+
+        // what it acknowledges goes
+        drawn.outbox.retain(|(sequence, _)| *sequence > after);
+        drawn.outbox_bytes = drawn
+            .outbox
+            .iter()
+            .map(|(_, bytes)| u64::try_from(bytes.len()).unwrap_or(u64::MAX))
+            .fold(0, u64::saturating_add);
+        drawn.open = drawn.open.saturating_add(1);
+        drawn.last_activity = Some(self.clock.wall());
+
+        if let Some(idle) = drawn.idle.take() {
+            idle.cancel();
+        }
+
+        let replaced = drawn.listen.take();
+        let is_brought = !drawn.outbox.is_empty() || wait == 0;
+
+        state.next_exchange = state.next_exchange.saturating_add(1);
+
+        let id = state.next_exchange;
+        let (head, answered) = oneshot::channel();
+        let server = Weak::clone(&self.me);
+        let runtime = self.runtime.clone();
+        let responder =
+            Responder::new(head, (listed, Arc::clone(&flow))).telling(Box::new(move |_| {
+                // ! told from a turn of its own, as an exchange's end is
+                drop(platform::spawn(&runtime, async move {
+                    if let Some(inner) = server.upgrade() {
+                        inner.listen_closed(id);
+                    }
+                }));
+            }));
+
+        state.listens.insert(
+            id,
+            Listen {
+                connection: Arc::clone(handle),
+                responder,
+                timer: None,
+                flow,
+                taken: Arc::new(AtomicBool::new(false)),
+            },
+        );
+
+        if let Some(replaced) = replaced {
+            self.answer_listen((&mut state, replaced), &End::of(204));
+        }
+
+        if is_brought {
+            self.answer_listen((&mut state, id), &End::of(204));
+        } else {
+            self.hold_listen((&mut state, id), (handle, wait));
+        }
+
+        drop(state);
+        // said before the listen it replaces ends, so a second keeps its connection held
+        // throughout
+        self.tell(vec![Told::Listen(true, Arc::clone(handle))]);
+
+        let guard = ListenGuard {
+            server: Weak::clone(&self.me),
+            id,
+            is_open: true,
+        };
+
+        Box::pin(async move {
+            // * the guard whole, never its field alone, goes with the future
+            let mut guard = guard;
+            let head = answered.await.map_err(|_dropped| Cut)?;
+
+            guard.is_open = false;
+
+            Ok(head)
+        })
+    }
+
+    // a listen held for what comes within its wait, no longer than its limit
+    fn hold_listen(
+        &self,
+        (state, id): (&mut ServerState, u64),
+        (handle, wait): (&ConnectionHandle, u64),
+    ) {
+        if let Some(drawn) = state.drawn.get_mut(handle) {
+            drawn.listen = Some(id);
+        }
+
+        let server = Weak::clone(&self.me);
+        let armed = self.clock.arm(
+            Schedule::Once(Duration::from_millis(wait).min(self.settings.maximum_wait)),
+            Box::new(move || {
+                if let Some(inner) = server.upgrade() {
+                    let mut state = locked(&inner.state);
+
+                    inner.answer_listen((&mut state, id), &End::of(204));
+                    drop(state);
+                }
+            }),
+        );
+
+        if let Some(listen) = state.listens.get_mut(&id) {
+            listen.timer = armed.ok();
+        }
+    }
+
+    // a listen ends: with what waits for it, as a batch, or, nothing waiting, with `end`; once
+    fn answer_listen(&self, (state, id): (&mut ServerState, u64), end: &End) {
+        let Some(listen) = state.listens.get_mut(&id) else {
+            return;
+        };
+
+        if let Some(timer) = listen.timer.take() {
+            timer.cancel();
+        }
+
+        let connection = Arc::clone(&listen.connection);
+        let drawn = state.drawn.get_mut(&connection);
+        let waiting = drawn.map(|drawn| {
+            if drawn.listen == Some(id) {
+                drawn.listen = None;
+            }
+
+            let first = drawn
+                .sequence
+                .saturating_sub(u64::try_from(drawn.outbox.len()).unwrap_or(u64::MAX))
+                .saturating_add(1);
+            let mut batch = BytesMut::new();
+
+            // what waits follows what was acknowledged, one by one, each after its length
+            for (_, bytes) in &drawn.outbox {
+                batch.extend_from_slice(
+                    &u32::try_from(bytes.len()).unwrap_or(u32::MAX).to_be_bytes(),
+                );
+                batch.extend_from_slice(bytes);
+            }
+
+            (batch.freeze(), first)
+        });
+        let Some(listen) = state.listens.get_mut(&id) else {
+            return;
+        };
+
+        match waiting.filter(|(batch, _)| batch.len() >= LENGTH_BYTES) {
+            None => listen.responder.end(end),
+            Some((batch, first)) => {
+                let length = u64::try_from(batch.len()).unwrap_or(u64::MAX);
+                let flow = Arc::clone(&listen.flow);
+                let taken = Arc::clone(&listen.taken);
+
+                listen.responder.batch((batch, first));
+                // ! held to its pace: one past its deadline is an answer that could not be
+                // written, which drops its connection at both ends (spec 15.7, 15.12)
+                self.pace((connection, flow), (length, taken));
+            }
+        }
+    }
+
+    // a listen's response closed, its listen done: its connection rests once nothing else is
+    // under way, and tells its end while it stands
+    fn listen_closed(&self, id: u64) {
+        let mut state = locked(&self.state);
+        let Some(listen) = state.listens.remove(&id) else {
+            return;
+        };
+
+        if let Some(timer) = &listen.timer {
+            timer.cancel();
+        }
+
+        listen.taken.store(true, Ordering::SeqCst);
+
+        let connection = listen.connection;
+        let Some(drawn) = state.drawn.get_mut(&connection) else {
+            return;
+        };
+
+        if drawn.listen == Some(id) {
+            drawn.listen = None;
+        }
+
+        drawn.open = drawn.open.saturating_sub(1);
+        self.rest((&mut state, &connection));
+        drop(state);
+        self.tell(vec![Told::Listen(false, connection)]);
+    }
+
+    // an envelope of the server's own waits in its connection's outbox, numbered, for a listen to
+    // bring it back; past the outbox's bound the connection is dropped, its client behind (spec
+    // 15.9): false then
+    fn enqueue(
+        &self,
+        (state, handle): (&mut ServerState, &ConnectionHandle),
+        bytes: Bytes,
+    ) -> bool {
+        let maximum = self.settings.maximum_outbox_bytes;
+        let Some(drawn) = state.drawn.get_mut(handle) else {
+            return true;
+        };
+        let length = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
+
+        if drawn.outbox_bytes.saturating_add(length) > maximum {
+            return false;
+        }
+
+        drawn.sequence = drawn.sequence.saturating_add(1);
+        drawn.outbox.push_back((drawn.sequence, bytes));
+        drawn.outbox_bytes = drawn.outbox_bytes.saturating_add(length);
+
+        if let Some(id) = drawn.listen {
+            self.answer_listen((state, id), &End::of(204));
+        }
+
+        true
+    }
+
+    // a connection idle — no exchange under way — closes past its timeout, as lost
+    fn rest(&self, (state, handle): (&mut ServerState, &ConnectionHandle)) {
+        let Some(drawn) = state.drawn.get_mut(handle) else {
+            return;
+        };
+
+        if let Some(idle) = drawn.idle.take() {
+            idle.cancel();
+        }
+
+        if self.settings.inactivity_timeout == NEVER || drawn.open > 0 {
+            return;
+        }
+
+        let server = Weak::clone(&self.me);
+        let resting = Arc::clone(handle);
+        let armed = self.clock.arm(
+            Schedule::Once(self.settings.inactivity_timeout),
+            Box::new(move || {
+                if let Some(inner) = server.upgrade() {
+                    inner.close_drawn(&resting, false);
+                }
+            }),
+        );
+
+        drawn.idle = armed.ok();
     }
 
     // a connect: a connection drawn, its token said back in a 201
@@ -927,13 +1287,10 @@ impl ServerInner {
                             token: token.clone(),
                             arrival,
                             is_listening,
-                            open: 0,
-                            buried: HashMap::new(),
-                            waiting: HashMap::new(),
-                            last_activity: None,
-                            gate: Gate::default(),
+                            ..Drawn::default()
                         },
                     );
+                    self.rest((&mut state, &handle));
                     state.by_token.insert(token.clone(), Arc::clone(&handle));
                     state
                         .per_address
@@ -992,12 +1349,20 @@ impl ServerInner {
             burial.cancel();
         }
 
+        if let Some(idle) = &drawn.idle {
+            idle.cancel();
+        }
+
         for id in drawn.waiting.values() {
             if let Some(exchange) = state.exchanges.get_mut(id) {
                 exchange.is_ended = true;
 
                 if let Some(slow) = exchange.slow.take() {
                     slow.cancel();
+                }
+
+                if let Some(timer) = exchange.timer.take() {
+                    timer.cancel();
                 }
 
                 if exchange.is_delivered {
@@ -1032,6 +1397,12 @@ impl ServerInner {
         }
 
         state.body_bytes = state.body_bytes.saturating_sub(released);
+
+        // its listen learns it is gone, its outbox gone with it
+        if let Some(listen) = drawn.listen {
+            self.answer_listen((&mut state, listen), &unknown_connection());
+        }
+
         drop(state);
 
         true
@@ -1144,6 +1515,11 @@ impl ServerInner {
 
             drawn.open = drawn.open.saturating_add(1);
             drawn.last_activity = Some(now);
+
+            if let Some(idle) = drawn.idle.take() {
+                idle.cancel();
+            }
+
             state.next_exchange = state.next_exchange.saturating_add(1);
 
             let id = state.next_exchange;
@@ -1173,6 +1549,7 @@ impl ServerInner {
                     charged: 0,
                     received: 0,
                     slow: None,
+                    timer: None,
                     envelope: None,
                     credential: credential_of(
                         &authorizations
@@ -1624,6 +2001,23 @@ impl ServerInner {
 
                 if is_waiting && let Some(exchange) = state.exchanges.get_mut(&id) {
                     exchange.responder.head();
+
+                    if self.settings.exchange_timeout != NEVER {
+                        let server = Weak::clone(&self.me);
+                        let waited = Arc::clone(&connection);
+
+                        exchange.timer = self
+                            .clock
+                            .arm(
+                                Schedule::Once(self.settings.exchange_timeout),
+                                Box::new(move || {
+                                    if let Some(inner) = server.upgrade() {
+                                        inner.close_drawn(&waited, false);
+                                    }
+                                }),
+                            )
+                            .ok();
+                    }
                 }
 
                 drop(state);
@@ -1722,7 +2116,10 @@ impl ServerInner {
             release((&mut state, id));
         }
 
-        side_done((&mut state, id));
+        if let Some(connection) = side_done((&mut state, id)) {
+            self.rest((&mut state, &connection));
+        }
+
         drop(state);
     }
 
@@ -1750,7 +2147,11 @@ impl ServerInner {
             let lost = (!exchange.is_ended).then(|| Arc::clone(&exchange.connection));
 
             release((&mut state, id));
-            side_done((&mut state, id));
+
+            if let Some(connection) = side_done((&mut state, id)) {
+                self.rest((&mut state, &connection));
+            }
+
             drop(state);
 
             lost
@@ -1767,7 +2168,17 @@ impl ServerInner {
         let (listening, handles, flows) = {
             let mut state = locked(&self.state);
             let listening: Vec<Listening> = core::mem::take(&mut state.listening);
-            let handles: Vec<ConnectionHandle> = state.drawn.keys().cloned().collect();
+            // each closed in the order it was drawn
+            let mut drawn: Vec<(u64, ConnectionHandle)> = state
+                .drawn
+                .iter()
+                .map(|(handle, drawn)| (drawn.arrival, Arc::clone(handle)))
+                .collect();
+
+            drawn.sort_by_key(|(arrival, _)| *arrival);
+
+            let handles: Vec<ConnectionHandle> =
+                drawn.into_iter().map(|(_, handle)| handle).collect();
             let flows: Vec<Arc<Flow>> = state.flows.values().cloned().collect();
 
             drop(state);
@@ -1796,17 +2207,28 @@ impl ServerInner {
         })
     }
 
-    // an answer's bytes, held to the pace its socket takes them at; one its socket still holds
-    // past its deadline is lost, which drops its connection at both ends (spec 15.7, 15.12)
+    // an answer's bytes, held to the pace its socket takes them at
     fn pace_answer(&self, (state, id): (&mut ServerState, u64), (bytes, flow): (u64, Arc<Flow>)) {
         let Some(exchange) = state.exchanges.get_mut(&id) else {
             return;
         };
-        let server = Weak::clone(&self.me);
-        let connection = Arc::clone(&exchange.connection);
-        let options = self.settings.pace;
         let taken = Arc::new(AtomicBool::new(false));
-        let (held, unsent, kept) = (Arc::clone(&taken), Arc::clone(&flow), Arc::clone(&flow));
+
+        exchange.taken = Some(Arc::clone(&taken));
+        self.pace((Arc::clone(&exchange.connection), flow), (bytes, taken));
+    }
+
+    // `bytes` held to the pace `connection`'s socket takes them at, until `taken` says hyper took
+    // them whole and its socket holds nothing more; one its socket still holds past its deadline
+    // is lost, which drops its connection at both ends (spec 15.7, 15.12)
+    fn pace(
+        &self,
+        (connection, flow): (ConnectionHandle, Arc<Flow>),
+        (bytes, taken): (u64, Arc<AtomicBool>),
+    ) {
+        let server = Weak::clone(&self.me);
+        let options = self.settings.pace;
+        let (held, unsent, kept) = (taken, Arc::clone(&flow), Arc::clone(&flow));
         let pace = SendPace::new(
             SendPaceHooks {
                 unsent: Box::new(move || {
@@ -1825,7 +2247,6 @@ impl ServerInner {
 
         pace.hand(bytes);
         kept.pace(pace);
-        exchange.taken = Some(taken);
     }
 }
 
@@ -1864,32 +2285,38 @@ fn end_early((state, id): (&mut ServerState, u64), end: &End) -> Vec<Told> {
     told
 }
 
-// one side of an exchange done; both done, it is over, and its connection has one less under way
-fn side_done((state, id): (&mut ServerState, u64)) {
-    let Some(exchange) = state.exchanges.get_mut(&id) else {
-        return;
-    };
+// one side of an exchange done; both done, it is over, and its connection, which it gives, has
+// one less under way
+fn side_done((state, id): (&mut ServerState, u64)) -> Option<ConnectionHandle> {
+    let exchange = state.exchanges.get_mut(&id)?;
 
     exchange.sides = exchange.sides.saturating_sub(1);
 
     if exchange.sides > 0 {
-        return;
+        return None;
     }
 
     let connection = Arc::clone(&exchange.connection);
     let prefix = exchange.prefix;
+    let timer = exchange.timer.take();
 
     state.exchanges.remove(&id);
 
-    if let Some(drawn) = state.drawn.get_mut(&connection) {
-        drawn.open = drawn.open.saturating_sub(1);
-
-        if let Some(prefix) = prefix
-            && drawn.waiting.get(&prefix.call_id) == Some(&id)
-        {
-            drawn.waiting.remove(&prefix.call_id);
-        }
+    if let Some(timer) = timer {
+        timer.cancel();
     }
+
+    let drawn = state.drawn.get_mut(&connection)?;
+
+    drawn.open = drawn.open.saturating_sub(1);
+
+    if let Some(prefix) = prefix
+        && drawn.waiting.get(&prefix.call_id) == Some(&id)
+    {
+        drawn.waiting.remove(&prefix.call_id);
+    }
+
+    Some(connection)
 }
 
 impl HttpTransportServer {
@@ -1910,12 +2337,9 @@ impl HttpTransportServer {
         Self::on_platform((runtime, platform), options)
     }
 
-    // a server on `runtime`, its timers that bound the platform's socket on `platform`: the
-    // platform's clock, but in a test
-    fn on_platform(
-        (runtime, platform): (Handle, SharedClock),
-        given: &HttpTransportServerOptions,
-    ) -> Result<Self, ProgrammerError> {
+    // what it is built with, each option held as the other sides hold it, a policy's members in
+    // their places
+    fn settings_of(given: &HttpTransportServerOptions) -> Result<Settings, ProgrammerError> {
         // * a policy's members in its place, each given once, there or beside it
         let options = given.with_policy()?;
         let body_bytes_budget = hold_count(
@@ -1960,6 +2384,20 @@ impl HttpTransportServer {
             "sendGracePeriod",
             options.send_grace_period.unwrap_or(SEND_GRACE_PERIOD),
         )?;
+        let exchange_timeout = hold(
+            "exchangeTimeout",
+            options.exchange_timeout.unwrap_or(EXCHANGE_TIMEOUT),
+        )?;
+        let inactivity_timeout = hold(
+            "inactivityTimeout",
+            options.inactivity_timeout.unwrap_or(INACTIVITY_TIMEOUT),
+        )?;
+        let maximum_outbox_bytes = hold_count(
+            "maximumOutboxBytes",
+            options.maximum_outbox_bytes.unwrap_or(MAXIMUM_OUTBOX_BYTES),
+        )?;
+        let maximum_wait =
+            hold_finite("maximumWait", options.maximum_wait.unwrap_or(MAXIMUM_WAIT))?;
         let hosts = options.hosts.clone().unwrap_or_default();
         let origins = options.origins.clone().unwrap_or_default();
         let procedures = options
@@ -1975,6 +2413,42 @@ impl HttpTransportServer {
         assert_hosts(&hosts)?;
         assert_origins(&origins)?;
 
+        Ok(Settings {
+            headers_timeout,
+            hosts,
+            origins,
+            maximum_connections,
+            maximum_per_address,
+            secure: options.secure,
+            pace: SendPaceOptions {
+                minimum_send_bytes_per_second: options
+                    .minimum_send_bytes_per_second
+                    .unwrap_or(MINIMUM_SEND_BYTES_PER_SECOND),
+                send_grace_period,
+            },
+            procedures,
+            proxies,
+            body_bytes_budget,
+            body_grace_period,
+            maximum_body_bytes,
+            maximum_waiting_exchanges,
+            minimum_body_bytes_per_second,
+            pathname: options.pathname.unwrap_or_else(|| PATHNAME.to_owned()),
+            exchange_timeout,
+            inactivity_timeout,
+            maximum_outbox_bytes,
+            maximum_wait,
+        })
+    }
+
+    // a server on `runtime`, its timers that bound the platform's socket on `platform`: the
+    // platform's clock, but in a test
+    fn on_platform(
+        (runtime, platform): (Handle, SharedClock),
+        given: &HttpTransportServerOptions,
+    ) -> Result<Self, ProgrammerError> {
+        let settings = Self::settings_of(given)?;
+        let options = given;
         let clock = options
             .clock
             .clone()
@@ -1986,31 +2460,7 @@ impl HttpTransportServer {
             platform,
             clock,
             given: options.clock.clone(),
-            settings: Settings {
-                headers_timeout,
-                hosts,
-                origins,
-                maximum_connections,
-                maximum_per_address,
-                secure: options.secure,
-                pace: SendPaceOptions {
-                    minimum_send_bytes_per_second: options
-                        .minimum_send_bytes_per_second
-                        .unwrap_or(MINIMUM_SEND_BYTES_PER_SECOND),
-                    send_grace_period,
-                },
-                procedures,
-                proxies,
-                body_bytes_budget,
-                body_grace_period,
-                maximum_body_bytes,
-                maximum_waiting_exchanges,
-                minimum_body_bytes_per_second,
-                pathname: options
-                    .pathname
-                    .clone()
-                    .unwrap_or_else(|| PATHNAME.to_owned()),
-            },
+            settings,
             life: Life::new(Box::new(move |future| {
                 drop(platform::spawn(&covering, future));
             })),
@@ -2121,7 +2571,26 @@ impl ServerTransport for HttpTransportServer {
         let waiting = is_answer
             .then(|| drawn.waiting.remove(&prefix.call_id))
             .flatten();
+        let is_listening = drawn.is_listening;
         let Some(id) = waiting else {
+            if is_listening {
+                let is_kept = inner.enqueue((&mut state, connection_handle), bytes);
+
+                drop(state);
+
+                if !is_kept {
+                    inner.drop_drawn(
+                        connection_handle,
+                        &format!(
+                            "its outbox would pass maximumOutboxBytes, {} bytes",
+                            inner.settings.maximum_outbox_bytes
+                        ),
+                    );
+                }
+
+                return Ok(Sent::Done);
+            }
+
             if is_answer {
                 return Ok(Sent::Done);
             }
@@ -2144,6 +2613,10 @@ impl ServerTransport for HttpTransportServer {
 
         if let Some(slow) = exchange.slow.take() {
             slow.cancel();
+        }
+
+        if let Some(timer) = exchange.timer.take() {
+            timer.cancel();
         }
 
         exchange.responder.answer((bytes, closing));
@@ -2255,6 +2728,42 @@ impl ServerTransport for HttpTransportServer {
             "waitingExchanges",
             count(state.drawn.values().map(|drawn| drawn.waiting.len()).sum()),
         );
+        gauges.counts.insert(
+            "listens",
+            count(
+                state
+                    .drawn
+                    .values()
+                    .filter(|drawn| drawn.listen.is_some())
+                    .count(),
+            ),
+        );
+        gauges.counts.insert(
+            "outboxBytes",
+            state
+                .drawn
+                .values()
+                .map(|drawn| drawn.outbox_bytes)
+                .fold(0, u64::saturating_add),
+        );
+        gauges.counts.insert(
+            "outboxEnvelopes",
+            count(state.drawn.values().map(|drawn| drawn.outbox.len()).sum()),
+        );
+        gauges.counts.insert(
+            "largestOutboxBytes",
+            state
+                .drawn
+                .values()
+                .map(|drawn| drawn.outbox_bytes)
+                .max()
+                .unwrap_or(0),
+        );
+        gauges
+            .ceilings
+            .insert("largestOutboxBytes", settings.maximum_outbox_bytes);
+        // HTTP/2's sessions, none over HTTP/1.1 alone
+        gauges.counts.insert("http2Sessions", 0);
         gauges
             .ceilings
             .insert("bodyBytes", settings.body_bytes_budget);

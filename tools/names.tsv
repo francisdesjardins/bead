@@ -1,4 +1,4 @@
-# alone: typescript 301, csharp 61, rust 78
+# alone: typescript 297, csharp 61, rust 78
 # concept	typescript	csharp	rust	class
 ACCEPT_TIMEOUT	ACCEPT_TIMEOUT [constant]	-	ACCEPT_TIMEOUT [constant]	same
 AccessRefusal	IAccessRefusal [record]	AccessRefusal [record]	AccessRefusal [record]	same
@@ -438,7 +438,7 @@ ENVELOPE_PREFIX	ENVELOPE_PREFIX [constant]	-	-	alone
 EnvelopeAsked	-	-	EnvelopeAsked [record]	alone
 ERROR_EVENT	ERROR_EVENT [constant]	-	-	alone
 EventIteratorOptions	IEventIteratorOptions [record]	-	-	alone
-EXCHANGE_TIMEOUT	EXCHANGE_TIMEOUT [constant]	-	-	alone
+EXCHANGE_TIMEOUT	EXCHANGE_TIMEOUT [constant]	-	EXCHANGE_TIMEOUT [constant]	same
 FailureArising	-	FailureArising [choice]	-	alone
 FailureException.Raised	-	FailureException.Raised [record]	-	alone
 FailureExceptionOptions	-	FailureExceptionOptions [record]	-	alone
@@ -494,7 +494,7 @@ HttpTemplate	-	HttpTemplate [record]	-	alone
 HttpTransport	-	HttpTransport [constant]	-	alone
 HttpVariable	-	HttpVariable [record]	-	alone
 IDLE_TIMEOUT	IDLE_TIMEOUT [constant]	-	-	alone
-INACTIVITY_TIMEOUT	INACTIVITY_TIMEOUT [constant]	-	-	alone
+INACTIVITY_TIMEOUT	INACTIVITY_TIMEOUT [constant]	-	INACTIVITY_TIMEOUT [constant]	same
 IncomingMessageLike	IIncomingMessageLike [record]	-	-	alone
 isReadyStateClosed	isReadyStateClosed [function]	-	-	alone
 isReadyStateClosing	isReadyStateClosing [function]	-	-	alone
@@ -546,9 +546,9 @@ MAXIMUM_DEPTH	MAXIMUM_DEPTH [constant]	-	-	alone
 MAXIMUM_EXCHANGES	MAXIMUM_EXCHANGES [constant]	-	-	alone
 MAXIMUM_EXCHANGES_PER_ADDRESS	MAXIMUM_EXCHANGES_PER_ADDRESS [constant]	-	-	alone
 MAXIMUM_MESSAGE_SIZE	MAXIMUM_MESSAGE_SIZE [constant]	-	-	alone
-MAXIMUM_OUTBOX_BYTES	MAXIMUM_OUTBOX_BYTES [constant]	-	-	alone
+MAXIMUM_OUTBOX_BYTES	MAXIMUM_OUTBOX_BYTES [constant]	-	MAXIMUM_OUTBOX_BYTES [constant]	same
 MAXIMUM_PACKET_SIZE	MAXIMUM_PACKET_SIZE [constant]	-	-	alone
-MAXIMUM_WAIT	MAXIMUM_WAIT [constant]	-	-	alone
+MAXIMUM_WAIT	MAXIMUM_WAIT [constant]	-	MAXIMUM_WAIT [constant]	same
 MAXIMUM_WAITING_EXCHANGES	MAXIMUM_WAITING_EXCHANGES [constant]	-	MAXIMUM_WAITING_EXCHANGES [constant]	same
 MEMORY_ADDRESS	-	-	MEMORY_ADDRESS [constant]	alone
 MEMORY_BROKER_FAULTS	MEMORY_BROKER_FAULTS [constant]	-	-	alone

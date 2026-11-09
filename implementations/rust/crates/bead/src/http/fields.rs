@@ -19,6 +19,18 @@ mod tests;
 /// The media type of one envelope, a `POST`'s body and an answer's (spec 15.6).
 pub(crate) const BEAD_MEDIA_TYPE: &str = "application/prs.bead";
 
+/// The media type of what a listen brings back, each envelope after its length (spec 15.9).
+pub(crate) const BEAD_BATCH_MEDIA_TYPE: &str = "application/prs.bead-batch";
+
+/// The field a listen acknowledges by, the number of the last envelope its client heard whole.
+pub(crate) const AFTER_HEADER: &str = "bead-after";
+
+/// The field a listen says how long it waits in, in milliseconds.
+pub(crate) const WAIT_HEADER: &str = "bead-wait";
+
+/// The field a batch numbers its first envelope in.
+pub(crate) const SEQUENCE_HEADER: &str = "bead-sequence";
+
 /// The field a connection's token goes in, each exchange after its connect presenting it.
 pub(crate) const CONNECTION_TOKEN_HEADER: &str = "bead-connection-token";
 
@@ -266,6 +278,16 @@ impl Request<'_> {
         }
 
         parse_item(&lines.join(", ")).map_or(Field::Unread, |item| Field::Read(item.bare_item))
+    }
+
+    /// A count a listen gives (spec 15.9): an Integer of 0 or more, anything else none; left out, 0,
+    /// or none where it `is_required`.
+    pub(crate) fn count_of(&self, (name, is_required): (&str, bool)) -> Option<u64> {
+        match self.bare_item_of(name) {
+            Field::Absent => (!is_required).then_some(0),
+            Field::Read(BareItem::Integer(value)) => u64::try_from(value).ok(),
+            Field::Read(_) | Field::Unread => None,
+        }
     }
 
     /// Whether a connect says its client listens: a Boolean, absent being false; anything else is

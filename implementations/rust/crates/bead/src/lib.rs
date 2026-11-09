@@ -108,7 +108,8 @@ pub use failure::{Failure, FailureOrigin, ProcedureAddress};
 pub use http::fields::{HTTP_REFUSALS, HttpRefusals};
 #[cfg(feature = "http")]
 pub use http::server::{
-    BODY_BYTES_BUDGET, HttpTransportServer, HttpTransportServerOptions, MAXIMUM_BODY_BYTES,
+    BODY_BYTES_BUDGET, EXCHANGE_TIMEOUT, HttpTransportServer, HttpTransportServerOptions,
+    INACTIVITY_TIMEOUT, MAXIMUM_BODY_BYTES, MAXIMUM_OUTBOX_BYTES, MAXIMUM_WAIT,
     MAXIMUM_WAITING_EXCHANGES, PATHNAME, TRANSPORT_HTTP,
 };
 pub use http_policy::{HttpPolicy, HttpPolicyOptions};

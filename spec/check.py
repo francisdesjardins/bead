@@ -223,8 +223,9 @@ AHEAD = {
         "Rust's transports over HTTP and WebSocket": {
             'transports': ('http',),
             'units': (('spec', '15.10'),),
-            'places': ('httpTransport', 'httpTransportClient'),
-            'ways': (('transportClient.connectTimeout', 'http'), ('httpTransportServer.maximumWait', 'options')),
+            'places': ('httpTransportClient',),
+            'ways': (('transportClient.connectTimeout', 'http'), ('httpTransport.exchangeTimeout', 'client'),
+                     ('httpTransport.inactivityTimeout', 'client')),
         },
         # the gateway's ways of 15.12's places stay ahead with the gateway once the HTTP server lands
         "Rust's gateway": {

@@ -52,7 +52,7 @@ const OTHER_TIMEOUT: Duration = Duration::from_secs(1);
 
 // the places this side plays, by the id the file keys them by; every other is ahead, with the
 // stage that brings it: its transports over HTTP and WebSocket, its broker bindings, its gateway
-const PLACES: [&str; 25] = [
+const PLACES: [&str; 27] = [
     "call.timeout",
     "serviceManager.defaultTimeout",
     "router.reservation",
@@ -78,6 +78,8 @@ const PLACES: [&str; 25] = [
     "webSocketTransportServer.headersTimeout",
     "webSocketTransport.heartbeat",
     "webSocketTransportServer.sendGracePeriod",
+    "httpTransport.exchangeTimeout",
+    "httpTransport.inactivityTimeout",
 ];
 
 // the ways of each place this side has, the others its rows excuse it from
@@ -93,7 +95,8 @@ fn ways_of(place: &str) -> &'static [&'static str] {
         | "brokerTransportServer.acceptTimeout"
         | "brokerParticipant.bodyGracePeriod"
         | "webSocketTransportServer.headersTimeout"
-        | "webSocketTransportServer.sendGracePeriod" => &["options"],
+        | "webSocketTransportServer.sendGracePeriod"
+        | "httpTransportServer.maximumWait" => &["options"],
         "router.reservation" => &["reserve", "cancel"],
         "relay.timeout" => &["relay", "register"],
         "session.inactivityTimeouts" => &[
@@ -112,17 +115,18 @@ fn ways_of(place: &str) -> &'static [&'static str] {
         | "httpTransportServer.headersTimeout"
         | "httpTransportServer.bodyGracePeriod" => &["options", "policy"],
         "webSocketTransport.closeTimeout" | "webSocketTransport.heartbeat" => &["server", "client"],
+        "httpTransport.exchangeTimeout" | "httpTransport.inactivityTimeout" => &["server"],
         _ => &[],
     }
 }
 
 // the ways of a place played that are ahead, each with the stage that brings it: a connect's
-// timeout over HTTP and an HTTP server's options, with Rust's transports over HTTP; a gateway's with
-// its gateway
+// timeout over HTTP and an HTTP client's, with Rust's transports over HTTP; a gateway's with its
+// gateway
 fn ahead_of(place: &str) -> &'static [&'static str] {
     match place {
         "transportClient.connectTimeout" => &["http"],
-        "httpTransportServer.maximumWait" => &["options"],
+        "httpTransport.exchangeTimeout" | "httpTransport.inactivityTimeout" => &["client"],
         "httpTransportServer.sendGracePeriod"
         | "httpTransportServer.headersTimeout"
         | "httpTransportServer.bodyGracePeriod" => &["gateway"],
@@ -1641,91 +1645,237 @@ fn policy_way(member: &str, given: Option<Duration>) -> Played {
     Ok(Observed::Taken)
 }
 
-// an HTTP transport server on a stepping clock, its body's grace as `given`, connected to: the due
-// of the pace a body is held to, armed as its exchange's head is read, before a byte of it came;
-// refused, as it is built
-async fn http_body_grace_period_by_options(given: Option<Duration>) -> Played {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+// an HTTP transport server on a stepping clock, as `options` says, started on the loopback, and the
+// exchanges its places are read by, each written raw on a socket of its own
+struct HttpDrive {
+    server: HttpTransportServer,
+    clock: Arc<SteppingClock>,
+    port: u16,
+    sockets: Vec<tokio::net::TcpStream>,
+}
 
-    let clock = SteppingClock::new(epoch());
-    let mut options = HttpTransportServerOptions::default();
+impl HttpDrive {
+    // a drive of `options` on its own clock; refused, as it is built
+    async fn of(
+        given: &HttpTransportServerOptions,
+    ) -> Result<Result<Self, ProgrammerError>, String> {
+        let clock = SteppingClock::new(epoch());
+        let mut options = given.clone();
 
-    options.body_grace_period = given;
-    options.clock = Some(shared_of(&clock));
+        options.clock = Some(shared_of(&clock));
 
-    let server = match HttpTransportServer::new(&options) {
-        Ok(server) => server,
-        Err(refused) => return Ok(Observed::Refused(refused)),
-    };
-    let mut start = TransportServerStartOptions::default();
+        let server = match HttpTransportServer::new(&options) {
+            Ok(server) => server,
+            Err(refused) => return Ok(Err(refused)),
+        };
+        let mut start = TransportServerStartOptions::default();
 
-    start.address = Some("127.0.0.1".to_owned());
-    start.find_open_port = Some(true);
+        start.address = Some("127.0.0.1".to_owned());
+        start.find_open_port = Some(true);
 
-    let port = server
-        .start(&start)
-        .await
-        .map_err(|error| error.to_string())?
-        .port;
-    let head = |fields: &str| {
-        format!(
-            "POST /bead HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/prs.bead\r\n{fields}\r\n"
-        )
-    };
-    let mut connect = tokio::net::TcpStream::connect(("127.0.0.1", port))
-        .await
-        .map_err(|error| error.to_string())?;
-    let mut answer = Vec::new();
+        let port = server
+            .start(&start)
+            .await
+            .map_err(|error| error.to_string())?
+            .port;
 
-    connect
-        .write_all(head("Content-Length: 0\r\n").as_bytes())
-        .await
-        .map_err(|error| error.to_string())?;
+        Ok(Ok(Self {
+            server,
+            clock,
+            port,
+            sockets: Vec::new(),
+        }))
+    }
 
-    while !answer.windows(4).any(|window| window == b"\r\n\r\n") {
-        let mut chunk = [0_u8; 1_024];
-        let read = connect
-            .read(&mut chunk)
+    // `request` written on a socket of its own, kept open
+    async fn write(&mut self, request: &str) -> Result<(), String> {
+        self.write_bytes(request.as_bytes()).await
+    }
+
+    async fn write_bytes(&mut self, request: &[u8]) -> Result<(), String> {
+        use tokio::io::AsyncWriteExt;
+
+        let mut socket = tokio::net::TcpStream::connect(("127.0.0.1", self.port))
             .await
             .map_err(|error| error.to_string())?;
 
-        hold(read > 0, || "the connect's answer cut".to_owned())?;
-        answer.extend_from_slice(chunk.get(..read).unwrap_or_default());
+        socket
+            .write_all(request)
+            .await
+            .map_err(|error| error.to_string())?;
+        self.sockets.push(socket);
+
+        Ok(())
     }
 
-    let token = String::from_utf8_lossy(&answer)
-        .lines()
-        .find_map(|line| {
-            line.strip_prefix("bead-connection-token: ")
-                .map(str::to_owned)
-        })
-        .ok_or_else(|| "a connect drew no token".to_owned())?;
-    let mut exchange = tokio::net::TcpStream::connect(("127.0.0.1", port))
-        .await
-        .map_err(|error| error.to_string())?;
+    // a connect, listening as `fields` say: its token, read from its 201
+    async fn connect(&mut self, fields: &str) -> Result<String, String> {
+        use tokio::io::AsyncReadExt;
 
-    exchange
-        .write_all(
-            head(&format!(
-                "bead-connection-token: {token}\r\nContent-Length: 16\r\n"
-            ))
-            .as_bytes(),
-        )
-        .await
-        .map_err(|error| error.to_string())?;
+        self.write(&format!(
+            "POST /bead HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/prs.bead\r\n{fields}Content-Length: 0\r\n\r\n"
+        ))
+        .await?;
 
+        let socket = self
+            .sockets
+            .last_mut()
+            .ok_or_else(|| "no socket".to_owned())?;
+        let mut answer = Vec::new();
+
+        while !answer.windows(4).any(|window| window == b"\r\n\r\n") {
+            let mut chunk = [0_u8; 1_024];
+            let read = socket
+                .read(&mut chunk)
+                .await
+                .map_err(|error| error.to_string())?;
+
+            hold(read > 0, || "the connect's answer cut".to_owned())?;
+            answer.extend_from_slice(chunk.get(..read).unwrap_or_default());
+        }
+
+        String::from_utf8_lossy(&answer)
+            .lines()
+            .find_map(|line| {
+                line.strip_prefix("bead-connection-token: ")
+                    .map(str::to_owned)
+            })
+            .ok_or_else(|| "a connect drew no token".to_owned())
+    }
+
+    // the due of the one timer armed once `count` are, or of none once the side settled
+    async fn due(&self, count: usize) -> Result<Duration, String> {
+        for _ in 0..200 {
+            if self.clock.dues().len() >= count {
+                break;
+            }
+
+            bead::testing::rest(Duration::from_millis(5)).await;
+        }
+
+        due_of(&self.clock.dues())
+    }
+
+    async fn stop(self) -> Result<(), String> {
+        drop(self.sockets);
+        self.server.stop().await.map_err(|error| error.to_string())
+    }
+}
+
+// an HTTP transport server's body's grace as `given`, connected to: the due of the pace a body is
+// held to, armed as its exchange's head is read, before a byte of it came; refused, as it is built
+async fn http_body_grace_period_by_options(given: Option<Duration>) -> Played {
+    let mut options = HttpTransportServerOptions::default();
+
+    options.body_grace_period = given;
+    options.inactivity_timeout = Some(NEVER);
+
+    let mut drive = match HttpDrive::of(&options).await? {
+        Ok(drive) => drive,
+        Err(refused) => return Ok(Observed::Refused(refused)),
+    };
+    let token = drive.connect("").await?;
+
+    drive
+        .write(&format!(
+            "POST /bead HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/prs.bead\r\nbead-connection-token: {token}\r\nContent-Length: 16\r\n\r\n"
+        ))
+        .await?;
+
+    let due = drive.due(1).await;
+
+    drive.stop().await?;
+
+    Ok(Observed::Held(due?))
+}
+
+// an HTTP transport server's longest wait as `given`: the due of a listen's that asks for longer;
+// refused, as it is built
+async fn http_maximum_wait_by_options(given: Option<Duration>) -> Played {
+    let mut options = HttpTransportServerOptions::default();
+
+    options.maximum_wait = given;
+    options.inactivity_timeout = Some(NEVER);
+
+    let mut drive = match HttpDrive::of(&options).await? {
+        Ok(drive) => drive,
+        Err(refused) => return Ok(Observed::Refused(refused)),
+    };
+    let token = drive.connect("bead-listen: ?1\r\n").await?;
+
+    drive
+        .write(&format!(
+            "GET /bead HTTP/1.1\r\nHost: 127.0.0.1\r\nbead-connection-token: {token}\r\nbead-after: 0\r\nbead-wait: 2147483647\r\n\r\n"
+        ))
+        .await?;
+
+    let due = drive.due(1).await;
+
+    drive.stop().await?;
+
+    Ok(Observed::Held(due?))
+}
+
+// an HTTP transport server's exchange timeout as `given`: the due of the timer a request handed
+// on and waiting arms; none for never; refused, as it is built
+async fn http_exchange_timeout_by_server(given: Option<Duration>) -> Played {
+    let mut options = HttpTransportServerOptions::default();
+
+    options.exchange_timeout = given;
+    options.inactivity_timeout = Some(NEVER);
+
+    let mut drive = match HttpDrive::of(&options).await? {
+        Ok(drive) => drive,
+        Err(refused) => return Ok(Observed::Refused(refused)),
+    };
+    let token = drive.connect("").await?;
+
+    let mut request = format!(
+        "POST /bead HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/prs.bead\r\nbead-connection-token: {token}\r\nContent-Length: 8\r\n\r\n"
+    )
+    .into_bytes();
+
+    request.extend_from_slice(&[0xA1, 0x10, 0, 0, 0, 0, 0, 1]);
+    drive.write_bytes(&request).await?;
+
+    // its head goes once it is handed on, its timer armed then, its body's pace gone with its body
     for _ in 0..1_000 {
-        if !clock.dues().is_empty() {
+        let counts = drive.server.gauges().map(|gauges| gauges.counts);
+        let is_handed = counts.is_some_and(|counts| {
+            counts.get("waitingExchanges") == Some(&1) && counts.get("bodyBytes") == Some(&0)
+        });
+
+        if is_handed {
             break;
         }
 
         bead::testing::rest(Duration::from_millis(5)).await;
     }
 
-    let due = due_of(&clock.dues());
+    let due = drive.due(1).await;
 
-    drop(exchange);
-    server.stop().await.map_err(|error| error.to_string())?;
+    drive.stop().await?;
+
+    Ok(Observed::Held(due?))
+}
+
+// an HTTP transport server's inactivity timeout as `given`: the due of a connection's rest, armed
+// as it is drawn; none for never; refused, as it is built
+async fn http_inactivity_timeout_by_server(given: Option<Duration>) -> Played {
+    let mut options = HttpTransportServerOptions::default();
+
+    options.inactivity_timeout = given;
+
+    let mut drive = match HttpDrive::of(&options).await? {
+        Ok(drive) => drive,
+        Err(refused) => return Ok(Observed::Refused(refused)),
+    };
+
+    drive.connect("").await?;
+
+    let due = due_of(&drive.clock.dues());
+
+    drive.stop().await?;
 
     Ok(Observed::Held(due?))
 }
@@ -1857,6 +2007,11 @@ async fn play_way((place, way): (&str, &str), given: Option<Duration>) -> Played
         }
         ("httpTransportServer.bodyGracePeriod", "options") => {
             http_body_grace_period_by_options(given).await
+        }
+        ("httpTransportServer.maximumWait", "options") => http_maximum_wait_by_options(given).await,
+        ("httpTransport.exchangeTimeout", "server") => http_exchange_timeout_by_server(given).await,
+        ("httpTransport.inactivityTimeout", "server") => {
+            http_inactivity_timeout_by_server(given).await
         }
         ("httpTransportServer.headersTimeout", "policy") => policy_way("headersTimeout", given),
         ("httpTransportServer.bodyGracePeriod", "policy") => policy_way("bodyGracePeriod", given),
