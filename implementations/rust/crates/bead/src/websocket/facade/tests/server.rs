@@ -2159,8 +2159,8 @@ async fn keeps_two_sockets_from_one_address_and_port_to_two_of_its_addresses_as_
         "answered within it"
     );
 
-    // the stop reaches each, going away, and resolves
-    let stopping = crate::testing::spawn(server.dispose());
+    // the stop reaches each, going away, and resolves: it starts as it is called
+    let stopping = server.dispose();
 
     assert_eq!(
         (close_of(&mut alice).await, close_of(&mut other).await),
@@ -2170,7 +2170,6 @@ async fn keeps_two_sockets_from_one_address_and_port_to_two_of_its_addresses_as_
     patience(PATIENCE, stopping)
         .await
         .expect("stopped in time")
-        .expect("its task")
         .expect("stopped");
 }
 
