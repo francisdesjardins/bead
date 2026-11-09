@@ -127,6 +127,27 @@ test.describe('createHTTPTransportServer', () => {
     expect(START_DEFAULTS).toEqual({ address: 'localhost', findOpenPort: false, port: 80 });
   });
 
+  // spec 9.11
+  test('an HTTP server transport takes the procedures it is given', async () => {
+    await using started = await startTransport({ procedures: [{ procedureId: 1, serviceId: 2 }] });
+    const { server, url } = started;
+    const { connectionHandle } = await connect(url, server);
+
+    expect([
+      server.takesProcedure?.(connectionHandle, { procedureId: 1, serviceId: 2 }),
+      server.takesProcedure?.(connectionHandle, { procedureId: 2, serviceId: 2 }),
+      server.takesProcedure?.(connectionHandle, { procedureId: 1, serviceId: 3 }),
+    ]).toEqual([true, false, false]);
+    // given none, it names none: its router never asks
+    expect(
+      createHTTPTransportServer({
+        createServer: (listener) => {
+          return createServer(listener);
+        },
+      }).takesProcedure
+    ).toBeUndefined();
+  });
+
   test('draws a connection on a connect: a token of 16 bytes, a 201, and "connection" first, showing neither', async () => {
     await using started = await startTransport();
     const { events, server, url } = started;

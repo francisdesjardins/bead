@@ -60,6 +60,7 @@
   ACCEPT_TIMEOUT	src/transport/server/broker-transport-server.ts
   BrokerTransportServer	src/transport/server/types.ts
   IBrokerTransportServerOptions	src/transport/server/types.ts
+  IProcedureAddress	src/router/shared/types.ts
   MAXIMUM_CONNECTIONS	src/transport/server/server-bounds.ts
   MAXIMUM_CONNECTIONS_PER_ADDRESS	src/transport/server/server-bounds.ts
   MAXIMUM_UNSENT_BYTES	src/transport/server/broker-transport-server.ts
@@ -295,6 +296,7 @@
   IHTTPServerLike	src/transport/server/types.ts
   IHTTPTransportServerOptions	src/transport/server/types.ts
   INACTIVITY_TIMEOUT	src/transport/server/http-transport-server.ts
+  IProcedureAddress	src/router/shared/types.ts
   LISTEN_HEADER	src/transport/shared/constants.ts
   MAXIMUM_BODY_BYTES	src/transport/server/http-transport-server.ts
   MAXIMUM_CONNECTIONS	src/transport/server/server-bounds.ts
@@ -317,6 +319,7 @@
   IGauges	src/transport/shared/types.ts
   IJoinableTransportServer	src/transport/server/types.ts
   IJoinedTransportServer	src/transport/server/types.ts
+  IProcedureAddress	src/router/shared/types.ts
   joinTransports	src/transport/server/joined-transport-server.ts
 ./memory-broker
   BROKER_DELIVERIES	src/transport/shared/constants.ts
@@ -356,6 +359,7 @@
   IMemoryPeerLike	src/transport/shared/types.ts
   IMemoryTransportServerLike	src/transport/shared/types.ts
   IMemoryTransportServerOptions	src/transport/server/types.ts
+  IProcedureAddress	src/router/shared/types.ts
   MemoryTransportServer	src/transport/server/types.ts
   START_DEFAULTS	src/transport/server/memory-transport-server.ts
   TRANSPORT_MEMORY	src/transport/shared/constants.ts
@@ -599,6 +603,7 @@
   FailureNameOf	src/service/descriptors.ts
   GENERATED_CODE_SUPPORTS_VERSION_6	src/service/generated-code.ts
   GENERATED_CODE_SUPPORTS_VERSION_7	src/service/generated-code.ts
+  GENERATED_CODE_SUPPORTS_VERSION_8	src/service/generated-code.ts
   GivenOf	src/service/descriptors.ts
   HookName	src/service/descriptors.ts
   IAdmissionHook	src/service/descriptors.ts
@@ -992,6 +997,7 @@
   IClock	src/transport/shared/clock.ts
   IEventIteratorOptions	src/transport/shared/types.ts
   IGauges	src/transport/shared/types.ts
+  IProcedureAddress	src/router/shared/types.ts
   ITransportMessage	src/transport/shared/types.ts
   ITransportServer	src/transport/server/types.ts
   ITransportServerAddress	src/transport/server/types.ts
@@ -1189,6 +1195,7 @@
   HOST_REFUSAL	src/transport/server/hosts-and-origins.ts
   IDrawingRequest	src/transport/server/types.ts
   IIncomingMessageLike	src/transport/server/types.ts
+  IProcedureAddress	src/router/shared/types.ts
   IServerSocketLike	src/transport/server/types.ts
   IUpgradeSocketLike	src/transport/server/types.ts
   IWebSocketServerConstructor	src/transport/server/types.ts
@@ -1337,6 +1344,7 @@
   WorkerTransportClient	src/transport/client/types.ts
   createWorkerTransportClient	src/transport/client/worker-transport-client.ts
 ./worker-transport-server
+  IProcedureAddress	src/router/shared/types.ts
   IWorkerMessageEventLike	src/transport/shared/types.ts
   IWorkerPortLike	src/transport/shared/types.ts
   IWorkerScopeLike	src/transport/server/types.ts
@@ -1717,6 +1725,7 @@ src/router/server/types.ts IRouterServerTransportLike
     carriesCredential?(connectionHandle: TransportServerConnectionHandle): boolean
     isSecure?(connectionHandle: TransportServerConnectionHandle): boolean
     isTwoWay?(connectionHandle: TransportServerConnectionHandle): boolean
+    takesProcedure?(connectionHandle: TransportServerConnectionHandle, address: IProcedureAddress): boolean
     pause(connectionHandle: TransportServerConnectionHandle): void
     resume(connectionHandle: TransportServerConnectionHandle): void
     send(message: ITransportMessage, connectionHandle: TransportServerConnectionHandle): Promise<void>
@@ -2575,6 +2584,7 @@ src/server/types.ts IServerTransportLike
     carriesCredential?(connectionHandle: TransportServerConnectionHandle): boolean
     isSecure?(connectionHandle: TransportServerConnectionHandle): boolean
     isTwoWay?(connectionHandle: TransportServerConnectionHandle): boolean
+    takesProcedure?(connectionHandle: TransportServerConnectionHandle, address: IProcedureAddress): boolean
     pause(connectionHandle: TransportServerConnectionHandle): void
     resume(connectionHandle: TransportServerConnectionHandle): void
     send(message: ITransportMessage, connectionHandle: TransportServerConnectionHandle): Promise<void>
@@ -2704,6 +2714,8 @@ src/service/generated-code.ts GENERATED_CODE_SUPPORTS_VERSION_6
   const GENERATED_CODE_SUPPORTS_VERSION_6: true
 src/service/generated-code.ts GENERATED_CODE_SUPPORTS_VERSION_7
   const GENERATED_CODE_SUPPORTS_VERSION_7: true
+src/service/generated-code.ts GENERATED_CODE_SUPPORTS_VERSION_8
+  const GENERATED_CODE_SUPPORTS_VERSION_8: true
 src/service/service-client.ts IServiceClient
   interface IServiceClient<S extends ServiceProcedures>
     readonly notifications: {readonly [Name in keyof S as Name extends NotifyingName<S> ? Name : never]: INotification<GivenOf<S[Name]['request']>, ValueOf<NonNullable<S[Name]['notification']>>>}
@@ -3414,6 +3426,8 @@ src/transport/server/types.ts IBrokerTransportServerOptions
     maximumConnectionsPerAddress?: number | undefined
     maximumUnsentBytes?: number | undefined
     names: readonly string[]
+    procedures?: readonly IProcedureAddress[] | undefined
+    proceduresByName?: Readonly<Record<string, readonly IProcedureAddress[]>> | undefined
     secure?: boolean | undefined
 src/transport/server/types.ts IDrawingRequest
   interface IDrawingRequest
@@ -3488,6 +3502,7 @@ src/transport/server/types.ts IHTTPTransportServerOptions
     unnamedProxies?: number | undefined
     readonly policy?: IHTTPPolicy | undefined
     clock?: IClock | undefined
+    procedures?: readonly IProcedureAddress[] | undefined
 src/transport/server/types.ts IIncomingMessageLike
   interface IIncomingMessageLike
     readonly headers: Readonly<Record<string, string | string[] | undefined>>
@@ -3511,6 +3526,7 @@ src/transport/server/types.ts IJoinableTransportServer
     resume(connectionHandle: TransportServerConnectionHandle): void
     send(message: ITransportMessage, connectionHandle: TransportServerConnectionHandle): Promise<void>
     stop(): Promise<void>
+    takesProcedure?(connectionHandle: TransportServerConnectionHandle, address: IProcedureAddress): boolean
 src/transport/server/types.ts IJoinedTransportServer
   interface IJoinedTransportServer<Transports extends readonly IJoinableTransportServer[] = readonly IJoinableTransportServer[]> extends IEventMethods<TransportServerEventMap, IJoinedTransportServer<Transports>>
     readonly clock: IClock | undefined
@@ -3523,6 +3539,7 @@ src/transport/server/types.ts IJoinedTransportServer
     pause(connectionHandle: TransportServerConnectionHandle): void
     resume(connectionHandle: TransportServerConnectionHandle): void
     send(message: ITransportMessage, connectionHandle: TransportServerConnectionHandle): Promise<void>
+    takesProcedure?(connectionHandle: TransportServerConnectionHandle, address: IProcedureAddress): boolean
     stop(): Promise<void>
     [Symbol.asyncDispose](): Promise<void>
     emit<K extends keyof E>(event: K, ...params: E[K]): boolean
@@ -3572,6 +3589,7 @@ src/transport/server/types.ts ITransportServer
     send(message: ITransportMessage, connectionHandle: TransportServerConnectionHandle): Promise<void>
     start(options?: ITransportServerStartOptions): Promise<ITransportServerAddress>
     stop(): Promise<void>
+    takesProcedure?(connectionHandle: TransportServerConnectionHandle, address: IProcedureAddress): boolean
     [Symbol.asyncDispose](): Promise<void>
     isClosed(): boolean
     isClosing(): boolean
@@ -3627,9 +3645,11 @@ src/transport/server/types.ts ITransportServerImplementation
     send(message: ITransportMessage, connection: ITransportServerClientAware<Socket>): Promise<void>
     start(options: TransportServerResolvedStartOptions & {signal?: AbortSignal | undefined}): Promise<ITransportServerAddress>
     stop(): Promise<void>
+    takesProcedure?(connectionHandle: TransportServerConnectionHandle, address: IProcedureAddress): boolean
 src/transport/server/types.ts ITransportServerOptions
   interface ITransportServerOptions
     clock?: IClock | undefined
+    procedures?: readonly IProcedureAddress[] | undefined
 src/transport/server/types.ts ITransportServerRefusal
   interface ITransportServerRefusal
     address: string | undefined
@@ -3680,6 +3700,7 @@ src/transport/server/types.ts IWebSocketTransportServerOptions
     unnamedProxies?: number | undefined
     WebSocketServer: IWebSocketServerConstructor
     clock?: IClock | undefined
+    procedures?: readonly IProcedureAddress[] | undefined
 src/transport/server/types.ts IWorkerScopeLike
   interface IWorkerScopeLike
     addEventListener(type: 'message', listener: (event: IWorkerMessageEventLike) => void): void
@@ -3688,6 +3709,7 @@ src/transport/server/types.ts IWorkerTransportServerOptions
   interface IWorkerTransportServerOptions extends ITransportServerOptions
     scope: IWorkerScopeLike
     clock?: IClock | undefined
+    procedures?: readonly IProcedureAddress[] | undefined
 src/transport/server/types.ts MemoryTransportServer
   type MemoryTransportServer = ITransportServer<IMemoryPeerLike, undefined> & IMemoryTransportServerLike
 src/transport/server/types.ts TRANSPORT_SERVER_EVENTS
@@ -3729,7 +3751,7 @@ src/transport/server/websocket-transport-server.ts createWebSocketTransportServe
 src/transport/server/worker-transport-server.ts START_DEFAULTS
   const START_DEFAULTS: Readonly<{address: string; findOpenPort: false; port: number}>
 src/transport/server/worker-transport-server.ts createWorkerTransportServer
-  const createWorkerTransportServer({clock, scope}: IWorkerTransportServerOptions): WorkerTransportServer
+  const createWorkerTransportServer({clock, procedures, scope}: IWorkerTransportServerOptions): WorkerTransportServer
 src/transport/shared/amqp-broker-adapter.ts CONNECT_TIMEOUT
   const CONNECT_TIMEOUT: 30000
 src/transport/shared/amqp-broker-adapter.ts IAmqpBrokerAdapter

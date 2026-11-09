@@ -3,6 +3,8 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
 import { createTestClock, hasRef, timersBy } from '../../../transport/shared/__tests__/fixtures';
 import type { IClock } from '../../../transport/shared/clock';
+import type { TransportServerConnectionHandle } from '../../../transport/server/types';
+import { createEmitter } from '../../../transport/shared/emitter';
 import { CancelError, ProgrammerError, TimeoutError } from '../../../transport/shared/errors';
 import { nextTask } from '../../../transport/shared/later-task';
 import { noop } from '../../../transport/shared/noop';
@@ -23,6 +25,7 @@ import * as routerClient from '../../client/router-client';
 import * as routerServer from '../../server/router-server';
 import { createRouterCore } from '../router-core';
 import * as serviceManager from '../service-manager';
+import { bytesOf, readEnvelope } from '../envelope';
 import type {
   Envelope,
   IAdmissionRequest,
@@ -31,6 +34,7 @@ import type {
   IFailure,
   INotificationHeader,
   IProcedure,
+  IProcedureAddress,
   IDestinationHandler,
   IRequestHandler,
   IRequestHeader,
@@ -2347,6 +2351,131 @@ test.describe('createRouterCore', () => {
         expect(admitted).toBe(1);
         expect(answersOf(sent)).toEqual([['a', 'credit', 1, Math.min(total, opening + 128)]]);
       }
+    });
+  });
+
+  // spec 9.2, step 5; 9.11
+  test.describe('the procedures its transport takes', () => {
+    test('a router asks its transport of each request that names no destination, and of none that names one', async () => {
+      const asked: string[] = [];
+      const relayed: IRequestResolverProps<Handle>[] = [];
+      const other: IProcedure = { ...echo, procedureId: 2, procedureName: 'other' };
+      // `a` takes echo alone; `b` none
+      const { port, sent } = createPort({
+        handlerOfDestination: () => {
+          return (props) => {
+            relayed.push(props);
+
+            return Promise.resolve();
+          };
+        },
+        takesProcedure: (connectionHandle, { procedureId, serviceId }) => {
+          asked.push(`${connectionHandle} ${String(serviceId)}/${String(procedureId)}`);
+
+          return connectionHandle === 'a' && procedureId === echo.procedureId;
+        },
+      });
+      using core = createRouterCore(port);
+      const seen: IRequestResolverProps<Handle>[] = [];
+
+      core.registerResolver(resolverOf(echo, seen));
+      core.registerResolver(resolverOf(other));
+      core.receive(requestOf(1), 'a');
+      core.receive(requestOf(3, { procedure: other }), 'a');
+      core.receive(requestOf(5, { destinationId: 5 }), 'a');
+      core.receive(requestOf(7), 'b');
+      await sleep(0);
+
+      expect(
+        seen.map(({ header }) => {
+          return header.callId;
+        })
+      ).toEqual([1]);
+      expect(
+        relayed.map(({ header }) => {
+          return header.callId;
+        })
+      ).toEqual([5]);
+      // * its address, then, refused, its service's procedures until one is taken; never one that
+      // names a destination
+      expect(asked).toEqual(['a 2/1', 'a 2/2', 'a 2/1', 'b 2/1', 'b 2/1', 'b 2/2']);
+      expect(answersOf(sent)).toEqual([
+        ['a', 'failure', 3, ProtocolCode.PROCEDURE_UNKNOWN],
+        ['b', 'failure', 7, ProtocolCode.SERVICE_UNKNOWN],
+      ]);
+    });
+
+    test('a router whose transport names no procedures never asks', async () => {
+      const handle: TransportServerConnectionHandle = 'type=WS;ip=127.0.0.1;port=50001;ordinal=1';
+      const emitter = createEmitter<{
+        close: [wasClean: boolean, connectionHandle: TransportServerConnectionHandle];
+        connection: [
+          connection: { request: unknown; socket: unknown },
+          connectionHandle: TransportServerConnectionHandle,
+        ];
+        message: [message: { data: Uint8Array }, connectionHandle: TransportServerConnectionHandle];
+      }>();
+      const sent: (Envelope | undefined)[] = [];
+      const asked: IProcedureAddress[] = [];
+      const transport: routerServer.IRouterServerTransportLike = {
+        // oxlint-disable-next-line typescript/unbound-method -- `createEmitter` returns arrow functions, which have no `this` to lose
+        off: emitter.off,
+        // oxlint-disable-next-line typescript/unbound-method -- as above
+        on: emitter.on,
+        pause: noop,
+        resume: noop,
+        send: ({ data }) => {
+          sent.push(
+            readEnvelope(bytesOf(data), {
+              failures: CLIENT_FAILURES,
+              maximumEnvelopeBytes: Number.MAX_SAFE_INTEGER,
+            })
+          );
+
+          return Promise.resolve();
+        },
+      };
+      using router = routerServer.createRouterServer(transport);
+      const seen: IRequestResolverProps<TransportServerConnectionHandle>[] = [];
+
+      router.registerResolver(
+        Object.assign((props: IRequestResolverProps<TransportServerConnectionHandle>) => {
+          seen.push(props);
+
+          return Promise.resolve();
+        }, echo)
+      );
+      // ! named once its router is built, which asked then: it is never asked since
+      Object.assign(transport, {
+        takesProcedure: (
+          _connectionHandle: TransportServerConnectionHandle,
+          address: IProcedureAddress
+        ) => {
+          asked.push(address);
+
+          return false;
+        },
+      });
+      emitter.emit('connection', { request: {}, socket: {} }, handle);
+      emitter.emit('message', { data: requestOf(1) }, handle);
+      emitter.emit(
+        'message',
+        { data: requestOf(3, { procedure: { ...echo, procedureId: 9 } }) },
+        handle
+      );
+      await sleep(0);
+
+      expect(asked).toEqual([]);
+      expect(
+        seen.map(({ header }) => {
+          return header.callId;
+        })
+      ).toEqual([1]);
+      expect(
+        sent.map((envelope) => {
+          return envelope?.kind === EnvelopeKind.FAILURE ? envelope.failure.code : envelope?.kind;
+        })
+      ).toEqual([ProtocolCode.PROCEDURE_UNKNOWN]);
     });
   });
 

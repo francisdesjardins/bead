@@ -324,6 +324,8 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
       });
   };
 
+  // read once, as the router is built: a transport that names no procedures is never asked
+  const takesProcedure = transport.takesProcedure?.bind(transport);
   const core = createRouterCore<TransportServerConnectionHandle>(
     {
       credentialSchemes: credentials.schemes,
@@ -343,6 +345,9 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
       isTwoWay: (connectionHandle) => {
         return transport.isTwoWay?.(connectionHandle) ?? true;
       },
+      // * only when its transport names procedures: over one that names none, nothing is asked
+      // (spec 9.11)
+      ...(takesProcedure === undefined ? {} : { takesProcedure }),
       beforeAnswer: ({ connectionHandle, header, isFailure, resolver, session }) => {
         const { callId, procedureId, serviceId } = header;
         const { end, identifier } = subscribingOf(session);

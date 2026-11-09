@@ -764,6 +764,16 @@ export interface IRouterServerTransportLike {
    */
   isTwoWay?(connectionHandle: TransportServerConnectionHandle): boolean;
   /**
+   * Whether a connection takes a procedure (spec 9.11), asked of each request that names no
+   * destination: one it does not take is answered as one to no resolver, `SERVICE_UNKNOWN` or
+   * `PROCEDURE_UNKNOWN`, before its credential, its admission or its payload. Every connection takes
+   * every procedure without it, and the router then never asks.
+   */
+  takesProcedure?(
+    connectionHandle: TransportServerConnectionHandle,
+    address: IProcedureAddress
+  ): boolean;
+  /**
    * Pauses a connection, its router behind on it (spec 15.12, decision 0046): it hands nothing more
    * of it, and holds what it already received, whole or still arriving, in order, until `resume`;
    * while it holds anything, what comes next waits behind it, paused or not, so nothing overtakes

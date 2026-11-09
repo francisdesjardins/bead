@@ -57,6 +57,7 @@ import {
   SEND_GRACE_PERIOD,
 } from './server-bounds';
 import { withPolicy } from './http-policy';
+import { takingOf } from './shared/procedures-taken';
 import { clientAddressOf, trustedProxiesOf } from './trusted-proxies';
 import { BUSY_EXCHANGES, createHTTPRequestExchange, type IExchange } from './http-request-exchange';
 import {
@@ -97,6 +98,7 @@ import type {
   TransportServerConnectionHandle,
 } from './types';
 
+export type { IProcedureAddress } from '../../router/shared/types';
 export {
   AFTER_HEADER,
   BEAD_BATCH_MEDIA_TYPE,
@@ -355,6 +357,7 @@ export const createHTTPTransportServer = (
     minimumSendBytesPerSecond = MINIMUM_SEND_BYTES_PER_SECOND,
     origins = [],
     pathname = PATHNAME,
+    procedures,
     secure,
     sendGracePeriod: givenSendGracePeriod = SEND_GRACE_PERIOD,
     trustedProxies,
@@ -383,6 +386,7 @@ export const createHTTPTransportServer = (
   assertHosts(hosts);
   assertOrigins(origins);
   const proxies = trustedProxiesOf(trustedProxies, { unnamedProxies });
+  const taking = takingOf(procedures, 'an HTTP transport server');
 
   // what the transport keeps of each connection, by handle
   const drawn = new Map<TransportServerConnectionHandle, IDrawn>();
@@ -1106,6 +1110,7 @@ export const createHTTPTransportServer = (
         },
         secure,
         type: TRANSPORT_HTTP,
+        ...taking,
 
         start: async ({ address, findOpenPort, port, signal }) => {
           assertListeningAddress(address);

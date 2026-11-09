@@ -792,8 +792,9 @@ export interface IRouterCoreOptions {
  * answers announce, and what it hears of what the core does.
  *
  * The core calls it in this order. An envelope that reads is traced, then dispatched by kind: a
- * request asks `isCallIdInUse`, then — one that names a destination — `handlerOfDestination`, then
- * — its credential of a scheme the side takes — `sessionOf`, then its handler's `admit`, on the
+ * request asks `isCallIdInUse`, then — one that names a destination — `handlerOfDestination`, or —
+ * one that names none — `takesProcedure`, then — its credential of a scheme the side takes —
+ * `sessionOf`, then its handler's `admit`, on the
  * call's session, then — one that opens a subscription — `isTwoWay`, then goes to its handler
  * once its payload is whole; a result or a failure
  * is shown to `onAnswerReceived`, then paired with its request, and a failure no call waits on is
@@ -836,6 +837,14 @@ export interface IRouterCorePort<Handle extends string> {
    * without it.
    */
   isTwoWay?(connectionHandle: Handle): boolean;
+  /**
+   * Whether a connection's transport takes a procedure (spec 9.11), asked of a request that names no
+   * destination, past the calls its connection has answered and before its credential: one it does
+   * not take has no resolver, and its service is known there only when a resolver of it registered
+   * has an address it takes. Without it, every connection takes every procedure, and nothing is
+   * asked.
+   */
+  takesProcedure?(connectionHandle: Handle, address: IProcedureAddress): boolean;
   /**
    * An answer about to be written — a failure or not — the handler its request was routed to, and
    * the call's session its admission read; what it returns undoes what it did, should the answer

@@ -28,6 +28,7 @@ import type {
   TransportServerToldEvent,
 } from './types';
 
+export type { IProcedureAddress } from '../../router/shared/types';
 export { LONGEST_TIMER, PLATFORM_CLOCK } from '../shared/clock';
 export type { IClock, TimeoutId } from '../shared/clock';
 export {
@@ -436,6 +437,14 @@ export const createTransportServer = <Socket extends object, Request>(
   const implementation = define(server, connections, defineOptions);
 
   startOptions = implementation.defaults;
+
+  // * present only on a transport given procedures, so a router over one given none never asks
+  // (spec 9.11)
+  const takesProcedure = implementation.takesProcedure?.bind(implementation);
+
+  if (takesProcedure !== undefined) {
+    server.takesProcedure = takesProcedure;
+  }
 
   return server;
 };

@@ -15,6 +15,7 @@ import { createEmitter } from '../shared/emitter';
 import { ProgrammerError, toError } from '../shared/errors';
 import { gaugesOf } from '../shared/gauges';
 import { createEventMethods } from '../shared/lifecycle';
+import type { IProcedureAddress } from '../../router/shared/types';
 import type { IGauges } from '../shared/types';
 import type {
   IJoinableTransportServer,
@@ -24,6 +25,7 @@ import type {
   TransportServerToldEvent,
 } from './types';
 
+export type { IProcedureAddress } from '../../router/shared/types';
 export type { IGauges } from '../shared/types';
 export type { IJoinableTransportServer, IJoinedTransportServer } from './types';
 
@@ -97,7 +99,8 @@ const clockOf = (transports: readonly IJoinableTransportServer[]): IClock | unde
  * transport binds both addresses instead. So is none, a join among them, and two clocks.
  *
  * A connection's flags, sends, closes, pauses and resumes go to the transport that drew its
- * handle; each transport's events are told on with that handle, in the order it told them, each
+ * handle, and so does whether it takes a procedure (spec 9.11), every one for a transport that
+ * names none; each transport's events are told on with that handle, in the order it told them, each
  * listener within a guard (spec 15.1). It starts nothing and serves no port: an application starts
  * each transport, where it listens; one port for two comes from a proxy in front of them.
  *
@@ -228,6 +231,24 @@ export const joinTransports = <const Transports extends readonly IJoinableTransp
     send: (message, connectionHandle) => {
       return ownerOf(connectionHandle)?.send(message, connectionHandle) ?? Promise.resolve();
     },
+    // * present only when one of its transports names procedures, so a router over a join none of
+    // whose transports does never asks (spec 9.11)
+    ...(transports.some((transport) => {
+      return transport.takesProcedure !== undefined;
+    })
+      ? {
+          takesProcedure: (
+            connectionHandle: TransportServerConnectionHandle,
+            address: IProcedureAddress
+          ) => {
+            const owner = ownerOf(connectionHandle);
+
+            return owner === undefined
+              ? false
+              : (owner.takesProcedure?.(connectionHandle, address) ?? true);
+          },
+        }
+      : {}),
     stop: async () => {
       const stopped = await Promise.allSettled(
         transports.map((transport) => {
