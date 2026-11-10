@@ -827,7 +827,8 @@ export type RouterServerEventMap = {
   /**
    * What went wrong with an envelope no call was waiting on, in a resolver, or with a notification,
    * and the connection that envelope came from or went to; none for what no connection carries: a
-   * debug listener that throws as a notification is told sent, to whoever is subscribed.
+   * debug listener that throws as a notification is told sent, to whoever is subscribed. What a
+   * listener of it throws is dropped, the listeners after it told all the same (spec 15.1).
    */
   error: [error: Error, connectionHandle: TransportServerConnectionHandle | undefined];
 };

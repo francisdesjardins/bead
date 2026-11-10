@@ -24,6 +24,7 @@ import {
   createTestClock,
   delaysOn,
   timersUntil,
+  trapUncaught,
 } from '../../../transport/shared/__tests__/fixtures';
 import { countedOf, createPipedTransports, envelopeOf } from '../../shared/__tests__/fixtures';
 import { createRouterServer } from '../../server/router-server';
@@ -2728,6 +2729,36 @@ test.describe('createRouterClient', () => {
       expect(sent).toHaveLength(1);
       expect(heard).toEqual(['tx', 'rx']);
       expect(errors).toEqual([failure, failure]);
+    });
+
+    // spec 15.1; debugging 2.2
+    test('drops what an error listener throws, the next error listener told, and the call goes on', async () => {
+      using uncaught = trapUncaught();
+      const { deliver, sent, transport } = createScriptedTransport();
+      using router = createRouterClient(transport);
+      const failure = new Error('listener bug');
+      const heard: Error[] = [];
+
+      router.once('debug', () => {
+        throw failure;
+      });
+      router.on('error', () => {
+        throw new Error('an error listener that throws');
+      });
+      router.on('error', (error) => {
+        heard.push(error);
+      });
+
+      const answering = router.request(new Uint8Array(0), { options, procedure: service });
+
+      deliver(resultOf(1));
+
+      // * the debug listener's throw told the next error listener, and the throw of the first
+      // dropped: the call answered with its result
+      await expect(answering).resolves.toMatchObject({ header: { callId: 1 } });
+      expect(sent).toHaveLength(1);
+      expect(heard).toEqual([failure]);
+      expect(uncaught.thrown).toEqual([]);
     });
 
     // debugging 4.4

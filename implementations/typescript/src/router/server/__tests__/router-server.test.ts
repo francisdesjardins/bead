@@ -44,6 +44,7 @@ import {
   delaysOn,
   type TestClock,
   timersUntil,
+  trapUncaught,
 } from '../../../transport/shared/__tests__/fixtures';
 import {
   callIdsOf,
@@ -5373,6 +5374,39 @@ test.describe('createRouterServer, its metrics', () => {
       [failure, first],
       [failure, first],
     ]);
+  });
+
+  // spec 15.1; debugging 2.2
+  test('drops what an error listener throws, the next error listener told, and the call goes on', async () => {
+    using uncaught = trapUncaught();
+    const { deliver, open, sent, transport } = createScriptedTransport();
+    using router = createRouterServer(transport);
+    const failure = new Error('listener bug');
+    const heard: [Error, string | undefined][] = [];
+
+    router.once('debug', () => {
+      throw failure;
+    });
+    router.on('error', () => {
+      throw new Error('an error listener that throws');
+    });
+    router.on('error', (error, connectionHandle) => {
+      heard.push([error, connectionHandle]);
+    });
+    createServiceManager(router).getRequestResolver(echo, { serializer: answering })(
+      (request, response) => {
+        return response(request.payload);
+      }
+    );
+    open(first);
+    deliver(first, requestOf(1, { payload: text.encode('hi') }));
+    await sleep(0);
+
+    // * the debug listener's throw told the next error listener, with its connection, and the
+    // throw of the first dropped: the call answered with its result
+    expect(answersOf(sent)).toEqual([[first, 'result', 1, 'hi']]);
+    expect(heard).toEqual([[failure, first]]);
+    expect(uncaught.thrown).toEqual([]);
   });
 
   // debugging 9.7

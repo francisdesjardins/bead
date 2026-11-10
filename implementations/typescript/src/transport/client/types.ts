@@ -250,6 +250,11 @@ export interface ITransportClientImplementation<
 /** What {@link createTransportClient} gives its transport beside the client. */
 export interface ITransportClientDefineOptions {
   /**
+   * Tells `error` to each of its listeners within a guard (spec 15.1): what one throws is dropped,
+   * and the listeners after it are told all the same. Returns whether it had any.
+   */
+  readonly report: (error: Error) => boolean;
+  /**
    * Calls each listener of a `message` or a `close` within a guard (spec 15.1): what one throws is
    * reported through `error`, and the listeners after it are called all the same. Returns whether
    * `event` had any.
@@ -284,7 +289,8 @@ export type TransportClientEventMap = {
    * client does; and, once open, what the client closes its connection for of its own — a protocol
    * error, a message or an envelope past its bound, a batch that does not read — once, as the
    * connection ends, before its `close` (spec 15.1). A connect that fails rejects; a server or a
-   * network that ends the connection shows as `close` alone.
+   * network that ends the connection shows as `close` alone. What a listener of it throws is
+   * dropped, the listeners after it told all the same.
    */
   error: [error: Error];
   /**

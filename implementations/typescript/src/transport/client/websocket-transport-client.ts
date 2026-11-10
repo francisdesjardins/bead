@@ -5,7 +5,6 @@
 import {
   CLOSE_EVENT,
   CLOSE_TIMEOUT,
-  ERROR_EVENT,
   MESSAGE_EVENT,
   REFUSAL_HEADER,
   TRANSPORT_WEBSOCKET_BINARYTYPE,
@@ -205,7 +204,7 @@ export const createWebSocketTransportClient = (
   const closeTimeout = assertHeld('a close timeout', givenCloseTimeout);
 
   return createTransportClient<IWebSocketLike, IWebSocketTransportClientConnectOptions>(
-    (client, { tell }) => {
+    (client, { report, tell }) => {
       // settle the connect or the disconnect in flight, so a socket dropped under either cannot leave
       // it pending, and the client with it
       let rejectConnect: ((reason: Error) => void) | undefined;
@@ -447,8 +446,8 @@ export const createWebSocketTransportClient = (
                       return (hold.offer({ credential: undefined, data: data as Data }), undefined);
                     };
 
-                    // * its end: its one error, then its close, told even when a listener of
-                    // `error` throws, which is Node's or the page's (spec 15.1)
+                    // * its end: its one error, then its close, what a listener of `error` throws
+                    // dropped (spec 15.1)
                     socket.onclose = () => {
                       stopBeating();
                       hold.drop();
@@ -456,13 +455,11 @@ export const createWebSocketTransportClient = (
                       if (!client.isReconnecting()) {
                         setReadyStateClosed(client);
 
-                        try {
-                          if (failure !== undefined) {
-                            client.emit(ERROR_EVENT, failure);
-                          }
-                        } finally {
-                          tell(CLOSE_EVENT, [false, false]);
+                        if (failure !== undefined) {
+                          report(failure);
                         }
+
+                        tell(CLOSE_EVENT, [false, false]);
                       }
                     };
 

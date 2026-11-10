@@ -2,7 +2,7 @@
 
 // dependencies
 
-import { CLOSE_EVENT, ERROR_EVENT, MESSAGE_EVENT, WORKER_MESSAGES } from '../shared/constants';
+import { CLOSE_EVENT, MESSAGE_EVENT, WORKER_MESSAGES } from '../shared/constants';
 import { createPromise } from '../shared/create-promise';
 import { ConnectError, GenericError, ProgrammerError, ReadyStateError } from '../shared/errors';
 import { createHold } from '../shared/hold';
@@ -84,7 +84,7 @@ export const createWorkerTransportClient = ({
   worker,
 }: IWorkerTransportClientOptions): WorkerTransportClient => {
   return createTransportClient<IWorkerPortLike, ITransportClientConnectOptions>(
-    (client, { tell }) => {
+    (client, { report, tell }) => {
       let port: IWorkerPortLike | undefined;
       // settles the connect in flight, so a dispose under it cannot leave it pending
       let rejectConnect: ((reason: Error) => void) | undefined;
@@ -112,13 +112,11 @@ export const createWorkerTransportClient = ({
         if (!client.isReconnecting()) {
           setReadyStateClosed(client);
 
-          try {
-            if (failure !== undefined) {
-              client.emit(ERROR_EVENT, failure);
-            }
-          } finally {
-            tell(CLOSE_EVENT, [false, false]);
+          if (failure !== undefined) {
+            report(failure);
           }
+
+          tell(CLOSE_EVENT, [false, false]);
         }
       };
 

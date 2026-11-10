@@ -3386,7 +3386,7 @@ test.describe('WebSocketTransportServer, its bounds', () => {
   });
 
   // spec 15.1
-  test('closes with 1009, and drops behind maximumUnsentBytes, a connection whose error listener throws, telling its close all the same', async () => {
+  test('closes with 1009, and drops behind maximumUnsentBytes, a connection whose error listener throws, telling its close all the same and dropping what it threw', async () => {
     using uncaught = trapUncaught();
     await using started = await startDated({
       heartbeat: Infinity,
@@ -3396,12 +3396,16 @@ test.describe('WebSocketTransportServer, its bounds', () => {
     });
     const { port, server } = started;
     const reported: string[] = [];
+    const heard: string[] = [];
     const closes: unknown[] = [];
 
     server.on('error', (error) => {
       reported.push(error.message);
 
       throw new Error('an error listener that throws');
+    });
+    server.on('error', (error) => {
+      heard.push(error.message);
     });
     server.on('close', (wasClean, connectionHandle) => {
       closes.push([wasClean, connectionHandle]);
@@ -3446,17 +3450,18 @@ test.describe('WebSocketTransportServer, its bounds', () => {
         [false, tooBigHandle],
         [false, behindHandle],
       ]);
-    expect(reported).toEqual([
-      `${tooBigHandle} is closed with 1009: a message past its maximumMessageBytes, 64 bytes`,
-      `${behindHandle} is dropped: what waits for its socket would pass maximumUnsentBytes, 65536 bytes`,
+    // * what the listener threw is dropped: the listener after it told each error, and nothing else
+    expect([reported, heard]).toEqual([
+      [
+        `${tooBigHandle} is closed with 1009: a message past its maximumMessageBytes, 64 bytes`,
+        `${behindHandle} is dropped: what waits for its socket would pass maximumUnsentBytes, 65536 bytes`,
+      ],
+      [
+        `${tooBigHandle} is closed with 1009: a message past its maximumMessageBytes, 64 bytes`,
+        `${behindHandle} is dropped: what waits for its socket would pass maximumUnsentBytes, 65536 bytes`,
+      ],
     ]);
-    // what the listener threw was Node's, once each
-    expect(
-      uncaught.thrown.map((error) => {
-        return (error as Error).message;
-      })
-    ).toEqual(['an error listener that throws', 'an error listener that throws']);
-    expect(server.clients).toEqual([]);
+    expect([uncaught.thrown, server.clients]).toEqual([[], []]);
     socket.destroy();
   });
 

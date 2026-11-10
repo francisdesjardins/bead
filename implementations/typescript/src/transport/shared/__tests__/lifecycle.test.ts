@@ -31,6 +31,34 @@ test.describe('createEventMethods', () => {
     expect(methods.emit('message', 'b')).toBe(false);
     expect(seen).toEqual(['a']);
   });
+
+  // spec 15.1
+  test('tells an "error" within a guard, dropping what a listener of it throws, and no other event', () => {
+    const emitter = createEmitter<{ error: [error: Error]; message: [data: string] }>();
+    const methods = createEventMethods(emitter, () => {
+      return {};
+    });
+    const failure = new Error('an error listener that throws');
+    const heard: Error[] = [];
+    const told = new Error('told');
+
+    methods.on('error', () => {
+      throw failure;
+    });
+    methods.on('error', (error) => {
+      heard.push(error);
+    });
+    methods.on('message', () => {
+      throw failure;
+    });
+
+    expect(methods.emit('error', told)).toBe(true);
+    expect(heard).toEqual([told]);
+    // `message` guards none
+    expect(() => {
+      methods.emit('message', 'a');
+    }).toThrow(failure);
+  });
 });
 
 test.describe('createReadyStateMethods', () => {

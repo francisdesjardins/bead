@@ -3,8 +3,8 @@
 // dependencies
 
 import { assertHeld, PLATFORM_CLOCK } from '../shared/clock';
-import { ERROR_EVENT, RECONNECT_EVENT } from '../shared/constants';
-import { createEmitter } from '../shared/emitter';
+import { type ERROR_EVENT, RECONNECT_EVENT } from '../shared/constants';
+import { createEmitter, tellError } from '../shared/emitter';
 import { ProgrammerError, toCancelError, toError } from '../shared/errors';
 import { createEventMethods, createReadyStateMethods } from '../shared/lifecycle';
 import { noop } from '../shared/noop';
@@ -175,21 +175,24 @@ export const createTransportClient = <
   let isAttempting = false;
   let lastConnectOptions: ConnectOptions | undefined;
 
-  // each listener within a guard (spec 15.1): what one throws is reported, and the transport goes
-  // on as if it returned; the transport tells its `message` and its `close` by it, and the client
-  // its `reconnect`
+  // each listener within a guard (spec 15.1): what one throws is reported, what a listener of
+  // `error` throws dropped, and the transport goes on as if it returned; the transport tells its
+  // `error`, its `message` and its `close` by these, and the client its `reconnect`
+  const report = (error: Error): boolean => {
+    return tellError(emitter, [error]);
+  };
   const tell = <K extends Exclude<TRANSPORT_CLIENT_EVENTS, ERROR_EVENT>>(
     event: K,
     params: TransportClientEventMap[K]
   ): boolean => {
     return emitter.emitEach(event, {
       onError: (error) => {
-        emitter.emit(ERROR_EVENT, toError(error));
+        report(toError(error));
       },
       params,
     });
   };
-  const defineOptions: ITransportClientDefineOptions = { tell };
+  const defineOptions: ITransportClientDefineOptions = { report, tell };
 
   const client: ITransportClientInternal<Socket, ConnectOptions> = {
     socket: null,

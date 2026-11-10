@@ -2554,15 +2554,19 @@ test.describe('WebSocketTransportClient, what its error tells', () => {
     ]);
   });
 
-  test('fails its connection on a protocol error whose error listener throws, telling its close all the same', async () => {
+  test('fails its connection on a protocol error whose error listener throws, telling its close all the same and dropping what it threw', async () => {
     using uncaught = trapUncaught();
     await using raw = await startRaw();
     const client = createWebSocketTransportClient({ WebSocket: TrackedWs });
     const closes: unknown[][] = [];
+    const heard: (string | undefined)[] = [];
     const upgraded = raw.next();
 
     client.on('error', () => {
       throw new Error('an error listener that throws');
+    });
+    client.on('error', (error) => {
+      heard.push((error as Error & { code?: string }).code);
     });
     client.on('close', (wasClean, wasQuick) => {
       closes.push([wasClean, wasQuick]);
@@ -2579,12 +2583,8 @@ test.describe('WebSocketTransportClient, what its error tells', () => {
         return closes;
       })
       .toEqual([[false, false]]);
-    // what the listener threw was Node's, once
-    expect(
-      uncaught.thrown.map((error) => {
-        return (error as Error).message;
-      })
-    ).toEqual(['an error listener that throws']);
+    // * what the listener threw is dropped: the listener after it told the failure, and nothing else
+    expect([heard, uncaught.thrown]).toEqual([['WS_ERR_INVALID_OPCODE'], []]);
     expect(client.isClosed()).toBe(true);
   });
 

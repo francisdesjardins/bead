@@ -1,5 +1,7 @@
 // dependencies
 
+import { ERROR_EVENT } from './constants';
+import { dropThrown } from './emitter';
 import { createEventIterator } from './event-iterator';
 import {
   isReadyStateClosed,
@@ -15,7 +17,8 @@ import type { EmitterEventMap, IEmitter, IEventMethods, IReadyStateMethods } fro
 
 /**
  * `emitter` exposed as methods that return the end they are spread into. `getEnd` is a getter
- * because the end is still being built when these are.
+ * because the end is still being built when these are. An `error` its `emit` tells, whoever tells
+ * it, is told within a guard: what a listener of it throws is dropped (spec 15.1).
  */
 export const createEventMethods = <E extends EmitterEventMap<E>, End>(
   emitter: IEmitter<E>,
@@ -23,7 +26,9 @@ export const createEventMethods = <E extends EmitterEventMap<E>, End>(
 ): IEventMethods<E, End> => {
   return {
     emit: (event, ...params) => {
-      return emitter.emit(event, ...params);
+      return event === ERROR_EVENT
+        ? emitter.emitEach(event, { onError: dropThrown, params })
+        : emitter.emit(event, ...params);
     },
     events: (event, options) => {
       return createEventIterator(emitter, { ...options, event });

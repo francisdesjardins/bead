@@ -3150,6 +3150,7 @@ src/transport/client/types.ts ITransportClientConnectOptions
     timeout?: number | undefined
 src/transport/client/types.ts ITransportClientDefineOptions
   interface ITransportClientDefineOptions
+    readonly report: (error: Error) => boolean
     readonly tell: <K extends TransportClientToldEvent>(event: K, params: TransportClientEventMap[K]) => boolean
 src/transport/client/types.ts ITransportClientDisconnectOptions
   interface ITransportClientDisconnectOptions
@@ -3623,6 +3624,7 @@ src/transport/server/types.ts ITransportServerConnection
 src/transport/server/types.ts ITransportServerDefineOptions
   interface ITransportServerDefineOptions<Socket = unknown, Request = unknown>
     readonly isHeard: (event: TransportServerToldEvent) => boolean
+    readonly report: (error: Error, connectionHandle: TransportServerConnectionHandle | '') => boolean
     readonly tell: <K extends TransportServerToldEvent>(event: K, params: TransportServerEventMap<Socket, Request>[K]) => boolean
 src/transport/server/types.ts ITransportServerHandleInfo
   interface ITransportServerHandleInfo

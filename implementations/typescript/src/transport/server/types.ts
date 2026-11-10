@@ -320,6 +320,15 @@ export interface ITransportServerDefineOptions<Socket = unknown, Request = unkno
    */
   readonly isHeard: (event: TransportServerToldEvent) => boolean;
   /**
+   * Tells `error` to each of its listeners within a guard (spec 15.1), with the connection it
+   * concerns, the empty handle for none: what one throws is dropped, and the listeners after it are
+   * told all the same. Returns whether it had any.
+   */
+  readonly report: (
+    error: Error,
+    connectionHandle: TransportServerConnectionHandle | ''
+  ) => boolean;
+  /**
    * Calls each listener of `event` but `error` within a guard (spec 15.1): what one throws is
    * reported through `error`, with the connection `params` ends with — the empty handle for a
    * refusal, which names none — and the listeners after it are called all the same. Returns
@@ -371,9 +380,10 @@ export type TransportServerEventMap<Socket = unknown, Request = unknown> = {
     connectionHandle: TransportServerConnectionHandle,
   ];
   /**
-   * What went wrong on a connection, or what a listener of its events threw, which changes nothing
-   * the server does; when it ends the connection, its `close` follows. An empty handle is the
-   * server's own error, or what a `refusal` listener threw, which no connection was told with.
+   * What went wrong on a connection, or what a listener of its other events threw, which changes
+   * nothing the server does; when it ends the connection, its `close` follows. An empty handle is
+   * the server's own error, or what a `refusal` listener threw, which no connection was told with.
+   * What a listener of it throws is dropped, the listeners after it told all the same (spec 15.1).
    */
   error: [error: Error, connectionHandle: TransportServerConnectionHandle | ''];
   /**

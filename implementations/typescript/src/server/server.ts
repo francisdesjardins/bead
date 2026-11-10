@@ -198,8 +198,9 @@ export const createServer = <Transport extends IServerTransportLike, Data = unkn
     sessions.delete(connectionHandle);
   };
 
-  // a close that fails is the router's to report, with the connection; one the transport no longer
-  // holds tells no `close`, so what it left goes now
+  // a close that fails is the router's to report, with the connection, by its `emit`, which tells an
+  // `error` within a guard (spec 15.1); one the transport no longer holds tells no `close`, so what
+  // it left goes now
   const close = (connectionHandle: TransportServerConnectionHandle): void => {
     if (closing.has(connectionHandle)) {
       return;

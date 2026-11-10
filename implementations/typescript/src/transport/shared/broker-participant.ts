@@ -35,7 +35,7 @@ import {
 } from './broker-sequence';
 import { assertHeldFinite, type IClock, PLATFORM_CLOCK } from './clock';
 import { BROKER_DELIVERIES, BROKER_PUBLISHED } from './constants';
-import { createEmitter } from './emitter';
+import { createEmitter, tellError } from './emitter';
 import {
   ConnectError,
   GenericError,
@@ -595,10 +595,12 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
   const isDebugging = (): boolean => {
     return emitter.listenerCount('debug') > 0;
   };
+  // what a debug listener throws is reported; what a listener of `error` throws is dropped (spec
+  // 15.1)
   const debug = (event: IParticipantDebugEvent): void => {
     emitter.emitEach('debug', {
       onError: (reason) => {
-        emitter.emitEach('error', { onError: noop, params: [toError(reason)] });
+        tellError(emitter, [toError(reason)]);
       },
       params: [event],
     });
@@ -607,7 +609,7 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
     if (isDebugging()) {
       debug({ event: 'report', report: error.message });
     }
-    emitter.emitEach('error', { onError: noop, params: [error] });
+    tellError(emitter, [error]);
   };
   const traceParcel = (
     parcel: IParcelPrefix | undefined,

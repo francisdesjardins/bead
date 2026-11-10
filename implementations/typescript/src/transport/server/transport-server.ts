@@ -3,8 +3,7 @@
 // dependencies
 
 import { PLATFORM_CLOCK } from '../shared/clock';
-import { createEmitter } from '../shared/emitter';
-import { ERROR_EVENT } from '../shared/constants';
+import { createEmitter, tellError } from '../shared/emitter';
 import { ProgrammerError, toError } from '../shared/errors';
 import { gaugesOf, mergeGauges } from '../shared/gauges';
 import { createEventMethods, createReadyStateMethods } from '../shared/lifecycle';
@@ -239,11 +238,19 @@ export const createTransportServer = <Socket extends object, Request>(
   let hasStarted = false;
 
   // each listener within a guard (spec 15.1): what one throws is reported with the connection it
-  // was told of, and the transport goes on as if it returned
+  // was told of, what a listener of `error` throws dropped, and the transport goes on as if it
+  // returned
+  const report = (
+    error: Error,
+    connectionHandle: TransportServerConnectionHandle | ''
+  ): boolean => {
+    return tellError(emitter, [error, connectionHandle]);
+  };
   const defineOptions: ITransportServerDefineOptions<Socket, Request> = {
     isHeard: (event) => {
       return emitter.listenerCount(event) > 0;
     },
+    report,
     tell: <K extends TransportServerToldEvent>(
       event: K,
       params: TransportServerEventMap<Socket, Request>[K]
@@ -256,7 +263,7 @@ export const createTransportServer = <Socket extends object, Request>(
 
       return emitter.emitEach(event, {
         onError: (error) => {
-          emitter.emit(ERROR_EVENT, toError(error), connectionHandle);
+          report(toError(error), connectionHandle);
         },
         params,
       });

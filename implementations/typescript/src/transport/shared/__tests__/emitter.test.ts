@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { createEmitter } from '../emitter';
+import { createEmitter, tellError } from '../emitter';
 import { noop } from '../noop';
 
 const counter = () => {
@@ -231,5 +231,24 @@ test.describe('createEmitter', () => {
     expect(() => {
       emitter.emit('debug', 'rx');
     }).toThrow(failure);
+  });
+
+  // spec 15.1
+  test('"tellError" tells "error" to each listener within a guard, dropping what one throws', () => {
+    const emitter = createEmitter<{ error: [error: Error, connectionHandle: string] }>();
+    const told = new Error('told');
+    const heard: [Error, string][] = [];
+
+    expect(tellError(emitter, [told, 'a'])).toBe(false);
+
+    emitter.on('error', () => {
+      throw new Error('an error listener that throws');
+    });
+    emitter.on('error', (error, connectionHandle) => {
+      heard.push([error, connectionHandle]);
+    });
+
+    expect(tellError(emitter, [told, 'a'])).toBe(true);
+    expect(heard).toEqual([[told, 'a']]);
   });
 });

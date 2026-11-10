@@ -15,7 +15,7 @@ import {
   type IBrokerParticipant,
   portOf,
 } from '../shared/broker-participant';
-import { BROKER_PUBLISHED, CLOSE_EVENT, ERROR_EVENT, MESSAGE_EVENT } from '../shared/constants';
+import { BROKER_PUBLISHED, CLOSE_EVENT, MESSAGE_EVENT } from '../shared/constants';
 import { createPromise } from '../shared/create-promise';
 import {
   ConnectError,
@@ -146,7 +146,7 @@ export const createBrokerTransportClient = (
   assertCount('maximumUnsentBytes', { value: maximumUnsentBytes });
 
   return createTransportClient<IBrokerPeer, IBrokerTransportClientConnectOptions>(
-    (client, { tell }) => {
+    (client, { report, tell }) => {
       let current: IAttempt | undefined;
       // gives up on the connect in flight, so a dispose under it cannot leave it pending
       let giveUp: ((reason: Error) => void) | undefined;
@@ -215,7 +215,7 @@ export const createBrokerTransportClient = (
               },
               report: (error) => {
                 if (current === attempt) {
-                  client.emit(ERROR_EVENT, error);
+                  report(error);
                 }
               },
               subject: () => {
