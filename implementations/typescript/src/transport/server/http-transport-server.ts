@@ -1020,9 +1020,9 @@ export const createHTTPTransportServer = (
       const onExchange: HTTPRequestListener = (request, response) => {
         const exchange = { request, response };
 
-        // * a field or a target past visible ASCII before anything else: Node's parser answers a
-        // control character itself, and drops a padded field over HTTP/2 unless
-        // `strictFieldWhitespaceValidation` is false
+        // * a field or a target past visible ASCII, or a target holding a #, before anything else:
+        // Node's parser answers a control character itself and hands a # on, nghttp2 in :path too,
+        // and drops a padded field over HTTP/2 unless `strictFieldWhitespaceValidation` is false
         if (!hasVisibleFields(request.rawHeaders) || !isVisibleTarget(request.url)) {
           return (refuseMalformed(exchange), undefined);
         }

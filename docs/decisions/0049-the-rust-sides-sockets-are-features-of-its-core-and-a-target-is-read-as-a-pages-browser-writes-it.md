@@ -12,12 +12,12 @@
   side. It moves the reading of an
   absolute-form target's scheme that
   [0024](0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md) states,
-  and the `#` that
-  [0026](0026-a-server-tells-each-refusal-it-judges-and-a-client-names-the-one-it-reads.md) keeps in
-  a path; the hosts, the origins and the authority stay theirs. It settles the names the TypeScript
-  and C# sides held apart, under [0047](0047-every-side-shows-one-public-surface.md)'s rule. One
-  behaviour, and a difference a row of the matrix, are
-  [0004](0004-one-behaviour-in-every-language.md)'s; the bounds a side keeps against a peer
+  and what
+  [0026](0026-a-server-tells-each-refusal-it-judges-and-a-client-names-the-one-it-reads.md) says
+  of a `#` in a target; the hosts, the origins and the authority stay theirs. It settles the names
+  the TypeScript and C# sides held apart, under
+  [0047](0047-every-side-shows-one-public-surface.md)'s rule. One behaviour, and a difference a
+  row of the matrix, are [0004](0004-one-behaviour-in-every-language.md)'s; the bounds a side keeps against a peer
   [0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)'s; the clocks
   [0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)'s; a duration
   [0014](0014-every-place-that-takes-a-duration-is-a-row-of-one-file.md)'s. Ahead: a Rust client in
@@ -38,14 +38,17 @@ clock alone, and the core compiles for `wasm32-unknown-unknown`, where no socket
 ecosystem's servers and clients run on, parses every HTTP/1.1 target and HTTP/2 `:path` into
 `http::Uri`. Probed, it answers 400 itself `<`, `>` and `` ` `` in a path, and `"`, `<` and `>` in a
 query; it cuts a target at its `#` and keeps nothing of what follows, refusing a control character
-and DEL there and taking the rest; and it reads `HTTP://`, `hTtP://` and `HTTPS://` as `http://` and
-`https://`. 15.12 took every visible character a URI leaves out as it came, `#` among them as a
-character of the path, and read an absolute-form target's scheme in lower case alone, as Kestrel
-does. Node's parser hands every one of these targets on as it came, but an octet past US-ASCII
-past a `#`, which it answers 400 itself; Kestrel hands on `<`, `"`,
-`` ` ``, `{`, `^`, `|`, `\` and a `#` with what follows, which `RawTarget` and `Request.Path` both
-keep, but answers 400 itself a `%00` or an octet past US-ASCII past a `#`, and an absolute-form
-scheme not in lower case.
+and DEL there and taking the rest, so that `/a#b` and `/a` are one `Uri` (`http` 1.5.0's
+`PathAndQuery::from_shared`, where its `from_static` refuses a fragment); and it reads `HTTP://`,
+`hTtP://` and `HTTPS://` as `http://` and `https://`. No option of hyper's keeps or shows the request
+line, and `OnUpgrade` gives the socket after a 101, never the head. Node's parser hands every one of
+these targets on as it came, a `#` and what follows among them, but an octet past US-ASCII past a
+`#`, which it answers 400 itself; over HTTP/2, nghttp2 takes a `#` in `:path`. Kestrel hands on `<`,
+`"`, `` ` ``, `{`, `^`, `|` and `\`, which `RawTarget` and `Request.Path` both keep, and answers 400
+itself an absolute-form scheme not in lower case and, since .NET 10.0.15, a literal `#` in an
+HTTP/1.x target, resetting an HTTP/2 or HTTP/3 stream whose `:path` holds one `PROTOCOL_ERROR`
+(dotnet/dotnet `a804e66777`), unless the process-wide `AppContext` switch
+`Microsoft.AspNetCore.Server.Kestrel.AllowFragmentInRequestTarget` says otherwise (`c5a167a856`).
 
 **What a page's browser sends.** A page writes a request's target from a URL it parsed, and the URL
 Standard percent-encodes, before any byte goes out, the C0 controls, the space, `"`, `#`, `<` and
@@ -69,7 +72,7 @@ Standard percent-encodes, before any byte goes out, the C0 controls, the space, 
   §15.5.9, 408, which a server may send on a connection it closes; §15.5.20, 431.
 - **[RFC 9112 §9.6](https://www.rfc-editor.org/rfc/rfc9112#section-9.6)**: a close in stages.
 - **[RFC 9113](https://www.rfc-editor.org/rfc/rfc9113)**: §3.3, HTTP/2 over TLS by ALPN; §8.1.1, a
-  malformed request's stream reset; §8.3.1, `:authority`.
+  malformed request's stream reset; §8.3.1, `:authority` and `:path`.
 - **[RFC 6455](https://www.rfc-editor.org/rfc/rfc6455)**: §4.1-4.2, the opening handshake; §5.5,
   ping and pong; §7.1.1 and §7.4.1, the closing handshake and its codes; §10.5, a client's
   authentication.
@@ -123,40 +126,45 @@ allows `ISC`, the licence of rustls-webpki, aws-lc-rs and aws-lc-sys, and one ex
 
 ### A target read as a page's browser writes it, on every side
 
-15.12 changes on every side, each judging a target as it came: the raw `request.url` on the
-TypeScript side, `IHttpRequestFeature.RawTarget` on the C# side, the head's own bytes at the Rust
-side's WebSocket address, and hyper's `Uri` at its HTTP address, which has judged the first and the
-fourth step already. In this order:
+Every side judges a target as it came, by 15.12: the raw `request.url` on the TypeScript side, an
+HTTP/2 `:path` among it, `IHttpRequestFeature.RawTarget` on the C# side, the head's own bytes at the
+Rust side's WebSocket address, and hyper's `Uri` at its HTTP address. One predicate refuses a
+target, 400 unmarked, its stream reset `PROTOCOL_ERROR` over HTTP/2, nothing written, when it holds:
 
-1. a control character, HTAB, a bare CR or DEL anywhere in the target, past a `#` too: 400 unmarked;
-2. the target cut at its first `#`, what follows never judged again;
-3. in what remains, a space or an octet past US-ASCII in its path or its query: 400 unmarked;
-4. `"`, `<` or `>` in its path or its query, `^`, `` ` ``, `{` or `}` in its path: 400 unmarked;
-5. a path whose percent-decoding holds NUL: 400 unmarked;
-6. in absolute-form, `http` or `https` in any ASCII case, then `://` and an authority that is not
-   empty and is a host; any other: 400 unmarked.
+- a control character, HTAB, a bare CR, DEL, a space or an octet past US-ASCII, anywhere;
+- a `#`, anywhere; `"`, `<` or `>` in its path or its query; `^`, `` ` ``, `{` or `}` in its path;
+- a path whose percent-decoding holds NUL.
 
-Over HTTP/2 each is a stream reset `PROTOCOL_ERROR`, nothing written. Three things change, each by
-its standard:
+Its refusals are one answer, so no order among them shows. A target it takes is then read apart in
+absolute-form, since that form yields the authority: `http` or `https` in any ASCII case, then `://`
+and an authority that is not empty and is a host; any other, 400 unmarked. Three things hold, each
+by its standard:
 
 - **What a page's browser always percent-encodes where it stands is an invalid request-line**
   (RFC 3986 §2, RFC 9112 §3): the URL Standard's path and query sets, less what a URI keeps, `'`
   among it, a sub-delim of RFC 3986 §2.2 that a request-line may hold. They cover every target hyper
   refuses, and Bead refuses the rest itself. `\`, `|`, and `^`, `` ` ``, `{` and `}` in a query are
   taken as they came, as a page sends them.
-- **A target ends at its first `#`**, what follows neither its path nor its query, as a fragment is
-  apart from both (RFC 3986 §3.5), though a request-target never carries one: a leveling, a row of
-  the matrix's "Leveled down", since hyper keeps nothing past it. A control character there is still
-  the request-line's and refused, which hyper and every other side can do. A `%00` or an octet past
-  US-ASCII there is taken, judged by no rule of a path; Kestrel answers either 400 itself, and Node's
-  parser the octet past US-ASCII, a row of the matrix's Differences, `What follows a # in a target`.
+- **A target that holds a `#` anywhere is an invalid request-line** (RFC 9112 §3.2, §3): no form of
+  a request-target carries a fragment, and serving a target cut at its `#` is the autocorrection §3
+  tells a recipient not to make. A page's browser never sends one, since the URL Standard reads a
+  `#` as a fragment's start, which fetch never sends, and every client of Bead's builds its target
+  with a URL parser; a hand-written client that sends one is refused, never served another
+  resource. `%23` is an octet the target encodes, a character of its path or its query. Each side
+  judges the `#` itself, never by its platform's patch level: Kestrel refuses it first since 10.0.15,
+  and the C# side's judgement of `RawTarget` refuses it alike on an earlier runtime. The Rust side's
+  HTTP address cannot: hyper's `Uri` has cut the `#` before Bead reads the target, over HTTP/1.1 and
+  in HTTP/2's `:path` alike, so it serves the target cut, a row of Differences, `A # in a target`,
+  lifted when `http`'s `PathAndQuery::from_shared` refuses a fragment as its `from_static` does.
 - **A scheme is read in any case** (RFC 3986 §3.1), as hyper reads it and Node hands it on. Kestrel
   answers any other than lower case 400 before the application runs: a row of Differences,
   `A target in absolute-form, its scheme's case`, which lifts the former leveling.
 
-`spec/transports.json` gains nine cases, six over HTTP and three at a WebSocket's address, and
-the case of `spec/transcoding.json` that reads a target reads `/v1/books/a#b` as `a` and refuses
-`/v1/books/a"b`. A side plays them all but those a `differs` excuses it from.
+`spec/transports.json` holds seven cases of these, four over HTTP and three at a WebSocket's
+address, beside those of a control character; `spec/transcoding.json` refuses `/v1/books/a"b` in the
+exchange that reads a target, and `/v1/books/a#b` in one of its own, which reads `/v1/books/a%23b`
+as `a#b`. A side plays them all but those a `differs` excuses it from: the C# side the two of a
+scheme's case, and the Rust side's HTTP address the one of a `#`.
 
 ### The WebSocket server reads its own head
 
@@ -283,12 +291,13 @@ side's `fetchInOrder` and the C# side's `InOrder` keep theirs; the transport ord
 ## Consequences
 
 - **Every side refuses what a page never sends**, and takes what it does: a hand-written client that
-  sends `<` or `{` raw in a path, or `"` in a query, is answered 400; nothing a browser writes is.
-- **What follows a `#` reaches no side's application**, where Kestrel and Node kept it in the path:
-  a route that matched it no longer does.
-- **The C# side keeps two rows of Differences**, Kestrel's refusals of an upper-case scheme and of a
-  `%00` or an octet past US-ASCII past a `#`, and the TypeScript side one, Node's parser's refusal of
-  an octet past US-ASCII past a `#`; a case's `differs` excuses its player from each.
+  sends `<`, `{` or `#` raw in a path, or `"` in a query, is answered 400; nothing a browser writes
+  is.
+- **No application sees a `#` in a target**: every side refuses it, but the Rust side's HTTP
+  address, which serves the target cut at it, its application never seeing what followed.
+- **The C# side keeps one row of Differences**, Kestrel's refusal of an upper-case scheme, and the
+  Rust side one, its HTTP address serving a target cut at its `#`; a case's `differs` excuses its
+  player from each.
 - **A build with a socket feature needs a C compiler**, aws-lc-rs's; the core with no feature does
   not.
 - **CI lints the core's library four ways**, with no feature, with `websocket` alone, with `http`
@@ -303,7 +312,7 @@ side's `fetchInOrder` and the C# side's `InOrder` keep theirs; the transport ord
 ## The Tenth Man
 
 The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)) in
-two rounds, each at xhigh effort. Their objections, each with the answer that holds:
+three rounds, each at xhigh effort. Their objections, each with the answer that holds:
 
 ### On the sockets and a target's reading
 
@@ -332,9 +341,8 @@ which reaches a connection's first head alone, and an HTTP/1.1 server of Bead's 
 a second parser beside hyper's; a connection per request, so that every head is a first; 15.12 kept
 and the Rust side's erasures a row, a library choosing what the spec holds; leveling to exactly
 what hyper refuses, `"` refused in a query and taken in a path; every character a URI leaves out
-refused, which would refuse pages; the scheme kept in lower case, the Rust side a row; a `#` refused
-on every side but the Rust HTTP server; one rule for what follows a `#`, which neither hyper nor
-Kestrel can bend to; `'` refused in a query; the WebSocket server on hyper; a 408 only where hyper
+refused, which would refuse pages; the scheme kept in lower case, the Rust side a row; `'` refused
+in a query; the WebSocket server on hyper; a 408 only where hyper
 buffered bytes, and a second timer for the idle close; hyper's head bound, Kestrel's 32 KiB, or a
 bound in the spec; `rustls-native-certs`, `webpki-roots`, `ring`, `rustls-rustcrypto` and
 `native-tls`; hyper-util's `client::pool` layers, `hyper::client::conn::http1` with a pool of Bead's
@@ -357,3 +365,33 @@ checked against the code before it was answered: two accepted, three in part, no
 | The parity rule names removal first, and nobody calls `closeAll`: it is `Promise.all` over a snapshot, closes with 1000 where a stop sends 1001, and may go before 1.0.0                                                                                                                                                     | Accepted: `closeAll` leaves the TypeScript side and `CloseAll` the C# side, their tests with them, the CHANGELOG telling it; the Rust side gains none                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | The level differs for `clients`, `close` and `closeAll` alike — interface on one side, inherent on another, a trait on the third — and the names check cannot see an instance method                                                                                                                                         | In part: with `closeAll` gone nothing is added at any level. `close` stands on the server's transport on every side, `IServerTransport.CloseConnection` among them (`Server.cs` 74), where the objection read none; `clients` stands on each concrete transport server on every side and on no joined one. One level each; the matrix and the twins hold it, and the Rust WebSocket and HTTP servers gain their `clients` twins                                                                                                                                                     |
 | The round is undersized: an error listener's throw revises a record and 15.1, a call to a client not open the companion and a count, a text message a public Rust type; that is the full round's size, and the first two should go through it with their records                                                             | In part: the size is accepted, and this round is the full one, which writes 15.1, 15.2 and debugging 2.2, 9.6 and 9.7 and revises 0023, 0013 and this record. The split into rounds of their own is refused: each behaviour lands in its own commits, the spec's first, and none waits on another                                                                                                                                                                                                                                                                                   |
+
+### On a # in a target
+
+Kestrel answers a literal `#` in a target 400 since .NET 10.0.15, before any code of Bead's runs, so
+the leveling that ended a target at its `#` on every side can no longer be held on every side; the
+standard picks which way it breaks, and RFC 9112 §3.2 and §3 refuse it. The proposal: a `#`
+anywhere in a target is an invalid request-line on every side that can see it, the Rust side's HTTP
+address a row. Ten objections, each checked against the code, the crates the lock pins, nghttp2
+and the two Kestrel commits: all ten accepted, none refused.
+
+| Objection                                                                                                                                           | Answer                                                                                                                                                                                                                                                                                                                                                               |
+| --------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| This record refused this design by name, a `#` refused on every side but the Rust HTTP server, and the proposal does not say why the refusal falls. | Accepted. The record is revised in place: the item leaves "Refused besides", and this round says what moved, Kestrel's refusal of a literal `#`, dotnet/dotnet `a804e66777` (PR 66712 of dotnet/dotnet), and its process-wide switch, `c5a167a856`.                                                                                                                  |
+| Two cases, their `differs` and the matrix's rows die with the cut, unnamed.                                                                         | Accepted. One case over HTTP takes the place of three, every `#` they sent refused, then `%23` taken in a query and in a path; the control character past a `#` joins the case of a control character, which every address plays. `What follows a # in a target` leaves Differences, and `A # in a target` moves from Leveled down to Differences, of kind platform. |
+| `orLost` tolerates a socket lost, not another status, and a mark per address is a new shape of the files.                                           | Accepted. The case over HTTP carries a `differs` for the Rust side, the shape every player reads; the case at a WebSocket's address carries none, which the Rust side plays.                                                                                                                                                                                         |
+| `spec/transcoding.json` has no `differs`, and its `#` is one step of an exchange of eleven, which the Rust gateway would fail whole.                | Accepted. The `#` is an exchange of its own, `/v1/books/a#b` refused and `/v1/books/a%23b` read as `a#b`, so that one exchange takes the excuse when that gateway comes; transcoding 3.6 refuses a `#` anywhere with the rest.                                                                                                                                       |
+| No test sends a `#` in `:path` over HTTP/2, and nghttp2 lets one through.                                                                           | Accepted. A twin on the TypeScript and C# sides resets a `:path` of `/bead#x` `PROTOCOL_ERROR`, nothing written, and serves one that holds `%23`; on the TypeScript side it holds Bead's own judgement, since nghttp2 hands the `#` on.                                                                                                                              |
+| The twins that take a `#` flip on every side, and the Rust HTTP twin cannot.                                                                        | Accepted. Every twin flips, its title with it; the Rust side's test of `Fields::target` keeps asserting hyper's cut, and a server test over a raw socket that sends `POST /bead#x` and reads 201 is the row's test.                                                                                                                                                  |
+| The row's lift is a wish.                                                                                                                           | Accepted. It names the change: `http`'s `PathAndQuery::from_shared` refusing a fragment as its `from_static` does, hyper then answering 400 itself, and h2 alike for `:path`.                                                                                                                                                                                        |
+| Where a `!` goes, and where it does not.                                                                                                            | Accepted. On the Rust side's `Fields::target`, where 15.12 cannot be held; a plain note on the C# side's `IsVisibleTarget`, which Kestrel reaches first since 10.0.15.                                                                                                                                                                                               |
+| The CHANGELOG's bullet is rewritten, not added to.                                                                                                  | Accepted. One Breaking bullet, against 0.11.0: the transport's answer to `/bead#x` goes from 404 to 400, an upgrade's alike, and the gateway's `/v1/books/a#b` from 200 to 400.                                                                                                                                                                                      |
+| With nothing cut, the six ordered steps are one predicate, and a `#` belongs beside `"`, `<` and `>`.                                               | Accepted. One predicate over the target, then the reading of absolute-form apart, since it yields the authority; a `#` stands beside `"`, `<` and `>`, on its own ground, a fragment no request-target carries.                                                                                                                                                      |
+
+Refused besides, each weighed: the C# server setting `AllowFragmentInRequestTarget`, a switch of
+the host's whole process that loosens every endpoint it serves, and only before its
+`KestrelServerOptions` are read; the C# side alone refusing, a row by patch level, which on an
+earlier runtime still needs its own judgement; every side cutting, which Kestrel no longer lets the
+C# side do without that switch; a pre-read or a wrapper of the socket that finds each request line,
+the second parser this record refuses; and a mark per address, or `orLost`, in the conformance
+files.

@@ -172,9 +172,8 @@ its text exactly, `*` one segment, and `**` zero or more, as `http.proto` has it
 last but its verb. A target that holds an octet other than visible ASCII, or a path whose
 percent-decoding holds NUL, is what HTTP refuses of its own (section 10.1, step 1), answered as
 section 15.12 of `spec.md` answers it — 400 unmarked over HTTP/1.1, its stream reset over HTTP/2 —
-before anything else of it is judged; a `#` ends its target, and a character a page's browser always
-percent-encodes where it stands is refused with the others, as section 15.12 of `spec.md` reads
-both; `\`, `|`, and `^`, `` ` ``, `{` and `}` in a query are characters of its path or its query,
+before anything else of it is judged; a `#` anywhere in it, and a character a page's browser always
+percent-encodes where it stands, are refused with them, as section 15.12 of `spec.md` reads both; `\`, `|`, and `^`, `` ` ``, `{` and `}` in a query are characters of its path or its query,
 matched and decoded as any other.
 
 3.7. A path's verb is what follows the last `:` of its last segment that is not percent-encoded, and

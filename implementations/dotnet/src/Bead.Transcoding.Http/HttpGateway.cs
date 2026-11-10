@@ -1541,8 +1541,8 @@ public sealed class HttpGateway : IAsyncDisposable
     }
 
     // a request's target as it came (3.6): an absolute-form target's path and query, its authority
-    // aside, ended at its first # (spec 15.12)
-    // ! never Request.Path nor Request.QueryString, which keep a # and what follows it
+    // aside (spec 15.12)
+    // ! never Request.Path, which decodes it, but where Kestrel gives no RawTarget
     private static string RawTargetOf(HttpContext context)
     {
         var raw = context.Features.Get<IHttpRequestFeature>()?.RawTarget ?? (context.Request.Path + context.Request.QueryString).ToString();

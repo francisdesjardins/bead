@@ -1813,6 +1813,42 @@ test.describe('createHTTPTransportServer, over TLS', () => {
     ]);
   });
 
+  test('resets over HTTP/2 the stream of a request whose target holds a #, PROTOCOL_ERROR, nothing written, and serves one that holds an encoded #', async () => {
+    await using started = await startSecure();
+    const { server, session } = started;
+    const told: unknown[] = [];
+    const connections: unknown[] = [];
+
+    server.on('refusal', (refusal) => {
+      told.push(refusal);
+    });
+    server.on('connection', (...params) => {
+      connections.push(params);
+    });
+
+    // ! nghttp2 hands a # in :path on, and Node with it: the transport alone resets it
+    expect(
+      await Promise.all(
+        ['/bead#x', '/bead#', '/bead?x#y', '/elsewhere#/bead'].map((path) => {
+          return resetOf(session, { ':path': path });
+        })
+      )
+    ).toEqual(
+      Array.from({ length: 4 }, () => {
+        return PROTOCOL_ERROR;
+      })
+    );
+    expect(told).toEqual([]);
+    expect(connections).toEqual([]);
+    // %23 is a character of its query, and of its path
+    expect(await answerOverHTTP2(session, { ':path': '/bead?a%23b' })).toEqual([201, undefined]);
+    expect(await answerOverHTTP2(session, { ':path': '/bead%23' })).toEqual([
+      404,
+      HTTP_REFUSALS.PATH,
+    ]);
+    expect(connections).toHaveLength(1);
+  });
+
   test('takes over HTTP/2 a request with a field holding a control character but a tab, or whose value starts or ends with a space or a tab, which Node’s parser drops before the transport reads the request', async () => {
     await using started = await startSecure();
     const { server, session } = started;

@@ -8551,30 +8551,9 @@
         },
         {
           "send": {
-            "head": "GET /v1/books/a#b HTTP/1.1\r\nhost: {host}\r\nconnection: close\r\n\r\n"
-          },
-          "on": "j"
-        },
-        {
-          "expect": {
-            "status": 200,
-            "fields": {
-              "cache-control": "no-store",
-              "x-content-type-options": "nosniff",
-              "vary": "Origin",
-              "content-type": "application/json",
-              "content-length": "29",
-              "bead-refusal": null
-            },
-            "body": "{\"name\":\"a\",\"title\":\"A tale\"}"
-          },
-          "on": "j"
-        },
-        {
-          "send": {
             "head": "GET /v1/books/a\"b HTTP/1.1\r\nhost: {host}\r\nconnection: close\r\n\r\n"
           },
-          "on": "k"
+          "on": "j"
         },
         {
           "expect": {
@@ -8585,7 +8564,56 @@
             },
             "body": ""
           },
-          "on": "k"
+          "on": "j"
+        }
+      ]
+    },
+    {
+      "name": "a target holding a # is refused as HTTP refuses it, unmarked, its body empty, before its path is matched; %23 is a path's",
+      "clauses": [
+        "3.6",
+        "10.1",
+        "10.1.1",
+        "spec:15.12"
+      ],
+      "steps": [
+        {
+          "send": {
+            "head": "GET /v1/books/a#b HTTP/1.1\r\nhost: {host}\r\nconnection: close\r\n\r\n"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "content-type": null
+            },
+            "body": ""
+          },
+          "on": "a"
+        },
+        {
+          "send": {
+            "head": "GET /v1/books/a%23b HTTP/1.1\r\nhost: {host}\r\nconnection: close\r\n\r\n"
+          },
+          "on": "b"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "31",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"a#b\",\"title\":\"A tale\"}"
+          },
+          "on": "b"
         }
       ]
     },

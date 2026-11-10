@@ -605,10 +605,10 @@ public sealed class HostsAndOriginsTests
     }
 
     [Fact]
-    public void IsVisibleTarget_takes_visible_ASCII_and_a_percent_encoded_octet_NUL_in_a_query_among_them_ends_a_target_at_its_hash_and_refuses_each_control_character_SP_DEL_and_0x80_to_0xFF_a_character_a_browser_always_encodes_where_it_stands_and_NUL_percent_encoded_in_a_path()
+    public void IsVisibleTarget_takes_visible_ASCII_and_a_percent_encoded_octet_NUL_in_a_query_and_an_encoded_hash_among_them_and_refuses_each_control_character_SP_DEL_and_0x80_to_0xFF_a_hash_anywhere_a_character_a_browser_always_encodes_where_it_stands_and_NUL_percent_encoded_in_a_path()
     {
-        string[] encodedInAPath = ["\"", "<", ">", "^", "`", "{", "}"];
-        string[] encodedInAQuery = ["\"", "<", ">"];
+        string[] encodedInAPath = ["\"", "#", "<", ">", "^", "`", "{", "}"];
+        string[] encodedInAQuery = ["\"", "#", "<", ">"];
         var visible = new string([.. Enumerable.Range(0x21, 0x7F - 0x21).Select((code) =>
         {
             return (char)code;
@@ -622,19 +622,24 @@ public sealed class HostsAndOriginsTests
         {
             return new string([.. visible.Where((character) =>
             {
-                return character != '#' && !encoded.Contains(character.ToString());
+                return !encoded.Contains(character.ToString());
             })]);
         }
 
-        // * a target ends at its #, and the characters a browser sends unencoded are taken as they came
+        // * the characters a browser sends unencoded are taken as they came, and what a target
+        // percent-encodes, %23 among it
         Assert.True(HostsAndOrigins.IsVisibleTarget($"/{Without(encodedInAPath)}"));
         Assert.True(HostsAndOrigins.IsVisibleTarget($"/bead?{Without(encodedInAQuery)}"));
-        Assert.True(HostsAndOrigins.IsVisibleTarget($"/bead#{visible}"));
-        Assert.True(HostsAndOrigins.IsVisibleTarget($"/bead?a#{visible}"));
         Assert.True(HostsAndOrigins.IsVisibleTarget(null));
         Assert.True(HostsAndOrigins.IsVisibleTarget("/a%01b%7F%FF?x=%00"));
         Assert.True(HostsAndOrigins.IsVisibleTarget("http://127.0.0.1/a%01?%00"));
-        Assert.True(HostsAndOrigins.IsVisibleTarget("/bead#%00\u00e9"));
+        Assert.True(HostsAndOrigins.IsVisibleTarget("/bead%23?a%23b"));
+
+        // a # anywhere, since no form of a request-target carries a fragment: in its path, in its
+        // query and in an absolute-form's authority, whatever follows it, nothing too
+        Assert.DoesNotContain(
+            ["/bead#", "/bead#x", $"/bead#{visible}", "/bead#a b", "/bead#\u00e9", "/a#%00?x", "/bead?x#y", "/bead?x#<\"", "http://127.0.0.1/#{}", "http://127.0.0.1#/bead", "http://#x/"],
+            HostsAndOrigins.IsVisibleTarget);
         Assert.DoesNotContain(others, (character) =>
         {
             return new[] { $"/a{character}b", $"/bead?a{character}b", $"http://127.0.0.1/a{character}b" }.Any(HostsAndOrigins.IsVisibleTarget);
@@ -651,7 +656,7 @@ public sealed class HostsAndOriginsTests
             return new[] { $"/bead?a{character}b", $"http://127.0.0.1/bead?a{character}b" }.Any(HostsAndOrigins.IsVisibleTarget);
         });
 
-        // a control character past a # is still the request-line's, and refused as one in its path
+        // a control character past a # is refused with it
         var controls = others.Where((character) =>
         {
             return character is < ' ' or '\u007F';
@@ -663,12 +668,10 @@ public sealed class HostsAndOriginsTests
             return HostsAndOrigins.IsVisibleTarget($"/bead#a{character}b");
         });
 
-        // a path whose percent-decoding holds NUL, in origin-form or absolute-form; one past a # is
-        // no path's
+        // a path whose percent-decoding holds NUL, in origin-form or absolute-form
         string[] nul = ["/%00", "/be%00ad", "http://127.0.0.1/a%00b?x=1"];
 
         Assert.DoesNotContain(nul, HostsAndOrigins.IsVisibleTarget);
-        Assert.True(HostsAndOrigins.IsVisibleTarget("/a#%00?x"));
     }
 
     [Fact]
@@ -768,22 +771,24 @@ public sealed class HostsAndOriginsTests
     }
 
     [Fact]
-    public void Reads_an_absolute_form_target_s_scheme_in_lower_case_alone_ends_a_target_at_its_hash_and_refuses_one_without_an_authority()
+    public void Reads_an_absolute_form_target_s_scheme_in_lower_case_alone_cuts_nothing_at_a_hash_and_refuses_one_without_an_authority()
     {
         // ! Kestrel answers a scheme in any other case 400 before the transport runs, where the
         // TypeScript twin reads it in any case: the row "A target in absolute-form, its scheme's
         // case" of docs/support.md
-        foreach (var target in new[] { "http:///", "HTTP://127.0.0.1/", "http://#x/", "ftp://127.0.0.1/" })
+        // a # in an authority is no host's
+        foreach (var target in new[] { "http:///", "HTTP://127.0.0.1/", "http://#x/", "http://127.0.0.1#/bead", "ftp://127.0.0.1/" })
         {
             Assert.False(HostsAndOrigins.IsTakenTarget(target), target);
         }
 
-        foreach (var (target, rest) in new[] { ("/bead#x", "/bead"), ("/bead?x=1#y?z", "/bead?x=1"), ("http://127.0.0.1#/bead", "/"), ("/bead#", "/bead"), ("http://bead.test?x", "/?x") })
+        // * a target is read as it came, a # in it among it, which IsVisibleTarget refuses
+        foreach (var (target, rest) in new[] { ("/bead#x", "/bead#x"), ("/bead?x=1#y?z", "/bead?x=1#y?z"), ("http://127.0.0.1/bead#x", "/bead#x"), ("/bead#", "/bead#"), ("http://bead.test?x", "/?x") })
         {
             Assert.Equal(rest, HostsAndOrigins.TargetRestOf(target));
         }
 
-        Assert.Equal("127.0.0.1", HostsAndOrigins.TargetAuthorityOf("http://127.0.0.1#/bead"));
+        Assert.Equal("127.0.0.1#", HostsAndOrigins.TargetAuthorityOf("http://127.0.0.1#/bead"));
         Assert.Equal("127.0.0.1", HostsAndOrigins.TargetAuthorityOf("http://127.0.0.1/bead?x=1"));
     }
 

@@ -106,8 +106,8 @@ public sealed partial class HttpTransportServer
             return HostsAndOrigins.IsVisibleTarget(context.Features.Get<IHttpRequestFeature>()?.RawTarget);
         }
 
-        // the path a request's target names as it came, ended at its first #, an absolute-form
-        // target's after its authority: HTTP/2's :path, which Kestrel gives as its RawTarget, among them
+        // the path a request's target names as it came, an absolute-form target's after its
+        // authority: HTTP/2's :path, which Kestrel gives as its RawTarget, among them
         internal static string PathOf(HttpContext context)
         {
             var request = context.Request;

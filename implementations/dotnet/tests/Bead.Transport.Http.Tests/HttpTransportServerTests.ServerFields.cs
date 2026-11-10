@@ -155,16 +155,21 @@ public sealed partial class HttpTransportServerTests
             await StatusOf("http://bead.example HTTP/1.1", bead),
             await StatusOf("http://bead.example?after=1 HTTP/1.1", bead),
             await StatusOf("/bead HTTP/1.1", $"Content-Type: {HttpTransport.MediaType}\r\n"),
-            // a target ends at its #, what follows it neither its path nor its query, a character a
-            // browser encodes among it; one such character before it makes the request-line invalid
+            // a # anywhere in a target makes the request-line invalid, as a character a browser
+            // always encodes where it stands does: Kestrel refuses it since 10.0.15, and the
+            // transport alike before
             await StatusOf("/bead#x HTTP/1.1", bead),
             await StatusOf("/bead#<\" HTTP/1.1", bead),
             await StatusOf("http://bead.example/bead#/elsewhere HTTP/1.1", bead),
+            await StatusOf("/elsewhere#/bead HTTP/1.1", bead),
             await StatusOf("/be<ad HTTP/1.1", bead),
             await StatusOf("/bead?a\"b HTTP/1.1", bead),
             await StatusOf("/bead?a^b HTTP/1.1", bead),
-            // its path matched as it came, an octet percent-encoded not the letter it encodes
+            // its path matched as it came, an octet percent-encoded not the letter it encodes, %23
+            // a character of its path or its query
             await StatusOf("/b%65ad HTTP/1.1", bead),
+            await StatusOf("/bead%23 HTTP/1.1", bead),
+            await StatusOf("/bead?a%23b HTTP/1.1", bead),
         };
 
         Assert.Equal(
@@ -195,13 +200,16 @@ public sealed partial class HttpTransportServerTests
                 (404, HttpRefusals.Path),
                 (404, HttpRefusals.Path),
                 (400, null),
-                (201, null),
-                (201, null),
-                (201, null),
+                (400, null),
+                (400, null),
+                (400, null),
+                (400, null),
                 (400, null),
                 (400, null),
                 (201, null),
                 (404, HttpRefusals.Path),
+                (404, HttpRefusals.Path),
+                (201, null),
             ],
             statuses);
 

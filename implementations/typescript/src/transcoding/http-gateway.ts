@@ -1654,7 +1654,8 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     };
     writerOf(response);
 
-    // 1: what HTTP refuses of its own, unmarked: a field or a target past visible ASCII among it
+    // 1: what HTTP refuses of its own, unmarked: a field or a target past visible ASCII, or a #
+    // anywhere in its target, among it
     const named =
       hasVisibleFields(request.rawHeaders) && isVisibleTarget(request.url)
         ? authorityNamedBy(request)

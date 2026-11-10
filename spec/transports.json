@@ -2703,6 +2703,26 @@
         },
         {
           "send": {
+            "head": "POST /bead#a\u0001b HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "hash"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "hash"
+        },
+        {
+          "send": {
             "head": "POST /bead?a%01b%7F%00 HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
           },
           "on": "encoded"
@@ -3032,7 +3052,7 @@
       ]
     },
     {
-      "name": "a target ends at its first #: what follows is neither its path nor its query, a character a browser encodes there among it, and a control character there is refused as one in its path",
+      "name": "a target holding a # anywhere is answered 400 unmarked before its host, its path or its origin is judged; %23 is a character of its path or its query",
       "clauses": [
         "15.6",
         "15.12"
@@ -3043,36 +3063,18 @@
           "bead.test"
         ]
       },
+      "differs": [
+        {
+          "row": "A # in a target",
+          "language": "Rust"
+        }
+      ],
       "steps": [
         {
           "send": {
             "head": "POST /bead#x HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
           },
           "on": "hash"
-        },
-        {
-          "expect": {
-            "status": 201
-          },
-          "on": "hash"
-        },
-        {
-          "send": {
-            "head": "POST /bead#<\" HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
-          },
-          "on": "quote"
-        },
-        {
-          "expect": {
-            "status": 201
-          },
-          "on": "quote"
-        },
-        {
-          "send": {
-            "head": "POST /bead#a\u0001b HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
-          },
-          "on": "control"
         },
         {
           "expect": {
@@ -3086,29 +3088,28 @@
             },
             "body": ""
           },
-          "on": "control"
-        }
-      ]
-    },
-    {
-      "name": "what follows a target's # is judged by no rule of its path: a NUL percent-encoded there is taken with it",
-      "clauses": [
-        "15.6",
-        "15.12"
-      ],
-      "transport": "http",
-      "options": {
-        "hosts": [
-          "bead.test"
-        ]
-      },
-      "differs": [
+          "on": "hash"
+        },
         {
-          "row": "What follows a # in a target",
-          "language": "C#"
-        }
-      ],
-      "steps": [
+          "send": {
+            "head": "POST /bead#<\" HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "quote"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "quote"
+        },
         {
           "send": {
             "head": "POST /bead#%00 HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
@@ -3117,15 +3118,135 @@
         },
         {
           "expect": {
-            "status": 201
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
           },
           "on": "nul"
         },
         {
           "send": {
+            "head": "POST /bead#Ã© HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "latin"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "latin"
+        },
+        {
+          "send": {
             "head": "POST /a#%00?x HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
           },
+          "on": "path"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "path"
+        },
+        {
+          "send": {
+            "head": "POST /bead?x#y HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "query"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "query"
+        },
+        {
+          "send": {
+            "head": "POST http://{host}/bead#x HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "absolute"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "absolute"
+        },
+        {
+          "send": {
+            "head": "POST /bead#x HTTP/1.1\r\nhost: elsewhere.test\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
           "on": "elsewhere"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "elsewhere"
+        },
+        {
+          "send": {
+            "head": "POST /bead?a%23b HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "encoded"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "encoded"
+        },
+        {
+          "send": {
+            "head": "POST /bead%23 HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "pathencoded"
         },
         {
           "expect": {
@@ -3143,44 +3264,7 @@
               "port": "{port}"
             }
           },
-          "on": "elsewhere"
-        }
-      ]
-    },
-    {
-      "name": "what follows a target's # is judged by no rule of its path: an octet past US-ASCII there is taken with it",
-      "clauses": [
-        "15.6",
-        "15.12"
-      ],
-      "transport": "http",
-      "options": {
-        "hosts": [
-          "bead.test"
-        ]
-      },
-      "differs": [
-        {
-          "row": "What follows a # in a target",
-          "language": "TypeScript"
-        },
-        {
-          "row": "What follows a # in a target",
-          "language": "C#"
-        }
-      ],
-      "steps": [
-        {
-          "send": {
-            "head": "POST /bead#Ã© HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
-          },
-          "on": "latin"
-        },
-        {
-          "expect": {
-            "status": 201
-          },
-          "on": "latin"
+          "on": "pathencoded"
         }
       ]
     },
@@ -9147,7 +9231,7 @@
       ]
     },
     {
-      "name": "an upgrade's target ends at its first #, and a control character past it is refused as one in its path",
+      "name": "an upgrade whose target holds a # is refused 400 unmarked",
       "clauses": [
         "15.2.1",
         "15.12"
@@ -9162,27 +9246,15 @@
         },
         {
           "expect": {
-            "status": 101,
+            "status": 400,
             "fields": {
-              "upgrade": "websocket",
-              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
-            }
-          },
-          "on": "hash"
-        },
-        {
-          "send": {
-            "binary": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 78 22"
-          },
-          "on": "hash"
-        },
-        {
-          "expect": {
-            "envelope": {
-              "kind": 17,
-              "callId": 1,
-              "payload": "22 78 22"
-            }
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
           },
           "on": "hash"
         },

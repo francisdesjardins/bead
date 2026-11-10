@@ -230,7 +230,7 @@ test.describe('createHTTPTransportServer, its edges', () => {
       statusOf(bead, { url: 'http://bead.example:8443/bead' }),
       statusOf({ ...bead, host: 'rebound.example' }, { url: 'https://bead.example/bead' }),
       statusOf({ ...bead, host: 'bad host' }, { url: 'http://localhost/bead?after=1' }),
-      // its scheme read in any case, and the target ended at its #
+      // its scheme read in any case, and a target holding a #, which HTTP refuses of its own
       statusOf(bead, { url: 'HTTP://bead.example/bead' }),
       statusOf(bead, { url: 'hTtPs://bead.example/bead#after' }),
       statusOf(bead, { url: '/bead#/elsewhere' }),
@@ -251,8 +251,11 @@ test.describe('createHTTPTransportServer, its edges', () => {
       statusOf({ ...bead, host: '' }),
       statusOf(bead, { url: '/' }),
       statusOf({ ...bead, host: 'rebound.example' }, { url: 'http://bead.example/bead' }),
-      // its path matched as it came, an octet percent-encoded not the letter it encodes
+      // its path matched as it came, an octet percent-encoded not the letter it encodes, %23 a
+      // character of its path or its query
       statusOf(bead, { url: '/b%65ad' }),
+      statusOf(bead, { url: '/bead%23' }),
+      statusOf(bead, { url: '/bead?a%23b' }),
     ]).toEqual([
       [201, undefined],
       [404, HTTP_REFUSALS.PATH],
@@ -269,21 +272,23 @@ test.describe('createHTTPTransportServer, its edges', () => {
       [201, undefined],
       [201, undefined],
       [201, undefined],
-      [201, undefined],
-      [201, undefined],
-      [403, HTTP_REFUSALS.HOST],
-      [404, HTTP_REFUSALS.PATH],
-      [404, HTTP_REFUSALS.PATH],
-      [400, undefined],
-      [400, undefined],
-      [400, undefined],
-      [400, undefined],
       [400, undefined],
       [400, undefined],
       [403, HTTP_REFUSALS.HOST],
       [404, HTTP_REFUSALS.PATH],
+      [404, HTTP_REFUSALS.PATH],
+      [400, undefined],
+      [400, undefined],
+      [400, undefined],
+      [400, undefined],
+      [400, undefined],
+      [400, undefined],
+      [403, HTTP_REFUSALS.HOST],
+      [404, HTTP_REFUSALS.PATH],
       [201, undefined],
       [404, HTTP_REFUSALS.PATH],
+      [404, HTTP_REFUSALS.PATH],
+      [201, undefined],
     ]);
 
     // HTTP/2's authority that is no host resets its stream, nothing written
@@ -328,10 +333,12 @@ test.describe('createHTTPTransportServer, its edges', () => {
       expect(await answerOf(target), target).toEqual([400, null]);
     }
     expect(namesOf(started.events, 'connection')).toEqual([]);
-    // its scheme in any case, and what follows its # neither its path nor its query
-    for (const target of ['HTTP://127.0.0.1/elsewhere', '/elsewhere#/bead']) {
-      expect(await answerOf(target), target).toEqual([404, HTTP_REFUSALS.PATH]);
+    // its scheme in any case, and a # anywhere refused, whatever follows it
+    expect(await answerOf('HTTP://127.0.0.1/elsewhere')).toEqual([404, HTTP_REFUSALS.PATH]);
+    for (const target of ['/elsewhere#/bead', '/bead#x', 'http://127.0.0.1/bead#x']) {
+      expect(await answerOf(target), target).toEqual([400, null]);
     }
+    expect(namesOf(started.events, 'connection')).toEqual([]);
   });
 
   test('tells a header given empty from one absent: an empty token is malformed, an empty origin or encoding refused, an empty listen none', async () => {

@@ -2670,6 +2670,32 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         Assert.Equal(new TlsAnswer(201, null, null), await Http2Of((":path", "/bead?a%01b%7F%00"), own, bead));
     }
 
+    // spec 15.12
+    [Fact]
+    public async Task Resets_over_HTTP_2_the_stream_of_a_request_whose_target_holds_a_hash_PROTOCOL_ERROR_nothing_written_and_serves_one_that_holds_an_encoded_hash()
+    {
+        await Start(new HttpTransportServerOptions { Certificate = Certificate.Value });
+
+        var own = (":authority", $"{Host}:{_port}");
+        var bead = ("content-type", HttpTransport.MediaType);
+
+        // no form of a request-target carries a fragment (RFC 9112 §3.2), :path among them (RFC 9113
+        // §8.3.1): Kestrel resets its stream itself since 10.0.15, and the transport alike before,
+        // PROTOCOL_ERROR, nothing written
+        foreach (var path in (string[])["/bead#x", "/bead#", "/bead?x#y", "/elsewhere#/bead"])
+        {
+            Assert.Equal(new TlsAnswer(null, null, 0x1), await Http2Of((":path", path), own, bead));
+        }
+
+        Assert.Empty(_refusals);
+        Assert.Empty(_connections);
+
+        // %23 is a character of its query, and of its path
+        Assert.Equal(new TlsAnswer(201, null, null), await Http2Of((":path", "/bead?a%23b"), own, bead));
+        Assert.Equal(new TlsAnswer(404, HttpRefusals.Path, null), await Http2Of((":path", "/bead%23"), own, bead));
+        Assert.Single(_connections);
+    }
+
     [Fact]
     public async Task Resets_over_HTTP_2_the_stream_of_a_request_with_a_field_holding_a_control_character_but_a_tab_or_whose_value_starts_or_ends_with_a_space_or_a_tab_and_Kestrel_ends_the_session_of_an_octet_that_is_no_UTF_8()
     {

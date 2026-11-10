@@ -54,17 +54,14 @@ const PORT = /^\d+$/u;
 // §8.2.1)
 const VISIBLE_FIELD = /^(?:[!-~](?:[\t -~]*[!-~])?)?$/u;
 
-// a control character, HTAB and a bare CR among them, or DEL, the request-line's wherever it
-// stands: any character but a space, visible ASCII and those past ASCII
-const CONTROL = /[^ -~\u{80}-\u{10FFFF}]/u;
-
 // a target of visible ASCII alone, a URI's characters (RFC 3986 §2)
 const VISIBLE_TARGET = /^[!-~]*$/u;
 
 // what a page's browser always percent-encodes in a path, and in a query, by the URL Standard's
-// path and query percent-encode sets: a URI leaves each out (RFC 3986 §2)
-const ENCODED_IN_PATH = /["<>^`{}]/u;
-const ENCODED_IN_QUERY = /["<>]/u;
+// path and query percent-encode sets: a URI leaves each out (RFC 3986 §2), and a `#`, which no
+// form of a request-target carries (RFC 9112 §3.2)
+const ENCODED_IN_PATH = /["#<>^`{}]/u;
+const ENCODED_IN_QUERY = /["#<>]/u;
 
 // the two schemes whose target in absolute-form names the request's authority, read in any case
 // (RFC 3986 §3.1)
@@ -244,49 +241,31 @@ export const hasVisibleFields = (rawHeaders: readonly string[]): boolean => {
 };
 
 /**
- * A target cut at its first `#` (spec 15.12): what follows is neither its path nor its query, as a
- * URI reference's fragment is apart from both (RFC 3986 §3.5).
- */
-const beforeHashOf = (target: string): string => {
-  const index = target.indexOf('#');
-
-  return index === -1 ? target : target.slice(0, index);
-};
-
-/**
  * Whether a request's target, as it came, is one a server reads (spec 15.12): visible ASCII alone,
  * a URI's characters (RFC 3986 §2), in its path and its query, in origin-form or absolute-form, and
  * a path whose percent-decoding holds no NUL. A control character, HTAB and a bare CR among them,
- * and DEL are none, wherever they stand, past a `#` too. A target ends at its first `#`: what
- * follows it is neither its path nor its query, and no rule of a path or a query reaches it, as a
- * URI reference's fragment is apart from both (RFC 3986 §3.5), though a request-target never
- * carries one (RFC 9112 §3.2). Before it, a space and an octet past ASCII, which a request carries
- * as the character of its Latin-1 code, are none; nor is a visible character a URI leaves out that
- * a page's browser always percent-encodes where it stands — `"`, `<` or `>` in a path or a query,
- * `^`, `` ` ``, `{` or `}` in a path, by the URL Standard's path and query percent-encode sets. Any
- * percent-encoded octet is otherwise taken, `%01` and `%7F` among them, and `%00` in a query; and
- * so are the other visible characters a URI leaves out, `\` and `|`, and `^`, `` ` ``, `{` and `}`
- * in a query, as a page's browser sends them unencoded. A request that holds another is answered
- * 400 unmarked, or over HTTP/2 its stream reset, before anything else of it is judged (RFC 9112
- * §3).
+ * DEL, a space and an octet past ASCII, which a request carries as the character of its Latin-1
+ * code, are none, wherever they stand. Nor is a `#` anywhere, since no form of a request-target
+ * carries a fragment (RFC 9112 §3.2), nor a visible character a URI leaves out that a page's
+ * browser always percent-encodes where it stands — `"`, `<` or `>` in a path or a query, `^`,
+ * `` ` ``, `{` or `}` in a path, by the URL Standard's path and query percent-encode sets, which
+ * hold `#` too. Any percent-encoded octet is otherwise taken, `%01`, `%7F` and `%23` among them, and
+ * `%00` in a query; and so are the other visible characters a URI leaves out, `\` and `|`, and `^`,
+ * `` ` ``, `{` and `}` in a query, as a page's browser sends them unencoded. A request that holds
+ * another is answered 400 unmarked, or over HTTP/2 its stream reset, before anything else of it is
+ * judged (RFC 9112 §3).
  */
 export const isVisibleTarget = (target: string | undefined): boolean => {
   if (target === undefined) {
     return true;
   }
 
-  // * a control character is the request-line's, refused past a # too; nothing else is read there
-  if (CONTROL.test(target)) {
-    return false;
-  }
-
-  const read = beforeHashOf(target);
-  const index = read.indexOf('?');
-  const path = index === -1 ? read : read.slice(0, index);
-  const query = index === -1 ? '' : read.slice(index + 1);
+  const index = target.indexOf('?');
+  const path = index === -1 ? target : target.slice(0, index);
+  const query = index === -1 ? '' : target.slice(index + 1);
 
   return (
-    VISIBLE_TARGET.test(read) &&
+    VISIBLE_TARGET.test(target) &&
     !ENCODED_IN_PATH.test(path) &&
     !ENCODED_IN_QUERY.test(query) &&
     !path.includes('%00')
@@ -321,16 +300,16 @@ export const hostPartOf = (authority: string): string => {
 };
 
 /**
- * A request's target as HTTP reads it (spec 15.12), cut at its first `#`, what follows it neither
- * its path nor its query: in absolute-form, its scheme `http` or `https`, in any case (RFC 3986
- * §3.1), then `://` and an authority as it came (RFC 9112 §3.2.2), then its path, `/` when it names
- * none; otherwise its path whole, `/` when there is none. `undefined` for a target HTTP refuses:
- * another scheme's absolute-form, or an authority that is no host, a userinfo, a colon with no port
- * and an empty one among them (RFC 9110 §4.2.1, §4.2.4). Read by hand, never by a URL parser, so no
- * target throws.
+ * A request's target as HTTP reads it (spec 15.12), nothing of it cut: in absolute-form, its scheme
+ * `http` or `https`, in any case (RFC 3986 §3.1), then `://` and an authority as it came (RFC 9112
+ * §3.2.2), then its path, `/` when it names none; otherwise its path whole, `/` when there is none.
+ * `undefined` for a target HTTP refuses: another scheme's absolute-form, or an authority that is no
+ * host, a userinfo, a colon with no port and an empty one among them (RFC 9110 §4.2.1, §4.2.4).
+ * Read by hand, never by a URL parser, so no target throws: one that holds a `#` is read as it came,
+ * and {@link isVisibleTarget} refuses it.
  */
 export const requestTargetOf = (target: string | undefined): IRequestTarget | undefined => {
-  const given = beforeHashOf(target ?? '/');
+  const given = target ?? '/';
   const scheme = ABSOLUTE_FORM.exec(given)?.[0];
 
   if (scheme === undefined) {
