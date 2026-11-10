@@ -236,7 +236,7 @@ impl ServerListeners {
 
     pub(crate) fn report(&self, error: &RouterError, handle: Option<&ConnectionHandle>) {
         for listener in self.error.all() {
-            // ! a listener of errors that panics would loop: its panic is dropped
+            // ! a listener of errors that panics would loop: its panic is dropped (spec 15.1)
             let called =
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| listener(error, handle)));
 

@@ -204,7 +204,7 @@ impl ServerInner {
         (error, connection_handle): (&RouterError, Option<&ConnectionHandle>),
     ) {
         for listener in self.listeners.all() {
-            // ! a listener of errors that panics would loop: its panic is dropped
+            // ! a listener of errors that panics would loop: its panic is dropped (spec 15.1)
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 listener.on_error(error, connection_handle);
             }))

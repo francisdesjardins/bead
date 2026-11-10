@@ -145,6 +145,7 @@ impl ClientInner {
             |error: RouterError| {
                 for heard in &listeners {
                     // ! a listener of errors that panics would loop: its panic is dropped
+                    // (spec 15.1)
                     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         heard.on_error(&error);
                     }))
@@ -156,7 +157,7 @@ impl ClientInner {
 
     fn report(&self, error: &RouterError) {
         for listener in self.listeners.all() {
-            // ! a listener of errors that panics would loop: its panic is dropped
+            // ! a listener of errors that panics would loop: its panic is dropped (spec 15.1)
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| listener.on_error(error)))
                 .ok();
         }

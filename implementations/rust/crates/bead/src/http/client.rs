@@ -742,6 +742,7 @@ impl ClientInner {
             |error: RouterError| {
                 for heard in &listeners {
                     // ! a listener of errors that panics would loop: its panic is dropped
+                    // (spec 15.1)
                     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         heard.on_error(&error);
                     }))

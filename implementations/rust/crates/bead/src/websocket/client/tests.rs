@@ -3120,8 +3120,10 @@ async fn fails_with_1009_a_message_past_its_bound_for_a_server_that_never_answer
 }
 
 // spec 15.1
+// * an error listener that panics is caught as it tells and its panic dropped, as every side drops
+// it: the listener after it, its recorder, hears the error alone
 #[tokio::test]
-async fn fails_its_connection_on_a_protocol_error_whose_error_listener_throws_telling_its_close_all_the_same()
+async fn fails_its_connection_on_a_protocol_error_whose_error_listener_throws_telling_its_close_all_the_same_and_dropping_what_it_threw()
  {
     struct Throwing;
 
@@ -3152,6 +3154,14 @@ async fn fails_its_connection_on_a_protocol_error_whose_error_listener_throws_te
         "its close all the same"
     );
     assert!(is_state(&client, ReadyState::Closed), "closed");
+
+    let told = told_of(&recorder);
+
+    assert_eq!(told.len(), 2, "one error, then its close: {told:?}");
+    assert!(
+        told[0].starts_with("error: the connection is closed with 1002"),
+        "the error alone, no throw told: {told:?}"
+    );
 }
 
 // ── Its close timeout ────────────────────────────────────────────────────────────────────────

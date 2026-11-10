@@ -2897,8 +2897,11 @@ async fn drops_a_client_once_what_waits_for_it_would_pass_maximum_unsent_bytes_t
     stopped(&server).await;
 }
 
+// spec 15.1
+// * an error listener that panics is caught as it tells and its panic dropped, as every side drops
+// it: the listener after it, its recorder, hears each error alone
 #[tokio::test]
-async fn closes_with_1009_and_drops_behind_maximum_unsent_bytes_a_connection_whose_error_listener_throws_telling_its_close_all_the_same()
+async fn closes_with_1009_and_drops_behind_maximum_unsent_bytes_a_connection_whose_error_listener_throws_telling_its_close_all_the_same_and_dropping_what_it_threw()
  {
     struct Throwing;
 
@@ -2926,6 +2929,8 @@ async fn closes_with_1009_and_drops_behind_maximum_unsent_bytes_a_connection_who
 
     while let Some(Ok(_)) = next_of(&mut first).await {}
 
+    let failed = recorder.connections(1).await.remove(0);
+
     assert_eq!(recorder.closes(1).await.len(), 1, "its close told");
 
     // past what may wait for it
@@ -2937,8 +2942,26 @@ async fn closes_with_1009_and_drops_behind_maximum_unsent_bytes_a_connection_who
 
     assert_eq!(
         recorder.closes(2).await[1],
-        (false, handle),
+        (false, Arc::clone(&handle)),
         "its close told all the same"
+    );
+    assert_eq!(
+        recorder.errors(2).await,
+        vec![
+            (
+                format!(
+                    "{failed} is closed with 1009: a message past its maximumMessageBytes, 8 bytes"
+                ),
+                Some(Arc::clone(&failed))
+            ),
+            (
+                format!(
+                    "{handle} is dropped: what waits for its socket would pass maximumUnsentBytes, 1000 bytes"
+                ),
+                Some(Arc::clone(&handle))
+            )
+        ],
+        "each error alone, no throw told"
     );
     stopped(&server).await;
     second.await.unwrap();

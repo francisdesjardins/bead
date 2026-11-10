@@ -635,7 +635,15 @@ impl ScriptedServer {
 
     /// Reports an error from a connection, or the transport's own when none.
     pub fn report(&self, error: &RouterError, connection_handle: Option<&ConnectionHandle>) {
-        self.tell(|listener| listener.on_error(error, connection_handle));
+        let listeners = locked(&self.listeners).clone();
+
+        for listener in listeners {
+            // ! a listener of errors that panics would loop: its panic is dropped (spec 15.1)
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                listener.on_error(error, connection_handle);
+            }))
+            .ok();
+        }
     }
 
     /// Tells its listeners the request its transport refused.

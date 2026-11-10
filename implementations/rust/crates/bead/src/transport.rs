@@ -588,7 +588,7 @@ pub(crate) fn tell_server<C: Fn(&dyn ServerListener)>(
         |listener: &(dyn ServerListener + 'static)| call(listener),
         |error: RouterError| {
             for listener in &heard {
-                // ! a listener of errors that panics would loop: its panic is dropped
+                // ! a listener of errors that panics would loop: its panic is dropped (spec 15.1)
                 catch_unwind(AssertUnwindSafe(|| {
                     listener.on_error(&error, connection_handle);
                 }))

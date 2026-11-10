@@ -3395,3 +3395,46 @@ async fn tells_nothing_of_a_name_its_link_lost_as_it_stopped() {
     assert!(locked(&reported).is_empty(), "nothing reported, let go");
     participant.dispose().await;
 }
+
+// spec 15.1
+// * an error listener that panics is caught as it is told and its panic dropped: the listeners
+// after it are told the report alone, the panic told to none, and the participant goes on
+#[tokio::test]
+async fn drops_what_an_error_listener_throws_the_next_error_listener_told_and_the_participant_goes_on()
+ {
+    let broker = broker();
+    let participant = participant_of(
+        &adapter_of(&broker, "ada"),
+        &BrokerParticipantOptions::default(),
+    );
+    let (other, _) = peer_of(&broker, ("other", &[])).await;
+
+    participant.on_error(Arc::new(|_: &RouterError| {
+        panic!("an error listener that throws")
+    }));
+
+    let reported = reporting(&participant);
+
+    participant.start().await.expect("started");
+
+    // a report of its own: a message that is no parcel
+    publish_to(&other, (["bead", "i", "ada"], vec![0xB1])).await;
+    until(|| !locked(&reported).is_empty(), "its report").await;
+
+    // * it takes the next parcel: the ACCEPT that opens its connection
+    let client = participant
+        .client(&BrokerTransportClientOptions::default())
+        .expect("a client");
+
+    accepted_of((&broker, &client), 1_024).await;
+    settle().await;
+
+    // the report told the next listener once, the panic of the first told to none
+    assert_eq!(client.ready_state(), ReadyState::Open, "open");
+    assert_eq!(
+        *locked(&reported),
+        ["a message to the inbox of ada is no parcel: 1 bytes, under a parcel's 28"],
+        "the report alone, once"
+    );
+    participant.stop().await;
+}
