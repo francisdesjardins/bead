@@ -2433,6 +2433,40 @@ test.describe('createRouterServer', () => {
       ]);
     });
 
+    // spec 15.2, 15.12.18
+    test('counts a text message by its UTF-8 bytes, then reports it ENVELOPE_MALFORMED with its connection, handing nothing on', async () => {
+      const { emitter, isPaused, open, paces, sent, transport } = createScriptedTransport();
+      using router = createRouterServer(transport, { intake: { maximumUntakenBytes: 4 } });
+      const taken = takenBy(router, isPaused);
+      const reported: [string, Handle | undefined, boolean][] = [];
+
+      router.on('error', (error, connectionHandle) => {
+        reported.push([
+          error instanceof FailureError ? `${String(error.code)} ${error.detail}` : error.message,
+          connectionHandle,
+          isPaused(first),
+        ]);
+      });
+      open(first);
+
+      // * four bytes in two UTF-16 code units: its bound reached, counted before it is reported
+      emitter.emit('message', { data: 'éé' }, first);
+
+      expect(reported).toEqual([
+        [
+          `${String(ProtocolCode.ENVELOPE_MALFORMED)} an envelope is binary, not a string`,
+          first,
+          true,
+        ],
+      ]);
+
+      await nextTask();
+      await sleep(0);
+
+      // released in the next task, and nothing handed on or answered
+      expect([paces, taken, sent]).toEqual([['pause first', 'resume first'], [], []]);
+    });
+
     // spec 15.12.17
     test('an envelope of one connection waits behind no more than the bound of another that floods', async () => {
       const memory = createMemoryTransportServer();
