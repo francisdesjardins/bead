@@ -17,6 +17,101 @@ mod listens;
 mod over_tls;
 mod tls_wire;
 
+#[tokio::test]
+async fn refuses_431_a_head_past_16_kib_its_request_line_among_it_or_past_100_fields_over_http() {
+    let started = started(&HttpTransportServerOptions::default()).await;
+    let port = started.port;
+    let padding = core::iter::repeat_n('x', 16_384).collect::<String>();
+    let large = format!("X-Large: {padding}");
+    let long_target = format!("/{padding}");
+    let fields = (0..101)
+        .map(|number| format!("X-{number}: x"))
+        .collect::<Vec<_>>();
+    let counted = fields.iter().map(String::as_str).collect::<Vec<_>>();
+
+    for request in [
+        head_of(("POST", "/bead"), (port, &[&large])),
+        head_of(("POST", &long_target), (port, &[])),
+        head_of(("POST", "/bead"), (port, &counted)),
+    ] {
+        let answer = raw_answer_of(port, request.as_bytes()).await;
+
+        assert_eq!((answer.status, answer.refusal), (431, None), "unmarked");
+    }
+    assert!(
+        started.recorder.told().connections.is_empty(),
+        "nothing drawn"
+    );
+    assert!(
+        started.recorder.told().refusals.is_empty(),
+        "the parser's alone"
+    );
+    started.stop().await;
+}
+
+#[tokio::test]
+async fn refuses_an_extension_method_on_the_wire_405_method_refused() {
+    let started = started(&HttpTransportServerOptions::default()).await;
+
+    for method in ["BEAD", "get"] {
+        let request = head_of((method, "/bead"), (started.port, &[]));
+        let answer = raw_answer_of(started.port, request.as_bytes()).await;
+
+        assert_eq!(
+            (answer.status, answer.refusal),
+            (405, Some(HTTP_REFUSALS.method.to_owned())),
+            "{method}"
+        );
+    }
+    assert!(
+        started.recorder.told().connections.is_empty(),
+        "nothing drawn"
+    );
+    started.stop().await;
+}
+
+#[tokio::test]
+async fn closes_without_a_response_an_http_2_preface_where_http_1_1_alone_is_served() {
+    let started = started(&HttpTransportServerOptions::default()).await;
+    let mut socket = RawSocket::on(started.port).await;
+
+    socket
+        .write(b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")
+        .await
+        .unwrap();
+    assert!(socket.ended(PATIENCE).await, "its socket closed");
+    assert!(socket.reader.head().is_none(), "nothing answered");
+    assert!(
+        started.recorder.told().connections.is_empty(),
+        "nothing drawn"
+    );
+    started.stop().await;
+}
+
+#[tokio::test]
+async fn closes_an_idle_kept_alive_socket_without_another_response() {
+    let started = started(&HttpTransportServerOptions {
+        headers_timeout: Some(Duration::from_millis(100)),
+        ..HttpTransportServerOptions::default()
+    })
+    .await;
+    let mut socket = RawSocket::on(started.port).await;
+
+    socket
+        .write(&Post::default().request(started.port))
+        .await
+        .unwrap();
+    assert_eq!(
+        socket.response(PATIENCE).await.unwrap().head.status,
+        201,
+        "drawn"
+    );
+    socket.next();
+    assert!(socket.ended(PATIENCE).await, "idle socket closed");
+    assert!(socket.reader.head().is_none(), "no second response");
+    started.stop().await;
+}
+
 // a refusal's status and mark, and what it tells of its request: its authority and its origin
 type Mark<'a> = (u16, &'a str);
 type Told<'a> = (Option<&'a str>, Option<&'a str>);
