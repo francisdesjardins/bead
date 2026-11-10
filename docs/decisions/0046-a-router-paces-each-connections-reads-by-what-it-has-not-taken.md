@@ -298,7 +298,7 @@ create whose connections its peers' own bounds end, are no deadlock of the bound
 player cannot hold a router's turn from the wire, as 15.12's pace rows, 15.12.11 to 15.12.13, are
 held by twins for the same reason. The units 15.12.17, 15.12.18 and 15.23.5 are of reason
 `twins`, which `spec/check.py` holds to a test on every side naming each. The twins, named alike on
-every side, the Rust side's over HTTP and WebSocket ahead with its transports:
+every side:
 
 - pauses a connection once its untaken envelopes reach a bound, and resumes it once they are at
   half;

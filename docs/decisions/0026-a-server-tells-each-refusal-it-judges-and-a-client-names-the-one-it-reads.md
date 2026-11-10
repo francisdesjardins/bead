@@ -153,9 +153,11 @@ predicate, the TypeScript side through `isVisibleTarget`, beside `hasVisibleFiel
 percent-encoded in a path is the one encoded octet refused, since Kestrel refuses it before an
 application runs and RFC 3986 §2.1 allows it: every side keeps to Kestrel's, a row of
 `docs/support.md`'s "Leveled down"; `%00` in a query, and every other octet percent-encoded, are
-taken. The visible characters a URI leaves out, `"`, `#`, `<`, `>`, `\`, `^`, `` ` ``, `{`, `|` and
-`}`, are taken as they came, as a page's browser sends some of them unencoded in a query, and a `#`
-opens no fragment: both servers keep it in the path.
+taken. Of the visible characters a URI leaves out, what a page's browser always percent-encodes
+where it stands, `"`, `<` and `>` in a path or a query, and `^`, `` ` ``, `{` and `}` in a path, is
+answered 400 unmarked, and a target ends at its first `#`, what follows neither its path nor its
+query; `\`, `|`, and `^`, `` ` ``, `{` and `}` in a query are taken as they came, as a page sends
+them ([0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)).
 
 **A client names the status and the reason of a refusal it reads** (spec 15.6): the HTTP connect,
 "the server drew no connection: {status} {reason}", an unmarked status by its number alone; the

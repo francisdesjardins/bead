@@ -19,6 +19,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   server on hyper's HTTP/1.1 and its HTTP/2 under TLS, the client on hyper's pooled HTTP/1.1, with
   `HttpServer` and `HttpClient` and the defaults the other sides export; it plays
   `spec/transports.json`'s cases over HTTP and its places of `spec/durations.json` (decision 0049).
+- The interop with the Rust side, both ways, over WebSocket and HTTP: the Rust client against the
+  TypeScript and C# interop servers, and their clients against the Rust one,
+  `bead-interop-server`, in CI's `interop-rust` job (decision 0049).
 
 ### Changed
 

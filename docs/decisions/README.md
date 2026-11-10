@@ -39,18 +39,18 @@ transport, never a network of its own
 and AMQP 1.0's on RabbitMQ 4
 ([0043](0043-over-amqp-1-0-a-participant-is-one-connection-whose-exclusive-inbox-ends-with-it-and-a-parcel-one-message-of-one-profile-each-counted-to-its-byte.md))
 — and proven byte for byte by the conformance files and the interop. Its third language, Rust, has
-its core: the envelope's codec, its routers and managers, the service layer's server half, its
-sessions and credentials, the trace, the filter and the registry, the in-memory transport, the
-broker's core over an in-memory broker with the joined transport, and its `proto` codec on Buffa,
-playing the conformance files its core reaches before it has a socket, under a toolchain, lints
-denied whole and a CI job of its own, each part it lacks a row of the support matrix ahead
-([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md),
-[0004](0004-one-behaviour-in-every-language.md)). Ahead, in this order:
+its core: the envelope's codec, its routers and managers, the service layer, its sessions and
+credentials, the trace, the filter and the registry, the in-memory transport, the broker's core over
+an in-memory broker with the joined transport, and its `proto` codec on Buffa, under a toolchain,
+lints denied whole and a CI job of its own
+([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)); and its
+transports over WebSocket (RFC 6455) and HTTP/1.1 and HTTP/2 (RFC 9110, 9112, 9113), features of
+its core, with the interop both ways with the TypeScript and C# sides
+([0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)).
+It plays the conformance files it reaches, each part it lacks a row of the support matrix ahead
+([0004](0004-one-behaviour-in-every-language.md)). Ahead, in this order:
 
-- **Rust's transports**: WebSocket (RFC 6455) and HTTP/1.1 and HTTP/2 (RFC 9110, 9112, 9113) over
-  sockets, features of its core, with the interop both ways with the TypeScript and C# sides
-  ([0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md));
-  then its broker bindings, MQTT 5 and AMQP 1.0; its gateway; and beadc's Rust target, with
+- **Rust's broker bindings**, MQTT 5 and AMQP 1.0; then its gateway; and beadc's Rust target, with
   `examples/hello`'s Rust half, the lists of the procedures a server's transports take
   ([0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md))
   and the validators of a blueprint's rules generated for it, or beadc refusing to generate them
@@ -124,10 +124,10 @@ that meets the Tenth Man:
 - **one corpus read alike by every side's parsers**, held as a gate, as
   `tools/protobuf-conformance.mjs differential` holds a `proto` payload
   ([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)):
-  the parsers the sides fuzz, the eight the TypeScript and C# sides share and six of them on the
-  Rust side ([the root README](../../README.md#fuzzing)), each read on one corpus by every side and
-  compared, beside the seeded mutations of the envelope and the parcel that each side's suite reads
-  alike and judges alone; and the `envelope` target's writer held to the refusals it documents, as
+  the parsers the sides fuzz, the eight every side shares
+  ([the root README](../../README.md#fuzzing)), each read on one corpus by every side and compared,
+  beside the seeded mutations of the envelope and the parcel that each side's suite reads alike and
+  judges alone; and the `envelope` target's writer held to the refusals it documents, as
   `broker-parcel`'s is ([0006](0006-a-rule-has-its-gate.md));
 - what [0030](0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-and-counts.md)
   names: `Forwarded`, an IPv6 client keyed by its prefix, and a per-address value fit for a NAT,

@@ -1,17 +1,17 @@
 # 0018 — A service's procedures are typed descriptors, served and called through one layer in each runtime
 
 - **Status**: accepted
-- **Scope**: every runtime's public surface, the service layer's client half ahead in the Rust
-  side's core: a procedure's kind, checked by each router as it is declared; a side's services,
-  typed by its side; the payload codecs made public; the admission vocabulary; the failure
-  catalogue; the typed descriptors, and their validator; the service layer that serves and calls
-  them; the notify filter's argument; a notification asked for again at another window; the bound
-  call and its guard; the C# side's server and client interfaces, and its routers' `Notify`; the
-  TypeScript side's `./service` entry; the constant of the contract with generated code. Spec
-  section 16, whose 16.10 holds the reason `against its kind` and whose 16.11 says what each way of
-  declaring takes, with `spec/identities.json`, its schema and its generator; the support matrix's
-  rows of the layer; [0003](0003-one-word-one-meaning.md)'s sentence on _kind_ and _type_. The
-  `proto` encoding, section 17.9, its file and its rows, is
+- **Scope**: every runtime's public surface, the Rust side's core among them: a procedure's kind,
+  checked by each router as it is declared; a side's services, typed by its side; the payload codecs
+  made public; the admission vocabulary; the failure catalogue; the typed descriptors, and their
+  validator; the service layer that serves and calls them; the notify filter's argument; a
+  notification asked for again at another window; the bound call and its guard; the C# side's server
+  and client interfaces, and its routers' `Notify`; the TypeScript side's `./service` entry; the
+  constant of the contract with generated code. Spec section 16, whose 16.10 holds the reason
+  `against its kind` and whose 16.11 says what each way of declaring takes, with
+  `spec/identities.json`, its schema and its generator; the support matrix's rows of the layer;
+  [0003](0003-one-word-one-meaning.md)'s sentence on _kind_ and _type_. The `proto` encoding,
+  section 17.9, its file and its rows, is
   [0031](0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)'s; the check of a
   `proto` payload's records before its library reads them, its levelings and protobuf's conformance
   suite are
@@ -19,7 +19,8 @@
   what a request's rules are, the violations and their detail, and the validators beadc generates,
   [0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)'s;
   what an output's `server`, `client` and `gateway` select, and the procedures a server's transport
-  takes, [0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md)'s
+  takes,
+  [0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md)'s
 
 ## Context
 

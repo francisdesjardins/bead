@@ -196,11 +196,14 @@ origin, which is `http://` or `https://` followed by that authority, port includ
 ([RFC 6454 §4](https://www.rfc-editor.org/rfc/rfc6454#section-4)). The C# side sets
 `AllowHostHeaderOverride` on both transports, RFC 9112 §3.2.2's conforming form of Kestrel; the
 TypeScript side reads the authority and the path from the target by hand, as it reads the rest of a
-request, never through a URL parser. Both read it as it came, where Kestrel's `Uri` drops a userinfo
-and an empty port: a target in absolute-form is read when it is `http://` or `https://`, its scheme
-in lower case as Kestrel reads it though
-[RFC 3986 §3.1](https://www.rfc-editor.org/rfc/rfc3986#section-3.1) reads a scheme in any case,
-then an authority of 15.12's grammar that is not empty
+request, never through a URL parser; the Rust side reads the head's own bytes at a WebSocket's
+address and hyper's `Uri` over HTTP
+([0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)).
+Each reads it as it came, where Kestrel's `Uri` drops a userinfo and an empty port: a target in
+absolute-form is read when its scheme is `http` or `https` in any ASCII case, as
+[RFC 3986 §3.1](https://www.rfc-editor.org/rfc/rfc3986#section-3.1) reads a scheme, Kestrel's
+refusal of one not in lower case a row of the matrix's Differences, then `://` and an authority of
+15.12's grammar that is not empty
 ([RFC 9110 §4.2.1](https://www.rfc-editor.org/rfc/rfc9110#section-4.2.1)), so a userinfo, which
 [RFC 9110 §4.2.4](https://www.rfc-editor.org/rfc/rfc9110#section-4.2.4) has a recipient treat as an
 error, and a colon with no port are none; any other is answered 400. The `Host` beside it is judged

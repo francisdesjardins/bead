@@ -2,10 +2,11 @@
 
 Bead is a binary wire protocol: its spec and conformance files in `spec/`, a TypeScript
 implementation in `implementations/typescript` and a C# one in `implementations/dotnet`, at
-behavioural parity, and a Rust one in `implementations/rust`, its core, each part it lacks a
-row of `docs/support.md` ahead (decision 0044), the builder, `beadc`, in `builder/`, an example in
-`examples/hello`, the demo, the DevTools extension, and the page francisdesjardins.ca serves at
-`/bead/`, in `site/`. `README.md` says how each part builds and tests.
+behavioural parity, and a Rust one in `implementations/rust`, its core and its transports over
+WebSocket and HTTP, each part it lacks a row of `docs/support.md` ahead (decisions 0044, 0049), the
+builder, `beadc`, in `builder/`, an example in `examples/hello`, the demo, the DevTools extension,
+and the page francisdesjardins.ca serves at `/bead/`, in `site/`. `README.md` says how each part
+builds and tests.
 
 What a session needs beyond this file lives in `.claude/`:
 

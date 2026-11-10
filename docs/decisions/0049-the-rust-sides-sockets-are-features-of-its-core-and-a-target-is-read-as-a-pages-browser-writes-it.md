@@ -23,15 +23,14 @@
 
 ## Context
 
-**The Rust core holds everything but a socket.** Its routers, its managers, its sessions, the
-in-memory transport and the broker's core play the conformance files they reach
-([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)); the cases
-over HTTP and over WebSocket, the HTTP and WebSocket places of `spec/durations.json` and the
-interop are rows of the matrix ahead. Its `ServerTransport` trait carries `start`, which no router,
-facade or join calls: the in-memory and broker servers each keep a starting and a started state by
-hand, where the TypeScript side's `createTransportServer` and the C# side's `TransportServerLife`
-hold one life for every server. Spawning and time go through `crate::platform` and the clock alone,
-and the core compiles for `wasm32-unknown-unknown`.
+**The sockets join a core that holds everything else.** The Rust side's routers, its managers, its
+sessions, the in-memory transport and the broker's core play the conformance files they reach
+([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)) with no
+socket; the cases over HTTP and over WebSocket, the HTTP and WebSocket places of
+`spec/durations.json` and the interop need one. The TypeScript side's `createTransportServer` and
+the C# side's `TransportServerLife` hold one life for every server, which a socket's server takes
+as the in-memory and broker servers do. Spawning and time go through `crate::platform` and the
+clock alone, and the core compiles for `wasm32-unknown-unknown`, where no socket builds.
 
 **hyper reads a target before any code of Bead's does.** hyper, the HTTP implementation the Rust
 ecosystem's servers and clients run on, parses every HTTP/1.1 target and HTTP/2 `:path` into
@@ -94,8 +93,8 @@ target, its origin and its proxies, the policy's Items
 ([RFC 9651](https://www.rfc-editor.org/rfc/rfc9651)), the WebSocket handshake, so the fuzz targets
 `http-fields` and `ws-handshake` and the players reach them through `bead::internal` with no
 feature. A server's life, `crate::life`, is core and always built, the in-memory, broker, WebSocket
-and HTTP servers each holding it, as `TransportServerLife` is the C# side's. The crates
-`bead-transport-websocket` and `bead-transport-http` are no longer reserved.
+and HTTP servers each holding it, as `TransportServerLife` is the C# side's. No crate is named for
+either transport.
 
 ### The libraries
 
@@ -162,7 +161,7 @@ the case of `spec/transcoding.json` that reads a target reads `/v1/books/a#b` as
 An upgrade is one GET head with no body. The WebSocket server reads it with httparse, hyper's own
 tokenizer, under the head's bounds and its deadline, judges it by 15.2's steps, writes its 101 or
 its refusal itself, every refusal saying `connection: close` and its socket closed in stages, and
-hands the socket to `tokio_tungstenite::WebSocketStream::from_raw_socket`, what it read past the
+hands the socket to `tokio_tungstenite::WebSocketStream::from_partially_read`, what it read past the
 head given first, so a frame written with the upgrade reaches tungstenite. No hyper serves it: the
 target stays as it came, a silent socket is told from a head under way, and no socket is taken back
 from hyper after a 101.
@@ -243,6 +242,12 @@ TypeScript and C# servers of the interop service, and their clients against its 
 once and hands them on; a job of its own, `interop-rust`, runs them in the image the browser's tests
 run in, with no Rust toolchain, the binary finding the repository at run time.
 
+The Rust HTTP client sends each envelope in an exchange of its own, as the other sides' do, so two
+envelopes reach the server in no guaranteed order (spec 15.1, 15.5): a CANCEL may overtake the
+REQUEST it cancels. The interop's trials keep their order by a guard of the tests' own, `InOrder`,
+which lets an envelope go once the server answered the head of the one before, as the TypeScript
+side's `fetchInOrder` and the C# side's `InOrder` keep theirs; the transport orders nothing.
+
 ## Consequences
 
 - **Every side refuses what a page never sends**, and takes what it does: a hand-written client that
@@ -272,7 +277,7 @@ answered. Twelve were accepted, two in part, and none refused.
 | Objection                                                                                                                                                                                                                                                                     | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | hyper reads every target as `http::Uri`: it 400s `<`, `>`, `` ` `` in a path and `"`, `<`, `>` in a query, and cuts a target at `#`, where 15.12 takes them as they came; no case sends them, so CI never sees it. Bead should read each request line itself, or level 15.12. | Accepted. The probes confirm it and add the tail past a `#` (control characters refused, the rest taken). Reading each head is refused: a pre-read reaches a connection's first head alone, and a second parser beside hyper's invites smuggling. 15.12 changes on every side instead, by standards: a character a URI leaves out that a page's browser always encodes where it stands is an invalid request-line, 400 unmarked (RFC 3986 §2, RFC 9112 §3, the URL Standard's path and query sets, a superset of hyper's refusals, Bead refusing the rest itself); a `#` ends the target, a leveling with its row, Kestrel's refusal of a `%00` or an octet past ASCII after it a row of Differences (probed); the scheme is read in any case (RFC 3986 §3.1). Eight generated cases hold each side's server to it. |
-| The WebSocket server needs no hyper: an upgrade is one head, which httparse reads, keeping the target raw, giving Bead its own 408 and dropping the take-back after a 101.                                                                                                    | Accepted. The server reads its head with httparse under its bounds and its deadline, writes its 101 and its refusals, `connection: close` on each, and closes in stages. The prefix reader stays: a frame written with the upgrade must reach tungstenite first. The head's parse is pure and always built, so the fuzz target reaches it with no feature.                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| The WebSocket server needs no hyper: an upgrade is one head, which httparse reads, keeping the target raw, giving Bead its own 408 and dropping the take-back after a 101.                                                                                                    | Accepted. The server reads its head with httparse under its bounds and its deadline, writes its 101 and its refusals, `connection: close` on each, and closes in stages. What it read past the head reaches tungstenite first, by `WebSocketStream::from_partially_read`: a frame written with the upgrade. The head's parse is pure and always built, so the fuzz target reaches it with no feature.                                                                                                                                                                                                                                                                                                                                                                                                               |
 | hyper's head timer is also its idle timer: as written, every idle connection gets a 408 at 30 s; Node and Kestrel close idle connections silently. The client's pool keeps idle connections 90 s against Node's 5 s.                                                          | In part. A kept-alive connection gone idle closes without a word; but Node answers a silent new connection 408 at `headersTimeout` (probed), and `read_buf` is empty for both, so the rule follows the transport's own count of the responses written, not the buffer. The pool's idle timeout is 4 s, under Node's 5 s, on Bead's timer, without which hyper-util applies none. A row, "An idle connection's close", names the three platforms. The round found one more: under TLS, hyper's timer arms only after the handshake, so the handshake runs under `headers_timeout` on the platform's clock, closed without a word past it, as Node and Kestrel bound theirs.                                                                                                                                          |
 | A head is bounded at hyper's 417,792 bytes, 25 times Node's, with no option, table or row naming it.                                                                                                                                                                          | Accepted. 16 KiB, the request line among it, and 100 fields, 431 past either, over HTTP/1.1, HTTP/2 and at a WebSocket's address; a row, "A request head's size". Not leveled in the spec: Kestrel's line and fields are bounded apart.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | Both of Q4's options contradict 15.12's text, so "no change to the spec" cannot stand; option (b) leaves C# the one side unable to meet the spec.                                                                                                                             | Accepted. The spec reads the scheme in any case, as RFC 3986 §3.1 does; the leveling breaks whichever way once the Rust side cannot hold it, and the standard decides which text the spec states. Kestrel's refusal is a row of Differences, lifted when Kestrel reads any case; a case with its `differs` holds it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
