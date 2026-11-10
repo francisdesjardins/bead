@@ -282,8 +282,9 @@ checker, and `yarn surface:write` writes the list anew, its diff the change's to
 
 ## C#
 
-In `implementations/dotnet`. The .NET 10 SDK, as `global.json` pins it; tests run on
-Microsoft.Testing.Platform. Every warning is an error, the recommended analyzers are on, and every
+In `implementations/dotnet`. The .NET 10 SDK `global.json` pins, that one and no later, with the
+runtimes it brings, Kestrel's among them: a new one comes by Dependabot's pull request, which CI
+judges. Tests run on Microsoft.Testing.Platform. Every warning is an error, the recommended analyzers are on, and every
 public member has its doc comment. Each `src` project's public surface, its members included, is
 pinned to its `PublicAPI.Shipped.txt`, what the last release shipped, and its
 `PublicAPI.Unshipped.txt`, what changed since: the build refuses a public symbol neither lists and
