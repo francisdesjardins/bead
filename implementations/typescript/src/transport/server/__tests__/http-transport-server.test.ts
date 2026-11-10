@@ -36,6 +36,7 @@ import {
   createHTTPTransportServer,
   ENVELOPE_KINDS,
   EXCHANGE_TIMEOUT,
+  HEAD_DELAY_MILLISECONDS,
   INACTIVITY_TIMEOUT,
   LISTEN_HEADER,
   MAXIMUM_BODY_BYTES,
@@ -195,7 +196,7 @@ test.describe('createHTTPTransportServer', () => {
     expect(second.connectionToken).not.toBe(connectionToken);
   });
 
-  test('pairs each answer with the exchange of its request, whatever the order, the head going as the request is handed on', async () => {
+  test('pairs each answer with the exchange of its request, whatever the order, the head going 40 ms after the request is handed on', async () => {
     await using started = await startTransport();
     const { events, server, url } = started;
     const { connectionHandle, connectionToken } = await connect(url, server);
@@ -2322,6 +2323,8 @@ test.describe('createHTTPTransportServer, its edges', () => {
     const late = exchangeOf(connectionToken);
 
     fake.feed(late.request, [envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 5 })]);
+    // its head, once it waited 40 ms for its answer (spec 15.7)
+    clock.tick(HEAD_DELAY_MILLISECONDS);
 
     expect([late.response.status, burials]).toEqual([200, 3]);
 
@@ -2358,19 +2361,34 @@ test.describe('createHTTPTransportServer, its edges', () => {
       fake.feed(asking.request, [envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 })]);
 
       // one idle timer per connection as drawn; the one asking lost its own as its exchange came,
-      // and its body's pace, armed at its head and again at its bytes, went once it was whole
+      // and its body's pace, armed at its head and again at its bytes, went once it was whole; its
+      // exchange timer counts from its hand-off, its head's 40 ms first (spec 15.7)
       const delays = clock.armed.map(({ delay }) => {
         return delay;
       });
 
-      expect(delays).toEqual([2_000, 2_000, BODY_GRACE_PERIOD, BODY_GRACE_PERIOD, 1_000]);
+      expect(delays).toEqual([
+        2_000,
+        2_000,
+        BODY_GRACE_PERIOD,
+        BODY_GRACE_PERIOD,
+        HEAD_DELAY_MILLISECONDS,
+      ]);
       expect(clock.cleared).toEqual(
         [0, 2, 3].map((index) => {
           return clock.armed[index]?.handle;
         })
       );
 
-      clock.tick(999);
+      // its head goes, and the rest of its timeout is armed
+      clock.tick(HEAD_DELAY_MILLISECONDS);
+
+      expect([asking.response.status, clock.armed.at(-1)?.delay]).toEqual([
+        200,
+        1_000 - HEAD_DELAY_MILLISECONDS,
+      ]);
+
+      clock.tick(999 - HEAD_DELAY_MILLISECONDS);
 
       expect(namesOf(events, 'close')).toEqual([]);
 
@@ -2656,7 +2674,8 @@ test.describe('createHTTPTransportServer, its edges', () => {
     ).toEqual([2_000]);
     await server.stop();
 
-    // a request waits for its answer for ever, and a connection rests for ever: no timer
+    // a request waits for its answer for ever, and a connection rests for ever: no timer but its
+    // head's delay (spec 15.7)
     const foreverClock = createTestClock();
     const forever = await startScripted({
       clock: foreverClock,
@@ -2669,13 +2688,24 @@ test.describe('createHTTPTransportServer, its edges', () => {
       forever.fake.feed(asking.request, [envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 })]);
     });
 
-    // its body's pace alone was armed, and went once its body was whole
+    // its body's pace, which went once its body was whole, and its head's delay
     expect([
       asking.response.status,
-      armedForever.filter(({ handle }) => {
-        return !cleared.includes(handle);
-      }),
-    ]).toEqual([200, []]);
+      armedForever
+        .filter(({ handle }) => {
+          return !cleared.includes(handle);
+        })
+        .map(({ delay }) => {
+          return delay;
+        }),
+    ]).toEqual([undefined, [HEAD_DELAY_MILLISECONDS]]);
+
+    // its head goes, and nothing is armed for the rest of an exchange timeout of never
+    const { armed: armedAfter } = timersBy(foreverClock, () => {
+      foreverClock.tick(HEAD_DELAY_MILLISECONDS);
+    });
+
+    expect([asking.response.status, armedAfter]).toEqual([200, []]);
     await forever.server.stop();
   });
 
@@ -3172,12 +3202,15 @@ test.describe('createHTTPTransportServer, listening', () => {
   });
 
   test('keeps a notification for a listen, even on the call id of a request still waiting, which it never answers', async () => {
-    const { connectScripted, exchangeOf, fake, listenOf, server } = await startScripted();
+    const clock = createTestClock();
+    const { connectScripted, exchangeOf, fake, listenOf, server } = await startScripted({ clock });
     const { connectionHandle, connectionToken } = connectScripted({ isListening: true });
     const asking = exchangeOf(connectionToken);
     const notification = envelopeOf(EnvelopeKind.NOTIFICATION, { callId: 1 });
 
     fake.feed(asking.request, [envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 })]);
+    // its head, once it waited 40 ms for its answer (spec 15.7)
+    clock.tick(HEAD_DELAY_MILLISECONDS);
     await server.send({ data: notification }, connectionHandle);
 
     expect([asking.response.status, asking.response.body]).toEqual([200, undefined]);
@@ -4330,6 +4363,232 @@ test.describe('createHTTPTransportServer, its bounds', () => {
           ...options,
         });
       }).toThrow(new ProgrammerError(refusal));
+    }
+  });
+});
+
+test.describe('createHTTPTransportServer, its head’s delay', () => {
+  test.afterAll(async () => {
+    await tcpSocketsClosed();
+  });
+
+  // a request handed on, on a raw socket of its own, its timers on the test clock
+  const handOn = async (
+    started: Awaited<ReturnType<typeof startTransport>>,
+    { callId, connectionToken }: { callId: number; connectionToken: string }
+  ) => {
+    const { events, server, url } = started;
+    const handed = namesOf(events, 'message').length;
+    const raw = await rawSocketOn(portOf(url));
+    const request = envelopeOf(ENVELOPE_KINDS.REQUEST, { callId });
+
+    raw.socket.write(postHeadOf(connectionToken, request.length));
+    raw.socket.write(request);
+    await expect
+      .poll(() => {
+        return namesOf(events, 'message').length;
+      })
+      .toBe(handed + 1);
+    expect(server.gauges().counts['waitingExchanges']).toBe(1);
+
+    return raw;
+  };
+
+  // the head a raw socket read, in lower case, once it came whole
+  const headOf = async (read: { text: string }) => {
+    await expect
+      .poll(() => {
+        return read.text.includes('\r\n\r\n');
+      })
+      .toBe(true);
+
+    return read.text.slice(0, read.text.indexOf('\r\n\r\n')).toLowerCase();
+  };
+
+  // what a raw socket read after its head
+  const afterHeadOf = (read: { text: string }) => {
+    return read.text.slice(read.text.indexOf('\r\n\r\n') + 4);
+  };
+
+  test('answers a request whole when its answer comes before 40 ms passed from its hand-off, its content-length with its head, over HTTP/1.1 (spec 15.7)', async () => {
+    const clock = createTestClock();
+
+    await using started = await startTransport({ clock });
+    const { server, url } = started;
+    const { connectionHandle, connectionToken } = await connect(url, server);
+    const answer = envelopeOf(ENVELOPE_KINDS.FAILURE, { callId: 5 });
+
+    // a turn after its hand-off, as the router answers it, the clock never advanced
+    server.on('message', () => {
+      setImmediate(() => {
+        void server.send({ data: answer }, connectionHandle);
+      });
+    });
+
+    const response = await post(url, {
+      body: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 5 }),
+      connectionToken,
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toBe(BEAD_MEDIA_TYPE);
+    expect(response.headers.get('content-length')).toBe(String(answer.length));
+    expect(response.headers.get('transfer-encoding')).toBeNull();
+    expect(await bytesOf(response)).toEqual([...answer]);
+  });
+
+  test('sends the head of a request still unanswered 40 ms after its hand-off, then its answer chunked, over HTTP/1.1 (spec 15.7)', async () => {
+    const clock = createTestClock();
+
+    await using started = await startTransport({ clock });
+    const { server, url } = started;
+    const { connectionHandle, connectionToken } = await connect(url, server);
+    const answer = envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 7 });
+    const { read, socket } = await handOn(started, { callId: 7, connectionToken });
+
+    try {
+      // one timer for its head and its exchange: its head's delay first
+      expect(clock.armed.at(-1)?.delay).toBe(HEAD_DELAY_MILLISECONDS);
+
+      await clock.tickAsync(HEAD_DELAY_MILLISECONDS - 1);
+
+      expect(read.text).toBe('');
+
+      await clock.tickAsync(1);
+
+      const head = await headOf(read);
+
+      expect(head).toMatch(/^http\/1\.1 200 /u);
+      expect(head).toContain(`\r\ncontent-type: ${BEAD_MEDIA_TYPE}`);
+      expect(head).toContain('\r\ntransfer-encoding: chunked');
+      expect(head).not.toContain('content-length');
+      // then armed again, for what is left of its exchange timeout
+      expect(clock.armed.at(-1)?.delay).toBe(EXCHANGE_TIMEOUT - HEAD_DELAY_MILLISECONDS);
+
+      await server.send({ data: answer }, connectionHandle);
+      await expect
+        .poll(() => {
+          return read.text.endsWith('\r\n0\r\n\r\n');
+        })
+        .toBe(true);
+      expect(afterHeadOf(read)).toBe(`8\r\n${Buffer.from(answer).toString('latin1')}\r\n0\r\n\r\n`);
+    } finally {
+      socket.destroy();
+    }
+  });
+
+  test('counts a request’s exchange timeout from its hand-off, the 40 ms of its head within it (spec 15.7)', async () => {
+    const clock = createTestClock();
+
+    await using started = await startTransport({ clock, exchangeTimeout: 100 });
+    const { events, server, url } = started;
+    const { connectionHandle, connectionToken } = await connect(url, server);
+    const { read, socket } = await handOn(started, { callId: 9, connectionToken });
+
+    try {
+      await clock.tickAsync(HEAD_DELAY_MILLISECONDS);
+
+      expect(await headOf(read)).toMatch(/^http\/1\.1 200 /u);
+
+      await clock.tickAsync(100 - HEAD_DELAY_MILLISECONDS - 1);
+
+      expect(server.gauges().connectionHandles).toEqual(new Set([connectionHandle]));
+      expect(namesOf(events, 'close')).toEqual([]);
+
+      await clock.tickAsync(1);
+
+      // its connection lost, and its exchange cut after its head, never ended
+      expect(namesOf(events, 'close')).toEqual([['close', false, connectionHandle]]);
+      await expect
+        .poll(() => {
+          return read.isClosed;
+        })
+        .toBe(true);
+      expect(read.text).not.toContain('\r\n0\r\n\r\n');
+    } finally {
+      socket.destroy();
+    }
+  });
+
+  test('cuts a request whose exchange timeout is 40 ms or less at that timeout, its head going with its cut (spec 15.7)', async () => {
+    const clock = createTestClock();
+
+    await using started = await startTransport({ clock, exchangeTimeout: 10 });
+    const { events, server, url } = started;
+    const { connectionHandle, connectionToken } = await connect(url, server);
+    const { read, socket } = await handOn(started, { callId: 11, connectionToken });
+    const armedAt = clock.armed.length - 1;
+
+    try {
+      // its exchange timer alone, at its timeout
+      expect(clock.armed[armedAt]?.delay).toBe(10);
+
+      await clock.tickAsync(9);
+
+      expect(read.text).toBe('');
+
+      await clock.tickAsync(1);
+
+      expect(await headOf(read)).toMatch(/^http\/1\.1 200 /u);
+      expect(namesOf(events, 'close')).toEqual([['close', false, connectionHandle]]);
+      await expect
+        .poll(() => {
+          return read.isClosed;
+        })
+        .toBe(true);
+      expect(read.text).not.toContain('\r\n0\r\n\r\n');
+      // one timer armed for it, at 10 ms, and none after
+      expect(
+        clock.armed.slice(armedAt).map(({ delay }) => {
+          return delay;
+        })
+      ).toEqual([10]);
+    } finally {
+      socket.destroy();
+    }
+  });
+
+  test('ends a request cancelled before its head went 204, empty, and one cancelled after it 200, empty (spec 15.6, 15.7)', async () => {
+    const clock = createTestClock();
+
+    await using started = await startTransport({ clock });
+    const { server, url } = started;
+    const { connectionToken } = await connect(url, server);
+    const cancelOf = (callId: number) => {
+      return post(url, { body: envelopeOf(ENVELOPE_KINDS.CANCEL, { callId }), connectionToken });
+    };
+
+    // cancelled with the clock unadvanced: its head never went, and it ends 204, empty
+    const early = await handOn(started, { callId: 13, connectionToken });
+
+    try {
+      expect((await cancelOf(13)).status).toBe(204);
+
+      const head = await headOf(early.read);
+
+      expect(head).toMatch(/^http\/1\.1 204 /u);
+      expect(head).not.toContain('transfer-encoding');
+      expect(afterHeadOf(early.read)).toBe('');
+    } finally {
+      early.socket.destroy();
+    }
+
+    // cancelled once its head went, 40 ms after its hand-off: its 200 ends with no body
+    const late = await handOn(started, { callId: 15, connectionToken });
+
+    try {
+      await clock.tickAsync(HEAD_DELAY_MILLISECONDS);
+
+      expect(await headOf(late.read)).toMatch(/^http\/1\.1 200 /u);
+      expect((await cancelOf(15)).status).toBe(204);
+      await expect
+        .poll(() => {
+          return late.read.text.endsWith('\r\n\r\n0\r\n\r\n');
+        })
+        .toBe(true);
+      expect(afterHeadOf(late.read)).toBe('0\r\n\r\n');
+    } finally {
+      late.socket.destroy();
     }
   });
 });
