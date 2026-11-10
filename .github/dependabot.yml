@@ -118,6 +118,32 @@ updates:
       # tools/protobuf-conformance/runner.json, and protoc's pin, builder/protoc.json (decision 0028)
       - dependency-name: Google.Protobuf
 
+  # The SDK each global.json names, and with it the .NET and ASP.NET Core runtimes the side runs
+  # on, Kestrel among them: rollForward is disable, so a new patch reaches CI only by this pull
+  # request, which CI judges. A major SDK moves with the side's target framework, by hand.
+  - package-ecosystem: dotnet-sdk
+    directories:
+      - /implementations/dotnet
+      - /examples/hello/dotnet
+    schedule:
+      interval: weekly
+      day: monday
+      time: '04:00'
+      timezone: UTC
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+      semver-minor-days: 7
+      semver-patch-days: 3
+    commit-message:
+      prefix: 'build(deps)'
+    groups:
+      dotnet-sdk:
+        patterns: ['*']
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
+
   # ── Rust ─────────────────────────────────────────────────────────────────────
   # The workspace, the fuzz targets and the conformance suite's testee, each a project of its own
   # with its own lock. The toolchain moves by a commit of its own, never here.
