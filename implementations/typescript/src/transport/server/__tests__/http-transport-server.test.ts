@@ -102,6 +102,77 @@ test.describe('createHTTPTransportServer', () => {
     await tcpSocketsClosed();
   });
 
+  test('refuses 431 a head past 16 KiB, its request line among it, as Node’s maxHeaderSize bounds it, and takes 101 fields, over HTTP', async () => {
+    await using started = await startTransport();
+    const port = portOf(started.url);
+
+    for (const head of [
+      rawConnectOf(host, `X-Large: ${'x'.repeat(16_384)}\r\n`),
+      `POST /${'x'.repeat(16_384)} HTTP/1.1\r\nHost: ${host}\r\n\r\n`,
+    ]) {
+      expect((await rawAnswerOf(port, head)).answer).toEqual([431, null]);
+    }
+    const fields = Array.from({ length: 101 }, (_, index) => {
+      return `X-${String(index)}: x\r\n`;
+    }).join('');
+
+    expect((await rawAnswerOf(port, rawConnectOf(host, fields))).answer).toEqual([201, null]);
+  });
+
+  test('refuses an extension method on the wire 400 unmarked', async () => {
+    await using started = await startTransport();
+
+    for (const method of ['BEAD', 'get']) {
+      const head = `${method} /bead HTTP/1.1\r\nHost: ${host}\r\nContent-Length: 0\r\n\r\n`;
+
+      expect((await rawAnswerOf(portOf(started.url), head)).answer).toEqual([400, null]);
+    }
+    expect(started.server.clients).toEqual([]);
+    expect(namesOf(started.events, 'refusal')).toEqual([]);
+  });
+
+  test('answers 400 unmarked an HTTP/2 preface where HTTP/1.1 alone is served', async () => {
+    await using started = await startTransport();
+
+    expect(
+      (await rawAnswerOf(portOf(started.url), 'PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n')).answer
+    ).toEqual([400, null]);
+    expect(started.server.clients).toEqual([]);
+  });
+
+  test('closes an idle kept-alive socket without another response', async () => {
+    await using started = await startTransport({
+      createServer: (listener) => {
+        const server = createServer(listener);
+
+        server.keepAliveTimeout = 100;
+
+        return server;
+      },
+    });
+    const { read, socket } = await rawSocketOn(portOf(started.url));
+
+    try {
+      socket.write(rawConnectOf(host));
+      await expect
+        .poll(() => {
+          return read.text.includes('\r\n\r\n');
+        })
+        .toBe(true);
+      expect(read.text).toMatch(/^HTTP\/1\.1 201 /u);
+      const answer = read.text;
+
+      await expect
+        .poll(() => {
+          return read.isClosed;
+        })
+        .toBe(true);
+      expect(read.text).toBe(answer);
+    } finally {
+      socket.destroy();
+    }
+  });
+
   // spec 15.12.4
   test('keeps its constants in step with the router’s', () => {
     expect(ENVELOPE_KINDS).toEqual({
