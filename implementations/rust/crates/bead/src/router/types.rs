@@ -216,9 +216,7 @@ pub fn limits_of(given: &RouterLimitsOptions) -> Result<RouterLimits, Programmer
 /// # Errors
 ///
 /// A [`ProgrammerError`] for a transfer asked for.
-// its one caller its unit test, until the HTTP transport, a feature of the core, calls it
-#[cfg(test)]
-pub(crate) fn whole_envelope_limits_of(
+pub fn whole_envelope_limits_of(
     limits: &RouterLimitsOptions,
 ) -> Result<RouterLimitsOptions, ProgrammerError> {
     let maximum_envelope_bytes = limits

@@ -1,4 +1,4 @@
-# alone: typescript 297, csharp 61, rust 78
+# alone: typescript 296, csharp 61, rust 78
 # concept	typescript	csharp	rust	class
 ACCEPT_TIMEOUT	ACCEPT_TIMEOUT [constant]	-	ACCEPT_TIMEOUT [constant]	same
 AccessRefusal	IAccessRefusal [record]	AccessRefusal [record]	AccessRefusal [record]	same
@@ -60,6 +60,7 @@ Command	ICommand [record]	-	Command [record]	same
 commandOf	commandOf [function]	-	command_of [function]	same
 CommandOptions	ICommandOptions [record]	CommandOptions [record]	CommandOptions [record]	same
 CONNECT_TIMEOUT	CONNECT_TIMEOUT [constant]	-	CONNECT_TIMEOUT [constant]	same
+CONNECTION_INACTIVITY_TIMEOUT	CONNECTION_INACTIVITY_TIMEOUT [constant]	-	CONNECTION_INACTIVITY_TIMEOUT [constant]	same
 ConnectError	ConnectError [record]	ConnectException [record]	ConnectError [record]	rendered: error (0007, 0044)
 ConnectionHandle	ConnectionHandle [scalar]	-	ConnectionHandle [scalar]	same
 ConnectionTarget	IConnectionTarget [record]	ConnectionTarget [record]	-	same
@@ -116,8 +117,8 @@ HTTPBinding	IHTTPBinding [record], createHTTPBinding [function]	HttpBinding [rec
 HTTPCaller	IHTTPCaller [record], createHTTPCaller [function]	HttpCaller [record]	-	same
 HTTPCallerOptions	IHTTPCallerOptions [record]	HttpCallerOptions [record]	-	same
 HTTPCallOptions	IHTTPCallOptions [record]	HttpCallOptions [record]	-	same
-HTTPClient	HTTPClient [record], createHTTPClient [function]	BeadHttpClient [record]	-	rendered: platform (0049)
-HTTPClientOptions	IHTTPClientOptions [record]	BeadHttpClientOptions [record]	-	rendered: platform (0049)
+HTTPClient	HTTPClient [record], createHTTPClient [function]	BeadHttpClient [record]	HttpClient [record]	rendered: platform (0049)
+HTTPClientOptions	IHTTPClientOptions [record]	BeadHttpClientOptions [record]	HttpClientOptions [record]	rendered: platform (0049)
 HTTPEvent	HTTPEvent [choice]	HttpEvent [record]	-	same
 HTTPGateway	IHTTPGateway [record], createHTTPGateway [function]	HttpGateway [record]	-	same
 HTTPGatewayOptions	IHTTPGatewayOptions [record]	HttpGatewayOptions [record]	-	same
@@ -127,8 +128,8 @@ HTTPPolicy	IHTTPPolicy [record]	HttpPolicy [record]	HttpPolicy [record]	same
 HTTPPolicyOptions	IHTTPPolicyOptions [record]	HttpPolicyOptions [record]	HttpPolicyOptions [record]	same
 HttpRefusals	-	-	HttpRefusals [record]	own: the type of the Rust side's constant of refusals, where the other sides hold a frozen object and a static class of constants (0044)
 HttpRouteTemplate	IHttpRouteTemplate [record]	HttpRouteTemplate [record]	-	same
-HTTPServer	HTTPServer [record], createHTTPServer [function]	HttpServer [record]	-	same
-HTTPServerOptions	IHTTPServerOptions [record]	HttpServerOptions [record]	-	same
+HTTPServer	HTTPServer [record], createHTTPServer [function]	HttpServer [record]	HttpServer [record]	same
+HTTPServerOptions	IHTTPServerOptions [record]	HttpServerOptions [record]	HttpServerOptions [record]	same
 HTTPTransportClient	HTTPTransportClient [record], createHTTPTransportClient [function]	HttpTransportClient [record]	HttpTransportClient [record]	same
 HTTPTransportClientConnectOptions	IHTTPTransportClientConnectOptions [record]	HttpTransportClientConnectOptions [record]	HttpTransportClientConnectOptions [record]	same
 HTTPTransportClientOptions	IHTTPTransportClientOptions [record]	HttpTransportClientOptions [record]	HttpTransportClientOptions [record]	same
@@ -387,7 +388,6 @@ config_of	-	-	config_of [function]	alone
 Connect	-	-	Connect [record]	alone
 CONNECT_DEFAULTS	CONNECT_DEFAULTS [constant]	-	-	alone
 CONNECTION_EVENT	CONNECTION_EVENT [constant]	-	-	alone
-CONNECTION_INACTIVITY_TIMEOUT	CONNECTION_INACTIVITY_TIMEOUT [constant]	-	-	alone
 CONNECTION_INACTIVITY_TIMEOUT_CHANGED_EVENT	CONNECTION_INACTIVITY_TIMEOUT_CHANGED_EVENT [constant]	-	-	alone
 CONNECTION_INACTIVITY_TIMEOUT_REACHED_EVENT	CONNECTION_INACTIVITY_TIMEOUT_REACHED_EVENT [constant]	-	-	alone
 CONNECTION_TOKEN_HEADER	CONNECTION_TOKEN_HEADER [constant]	-	-	alone

@@ -142,8 +142,8 @@ each stage under a record of its own.
 The Rust side is a partial side, under [0004](0004-one-behaviour-in-every-language.md)'s rule: each
 part it does not play is an open row of [the support matrix](../support.md), ahead with the stage
 that brings it, and, where a conformance file plays that part, a row of `spec/check.py`'s `AHEAD`:
-`Rust's transports over HTTP and WebSocket`, `Rust's gateway`, `Rust's broker bindings` and
-`Rust's beadc target`, each a row of the matrix and of `AHEAD`;
+`Rust's gateway`, `Rust's broker bindings` and `Rust's beadc target`, each a row of the matrix and
+of `AHEAD`;
 `Rust's service manager over a router of the application's own` and `Rust's interop`, which no
 conformance file plays, rows of the matrix alone. **Its tests are told from its sources by a
 predicate**, since a suffix does not tell them, both being `.rs`: a module's

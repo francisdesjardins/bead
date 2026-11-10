@@ -875,6 +875,101 @@ async fn bounds_its_connections_and_those_of_one_address_the_requests_one_waits_
     started.stop().await;
 }
 
+// spec 15.12
+#[tokio::test]
+async fn gauges_the_connections_its_busiest_address_holds_against_maximum_connections_per_address_which_its_health_warns_on_at_80()
+ {
+    // the clients behind a proxy it names, each its address, as a proxy it does not name holds
+    // every client behind it as its own
+    let started = started(&HttpTransportServerOptions {
+        maximum_connections_per_address: Some(5),
+        trusted_proxies: Some(vec![HOST.to_owned()]),
+        ..HttpTransportServerOptions::default()
+    })
+    .await;
+    let draw = |address: &'static str| {
+        let port = started.port;
+
+        async move {
+            posted(
+                port,
+                &Post {
+                    fields: vec![format!("X-Forwarded-For: {address}")],
+                    ..Post::default()
+                },
+            )
+            .await
+        }
+    };
+    let check_of = || {
+        let gauges = started.server.gauges().unwrap();
+        let held = gauges.connection_handles.clone();
+        let health = crate::server::health_of(&crate::server::ServerGauges {
+            router: crate::server::LayerGauges::default(),
+            server: crate::server::LayerGauges::default(),
+            sessions: crate::server::LayerGauges::default(),
+            transport: crate::server::layer_gauges_of(gauges, &held),
+        });
+        let check = &health.checks["transport:largestAddressConnections"][0];
+
+        (
+            check.observed_value,
+            check.output.clone().unwrap_or_default(),
+            check.status,
+        )
+    };
+    let gauges = started.server.gauges().unwrap();
+
+    assert_eq!(
+        (
+            gauges.counts.get("largestAddressConnections"),
+            gauges.ceilings.get("largestAddressConnections")
+        ),
+        (Some(&0), Some(&5)),
+        "none yet, under its ceiling"
+    );
+
+    for address in ["10.0.0.3", "10.0.0.3", "10.0.0.3", "10.0.0.4"] {
+        assert_eq!(draw(address).await.head.status, 201, "drawn");
+    }
+
+    assert_eq!(
+        check_of(),
+        (3, "3 of 5".to_owned(), crate::server::HealthStatus::Pass),
+        "the busiest address"
+    );
+    // the busiest address at 80% of its ceiling warns, before its first 503
+    draw("10.0.0.3").await;
+    assert_eq!(
+        check_of(),
+        (4, "4 of 5".to_owned(), crate::server::HealthStatus::Warn),
+        "at 80%"
+    );
+    draw("10.0.0.3").await;
+
+    let refused = draw("10.0.0.3").await;
+
+    assert_eq!(
+        (refusal_of(&refused.head), check_of()),
+        (
+            (503, Some(HTTP_REFUSALS.busy.to_owned())),
+            (5, "5 of 5".to_owned(), crate::server::HealthStatus::Warn)
+        ),
+        "past its ceiling"
+    );
+    started.stop().await;
+    assert_eq!(
+        started
+            .server
+            .gauges()
+            .unwrap()
+            .counts
+            .get("largestAddressConnections"),
+        Some(&0),
+        "none once stopped"
+    );
+}
+
 #[tokio::test]
 async fn closes_a_connection_on_its_delete_a_request_handed_on_learns_it_by_its_exchange_cut() {
     let started = started(&HttpTransportServerOptions::default()).await;

@@ -114,6 +114,11 @@ crate
   use http::client::HttpTransportClient #[cfg(feature = "http")]
   use http::client::HttpTransportClientConnectOptions #[cfg(feature = "http")]
   use http::client::HttpTransportClientOptions #[cfg(feature = "http")]
+  use http::facade::CONNECTION_INACTIVITY_TIMEOUT #[cfg(feature = "http")]
+  use http::facade::HttpClient #[cfg(feature = "http")]
+  use http::facade::HttpClientOptions #[cfg(feature = "http")]
+  use http::facade::HttpServer #[cfg(feature = "http")]
+  use http::facade::HttpServerOptions #[cfg(feature = "http")]
   use http::fields::HTTP_REFUSALS #[cfg(feature = "http")]
   use http::fields::HttpRefusals #[cfg(feature = "http")]
   use http::server::BODY_BYTES_BUDGET #[cfg(feature = "http")]
@@ -1070,6 +1075,40 @@ crate::http::client
     fn reconnect(&self, options: &TransportClientReconnectOptions) -> Result<BoxFuture<Result<(), TransportError>>, TransportError>
     implements Debug, RouterClientTransport
     derives Clone #[cfg(feature = "http")]
+crate::http::facade
+  const CONNECTION_INACTIVITY_TIMEOUT: Duration #[cfg(feature = "http")]
+  struct HttpServerOptions #[non_exhaustive] #[cfg(feature = "http")]
+    pub server: Option<ServerOptions> #[cfg(feature = "http")]
+    pub transport: Option<HttpTransportServerOptions> #[cfg(feature = "http")]
+    derives Clone, Debug, Default #[cfg(feature = "http")]
+  struct HttpServer #[cfg(feature = "http")]
+    fn new(options: &HttpServerOptions) -> Result<Self, ProgrammerError>
+    const fn server(&self) -> &Server
+    fn router(&self) -> &RouterServer
+    fn services(&self) -> &ServiceManagerServer
+    fn sessions(&self) -> &SessionManager
+    const fn transport(&self) -> &HttpTransportServer
+    fn gauges(&self) -> BoxFuture<Result<ServerGauges, ProgrammerError>>
+    fn health(&self) -> BoxFuture<Result<Health, ProgrammerError>>
+    fn dispose(&self) -> BoxFuture<Result<(), RouterError>>
+    implements Debug
+    derives Clone #[cfg(feature = "http")]
+  struct HttpClientOptions #[non_exhaustive] #[cfg(feature = "http")]
+    pub client: Option<ClientOptions> #[cfg(feature = "http")]
+    pub transport: Option<HttpTransportClientOptions> #[cfg(feature = "http")]
+    derives Clone, Debug, Default #[cfg(feature = "http")]
+  struct HttpClient #[cfg(feature = "http")]
+    fn new(options: &HttpClientOptions) -> Result<Self, ProgrammerError>
+    const fn client(&self) -> &Client
+    const fn router(&self) -> &RouterClient
+    const fn services(&self) -> &ServiceManagerClient
+    const fn transport(&self) -> &HttpTransportClient
+    fn connect(&self, options: &HttpTransportClientConnectOptions) -> Connect
+    fn disconnect(&self, options: &TransportClientDisconnectOptions) -> Result<BoxFuture<()>, TransportError>
+    fn reconnect(&self, options: &TransportClientReconnectOptions) -> Result<BoxFuture<Result<(), TransportError>>, TransportError>
+    fn dispose(&self) -> BoxFuture<()>
+    implements Debug
+    derives Clone #[cfg(feature = "http")]
 crate::http::fields
   struct HttpRefusals #[non_exhaustive] #[cfg(feature = "http")]
     pub busy: &'static str #[cfg(feature = "http")]
@@ -1994,6 +2033,7 @@ crate::router::types
     derives Clone, Debug, Default, Eq, PartialEq
   const LIMIT_DEFAULTS: RouterLimits
   fn limits_of(given: &RouterLimitsOptions) -> Result<RouterLimits, ProgrammerError>
+  fn whole_envelope_limits_of(limits: &RouterLimitsOptions) -> Result<RouterLimitsOptions, ProgrammerError>
   struct IntakeLimits #[non_exhaustive]
     pub maximum_untaken_envelopes: u64
     pub maximum_untaken_bytes: u64
@@ -2536,3 +2576,4 @@ crate::internal
   use crate::jwt_verifier::verify_jwt
   use crate::router::types::limits_of
   use crate::router::types::session_key_of
+  use crate::router::types::whole_envelope_limits_of

@@ -220,10 +220,7 @@ SIDES = {
 # the side plays fails, so the table only shrinks
 AHEAD = {
     'Rust': {
-        "Rust's transports over HTTP and WebSocket": {
-            'transports': ('http',),
-        },
-        # the gateway's ways of 15.12's places stay ahead with the gateway once the HTTP server lands
+        # the gateway's ways of 15.12's places, ahead with the gateway
         "Rust's gateway": {
             'files': ('transcoding',),
             'documents': ('transcoding',),

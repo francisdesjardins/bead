@@ -15,6 +15,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   of its core, with `WebSocketServer` and `WebSocketClient` and the defaults the other sides
   export; it plays `spec/transports.json`'s cases over WebSocket and its places of
   `spec/durations.json` (decision 0049).
+- The Rust side's transport over HTTP, client and server, the feature `http` of its core: the
+  server on hyper's HTTP/1.1 and its HTTP/2 under TLS, the client on hyper's pooled HTTP/1.1, with
+  `HttpServer` and `HttpClient` and the defaults the other sides export; it plays
+  `spec/transports.json`'s cases over HTTP and its places of `spec/durations.json` (decision 0049).
 
 ### Changed
 

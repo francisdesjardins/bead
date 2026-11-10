@@ -109,6 +109,10 @@ pub use http::client::{
     HttpTransportClient, HttpTransportClientConnectOptions, HttpTransportClientOptions,
 };
 #[cfg(feature = "http")]
+pub use http::facade::{
+    CONNECTION_INACTIVITY_TIMEOUT, HttpClient, HttpClientOptions, HttpServer, HttpServerOptions,
+};
+#[cfg(feature = "http")]
 pub use http::fields::{HTTP_REFUSALS, HttpRefusals};
 #[cfg(feature = "http")]
 pub use http::server::{
@@ -227,7 +231,7 @@ pub mod internal {
     pub use crate::identity::{are_one_name, is_procedure_name};
     pub use crate::judgement::{handshake, head, hosts, items, proxies, security, url_host};
     pub use crate::jwt_verifier::{ReadJwt, read_jwt, verify_jwt};
-    pub use crate::router::types::{limits_of, session_key_of};
+    pub use crate::router::types::{limits_of, session_key_of, whole_envelope_limits_of};
 }
 
 #[cfg(any(test, feature = "testing"))]

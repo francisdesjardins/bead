@@ -1,13 +1,13 @@
-//! `spec/transports.json`'s cases over a broker (spec 15.16 to 15.24) and over WebSocket (spec
-//! 15.2, 15.3, 15.12), played against the Rust side's transports. Over a broker, its broker
-//! transports over the in-memory broker: in the server role, the interop service's server on a
-//! broker server transport over the participant `server`; in the client role, a broker client
-//! transport alone over the participant `client`; the case's peers, adapters of the same broker,
-//! publishing parcels and reading their inboxes. Over WebSocket, the interop service's server on a
-//! WebSocket server, and the case's peers, each exchange on a socket of its own. A trial a case; a
-//! case a row of the support matrix excuses this side from is not played. The responses every
-//! side's reader reads alike are a trial each. The cases over HTTP, MQTT 5 and AMQP 1.0 are ahead,
-//! with the stages that bring their transports.
+//! `spec/transports.json`'s cases over a broker (spec 15.16 to 15.24), over HTTP (spec 15.6 to
+//! 15.12) and over WebSocket (spec 15.2, 15.3, 15.12), played against the Rust side's transports.
+//! Over a broker, its broker transports over the in-memory broker: in the server role, the interop
+//! service's server on a broker server transport over the participant `server`; in the client
+//! role, a broker client transport alone over the participant `client`; the case's peers, adapters
+//! of the same broker, publishing parcels and reading their inboxes. Over HTTP and over WebSocket,
+//! the interop service's server on an HTTP or a WebSocket server, and the case's peers, each
+//! exchange on a socket of its own. A trial a case; a case a row of the support matrix excuses this
+//! side from is not played. The responses every side's reader reads alike are a trial each. The
+//! cases over MQTT 5 and AMQP 1.0 are ahead, with the stage that brings their bindings.
 
 #![expect(
     clippy::disallowed_methods,
@@ -58,7 +58,7 @@ const PLACED_GRACE: Duration = Duration::from_millis(100);
 const ROOT: &str = "bead";
 
 // the transports whose cases this side plays: the others are ahead
-const PLAYED_TRANSPORTS: [&str; 2] = ["broker", "websocket"];
+const PLAYED_TRANSPORTS: [&str; 3] = ["broker", "http", "websocket"];
 
 // ! every key of a case and of a step this player reads: one it does not know fails the case,
 // rather than pass it unplayed
@@ -1617,7 +1617,11 @@ fn trials() -> Result<Vec<Trial>, String> {
                     .enable_all()
                     .build()
                     .map_err(|error| error.to_string())?;
-                let played = if case.get("transport").and_then(Value::as_str) == Some("websocket") {
+                let is_socket = matches!(
+                    case.get("transport").and_then(Value::as_str),
+                    Some("http" | "websocket")
+                );
+                let played = if is_socket {
                     read_case_keys(&case).and_then(|()| runtime.block_on(socket::play(&case, wall)))
                 } else {
                     runtime.block_on(play((&case, wall)))
@@ -1655,7 +1659,7 @@ fn trials() -> Result<Vec<Trial>, String> {
     trials.insert(
         0,
         Trial::test(
-            "plays every case over a broker and over WebSocket but those a row of the support matrix excuses this side from",
+            "plays every case over a broker, HTTP and WebSocket but those a row of the support matrix excuses this side from",
             move || {
                 let names: HashSet<&String> = excusals.iter().map(|(name, _)| name).collect();
                 let wrong: Vec<&String> = excusals

@@ -361,10 +361,8 @@ every side, the Rust side's over HTTP and WebSocket ahead with its transports:
 - **Over a broker, a hold that buffers, then loses**: nothing of a pause reaches the peer.
 - **In memory and over the Web Worker, a hold without bound**, its sender the application's own
   code.
-- **On the Rust side**, the bound reaches the broker's and the in-memory transports; its transports
-  over sockets, ahead, implement the required pair, so none skips it; no untrusted peer reaches a
-  Rust router, and the matrix's row `Rust's transports over HTTP and WebSocket` holds their pause
-  among what it brings.
+- **On the Rust side**, the bound reaches the broker's and the in-memory transports, and its
+  transports over HTTP and WebSocket, which implement the required pair, so none skips it.
 - **The TypeScript side holds one socket read** of a paused `ws` connection beyond the count, 64
   KiB, and pays 0.4–1.4 % of throughput on a flood of small envelopes: the platform's row of the
   matrix, with its test.

@@ -1,8 +1,8 @@
-//! `spec/transports.json`'s cases over a socket, played against the Rust side's WebSocket server: a
-//! server of the interop service, its options on its transport and its limits on its router, every
-//! layer on the case's stepping clock, and the case's peers, each exchange on a socket of its own
-//! written in exact octets by `bead::testing::wire`; and the responses every side's reader reads
-//! alike, cut across reads.
+//! `spec/transports.json`'s cases over a socket, played against the Rust side's HTTP and WebSocket
+//! servers: a server of the interop service, its options on its transport and its limits on its
+//! router, every layer on the case's stepping clock, and the case's peers, each exchange on a
+//! socket of its own written in exact octets by `bead::testing::wire`; and the responses every
+//! side's reader reads alike, cut across reads.
 
 use core::time::Duration;
 use std::collections::{HashMap, VecDeque};
@@ -10,12 +10,15 @@ use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Instant, SystemTime};
 
+use bead::internal::whole_envelope_limits_of;
 use bead::testing::wire::{
     BINARY, Exchange, ExchangeOptions, Frame, Heard, ResponseHead, ResponseReader, TEXT, latin1_of,
 };
 use bead::testing::{SteppingClock, hexadecimal};
 use bead::{
-    ConnectionHandle, RouterError, ServerListener, ServerOptions, ServerTransport, SharedClock,
+    BoxFuture, CONNECTION_INACTIVITY_TIMEOUT, ConnectionHandle, HttpTransportServer,
+    HttpTransportServerOptions, RouterError, Server, ServerListener, ServerOptions,
+    ServerTransport, SharedClock, TransportServerAddress, TransportServerClient,
     TransportServerRefusal, TransportServerStartOptions, WebSocketServer, WebSocketServerOptions,
     WebSocketTransportServerOptions,
 };
@@ -33,7 +36,7 @@ const POLL: Duration = Duration::from_millis(5);
 // the address every server of a case listens on, which every server takes
 const HOST: Ipv4Addr = Ipv4Addr::LOCALHOST;
 
-// ! every key of a step and of an option this player reads over WebSocket: one it does not know
+// ! every key of a step and of an option this player reads over a socket: one it does not know
 // fails the case, rather than pass it unplayed
 const STEP_KEYS: [&str; 9] = [
     "advance", "after", "expect", "on", "report", "send", "stop", "until", "within",
@@ -42,7 +45,7 @@ const STEP_KEYS: [&str; 9] = [
 // the keys that time a step or name its exchange rather than make an act
 const MODIFIERS: [&str; 3] = ["after", "on", "within"];
 
-const OPTION_KEYS: [&str; 12] = [
+const WEBSOCKET_OPTION_KEYS: [&str; 12] = [
     "maximumMessageBytes",
     "heartbeat",
     "hosts",
@@ -57,8 +60,33 @@ const OPTION_KEYS: [&str; 12] = [
     "headersTimeout",
 ];
 
+// the bounds of an HTTP server's transport, and its server layer's own connection timeout
+const HTTP_OPTION_KEYS: [&str; 19] = [
+    "maximumConnections",
+    "maximumConnectionsPerAddress",
+    "maximumWaitingExchanges",
+    "bodyBytesBudget",
+    "maximumBodyBytes",
+    "maximumOutboxBytes",
+    "maximumWait",
+    "exchangeTimeout",
+    "inactivityTimeout",
+    "hosts",
+    "origins",
+    "trustedProxies",
+    "unnamedProxies",
+    "minimumSendBytesPerSecond",
+    "sendGracePeriod",
+    "headersTimeout",
+    "minimumBodyBytesPerSecond",
+    "bodyGracePeriod",
+    "connectionInactivityTimeout",
+];
+
 // what an expectation of a response reads, and of what a WebSocket heard
-const RESPONSE_KEYS: [&str; 5] = ["status", "fields", "body", "envelope", "told"];
+const RESPONSE_KEYS: [&str; 7] = [
+    "status", "fields", "body", "envelope", "batch", "told", "orLost",
+];
 const HEARD_KEYS: [&str; 5] = ["envelope", "binary", "close", "ping", "end"];
 
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -248,17 +276,25 @@ fn code_of(error: &RouterError) -> Value {
     }
 }
 
-struct AtTransport(Arc<Told>);
+// what a transport tells: its refusals, and over WebSocket its reports
+struct AtTransport {
+    told: Arc<Told>,
+    hears_reports: bool,
+}
 
 impl ServerListener for AtTransport {
     fn on_refusal(&self, refusal: &TransportServerRefusal) {
-        locked(&self.0.refusals).push_back(refusal.clone());
+        locked(&self.told.refusals).push_back(refusal.clone());
     }
 
-    // * what the transport reports is the server's report to its application, as its router's is:
-    // a text message's ENVELOPE_MALFORMED among it
+    // * over WebSocket, what the transport reports is the server's report to its application, as
+    // its router's is: a text message's ENVELOPE_MALFORMED among it, which the other sides' router
+    // reports; over HTTP the router's reports alone are heard, as the other sides' players hear
+    // them, a connection dropped behind its outbox's bound told by its transport alone
     fn on_error(&self, error: &RouterError, connection_handle: Option<&ConnectionHandle>) {
-        locked(&self.0.reports).push_back((code_of(error), connection_handle.cloned()));
+        if self.hears_reports {
+            locked(&self.told.reports).push_back((code_of(error), connection_handle.cloned()));
+        }
     }
 }
 
@@ -279,12 +315,56 @@ fn strings_of(options: &Map<String, Value>, name: &str) -> Option<Vec<String>> {
     })
 }
 
-// the interop service's server on WebSocket, the case's options on its transport and its limits on
-// its router, every layer on `clock`, its reports and refusals heard
-fn server_of(
-    case: &Value,
-    (clock, told): (&SharedClock, &Arc<Told>),
-) -> Result<WebSocketServer, String> {
+// the server under test: the interop service's, over WebSocket as its facade builds it, or over
+// HTTP as each side's interop server builds it, its transport given every bound as it is
+#[derive(Clone)]
+enum UnderTest {
+    WebSocket(WebSocketServer),
+    Http {
+        server: Server,
+        transport: HttpTransportServer,
+    },
+}
+
+impl UnderTest {
+    const fn server(&self) -> &Server {
+        match self {
+            Self::WebSocket(built) => built.server(),
+            Self::Http { server, .. } => server,
+        }
+    }
+
+    fn transport(&self) -> &dyn ServerTransport {
+        match self {
+            Self::WebSocket(built) => built.transport(),
+            Self::Http { transport, .. } => transport,
+        }
+    }
+
+    fn clients(&self) -> Vec<TransportServerClient> {
+        match self {
+            Self::WebSocket(built) => built.transport().clients(),
+            Self::Http { transport, .. } => transport.clients(),
+        }
+    }
+
+    fn start(
+        &self,
+        options: &TransportServerStartOptions,
+    ) -> BoxFuture<Result<TransportServerAddress, RouterError>> {
+        match self {
+            Self::WebSocket(built) => built.transport().start(options),
+            Self::Http { transport, .. } => transport.start(options),
+        }
+    }
+
+    fn dispose(&self) -> BoxFuture<Result<(), RouterError>> {
+        self.server().dispose()
+    }
+}
+
+// the case's options, each one this player reads over its transport
+fn options_of(case: &Value, known: &[&str]) -> Result<Map<String, Value>, String> {
     let options = case
         .get("options")
         .and_then(Value::as_object)
@@ -292,13 +372,20 @@ fn server_of(
         .unwrap_or_default();
     let unread: Vec<&String> = options
         .keys()
-        .filter(|key| !OPTION_KEYS.contains(&key.as_str()))
+        .filter(|key| !known.contains(&key.as_str()))
         .collect();
 
     hold(unread.is_empty(), || {
         format!("a case sets an option no test reads: {unread:?}")
     })?;
 
+    Ok(options)
+}
+
+// the interop service's server on WebSocket, the case's options on its transport and its limits on
+// its router, every layer on `clock`
+fn websocket_server_of(case: &Value, clock: &SharedClock) -> Result<UnderTest, String> {
+    let options = options_of(case, &WEBSOCKET_OPTION_KEYS)?;
     let limits = conversation::limits_of(case)?;
     let count = |name: &str| options.get(name).and_then(Value::as_u64);
     let mut transport = WebSocketTransportServerOptions::default();
@@ -329,17 +416,83 @@ fn server_of(
     facade.server = Some(server);
     facade.transport = Some(transport);
 
-    let built = WebSocketServer::new(&facade).map_err(|error| error.to_string())?;
+    WebSocketServer::new(&facade)
+        .map(UnderTest::WebSocket)
+        .map_err(|error| error.to_string())
+}
+
+// the interop service's server on HTTP, as the other sides' players build it: its transport given
+// the case's bounds as they are, its body's among them, which the facade sets itself; its server
+// layer its own connection timeout, the facade's default unless given; its router's limits whole
+// envelopes; every layer on `clock`
+fn http_server_of(case: &Value, clock: &SharedClock) -> Result<UnderTest, String> {
+    let options = options_of(case, &HTTP_OPTION_KEYS)?;
+    let limits = whole_envelope_limits_of(&conversation::limits_of(case)?)
+        .map_err(|error| error.to_string())?;
+    let count = |name: &str| options.get(name).and_then(Value::as_u64);
+    let mut transport = HttpTransportServerOptions::default();
+
+    transport.clock = Some(Arc::clone(clock));
+    transport.maximum_connections = count("maximumConnections");
+    transport.maximum_connections_per_address = count("maximumConnectionsPerAddress");
+    transport.maximum_waiting_exchanges = count("maximumWaitingExchanges");
+    transport.body_bytes_budget = count("bodyBytesBudget");
+    transport.maximum_body_bytes = count("maximumBodyBytes");
+    transport.maximum_outbox_bytes = count("maximumOutboxBytes");
+    transport.maximum_wait = duration_of(&options, "maximumWait");
+    transport.exchange_timeout = duration_of(&options, "exchangeTimeout");
+    transport.inactivity_timeout = duration_of(&options, "inactivityTimeout");
+    transport.hosts = strings_of(&options, "hosts");
+    transport.origins = strings_of(&options, "origins");
+    transport.trusted_proxies = strings_of(&options, "trustedProxies");
+    transport.unnamed_proxies = count("unnamedProxies");
+    transport.minimum_send_bytes_per_second = count("minimumSendBytesPerSecond");
+    transport.send_grace_period = duration_of(&options, "sendGracePeriod");
+    transport.headers_timeout = duration_of(&options, "headersTimeout");
+    transport.minimum_body_bytes_per_second = count("minimumBodyBytesPerSecond");
+    transport.body_grace_period = duration_of(&options, "bodyGracePeriod");
+
+    let transport = HttpTransportServer::new(&transport).map_err(|error| error.to_string())?;
+    let mut server = ServerOptions::default();
+
+    server.connection_inactivity_timeout = Some(
+        duration_of(&options, "connectionInactivityTimeout")
+            .unwrap_or(CONNECTION_INACTIVITY_TIMEOUT),
+    );
+    server.credentials = Some(
+        bead_interop::interop_credentials_of(clock, &limits).map_err(|error| error.to_string())?,
+    );
+    server.limits = Some(limits);
+
+    let built =
+        Server::new(Arc::new(transport.clone()), &server).map_err(|error| error.to_string())?;
+
+    Ok(UnderTest::Http {
+        server: built,
+        transport,
+    })
+}
+
+// the server under test for the case's transport, its reports and refusals heard, the interop
+// service offered on it
+fn server_of(case: &Value, (clock, told): (&SharedClock, &Arc<Told>)) -> Result<UnderTest, String> {
+    let is_http = case.get("transport").and_then(Value::as_str) == Some("http");
+    let built = if is_http {
+        http_server_of(case, clock)?
+    } else {
+        websocket_server_of(case, clock)?
+    };
     let reporting = Arc::clone(told);
 
-    built.router().on_error(Arc::new(
+    built.server().router().on_error(Arc::new(
         move |error: &RouterError, handle: Option<&ConnectionHandle>| {
             locked(&reporting.reports).push_back((code_of(error), handle.cloned()));
         },
     ));
-    built
-        .transport()
-        .listen(Arc::new(AtTransport(Arc::clone(told))));
+    built.transport().listen(Arc::new(AtTransport {
+        told: Arc::clone(told),
+        hears_reports: !is_http,
+    }));
     bead_interop::offer_interop(built.server()).map_err(|error| error.to_string())?;
 
     Ok(built)
@@ -387,7 +540,7 @@ struct Act<'a> {
 
 struct Played {
     clock: Arc<SteppingClock>,
-    server: WebSocketServer,
+    server: UnderTest,
     told: Arc<Told>,
     exchanges: HashMap<String, Exchange>,
     values: HashMap<String, String>,
@@ -422,7 +575,6 @@ impl Played {
         let port = self.exchange((on, at))?.local_port();
 
         self.server
-            .transport()
             .clients()
             .into_iter()
             .find(|client| client.port == Some(port))
@@ -521,6 +673,37 @@ fn frames_of(send: &Map<String, Value>) -> Result<Vec<Frame>, String> {
         .collect()
 }
 
+// a batch's envelopes, each after its length on 4 bytes, big-endian, as `expected` writes them; what
+// is left past the last whole one, in hexadecimal
+fn batch_of(body: &[u8], expected: Option<&Vec<Value>>) -> Value {
+    let mut envelopes = Vec::new();
+    let mut rest = body;
+
+    while let Some((length, after)) = rest.split_first_chunk::<4>() {
+        let length = usize::try_from(u32::from_be_bytes(*length)).unwrap_or(usize::MAX);
+        let Some(bytes) = after.get(..length) else {
+            break;
+        };
+        let bytes = Bytes::copy_from_slice(bytes);
+        let want = expected
+            .and_then(|expected| expected.get(envelopes.len()))
+            .cloned()
+            .unwrap_or(Value::Null);
+
+        envelopes.push(
+            conversation::actual_of(Some(&bytes), &want)
+                .unwrap_or_else(|| json!(hexadecimal::text_of(&bytes))),
+        );
+        rest = after.get(length..).unwrap_or_default();
+    }
+
+    if !rest.is_empty() {
+        envelopes.push(json!(hexadecimal::text_of(rest)));
+    }
+
+    Value::Array(envelopes)
+}
+
 // what a response shows of what `expected` names, in its terms: a field of the shape expected shows
 // as that shape, so a comparison tells a value drawn from a value wrong
 fn seen_of((head, body): (&ResponseHead, Option<&[u8]>), expected: &Map<String, Value>) -> Value {
@@ -565,6 +748,10 @@ fn seen_of((head, body): (&ResponseHead, Option<&[u8]>), expected: &Map<String, 
         );
     }
 
+    if let Some(Value::Array(want)) = expected.get("batch") {
+        seen.insert("batch".to_owned(), batch_of(body, Some(want)));
+    }
+
     Value::Object(seen)
 }
 
@@ -594,16 +781,23 @@ async fn expect_response(
 ) -> Result<(), String> {
     let Act { on, at, timing } = *act;
     let exchange = played.exchange((on, at))?;
-    let head = exchange
-        .head(timing.wait())
-        .await
-        .map_err(|error| format!("{at}: the response's head: {error}"))?;
+    let head = match exchange.head(timing.wait()).await {
+        Ok(head) => head,
+        // a cut that overtook the head, where the case allows it; a head that did not come in
+        // time, or came unreadable, is no loss
+        Err(_) if expected.get("orLost") == Some(&Value::Bool(true)) && exchange.is_lost() => {
+            return Ok(());
+        }
+        Err(error) => return Err(format!("{at}: the response's head: {error}")),
+    };
 
     if let Some(soon) = timing.too_soon(Instant::now()) {
         return Err(format!("{at}: the response's head {soon}"));
     }
 
-    let has_body = expected.contains_key("body") || expected.contains_key("envelope");
+    let has_body = ["body", "envelope", "batch"]
+        .iter()
+        .any(|key| expected.contains_key(*key));
     let body = if has_body {
         Some(
             exchange
@@ -619,6 +813,7 @@ async fn expect_response(
     let mut wanted = expected.clone();
 
     wanted.remove("told");
+    wanted.remove("orLost");
 
     if let Some(Value::String(body)) = expected.get("body") {
         wanted.insert("body".to_owned(), json!(canonical_of(body)?));
@@ -924,7 +1119,7 @@ async fn play_steps(played: &mut Played, steps: &[Value]) -> Result<(), String> 
     played.nothing_reported("at the end")
 }
 
-/// Plays a case over WebSocket against a server of the interop service, started on the IPv4
+/// Plays a case over HTTP or WebSocket against a server of the interop service, started on the IPv4
 /// loopback on a port the system draws, every layer on a stepping clock from `wall`.
 pub(crate) async fn play(case: &Value, wall: SystemTime) -> Result<(), String> {
     let steps = case
@@ -943,7 +1138,6 @@ pub(crate) async fn play(case: &Value, wall: SystemTime) -> Result<(), String> {
     start.find_open_port = Some(true);
 
     let started = server
-        .transport()
         .start(&start)
         .await
         .map_err(|error| error.to_string())?;
