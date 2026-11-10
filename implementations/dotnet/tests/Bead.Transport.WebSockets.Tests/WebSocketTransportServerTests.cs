@@ -2609,36 +2609,6 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         await AssertRefused(port);
     }
 
-    [Fact]
-    public async Task CloseAll_closes_every_connection_with_1000_and_gives_nothing_without_one()
-    {
-        Assert.Empty(await _server.CloseAll().WaitAsync(Patience, Cancelled));
-
-        var (first, firstHandle) = await Connect();
-        var (second, secondHandle) = await Connect();
-
-        using (first)
-        using (second)
-        {
-            var answering = Task.WhenAll(AnswerClose(first), AnswerClose(second));
-            var closed = await _server.CloseAll().WaitAsync(Patience, Cancelled);
-
-            Assert.Equal([true, true], closed);
-            Assert.Empty(_server.ConnectionHandles);
-            Assert.Empty(_server.Clients);
-            Assert.True(_closes.Reader.TryRead(out var one));
-            Assert.True(_closes.Reader.TryRead(out var other));
-            Assert.Equal(
-                new HashSet<(bool, string)> { (true, firstHandle), (true, secondHandle) },
-                new HashSet<(bool, string)> { one, other });
-
-            var answered = await answering.WaitAsync(Patience, Cancelled);
-
-            Assert.Equal([WebSocketCloseStatus.NormalClosure, WebSocketCloseStatus.NormalClosure], answered);
-            Assert.Equal(ReadyState.Open, _server.ReadyState);
-        }
-    }
-
     // a heartbeat refused is the durations' file's to play
     [Fact]
     public async Task Pings_nothing_with_a_heartbeat_of_infinity()

@@ -564,15 +564,6 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     }
 
     /// <summary>
-    /// Closes every connection with 1000, as <see cref="CloseConnection"/> closes one, and gives what
-    /// each close gave; none without a connection.
-    /// </summary>
-    public Task<bool[]> CloseAll()
-    {
-        return Task.WhenAll(_connections.Keys.Select(CloseConnection));
-    }
-
-    /// <summary>
     /// Closes a connection with 1000, within its close timeout, and settles once it is gone, its
     /// close raised; false when it held none by that handle.
     /// </summary>

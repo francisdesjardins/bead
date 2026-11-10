@@ -942,12 +942,6 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
         }
     }
 
-    /// <summary>Closes every connection, as <see cref="CloseConnection"/> closes one, and gives what each close gave.</summary>
-    public Task<bool[]> CloseAll()
-    {
-        return Task.WhenAll(ConnectionHandles.Select(CloseConnection));
-    }
-
     /// <summary>Closes a connection cleanly, its close raised; false when it held none by that handle.</summary>
     public Task<bool> CloseConnection(string connectionHandle)
     {

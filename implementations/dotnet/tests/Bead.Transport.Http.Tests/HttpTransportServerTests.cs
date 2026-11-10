@@ -4061,40 +4061,6 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         Assert.Empty(_server.Clients);
     }
 
-    // closed cleanly, as with 1000 over a socket: each close raised, and each exchange still waiting
-    // told its connection is gone
-    [Fact]
-    public async Task CloseAll_closes_every_connection_cleanly_and_gives_nothing_without_one()
-    {
-        await Start();
-
-        Assert.Empty(await _server.CloseAll().WaitAsync(Patience, Cancelled));
-
-        var (waitingToken, waitingHandle) = await Connect();
-        var (listeningToken, listeningHandle) = await Connect(true);
-        using var waiting = await Fetch(PostOf(waitingToken, EnvelopeOf(EnvelopeKind.Request, 1)));
-        var listen = ListenOf(listeningToken, new() { Wait = "20000" });
-
-        await Until(() =>
-        {
-            return Count("listens") == 1;
-        });
-
-        var closed = await _server.CloseAll().WaitAsync(Patience, Cancelled);
-
-        Assert.Equal([true, true], closed);
-        Assert.Empty(_server.ConnectionHandles);
-        Assert.Empty(_server.Clients);
-        Assert.Equal(
-            new HashSet<(bool, string)> { (true, waitingHandle), (true, listeningHandle) },
-            new HashSet<(bool, string)>(_closes));
-        Assert.Equal(2, _closes.Count);
-        // a request handed on, its head out, by its body cut; a listen held, by the marked 404
-        Assert.Equal("cut", await EndOf(waiting));
-        Assert.Equal((404, HttpRefusals.ConnectionUnknown), await RefusalOf(listen));
-        Assert.Equal(ReadyState.Open, _server.ReadyState);
-    }
-
     [Fact]
     public async Task Resolves_a_send_for_a_handle_nobody_holds()
     {
