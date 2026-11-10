@@ -1447,7 +1447,7 @@ the request ran: the client counts the exchange lost.
 | ------ | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 200    |                                       | the request is with the router; its answer is the body — or, to a listen, a batch                                                                                                                                                                                            |
 | 201    |                                       | a connection drawn, its token in `bead-connection-token`                                                                                                                                                                                                                     |
-| 204    |                                       | handed on, nothing to come back: a cancel, anything but a request, a request held off; a `DELETE` done; a listen that brought nothing; a preflight from an origin the server lists (section 15.12)                                                                           |
+| 204    |                                       | handed on, nothing to come back: a cancel, anything but a request, a request held off or cancelled before its head went; a `DELETE` done; a listen that brought nothing; a preflight from an origin the server lists (section 15.12)                                         |
 | 400    | `malformed`                           | a connect with a body, no token or a malformed one, not an envelope, a request on the server's parity, two `Authorization` fields; a listen without `bead-after`, a count that is none, or a `bead-after` past what was sent; a WebSocket's upgrade malformed (section 15.2) |
 | 403    | `host-refused`, `origin-refused`      | a host not among those the server takes, whatever the request at a WebSocket's address; an exchange, or a WebSocket's upgrade, from an origin neither the server's nor among those it takes                                                                                  |
 | 404    | `path-unknown`, `connection-unknown`  | not the path; the connection is gone — closed, or its server stopping                                                                                                                                                                                                        |
@@ -1481,10 +1481,19 @@ fields, 413 for a length it declares past `maximumBodyBytes`, and 429 past what 
 under way, each before its body is read; what its body brings is judged as it comes (section 15.5):
 past `maximumBodyBytes` 413, past the budget 503, slower than its rate 408 (section 15.12).
 
-15.7. A client's send settles on the head of its answer: a 2xx says the server had the envelope. An
-exchange lost — a network that failed, an answer that could not be written, a request unanswered
-past the exchange timeout, 5 minutes by default, or an envelope still refused `busy` past it from
-its first send (section 15.6) — closes the connection at both ends, as a socket that drops does;
+15.7. A client's send settles on the head of its answer: a 2xx says the server had the envelope. A
+server waits 40 ms from a request's hand-off for its answer: one that comes within them goes whole,
+its head with it and its length in `content-length`
+([RFC 9110 §8.6](https://www.rfc-editor.org/rfc/rfc9110#section-8.6)), as TCP holds back an
+acknowledgement to ride with its data
+([RFC 9293 §3.8.6.3](https://www.rfc-editor.org/rfc/rfc9293#section-3.8.6.3)); a request still
+unanswered then gets its head, a 200 with no length, and its answer after it, chunked over HTTP/1.1
+([RFC 9112 §7.1](https://www.rfc-editor.org/rfc/rfc9112#section-7.1)). A client reads either
+([RFC 9112 §6.3](https://www.rfc-editor.org/rfc/rfc9112#section-6.3)). The exchange timeout counts
+from the hand-off, those 40 ms within it. An exchange lost — a network that failed, an answer that
+could not be written, a request unanswered past the exchange timeout, 5 minutes by default, or an
+envelope still refused `busy` past it from its first send (section 15.6) — closes the connection at
+both ends, as a socket that drops does;
 the exchanges it handed on are cut, never answered. So does the 404 marked
 `connection-unknown`. An answer whose socket still holds it past its deadline (section 15.12) is an
 answer that could not be written. A request handed on is never refused: when its connection closes,
