@@ -200,6 +200,10 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     {
         if (transport is Mqtt or Amqp)
         {
+            // ! the TypeScript server is the broker's participant `interop-ts`: started and ready
+            // before the connect, or the broker knows no participant of that name
+            await server.Ports();
+
             var link = await LinkedOver(transport);
             var broker = new BrokerClient(link.Participant.Client());
 
