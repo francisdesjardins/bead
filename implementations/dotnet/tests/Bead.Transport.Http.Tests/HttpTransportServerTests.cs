@@ -1644,20 +1644,44 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Refuses_an_extension_method_405_method_refused_and_a_lowercase_get_400_malformed_on_the_wire()
+    public async Task Refuses_an_extension_method_on_the_wire_405_method_refused()
     {
         await Start();
 
-        foreach (var (method, expected) in new[] { ("BEAD", (405, HttpRefusals.Method)), ("get", (400, HttpRefusals.Malformed)) })
+        foreach (var method in new[] { "BEAD", "get" })
         {
             using var wire = await Wire.Open(_port);
 
             await wire.Write($"{method} /bead HTTP/1.1\r\nHost: {Host}\r\nContent-Length: 0\r\n\r\n");
             var head = await wire.ReadHead();
 
-            Assert.Equal(expected, (head.Status, head.Headers.GetValueOrDefault(HttpTransport.RefusalHeader)));
+            Assert.Equal((405, HttpRefusals.Method), (head.Status, head.Headers.GetValueOrDefault(HttpTransport.RefusalHeader)));
+            Assert.Equal("GET, POST, DELETE", head.Headers.GetValueOrDefault("allow"));
         }
         Assert.Empty(_server.Clients);
+    }
+
+    [Fact]
+    public async Task Refuses_lowercase_methods_on_the_wire_405_method_refused()
+    {
+        await Start(new HttpTransportServerOptions { Origins = [Page] });
+
+        foreach (var method in new[] { "get", "post", "delete", "head", "options" })
+        {
+            using var wire = await Wire.Open(_port);
+
+            await wire.Write($"{method} /bead HTTP/1.1\r\nHost: {Host}\r\nOrigin: {Page}\r\nAccess-Control-Request-Method: POST\r\nContent-Length: 0\r\n\r\n");
+            var head = await wire.ReadHead();
+
+            Assert.Equal((405, HttpRefusals.Method), (head.Status, head.Headers.GetValueOrDefault(HttpTransport.RefusalHeader)));
+            Assert.Equal("GET, POST, DELETE", head.Headers.GetValueOrDefault("allow"));
+        }
+        Assert.Empty(_server.Clients);
+        Assert.Equal(5, _refusals.Count);
+        Assert.All(_refusals, (refusal) =>
+        {
+            Assert.Equal((405, HttpRefusals.Method), (refusal.Status, refusal.Reason));
+        });
     }
 
     [Fact]

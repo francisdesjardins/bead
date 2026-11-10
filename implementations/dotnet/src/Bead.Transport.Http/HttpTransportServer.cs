@@ -1432,14 +1432,14 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
         }
 
         // a preflight is no refusal, so EndWith, never Finish: nothing told, no connection drawn
-        if (isListed && HttpMethods.IsOptions(request.Method) && request.Headers.ContainsKey(HeaderNames.AccessControlRequestMethod))
+        if (isListed && IsMethod(request, "OPTIONS") && request.Headers.ContainsKey(HeaderNames.AccessControlRequestMethod))
         {
             await HttpServerFields.EndWith(context, HttpServerFields.PreflightOf(request));
 
             return;
         }
 
-        if (!HttpMethods.IsGet(request.Method) && !HttpMethods.IsPost(request.Method) && !HttpMethods.IsDelete(request.Method))
+        if (!IsMethod(request, "GET") && !IsMethod(request, "POST") && !IsMethod(request, "DELETE"))
         {
             await Finish(context, new End(StatusCodes.Status405MethodNotAllowed, HttpRefusals.Method) { Headers = new Dictionary<string, string> { ["allow"] = "GET, POST, DELETE" } });
 
@@ -1448,7 +1448,7 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
 
         var connectionToken = HttpServerFields.HeaderOf(request, HttpTransport.ConnectionTokenHeader);
 
-        if (connectionToken is null && HttpMethods.IsPost(request.Method))
+        if (connectionToken is null && IsMethod(request, "POST"))
         {
             await (HttpServerFields.IsBeadBody(request) ? Connect(context) : Finish(context, new End(StatusCodes.Status415UnsupportedMediaType, HttpRefusals.Type)));
 
@@ -1485,7 +1485,7 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
             return;
         }
 
-        if (HttpMethods.IsDelete(request.Method))
+        if (IsMethod(request, "DELETE"))
         {
             CloseDrawn(connection, true);
             await Finish(context, Nothing);
@@ -1493,7 +1493,7 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
             return;
         }
 
-        if (HttpMethods.IsGet(request.Method))
+        if (IsMethod(request, "GET"))
         {
             await Hold(context, connection);
 
@@ -1501,6 +1501,12 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
         }
 
         await (HttpServerFields.IsBeadBody(request) ? Receive(context, connection) : Finish(context, new End(StatusCodes.Status415UnsupportedMediaType, HttpRefusals.Type)));
+    }
+
+    // whether a request's method is the one named: a method is case-sensitive (RFC 9110 §9.1)
+    private static bool IsMethod(HttpRequest request, string method)
+    {
+        return string.Equals(request.Method, method, StringComparison.Ordinal);
     }
 
     // a connect: a connection drawn, registered before its client has its token
