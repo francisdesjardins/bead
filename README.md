@@ -282,8 +282,9 @@ checker, and `yarn surface:write` writes the list anew, its diff the change's to
 
 ## C#
 
-In `implementations/dotnet`. The .NET 10 SDK, as `global.json` pins it; tests run on
-Microsoft.Testing.Platform. Every warning is an error, the recommended analyzers are on, and every
+In `implementations/dotnet`. The .NET 10 SDK `global.json` pins, that one and no later, with the
+runtimes it brings, Kestrel's among them: a new one comes by Dependabot's pull request, which CI
+judges. Tests run on Microsoft.Testing.Platform. Every warning is an error, the recommended analyzers are on, and every
 public member has its doc comment. Each `src` project's public surface, its members included, is
 pinned to its `PublicAPI.Shipped.txt`, what the last release shipped, and its
 `PublicAPI.Unshipped.txt`, what changed since: the build refuses a public symbol neither lists and
@@ -591,9 +592,11 @@ the measurement processes. The TypeScript bench's C# interop server is built onc
 with `--no-build`.
 
 CI's [`bench.yml`](.github/workflows/bench.yml) measures each side on every push to a release or
-hotfix branch, and by hand against a tag it is given: a runner of its own a side checks out the
-newest `v*` tag by semver beside the candidate, measures both trees in turn by `--tree`, at the
-defaults above, and compares them at 25%. For one side, from the candidate's root:
+hotfix branch, and by hand: a runner of its own a side checks out the newest `v*` tag by semver
+beside the candidate, measures both trees in turn by `--tree`, at the defaults above, and compares
+them at 25%. By hand it also takes a `baseline` other than that tag (a tag, a branch or a commit's
+full sha, to measure a branch against `develop`'s head), the `sides` to measure, and a `filter`, one
+measure's ID or name, passed to `--filter`. For one side, from the candidate's root:
 
 ```sh
 git worktree add --detach ../bench-baseline v0.9.0
