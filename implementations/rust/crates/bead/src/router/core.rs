@@ -693,6 +693,7 @@ pub(crate) fn reported_call(error: CallError) -> RouterError {
         CallError::Other(error) => RouterError::Other(error),
         other @ (CallError::Cancelled(_)
         | CallError::Disconnected(_)
+        | CallError::ReadyState(_)
         | CallError::TimedOut(_)
         | CallError::Refused(_)) => RouterError::Other(Arc::new(other)),
     }
@@ -911,6 +912,8 @@ fn limits_side<S: Side>(state: &mut S) -> RouterSide {
 pub(crate) fn call_error_of(error: RouterError) -> CallError {
     match error {
         RouterError::Failure(failure) => CallError::Failure(failure),
+        RouterError::ReadyState(error) => CallError::ReadyState(error),
+        RouterError::Disconnected(reason) => CallError::Disconnected(reason),
         RouterError::Other(error) => CallError::Other(error),
     }
 }

@@ -478,12 +478,122 @@ async fn disconnects_by_a_delete_the_server_closing_first_and_closes_clean() {
 
     let refused = client.send(envelope(vec![0; 8]));
 
+    // debugging 9.7
     assert!(
-        matches!(&refused, Err(error) if error.to_string().contains("closed")),
-        "a send refused: {:?}",
+        matches!(&refused, Err(RouterError::Disconnected(reason)) if reason == "the transport client is closed, not open"),
+        "a send refused as a disconnection: {:?}",
         refused.err()
     );
     server.stop().await;
+}
+
+// what a send in a state gives: sent, its ready state's refusal or a disconnection
+fn sent_in(sent: Result<Sent, RouterError>) -> String {
+    match sent {
+        Ok(_) => "sent".to_owned(),
+        Err(RouterError::ReadyState(refusal)) => format!("ready state {}", refusal.got().name()),
+        Err(RouterError::Disconnected(reason)) => format!("disconnected: {reason}"),
+        Err(other) => format!("other: {other}"),
+    }
+}
+
+// the first call its server took whose method is `method`, once taken
+async fn call_by(fake: &Fake, method: &str) -> Arc<Call> {
+    within(async {
+        loop {
+            if let Some(call) = fake.calls().into_iter().find(|call| call.method == method) {
+                return call;
+            }
+
+            rest(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+}
+
+// debugging 9.7
+#[tokio::test]
+async fn refuses_a_send_by_its_ready_state_before_the_open_and_as_a_disconnection_after_it_in_each_state_it_holds()
+ {
+    let fake = fake_of(&ScriptOptions {
+        is_delete_held: true,
+        ..ScriptOptions::default()
+    })
+    .await;
+    let client = client_of(&not_listening());
+    let mut told = Vec::new();
+
+    // never connected
+    told.push(("UNINITIALIZED", sent_in(client.send(request(1)))));
+
+    // its POST held
+    let refusing = client.connect(&to(fake.port));
+    let post = fake.call_of(0).await;
+
+    assert_eq!(client.ready_state(), ReadyState::Connecting, "connecting");
+    told.push(("CONNECTING", sent_in(client.send(request(1)))));
+
+    // a connect its server refused: closed
+    post.answer(&refusal(503, "busy"));
+    settled(refusing).await.expect_err("refused by its server");
+    told.push(("CLOSED, failed", sent_in(client.send(request(1)))));
+
+    // a reconnection's attempt, its POST held
+    let reconnecting = client
+        .reconnect(&TransportClientReconnectOptions::default())
+        .unwrap();
+    let post = fake.call_of(1).await;
+
+    assert_eq!(
+        client.ready_state(),
+        ReadyState::Reconnecting,
+        "reconnecting"
+    );
+    told.push(("RECONNECTING", sent_in(client.send(request(1)))));
+    post.answer(&drawn(false));
+    within(reconnecting).await.expect("reconnected");
+    told.push(("OPEN", sent_in(client.send(request(1)))));
+
+    // its DELETE held
+    let disconnecting = client
+        .disconnect(&TransportClientDisconnectOptions::default())
+        .unwrap();
+    let delete = call_by(&fake, "DELETE").await;
+
+    assert_eq!(client.ready_state(), ReadyState::Closing, "closing");
+    told.push(("CLOSING", sent_in(client.send(request(1)))));
+
+    // closed by its own disconnect
+    delete.answer(&Answer::of(204));
+    within(disconnecting).await;
+    told.push(("CLOSED", sent_in(client.send(request(1)))));
+
+    assert_eq!(
+        told,
+        [
+            ("UNINITIALIZED", "ready state UNINITIALIZED".to_owned()),
+            ("CONNECTING", "ready state CONNECTING".to_owned()),
+            (
+                "CLOSED, failed",
+                "disconnected: the transport client is closed, not open".to_owned()
+            ),
+            (
+                "RECONNECTING",
+                "disconnected: the transport client is reconnecting, not open".to_owned()
+            ),
+            ("OPEN", "sent".to_owned()),
+            (
+                "CLOSING",
+                "disconnected: the transport client is closing, not open".to_owned()
+            ),
+            (
+                "CLOSED",
+                "disconnected: the transport client is closed, not open".to_owned()
+            ),
+        ],
+        "each state's"
+    );
+    client.dispose();
 }
 
 #[tokio::test]

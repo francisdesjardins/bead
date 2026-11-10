@@ -30,7 +30,7 @@ use crate::transport::{
     CONNECT_TIMEOUT, ClientListener, Connect, Listeners, RECONNECTION_CANCELLED, ReadyState,
     RouterClientTransport, Sent, ServerListener, ServerTransport, TransportClientDisconnectOptions,
     TransportClientReconnectOptions, TransportServerAddress, TransportServerClient, attempting,
-    first_of, hold_reconnection, is_field_value, tell_server,
+    first_of, hold_reconnection, is_field_value, refused_unless_open, tell_server,
 };
 
 #[cfg(test)]
@@ -1201,8 +1201,8 @@ impl MemoryTransportClient {
 
             if state.ready != ReadyState::Open || state.current.is_none() {
                 return Err(TransportError::ReadyState(ReadyStateError::new(
-                    state.ready.name(),
-                    ReadyState::Open.name(),
+                    state.ready,
+                    ReadyState::Open,
                 )));
             }
 
@@ -1382,10 +1382,7 @@ impl RouterClientTransport for MemoryTransportClient {
             match (&state.current, state.ready) {
                 (Some((end, _)), ReadyState::Open) => end.clone(),
                 (_, ready) => {
-                    return Err(RouterError::Other(Arc::new(ReadyStateError::new(
-                        ready.name(),
-                        ReadyState::Open.name(),
-                    ))));
+                    return Err(refused_unless_open(ready));
                 }
             }
         };

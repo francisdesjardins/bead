@@ -1174,16 +1174,21 @@ async fn a_connect_given_up_its_client_let_go_as_its_server_draws_it_leaves_no_c
 }
 
 // a platform's shape: a message's data is bytes, so what is no bytes is no message to send
+// debugging 9.7
 #[tokio::test]
 async fn refuses_a_send_or_a_disconnect_unless_open_and_a_send_of_what_is_no_bytes() {
     let ends = Ends::started().await;
     let (client, _) = ends.client();
 
-    // * never connected: nothing to send on, nor to close
+    // * never connected: nothing to send on, nor to close; its send refused by its ready state
     let unsent = client
         .send(message_of(&[1], None))
         .expect_err("never connected");
 
+    assert!(
+        matches!(&unsent, RouterError::ReadyState(refusal) if refusal.got() == ReadyState::Uninitialized),
+        "its ready state's refusal: {unsent:?}"
+    );
     assert_eq!(
         unsent.to_string(),
         "the transport client is uninitialized, not open",
@@ -1212,6 +1217,133 @@ async fn refuses_a_send_or_a_disconnect_unless_open_and_a_send_of_what_is_no_byt
         ReadyState::Uninitialized,
         "nothing moved"
     );
+
+    // * open
+    let connecting = client.connect(&MemoryTransportClientConnectOptions::new(
+        ends.server.clone(),
+    ));
+
+    ends.clock.settle().await;
+    connecting.await.expect("connected");
+    ends.server_told();
+    // * closed: its send a disconnection, its disconnect refused by its ready state
+    client
+        .disconnect(&TransportClientDisconnectOptions::default())
+        .expect("open");
+
+    let unsent = client.send(message_of(&[3], None)).expect_err("closed");
+
+    assert!(
+        matches!(&unsent, RouterError::Disconnected(reason) if reason == "the transport client is closed, not open"),
+        "a disconnection: {unsent:?}"
+    );
+
+    let unclosed = client
+        .disconnect(&TransportClientDisconnectOptions::default())
+        .expect_err("closed");
+
+    assert!(
+        matches!(&unclosed, TransportError::ReadyState(refusal) if refusal.got() == ReadyState::Closed),
+        "a ready state's error: {unclosed:?}"
+    );
+}
+
+// what a send in a state gives: sent, its ready state's refusal or a disconnection
+fn sent_in(sent: Result<crate::transport::Sent, RouterError>) -> String {
+    match sent {
+        Ok(_) => "sent".to_owned(),
+        Err(RouterError::ReadyState(refusal)) => format!("ready state {}", refusal.got().name()),
+        Err(RouterError::Disconnected(reason)) => format!("disconnected: {reason}"),
+        Err(other) => format!("other: {other}"),
+    }
+}
+
+// debugging 9.7
+// * CLOSING is left out: its disconnect passes it within its call, closed as it returns
+#[tokio::test]
+async fn refuses_a_send_by_its_ready_state_before_the_open_and_as_a_disconnection_after_it_in_each_state_it_holds()
+ {
+    let ends = Ends::unstarted();
+    let (client, _) = ends.client();
+    let mut told = Vec::new();
+
+    // never connected
+    told.push((
+        "UNINITIALIZED",
+        sent_in(client.send(message_of(&[1], None))),
+    ));
+
+    // a connect its server, not started, refuses: closed
+    client
+        .connect(&MemoryTransportClientConnectOptions::new(
+            ends.server.clone(),
+        ))
+        .await
+        .expect_err("its server not started");
+    told.push((
+        "CLOSED, failed",
+        sent_in(client.send(message_of(&[1], None))),
+    ));
+
+    // a reconnection's wait held on the clock
+    let reconnecting = crate::testing::spawn(
+        client
+            .reconnect(&TransportClientReconnectOptions {
+                delay: Some(TransportClientReconnectDelay::Fixed(Duration::from_millis(
+                    60,
+                ))),
+                ..TransportClientReconnectOptions::default()
+            })
+            .expect("reconnecting"),
+    );
+
+    ends.clock.settle().await;
+    assert_eq!(client.ready_state(), ReadyState::Reconnecting);
+    told.push(("RECONNECTING", sent_in(client.send(message_of(&[1], None)))));
+    ends.server.start().await.expect("started");
+    ends.clock.advance(Duration::from_millis(60)).await;
+    reconnecting.await.expect("joined").expect("reconnected");
+    told.push(("OPEN", sent_in(client.send(message_of(&[1], None)))));
+
+    // closed by its own disconnect
+    client
+        .disconnect(&TransportClientDisconnectOptions::default())
+        .expect("open");
+    told.push(("CLOSED", sent_in(client.send(message_of(&[1], None)))));
+
+    // a connect its server holds until a later turn of its pipe
+    let connecting = client.connect(&MemoryTransportClientConnectOptions::new(
+        ends.server.clone(),
+    ));
+
+    assert_eq!(client.ready_state(), ReadyState::Connecting);
+    told.push(("CONNECTING", sent_in(client.send(message_of(&[1], None)))));
+    ends.clock.settle().await;
+    connecting.await.expect("connected");
+
+    assert_eq!(
+        told,
+        [
+            ("UNINITIALIZED", "ready state UNINITIALIZED".to_owned()),
+            (
+                "CLOSED, failed",
+                "disconnected: the transport client is closed, not open".to_owned()
+            ),
+            (
+                "RECONNECTING",
+                "disconnected: the transport client is reconnecting, not open".to_owned()
+            ),
+            ("OPEN", "sent".to_owned()),
+            (
+                "CLOSED",
+                "disconnected: the transport client is closed, not open".to_owned()
+            ),
+            ("CONNECTING", "ready state CONNECTING".to_owned()),
+        ],
+        "each state's"
+    );
+    client.dispose();
+    ends.server.stop().await.expect("stopped");
 }
 
 // spec 15.13

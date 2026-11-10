@@ -257,6 +257,7 @@ async fn counts_a_call_refused_before_it_goes_session_required_or_destination_un
         | Err(
             CallError::Cancelled(_)
             | CallError::Disconnected(_)
+            | CallError::ReadyState(_)
             | CallError::TimedOut(_)
             | CallError::Refused(_)
             | CallError::Other(_),
@@ -406,6 +407,61 @@ async fn counts_a_call_its_caller_cancels_as_cancelled_and_one_its_transport_ref
         ],
         "one cancelled, one an error"
     );
+}
+
+// debugging 9.6, 9.7
+#[tokio::test]
+async fn counts_a_call_to_a_client_not_open_by_its_transport_state_error_before_the_open_and_closed_after_it()
+ {
+    use crate::transport::ReadyState;
+
+    let registry = registry();
+    let scripted = counted(&registry);
+    let mut failures = Vec::new();
+
+    for ready in [
+        ReadyState::Uninitialized,
+        ReadyState::Connecting,
+        ReadyState::Closing,
+        ReadyState::Closed,
+        ReadyState::Reconnecting,
+    ] {
+        scripted.transport.ready_as(ready);
+
+        let call = call_of(&scripted, request_of((None, super::TIMEOUT))).expect("a call");
+
+        failures.push(match super::answered(call).await {
+            Err(CallError::ReadyState(refusal)) => format!("ready state {}", refusal.got().name()),
+            Err(CallError::Disconnected(reason)) => format!("disconnected: {reason}"),
+            other => panic!("refused, not {other:?}"),
+        });
+    }
+
+    scripted.settle().await;
+
+    // * before its open, its ready state's refusal; once its state is a close's, a disconnection
+    assert_eq!(
+        failures,
+        [
+            "ready state UNINITIALIZED",
+            "ready state CONNECTING",
+            "disconnected: the transport client is closing, not open",
+            "disconnected: the transport client is closed, not open",
+            "disconnected: the transport client is reconnecting, not open",
+        ],
+        "each by its state"
+    );
+    assert_eq!(
+        echo_counts_of(&registry),
+        [
+            made_of("duration_seconds_count{} 5"),
+            made_of("handled_total{outcome=\"closed\"} 3"),
+            made_of("handled_total{outcome=\"error\"} 2"),
+            made_of("started_total{} 5"),
+        ],
+        "error before the open, closed after it"
+    );
+    assert!(scripted.transport.sent().is_empty(), "nothing sent");
 }
 
 // debugging 9.1.6, 10.2, 10.3.3

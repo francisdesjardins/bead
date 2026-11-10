@@ -345,7 +345,9 @@ async fn reserves_by_connection_and_forgets_the_reservations_of_a_connection_or_
                     .map(|(handle, error)| match error {
                         crate::router::types::RouterError::Failure(failure) =>
                             (handle.as_ref(), failure.code()),
-                        other @ crate::router::types::RouterError::Other(_) =>
+                        other @ (crate::router::types::RouterError::ReadyState(_)
+                        | crate::router::types::RouterError::Disconnected(_)
+                        | crate::router::types::RouterError::Other(_)) =>
                             panic!("a protocol failure expected: {other:?}"),
                     })
                     .collect::<Vec<_>>(),

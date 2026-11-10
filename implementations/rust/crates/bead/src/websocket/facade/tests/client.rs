@@ -951,10 +951,9 @@ async fn rejects_what_waits_as_replaced_once_its_transport_reconnects() {
     served.server.dispose().await.expect("stopped");
 }
 
-// the C# side's own: a call its transport refuses to send fails with the transport's refusal, as
-// on this side's other transports
+// debugging 9.7
 #[tokio::test]
-async fn fails_a_send_before_it_connects() {
+async fn fails_a_call_before_it_connects_by_its_ready_state_sending_nothing() {
     let unconnected = client_with(&RouterLimitsOptions::default());
     let failed = outcome_of(
         call_of(&unconnected, (&echo(), "a"), &RequestOptions::default()),
@@ -962,11 +961,55 @@ async fn fails_a_send_before_it_connects() {
     )
     .await;
 
-    assert!(
-        matches!(&failed, Err(CallError::Other(refusal)) if refusal.downcast_ref::<crate::errors::ReadyStateError>().is_some()),
-        "failed unsent, {failed:?}"
+    let Err(CallError::ReadyState(refusal)) = &failed else {
+        panic!("refused by its ready state, not {failed:?}");
+    };
+
+    assert_eq!(refusal.got(), ReadyState::Uninitialized, "its state");
+    assert_eq!(refusal.expected(), ReadyState::Open, "the state it needs");
+    assert_eq!(
+        unconnected.transport().ready_state(),
+        ReadyState::Uninitialized,
+        "nothing opened to send on"
     );
     unconnected.dispose().await;
+}
+
+// debugging 9.7
+#[tokio::test]
+async fn fails_a_call_once_disconnected_as_a_disconnection_sending_nothing() {
+    let served = served().await;
+    let client = served.connected().await;
+
+    patience(
+        PATIENCE,
+        client
+            .disconnect(&TransportClientDisconnectOptions::default())
+            .expect("open"),
+    )
+    .await
+    .expect("closed in time");
+
+    let failed = outcome_of(
+        call_of(&client, (&echo(), "a"), &RequestOptions::default()),
+        PATIENCE,
+    )
+    .await;
+
+    assert_eq!(
+        disconnected_of(failed),
+        "the transport client is closed, not open",
+        "a disconnection"
+    );
+    // ! its server tells each request it reads: none came
+    assert!(
+        patience(Duration::from_millis(50), served.requested.notified())
+            .await
+            .is_err(),
+        "nothing sent"
+    );
+    client.dispose().await;
+    served.server.dispose().await.expect("stopped");
 }
 
 // this side's own: the client's runtime is its transport's, every layer on it

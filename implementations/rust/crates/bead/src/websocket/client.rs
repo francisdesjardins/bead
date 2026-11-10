@@ -42,7 +42,7 @@ use crate::router::types::{BoxFuture, RouterError, TransportMessage};
 use crate::transport::{
     ClientListener, Connect, Listeners, RECONNECTION_CANCELLED, ReadyState, RouterClientTransport,
     Sent, TransportClientDisconnectOptions, TransportClientReconnectOptions, attempting, caught,
-    caught_future, hold_reconnection, is_field_value,
+    caught_future, hold_reconnection, is_field_value, refused_unless_open,
 };
 use crate::websocket::connection::{
     CLOSE_TIMEOUT, Commands, Connection, ConnectionBounds, ConnectionHooks, Ended, Failed,
@@ -1100,8 +1100,8 @@ impl WebSocketTransportClient {
             };
             let Some(open) = open else {
                 return Err(TransportError::ReadyState(ReadyStateError::new(
-                    state.ready.name(),
-                    ReadyState::Open.name(),
+                    state.ready,
+                    ReadyState::Open,
                 )));
             };
 
@@ -1307,10 +1307,7 @@ impl RouterClientTransport for WebSocketTransportClient {
 
                 Ok(Sent::Done)
             }
-            (_, ready) => Err(RouterError::Other(Arc::new(ReadyStateError::new(
-                ready.name(),
-                ReadyState::Open.name(),
-            )))),
+            (_, ready) => Err(refused_unless_open(ready)),
         }
     }
 
