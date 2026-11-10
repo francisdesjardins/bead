@@ -105,6 +105,10 @@ pub use errors::{
 };
 pub use failure::{Failure, FailureOrigin, ProcedureAddress};
 #[cfg(feature = "http")]
+pub use http::client::{
+    HttpTransportClient, HttpTransportClientConnectOptions, HttpTransportClientOptions,
+};
+#[cfg(feature = "http")]
 pub use http::fields::{HTTP_REFUSALS, HttpRefusals};
 #[cfg(feature = "http")]
 pub use http::server::{

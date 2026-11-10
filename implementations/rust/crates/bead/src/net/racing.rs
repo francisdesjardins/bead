@@ -22,6 +22,8 @@ use tokio::net::TcpStream;
 use tokio::sync::oneshot;
 
 use crate::clock::{Schedule, SharedClock};
+use crate::errors::{ConnectError, TransportError};
+use crate::judgement::url_host::url_host_of;
 use crate::router::types::BoxFuture;
 
 #[cfg(test)]
@@ -107,6 +109,32 @@ async fn attempted(address: SocketAddr) -> io::Result<TcpStream> {
     socket.set_nodelay(true)?;
 
     Ok(socket)
+}
+
+/// The host a connect names, as the URL Standard's host parser reads it, an IPv6 one bracketed:
+/// what its URL writes, and what it resolves or connects to, bare.
+///
+/// # Errors
+///
+/// A [`ConnectError`] for a host no URL can name.
+pub(crate) fn host_of(host: &str) -> Result<(String, String), TransportError> {
+    let bracketed = if host.contains(':') && !host.starts_with('[') {
+        format!("[{host}]")
+    } else {
+        host.to_owned()
+    };
+    let Some(parsed) = url_host_of(&bracketed) else {
+        return Err(TransportError::Connect(ConnectError::new(format!(
+            "{host} is no host a URL can name"
+        ))));
+    };
+    let bare = parsed
+        .strip_prefix('[')
+        .and_then(|inner| inner.strip_suffix(']'))
+        .unwrap_or(&parsed)
+        .to_owned();
+
+    Ok((parsed, bare))
 }
 
 /// Connects to `host`, an IP address, bracketed or not, or a name in ASCII, and `port`: the name

@@ -129,9 +129,9 @@ HttpRefusals	-	-	HttpRefusals [record]	own: the type of the Rust side's constant
 HttpRouteTemplate	IHttpRouteTemplate [record]	HttpRouteTemplate [record]	-	same
 HTTPServer	HTTPServer [record], createHTTPServer [function]	HttpServer [record]	-	same
 HTTPServerOptions	IHTTPServerOptions [record]	HttpServerOptions [record]	-	same
-HTTPTransportClient	HTTPTransportClient [record], createHTTPTransportClient [function]	HttpTransportClient [record]	-	same
-HTTPTransportClientConnectOptions	IHTTPTransportClientConnectOptions [record]	HttpTransportClientConnectOptions [record]	-	same
-HTTPTransportClientOptions	IHTTPTransportClientOptions [record]	HttpTransportClientOptions [record]	-	same
+HTTPTransportClient	HTTPTransportClient [record], createHTTPTransportClient [function]	HttpTransportClient [record]	HttpTransportClient [record]	same
+HTTPTransportClientConnectOptions	IHTTPTransportClientConnectOptions [record]	HttpTransportClientConnectOptions [record]	HttpTransportClientConnectOptions [record]	same
+HTTPTransportClientOptions	IHTTPTransportClientOptions [record]	HttpTransportClientOptions [record]	HttpTransportClientOptions [record]	same
 HTTPTransportServer	HTTPTransportServer [record], createHTTPTransportServer [function]	HttpTransportServer [record]	HttpTransportServer [record]	same
 HTTPTransportServerOptions	IHTTPTransportServerOptions [record]	HttpTransportServerOptions [record]	HttpTransportServerOptions [record]	same
 IdentityRefusal	-	-	IdentityRefusal [choice]	own: a Result's error, where the other sides throw (0044)

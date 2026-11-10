@@ -34,8 +34,8 @@ websocket = [
   "dep:rustls-platform-verifier",
   "dep:httpdate",
 ]
-# the HTTP transport's server over tokio's sockets, on hyper's HTTP/1.1, and HTTP/2 beside it under
-# TLS (decision 0049)
+# the HTTP transport, server and client, over tokio's sockets, on hyper's HTTP/1.1, and HTTP/2 beside
+# it under TLS on the server (decision 0049)
 http = [
   "tokio/net",
   "tokio/io-util",
@@ -44,6 +44,7 @@ http = [
   "dep:hyper",
   "dep:hyper-util",
   "dep:h2",
+  "dep:tower-service",
   "dep:futures-util",
   "dep:rustls",
   "dep:tokio-rustls",
@@ -82,9 +83,10 @@ rustls-platform-verifier = { workspace = true, optional = true }
 tungstenite = { workspace = true, optional = true }
 tokio-tungstenite = { workspace = true, optional = true }
 # the HTTP transport's alone
-hyper = { workspace = true, optional = true, features = ["server", "http1", "http2"] }
-hyper-util = { workspace = true, optional = true, features = ["tokio"] }
+hyper = { workspace = true, optional = true, features = ["server", "client", "http1", "http2"] }
+hyper-util = { workspace = true, optional = true, features = ["tokio", "client-legacy", "http1"] }
 h2 = { workspace = true, optional = true }
+tower-service = { workspace = true, optional = true }
 
 [dev-dependencies]
 # the crate itself, with its test kit: one copy of bead for the unit tests and the players

@@ -6,19 +6,13 @@
 
 use std::sync::Arc;
 
-#[cfg(feature = "websocket")]
 use rustls::ClientConfig;
 #[cfg(feature = "http")]
 use rustls::ServerConfig;
-#[cfg(feature = "websocket")]
 use rustls::pki_types::ServerName;
-#[cfg(feature = "websocket")]
 use rustls_platform_verifier::BuilderVerifierExt;
-#[cfg(feature = "websocket")]
 use tokio::net::TcpStream;
-#[cfg(feature = "websocket")]
 use tokio_rustls::TlsConnector;
-#[cfg(feature = "websocket")]
 use tokio_rustls::client::TlsStream;
 
 // HTTP/1.1's protocol by ALPN (RFC 7301): the one a WebSocket's upgrade speaks (RFC 6455 §4.1), a
@@ -35,7 +29,6 @@ pub(crate) const H2: &[u8] = b"h2";
 /// # Errors
 ///
 /// What rustls or the platform's verifier refuses it for.
-#[cfg(feature = "websocket")]
 pub(crate) fn platform_client_config() -> Result<ClientConfig, rustls::Error> {
     Ok(
         ClientConfig::builder_with_provider(
@@ -47,14 +40,13 @@ pub(crate) fn platform_client_config() -> Result<ClientConfig, rustls::Error> {
     )
 }
 
-/// The config a WebSocket's upgrade goes over: a copy of `given`, or of the platform's, that offers
-/// HTTP/1.1 alone by ALPN.
+/// The config a client's HTTP/1.1 goes over, a WebSocket's upgrade or the HTTP client's exchanges: a
+/// copy of `given`, or of the platform's, that offers HTTP/1.1 alone by ALPN.
 ///
 /// # Errors
 ///
 /// What rustls or the platform's verifier refuses the platform's for.
-#[cfg(feature = "websocket")]
-pub(crate) fn upgrade_config_of(
+pub(crate) fn http1_config_of(
     given: Option<&Arc<ClientConfig>>,
 ) -> Result<Arc<ClientConfig>, rustls::Error> {
     let mut config = match given {
@@ -83,7 +75,6 @@ pub(crate) fn serving_config_of(given: &Arc<ServerConfig>) -> Arc<ServerConfig> 
 /// # Errors
 ///
 /// A host no certificate can name, or what the handshake failed with.
-#[cfg(feature = "websocket")]
 pub(crate) async fn connect_tls(
     (socket, host): (TcpStream, &str),
     config: &Arc<ClientConfig>,

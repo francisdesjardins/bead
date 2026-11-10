@@ -409,10 +409,18 @@ impl<F> Exchange for F where
 {
 }
 
-// hyper's executor over the platform: each HTTP/2 stream spawned on the server's runtime
+/// hyper's executor over the platform: each HTTP/2 stream of a server's, and each connection of the
+/// client's pool, spawned on its runtime.
 #[derive(Clone)]
-struct Spawner {
+pub(crate) struct Spawner {
     runtime: Handle,
+}
+
+impl Spawner {
+    /// An executor on `runtime`.
+    pub(crate) const fn on(runtime: Handle) -> Self {
+        Self { runtime }
+    }
 }
 
 impl<F> hyper::rt::Executor<F> for Spawner
@@ -593,9 +601,7 @@ where
         runtime, platform, ..
     } = options;
     let serving = Arc::clone(&flow);
-    let mut builder = http2::Builder::new(Spawner {
-        runtime: runtime.clone(),
-    });
+    let mut builder = http2::Builder::new(Spawner::on(runtime.clone()));
 
     builder
         .timer(HyperTimer::on(runtime))

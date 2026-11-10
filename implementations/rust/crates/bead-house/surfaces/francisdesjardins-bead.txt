@@ -111,6 +111,9 @@ crate
   use failure::Failure
   use failure::FailureOrigin
   use failure::ProcedureAddress
+  use http::client::HttpTransportClient #[cfg(feature = "http")]
+  use http::client::HttpTransportClientConnectOptions #[cfg(feature = "http")]
+  use http::client::HttpTransportClientOptions #[cfg(feature = "http")]
   use http::fields::HTTP_REFUSALS #[cfg(feature = "http")]
   use http::fields::HttpRefusals #[cfg(feature = "http")]
   use http::server::BODY_BYTES_BUDGET #[cfg(feature = "http")]
@@ -1037,6 +1040,36 @@ crate::failure
     fn record(&self) -> FailureRecord
     implements Display, Error
     derives Clone, Debug
+crate::http::client
+  struct HttpTransportClientOptions #[non_exhaustive] #[cfg(feature = "http")]
+    pub clock: Option<SharedClock> #[cfg(feature = "http")]
+    pub runtime: Option<Handle> #[cfg(feature = "http")]
+    pub exchange_timeout: Option<Duration> #[cfg(feature = "http")]
+    pub inactivity_timeout: Option<Duration> #[cfg(feature = "http")]
+    pub is_listening: Option<bool> #[cfg(feature = "http")]
+    pub maximum_body_bytes: Option<u64> #[cfg(feature = "http")]
+    pub pause: Option<Duration> #[cfg(feature = "http")]
+    pub wait: Option<Duration> #[cfg(feature = "http")]
+    pub tls: Option<Arc<ClientConfig>> #[cfg(feature = "http")]
+    derives Clone, Debug, Default #[cfg(feature = "http")]
+  struct HttpTransportClientConnectOptions #[non_exhaustive] #[cfg(feature = "http")]
+    pub host: String #[cfg(feature = "http")]
+    pub port: u16 #[cfg(feature = "http")]
+    pub pathname: Option<String> #[cfg(feature = "http")]
+    pub secured: Option<bool> #[cfg(feature = "http")]
+    pub timeout: Option<Duration> #[cfg(feature = "http")]
+    pub signal: Option<CancellationToken> #[cfg(feature = "http")]
+    fn new<H: Into<String>>(host: H, port: u16) -> Self
+    derives Clone, Debug #[cfg(feature = "http")]
+  struct HttpTransportClient #[cfg(feature = "http")]
+    fn new(options: &HttpTransportClientOptions) -> Result<Self, ProgrammerError>
+    fn connect(&self, options: &HttpTransportClientConnectOptions) -> Connect
+    fn disconnect(&self, options: &TransportClientDisconnectOptions) -> Result<BoxFuture<()>, TransportError>
+    fn dispose(&self)
+    fn close(&self) -> BoxFuture<()>
+    fn reconnect(&self, options: &TransportClientReconnectOptions) -> Result<BoxFuture<Result<(), TransportError>>, TransportError>
+    implements Debug, RouterClientTransport
+    derives Clone #[cfg(feature = "http")]
 crate::http::fields
   struct HttpRefusals #[non_exhaustive] #[cfg(feature = "http")]
     pub busy: &'static str #[cfg(feature = "http")]
