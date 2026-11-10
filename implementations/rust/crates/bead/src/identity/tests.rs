@@ -9,6 +9,29 @@ use crate::constants::ProcedureKind;
 use crate::errors::Refusal;
 use crate::testing::pair::echo;
 
+// A Rust slice holds addresses alone: null and an object in place of a list are no inputs.
+#[test]
+fn refuses_an_address_out_of_its_range_naming_the_transport_and_the_address_and_a_list_that_is_no_array()
+ {
+    let refused = super::procedures_taken_of(
+        &[crate::failure::ProcedureAddress {
+            service_id: 0,
+            procedure_id: 7,
+        }],
+        "a transport",
+    )
+    .expect_err("an address out of its range");
+
+    assert_eq!(
+        refused.reason(),
+        Some(Refusal::Identity(IdentityRefusal::OutOfItsRange))
+    );
+    assert_eq!(
+        refused.message(),
+        "a transport takes 0/7, out of its range: a service and a procedure are from 1 to 65535, service 0 the protocol's (spec 9.12, 16.2, 16.3)"
+    );
+}
+
 #[test]
 #[expect(
     clippy::disallowed_methods,
