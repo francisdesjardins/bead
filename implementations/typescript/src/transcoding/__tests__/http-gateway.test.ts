@@ -1375,10 +1375,15 @@ test('writes a text or a raw stream’s data as a JSON string and a result it ca
     ],
   });
   const reported = reportedBy(fixture.gateway);
+  const heard: string[] = [];
 
-  // a listener that throws: the exchange answers on
+  // * a listener that throws: what it threw dropped, the listener after it told, the exchange
+  // answering on (spec 15.1)
   fixture.gateway.on('error', () => {
     throw new Error('a listener broke');
+  });
+  fixture.gateway.on('error', ({ message }) => {
+    heard.push(message);
   });
 
   const ticked = (path: string, from: number): Promise<IAnswered> => {
@@ -1408,6 +1413,7 @@ test('writes a text or a raw stream’s data as a JSON string and a result it ca
   expect(await ticked('/edges-ticks', 2)).toMatchObject({ body: undecodable, status: 502 });
   expect(await ticked('/text-ticks', -1)).toMatchObject({ body: undecodable, status: 502 });
   expect(reported).toHaveLength(2);
+  expect(heard).toEqual(reported);
 });
 
 test('answers 500 a result its mapping holds no form of, reported, in the mapping’s words', async () => {

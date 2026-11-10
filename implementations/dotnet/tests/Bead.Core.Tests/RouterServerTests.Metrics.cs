@@ -321,6 +321,49 @@ public sealed partial class RouterServerTests
         }));
     }
 
+    // spec 15.1; debugging 2.2
+    [Fact]
+    public async Task Drops_what_an_error_listener_throws_the_next_error_listener_told_and_the_call_goes_on()
+    {
+        var failure = new InvalidOperationException("listener bug");
+        var heard = new List<(Exception Reason, string? ConnectionHandle)>();
+        var isThrown = false;
+
+        Start();
+        _transport.Open(First);
+        EchoOf((request, response) =>
+        {
+            return response.Answer(request.Payload);
+        });
+
+        // a debug listener that throws on its first envelope alone
+        Router.Debug += (_, _) =>
+        {
+            if (!isThrown)
+            {
+                isThrown = true;
+
+                throw failure;
+            }
+        };
+        Router.Error += (_, _) =>
+        {
+            throw new InvalidOperationException("an error listener that throws");
+        };
+        Router.Error += (reason, connectionHandle) =>
+        {
+            heard.Add((reason, connectionHandle));
+        };
+
+        Deliver(First, RequestOf(1, Echo, "hi"));
+        await Settle();
+
+        // * the debug listener's throw told the next error listener, with its connection, and the
+        // throw of the one before it dropped: the call answered with its result
+        Assert.Equal(["first result 1 hi"], SentSince());
+        Assert.Equal([(failure, First)], heard);
+    }
+
     [Fact]
     public async Task Drops_each_subscription_a_close_or_its_disposal_ends_with_no_code_and_none_its_client_cancels()
     {

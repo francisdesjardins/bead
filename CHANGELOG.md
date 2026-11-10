@@ -39,9 +39,34 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `port`, as on the C# and Rust sides.
 - **Breaking:** on the Rust side a server transport's `start` leaves `ServerTransport`: each server
   starts itself and gives the `TransportServerAddress` it listens at.
+- **Breaking:** what a listener of an `error` event throws — a transport's, server or client, a
+  router's, a broker participant's or a gateway's — is dropped on every side, the listeners after
+  it told: as a connection drops, an HTTP `send` no longer rejects with it, nor the C# side's `Send`
+  throws it; over WebSocket it no longer reaches Node's `uncaughtException` or Kestrel; and the Rust
+  side's participant no longer tells an error listener's panic to its error listeners (spec 15.1,
+  debugging 2.2, 13.9; decision 0023).
+- **Breaking:** a call to a client whose transport is not open fails by the transport's state:
+  before its open, uninitialized or connecting, by its ready state, counted `error` — on the C#
+  side a `ReadyStateException`, new, where a `DisconnectException` counted `closed`, as is its
+  transport client's `CloseConnection` unless open; on the Rust side `CallError::ReadyState`, new;
+  once its state is a close's, closing, closed or reconnecting, a failed connect's among them, as a
+  disconnection, counted `closed`, on the TypeScript and Rust sides as on the C# side (debugging
+  9.6, 9.7; decision 0013).
+- **Breaking:** the Rust side's WebSocket transports hand a text message to their router, marked by
+  `TransportMessage`'s `is_text`, which reports it `ENVELOPE_MALFORMED` with its connection; its
+  activity is stamped; its in-memory and broker transports refuse to send one (spec 15.2; decision
+  0049).
+
+### Removed
+
+- **Breaking:** `closeAll` from the TypeScript side's transport servers, and `CloseAll` from the C#
+  side's HTTP and WebSocket servers: a server that ends its connections stops (spec 15.1; decision
+  0049).
 
 ### Fixed
 
+- The TypeScript side counts a text message against `maximumUntakenBytes` by its UTF-8 bytes, as
+  the wire carried it, not by its UTF-16 code units (spec 15.12).
 - The C# side's HTTP transport server matches its pathname against the target as it came, as the
   TypeScript side does, where Kestrel's decoded path let `/b%65ad` reach `/bead`; and its gateway
   keeps the query of an absolute-form target that names no path, `http://bead.test?x`.

@@ -276,7 +276,7 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         _isSecure = _options.Secure ?? false;
         _listeners = new ListenerGuard((reason, connectionHandle) =>
         {
-            Error?.Invoke(reason, connectionHandle ?? "");
+            ListenerGuard.TellError(Error, (reason, connectionHandle ?? ""));
         });
     }
 
@@ -561,15 +561,6 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
 
             throw;
         }
-    }
-
-    /// <summary>
-    /// Closes every connection with 1000, as <see cref="CloseConnection"/> closes one, and gives what
-    /// each close gave; none without a connection.
-    /// </summary>
-    public Task<bool[]> CloseAll()
-    {
-        return Task.WhenAll(_connections.Keys.Select(CloseConnection));
     }
 
     /// <summary>
@@ -971,28 +962,23 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     // * a connection's end, told once its read ended, its close or its abort begun: its one error,
     // when it has one, then its close, unclean whenever this side ended it of its own, whatever the
     // peer answered; so a listener of Error that throws stops nothing, and its close is told all
-    // the same, what it threw going on to Kestrel (spec 15.1)
+    // the same, what it threw dropped (spec 15.1)
     private void Ended(Held held, (Exception? Failure, string ConnectionHandle) end)
     {
         var (failure, connectionHandle) = end;
         var connection = held.Connection;
 
-        try
+        if (failure is not null)
         {
-            if (failure is not null)
-            {
-                Error?.Invoke(failure, connectionHandle);
-            }
+            ListenerGuard.TellError(Error, (failure, connectionHandle));
         }
-        finally
-        {
-            // a connection the registry no longer holds tells no close: the stop's clear took it
-            if (_connections.TryRemove(new KeyValuePair<string, Held>(connectionHandle, held)))
-            {
-                var isClean = failure is null && !connection.IsEndedHere && connection.Socket.CloseStatus == WebSocketCloseStatus.NormalClosure;
 
-                _listeners.Tell(Close, (isClean, connectionHandle));
-            }
+        // a connection the registry no longer holds tells no close: the stop's clear took it
+        if (_connections.TryRemove(new KeyValuePair<string, Held>(connectionHandle, held)))
+        {
+            var isClean = failure is null && !connection.IsEndedHere && connection.Socket.CloseStatus == WebSocketCloseStatus.NormalClosure;
+
+            _listeners.Tell(Close, (isClean, connectionHandle));
         }
     }
 

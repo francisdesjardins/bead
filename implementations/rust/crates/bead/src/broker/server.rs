@@ -204,7 +204,7 @@ impl ServerInner {
         (error, connection_handle): (&RouterError, Option<&ConnectionHandle>),
     ) {
         for listener in self.listeners.all() {
-            // ! a listener of errors that panics would loop: its panic is dropped
+            // ! a listener of errors that panics would loop: its panic is dropped (spec 15.1)
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 listener.on_error(error, connection_handle);
             }))
@@ -1029,6 +1029,13 @@ impl ServerTransport for BrokerTransportServer {
         message: TransportMessage,
         connection_handle: &ConnectionHandle,
     ) -> Result<Sent, RouterError> {
+        // refused before it goes, the connection kept: a text message is no envelope (spec 15.2)
+        if message.is_text {
+            return Err(RouterError::Other(Arc::new(ProgrammerError::new(
+                crate::broker::TEXT_REFUSED,
+            ))));
+        }
+
         let held = {
             let state = locked(&self.inner.state);
 

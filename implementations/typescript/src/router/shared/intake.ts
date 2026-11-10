@@ -37,10 +37,38 @@ export interface IIntake<Handle extends string> {
 
 // helpers
 
-// the bytes of what a transport handed: an envelope's, or a text frame's characters
+// a text frame's bytes, UTF-8, as the wire carried them, counted without encoding it: one, two or
+// three by code unit, four by surrogate pair, and three for a lone surrogate, which `TextEncoder`
+// writes as U+FFFD
+const utf8LengthOf = (text: string): number => {
+  let length = 0;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const unit = text.charCodeAt(index);
+
+    if (unit < 0x80) {
+      length += 1;
+    } else if (unit < 0x800) {
+      length += 2;
+    } else if (
+      unit >= 0xd800 &&
+      unit <= 0xdbff &&
+      (text.charCodeAt(index + 1) & 0xfc00) === 0xdc00
+    ) {
+      length += 4;
+      index += 1;
+    } else {
+      length += 3;
+    }
+  }
+
+  return length;
+};
+
+// the bytes of what a transport handed: an envelope's, or a text frame's, UTF-8
 const sizeOf = (data: Data): number => {
   if (typeof data === 'string') {
-    return data.length;
+    return utf8LengthOf(data);
   }
 
   if (data instanceof ArrayBuffer || ArrayBuffer.isView(data)) {

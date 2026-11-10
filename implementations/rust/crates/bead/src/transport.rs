@@ -18,7 +18,9 @@ use tokio_util::sync::CancellationToken;
 
 use crate::clock::{Schedule, SharedClock};
 use crate::duration::hold_delay;
-use crate::errors::{ConnectError, ProgrammerError, ReconnectError, TransportError};
+use crate::errors::{
+    ConnectError, ProgrammerError, ReadyStateError, ReconnectError, TransportError,
+};
 use crate::failure::ProcedureAddress;
 use crate::router::types::{BoxFuture, ConnectionHandle, Gauges, RouterError, TransportMessage};
 
@@ -85,6 +87,24 @@ impl ReadyState {
             Self::Closed => "closed",
             Self::Uninitialized => "uninitialized",
             Self::Reconnecting => "reconnecting",
+        }
+    }
+}
+
+/// What a client transport's send is refused with while it is not open (debugging 9.7): before its
+/// open, uninitialized or connecting, its ready state's refusal; once its state is a close's,
+/// closing, closed or reconnecting, a disconnection, as a call pending when the close came fails.
+pub(crate) fn refused_unless_open(ready: ReadyState) -> RouterError {
+    match ready {
+        ReadyState::Uninitialized | ReadyState::Connecting => {
+            RouterError::ReadyState(ReadyStateError::new(ready, ReadyState::Open))
+        }
+        // ! open reaches it only with no connection held, which no client keeps: a disconnection
+        ReadyState::Open | ReadyState::Closing | ReadyState::Closed | ReadyState::Reconnecting => {
+            RouterError::Disconnected(format!(
+                "the transport client is {}, not open",
+                ready.said()
+            ))
         }
     }
 }
@@ -332,7 +352,10 @@ pub trait RouterClientTransport: Send + Sync + fmt::Debug {
     ///
     /// # Errors
     ///
-    /// What refuses it before it is handed over: a connection not open, say.
+    /// What refuses it before it is handed over: before its open, uninitialized or connecting, a
+    /// [`RouterError::ReadyState`]; once its state is a close's, closing, closed or reconnecting, a
+    /// [`RouterError::Disconnected`] (debugging 9.7); a text message where its connection carries
+    /// bytes alone, say.
     fn send(&self, message: TransportMessage) -> Result<Sent, RouterError>;
 
     /// Hears its events from now on.
@@ -588,7 +611,7 @@ pub(crate) fn tell_server<C: Fn(&dyn ServerListener)>(
         |listener: &(dyn ServerListener + 'static)| call(listener),
         |error: RouterError| {
             for listener in &heard {
-                // ! a listener of errors that panics would loop: its panic is dropped
+                // ! a listener of errors that panics would loop: its panic is dropped (spec 15.1)
                 catch_unwind(AssertUnwindSafe(|| {
                     listener.on_error(&error, connection_handle);
                 }))

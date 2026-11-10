@@ -318,14 +318,20 @@ public sealed class MemoryTransportClientTests
         var heard = new List<string>();
 
         // * never connected: nothing to send on, nor to close
-        Assert.Equal("the transport client is uninitialized, not open", (await Assert.ThrowsAsync<DisconnectException>(() =>
+        foreach (var refused in new[]
         {
-            return client.Send(new TransportMessage(new byte[] { 1 }, false));
-        })).Message);
-        Assert.Equal("the transport client is uninitialized, not open", (await Assert.ThrowsAsync<DisconnectException>(() =>
+            await Assert.ThrowsAsync<ReadyStateException>(() =>
+            {
+                return client.Send(new TransportMessage(new byte[] { 1 }, false));
+            }),
+            await Assert.ThrowsAsync<ReadyStateException>(() =>
+            {
+                return client.CloseConnection();
+            }),
+        })
         {
-            return client.CloseConnection();
-        })).Message);
+            Assert.Equal((ReadyState.Uninitialized, ReadyState.Open, "the transport client is uninitialized, not open"), (refused.Got, refused.Expected, refused.Message));
+        }
 
         // open: a text message refused before it goes, the connection kept
         server.Message += (message, _) =>
@@ -343,6 +349,93 @@ public sealed class MemoryTransportClientTests
 
         Assert.Empty(heard);
         Assert.Equal(ReadyState.Open, client.ReadyState);
+
+        // * closed: a send fails as a disconnection, a disconnect by its state (debugging 9.7)
+        await client.CloseConnection();
+        Assert.Equal("the transport client is closed, not open", (await Assert.ThrowsAsync<DisconnectException>(() =>
+        {
+            return client.Send(new TransportMessage(new byte[] { 1 }, false));
+        })).Message);
+
+        var closed = await Assert.ThrowsAsync<ReadyStateException>(() =>
+        {
+            return client.CloseConnection();
+        });
+
+        Assert.Equal((ReadyState.Closed, "the transport client is closed, not open"), (closed.Got, closed.Message));
+    }
+
+    // debugging 9.7
+    [Fact]
+    public async Task Refuses_a_send_by_its_ready_state_before_the_open_and_as_a_disconnection_after_it_in_each_state_it_holds()
+    {
+        // * a server that holds each connect until the test lets it go, or its token ends it
+        var held = Channel.CreateUnbounded<TaskCompletionSource>();
+        await using var server = new MemoryTransportServer(new MemoryTransportServerOptions
+        {
+            Accepting = async (token) =>
+            {
+                var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+                held.Writer.TryWrite(release);
+                await release.Task.WaitAsync(token);
+            },
+        });
+        await using var client = new MemoryTransportClient();
+        var refusals = new List<string>();
+
+        await server.Start();
+
+        // never connected
+        refusals.Add(await SendRefusals.Of(client));
+
+        // connecting, its server not yet accepting
+        var connecting = client.Connect(new MemoryTransportClientConnectOptions { Server = server, CancellationToken = Cancelled });
+        var accept = await held.Reader.ReadAsync(Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+
+        refusals.Add(await SendRefusals.Of(client));
+        accept.SetResult();
+        await connecting.WaitAsync(Patience, Cancelled);
+
+        // open, the send going
+        refusals.Add(await SendRefusals.Of(client));
+
+        // closing left out: its close is closing and closed within one call
+        await client.CloseConnection();
+        refusals.Add(await SendRefusals.Of(client));
+
+        // reconnecting, its attempt held by its server, then ended by its token
+        using var ending = new CancellationTokenSource();
+        var reconnecting = client.Reconnect(new TransportClientReconnectOptions { CancellationToken = ending.Token });
+
+        await held.Reader.ReadAsync(Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+        refusals.Add(await SendRefusals.Of(client));
+        await ending.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+        {
+            return reconnecting.WaitAsync(Patience, Cancelled);
+        });
+
+        // closed by a connect that started and failed: its server not started
+        await using var unstarted = new MemoryTransportServer();
+        await using var failed = new MemoryTransportClient();
+
+        await Assert.ThrowsAsync<ConnectException>(() =>
+        {
+            return failed.Connect(new MemoryTransportClientConnectOptions { Server = unstarted, CancellationToken = Cancelled });
+        });
+        refusals.Add(await SendRefusals.Of(failed));
+
+        Assert.Equal(
+            [
+                "ReadyStateException Uninitialized: the transport client is uninitialized, not open",
+                "ReadyStateException Connecting: the transport client is connecting, not open",
+                "sent",
+                "DisconnectException: the transport client is closed, not open",
+                "DisconnectException: the transport client is reconnecting, not open",
+                "DisconnectException: the transport client is closed, not open",
+            ],
+            refusals);
     }
 
     [Fact]

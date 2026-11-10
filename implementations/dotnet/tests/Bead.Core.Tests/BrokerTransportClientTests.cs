@@ -89,16 +89,88 @@ public sealed class BrokerTransportClientTests
             });
         }
 
+        // closed by a connect that started and failed: a send fails as a disconnection, a close by
+        // its state (debugging 9.7)
         await Assert.ThrowsAsync<DisconnectException>(() =>
         {
             return client.Send(new TransportMessage((byte[])[1], false));
         });
-        await Assert.ThrowsAsync<DisconnectException>(() =>
+        Assert.Equal(ReadyState.Closed, (await Assert.ThrowsAsync<ReadyStateException>(() =>
         {
             return client.CloseConnection();
-        });
+        })).Got);
         Assert.Equal((true, false), (client.Carries("Bearer token"), client.Carries(" padded")));
         Assert.Equal(2, opens);
+    }
+
+    // debugging 9.7
+    [Fact]
+    public async Task Refuses_a_send_by_its_ready_state_before_the_open_and_as_a_disconnection_after_it_in_each_state_it_holds()
+    {
+        var scheduler = new SerialScheduler();
+        var broker = new MemoryBroker(new MemoryBrokerOptions { Scheduler = scheduler });
+        await using var ada = new BrokerParticipant(broker.Adapter(new MemoryBrokerAdapterOptions { Id = "ada" }), new BrokerParticipantOptions { Scheduler = scheduler });
+
+        // * a server of the test's own, which answers an OPEN only as the test does
+        var (peer, heard) = await PeerOf(broker);
+        await using var client = ada.Client();
+        var refusals = new List<string>();
+
+        // never connected
+        refusals.Add(await SendRefusals.Of(client));
+
+        // connecting, its OPEN unanswered
+        var connecting = client.Connect(new BrokerTransportClientConnectOptions { Server = "interop", CancellationToken = Cancelled });
+        var opener = await OpenerOf(heard);
+
+        refusals.Add(await SendRefusals.Of(client));
+        await peer.Publish(new BrokerPublication { Topic = Inbox, Payload = AcceptOf(opener) });
+        await connecting.WaitAsync(BrokerPair.Patience, Cancelled);
+
+        // open, the send going
+        refusals.Add(await SendRefusals.Of(client));
+
+        // closing left out: its close, a CLOSE or a RESET, is closed as it is asked
+        await client.CloseConnection();
+        refusals.Add(await SendRefusals.Of(client));
+
+        // reconnecting, its OPEN unanswered, then ended by its token
+        using var ending = new CancellationTokenSource();
+        var reconnecting = client.Reconnect(new TransportClientReconnectOptions { CancellationToken = ending.Token });
+
+        await BrokerPair.Until(
+            () =>
+            {
+                return heard.Count((parcel) =>
+                {
+                    return parcel.Kind == BrokerParcelKinds.Open;
+                }) == 2;
+            },
+            "its second OPEN reaches the name");
+        refusals.Add(await SendRefusals.Of(client));
+        await ending.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+        {
+            return reconnecting.WaitAsync(BrokerPair.Patience, Cancelled);
+        });
+
+        // closed by a connect that started and failed: nothing serves its name, its broker says so
+        await Assert.ThrowsAsync<ConnectException>(() =>
+        {
+            return client.Connect(new BrokerTransportClientConnectOptions { Server = "nobody", CancellationToken = Cancelled });
+        });
+        refusals.Add(await SendRefusals.Of(client));
+
+        Assert.Equal(
+            [
+                "ReadyStateException Uninitialized: the transport client is uninitialized, not open",
+                "ReadyStateException Connecting: the transport client is connecting, not open",
+                "sent",
+                "DisconnectException: the transport client is closed, not open",
+                "DisconnectException: the transport client is reconnecting, not open",
+                "DisconnectException: the transport client is closed, not open",
+            ],
+            refusals);
     }
 
     [Fact]

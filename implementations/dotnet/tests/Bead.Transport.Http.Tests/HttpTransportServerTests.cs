@@ -4061,40 +4061,6 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         Assert.Empty(_server.Clients);
     }
 
-    // closed cleanly, as with 1000 over a socket: each close raised, and each exchange still waiting
-    // told its connection is gone
-    [Fact]
-    public async Task CloseAll_closes_every_connection_cleanly_and_gives_nothing_without_one()
-    {
-        await Start();
-
-        Assert.Empty(await _server.CloseAll().WaitAsync(Patience, Cancelled));
-
-        var (waitingToken, waitingHandle) = await Connect();
-        var (listeningToken, listeningHandle) = await Connect(true);
-        using var waiting = await Fetch(PostOf(waitingToken, EnvelopeOf(EnvelopeKind.Request, 1)));
-        var listen = ListenOf(listeningToken, new() { Wait = "20000" });
-
-        await Until(() =>
-        {
-            return Count("listens") == 1;
-        });
-
-        var closed = await _server.CloseAll().WaitAsync(Patience, Cancelled);
-
-        Assert.Equal([true, true], closed);
-        Assert.Empty(_server.ConnectionHandles);
-        Assert.Empty(_server.Clients);
-        Assert.Equal(
-            new HashSet<(bool, string)> { (true, waitingHandle), (true, listeningHandle) },
-            new HashSet<(bool, string)>(_closes));
-        Assert.Equal(2, _closes.Count);
-        // a request handed on, its head out, by its body cut; a listen held, by the marked 404
-        Assert.Equal("cut", await EndOf(waiting));
-        Assert.Equal((404, HttpRefusals.ConnectionUnknown), await RefusalOf(listen));
-        Assert.Equal(ReadyState.Open, _server.ReadyState);
-    }
-
     [Fact]
     public async Task Resolves_a_send_for_a_handle_nobody_holds()
     {
@@ -4351,7 +4317,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
 
     // spec 15.1
     [Fact]
-    public async Task Drops_behind_maximumOutboxBytes_a_connection_whose_error_listener_throws_telling_its_close_all_the_same()
+    public async Task Drops_behind_maximumOutboxBytes_a_connection_whose_error_listener_throws_telling_its_close_all_the_same_and_dropping_what_it_threw()
     {
         await Start(new HttpTransportServerOptions { MaximumOutboxBytes = 20 });
 
@@ -4359,11 +4325,13 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         var (connectionToken, connectionHandle) = await Connect(true);
         var envelope = EnvelopeOf(EnvelopeKind.Notification, (1, 2));
 
+        _server.Error += (_, _) =>
+        {
+            throw new InvalidOperationException("an error listener that throws");
+        };
         _server.Error += (reason, handle) =>
         {
             reported.Enqueue((reason, handle));
-
-            throw new InvalidOperationException("an error listener that throws");
         };
 
         // 10 bytes, 20, then 30: past it
@@ -4372,12 +4340,9 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
             await _server.Send(new TransportMessage(envelope, false), connectionHandle).WaitAsync(Patience, Cancelled);
         }
 
-        // what the listener threw is .NET's: it reaches the send under way, the connection dropped
-        // first
-        Assert.Equal("an error listener that throws", (await Assert.ThrowsAsync<InvalidOperationException>(async () =>
-        {
-            await _server.Send(new TransportMessage(envelope, false), connectionHandle).WaitAsync(Patience, Cancelled);
-        })).Message);
+        // * what the listener threw is dropped: the send settles as with no listener, the listener
+        // after it told the drop and nothing else
+        await _server.Send(new TransportMessage(envelope, false), connectionHandle).WaitAsync(Patience, Cancelled);
         Assert.Equal(
             [($"{connectionHandle} is dropped: its outbox would pass maximumOutboxBytes, 20 bytes", connectionHandle)],
             reported.Select((report) =>

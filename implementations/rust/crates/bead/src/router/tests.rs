@@ -195,7 +195,9 @@ fn codes_of(errors: &[RouterError]) -> Vec<String> {
                 .protocol_code()
                 .and_then(ProtocolCode::name)
                 .map_or_else(|| failure.to_string(), str::to_owned),
-            RouterError::Other(error) => error.to_string(),
+            other @ (RouterError::ReadyState(_)
+            | RouterError::Disconnected(_)
+            | RouterError::Other(_)) => other.to_string(),
         })
         .collect()
 }

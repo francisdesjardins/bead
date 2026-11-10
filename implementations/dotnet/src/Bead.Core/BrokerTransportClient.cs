@@ -132,7 +132,7 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
         _maximumUnsentBytes = options?.MaximumUnsentBytes ?? ServerBounds.UnsentBytesOf(RouterLimits.Default);
         _listeners = new ListenerGuard((reason, _) =>
         {
-            Error?.Invoke(reason);
+            ListenerGuard.TellError(Error, reason);
         });
     }
 
@@ -297,9 +297,10 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
 
     /// <summary>
     /// Sends an envelope in DATA parcels, the credential beside it on the first, an empty one
-    /// carrying none, at once, after what went before; refused with a
-    /// <see cref="DisconnectException"/> unless Open, and with an <see cref="ArgumentException"/>,
-    /// its connection kept, for a text message, which is no envelope, a credential no field carries,
+    /// carrying none, at once, after what went before; refused unless Open, before
+    /// its open with a <see cref="ReadyStateException"/>, once its state is a close's with a
+    /// <see cref="DisconnectException"/> (debugging 9.7), and with an
+    /// <see cref="ArgumentException"/>, its connection kept, for a text message, which is no envelope, a credential no field carries,
     /// or one that leaves a parcel toward its server no byte of the envelope.
     /// </summary>
     public Task Send(TransportMessage message)
@@ -313,7 +314,7 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
 
         if (connection is null)
         {
-            return Task.FromException(new DisconnectException($"the transport client is {NameOf(_readyState)}, not open"));
+            return Task.FromException(NotOpen.Of(_readyState));
         }
 
         if (message.IsText)
@@ -347,7 +348,7 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
     /// <summary>
     /// Closes the connection with a CLOSE of 1000, or by a RESET, at once, where
     /// <see cref="TransportClientDisconnectOptions.IsClean"/> says it is not clean, and raises its close
-    /// as its options say. Refused with a <see cref="DisconnectException"/> unless Open. It ends Closed.
+    /// as its options say. Refused with a <see cref="ReadyStateException"/> unless Open. It ends Closed.
     /// </summary>
     public Task CloseConnection(TransportClientDisconnectOptions? options = null)
     {
@@ -359,7 +360,7 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
         {
             if (_readyState != ReadyState.Open || _connection is null)
             {
-                return Task.FromException(new DisconnectException($"the transport client is {NameOf(_readyState)}, not open"));
+                return Task.FromException(new ReadyStateException(_readyState, ReadyState.Open));
             }
 
             connection = _connection;
@@ -503,7 +504,7 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
                 {
                     await CloseConnection();
                 }
-                catch (DisconnectException)
+                catch (ReadyStateException)
                 {
                     // closed meanwhile: there is nothing left to close
                 }
@@ -536,7 +537,7 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
 
                 return;
             }
-            catch (DisconnectException)
+            catch (ReadyStateException)
             {
                 // closed or replaced meanwhile: what is left is let go of below
             }
@@ -609,7 +610,7 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
 
         if (end.Reported is { } reported)
         {
-            Error?.Invoke(reported);
+            ListenerGuard.TellError(Error, reported);
         }
 
         _listeners.Tell(Close, (end.IsClean, false));

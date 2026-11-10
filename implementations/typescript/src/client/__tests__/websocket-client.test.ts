@@ -13,12 +13,14 @@ import { CLOSE_TIMEOUT } from '../../transport/client/websocket-transport-client
 import { bytesOf, readEnvelope, writeEnvelope } from '../../router/shared/envelope';
 import { CredentialScheme } from '../../router/shared/constants';
 import { toSessionToken } from '../../router/shared/identifiers';
+import { ReadyState } from '../../transport/shared/ready-state';
 import type { Announcement, Envelope, IFailure, OutgoingEnvelope } from '../../router/shared/types';
 import {
   createWebSocketClient,
   DisconnectError,
   FailureError,
   FailureScope,
+  ReadyStateError,
   SERVER_FAILURES,
   TimeoutError,
   type WebSocketClient,
@@ -91,7 +93,7 @@ const startEnvelopeServer = async () => {
     socket.send(writeEnvelope(envelope));
   };
 
-  return { nextEnvelope, send, server };
+  return { nextEnvelope, received, send, server };
 };
 
 /** The answer to `request`, on its call id: a result, or a failure, announcing a session or not. */
@@ -342,6 +344,32 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS) {
       request.socket.close(1001);
 
       await expect(answering).rejects.toBeInstanceOf(DisconnectError);
+    });
+
+    // debugging 9.7
+    test('fails a call before it connects by its ready state, sending nothing', async () => {
+      await using unconnected = createWebSocketClient({
+        transport: { WebSocket: TrackedWebSocket },
+      });
+      const failing = unconnected.services.getRequest(echo, { serializer })('hello')();
+
+      await expect(failing).rejects.toBeInstanceOf(ReadyStateError);
+      await expect(failing).rejects.toMatchObject({
+        expected: ReadyState.OPEN,
+        got: ReadyState.UNINITIALIZED,
+      });
+      expect(envelopes.received).toEqual([]);
+    });
+
+    // debugging 9.7
+    test('fails a call once disconnected as a disconnection, sending nothing', async () => {
+      await client.disconnect();
+
+      const failing = client.services.getRequest(echo, { serializer })('hello')();
+
+      await expect(failing).rejects.toBeInstanceOf(DisconnectError);
+      await expect(failing).rejects.toThrow('the transport client is closed, not open');
+      expect(envelopes.received).toEqual([]);
     });
   });
 }

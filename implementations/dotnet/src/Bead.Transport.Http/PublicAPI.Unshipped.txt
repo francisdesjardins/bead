@@ -1,4 +1,5 @@
 #nullable enable
+*REMOVED*Bead.Transport.Http.HttpTransportServer.CloseAll() -> System.Threading.Tasks.Task<bool[]!>!
 Bead.Transport.Http.HttpTransportServer.Start(Bead.TransportServerStartOptions? options = null) -> System.Threading.Tasks.Task<Bead.TransportServerAddress>!
 *REMOVED*Bead.Transport.Http.HttpTransportServer.Start(Bead.Transport.Http.HttpTransportStartOptions? options = null) -> System.Threading.Tasks.Task<Bead.TransportServerAddress>!
 *REMOVED*Bead.Transport.Http.HttpTransportStartOptions

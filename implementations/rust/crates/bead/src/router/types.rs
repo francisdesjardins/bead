@@ -16,7 +16,7 @@ use tokio_util::sync::CancellationToken;
 use crate::constants::CredentialScheme;
 use crate::duration::{LONGEST_TIMER, hold_finite};
 use crate::envelope::{FailureRecord, MAXIMUM_DETAIL_BYTES, MAXIMUM_ENVELOPE_BYTES, ResultHeader};
-use crate::errors::{CallError, ProgrammerError};
+use crate::errors::{CallError, ProgrammerError, ReadyStateError};
 use crate::failure::{Failure, ProcedureAddress};
 use crate::identity::Procedure;
 use crate::managers::notification::NotificationKey;
@@ -602,6 +602,8 @@ pub struct TransportMessage {
     pub port: Option<u16>,
     /// Whether it came by a way that keeps no order with its call's answer.
     pub may_overtake: bool,
+    /// Whether it came as a text message, which is no envelope (spec 15.2).
+    pub is_text: bool,
 }
 
 impl fmt::Debug for TransportMessage {
@@ -614,6 +616,7 @@ impl fmt::Debug for TransportMessage {
             .field("address", &self.address)
             .field("port", &self.port)
             .field("may_overtake", &self.may_overtake)
+            .field("is_text", &self.is_text)
             .field(
                 "credential",
                 &format_args!("{}", carried_or_none(self.credential.as_ref())),
@@ -685,6 +688,12 @@ pub struct AccessRefusal {
 pub enum RouterError {
     /// A failure of the protocol's, raised or received.
     Failure(Failure),
+    /// A client transport's send refused by its ready state before its open: uninitialized or
+    /// connecting (debugging 9.7).
+    ReadyState(ReadyStateError),
+    /// A client transport's send refused as its state is a close's: closing, closed or
+    /// reconnecting, saying so (debugging 9.7).
+    Disconnected(String),
     /// Anything else: what an application's code failed with, or a transport's error.
     Other(Arc<dyn Error + Send + Sync>),
 }
@@ -693,6 +702,8 @@ impl fmt::Display for RouterError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Failure(failure) => write!(formatter, "{failure}"),
+            Self::ReadyState(error) => write!(formatter, "{error}"),
+            Self::Disconnected(reason) => formatter.write_str(reason),
             Self::Other(error) => write!(formatter, "{error}"),
         }
     }
@@ -704,6 +715,8 @@ impl Error for RouterError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Failure(failure) => failure.source(),
+            Self::ReadyState(error) => error.source(),
+            Self::Disconnected(_) => None,
             Self::Other(error) => {
                 let source: &(dyn Error + 'static) = error.as_ref();
                 source.source()

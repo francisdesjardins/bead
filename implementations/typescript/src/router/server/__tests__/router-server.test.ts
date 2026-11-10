@@ -44,6 +44,7 @@ import {
   delaysOn,
   type TestClock,
   timersUntil,
+  trapUncaught,
 } from '../../../transport/shared/__tests__/fixtures';
 import {
   callIdsOf,
@@ -2430,6 +2431,40 @@ test.describe('createRouterServer', () => {
         ['pause first', 'resume first'],
         ['pause first', 'resume first'],
       ]);
+    });
+
+    // spec 15.2, 15.12.18
+    test('counts a text message by its UTF-8 bytes, then reports it ENVELOPE_MALFORMED with its connection, handing nothing on', async () => {
+      const { emitter, isPaused, open, paces, sent, transport } = createScriptedTransport();
+      using router = createRouterServer(transport, { intake: { maximumUntakenBytes: 4 } });
+      const taken = takenBy(router, isPaused);
+      const reported: [string, Handle | undefined, boolean][] = [];
+
+      router.on('error', (error, connectionHandle) => {
+        reported.push([
+          error instanceof FailureError ? `${String(error.code)} ${error.detail}` : error.message,
+          connectionHandle,
+          isPaused(first),
+        ]);
+      });
+      open(first);
+
+      // * four bytes in two UTF-16 code units: its bound reached, counted before it is reported
+      emitter.emit('message', { data: 'éé' }, first);
+
+      expect(reported).toEqual([
+        [
+          `${String(ProtocolCode.ENVELOPE_MALFORMED)} an envelope is binary, not a string`,
+          first,
+          true,
+        ],
+      ]);
+
+      await nextTask();
+      await sleep(0);
+
+      // released in the next task, and nothing handed on or answered
+      expect([paces, taken, sent]).toEqual([['pause first', 'resume first'], [], []]);
     });
 
     // spec 15.12.17
@@ -5373,6 +5408,39 @@ test.describe('createRouterServer, its metrics', () => {
       [failure, first],
       [failure, first],
     ]);
+  });
+
+  // spec 15.1; debugging 2.2
+  test('drops what an error listener throws, the next error listener told, and the call goes on', async () => {
+    using uncaught = trapUncaught();
+    const { deliver, open, sent, transport } = createScriptedTransport();
+    using router = createRouterServer(transport);
+    const failure = new Error('listener bug');
+    const heard: [Error, string | undefined][] = [];
+
+    router.once('debug', () => {
+      throw failure;
+    });
+    router.on('error', () => {
+      throw new Error('an error listener that throws');
+    });
+    router.on('error', (error, connectionHandle) => {
+      heard.push([error, connectionHandle]);
+    });
+    createServiceManager(router).getRequestResolver(echo, { serializer: answering })(
+      (request, response) => {
+        return response(request.payload);
+      }
+    );
+    open(first);
+    deliver(first, requestOf(1, { payload: text.encode('hi') }));
+    await sleep(0);
+
+    // * the debug listener's throw told the next error listener, with its connection, and the
+    // throw of the first dropped: the call answered with its result
+    expect(answersOf(sent)).toEqual([[first, 'result', 1, 'hi']]);
+    expect(heard).toEqual([[failure, first]]);
+    expect(uncaught.thrown).toEqual([]);
   });
 
   // debugging 9.7

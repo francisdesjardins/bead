@@ -270,26 +270,11 @@ public sealed class BrokerParticipant : IAsyncDisposable
         }
     }
 
+    // each error listener within a guard that drops what it throws, the listeners after it told:
+    // an error listener cannot fail its participant (spec 15.1)
     private void TellError(Exception reason)
     {
-        var listeners = Error;
-
-        if (listeners is null)
-        {
-            return;
-        }
-
-        foreach (var listener in listeners.GetInvocationList())
-        {
-            try
-            {
-                ((Action<Exception>)listener)(reason);
-            }
-            catch (Exception)
-            {
-                // an error listener cannot fail its participant
-            }
-        }
+        ListenerGuard.TellError(Error, reason);
     }
 
     internal long DrawOrdinal()

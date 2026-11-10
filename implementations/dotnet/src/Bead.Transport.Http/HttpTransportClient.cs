@@ -198,7 +198,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
         _maximumBodyBytes = _options.MaximumBodyBytes ?? LimitDefaults.MaximumEnvelopeBytes;
         _listeners = new ListenerGuard((reason, _) =>
         {
-            Error?.Invoke(reason);
+            ListenerGuard.TellError(Error, reason);
         });
     }
 
@@ -353,8 +353,9 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
 
     /// <summary>
     /// Posts one envelope, with its credential in the <c>Authorization</c> field when it has one,
-    /// settling on the head of its answer; refused with a <see cref="DisconnectException"/> unless
-    /// Open, and with an <see cref="ArgumentException"/>, its connection kept, for a credential no
+    /// settling on the head of its answer; refused unless Open, before its open with a
+    /// <see cref="ReadyStateException"/>, once its state is a close's with a
+    /// <see cref="DisconnectException"/> (debugging 9.7), and with an <see cref="ArgumentException"/>, its connection kept, for a credential no
     /// field carries. A refusal the server marks is an <see cref="IOException"/>: nothing of it was
     /// tried.
     /// </summary>
@@ -371,7 +372,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
 
         if (readyState != ReadyState.Open || connection is null)
         {
-            return Task.FromException(new DisconnectException($"the transport client is {NameOf(readyState)}, not open"));
+            return Task.FromException(NotOpen.Of(readyState));
         }
 
         // refused before it goes, the connection kept: a field could not carry it as it is (RFC 9110
@@ -388,7 +389,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     /// Deletes the connection — the server ends it first, so what waits there learns it, then what
     /// waits here goes — and raises its close, which says it was clean as
     /// <see cref="TransportClientDisconnectOptions.IsClean"/> does; quick, it lets the connection go at once,
-    /// the server told unwaited. Refused with a <see cref="DisconnectException"/> unless Open.
+    /// the server told unwaited. Refused with a <see cref="ReadyStateException"/> unless Open.
     /// </summary>
     public async Task CloseConnection(TransportClientDisconnectOptions? options = null)
     {
@@ -401,7 +402,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
         {
             if (_readyState != ReadyState.Open || _drawn is null)
             {
-                throw new DisconnectException($"the transport client is {NameOf(_readyState)}, not open");
+                throw new ReadyStateException(_readyState, ReadyState.Open);
             }
 
             _readyState = ReadyState.Closing;
@@ -434,14 +435,12 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
             _readyState = ReadyState.Closed;
         }
 
-        try
+        if (failure is not null)
         {
-            if (failure is not null) { Error?.Invoke(failure); }
+            ListenerGuard.TellError(Error, failure);
         }
-        finally
-        {
-            _listeners.Tell(Close, (isClean, isQuick));
-        }
+
+        _listeners.Tell(Close, (isClean, isQuick));
     }
 
     /// <summary>
@@ -523,7 +522,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
                 {
                     await CloseConnection();
                 }
-                catch (DisconnectException)
+                catch (ReadyStateException)
                 {
                     // closed meanwhile: there is nothing left to close
                 }
@@ -555,7 +554,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
             {
                 await CloseConnection();
             }
-            catch (DisconnectException)
+            catch (ReadyStateException)
             {
                 // closed or replaced meanwhile: what is left is dropped below
             }
@@ -754,8 +753,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     }
 
     // * its end: its exchanges cut, the server told when it is released, then its one error, then
-    // its close, told even when a listener of Error throws, which goes on to the task no one awaits,
-    // the platform's (spec 15.1)
+    // its close, told even when a listener of Error throws, what it threw dropped (spec 15.1)
     private void Ended(Drawn connection, (bool IsReleased, Exception? Failure) end)
     {
         var (isReleased, failure) = end;
@@ -789,17 +787,12 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
 
         if (isClosing)
         {
-            try
+            if (failure is not null)
             {
-                if (failure is not null)
-                {
-                    Error?.Invoke(failure);
-                }
+                ListenerGuard.TellError(Error, failure);
             }
-            finally
-            {
-                _listeners.Tell(Close, (false, false));
-            }
+
+            _listeners.Tell(Close, (false, false));
         }
     }
 

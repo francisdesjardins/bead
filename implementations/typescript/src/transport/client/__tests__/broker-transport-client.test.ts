@@ -13,6 +13,7 @@ import { createBrokerParticipant } from '../../shared/broker-participant';
 import {
   CancelError,
   ConnectError,
+  DisconnectError,
   GenericError,
   ProgrammerError,
   ReadyStateError,
@@ -24,8 +25,9 @@ import {
   type IMemoryBrokerAdapter,
 } from '../../shared/memory-broker';
 import { noop } from '../../shared/noop';
+import { ReadyState } from '../../shared/ready-state';
 import type { BrokerTopic, IBrokerAdapter } from '../../shared/types';
-import { createTestClock } from '../../shared/__tests__/fixtures';
+import { createTestClock, sendRefusalOf } from '../../shared/__tests__/fixtures';
 import {
   BrokerRefusedError,
   CONNECT_DEFAULTS,
@@ -301,7 +303,8 @@ test.describe('createBrokerTransportClient', () => {
       await expect(client.connect({ server })).rejects.toThrow(ProgrammerError);
     }
 
-    await expect(client.send({ data: new Uint8Array(1) })).rejects.toThrow(ReadyStateError);
+    // * closed by the connect that failed: a send fails as a disconnection, a disconnect by its state
+    await expect(client.send({ data: new Uint8Array(1) })).rejects.toThrow(DisconnectError);
     await expect(client.disconnect()).rejects.toThrow(ReadyStateError);
     expect([client.carries('Bearer token'), client.carries(' padded')]).toEqual([true, false]);
 
@@ -530,7 +533,76 @@ test.describe('createBrokerTransportClient', () => {
       [[false, 'type=BROKER;participant=ada;ordinal=1']],
     ]);
 
+    // closed: a send fails as a disconnection, a disconnect by its state (debugging 9.7)
+    await expect(client.send({ data: Uint8Array.of(0xa1) })).rejects.toThrow(
+      new DisconnectError('the transport client is closed, not open')
+    );
+    await expect(client.disconnect()).rejects.toMatchObject({
+      got: ReadyState.CLOSED,
+      name: 'ReadyStateError',
+    });
+
     await Promise.all([participant.stop(), ada.stop()]);
+  });
+
+  // debugging 9.7
+  test('refuses a send by its ready state before the open and as a disconnection after it, in each state it holds', async () => {
+    const broker = createMemoryBroker();
+    const ada = createBrokerParticipant({ adapter: broker.adapter({ id: 'ada' }) });
+    // * a server of the test's own, which answers an OPEN only as the test does
+    const peer = await peerOf(broker);
+    const client = ada.transportClient();
+    const refusals: Awaited<ReturnType<typeof sendRefusalOf>>[] = [];
+
+    // never connected
+    refusals.push(await sendRefusalOf(client));
+
+    // connecting, its OPEN unanswered
+    const connecting = client.connect({ server: 'interop' });
+
+    await turn();
+    refusals.push(await sendRefusalOf(client));
+    await peer.adapter.publish({
+      payload: acceptOf(peer.heard[0]?.opener ?? new Uint8Array(8)),
+      topic: INBOX,
+    });
+    await connecting;
+
+    // open, the send going
+    refusals.push(await sendRefusalOf(client));
+
+    // closing left out: its disconnect, a CLOSE or a RESET, is closing and closed within one turn
+    await client.disconnect();
+    refusals.push(await sendRefusalOf(client));
+
+    // reconnecting, its OPEN unanswered, then ended by its signal
+    const ending = new AbortController();
+    const reconnecting = client.reconnect({ signal: ending.signal });
+
+    await turn();
+    refusals.push(await sendRefusalOf(client));
+    ending.abort();
+    await expect(reconnecting).rejects.toBeInstanceOf(CancelError);
+
+    // closed by a connect that started and failed: nothing serves its name, its broker says so
+    await expect(client.connect({ server: 'nobody' })).rejects.toBeInstanceOf(ConnectError);
+    refusals.push(await sendRefusalOf(client));
+
+    expect(refusals).toEqual([
+      [
+        'ReadyStateError',
+        ReadyState.UNINITIALIZED,
+        'the transport client is uninitialized, not open',
+      ],
+      ['ReadyStateError', ReadyState.CONNECTING, 'the transport client is connecting, not open'],
+      'sent',
+      ['DisconnectError', undefined, 'the transport client is closed, not open'],
+      ['DisconnectError', undefined, 'the transport client is reconnecting, not open'],
+      ['DisconnectError', undefined, 'the transport client is closed, not open'],
+    ]);
+
+    await ada.stop();
+    await peer.adapter.stop();
   });
 
   test('fails a connect under way once disposed, its link up or not yet', async () => {

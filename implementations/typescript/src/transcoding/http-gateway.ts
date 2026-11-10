@@ -27,7 +27,7 @@ import { PAYLOAD_CODECS } from '../router/shared/payloads';
 import { createMemoryTransportClient } from '../transport/client/memory-transport-client';
 import { assertHeld, type IClock, PLATFORM_CLOCK, type TimeoutId } from '../transport/shared/clock';
 import { REFUSAL_HEADER } from '../transport/shared/constants';
-import { createEmitter } from '../transport/shared/emitter';
+import { createEmitter, tellError } from '../transport/shared/emitter';
 import {
   CancelError,
   ConnectError,
@@ -593,9 +593,9 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
   const live = new Set<() => void>();
   const emitter = createEmitter<HTTPGatewayEventMap>();
 
-  // ! a listener's throw goes no further: the exchange answers on
+  // ! what a listener of `error` throws is dropped, and the exchange answers on (spec 15.1)
   const report = (reason: unknown): void => {
-    emitter.emitEach('error', { onError: () => {}, params: [toError(reason)] });
+    tellError(emitter, [toError(reason)]);
   };
 
   /** A call or a stream held against its bounds (10.3): its release, or the words of the bound it is past. */

@@ -12,5 +12,8 @@ pub(crate) mod participant;
 pub(crate) mod sequence;
 pub(crate) mod server;
 
+// what refuses a text message at either end, as the other sides word it (spec 15.2)
+const TEXT_REFUSED: &str = "a broker connection carries envelopes, as bytes";
+
 #[cfg(test)]
 mod tests;

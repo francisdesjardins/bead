@@ -596,7 +596,7 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
         _clock = _options.Clock ?? TimeProvider.System;
         _listeners = new ListenerGuard((reason, connectionHandle) =>
         {
-            Error?.Invoke(reason, connectionHandle ?? "");
+            ListenerGuard.TellError(Error, (reason, connectionHandle ?? ""));
         });
         _exchange = new HttpRequestExchange<Drawn>(new HttpRequestExchange<Drawn>.Port
         {
@@ -940,12 +940,6 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
 
             throw;
         }
-    }
-
-    /// <summary>Closes every connection, as <see cref="CloseConnection"/> closes one, and gives what each close gave.</summary>
-    public Task<bool[]> CloseAll()
-    {
-        return Task.WhenAll(ConnectionHandles.Select(CloseConnection));
     }
 
     /// <summary>Closes a connection cleanly, its close raised; false when it held none by that handle.</summary>
@@ -1322,7 +1316,7 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
     // ! a connection dropped behind a bound of its own (spec 15.9, 15.12), its exchange lost, as an
     // answer that could not be written is (spec 15.7): its end begun, then reported, why naming the
     // bound in the spec's spelling and its value; once, as it ends, before its unclean close, which
-    // is told even when a listener of Error throws, what it threw going on to its caller (spec 15.1)
+    // is told even when a listener of Error throws, what it threw dropped (spec 15.1)
     private void Drop((Drawn Connection, string Why) dropped)
     {
         var (connection, why) = dropped;
@@ -1339,14 +1333,8 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
                     return;
                 }
 
-                try
-                {
-                    Error?.Invoke(ServerBounds.DroppedOf(connection.ConnectionHandle, why), connection.ConnectionHandle);
-                }
-                finally
-                {
-                    _listeners.Tell(Close, (false, connection.ConnectionHandle));
-                }
+                ListenerGuard.TellError(Error, (ServerBounds.DroppedOf(connection.ConnectionHandle, why), connection.ConnectionHandle));
+                _listeners.Tell(Close, (false, connection.ConnectionHandle));
             }
         }
         finally

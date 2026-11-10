@@ -8,6 +8,7 @@ import {
   CancelError,
   ConnectError,
   type Data,
+  DisconnectError,
   dispose,
   type ITransportClient,
   type ITransportClientInternal,
@@ -37,6 +38,7 @@ import {
   IMPLEMENTATIONS,
   portOf,
   reachedByLocalhost,
+  sendRefusalOf,
   sockets,
   spyIntervals,
   startServer,
@@ -637,10 +639,11 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
         expect([isBinary, data.toString()]).toEqual([true, 'hello']);
       });
 
-      test('rejects with a ReadyStateError after disconnecting', async () => {
+      // debugging 9.7
+      test('rejects with a DisconnectError after disconnecting', async () => {
         await client.connect({ host, port });
         await client.disconnect();
-        await expect(client.send({ data: 'HelloWorld' })).rejects.toBeInstanceOf(ReadyStateError);
+        await expect(client.send({ data: 'HelloWorld' })).rejects.toBeInstanceOf(DisconnectError);
       });
 
       test('delivers a fragmented message whole then the next message separately', async () => {
@@ -806,14 +809,21 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
         expect(client.isClosed()).toBe(true);
       });
 
-      test('rejects with a ReadyStateError before connecting', async () => {
-        await expect(client.disconnect()).rejects.toBeInstanceOf(ReadyStateError);
-      });
-
-      test('rejects with a ReadyStateError on a closed connection', async () => {
+      // debugging 9.7
+      test('refuses a close before it connects and once closed', async () => {
+        // a lifecycle operation, refused by its ready state in every state but open
+        await expect(client.disconnect()).rejects.toMatchObject({
+          got: ReadyState.UNINITIALIZED,
+          message: 'the transport client is uninitialized, not open',
+          name: 'ReadyStateError',
+        });
         await client.connect({ host, port });
         await client.disconnect();
-        await expect(client.disconnect()).rejects.toBeInstanceOf(ReadyStateError);
+        await expect(client.disconnect()).rejects.toMatchObject({
+          got: ReadyState.CLOSED,
+          message: 'the transport client is closed, not open',
+          name: 'ReadyStateError',
+        });
       });
 
       test('emits "close" with wasClean=true and wasQuick=false when the client disconnects', async () => {
@@ -855,7 +865,7 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
         expect(await closed).toEqual([false, false]);
         expect(client.isClosed()).toBe(true);
         await expect(client.send({ data: Uint8Array.of(1) })).rejects.toBeInstanceOf(
-          ReadyStateError
+          DisconnectError
         );
       });
 
@@ -900,7 +910,7 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
         drop(client);
 
         expect(client.isClosed()).toBe(true);
-        await expect(client.send({ data: 'x' })).rejects.toHaveProperty('got', ReadyState.CLOSED);
+        await expect(client.send({ data: 'x' })).rejects.toBeInstanceOf(DisconnectError);
 
         await client.connect({ host, port });
         expect(client.isOpen()).toBe(true);
@@ -1161,6 +1171,71 @@ test.describe('WebSocketTransportClient, with a scripted WebSocket', () => {
     await again;
 
     expect(client.isOpen()).toBe(true);
+  });
+
+  // debugging 9.7
+  test('refuses a send by its ready state before the open and as a disconnection after it, in each state it holds', async () => {
+    const { FakeWebSocket, sockets: scripted } = createFakeWebSocket();
+    await using client = createWebSocketTransportClient({ WebSocket: FakeWebSocket });
+    const refusals: Awaited<ReturnType<typeof sendRefusalOf>>[] = [];
+
+    // never connected
+    refusals.push(await sendRefusalOf(client));
+
+    // connecting, its handshake unanswered
+    const connecting = client.connect({ host: 'h', port: 1 });
+
+    refusals.push(await sendRefusalOf(client));
+    scripted[0]?.fireOpen();
+    await connecting;
+
+    // open, the send going
+    refusals.push(await sendRefusalOf(client));
+
+    // closing, its close unanswered
+    const socket = scripted[0];
+
+    if (socket !== undefined) {
+      socket.closeBehaviour = 'ignore';
+    }
+
+    const disconnecting = client.disconnect();
+
+    refusals.push(await sendRefusalOf(client));
+    socket?.fireClose({ code: 1000, reason: '' });
+    await disconnecting;
+
+    // closed by its own disconnect
+    refusals.push(await sendRefusalOf(client));
+
+    // reconnecting, its handshake unanswered, then ended by its signal
+    const ending = new AbortController();
+    const reconnecting = client.reconnect({ signal: ending.signal });
+
+    refusals.push(await sendRefusalOf(client));
+    ending.abort();
+    await expect(reconnecting).rejects.toBeInstanceOf(CancelError);
+
+    // closed by a connect that started and failed: its server refusing it
+    const failing = client.connect({ host: 'h', port: 1 });
+
+    scripted.at(-1)?.fireClose({ code: 1006, reason: 'refused' });
+    await expect(failing).rejects.toBeInstanceOf(ConnectError);
+    refusals.push(await sendRefusalOf(client));
+
+    expect(refusals).toEqual([
+      [
+        'ReadyStateError',
+        ReadyState.UNINITIALIZED,
+        'the transport client is uninitialized, not open',
+      ],
+      ['ReadyStateError', ReadyState.CONNECTING, 'the transport client is connecting, not open'],
+      'sent',
+      ['DisconnectError', undefined, 'the transport client is closing, not open'],
+      ['DisconnectError', undefined, 'the transport client is closed, not open'],
+      ['DisconnectError', undefined, 'the transport client is reconnecting, not open'],
+      ['DisconnectError', undefined, 'the transport client is closed, not open'],
+    ]);
   });
 
   test('a dispose or a close between the open and the end of connect is not undone', async () => {
@@ -2554,15 +2629,19 @@ test.describe('WebSocketTransportClient, what its error tells', () => {
     ]);
   });
 
-  test('fails its connection on a protocol error whose error listener throws, telling its close all the same', async () => {
+  test('fails its connection on a protocol error whose error listener throws, telling its close all the same and dropping what it threw', async () => {
     using uncaught = trapUncaught();
     await using raw = await startRaw();
     const client = createWebSocketTransportClient({ WebSocket: TrackedWs });
     const closes: unknown[][] = [];
+    const heard: (string | undefined)[] = [];
     const upgraded = raw.next();
 
     client.on('error', () => {
       throw new Error('an error listener that throws');
+    });
+    client.on('error', (error) => {
+      heard.push((error as Error & { code?: string }).code);
     });
     client.on('close', (wasClean, wasQuick) => {
       closes.push([wasClean, wasQuick]);
@@ -2579,12 +2658,8 @@ test.describe('WebSocketTransportClient, what its error tells', () => {
         return closes;
       })
       .toEqual([[false, false]]);
-    // what the listener threw was Node's, once
-    expect(
-      uncaught.thrown.map((error) => {
-        return (error as Error).message;
-      })
-    ).toEqual(['an error listener that throws']);
+    // * what the listener threw is dropped: the listener after it told the failure, and nothing else
+    expect([heard, uncaught.thrown]).toEqual([['WS_ERR_INVALID_OPCODE'], []]);
     expect(client.isClosed()).toBe(true);
   });
 

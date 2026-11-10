@@ -32,6 +32,8 @@ with the hash of its text. The why of each rule is in the decisions:
 - [0042](../docs/decisions/0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md):
   a request that leaves a required field unset, refused where its server would refuse it, and where
   it is placed (4.5, 5.2, 5.6, 7.4, 11);
+- [0023](../docs/decisions/0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md):
+  what a listener of a gateway's error event throws;
 - [0002](../docs/decisions/0002-a-subscription-goes-at-its-clients-pace.md): a stream at its
   reader's pace (8.8);
 - [0024](../docs/decisions/0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md),
@@ -547,7 +549,8 @@ application's: a code between it and its server, its server's answer it could no
 its server takes none of, its call's timeout, its exchange's connection closed, a result section 5.7
 refuses, what no gate foresaw. What it reports no problem's member carries, and an answer for an
 error of its own carries its code alone, as section 9.0 has one: `DESTINATION_UNREACHABLE` and what
-no gate foresaw, with no detail.
+no gate foresaw, with no detail. What a listener of its `error` throws is dropped, and the exchange
+answers on (section 15.1 of `spec.md`).
 
 7.7. A refusal of the gateway's own is marked in `bead-refusal`, as section 15.6 of `spec.md` marks
 a transport's, so that a client tells it from a call's answer, and a gateway MUST write its body as

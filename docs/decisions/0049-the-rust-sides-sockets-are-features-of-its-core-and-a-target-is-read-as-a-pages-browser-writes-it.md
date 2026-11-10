@@ -7,7 +7,9 @@
   them; a server's start and its life on the Rust side; and, on every side, the rule of
   [`spec/spec.md`](../../spec/spec.md)'s 15.12 on a request's target and
   [`spec/transcoding.md`](../../spec/transcoding.md)'s 3.6, which reads it, with the cases of
-  `spec/transports.json` and `spec/transcoding.json` that play it. It moves the reading of an
+  `spec/transports.json` and `spec/transcoding.json` that play it; a text message over WebSocket at
+  its router, spec 15.2, on every side; and the transport servers' `closeAll`, which leaves every
+  side. It moves the reading of an
   absolute-form target's scheme that
   [0024](0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md) states,
   and the `#` that
@@ -234,6 +236,36 @@ sides; and a WebSocket client's `pathname` defaults to `/` there. The HTTP clien
 three names, one row of `tools/names.tsv` rendered by its platform: `HTTPClient`, `BeadHttpClient`
 beside .NET's own `System.Net.Http.HttpClient`, and `HttpClient`.
 
+### A text message reaches its router
+
+A WebSocket transport, server and client, on every side, hands a text message to its router as it
+hands a binary one, marked text, its connection's activity stamped as it is read, before anything
+judges it; the router counts it against what its connection has not taken by **its bytes as the
+wire carried them, UTF-8** ([RFC 6455 §5.6](https://www.rfc-editor.org/rfc/rfc6455#section-5.6),
+spec 15.12), then reports it `ENVELOPE_MALFORMED`, "an envelope is binary, not a string", through
+its own `error` event with its connection (none on a client), releases its count in that turn, and
+hands nothing on (spec 15.2). The transport reports nothing of it: what a transport reports on its
+`error` is what it ends a connection for of its own (spec 15.1), and a text ends nothing. The mark
+is the C# side's `TransportMessage.IsText` and the Rust side's `TransportMessage::is_text`; on the
+TypeScript side a text is the string the WebSocket API gives (`MessageEvent.data`, a DOMString),
+counted by its UTF-8 length, since a page's client receives nothing else. An in-memory or broker
+transport refuses to send a text, before anything goes, the connection kept: "an in-memory
+connection carries envelopes, as bytes", "a broker connection carries envelopes, as bytes"
+(TypeScript `ProgrammerError`, C# `ArgumentException`, Rust a `ProgrammerError`). A WebSocket or
+HTTP transport sends what it is given as binary, the mark unread.
+
+### closeAll leaves every side
+
+No transport server closes every connection it holds while it listens on: the TypeScript side's
+`ITransportServer` and `createTransportServer` carry no `closeAll`, the C# side's
+`HttpTransportServer` and `WebSocketTransportServer` no `CloseAll`, and the Rust side's servers no
+twin of them. A server that ends its connections stops (spec 15.1), each closed going away, 1001
+([RFC 6455 §7.4.1](https://www.rfc-editor.org/rfc/rfc6455#section-7.4.1)); one connection closes by
+`close` (TypeScript, Rust) or `CloseConnection` (C#), on the server's transport on every side
+(`IServerTransportLike`, `IServerTransport`, `ServerTransport`). `clients` stays on each concrete
+transport server, every side, a copy without the sockets, which twin tests hold on the Rust
+WebSocket and HTTP servers as on the others'.
+
 ### The interop
 
 The interop runs both ways with the Rust side, over WebSocket and over HTTP: its client against the
@@ -270,9 +302,13 @@ side's `fetchInOrder` and the C# side's `InOrder` keep theirs; the transport ord
 
 ## The Tenth Man
 
-The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)) at
-xhigh effort: fourteen objections, each checked against its probe or the code before it was
-answered. Twelve were accepted, two in part, and none refused.
+The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)) in
+two rounds, each at xhigh effort. Their objections, each with the answer that holds:
+
+### On the sockets and a target's reading
+
+Fourteen objections, each checked against its probe or the code before it was answered. Twelve
+were accepted, two in part, and none refused.
 
 | Objection                                                                                                                                                                                                                                                                     | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -304,3 +340,20 @@ bound in the spec; `rustls-native-certs`, `webpki-roots`, `ring`, `rustls-rustcr
 `native-tls`; hyper-util's `client::pool` layers, `hyper::client::conn::http1` with a pool of Bead's
 own, and reqwest; a crate per transport; a `tls` feature; `cargo hack --each-feature`; h2c; the
 service client in this stage; and axum, fastwebsockets, `TokioExecutor` and `TokioTimer`.
+
+### On the four divergences found as the sockets landed
+
+Two of the four, what a listener of an `error` event throws and a call to a client whose transport
+is not open, are
+[0023](0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md)'s
+and [0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)'s, whose rounds answer their
+objections; a text message at its router and `closeAll` are this record's. Five objections, each
+checked against the code before it was answered: two accepted, three in part, none refused.
+
+| Objection                                                                                                                                                                                                                                                                                                                    | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| "As TS and C# do" is two behaviours: TypeScript hands a decoded string and counts it in UTF-16 units, C# bytes marked text counted in UTF-8 bytes; and the Rust radius is larger — a public field on a `#[non_exhaustive]` type with a hand-written `Debug`, 36 construction sites, the in-memory and broker sends' refusals | In part: the count's unit is named, the bytes the wire carried, UTF-8 (RFC 6455 §5.6), and the TypeScript side counts a string by its UTF-8 length; the Rust radius is listed — the field, its `Debug`, every construction, the in-memory and broker refusals as the other sides', and their twins; and hearing the router alone also stops the Rust player hearing the transport's 1009 report the case does not list. Handing bytes marked text on the TypeScript side is refused: the WebSocket API delivers a text as a string, which a page's client receives and nothing else |
+| A fourth state: the Rust server stamps no activity on a text, and its twin cannot tell, its clock frozen and a binary following                                                                                                                                                                                              | Accepted: the activity is stamped as a message is read, before anything judges it; the Rust twin steps its clock between the text and the binary and asserts the stamp after each, as the TypeScript twin does                                                                                                                                                                                                                                                                                                                                                                      |
+| The parity rule names removal first, and nobody calls `closeAll`: it is `Promise.all` over a snapshot, closes with 1000 where a stop sends 1001, and may go before 1.0.0                                                                                                                                                     | Accepted: `closeAll` leaves the TypeScript side and `CloseAll` the C# side, their tests with them, the CHANGELOG telling it; the Rust side gains none                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| The level differs for `clients`, `close` and `closeAll` alike — interface on one side, inherent on another, a trait on the third — and the names check cannot see an instance method                                                                                                                                         | In part: with `closeAll` gone nothing is added at any level. `close` stands on the server's transport on every side, `IServerTransport.CloseConnection` among them (`Server.cs` 74), where the objection read none; `clients` stands on each concrete transport server on every side and on no joined one. One level each; the matrix and the twins hold it, and the Rust WebSocket and HTTP servers gain their `clients` twins                                                                                                                                                     |
+| The round is undersized: an error listener's throw revises a record and 15.1, a call to a client not open the companion and a count, a text message a public Rust type; that is the full round's size, and the first two should go through it with their records                                                             | In part: the size is accepted, and this round is the full one, which writes 15.1, 15.2 and debugging 2.2, 9.6 and 9.7 and revises 0023, 0013 and this record. The split into rounds of their own is refused: each behaviour lands in its own commits, the spec's first, and none waits on another                                                                                                                                                                                                                                                                                   |

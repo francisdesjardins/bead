@@ -1660,7 +1660,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
 
     // spec 15.1
     [Fact]
-    public async Task Closes_with_1009_and_drops_behind_maximumUnsentBytes_a_connection_whose_error_listener_throws_telling_its_close_all_the_same()
+    public async Task Closes_with_1009_and_drops_behind_maximumUnsentBytes_a_connection_whose_error_listener_throws_telling_its_close_all_the_same_and_dropping_what_it_threw()
     {
         PausedWebSocket? paused = null;
 
@@ -1676,11 +1676,13 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
 
         var reported = new ConcurrentQueue<string>();
 
+        _server.Error += (_, _) =>
+        {
+            throw new InvalidOperationException("an error listener that throws");
+        };
         _server.Error += (reason, _) =>
         {
             reported.Enqueue(reason.Message);
-
-            throw new InvalidOperationException("an error listener that throws");
         };
 
         var (tooBig, tooBigHandle) = await Connect();
@@ -1710,6 +1712,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             Assert.Equal((false, behindHandle), await Next(_closes));
         }
 
+        // * what the listener threw is dropped: the listener after it told each end, and nothing else
         Assert.Equal(
             [
                 $"{tooBigHandle} is closed with 1009: a message past its maximumMessageBytes, 64 bytes",
@@ -2604,36 +2607,6 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         })).Message);
         Assert.Equal(ReadyState.Closed, server.ReadyState);
         await AssertRefused(port);
-    }
-
-    [Fact]
-    public async Task CloseAll_closes_every_connection_with_1000_and_gives_nothing_without_one()
-    {
-        Assert.Empty(await _server.CloseAll().WaitAsync(Patience, Cancelled));
-
-        var (first, firstHandle) = await Connect();
-        var (second, secondHandle) = await Connect();
-
-        using (first)
-        using (second)
-        {
-            var answering = Task.WhenAll(AnswerClose(first), AnswerClose(second));
-            var closed = await _server.CloseAll().WaitAsync(Patience, Cancelled);
-
-            Assert.Equal([true, true], closed);
-            Assert.Empty(_server.ConnectionHandles);
-            Assert.Empty(_server.Clients);
-            Assert.True(_closes.Reader.TryRead(out var one));
-            Assert.True(_closes.Reader.TryRead(out var other));
-            Assert.Equal(
-                new HashSet<(bool, string)> { (true, firstHandle), (true, secondHandle) },
-                new HashSet<(bool, string)> { one, other });
-
-            var answered = await answering.WaitAsync(Patience, Cancelled);
-
-            Assert.Equal([WebSocketCloseStatus.NormalClosure, WebSocketCloseStatus.NormalClosure], answered);
-            Assert.Equal(ReadyState.Open, _server.ReadyState);
-        }
     }
 
     // a heartbeat refused is the durations' file's to play

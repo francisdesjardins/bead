@@ -1039,10 +1039,11 @@ async fn reports_an_outbox_that_passes_maximum_outbox_bytes_as_it_closes_its_con
 }
 
 // spec 15.1
-// * an error listener that panics is caught as it tells, so the send settles all the same, where
-// the other sides' throw reaches the send under way
+// * an error listener that panics is caught as it tells and its panic dropped, as every side drops
+// it: the send settles as with no listener, and the listener after it, its recorder, hears the
+// error alone
 #[tokio::test]
-async fn drops_behind_maximum_outbox_bytes_a_connection_whose_error_listener_throws_telling_its_close_all_the_same()
+async fn drops_behind_maximum_outbox_bytes_a_connection_whose_error_listener_throws_telling_its_close_all_the_same_and_dropping_what_it_threw()
  {
     struct Throwing;
 

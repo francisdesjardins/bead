@@ -35,6 +35,7 @@ const LOOPBACK: &str = "127.0.0.1";
 #[derive(Default)]
 struct Told {
     messages: Vec<Bytes>,
+    texts: Vec<bool>,
     closes: Vec<(bool, bool)>,
     errors: Vec<String>,
     reconnects: usize,
@@ -56,6 +57,10 @@ impl Recorder {
         self.told.lock().unwrap().messages.clone()
     }
 
+    fn texts(&self) -> Vec<bool> {
+        self.told.lock().unwrap().texts.clone()
+    }
+
     fn closes(&self) -> Vec<(bool, bool)> {
         self.told.lock().unwrap().closes.clone()
     }
@@ -67,7 +72,10 @@ impl Recorder {
 
 impl ClientListener for Recorder {
     fn on_message(&self, message: TransportMessage) {
-        self.record(|told| told.messages.push(message.data));
+        self.record(|told| {
+            told.texts.push(message.is_text);
+            told.messages.push(message.data);
+        });
     }
 
     fn on_close(&self, was_clean: bool, is_quick: bool) {
@@ -2143,8 +2151,9 @@ async fn carries_no_credential_the_envelope_alone_goes() {
     client.dispose();
 }
 
+// debugging 9.7
 #[tokio::test]
-async fn rejects_with_a_ready_state_error_after_disconnecting() {
+async fn rejects_with_a_disconnect_error_after_disconnecting() {
     let server = hearing(None).await;
     let client = client();
 
@@ -2154,7 +2163,7 @@ async fn rejects_with_a_ready_state_error_after_disconnecting() {
     let refused = client.send(binary(b"HelloWorld"));
 
     assert!(
-        matches!(&refused, Err(RouterError::Other(error)) if error.downcast_ref::<ReadyStateError>().is_some()),
+        matches!(&refused, Err(RouterError::Disconnected(reason)) if reason == "the transport client is closed, not open"),
         "{refused:?}"
     );
 }
@@ -2185,8 +2194,9 @@ async fn delivers_a_fragmented_message_whole_then_the_next_message_separately() 
 
 // ── Its "message" event ──────────────────────────────────────────────────────────────────────
 
+// spec 15.2
 #[tokio::test]
-async fn emits_what_the_server_sends_text_as_a_string_binary_as_an_array_buffer() {
+async fn emits_what_the_server_sends_text_as_text_binary_as_bytes() {
     let server = hearing(None).await;
     let client = client();
     let recorder = recorded(&client);
@@ -2198,21 +2208,15 @@ async fn emits_what_the_server_sends_text_as_a_string_binary_as_an_array_buffer(
     upgraded.send(Message::text("text"));
     upgraded.send(Message::Binary(Bytes::from_static(b"binary")));
 
-    // * a text message is no envelope: reported, handed nothing; a binary one handed whole
+    // * each handed on whole, a text one marked so: its router judges it, its transport reports
+    // nothing of it (spec 15.2)
     assert_eq!(
-        messages_within(&recorder, 1).await,
-        [Bytes::from_static(b"binary")],
-        "the binary one"
+        messages_within(&recorder, 2).await,
+        [Bytes::from_static(b"text"), Bytes::from_static(b"binary")],
+        "both, in order"
     );
-    assert_eq!(
-        recorder
-            .errors()
-            .iter()
-            .map(|error| error.ends_with("ENVELOPE_MALFORMED: an envelope is binary, not a string"))
-            .collect::<Vec<_>>(),
-        [true],
-        "the text one reported"
-    );
+    assert_eq!(recorder.texts(), [true, false], "the text one marked");
+    assert!(recorder.errors().is_empty(), "nothing reported");
     client.dispose();
 }
 
@@ -2491,8 +2495,8 @@ async fn dispose_on_an_open_client_leaves_it_closed_and_ready_to_connect_again()
 
     assert!(is_state(&client, ReadyState::Closed), "closed");
     assert!(
-        matches!(client.send(binary(b"x")), Err(RouterError::Other(error)) if error.to_string() == "the transport client is closed, not open"),
-        "refused, closed"
+        matches!(client.send(binary(b"x")), Err(RouterError::Disconnected(reason)) if reason == "the transport client is closed, not open"),
+        "refused as a disconnection, closed"
     );
 
     settled(client.connect(&to(server.port))).await.unwrap();
@@ -3120,8 +3124,10 @@ async fn fails_with_1009_a_message_past_its_bound_for_a_server_that_never_answer
 }
 
 // spec 15.1
+// * an error listener that panics is caught as it tells and its panic dropped, as every side drops
+// it: the listener after it, its recorder, hears the error alone
 #[tokio::test]
-async fn fails_its_connection_on_a_protocol_error_whose_error_listener_throws_telling_its_close_all_the_same()
+async fn fails_its_connection_on_a_protocol_error_whose_error_listener_throws_telling_its_close_all_the_same_and_dropping_what_it_threw()
  {
     struct Throwing;
 
@@ -3152,6 +3158,14 @@ async fn fails_its_connection_on_a_protocol_error_whose_error_listener_throws_te
         "its close all the same"
     );
     assert!(is_state(&client, ReadyState::Closed), "closed");
+
+    let told = told_of(&recorder);
+
+    assert_eq!(told.len(), 2, "one error, then its close: {told:?}");
+    assert!(
+        told[0].starts_with("error: the connection is closed with 1002"),
+        "the error alone, no throw told: {told:?}"
+    );
 }
 
 // ── Its close timeout ────────────────────────────────────────────────────────────────────────
@@ -3594,4 +3608,146 @@ fn runs_on_the_runtime_it_is_given_and_on_the_current_one_alone_when_given_none(
     assert_eq!(client.ready_state(), ReadyState::Open, "open");
     runtime.block_on(client.close());
     runtime.block_on(server.stop()).expect("stopped");
+}
+
+// ── Not open ─────────────────────────────────────────────────────────────────────────────────
+
+// what a send in a state gives: sent, its ready state's refusal or a disconnection
+fn sent_in(sent: Result<Sent, RouterError>) -> String {
+    match sent {
+        Ok(_) => "sent".to_owned(),
+        Err(RouterError::ReadyState(refusal)) => format!("ready state {}", refusal.got().name()),
+        Err(RouterError::Disconnected(reason)) => format!("disconnected: {reason}"),
+        Err(other) => format!("other: {other}"),
+    }
+}
+
+// debugging 9.7
+#[tokio::test]
+async fn refuses_a_close_before_it_connects_and_once_closed() {
+    let server = hearing(None).await;
+    let client = client();
+    let refused = client
+        .disconnect(&TransportClientDisconnectOptions::default())
+        .err();
+
+    assert!(
+        matches!(&refused, Some(TransportError::ReadyState(refusal)) if refusal.got() == ReadyState::Uninitialized),
+        "before it connects: {refused:?}"
+    );
+
+    settled(client.connect(&to(server.port))).await.unwrap();
+    disconnected(&client).await.unwrap();
+
+    let refused = client
+        .disconnect(&TransportClientDisconnectOptions::default())
+        .err();
+
+    assert!(
+        matches!(&refused, Some(TransportError::ReadyState(refusal)) if refusal.got() == ReadyState::Closed),
+        "once closed: {refused:?}"
+    );
+    assert_eq!(
+        refused.map(|refusal| refusal.to_string()).as_deref(),
+        Some("the transport client is closed, not open"),
+        "said why"
+    );
+}
+
+// debugging 9.7
+#[tokio::test]
+async fn refuses_a_send_by_its_ready_state_before_the_open_and_as_a_disconnection_after_it_in_each_state_it_holds()
+ {
+    let mut held = holding().await;
+    let mut server = raw().await;
+    let client = client_of(&WebSocketTransportClientOptions {
+        close_timeout: Some(Duration::from_millis(100)),
+        ..WebSocketTransportClientOptions::default()
+    });
+    let mut told = Vec::new();
+
+    // never connected
+    told.push(("UNINITIALIZED", sent_in(client.send(binary(b"x")))));
+
+    // its handshake unanswered
+    let refusing = spawn(client.connect(&to(held.port)));
+    let mut socket = held.next().await;
+
+    head_of(&mut socket).await;
+    assert!(is_state(&client, ReadyState::Connecting), "connecting");
+    told.push(("CONNECTING", sent_in(client.send(binary(b"x")))));
+
+    // a connect its server refused: closed
+    socket.write_all(FORBIDDEN.as_bytes()).await.unwrap();
+    patience(PATIENCE, refusing)
+        .await
+        .unwrap()
+        .unwrap()
+        .expect_err("refused by its server");
+    told.push(("CLOSED, failed", sent_in(client.send(binary(b"x")))));
+
+    // a reconnection's attempt, its handshake unanswered, then cancelled
+    let cancelling = CancellationToken::new();
+    let reconnecting = spawn(
+        client
+            .reconnect(&TransportClientReconnectOptions {
+                signal: Some(cancelling.clone()),
+                ..TransportClientReconnectOptions::default()
+            })
+            .unwrap(),
+    );
+    let attempt = held.next().await;
+
+    assert!(is_state(&client, ReadyState::Reconnecting), "reconnecting");
+    told.push(("RECONNECTING", sent_in(client.send(binary(b"x")))));
+    cancelling.cancel();
+    patience(PATIENCE, reconnecting)
+        .await
+        .unwrap()
+        .unwrap()
+        .expect_err("cancelled");
+    drop(attempt);
+
+    // open, then its close unanswered
+    settled(client.connect(&to(server.port))).await.unwrap();
+    told.push(("OPEN", sent_in(client.send(binary(b"x")))));
+
+    let _open = server.next().await;
+    let closing = client
+        .disconnect(&TransportClientDisconnectOptions::default())
+        .unwrap();
+
+    assert!(is_state(&client, ReadyState::Closing), "closing");
+    told.push(("CLOSING", sent_in(client.send(binary(b"x")))));
+
+    // closed by its own disconnect, past its close timeout
+    patience(PATIENCE, closing).await.unwrap();
+    told.push(("CLOSED", sent_in(client.send(binary(b"x")))));
+
+    assert_eq!(
+        told,
+        [
+            ("UNINITIALIZED", "ready state UNINITIALIZED".to_owned()),
+            ("CONNECTING", "ready state CONNECTING".to_owned()),
+            (
+                "CLOSED, failed",
+                "disconnected: the transport client is closed, not open".to_owned()
+            ),
+            (
+                "RECONNECTING",
+                "disconnected: the transport client is reconnecting, not open".to_owned()
+            ),
+            ("OPEN", "sent".to_owned()),
+            (
+                "CLOSING",
+                "disconnected: the transport client is closing, not open".to_owned()
+            ),
+            (
+                "CLOSED",
+                "disconnected: the transport client is closed, not open".to_owned()
+            ),
+        ],
+        "each state's"
+    );
+    client.dispose();
 }

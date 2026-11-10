@@ -9,7 +9,6 @@ import {
   CLOSE_EVENT,
   CONNECTION_TOKEN_HEADER,
   CONNECTION_UNKNOWN,
-  ERROR_EVENT,
   LISTEN_HEADER,
   MESSAGE_EVENT,
   REFUSAL_HEADER,
@@ -22,6 +21,7 @@ import {
   ConnectError,
   GenericError,
   ProgrammerError,
+  notOpenOf,
   ReadyStateError,
   reasonMessage,
   toError,
@@ -384,7 +384,7 @@ export const createHTTPTransportClient = (
   const wait = assertHeldDelay('wait', givenWait);
 
   return createTransportClient<IHTTPClientConnection, IHTTPTransportClientConnectOptions>(
-    (client, { tell }) => {
+    (client, { report, tell }) => {
       let drawn: IDrawn | undefined;
       // settles the connect in flight, so a dispose under it cannot leave it pending
       let rejectConnect: ((reason: Error) => void) | undefined;
@@ -481,13 +481,11 @@ export const createHTTPTransportClient = (
         if (!client.isReconnecting()) {
           setReadyStateClosed(client);
 
-          try {
-            if (failure !== undefined) {
-              client.emit(ERROR_EVENT, failure);
-            }
-          } finally {
-            tell(CLOSE_EVENT, [false, false]);
+          if (failure !== undefined) {
+            report(failure);
           }
+
+          tell(CLOSE_EVENT, [false, false]);
         }
       };
 
@@ -936,20 +934,19 @@ export const createHTTPTransportClient = (
 
           client.socket = null;
           setReadyStateClosed(client);
-          try {
-            if (failure !== undefined) {
-              client.emit(ERROR_EVENT, failure);
-            }
-          } finally {
-            tell(CLOSE_EVENT, [isClean, isQuick]);
+
+          if (failure !== undefined) {
+            report(failure);
           }
+
+          tell(CLOSE_EVENT, [isClean, isQuick]);
         },
 
         send: ({ credential, data }) => {
           const connection = drawn;
 
           if (!client.isOpen() || connection === undefined) {
-            return Promise.reject(new ReadyStateError(getReadyState(client), ReadyState.OPEN));
+            return Promise.reject(notOpenOf(getReadyState(client)));
           }
 
           // refused before it goes, the connection kept: a field could not carry it as it is, and

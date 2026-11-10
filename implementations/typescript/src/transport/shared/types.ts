@@ -58,6 +58,10 @@ export interface IEventIteratorOptions {
 
 /** The event half every transport end shares; each registration returns the end itself. */
 export interface IEventMethods<E extends EmitterEventMap<E>, End> {
+  /**
+   * Tells `event` to its listeners; an `error` within a guard, what a listener of it throws dropped
+   * and the listeners after it told (spec 15.1). Returns whether it had any.
+   */
   emit<K extends keyof E>(event: K, ...params: E[K]): boolean;
   /** Every `event` from now on, as its arguments, for `for await`. */
   events<K extends keyof E>(

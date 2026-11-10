@@ -429,6 +429,62 @@ async fn rejects_what_waits_as_replaced_once_its_transport_reconnects() {
     served.server.dispose().await.expect("stopped");
 }
 
+// debugging 9.7
+#[tokio::test]
+async fn fails_a_call_before_it_connects_by_its_ready_state_sending_nothing() {
+    let unconnected = client_of((false, None));
+    let failed = ask(&unconnected, (&echo(), "a"), &RequestOptions::default()).await;
+
+    let Err(CallError::ReadyState(refusal)) = &failed else {
+        panic!("refused by its ready state, not {failed:?}");
+    };
+
+    assert_eq!(refusal.got(), ReadyState::Uninitialized, "its state");
+    assert_eq!(refusal.expected(), ReadyState::Open, "the state it needs");
+    assert_eq!(
+        unconnected.transport().ready_state(),
+        ReadyState::Uninitialized,
+        "nothing opened to send on"
+    );
+    unconnected.dispose().await;
+}
+
+// debugging 9.7
+#[tokio::test]
+async fn fails_a_call_once_disconnected_as_a_disconnection_sending_nothing() {
+    let served = served().await;
+    let client = served.connected().await;
+
+    patience(
+        PATIENCE,
+        client
+            .disconnect(&TransportClientDisconnectOptions::default())
+            .expect("open"),
+    )
+    .await
+    .expect("closed in time");
+
+    // ! its slow call's resolver tells each request it hears: none comes
+    let failed = outcome_of(
+        call_of(&client, (&slow(), "a"), &RequestOptions::default()),
+        PATIENCE,
+    )
+    .await;
+
+    assert!(
+        matches!(&failed, Err(CallError::Disconnected(reason)) if reason == "the transport client is closed, not open"),
+        "a disconnection, not {failed:?}"
+    );
+    assert!(
+        patience(Duration::from_millis(50), served.requested.notified())
+            .await
+            .is_err(),
+        "nothing sent"
+    );
+    client.dispose().await;
+    served.server.dispose().await.expect("stopped");
+}
+
 // this side's own: the client's runtime is its transport's, every layer on it
 #[test]
 fn hands_its_runtime_to_its_transport_every_layer_on_it() {

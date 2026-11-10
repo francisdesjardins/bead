@@ -927,46 +927,62 @@ async fn keeps_a_connection_whose_connection_listener_throws_its_messages_heard_
     stopped(&server).await;
 }
 
+// spec 15.2
 #[tokio::test]
-async fn delivers_binary_with_its_connection_s_address_and_port_stamping_the_activity_and_reports_text_as_envelope_malformed_handing_nothing()
- {
+async fn delivers_text_as_text_and_binary_as_bytes_stamping_the_activity() {
+    let stepping = SteppingClock::new(dated_at());
     let (server, recorder, port) = started(&WebSocketTransportServerOptions {
-        clock: Some(dated()),
+        clock: Some(Arc::<SteppingClock>::clone(&stepping)),
         ..briefly_closing()
     })
     .await;
     let mut client = client(port).await;
     let handle = recorder.connections(1).await.remove(0);
+    let second = Duration::from_secs(1);
 
     assert_eq!(server.clients()[0].last_activity, None, "none before");
 
+    stepping.advance(second).await;
     client.send(Message::text("hi")).await.unwrap();
-    client.send(binary(&[1, 2])).await.unwrap();
 
-    let (message, on) = recorder.messages(1).await.remove(0);
-    let errors = recorder.errors(1).await;
+    // * a text message is handed on as it came, marked so, for its router to judge: its transport
+    // reports nothing of it
+    let (text, on) = recorder.messages(1).await.remove(0);
 
-    assert_eq!(&*message.data, &[1, 2], "the binary one alone");
+    assert_eq!(&*text.data, b"hi", "the text, as its bytes");
+    assert!(text.is_text, "marked text");
     assert_eq!(on, handle, "its connection");
-    assert_eq!(message.address.as_deref(), Some("127.0.0.1"), "its address");
+    assert_eq!(text.address.as_deref(), Some("127.0.0.1"), "its address");
     assert_eq!(
-        message.port,
+        text.port,
         Some(server.clients()[0].port.unwrap()),
         "its port"
     );
-    assert_eq!(message.credential, None, "no credential");
-    assert_eq!(
-        errors,
-        vec![(
-            "local server protocol failure 1 ENVELOPE_MALFORMED: an envelope is binary, not a string".to_owned(),
-            Some(Arc::clone(&handle))
-        )],
-        "the text reported"
-    );
+    assert_eq!(text.credential, None, "no credential");
     assert_eq!(
         server.clients()[0].last_activity,
-        Some(dated_at()),
-        "stamped on its clock"
+        dated_at().checked_add(second),
+        "stamped by the text, on its clock"
+    );
+
+    // each message stamps it again
+    stepping.advance(second).await;
+    client.send(binary(&[1, 2])).await.unwrap();
+
+    let (bytes, on) = recorder.messages(2).await.remove(1);
+
+    assert_eq!(&*bytes.data, &[1, 2], "the binary one");
+    assert!(!bytes.is_text, "not marked text");
+    assert_eq!(on, handle, "its connection");
+    assert_eq!(
+        server.clients()[0].last_activity,
+        dated_at().checked_add(second * 2),
+        "stamped by the binary"
+    );
+    assert_eq!(
+        recorder.count(|told| told.errors.len()),
+        0,
+        "nothing reported"
     );
     stopped(&server).await;
 }
@@ -2897,8 +2913,11 @@ async fn drops_a_client_once_what_waits_for_it_would_pass_maximum_unsent_bytes_t
     stopped(&server).await;
 }
 
+// spec 15.1
+// * an error listener that panics is caught as it tells and its panic dropped, as every side drops
+// it: the listener after it, its recorder, hears each error alone
 #[tokio::test]
-async fn closes_with_1009_and_drops_behind_maximum_unsent_bytes_a_connection_whose_error_listener_throws_telling_its_close_all_the_same()
+async fn closes_with_1009_and_drops_behind_maximum_unsent_bytes_a_connection_whose_error_listener_throws_telling_its_close_all_the_same_and_dropping_what_it_threw()
  {
     struct Throwing;
 
@@ -2926,6 +2945,8 @@ async fn closes_with_1009_and_drops_behind_maximum_unsent_bytes_a_connection_who
 
     while let Some(Ok(_)) = next_of(&mut first).await {}
 
+    let failed = recorder.connections(1).await.remove(0);
+
     assert_eq!(recorder.closes(1).await.len(), 1, "its close told");
 
     // past what may wait for it
@@ -2937,8 +2958,26 @@ async fn closes_with_1009_and_drops_behind_maximum_unsent_bytes_a_connection_who
 
     assert_eq!(
         recorder.closes(2).await[1],
-        (false, handle),
+        (false, Arc::clone(&handle)),
         "its close told all the same"
+    );
+    assert_eq!(
+        recorder.errors(2).await,
+        vec![
+            (
+                format!(
+                    "{failed} is closed with 1009: a message past its maximumMessageBytes, 8 bytes"
+                ),
+                Some(Arc::clone(&failed))
+            ),
+            (
+                format!(
+                    "{handle} is dropped: what waits for its socket would pass maximumUnsentBytes, 1000 bytes"
+                ),
+                Some(Arc::clone(&handle))
+            )
+        ],
+        "each error alone, no throw told"
     );
     stopped(&server).await;
     second.await.unwrap();
@@ -3086,5 +3125,63 @@ async fn a_paused_connection_closes_cleanly() {
         0,
         "nothing handed"
     );
+    stopped(&server).await;
+}
+
+// the twin of `"clients" is a copy without the sockets`: each entry what its connection looked like
+// as it was taken, a later change leaving the copy as it was
+#[tokio::test]
+async fn clients_is_a_copy_without_the_sockets() {
+    let (server, recorder, port) = started(&briefly_closing()).await;
+    // a socket of the test's own, whose port is known
+    let (first, _) = upgraded(port).await;
+    let first_handle = recorder.connections(1).await.remove(0);
+    let first_port = first.local_addr().unwrap().port();
+    let clients = server.clients();
+
+    assert_eq!(
+        clients
+            .iter()
+            .map(|client| (
+                Arc::clone(&client.connection_handle),
+                client.address.clone(),
+                client.port,
+                client.last_activity,
+                client.transport_type
+            ))
+            .collect::<Vec<_>>(),
+        [(
+            Arc::clone(&first_handle),
+            "127.0.0.1".to_owned(),
+            Some(first_port),
+            None,
+            TRANSPORT_WEBSOCKET
+        )],
+        "what it held then"
+    );
+
+    // in the order the connections came, whichever went in between; the copy taken before stays
+    let second = client(port).await;
+    let second_handle = recorder.connections(2).await.remove(1);
+
+    drop(first);
+    recorder.closes(1).await;
+
+    let third = client(port).await;
+    let third_handle = recorder.connections(3).await.remove(2);
+    let handles_of = |clients: &[TransportServerClient]| {
+        clients
+            .iter()
+            .map(|client| Arc::clone(&client.connection_handle))
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(
+        handles_of(&server.clients()),
+        [second_handle, third_handle],
+        "those it holds now, in order"
+    );
+    assert_eq!(handles_of(&clients), [first_handle], "the copy as it was");
+    drop((second, third));
     stopped(&server).await;
 }

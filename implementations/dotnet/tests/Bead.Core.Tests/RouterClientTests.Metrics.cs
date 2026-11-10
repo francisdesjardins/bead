@@ -163,6 +163,45 @@ public sealed partial class RouterClientTests
         Assert.Equal([failure, failure], scripted.Errors);
     }
 
+    // spec 15.1; debugging 2.2
+    [Fact]
+    public async Task Drops_what_an_error_listener_throws_the_next_error_listener_told_and_the_call_goes_on()
+    {
+        using var scripted = new ScriptedRouter();
+
+        var (router, transport) = (scripted.Router, scripted.Transport);
+        var failure = new InvalidOperationException("listener bug");
+        var heard = new List<Exception>();
+        var isThrown = false;
+
+        // a debug listener that throws on its first envelope alone
+        router.Debug += (_, _) =>
+        {
+            if (!isThrown)
+            {
+                isThrown = true;
+
+                throw failure;
+            }
+        };
+        router.Error += (_) =>
+        {
+            throw new InvalidOperationException("an error listener that throws");
+        };
+        router.Error += heard.Add;
+
+        var answering = router.Request(ReadOnlyMemory<byte>.Empty, RequestOf());
+
+        transport.Deliver(ResultOf(1));
+
+        // * the debug listener's throw told the next error listener, and the throw of the one before
+        // it dropped: the call answered with its result
+        Assert.Equal(1u, (await answering.WaitAsync(Patience, Cancelled)).Header.CallId);
+        await scripted.Settle();
+        Assert.Single(transport.Sent);
+        Assert.Equal([failure], heard);
+    }
+
     [Fact]
     public async Task Counts_exactly_under_calls_made_at_once_from_many_threads()
     {
@@ -352,6 +391,49 @@ public sealed partial class RouterClientTests
             {
                 return line.Contains("procedure=\"echo\"", StringComparison.Ordinal);
             }).Order(StringComparer.Ordinal));
+    }
+
+    // debugging 9.7
+    [Fact]
+    public async Task Counts_a_call_to_a_client_not_open_by_its_transport_state_error_before_the_open_and_closed_after_it()
+    {
+        var registry = new MetricsRegistry();
+
+        using var scripted = new ScriptedRouter(new RouterClientOptions { MetricsRegistry = registry });
+
+        var router = scripted.Router;
+        var series = router.DeclareRequester(Service);
+        var failures = new List<(string Name, ReadyState? Got)>();
+
+        foreach (var readyState in new[] { ReadyState.Uninitialized, ReadyState.Connecting, ReadyState.Closing, ReadyState.Closed, ReadyState.Reconnecting })
+        {
+            scripted.Transport.ReadyState = readyState;
+
+            var reason = await Assert.ThrowsAnyAsync<Exception>(() =>
+            {
+                return router.Request(ReadOnlyMemory<byte>.Empty, RequestOf() with { Series = series }).WaitAsync(Patience, Cancelled);
+            });
+
+            failures.Add((reason.GetType().Name, (reason as ReadyStateException)?.Got));
+        }
+
+        // * before its open, its ready state's refusal; once its state is a close's, a disconnection
+        Assert.Equal(
+            [
+                (nameof(ReadyStateException), ReadyState.Uninitialized),
+                (nameof(ReadyStateException), ReadyState.Connecting),
+                (nameof(DisconnectException), null),
+                (nameof(DisconnectException), null),
+                (nameof(DisconnectException), null),
+            ],
+            failures);
+        Assert.Equal(
+            [MadeOf("duration_seconds_count{} 5"), MadeOf("handled_total{outcome=\"closed\"} 3"), MadeOf("handled_total{outcome=\"error\"} 2"), MadeOf("started_total{} 5")],
+            CallCountsOf(registry).Where((line) =>
+            {
+                return line.Contains("procedure=\"echo\"", StringComparison.Ordinal);
+            }).Order(StringComparer.Ordinal));
+        Assert.Empty(scripted.Transport.Sent);
     }
 
     // debugging 9.1.6, 10.2 and 10.3.3

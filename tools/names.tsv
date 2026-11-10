@@ -216,7 +216,7 @@ ProgrammerError	ProgrammerError [record]	-	ProgrammerError [record]	same
 ProtocolCode	ProtocolCode [choice]	ProtocolCode [choice]	ProtocolCode [choice]	same
 ReadViolations	IReadViolations [record]	ReadViolations [record]	ReadViolations [record]	same
 ReadyState	ReadyState [choice]	ReadyState [choice]	ReadyState [choice]	same
-ReadyStateError	ReadyStateError [record]	-	ReadyStateError [record]	same
+ReadyStateError	ReadyStateError [record]	ReadyStateException [record]	ReadyStateError [record]	rendered: error (0007, 0044)
 RECONNECT_DEFAULTS	RECONNECT_DEFAULTS [constant]	-	RECONNECT_DEFAULTS [constant]	same
 ReconnectError	ReconnectError [record]	ReconnectException [record]	ReconnectError [record]	rendered: error (0007, 0044)
 RefusalListener	-	-	RefusalListener [function type]	own: a listener the Rust side registers for an event the other sides emit (0044)

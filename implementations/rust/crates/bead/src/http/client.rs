@@ -48,7 +48,7 @@ use crate::router::types::{BoxFuture, RouterError, TransportMessage};
 use crate::transport::{
     ClientListener, Connect, Listeners, RECONNECTION_CANCELLED, ReadyState, RouterClientTransport,
     Sent, TransportClientDisconnectOptions, TransportClientReconnectOptions, attempting,
-    hold_reconnection, is_field_value,
+    hold_reconnection, is_field_value, refused_unless_open,
 };
 
 #[cfg(test)]
@@ -742,6 +742,7 @@ impl ClientInner {
             |error: RouterError| {
                 for heard in &listeners {
                     // ! a listener of errors that panics would loop: its panic is dropped
+                    // (spec 15.1)
                     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         heard.on_error(&error);
                     }))
@@ -1663,8 +1664,8 @@ impl HttpTransportClient {
             };
             let Some(drawn) = drawn else {
                 return Err(TransportError::ReadyState(ReadyStateError::new(
-                    state.ready.name(),
-                    ReadyState::Open.name(),
+                    state.ready,
+                    ReadyState::Open,
                 )));
             };
 
@@ -1907,10 +1908,7 @@ impl RouterClientTransport for HttpTransportClient {
             match (&state.drawn, state.ready) {
                 (Some(drawn), ReadyState::Open) => Arc::clone(drawn),
                 (_, ready) => {
-                    return Err(RouterError::Other(Arc::new(ReadyStateError::new(
-                        ready.name(),
-                        ReadyState::Open.name(),
-                    ))));
+                    return Err(refused_unless_open(ready));
                 }
             }
         };

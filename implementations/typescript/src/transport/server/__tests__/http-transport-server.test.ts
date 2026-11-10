@@ -19,7 +19,12 @@ import {
 } from '../../../router/shared/constants';
 import { healthOf, layerGaugesOf } from '../../../server/health';
 import { CancelError, ProgrammerError } from '../../shared/errors';
-import { createTestClock, tcpSocketsClosed, timersBy } from '../../shared/__tests__/fixtures';
+import {
+  createTestClock,
+  tcpSocketsClosed,
+  timersBy,
+  trapUncaught,
+} from '../../shared/__tests__/fixtures';
 import {
   AFTER_HEADER,
   BEAD_BATCH_MEDIA_TYPE,
@@ -679,48 +684,6 @@ test.describe('createHTTPTransportServer', () => {
     // * what waited at its gate goes with it, its charge released, and nothing of it handed on
     expect(await refusalOf(held)).toEqual([404, HTTP_REFUSALS.CONNECTION_UNKNOWN]);
     expect([namesOf(events, 'message'), server.gauges().counts['bodyBytes'] ?? 0]).toEqual([[], 0]);
-  });
-
-  test('"closeAll" closes every connection cleanly, and gives nothing without one', async () => {
-    await using started = await startTransport();
-    const { events, server, url } = started;
-
-    await expect(server.closeAll()).resolves.toEqual([]);
-
-    const waitingConnection = await connect(url, server);
-    const response = await post(url, { headers: { [LISTEN_HEADER]: '?1' } });
-    const listeningToken = response.headers.get(CONNECTION_TOKEN_HEADER) ?? '';
-    const listeningHandle = server.clients.at(-1)!.connectionHandle;
-    const waiting = await post(url, {
-      body: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }),
-      connectionToken: waitingConnection.connectionToken,
-    });
-    const listen = fetch(url, {
-      headers: {
-        [CONNECTION_TOKEN_HEADER]: listeningToken,
-        [AFTER_HEADER]: '0',
-        [WAIT_HEADER]: '20000',
-      },
-    });
-
-    await expect
-      .poll(() => {
-        return server.gauges().counts['listens'];
-      })
-      .toBe(1);
-    await expect(server.closeAll()).resolves.toEqual([true, true]);
-    expect(server.clients).toEqual([]);
-    expect(server.gauges().connectionHandles).toEqual(new Set());
-    expect(namesOf(events, 'close')).toHaveLength(2);
-    expect(namesOf(events, 'close')).toEqual(
-      expect.arrayContaining([
-        ['close', true, waitingConnection.connectionHandle],
-        ['close', true, listeningHandle],
-      ])
-    );
-    await expect(waiting.arrayBuffer()).rejects.toThrow();
-    expect(await refusalOf(listen)).toEqual([404, HTTP_REFUSALS.CONNECTION_UNKNOWN]);
-    expect(server.isOpen()).toBe(true);
   });
 
   test('closes a connection on its DELETE; a request handed on learns it by its exchange cut', async () => {
@@ -4204,14 +4167,19 @@ test.describe('createHTTPTransportServer, its bounds', () => {
   });
 
   // spec 15.1
-  test('drops behind maximumOutboxBytes a connection whose error listener throws, telling its close all the same', async () => {
+  test('drops behind maximumOutboxBytes a connection whose error listener throws, telling its close all the same and dropping what it threw', async () => {
+    using uncaught = trapUncaught();
     const { connectScripted, events, exchangeOf, fake, server } = await startScripted({
       maximumOutboxBytes: 64,
     });
     const { connectionHandle, connectionToken } = connectScripted({ isListening: true });
+    const heard: string[] = [];
 
     server.on('error', () => {
       throw new Error('an error listener that throws');
+    });
+    server.on('error', (error) => {
+      heard.push(error.message);
     });
 
     await server.send(
@@ -4219,10 +4187,14 @@ test.describe('createHTTPTransportServer, its bounds', () => {
       connectionHandle
     );
 
-    // what the listener threw is Node's: it reaches the send under way, the connection dropped first
+    // * what the listener threw is dropped: the send settles as with no listener, the listener
+    // after it told the drop and nothing else
     await expect(
       server.send({ data: envelopeOf(NOTIFICATION, { callId: 2, extra: 40 }) }, connectionHandle)
-    ).rejects.toThrow('an error listener that throws');
+    ).resolves.toBeUndefined();
+    expect(heard).toEqual([
+      `${connectionHandle} is dropped: its outbox would pass maximumOutboxBytes, 64 bytes`,
+    ]);
     expect(
       events.filter(([name]) => {
         return name === 'error' || name === 'close';
@@ -4235,7 +4207,7 @@ test.describe('createHTTPTransportServer, its bounds', () => {
       ],
       ['close', false, connectionHandle],
     ]);
-    expect(server.clients).toEqual([]);
+    expect([server.clients, uncaught.thrown]).toEqual([[], []]);
 
     const after = exchangeOf(connectionToken);
 

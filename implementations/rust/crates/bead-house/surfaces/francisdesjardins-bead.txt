@@ -962,6 +962,7 @@ crate::errors
     Failure(Failure)
     Cancelled(Option<u32>)
     Disconnected(String)
+    ReadyState(ReadyStateError)
     TimedOut(Duration)
     Refused(ProgrammerError)
     Other(Arc<dyn Error + Send + Sync>)
@@ -984,7 +985,9 @@ crate::errors
     implements Display, Error
     derives Clone, Debug, Eq, PartialEq
   struct ReadyStateError
-    fn new(got: &'static str, expected: &'static str) -> Self
+    const fn new(got: ReadyState, expected: ReadyState) -> Self
+    const fn got(&self) -> ReadyState
+    const fn expected(&self) -> ReadyState
     implements Display, Error
     derives Clone, Debug, Eq, PartialEq
   enum ResolverError #[non_exhaustive]
@@ -2112,6 +2115,7 @@ crate::router::types
     pub address: Option<String>
     pub port: Option<u16>
     pub may_overtake: bool
+    pub is_text: bool
     implements Debug
     derives Clone, Default, Eq, PartialEq
   enum RouterActivity #[non_exhaustive]
@@ -2137,6 +2141,8 @@ crate::router::types
     derives Clone, Debug, Eq, PartialEq
   enum RouterError #[non_exhaustive]
     Failure(Failure)
+    ReadyState(ReadyStateError)
+    Disconnected(String)
     Other(Arc<dyn Error + Send + Sync>)
     implements Display, Error, From
     derives Clone, Debug

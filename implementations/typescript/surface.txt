@@ -72,7 +72,7 @@
   ConnectError	src/transport/shared/errors.ts
   CredentialScheme	src/router/shared/constants.ts
   DEVTOOLS_HOOK_KEY	src/client/devtools-hook.ts
-  DisconnectError	src/router/shared/errors.ts
+  DisconnectError	src/transport/shared/errors.ts
   FailureError	src/router/shared/errors.ts
   FailureScope	src/router/shared/constants.ts
   GenericError	src/transport/shared/errors.ts
@@ -115,7 +115,7 @@
   ConnectError	src/transport/shared/errors.ts
   CredentialScheme	src/router/shared/constants.ts
   DEVTOOLS_HOOK_KEY	src/client/devtools-hook.ts
-  DisconnectError	src/router/shared/errors.ts
+  DisconnectError	src/transport/shared/errors.ts
   FailureError	src/router/shared/errors.ts
   FailureScope	src/router/shared/constants.ts
   GenericError	src/transport/shared/errors.ts
@@ -175,7 +175,7 @@
   CONNECTION_TOKEN_HEADER	src/transport/shared/constants.ts
   CancelError	src/transport/shared/errors.ts
   CredentialScheme	src/router/shared/constants.ts
-  DisconnectError	src/router/shared/errors.ts
+  DisconnectError	src/transport/shared/errors.ts
   FailureError	src/router/shared/errors.ts
   FailureScope	src/router/shared/constants.ts
   GenericError	src/transport/shared/errors.ts
@@ -429,7 +429,7 @@
   DebugFilterSource	src/router/shared/types.ts
   DefaultCredential	src/router/shared/types.ts
   DestinationId	src/router/shared/types.ts
-  DisconnectError	src/router/shared/errors.ts
+  DisconnectError	src/transport/shared/errors.ts
   EnvelopeHeader	src/router/shared/types.ts
   EnvelopeKind	src/router/shared/constants.ts
   FailureError	src/router/shared/errors.ts
@@ -506,7 +506,7 @@
   DebugFilterSource	src/router/shared/types.ts
   DefaultCredential	src/router/shared/types.ts
   DestinationId	src/router/shared/types.ts
-  DisconnectError	src/router/shared/errors.ts
+  DisconnectError	src/transport/shared/errors.ts
   EnvelopeHeader	src/router/shared/types.ts
   EnvelopeKind	src/router/shared/constants.ts
   FailureError	src/router/shared/errors.ts
@@ -676,7 +676,7 @@
   DebugFilterSource	src/router/shared/types.ts
   DebugType	src/router/shared/types.ts
   DestinationId	src/router/shared/types.ts
-  DisconnectError	src/router/shared/errors.ts
+  DisconnectError	src/transport/shared/errors.ts
   EnvelopeHeader	src/router/shared/types.ts
   FailureError	src/router/shared/errors.ts
   FailureOrigin	src/router/shared/types.ts
@@ -810,7 +810,7 @@
   CLIENT_FAILURES	src/router/shared/constants.ts
   CancelError	src/transport/shared/errors.ts
   CredentialScheme	src/router/shared/constants.ts
-  DisconnectError	src/router/shared/errors.ts
+  DisconnectError	src/transport/shared/errors.ts
   FailureError	src/router/shared/errors.ts
   FailureScope	src/router/shared/constants.ts
   GenericError	src/transport/shared/errors.ts
@@ -936,6 +936,7 @@
   DEFAULTS	src/transport/client/transport-client.ts
   DISCONNECT_DEFAULTS	src/transport/client/transport-client.ts
   Data	src/transport/shared/types.ts
+  DisconnectError	src/transport/shared/errors.ts
   ERROR_EVENT	src/transport/shared/constants.ts
   GenericError	src/transport/shared/errors.ts
   IClock	src/transport/shared/clock.ts
@@ -1061,7 +1062,7 @@
   ConnectError	src/transport/shared/errors.ts
   CredentialScheme	src/router/shared/constants.ts
   DEVTOOLS_HOOK_KEY	src/client/devtools-hook.ts
-  DisconnectError	src/router/shared/errors.ts
+  DisconnectError	src/transport/shared/errors.ts
   FailureError	src/router/shared/errors.ts
   FailureScope	src/router/shared/constants.ts
   GenericError	src/transport/shared/errors.ts
@@ -1107,7 +1108,7 @@
   CLIENT_FAILURES	src/router/shared/constants.ts
   CancelError	src/transport/shared/errors.ts
   CredentialScheme	src/router/shared/constants.ts
-  DisconnectError	src/router/shared/errors.ts
+  DisconnectError	src/transport/shared/errors.ts
   FailureError	src/router/shared/errors.ts
   FailureScope	src/router/shared/constants.ts
   GenericError	src/transport/shared/errors.ts
@@ -1219,7 +1220,7 @@
   ConnectError	src/transport/shared/errors.ts
   CredentialScheme	src/router/shared/constants.ts
   DEVTOOLS_HOOK_KEY	src/client/devtools-hook.ts
-  DisconnectError	src/router/shared/errors.ts
+  DisconnectError	src/transport/shared/errors.ts
   FailureError	src/router/shared/errors.ts
   FailureScope	src/router/shared/constants.ts
   GenericError	src/transport/shared/errors.ts
@@ -1265,7 +1266,7 @@
   CLIENT_FAILURES	src/router/shared/constants.ts
   CancelError	src/transport/shared/errors.ts
   CredentialScheme	src/router/shared/constants.ts
-  DisconnectError	src/router/shared/errors.ts
+  DisconnectError	src/transport/shared/errors.ts
   FailureError	src/router/shared/errors.ts
   FailureScope	src/router/shared/constants.ts
   GenericError	src/transport/shared/errors.ts
@@ -1860,9 +1861,6 @@ src/router/shared/debug-filter.ts filterEnvelopeDebug
   const filterEnvelopeDebug<Info extends IEnvelopeDebug>(listener: (info: Info) => void, source: DebugFilterSource): ((info: Info) => void)
 src/router/shared/debug-filter.ts parseDebugFilter
   const parseDebugFilter(spec: string): IDebugFilter
-src/router/shared/errors.ts DisconnectError
-  class DisconnectError extends GenericError
-    name: string
 src/router/shared/errors.ts FailureError
   class FailureError extends GenericError
     name: string
@@ -3150,6 +3148,7 @@ src/transport/client/types.ts ITransportClientConnectOptions
     timeout?: number | undefined
 src/transport/client/types.ts ITransportClientDefineOptions
   interface ITransportClientDefineOptions
+    readonly report: (error: Error) => boolean
     readonly tell: <K extends TransportClientToldEvent>(event: K, params: TransportClientEventMap[K]) => boolean
 src/transport/client/types.ts ITransportClientDisconnectOptions
   interface ITransportClientDisconnectOptions
@@ -3575,7 +3574,6 @@ src/transport/server/types.ts ITransportServer
     readonly type: TRANSPORTS
     carriesCredential(connectionHandle: TransportServerConnectionHandle): boolean
     close(connectionHandle: TransportServerConnectionHandle): Promise<boolean>
-    closeAll(): Promise<boolean[]>
     isSecure(connectionHandle: TransportServerConnectionHandle): boolean
     emit<K extends TRANSPORT_SERVER_EVENTS>(event: K, ...params: TransportServerEventMap<Socket, Request>[K]): boolean
     events<K extends TRANSPORT_SERVER_EVENTS>(event: K, options?: IEventIteratorOptions): AsyncIterableIterator<TransportServerEventMap<Socket, Request>[K], undefined>
@@ -3623,6 +3621,7 @@ src/transport/server/types.ts ITransportServerConnection
 src/transport/server/types.ts ITransportServerDefineOptions
   interface ITransportServerDefineOptions<Socket = unknown, Request = unknown>
     readonly isHeard: (event: TransportServerToldEvent) => boolean
+    readonly report: (error: Error, connectionHandle: TransportServerConnectionHandle | '') => boolean
     readonly tell: <K extends TransportServerToldEvent>(event: K, params: TransportServerEventMap<Socket, Request>[K]) => boolean
 src/transport/server/types.ts ITransportServerHandleInfo
   interface ITransportServerHandleInfo
@@ -3969,6 +3968,9 @@ src/transport/shared/errors.ts CancelError
     name: string
 src/transport/shared/errors.ts ConnectError
   class ConnectError extends GenericError
+    name: string
+src/transport/shared/errors.ts DisconnectError
+  class DisconnectError extends GenericError
     name: string
 src/transport/shared/errors.ts GenericError
   class GenericError extends Error

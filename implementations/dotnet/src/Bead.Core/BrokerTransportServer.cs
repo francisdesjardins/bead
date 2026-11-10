@@ -140,7 +140,7 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
         _isSecure = options.Secure ?? participant.Adapter.IsSecure;
         _listeners = new ListenerGuard((reason, connectionHandle) =>
         {
-            Error?.Invoke(reason, connectionHandle ?? "");
+            ListenerGuard.TellError(Error, (reason, connectionHandle ?? ""));
         });
     }
 
@@ -547,7 +547,7 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
         // a half-open connection lost is reported with no handle, as its router was never told it
         if (end.Reported is { } reported)
         {
-            Error?.Invoke(reported, handle ?? "");
+            ListenerGuard.TellError(Error, (reported, handle ?? ""));
         }
 
         if (handle is not null)
@@ -666,7 +666,7 @@ public sealed class BrokerTransportServer : IServerTransport, IAsyncDisposable, 
         {
             _participant.Trace(new ParticipantDebugEvent { Event = "report", Report = reason.Message });
         }
-        Error?.Invoke(reason, "");
+        ListenerGuard.TellError(Error, (reason, ""));
     }
 
     // the procedures given for each name, each checked, and each a name it serves (spec 9.12)

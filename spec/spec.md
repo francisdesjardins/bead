@@ -1219,10 +1219,15 @@ each listener of its transport's events — a connection opened, an envelope, a 
 refusal, a reconnection — within a guard, as it calls a debug listener (`debugging.md` 2.2, 2.3):
 what one throws is reported, as section 9.0 reports an error, by its transport with the connection
 it was told of; the listeners after it are called all the same, and the transport goes on as if it
-returned. A side awaits nothing a listener returns: what it settles to later is its platform's, as
-is what a listener of the transport's own `error` throws. A listener's throw refuses no connection,
-fails no exchange and closes nothing. What a side's transport reports on its `error`, a client's as
-a server's, is what it ends a connection for of its own — a protocol error on it; a message it fails
+returned. A side awaits nothing a listener returns: what it settles to later is its platform's.
+Every `error` event a side tells — its transport's, its router's, its broker participant's, its
+gateway's — calls each listener within a guard too: what one throws is dropped, reported nowhere,
+since reporting it would tell the event that threw; the listeners after it are called all the same,
+and the side goes on as if it returned, as an `error` listener's own exception fires no `error`
+again in HTML's report of an exception
+([WHATWG HTML §8.1.4.6](https://html.spec.whatwg.org/multipage/webappapis.html#report-an-exception)).
+A listener's throw refuses no connection, fails no exchange and closes nothing. What a side's
+transport reports on its `error`, a client's as a server's, is what it ends a connection for of its own — a protocol error on it; a message it fails
 with 1009, or over HTTP an envelope past its `maximumBodyBytes`, an answer's or a batch's, and a
 connection a server drops behind a bound, each naming the bound and its value (sections 15.3,
 15.12); a batch that does not read, saying what of it does not (section 15.9); a Web Worker client's
@@ -1274,9 +1279,11 @@ scheme.
 ### WebSocket
 
 15.2. Each envelope is one binary message ([RFC 6455](https://www.rfc-editor.org/rfc/rfc6455)), and
-each binary message one envelope. A text message is no envelope: the receiver reports it as
-`ENVELOPE_MALFORMED`, and answers nothing. No subprotocol is required. A WebSocket upgrade that
-carries no `Origin` carries one credential, toward its server alone: its `Authorization` field
+each binary message one envelope. A text message is no envelope: its transport hands it on, and its
+router reports it as `ENVELOPE_MALFORMED`, as section 9.0 reports an error, and answers nothing; it
+counts as a message its router has not taken by the bytes it came as (section 15.12). No
+subprotocol is required. A WebSocket upgrade that carries no `Origin` carries one credential,
+toward its server alone: its `Authorization` field
 ([RFC 9110 §11.6.2](https://www.rfc-editor.org/rfc/rfc9110#section-11.6.2),
 [RFC 6455 §10.5](https://www.rfc-editor.org/rfc/rfc6455#section-10.5)), as it came, whole — its
 auth-scheme included — its surrounding whitespace removed, none when the field is empty or absent.

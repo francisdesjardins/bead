@@ -1344,21 +1344,102 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         });
     }
 
+    // debugging 9.7
+    [Fact]
+    public async Task Refuses_a_send_by_its_ready_state_before_the_open_and_as_a_disconnection_after_it_in_each_state_it_holds()
+    {
+        using var listener = new Listener(IPAddress.Loopback);
+        await using var client = new WebSocketTransportClient();
+        var target = new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled };
+        var refusals = new List<string>();
+
+        // never connected
+        refusals.Add(await SendRefusals.Of(client));
+
+        // connecting, its handshake unanswered
+        var connecting = client.Connect(target);
+        var (peer, head) = await listener.Next();
+
+        refusals.Add(await SendRefusals.Of(client));
+
+        using (peer)
+        using (var server = await Listener.Answer(peer, head))
+        {
+            await connecting.WaitAsync(Patience, Cancelled);
+
+            // open, the send going
+            refusals.Add(await SendRefusals.Of(client));
+
+            // closing, its close unanswered while the server's end reads nothing
+            var closing = client.CloseConnection();
+
+            refusals.Add(await SendRefusals.Of(client));
+
+            // then answered: what was sent read, then the close
+            WebSocketReceiveResult received;
+
+            do
+            {
+                received = await server.ReceiveAsync(new byte[16], Cancelled).WaitAsync(Patience, Cancelled);
+            }
+            while (received.MessageType != WebSocketMessageType.Close);
+
+            await server.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, null, Cancelled);
+            await closing.WaitAsync(Patience, Cancelled);
+        }
+
+        // closed by its own close
+        refusals.Add(await SendRefusals.Of(client));
+
+        // reconnecting, its handshake unanswered, then ended by its token
+        using var ending = new CancellationTokenSource();
+        var reconnecting = client.Reconnect(new TransportClientReconnectOptions { CancellationToken = ending.Token });
+        var (unanswered, _) = await listener.Next();
+
+        using (unanswered)
+        {
+            refusals.Add(await SendRefusals.Of(client));
+            await ending.CancelAsync();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            {
+                return reconnecting.WaitAsync(Patience, Cancelled);
+            });
+        }
+
+        // closed by a connect that started and failed: its server refusing it
+        await ConnectRefused(client, listener);
+        refusals.Add(await SendRefusals.Of(client));
+
+        Assert.Equal(
+            [
+                "ReadyStateException Uninitialized: the transport client is uninitialized, not open",
+                "ReadyStateException Connecting: the transport client is connecting, not open",
+                "sent",
+                "DisconnectException: the transport client is closing, not open",
+                "DisconnectException: the transport client is closed, not open",
+                "DisconnectException: the transport client is reconnecting, not open",
+                "DisconnectException: the transport client is closed, not open",
+            ],
+            refusals);
+    }
+
     [Fact]
     public async Task Refuses_a_close_before_it_connects_and_once_closed()
     {
-        await Assert.ThrowsAsync<DisconnectException>(() =>
+        Assert.Equal(ReadyState.Uninitialized, (await Assert.ThrowsAsync<ReadyStateException>(() =>
         {
             return _client.CloseConnection();
-        });
+        })).Got);
 
         await _client.Connect(Target with { CancellationToken = Cancelled });
         await _client.CloseConnection().WaitAsync(Patience, Cancelled);
 
-        Assert.Equal("the transport client is closed, not open", (await Assert.ThrowsAsync<DisconnectException>(() =>
+        var refused = await Assert.ThrowsAsync<ReadyStateException>(() =>
         {
             return _client.CloseConnection();
-        })).Message);
+        });
+
+        Assert.Equal((ReadyState.Closed, "the transport client is closed, not open"), (refused.Got, refused.Message));
     }
 
     [Fact]
@@ -1405,10 +1486,10 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
             // the server's end reads nothing, so it never answers the close
             var first = _client.CloseConnection();
 
-            await Assert.ThrowsAsync<DisconnectException>(() =>
+            Assert.Equal(ReadyState.Closing, (await Assert.ThrowsAsync<ReadyStateException>(() =>
             {
                 return _client.CloseConnection();
-            });
+            })).Got);
             await _client.DisposeAsync();
 
             // well within the close timeout, 5 s, which only a close nothing settled waits out
@@ -1930,14 +2011,19 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Fails_its_connection_on_a_protocol_error_whose_error_listener_throws_telling_its_close_all_the_same()
+    public async Task Fails_its_connection_on_a_protocol_error_whose_error_listener_throws_telling_its_close_all_the_same_and_dropping_what_it_threw()
     {
         using var listener = new Listener(IPAddress.Loopback);
         var closes = ClosesOf(_client);
+        var heard = new ConcurrentQueue<Exception>();
 
         _client.Error += (_) =>
         {
             throw new InvalidOperationException("an error listener that throws");
+        };
+        _client.Error += (reason) =>
+        {
+            heard.Enqueue(reason);
         };
 
         var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
@@ -1949,8 +2035,10 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
             await connecting.WaitAsync(Patience, Cancelled);
             await peer.GetStream().WriteAsync(ReservedFrame, Cancelled);
 
-            // what the listener threw goes on to the task no one awaits, the platform's
             Assert.Equal((false, false), await Next(closes));
+            // * what the listener threw is dropped: the listener after it told the failure, and
+            // nothing else
+            Assert.Equal(WebSocketError.Faulted, Assert.IsType<WebSocketException>(Assert.Single(heard)).WebSocketErrorCode);
             Assert.Equal(ReadyState.Closed, _client.ReadyState);
         }
     }
@@ -2050,6 +2138,46 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
             _client.Resume();
 
             Assert.Equal(new byte[] { 7 }, (await Next(messages)).Bytes.ToArray());
+        }
+    }
+
+    // spec 15.2
+    [Fact]
+    public async Task Emits_what_the_server_sends_text_as_text_binary_as_bytes()
+    {
+        using var listener = new Listener(IPAddress.Loopback);
+        var messages = Channel.CreateUnbounded<TransportMessage>();
+        var errors = Channel.CreateUnbounded<Exception>();
+
+        _client.Message += (message) =>
+        {
+            messages.Writer.TryWrite(message);
+        };
+        _client.Error += (reason) =>
+        {
+            errors.Writer.TryWrite(reason);
+        };
+
+        var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
+        var (peer, head) = await listener.Next();
+
+        using (peer)
+        using (var server = await Listener.Answer(peer, head))
+        {
+            await connecting.WaitAsync(Patience, Cancelled);
+            await server.SendAsync(Encoding.UTF8.GetBytes("text"), WebSocketMessageType.Text, true, Cancelled);
+            await server.SendAsync(Encoding.UTF8.GetBytes("binary"), WebSocketMessageType.Binary, true, Cancelled);
+
+            var text = await Next(messages);
+            var binary = await Next(messages);
+
+            // * each handed on whole, a text one marked so: its router judges it, its transport reports
+            // nothing of it (spec 15.2)
+            Assert.Equal("text"u8.ToArray(), text.Bytes.ToArray());
+            Assert.True(text.IsText);
+            Assert.Equal("binary"u8.ToArray(), binary.Bytes.ToArray());
+            Assert.False(binary.IsText);
+            Assert.True(errors.Reader.Count == 0);
         }
     }
 

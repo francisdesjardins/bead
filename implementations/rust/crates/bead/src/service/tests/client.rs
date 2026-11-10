@@ -609,7 +609,9 @@ async fn sends_a_command_s_unlisted_code_as_written_and_reports_it() {
         .iter()
         .map(|error| match error {
             RouterError::Other(error) => error.to_string(),
-            RouterError::Failure(failure) => failure.to_string(),
+            other @ (RouterError::Failure(_)
+            | RouterError::ReadyState(_)
+            | RouterError::Disconnected(_)) => other.to_string(),
         })
         .collect();
 

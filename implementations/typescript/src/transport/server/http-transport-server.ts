@@ -324,8 +324,8 @@ const unref = (timer: TimeoutId): void => {
  * past `maximumOutboxBytes` or an answer its socket held past its deadline at
  * `minimumSendBytesPerSecond` past `sendGracePeriod`, a {@link GenericError} naming the bound in the
  * spec's spelling and its value, told once, as its connection ends, its end begun, before its
- * unclean `close`, so a listener that throws keeps nothing open; and what a listener of its events
- * threw, as it threw. A client gone, an exchange lost, or a connection closed past
+ * unclean `close`, so a listener that throws keeps nothing open; and what a listener of its other
+ * events threw, as it threw. A client gone, an exchange lost, or a connection closed past
  * `exchangeTimeout` or `inactivityTimeout` emits no `error`: its unclean `close` tells it.
  *
  * @example
@@ -392,7 +392,7 @@ export const createHTTPTransportServer = (
   const drawn = new Map<TransportServerConnectionHandle, IDrawn>();
 
   const transport = createTransportServer<IDrawnConnection, IDrawingRequest>(
-    (server, connections, { isHeard, tell }) => {
+    (server, connections, { isHeard, report, tell }) => {
       // the servers the start under way, or the last, built and keeps: one an address bound, each
       // by the application's `createServer`, configured alike
       const httpServers = new Set<IHTTPServerLike>();
@@ -536,8 +536,8 @@ export const createHTTPTransportServer = (
       };
 
       // ! a connection behind its bounds is dropped, its close unclean, then reported, naming the
-      // bound, so an operator tells it from a network that failed; once, as it ends, and its close
-      // told even when a listener of `error` throws, which is Node's (spec 15.1)
+      // bound, so an operator tells it from a network that failed; once, as it ends, its close told
+      // after, what a listener of `error` throws dropped (spec 15.1)
       const drop = (connection: IDrawn, why: string): void => {
         const { connectionHandle } = connection;
 
@@ -545,11 +545,8 @@ export const createHTTPTransportServer = (
           return;
         }
 
-        try {
-          server.emit(ERROR_EVENT, droppedOf(connectionHandle, why), connectionHandle);
-        } finally {
-          tell(CLOSE_EVENT, [false, connectionHandle]);
-        }
+        report(droppedOf(connectionHandle, why), connectionHandle);
+        tell(CLOSE_EVENT, [false, connectionHandle]);
       };
 
       // an answer's bytes, held to the pace its socket takes them at; `late` hears, naming the
@@ -1140,7 +1137,7 @@ export const createHTTPTransportServer = (
             const entry = {
               instance,
               onError: (error: Error): void => {
-                server.emit(ERROR_EVENT, error, '');
+                report(error, '');
               },
             };
 
@@ -1180,7 +1177,7 @@ export const createHTTPTransportServer = (
                 const addressInfo = instance.address();
 
                 entry.onError = (error) => {
-                  server.emit(ERROR_EVENT, error, '');
+                  report(error, '');
                 };
 
                 resolve({

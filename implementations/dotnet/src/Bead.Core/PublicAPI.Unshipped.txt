@@ -1,4 +1,8 @@
 #nullable enable
+Bead.ReadyStateException
+Bead.ReadyStateException.Expected.get -> Bead.ReadyState
+Bead.ReadyStateException.Got.get -> Bead.ReadyState
+Bead.ReadyStateException.ReadyStateException(Bead.ReadyState got, Bead.ReadyState expected) -> void
 Bead.TransportServerStartOptions
 Bead.TransportServerStartOptions.<Clone>$() -> Bead.TransportServerStartOptions!
 Bead.TransportServerStartOptions.Address.get -> string!

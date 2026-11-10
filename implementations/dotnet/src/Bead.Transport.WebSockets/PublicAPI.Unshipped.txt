@@ -1,4 +1,5 @@
 #nullable enable
+*REMOVED*Bead.Transport.WebSockets.WebSocketTransportServer.CloseAll() -> System.Threading.Tasks.Task<bool[]!>!
 Bead.Transport.WebSockets.WebSocketTransportServer.Start(Bead.TransportServerStartOptions? options = null) -> System.Threading.Tasks.Task<Bead.TransportServerAddress>!
 *REMOVED*Bead.Transport.WebSockets.WebSocketTransportServer.Start(Bead.Transport.WebSockets.WebSocketTransportStartOptions? options = null) -> System.Threading.Tasks.Task<Bead.TransportServerAddress>!
 *REMOVED*Bead.Transport.WebSockets.WebSocketTransportStartOptions

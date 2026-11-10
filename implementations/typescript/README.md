@@ -141,9 +141,10 @@ await client.send({ data: 'hello' });
 
 Each listener of a transport's events is called within a guard: what one throws goes to the
 transport's `error`, the next listener is called all the same, and the transport goes on as if it
-returned (spec 15.1). It awaits nothing a listener returns, so a listener's rejection is Node's, as
-what a listener of `error` throws is: an unhandled rejection ends the process, and a listener
-catches its own, as the `reconnect` above does. The HTTP client waits a `busy` refusal's
+returned (spec 15.1). It awaits nothing a listener returns, so a listener's rejection is Node's;
+what a listener of `error` throws is dropped, the listeners after it told (spec 15.1). An unhandled
+rejection ends the process, and a listener catches its own, an `error` listener's too, as the
+`reconnect` above does. The HTTP client waits a `busy` refusal's
 `Retry-After` before it sends an envelope that is no request again, until `exchangeTimeout` from
 its first send (spec 15.6); a reconnection waits its own schedule, whatever the field asks.
 

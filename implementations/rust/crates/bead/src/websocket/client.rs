@@ -29,10 +29,8 @@ use tungstenite::error::Error as WsError;
 
 use crate::HEARTBEAT;
 use crate::clock::{Schedule, SharedClock, SystemClock, Timer};
-use crate::constants::{ProtocolCode, RouterSide};
 use crate::duration::{NEVER, hold};
 use crate::errors::{ConnectError, ProgrammerError, ReadyStateError, TransportError};
-use crate::failure::Failure;
 use crate::judgement::security::is_secure;
 use crate::net::bounds::hold_count;
 use crate::net::racing::{RacingOptions, connect_racing, host_of};
@@ -42,7 +40,7 @@ use crate::router::types::{BoxFuture, RouterError, TransportMessage};
 use crate::transport::{
     ClientListener, Connect, Listeners, RECONNECTION_CANCELLED, ReadyState, RouterClientTransport,
     Sent, TransportClientDisconnectOptions, TransportClientReconnectOptions, attempting, caught,
-    caught_future, hold_reconnection, is_field_value,
+    caught_future, hold_reconnection, is_field_value, refused_unless_open,
 };
 use crate::websocket::connection::{
     CLOSE_TIMEOUT, Commands, Connection, ConnectionBounds, ConnectionHooks, Ended, Failed,
@@ -339,8 +337,8 @@ struct Opened {
 /// runs on its clock; a connect given up by its timeout, its signal or its dispose drops what it
 /// opened.
 ///
-/// Once open, each binary message is handed on `on_message`; a text message is
-/// `ENVELOPE_MALFORMED`, reported on `on_error`, handed nothing. A message past
+/// Once open, each message is handed on `on_message`, a text one marked `is_text`, for its router
+/// to report as no envelope (spec 15.2). A message past
 /// `maximum_message_bytes` fails its connection with 1009, reported on `on_error` naming
 /// `maximumMessageBytes`, then its unclean close; a protocol error is reported alike, failed with
 /// 1002. A server gone without its closing handshake tells its unclean close alone.
@@ -471,6 +469,7 @@ impl ClientInner {
             |error: RouterError| {
                 for heard in &listeners {
                     // ! a listener of errors that panics would loop: its panic is dropped
+                    // (spec 15.1)
                     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         heard.on_error(&error);
                     }))
@@ -805,8 +804,8 @@ impl ClientInner {
         }
     }
 
-    // a message whole, handed on unless its connection is gone or closing; a text one reported,
-    // as no envelope
+    // a message whole, handed on unless its connection is gone or closing; a text one marked so,
+    // for its router to judge (spec 15.2)
     fn deliver(&self, serial: u64, (data, is_text): (Bytes, bool)) {
         {
             let state = locked(&self.state);
@@ -823,17 +822,9 @@ impl ClientInner {
             }
         }
 
-        if is_text {
-            self.report(&RouterError::Failure(
-                Failure::protocol(ProtocolCode::ENVELOPE_MALFORMED, RouterSide::Client)
-                    .saying("an envelope is binary, not a string"),
-            ));
-
-            return;
-        }
-
         let message = TransportMessage {
             data,
+            is_text,
             ..TransportMessage::default()
         };
 
@@ -1099,8 +1090,8 @@ impl WebSocketTransportClient {
             };
             let Some(open) = open else {
                 return Err(TransportError::ReadyState(ReadyStateError::new(
-                    state.ready.name(),
-                    ReadyState::Open.name(),
+                    state.ready,
+                    ReadyState::Open,
                 )));
             };
 
@@ -1306,10 +1297,7 @@ impl RouterClientTransport for WebSocketTransportClient {
 
                 Ok(Sent::Done)
             }
-            (_, ready) => Err(RouterError::Other(Arc::new(ReadyStateError::new(
-                ready.name(),
-                ReadyState::Open.name(),
-            )))),
+            (_, ready) => Err(refused_unless_open(ready)),
         }
     }
 

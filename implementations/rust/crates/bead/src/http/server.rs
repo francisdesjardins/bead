@@ -696,7 +696,7 @@ impl ServerInner {
     // what it reports of its own, with the connection it came on
     fn report(&self, (error, connection_handle): (&RouterError, Option<&ConnectionHandle>)) {
         for listener in self.listeners.all() {
-            // ! a listener of errors that panics would loop: its panic is dropped
+            // ! a listener of errors that panics would loop: its panic is dropped (spec 15.1)
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 listener.on_error(error, connection_handle);
             }))
@@ -1992,6 +1992,7 @@ impl ServerInner {
                 address: exchange.facts.address.clone(),
                 port: Some(exchange.facts.port),
                 may_overtake: false,
+                is_text: false,
             };
             let connection = Arc::clone(&exchange.connection);
 

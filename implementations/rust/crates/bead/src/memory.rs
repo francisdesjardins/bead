@@ -30,11 +30,14 @@ use crate::transport::{
     CONNECT_TIMEOUT, ClientListener, Connect, Listeners, RECONNECTION_CANCELLED, ReadyState,
     RouterClientTransport, Sent, ServerListener, ServerTransport, TransportClientDisconnectOptions,
     TransportClientReconnectOptions, TransportServerAddress, TransportServerClient, attempting,
-    first_of, hold_reconnection, is_field_value, tell_server,
+    first_of, hold_reconnection, is_field_value, refused_unless_open, tell_server,
 };
 
 #[cfg(test)]
 mod tests;
+
+// what refuses a text message at either end, as the other sides word it (spec 15.2)
+const TEXT_REFUSED: &str = "an in-memory connection carries envelopes, as bytes";
 
 /// The type an in-memory connection's handle names.
 pub const TRANSPORT_MEMORY: &str = "MEMORY";
@@ -405,6 +408,13 @@ impl ServerTransport for MemoryTransportServer {
         message: TransportMessage,
         connection_handle: &ConnectionHandle,
     ) -> Result<Sent, RouterError> {
+        // refused before it goes, the connection kept: a text message is no envelope (spec 15.2)
+        if message.is_text {
+            return Err(RouterError::Other(Arc::new(ProgrammerError::new(
+                TEXT_REFUSED,
+            ))));
+        }
+
         let peer = locked(&self.inner.state)
             .connections
             .get(connection_handle)
@@ -771,6 +781,7 @@ impl ClientInner {
             |error: RouterError| {
                 for heard in &listeners {
                     // ! a listener of errors that panics would loop: its panic is dropped
+                    // (spec 15.1)
                     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         heard.on_error(&error);
                     }))
@@ -1200,8 +1211,8 @@ impl MemoryTransportClient {
 
             if state.ready != ReadyState::Open || state.current.is_none() {
                 return Err(TransportError::ReadyState(ReadyStateError::new(
-                    state.ready.name(),
-                    ReadyState::Open.name(),
+                    state.ready,
+                    ReadyState::Open,
                 )));
             }
 
@@ -1381,13 +1392,17 @@ impl RouterClientTransport for MemoryTransportClient {
             match (&state.current, state.ready) {
                 (Some((end, _)), ReadyState::Open) => end.clone(),
                 (_, ready) => {
-                    return Err(RouterError::Other(Arc::new(ReadyStateError::new(
-                        ready.name(),
-                        ReadyState::Open.name(),
-                    ))));
+                    return Err(refused_unless_open(ready));
                 }
             }
         };
+
+        // refused before it goes, the connection kept: a text message is no envelope (spec 15.2)
+        if message.is_text {
+            return Err(RouterError::Other(Arc::new(ProgrammerError::new(
+                TEXT_REFUSED,
+            ))));
+        }
 
         // refused before it goes, the connection kept: a field could not carry it as it is
         if let Some(credential) = &message.credential

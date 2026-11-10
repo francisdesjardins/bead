@@ -711,18 +711,11 @@ impl Config {
 
     // ! a debug listener's panic reaches errors alone, so it cannot trace itself recursively
     fn tell_error(&self, error: &RouterError) {
-        let heard = self.listeners.all();
-
-        self.listeners.each((
-            |listener: &(dyn Fn(&RouterError) + Send + Sync + 'static)| listener(error),
-            |panicked: RouterError| {
-                for listener in &heard {
-                    // ! a listener of errors that panics would loop: its panic is dropped
-                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| listener(&panicked)))
-                        .ok();
-                }
-            },
-        ));
+        for listener in self.listeners.all() {
+            // ! a listener of errors that panics would loop: its panic is dropped, and the listeners
+            // after it told the error alone (spec 15.1)
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| listener(error))).ok();
+        }
     }
 
     /// The server transports over it, while they stand.

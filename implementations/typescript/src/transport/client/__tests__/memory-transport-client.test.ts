@@ -7,10 +7,11 @@ import { createServiceManager } from '../../../router/shared/service-manager';
 import type { IProcedure } from '../../../router/shared/types';
 import { createMemoryTransportServer } from '../../server/memory-transport-server';
 import type { MemoryTransportServer } from '../../server/types';
-import { createTestClock } from '../../shared/__tests__/fixtures';
+import { createTestClock, sendRefusalOf } from '../../shared/__tests__/fixtures';
 import {
   CancelError,
   ConnectError,
+  DisconnectError,
   ProgrammerError,
   ReadyStateError,
   ReconnectError,
@@ -523,7 +524,75 @@ test.describe('createMemoryTransportClient', () => {
       await turn();
 
       expect([atServer, client.isOpen()]).toEqual([[], true]);
+
+      // * closed: a send fails as a disconnection, a disconnect by its state (debugging 9.7)
+      await client.disconnect();
+      await expect(client.send({ data: new Uint8Array([1]) })).rejects.toThrow(
+        new DisconnectError('the transport client is closed, not open')
+      );
+      await expect(client.disconnect()).rejects.toMatchObject({
+        expected: ReadyState.OPEN,
+        got: ReadyState.CLOSED,
+        message: 'the transport client is closed, not open',
+        name: 'ReadyStateError',
+      });
     }
+  });
+
+  // debugging 9.7
+  test('refuses a send by its ready state before the open and as a disconnection after it, in each state it holds', async () => {
+    // * a server that holds each connect until the test draws or refuses it
+    const held = createHeldServer();
+    await using client = createMemoryTransportClient();
+    const refusals: Awaited<ReturnType<typeof sendRefusalOf>>[] = [];
+
+    // never connected
+    refusals.push(await sendRefusalOf(client));
+
+    // connecting, its server not yet accepting
+    const connecting = client.connect({ server: held.server });
+
+    await turn();
+    refusals.push(await sendRefusalOf(client));
+    held.accepts[0]?.resolve(held.end);
+    await connecting;
+
+    // open, the send going
+    refusals.push(await sendRefusalOf(client));
+
+    // closing left out: its disconnect is closing and closed within one turn
+    await client.disconnect();
+    refusals.push(await sendRefusalOf(client));
+
+    // reconnecting, its attempt held by its server, then ended by its signal
+    const ending = new AbortController();
+    const reconnecting = client.reconnect({ signal: ending.signal });
+
+    await turn();
+    refusals.push(await sendRefusalOf(client));
+    ending.abort();
+    await expect(reconnecting).rejects.toBeInstanceOf(CancelError);
+
+    // closed by a connect that started and failed: its server not started
+    await using failed = createMemoryTransportClient();
+
+    await expect(failed.connect({ server: createMemoryTransportServer() })).rejects.toBeInstanceOf(
+      ConnectError
+    );
+    refusals.push(await sendRefusalOf(failed));
+
+    expect(refusals).toEqual([
+      [
+        'ReadyStateError',
+        ReadyState.UNINITIALIZED,
+        'the transport client is uninitialized, not open',
+      ],
+      ['ReadyStateError', ReadyState.CONNECTING, 'the transport client is connecting, not open'],
+      'sent',
+      ['DisconnectError', undefined, 'the transport client is closed, not open'],
+      ['DisconnectError', undefined, 'the transport client is reconnecting, not open'],
+      ['DisconnectError', undefined, 'the transport client is closed, not open'],
+    ]);
   });
 
   // spec 15.13

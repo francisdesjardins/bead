@@ -327,6 +327,7 @@ async fn answers_an_answer_sent_as_its_request_is_handed_on_in_one_go() {
                 address: None,
                 port: None,
                 may_overtake: false,
+                is_text: false,
             };
 
             drop(server.send(message, handle));
@@ -396,6 +397,7 @@ async fn hands_a_request_on_with_its_authorization_whole_and_any_other_envelope_
                     address: None,
                     port: None,
                     may_overtake: false,
+                    is_text: false,
                 };
 
                 drop(server.send(answer, handle));
@@ -1470,6 +1472,7 @@ async fn keeps_a_connection_whose_refused_exchange_lost_its_socket_and_closes_on
         address: None,
         port: None,
         may_overtake: false,
+        is_text: false,
     };
     let Sent::Later(sending) = started.server.send(message, &handle).unwrap() else {
         panic!("an answer settles later");
@@ -2122,6 +2125,7 @@ async fn loses_an_answer_whose_client_reads_slower_than_minimum_send_bytes_per_s
         address: None,
         port: None,
         may_overtake: false,
+        is_text: false,
     };
     let Sent::Later(sending) = started.server.send(message, &handle).unwrap() else {
         panic!("an answer settles later");
@@ -2305,4 +2309,60 @@ fn refuses_a_headers_timeout_a_send_grace_period_a_body_grace_period_a_minimum_s
         "minimumBodyBytesPerSecond is a whole number above 0, not 0",
         "its words"
     );
+}
+
+// the twin of `"clients" is a copy without the sockets`: each entry what its connection looked like
+// as it was taken, a later change leaving the copy as it was
+#[tokio::test]
+async fn clients_is_a_copy_without_the_sockets() {
+    let started = started(&HttpTransportServerOptions::default()).await;
+    let (first, _) = connect(&started).await;
+    let clients = started.server.clients();
+
+    assert_eq!(
+        clients
+            .iter()
+            .map(|client| (
+                Arc::clone(&client.connection_handle),
+                client.address.clone(),
+                client.port.is_some(),
+                client.last_activity,
+                client.transport_type
+            ))
+            .collect::<Vec<_>>(),
+        [(
+            Arc::clone(&first),
+            HOST.to_owned(),
+            true,
+            None,
+            TRANSPORT_HTTP
+        )],
+        "what it held then"
+    );
+
+    // in the order they were drawn, whichever went in between; the copy taken before stays
+    let (second, _) = connect(&started).await;
+
+    assert!(
+        patience(PATIENCE, started.server.close(&first))
+            .await
+            .expect("closed in time"),
+        "held"
+    );
+
+    let (third, _) = connect(&started).await;
+    let handles_of = |clients: &[TransportServerClient]| {
+        clients
+            .iter()
+            .map(|client| Arc::clone(&client.connection_handle))
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(
+        handles_of(&started.server.clients()),
+        [second, third],
+        "those it holds now, in order"
+    );
+    assert_eq!(handles_of(&clients), [first], "the copy as it was");
+    started.stop().await;
 }

@@ -79,7 +79,7 @@ public sealed class JoinedServerTransport : IServerTransport, IAsyncDisposable
         });
         _listeners = new ListenerGuard((reason, connectionHandle) =>
         {
-            Error?.Invoke(reason, connectionHandle ?? "");
+            ListenerGuard.TellError(Error, (reason, connectionHandle ?? ""));
         });
 
         _told = [.. _transports.Select((_) =>
@@ -119,11 +119,12 @@ public sealed class JoinedServerTransport : IServerTransport, IAsyncDisposable
                 _listeners.Tell(Refusal, refusal);
             };
 
-            // ! told on as it came, outside the guard: a listener of Error that throws would be
-            // reported to itself
+            // ! told on as it came, outside the report of a listener's throw, within a guard that
+            // drops what a listener of Error throws: reported, it would tell the event that threw
+            // (spec 15.1)
             transport.Error += (reason, connectionHandle) =>
             {
-                Error?.Invoke(reason, connectionHandle);
+                ListenerGuard.TellError(Error, (reason, connectionHandle));
             };
         }
     }

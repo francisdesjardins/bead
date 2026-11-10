@@ -32,6 +32,8 @@
     <Compile Include="../Shared/JsonPayloads.cs" Link="JsonPayloads.cs" />
     <!-- the addresses a server listens on, and the forms it refuses, as the TypeScript side's tests hold them -->
     <Compile Include="../Shared/Addresses.cs" Link="Addresses.cs" />
+    <!-- what a client transport's send gives in each state, as the TypeScript side's sendRefusalOf reads it -->
+    <Compile Include="../Shared/SendRefusals.cs" Link="SendRefusals.cs" />
   </ItemGroup>
 
   <ItemGroup>

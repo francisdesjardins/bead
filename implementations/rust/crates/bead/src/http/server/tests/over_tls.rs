@@ -665,6 +665,7 @@ async fn serves_http_2_and_http_1_1_on_one_port_a_call_over_each_and_closes_its_
                     address: None,
                     port: None,
                     may_overtake: false,
+                    is_text: false,
                 },
                 handle,
             ));
