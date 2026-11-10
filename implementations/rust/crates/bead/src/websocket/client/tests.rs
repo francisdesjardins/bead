@@ -17,6 +17,8 @@ use crate::transport::TransportServerStartOptions;
 use crate::websocket::server::{WebSocketTransportServer, WebSocketTransportServerOptions};
 use crate::{ServerTransport, TransportServerAddress};
 
+mod reconnection;
+
 const PATIENCE: Duration = Duration::from_secs(10);
 
 // a bearer credential, as RFC 6750 §2.1 writes one
@@ -2602,6 +2604,7 @@ async fn reconnects_an_open_transport_without_emitting_close() {
     let recorder = recorded(&client);
 
     settled(client.connect(&to(server.port))).await.unwrap();
+    let mut replaced = server.next_upgraded().await;
     reconnected(
         &client,
         &TransportClientReconnectOptions {
@@ -2616,6 +2619,12 @@ async fn reconnects_an_open_transport_without_emitting_close() {
 
     assert!(is_state(&client, ReadyState::Open), "open");
     assert!(recorder.closes().is_empty(), "no close");
+    replaced.ended().await;
+    assert_eq!(
+        server.accepted.load(Ordering::SeqCst),
+        2,
+        "its replacement opened"
+    );
     client.dispose();
 }
 
