@@ -591,9 +591,11 @@ the measurement processes. The TypeScript bench's C# interop server is built onc
 with `--no-build`.
 
 CI's [`bench.yml`](.github/workflows/bench.yml) measures each side on every push to a release or
-hotfix branch, and by hand against a tag it is given: a runner of its own a side checks out the
-newest `v*` tag by semver beside the candidate, measures both trees in turn by `--tree`, at the
-defaults above, and compares them at 25%. For one side, from the candidate's root:
+hotfix branch, and by hand: a runner of its own a side checks out the newest `v*` tag by semver
+beside the candidate, measures both trees in turn by `--tree`, at the defaults above, and compares
+them at 25%. By hand it also takes a `baseline` other than that tag (a tag, a branch or a commit's
+full sha, to measure a branch against `develop`'s head), the `sides` to measure, and a `filter`, one
+measure's ID or name, passed to `--filter`. For one side, from the candidate's root:
 
 ```sh
 git worktree add --detach ../bench-baseline v0.9.0
