@@ -439,25 +439,34 @@ subscription and is refused in its own answer, its queue past its bounds before 
 
 9.6. Each call a side makes ends as one of these, the sections `spec.md`'s:
 
-| A call this side makes                                                                                                                                                        | `outcome`   | `code`                            |
-| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | --------------------------------- |
-| it asks for `OPAQUE` and its side knows no session, or would present a default withdrawn, before it goes (13.4)                                                               | `failure`   | `SESSION_REQUIRED`                |
-| it presents a credential its transport cannot carry, before it goes (13.4)                                                                                                    | `failure`   | `DESTINATION_UNREACHABLE`         |
-| no call id is free, or its calls waiting on the connection number `maximumAnsweringCalls`, before it goes (9.1)                                                               | `failure`   | `CAPACITY_EXCEEDED`               |
-| its payload past its limit, a transfer its side sends none of, or one its header leaves no opening, past 1,020 bytes or without a byte within `chunkBytes` (12.1, 12.2, 12.3) | `failure`   | `PAYLOAD_TOO_LARGE`               |
-| its value its rules refuse, before it goes, in the turn it started (18.2)                                                                                                     | `failure`   | `PAYLOAD_INVALID`                 |
-| a result comes whole (9.7, 12.6), whether its requester decodes it or not                                                                                                     | `result`    |                                   |
-| a failure comes (9.7), passed on by relays or not (7.5)                                                                                                                       | `failure`   | its name, `application`, `_OTHER` |
-| its router ends it once it went: an answer that does not read (9.6.3), its result's transfer refused (12.3, 12.6)                                                             | `failure`   | its name                          |
-| its time passes (9.9), or its transfer's inactivity (12.7, 12.8)                                                                                                              | `timeout`   |                                   |
-| its caller cancels it (10.1)                                                                                                                                                  | `cancelled` |                                   |
-| its connection is not open as it starts, or closes, or the side is disposed (9.10)                                                                                            | `closed`    |                                   |
-| anything else its router fails it with: a transport that refuses its request                                                                                                  | `error`     |                                   |
+| A call this side makes                                                                                                                                                           | `outcome`   | `code`                            |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | --------------------------------- |
+| it asks for `OPAQUE` and its side knows no session, or would present a default withdrawn, before it goes (13.4)                                                                  | `failure`   | `SESSION_REQUIRED`                |
+| it presents a credential its transport cannot carry, before it goes (13.4)                                                                                                       | `failure`   | `DESTINATION_UNREACHABLE`         |
+| no call id is free, or its calls waiting on the connection number `maximumAnsweringCalls`, before it goes (9.1)                                                                  | `failure`   | `CAPACITY_EXCEEDED`               |
+| its payload past its limit, a transfer its side sends none of, or one its header leaves no opening, past 1,020 bytes or without a byte within `chunkBytes` (12.1, 12.2, 12.3)    | `failure`   | `PAYLOAD_TOO_LARGE`               |
+| its value its rules refuse, before it goes, in the turn it started (18.2)                                                                                                        | `failure`   | `PAYLOAD_INVALID`                 |
+| a result comes whole (9.7, 12.6), whether its requester decodes it or not                                                                                                        | `result`    |                                   |
+| a failure comes (9.7), passed on by relays or not (7.5)                                                                                                                          | `failure`   | its name, `application`, `_OTHER` |
+| its router ends it once it went: an answer that does not read (9.6.3), its result's transfer refused (12.3, 12.6)                                                                | `failure`   | its name                          |
+| its time passes (9.9), or its transfer's inactivity (12.7, 12.8)                                                                                                                 | `timeout`   |                                   |
+| its caller cancels it (10.1)                                                                                                                                                     | `cancelled` |                                   |
+| its connection is not open as it starts — one its side no longer holds, or a client's transport closing, closed or reconnecting — or closes, or the side is disposed (9.7, 9.10) | `closed`    |                                   |
+| anything else its router fails it with: a transport that refuses its request, a client's transport before its open, uninitialized or connecting, among them (9.7)                | `error`     |                                   |
 
 9.7. A call to a connection that is not open fails with the type a connection that closes fails it
-with, and counts alike, `closed`: the two are one race with a close. A call made on a connection
-that closes fails and counts so too, even when the signal it was given is that of a call the close
-ends: never as a cancel. Each side's two types are the support matrix's.
+with, and counts alike, `closed`: the two are one race with a close. A client's connection is not
+open once its transport's state is a close's — closing, closed or reconnecting — however it came to
+be so: a close, a connection lost, or a connect that started and failed, refused by its server or
+ended as `spec.md` 15.15 ends one, which leaves its client closed. Before its open, its transport
+uninitialized or connecting, a client has no close to race: its transport refuses the call by its
+ready state, and it counts `error`, as the WebSocket API's `send()` throws an `InvalidStateError`
+in CONNECTING alone and leaves a connection closing or closed, a failed one among them, to its close
+([WHATWG WebSockets §3.1](https://websockets.spec.whatwg.org/#dom-websocket-send),
+[§4](https://websockets.spec.whatwg.org/#feedback-from-the-protocol)). A connect refused before it
+moves leaves the state as it was. A call made on a connection that closes fails and counts so too,
+even when the signal it was given is that of a call the close ends: never as a cancel. Each side's
+types are the support matrix's.
 
 9.8. The metrics count what the wire carried, and the trace tells what the side made of it. A result
 its requester cannot decode came as a result, and is counted so at both ends; the trace tells the

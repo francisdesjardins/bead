@@ -45,6 +45,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   throws it; over WebSocket it no longer reaches Node's `uncaughtException` or Kestrel; and the Rust
   side's participant no longer tells an error listener's panic to its error listeners (spec 15.1,
   debugging 2.2, 13.9; decision 0023).
+- **Breaking:** a call to a client whose transport is not open fails by the transport's state:
+  before its open, uninitialized or connecting, by its ready state, counted `error` — on the C#
+  side a `ReadyStateException`, new, where a `DisconnectException` counted `closed`, as is its
+  transport client's `CloseConnection` unless open; on the Rust side `CallError::ReadyState`, new;
+  once its state is a close's, closing, closed or reconnecting, a failed connect's among them, as a
+  disconnection, counted `closed`, on the TypeScript and Rust sides as on the C# side (debugging
+  9.6, 9.7; decision 0013).
 
 ### Fixed
 
