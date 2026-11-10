@@ -59,6 +59,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   whole, its head with it and its length in content-length, one write; a request that takes longer
   gets its head then and its answer chunked, as before; one cancelled before its head ends 204 (spec
   15.6, 15.7; decision 0020).
+- `spec.md` 15.6 compares a method as it came, a case-sensitive token (RFC 9110 §9.1): `get` is
+  no `GET`, and any method the path does not take, an extension method among them, is refused 405,
+  its `Allow` naming those it takes, never the 501 of a method a server does not recognize; 15.2's
+  step 3 compares alike. `spec/transports.json` adds one case over HTTP, which holds the method's
+  place after the path and the origin and an `options` that asks a preflight as none, and one at
+  a WebSocket's address, a `head` refused 405 where a `HEAD` is answered 426; the TypeScript side,
+  whose parser refuses such a method 400 first, is excused from both; its schema takes a request's
+  method as any token, in any case (decision 0026).
 
 ### Removed
 
@@ -68,8 +76,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- The C# side's HTTP transport server and gateway compare request methods case-sensitively, so
-  `get` is refused 405 as an unknown method (RFC 9110 §9.1).
+- The C# side's HTTP transport server and gateway compare request methods as they came, a
+  case-sensitive token (RFC 9110 §9.1), so `get` is refused 405 as any method the path does not
+  take.
 - The TypeScript side counts a text message against `maximumUntakenBytes` by its UTF-8 bytes, as
   the wire carried it, not by its UTF-16 code units (spec 15.12).
 - The C# side's HTTP transport server matches its pathname against the target as it came, as the

@@ -1324,8 +1324,8 @@ WebSocket's address in this order, and answers the first that applies:
    `bead-refusal` `host-refused`, whatever else it holds, since a page that rebinds its name to the
    server's address is its own origin by its authority, and `hosts` is what refuses it — under `*`,
    which takes it here, step 7 does, its origin none of the server's own (section 15.12).
-3. A method other than `GET` or `HEAD` is refused 405, its `Allow` naming both
-   ([RFC 9110 §15.5.6](https://www.rfc-editor.org/rfc/rfc9110#section-15.5.6)).
+3. A method other than `GET` or `HEAD`, compared as it came (section 15.6), is refused 405, its
+   `Allow` naming both ([RFC 9110 §15.5.6](https://www.rfc-editor.org/rfc/rfc9110#section-15.5.6)).
 4. A request that asks no WebSocket is answered 426, `upgrade-required`, its `Upgrade` naming
    `websocket` ([RFC 9110 §15.5.22](https://www.rfc-editor.org/rfc/rfc9110#section-15.5.22)): a
    `HEAD`, which cannot switch; an `HTTP/1.0` request, whose `Upgrade` is ignored; one whose
@@ -1451,7 +1451,7 @@ the request ran: the client counts the exchange lost.
 | 400    | `malformed`                           | a connect with a body, no token or a malformed one, not an envelope, a request on the server's parity, two `Authorization` fields; a listen without `bead-after`, a count that is none, or a `bead-after` past what was sent; a WebSocket's upgrade malformed (section 15.2) |
 | 403    | `host-refused`, `origin-refused`      | a host not among those the server takes, whatever the request at a WebSocket's address; an exchange, or a WebSocket's upgrade, from an origin neither the server's nor among those it takes                                                                                  |
 | 404    | `path-unknown`, `connection-unknown`  | not the path; the connection is gone — closed, or its server stopping                                                                                                                                                                                                        |
-| 405    | `method-refused`                      | neither `GET`, `POST` nor `DELETE`, which `Allow` names; at a WebSocket's address, neither `GET` nor `HEAD`, which `Allow` names                                                                                                                                             |
+| 405    | `method-refused`                      | neither `GET`, `POST` nor `DELETE`, compared as they came, which `Allow` names; at a WebSocket's address, neither `GET` nor `HEAD`, which `Allow` names                                                                                                                      |
 | 408    | `too-slow`                            | a body that came slower than `minimumBodyBytesPerSecond` once `bodyGracePeriod` passed (section 15.12)                                                                                                                                                                       |
 | 409    | `call-waiting`, `listen-undeclared`   | a request on a call id already waiting; a listen whose client did not say at connect it listens                                                                                                                                                                              |
 | 413    | `too-large`                           | a body past the envelope's limit                                                                                                                                                                                                                                             |
@@ -1469,17 +1469,25 @@ carries the first two.
 A server judges a request at its path in this order, and answers the first that applies. What HTTP
 refuses of its own, its HTTP server answers, unmarked (section 15.12); then a host the server does
 not take, 403; a path not its own, 404; an origin it does not take, 403; a preflight from an origin
-it lists, answered 204 (section 15.12); a method but `GET`, `POST` or `DELETE`, 405. A `POST` that
-presents no token connects: no type, or another than `application/prs.bead`, or a body encoded,
-415; the connect's own 400; then, once its stop began, or past `maximumConnections` or
-`maximumConnectionsPerAddress`, 503. Any other request is judged by its token: none, or one of
-another form, 400; once the server's stop began, the 404 marked `connection-unknown`, the token not
-looked up; a token it does not hold, the same 404. A `DELETE` then ends its connection. A listen is
-refused 409 when its client did not say it listens, then 400 for a body or its counts (section
-15.9). A `POST` is refused 415 for its type or its encoding, then 400 for two `Authorization`
-fields, 413 for a length it declares past `maximumBodyBytes`, and 429 past what its connection has
-under way, each before its body is read; what its body brings is judged as it comes (section 15.5):
-past `maximumBodyBytes` 413, past the budget 503, slower than its rate 408 (section 15.12).
+it lists, answered 204 (section 15.12); a method but `GET`, `POST` or `DELETE`, 405. A method is
+compared as it came, a case-sensitive token
+([RFC 9110 §9.1](https://www.rfc-editor.org/rfc/rfc9110#section-9.1)): `get` is no `GET`, and is
+refused 405 as any method the path does not take, an extension method among them, its `Allow`
+naming the three — never the 501 §9.1 suggests for a method a server does not recognize
+([RFC 9110 §15.6.2](https://www.rfc-editor.org/rfc/rfc9110#section-15.6.2)), since what a server
+recognizes beyond the path's methods is its HTTP parser's, which no two platforms share, and
+`Allow` tells a client what to send where 501 tells nothing; a WebSocket's address compares alike
+(section 15.2, step 3). A `POST` that presents no token connects: no type, or another than
+`application/prs.bead`, or a body encoded, 415; the connect's own 400; then, once its stop began, or
+past `maximumConnections` or `maximumConnectionsPerAddress`, 503. Any other request is judged by its
+token: none, or one of another form, 400; once the server's stop began, the 404 marked
+`connection-unknown`, the token not looked up; a token it does not hold, the same 404. A `DELETE`
+then ends its connection. A listen is refused 409 when its client did not say it listens, then 400
+for a body or its counts (section 15.9). A `POST` is refused 415 for its type or its encoding, then
+400 for two `Authorization` fields, 413 for a length it declares past `maximumBodyBytes`, and 429
+past what its connection has under way, each before its body is read; what its body brings is judged
+as it comes (section 15.5): past `maximumBodyBytes` 413, past the budget 503, slower than its rate
+408 (section 15.12).
 
 15.7. A client's send settles on the head of its answer: a 2xx says the server had the envelope. A
 server waits 40 ms from a request's hand-off for its answer: one that comes within them goes whole,

@@ -1092,6 +1092,181 @@
       ]
     },
     {
+      "name": "a method is compared as it came: get, post and BEAD are refused 405 as any method but GET, POST or DELETE, its Allow naming them, in section 15.6's place, after the path and the origin; an options asking a preflight is none",
+      "clauses": [
+        "15.6",
+        "15.6.7",
+        "15.12"
+      ],
+      "transport": "http",
+      "options": {
+        "origins": [
+          "https://page.test"
+        ]
+      },
+      "differs": [
+        {
+          "row": "A method Node's HTTP parser does not know",
+          "language": "TypeScript"
+        }
+      ],
+      "steps": [
+        {
+          "send": {
+            "head": "get /bead HTTP/1.1\r\nhost: {host}\r\nconnection: close\r\n\r\n"
+          },
+          "on": "lower"
+        },
+        {
+          "expect": {
+            "status": 405,
+            "fields": {
+              "bead-refusal": "method-refused",
+              "allow": "GET, POST, DELETE"
+            },
+            "body": "",
+            "told": {
+              "status": 405,
+              "reason": "method-refused",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "lower"
+        },
+        {
+          "send": {
+            "head": "post /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nconnection: close\r\n\r\n"
+          },
+          "on": "post"
+        },
+        {
+          "expect": {
+            "status": 405,
+            "fields": {
+              "bead-refusal": "method-refused",
+              "allow": "GET, POST, DELETE"
+            },
+            "body": "",
+            "told": {
+              "status": 405,
+              "reason": "method-refused",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "post"
+        },
+        {
+          "send": {
+            "head": "BEAD /bead HTTP/1.1\r\nhost: {host}\r\nconnection: close\r\n\r\n"
+          },
+          "on": "unknown"
+        },
+        {
+          "expect": {
+            "status": 405,
+            "fields": {
+              "bead-refusal": "method-refused",
+              "allow": "GET, POST, DELETE"
+            },
+            "body": "",
+            "told": {
+              "status": 405,
+              "reason": "method-refused",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "unknown"
+        },
+        {
+          "send": {
+            "head": "get /elsewhere HTTP/1.1\r\nhost: {host}\r\nconnection: close\r\n\r\n"
+          },
+          "on": "path"
+        },
+        {
+          "expect": {
+            "status": 404,
+            "fields": {
+              "bead-refusal": "path-unknown"
+            },
+            "body": "",
+            "told": {
+              "status": 404,
+              "reason": "path-unknown",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "path"
+        },
+        {
+          "send": {
+            "head": "get /bead HTTP/1.1\r\nhost: {host}\r\norigin: https://elsewhere.test\r\nconnection: close\r\n\r\n"
+          },
+          "on": "origin"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "origin-refused"
+            },
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "origin-refused",
+              "authority": "{host}",
+              "origin": "https://elsewhere.test",
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "origin"
+        },
+        {
+          "send": {
+            "head": "options /bead HTTP/1.1\r\nhost: {host}\r\norigin: https://page.test\r\naccess-control-request-method: POST\r\nconnection: close\r\n\r\n"
+          },
+          "on": "options"
+        },
+        {
+          "expect": {
+            "status": 405,
+            "fields": {
+              "access-control-allow-origin": "https://page.test",
+              "access-control-expose-headers": "*",
+              "vary": "Origin",
+              "access-control-allow-credentials": null,
+              "bead-refusal": "method-refused",
+              "allow": "GET, POST, DELETE",
+              "access-control-allow-methods": null
+            },
+            "body": "",
+            "told": {
+              "status": 405,
+              "reason": "method-refused",
+              "authority": "{host}",
+              "origin": "https://page.test",
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "options"
+        }
+      ]
+    },
+    {
       "name": "a body of another type, or encoded, is refused 415, marked",
       "clauses": [
         "15.6.11"
@@ -11018,6 +11193,136 @@
             }
           },
           "on": "eighth"
+        }
+      ]
+    },
+    {
+      "name": "a request at a WebSocket's address of a method not in upper case, get and head among them, or of one unknown, BEAD, is refused 405 as any method but GET or HEAD, its Allow naming both, after its host",
+      "clauses": [
+        "15.2",
+        "15.2.2",
+        "15.2.3",
+        "15.6.7"
+      ],
+      "transport": "websocket",
+      "options": {
+        "hosts": [
+          "bead.test"
+        ]
+      },
+      "differs": [
+        {
+          "row": "A method Node's HTTP parser does not know",
+          "language": "TypeScript"
+        }
+      ],
+      "steps": [
+        {
+          "send": {
+            "head": "get / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "lower"
+        },
+        {
+          "expect": {
+            "status": 405,
+            "fields": {
+              "bead-refusal": "method-refused",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "allow": "GET, HEAD"
+            },
+            "body": "",
+            "told": {
+              "status": 405,
+              "reason": "method-refused",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "lower"
+        },
+        {
+          "send": {
+            "head": "head / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "head"
+        },
+        {
+          "expect": {
+            "status": 405,
+            "fields": {
+              "bead-refusal": "method-refused",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "allow": "GET, HEAD"
+            },
+            "body": "",
+            "told": {
+              "status": 405,
+              "reason": "method-refused",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "head"
+        },
+        {
+          "send": {
+            "head": "BEAD / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "unknown"
+        },
+        {
+          "expect": {
+            "status": 405,
+            "fields": {
+              "bead-refusal": "method-refused",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "allow": "GET, HEAD"
+            },
+            "body": "",
+            "told": {
+              "status": 405,
+              "reason": "method-refused",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "unknown"
+        },
+        {
+          "send": {
+            "head": "get / HTTP/1.1\r\nhost: elsewhere.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "elsewhere"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff"
+            },
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "elsewhere.test",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "elsewhere"
         }
       ]
     },

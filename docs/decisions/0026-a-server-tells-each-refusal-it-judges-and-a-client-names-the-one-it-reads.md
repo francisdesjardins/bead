@@ -4,8 +4,9 @@
 - **Scope**: the protocol, and every implementation's server transports and clients, over HTTP and
   at a WebSocket's address: in [`spec/spec.md`](../../spec/spec.md), the refusal a server's
   transport tells (15.1, and 15.2's refusals told), what a client names of a refusal it reads
-  (15.6), and the octets a request's field and its target may hold (15.12, and transcoding 3.6). The
-  marks and their order are 15.6's; a server's hosts and the address it listens on are
+  (15.6), the octets a request's field and its target may hold (15.12, and transcoding 3.6), and
+  how its method is compared (15.6, and 15.2's step 3). The marks and their order are 15.6's; a
+  server's hosts and the address it listens on are
   [0024](0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md)'s; the
   guard a listener is called within is
   [0023](0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md)'s;
@@ -159,6 +160,22 @@ answered 400 unmarked, and a target that holds a `#` anywhere is answered alike;
 `^`, `` ` ``, `{` and `}` in a query are taken as they came, as a page sends them
 ([0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)).
 
+**A request's method is compared as it came** (spec 15.6, and 15.2's step 3): a case-sensitive
+token ([RFC 9110 §9.1](https://www.rfc-editor.org/rfc/rfc9110#section-9.1)), so `get` is no `GET`.
+Any method the path does not take, an extension method among them, is refused 405
+`method-refused`, its `Allow` naming those it takes
+([RFC 9110 §15.5.6](https://www.rfc-editor.org/rfc/rfc9110#section-15.5.6)), in its place in
+15.6's order, after the host, the path, the origin and a preflight; at a WebSocket's address, after
+the host, a `head` is refused 405 where a `HEAD` is answered 426. §9.1's SHOULD, a 501 for a
+method a server does not recognize
+([§15.6.2](https://www.rfc-editor.org/rfc/rfc9110#section-15.6.2)), is set aside: what a server
+recognizes beyond its path's methods is its HTTP parser's, Node's llhttp a table of
+upper-case methods, Kestrel and hyper none, so no reading of it is shared; and `Allow` tells a
+client what to send, where a 501 tells nothing. Every side's judgement compares the method byte
+for byte; on the TypeScript side Node's parser refuses a method its table does not hold 400,
+unmarked, before the transport reads it, a platform row of `docs/support.md`,
+`A method Node's HTTP parser does not know`.
+
 **A client names the status and the reason of a refusal it reads** (spec 15.6): the HTTP connect,
 "the server drew no connection: {status} {reason}", an unmarked status by its number alone; the
 WebSocket connect, "the server refused the upgrade: {status} {reason}", over `ws` through
@@ -202,6 +219,15 @@ it drop a value padded at either end unless the application's `createServer` is 
 UTF-8, where the TypeScript side's transport resets the stream. A platform row of `docs/support.md`
 names both; neither takes a request past what one without the field would be.
 
+**A method's case is held by two cases of `spec/transports.json`**, each refusal told: over HTTP,
+`get`, a `post` of Bead's type that would draw a connection were the method folded, and `BEAD`,
+each 405; `get` at another path, 404, and from an origin not taken, 403; and an `options` that asks
+a preflight from a listed origin, 405 with CORS's fields and no `Access-Control-Allow-Methods`. At a
+WebSocket's address, `get`, `head` and `BEAD`, each 405, then `get` from a host not taken, 403.
+Their schema takes a request's method as any token, in any case. The TypeScript side is excused
+from both by their `differs`, its parser answering first; its twin over HTTP, beside the C# and
+Rust sides', is the row's.
+
 **A page's WebSocket still learns nothing but its close**: its server's tell is what says why.
 
 **What a listener costs is held by inspection**: no record is built while none listens.
@@ -235,7 +261,8 @@ the address a server listens on; a field value's ends met it in
 [0029](0029-a-listen-names-its-cursor-and-its-wait-in-fields-of-its-own.md)'s round, which keeps its
 objections and answers; a request's target met it in a round of its own, at xhigh effort, beside
 [0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)'s
-rule on a target past US-ASCII at a gateway: ten objections, each accepted. Its objections, each
+rule on a target past US-ASCII at a gateway: ten objections, each accepted; and a method's case
+met it in a round of its own, at xhigh effort: eight objections, each accepted. Its objections, each
 with the answer that holds:
 
 ### On a refusal told and the default listening address
@@ -262,3 +289,22 @@ with the answer that holds:
 | The draft cites RFC 3986 alone, which says what a URI holds and not what a server answers                                                                                                                                                                                                                                                    | Accepted: RFC 9112 §3, a request-line that is invalid answered 400, §2.2, a bare CR invalid, and §3.2, beside RFC 3986 §2 and RFC 9113 §8.3.1                                                                                                                                                                                                                            |
 | `spec/transports.json`'s schema writes a target `\S+`, which under Python's `re` holds no HTAB, no bare CR and none of 0x1C to 0x1F                                                                                                                                                                                                          | Accepted: a target is any octet but a space and LF, a bare CR among them, and no character past U+00FF, which no octet writes; `transcoding.json`'s pattern stays                                                                                                                                                                                                        |
 | A rule stated at the HTTP transport alone leaves the gateway and the WebSocket's address to infer it                                                                                                                                                                                                                                         | Accepted: 15.12 states it for every HTTP server, and 15.2's step 1 and transcoding 3.6 point to it                                                                                                                                                                                                                                                                       |
+
+### On a method's case
+
+The proposal: one case over HTTP and one at a WebSocket's address, each sending `get`, `Get`,
+`post` and `BEAD`, refused 405 with its `Allow`, then a `GET` as a control, the TypeScript side
+excused. Eight objections, each checked against every side's judgement and RFC 9110: all eight
+accepted, the proposal amended. No side's code moves, every side's judgement comparing a method as
+it came.
+
+| Objection                                                                                                                                                                                                                                                                                               | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| The spec states no rule on a method's case: it says where a token folds, `Upgrade` and `Connection`, an `Origin`, a host, and nothing where it does not, so a platform that folds, as ASP.NET's `HttpMethods.IsGet` does, reads a fold from its silence; a case would hold a rule the spec does not say | **Accepted.** 15.6 states it in one sentence after its order's 405, its 405 row reads "compared as they came", and 15.2's step 3 points to it; the cases cite 15.6 and 15.6.7.                                                                                                                                                                                                                                                                                                                                                                               |
+| 405 for `get` and `BEAD` departs from RFC 9110 §9.1's SHOULD, a 501 for a method a server does not recognize (§15.6.2), unnamed; and the CHANGELOG cites §9.1 for a 405 it does not give                                                                                                                | **Accepted, 405 kept and its reason named.** What a server recognizes beyond its path's methods is its parser's: Node's table, Kestrel's none, hyper's none. A 501 would need the spec to carry a set and every side to hold it, for a status no client of Bead reads, where `Allow`, a MUST on a 405 (§15.5.6), tells a client what to send. Every side that reads the method answers 405; ASP.NET Core's endpoint routing, nginx and axum answer 405, Apache 501, so the spec picks one and says why. The CHANGELOG cites §9.1 for the token's case alone. |
+| Four refusals and a control repeat the three twins the row cites; what a case alone holds, the refusal told, the method's place in 15.6's order and an `options` that is no preflight, is mostly left out                                                                                               | **Accepted.** The case over HTTP holds all three: each refusal told, by the generator's `tell`; `get /elsewhere` 404 and `get` from a foreign origin 403; an `options` with `Access-Control-Request-Method` from a listed origin, 405 with CORS's fields and no `Access-Control-Allow-Methods`. The Rust side gains through it the preflight and the order, which no unit test of its own holds.                                                                                                                                                             |
+| The order should be proven with a lower-case method at both addresses, and one target kept out, `get /bead#x`, which Kestrel answers 400 and hyper cuts to `/bead`                                                                                                                                      | **Accepted.** Over HTTP, the path's and the origin's steps; at a WebSocket's address, `get` from a host not taken, 403. No `#` and no absolute-form target, each a row of its own.                                                                                                                                                                                                                                                                                                                                                                           |
+| At a WebSocket's address `head` is the sharp step, a `HEAD` being 426; `Get` adds nothing `get` does not, and `post` repeats the `POST` step                                                                                                                                                            | **Accepted.** `get`, `head` and `BEAD`, then the host's step; over HTTP, `get`, a `post` of Bead's type that would draw a connection were the method folded, and `BEAD`. No `Get`.                                                                                                                                                                                                                                                                                                                                                                           |
+| The excuse hides no refusal, but a `GET` control is the one step the TypeScript side could play; and that side's twin sends `BEAD` and `get` alone                                                                                                                                                      | **Accepted.** No control step: each step opens its own socket, and the next case proves the server standing. Two cases of their own rather than steps added to the 405 cases, since a `differs` excuses a whole case. The row says what holds of the rest: llhttp matches its method table byte for byte, in upper case alone.                                                                                                                                                                                                                               |
+| The row, the counts and the gate that holds them are unsaid: `check_crossing` asks the row to name both titles, and `spec/check.py` holds the totals and the Rust side's count, not the TypeScript and C# sides' "but"                                                                                  | **Accepted.** The row names both titles; 268 cases, 91 over HTTP and 46 over WebSocket, the Rust side's 182 of 268, the README's 268; the TypeScript and C# sides' "all 268 but two" each, counted from the file's `differs`. The page's count follows the file, read at its build.                                                                                                                                                                                                                                                                          |
+| The CHANGELOG's line is to be reworded and the cases told; the proposal's account of today misses the twins on every side; `BEAD` as the unknown method                                                                                                                                                 | **Accepted.** The line reworded, the cases told; this table answers the proposal as it stands, the three twins cited by the row; `BEAD` kept, a token no parser's table holds and no registered method.                                                                                                                                                                                                                                                                                                                                                      |

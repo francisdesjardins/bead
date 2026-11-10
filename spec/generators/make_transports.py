@@ -256,13 +256,22 @@ def tick(call_id, value):
 
 
 # 15.12's cases that a row of docs/support.md excuses a side from, by their names: a # in a target
-# (hyper's Uri cuts a target at its # before the Rust side's HTTP address reads it), and a scheme in
-# upper case (Kestrel reads absolute-form by a scheme in lower case alone)
+# (hyper's Uri cuts a target at its # before the Rust side's HTTP address reads it), a scheme in
+# upper case (Kestrel reads absolute-form by a scheme in lower case alone), and 15.6's method as it
+# came (Node's parser refuses a method not in its table, upper case alone, before the TypeScript
+# side reads it)
 HASH = "a target holding a # anywhere is answered 400 unmarked before its host, its path or its origin is judged; %23 is a character of its path or its query"
 SCHEME_CASE = "a target in absolute-form is read whatever its scheme's case, HTTP:// as http://"
 UPGRADE_SCHEME_CASE = "an upgrade whose target is in absolute-form is read whatever its scheme's case"
+METHOD_CASE = ("a method is compared as it came: get, post and BEAD are refused 405 as any method but GET, POST or DELETE, "
+               "its Allow naming them, in section 15.6's place, after the path and the origin; an options asking a preflight is none")
+UPGRADE_METHOD_CASE = ("a request at a WebSocket's address of a method not in upper case, get and head among them, or of one "
+                       "unknown, BEAD, is refused 405 as any method but GET or HEAD, its Allow naming both, after its host")
 HASHES = [{'row': 'A # in a target', 'language': 'Rust'}]
 SCHEMES_CASE = [{'row': "A target in absolute-form, its scheme's case", 'language': 'C#'}]
+METHODS_CASE = [{'row': "A method Node's HTTP parser does not know", 'language': 'TypeScript'}]
+# a 405 over HTTP names the methods its path takes (RFC 9110 §15.5.6)
+ALLOWED = {'allow': 'GET, POST, DELETE'}
 
 
 cases = [
@@ -334,6 +343,20 @@ cases = [
         send('elsewhere', 'POST', '/elsewhere'), refused('elsewhere', 404, 'path-unknown')]),
     ('a method the server does not take is refused 405, its Allow naming those it does', ['15.6.7'], None, [
         send('put', 'PUT', body='A1'), refused('put', 405, 'method-refused', {'allow': 'GET, POST, DELETE'})]),
+    # 15.6: a method is a case-sensitive token (RFC 9110 §9.1), a lower-case one no method the path
+    # takes, judged in its place; a case of its own, since its differs excuses a whole case
+    (METHOD_CASE, ['15.6', '15.6.7', '15.12'], {'origins': [PAGE]}, [
+        send('lower', 'get'), refused('lower', 405, 'method-refused', ALLOWED),
+        # a post of Bead's type that would connect, were the method folded
+        send('post', 'post', fields={'content-type': BEAD}), refused('post', 405, 'method-refused', ALLOWED),
+        send('unknown', 'BEAD'), refused('unknown', 405, 'method-refused', ALLOWED),
+        # its place: the path and the origin are judged first
+        send('path', 'get', '/elsewhere'), refused('path', 404, 'path-unknown'),
+        send('origin', 'get', fields={'origin': 'https://elsewhere.test'}), refused('origin', 403, 'origin-refused'),
+        # an options is no OPTIONS: no preflight, its refusal readable from the listed origin
+        send('options', 'options', fields={'origin': PAGE, 'access-control-request-method': 'POST'}),
+        expect('options', 405, fields={**CORS, 'bead-refusal': 'method-refused', **ALLOWED,
+                                       'access-control-allow-methods': None}, body='')]),
     ('a body of another type, or encoded, is refused 415, marked', ['15.6.11'], None, [
         *drawn(),
         send('plain', 'POST', fields={'bead-connection-token': '{token}', 'content-type': 'text/plain'}, body=ECHO),
@@ -1221,6 +1244,14 @@ websocket = [
          asked('options', method='OPTIONS'), refused('options', 405, 'method-refused', METHOD_REFUSED),
          asked('delete', method='DELETE', **PLAIN), refused('delete', 405, 'method-refused', METHOD_REFUSED),
          asked('eighth', method='POST', version=8), refused('eighth', 405, 'method-refused', METHOD_REFUSED)]),
+    # 15.2, step 3: a method compared as it came (section 15.6), after the host of step 2
+    (UPGRADE_METHOD_CASE, ['15.2', '15.2.2', '15.2.3', '15.6.7'],
+     {'options': {'hosts': ['bead.test']}, 'differs': METHODS_CASE}, [
+        asked('lower', method='get'), refused('lower', 405, 'method-refused', METHOD_REFUSED),
+        # a HEAD is 426; a head is no HEAD
+        asked('head', method='head'), refused('head', 405, 'method-refused', METHOD_REFUSED),
+        asked('unknown', method='BEAD'), refused('unknown', 405, 'method-refused', METHOD_REFUSED),
+        asked('elsewhere', method='get', host='elsewhere.test'), refused('elsewhere', 403, 'host-refused', UPGRADE_REFUSED)]),
     # ! a HEAD's answer has no body: the peers read it by its length, which both sides write 0
     ('a request at a WebSocket\'s address that asks no WebSocket is answered 426, marked, its Upgrade naming websocket',
      ['15.2', '15.2.4', '15.6.12'], {}, [
@@ -2638,7 +2669,7 @@ def amqp_broker():
 HTTP_REAL_TIME = {'a request whose head does not come whole within headersTimeout is answered 408, unmarked, and told by none'}
 assert HTTP_REAL_TIME <= {name for name, *_ in cases}
 # the cases over HTTP a row of docs/support.md excuses a side from, by their names
-HTTP_DIFFERS = {HASH: HASHES, SCHEME_CASE: SCHEMES_CASE}
+HTTP_DIFFERS = {HASH: HASHES, SCHEME_CASE: SCHEMES_CASE, METHOD_CASE: METHODS_CASE}
 assert set(HTTP_DIFFERS) <= {name for name, *_ in cases}
 
 for _name, _clauses, _options, _steps in cases:
