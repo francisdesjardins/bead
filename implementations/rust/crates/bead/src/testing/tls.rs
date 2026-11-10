@@ -28,6 +28,8 @@ zj0EAwIDRwAwRAIgBJ615Fg0220CPpLimCXxjBTBGtZ3rW1rPtWzafaLvtkCIC57
 ";
 
 /// Its key, in PEM: PKCS #8.
+// a test's key, the TypeScript fixture's, that guards nothing
+// nosemgrep: generic.secrets.security.detected-private-key.detected-private-key
 pub const KEY: &str = "-----BEGIN PRIVATE KEY-----
 MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgOK27HlYYTvZWNX0P
 xvAw7AyXGDlQ02ozYvs7wiDSIqyhRANCAAT1wVAvZqtAUXTdWGIGQPdbYXuLAH8L
