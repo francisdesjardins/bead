@@ -39,9 +39,10 @@ const NAME_MARKS: &[u8] = b"-._~!$&'()";
 
 // the visible characters a URI leaves out that a page's browser always percent-encodes where they
 // stand (spec 15.12): in a path, the URL Standard's path percent-encode set; in a query, its query
-// percent-encode set, which leaves ^, `, { and } as they came
-const ENCODED_IN_PATH: &[char] = &['"', '<', '>', '^', '`', '{', '}'];
-const ENCODED_IN_QUERY: &[char] = &['"', '<', '>'];
+// percent-encode set, which leaves ^, `, { and } as they came; both hold #, which no form of a
+// request-target carries (RFC 9112 §3.2)
+const ENCODED_IN_PATH: &[char] = &['"', '#', '<', '>', '^', '`', '{', '}'];
+const ENCODED_IN_QUERY: &[char] = &['"', '#', '<', '>'];
 
 // the schemes whose origin a browser serializes with its host in lower case and its default port
 // left out (RFC 6454 §6.2; the URL Standard's special schemes)
@@ -260,53 +261,34 @@ pub fn has_visible_fields(raw: &[&str]) -> bool {
         .all(|value| is_visible_field(value))
 }
 
-// what stands before a target's first `#`, where it ends (spec 15.12): what follows is neither its
-// path nor its query, as a URI reference's fragment is apart from both (RFC 3986 §3.5)
-fn before_hash(target: &str) -> &str {
-    target.split_once('#').map_or(target, |(before, _)| before)
-}
-
 // a target's path and its query, at its first `?`
 fn path_and_query(read: &str) -> (&str, &str) {
     read.split_once('?').unwrap_or((read, ""))
-}
-
-// one of ASCII's controls, HTAB and DEL among them (RFC 5234 B.1, CTL)
-const fn is_control(character: char) -> bool {
-    character < ' ' || character == '\u{7F}'
 }
 
 /// Whether a request's target, as it came, is one a server reads (spec 15.12).
 ///
 /// Visible ASCII alone, a URI's characters (RFC 3986 §2), in its path and its query, in origin-form
 /// or absolute-form, and a path whose percent-decoding holds no NUL. A control character, HTAB and
-/// a bare CR among them, and DEL are none, wherever they stand, past a `#` too. A target ends at
-/// its first `#`: what follows it is neither its path nor its query, and no rule of a path or a
-/// query reaches it, as a URI reference's fragment is apart from both (RFC 3986 §3.5), though a
-/// request-target never carries one (RFC 9112 §3.2). Before it, a space and an octet past ASCII,
-/// which a request carries as the character of its Latin-1 code, are none; nor is a visible
-/// character a URI leaves out that a page's browser always percent-encodes where it stands — `"`,
-/// `<` or `>` in a path or a query, `^`, `` ` ``, `{` or `}` in a path, by the URL Standard's path
-/// and query percent-encode sets. Any percent-encoded octet is otherwise taken, `%01` and `%7F`
-/// among them, and `%00` in a query; and so are the other visible characters a URI leaves out, `\`
-/// and `|`, and `^`, `` ` ``, `{` and `}` in a query, as a page's browser sends them unencoded. A
-/// request that holds another is answered 400 unmarked, or over HTTP/2 its stream reset, before
-/// anything else of it is judged (RFC 9112 §3).
+/// a bare CR among them, DEL, a space and an octet past ASCII, which a request carries as the
+/// character of its Latin-1 code, are none, wherever they stand. Nor is a `#` anywhere in it, since
+/// no form of a request-target carries a fragment (RFC 9112 §3.2), nor a visible character a URI
+/// leaves out that a page's browser always percent-encodes where it stands — `"`, `<` or `>` in a
+/// path or a query, `^`, `` ` ``, `{` or `}` in a path, by the URL Standard's path and query
+/// percent-encode sets, which hold `#` too. Any percent-encoded octet is otherwise taken, `%01`,
+/// `%7F` and `%23` among them, and `%00` in a query; and so are the other visible characters a URI
+/// leaves out, `\` and `|`, and `^`, `` ` ``, `{` and `}` in a query, as a page's browser sends them
+/// unencoded. A request that holds another is answered 400 unmarked, or over HTTP/2 its stream
+/// reset, before anything else of it is judged (RFC 9112 §3).
 #[must_use]
 pub fn is_visible_target(target: Option<&str>) -> bool {
     let Some(target) = target else {
         return true;
     };
+    let (path, query) = path_and_query(target);
 
-    // * a control character is the request-line's, refused past a # too; nothing else is read there
-    if target.chars().any(is_control) {
-        return false;
-    }
-
-    let read = before_hash(target);
-    let (path, query) = path_and_query(read);
-
-    read.chars()
+    target
+        .chars()
         .all(|character| ('!'..='~').contains(&character))
         && !path.contains(ENCODED_IN_PATH)
         && !query.contains(ENCODED_IN_QUERY)
@@ -363,8 +345,7 @@ fn names_other_scheme(target: &str) -> bool {
     })
 }
 
-/// A request's target as HTTP reads it (spec 15.12), cut at its first `#`, what follows it neither
-/// its path nor its query.
+/// A request's target as HTTP reads it (spec 15.12).
 ///
 /// In absolute-form, its scheme `http` or `https`, in any case (RFC 3986 §3.1), then `://` and an
 /// authority as it came (RFC 9112 §3.2.2), then its path, `/` when it names none; otherwise its
@@ -373,7 +354,7 @@ fn names_other_scheme(target: &str) -> bool {
 /// one among them (RFC 9110 §4.2.1, §4.2.4).
 #[must_use]
 pub fn request_target_of(target: Option<&str>) -> Option<RequestTarget<'_>> {
-    let given = before_hash(target.unwrap_or("/"));
+    let given = target.unwrap_or("/");
     let Some(rest) = absolute_form_of(given).and_then(|length| given.get(length..)) else {
         if names_other_scheme(given) {
             return None;
@@ -603,8 +584,7 @@ fn serialized_origin_of(entry: &str) -> Option<(&str, &str, Option<&str>)> {
     let end = if rest.starts_with('[') {
         rest.find(']')?.saturating_add(1)
     } else {
-        rest.find([':', '/', '?', '#', '[', ']'])
-            .unwrap_or(rest.len())
+        rest.find([':', '/', '?', '[', ']']).unwrap_or(rest.len())
     };
     let (host, after) = rest.split_at_checked(end)?;
     let port = match after.strip_prefix(':') {

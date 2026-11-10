@@ -281,7 +281,8 @@ async fn reads_any_target_without_throwing_a_header_given_twice_by_its_first_and
             (&["bad host"], bead.clone()),
             (201, None),
         ),
-        // its scheme read in any case, and the target ended at its #
+        // its scheme read in any case; and a target that holds a #, which spec 15.12 refuses, served
+        // cut at it, as hyper hands it on: the row "A # in a target" of docs/support.md
         (
             "HTTP://bead.example/bead",
             (&["bead.example"], bead.clone()),
@@ -373,7 +374,7 @@ async fn reads_any_target_without_throwing_a_header_given_twice_by_its_first_and
             (&["bead.example"], bead.clone()),
             (400, None),
         ),
-        // its scheme in any case, and what follows its # neither its path nor its query
+        // its scheme in any case, and a target cut at its # by hyper, what followed it gone
         (
             "HTTP://127.0.0.1/elsewhere",
             (&["bead.example"], bead.clone()),

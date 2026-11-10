@@ -793,6 +793,51 @@ async fn reads_the_host_as_it_came_an_idn_page_s_own_in_punycode_and_one_of_inva
     );
 }
 
+// this side's own, the Rust cell of the matrix's row "A # in a target": hyper's `Uri` drops a `#`
+// and what follows before the transport reads the target, so a target that holds one, which spec
+// 15.12 refuses, is served cut at it; a control character past it is httparse's to refuse
+#[tokio::test]
+async fn serves_a_target_that_holds_a_hash_cut_at_it_as_hyper_hands_it_on() {
+    let started = started(&HttpTransportServerOptions::default()).await;
+    let port = started.port;
+    let absolute = format!("http://{HOST}:{port}/bead#x");
+    let bead = format!("Content-Type: {BEAD_MEDIA_TYPE}");
+    let mut answers = Vec::new();
+
+    for target in [
+        "/bead#x",
+        "/bead#<\"",
+        "/bead#%00",
+        "/bead#caf\u{e9}",
+        "/bead?x#y",
+        &absolute,
+        "/a#%00?x",
+        "/bead#a\u{1}b",
+    ] {
+        let head = head_of(("POST", target), (port, &[&bead, "Content-Length: 0"]));
+        let answer = raw_answer_of(port, head.as_bytes()).await;
+
+        answers.push((answer.status, answer.refusal));
+    }
+
+    assert_eq!(
+        answers,
+        [
+            (201, None),
+            (201, None),
+            (201, None),
+            (201, None),
+            (201, None),
+            (201, None),
+            // served as `/a`, its query gone with the rest
+            (404, Some(HTTP_REFUSALS.path.to_owned())),
+            (400, None),
+        ],
+        "served cut"
+    );
+    started.stop().await;
+}
+
 #[tokio::test]
 async fn refuses_a_request_on_a_call_id_already_waiting_409() {
     let started = started(&HttpTransportServerOptions::default()).await;

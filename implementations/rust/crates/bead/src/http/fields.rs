@@ -211,6 +211,9 @@ impl Request<'_> {
     /// HTTP/1, an absolute-form's scheme, `://` and authority, then its path and query; `*` as it
     /// came. Over HTTP/2, its `:path` alone, its authority `:authority`'s.
     pub(crate) fn target(&self) -> String {
+        // ! hyper's Uri drops a # and what follows before this runs: a target that holds one is
+        // served cut here, where spec 15.12 refuses it, the row "A # in a target" of
+        // docs/support.md
         let path = self
             .uri
             .path_and_query()

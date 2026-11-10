@@ -759,7 +759,7 @@ fn takes_whatever_its_hosts_the_hosts_every_server_takes_and_any_page_of_its_own
         let mut expected = each(TAKEN, 8);
 
         expected.extend(each(HOST_REFUSED, 7));
-        expected.extend(each(HOST, 8));
+        expected.extend(each(HOST, 12));
         assert_eq!(
             given(&[
                 naming("localhost", &[]),
@@ -773,9 +773,10 @@ fn takes_whatever_its_hosts_the_hosts_every_server_takes_and_any_page_of_its_own
                     at("http://127.0.0.1:8080/")
                 ),
                 named_as("bad host", at("http://localhost/")),
-                // its scheme read in any case, and the target ended at its #
+                // its scheme read in any case
                 request_of(&[], at("HTTP://127.0.0.1/")),
-                request_of(&[], at("hTtPs://127.0.0.1/#{}")),
+                // and %23, a character of its query
+                named_as("localhost", at("/?a%23b")),
                 naming(
                     "rebind.example:8080",
                     &[("Origin", "http://rebind.example:8080")]
@@ -800,9 +801,13 @@ fn takes_whatever_its_hosts_the_hosts_every_server_takes_and_any_page_of_its_own
                 request_of(&[], at("http://localhost:/")),
                 request_of(&[], at("http://user@localhost/")),
                 // and a target holding what a page's browser always percent-encodes where it
-                // stands
+                // stands, a # anywhere among it
                 request_of(&[], at("/be<ad")),
                 request_of(&[], at("/?a\"b")),
+                request_of(&[], at("hTtPs://127.0.0.1/#{}")),
+                request_of(&[], at("/#x")),
+                request_of(&[], at("/#<\"")),
+                named_as("elsewhere.test", at("/?a#b")),
             ]),
             expected,
             "{hosts:?}"

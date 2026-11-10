@@ -906,7 +906,7 @@ fn is_visible_field_takes_htab_sp_and_visible_ascii_and_refuses_each_other_contr
     clippy::too_many_lines,
     reason = "a twin plays its sentence whole, as the other sides' twins do"
 )]
-fn is_visible_target_takes_visible_ascii_and_a_percent_encoded_octet_nul_in_a_query_among_them_ends_a_target_at_its_hash_and_refuses_each_control_character_sp_del_and_0x80_to_0xff_a_character_a_browser_always_encodes_where_it_stands_and_nul_percent_encoded_in_a_path()
+fn is_visible_target_takes_visible_ascii_and_a_percent_encoded_octet_nul_in_a_query_and_an_encoded_hash_among_them_and_refuses_each_control_character_sp_del_and_0x80_to_0xff_a_hash_anywhere_a_character_a_browser_always_encodes_where_it_stands_and_nul_percent_encoded_in_a_path()
  {
     let visible: String = ('!'..='~').collect();
     let others: Vec<char> = ('\u{0}'..='\u{20}').chain('\u{7F}'..='\u{FF}').collect();
@@ -915,18 +915,18 @@ fn is_visible_target_takes_visible_ascii_and_a_percent_encoded_octet_nul_in_a_qu
         .copied()
         .filter(|character| *character < ' ' || *character == '\u{7F}')
         .collect();
-    // what a page's browser always percent-encodes in a path, and in a query
-    let encoded_in_path = ['"', '<', '>', '^', '`', '{', '}'];
-    let encoded_in_query = ['"', '<', '>'];
+    // what a page's browser always percent-encodes in a path, and in a query, # in both
+    let encoded_in_path = ['"', '#', '<', '>', '^', '`', '{', '}'];
+    let encoded_in_query = ['"', '#', '<', '>'];
     let without = |left: &[char]| -> String {
         visible
             .chars()
-            .filter(|character| *character != '#' && !left.contains(character))
+            .filter(|character| !left.contains(character))
             .collect()
     };
     let is_taken = |target: &str| is_visible_target(Some(target));
 
-    // * a target ends at its #, and the characters a browser sends unencoded are taken as they came
+    // * the characters a browser sends unencoded are taken as they came
     assert!(
         is_taken(&format!("/{}", without(&encoded_in_path))),
         "a path"
@@ -947,21 +947,28 @@ fn is_visible_target_takes_visible_ascii_and_a_percent_encoded_octet_nul_in_a_qu
     assert!(is_visible_target(None), "none");
     assert!(is_taken("/a%01b%7F%FF?x=%00"), "percent-encoded");
     assert!(is_taken("http://127.0.0.1/a%01?%00"), "percent-encoded");
-    // what follows a # is neither its path nor its query: no rule of either reaches it
+    assert!(is_taken("/bead%23?a%23b"), "an encoded #");
+    // a # anywhere, since no form of a request-target carries a fragment (RFC 9112 §3.2): in its
+    // path, in its query and in an absolute-form's authority, whatever follows it, nothing too
     assert_eq!(
         [
+            "/bead#".to_owned(),
+            "/bead#x".to_owned(),
             format!("/bead#{visible}"),
             "/bead#a b".to_owned(),
             "/bead#\u{e9}".to_owned(),
             "/a#%00?x".to_owned(),
+            "/bead?x#y".to_owned(),
             "/bead?x#<\"".to_owned(),
             "http://127.0.0.1/#{}".to_owned(),
+            "http://127.0.0.1#/bead".to_owned(),
+            "http://#x/".to_owned(),
         ]
         .into_iter()
-        .filter(|target| !is_taken(target))
+        .filter(|target| is_taken(target))
         .collect::<Vec<String>>(),
         Vec::<String>::new(),
-        "nothing past a # judged"
+        "a # refused"
     );
     assert_eq!(
         others
@@ -980,7 +987,7 @@ fn is_visible_target_takes_visible_ascii_and_a_percent_encoded_octet_nul_in_a_qu
         "none other"
     );
     assert_eq!(others.len(), 33 + 129, "each counted");
-    // a control character is the request-line's, past a # too
+    // a control character is the request-line's, beside a # too
     assert_eq!(
         controls
             .iter()
@@ -994,7 +1001,7 @@ fn is_visible_target_takes_visible_ascii_and_a_percent_encoded_octet_nul_in_a_qu
             })
             .collect::<Vec<&char>>(),
         Vec::<&char>::new(),
-        "a control refused past a #"
+        "a control refused beside a #"
     );
     assert_eq!(controls.len(), 32 + 1, "each counted");
     // a character a browser always encodes where it stands, in origin-form or absolute-form, and
@@ -1039,7 +1046,7 @@ fn is_visible_target_takes_visible_ascii_and_a_percent_encoded_octet_nul_in_a_qu
     );
     // a path whose percent-decoding holds NUL, in origin-form or absolute-form
     assert_eq!(
-        ["/%00", "/be%00ad", "/a%00#x", "http://127.0.0.1/a%00b?x=1"]
+        ["/%00", "/be%00ad", "http://127.0.0.1/a%00b?x=1"]
             .into_iter()
             .filter(|target| is_taken(target))
             .collect::<Vec<&str>>(),
@@ -1115,9 +1122,16 @@ fn folds_ascii_alone_a_host_that_differs_past_ascii_is_another() {
 }
 
 #[test]
-fn reads_an_absolute_form_targets_scheme_in_any_case_http_as_http_ends_a_target_at_its_and_refuses_one_without_an_authority()
+fn reads_an_absolute_form_targets_scheme_in_any_case_http_as_http_cuts_nothing_at_a_hash_and_refuses_one_without_an_authority()
  {
-    for target in ["http:///", "HTTP:///", "http://#x/", "ftp://127.0.0.1/"] {
+    // a # in an authority is no host's
+    for target in [
+        "http:///",
+        "HTTP:///",
+        "http://#x/",
+        "http://127.0.0.1#/bead",
+        "ftp://127.0.0.1/",
+    ] {
         assert_eq!(request_target_of(Some(target)), None, "{target}");
     }
 
@@ -1137,11 +1151,12 @@ fn reads_an_absolute_form_targets_scheme_in_any_case_http_as_http_ends_a_target_
         [Some(read); 3],
         "its scheme in any case"
     );
+    // * a target is read as it came, a # in it among it, which is_visible_target refuses
     assert_eq!(
         [
             "/bead#x",
             "/bead?x=1#y?z",
-            "http://127.0.0.1#/bead",
+            "http://127.0.0.1/bead#x",
             "/bead#",
             "http://bead.test?x",
         ]
@@ -1149,22 +1164,22 @@ fn reads_an_absolute_form_targets_scheme_in_any_case_http_as_http_ends_a_target_
         [
             Some(RequestTarget {
                 authority: None,
-                path: "/bead",
+                path: "/bead#x",
                 query: "",
             }),
             Some(RequestTarget {
                 authority: None,
                 path: "/bead",
-                query: "x=1",
+                query: "x=1#y?z",
             }),
             Some(RequestTarget {
                 authority: Some("127.0.0.1"),
-                path: "/",
+                path: "/bead#x",
                 query: "",
             }),
             Some(RequestTarget {
                 authority: None,
-                path: "/bead",
+                path: "/bead#",
                 query: "",
             }),
             Some(RequestTarget {
@@ -1173,6 +1188,6 @@ fn reads_an_absolute_form_targets_scheme_in_any_case_http_as_http_ends_a_target_
                 query: "x",
             }),
         ],
-        "ended at its #"
+        "read as it came"
     );
 }

@@ -1974,52 +1974,6 @@ async fn answers_400_unmarked_with_none_of_the_path_s_fields_a_field_holding_a_c
     stopped(&server).await;
 }
 
-// this side's own, the Rust cell of the matrix's row "What follows a # in a target": httparse reads
-// a request-line's target as UTF-8 alone, so a lone octet past ASCII past its `#`, which spec 15.12
-// leaves to no rule, makes the request-line invalid here; the same character as UTF-8 is taken, and
-// a `%00` there too
-#[tokio::test]
-async fn answers_400_unmarked_a_target_whose_part_past_its_hash_holds_a_lone_octet_past_ascii_and_upgrades_one_that_holds_it_as_utf_8_or_a_nul_percent_encoded()
- {
-    let (server, recorder, port) = started(&judging(&["bead.test"], &[])).await;
-    let latin1_octets = |text: &str| -> Vec<u8> {
-        text.chars()
-            .map(|character| u8::try_from(u32::from(character)).unwrap())
-            .collect()
-    };
-    let mut lone = latin1_octets(&request_of("GET /#caf\u{e9} HTTP/1.1", &[]));
-    let mut socket = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
-
-    socket.write_all(&lone).await.unwrap();
-    lone.clear();
-    patience(PATIENCE, socket.read_to_end(&mut lone))
-        .await
-        .unwrap()
-        .ok();
-    assert!(
-        latin1(&lone).starts_with("HTTP/1.1 400 Bad Request\r\n")
-            && !latin1(&lone).contains("bead-refusal"),
-        "a lone octet: {}",
-        latin1(&lone)
-    );
-
-    for target in ["/#caf\u{c3}\u{a9}", "/#%00"] {
-        let request = latin1_octets(&request_of(&format!("GET {target} HTTP/1.1"), &[]));
-        let mut socket = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
-
-        socket.write_all(&request).await.unwrap();
-        assert!(
-            read_head_of(&mut socket)
-                .await
-                .starts_with("HTTP/1.1 101 Switching Protocols\r\n"),
-            "{target:?} upgraded"
-        );
-    }
-
-    assert!(recorder.refusals().is_empty(), "nothing told");
-    stopped(&server).await;
-}
-
 #[tokio::test]
 async fn takes_an_upgrade_whose_upgrade_lists_websocket_in_any_case_in_one_field_line_or_several_whose_connection_names_upgrade_among_other_tokens_with_no_content()
  {
