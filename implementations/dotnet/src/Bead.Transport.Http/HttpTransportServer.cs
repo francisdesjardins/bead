@@ -1396,8 +1396,7 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
             return;
         }
 
-        // ! the path as it came, ended at its first # (spec 15.12): Kestrel's Request.Path keeps a #
-        // and what follows it, and decodes it
+        // ! the path as it came (spec 15.12): Kestrel's Request.Path decodes it
         if (HttpServerFields.PathOf(context) != _options.Pathname)
         {
             await Finish(context, new End(StatusCodes.Status404NotFound, HttpRefusals.Path));

@@ -46,12 +46,13 @@ internal static class HostsAndOrigins
     // sub-delims no HTTP server refuses (spec 15.12)
     private const string NameMarks = "-._~!$&'()";
 
-    // the visible characters a URI leaves out that a page's browser always percent-encodes where
-    // they stand (spec 15.12): in a path, the URL Standard's path percent-encode set; in a query, its
-    // query percent-encode set, which leaves ^, `, { and } as they came
-    private static readonly SearchValues<char> PathEncoded = SearchValues.Create("\"<>^`{}");
+    // the visible characters a page's browser always percent-encodes where they stand (spec 15.12):
+    // in a path, the URL Standard's path percent-encode set; in a query, its query percent-encode
+    // set, which leaves ^, `, { and } as they came; # in both, since no form of a request-target
+    // carries a fragment (RFC 9112 §3.2)
+    private static readonly SearchValues<char> PathEncoded = SearchValues.Create("\"#<>^`{}");
 
-    private static readonly SearchValues<char> QueryEncoded = SearchValues.Create("\"<>");
+    private static readonly SearchValues<char> QueryEncoded = SearchValues.Create("\"#<>");
 
     // the schemes whose origin a browser serializes with its host in lower case and its default
     // port left out (RFC 6454 §6.2; the URL Standard's special schemes)
@@ -248,26 +249,24 @@ internal static class HostsAndOrigins
             return authority.Length > 0 && IsAuthority(authority);
         }
 
-        return target is null || !NamesScheme(BeforeHash(target));
+        return target is null || !NamesScheme(target);
     }
 
     /// <summary>
     /// Whether a request's target, as it came, is one a server reads (spec 15.12): visible ASCII
     /// alone, in its path and its query, in origin-form or absolute-form, and a path whose
     /// percent-decoding holds no NUL. A control character, HTAB, a bare CR and DEL among them, is
-    /// none anywhere in it, past a <c>#</c> too. What a target percent-encodes is otherwise no octet
-    /// of it, and is taken, <c>%01</c> and <c>%7F</c> among them, and <c>%00</c> in a query. A target
-    /// ends at its first <c>#</c>: what follows it is neither its path nor its query, and no rule of
-    /// a path or a query reaches it, as a URI reference's fragment is apart from both (RFC 3986
-    /// §3.5), though a request-target never carries one (RFC 9112 §3.2); a control character past it
-    /// is still the request-line's, refused as one in its path. A visible character a URI leaves out
-    /// (RFC 3986 §2) that a page's browser always percent-encodes where it stands — <c>"</c>,
-    /// <c>&lt;</c> or <c>&gt;</c> in a path or a query, <c>^</c>, <c>`</c>, <c>{</c> or <c>}</c> in
-    /// a path, by the URL Standard's path and query percent-encode sets — makes the request-line
-    /// invalid (RFC 9112 §3). The other visible characters a URI leaves out, <c>\</c> and
-    /// <c>|</c>, and <c>^</c>, <c>`</c>, <c>{</c> and <c>}</c> in a query, are taken as they came,
-    /// as a page's browser sends them unencoded. A request that holds another is answered 400
-    /// unmarked, or over HTTP/2 its stream reset, before anything else of it is judged.
+    /// none anywhere in it. What a target percent-encodes is otherwise no octet of it, and is taken,
+    /// <c>%01</c>, <c>%7F</c> and <c>%23</c> among them, and <c>%00</c> in a query. A <c>#</c>
+    /// anywhere in a target, since no form of a request-target carries a fragment (RFC 9112 §3.2),
+    /// and a visible character a URI leaves out (RFC 3986 §2) that a page's browser always
+    /// percent-encodes where it stands — <c>"</c>, <c>&lt;</c> or <c>&gt;</c> in a path or a
+    /// query, <c>^</c>, <c>`</c>, <c>{</c> or <c>}</c> in a path, by the URL Standard's path and
+    /// query percent-encode sets, which hold <c>#</c> too — make the request-line invalid (RFC 9112
+    /// §3). The other visible characters a URI leaves out, <c>\</c> and <c>|</c>, and <c>^</c>,
+    /// <c>`</c>, <c>{</c> and <c>}</c> in a query, are taken as they came, as a page's browser sends
+    /// them unencoded. A request that holds another is answered 400 unmarked, or over HTTP/2 its
+    /// stream reset, before anything else of it is judged.
     /// </summary>
     public static bool IsVisibleTarget(string? target)
     {
@@ -276,18 +275,13 @@ internal static class HostsAndOrigins
             return true;
         }
 
-        // * a control character anywhere, past a # too, then the rest on what stands before it
-        if (target.Any(IsControl))
-        {
-            return false;
-        }
+        // Kestrel refuses a # in a target itself since 10.0.15, before this runs; a runtime before
+        // it hands such a target on, and this refuses it alike
+        var question = target.IndexOf('?', StringComparison.Ordinal);
+        var path = question < 0 ? target : target[..question];
+        var query = question < 0 ? "" : target[(question + 1)..];
 
-        var before = BeforeHash(target);
-        var question = before.IndexOf('?', StringComparison.Ordinal);
-        var path = question < 0 ? before : before[..question];
-        var query = question < 0 ? "" : before[(question + 1)..];
-
-        return before.All((character) =>
+        return target.All((character) =>
         {
             return character is > ' ' and <= '~';
         }) && !path.AsSpan().ContainsAny(PathEncoded) && !query.AsSpan().ContainsAny(QueryEncoded) && !path.Contains("%00", StringComparison.Ordinal);
@@ -295,9 +289,9 @@ internal static class HostsAndOrigins
 
     /// <summary>
     /// The path a request's target names, as it came (spec 15.12): what stands before its first
-    /// <c>#</c> and its first <c>?</c>; in absolute-form, under <c>http://</c> or <c>https://</c>,
-    /// what follows its authority, <c>/</c> when it names none. Never Kestrel's <c>Request.Path</c>,
-    /// which keeps a <c>#</c> and what follows it, and decodes it.
+    /// <c>?</c>; in absolute-form, under <c>http://</c> or <c>https://</c>, what follows its
+    /// authority, <c>/</c> when it names none. Never Kestrel's <c>Request.Path</c>, which decodes
+    /// it.
     /// </summary>
     public static string TargetPathOf(string target)
     {
@@ -310,38 +304,22 @@ internal static class HostsAndOrigins
     }
 
     /// <summary>
-    /// A request's target as it came, its path and its query, before its first <c>#</c> (spec
-    /// 15.12): in absolute-form, under <c>http://</c> or <c>https://</c>, what follows its
-    /// authority, <c>/</c> when it names no path.
+    /// A request's target as it came, its path and its query (spec 15.12): in absolute-form, under
+    /// <c>http://</c> or <c>https://</c>, what follows its authority, <c>/</c> when it names no
+    /// path.
     /// </summary>
     public static string TargetRestOf(string target)
     {
         ArgumentNullException.ThrowIfNull(target);
 
-        var before = BeforeHash(target);
-
-        if (TargetAuthorityOf(before) is not { } authority)
+        if (TargetAuthorityOf(target) is not { } authority)
         {
-            return before;
+            return target;
         }
 
-        var rest = before[(before.IndexOf("://", StringComparison.Ordinal) + 3 + authority.Length)..];
+        var rest = target[(target.IndexOf("://", StringComparison.Ordinal) + 3 + authority.Length)..];
 
         return rest.StartsWith('/') ? rest : $"/{rest}";
-    }
-
-    // whether a character is one of ASCII's controls, HTAB and DEL among them (RFC 5234 B.1, CTL)
-    private static bool IsControl(char character)
-    {
-        return character is < ' ' or '\u007F';
-    }
-
-    // what stands before a target's first "#", where it ends (spec 15.12)
-    private static string BeforeHash(string target)
-    {
-        var hash = target.IndexOf('#', StringComparison.Ordinal);
-
-        return hash < 0 ? target : target[..hash];
     }
 
     // whether a target opens with a scheme and its "//" (RFC 3986 §3.1): a letter, then letters,
@@ -363,8 +341,8 @@ internal static class HostsAndOrigins
 
     /// <summary>
     /// The authority an HTTP/1 request's target names when it is in absolute-form (RFC 9112 §3.2.2,
-    /// §3.3): what follows its <c>http://</c> or <c>https://</c> up to its path, its query, the
-    /// <c>#</c> that ends the target or its end, as it came; none for a target of another form.
+    /// §3.3): what follows its <c>http://</c> or <c>https://</c> up to its path, its query or its
+    /// end, as it came; none for a target of another form.
     /// </summary>
     public static string? TargetAuthorityOf(string? target)
     {
@@ -379,7 +357,7 @@ internal static class HostsAndOrigins
         }
 
         var rest = target![scheme..];
-        var end = rest.IndexOfAny(['/', '?', '#']);
+        var end = rest.IndexOfAny(['/', '?']);
 
         return end < 0 ? rest : rest[..end];
     }
