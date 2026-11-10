@@ -463,9 +463,10 @@ public sealed record HttpTransportServerOptions
 /// <remarks>
 /// Each <c>POST</c> carries one envelope, of type <see cref="HttpTransport.MediaType"/>; the
 /// transport reads its layout, kind and call id, and nothing else. A request waits under its call id
-/// for the answer the router sends on it, its head going out as it is handed on; any other envelope
-/// ends 204. A request is handed on with its credential, the <c>Authorization</c> field of its
-/// <c>POST</c> as it came, its surrounding whitespace removed, and none when the field is empty or
+/// for the answer the router sends on it: one within 40 ms of its hand-off goes whole, and a request
+/// still unanswered then gets its head alone, so its requester knows the router has it; any other
+/// envelope ends 204. A request is handed on with its credential, the <c>Authorization</c> field of
+/// its <c>POST</c> as it came, its surrounding whitespace removed, and none when the field is empty or
 /// absent; no other exchange's is read, and a <c>POST</c> with two is refused 400. An answer, and
 /// what a listen brings back, carry none. A cancel ends the exchange of its call; one before its
 /// request buries that call id for 5 seconds. Each refusal of its own is marked in
@@ -473,14 +474,15 @@ public sealed record HttpTransportServerOptions
 /// <see cref="HttpTransportServerOptions.Origins"/> names, it answers CORS (spec 15.12): its
 /// preflight 204, and every answer once its origin is judged naming it and exposing every field, no
 /// credential allowed. An exchange lost — its client gone before the transport ended it — closes the
-/// connection, as a socket that drops does; so do a request unanswered past its exchange timeout and
-/// a connection idle past its inactivity timeout. What the server sends of its
-/// own waits, numbered, in the outbox of a connection whose client said at connect that it listens,
-/// until a <c>GET</c> listen brings it back in a batch; each listen held, once past its refusals,
-/// raises <see cref="Listen"/> with true, and its end, while its connection stands, with false. Each
-/// exchange waits in its own request, on Kestrel's thread, for what ends it; what the transport holds
-/// is kept under one lock, and its events are raised outside it, each listener within a guard: what
-/// one throws is reported through <see cref="Error"/>, and changes nothing the transport does.
+/// connection, as a socket that drops does; so do a request unanswered past its exchange timeout,
+/// counted from its hand-off, and a connection idle past its inactivity timeout. What the server
+/// sends of its own waits, numbered, in the outbox of a connection whose client said at connect that
+/// it listens, until a <c>GET</c> listen brings it back in a batch; each listen held, once past its
+/// refusals, raises <see cref="Listen"/> with true, and its end, while its connection stands, with
+/// false. Each exchange waits in its own request, on Kestrel's thread, for what ends it; what the
+/// transport holds is kept under one lock, and its events are raised outside it, each listener
+/// within a guard: what one throws is reported through <see cref="Error"/>, and changes nothing the
+/// transport does.
 /// </remarks>
 public sealed partial class HttpTransportServer : IServerTransport, IAsyncDisposable
 {
@@ -490,6 +492,11 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
     // what a cancel that came before its request buries that call id for: the least a requester
     // reserves one for
     private static readonly TimeSpan Burial = TimeSpan.FromSeconds(5);
+
+    // how long a request's head waits for its answer from its hand-off: an answer within it goes
+    // whole, its length in content-length; a request still unanswered then gets its head alone, and
+    // its answer after it. Its exchange timeout counts from the hand-off, this within it (spec 15.7)
+    private static readonly TimeSpan HeadDelay = TimeSpan.FromMilliseconds(40);
 
     // how long a stop lets the exchanges under way write their end before it cuts them, at most: an
     // end its closes wrote is a few bytes, where the TypeScript side's go out as they are written,
@@ -1759,18 +1766,59 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
         return HandOff.Told;
     }
 
-    // a request handed on: whether it still waits for its answer, its timer armed when it does
-    private bool WaitAfterHandOff((Drawn Connection, Waiting Waiting, uint CallId) call)
+    // * a request handed on, still waiting — not answered as it came — arms its one timer: its head's
+    // delay first, then what is left of its exchange timeout; under an exchange timeout of 40 ms or
+    // less, the exchange timer alone, whose close sends its head and cuts its exchange (spec 15.7)
+    private void WaitAfterHandOff((Drawn Connection, Waiting Waiting, uint CallId) call)
     {
         var (connection, waiting, callId) = call;
-        bool isWaiting;
+        var exchangeTimeout = _options.ExchangeTimeout;
+        var isCutFirst = exchangeTimeout != Timeout.InfiniteTimeSpan && exchangeTimeout <= HeadDelay;
 
         lock (_gate)
         {
-            // still waiting — not answered as it came — it waits for its answer no longer than it may
-            isWaiting = connection.Waiting.GetValueOrDefault(callId) == waiting;
+            if (connection.Waiting.GetValueOrDefault(callId) == waiting)
+            {
+                waiting.Timer = _clock.CreateTimer(
+                    (_) =>
+                    {
+                        if (isCutFirst)
+                        {
+                            CloseDrawn(connection, false);
+                        }
+                        else
+                        {
+                            HeadDue((connection, waiting));
+                        }
+                    },
+                    null,
+                    isCutFirst ? exchangeTimeout : HeadDelay,
+                    Timeout.InfiniteTimeSpan);
+            }
+        }
+    }
 
-            if (isWaiting && _options.ExchangeTimeout != Timeout.InfiniteTimeSpan)
+    // a request still unanswered once its head waited 40 ms: its head goes, on its exchange's own
+    // flow, and its timer is armed again for what is left of its exchange timeout, or not at all
+    // under one of never
+    private void HeadDue((Drawn Connection, Waiting Waiting) call)
+    {
+        var (connection, waiting) = call;
+
+        lock (_gate)
+        {
+            // ! ended stands for out of its connection's waiting: whatever takes it out — an answer, a
+            // cancel, a close, an early end — ends it under this same lock
+            if (waiting.IsEnded)
+            {
+                return;
+            }
+
+            waiting.HeadDue.TrySetResult();
+            waiting.Timer?.Dispose();
+            waiting.Timer = null;
+
+            if (_options.ExchangeTimeout != Timeout.InfiniteTimeSpan)
             {
                 waiting.Timer = _clock.CreateTimer(
                     (_) =>
@@ -1778,12 +1826,10 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
                         CloseDrawn(connection, false);
                     },
                     null,
-                    _options.ExchangeTimeout,
+                    _options.ExchangeTimeout - HeadDelay,
                     Timeout.InfiniteTimeSpan);
             }
         }
-
-        return isWaiting;
     }
 
     // bytes of body charged against the server's budget: whether it is now past it
