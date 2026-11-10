@@ -1535,6 +1535,89 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Refuses_431_a_head_past_32_KiB_of_fields_414_a_request_line_past_8_KiB_and_431_past_100_fields_as_Kestrel_bounds_them_over_HTTP()
+    {
+        await Start();
+
+        var fields = string.Join("", Enumerable.Range(0, 101).Select((number) =>
+        {
+            return $"X-{number}: x\r\n";
+        }));
+        foreach (var (request, expected) in new[]
+        {
+            ($"POST /bead HTTP/1.1\r\nHost: {Host}\r\nX-Large: {new string('x', 32_768)}\r\n\r\n", 431),
+            ($"POST /{new string('x', 8_192)} HTTP/1.1\r\nHost: {Host}\r\n\r\n", 414),
+            ($"POST /bead HTTP/1.1\r\nHost: {Host}\r\n{fields}\r\n", 431),
+        })
+        {
+            using var wire = await Wire.Open(_port);
+
+            await wire.Write(request);
+            var head = await wire.ReadHead();
+
+            Assert.Equal(expected, head.Status);
+            Assert.False(head.Headers.ContainsKey(HttpTransport.RefusalHeader));
+        }
+        Assert.Empty(_server.Clients);
+        Assert.Empty(_refusals);
+    }
+
+    [Fact]
+    public async Task Refuses_an_extension_method_405_method_refused_and_a_lowercase_get_400_malformed_on_the_wire()
+    {
+        await Start();
+
+        foreach (var (method, expected) in new[] { ("BEAD", (405, HttpRefusals.Method)), ("get", (400, HttpRefusals.Malformed)) })
+        {
+            using var wire = await Wire.Open(_port);
+
+            await wire.Write($"{method} /bead HTTP/1.1\r\nHost: {Host}\r\nContent-Length: 0\r\n\r\n");
+            var head = await wire.ReadHead();
+
+            Assert.Equal(expected, (head.Status, head.Headers.GetValueOrDefault(HttpTransport.RefusalHeader)));
+        }
+        Assert.Empty(_server.Clients);
+    }
+
+    [Fact]
+    public async Task Answers_GOAWAY_HTTP_1_1_REQUIRED_an_HTTP_2_preface_where_HTTP_1_1_alone_is_served()
+    {
+        await Start();
+        using var peer = new TcpClient();
+
+        await peer.ConnectAsync(IPAddress.Loopback, _port, Cancelled);
+        await peer.GetStream().WriteAsync("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"u8.ToArray(), Cancelled);
+        var frame = new byte[17];
+
+        await peer.GetStream().ReadExactlyAsync(frame, Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+        Assert.Equal(new byte[] { 0, 0, 8, 7, 0, 0, 0, 0, 0 }, frame[..9]);
+        Assert.Equal(0u, BinaryPrimitives.ReadUInt32BigEndian(frame.AsSpan(9, 4)));
+        Assert.Equal(13u, BinaryPrimitives.ReadUInt32BigEndian(frame.AsSpan(13, 4)));
+        Assert.Empty(_server.Clients);
+    }
+
+    [Fact]
+    public async Task Closes_an_idle_kept_alive_socket_without_another_response()
+    {
+        await using var server = new HttpTransportServer();
+
+        server.Built += (application) =>
+        {
+            Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions
+                .GetRequiredService<Microsoft.Extensions.Options.IOptions<Microsoft.AspNetCore.Server.Kestrel.Core.KestrelServerOptions>>(application.Services)
+                .Value.Limits.KeepAliveTimeout = TimeSpan.FromMilliseconds(100);
+        };
+        var port = (await server.Start(Loopback with { CancellationToken = Cancelled })).Port;
+        using var wire = await Wire.Open(port);
+
+        await wire.Write($"POST /bead HTTP/1.1\r\nHost: {Host}\r\nContent-Type: {HttpTransport.MediaType}\r\nContent-Length: 0\r\n\r\n");
+        var (head, _) = await wire.Read();
+
+        Assert.Equal(201, head.Status);
+        Assert.True(await wire.IsClosed());
+    }
+
+    [Fact]
     public async Task Is_secure_under_TLS_whatever_it_listens_on_or_on_a_loopback_host_alone_and_carries_no_credential_toward_a_connection()
     {
         using var key = System.Security.Cryptography.ECDsa.Create();
