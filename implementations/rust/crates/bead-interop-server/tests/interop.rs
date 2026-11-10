@@ -32,11 +32,13 @@ use std::time::{Instant, UNIX_EPOCH};
 
 use bead::testing::{patience, rest, wall_now};
 use bead::{
-    CallError, Client, CodecRefusal, Failure, FailureOrigin, FailureScope, HttpClient,
-    HttpClientOptions, HttpTransportClientConnectOptions, JsonCodec, NotificationCallback,
-    NotificationDependencies, PayloadCodec, Procedure, ProtocolCode, RawCodec, RegistrationOptions,
-    RequestCredential, RequestDependencies, RequestOptions, RouterSide, WebSocketClient,
-    WebSocketClientOptions, WebSocketTransportClientConnectOptions,
+    CallError, Client, ClientListener, ClientOptions, CodecRefusal, Failure, FailureOrigin,
+    FailureScope, HttpTransportClient, HttpTransportClientConnectOptions,
+    HttpTransportClientOptions, JsonCodec, NotificationCallback, NotificationDependencies,
+    PayloadCodec, Procedure, ProtocolCode, RawCodec, ReadyState, RegistrationOptions,
+    RequestCredential, RequestDependencies, RequestOptions, RouterClientTransport, RouterError,
+    RouterSide, Sent, SharedClock, TransportMessage, WebSocketClient, WebSocketClientOptions,
+    WebSocketTransportClientConnectOptions,
 };
 use bead_interop::{
     INTEROP_SERVICE, InteropDescriptor, InteropProcedures, interop_procedures, offer_interop_client,
@@ -46,6 +48,7 @@ use hmac::{Hmac, KeyInit, Mac};
 use libtest_mimic::{Arguments, Failed, Trial};
 use serde_json::{Value, json};
 use sha2::Sha256;
+use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
 // how long a step waits for what it awaits
@@ -309,10 +312,89 @@ impl Over {
     }
 }
 
-// a client connected over one transport or the other
+/// What an HTTP client's envelopes go through: one goes only once the server said it had the one
+/// before, its answer's head come back (spec 15.7), as a socket keeps them in order, so a cancel
+/// never overtakes its request, which the server would bury unseen; as the other sides' interop
+/// tests order theirs, by a fetch and by a handler.
+#[derive(Debug)]
+struct InOrder {
+    inner: Arc<HttpTransportClient>,
+    // settled once the envelope handed on last is: the turn of the next
+    last: Mutex<Option<oneshot::Receiver<()>>>,
+}
+
+impl RouterClientTransport for InOrder {
+    // its turn taken as it is sent, so the order kept is the order sent
+    fn send(&self, message: TransportMessage) -> Result<Sent, RouterError> {
+        let (turn, next) = oneshot::channel::<()>();
+        let before = locked(&self.last).replace(next);
+        let inner = Arc::clone(&self.inner);
+        let (settled, outcome) = oneshot::channel();
+
+        drop(tokio::spawn(async move {
+            if let Some(before) = before {
+                before.await.ok();
+            }
+
+            let sent = match inner.send(message) {
+                Ok(Sent::Later(later)) => later.await,
+                Ok(_) => Ok(()),
+                Err(error) => Err(error),
+            };
+
+            drop(turn);
+            settled.send(sent).ok();
+        }));
+
+        Ok(Sent::Later(Box::pin(async move {
+            outcome.await.unwrap_or(Ok(()))
+        })))
+    }
+
+    fn listen(&self, listener: Arc<dyn ClientListener>) {
+        self.inner.listen(listener);
+    }
+
+    fn unlisten(&self, listener: &Arc<dyn ClientListener>) {
+        self.inner.unlisten(listener);
+    }
+
+    fn pause(&self) {
+        self.inner.pause();
+    }
+
+    fn resume(&self) {
+        self.inner.resume();
+    }
+
+    fn clock(&self) -> Option<SharedClock> {
+        self.inner.clock()
+    }
+
+    fn is_secure(&self) -> bool {
+        self.inner.is_secure()
+    }
+
+    fn carries(&self, credential: &str) -> bool {
+        self.inner.carries(credential)
+    }
+
+    fn is_open(&self) -> bool {
+        self.inner.is_open()
+    }
+
+    fn ready_state(&self) -> ReadyState {
+        self.inner.ready_state()
+    }
+}
+
+// a client connected over one transport or the other, over HTTP its envelopes in order
 enum Connected {
     WebSocket(WebSocketClient),
-    Http(HttpClient),
+    Http {
+        transport: Arc<HttpTransportClient>,
+        client: Client,
+    },
 }
 
 impl Connected {
@@ -332,14 +414,22 @@ impl Connected {
                 (Self::WebSocket(client), connect)
             }
             Over::Http => {
-                let client = HttpClient::new(&HttpClientOptions::default())
+                let transport = Arc::new(
+                    HttpTransportClient::new(&HttpTransportClientOptions::default())
+                        .map_err(|error| error.to_string())?,
+                );
+                let in_order = InOrder {
+                    inner: Arc::clone(&transport),
+                    last: Mutex::new(None),
+                };
+                let client = Client::new(Arc::new(in_order), &ClientOptions::default())
                     .map_err(|error| error.to_string())?;
-                let connect = client.connect(&HttpTransportClientConnectOptions::new(
+                let connect = transport.connect(&HttpTransportClientConnectOptions::new(
                     HOST,
                     ports.http_port,
                 ));
 
-                (Self::Http(client), connect)
+                (Self::Http { transport, client }, connect)
             }
         };
         let (client, connect) = connected;
@@ -362,14 +452,17 @@ impl Connected {
     const fn client(&self) -> &Client {
         match self {
             Self::WebSocket(client) => client.client(),
-            Self::Http(client) => client.client(),
+            Self::Http { client, .. } => client,
         }
     }
 
     async fn dispose(&self) {
         match self {
             Self::WebSocket(client) => client.dispose().await,
-            Self::Http(client) => client.dispose().await,
+            Self::Http { transport, client } => {
+                client.dispose().await;
+                transport.dispose();
+            }
         }
     }
 }
