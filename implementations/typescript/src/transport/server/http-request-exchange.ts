@@ -14,7 +14,6 @@ import {
   type IExchangeIn,
   linesOf,
   HTTP_REFUSALS,
-  sendHead,
   UNKNOWN_CONNECTION,
 } from './http-server-fields';
 import type { IHTTPRequestLike, IHTTPResponseLike } from './types';
@@ -92,7 +91,11 @@ export interface IHTTPRequestExchangePort<Connection> {
     state: IExchange,
     options: { callId: number }
   ) => boolean;
-  /** Ends an exchange's connection, as lost, once its request waited past `exchangeTimeout`. */
+  /**
+   * Arms a waiting exchange's one timer: its head's delay, which sends its head alone once its
+   * request waited 40 ms unanswered, then the rest of `exchangeTimeout`, which ends its connection,
+   * as lost, once its request waited past it (spec 15.7).
+   */
   armExchangeTimer: (connection: Connection, state: IExchange) => void;
   /**
    * An envelope handed on to the router, with the credential its exchange carried, and the address
@@ -114,8 +117,8 @@ export interface IHTTPRequestExchangePort<Connection> {
 export interface IHTTPRequestExchange<Connection> {
   /**
    * One envelope: its body read into one buffer under its limits, its prefix checked from its first
-   * 8 bytes, then handed on; a request's head sent and its timer armed, its answer written by the
-   * server's `send`.
+   * 8 bytes, then handed on; a request's timer armed, its head waiting 40 ms for its answer, which
+   * the server's `send` writes.
    */
   receive: (exchange: IExchangeIn, connection: Connection) => void;
 }
@@ -403,11 +406,10 @@ export const createHTTPRequestExchange = <Connection>(
         port.beginHandOff(state);
         port.message(connection, { ...port.originOf(request), credential, data: envelope });
 
-        // still waiting — not answered as it came — its head goes now, so its client knows the
-        // router has it; and it waits for its answer no longer than it may
+        // still waiting — not answered as it came — its head waits 40 ms for its answer, then
+        // goes alone, so its client knows the router has it; and it waits for its answer no
+        // longer than it may (spec 15.7)
         if (port.waitAfterHandOff(connection, state, { callId })) {
-          sendHead(response);
-
           port.armExchangeTimer(connection, state);
         }
       };

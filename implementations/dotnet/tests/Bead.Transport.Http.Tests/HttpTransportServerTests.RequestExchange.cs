@@ -76,6 +76,8 @@ public sealed partial class HttpTransportServerTests
             await wire.Write(piece);
         }
 
+        await HeadsGo();
+
         Assert.Equal(200, (await wire.ReadHead()).Status);
         Assert.Equal(envelope, Assert.Single(_messages).Bytes);
     }
@@ -169,6 +171,7 @@ public sealed partial class HttpTransportServerTests
 
         await counted.Write(PostHead(connectionToken, "Transfer-Encoding: chunked"));
         await counted.Write([.. ChunkOf(EnvelopeOf(EnvelopeKind.Request, 3)), .. ChunkOf(new byte[8]), .. "0\r\n\r\n"u8]);
+        await HeadsGo(2);
 
         Assert.Equal((200, 200), ((await declared.ReadHead()).Status, (await counted.ReadHead()).Status));
         Assert.Equal(2, _messages.Count);
@@ -185,6 +188,7 @@ public sealed partial class HttpTransportServerTests
         });
         await filling.Write(PostHead(connectionToken, "Content-Length: 16"));
         await filling.Write(EnvelopeOf(EnvelopeKind.Request, (7, 8)));
+        await HeadsGo();
 
         Assert.Equal(200, (await filling.ReadHead()).Status);
         await Until(() =>
@@ -192,6 +196,7 @@ public sealed partial class HttpTransportServerTests
             return _messages.Count == 3 && Count("bodyBytes") == 8;
         });
         await holding.Write(new byte[8]);
+        await HeadsGo();
 
         Assert.Equal(200, (await holding.ReadHead()).Status);
         await Until(() =>
@@ -348,10 +353,7 @@ public sealed partial class HttpTransportServerTests
         });
         _time.Advance(TimeSpan.FromSeconds(0.9));
         await steady.Write(paced[1_200..]);
-        await Until(() =>
-        {
-            return !_messages.IsEmpty;
-        });
+        await HeadsGo();
         Assert.Equal((200, paced.Length), ((await steady.ReadHead()).Status, Assert.Single(_messages).Bytes.Length));
         Assert.Empty(_closes);
         Assert.Contains(connectionHandle, _server.ConnectionHandles);

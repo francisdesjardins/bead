@@ -436,7 +436,13 @@ public sealed partial class HttpTransportServerTests
         using var drawn = await Named(With(PostOf(null, null), (HttpTransport.ListenHeader, "?1")));
         var token = HeaderOf(drawn, HttpTransport.ConnectionTokenHeader) ?? "";
         var handle = _connections.Last();
-        using var delayed = await Named(With(PostOf(token, EnvelopeOf(EnvelopeKind.Request, 1)), ("authorization", Bearer)));
+
+        // a request with its Authorization, its head going 40 ms after it is handed on, then answered
+        var naming = Named(With(PostOf(token, EnvelopeOf(EnvelopeKind.Request, 1)), ("authorization", Bearer)));
+
+        await HeadsGo();
+
+        using var delayed = await naming;
 
         await _server.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Result, 1), false), handle).WaitAsync(Patience, Cancelled);
         Assert.Equal(EnvelopeOf(EnvelopeKind.Result, 1), await BytesOf(delayed));

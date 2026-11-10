@@ -230,6 +230,14 @@ export const START_DEFAULTS = Object.freeze({
  */
 export const BURIAL_MILLISECONDS = 5_000;
 
+/**
+ * How long a request's head waits for its answer from its hand-off: 40 ms. An answer within them
+ * goes whole, its head with it and its length in `content-length`; a request still unanswered then
+ * gets its head alone, and its answer after it (spec 15.7). The exchange timeout counts from the
+ * hand-off, those 40 ms within it.
+ */
+export const HEAD_DELAY_MILLISECONDS = 40;
+
 // a token: 16 bytes from `crypto`, in base64url without padding, as a session's
 const TOKEN_BYTES = 16;
 const TOKEN_PATTERN = /^[\w-]{22}$/u;
@@ -289,8 +297,9 @@ const unref = (timer: TimeoutId): void => {
  *
  * Each `POST` carries one envelope, of type `application/prs.bead`. The transport reads its layout,
  * kind and call id, and nothing else: a request's exchange waits under its call id — from its first
- * 8 bytes — for the answer the router sends on it, whose head goes out as the request is handed on,
- * so the requester knows the router has it; any other envelope is handed on and its exchange ends
+ * 8 bytes — for the answer the router sends on it: one within {@link HEAD_DELAY_MILLISECONDS} of
+ * its hand-off goes whole, and a request still unanswered then gets its head alone, so the
+ * requester knows the router has it; any other envelope is handed on and its exchange ends
  * 204. A request is handed on with its credential, the `Authorization` field of its `POST` as it
  * came, its surrounding whitespace removed, and none when the field is empty or absent; no other
  * exchange's is read, and a `POST` with two is refused 400. An answer, and what a listen brings
@@ -299,8 +308,8 @@ const unref = (timer: TimeoutId): void => {
  * in `bead-refusal`. To a page of an origin `origins` names, it answers CORS (spec 15.12): its
  * preflight 204, and every answer once its origin is judged naming it and exposing every field, no
  * credential allowed. An exchange lost — its response closed before the transport ended it — closes
- * the connection, as a socket that drops does; so do a request unanswered past `exchangeTimeout` and
- * a connection idle past `inactivityTimeout`.
+ * the connection, as a socket that drops does; so do a request unanswered past `exchangeTimeout`,
+ * counted from its hand-off, and a connection idle past `inactivityTimeout`.
  *
  * A connection its router paused hands on nothing (spec 15.12): each envelope read whole waits at
  * its gate, in order, its body still charged to `bodyBytesBudget`, its request's head and any
@@ -953,13 +962,28 @@ export const createHTTPTransportServer = (
           waitAfterHandOff: (connection, state, { callId }) => {
             return connection.waiting.get(callId) === state;
           },
+          // * one timer from the hand-off: the head's delay first, then what is left of the
+          // exchange timeout; one of 40 ms or less is the exchange timer alone, whose close sends
+          // the head and cuts the exchange (spec 15.7)
           armExchangeTimer: (connection, state) => {
-            if (exchangeTimeout !== Infinity) {
-              state.timer = clock.setTimeout(() => {
-                closeDrawn(connection, false);
-              }, exchangeTimeout);
-              unref(state.timer);
-            }
+            state.timer = clock.setTimeout(
+              () => {
+                if (exchangeTimeout <= HEAD_DELAY_MILLISECONDS) {
+                  closeDrawn(connection, false);
+                } else if (!state.isEnded) {
+                  sendHead(state.response);
+
+                  if (exchangeTimeout !== Infinity) {
+                    state.timer = clock.setTimeout(() => {
+                      closeDrawn(connection, false);
+                    }, exchangeTimeout - HEAD_DELAY_MILLISECONDS);
+                    unref(state.timer);
+                  }
+                }
+              },
+              Math.min(HEAD_DELAY_MILLISECONDS, exchangeTimeout)
+            );
+            unref(state.timer);
           },
           message: (connection, message) => {
             tell(MESSAGE_EVENT, [message, connection.connectionHandle]);
