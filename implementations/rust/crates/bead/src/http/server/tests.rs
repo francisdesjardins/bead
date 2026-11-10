@@ -2310,3 +2310,59 @@ fn refuses_a_headers_timeout_a_send_grace_period_a_body_grace_period_a_minimum_s
         "its words"
     );
 }
+
+// the twin of `"clients" is a copy without the sockets`: each entry what its connection looked like
+// as it was taken, a later change leaving the copy as it was
+#[tokio::test]
+async fn clients_is_a_copy_without_the_sockets() {
+    let started = started(&HttpTransportServerOptions::default()).await;
+    let (first, _) = connect(&started).await;
+    let clients = started.server.clients();
+
+    assert_eq!(
+        clients
+            .iter()
+            .map(|client| (
+                Arc::clone(&client.connection_handle),
+                client.address.clone(),
+                client.port.is_some(),
+                client.last_activity,
+                client.transport_type
+            ))
+            .collect::<Vec<_>>(),
+        [(
+            Arc::clone(&first),
+            HOST.to_owned(),
+            true,
+            None,
+            TRANSPORT_HTTP
+        )],
+        "what it held then"
+    );
+
+    // in the order they were drawn, whichever went in between; the copy taken before stays
+    let (second, _) = connect(&started).await;
+
+    assert!(
+        patience(PATIENCE, started.server.close(&first))
+            .await
+            .expect("closed in time"),
+        "held"
+    );
+
+    let (third, _) = connect(&started).await;
+    let handles_of = |clients: &[TransportServerClient]| {
+        clients
+            .iter()
+            .map(|client| Arc::clone(&client.connection_handle))
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(
+        handles_of(&started.server.clients()),
+        [second, third],
+        "those it holds now, in order"
+    );
+    assert_eq!(handles_of(&clients), [first], "the copy as it was");
+    started.stop().await;
+}

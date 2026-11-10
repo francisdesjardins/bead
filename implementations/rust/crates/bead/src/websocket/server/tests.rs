@@ -3127,3 +3127,61 @@ async fn a_paused_connection_closes_cleanly() {
     );
     stopped(&server).await;
 }
+
+// the twin of `"clients" is a copy without the sockets`: each entry what its connection looked like
+// as it was taken, a later change leaving the copy as it was
+#[tokio::test]
+async fn clients_is_a_copy_without_the_sockets() {
+    let (server, recorder, port) = started(&briefly_closing()).await;
+    // a socket of the test's own, whose port is known
+    let (first, _) = upgraded(port).await;
+    let first_handle = recorder.connections(1).await.remove(0);
+    let first_port = first.local_addr().unwrap().port();
+    let clients = server.clients();
+
+    assert_eq!(
+        clients
+            .iter()
+            .map(|client| (
+                Arc::clone(&client.connection_handle),
+                client.address.clone(),
+                client.port,
+                client.last_activity,
+                client.transport_type
+            ))
+            .collect::<Vec<_>>(),
+        [(
+            Arc::clone(&first_handle),
+            "127.0.0.1".to_owned(),
+            Some(first_port),
+            None,
+            TRANSPORT_WEBSOCKET
+        )],
+        "what it held then"
+    );
+
+    // in the order the connections came, whichever went in between; the copy taken before stays
+    let second = client(port).await;
+    let second_handle = recorder.connections(2).await.remove(1);
+
+    drop(first);
+    recorder.closes(1).await;
+
+    let third = client(port).await;
+    let third_handle = recorder.connections(3).await.remove(2);
+    let handles_of = |clients: &[TransportServerClient]| {
+        clients
+            .iter()
+            .map(|client| Arc::clone(&client.connection_handle))
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(
+        handles_of(&server.clients()),
+        [second_handle, third_handle],
+        "those it holds now, in order"
+    );
+    assert_eq!(handles_of(&clients), [first_handle], "the copy as it was");
+    drop((second, third));
+    stopped(&server).await;
+}
