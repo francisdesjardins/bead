@@ -1,12 +1,18 @@
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net;
+using System.Net.Security;
 using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading.Channels;
 using Bead.Tests;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Time.Testing;
 
 namespace Bead.Transport.WebSockets.Tests;
@@ -1234,6 +1240,82 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
             {
                 return connecting.WaitAsync(Patience, Cancelled);
             });
+        }
+
+        // a real upgrade and binary messages in both directions, trusting the peer's certificate alone
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using var made = new CertificateRequest("CN=127.0.0.1", key, HashAlgorithmName.SHA256)
+            .CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
+        using var certificate = X509CertificateLoader.LoadPkcs12(made.Export(X509ContentType.Pfx), null);
+        var builder = WebApplication.CreateSlimBuilder();
+
+        builder.Logging.ClearProviders();
+        builder.WebHost.ConfigureKestrel((options) =>
+        {
+            options.Listen(IPAddress.Loopback, 0, (listen) =>
+            {
+                listen.Protocols = HttpProtocols.Http1AndHttp2;
+                listen.UseHttps(certificate);
+            });
+        });
+        await using var application = builder.Build();
+        var accepted = new TaskCompletionSource<WebSocket>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var released = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        application.UseWebSockets();
+        application.Run(async (context) =>
+        {
+            using var socket = await context.WebSockets.AcceptWebSocketAsync();
+
+            accepted.TrySetResult(socket);
+            await released.Task;
+        });
+        await application.StartAsync(Cancelled);
+
+        using var invoker = new HttpMessageInvoker(new SocketsHttpHandler
+        {
+            SslOptions = new SslClientAuthenticationOptions
+            {
+                RemoteCertificateValidationCallback = (_, offered, _, _) =>
+                {
+                    return offered is not null && offered.GetCertHashString() == certificate.GetCertHashString();
+                },
+            },
+        });
+        await using var secured = new WebSocketTransportClient(new WebSocketTransportClientOptions { Invoker = invoker });
+        var messages = Channel.CreateUnbounded<TransportMessage>();
+
+        secured.Message += (message) =>
+        {
+            messages.Writer.TryWrite(message);
+        };
+
+        try
+        {
+            await secured.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = new Uri(application.Urls.Single()).Port, Secured = true, CancellationToken = Cancelled });
+            var socket = await accepted.Task.WaitAsync(Patience, Cancelled);
+            var buffer = new byte[16];
+
+            await secured.Send(new TransportMessage("hello"u8.ToArray(), false));
+            var received = await socket.ReceiveAsync(buffer, Cancelled).WaitAsync(Patience, Cancelled);
+
+            Assert.Equal((WebSocketMessageType.Binary, true, "hello"), (received.MessageType, received.EndOfMessage, Encoding.UTF8.GetString(buffer, 0, received.Count)));
+            await socket.SendAsync("again"u8.ToArray(), WebSocketMessageType.Binary, true, Cancelled);
+            var heard = await Next(messages);
+
+            Assert.Equal("again", Encoding.UTF8.GetString(heard.Bytes.Span));
+            Assert.False(heard.IsText);
+            Assert.True(secured.IsSecure);
+
+            var closing = secured.CloseConnection();
+
+            Assert.Equal(WebSocketMessageType.Close, (await socket.ReceiveAsync(buffer, Cancelled).WaitAsync(Patience, Cancelled)).MessageType);
+            await socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "", Cancelled);
+            await closing.WaitAsync(Patience, Cancelled);
+        }
+        finally
+        {
+            released.TrySetResult();
         }
     }
 

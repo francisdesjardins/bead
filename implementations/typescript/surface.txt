@@ -283,6 +283,7 @@
   ENVELOPE_PREFIX	src/transport/server/http-server-fields.ts
   EXCHANGE_TIMEOUT	src/transport/server/http-transport-server.ts
   HEADERS_TIMEOUT	src/transport/server/server-bounds.ts
+  HEAD_DELAY_MILLISECONDS	src/transport/server/http-transport-server.ts
   HTTPRequestListener	src/transport/server/types.ts
   HTTPTransportServer	src/transport/server/types.ts
   HTTP_POLICY_MEMBERS	src/transport/server/http-policy.ts
@@ -3363,6 +3364,8 @@ src/transport/server/http-transport-server.ts BURIAL_MILLISECONDS
   const BURIAL_MILLISECONDS: 5000
 src/transport/server/http-transport-server.ts EXCHANGE_TIMEOUT
   const EXCHANGE_TIMEOUT: 300000
+src/transport/server/http-transport-server.ts HEAD_DELAY_MILLISECONDS
+  const HEAD_DELAY_MILLISECONDS: 40
 src/transport/server/http-transport-server.ts INACTIVITY_TIMEOUT
   const INACTIVITY_TIMEOUT: 300000
 src/transport/server/http-transport-server.ts MAXIMUM_BODY_BYTES

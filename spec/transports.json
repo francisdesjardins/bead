@@ -341,6 +341,14 @@
           "on": "slow"
         },
         {
+          "until": {
+            "timer": 40
+          }
+        },
+        {
+          "advance": 40
+        },
+        {
           "expect": {
             "status": 200
           },
@@ -5103,6 +5111,14 @@
           "on": "slow"
         },
         {
+          "until": {
+            "timer": 40
+          }
+        },
+        {
+          "advance": 40
+        },
+        {
           "expect": {
             "status": 200
           },
@@ -6780,6 +6796,184 @@
       ]
     },
     {
+      "name": "a request answered within 40 ms of its hand-off goes whole, its length in content-length",
+      "clauses": [
+        "15.7"
+      ],
+      "transport": "http",
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": null
+            }
+          },
+          "on": "connect"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 15\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 78 22"
+          },
+          "on": "echo"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "content-length": "11",
+              "transfer-encoding": null
+            },
+            "envelope": {
+              "kind": 17,
+              "callId": 1,
+              "payload": "22 78 22"
+            }
+          },
+          "on": "echo"
+        }
+      ]
+    },
+    {
+      "name": "a request unanswered 40 ms after its hand-off gets its head then, and its answer chunked",
+      "clauses": [
+        "15.7"
+      ],
+      "transport": "http",
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": null
+            }
+          },
+          "on": "connect"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 32\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 01  00 01 00 03 | 7B 22 6D 69 6C 6C 69 73 65 63 6F 6E 64 73 22 3A 31 30 30 7D"
+          },
+          "on": "slow"
+        },
+        {
+          "until": {
+            "timer": 40
+          }
+        },
+        {
+          "advance": 40
+        },
+        {
+          "until": {
+            "timer": 60
+          }
+        },
+        {
+          "advance": 60
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "transfer-encoding": "chunked",
+              "content-length": null
+            },
+            "envelope": {
+              "kind": 17,
+              "callId": 1,
+              "payload": "31 30 30"
+            }
+          },
+          "on": "slow"
+        }
+      ]
+    },
+    {
+      "name": "a request cancelled before its head went ends 204, empty",
+      "clauses": [
+        "15.6.3",
+        "15.7"
+      ],
+      "transport": "http",
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": null
+            }
+          },
+          "on": "connect"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 36\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 01  00 01 00 03 | 7B 22 6D 69 6C 6C 69 73 65 63 6F 6E 64 73 22 3A 33 36 30 30 30 30 30 7D"
+          },
+          "on": "slow"
+        },
+        {
+          "until": {
+            "timer": 40
+          }
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 8\r\nconnection: close\r\n\r\n",
+            "body": "A1 16 00 02  00 00 00 01"
+          },
+          "on": "cancel"
+        },
+        {
+          "expect": {
+            "status": 204,
+            "body": ""
+          },
+          "on": "cancel"
+        },
+        {
+          "expect": {
+            "status": 204,
+            "body": ""
+          },
+          "on": "slow"
+        }
+      ]
+    },
+    {
       "name": "a request unanswered past the exchange timeout closes its connection",
       "clauses": [
         "15.7",
@@ -6817,6 +7011,14 @@
           "on": "slow"
         },
         {
+          "until": {
+            "timer": 40
+          }
+        },
+        {
+          "advance": 40
+        },
+        {
           "expect": {
             "status": 200
           },
@@ -6824,11 +7026,11 @@
         },
         {
           "until": {
-            "timer": 10000
+            "timer": 9960
           }
         },
         {
-          "advance": 10000
+          "advance": 9960
         },
         {
           "until": {
@@ -6860,6 +7062,66 @@
             }
           },
           "on": "after"
+        }
+      ]
+    },
+    {
+      "name": "a request whose exchange timeout is 40 ms or less gets its head with its cut, at that timeout",
+      "clauses": [
+        "15.7",
+        "15.12.8"
+      ],
+      "transport": "http",
+      "options": {
+        "exchangeTimeout": 10
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": null
+            }
+          },
+          "on": "connect"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 36\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 01  00 01 00 03 | 7B 22 6D 69 6C 6C 69 73 65 63 6F 6E 64 73 22 3A 33 36 30 30 30 30 30 7D"
+          },
+          "on": "slow"
+        },
+        {
+          "until": {
+            "timer": 10
+          }
+        },
+        {
+          "advance": 10
+        },
+        {
+          "expect": {
+            "status": 200,
+            "orLost": true
+          },
+          "on": "slow"
+        },
+        {
+          "until": {
+            "gauge": "connections",
+            "is": 0
+          }
         }
       ]
     },

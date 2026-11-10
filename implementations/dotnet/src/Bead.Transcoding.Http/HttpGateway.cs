@@ -318,7 +318,7 @@ public sealed class HttpGateway : IAsyncDisposable
             context.Response.Headers.AccessControlExposeHeaders = "*";
 
             // 6. a preflight from an origin it lists: the methods its path's routes take
-            if (HttpMethods.IsOptions(request.Method) && request.Headers.ContainsKey(HeaderNames.AccessControlRequestMethod))
+            if (IsMethod(request, "OPTIONS") && request.Headers.ContainsKey(HeaderNames.AccessControlRequestMethod))
             {
                 await Preflight(context, isDocument ? ["GET", "HEAD"] : MethodsOf(matched));
 
@@ -336,7 +336,7 @@ public sealed class HttpGateway : IAsyncDisposable
             return;
         }
 
-        var method = HttpMethods.IsHead(request.Method) ? "GET" : request.Method;
+        var method = IsMethod(request, "HEAD") ? "GET" : request.Method;
 
         if (isDocument)
         {
@@ -466,9 +466,15 @@ public sealed class HttpGateway : IAsyncDisposable
             return true;
         }
 
-        var isRead = HttpMethods.IsGet(context.Request.Method) || HttpMethods.IsHead(context.Request.Method);
+        var isRead = IsMethod(context.Request, "GET") || IsMethod(context.Request, "HEAD");
 
         return isRead && asked.Matched.TryGetValue("GET", out var served) && served.Route.NoSideEffects;
+    }
+
+    // whether a request's method is the one named: a method is case-sensitive (RFC 9110 §9.1)
+    private static bool IsMethod(HttpRequest request, string method)
+    {
+        return string.Equals(request.Method, method, StringComparison.Ordinal);
     }
 
     // each method's route that answers a raw path, by 3.5's precedence among that method's; HEAD as GET
@@ -1334,7 +1340,7 @@ public sealed class HttpGateway : IAsyncDisposable
         response.ContentType = "application/json";
         response.ContentLength = _document!.Length;
 
-        if (!HttpMethods.IsHead(context.Request.Method))
+        if (!IsMethod(context.Request, "HEAD"))
         {
             await WriteSlices(context, _document);
         }
@@ -1358,7 +1364,7 @@ public sealed class HttpGateway : IAsyncDisposable
         response.ContentType = answer.ContentType;
         response.ContentLength = answer.Body.Length;
 
-        if (!HttpMethods.IsHead(context.Request.Method) && answer.Body.Length > 0)
+        if (!IsMethod(context.Request, "HEAD") && answer.Body.Length > 0)
         {
             await WriteSlices(context, answer.Body);
         }

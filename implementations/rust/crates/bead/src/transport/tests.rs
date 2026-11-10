@@ -164,3 +164,63 @@ fn reports_a_throw_of_a_listener_told_no_connection_with_the_empty_handle() {
         "the panic reported with no connection, and the refusal told after it"
     );
 }
+
+// spec 15.1: an error listener's panic is dropped, so telling an error cannot recurse.
+#[test]
+fn tell_error_tells_error_to_each_listener_within_a_guard_dropping_what_one_throws() {
+    struct Report {
+        reason: RouterError,
+        connection_handle: Option<ConnectionHandle>,
+    }
+
+    struct HearingErrors {
+        told: Arc<Mutex<Vec<Report>>>,
+    }
+
+    impl ServerListener for HearingErrors {
+        fn on_error(&self, reason: &RouterError, connection_handle: Option<&ConnectionHandle>) {
+            self.told
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(Report {
+                    reason: reason.clone(),
+                    connection_handle: connection_handle.cloned(),
+                });
+        }
+    }
+
+    struct Panicking;
+
+    impl ServerListener for Panicking {
+        fn on_error(&self, _: &RouterError, _: Option<&ConnectionHandle>) {
+            panic!("an error listener that throws");
+        }
+    }
+
+    let listeners: Listeners<dyn ServerListener> = Listeners::default();
+    let told = Arc::new(Mutex::new(Vec::new()));
+    let error: Arc<dyn std::error::Error + Send + Sync> =
+        Arc::new(crate::errors::ProgrammerError::new("told"));
+    let reason = RouterError::Other(Arc::clone(&error));
+    let handle = crate::testing::scripted::handle_of(1);
+    let tell =
+        |listener: &(dyn ServerListener + 'static)| listener.on_error(&reason, Some(&handle));
+
+    // nobody listening: nothing told and nothing thrown
+    listeners.each((tell, |_| {}));
+    listeners.add(Arc::new(Panicking));
+    listeners.add(Arc::new(HearingErrors {
+        told: Arc::clone(&told),
+    }));
+    listeners.each((tell, |_| {}));
+
+    let told = told.lock().unwrap_or_else(PoisonError::into_inner);
+
+    assert_eq!(told.len(), 1, "the panic reaches nobody");
+    assert_eq!(told[0].connection_handle.as_ref(), Some(&handle));
+    assert!(
+        matches!(&told[0].reason, RouterError::Other(heard) if Arc::ptr_eq(heard, &error)),
+        "the error given reaches the listener after the one that panics"
+    );
+    drop(told);
+}

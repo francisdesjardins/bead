@@ -102,6 +102,12 @@ const LENGTH_BYTES: usize = 4;
 /// late by its requester.
 const BURIAL: Duration = Duration::from_secs(5);
 
+/// How long a request's head waits for its answer from its hand-off: 40 ms. An answer within them
+/// goes whole, its head with it and its length in `content-length`; a request still unanswered
+/// then gets its head alone, and its answer after it (spec 15.7). The exchange timeout counts from
+/// the hand-off, those 40 ms within it.
+const HEAD_DELAY: Duration = Duration::from_millis(40);
+
 // a token: 16 bytes drawn from the system's random source, in base64url without padding, as a
 // session's
 const TOKEN_BYTES: usize = 16;
@@ -135,8 +141,9 @@ pub struct HttpTransportServerOptions {
     /// How long a body comes, from its head, before its rate is held:
     /// [`crate::BODY_GRACE_PERIOD`] when none; never is refused.
     pub body_grace_period: Option<Duration>,
-    /// How long a request handed on waits for its answer, past which its connection is closed, as
-    /// lost: [`EXCHANGE_TIMEOUT`] when none; [`crate::NEVER`] waits without end, arming no timer.
+    /// How long a request handed on waits for its answer, from its hand-off, past which its
+    /// connection is closed, as lost: [`EXCHANGE_TIMEOUT`] when none; [`crate::NEVER`] waits
+    /// without end, arming no timer past its head's 40 ms.
     pub exchange_timeout: Option<Duration>,
     /// How long a request's head may take to come whole, past which it is answered 408:
     /// [`HEADERS_TIMEOUT`] when none; never is refused.
@@ -473,17 +480,18 @@ pub(crate) struct ServerInner {
 ///
 /// Each `POST` carries one envelope, of type `application/prs.bead`. The transport reads its
 /// layout, kind and call id, and nothing else: a request's exchange waits under its call id — from
-/// its first 8 bytes — for the answer the router sends on it, whose head goes out as the request is
-/// handed on, so its requester knows the router has it; any other envelope is handed on and its
-/// exchange ends 204. A request is handed on with its credential, the `Authorization` field of its
-/// `POST` as it came, trimmed, and none when the field is empty or absent; no other exchange's is
-/// read, and a `POST` with two is refused 400. An answer carries none. A cancel ends the exchange of
-/// its call; one that comes before its request buries that call id for 5 seconds. Each refusal of
-/// the transport's own is marked in `bead-refusal`, and told on `on_refusal`. To a page of an origin
-/// `origins` names, it answers CORS (spec 15.12): its preflight 204, and every answer once its
-/// origin is judged naming it and exposing every field, no credential allowed. An exchange lost —
-/// its response closed before the transport ended it — closes the connection, as a socket that
-/// drops does; so do a request unanswered past `exchange_timeout` and a connection idle past
+/// its first 8 bytes — for the answer the router sends on it: one within 40 ms of its hand-off goes
+/// whole, and a request still unanswered then gets its head alone, so its requester knows the
+/// router has it; any other envelope is handed on and its exchange ends 204. A request is handed
+/// on with its credential, the `Authorization` field of its `POST` as it came, trimmed, and none
+/// when the field is empty or absent; no other exchange's is read, and a `POST` with two is refused
+/// 400. An answer carries none. A cancel ends the exchange of its call; one that comes before its
+/// request buries that call id for 5 seconds. Each refusal of the transport's own is marked in
+/// `bead-refusal`, and told on `on_refusal`. To a page of an origin `origins` names, it answers
+/// CORS (spec 15.12): its preflight 204, and every answer once its origin is judged naming it and
+/// exposing every field, no credential allowed. An exchange lost — its response closed before the
+/// transport ended it — closes the connection, as a socket that drops does; so do a request
+/// unanswered past `exchange_timeout`, counted from its hand-off, and a connection idle past
 /// `inactivity_timeout`, on its clock.
 ///
 /// What the server sends of its own reaches a client that said at connect that it listens —
@@ -1480,7 +1488,8 @@ impl ServerInner {
     }
 
     // one envelope: read into one buffer under its bounds, its prefix judged from its first 8
-    // bytes, then handed on; a request's head sent as it is, its answer written by `send`
+    // bytes, then handed on; a request's answer written by `send`, its head with it or, 40 ms
+    // after its hand-off, alone before it
     fn receive(
         self: Arc<Self>,
         (body, handle): (Option<Incoming>, &ConnectionHandle),
@@ -1967,7 +1976,8 @@ impl ServerInner {
     }
 
     // an envelope read whole, handed on: a request with the credential its exchange carried, its
-    // head going once its router has it; any other with none, its exchange ended 204
+    // head waiting 40 ms for its answer once its router has it; any other with none, its exchange
+    // ended 204
     fn hand(&self, id: u64) {
         let handed = {
             let mut state = locked(&self.state);
@@ -2009,32 +2019,36 @@ impl ServerInner {
             let mut state = locked(&self.state);
 
             if prefix.kind == REQUEST {
-                // still waiting — not answered as it came — its head goes now, so its client knows
-                // the router has it
+                // still waiting — not answered as it came — its head waits 40 ms for its answer,
+                // then goes alone, so its client knows the router has it
                 let is_waiting = state
                     .drawn
                     .get(&connection)
                     .is_some_and(|drawn| drawn.waiting.get(&prefix.call_id) == Some(&id));
 
                 if is_waiting && let Some(exchange) = state.exchanges.get_mut(&id) {
-                    exchange.responder.head();
+                    // * one timer from the hand-off: the head's delay first, then what is left of
+                    // the exchange timeout; one of 40 ms or less is the exchange timer alone, whose
+                    // close sends the head and cuts the exchange (spec 15.7)
+                    let timeout = self.settings.exchange_timeout;
+                    let server = Weak::clone(&self.me);
+                    let waited = Arc::clone(&connection);
 
-                    if self.settings.exchange_timeout != NEVER {
-                        let server = Weak::clone(&self.me);
-                        let waited = Arc::clone(&connection);
-
-                        exchange.timer = self
-                            .clock
-                            .arm(
-                                Schedule::Once(self.settings.exchange_timeout),
-                                Box::new(move || {
-                                    if let Some(inner) = server.upgrade() {
+                    exchange.timer = self
+                        .clock
+                        .arm(
+                            Schedule::Once(timeout.min(HEAD_DELAY)),
+                            Box::new(move || {
+                                if let Some(inner) = server.upgrade() {
+                                    if timeout <= HEAD_DELAY {
                                         inner.close_drawn(&waited, false);
+                                    } else {
+                                        inner.head_due((&waited, id));
                                     }
-                                }),
-                            )
-                            .ok();
-                    }
+                                }
+                            }),
+                        )
+                        .ok();
                 }
 
                 drop(state);
@@ -2053,6 +2067,51 @@ impl ServerInner {
         };
 
         self.tell(told);
+    }
+
+    // a request still unanswered 40 ms after its hand-off: its head goes alone, and its timer is
+    // armed again for what is left of its exchange timeout, none under a timeout of never
+    fn head_due(&self, (connection, id): (&ConnectionHandle, u64)) {
+        let mut state = locked(&self.state);
+        let call_id = state
+            .exchanges
+            .get(&id)
+            .and_then(|exchange| exchange.prefix)
+            .map(|prefix| prefix.call_id);
+        let is_waiting = call_id.is_some_and(|call_id| {
+            state
+                .drawn
+                .get(connection)
+                .is_some_and(|drawn| drawn.waiting.get(&call_id) == Some(&id))
+        });
+        let timeout = self.settings.exchange_timeout;
+
+        if let Some(exchange) = state.exchanges.get_mut(&id) {
+            exchange.timer = None;
+
+            if is_waiting && !exchange.is_ended {
+                exchange.responder.head();
+
+                if timeout != NEVER {
+                    let server = Weak::clone(&self.me);
+                    let waited = Arc::clone(connection);
+
+                    exchange.timer = self
+                        .clock
+                        .arm(
+                            Schedule::Once(timeout.saturating_sub(HEAD_DELAY)),
+                            Box::new(move || {
+                                if let Some(inner) = server.upgrade() {
+                                    inner.close_drawn(&waited, false);
+                                }
+                            }),
+                        )
+                        .ok();
+                }
+            }
+        }
+
+        drop(state);
     }
 
     // a cancel is never answered: the exchange of its call ends empty — a 200 with no body once

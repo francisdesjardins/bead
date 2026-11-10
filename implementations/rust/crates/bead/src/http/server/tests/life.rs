@@ -878,6 +878,9 @@ async fn lets_a_burial_lapse_buries_only_the_client_s_call_ids_and_so_many_of_th
 
     let late = posting(port, &post_of(envelope_of(REQUEST, (5, 0)))).await;
 
+    // its head, once it waited 40 ms for its answer (spec 15.7)
+    head_delayed(&clock).await;
+
     assert_eq!(
         late.head(PATIENCE).await.unwrap().status,
         200,
@@ -936,7 +939,23 @@ async fn closes_as_lost_a_connection_whose_request_waited_past_its_timeout_and_o
         },
     )
     .await;
+    let head_delay = Duration::from_millis(40);
 
+    // its exchange timer counts from its hand-off, its head's 40 ms first (spec 15.7)
+    until(|| clock.dues().contains(&head_delay)).await;
+
+    let mut dues = clock.dues();
+
+    dues.sort();
+
+    assert_eq!(
+        dues,
+        vec![head_delay, Duration::from_secs(2)],
+        "its head's delay, and the idle one's rest"
+    );
+
+    // its head goes, and the rest of its timeout is armed
+    clock.advance(head_delay).await;
     asking.head(PATIENCE).await.unwrap();
 
     let mut dues = clock.dues();
@@ -945,11 +964,11 @@ async fn closes_as_lost_a_connection_whose_request_waited_past_its_timeout_and_o
 
     assert_eq!(
         dues,
-        vec![Duration::from_secs(1), Duration::from_secs(2)],
-        "its exchange's timeout, and the idle one's rest"
+        vec![Duration::from_millis(960), Duration::from_millis(1_960)],
+        "what is left of its exchange's timeout, and of the idle one's rest"
     );
 
-    clock.advance(Duration::from_millis(999)).await;
+    clock.advance(Duration::from_millis(959)).await;
 
     assert!(
         started.recorder.told().closes.is_empty(),
@@ -1036,6 +1055,8 @@ async fn rests_a_connection_once_none_of_its_exchanges_is_under_way_and_arms_no_
         )
         .await;
 
+        // its head, once it waited 40 ms for its answer (spec 15.7)
+        head_delayed(&clock).await;
         exchange.head(PATIENCE).await.unwrap();
         exchange
     };
@@ -1062,7 +1083,8 @@ async fn rests_a_connection_once_none_of_its_exchanges_is_under_way_and_arms_no_
     until(|| clock.dues() == [Duration::from_secs(2)]).await;
     started.stop().await;
 
-    // a request waits for its answer for ever, and a connection rests for ever: no timer
+    // a request waits for its answer for ever, and a connection rests for ever: no timer but its
+    // head's delay (spec 15.7)
     let forever = SteppingClock::new(SystemTime::UNIX_EPOCH);
     let started = stepped(
         &forever,
@@ -1084,7 +1106,14 @@ async fn rests_a_connection_once_none_of_its_exchanges_is_under_way_and_arms_no_
     )
     .await;
 
-    // its body's pace alone was armed, and went once its body was whole
+    // its body's pace, which went once its body was whole, and its head's delay
+    let head_delay = Duration::from_millis(40);
+
+    until(|| forever.dues() == [head_delay]).await;
+
+    // its head goes, and nothing is armed for the rest of an exchange timeout of never
+    forever.advance(head_delay).await;
+
     assert_eq!(asking.head(PATIENCE).await.unwrap().status, 200, "its head");
     assert!(forever.dues().is_empty(), "no timer: {:?}", forever.dues());
     started.stop().await;
@@ -1150,6 +1179,8 @@ async fn tells_no_refusal_of_the_404_that_ends_an_exchange_or_a_listen_as_its_co
     )
     .await;
 
+    // its head, once it waited 40 ms for its answer (spec 15.7)
+    head_delayed(&clock).await;
     asking.head(PATIENCE).await.unwrap();
     clock.advance(Duration::from_secs(1)).await;
     ends.push(refusal_of(&held.head(PATIENCE).await.unwrap()));

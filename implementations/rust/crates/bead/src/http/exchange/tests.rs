@@ -280,7 +280,7 @@ async fn reads_a_body_up_to_its_limit_exactly_declared_or_counted_refuses_one_de
             counted.head(PATIENCE).await.map(|head| head.status)
         ),
         (Some(200), Some(200)),
-        "each handed on, its head going"
+        "each handed on, its head going 40 ms after"
     );
     assert_eq!(started.recorder.messages(2).await.len(), 2, "two handed on");
 

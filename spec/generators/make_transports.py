@@ -29,6 +29,10 @@ PROCEDURE_FAILED, DESTINATION_LOST = 64, 65
 BEAD = 'application/prs.bead'
 BATCH = 'application/prs.bead-batch'
 SLOW = '{"milliseconds":3600000}'
+# what a request's head waits for its answer from its hand-off, on the clock the server is given
+# (spec 15.7), and a request slow past it, answered 100 ms after its hand-off
+HEAD_DELAY = 40
+PAST_HEAD = 100
 # a page of another origin, which a server answers CORS to when origins names it (spec 15.12)
 PAGE = 'https://page.test'
 # where every case's wall clock starts, and that instant in milliseconds since the epoch
@@ -63,6 +67,11 @@ def request(call_id, procedure, value, *, flags=0, words=3, tail=''):
 
 def cancel(call_id):
     return f'A1 16 00 02  {word(call_id, 4)}'
+
+
+def result_bytes(call_id, value):
+    """A result's bytes, as a peer in the client's role sends one."""
+    return f'A1 11 00 02  {word(call_id, 4)} | {text(value)}'
 
 
 # what an answer announces, by the scheme of its CREDENTIAL block: a session's token, or its end
@@ -274,8 +283,8 @@ cases = [
     ('a request on the server\'s own parity is refused 400, marked', ['15.5.3', '15.6.4'], None, [
         *drawn(), post('even', request(2, 'echo', '"x"')), refused('even', 400, 'malformed')]),
     ('a request on a call id already waiting is refused 409, marked', ['15.5.3', '15.6.9'], None, [
-        *drawn(), post('slow', request(1, 'slow', SLOW)), expect('slow', 200),
-        post('again', ECHO), refused('again', 409, 'call-waiting')]),
+        *drawn(), post('slow', request(1, 'slow', SLOW)), armed(HEAD_DELAY), advance(HEAD_DELAY),
+        expect('slow', 200), post('again', ECHO), refused('again', 409, 'call-waiting')]),
     # 15.5: a request's Authorization, which the transport hands on with it, and two refused
     ('a request carries its credential in its Authorization, or none in an empty one, and is handed on as any other',
      ['15.5'], None, [
@@ -657,8 +666,8 @@ cases = [
          connect('second', fields={'x-forwarded-for': '192.0.2.2'}), refused('second', 503, 'busy', BUSY)]),
     ('past the requests waiting on one connection, a request is refused 429, marked',
      ['15.6.13', '15.12.3'], {'maximumWaitingExchanges': 1}, [
-         *drawn(), post('slow', request(1, 'slow', SLOW)), expect('slow', 200),
-         post('more', request(3, 'slow', SLOW)), refused('more', 429, 'busy')]),
+         *drawn(), post('slow', request(1, 'slow', SLOW)), armed(HEAD_DELAY), advance(HEAD_DELAY),
+         expect('slow', 200), post('more', request(3, 'slow', SLOW)), refused('more', 429, 'busy')]),
     # 15.12: a body held to its rate on the server's clock, past its grace; its 408 written before
     # the body is whole closes the socket in stages, and the Bead connection stays
     ('a body that comes slower than its rate past its grace is refused 408, marked, its connection closed in stages, its Bead connection kept',
@@ -770,12 +779,29 @@ cases = [
          *drawn(listening=True), listen('listen', 0, 10000), armed(10_000), advance(10_000), expect('listen', 204, body=''),
          armed(5000), advance(5000), until('connections', 0),
          post('after', ECHO), refused('after', 404, 'connection-unknown')]),
-    # the 200 head goes as the request is handed on; the 404 after the close stands for the cut that
-    # follows it
+    # a request's head waits 40 ms for its answer, the exchange timeout counted from the hand-off and
+    # those 40 ms within it; the 404 after the close stands for the cut that follows the head
+    ('a request answered within 40 ms of its hand-off goes whole, its length in content-length', ['15.7'], None, [
+        *drawn(), post('echo', ECHO),
+        expect('echo', 200, fields={'content-length': str(length_of(result_bytes(1, '"x"'))), 'transfer-encoding': None},
+               envelope=result(1, '"x"'))]),
+    ('a request unanswered 40 ms after its hand-off gets its head then, and its answer chunked', ['15.7'], None, [
+        *drawn(), post('slow', request(1, 'slow', '{"milliseconds":%d}' % PAST_HEAD)),
+        armed(HEAD_DELAY), advance(HEAD_DELAY), armed(PAST_HEAD - HEAD_DELAY), advance(PAST_HEAD - HEAD_DELAY),
+        expect('slow', 200, fields={'transfer-encoding': 'chunked', 'content-length': None},
+               envelope=result(1, str(PAST_HEAD)))]),
+    # the head's timer, armed at the hand-off, tells the request handed on before its cancel comes
+    ('a request cancelled before its head went ends 204, empty', ['15.6.3', '15.7'], None, [
+        *drawn(), post('slow', request(1, 'slow', SLOW)), armed(HEAD_DELAY),
+        post('cancel', cancel(1)), expect('cancel', 204, body=''), expect('slow', 204, body='')]),
     ('a request unanswered past the exchange timeout closes its connection', ['15.7', '15.12.8'], {'exchangeTimeout': 10_000}, [
-        *drawn(), post('slow', request(1, 'slow', SLOW)), expect('slow', 200),
-        armed(10_000), advance(10_000), until('connections', 0),
+        *drawn(), post('slow', request(1, 'slow', SLOW)), armed(HEAD_DELAY), advance(HEAD_DELAY),
+        expect('slow', 200), armed(10_000 - HEAD_DELAY), advance(10_000 - HEAD_DELAY), until('connections', 0),
         post('after', request(3, 'echo', '"x"')), refused('after', 404, 'connection-unknown')]),
+    ('a request whose exchange timeout is 40 ms or less gets its head with its cut, at that timeout',
+     ['15.7', '15.12.8'], {'exchangeTimeout': 10}, [
+         *drawn(), post('slow', request(1, 'slow', SLOW)), armed(10), advance(10),
+         expect('slow', 200, orLost=True), until('connections', 0)]),
     ('a connection with no session is closed once silent past the server\'s own connection timeout, 30 s by default',
      ['13.7', '15.12.10'], None, [
          *drawn(), armed(30_000), advance(30_000), until('connections', 0),
@@ -1372,11 +1398,6 @@ def half(n):
 def octets(data):
     """The bytes a hexadecimal string holds, its bars aside."""
     return bytes.fromhex(data.replace('|', ' '))
-
-
-def result_bytes(call_id, value):
-    """A result's bytes, as a peer in the client's role sends one."""
-    return f'A1 11 00 02  {word(call_id, 4)} | {text(value)}'
 
 
 def credit_of(call_id, end, paced=False):

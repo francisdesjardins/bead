@@ -115,6 +115,8 @@ mod server_requests;
 mod server_token_provider;
 mod server_unsubscribe;
 mod server_waiting;
+#[cfg(feature = "websocket")]
+mod server_wire;
 mod surface;
 mod timers;
 mod transfer;

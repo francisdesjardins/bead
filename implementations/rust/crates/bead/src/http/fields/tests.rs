@@ -1114,7 +1114,7 @@ async fn names_an_origin_it_names_on_every_answer_it_writes_to_it_once_that_orig
 
     answers.push((drawn.head.status, named(&drawn.head)));
 
-    // a request with its Authorization, its head going as it is handed on, then answered
+    // a request with its Authorization, its head going 40 ms after it is handed on, then answered
     let request = posting(
         port,
         &Post {

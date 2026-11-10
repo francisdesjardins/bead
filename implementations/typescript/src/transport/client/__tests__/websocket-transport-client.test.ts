@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { createServer as createNodeServer } from 'node:http';
+import { createServer as createTlsServer } from 'node:https';
 import { createServer as createTcpServer, type AddressInfo, type Socket } from 'node:net';
+import { getCACertificates, setDefaultCACertificates } from 'node:tls';
 import { expect, test } from '@playwright/test';
 import { type WebSocket as WsWebSocket, WebSocketServer } from 'ws';
 import {
@@ -58,6 +60,7 @@ import {
 } from '../websocket-transport-client';
 import { createWebSocketTransportServer } from '../../server/websocket-transport-server';
 import { hasIPv6Loopback } from '../../server/__tests__/addresses';
+import { TLS_FIXTURE } from '../../server/__tests__/tls-fixture';
 import { createFakeWebSocket } from './fake-websocket';
 
 /** The drop only an implementation reaches, as the base and the transport use it. */
@@ -581,6 +584,45 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
               resolve();
             });
           });
+        }
+
+        // a real upgrade and binary messages in both directions, under the fixture's certificate
+        const roots = getCACertificates('default');
+        const secured = createTlsServer({ ...TLS_FIXTURE, ALPNProtocols: ['http/1.1'] });
+        const websocket = new WebSocketServer({ server: secured });
+
+        setDefaultCACertificates([...roots, TLS_FIXTURE.cert]);
+        secured.listen(0, host);
+        await once(secured, 'listening');
+
+        try {
+          const connection = nextConnection(websocket);
+          const message = nextMessage(websocket);
+
+          await client.connect({
+            host,
+            port: (secured.address() as AddressInfo).port,
+            secured: true,
+          });
+          await client.send({ data: Buffer.from('hello') });
+          expect(await message).toEqual({ data: Buffer.from('hello'), isBinary: true });
+
+          const heard = nextEvent(client, 'message');
+
+          (await connection).socket.send(Buffer.from('again'));
+          expect(new Uint8Array((await heard)[0].data as ArrayBuffer)).toEqual(
+            new Uint8Array(Buffer.from('again'))
+          );
+          expect(client.isSecure).toBe(true);
+          await client.disconnect();
+        } finally {
+          await stopServer(websocket);
+          await new Promise<void>((resolve) => {
+            secured.close(() => {
+              resolve();
+            });
+          });
+          setDefaultCACertificates(roots);
         }
       });
     });
