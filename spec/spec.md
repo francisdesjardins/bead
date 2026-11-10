@@ -1279,9 +1279,11 @@ scheme.
 ### WebSocket
 
 15.2. Each envelope is one binary message ([RFC 6455](https://www.rfc-editor.org/rfc/rfc6455)), and
-each binary message one envelope. A text message is no envelope: the receiver reports it as
-`ENVELOPE_MALFORMED`, and answers nothing. No subprotocol is required. A WebSocket upgrade that
-carries no `Origin` carries one credential, toward its server alone: its `Authorization` field
+each binary message one envelope. A text message is no envelope: its transport hands it on, and its
+router reports it as `ENVELOPE_MALFORMED`, as section 9.0 reports an error, and answers nothing; it
+counts as a message its router has not taken by the bytes it came as (section 15.12). No
+subprotocol is required. A WebSocket upgrade that carries no `Origin` carries one credential,
+toward its server alone: its `Authorization` field
 ([RFC 9110 §11.6.2](https://www.rfc-editor.org/rfc/rfc9110#section-11.6.2),
 [RFC 6455 §10.5](https://www.rfc-editor.org/rfc/rfc6455#section-10.5)), as it came, whole — its
 auth-scheme included — its surrounding whitespace removed, none when the field is empty or absent.
