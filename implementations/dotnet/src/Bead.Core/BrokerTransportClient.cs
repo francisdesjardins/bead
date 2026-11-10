@@ -132,7 +132,7 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
         _maximumUnsentBytes = options?.MaximumUnsentBytes ?? ServerBounds.UnsentBytesOf(RouterLimits.Default);
         _listeners = new ListenerGuard((reason, _) =>
         {
-            Error?.Invoke(reason);
+            ListenerGuard.TellError(Error, reason);
         });
     }
 
@@ -609,7 +609,7 @@ public sealed class BrokerTransportClient : IRouterClientTransport, IAsyncDispos
 
         if (end.Reported is { } reported)
         {
-            Error?.Invoke(reported);
+            ListenerGuard.TellError(Error, reported);
         }
 
         _listeners.Tell(Close, (end.IsClean, false));

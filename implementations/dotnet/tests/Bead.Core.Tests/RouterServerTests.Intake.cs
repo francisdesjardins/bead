@@ -307,8 +307,8 @@ public sealed partial class RouterServerTests
         Assert.Equal(["pause first", "resume first"], _transport.Paces);
         Assert.Equal(["this listener breaks, on purpose first"], Reported());
 
-        // * a text message's report runs the application's handler in its job, whose throw the
-        // scheduler goes on past: its count released in the job's finally all the same
+        // * a text message's report runs the application's handler in its job, whose throw is
+        // dropped (spec 15.1): its count released all the same
         Router.Error += (reason, _) =>
         {
             if (reason is FailureException)

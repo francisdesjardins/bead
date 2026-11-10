@@ -1660,7 +1660,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
 
     // spec 15.1
     [Fact]
-    public async Task Closes_with_1009_and_drops_behind_maximumUnsentBytes_a_connection_whose_error_listener_throws_telling_its_close_all_the_same()
+    public async Task Closes_with_1009_and_drops_behind_maximumUnsentBytes_a_connection_whose_error_listener_throws_telling_its_close_all_the_same_and_dropping_what_it_threw()
     {
         PausedWebSocket? paused = null;
 
@@ -1676,11 +1676,13 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
 
         var reported = new ConcurrentQueue<string>();
 
+        _server.Error += (_, _) =>
+        {
+            throw new InvalidOperationException("an error listener that throws");
+        };
         _server.Error += (reason, _) =>
         {
             reported.Enqueue(reason.Message);
-
-            throw new InvalidOperationException("an error listener that throws");
         };
 
         var (tooBig, tooBigHandle) = await Connect();
@@ -1710,6 +1712,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             Assert.Equal((false, behindHandle), await Next(_closes));
         }
 
+        // * what the listener threw is dropped: the listener after it told each end, and nothing else
         Assert.Equal(
             [
                 $"{tooBigHandle} is closed with 1009: a message past its maximumMessageBytes, 64 bytes",

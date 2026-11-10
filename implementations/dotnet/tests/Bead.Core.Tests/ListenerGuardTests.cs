@@ -123,4 +123,29 @@ public sealed class ListenerGuardTests
         Assert.Equal([refusal], told);
         Assert.Equal([(thrown, null)], reported);
     }
+
+    // spec 15.1
+    [Fact]
+    public void TellError_tells_Error_to_each_listener_within_a_guard_dropping_what_one_throws()
+    {
+        var told = new InvalidOperationException("told");
+        var heard = new List<(Exception Reason, string ConnectionHandle)>();
+        Action<Exception, string>? error = null;
+
+        // none listening: nothing told, nothing thrown
+        ListenerGuard.TellError(error, (told, Handle));
+
+        error += (_, _) =>
+        {
+            throw new InvalidOperationException("an error listener that throws");
+        };
+        error += (reason, connectionHandle) =>
+        {
+            heard.Add((reason, connectionHandle));
+        };
+
+        ListenerGuard.TellError(error, (told, Handle));
+
+        Assert.Equal([(told, Handle)], heard);
+    }
 }

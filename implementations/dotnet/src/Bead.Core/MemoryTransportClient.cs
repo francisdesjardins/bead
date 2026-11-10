@@ -96,7 +96,7 @@ public sealed class MemoryTransportClient : IRouterClientTransport, IAsyncDispos
         _scheduler = options?.Scheduler ?? new SerialScheduler();
         _listeners = new ListenerGuard((reason, _) =>
         {
-            Error?.Invoke(reason);
+            ListenerGuard.TellError(Error, reason);
         });
     }
 

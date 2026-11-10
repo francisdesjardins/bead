@@ -1613,11 +1613,14 @@ public sealed class HttpGatewayTests
         });
         var reported = ReportedBy(started.Gateway);
 
-        // a listener that throws: the exchange answers on
+        // * a listener that throws: what it threw dropped, the listener after it told, the exchange
+        // answering on (spec 15.1)
         started.Gateway.Error += (_) =>
         {
             throw new InvalidOperationException("a listener broke");
         };
+
+        var heard = ReportedBy(started.Gateway);
 
         async Task<(int Status, string Body)> Ticks(string path, int from)
         {
@@ -1642,6 +1645,7 @@ public sealed class HttpGatewayTests
             Assert.Equal((502, Undecodable), await Ticks("/edges-ticks", 2));
             Assert.Equal((502, Undecodable), await Ticks("/text-ticks", -1));
             Assert.Equal(2, reported.Count);
+            Assert.Equal(reported, heard);
         }
         finally
         {

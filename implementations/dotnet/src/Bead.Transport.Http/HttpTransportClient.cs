@@ -198,7 +198,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
         _maximumBodyBytes = _options.MaximumBodyBytes ?? LimitDefaults.MaximumEnvelopeBytes;
         _listeners = new ListenerGuard((reason, _) =>
         {
-            Error?.Invoke(reason);
+            ListenerGuard.TellError(Error, reason);
         });
     }
 
@@ -434,14 +434,12 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
             _readyState = ReadyState.Closed;
         }
 
-        try
+        if (failure is not null)
         {
-            if (failure is not null) { Error?.Invoke(failure); }
+            ListenerGuard.TellError(Error, failure);
         }
-        finally
-        {
-            _listeners.Tell(Close, (isClean, isQuick));
-        }
+
+        _listeners.Tell(Close, (isClean, isQuick));
     }
 
     /// <summary>
@@ -754,8 +752,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     }
 
     // * its end: its exchanges cut, the server told when it is released, then its one error, then
-    // its close, told even when a listener of Error throws, which goes on to the task no one awaits,
-    // the platform's (spec 15.1)
+    // its close, told even when a listener of Error throws, what it threw dropped (spec 15.1)
     private void Ended(Drawn connection, (bool IsReleased, Exception? Failure) end)
     {
         var (isReleased, failure) = end;
@@ -789,17 +786,12 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
 
         if (isClosing)
         {
-            try
+            if (failure is not null)
             {
-                if (failure is not null)
-                {
-                    Error?.Invoke(failure);
-                }
+                ListenerGuard.TellError(Error, failure);
             }
-            finally
-            {
-                _listeners.Tell(Close, (false, false));
-            }
+
+            _listeners.Tell(Close, (false, false));
         }
     }
 

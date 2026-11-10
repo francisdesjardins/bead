@@ -4351,7 +4351,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
 
     // spec 15.1
     [Fact]
-    public async Task Drops_behind_maximumOutboxBytes_a_connection_whose_error_listener_throws_telling_its_close_all_the_same()
+    public async Task Drops_behind_maximumOutboxBytes_a_connection_whose_error_listener_throws_telling_its_close_all_the_same_and_dropping_what_it_threw()
     {
         await Start(new HttpTransportServerOptions { MaximumOutboxBytes = 20 });
 
@@ -4359,11 +4359,13 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         var (connectionToken, connectionHandle) = await Connect(true);
         var envelope = EnvelopeOf(EnvelopeKind.Notification, (1, 2));
 
+        _server.Error += (_, _) =>
+        {
+            throw new InvalidOperationException("an error listener that throws");
+        };
         _server.Error += (reason, handle) =>
         {
             reported.Enqueue((reason, handle));
-
-            throw new InvalidOperationException("an error listener that throws");
         };
 
         // 10 bytes, 20, then 30: past it
@@ -4372,12 +4374,9 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
             await _server.Send(new TransportMessage(envelope, false), connectionHandle).WaitAsync(Patience, Cancelled);
         }
 
-        // what the listener threw is .NET's: it reaches the send under way, the connection dropped
-        // first
-        Assert.Equal("an error listener that throws", (await Assert.ThrowsAsync<InvalidOperationException>(async () =>
-        {
-            await _server.Send(new TransportMessage(envelope, false), connectionHandle).WaitAsync(Patience, Cancelled);
-        })).Message);
+        // * what the listener threw is dropped: the send settles as with no listener, the listener
+        // after it told the drop and nothing else
+        await _server.Send(new TransportMessage(envelope, false), connectionHandle).WaitAsync(Patience, Cancelled);
         Assert.Equal(
             [($"{connectionHandle} is dropped: its outbox would pass maximumOutboxBytes, 20 bytes", connectionHandle)],
             reported.Select((report) =>

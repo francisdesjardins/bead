@@ -773,11 +773,12 @@ server.Router.AccessRefused += (refusal) =>
 
 A transport goes on through what its listener throws, a reconnection's listener among them, and
 awaits nothing it returns (spec 15.1): what one throws is reported through the transport's `Error`,
-which no router forwards to its own. A server gives its transport as `IServerTransport`, which
-carries `Error` and `Refusal` alike, so an application hears both through `server.Transport`,
-whichever transport it built, beside its router's; a client's, through the client transport it
-built. An `async` lambda given to one of its events is `async void`, whose exception ends the
-process, so a listener catches its own. The threading analyzers'
+which no router forwards to its own, and what a listener of `Error` throws is dropped, the listeners
+after it told (spec 15.1). A server gives its transport as `IServerTransport`, which carries `Error`
+and `Refusal` alike, so an application hears both through `server.Transport`, whichever transport it
+built, beside its router's; a client's, through the client transport it built. An `async` lambda
+given to one of its events is `async void`, whose exception ends the process, so a listener catches
+its own, an `Error` listener's too. The threading analyzers'
 [VSTHRD101](https://microsoft.github.io/vs-threading/analyzers/VSTHRD101.html) says where one is
 given, at build: Bead's own projects hold it, and an application's may, by
 `Microsoft.VisualStudio.Threading.Analyzers`.

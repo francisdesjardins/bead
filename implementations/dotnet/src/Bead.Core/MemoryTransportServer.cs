@@ -87,7 +87,7 @@ public sealed class MemoryTransportServer : IServerTransport, IAsyncDisposable
         _accepting = options?.Accepting;
         _listeners = new ListenerGuard((reason, connectionHandle) =>
         {
-            Error?.Invoke(reason, connectionHandle ?? "");
+            ListenerGuard.TellError(Error, (reason, connectionHandle ?? ""));
         });
     }
 

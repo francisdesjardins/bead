@@ -180,7 +180,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
         _clock = _options.Clock ?? TimeProvider.System;
         _listeners = new ListenerGuard((reason, _) =>
         {
-            Error?.Invoke(reason);
+            ListenerGuard.TellError(Error, reason);
         });
     }
 
@@ -1035,20 +1035,14 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
         }
 
         // * its end: its one error, a message past its bound named by it and its value, then its
-        // close, told even when a listener of Error throws, which goes on to the task no one awaits,
-        // the platform's (spec 15.1)
+        // close, told even when a listener of Error throws, what it threw dropped (spec 15.1)
         failure ??= connection.IsTooBig ? connection.TooBigOf("the connection") : null;
 
-        try
+        if (failure is not null)
         {
-            if (failure is not null)
-            {
-                Error?.Invoke(failure);
-            }
+            ListenerGuard.TellError(Error, failure);
         }
-        finally
-        {
-            _listeners.Tell(Close, (false, false));
-        }
+
+        _listeners.Tell(Close, (false, false));
     }
 }

@@ -461,7 +461,7 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
 
         _core.Post(() =>
         {
-            Error?.Invoke(reason);
+            ListenerGuard.TellError(Error, reason);
         });
     }
 
@@ -667,7 +667,7 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
                 }
                 catch (Exception reason)
                 {
-                    Error?.Invoke(reason);
+                    ListenerGuard.TellError(Error, reason);
                 }
             }
 
@@ -808,7 +808,7 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
         }
         catch (Exception reason)
         {
-            Error?.Invoke(reason);
+            ListenerGuard.TellError(Error, reason);
         }
     }
 
@@ -835,7 +835,7 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
 
                     foreach (var fault in faults)
                     {
-                        Error?.Invoke(fault);
+                        ListenerGuard.TellError(Error, fault);
                     }
 
                     if (subscription.Pacing is { } pacing)
@@ -876,7 +876,7 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
             }
             catch (Exception reason)
             {
-                Error?.Invoke(reason);
+                ListenerGuard.TellError(Error, reason);
             }
         }
     }
@@ -910,14 +910,8 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
         {
             _core.Post(() =>
             {
-                try
-                {
-                    Error?.Invoke(FailureException.OfProtocol(ProtocolCode.EnvelopeMalformed, RouterSide.Client, "an envelope is binary, not a string"));
-                }
-                finally
-                {
-                    Taken();
-                }
+                ListenerGuard.TellError(Error, FailureException.OfProtocol(ProtocolCode.EnvelopeMalformed, RouterSide.Client, "an envelope is binary, not a string"));
+                Taken();
             });
 
             return;
@@ -945,7 +939,7 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
         {
             _core.Post(() =>
             {
-                Error?.Invoke(reason);
+                ListenerGuard.TellError(Error, reason);
             });
         }
     }
@@ -1027,7 +1021,7 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
         {
             if (!client._subscriptions.TryGetValue(header.CallId, out var subscription))
             {
-                client.Error?.Invoke(new FailureException(
+                ListenerGuard.TellError(client.Error, new FailureException(
                     Failure.OfProtocol(ProtocolCode.SubscriptionUnknown, $"no subscription under call {header.CallId}"),
                     new FailureException.Raised(FailureOrigin.Local, RouterSide.Client))
                 {
@@ -1073,7 +1067,7 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
             }
             catch (Exception reason)
             {
-                client.Error?.Invoke(reason);
+                ListenerGuard.TellError(client.Error, reason);
             }
 
             return true;
@@ -1093,7 +1087,7 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
 
         public void Report(Exception reason, string? connectionHandle)
         {
-            client.Error?.Invoke(reason);
+            ListenerGuard.TellError(client.Error, reason);
         }
 
         // the session it learned stands for its connection's: a call presenting OPAQUE presents it,
@@ -1164,7 +1158,7 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
                 }
                 catch (Exception reason)
                 {
-                    client.Error?.Invoke(reason);
+                    ListenerGuard.TellError(client.Error, reason);
                 }
             }
         }

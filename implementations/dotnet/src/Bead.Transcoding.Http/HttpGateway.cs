@@ -1556,16 +1556,11 @@ public sealed class HttpGateway : IAsyncDisposable
         return Bead.TrustedProxies.ClientAddressOf(remote, (forwarded.Count == 0 ? null : forwarded.ToString(), _proxyTrust));
     }
 
+    // each error listener within a guard that drops what it throws, the listeners after it told:
+    // the exchange answers on (spec 15.1)
     private void Report(Exception reason)
     {
-        try
-        {
-            Error?.Invoke(reason);
-        }
-        catch (Exception thrown) when (thrown is not OutOfMemoryException)
-        {
-            // a listener's throw goes no further: the exchange answers on
-        }
+        ListenerGuard.TellError(Error, reason);
     }
 
     // its options' members, each its policy's where the policy gives one, one given in it and beside

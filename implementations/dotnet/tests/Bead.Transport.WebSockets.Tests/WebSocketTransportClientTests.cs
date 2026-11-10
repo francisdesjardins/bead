@@ -1930,14 +1930,19 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Fails_its_connection_on_a_protocol_error_whose_error_listener_throws_telling_its_close_all_the_same()
+    public async Task Fails_its_connection_on_a_protocol_error_whose_error_listener_throws_telling_its_close_all_the_same_and_dropping_what_it_threw()
     {
         using var listener = new Listener(IPAddress.Loopback);
         var closes = ClosesOf(_client);
+        var heard = new ConcurrentQueue<Exception>();
 
         _client.Error += (_) =>
         {
             throw new InvalidOperationException("an error listener that throws");
+        };
+        _client.Error += (reason) =>
+        {
+            heard.Enqueue(reason);
         };
 
         var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
@@ -1949,8 +1954,10 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
             await connecting.WaitAsync(Patience, Cancelled);
             await peer.GetStream().WriteAsync(ReservedFrame, Cancelled);
 
-            // what the listener threw goes on to the task no one awaits, the platform's
             Assert.Equal((false, false), await Next(closes));
+            // * what the listener threw is dropped: the listener after it told the failure, and
+            // nothing else
+            Assert.Equal(WebSocketError.Faulted, Assert.IsType<WebSocketException>(Assert.Single(heard)).WebSocketErrorCode);
             Assert.Equal(ReadyState.Closed, _client.ReadyState);
         }
     }

@@ -163,6 +163,45 @@ public sealed partial class RouterClientTests
         Assert.Equal([failure, failure], scripted.Errors);
     }
 
+    // spec 15.1; debugging 2.2
+    [Fact]
+    public async Task Drops_what_an_error_listener_throws_the_next_error_listener_told_and_the_call_goes_on()
+    {
+        using var scripted = new ScriptedRouter();
+
+        var (router, transport) = (scripted.Router, scripted.Transport);
+        var failure = new InvalidOperationException("listener bug");
+        var heard = new List<Exception>();
+        var isThrown = false;
+
+        // a debug listener that throws on its first envelope alone
+        router.Debug += (_, _) =>
+        {
+            if (!isThrown)
+            {
+                isThrown = true;
+
+                throw failure;
+            }
+        };
+        router.Error += (_) =>
+        {
+            throw new InvalidOperationException("an error listener that throws");
+        };
+        router.Error += heard.Add;
+
+        var answering = router.Request(ReadOnlyMemory<byte>.Empty, RequestOf());
+
+        transport.Deliver(ResultOf(1));
+
+        // * the debug listener's throw told the next error listener, and the throw of the one before
+        // it dropped: the call answered with its result
+        Assert.Equal(1u, (await answering.WaitAsync(Patience, Cancelled)).Header.CallId);
+        await scripted.Settle();
+        Assert.Single(transport.Sent);
+        Assert.Equal([failure], heard);
+    }
+
     [Fact]
     public async Task Counts_exactly_under_calls_made_at_once_from_many_threads()
     {
