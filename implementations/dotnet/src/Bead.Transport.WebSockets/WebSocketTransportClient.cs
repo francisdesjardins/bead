@@ -380,8 +380,9 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
     }
 
     /// <summary>
-    /// Hands the bytes of <paramref name="message"/> to the connection, as binary; refused with a
-    /// <see cref="DisconnectException"/> unless Open, as the TypeScript side's ReadyStateError. Its
+    /// Hands the bytes of <paramref name="message"/> to the connection, as binary; refused unless
+    /// Open, before its open with a <see cref="ReadyStateException"/>, once its state is a close's
+    /// with a <see cref="DisconnectException"/> (debugging 9.7), as the TypeScript side's is. Its
     /// credential is not sent beside it: the connection carries its upgrade's alone, as its router
     /// fails before it goes a call presenting another.
     /// </summary>
@@ -398,7 +399,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
 
         return readyState == ReadyState.Open && connection is not null
             ? connection.Send(message.Bytes)
-            : Task.FromException(new DisconnectException($"the transport client is {NameOf(readyState)}, not open"));
+            : Task.FromException(NotOpen.Of(readyState));
     }
 
     /// <summary>
@@ -406,7 +407,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
     /// <see cref="TransportClientDisconnectOptions.IsClean"/> does: with 1000, settling once the server
     /// answered or its close timeout passed; or, <see cref="TransportClientDisconnectOptions.IsQuick"/>,
     /// at once, the socket dropped, its close going out going away, 1001, unwaited. Refused with a
-    /// <see cref="DisconnectException"/> unless Open, as the TypeScript side's ReadyStateError. A
+    /// <see cref="ReadyStateException"/> unless Open, as the TypeScript side's ReadyStateError. A
     /// dispose meanwhile drops the socket, and no close is raised. It ends Closed.
     /// </summary>
     public async Task CloseConnection(TransportClientDisconnectOptions? options = null)
@@ -420,7 +421,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
         {
             if (_readyState != ReadyState.Open || _connection is null)
             {
-                throw new DisconnectException($"the transport client is {NameOf(_readyState)}, not open");
+                throw new ReadyStateException(_readyState, ReadyState.Open);
             }
 
             _readyState = ReadyState.Closing;
@@ -549,7 +550,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
                 {
                     await CloseConnection();
                 }
-                catch (DisconnectException)
+                catch (ReadyStateException)
                 {
                     // closed meanwhile: there is nothing left to close
                 }
@@ -584,7 +585,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
             {
                 await CloseConnection();
             }
-            catch (DisconnectException)
+            catch (ReadyStateException)
             {
                 // closed or replaced meanwhile: what is left is dropped below
             }

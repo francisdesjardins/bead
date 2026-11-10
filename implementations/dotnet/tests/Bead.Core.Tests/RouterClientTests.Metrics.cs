@@ -393,6 +393,49 @@ public sealed partial class RouterClientTests
             }).Order(StringComparer.Ordinal));
     }
 
+    // debugging 9.7
+    [Fact]
+    public async Task Counts_a_call_to_a_client_not_open_by_its_transport_state_error_before_the_open_and_closed_after_it()
+    {
+        var registry = new MetricsRegistry();
+
+        using var scripted = new ScriptedRouter(new RouterClientOptions { MetricsRegistry = registry });
+
+        var router = scripted.Router;
+        var series = router.DeclareRequester(Service);
+        var failures = new List<(string Name, ReadyState? Got)>();
+
+        foreach (var readyState in new[] { ReadyState.Uninitialized, ReadyState.Connecting, ReadyState.Closing, ReadyState.Closed, ReadyState.Reconnecting })
+        {
+            scripted.Transport.ReadyState = readyState;
+
+            var reason = await Assert.ThrowsAnyAsync<Exception>(() =>
+            {
+                return router.Request(ReadOnlyMemory<byte>.Empty, RequestOf() with { Series = series }).WaitAsync(Patience, Cancelled);
+            });
+
+            failures.Add((reason.GetType().Name, (reason as ReadyStateException)?.Got));
+        }
+
+        // * before its open, its ready state's refusal; once its state is a close's, a disconnection
+        Assert.Equal(
+            [
+                (nameof(ReadyStateException), ReadyState.Uninitialized),
+                (nameof(ReadyStateException), ReadyState.Connecting),
+                (nameof(DisconnectException), null),
+                (nameof(DisconnectException), null),
+                (nameof(DisconnectException), null),
+            ],
+            failures);
+        Assert.Equal(
+            [MadeOf("duration_seconds_count{} 5"), MadeOf("handled_total{outcome=\"closed\"} 3"), MadeOf("handled_total{outcome=\"error\"} 2"), MadeOf("started_total{} 5")],
+            CallCountsOf(registry).Where((line) =>
+            {
+                return line.Contains("procedure=\"echo\"", StringComparison.Ordinal);
+            }).Order(StringComparer.Ordinal));
+        Assert.Empty(scripted.Transport.Sent);
+    }
+
     // debugging 9.1.6, 10.2 and 10.3.3
     [Fact]
     public async Task Counts_a_notification_heard_under_a_subscription_it_holds_and_a_subscription_dropped_at_this_end_by_the_failure_that_ends_it_or_with_its_connection_never_by_its_own_cancel()

@@ -223,9 +223,10 @@ public sealed class MemoryTransportClient : IRouterClientTransport, IAsyncDispos
 
     /// <summary>
     /// Hands a copy of the bytes of <paramref name="message"/> to its server, with the credential
-    /// beside them, an empty one carrying none, in a later turn, after what went before; refused with a
-    /// <see cref="DisconnectException"/> unless Open, and with an <see cref="ArgumentException"/>,
-    /// its connection kept, for a text message, which is no envelope, or a credential no field
+    /// beside them, an empty one carrying none, in a later turn, after what went before; refused unless Open,
+    /// before its open with a <see cref="ReadyStateException"/>, once its state is a close's with a
+    /// <see cref="DisconnectException"/> (debugging 9.7), and with an
+    /// <see cref="ArgumentException"/>, its connection kept, for a text message, which is no envelope, or a credential no field
     /// carries.
     /// </summary>
     public Task Send(TransportMessage message)
@@ -241,7 +242,7 @@ public sealed class MemoryTransportClient : IRouterClientTransport, IAsyncDispos
 
         if (readyState != ReadyState.Open || connection is null)
         {
-            return Task.FromException(new DisconnectException($"the transport client is {NameOf(readyState)}, not open"));
+            return Task.FromException(NotOpen.Of(readyState));
         }
 
         if (message.IsText)
@@ -268,7 +269,7 @@ public sealed class MemoryTransportClient : IRouterClientTransport, IAsyncDispos
     /// <see cref="TransportClientDisconnectOptions.IsClean"/> does, and quick as
     /// <see cref="TransportClientDisconnectOptions.IsQuick"/> does, both alike in memory, where no
     /// handshake waits; its server is told in a later turn, after what was sent before. Refused with
-    /// a <see cref="DisconnectException"/> unless Open. It ends Closed.
+    /// a <see cref="ReadyStateException"/> unless Open. It ends Closed.
     /// </summary>
     public Task CloseConnection(TransportClientDisconnectOptions? options = null)
     {
@@ -280,7 +281,7 @@ public sealed class MemoryTransportClient : IRouterClientTransport, IAsyncDispos
         {
             if (_readyState != ReadyState.Open || _connection is null)
             {
-                return Task.FromException(new DisconnectException($"the transport client is {NameOf(_readyState)}, not open"));
+                return Task.FromException(new ReadyStateException(_readyState, ReadyState.Open));
             }
 
             connection = _connection;
@@ -389,7 +390,7 @@ public sealed class MemoryTransportClient : IRouterClientTransport, IAsyncDispos
                 {
                     await CloseConnection();
                 }
-                catch (DisconnectException)
+                catch (ReadyStateException)
                 {
                     // closed meanwhile: there is nothing left to close
                 }
@@ -424,7 +425,7 @@ public sealed class MemoryTransportClient : IRouterClientTransport, IAsyncDispos
 
                 return;
             }
-            catch (DisconnectException)
+            catch (ReadyStateException)
             {
                 // closed or replaced meanwhile: what is left is let go of below
             }

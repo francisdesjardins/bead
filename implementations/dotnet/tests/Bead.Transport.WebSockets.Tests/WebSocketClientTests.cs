@@ -332,17 +332,53 @@ public sealed class WebSocketClientTests : IAsyncLifetime
         Assert.Equal("{\"a\":1}", (await RequesterOf("echo")(JsonOf("{\"a\":1}"))().WaitAsync(Patience, Cancelled)).GetRawText());
     }
 
+    // debugging 9.7
     [Fact]
-    public async Task Fails_a_send_before_it_connects()
+    public async Task Fails_a_call_before_it_connects_by_its_ready_state_sending_nothing()
     {
         await using var unconnected = new WebSocketClient();
+        var received = RequestsReceived();
 
-        await Assert.ThrowsAsync<DisconnectException>(() =>
+        var refused = await Assert.ThrowsAsync<ReadyStateException>(() =>
         {
             return unconnected.Services.GetRequest(
                 InteropProcedures.Echo.Procedure,
                 new RequestDependencies<JsonElement, JsonElement> { Serializer = new JsonPayloads() })(JsonOf("null"))()
                 .WaitAsync(Patience, Cancelled);
         });
+
+        Assert.Equal((ReadyState.Uninitialized, ReadyState.Open), (refused.Got, refused.Expected));
+        Assert.Empty(received);
+    }
+
+    // debugging 9.7
+    [Fact]
+    public async Task Fails_a_call_once_disconnected_as_a_disconnection_sending_nothing()
+    {
+        var received = RequestsReceived();
+
+        await _client.Transport.CloseConnection().WaitAsync(Patience, Cancelled);
+
+        Assert.Equal("the transport client is closed, not open", (await Assert.ThrowsAsync<DisconnectException>(() =>
+        {
+            return RequesterOf("echo")(JsonOf("null"))().WaitAsync(Patience, Cancelled);
+        })).Message);
+        Assert.Empty(received);
+    }
+
+    // each request the server's router reads
+    private ConcurrentQueue<uint> RequestsReceived()
+    {
+        var received = new ConcurrentQueue<uint>();
+
+        _server.Router.Debug += (direction, envelope) =>
+        {
+            if (direction == DebugDirection.Rx && envelope.Header is RequestHeader request)
+            {
+                received.Enqueue(request.CallId);
+            }
+        };
+
+        return received;
     }
 }

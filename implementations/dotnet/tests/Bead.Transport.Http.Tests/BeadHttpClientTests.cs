@@ -235,6 +235,43 @@ public sealed class BeadHttpClientTests
         Assert.Equal(ReadyState.Uninitialized, client.Transport.ReadyState);
     }
 
+    // debugging 9.7
+    [Fact]
+    public async Task Fails_a_call_before_it_connects_by_its_ready_state_sending_nothing()
+    {
+        using var fetch = new Fetch(Echoing);
+        await using var client = ClientOn(fetch);
+
+        var refused = await Assert.ThrowsAsync<ReadyStateException>(() =>
+        {
+            return client.Services.GetRequest(Echo, Text)("hi")().WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.Equal((ReadyState.Uninitialized, ReadyState.Open), (refused.Got, refused.Expected));
+        Assert.Empty(fetch.Calls);
+    }
+
+    // debugging 9.7
+    [Fact]
+    public async Task Fails_a_call_once_disconnected_as_a_disconnection_sending_nothing()
+    {
+        // a server that draws the connection and lets it go
+        using var fetch = new Fetch(Echoing);
+        await using var client = ClientOn(fetch);
+
+        await client.Connect(new HttpTransportClientConnectOptions { Host = "localhost", Port = 8_080, CancellationToken = Cancelled });
+        await client.Transport.CloseConnection().WaitAsync(Patience, Cancelled);
+
+        Assert.Equal("the transport client is closed, not open", (await Assert.ThrowsAsync<DisconnectException>(() =>
+        {
+            return client.Services.GetRequest(Echo, Text)("hi")().WaitAsync(Patience, Cancelled);
+        })).Message);
+        Assert.Equal(["POST", "DELETE"], fetch.Calls.Select((call) =>
+        {
+            return call.Method;
+        }));
+    }
+
     [Fact]
     public async Task Reads_an_answer_no_larger_than_the_envelope_its_router_takes_and_closes_on_one_past_it()
     {
