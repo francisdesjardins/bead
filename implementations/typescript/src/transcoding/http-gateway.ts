@@ -53,8 +53,8 @@ import {
 import {
   httpPolicyOf,
   type IHTTPPolicy,
-  type IHTTPPolicyInit,
   type IHTTPPolicyOption,
+  type IHTTPPolicyOptions,
   withPolicy,
 } from '../transport/server/http-policy';
 import {
@@ -63,7 +63,7 @@ import {
   headerOf,
   linesOf,
   preflightOf,
-  REFUSALS,
+  HTTP_REFUSALS,
   refuseMalformed,
   RESPONSE_HEADERS,
 } from '../transport/server/http-server-fields';
@@ -119,7 +119,7 @@ import {
  * in-memory transport its connections cross, its document, and its gates and bounds, one by one or
  * as one policy, which the HTTP transport takes too.
  */
-export interface IHTTPGatewayOptions extends IHTTPPolicyInit, IHTTPPolicyOption {
+export interface IHTTPGatewayOptions extends IHTTPPolicyOptions, IHTTPPolicyOption {
   /**
    * What a call presents of a request's `authorization` (2.4): `elsewhere`, the field whole, by
    * default; `bearer-jwt`, a `Bearer` token as a `JWT`.
@@ -890,7 +890,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
           () => {
             fail({
               detail: 'a body slower than minimumBodyBytesPerSecond',
-              reason: REFUSALS.TOO_SLOW,
+              reason: HTTP_REFUSALS.TOO_SLOW,
               status: 408,
             });
           },
@@ -911,7 +911,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
           return (
             fail({
               detail: `a body past maximumBodyBytes ${String(maximumBodyBytes)}`,
-              reason: REFUSALS.TOO_LARGE,
+              reason: HTTP_REFUSALS.TOO_LARGE,
               status: 413,
             }),
             undefined
@@ -923,7 +923,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
             fail({
               detail: 'the bodies under way hold bodyBytesBudget',
               fields: { 'retry-after': '1' },
-              reason: REFUSALS.BUSY,
+              reason: HTTP_REFUSALS.BUSY,
               status: 503,
             }),
             undefined
@@ -1142,7 +1142,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
       return (
         refuse(exchange, {
           detail: `this route's body is ${MEDIA_TYPES[encoding]}, unencoded`,
-          reason: REFUSALS.TYPE,
+          reason: HTTP_REFUSALS.TYPE,
           status: 415,
         }),
         undefined
@@ -1153,7 +1153,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
       return (
         refuse(exchange, {
           detail: 'content to a route that takes none',
-          reason: REFUSALS.MALFORMED,
+          reason: HTTP_REFUSALS.MALFORMED,
           status: 400,
         }),
         undefined
@@ -1165,7 +1165,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
       return (
         refuse(exchange, {
           detail: 'two authorization fields',
-          reason: REFUSALS.MALFORMED,
+          reason: HTTP_REFUSALS.MALFORMED,
           status: 400,
         }),
         undefined
@@ -1178,7 +1178,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
       return (
         refuse(exchange, {
           detail: `a body declared past maximumBodyBytes ${String(maximumBodyBytes)}`,
-          reason: REFUSALS.TOO_LARGE,
+          reason: HTTP_REFUSALS.TOO_LARGE,
           status: 413,
         }),
         undefined
@@ -1205,7 +1205,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
         refuse(exchange, {
           detail: admitted.refused,
           fields: { 'retry-after': '1' },
-          reason: REFUSALS.BUSY,
+          reason: HTTP_REFUSALS.BUSY,
           status: 503,
         }),
         undefined
@@ -1668,14 +1668,22 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
 
     // 2: its host
     if (!isTakenHost(named.authority, hosts)) {
-      refuse(exchange, { detail: 'a host it does not take', reason: REFUSALS.HOST, status: 403 });
+      refuse(exchange, {
+        detail: 'a host it does not take',
+        reason: HTTP_REFUSALS.HOST,
+        status: 403,
+      });
 
       return true;
     }
 
     // 3: its path
     if (!isDocument && matching.length === 0) {
-      refuse(exchange, { detail: 'a path no route matches', reason: REFUSALS.PATH, status: 404 });
+      refuse(exchange, {
+        detail: 'a path no route matches',
+        reason: HTTP_REFUSALS.PATH,
+        status: 404,
+      });
 
       return true;
     }
@@ -1686,7 +1694,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     if (!isTakenOrigin(origin, { host: ownAuthorityOf(named.authority, hosts), origins })) {
       refuse(exchange, {
         detail: 'an origin neither its own nor listed',
-        reason: REFUSALS.ORIGIN,
+        reason: HTTP_REFUSALS.ORIGIN,
         status: 403,
       });
 
@@ -1709,7 +1717,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
       if (!isNavigation || !(isDocument || navigated?.isNavigable === true)) {
         refuse(exchange, {
           detail: 'a request from a page of another site that shows no origin',
-          reason: REFUSALS.ORIGIN,
+          reason: HTTP_REFUSALS.ORIGIN,
           status: 403,
         });
 
@@ -1745,7 +1753,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
       refuse(exchange, {
         detail: 'a method no route of its path takes',
         fields: { allow: methods.join(', ') },
-        reason: REFUSALS.METHOD,
+        reason: HTTP_REFUSALS.METHOD,
         status: 405,
       });
 
@@ -1769,7 +1777,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
       refuse(exchange, {
         detail: 'a method the document takes none of',
         fields: { allow: 'GET, HEAD' },
-        reason: REFUSALS.METHOD,
+        reason: HTTP_REFUSALS.METHOD,
         status: 405,
       });
 
@@ -1779,7 +1787,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     if (carriesContent(exchange.request)) {
       refuse(exchange, {
         detail: 'content to the document',
-        reason: REFUSALS.MALFORMED,
+        reason: HTTP_REFUSALS.MALFORMED,
         status: 400,
       });
 

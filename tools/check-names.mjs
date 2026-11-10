@@ -407,7 +407,8 @@ const sectionsOf = (text) => {
     const top = line.match(/^ {2}(\S.*)$/);
 
     if (top !== null) {
-      const declaration = top[1];
+      // the features an item needs, marked at its line's end, are no part of its name (0049)
+      const declaration = top[1].replace(/(?: #\[cfg\(.*\)\])+$/u, '');
       const use = declaration.match(/^use ((?:\w+::)*)(\w+)$/);
       const typed = declaration.match(/^(struct|enum|trait|type|mod) (\w+)(.*)$/);
       const valued = declaration.match(/^(?:const |static |async |unsafe )*fn (\w+)/);

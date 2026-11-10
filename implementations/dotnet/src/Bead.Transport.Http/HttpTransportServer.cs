@@ -453,33 +453,6 @@ public sealed record HttpTransportServerOptions
     }
 }
 
-/// <summary>Where an HTTP transport server listens.</summary>
-public sealed record HttpTransportStartOptions
-{
-    /// <summary>
-    /// The address it listens on (spec 15.12): <c>localhost</c> by default, both loopbacks,
-    /// <c>127.0.0.1</c> and <c>::1</c> on one port, as Kestrel's <c>ListenLocalhost</c> binds them, so
-    /// no other process answers a client that reaches it by <c>localhost</c> on the other family; a
-    /// port another socket holds on either fails the start, and a port drawn is drawn again, eight
-    /// times at most. Where the IPv6 loopback is absent it listens on <c>127.0.0.1</c> alone, and
-    /// reports it. Or an IP address written bare, which it listens on alone: <c>0.0.0.0</c> or
-    /// <c>::</c> for every interface, which a container, or any server another machine reaches,
-    /// needs, its hosts named beside. RFC 3986's <c>IPv4address</c> or <c>IPv6address</c>, with no
-    /// brackets, no zone, and not IPv4-mapped; another name or any other form is an
-    /// <see cref="ArgumentException"/> as it starts, which ends Closed.
-    /// </summary>
-    public string Address { get; init; } = Loopbacks.Localhost;
-
-    /// <summary>The port it listens on.</summary>
-    public int Port { get; init; } = 80;
-
-    /// <summary>Whether it takes any free port instead.</summary>
-    public bool FindOpenPort { get; init; }
-
-    /// <summary>What gives up on the start.</summary>
-    public CancellationToken CancellationToken { get; init; }
-}
-
 /// <summary>
 /// A transport server over HTTP, on Kestrel, which keeps no connection and so draws one. A
 /// <c>POST</c> with no body and no token connects: the server draws a 16-byte token, raises
@@ -855,9 +828,9 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
     /// its state kept; then with an <see cref="InvalidOperationException"/> unless Uninitialized or
     /// Closed; one that fails ends Closed, ready to start again.
     /// </summary>
-    public Task<TransportServerAddress> Start(HttpTransportStartOptions? options = null)
+    public Task<TransportServerAddress> Start(TransportServerStartOptions? options = null)
     {
-        var start = options ?? new HttpTransportStartOptions();
+        var start = options ?? new TransportServerStartOptions();
 
         return _life.Start(() =>
         {
@@ -878,13 +851,13 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
     }
 
     // listens where it is told, localhost on both loopbacks, and gives where
-    private async Task<TransportServerAddress> Starting((HttpTransportStartOptions Start, CancellationToken Token) call)
+    private async Task<TransportServerAddress> Starting((TransportServerStartOptions Start, CancellationToken Token) call)
     {
         var (start, cancellationToken) = call;
 
         // ! an IP address by RFC 3986's grammar before the platform's parser reads it: it takes 0 for
         // 0.0.0.0, every interface, and 127.1, octal, hexadecimal and a zone besides
-        HostsAndOrigins.AssertAddress(start.Address, nameof(HttpTransportStartOptions.Address));
+        HostsAndOrigins.AssertAddress(start.Address, nameof(TransportServerStartOptions.Address));
 
         var ((application, port), address) = start.Address == Loopbacks.Localhost
             ? await Loopbacks.Bind(
@@ -1435,7 +1408,9 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
             return;
         }
 
-        if (request.Path.Value != _options.Pathname)
+        // ! the path as it came, ended at its first # (spec 15.12): Kestrel's Request.Path keeps a #
+        // and what follows it, and decodes it
+        if (HttpServerFields.PathOf(context) != _options.Pathname)
         {
             await Finish(context, new End(StatusCodes.Status404NotFound, HttpRefusals.Path));
 

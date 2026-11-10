@@ -1186,6 +1186,8 @@ impl SessionManager {
 // ── The server ───────────────────────────────────────────────────────────────────────────────
 
 struct Shared {
+    // the runtime its dispose runs on, its router's
+    runtime: Handle,
     router: RouterServer,
     services: ServiceManagerServer,
     sessions: SessionManager,
@@ -1267,7 +1269,7 @@ impl Server {
                     last_call_id: None,
                     session_of: None,
                     clock: Some(clock),
-                    runtime: Some(runtime),
+                    runtime: Some(runtime.clone()),
                     limits: options.limits.clone(),
                     metrics_registry: options.metrics_registry.clone(),
                     pacing: options.pacing.clone(),
@@ -1301,6 +1303,7 @@ impl Server {
 
         Ok(Self {
             shared: Arc::new(Shared {
+                runtime,
                 sessions: SessionManager {
                     router: router.clone(),
                     listeners,
@@ -1390,7 +1393,8 @@ impl Server {
     /// Disposes of it: its router, its sessions, then its transport, stopped. Its router disposed
     /// at once, a call made after it fails unsent; what it holds is let go in a later turn, behind
     /// what came before it, a call made before it among it, and a listener's dispose too (spec 9.0,
-    /// 9.1).
+    /// 9.1); its transport's stop follows that turn. It takes effect as it is called, its future
+    /// only waiting for the stop's end.
     ///
     /// # Errors
     ///
@@ -1408,11 +1412,16 @@ impl Server {
             }
         });
         let transport = Arc::clone(&self.shared.transport);
+        let (done, stopped) = tokio::sync::oneshot::channel();
 
-        Box::pin(async move {
+        // * the stop goes on its own task, behind the turn that let go of the rest: dropping this
+        // future cancels neither
+        drop(crate::platform::spawn(&self.shared.runtime, async move {
             disposed.await.ok();
-            transport.stop().await
-        })
+            done.send(transport.stop().await).ok();
+        }));
+
+        Box::pin(async move { stopped.await.unwrap_or(Ok(())) })
     }
 
     /// Reports what went wrong that no call waits on, through its router.

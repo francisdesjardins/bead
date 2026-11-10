@@ -1,1 +1,20 @@
 #nullable enable
+Bead.Transport.Http.HttpTransportServer.Start(Bead.TransportServerStartOptions? options = null) -> System.Threading.Tasks.Task<Bead.TransportServerAddress>!
+*REMOVED*Bead.Transport.Http.HttpTransportServer.Start(Bead.Transport.Http.HttpTransportStartOptions? options = null) -> System.Threading.Tasks.Task<Bead.TransportServerAddress>!
+*REMOVED*Bead.Transport.Http.HttpTransportStartOptions
+*REMOVED*Bead.Transport.Http.HttpTransportStartOptions.<Clone>$() -> Bead.Transport.Http.HttpTransportStartOptions!
+*REMOVED*Bead.Transport.Http.HttpTransportStartOptions.Address.get -> string!
+*REMOVED*Bead.Transport.Http.HttpTransportStartOptions.Address.init -> void
+*REMOVED*Bead.Transport.Http.HttpTransportStartOptions.CancellationToken.get -> System.Threading.CancellationToken
+*REMOVED*Bead.Transport.Http.HttpTransportStartOptions.CancellationToken.init -> void
+*REMOVED*Bead.Transport.Http.HttpTransportStartOptions.Equals(Bead.Transport.Http.HttpTransportStartOptions? other) -> bool
+*REMOVED*Bead.Transport.Http.HttpTransportStartOptions.FindOpenPort.get -> bool
+*REMOVED*Bead.Transport.Http.HttpTransportStartOptions.FindOpenPort.init -> void
+*REMOVED*Bead.Transport.Http.HttpTransportStartOptions.HttpTransportStartOptions() -> void
+*REMOVED*Bead.Transport.Http.HttpTransportStartOptions.Port.get -> int
+*REMOVED*Bead.Transport.Http.HttpTransportStartOptions.Port.init -> void
+*REMOVED*override Bead.Transport.Http.HttpTransportStartOptions.Equals(object? obj) -> bool
+*REMOVED*override Bead.Transport.Http.HttpTransportStartOptions.GetHashCode() -> int
+*REMOVED*override Bead.Transport.Http.HttpTransportStartOptions.ToString() -> string!
+*REMOVED*static Bead.Transport.Http.HttpTransportStartOptions.operator !=(Bead.Transport.Http.HttpTransportStartOptions? left, Bead.Transport.Http.HttpTransportStartOptions? right) -> bool
+*REMOVED*static Bead.Transport.Http.HttpTransportStartOptions.operator ==(Bead.Transport.Http.HttpTransportStartOptions? left, Bead.Transport.Http.HttpTransportStartOptions? right) -> bool

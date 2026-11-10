@@ -3573,3 +3573,105 @@ test.describe('WebSocketTransportServer, a connection its router paused', () => 
     expect(heard).toEqual([]);
   });
 });
+
+// * the head is Node's to read: what it takes, waits for and refuses, as the Rust side's own read
+test.describe('WebSocketTransportServer, the head it reads', () => {
+  test('reads a head whole, its method, its target and its fields as they came, an octet past ASCII refused 400 unmarked', async () => {
+    await using started = await startDated({ hosts: ['bead.test'] });
+    const { port, server } = started;
+    const connection = nextServerEvent(server, 'connection');
+    const opened = await answerFromOf(
+      port,
+      requestOf('GET /bead?x=1 HTTP/1.1', ['X-Other:  caf\t'])
+    );
+    const [{ request }] = await connection;
+
+    expect([opened.answer, request.method, request.url]).toEqual([[101, null], 'GET', '/bead?x=1']);
+    expect(
+      (await answerFromOf(port, requestOf('GET / HTTP/1.1', ['X-Other: café']))).answer
+    ).toEqual([400, null]);
+  });
+
+  test('waits for a head not whole', async () => {
+    await using started = await startDated({ hosts: ['bead.test'] });
+    const { port, server } = started;
+    const whole = requestOf('GET / HTTP/1.1');
+    const socket = await openTcp(port);
+    let answer = '';
+
+    socket.on('data', (chunk: Buffer) => {
+      answer += chunk.toString('latin1');
+    });
+    socket.write(whole.slice(0, -1));
+    await sleep(200);
+
+    expect([answer, server.clients]).toEqual(['', []]);
+    socket.write(whole.slice(-1));
+    await expect
+      .poll(() => {
+        return answer.split('\r\n')[0];
+      })
+      .toBe('HTTP/1.1 101 Switching Protocols');
+    socket.destroy();
+  });
+
+  test('answers 408 a head that did not come within its headers timeout, unmarked', async () => {
+    await using started = await startDated({ headersTimeout: 100, hosts: ['bead.test'] });
+    const { port, server } = started;
+    const refusals = refusalsOf(server);
+    const { answer } = await answerFromOf(port, 'GET / HTTP/1.1\r\nHost: bead.test\r\n');
+
+    expect([answer, refusals]).toEqual([[408, null], []]);
+  });
+
+  test('refuses 431 a head past 16 KiB, its request line among it, as Node’s maxHeaderSize bounds it, and takes 101 fields', async () => {
+    await using started = await startDated({ hosts: ['bead.test'] });
+    const { port } = started;
+    const length = requestOf('GET / HTTP/1.1').length;
+    const padded = (total: number) => {
+      return requestOf('GET / HTTP/1.1', [`X-Pad: ${'a'.repeat(total - length - 9)}`]);
+    };
+    const fields = Array.from({ length: 96 }, (_, index) => {
+      return `X-${String(index)}: ${String(index)}`;
+    });
+
+    expect((await answerFromOf(port, padded(16_384))).answer).toEqual([101, null]);
+    expect((await answerFromOf(port, padded(16_640))).answer).toEqual([431, null]);
+    expect(
+      (await answerFromOf(port, requestOf(`GET /${'a'.repeat(16_640)} HTTP/1.1`))).answer
+    ).toEqual([431, null]);
+    expect((await answerFromOf(port, requestOf('GET / HTTP/1.1', fields))).answer).toEqual([
+      101,
+      null,
+    ]);
+  });
+
+  test('refuses 400 a head HTTP does not read, a control character in its target or a value among it, and answers a version but 1.1 426 upgrade-required', async () => {
+    await using started = await startDated({ hosts: ['bead.test'] });
+    const { port, server } = started;
+    const answers: unknown[] = [];
+
+    for (const malformed of [
+      requestOf('GET /a\u0001b HTTP/1.1'),
+      requestOf('GET /a\u007fb HTTP/1.1'),
+      requestOf('GET /a b HTTP/1.1'),
+      requestOf('GET / HTTP/1.1', ['X-Other: a\u0007b']),
+      requestOf('GET / HTTP/1.1').replace('\r\n\r\n', '\r\nno colon\r\n\r\n'),
+      requestOf('GET / HTTP/1.1', ['bad name: x']),
+      requestOf('G(T / HTTP/1.1'),
+    ]) {
+      answers.push((await answerFromOf(port, malformed)).answer);
+    }
+
+    expect(answers).toEqual(
+      Array.from({ length: 7 }, () => {
+        return [400, null];
+      })
+    );
+    expect((await answerFromOf(port, requestOf('GET / HTTP/2.0'))).answer).toEqual([
+      426,
+      'upgrade-required',
+    ]);
+    expect(server.clients).toHaveLength(0);
+  });
+});

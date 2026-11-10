@@ -218,7 +218,24 @@ fn is_tests_alone(attributes: &[Attribute]) -> bool {
     })
 }
 
-// the attributes a list names: `#[non_exhaustive]` and `#[doc(hidden)]`
+// the features an item needs, as its `cfg` names them: none for the tests' own, which the list
+// leaves out (decision 0049)
+fn needs_of(attributes: &[Attribute]) -> String {
+    let mut needs = String::new();
+
+    for attribute in attributes {
+        if attribute.path().is_ident("cfg")
+            && !is_tests_alone(core::slice::from_ref(attribute))
+            && let Meta::List(list) = &attribute.meta
+        {
+            write!(needs, " #[cfg({})]", printed(&list.tokens.to_string())).ok();
+        }
+    }
+
+    needs
+}
+
+// the attributes a list names: `#[non_exhaustive]`, `#[doc(hidden)]` and the features it needs
 fn marks_of(attributes: &[Attribute]) -> String {
     let mut marks = String::new();
 
@@ -232,6 +249,7 @@ fn marks_of(attributes: &[Attribute]) -> String {
         }
     }
 
+    marks.push_str(&needs_of(attributes));
     marks
 }
 
@@ -462,7 +480,7 @@ fn function_of(source: &Source<'_>, function: &ItemFn) -> String {
 
 // the module of `items`, its path `path`, its folder `folder`, and every module below it
 fn read_module(
-    (items, path, folder): (&[Item], &str, &Path),
+    (items, path, folder, needs): (&[Item], &str, &Path, &str),
     (source, modules, implemented): (
         &Source<'_>,
         &mut Vec<Module>,
@@ -497,14 +515,29 @@ fn read_module(
         }
     }
 
+    // * a module a feature holds marks each line it lists with it
+    if !needs.is_empty() {
+        for (line, _) in &mut module.lines {
+            if !line.is_empty() {
+                line.push_str(needs);
+            }
+        }
+    }
+
     modules.push(module);
 
     for declared in below {
         let inner_path = format!("{path}::{}", declared.ident);
+        let inner_needs = format!("{needs}{}", needs_of(&declared.attrs));
 
         if let Some((_, inner)) = &declared.content {
             read_module(
-                (inner, &inner_path, &folder.join(declared.ident.to_string())),
+                (
+                    inner,
+                    &inner_path,
+                    &folder.join(declared.ident.to_string()),
+                    &inner_needs,
+                ),
                 (source, modules, implemented),
             )?;
         } else {
@@ -520,6 +553,7 @@ fn read_module(
                     &parsed.items,
                     &inner_path,
                     &folder.join(declared.ident.to_string()),
+                    &inner_needs,
                 ),
                 (&inner_source, modules, implemented),
             )?;
@@ -592,7 +626,7 @@ fn item_of(source: &Source<'_>, item: &Item) -> Option<Vec<(String, Option<Strin
             uses_of(&used.tree, ("", &mut said));
 
             said.into_iter()
-                .map(|path| (format!("use {path}"), None))
+                .map(|path| (format!("use {path}{}", needs_of(&used.attrs)), None))
                 .collect()
         })
     } else {
@@ -630,7 +664,7 @@ pub fn surface_of(folder: &Path) -> Result<String, String> {
     let mut implemented = BTreeMap::new();
 
     read_module(
-        (&parsed.items, "crate", &folder.join("src")),
+        (&parsed.items, "crate", &folder.join("src"), ""),
         (&source, &mut modules, &mut implemented),
     )?;
 

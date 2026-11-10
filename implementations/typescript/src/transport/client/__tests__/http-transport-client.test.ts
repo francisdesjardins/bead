@@ -43,6 +43,7 @@ import {
   WAIT_HEADER,
   type FetchLike,
   type HTTPTransportClient,
+  type IHTTPTransportClientConnectOptions,
   type IHTTPTransportClientOptions,
 } from '../http-transport-client';
 import { dispose } from '../transport-client';
@@ -1233,7 +1234,19 @@ test.describe('createHTTPTransportClient', () => {
     await expect(lateConnecting).rejects.toBeInstanceOf(TimeoutError);
     await expect(lateConnecting).rejects.toThrow(new TimeoutError(20));
     expect(slow.calls[0]?.init.signal?.aborted).toBe(true);
-    expect(CONNECT_DEFAULTS.pathname).toBe('/bead');
+    expect(CONNECT_DEFAULTS).toEqual({ pathname: '/bead', secured: false, timeout: 30_000 });
+
+    // no host or no port, which its type requires and a caller in JavaScript may still leave out:
+    // refused before anything moves, nothing fetched
+    const unnamed = createFakeFetch();
+    const unaddressed = createHTTPTransportClient({ isListening: false, fetch: unnamed.fetch });
+
+    for (const given of [{ port: 80 }, { host }, {}]) {
+      await expect(
+        unaddressed.connect(given as unknown as IHTTPTransportClientConnectOptions)
+      ).rejects.toThrow(new ProgrammerError('a connect names the host and the port it reaches'));
+    }
+    expect([unaddressed.isUninitialized(), unnamed.calls]).toEqual([true, []]);
   });
 
   test('a drop aborts what is in flight, tells the server, and a dispose while connecting rejects the connect', async () => {

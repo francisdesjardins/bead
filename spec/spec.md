@@ -1654,12 +1654,13 @@ port      = 1*DIGIT
 `IPv6address`, `IPv4address` and `unreserved` are RFC 3986's, and `DIGIT` is RFC 5234's core rule
 ([Appendix B.1](https://www.rfc-editor.org/rfc/rfc5234#appendix-B.1)). An authority that is not of
 it is no host, a userinfo and a colon with no port among them. A target in absolute-form is read
-when it is `http://` or `https://`, its scheme in lower case as HTTP servers read it, then an
-authority that is not empty
-([RFC 9110 §4.2.1](https://www.rfc-editor.org/rfc/rfc9110#section-4.2.1)). A server answers 400, as
-HTTP does, an HTTP/1.1 request without a `Host`, and one with more than one `Host` field line, a
-target in absolute-form it does not read, or an authority that is no host, before it reads anything
-else of it ([RFC 9112 §3.2](https://www.rfc-editor.org/rfc/rfc9112#section-3.2)): no refusal of the
+when its scheme is `http` or `https`, in any case
+([RFC 3986 §3.1](https://www.rfc-editor.org/rfc/rfc3986#section-3.1)), then `://` and an authority
+that is not empty ([RFC 9110 §4.2.1](https://www.rfc-editor.org/rfc/rfc9110#section-4.2.1)). A
+server answers 400, as HTTP does, an HTTP/1.1 request without a `Host`, and one with more than one
+`Host` field line, a target in absolute-form it does not read, or an authority that is no host,
+before it reads anything else of it
+([RFC 9112 §3.2](https://www.rfc-editor.org/rfc/rfc9112#section-3.2)): no refusal of the
 transport's own, unmarked. The `Host` beside a target in absolute-form is judged as one field line
 alone, which an HTTP/1.0 request may leave out. Over HTTP/2, it resets the stream of a request that
 names no host, with neither `:authority` nor `host`, whatever its hosts, `*` among them
@@ -1689,10 +1690,24 @@ another is invalid, answered 400 rather than read on
 ([RFC 9112 §3](https://www.rfc-editor.org/rfc/rfc9112#section-3)), a bare CR in it among them
 ([RFC 9112 §2.2](https://www.rfc-editor.org/rfc/rfc9112#section-2.2)). So is a path whose
 percent-decoding holds NUL, `%00`. What a target percent-encodes is otherwise no octet of it, and
-is taken, `%01` and `%7F` among them, and `%00` in a query. The visible characters a URI leaves out,
-`"`, `#`, `<`, `>`, `\`, `^`, `` ` ``, `{`, `|` and `}`, are taken as they came, as a page's browser
-sends some of them unencoded in a query
-([URL Standard](https://url.spec.whatwg.org/#query-percent-encode-set)); a `#` opens no fragment.
+is taken, `%01` and `%7F` among them, and `%00` in a query. A target ends at its first `#`: what
+follows it is neither its path nor its query, and no rule of a path or a query reaches it, as a URI
+reference's fragment is apart from both
+([RFC 3986 §3.5](https://www.rfc-editor.org/rfc/rfc3986#section-3.5)), though a request-target
+never carries one ([RFC 9112 §3.2](https://www.rfc-editor.org/rfc/rfc9112#section-3.2)); a control
+character past it, HTAB and DEL among them, is still the request-line's, refused as one in its path.
+A visible character a URI leaves out
+([RFC 3986 §2](https://www.rfc-editor.org/rfc/rfc3986#section-2)) that a page's browser always
+percent-encodes where it stands — `"`, `<` or `>` in a path or a query, `^`, `` ` ``, `{` or `}` in
+a path, by the
+[URL Standard](https://url.spec.whatwg.org/#path-percent-encode-set)'s path and query
+percent-encode sets — makes the request-line invalid, answered alike, 400 unmarked over HTTP/1.1,
+with none of the fields every response on the path carries, and its stream reset `PROTOCOL_ERROR`
+over HTTP/2, before anything else of the request is judged
+([RFC 9112 §3](https://www.rfc-editor.org/rfc/rfc9112#section-3)). The other visible characters a
+URI leaves out, `\`, `|`, and `^`, `` ` ``, `{` and `}` in a query, are taken as they came, as a
+page's browser sends them unencoded
+([URL Standard](https://url.spec.whatwg.org/#query-percent-encode-set)).
 An empty `Host` is a host, and so is a name of invalid punycode. It takes the hosts a request may
 name besides those every server takes, `hosts`, and the origins an exchange may come from besides
 its own, `origins`, none when not given. Its own is its request's authority under `http` or `https`,

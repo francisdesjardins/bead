@@ -862,10 +862,6 @@ impl ServerTransport for ScriptedServer {
         locked(&self.carrying).contains(connection_handle)
     }
 
-    fn start(&self) -> BoxFuture<Result<(), RouterError>> {
-        Box::pin(async { Ok(()) })
-    }
-
     fn stop(&self) -> BoxFuture<Result<(), RouterError>> {
         self.stops.fetch_add(1, Ordering::SeqCst);
         Box::pin(async { Ok(()) })

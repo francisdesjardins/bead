@@ -8384,7 +8384,7 @@
       ]
     },
     {
-      "name": "a target holding an octet other than visible ASCII, or a path whose percent-decoding holds NUL, refused as HTTP refuses it, unmarked, its body empty, before its path is matched; one percent-encoded is taken, and a # is a character of its path",
+      "name": "a target holding an octet other than visible ASCII, or a path whose percent-decoding holds NUL, refused as HTTP refuses it, unmarked, its body empty, before its path is matched; one percent-encoded is taken",
       "clauses": [
         "3.6",
         "10.1",
@@ -8563,12 +8563,29 @@
               "x-content-type-options": "nosniff",
               "vary": "Origin",
               "content-type": "application/json",
-              "content-length": "31",
+              "content-length": "29",
               "bead-refusal": null
             },
-            "body": "{\"name\":\"a#b\",\"title\":\"A tale\"}"
+            "body": "{\"name\":\"a\",\"title\":\"A tale\"}"
           },
           "on": "j"
+        },
+        {
+          "send": {
+            "head": "GET /v1/books/a\"b HTTP/1.1\r\nhost: {host}\r\nconnection: close\r\n\r\n"
+          },
+          "on": "k"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "content-type": null
+            },
+            "body": ""
+          },
+          "on": "k"
         }
       ]
     },

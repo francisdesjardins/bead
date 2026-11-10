@@ -38,8 +38,12 @@ pub(crate) mod sessions;
 pub(crate) mod surface;
 #[cfg(test)]
 mod tests;
+#[cfg(any(feature = "websocket", feature = "http"))]
+pub mod tls;
 pub mod validations;
 pub mod vectors;
+#[cfg(any(feature = "websocket", feature = "http"))]
+pub mod wire;
 
 #[cfg(test)]
 pub(crate) use platform::blocking;

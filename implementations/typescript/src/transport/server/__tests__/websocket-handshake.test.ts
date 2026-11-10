@@ -497,6 +497,9 @@ test.describe('refusalOfHandshake', () => {
           // a target in absolute-form names the authority, its Host ignored but for being one
           requestOf([['Origin', 'http://127.0.0.1:8080']], { url: 'http://127.0.0.1:8080/' }),
           naming('bad host', [], { url: 'http://localhost/' }),
+          // its scheme read in any case, and the target ended at its #
+          requestOf([], { url: 'HTTP://127.0.0.1/' }),
+          requestOf([], { url: 'hTtPs://127.0.0.1/#{}' }),
           naming('rebind.example:8080', [['Origin', 'http://rebind.example:8080']]),
           naming('rebind.example', [], { method: 'POST' }),
           naming('rebind.example', [], { without: ['upgrade'] }),
@@ -508,20 +511,22 @@ test.describe('refusalOfHandshake', () => {
           naming('a*b.test'),
           requestOf([], { url: 'http://a%41.test/' }),
           requestOf([], { url: 'http:///' }),
-          requestOf([], { url: 'HTTP://127.0.0.1/' }),
           requestOf([], { url: 'ftp://127.0.0.1/' }),
           requestOf([], { url: 'http://localhost:/' }),
           requestOf([], { url: 'http://user@localhost/' }),
+          // and a target holding what a page's browser always percent-encodes where it stands
+          requestOf([], { url: '/be<ad' }),
+          requestOf([], { url: '/?a"b' }),
         ].map(answerGiven(hosts)),
         String(hosts)
       ).toEqual([
-        ...Array.from({ length: 6 }, () => {
+        ...Array.from({ length: 8 }, () => {
           return 'taken';
         }),
         ...Array.from({ length: 7 }, () => {
           return HOST_REFUSED;
         }),
-        ...Array.from({ length: 7 }, () => {
+        ...Array.from({ length: 8 }, () => {
           return HOST;
         }),
       ]);

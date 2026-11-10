@@ -78,10 +78,6 @@ impl ServerTransport for Unconnecting {
 
     fn resume(&self, _connection_handle: &ConnectionHandle) {}
 
-    fn start(&self) -> BoxFuture<Result<(), RouterError>> {
-        Box::pin(async { Ok(()) })
-    }
-
     fn stop(&self) -> BoxFuture<Result<(), RouterError>> {
         Box::pin(async { Ok(()) })
     }

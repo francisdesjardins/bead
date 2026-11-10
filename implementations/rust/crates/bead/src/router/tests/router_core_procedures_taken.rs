@@ -83,10 +83,6 @@ impl ServerTransport for Asking {
         self.taking.contains(&address)
     }
 
-    fn start(&self) -> BoxFuture<Result<(), RouterError>> {
-        self.scripted.start()
-    }
-
     fn stop(&self) -> BoxFuture<Result<(), RouterError>> {
         self.scripted.stop()
     }

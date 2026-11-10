@@ -59,7 +59,7 @@ public static class Serving
 
         await memory.Start();
 
-        var address = await webSocket.Start(new WebSocketTransportStartOptions { Address = "127.0.0.1", Port = port, FindOpenPort = port == 0 });
+        var address = await webSocket.Start(new TransportServerStartOptions { Address = "127.0.0.1", Port = port, FindOpenPort = port == 0 });
         var gatewayAddress = await gateway.Start(new HttpGatewayStartOptions { Address = "127.0.0.1", FindOpenPort = true });
 
         // LF, as the TypeScript server writes it, on every platform

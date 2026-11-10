@@ -23,7 +23,7 @@ public sealed partial class DurationsTests
 {
     // constants
 
-    private static readonly HttpTransportStartOptions Loopback = new() { Address = Host, FindOpenPort = true };
+    private static readonly TransportServerStartOptions Loopback = new() { Address = Host, FindOpenPort = true };
 
     // a wait no bound of a server's reaches
     private const long LongestWait = 999_999_999_999_999;

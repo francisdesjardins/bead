@@ -1,5 +1,6 @@
 crate
   mod json
+  use rustls #[cfg(any(feature = "websocket", feature = "http"))]
   use tokio::runtime::Handle
   use tokio_util::sync::CancellationToken
   use broker::adapter::BrokerAdapter
@@ -110,11 +111,36 @@ crate
   use failure::Failure
   use failure::FailureOrigin
   use failure::ProcedureAddress
+  use http::client::HttpTransportClient #[cfg(feature = "http")]
+  use http::client::HttpTransportClientConnectOptions #[cfg(feature = "http")]
+  use http::client::HttpTransportClientOptions #[cfg(feature = "http")]
+  use http::facade::CONNECTION_INACTIVITY_TIMEOUT #[cfg(feature = "http")]
+  use http::facade::HttpClient #[cfg(feature = "http")]
+  use http::facade::HttpClientOptions #[cfg(feature = "http")]
+  use http::facade::HttpServer #[cfg(feature = "http")]
+  use http::facade::HttpServerOptions #[cfg(feature = "http")]
+  use http::fields::HTTP_REFUSALS #[cfg(feature = "http")]
+  use http::fields::HttpRefusals #[cfg(feature = "http")]
+  use http::server::BODY_BYTES_BUDGET #[cfg(feature = "http")]
+  use http::server::EXCHANGE_TIMEOUT #[cfg(feature = "http")]
+  use http::server::HttpTransportServer #[cfg(feature = "http")]
+  use http::server::HttpTransportServerOptions #[cfg(feature = "http")]
+  use http::server::INACTIVITY_TIMEOUT #[cfg(feature = "http")]
+  use http::server::MAXIMUM_BODY_BYTES #[cfg(feature = "http")]
+  use http::server::MAXIMUM_OUTBOX_BYTES #[cfg(feature = "http")]
+  use http::server::MAXIMUM_WAIT #[cfg(feature = "http")]
+  use http::server::MAXIMUM_WAITING_EXCHANGES #[cfg(feature = "http")]
+  use http::server::PATHNAME #[cfg(feature = "http")]
+  use http::server::TRANSPORT_HTTP #[cfg(feature = "http")]
+  use http_policy::HttpPolicy
+  use http_policy::HttpPolicyOptions
   use identity::DeclarationWay
   use identity::Deprecation
   use identity::IdentityRefusal
   use identity::Procedure
   use joined::JoinedServerTransport
+  use judgement::handshake::WEBSOCKET_REFUSALS
+  use judgement::handshake::WebSocketRefusals
   use jwt_verifier::JwtAgainst
   use jwt_verifier::JwtAlgorithm
   use jwt_verifier::JwtKey
@@ -185,6 +211,9 @@ crate
   use metrics::ProcedureSeries
   use metrics::ResolverSeries
   use metrics::RouterMetrics
+  use net::bounds::HEADERS_TIMEOUT #[cfg(any(feature = "websocket", feature = "http"))]
+  use net::bounds::MINIMUM_SEND_BYTES_PER_SECOND #[cfg(any(feature = "websocket", feature = "http"))]
+  use net::bounds::SEND_GRACE_PERIOD #[cfg(any(feature = "websocket", feature = "http"))]
   use payloads::CodecRefusal
   use payloads::JsonCodec
   use payloads::JsonOf
@@ -294,8 +323,10 @@ crate
   use transport::TransportClientReconnectDelay
   use transport::TransportClientReconnectDelayResolver
   use transport::TransportClientReconnectOptions
+  use transport::TransportServerAddress
   use transport::TransportServerClient
   use transport::TransportServerRefusal
+  use transport::TransportServerStartOptions
   use transport::is_field_value
   use violations::CLOSING_BYTES
   use violations::Judged
@@ -306,6 +337,20 @@ crate
   use violations::violations_detail_of
   use violations::violations_of
   use violations::words_of
+  use websocket::client::CredentialProvider #[cfg(feature = "websocket")]
+  use websocket::client::CredentialProviderError #[cfg(feature = "websocket")]
+  use websocket::client::WebSocketTransportClient #[cfg(feature = "websocket")]
+  use websocket::client::WebSocketTransportClientConnectOptions #[cfg(feature = "websocket")]
+  use websocket::client::WebSocketTransportClientOptions #[cfg(feature = "websocket")]
+  use websocket::connection::CLOSE_TIMEOUT #[cfg(feature = "websocket")]
+  use websocket::connection::MAXIMUM_MESSAGE_BYTES #[cfg(feature = "websocket")]
+  use websocket::facade::WebSocketClient #[cfg(feature = "websocket")]
+  use websocket::facade::WebSocketClientOptions #[cfg(feature = "websocket")]
+  use websocket::facade::WebSocketServer #[cfg(feature = "websocket")]
+  use websocket::facade::WebSocketServerOptions #[cfg(feature = "websocket")]
+  use websocket::server::TRANSPORT_WEBSOCKET #[cfg(feature = "websocket")]
+  use websocket::server::WebSocketTransportServer #[cfg(feature = "websocket")]
+  use websocket::server::WebSocketTransportServerOptions #[cfg(feature = "websocket")]
   mod internal #[doc(hidden)]
 crate::broker::adapter
   enum BrokerDelivery #[non_exhaustive]
@@ -519,6 +564,8 @@ crate::broker::server
     fn new(participant: &BrokerParticipant, options: &BrokerTransportServerOptions) -> Result<Self, ProgrammerError>
     fn names(&self) -> &[String]
     fn ready_state(&self) -> ReadyState
+    fn start(&self) -> BoxFuture<Result<TransportServerAddress, RouterError>>
+    fn dispose(&self) -> BoxFuture<Result<(), RouterError>>
     fn clients(&self) -> Vec<TransportServerClient>
     implements Debug, ServerTransport
     derives Clone
@@ -998,6 +1045,163 @@ crate::failure
     fn record(&self) -> FailureRecord
     implements Display, Error
     derives Clone, Debug
+crate::http::client
+  struct HttpTransportClientOptions #[non_exhaustive] #[cfg(feature = "http")]
+    pub clock: Option<SharedClock> #[cfg(feature = "http")]
+    pub runtime: Option<Handle> #[cfg(feature = "http")]
+    pub exchange_timeout: Option<Duration> #[cfg(feature = "http")]
+    pub inactivity_timeout: Option<Duration> #[cfg(feature = "http")]
+    pub is_listening: Option<bool> #[cfg(feature = "http")]
+    pub maximum_body_bytes: Option<u64> #[cfg(feature = "http")]
+    pub pause: Option<Duration> #[cfg(feature = "http")]
+    pub wait: Option<Duration> #[cfg(feature = "http")]
+    pub tls: Option<Arc<ClientConfig>> #[cfg(feature = "http")]
+    derives Clone, Debug, Default #[cfg(feature = "http")]
+  struct HttpTransportClientConnectOptions #[non_exhaustive] #[cfg(feature = "http")]
+    pub host: String #[cfg(feature = "http")]
+    pub port: u16 #[cfg(feature = "http")]
+    pub pathname: Option<String> #[cfg(feature = "http")]
+    pub secured: Option<bool> #[cfg(feature = "http")]
+    pub timeout: Option<Duration> #[cfg(feature = "http")]
+    pub signal: Option<CancellationToken> #[cfg(feature = "http")]
+    fn new<H: Into<String>>(host: H, port: u16) -> Self
+    derives Clone, Debug #[cfg(feature = "http")]
+  struct HttpTransportClient #[cfg(feature = "http")]
+    fn new(options: &HttpTransportClientOptions) -> Result<Self, ProgrammerError>
+    fn connect(&self, options: &HttpTransportClientConnectOptions) -> Connect
+    fn disconnect(&self, options: &TransportClientDisconnectOptions) -> Result<BoxFuture<()>, TransportError>
+    fn dispose(&self)
+    fn close(&self) -> BoxFuture<()>
+    fn reconnect(&self, options: &TransportClientReconnectOptions) -> Result<BoxFuture<Result<(), TransportError>>, TransportError>
+    implements Debug, RouterClientTransport
+    derives Clone #[cfg(feature = "http")]
+crate::http::facade
+  const CONNECTION_INACTIVITY_TIMEOUT: Duration #[cfg(feature = "http")]
+  struct HttpServerOptions #[non_exhaustive] #[cfg(feature = "http")]
+    pub server: Option<ServerOptions> #[cfg(feature = "http")]
+    pub transport: Option<HttpTransportServerOptions> #[cfg(feature = "http")]
+    derives Clone, Debug, Default #[cfg(feature = "http")]
+  struct HttpServer #[cfg(feature = "http")]
+    fn new(options: &HttpServerOptions) -> Result<Self, ProgrammerError>
+    const fn server(&self) -> &Server
+    fn router(&self) -> &RouterServer
+    fn services(&self) -> &ServiceManagerServer
+    fn sessions(&self) -> &SessionManager
+    const fn transport(&self) -> &HttpTransportServer
+    fn gauges(&self) -> BoxFuture<Result<ServerGauges, ProgrammerError>>
+    fn health(&self) -> BoxFuture<Result<Health, ProgrammerError>>
+    fn dispose(&self) -> BoxFuture<Result<(), RouterError>>
+    implements Debug
+    derives Clone #[cfg(feature = "http")]
+  struct HttpClientOptions #[non_exhaustive] #[cfg(feature = "http")]
+    pub client: Option<ClientOptions> #[cfg(feature = "http")]
+    pub transport: Option<HttpTransportClientOptions> #[cfg(feature = "http")]
+    derives Clone, Debug, Default #[cfg(feature = "http")]
+  struct HttpClient #[cfg(feature = "http")]
+    fn new(options: &HttpClientOptions) -> Result<Self, ProgrammerError>
+    const fn client(&self) -> &Client
+    const fn router(&self) -> &RouterClient
+    const fn services(&self) -> &ServiceManagerClient
+    const fn transport(&self) -> &HttpTransportClient
+    fn connect(&self, options: &HttpTransportClientConnectOptions) -> Connect
+    fn disconnect(&self, options: &TransportClientDisconnectOptions) -> Result<BoxFuture<()>, TransportError>
+    fn reconnect(&self, options: &TransportClientReconnectOptions) -> Result<BoxFuture<Result<(), TransportError>>, TransportError>
+    fn dispose(&self) -> BoxFuture<()>
+    implements Debug
+    derives Clone #[cfg(feature = "http")]
+crate::http::fields
+  struct HttpRefusals #[non_exhaustive] #[cfg(feature = "http")]
+    pub busy: &'static str #[cfg(feature = "http")]
+    pub call_waiting: &'static str #[cfg(feature = "http")]
+    pub connection_unknown: &'static str #[cfg(feature = "http")]
+    pub host: &'static str #[cfg(feature = "http")]
+    pub listen_undeclared: &'static str #[cfg(feature = "http")]
+    pub malformed: &'static str #[cfg(feature = "http")]
+    pub method: &'static str #[cfg(feature = "http")]
+    pub origin: &'static str #[cfg(feature = "http")]
+    pub path: &'static str #[cfg(feature = "http")]
+    pub too_large: &'static str #[cfg(feature = "http")]
+    pub too_slow: &'static str #[cfg(feature = "http")]
+    pub type_refused: &'static str #[cfg(feature = "http")]
+    derives Clone, Copy, Debug, Eq, PartialEq #[cfg(feature = "http")]
+  const HTTP_REFUSALS: HttpRefusals #[cfg(feature = "http")]
+crate::http::server
+  const TRANSPORT_HTTP: &str #[cfg(feature = "http")]
+  const BODY_BYTES_BUDGET: u64 #[cfg(feature = "http")]
+  const MAXIMUM_BODY_BYTES: u64 #[cfg(feature = "http")]
+  const MAXIMUM_WAITING_EXCHANGES: u64 #[cfg(feature = "http")]
+  const PATHNAME: &str #[cfg(feature = "http")]
+  const EXCHANGE_TIMEOUT: Duration #[cfg(feature = "http")]
+  const INACTIVITY_TIMEOUT: Duration #[cfg(feature = "http")]
+  const MAXIMUM_OUTBOX_BYTES: u64 #[cfg(feature = "http")]
+  const MAXIMUM_WAIT: Duration #[cfg(feature = "http")]
+  struct HttpTransportServerOptions #[non_exhaustive] #[cfg(feature = "http")]
+    pub clock: Option<SharedClock> #[cfg(feature = "http")]
+    pub runtime: Option<Handle> #[cfg(feature = "http")]
+    pub procedures: Option<Vec<ProcedureAddress>> #[cfg(feature = "http")]
+    pub policy: Option<HttpPolicy> #[cfg(feature = "http")]
+    pub body_bytes_budget: Option<u64> #[cfg(feature = "http")]
+    pub body_grace_period: Option<Duration> #[cfg(feature = "http")]
+    pub exchange_timeout: Option<Duration> #[cfg(feature = "http")]
+    pub headers_timeout: Option<Duration> #[cfg(feature = "http")]
+    pub hosts: Option<Vec<String>> #[cfg(feature = "http")]
+    pub inactivity_timeout: Option<Duration> #[cfg(feature = "http")]
+    pub maximum_body_bytes: Option<u64> #[cfg(feature = "http")]
+    pub maximum_connections: Option<u64> #[cfg(feature = "http")]
+    pub maximum_connections_per_address: Option<u64> #[cfg(feature = "http")]
+    pub maximum_outbox_bytes: Option<u64> #[cfg(feature = "http")]
+    pub maximum_wait: Option<Duration> #[cfg(feature = "http")]
+    pub maximum_waiting_exchanges: Option<u64> #[cfg(feature = "http")]
+    pub minimum_body_bytes_per_second: Option<u64> #[cfg(feature = "http")]
+    pub minimum_send_bytes_per_second: Option<u64> #[cfg(feature = "http")]
+    pub origins: Option<Vec<String>> #[cfg(feature = "http")]
+    pub pathname: Option<String> #[cfg(feature = "http")]
+    pub secure: Option<bool> #[cfg(feature = "http")]
+    pub send_grace_period: Option<Duration> #[cfg(feature = "http")]
+    pub trusted_proxies: Option<Vec<String>> #[cfg(feature = "http")]
+    pub unnamed_proxies: Option<u64> #[cfg(feature = "http")]
+    pub tls: Option<Arc<rustls::ServerConfig>> #[cfg(feature = "http")]
+    derives Clone, Debug, Default #[cfg(feature = "http")]
+  struct HttpTransportServer #[cfg(feature = "http")]
+    fn new(options: &HttpTransportServerOptions) -> Result<Self, ProgrammerError>
+    fn ready_state(&self) -> ReadyState
+    fn start(&self, options: &TransportServerStartOptions) -> BoxFuture<Result<TransportServerAddress, RouterError>>
+    fn dispose(&self) -> BoxFuture<Result<(), RouterError>>
+    fn clients(&self) -> Vec<TransportServerClient>
+    implements Debug, ServerTransport
+    derives Clone #[cfg(feature = "http")]
+crate::http_policy
+  struct HttpPolicyOptions #[non_exhaustive]
+    pub body_bytes_budget: Option<u64>
+    pub body_grace_period: Option<Duration>
+    pub headers_timeout: Option<Duration>
+    pub hosts: Option<Vec<String>>
+    pub maximum_body_bytes: Option<u64>
+    pub maximum_connections: Option<u64>
+    pub maximum_connections_per_address: Option<u64>
+    pub minimum_body_bytes_per_second: Option<u64>
+    pub minimum_send_bytes_per_second: Option<u64>
+    pub origins: Option<Vec<String>>
+    pub send_grace_period: Option<Duration>
+    pub trusted_proxies: Option<Vec<String>>
+    pub unnamed_proxies: Option<u64>
+    derives Clone, Debug, Default
+  struct HttpPolicy
+    fn of(options: &HttpPolicyOptions) -> Result<Self, ProgrammerError>
+    const fn body_bytes_budget(&self) -> Option<u64>
+    const fn body_grace_period(&self) -> Option<Duration>
+    const fn headers_timeout(&self) -> Option<Duration>
+    fn hosts(&self) -> Option<&[String]>
+    const fn maximum_body_bytes(&self) -> Option<u64>
+    const fn maximum_connections(&self) -> Option<u64>
+    const fn maximum_connections_per_address(&self) -> Option<u64>
+    const fn minimum_body_bytes_per_second(&self) -> Option<u64>
+    const fn minimum_send_bytes_per_second(&self) -> Option<u64>
+    fn origins(&self) -> Option<&[String]>
+    const fn send_grace_period(&self) -> Option<Duration>
+    fn trusted_proxies(&self) -> Option<&[String]>
+    const fn unnamed_proxies(&self) -> Option<u64>
+    derives Clone, Debug, Eq, PartialEq
 crate::identity
   enum IdentityRefusal #[non_exhaustive]
     OutOfItsRange
@@ -1066,6 +1270,154 @@ crate::json
   fn to_bytes<T: Serialize + ?Sized>(value: &T) -> Result<Vec<u8>, JsonRefusal>
 crate::json::to_value
   fn to_value<T: Serialize + ?Sized>(value: &T) -> Result<Value, JsonRefusal>
+crate::judgement
+  mod handshake
+  mod head
+  mod hosts
+  mod items
+  mod proxies
+  mod security
+  mod url_host
+crate::judgement::handshake
+  struct WebSocketRefusals #[non_exhaustive]
+    pub busy: &'static str
+    pub host: &'static str
+    pub malformed: &'static str
+    pub method: &'static str
+    pub origin: &'static str
+    pub upgrade: &'static str
+    pub version: &'static str
+    derives Clone, Copy, Debug, Eq, PartialEq
+  const WEBSOCKET_REFUSALS: WebSocketRefusals
+  struct AnswerField #[non_exhaustive]
+    pub name: &'static str
+    pub value: &'static str
+    derives Clone, Copy, Debug, Eq, PartialEq
+  struct HandshakeRefusal #[non_exhaustive]
+    pub fields: Vec<AnswerField>
+    pub refusal: Option<&'static str>
+    pub status: u16
+    derives Clone, Debug, Eq, PartialEq
+  struct HandshakeRequest<'a> #[non_exhaustive]
+    pub http_version: &'a str
+    pub method: Option<&'a str>
+    pub raw_fields: &'a [&'a str]
+    pub target: Option<&'a str>
+    const fn new(http_version: &'a str, raw_fields: &'a [&'a str]) -> Self
+    derives Clone, Copy, Debug
+  struct HandshakeTaken<'a> #[non_exhaustive]
+    pub hosts: &'a [String]
+    pub origins: &'a [String]
+    const fn new(hosts: &'a [String], origins: &'a [String]) -> Self
+    derives Clone, Copy, Debug
+  struct HandshakeTold #[non_exhaustive]
+    pub authority: Option<String>
+    pub origin: Option<String>
+    derives Clone, Debug, Eq, PartialEq
+  fn malformed_handshake() -> HandshakeRefusal
+  fn busy_handshake() -> HandshakeRefusal
+  fn host_malformed() -> HandshakeRefusal
+  fn told_of_handshake(request: &HandshakeRequest<'_>) -> HandshakeTold
+  fn refusal_of_handshake(request: &HandshakeRequest<'_>, taken: &HandshakeTaken<'_>) -> Option<HandshakeRefusal>
+crate::judgement::head
+  const MAXIMUM_HEAD_BYTES: usize
+  const MAXIMUM_HEAD_FIELDS: usize
+  struct Head #[non_exhaustive]
+    pub method: String
+    pub target: String
+    pub http_version: &'static str
+    pub raw_fields: Vec<String>
+    pub length: usize
+    fn fields(&self) -> Vec<&str>
+    derives Clone, Debug, Eq, PartialEq
+  enum HeadRead #[non_exhaustive]
+    Partial
+    Whole(Head)
+    Refused(u16)
+    derives Clone, Debug, Eq, PartialEq
+  fn read_head(bytes: &[u8]) -> HeadRead
+crate::judgement::hosts
+  const HOST_REFUSAL: &str
+  const ORIGIN_REFUSAL: &str
+  const EVERY_HOST: &str
+  struct RequestTarget<'a> #[non_exhaustive]
+    pub authority: Option<&'a str>
+    pub path: &'a str
+    pub query: &'a str
+    derives Clone, Copy, Debug, Eq, PartialEq
+  struct TakenOrigins<'a> #[non_exhaustive]
+    pub host: Option<&'a str>
+    pub origins: &'a [String]
+    const fn new(host: Option<&'a str>, origins: &'a [String]) -> Self
+    derives Clone, Copy, Debug
+  fn is_ipv6_address(text: &str) -> bool
+  fn is_ipv4_address(value: &str) -> bool
+  fn is_ip_address(value: &str) -> bool
+  fn assert_listening_address(address: &str) -> Result<(), ProgrammerError>
+  fn is_visible_field(value: &str) -> bool
+  fn credential_of<'a>(lines: &[&'a str]) -> Option<&'a str>
+  fn has_visible_fields(raw: &[&str]) -> bool
+  fn is_visible_target(target: Option<&str>) -> bool
+  fn origin_of(lines: &[&str]) -> Option<String>
+  fn is_authority(value: &str) -> bool
+  fn host_part_of(authority: &str) -> &str
+  fn request_target_of(target: Option<&str>) -> Option<RequestTarget<'_>>
+  fn is_well_formed_host(lines: &[&str], is_required: bool) -> bool
+  struct Authority<'a> #[non_exhaustive]
+    pub authority: Option<&'a str>
+    derives Clone, Copy, Debug, Eq, PartialEq
+  struct HostRequest<'a> #[non_exhaustive]
+    pub is_required: bool
+    pub target: Option<RequestTarget<'a>>
+    const fn new(is_required: bool, target: Option<RequestTarget<'a>>) -> Self
+    derives Clone, Copy, Debug
+  fn authority_of<'a>(host_lines: &[&'a str], request: &HostRequest<'a>) -> Option<Authority<'a>>
+  fn is_taken_host(authority: Option<&str>, hosts: &[String]) -> bool
+  fn own_authority_of<'a>(authority: Option<&'a str>, hosts: &[String]) -> Option<&'a str>
+  fn is_taken_origin(origin: Option<&str>, taken: &TakenOrigins<'_>) -> bool
+  fn is_listed_origin(origin: Option<&str>, origins: &[String]) -> bool
+  fn assert_hosts(hosts: &[String]) -> Result<(), ProgrammerError>
+  fn assert_origins(origins: &[String]) -> Result<(), ProgrammerError>
+crate::judgement::items
+  enum BareItem
+    Boolean(bool)
+    ByteSequence(Vec<u8>)
+    Date(i64)
+    Decimal(f64)
+    DisplayString(String)
+    Integer(i64)
+    String(String)
+    Token(String)
+    derives Clone, Debug, PartialEq
+  struct Parameter #[non_exhaustive]
+    pub key: String
+    pub value: BareItem
+    derives Clone, Debug, PartialEq
+  struct Item #[non_exhaustive]
+    pub bare_item: BareItem
+    pub parameters: Vec<Parameter>
+    derives Clone, Debug, PartialEq
+  fn parse_item(value: &str) -> Option<Item>
+crate::judgement::proxies
+  const MAXIMUM_UNNAMED_PROXIES: u64
+  struct TrustedProxies
+    const fn unnamed(&self) -> u64
+    derives Clone, Debug, Default, Eq, PartialEq
+  struct ClientAddressOptions<'a> #[non_exhaustive]
+    pub forwarded: Option<&'a str>
+    pub trusted_proxies: Option<&'a TrustedProxies>
+    derives Clone, Debug, Default
+  fn held_address_of(address: &str) -> String
+  fn address_of_entry(entry: &str) -> Option<String>
+  fn assert_trusted_proxies(entries: &[String]) -> Result<(), ProgrammerError>
+  fn assert_unnamed_proxies(count: u64) -> Result<(), ProgrammerError>
+  fn trusted_proxies_of(entries: &[String], unnamed_proxies: Option<u64>) -> Result<TrustedProxies, ProgrammerError>
+  fn client_address_of(remote: &str, options: &ClientAddressOptions<'_>) -> String
+crate::judgement::security
+  fn is_loopback_host(host: &str) -> bool
+  fn is_secure(is_tls: bool, host: Option<&str>) -> bool
+crate::judgement::url_host
+  fn url_host_of(input: &str) -> Option<String>
 crate::jwt_verifier
   enum JwtAlgorithm #[non_exhaustive]
     Es256
@@ -1359,6 +1711,8 @@ crate::memory
   struct MemoryTransportServer
     fn new(options: &MemoryTransportServerOptions) -> Result<Self, ProgrammerError>
     fn ready_state(&self) -> ReadyState
+    fn start(&self) -> BoxFuture<Result<TransportServerAddress, RouterError>>
+    fn dispose(&self) -> BoxFuture<Result<(), RouterError>>
     fn clients(&self) -> Vec<TransportServerClient>
     implements Debug, ServerTransport
     derives Clone
@@ -1432,6 +1786,10 @@ crate::metrics
     fn declare_resolver(&self, procedure: &Procedure, notifies: bool) -> Result<ResolverSeries, ProgrammerError>
     fn declare_notification(&self, procedure: &Procedure) -> Result<NotificationSeries, ProgrammerError>
     derives Clone, Debug
+crate::net::bounds
+  const MINIMUM_SEND_BYTES_PER_SECOND: u64 #[cfg(any(feature = "websocket", feature = "http"))]
+  const SEND_GRACE_PERIOD: Duration #[cfg(any(feature = "websocket", feature = "http"))]
+  const HEADERS_TIMEOUT: Duration #[cfg(any(feature = "websocket", feature = "http"))]
 crate::payloads
   struct CodecRefusal
     fn new<R: Into<String>>(reason: R) -> Self
@@ -1675,6 +2033,7 @@ crate::router::types
     derives Clone, Debug, Default, Eq, PartialEq
   const LIMIT_DEFAULTS: RouterLimits
   fn limits_of(given: &RouterLimitsOptions) -> Result<RouterLimits, ProgrammerError>
+  fn whole_envelope_limits_of(limits: &RouterLimitsOptions) -> Result<RouterLimitsOptions, ProgrammerError>
   struct IntakeLimits #[non_exhaustive]
     pub maximum_untaken_envelopes: u64
     pub maximum_untaken_bytes: u64
@@ -1985,6 +2344,17 @@ crate::transport
     pub last_activity: Option<SystemTime>
     pub transport_type: &'static str
     derives Clone, Debug, Eq, PartialEq
+  struct TransportServerStartOptions #[non_exhaustive]
+    pub address: Option<String>
+    pub port: Option<u16>
+    pub find_open_port: Option<bool>
+    pub signal: Option<CancellationToken>
+    derives Clone, Debug, Default
+  struct TransportServerAddress #[non_exhaustive]
+    pub address: String
+    pub port: u16
+    fn new<A: Into<String>>(address: A, port: u16) -> Self
+    derives Clone, Debug, Eq, PartialEq
   trait ServerListener: Send + Sync
     fn on_connection(&self, _connection_handle: &ConnectionHandle)
     fn on_message(&self, _message: TransportMessage, _connection_handle: &ConnectionHandle)
@@ -2005,7 +2375,6 @@ crate::transport
     fn carries_credential(&self, _connection_handle: &ConnectionHandle) -> bool
     fn names_procedures(&self) -> bool
     fn takes_procedure(&self, _connection_handle: &ConnectionHandle, _address: ProcedureAddress) -> bool
-    fn start(&self) -> BoxFuture<Result<(), RouterError>>
     fn stop(&self) -> BoxFuture<Result<(), RouterError>>
     fn gauges(&self) -> Option<Gauges>
     fn transport_type(&self) -> Option<&str>
@@ -2079,6 +2448,104 @@ crate::violations
   fn violations_detail_of(judged: &Judged, maximum_bytes: usize) -> String
   fn words_of(violation: &Violation) -> Option<String>
   fn violations_of(failure: &Failure) -> ReadViolations
+crate::websocket::client
+  type CredentialProviderError = Box<dyn Error + Send + Sync> #[cfg(feature = "websocket")]
+  type CredentialProvider = Arc<dyn Fn(CancellationToken) -> BoxFuture<Result<String, CredentialProviderError>> + Send + Sync,> #[cfg(feature = "websocket")]
+  struct WebSocketTransportClientOptions #[non_exhaustive] #[cfg(feature = "websocket")]
+    pub clock: Option<SharedClock> #[cfg(feature = "websocket")]
+    pub runtime: Option<Handle> #[cfg(feature = "websocket")]
+    pub close_timeout: Option<Duration> #[cfg(feature = "websocket")]
+    pub heartbeat: Option<Duration> #[cfg(feature = "websocket")]
+    pub maximum_message_bytes: Option<u64> #[cfg(feature = "websocket")]
+    pub tls: Option<Arc<ClientConfig>> #[cfg(feature = "websocket")]
+    derives Clone, Debug, Default #[cfg(feature = "websocket")]
+  struct WebSocketTransportClientConnectOptions #[non_exhaustive] #[cfg(feature = "websocket")]
+    pub host: String #[cfg(feature = "websocket")]
+    pub port: u16 #[cfg(feature = "websocket")]
+    pub pathname: Option<String> #[cfg(feature = "websocket")]
+    pub secured: Option<bool> #[cfg(feature = "websocket")]
+    pub timeout: Option<Duration> #[cfg(feature = "websocket")]
+    pub signal: Option<CancellationToken> #[cfg(feature = "websocket")]
+    pub credential: Option<String> #[cfg(feature = "websocket")]
+    pub credential_provider: Option<CredentialProvider> #[cfg(feature = "websocket")]
+    pub protocols: Option<Vec<String>> #[cfg(feature = "websocket")]
+    fn new<H: Into<String>>(host: H, port: u16) -> Self
+    implements Debug
+    derives Clone #[cfg(feature = "websocket")]
+  struct WebSocketTransportClient #[cfg(feature = "websocket")]
+    fn new(options: &WebSocketTransportClientOptions) -> Result<Self, ProgrammerError>
+    fn connect(&self, options: &WebSocketTransportClientConnectOptions) -> Connect
+    fn disconnect(&self, options: &TransportClientDisconnectOptions) -> Result<BoxFuture<()>, TransportError>
+    fn dispose(&self)
+    fn close(&self) -> BoxFuture<()>
+    fn reconnect(&self, options: &TransportClientReconnectOptions) -> Result<BoxFuture<Result<(), TransportError>>, TransportError>
+    implements Debug, RouterClientTransport
+    derives Clone #[cfg(feature = "websocket")]
+crate::websocket::connection
+  const CLOSE_TIMEOUT: Duration #[cfg(feature = "websocket")]
+  const MAXIMUM_MESSAGE_BYTES: u64 #[cfg(feature = "websocket")]
+crate::websocket::facade
+  struct WebSocketServerOptions #[non_exhaustive] #[cfg(feature = "websocket")]
+    pub server: Option<ServerOptions> #[cfg(feature = "websocket")]
+    pub transport: Option<WebSocketTransportServerOptions> #[cfg(feature = "websocket")]
+    derives Clone, Debug, Default #[cfg(feature = "websocket")]
+  struct WebSocketServer #[cfg(feature = "websocket")]
+    fn new(options: &WebSocketServerOptions) -> Result<Self, ProgrammerError>
+    const fn server(&self) -> &Server
+    fn router(&self) -> &RouterServer
+    fn services(&self) -> &ServiceManagerServer
+    fn sessions(&self) -> &SessionManager
+    const fn transport(&self) -> &WebSocketTransportServer
+    fn gauges(&self) -> BoxFuture<Result<ServerGauges, ProgrammerError>>
+    fn health(&self) -> BoxFuture<Result<Health, ProgrammerError>>
+    fn dispose(&self) -> BoxFuture<Result<(), RouterError>>
+    implements Debug
+    derives Clone #[cfg(feature = "websocket")]
+  struct WebSocketClientOptions #[non_exhaustive] #[cfg(feature = "websocket")]
+    pub client: Option<ClientOptions> #[cfg(feature = "websocket")]
+    pub transport: Option<WebSocketTransportClientOptions> #[cfg(feature = "websocket")]
+    derives Clone, Debug, Default #[cfg(feature = "websocket")]
+  struct WebSocketClient #[cfg(feature = "websocket")]
+    fn new(options: &WebSocketClientOptions) -> Result<Self, ProgrammerError>
+    const fn client(&self) -> &Client
+    const fn router(&self) -> &RouterClient
+    const fn services(&self) -> &ServiceManagerClient
+    const fn transport(&self) -> &WebSocketTransportClient
+    fn connect(&self, options: &WebSocketTransportClientConnectOptions) -> Connect
+    fn disconnect(&self, options: &TransportClientDisconnectOptions) -> Result<BoxFuture<()>, TransportError>
+    fn reconnect(&self, options: &TransportClientReconnectOptions) -> Result<BoxFuture<Result<(), TransportError>>, TransportError>
+    fn dispose(&self) -> BoxFuture<()>
+    implements Debug
+    derives Clone #[cfg(feature = "websocket")]
+crate::websocket::server
+  const TRANSPORT_WEBSOCKET: &str #[cfg(feature = "websocket")]
+  struct WebSocketTransportServerOptions #[non_exhaustive] #[cfg(feature = "websocket")]
+    pub clock: Option<SharedClock> #[cfg(feature = "websocket")]
+    pub runtime: Option<Handle> #[cfg(feature = "websocket")]
+    pub close_timeout: Option<Duration> #[cfg(feature = "websocket")]
+    pub headers_timeout: Option<Duration> #[cfg(feature = "websocket")]
+    pub hosts: Option<Vec<String>> #[cfg(feature = "websocket")]
+    pub maximum_message_bytes: Option<u64> #[cfg(feature = "websocket")]
+    pub maximum_connections: Option<u64> #[cfg(feature = "websocket")]
+    pub maximum_connections_per_address: Option<u64> #[cfg(feature = "websocket")]
+    pub origins: Option<Vec<String>> #[cfg(feature = "websocket")]
+    pub secure: Option<bool> #[cfg(feature = "websocket")]
+    pub heartbeat: Option<Duration> #[cfg(feature = "websocket")]
+    pub maximum_unsent_bytes: Option<u64> #[cfg(feature = "websocket")]
+    pub minimum_send_bytes_per_second: Option<u64> #[cfg(feature = "websocket")]
+    pub send_grace_period: Option<Duration> #[cfg(feature = "websocket")]
+    pub procedures: Option<Vec<ProcedureAddress>> #[cfg(feature = "websocket")]
+    pub trusted_proxies: Option<Vec<String>> #[cfg(feature = "websocket")]
+    pub unnamed_proxies: Option<u64> #[cfg(feature = "websocket")]
+    derives Clone, Debug, Default #[cfg(feature = "websocket")]
+  struct WebSocketTransportServer #[cfg(feature = "websocket")]
+    fn new(options: &WebSocketTransportServerOptions) -> Result<Self, ProgrammerError>
+    fn ready_state(&self) -> ReadyState
+    fn start(&self, options: &TransportServerStartOptions) -> BoxFuture<Result<TransportServerAddress, RouterError>>
+    fn dispose(&self) -> BoxFuture<Result<(), RouterError>>
+    fn clients(&self) -> Vec<TransportServerClient>
+    implements Debug, ServerTransport
+    derives Clone #[cfg(feature = "websocket")]
 crate::internal
   use crate::credentials::JWT_LIMIT_BYTES
   use crate::duration::hold
@@ -2097,8 +2564,16 @@ crate::internal
   use crate::envelope::write_header
   use crate::identity::are_one_name
   use crate::identity::is_procedure_name
+  use crate::judgement::handshake
+  use crate::judgement::head
+  use crate::judgement::hosts
+  use crate::judgement::items
+  use crate::judgement::proxies
+  use crate::judgement::security
+  use crate::judgement::url_host
   use crate::jwt_verifier::ReadJwt
   use crate::jwt_verifier::read_jwt
   use crate::jwt_verifier::verify_jwt
   use crate::router::types::limits_of
   use crate::router::types::session_key_of
+  use crate::router::types::whole_envelope_limits_of

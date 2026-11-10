@@ -1111,7 +1111,7 @@ mod intake {
     use crate::testing::SteppingClock;
     use crate::testing::pair::{Pair, PairOptions, echo};
     use crate::testing::scripted::bytes_of;
-    use crate::transport::{RouterClientTransport, ServerTransport};
+    use crate::transport::RouterClientTransport;
 
     // a server's router options of the intake bounds given, its envelopes then its bytes
     fn intake_of((envelopes, bytes): (u64, u64)) -> RouterServerOptions {

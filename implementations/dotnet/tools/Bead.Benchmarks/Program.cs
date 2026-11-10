@@ -383,14 +383,14 @@ internal static class Program
                     var http = new HttpServer<string>(new HttpServerOptions { Server = new ServerOptions { Limits = limits } });
                     server = http;
                     InteropHandlers.Offer(server);
-                    port = (await http.Transport.Start(new HttpTransportStartOptions { Address = "127.0.0.1", FindOpenPort = true })).Port;
+                    port = (await http.Transport.Start(new TransportServerStartOptions { Address = "127.0.0.1", FindOpenPort = true })).Port;
                 }
                 else
                 {
                     var ws = new WebSocketServer<string>(new WebSocketServerOptions { Server = new ServerOptions { Limits = limits } });
                     server = ws;
                     InteropHandlers.Offer(server);
-                    port = (await ws.Transport.Start(new WebSocketTransportStartOptions { Address = "127.0.0.1", FindOpenPort = true })).Port;
+                    port = (await ws.Transport.Start(new TransportServerStartOptions { Address = "127.0.0.1", FindOpenPort = true })).Port;
                 }
             }
 

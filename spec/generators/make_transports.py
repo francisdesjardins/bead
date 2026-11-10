@@ -115,9 +115,10 @@ def send(on, method, target='/bead', *, fields=None, body=None, host='{host}', l
     return {'send': {'head': '\r\n'.join(lines) + '\r\n\r\n', **({'body': body} if body else {})}, 'on': on}
 
 
-def connect(on='connect', *, listen=False, fields=None, host='{host}', body=None):
+def connect(on='connect', *, listen=False, fields=None, host='{host}', body=None, target='/bead'):
     # a POST of Bead's type with no token, which draws a connection when it has no body
-    return send(on, 'POST', fields={'content-type': BEAD, **({'bead-listen': '?1'} if listen else {}), **(fields or {})},
+    return send(on, 'POST', target, fields={'content-type': BEAD, **({'bead-listen': '?1'} if listen else {}),
+                                            **(fields or {})},
                 host=host, body=body)
 
 
@@ -243,6 +244,19 @@ SUBSCRIBE = request(1, 'ticks', 'null', flags=0x10)
 
 def tick(call_id, value):
     return request(call_id, 'tick', '{"value":%d}' % value)
+
+
+# 15.12's cases that a row of docs/support.md excuses a side from, by their names: what follows a
+# target's # (Kestrel decodes past it and refuses NUL and an octet past ASCII there itself; Node's
+# parser refuses an octet past ASCII there itself), and a scheme in upper case (Kestrel reads
+# absolute-form by a scheme in lower case alone)
+HASH_TAIL = "what follows a target's # is judged by no rule of its path: a NUL percent-encoded there is taken with it"
+HASH_TAIL_OCTET = "what follows a target's # is judged by no rule of its path: an octet past US-ASCII there is taken with it"
+SCHEME_CASE = "a target in absolute-form is read whatever its scheme's case, HTTP:// as http://"
+UPGRADE_SCHEME_CASE = "an upgrade whose target is in absolute-form is read whatever its scheme's case"
+FOLLOWS_A_HASH = [{'row': 'What follows a # in a target', 'language': 'C#'}]
+FOLLOWS_A_HASH_OCTET = [{'row': 'What follows a # in a target', 'language': 'TypeScript'}, *FOLLOWS_A_HASH]
+SCHEMES_CASE = [{'row': "A target in absolute-form, its scheme's case", 'language': 'C#'}]
 
 
 cases = [
@@ -446,6 +460,47 @@ cases = [
          send('nul', 'POST', '/be%00ad', fields={'content-type': BEAD}), unmarked('nul'),
          send('encoded', 'POST', '/bead?a%01b%7F%00', fields={'content-type': BEAD}),
          expect('encoded', 201, fields={'bead-connection-token': {'capture': 'token', 'shape': 'token'}})]),
+    # 15.12: a visible character a URI leaves out that a page's browser always percent-encodes where it
+    # stands, by the URL Standard's path and query percent-encode sets, makes the request-line invalid
+    # (RFC 9112 §3); the others a browser sends as they are, and they are taken. ! a head's {name} is a
+    # value the player puts in, so a target here holds its braces with nothing between them
+    ('a target holding a character a page\'s browser always percent-encodes where it stands — ", < or > in its path or its query, ^, `, { or } in its path — is answered 400 unmarked before its host, its path or its origin is judged',
+     ['15.6', '15.12'], {'hosts': ['bead.test']}, [
+         step
+         for on, target, host in (('quote', '/be"ad', '{host}'), ('less', '/be<ad', '{host}'),
+                                  ('greater', '/be>ad', '{host}'), ('grave', '/be`ad', '{host}'),
+                                  ('caret', '/be^ad', '{host}'), ('brace', '/be{}ad', '{host}'),
+                                  ('queryquote', '/bead?a"b', '{host}'), ('queryless', '/bead?a<b', '{host}'),
+                                  ('querygreater', '/bead?a>b', '{host}'), ('absolute', 'http://{host}/be<ad', '{host}'),
+                                  ('elsewhere', '/be<ad', 'elsewhere.test'))
+         for step in (send(on, 'POST', target, host=host, fields={'content-type': BEAD}), unmarked(on))]),
+    ('the visible characters a URI leaves out that a page\'s browser sends unencoded are taken as they came: \\ and | in a path or a query, ^, `, { and } in a query',
+     ['15.6', '15.12'], {'hosts': ['bead.test']}, [
+         connect('query', target='/bead?a\\b|c^d`e{}f'), expect('query', 201),
+         send('pipe', 'POST', '/be|ad', fields={'content-type': BEAD}), refused('pipe', 404, 'path-unknown'),
+         send('backslash', 'POST', '/be\\ad', fields={'content-type': BEAD}), refused('backslash', 404, 'path-unknown')]),
+    # 15.12: a target ends at its first # (RFC 3986 §3.5), which a request-target never carries (RFC 9112
+    # §3.2): what follows is judged by no rule of its path or its query, but a control character is the
+    # request-line's
+    ('a target ends at its first #: what follows is neither its path nor its query, a character a browser encodes there among it, and a control character there is refused as one in its path',
+     ['15.6', '15.12'], {'hosts': ['bead.test']}, [
+         connect('hash', target='/bead#x'), expect('hash', 201),
+         connect('quote', target='/bead#<"'), expect('quote', 201),
+         send('control', 'POST', '/bead#a\x01b', fields={'content-type': BEAD}), unmarked('control')]),
+    (HASH_TAIL,
+     ['15.6', '15.12'], {'hosts': ['bead.test']}, [
+         connect('nul', target='/bead#%00'), expect('nul', 201),
+         send('elsewhere', 'POST', '/a#%00?x', fields={'content-type': BEAD}), refused('elsewhere', 404, 'path-unknown')]),
+    # é as the two octets of its UTF-8, apart from the one Latin-1 octet of the case above: what hyper
+    # takes past a #, a case of its own as Node's parser refuses it there too
+    (HASH_TAIL_OCTET,
+     ['15.6', '15.12'], {'hosts': ['bead.test']}, [
+         connect('latin', target='/bead#' + chr(0xC3) + chr(0xA9)), expect('latin', 201)]),
+    # 15.12: a scheme is read in any case (RFC 3986 §3.1)
+    (SCHEME_CASE,
+     ['15.6', '15.12'], {'hosts': ['bead.test']}, [
+         send('upper', 'POST', 'HTTP://{host}/bead', fields={'content-type': BEAD}), expect('upper', 201),
+         send('mixed', 'POST', 'hTtP://{host}/bead', fields={'content-type': BEAD}), expect('mixed', 201)]),
     ('an exchange from an origin the server does not take is refused 403, marked', ['15.6.5', '15.12'], None, [
         connect(fields={'origin': 'https://elsewhere.test'}), refused('connect', 403, 'origin-refused')]),
     ('an exchange from an origin the server takes is served', ['15.12'], {'origins': ['https://bead.test']}, [
@@ -1013,6 +1068,20 @@ websocket = [
          handshake('nul', target='/%00'), unmarked('nul'),
          *upgrade('encoded', target='/?a%01%00'), message('encoded', binary=ECHO),
          heard('encoded', envelope=result(1, '"x"'))]),
+    # 15.12: what a page's browser always percent-encodes where it stands makes the request-line
+    # invalid at a WebSocket's address too
+    ('a request at a WebSocket\'s address whose target holds a character a page\'s browser always percent-encodes where it stands is answered 400 unmarked',
+     ['15.2.1', '15.12'], {}, [
+         step for on, target in (('less', '/<'), ('grave', '/`'), ('brace', '/{}'), ('quote', '/?a"b'))
+         for step in (handshake(on, target=target), unmarked(on))]),
+    ('an upgrade\'s target ends at its first #, and a control character past it is refused as one in its path',
+     ['15.2.1', '15.12'], {}, [
+         *upgrade('hash', target='/#x'), message('hash', binary=ECHO), heard('hash', envelope=result(1, '"x"')),
+         handshake('control', target='/#\x01'), unmarked('control')]),
+    # a player excuses a whole case, so the scheme's case stands apart from the # above
+    (UPGRADE_SCHEME_CASE, ['15.2.1', '15.12'], {'differs': SCHEMES_CASE}, [
+        *upgrade('upper', target='HTTP://{host}/'), message('upper', binary=ECHO),
+        heard('upper', envelope=result(1, '"x"'))]),
     # 15.2 and 15.12: a request is taken from the hosts an HTTP exchange is, whatever else it holds,
     # and an upgrade from its origins
     ('a request naming a host the server does not take is refused 403, marked, whatever its method, its upgrade or its form',
@@ -2468,7 +2537,8 @@ def told_of(head, status, reason, options):
     target = head.split('\r\n', 1)[0].split(' ')[1]
     hosts = field_lines(head, 'host')
 
-    if target.startswith(('http://', 'https://')):
+    # a scheme in any case (spec 15.12, RFC 3986 §3.1)
+    if target.lower().startswith(('http://', 'https://')):
         authority = target.split('://', 1)[1].split('/', 1)[0]
     elif len(hosts) > 1:
         raise ValueError(f'a refusal told of a request with {len(hosts)} Host lines, which HTTP answers itself')
@@ -2549,6 +2619,9 @@ def amqp_broker():
 # the cases over HTTP played on the real clock, as what no clock given reaches is
 HTTP_REAL_TIME = {'a request whose head does not come whole within headersTimeout is answered 408, unmarked, and told by none'}
 assert HTTP_REAL_TIME <= {name for name, *_ in cases}
+# the cases over HTTP a row of docs/support.md excuses a side from, by their names
+HTTP_DIFFERS = {HASH_TAIL: FOLLOWS_A_HASH, HASH_TAIL_OCTET: FOLLOWS_A_HASH_OCTET, SCHEME_CASE: SCHEMES_CASE}
+assert set(HTTP_DIFFERS) <= {name for name, *_ in cases}
 
 for _name, _clauses, _options, _steps in cases:
     tell(_steps, _options)
@@ -2578,6 +2651,7 @@ document = {
         "Over a broker, until names a gauge of the transport under test: connections, those its router was told; halfOpen, those answered by an ACCEPT whose third leg has not come; partsBytes, what its participant holds in parts; names, the names its broker holds a subscription to, from its SUBACK to its UNSUBACK over MQTT 5, from its receiver's ATTACH to its DETACH over AMQP 1.0; departures, the peers' departures its participant subscribes; or unsettled, the messages its adapter handed its participant and it has not acknowledged. stop stops the server's transport under test, its participant's link kept, crossing a publish where it gives one: published in the turn the stop begins, before it. participant stops the participant under test in place, or starts it again, its stop or its start settled, crossing a publish where its stop gives one: published in the turn its stop begins, before it. wait waits that many milliseconds on the real clock, in a case marked realTime. options, over a broker, are also those of section 15.23 by their names, heartbeat its participant's, in either role; timeout, in the client role, its connect's time (spec 15.15); twin, a participant beside the peers that serves the server's names in their group, reading every OPEN its broker hands it and answering none; wills true, each peer's link leaving a will, the GONE of its id and of the incarnation its OPENs name; and maximumQueuedMessages, the messages the in-memory broker holds for each subscriber, published to it and not yet handed on, past which it drops one, as a broker whose queue is full does.",
         "lose loses the link of that participant, the one under test or a peer, without a clean end: in memory its adapter's lose, over MQTT 5 and AMQP 1.0 its relay cut, its broker publishing its will where it leaves one. takeover takes the link of the participant under test over by another link of its id: in memory its adapter's takeOver, its subscriptions dropped and its will published; over MQTT 5 a link of the player's own under its id, which subscribes nothing, stopped clean once the case ends; no case over AMQP 1.0 asks one. leave has a peer let its inbox go, its unsubscription settled, over AMQP 1.0 its inbox deleted through its broker's management, so that the next parcel to it finds no subscriber. expect placed reads that each OPEN of the openers given, their halves, reached the server under test or the participant with, its twin, never both and never neither: the server's ACCEPT read on the opener's inbox, the twin's OPEN read on the name. expect lives reads what the side under test asked its adapter of each publication's life, by an adapter the player wraps around the side's, in milliseconds on the clock given, exactly: open, an OPEN's; credential, a DATA's that carries a credential; other, every other parcel's, null for none.",
         'clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8.',
+        'Each item of differs names a row of docs/support.md a case crosses, which names the case, and the language it excuses: what that language\'s platform does otherwise before the transport reads the request. A harness plays every case but those a differs excuses its language from.',
     ],
     'specVersion': spec_version(),
     'wallClock': WALL_CLOCK,
@@ -2588,7 +2662,8 @@ document = {
     ],
     'cases': [
         {'name': name, 'clauses': clauses, 'transport': 'http', **({'options': options} if options else {}),
-         **({'realTime': True} if name in HTTP_REAL_TIME else {}), 'steps': steps}
+         **({'realTime': True} if name in HTTP_REAL_TIME else {}),
+         **({'differs': HTTP_DIFFERS[name]} if name in HTTP_DIFFERS else {}), 'steps': steps}
         for name, clauses, options, steps in cases
     ] + [
         {'name': name, 'clauses': clauses, 'transport': 'websocket', **fields, 'steps': steps}

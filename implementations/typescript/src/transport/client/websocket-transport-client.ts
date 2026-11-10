@@ -70,12 +70,10 @@ export const MAXIMUM_MESSAGE_BYTES = 16_778_240;
 
 /** What an omitted connect option resolves to. */
 export const CONNECT_DEFAULTS = Object.freeze({
-  host: 'localhost',
-  pathname: '',
-  port: 80,
+  pathname: '/',
   secured: false,
   timeout: 30_000,
-} satisfies IWebSocketTransportClientConnectOptions);
+} satisfies Omit<IWebSocketTransportClientConnectOptions, 'host' | 'port'>);
 
 // helpers
 
@@ -283,7 +281,12 @@ export const createWebSocketTransportClient = (
         // * a credential crosses the upgrade, so one the upgrade cannot carry as given is refused
         // before anything moves
         assertConnect: (connectOptions) => {
-          const { credential, credentialProvider } = connectOptions;
+          const { credential, credentialProvider, host, port } = connectOptions;
+
+          // what its type requires, and a caller in JavaScript may still leave out
+          if (typeof host !== 'string' || typeof port !== 'number') {
+            throw new ProgrammerError('a connect names the host and the port it reaches');
+          }
 
           if (credential === undefined && credentialProvider === undefined) {
             return;

@@ -3987,10 +3987,12 @@ EXCHANGES = [
                'on': 'a'}]),
     # * a head's characters are its octets, so a character past U+007F is one octet past US-ASCII: é as
     # the two octets of its UTF-8, in the path and in the query; each control character the octet
-    # itself, judged before the path is matched, so a path no route matches is 400 and not 404
+    # itself, judged before the path is matched, so a path no route matches is 400 and not 404; a
+    # target ends at its first #, and a " in its path is one a page's browser always percent-encodes
+    # (spec 15.12)
     exchange("a target holding an octet other than visible ASCII, or a path whose percent-decoding holds NUL, "
              "refused as HTTP refuses it, unmarked, its body empty, before its path is matched; one percent-encoded "
-             "is taken, and a # is a character of its path",
+             "is taken",
              ['3.6', '10.1', '10.1.1', 'spec:15.12'],
              [*[step for on, target in (('a', '/v1/books/' + chr(0xC3) + chr(0xA9)),
                                         ('b', '/v1/books/2?tags=' + chr(0xC3) + chr(0xA9)),
@@ -4004,7 +4006,10 @@ EXCHANGES = [
               send('GET', '/v1/books/a%01b', on='i'),
               answered(result('Book', {'name': 'a' + chr(1) + 'b', 'title': 'A tale'}), on='i'),
               send('GET', '/v1/books/a#b', on='j'),
-              answered(result('Book', {'name': 'a#b', 'title': 'A tale'}), on='j')]),
+              answered(result('Book', {'name': 'a', 'title': 'A tale'}), on='j'),
+              send('GET', '/v1/books/a"b', on='k'),
+              {'expect': {'status': 400, 'fields': {'bead-refusal': None, 'content-type': None}, 'body': ''},
+               'on': 'k'}]),
     exchange("a body past maximumBodyBytes as it comes, 413", ['9.3', '10.1', '10.1.10'],
              [{'send': {'head': 'POST /api/Transcoding/echo HTTP/1.1' + chr(13) + chr(10) + 'host: {host}' + chr(13) + chr(10)
                         + 'content-type: application/json' + chr(13) + chr(10) + 'transfer-encoding: chunked'

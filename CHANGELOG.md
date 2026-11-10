@@ -11,9 +11,40 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - The Rust side's service client, `ServiceClient` and `ServiceClientOptions`, the twin of the other
   sides' (decision 0044).
+- The Rust side's transport over WebSocket (RFC 6455), client and server, the feature `websocket`
+  of its core, with `WebSocketServer` and `WebSocketClient` and the defaults the other sides
+  export; it plays `spec/transports.json`'s cases over WebSocket and its places of
+  `spec/durations.json` (decision 0049).
+- The Rust side's transport over HTTP, client and server, the feature `http` of its core: the
+  server on hyper's HTTP/1.1 and its HTTP/2 under TLS, the client on hyper's pooled HTTP/1.1, with
+  `HttpServer` and `HttpClient` and the defaults the other sides export; it plays
+  `spec/transports.json`'s cases over HTTP and its places of `spec/durations.json` (decision 0049).
+- The interop with the Rust side, both ways, over WebSocket and HTTP: the Rust client against the
+  TypeScript and C# interop servers, and their clients against the Rust one,
+  `bead-interop-server`, in CI's `interop-rust` job (decision 0049).
+
+### Changed
+
+- **Breaking:** a request's target is read as a page's browser writes it, on every side: `"`, `<`
+  or `>` in its path or its query, or `^`, `` ` ``, `{` or `}` in its path, answered 400 unmarked
+  (RFC 9112 §3); a `#` ends it; and an absolute-form target's scheme is read in any case (RFC 3986
+  §3.1), but by Kestrel on the C# side, which also refuses a `%00` or an octet past US-ASCII past a
+  `#`, as Node's parser refuses that octet on the TypeScript side (spec 15.12, transcoding 3.6;
+  decision 0049).
+- **Breaking:** the TypeScript side's `REFUSALS` is `HTTP_REFUSALS`.
+- **Breaking:** the TypeScript side's `IHTTPPolicyInit` is `IHTTPPolicyOptions`.
+- **Breaking:** the C# side's `WebSocketTransportStartOptions` and `HttpTransportStartOptions` are
+  one `TransportServerStartOptions`, in `Bead.Core`.
+- **Breaking:** on the TypeScript side a WebSocket or HTTP client's connect names its `host` and its
+  `port`, as on the C# and Rust sides.
+- **Breaking:** on the Rust side a server transport's `start` leaves `ServerTransport`: each server
+  starts itself and gives the `TransportServerAddress` it listens at.
 
 ### Fixed
 
+- The C# side's HTTP transport server matches its pathname against the target as it came, as the
+  TypeScript side does, where Kestrel's decoded path let `/b%65ad` reach `/bead`; and its gateway
+  keeps the query of an absolute-form target that names no path, `http://bead.test?x`.
 - A publication over AMQP 1.0 asked as its broker ends its sending session, or detaches its sender,
   goes on another that it begins, on the C# side, where it could be refused with nothing sent
   (spec 15.33).

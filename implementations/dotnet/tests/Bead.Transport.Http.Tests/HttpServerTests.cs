@@ -187,7 +187,7 @@ public sealed class HttpServerTests
             await response.RegisterNotification();
             await response.Answer("subscribed");
         });
-        var address = await server.Transport.Start(new HttpTransportStartOptions { Address = Host, FindOpenPort = true, CancellationToken = Cancelled });
+        var address = await server.Transport.Start(new TransportServerStartOptions { Address = Host, FindOpenPort = true, CancellationToken = Cancelled });
         var client = new BeadHttpClient(new BeadHttpClientOptions { Transport = new HttpTransportClientOptions { IsListening = isListening } });
 
         await client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = address.Port, CancellationToken = Cancelled });
@@ -379,7 +379,7 @@ public sealed class HttpServerTests
         var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider();
 
         await using var server = new HttpServer<string>(new HttpServerOptions { Transport = new HttpTransportServerOptions { Clock = time } });
-        var address = await server.Transport.Start(new HttpTransportStartOptions { Address = Host, FindOpenPort = true, CancellationToken = Cancelled });
+        var address = await server.Transport.Start(new TransportServerStartOptions { Address = Host, FindOpenPort = true, CancellationToken = Cancelled });
         await using var client = new BeadHttpClient(new BeadHttpClientOptions { Transport = new HttpTransportClientOptions { IsListening = false } });
 
         await client.Connect(new HttpTransportClientConnectOptions { Host = Host, Port = address.Port, CancellationToken = Cancelled });
@@ -413,7 +413,7 @@ public sealed class HttpServerTests
             await response.Answer("subscribed");
         });
 
-        var address = await server.Transport.Start(new HttpTransportStartOptions { Address = Host, FindOpenPort = true, CancellationToken = Cancelled });
+        var address = await server.Transport.Start(new TransportServerStartOptions { Address = Host, FindOpenPort = true, CancellationToken = Cancelled });
         await using var client = new BeadHttpClient();
         var dropped = new TaskCompletionSource<(string ProcedureName, ushort? Code)>(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -499,7 +499,7 @@ public sealed class HttpServerTests
     public async Task Relay_a_call_from_an_HTTP_requester_to_a_target_behind_a_WebSocket_once_a_session_admits_it()
     {
         await using var target = new WebSocketServer<string>();
-        var targetAddress = await target.Transport.Start(new WebSocketTransportStartOptions { Address = Host, FindOpenPort = true, CancellationToken = Cancelled });
+        var targetAddress = await target.Transport.Start(new TransportServerStartOptions { Address = Host, FindOpenPort = true, CancellationToken = Cancelled });
         await using var toTarget = new WebSocketClient();
 
         target.Services.GetRequestResolver(Echo, new RequestResolverDependencies<string, string> { Serializer = Text })((request, response) =>
@@ -676,7 +676,7 @@ public sealed class HttpServerTests
                 await Task.Delay(Timeout.Infinite, request.Signal);
             });
 
-            var address = await server.Transport.Start(new HttpTransportStartOptions { Address = Host, FindOpenPort = true, CancellationToken = Cancelled });
+            var address = await server.Transport.Start(new TransportServerStartOptions { Address = Host, FindOpenPort = true, CancellationToken = Cancelled });
             using var http = new HttpClient();
             var uri = new Uri($"http://{Host}:{address.Port}/bead");
             using var connect = new HttpRequestMessage(HttpMethod.Post, uri) { Content = new ByteArrayContent([]) };
@@ -733,7 +733,7 @@ public sealed class HttpServerTests
             return response.Answer(request.Payload);
         });
 
-        var address = await server.Transport.Start(new HttpTransportStartOptions { Address = Host, FindOpenPort = true, CancellationToken = Cancelled });
+        var address = await server.Transport.Start(new TransportServerStartOptions { Address = Host, FindOpenPort = true, CancellationToken = Cancelled });
 
         // one socket and one proxy's walk for the connect, another for the POST
         async Task<(TcpClient Socket, string Head)> Exchange(string forwarded, (string Fields, byte[] Body) request)

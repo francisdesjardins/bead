@@ -889,7 +889,7 @@ public sealed class HttpTransportClientTests
         {
             var started = new Started();
 
-            started.Port = (await started.Server.Start(new HttpTransportStartOptions { Address = Host, FindOpenPort = true, CancellationToken = Cancelled })).Port;
+            started.Port = (await started.Server.Start(new TransportServerStartOptions { Address = Host, FindOpenPort = true, CancellationToken = Cancelled })).Port;
 
             return started;
         }
@@ -1933,7 +1933,7 @@ public sealed class HttpTransportClientTests
         foreach (var address in Addresses.ReachedByLocalhost())
         {
             await using var server = new HttpTransportServer();
-            var port = (await server.Start(new HttpTransportStartOptions { Address = address, FindOpenPort = true, CancellationToken = Cancelled })).Port;
+            var port = (await server.Start(new TransportServerStartOptions { Address = address, FindOpenPort = true, CancellationToken = Cancelled })).Port;
             await using var client = new HttpTransportClient(NotListening);
             var started = TimeProvider.System.GetTimestamp();
 

@@ -396,7 +396,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         {
             _connections.Writer.TryWrite(connectionHandle);
         };
-        _port = (await _server.Start(new WebSocketTransportStartOptions { Address = Host, FindOpenPort = true, CancellationToken = Cancelled })).Port;
+        _port = (await _server.Start(new TransportServerStartOptions { Address = Host, FindOpenPort = true, CancellationToken = Cancelled })).Port;
     }
 
     public async ValueTask DisposeAsync()
@@ -1276,7 +1276,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         }
 
         await using var server = new WebSocketTransportServer();
-        var port = (await server.Start(new WebSocketTransportStartOptions { Address = "::1", FindOpenPort = true, CancellationToken = Cancelled })).Port;
+        var port = (await server.Start(new TransportServerStartOptions { Address = "::1", FindOpenPort = true, CancellationToken = Cancelled })).Port;
 
         foreach (var host in new[] { "::1", "[::1]" })
         {
@@ -2839,7 +2839,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         foreach (var address in Addresses.ReachedByLocalhost())
         {
             await using var server = new WebSocketTransportServer();
-            var port = (await server.Start(new WebSocketTransportStartOptions { Address = address, FindOpenPort = true, CancellationToken = Cancelled })).Port;
+            var port = (await server.Start(new TransportServerStartOptions { Address = address, FindOpenPort = true, CancellationToken = Cancelled })).Port;
             await using var client = new WebSocketTransportClient();
             var started = TimeProvider.System.GetTimestamp();
 

@@ -35,7 +35,7 @@ public sealed record HttpServerOptions
 /// <code>
 /// await using var server = new HttpServer&lt;string&gt;();
 ///
-/// await server.Transport.Start(new HttpTransportStartOptions { Port = port });
+/// await server.Transport.Start(new TransportServerStartOptions { Port = port });
 /// </code>
 /// </example>
 /// <typeparam name="TData">What a session keeps.</typeparam>

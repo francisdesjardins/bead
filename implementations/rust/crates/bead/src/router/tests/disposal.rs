@@ -287,9 +287,7 @@ async fn routers_never_disposed_over_the_in_memory_transport_end_once_nothing_ho
         )
         .expect("a server's router");
 
-        crate::transport::ServerTransport::start(&memory)
-            .await
-            .expect("started");
+        memory.start().await.expect("started");
 
         let transport = crate::memory::MemoryTransportClient::new(
             &crate::memory::MemoryTransportClientOptions {

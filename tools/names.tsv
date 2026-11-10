@@ -1,4 +1,4 @@
-# alone: typescript 318, csharp 67, rust 78
+# alone: typescript 296, csharp 61, rust 78
 # concept	typescript	csharp	rust	class
 ACCEPT_TIMEOUT	ACCEPT_TIMEOUT [constant]	-	ACCEPT_TIMEOUT [constant]	same
 AccessRefusal	IAccessRefusal [record]	AccessRefusal [record]	AccessRefusal [record]	same
@@ -52,6 +52,7 @@ ClientLayers	IClientLayers [record]	-	-	differs: A facade's layers built by the 
 ClientListener	-	-	ClientListener [record]	own: a listener the Rust side registers for an event the other sides emit (0044)
 ClientOptions	IClientOptions [record]	-	ClientOptions [record]	same
 Clock	IClock [record]	-	Clock [record]	same
+CLOSE_TIMEOUT	CLOSE_TIMEOUT [constant]	-	CLOSE_TIMEOUT [constant]	same
 CLOSING_BYTES	-	Violations.ClosingBytes [constant]	CLOSING_BYTES [constant]	rendered: constant (0007)
 CodecRefusal	-	-	CodecRefusal [record]	own: a Result's error, where the other sides throw (0044)
 codePointLength	codePointLength [function]	Validators.CodePointLength [function]	-	rendered: of (0007, 0044)
@@ -59,11 +60,14 @@ Command	ICommand [record]	-	Command [record]	same
 commandOf	commandOf [function]	-	command_of [function]	same
 CommandOptions	ICommandOptions [record]	CommandOptions [record]	CommandOptions [record]	same
 CONNECT_TIMEOUT	CONNECT_TIMEOUT [constant]	-	CONNECT_TIMEOUT [constant]	same
+CONNECTION_INACTIVITY_TIMEOUT	CONNECTION_INACTIVITY_TIMEOUT [constant]	-	CONNECTION_INACTIVITY_TIMEOUT [constant]	same
 ConnectError	ConnectError [record]	ConnectException [record]	ConnectError [record]	rendered: error (0007, 0044)
 ConnectionHandle	ConnectionHandle [scalar]	-	ConnectionHandle [scalar]	same
 ConnectionTarget	IConnectionTarget [record]	ConnectionTarget [record]	-	same
 Credential	Credential [choice]	Credential [record]	Credential [choice]	same
 Credentials	ICredentials [record]	Credentials [record]	Credentials [record]	same
+CredentialProvider	-	-	CredentialProvider [function type]	own: the function's type a WebSocket client's connect takes, which the other sides write in place, TypeScript's ({ signal }) => string | Promise<string> and C#'s Func<CancellationToken, ValueTask<string>> (0044)
+CredentialProviderError	-	-	CredentialProviderError [record]	own: a Result's error, where the other sides throw (0044)
 CredentialScheme	CredentialScheme [choice]	CredentialScheme [choice]	CredentialScheme [choice]	same
 CreditHeader	ICreditHeader [record]	CreditHeader [record]	CreditHeader [record]	same
 DebugDirection	DebugDirection [choice]	DebugDirection [choice]	DebugDirection [choice]	same
@@ -103,28 +107,34 @@ GENERATED_CODE_SUPPORTS_VERSION_5	GENERATED_CODE_SUPPORTS_VERSION_5 [constant]	-
 GENERATED_CODE_SUPPORTS_VERSION_6	GENERATED_CODE_SUPPORTS_VERSION_6 [constant]	-	-	own: the TypeScript runtime's counter of generated code, each runtime's its own (0018, 0022)
 GENERATED_CODE_SUPPORTS_VERSION_7	GENERATED_CODE_SUPPORTS_VERSION_7 [constant]	-	-	own: the TypeScript runtime's counter of generated code, each runtime's its own (0018, 0022)
 GENERATED_CODE_SUPPORTS_VERSION_8	GENERATED_CODE_SUPPORTS_VERSION_8 [constant]	-	-	own: the TypeScript runtime's counter of generated code, each runtime's its own (0018, 0022)
+HEADERS_TIMEOUT	HEADERS_TIMEOUT [constant]	-	HEADERS_TIMEOUT [constant]	same
 Health	IHealth [record]	Health [record]	Health [record]	same
 HealthCheck	IHealthCheck [record]	HealthCheck [record]	HealthCheck [record]	same
 HealthStatus	HealthStatus [choice]	HealthStatus [choice]	HealthStatus [choice]	same
 HEARTBEAT	HEARTBEAT [constant]	-	HEARTBEAT [constant]	same
+HTTP_REFUSALS	HTTP_REFUSALS [constant]	HttpRefusals [constant]	HTTP_REFUSALS [constant]	same
 HTTPBinding	IHTTPBinding [record], createHTTPBinding [function]	HttpBinding [record]	-	same
 HTTPCaller	IHTTPCaller [record], createHTTPCaller [function]	HttpCaller [record]	-	same
 HTTPCallerOptions	IHTTPCallerOptions [record]	HttpCallerOptions [record]	-	same
 HTTPCallOptions	IHTTPCallOptions [record]	HttpCallOptions [record]	-	same
+HTTPClient	HTTPClient [record], createHTTPClient [function]	BeadHttpClient [record]	HttpClient [record]	rendered: platform (0049)
+HTTPClientOptions	IHTTPClientOptions [record]	BeadHttpClientOptions [record]	HttpClientOptions [record]	rendered: platform (0049)
 HTTPEvent	HTTPEvent [choice]	HttpEvent [record]	-	same
 HTTPGateway	IHTTPGateway [record], createHTTPGateway [function]	HttpGateway [record]	-	same
 HTTPGatewayOptions	IHTTPGatewayOptions [record]	HttpGatewayOptions [record]	-	same
 HTTPGatewayStartOptions	IHTTPGatewayStartOptions [record]	HttpGatewayStartOptions [record]	-	same
 HttpPayload	HttpPayload [choice]	HttpPayload [record]	-	same
-HTTPPolicy	IHTTPPolicy [record]	HttpPolicy [record]	-	same
+HTTPPolicy	IHTTPPolicy [record]	HttpPolicy [record]	HttpPolicy [record]	same
+HTTPPolicyOptions	IHTTPPolicyOptions [record]	HttpPolicyOptions [record]	HttpPolicyOptions [record]	same
+HttpRefusals	-	-	HttpRefusals [record]	own: the type of the Rust side's constant of refusals, where the other sides hold a frozen object and a static class of constants (0044)
 HttpRouteTemplate	IHttpRouteTemplate [record]	HttpRouteTemplate [record]	-	same
-HTTPServer	HTTPServer [record], createHTTPServer [function]	HttpServer [record]	-	same
-HTTPServerOptions	IHTTPServerOptions [record]	HttpServerOptions [record]	-	same
-HTTPTransportClient	HTTPTransportClient [record], createHTTPTransportClient [function]	HttpTransportClient [record]	-	same
-HTTPTransportClientConnectOptions	IHTTPTransportClientConnectOptions [record]	HttpTransportClientConnectOptions [record]	-	same
-HTTPTransportClientOptions	IHTTPTransportClientOptions [record]	HttpTransportClientOptions [record]	-	same
-HTTPTransportServer	HTTPTransportServer [record], createHTTPTransportServer [function]	HttpTransportServer [record]	-	same
-HTTPTransportServerOptions	IHTTPTransportServerOptions [record]	HttpTransportServerOptions [record]	-	same
+HTTPServer	HTTPServer [record], createHTTPServer [function]	HttpServer [record]	HttpServer [record]	same
+HTTPServerOptions	IHTTPServerOptions [record]	HttpServerOptions [record]	HttpServerOptions [record]	same
+HTTPTransportClient	HTTPTransportClient [record], createHTTPTransportClient [function]	HttpTransportClient [record]	HttpTransportClient [record]	same
+HTTPTransportClientConnectOptions	IHTTPTransportClientConnectOptions [record]	HttpTransportClientConnectOptions [record]	HttpTransportClientConnectOptions [record]	same
+HTTPTransportClientOptions	IHTTPTransportClientOptions [record]	HttpTransportClientOptions [record]	HttpTransportClientOptions [record]	same
+HTTPTransportServer	HTTPTransportServer [record], createHTTPTransportServer [function]	HttpTransportServer [record]	HttpTransportServer [record]	same
+HTTPTransportServerOptions	IHTTPTransportServerOptions [record]	HttpTransportServerOptions [record]	HttpTransportServerOptions [record]	same
 IdentityRefusal	-	-	IdentityRefusal [choice]	own: a Result's error, where the other sides throw (0044)
 INTAKE_DEFAULTS	INTAKE_DEFAULTS [constant]	-	INTAKE_DEFAULTS [constant]	same
 IntakeLimits	IIntakeLimits [record]	IntakeLimits [record]	IntakeLimits [record]	same
@@ -148,6 +158,7 @@ LONGEST_TIMER	LONGEST_TIMER [constant]	-	LONGEST_TIMER [constant]	same
 MAXIMUM_CONNECTIONS	MAXIMUM_CONNECTIONS [constant]	-	MAXIMUM_CONNECTIONS [constant]	same
 MAXIMUM_CONNECTIONS_PER_ADDRESS	MAXIMUM_CONNECTIONS_PER_ADDRESS [constant]	-	MAXIMUM_CONNECTIONS_PER_ADDRESS [constant]	same
 MAXIMUM_ENVELOPE_PARTS_BYTES	MAXIMUM_ENVELOPE_PARTS_BYTES [constant]	-	MAXIMUM_ENVELOPE_PARTS_BYTES [constant]	same
+MAXIMUM_MESSAGE_BYTES	MAXIMUM_MESSAGE_BYTES [constant]	-	MAXIMUM_MESSAGE_BYTES [constant]	same
 MAXIMUM_UNSENT_BYTES	MAXIMUM_UNSENT_BYTES [constant]	-	MAXIMUM_UNSENT_BYTES [constant]	same
 MemoryBroker	IMemoryBroker [record], createMemoryBroker [function]	MemoryBroker [record]	MemoryBroker [record]	same
 MemoryBrokerAdapter	IMemoryBrokerAdapter [record]	MemoryBrokerAdapter [record]	MemoryBrokerAdapter [record]	same
@@ -166,6 +177,7 @@ MetricsExposition	IMetricsExposition [record]	MetricsExposition [record]	Metrics
 MetricsRegistry	IMetricsRegistry [record], createMetricsRegistry [function]	MetricsRegistry [record]	MetricsRegistry [record]	same
 MetricsRegistryOptions	IMetricsRegistryOptions [record]	MetricsRegistryOptions [record]	MetricsRegistryOptions [record]	same
 MINIMUM_BODY_BYTES_PER_SECOND	MINIMUM_BODY_BYTES_PER_SECOND [constant]	-	MINIMUM_BODY_BYTES_PER_SECOND [constant]	same
+MINIMUM_SEND_BYTES_PER_SECOND	MINIMUM_SEND_BYTES_PER_SECOND [constant]	-	MINIMUM_SEND_BYTES_PER_SECOND [constant]	same
 MqttBrokerAdapter	IMqttBrokerAdapter [record], createMqttBrokerAdapter [function]	MqttBrokerAdapter [record]	-	same
 MqttBrokerAdapterOptions	IMqttBrokerAdapterOptions [record]	MqttBrokerAdapterOptions [record]	-	same
 NEVER	-	-	NEVER [constant]	own: never, which each other platform has of its own, Infinity and Timeout.InfiniteTimeSpan (0044)
@@ -251,6 +263,7 @@ RouterServerOptions	IRouterServerOptions [record]	RouterServerOptions [record]	R
 RouterServerTransportLike	IRouterServerTransportLike [record]	IRouterServerTransport [record]	-	rendered: like (0007)
 RouterSide	RouterSide [choice]	RouterSide [choice]	RouterSide [choice]	same
 Schedule	-	-	Schedule [choice]	own: the platform's clock and its timers, which the other sides take from their platform (0044, 0011)
+SEND_GRACE_PERIOD	SEND_GRACE_PERIOD [constant]	-	SEND_GRACE_PERIOD [constant]	same
 Server	IServer [record], createServer [function]	Server [record]	Server [record]	same
 SERVER_CONNECTION_HANDLE	SERVER_CONNECTION_HANDLE [constant]	RouterClient.ServerConnectionHandle [constant]	SERVER_CONNECTION_HANDLE [constant]	rendered: constant (0007)
 ServerGauges	ServerGauges [record]	ServerGauges [record]	ServerGauges [record]	same
@@ -291,16 +304,18 @@ TimerCallback	-	-	TimerCallback [function type]	own: the platform's clock and it
 TracedEnvelope	-	TracedEnvelope [record]	TracedEnvelope [record]	same
 TRANSPORT_BROKER	TRANSPORT_BROKER [constant]	-	TRANSPORT_BROKER [constant]	same
 TRANSPORT_MEMORY	TRANSPORT_MEMORY [constant]	-	TRANSPORT_MEMORY [constant]	same
+TRANSPORT_WEBSOCKET	TRANSPORT_WEBSOCKET [constant]	-	TRANSPORT_WEBSOCKET [constant]	same
 TransportClientDisconnectOptions	ITransportClientDisconnectOptions [record]	TransportClientDisconnectOptions [record]	TransportClientDisconnectOptions [record]	same
 TransportClientReconnectDelay	TransportClientReconnectDelay [choice]	TransportClientReconnectDelay [record]	TransportClientReconnectDelay [choice]	same
 TransportClientReconnectDelayResolver	TransportClientReconnectDelayResolver [function type]	TransportClientReconnectDelayResolver [function type]	TransportClientReconnectDelayResolver [function type]	same
 TransportClientReconnectOptions	ITransportClientReconnectOptions [record]	TransportClientReconnectOptions [record]	TransportClientReconnectOptions [record]	same
 TransportError	-	-	TransportError [choice]	own: a Result's error, where the other sides throw (0044)
 TransportMessage	ITransportMessage [record]	TransportMessage [record]	TransportMessage [record]	same
-TransportServerAddress	ITransportServerAddress [record]	TransportServerAddress [record]	-	same
+TransportServerAddress	ITransportServerAddress [record]	TransportServerAddress [record]	TransportServerAddress [record]	same
 TransportServerClient	ITransportServerClient [record]	TransportServerClient [record]	TransportServerClient [record]	same
 TransportServerConnection	ITransportServerConnection [record]	-	-	own: what a connection's platform opened it with, which the other sides do not hand (0007)
 TransportServerRefusal	ITransportServerRefusal [record]	TransportServerRefusal [record]	TransportServerRefusal [record]	same
+TransportServerStartOptions	ITransportServerStartOptions [record]	TransportServerStartOptions [record]	TransportServerStartOptions [record]	same
 UnregisterNotificationOptions	IUnregisterNotificationOptions [record]	-	UnregisterNotificationOptions [record]	same
 utf8Length	utf8Length [function]	Validators.Utf8Length [function]	-	rendered: of (0007, 0044)
 ValidateOptions	IValidateOptions [record]	ValidateOptions [record]	ValidateOptions [record]	same
@@ -310,16 +325,17 @@ violationsDetailOf	violationsDetailOf [function]	Violations.DetailOf [function]	
 ViolationSink	IViolationSink [record]	IViolationSink [record]	-	same
 violationsOf	violationsOf [function]	Violations.Of [function]	violations_of [function]	rendered: of (0007, 0044)
 WARNING_RATIO	WARNING_RATIO [constant]	Health.WarningRatio [constant]	WARNING_RATIO [constant]	rendered: constant (0007)
-WEBSOCKET_REFUSALS	WEBSOCKET_REFUSALS [constant]	WebSocketRefusals [constant]	-	same
-WebSocketClient	WebSocketClient [record], createWebSocketClient [function]	WebSocketClient [record]	-	same
-WebSocketClientOptions	IWebSocketClientOptions [record]	WebSocketClientOptions [record]	-	same
-WebSocketServer	WebSocketServer [record], createWebSocketServer [function]	WebSocketServer [record]	-	same
-WebSocketServerOptions	IWebSocketServerOptions [record]	WebSocketServerOptions [record]	-	same
-WebSocketTransportClient	WebSocketTransportClient [record], createWebSocketTransportClient [function]	WebSocketTransportClient [record]	-	same
-WebSocketTransportClientConnectOptions	IWebSocketTransportClientConnectOptions [record]	WebSocketTransportClientConnectOptions [record]	-	same
-WebSocketTransportClientOptions	IWebSocketTransportClientOptions [record]	WebSocketTransportClientOptions [record]	-	same
-WebSocketTransportServer	WebSocketTransportServer [record], createWebSocketTransportServer [function]	WebSocketTransportServer [record]	-	same
-WebSocketTransportServerOptions	IWebSocketTransportServerOptions [record]	WebSocketTransportServerOptions [record]	-	same
+WEBSOCKET_REFUSALS	WEBSOCKET_REFUSALS [constant]	WebSocketRefusals [constant]	WEBSOCKET_REFUSALS [constant]	same
+WebSocketRefusals	-	-	WebSocketRefusals [record]	own: the type of the Rust side's constant of refusals, where the other sides hold a frozen object and a static class of constants (0044)
+WebSocketClient	WebSocketClient [record], createWebSocketClient [function]	WebSocketClient [record]	WebSocketClient [record]	same
+WebSocketClientOptions	IWebSocketClientOptions [record]	WebSocketClientOptions [record]	WebSocketClientOptions [record]	same
+WebSocketServer	WebSocketServer [record], createWebSocketServer [function]	WebSocketServer [record]	WebSocketServer [record]	same
+WebSocketServerOptions	IWebSocketServerOptions [record]	WebSocketServerOptions [record]	WebSocketServerOptions [record]	same
+WebSocketTransportClient	WebSocketTransportClient [record], createWebSocketTransportClient [function]	WebSocketTransportClient [record]	WebSocketTransportClient [record]	same
+WebSocketTransportClientConnectOptions	IWebSocketTransportClientConnectOptions [record]	WebSocketTransportClientConnectOptions [record]	WebSocketTransportClientConnectOptions [record]	same
+WebSocketTransportClientOptions	IWebSocketTransportClientOptions [record]	WebSocketTransportClientOptions [record]	WebSocketTransportClientOptions [record]	same
+WebSocketTransportServer	WebSocketTransportServer [record], createWebSocketTransportServer [function]	WebSocketTransportServer [record]	WebSocketTransportServer [record]	same
+WebSocketTransportServerOptions	IWebSocketTransportServerOptions [record]	WebSocketTransportServerOptions [record]	WebSocketTransportServerOptions [record]	same
 WithdrawnListener	-	-	WithdrawnListener [function type]	own: a listener the Rust side registers for an event the other sides emit (0044)
 wordsOf	wordsOf [function]	Violations.WordsOf [function]	words_of [function]	rendered: of (0007, 0044)
 AdmissionRefusal	-	-	AdmissionRefusal [record]	alone
@@ -333,10 +349,8 @@ AnswerTarget	-	AnswerTarget [record]	-	alone
 Arose	Arose [choice]	-	-	alone
 BEAD_BATCH_MEDIA_TYPE	BEAD_BATCH_MEDIA_TYPE [constant]	-	-	alone
 BEAD_MEDIA_TYPE	BEAD_MEDIA_TYPE [constant]	-	-	alone
-BeadHttpClient	-	BeadHttpClient [record]	-	alone
-BeadHttpClientOptions	-	BeadHttpClientOptions [record]	-	alone
 BeadServer	-	IBeadServer [record]	-	alone
-BODY_BYTES_BUDGET	BODY_BYTES_BUDGET [constant]	-	-	alone
+BODY_BYTES_BUDGET	BODY_BYTES_BUDGET [constant]	-	BODY_BYTES_BUDGET [constant]	same
 BROKER_DELIVERIES	BROKER_DELIVERIES [constant]	-	-	alone
 BROKER_PUBLISHED	BROKER_PUBLISHED [constant]	-	-	alone
 BrokerAnswers	IBrokerAnswers [record]	-	-	alone
@@ -365,7 +379,6 @@ CLIENT_FAILURES	CLIENT_FAILURES [constant]	-	-	alone
 ClientTransportLike	IClientTransportLike [record]	-	-	alone
 Clocks	-	Clocks [constant]	-	alone
 CLOSE_EVENT	CLOSE_EVENT [constant]	-	-	alone
-CLOSE_TIMEOUT	CLOSE_TIMEOUT [constant]	-	-	alone
 CloseConnection	-	-	CloseConnection [function type]	alone
 CloseEventLike	ICloseEventLike [record]	-	-	alone
 CommandDescriptor	CommandDescriptor [record]	-	-	alone
@@ -375,14 +388,12 @@ config_of	-	-	config_of [function]	alone
 Connect	-	-	Connect [record]	alone
 CONNECT_DEFAULTS	CONNECT_DEFAULTS [constant]	-	-	alone
 CONNECTION_EVENT	CONNECTION_EVENT [constant]	-	-	alone
-CONNECTION_INACTIVITY_TIMEOUT	CONNECTION_INACTIVITY_TIMEOUT [constant]	-	-	alone
 CONNECTION_INACTIVITY_TIMEOUT_CHANGED_EVENT	CONNECTION_INACTIVITY_TIMEOUT_CHANGED_EVENT [constant]	-	-	alone
 CONNECTION_INACTIVITY_TIMEOUT_REACHED_EVENT	CONNECTION_INACTIVITY_TIMEOUT_REACHED_EVENT [constant]	-	-	alone
 CONNECTION_TOKEN_HEADER	CONNECTION_TOKEN_HEADER [constant]	-	-	alone
 CONNECTION_UNKNOWN	CONNECTION_UNKNOWN [constant]	-	-	alone
 ConnectParameters	ConnectParameters [record]	-	-	alone
 CREATED_EVENT	CREATED_EVENT [constant]	-	-	alone
-createHTTPClient	createHTTPClient [function]	-	-	alone
 createNotificationManager	createNotificationManager [function]	-	-	alone
 createTimers	createTimers [function]	-	-	alone
 createTransportClient	createTransportClient [function]	-	-	alone
@@ -427,7 +438,7 @@ ENVELOPE_PREFIX	ENVELOPE_PREFIX [constant]	-	-	alone
 EnvelopeAsked	-	-	EnvelopeAsked [record]	alone
 ERROR_EVENT	ERROR_EVENT [constant]	-	-	alone
 EventIteratorOptions	IEventIteratorOptions [record]	-	-	alone
-EXCHANGE_TIMEOUT	EXCHANGE_TIMEOUT [constant]	-	-	alone
+EXCHANGE_TIMEOUT	EXCHANGE_TIMEOUT [constant]	-	EXCHANGE_TIMEOUT [constant]	same
 FailureArising	-	FailureArising [choice]	-	alone
 FailureException.Raised	-	FailureException.Raised [record]	-	alone
 FailureExceptionOptions	-	FailureExceptionOptions [record]	-	alone
@@ -447,23 +458,18 @@ GivenFilter	-	-	GivenFilter [choice]	alone
 GivenOf	GivenOf [record]	-	-	alone
 HandedCredential	HandedCredential [choice]	-	-	alone
 HandedRequestHeader	IHandedRequestHeader [record]	-	-	alone
-HEADERS_TIMEOUT	HEADERS_TIMEOUT [constant]	-	-	alone
 HookName	HookName [record]	-	-	alone
 HOST_REFUSAL	HOST_REFUSAL [constant]	-	-	alone
 HTTP_POLICY_MEMBERS	HTTP_POLICY_MEMBERS [constant]	-	-	alone
-HTTPClient	HTTPClient [record]	-	-	alone
 HTTPClientConnection	IHTTPClientConnection [record]	-	-	alone
-HTTPClientOptions	IHTTPClientOptions [record]	-	-	alone
 HttpEncoding	-	HttpEncoding [choice]	-	alone
 HttpEvents	-	HttpEvents [record]	-	alone
 HttpGatewayEndpoints.MapBeadGateway	-	HttpGatewayEndpoints.MapBeadGateway [function]	-	alone
 HTTPGatewayEventMap	HTTPGatewayEventMap [record]	-	-	alone
 HttpMethod	HttpMethod [choice]	-	-	alone
 HttpPath	-	HttpPath [record]	-	alone
-HTTPPolicyInit	IHTTPPolicyInit [record]	-	-	alone
 httpPolicyOf	httpPolicyOf [function]	-	-	alone
 HTTPPolicyOption	IHTTPPolicyOption [record]	-	-	alone
-HttpPolicyOptions	-	HttpPolicyOptions [record]	-	alone
 HttpProblem	-	HttpProblem [record]	-	alone
 HttpProblems.MediaType	-	HttpProblems.MediaType [constant]	-	alone
 HttpProblems.Of	-	HttpProblems.Of [function]	-	alone
@@ -472,7 +478,6 @@ HttpProblems.PhraseOf	-	HttpProblems.PhraseOf [function]	-	alone
 HttpProblems.Refusal	-	HttpProblems.Refusal [function]	-	alone
 HttpProblems.StatusOf	-	HttpProblems.StatusOf [function]	-	alone
 HttpProblems.Tag	-	HttpProblems.Tag [constant]	-	alone
-HttpRefusals	-	HttpRefusals [constant]	-	alone
 HTTPRequester	IHTTPRequester [function type]	-	-	alone
 httpRequesterOf	httpRequesterOf [function]	-	-	alone
 HTTPRequestLike	IHTTPRequestLike [record]	-	-	alone
@@ -487,10 +492,9 @@ HTTPSubscriber	IHTTPSubscriber [function type]	-	-	alone
 httpSubscriberOf	httpSubscriberOf [function]	-	-	alone
 HttpTemplate	-	HttpTemplate [record]	-	alone
 HttpTransport	-	HttpTransport [constant]	-	alone
-HttpTransportStartOptions	-	HttpTransportStartOptions [record]	-	alone
 HttpVariable	-	HttpVariable [record]	-	alone
 IDLE_TIMEOUT	IDLE_TIMEOUT [constant]	-	-	alone
-INACTIVITY_TIMEOUT	INACTIVITY_TIMEOUT [constant]	-	-	alone
+INACTIVITY_TIMEOUT	INACTIVITY_TIMEOUT [constant]	-	INACTIVITY_TIMEOUT [constant]	same
 IncomingMessageLike	IIncomingMessageLike [record]	-	-	alone
 isReadyStateClosed	isReadyStateClosed [function]	-	-	alone
 isReadyStateClosing	isReadyStateClosing [function]	-	-	alone
@@ -537,16 +541,15 @@ LOCALHOST	LOCALHOST [constant]	-	-	alone
 LOCALHOST_DRAWS	LOCALHOST_DRAWS [constant]	-	-	alone
 matchesPattern	matchesPattern [function]	-	-	alone
 matchesTemplate	matchesTemplate [function]	-	-	alone
-MAXIMUM_BODY_BYTES	MAXIMUM_BODY_BYTES [constant]	-	-	alone
+MAXIMUM_BODY_BYTES	MAXIMUM_BODY_BYTES [constant]	-	MAXIMUM_BODY_BYTES [constant]	same
 MAXIMUM_DEPTH	MAXIMUM_DEPTH [constant]	-	-	alone
 MAXIMUM_EXCHANGES	MAXIMUM_EXCHANGES [constant]	-	-	alone
 MAXIMUM_EXCHANGES_PER_ADDRESS	MAXIMUM_EXCHANGES_PER_ADDRESS [constant]	-	-	alone
-MAXIMUM_MESSAGE_BYTES	MAXIMUM_MESSAGE_BYTES [constant]	-	-	alone
 MAXIMUM_MESSAGE_SIZE	MAXIMUM_MESSAGE_SIZE [constant]	-	-	alone
-MAXIMUM_OUTBOX_BYTES	MAXIMUM_OUTBOX_BYTES [constant]	-	-	alone
+MAXIMUM_OUTBOX_BYTES	MAXIMUM_OUTBOX_BYTES [constant]	-	MAXIMUM_OUTBOX_BYTES [constant]	same
 MAXIMUM_PACKET_SIZE	MAXIMUM_PACKET_SIZE [constant]	-	-	alone
-MAXIMUM_WAIT	MAXIMUM_WAIT [constant]	-	-	alone
-MAXIMUM_WAITING_EXCHANGES	MAXIMUM_WAITING_EXCHANGES [constant]	-	-	alone
+MAXIMUM_WAIT	MAXIMUM_WAIT [constant]	-	MAXIMUM_WAIT [constant]	same
+MAXIMUM_WAITING_EXCHANGES	MAXIMUM_WAITING_EXCHANGES [constant]	-	MAXIMUM_WAITING_EXCHANGES [constant]	same
 MEMORY_ADDRESS	-	-	MEMORY_ADDRESS [constant]	alone
 MEMORY_BROKER_FAULTS	MEMORY_BROKER_FAULTS [constant]	-	-	alone
 MemoryAcceptOptions	IMemoryAcceptOptions [record]	-	-	alone
@@ -556,7 +559,6 @@ MemoryTransportServerLike	IMemoryTransportServerLike [record]	-	-	alone
 MESSAGE_EVENT	MESSAGE_EVENT [constant]	-	-	alone
 MessageEventLike	IMessageEventLike [record]	-	-	alone
 MessageRules	MessageRules [function type]	-	-	alone
-MINIMUM_SEND_BYTES_PER_SECOND	MINIMUM_SEND_BYTES_PER_SECOND [constant]	-	-	alone
 MqttBrokerTlsOptions	-	MqttBrokerTlsOptions [record]	-	alone
 NoFailure	-	NoFailure [record]	-	alone
 NotificationCallback	-	-	NotificationCallback [function type]	alone
@@ -576,7 +578,7 @@ Pacing	IPacing [record]	-	-	alone
 PARCEL_VERDICTS	PARCEL_VERDICTS [constant]	-	-	alone
 parseTemplate	parseTemplate [function]	-	-	alone
 PARTICIPANT_PORT	PARTICIPANT_PORT [constant]	-	-	alone
-PATHNAME	PATHNAME [constant]	-	-	alone
+PATHNAME	PATHNAME [constant]	-	PATHNAME [constant]	same
 Pattern.Matches	-	Pattern.Matches [function]	-	alone
 PAYLOAD_CODECS	PAYLOAD_CODECS [constant]	-	-	alone
 payloadCodecOf	payloadCodecOf [function]	-	-	alone
@@ -616,7 +618,6 @@ RedactedHeader	RedactedHeader [record]	-	-	alone
 Refusal	-	-	Refusal [choice]	alone
 REFUSAL_EVENT	REFUSAL_EVENT [constant]	-	-	alone
 REFUSAL_HEADER	REFUSAL_HEADER [constant]	-	-	alone
-REFUSALS	REFUSALS [constant]	-	-	alone
 RelayLeg	-	-	RelayLeg [record]	alone
 RelayRouter	-	-	RelayRouter [record]	alone
 RequestDescriptor	RequestDescriptor [record]	-	-	alone
@@ -647,7 +648,6 @@ RouterServerDebugInfo	IRouterServerDebugInfo [record]	-	-	alone
 RouterServerEventMap	RouterServerEventMap [record]	-	-	alone
 RouterTarget	-	IRouterTarget [record]	-	alone
 Segment	Segment [choice]	-	-	alone
-SEND_GRACE_PERIOD	SEND_GRACE_PERIOD [constant]	-	-	alone
 Sent	-	-	Sent [choice]	alone
 SEQUENCE_HEADER	SEQUENCE_HEADER [constant]	-	-	alone
 SERVER_FAILURES	SERVER_FAILURES [constant]	-	-	alone
@@ -706,10 +706,9 @@ TracedError	-	-	TracedError [record]	alone
 TracedValue	-	-	TracedValue [record]	alone
 TRANSPORT_AMQP	TRANSPORT_AMQP [constant]	-	-	alone
 TRANSPORT_CLIENT_EVENTS	TRANSPORT_CLIENT_EVENTS [choice]	-	-	alone
-TRANSPORT_HTTP	TRANSPORT_HTTP [constant]	-	-	alone
+TRANSPORT_HTTP	TRANSPORT_HTTP [constant]	-	TRANSPORT_HTTP [constant]	same
 TRANSPORT_MQTT	TRANSPORT_MQTT [constant]	-	-	alone
 TRANSPORT_SERVER_EVENTS	TRANSPORT_SERVER_EVENTS [choice]	-	-	alone
-TRANSPORT_WEBSOCKET	TRANSPORT_WEBSOCKET [constant]	-	-	alone
 TRANSPORT_WEBSOCKET_BINARYTYPE	TRANSPORT_WEBSOCKET_BINARYTYPE [constant]	-	-	alone
 TRANSPORT_WORKER	TRANSPORT_WORKER [constant]	-	-	alone
 TransportClient	ITransportClient [record]	-	-	alone
@@ -742,7 +741,6 @@ TransportServerOnMessageCallback	TransportServerOnMessageCallback [record]	-	-	a
 TransportServerOnRefusalCallback	TransportServerOnRefusalCallback [record]	-	-	alone
 TransportServerOptions	ITransportServerOptions [record]	-	-	alone
 TransportServerResolvedStartOptions	TransportServerResolvedStartOptions [record]	-	-	alone
-TransportServerStartOptions	ITransportServerStartOptions [record]	-	-	alone
 TransportServerToldEvent	TransportServerToldEvent [record]	-	-	alone
 TransportTypes	-	TransportTypes [constant]	-	alone
 Unsubscribe	-	-	Unsubscribe [function type]	alone
@@ -769,7 +767,6 @@ WebSocketConstructor	IWebSocketConstructor [record]	-	-	alone
 WebSocketLike	IWebSocketLike [record]	-	-	alone
 WebSocketServerConstructor	IWebSocketServerConstructor [record]	-	-	alone
 WebSocketServerLike	IWebSocketServerLike [record]	-	-	alone
-WebSocketTransportStartOptions	-	WebSocketTransportStartOptions [record]	-	alone
 WINDOW	WINDOW [constant]	-	-	alone
 WORKER_MESSAGES	WORKER_MESSAGES [constant]	-	-	alone
 WorkerChannelLike	IWorkerChannelLike [record]	-	-	alone

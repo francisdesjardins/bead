@@ -18,7 +18,9 @@ export const meta = {
   ],
 };
 
-// args: { repo, scratch, venv, slug, subject, branch?, record?, draft?, draftEffort?, small? }
+// args: { repo, scratch, venv, slug, subject, branch?, record?, draft?, draftEffort?, small?,
+//   dissentModel? }
+// - dissentModel: the model the Tenth Man runs on, when it is not the session's ('fable', say);
 // - subject: the change in full: what differs or what changes, the files and sections it touches,
 //   the standards in play;
 // - record: the decision record whose `## The Tenth Man` keeps the round, when it is known;
@@ -124,7 +126,13 @@ const dissent = await agent(
   `${COMMON}
 # You are the Tenth Man (effort xhigh)
 The others agree with ${PROPOSAL}. You are bound to disagree: argue that the consensus is wrong, wherever it is — the reading of a standard, a peer or a deployment the change breaks, what each platform lets a side control at all, where the two sides would still differ, a name, an order, a cost the proposal leaves out, a simpler design it passed over. Rerun any probe you doubt, under ${OUT}/tenth/. Every objection with its evidence; as many as it deserves, no padding. Write them also to ${OUT}/objections.md.${SUMMARY}`,
-  { label: `tenth-man:${SLUG}`, phase: 'Tenth Man', effort: 'xhigh', schema: OBJECTIONS }
+  {
+    label: `tenth-man:${SLUG}`,
+    phase: 'Tenth Man',
+    effort: 'xhigh',
+    schema: OBJECTIONS,
+    ...(args.dissentModel ? { model: args.dissentModel } : {}),
+  }
 );
 
 phase('Revise');

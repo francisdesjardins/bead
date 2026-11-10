@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Coverage-guided fuzzing of Bead's own parsers, on every side, by hand and every week, never as a
-// pull request's gate (decision 0006). Eight targets, the same on each side and named alike, six of
-// them on the Rust side until its transports land, and one of beadc's, each fed raw bytes:
+// pull request's gate (decision 0006). Eight targets, the same on each side and named alike, and
+// one of beadc's, each fed raw bytes:
 //
 // - `envelope`: the envelope reader, its header then its body, and a failure's record;
 // - `payload-codecs`: the `json` and `text` codecs' readers, and the writers behind them;
@@ -34,10 +34,9 @@
 //   runtime does: what a run keeps past it fails as a finding, never as a slow climb to the limit.
 // - Rust: cargo-fuzz's libFuzzer, over `implementations/rust/fuzz/`, a project outside the side's
 //   workspace, on the nightly its `-Z sanitizer` needs, pinned by its date as CI's fuzz build is,
-//   on Linux or WSL; `envelope`, `payload-codecs`, `debug-filter`, `jwt`, `broker-parcel` and
-//   `proto-codecs`, the twins its core holds, `http-fields` and `ws-handshake` coming with its
-//   transports (decision 0044). Its runs read the folder's `.cargo/config.toml`, and set
-//   `CARGO_BUILD_WARNINGS=warn`: a newer compiler's warnings are no gate of the pinned one's.
+//   on Linux or WSL, every twin, over its core's judgement and codecs (decisions 0044, 0049). Its
+//   runs read the folder's `.cargo/config.toml`, and set `CARGO_BUILD_WARNINGS=warn`: a newer
+//   compiler's warnings are no gate of the pinned one's.
 // - C#: libFuzzer as libfuzzer-dotnet builds it for Windows, over
 //   `implementations/dotnet/tools/Bead.Fuzz/`, which it runs as its child, once SharpFuzz has
 //   instrumented Bead.Core, Bead.Transport.WebSockets, Bead.Protobuf and Google.Protobuf in a copy
@@ -91,20 +90,13 @@ export const TWINS = Object.freeze([
 ]);
 
 /**
- * Each side's targets, by their names: the twins, on the TypeScript side beadc's `blueprint`
- * beside them, and on the Rust side those its core holds, ahead of its transports.
+ * Each side's targets, by their names: the twins, on the TypeScript side beadc's `blueprint` beside
+ * them.
  */
 export const TARGETS = Object.freeze({
   typescript: Object.freeze([...TWINS, 'blueprint']),
   csharp: TWINS,
-  rust: Object.freeze([
-    'envelope',
-    'payload-codecs',
-    'debug-filter',
-    'jwt',
-    'broker-parcel',
-    'proto-codecs',
-  ]),
+  rust: TWINS,
 });
 
 /** Each side's folder, where its targets, its corpora and its findings are. */

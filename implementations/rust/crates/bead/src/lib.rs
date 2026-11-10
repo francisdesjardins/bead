@@ -18,13 +18,20 @@ mod duration;
 mod envelope;
 mod errors;
 mod failure;
+#[cfg(feature = "http")]
+mod http;
+mod http_policy;
 mod identity;
 mod joined;
 pub mod json;
+mod judgement;
 mod jwt_verifier;
+mod life;
 mod managers;
 mod memory;
 mod metrics;
+#[cfg(any(feature = "websocket", feature = "http"))]
+mod net;
 mod ordered;
 mod owner;
 mod payloads;
@@ -35,7 +42,13 @@ mod service;
 mod session_token;
 mod transport;
 mod violations;
+#[cfg(feature = "websocket")]
+mod websocket;
 
+/// The TLS a socket transport speaks, re-exported so that the config an application gives one is
+/// of the version Bead builds on.
+#[cfg(any(feature = "websocket", feature = "http"))]
+pub use rustls;
 /// The runtime handle accepted by Bead's runtime options.
 pub use tokio::runtime::Handle;
 /// The cancellation token accepted and handed by Bead's operations.
@@ -91,8 +104,26 @@ pub use errors::{
     ReconnectError, Refusal, ResolverError, TransportError,
 };
 pub use failure::{Failure, FailureOrigin, ProcedureAddress};
+#[cfg(feature = "http")]
+pub use http::client::{
+    HttpTransportClient, HttpTransportClientConnectOptions, HttpTransportClientOptions,
+};
+#[cfg(feature = "http")]
+pub use http::facade::{
+    CONNECTION_INACTIVITY_TIMEOUT, HttpClient, HttpClientOptions, HttpServer, HttpServerOptions,
+};
+#[cfg(feature = "http")]
+pub use http::fields::{HTTP_REFUSALS, HttpRefusals};
+#[cfg(feature = "http")]
+pub use http::server::{
+    BODY_BYTES_BUDGET, EXCHANGE_TIMEOUT, HttpTransportServer, HttpTransportServerOptions,
+    INACTIVITY_TIMEOUT, MAXIMUM_BODY_BYTES, MAXIMUM_OUTBOX_BYTES, MAXIMUM_WAIT,
+    MAXIMUM_WAITING_EXCHANGES, PATHNAME, TRANSPORT_HTTP,
+};
+pub use http_policy::{HttpPolicy, HttpPolicyOptions};
 pub use identity::{DeclarationWay, Deprecation, IdentityRefusal, Procedure};
 pub use joined::JoinedServerTransport;
+pub use judgement::handshake::{WEBSOCKET_REFUSALS, WebSocketRefusals};
 pub use jwt_verifier::{
     JwtAgainst, JwtAlgorithm, JwtKey, JwtRefusal, JwtSessionIdentifier, JwtVerdict,
 };
@@ -120,6 +151,8 @@ pub use metrics::{
     MetricsRegistry, MetricsRegistryOptions, NotificationSeries, ProcedureSeries, ResolverSeries,
     RouterMetrics,
 };
+#[cfg(any(feature = "websocket", feature = "http"))]
+pub use net::bounds::{HEADERS_TIMEOUT, MINIMUM_SEND_BYTES_PER_SECOND, SEND_GRACE_PERIOD};
 pub use payloads::{CodecRefusal, JsonCodec, JsonOf, PayloadCodec, RawCodec, TextCodec};
 pub use router::admissions::{
     BeforeRequest, require_credential, require_session, share_leg_b_session,
@@ -160,11 +193,27 @@ pub use transport::{
     CONNECT_TIMEOUT, ClientListener, Connect, ListenerId, RECONNECT_DEFAULTS, ReadyState,
     RouterClientTransport, Sent, ServerListener, ServerTransport, TransportClientDisconnectOptions,
     TransportClientReconnectDelay, TransportClientReconnectDelayResolver,
-    TransportClientReconnectOptions, TransportServerClient, TransportServerRefusal, is_field_value,
+    TransportClientReconnectOptions, TransportServerAddress, TransportServerClient,
+    TransportServerRefusal, TransportServerStartOptions, is_field_value,
 };
 pub use violations::{
     CLOSING_BYTES, Judged, ReadViolations, Violation, ViolationHolder, detail_bound_of,
     violations_detail_of, violations_of, words_of,
+};
+#[cfg(feature = "websocket")]
+pub use websocket::client::{
+    CredentialProvider, CredentialProviderError, WebSocketTransportClient,
+    WebSocketTransportClientConnectOptions, WebSocketTransportClientOptions,
+};
+#[cfg(feature = "websocket")]
+pub use websocket::connection::{CLOSE_TIMEOUT, MAXIMUM_MESSAGE_BYTES};
+#[cfg(feature = "websocket")]
+pub use websocket::facade::{
+    WebSocketClient, WebSocketClientOptions, WebSocketServer, WebSocketServerOptions,
+};
+#[cfg(feature = "websocket")]
+pub use websocket::server::{
+    TRANSPORT_WEBSOCKET, WebSocketTransportServer, WebSocketTransportServerOptions,
 };
 
 /// What the workspace's own members â€” the interop service, the bench, the conformance players and
@@ -180,8 +229,9 @@ pub mod internal {
         read_envelope, read_failure, read_header, read_prefix, write_envelope, write_header,
     };
     pub use crate::identity::{are_one_name, is_procedure_name};
+    pub use crate::judgement::{handshake, head, hosts, items, proxies, security, url_host};
     pub use crate::jwt_verifier::{ReadJwt, read_jwt, verify_jwt};
-    pub use crate::router::types::{limits_of, session_key_of};
+    pub use crate::router::types::{limits_of, session_key_of, whole_envelope_limits_of};
 }
 
 #[cfg(any(test, feature = "testing"))]

@@ -106,6 +106,15 @@ public sealed partial class HttpTransportServer
             return HostsAndOrigins.IsVisibleTarget(context.Features.Get<IHttpRequestFeature>()?.RawTarget);
         }
 
+        // the path a request's target names as it came, ended at its first #, an absolute-form
+        // target's after its authority: HTTP/2's :path, which Kestrel gives as its RawTarget, among them
+        internal static string PathOf(HttpContext context)
+        {
+            var request = context.Request;
+
+            return HostsAndOrigins.TargetPathOf(context.Features.Get<IHttpRequestFeature>()?.RawTarget ?? request.Path.Value ?? "");
+        }
+
         // the authority an HTTP/1 request's target names in absolute-form; none for another form, and
         // over HTTP/2, whose :authority Kestrel has put in the Host
         internal static string? TargetAuthorityOf(HttpContext context)

@@ -3,12 +3,11 @@
 Bead is a binary wire protocol: the envelopes of a request, its result or failure, the notifications
 of a subscription and the commands a server sends back, written at fixed offsets. This solution is
 its C# implementation, at behavioural parity with the TypeScript side: the same behaviour, played
-from the same conformance files in [`spec/`](../../spec/), which the Rust side plays as far as its
-core reaches, and proven against the TypeScript side in the interop. The
-rules its code keeps — interfaces and composition, every body a block, two parameters then an
-options record, every warning an error, one serial scheduler a router, and how the surface maps in
-.NET's terms — are [decision
-0007](../../docs/decisions/0007-csharp-interfaces-blocks-two-parameters-no-warning.md)'s.
+from the same conformance files in [`spec/`](../../spec/), which the Rust side plays as far as it
+reaches, and proven against the TypeScript and Rust sides in the interop. The rules its code keeps
+— interfaces and composition, every body a block, two parameters then an options record, every
+warning an error, one serial scheduler a router, and how the surface maps in .NET's terms — are
+[decision 0007](../../docs/decisions/0007-csharp-interfaces-blocks-two-parameters-no-warning.md)'s.
 
 ## Build and test
 
@@ -30,7 +29,9 @@ gone (RS0017), so a change of the surface writes its line in `PublicAPI.Unshippe
 before a symbol it takes away, and `tools/release.mjs prepare` moves them into
 `PublicAPI.Shipped.txt` (decision 0006). With `CI=true`, a restore that would change a
 `packages.lock.json` fails. The interop against the TypeScript server needs that side installed;
-with `BEAD_INTEROP_REQUIRED=1`, an interop that would skip fails instead.
+with `BEAD_INTEROP_REQUIRED=1`, an interop that would skip fails instead. The one against the Rust
+server, of the trait `server=Rust`, runs where `BEAD_INTEROP_RUST_SERVER` names its binary, and is
+skipped, saying so, otherwise.
 
 What plays against a real broker of MQTT 5 — the cases over MQTT 5, the adapter's link over a
 WebSocket, the interop over MQTT 5 — needs one given by `BEAD_MQTT_URL`, and is skipped, saying so,
