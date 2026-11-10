@@ -867,10 +867,9 @@ public sealed class BrokerParticipantTests
             reported.TrySetResult(reason);
         };
         await participant.Start();
-        adapter.Lose();
 
         // * each attempt is refused, and the wait before the next one is cut short
-        await adapter.Start();
+        await adapter.LoseThenStart();
         await cancelling.CancelAsync();
         Assert.Equal("the link of ada went down, and its reconnection ended: the reconnection was cancelled", (await reported.Task.WaitAsync(BrokerPair.Patience, Cancelled)).Message);
         Assert.False(participant.IsLinked);
@@ -920,8 +919,7 @@ public sealed class BrokerParticipantTests
         var reported = Hearing(participant);
 
         await participant.Start();
-        adapter.Lose();
-        await adapter.Start();
+        await adapter.LoseThenStart();
         await BrokerPair.Until(
             () =>
             {
@@ -1179,10 +1177,8 @@ public sealed class BrokerParticipantTests
 
         await throwing.Start();
         await tapping.Start();
-        ada.Lose();
-        await ada.Start();
-        bob.Lose();
-        await bob.Start();
+        await ada.LoseThenStart();
+        await bob.LoseThenStart();
         await BrokerPair.Until(
             () =>
             {
