@@ -579,6 +579,21 @@ public sealed class MemoryBrokerAdapter : IBrokerAdapter
     }
 
     /// <summary>
+    /// Its link lost, then started anew by the test that asks, both from one turn of its broker's:
+    /// the start goes behind the loss and before any attempt the loss sets off, which the loss's
+    /// own turn queues behind it.
+    /// </summary>
+    internal Task LoseThenStart()
+    {
+        return _broker.Scheduler.Run(() =>
+        {
+            Lose();
+
+            return Start();
+        });
+    }
+
+    /// <summary>
     /// Its link taken over by another link of its id, as a test asks: as <see cref="Lose"/>, its
     /// subscriptions dropped, since the link that takes it over holds none, and its will published,
     /// then <see cref="Down"/> raised telling it taken over. Its broker keeps one adapter to an id.
