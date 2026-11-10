@@ -124,7 +124,8 @@ first letter lowered, and only that.
 - Exact: `getHTTPStatus` and `getHttpStatus` live side by side in one service, as two `procedure`
   labels beside one `service`, which every filter word of those letters keeps both of, and which a
   CLS-compliant consumer's members cannot carry apart.
-- By each platform's comparison: `café` and `cafÉ` one on both, U+212A and `k` one on some readings.
+- By each platform's comparison: `café` and `cafÉ` one on Node and on .NET, U+212A and `k` one on
+  some readings.
 - **Without regard to case, in ASCII alone, character by character.** Chosen: how debugging 6.4
   reads a pattern, and what no platform's comparison does by itself.
 
@@ -134,9 +135,9 @@ first letter lowered, and only that.
   a preference ([0006](0006-a-rule-has-its-gate.md)).
 - A table in each router: a range, a form, one name an address, one revision a service, at each
   declaration whatever the registry. It repeats the registry's two reasons in a second layer; it
-  costs a lock of its own on the C# side, since `DeclareRequester` runs on the caller's thread
-  (`RouterClient.cs`), a table held for the router's life, and the tests that declare one name at
-  two addresses on one router or core.
+  costs a lock of its own on the C# and Rust sides, since a requester is declared on the caller's
+  thread (`RouterClient.cs`, the Rust side's `declare_requester`), a table held for the router's
+  life, and the tests that declare one name at two addresses on one router or core.
 - **What needs no memory at every declaration, what needs memory where 0013 put it.** Chosen. Each
   router checks the ids' ranges, the revision's and the name's form, a pure function over the
   procedure: no lock, no table, nothing held. The registry keeps its refusals, and compares names as
@@ -270,9 +271,10 @@ among it
 ([0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)),
 and, on the TypeScript and Rust sides, a refusal that is not an admission's, which the C# side
 refuses as the admission is built, before any maker, a difference the support matrix keeps. The
-side's refusal and a notification's keep their own type, a `ProgrammerError` and an
-`InvalidOperationException`, about the manager's state, and come before the router's reasons of
-state and its registry's. The router checks 16.10's three again for whoever calls it directly.
+side's refusal and a notification's keep their own type, about the manager's state, a
+`ProgrammerError` on the TypeScript and Rust sides and an `InvalidOperationException` on the C#
+side, and come before the router's reasons of state and its registry's. The router checks 16.10's
+three again for whoever calls it directly.
 
 **A side that keeps no names.** A constrained profile built without the trace and the metrics
 (debugging 1.2) refuses `out of its range` alone; its names are a blueprint's, which `beadc check`
