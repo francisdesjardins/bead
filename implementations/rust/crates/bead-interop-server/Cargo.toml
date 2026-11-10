@@ -1,0 +1,42 @@
+[package]
+name = "francisdesjardins-bead-interop-server"
+description = "The Rust server of Bead's interop service, over WebSocket and over HTTP, which the other sides' clients call, and the Rust client's trials against each side's server."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish.workspace = true
+
+# every test target is named below
+autotests = false
+
+[[bin]]
+name = "bead-interop-server"
+path = "src/main.rs"
+
+[dependencies]
+bead = { workspace = true, features = ["websocket", "http"] }
+bead-interop = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "time", "net"] }
+
+[dev-dependencies]
+bead = { workspace = true, features = ["testing", "websocket", "http"] }
+tokio = { workspace = true, features = ["rt", "time", "net"] }
+tokio-util = { workspace = true }
+bytes = { workspace = true }
+serde_json = { workspace = true }
+hmac = { workspace = true }
+sha2 = { workspace = true }
+libtest-mimic = { workspace = true }
+
+# the Rust client against each side's interop server, a trial per case per transport per server
+[[test]]
+name = "interop"
+harness = false
+
+[lints]
+workspace = true

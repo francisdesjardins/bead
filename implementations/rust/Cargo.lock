@@ -590,6 +590,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "francisdesjardins-bead-interop-server"
+version = "0.11.0"
+dependencies = [
+ "bytes",
+ "francisdesjardins-bead",
+ "francisdesjardins-bead-interop",
+ "hmac",
+ "libtest-mimic",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "francisdesjardins-bead-protobuf"
 version = "0.11.0"
 dependencies = [
