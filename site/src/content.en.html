@@ -1526,8 +1526,8 @@
   <p class="gist">
     Bead is a protocol: a specification, conformance files every implementation plays, and an
     interop service. The repository holds three implementations. TypeScript and C# are at
-    behavioural parity. Rust has its core, and each part it lacks is a row of the support matrix,
-    ahead.
+    behavioural parity. Rust has its core and its WebSocket and HTTP transports, and each part it
+    lacks is a row of the support matrix, ahead.
   </p>
   <div class="table-wrap">
     <table class="compare">
@@ -1553,15 +1553,17 @@
             transfers, relays, debugging and metrics
           </td>
           <td>
-            The routers, sessions and JWTs, debugging and metrics, the server half of the service
-            layer
+            The routers, the service layer, sessions and JWTs, debugging and metrics
           </td>
         </tr>
         <tr>
           <th scope="row">The transports</th>
           <td>WebSocket, HTTP, Web Worker, in memory, a broker over MQTT 5 or AMQP 1.0, and joined</td>
           <td>WebSocket, HTTP on Kestrel, in memory, a broker over MQTT 5 or AMQP 1.0, and joined</td>
-          <td>In memory, the broker’s core over an in-memory broker, and joined</td>
+          <td>
+            WebSocket and HTTP on hyper, in memory, the broker’s core over an in-memory broker, and
+            joined
+          </td>
         </tr>
         <tr>
           <th scope="row">The HTTP/JSON gateway</th>
@@ -1573,10 +1575,9 @@
     </table>
   </div>
   <p class="space">
-    On the Rust side, next come the client half of the service layer, the WebSocket and HTTP
-    transports with the interop, the bindings to a broker, the gateway and <code>beadc</code>’s Rust
-    target, each by a decision of its own. The core also compiles for
-    <code>wasm32-unknown-unknown</code>.
+    On the Rust side, next come the bindings to a broker, the gateway and <code>beadc</code>’s Rust
+    target, each by a decision of its own. Its WebSocket and HTTP transports meet the other two
+    sides in the interop, both ways. The core also compiles for <code>wasm32-unknown-unknown</code>.
   </p>
   <p>
     Parity holds down to the field. When one platform cannot do what another can, every side keeps
@@ -1610,8 +1611,8 @@
   <h3 id="implantations-conformite">What each implementation plays</h3>
   <p>
     Each unit of the specification is cited by a conformance file, or carries the reason none
-    cites it. The TypeScript and C# sides call each other in CI, over WebSocket, HTTP, MQTT 5 and
-    AMQP 1.0, and through their gateways.
+    cites it. The three sides call each other in CI over WebSocket and HTTP, and the TypeScript and
+    C# sides over MQTT 5 and AMQP 1.0 too, and through their gateways.
   </p>
   <details class="more">
     <summary>The conformance files, in figures</summary>
@@ -1708,8 +1709,8 @@
   <ul class="rules">
     <li>
       <strong>Rust in full</strong
-      ><span>The client of its service layer, its WebSocket and HTTP transports with the interop, its
-        MQTT 5 and AMQP 1.0 bindings, its gateway and its target in <code>beadc</code>.</span>
+      ><span>Its MQTT 5 and AMQP 1.0 bindings, its gateway and its target in
+        <code>beadc</code>.</span>
     </li>
     <li>
       <strong>Rules in CEL</strong
