@@ -95,7 +95,7 @@ to one meaning of `advance`. The why of each rule is in the decisions:
 - [0048](../docs/decisions/0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md):
   the procedures a server's transport takes, sections 9.2, 9.11, 9.12, 15.1 and 15.14.
 
-**Version: 0.12.0**, of layout `0xA1`, its broker parcels of layout `0xB1`. Each of its
+**Version: 0.13.0**, of layout `0xA1`, its broker parcels of layout `0xB1`. Each of its
 conformance files repeats it as its `specVersion`, and follows its schema in
 [`schemas/`](schemas/). The interop's blueprint,
 [`interop-blueprint.json`](interop-blueprint.json), and what its service does,

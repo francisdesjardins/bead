@@ -334,7 +334,7 @@ checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
 
 [[package]]
 name = "francisdesjardins-bead"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "bytes",
  "getrandom",
@@ -368,7 +368,7 @@ dependencies = [
 
 [[package]]
 name = "francisdesjardins-bead-protobuf"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "buffa",
  "buffa-descriptor",
@@ -380,7 +380,7 @@ dependencies = [
 
 [[package]]
 name = "francisdesjardins-bead-protobuf-build"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "buffa",
  "buffa-build",

@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-10
+
 ### Added
 
 - The Rust side's service client, `ServiceClient` and `ServiceClientOptions`, the twin of the other
@@ -25,6 +27,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The spec moves to 0.13.0 (`spec-v0.13.0`), its companion, `spec/debugging.md`, to 0.8.0
+  (`debugging-v0.8.0`), and the transcoding's companion, `spec/transcoding.md`, to 0.4.0
+  (`transcoding-v0.4.0`).
 - **Breaking:** a request's target is read as a page's browser writes it, on every side: `"`, `<`
   or `>` in its path or its query, `^`, `` ` ``, `{` or `}` in its path, or a `#` anywhere in it,
   answered 400 unmarked (RFC 9112 §3, §3.2), `%23` taken; and an absolute-form target's scheme is
@@ -2614,7 +2619,8 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
   workflows.
 - The licence, Apache-2.0.
 
-[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.11.0...develop
+[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.12.0...develop
+[0.12.0]: https://github.com/francisdesjardins/bead/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/francisdesjardins/bead/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/francisdesjardins/bead/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/francisdesjardins/bead/compare/v0.8.0...v0.9.0

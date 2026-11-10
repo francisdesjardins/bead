@@ -1253,6 +1253,10 @@ Bead.ReadyState.Connecting = 0 -> Bead.ReadyState
 Bead.ReadyState.Open = 1 -> Bead.ReadyState
 Bead.ReadyState.Reconnecting = 5 -> Bead.ReadyState
 Bead.ReadyState.Uninitialized = 4 -> Bead.ReadyState
+Bead.ReadyStateException
+Bead.ReadyStateException.Expected.get -> Bead.ReadyState
+Bead.ReadyStateException.Got.get -> Bead.ReadyState
+Bead.ReadyStateException.ReadyStateException(Bead.ReadyState got, Bead.ReadyState expected) -> void
 Bead.ReconnectException
 Bead.ReconnectException.ReconnectException(string! message, System.Exception! innerException) -> void
 Bead.Registrar
@@ -1871,6 +1875,18 @@ Bead.TransportServerRefusal.Reason.init -> void
 Bead.TransportServerRefusal.Status.get -> int
 Bead.TransportServerRefusal.Status.init -> void
 Bead.TransportServerRefusal.TransportServerRefusal() -> void
+Bead.TransportServerStartOptions
+Bead.TransportServerStartOptions.<Clone>$() -> Bead.TransportServerStartOptions!
+Bead.TransportServerStartOptions.Address.get -> string!
+Bead.TransportServerStartOptions.Address.init -> void
+Bead.TransportServerStartOptions.CancellationToken.get -> System.Threading.CancellationToken
+Bead.TransportServerStartOptions.CancellationToken.init -> void
+Bead.TransportServerStartOptions.Equals(Bead.TransportServerStartOptions? other) -> bool
+Bead.TransportServerStartOptions.FindOpenPort.get -> bool
+Bead.TransportServerStartOptions.FindOpenPort.init -> void
+Bead.TransportServerStartOptions.Port.get -> int
+Bead.TransportServerStartOptions.Port.init -> void
+Bead.TransportServerStartOptions.TransportServerStartOptions() -> void
 Bead.TransportTypes
 Bead.ValidateOptions
 Bead.ValidateOptions.<Clone>$() -> Bead.ValidateOptions!
@@ -2207,6 +2223,9 @@ override Bead.TransportServerClient.ToString() -> string!
 override Bead.TransportServerRefusal.Equals(object? obj) -> bool
 override Bead.TransportServerRefusal.GetHashCode() -> int
 override Bead.TransportServerRefusal.ToString() -> string!
+override Bead.TransportServerStartOptions.Equals(object? obj) -> bool
+override Bead.TransportServerStartOptions.GetHashCode() -> int
+override Bead.TransportServerStartOptions.ToString() -> string!
 override Bead.ValidateOptions.Equals(object? obj) -> bool
 override Bead.ValidateOptions.GetHashCode() -> int
 override Bead.ValidateOptions.ToString() -> string!
@@ -2463,6 +2482,8 @@ static Bead.TransportServerClient.operator !=(Bead.TransportServerClient? left, 
 static Bead.TransportServerClient.operator ==(Bead.TransportServerClient? left, Bead.TransportServerClient? right) -> bool
 static Bead.TransportServerRefusal.operator !=(Bead.TransportServerRefusal? left, Bead.TransportServerRefusal? right) -> bool
 static Bead.TransportServerRefusal.operator ==(Bead.TransportServerRefusal? left, Bead.TransportServerRefusal? right) -> bool
+static Bead.TransportServerStartOptions.operator !=(Bead.TransportServerStartOptions? left, Bead.TransportServerStartOptions? right) -> bool
+static Bead.TransportServerStartOptions.operator ==(Bead.TransportServerStartOptions? left, Bead.TransportServerStartOptions? right) -> bool
 static Bead.ValidateOptions.operator !=(Bead.ValidateOptions? left, Bead.ValidateOptions? right) -> bool
 static Bead.ValidateOptions.operator ==(Bead.ValidateOptions? left, Bead.ValidateOptions? right) -> bool
 static Bead.Violation.operator !=(Bead.Violation? left, Bead.Violation? right) -> bool

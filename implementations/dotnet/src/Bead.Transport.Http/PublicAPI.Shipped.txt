@@ -104,7 +104,6 @@ Bead.Transport.Http.HttpTransportServer.CarriesCredential(string! connectionHand
 Bead.Transport.Http.HttpTransportServer.Clients.get -> System.Collections.Generic.IReadOnlyList<Bead.TransportServerClient!>!
 Bead.Transport.Http.HttpTransportServer.Clock.get -> System.TimeProvider!
 Bead.Transport.Http.HttpTransportServer.Close -> System.Action<bool, string!>?
-Bead.Transport.Http.HttpTransportServer.CloseAll() -> System.Threading.Tasks.Task<bool[]!>!
 Bead.Transport.Http.HttpTransportServer.CloseConnection(string! connectionHandle) -> System.Threading.Tasks.Task<bool>!
 Bead.Transport.Http.HttpTransportServer.Connection -> System.Action<string!>?
 Bead.Transport.Http.HttpTransportServer.ConnectionHandles.get -> System.Collections.Generic.IReadOnlyCollection<string!>!
@@ -123,7 +122,7 @@ Bead.Transport.Http.HttpTransportServer.Refusal -> System.Action<Bead.TransportS
 Bead.Transport.Http.HttpTransportServer.Resume(string! connectionHandle) -> void
 Bead.Transport.Http.HttpTransportServer.Send(Bead.TransportMessage message, string! connectionHandle) -> System.Threading.Tasks.Task!
 Bead.Transport.Http.HttpTransportServer.Shutdown() -> System.Threading.Tasks.Task!
-Bead.Transport.Http.HttpTransportServer.Start(Bead.Transport.Http.HttpTransportStartOptions? options = null) -> System.Threading.Tasks.Task<Bead.TransportServerAddress>!
+Bead.Transport.Http.HttpTransportServer.Start(Bead.TransportServerStartOptions? options = null) -> System.Threading.Tasks.Task<Bead.TransportServerAddress>!
 Bead.Transport.Http.HttpTransportServer.Stop() -> System.Threading.Tasks.Task!
 Bead.Transport.Http.HttpTransportServer.TakesProcedure(string! connectionHandle, Bead.ProcedureAddress address) -> bool
 Bead.Transport.Http.HttpTransportServer.Type.get -> string!
@@ -179,18 +178,6 @@ Bead.Transport.Http.HttpTransportServerOptions.TrustedProxies.get -> System.Coll
 Bead.Transport.Http.HttpTransportServerOptions.TrustedProxies.init -> void
 Bead.Transport.Http.HttpTransportServerOptions.UnnamedProxies.get -> int
 Bead.Transport.Http.HttpTransportServerOptions.UnnamedProxies.init -> void
-Bead.Transport.Http.HttpTransportStartOptions
-Bead.Transport.Http.HttpTransportStartOptions.<Clone>$() -> Bead.Transport.Http.HttpTransportStartOptions!
-Bead.Transport.Http.HttpTransportStartOptions.Address.get -> string!
-Bead.Transport.Http.HttpTransportStartOptions.Address.init -> void
-Bead.Transport.Http.HttpTransportStartOptions.CancellationToken.get -> System.Threading.CancellationToken
-Bead.Transport.Http.HttpTransportStartOptions.CancellationToken.init -> void
-Bead.Transport.Http.HttpTransportStartOptions.Equals(Bead.Transport.Http.HttpTransportStartOptions? other) -> bool
-Bead.Transport.Http.HttpTransportStartOptions.FindOpenPort.get -> bool
-Bead.Transport.Http.HttpTransportStartOptions.FindOpenPort.init -> void
-Bead.Transport.Http.HttpTransportStartOptions.HttpTransportStartOptions() -> void
-Bead.Transport.Http.HttpTransportStartOptions.Port.get -> int
-Bead.Transport.Http.HttpTransportStartOptions.Port.init -> void
 const Bead.Transport.Http.HttpRefusals.Busy = "busy" -> string!
 const Bead.Transport.Http.HttpRefusals.CallWaiting = "call-waiting" -> string!
 const Bead.Transport.Http.HttpRefusals.ConnectionUnknown = "connection-unknown" -> string!
@@ -227,9 +214,6 @@ override Bead.Transport.Http.HttpTransportClientOptions.ToString() -> string!
 override Bead.Transport.Http.HttpTransportServerOptions.Equals(object? obj) -> bool
 override Bead.Transport.Http.HttpTransportServerOptions.GetHashCode() -> int
 override Bead.Transport.Http.HttpTransportServerOptions.ToString() -> string!
-override Bead.Transport.Http.HttpTransportStartOptions.Equals(object? obj) -> bool
-override Bead.Transport.Http.HttpTransportStartOptions.GetHashCode() -> int
-override Bead.Transport.Http.HttpTransportStartOptions.ToString() -> string!
 static Bead.Transport.Http.BeadHttpClientOptions.operator !=(Bead.Transport.Http.BeadHttpClientOptions? left, Bead.Transport.Http.BeadHttpClientOptions? right) -> bool
 static Bead.Transport.Http.BeadHttpClientOptions.operator ==(Bead.Transport.Http.BeadHttpClientOptions? left, Bead.Transport.Http.BeadHttpClientOptions? right) -> bool
 static Bead.Transport.Http.HttpServerOptions.ConnectionInactivityTimeoutDefault.get -> System.TimeSpan
@@ -241,5 +225,3 @@ static Bead.Transport.Http.HttpTransportClientOptions.operator !=(Bead.Transport
 static Bead.Transport.Http.HttpTransportClientOptions.operator ==(Bead.Transport.Http.HttpTransportClientOptions? left, Bead.Transport.Http.HttpTransportClientOptions? right) -> bool
 static Bead.Transport.Http.HttpTransportServerOptions.operator !=(Bead.Transport.Http.HttpTransportServerOptions? left, Bead.Transport.Http.HttpTransportServerOptions? right) -> bool
 static Bead.Transport.Http.HttpTransportServerOptions.operator ==(Bead.Transport.Http.HttpTransportServerOptions? left, Bead.Transport.Http.HttpTransportServerOptions? right) -> bool
-static Bead.Transport.Http.HttpTransportStartOptions.operator !=(Bead.Transport.Http.HttpTransportStartOptions? left, Bead.Transport.Http.HttpTransportStartOptions? right) -> bool
-static Bead.Transport.Http.HttpTransportStartOptions.operator ==(Bead.Transport.Http.HttpTransportStartOptions? left, Bead.Transport.Http.HttpTransportStartOptions? right) -> bool
