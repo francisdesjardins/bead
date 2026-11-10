@@ -26,11 +26,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Changed
 
 - **Breaking:** a request's target is read as a page's browser writes it, on every side: `"`, `<`
-  or `>` in its path or its query, or `^`, `` ` ``, `{` or `}` in its path, answered 400 unmarked
-  (RFC 9112 §3); a `#` ends it; and an absolute-form target's scheme is read in any case (RFC 3986
-  §3.1), but by Kestrel on the C# side, which also refuses a `%00` or an octet past US-ASCII past a
-  `#`, as Node's parser refuses that octet on the TypeScript side (spec 15.12, transcoding 3.6;
-  decision 0049).
+  or `>` in its path or its query, `^`, `` ` ``, `{` or `}` in its path, or a `#` anywhere in it,
+  answered 400 unmarked (RFC 9112 §3, §3.2), `%23` taken; and an absolute-form target's scheme is
+  read in any case (RFC 3986 §3.1), but by Kestrel on the C# side; the Rust side's HTTP address, on
+  hyper, serves a target cut at its `#` (spec 15.12, transcoding 3.6; decision 0049).
 - **Breaking:** the TypeScript side's `REFUSALS` is `HTTP_REFUSALS`.
 - **Breaking:** the TypeScript side's `IHTTPPolicyInit` is `IHTTPPolicyOptions`.
 - **Breaking:** the C# side's `WebSocketTransportStartOptions` and `HttpTransportStartOptions` are

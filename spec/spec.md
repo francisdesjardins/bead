@@ -1697,20 +1697,16 @@ another is invalid, answered 400 rather than read on
 ([RFC 9112 §3](https://www.rfc-editor.org/rfc/rfc9112#section-3)), a bare CR in it among them
 ([RFC 9112 §2.2](https://www.rfc-editor.org/rfc/rfc9112#section-2.2)). So is a path whose
 percent-decoding holds NUL, `%00`. What a target percent-encodes is otherwise no octet of it, and
-is taken, `%01` and `%7F` among them, and `%00` in a query. A target ends at its first `#`: what
-follows it is neither its path nor its query, and no rule of a path or a query reaches it, as a URI
-reference's fragment is apart from both
-([RFC 3986 §3.5](https://www.rfc-editor.org/rfc/rfc3986#section-3.5)), though a request-target
-never carries one ([RFC 9112 §3.2](https://www.rfc-editor.org/rfc/rfc9112#section-3.2)); a control
-character past it, HTAB and DEL among them, is still the request-line's, refused as one in its path.
-A visible character a URI leaves out
-([RFC 3986 §2](https://www.rfc-editor.org/rfc/rfc3986#section-2)) that a page's browser always
-percent-encodes where it stands — `"`, `<` or `>` in a path or a query, `^`, `` ` ``, `{` or `}` in
-a path, by the
+is taken, `%01`, `%7F` and `%23` among them, and `%00` in a query. A `#` anywhere in a target, since
+no form of a request-target carries a fragment
+([RFC 9112 §3.2](https://www.rfc-editor.org/rfc/rfc9112#section-3.2)), and a visible character a
+URI leaves out ([RFC 3986 §2](https://www.rfc-editor.org/rfc/rfc3986#section-2)) that a page's
+browser always percent-encodes where it stands — `"`, `<` or `>` in a path or a query, `^`, `` ` ``,
+`{` or `}` in a path, by the
 [URL Standard](https://url.spec.whatwg.org/#path-percent-encode-set)'s path and query
-percent-encode sets — makes the request-line invalid, answered alike, 400 unmarked over HTTP/1.1,
-with none of the fields every response on the path carries, and its stream reset `PROTOCOL_ERROR`
-over HTTP/2, before anything else of the request is judged
+percent-encode sets, which hold `#` too — make the request-line invalid, answered alike, 400
+unmarked over HTTP/1.1, with none of the fields every response on the path carries, and its stream
+reset `PROTOCOL_ERROR` over HTTP/2, before anything else of the request is judged
 ([RFC 9112 §3](https://www.rfc-editor.org/rfc/rfc9112#section-3)). The other visible characters a
 URI leaves out, `\`, `|`, and `^`, `` ` ``, `{` and `}` in a query, are taken as they came, as a
 page's browser sends them unencoded

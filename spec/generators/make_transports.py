@@ -246,16 +246,13 @@ def tick(call_id, value):
     return request(call_id, 'tick', '{"value":%d}' % value)
 
 
-# 15.12's cases that a row of docs/support.md excuses a side from, by their names: what follows a
-# target's # (Kestrel decodes past it and refuses NUL and an octet past ASCII there itself; Node's
-# parser refuses an octet past ASCII there itself), and a scheme in upper case (Kestrel reads
-# absolute-form by a scheme in lower case alone)
-HASH_TAIL = "what follows a target's # is judged by no rule of its path: a NUL percent-encoded there is taken with it"
-HASH_TAIL_OCTET = "what follows a target's # is judged by no rule of its path: an octet past US-ASCII there is taken with it"
+# 15.12's cases that a row of docs/support.md excuses a side from, by their names: a # in a target
+# (hyper's Uri cuts a target at its # before the Rust side's HTTP address reads it), and a scheme in
+# upper case (Kestrel reads absolute-form by a scheme in lower case alone)
+HASH = "a target holding a # anywhere is answered 400 unmarked before its host, its path or its origin is judged; %23 is a character of its path or its query"
 SCHEME_CASE = "a target in absolute-form is read whatever its scheme's case, HTTP:// as http://"
 UPGRADE_SCHEME_CASE = "an upgrade whose target is in absolute-form is read whatever its scheme's case"
-FOLLOWS_A_HASH = [{'row': 'What follows a # in a target', 'language': 'C#'}]
-FOLLOWS_A_HASH_OCTET = [{'row': 'What follows a # in a target', 'language': 'TypeScript'}, *FOLLOWS_A_HASH]
+HASHES = [{'row': 'A # in a target', 'language': 'Rust'}]
 SCHEMES_CASE = [{'row': "A target in absolute-form, its scheme's case", 'language': 'C#'}]
 
 
@@ -458,6 +455,7 @@ cases = [
          send('elsewhere', 'POST', '/bead?a\x01b', host='elsewhere.test', fields={'content-type': BEAD}),
          unmarked('elsewhere'),
          send('nul', 'POST', '/be%00ad', fields={'content-type': BEAD}), unmarked('nul'),
+         send('hash', 'POST', '/bead#a\x01b', fields={'content-type': BEAD}), unmarked('hash'),
          send('encoded', 'POST', '/bead?a%01b%7F%00', fields={'content-type': BEAD}),
          expect('encoded', 201, fields={'bead-connection-token': {'capture': 'token', 'shape': 'token'}})]),
     # 15.12: a visible character a URI leaves out that a page's browser always percent-encodes where it
@@ -479,23 +477,21 @@ cases = [
          connect('query', target='/bead?a\\b|c^d`e{}f'), expect('query', 201),
          send('pipe', 'POST', '/be|ad', fields={'content-type': BEAD}), refused('pipe', 404, 'path-unknown'),
          send('backslash', 'POST', '/be\\ad', fields={'content-type': BEAD}), refused('backslash', 404, 'path-unknown')]),
-    # 15.12: a target ends at its first # (RFC 3986 §3.5), which a request-target never carries (RFC 9112
-    # §3.2): what follows is judged by no rule of its path or its query, but a control character is the
-    # request-line's
-    ('a target ends at its first #: what follows is neither its path nor its query, a character a browser encodes there among it, and a control character there is refused as one in its path',
+    # 15.12: no form of a request-target carries a fragment (RFC 9112 §3.2), so a # anywhere in one
+    # makes its request-line invalid (RFC 9112 §3), past a ? among it; %23 is an octet it encodes, a
+    # character of its path or its query. é is the two octets of its UTF-8, apart from the one Latin-1
+    # octet of the case above
+    (HASH,
      ['15.6', '15.12'], {'hosts': ['bead.test']}, [
-         connect('hash', target='/bead#x'), expect('hash', 201),
-         connect('quote', target='/bead#<"'), expect('quote', 201),
-         send('control', 'POST', '/bead#a\x01b', fields={'content-type': BEAD}), unmarked('control')]),
-    (HASH_TAIL,
-     ['15.6', '15.12'], {'hosts': ['bead.test']}, [
-         connect('nul', target='/bead#%00'), expect('nul', 201),
-         send('elsewhere', 'POST', '/a#%00?x', fields={'content-type': BEAD}), refused('elsewhere', 404, 'path-unknown')]),
-    # é as the two octets of its UTF-8, apart from the one Latin-1 octet of the case above: what hyper
-    # takes past a #, a case of its own as Node's parser refuses it there too
-    (HASH_TAIL_OCTET,
-     ['15.6', '15.12'], {'hosts': ['bead.test']}, [
-         connect('latin', target='/bead#' + chr(0xC3) + chr(0xA9)), expect('latin', 201)]),
+         step
+         for on, target, host in (('hash', '/bead#x', '{host}'), ('quote', '/bead#<"', '{host}'),
+                                  ('nul', '/bead#%00', '{host}'), ('latin', '/bead#' + chr(0xC3) + chr(0xA9), '{host}'),
+                                  ('path', '/a#%00?x', '{host}'), ('query', '/bead?x#y', '{host}'),
+                                  ('absolute', 'http://{host}/bead#x', '{host}'), ('elsewhere', '/bead#x', 'elsewhere.test'))
+         for step in (send(on, 'POST', target, host=host, fields={'content-type': BEAD}), unmarked(on))] + [
+         connect('encoded', target='/bead?a%23b'), expect('encoded', 201),
+         send('pathencoded', 'POST', '/bead%23', fields={'content-type': BEAD}),
+         refused('pathencoded', 404, 'path-unknown')]),
     # 15.12: a scheme is read in any case (RFC 3986 §3.1)
     (SCHEME_CASE,
      ['15.6', '15.12'], {'hosts': ['bead.test']}, [
@@ -1074,11 +1070,12 @@ websocket = [
      ['15.2.1', '15.12'], {}, [
          step for on, target in (('less', '/<'), ('grave', '/`'), ('brace', '/{}'), ('quote', '/?a"b'))
          for step in (handshake(on, target=target), unmarked(on))]),
-    ('an upgrade\'s target ends at its first #, and a control character past it is refused as one in its path',
+    # 15.12: a # anywhere in a target makes the request-line invalid at a WebSocket's address too
+    ('an upgrade whose target holds a # is refused 400 unmarked',
      ['15.2.1', '15.12'], {}, [
-         *upgrade('hash', target='/#x'), message('hash', binary=ECHO), heard('hash', envelope=result(1, '"x"')),
+         handshake('hash', target='/#x'), unmarked('hash'),
          handshake('control', target='/#\x01'), unmarked('control')]),
-    # a player excuses a whole case, so the scheme's case stands apart from the # above
+    # a player excuses a whole case, so the scheme's case stands apart from the cases above
     (UPGRADE_SCHEME_CASE, ['15.2.1', '15.12'], {'differs': SCHEMES_CASE}, [
         *upgrade('upper', target='HTTP://{host}/'), message('upper', binary=ECHO),
         heard('upper', envelope=result(1, '"x"'))]),
@@ -2620,7 +2617,7 @@ def amqp_broker():
 HTTP_REAL_TIME = {'a request whose head does not come whole within headersTimeout is answered 408, unmarked, and told by none'}
 assert HTTP_REAL_TIME <= {name for name, *_ in cases}
 # the cases over HTTP a row of docs/support.md excuses a side from, by their names
-HTTP_DIFFERS = {HASH_TAIL: FOLLOWS_A_HASH, HASH_TAIL_OCTET: FOLLOWS_A_HASH_OCTET, SCHEME_CASE: SCHEMES_CASE}
+HTTP_DIFFERS = {HASH: HASHES, SCHEME_CASE: SCHEMES_CASE}
 assert set(HTTP_DIFFERS) <= {name for name, *_ in cases}
 
 for _name, _clauses, _options, _steps in cases:
