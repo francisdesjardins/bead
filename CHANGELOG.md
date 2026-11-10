@@ -69,6 +69,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The C# side's HTTP transport server and gateway compare request methods case-sensitively, so
+  `get` is refused 405 as an unknown method (RFC 9110 §9.1).
 - The TypeScript side counts a text message against `maximumUntakenBytes` by its UTF-8 bytes, as
   the wire carried it, not by its UTF-16 code units (spec 15.12).
 - The C# side's HTTP transport server matches its pathname against the target as it came, as the
