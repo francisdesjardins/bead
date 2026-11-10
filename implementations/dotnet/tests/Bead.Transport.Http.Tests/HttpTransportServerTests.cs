@@ -61,6 +61,9 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
     // what a cancel before its request buries that call id for: the least a requester reserves one for
     private static readonly TimeSpan Burial = TimeSpan.FromSeconds(5);
 
+    // what a request's head waits for its answer from its hand-off (spec 15.7)
+    private static readonly TimeSpan HeadDelay = TimeSpan.FromMilliseconds(40);
+
     private static readonly Lazy<X509Certificate2> Certificate = new(CertificateOf);
 
     // the addresses a server is secure on, the loopback's, and those it is not, the wildcards
@@ -266,6 +269,66 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         }
 
         Assert.True(condition(), "what was awaited never came");
+    }
+
+    // the heads of so many requests handed on and still unanswered go: once each armed its head's
+    // delay, the clock moved by it (spec 15.7)
+    private async Task HeadsGo(int count = 1)
+    {
+        await Until(() =>
+        {
+            return _time.Armed.Count((armed) =>
+            {
+                return armed.Delay == HeadDelay && !armed.IsCleared;
+            }) >= count;
+        });
+        _time.Advance(HeadDelay);
+    }
+
+    // a request handed on, on a socket of its own written by hand over HTTP/1.1, its timer armed
+    private async Task<Wire> HandedOn((string ConnectionToken, uint CallId) request)
+    {
+        var handed = _messages.Count;
+        var armed = _time.Armed.Count;
+        var envelope = EnvelopeOf(EnvelopeKind.Request, request.CallId);
+        var wire = await Wire.Open(_port);
+
+        try
+        {
+            await wire.Write(PostHead(request.ConnectionToken, $"Content-Length: {envelope.Length}"));
+            await wire.Write(envelope);
+            await Until(() =>
+            {
+                return _messages.Count == handed + 1 && _time.Armed.Skip(armed).Any((timer) =>
+                {
+                    return !timer.IsCleared;
+                });
+            });
+            Assert.Equal(1, Count("waitingExchanges"));
+
+            return wire;
+        }
+        catch
+        {
+            wire.Dispose();
+
+            throw;
+        }
+    }
+
+    // the head of a request handed on and left unanswered, which goes once it waited 40 ms
+    private async Task<HttpResponseMessage> UnansweredOf(HttpClient client, HttpRequestMessage request)
+    {
+        var asked = Fetch(client, request);
+
+        await HeadsGo();
+
+        return await asked;
+    }
+
+    private Task<HttpResponseMessage> UnansweredOf(HttpRequestMessage request)
+    {
+        return UnansweredOf(_http, request);
     }
 
     // once the token is cancelled, within the tests' patience
@@ -555,6 +618,21 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
             return [.. body];
         }
 
+        // what came of it and was not read yet: nothing when nothing came
+        public int Available
+        {
+            get
+            {
+                return _tcp.Available;
+            }
+        }
+
+        // so many octets as they came, their framing included
+        public async Task<byte[]> ReadOctets(int count)
+        {
+            return await ReadExactly(count);
+        }
+
         public async Task<(Head Head, byte[] Body)> Read()
         {
             var head = await ReadHead();
@@ -810,7 +888,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Pairs_each_answer_with_the_exchange_of_its_request_whatever_the_order_the_head_going_as_the_request_is_handed_on()
+    public async Task Pairs_each_answer_with_the_exchange_of_its_request_whatever_the_order_the_head_going_40_ms_after_the_request_is_handed_on()
     {
         await Start();
 
@@ -818,7 +896,9 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         var first = Fetch(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 1)));
         var second = Fetch(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, (3, 2))));
 
-        // both heads arrive before any answer: the router has both
+        // both heads arrive before any answer, once each waited 40 ms for it: the router has both
+        await HeadsGo(2);
+
         using var firstHead = await first;
         using var secondHead = await second;
 
@@ -945,7 +1025,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         await Start();
 
         var (connectionToken, connectionHandle) = await Connect();
-        using var head = await Fetch(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 1)));
+        using var head = await UnansweredOf(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 1)));
         using var cancel = await Fetch(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Cancel, 1)));
 
         // its head gone already: a 200 that ends with no body
@@ -960,7 +1040,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         Assert.Equal([EnvelopeKind.Request, EnvelopeKind.Cancel, EnvelopeKind.Cancel], KindsHandedOn());
 
         // the burial is spent: the call id may come again
-        using var again = await Fetch(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 3)));
+        using var again = await UnansweredOf(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 3)));
 
         Assert.Equal(200, (int)again.StatusCode);
         await _server.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Result, 3), false), connectionHandle).WaitAsync(Patience, Cancelled);
@@ -1031,7 +1111,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         await Start();
 
         var (connectionToken, connectionHandle) = await Connect();
-        using var first = await Fetch(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 7)));
+        using var first = await UnansweredOf(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 7)));
         var again = await RefusalOf(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 7)));
 
         Assert.Equal((200, (409, HttpRefusals.CallWaiting)), ((int)first.StatusCode, again));
@@ -1058,7 +1138,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         Assert.Equal((503, "1"), ((int)response.StatusCode, HeaderOf(response, "retry-after")));
         Assert.Equal(HttpRefusals.Busy, HeaderOf(response, HttpTransport.RefusalHeader));
 
-        using var waiting = await Fetch(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 1)));
+        using var waiting = await UnansweredOf(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 1)));
         // a cancel takes no place: it is never refused for the requests waiting
         // ! before the request refused, whose exchange is counted until after its 429 is read, and
         // whose socket it closes: on the cancel's, which it keeps, the two come one after the other
@@ -1098,7 +1178,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         };
 
         var (connectionToken, connectionHandle) = await Connect();
-        using var waiting = await Fetch(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 1)));
+        using var waiting = await UnansweredOf(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 1)));
         using var deleted = await Fetch(RequestOf(HttpMethod.Delete, connectionToken));
 
         Assert.Equal(204, (int)deleted.StatusCode);
@@ -1177,7 +1257,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
             errors.Enqueue((reason, handle));
         };
 
-        using var response = await Fetch(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 1)));
+        using var response = await UnansweredOf(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 1)));
 
         await Until(() =>
         {
@@ -1194,7 +1274,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         Assert.Equal([connectionHandle], _server.ConnectionHandles);
         Assert.Empty(_closes);
 
-        using var second = await Fetch(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 3)));
+        using var second = await UnansweredOf(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 3)));
         await Until(() =>
         {
             return heard.Count == 2;
@@ -1406,7 +1486,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         await Start();
 
         var (connectionToken, connectionHandle) = await Connect();
-        using var waiting = await Fetch(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 1)));
+        using var waiting = await UnansweredOf(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 1)));
 
         Assert.True(await _server.CloseConnection(connectionHandle).WaitAsync(Patience, Cancelled));
         Assert.Equal("cut", await EndOf(waiting));
@@ -1458,6 +1538,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         {
             await wire.Write(PostHead(connectionToken, "Content-Length: 8"));
             await wire.Write(EnvelopeOf(EnvelopeKind.Request, 1));
+            await HeadsGo();
 
             Assert.Equal(200, (await wire.ReadHead()).Status);
         }
@@ -1509,7 +1590,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         await Start();
 
         var (connectionToken, connectionHandle) = await Connect();
-        using var waiting = await Fetch(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 1)));
+        using var waiting = await UnansweredOf(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 1)));
         var body = EndOf(waiting);
         // and one whose body still comes, its prefix unread, which no stop waits on either
         using var coming = await Wire.Open(_port);
@@ -1755,14 +1836,14 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
 
         Assert.Equal((201, HttpVersion.Version20), ((int)drew.StatusCode, drew.Version));
 
-        using var asking = await Fetch(http2, Over(PostOf(SecureUrl, (connectionToken, EnvelopeOf(EnvelopeKind.Request, 1))), HttpVersion.Version20));
+        using var asking = await UnansweredOf(http2, Over(PostOf(SecureUrl, (connectionToken, EnvelopeOf(EnvelopeKind.Request, 1))), HttpVersion.Version20));
 
         Assert.Equal(200, (int)asking.StatusCode);
         await _server.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Result, 1), false), connectionHandle).WaitAsync(Patience, Cancelled);
         Assert.Equal(EnvelopeOf(EnvelopeKind.Result, 1), await BytesOf(asking));
 
         // a request waiting, its stream reset by its client: lost, and its connection with it
-        using (var waiting = await Fetch(http2, Over(PostOf(SecureUrl, (connectionToken, EnvelopeOf(EnvelopeKind.Request, 3))), HttpVersion.Version20)))
+        using (var waiting = await UnansweredOf(http2, Over(PostOf(SecureUrl, (connectionToken, EnvelopeOf(EnvelopeKind.Request, 3))), HttpVersion.Version20)))
         {
             Assert.Equal(200, (int)waiting.StatusCode);
         }
@@ -2434,7 +2515,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         // a request waiting past its exchange timeout
         var waited = await Connect(true);
         var heldAtTimeout = await Held(waited);
-        using var asking = await Fetch(PostOf(waited.ConnectionToken, EnvelopeOf(EnvelopeKind.Request, 1)));
+        using var asking = await UnansweredOf(PostOf(waited.ConnectionToken, EnvelopeOf(EnvelopeKind.Request, 1)));
 
         _time.Advance(TimeSpan.FromSeconds(1));
 
@@ -3101,7 +3182,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
             return armed.Delay == Burial;
         }));
 
-        using var late = await Fetch(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 5)));
+        using var late = await UnansweredOf(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 5)));
 
         Assert.Equal(200, (int)late.StatusCode);
 
@@ -3134,14 +3215,27 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         _time.Advance(TimeSpan.FromSeconds(1.5));
 
         var idle = await Connect();
-        using var asking = await Fetch(PostOf(unanswered.ConnectionToken, EnvelopeOf(EnvelopeKind.Request, 1)));
+        var asked = Fetch(PostOf(unanswered.ConnectionToken, EnvelopeOf(EnvelopeKind.Request, 1)));
 
-        // one idle timer per connection as drawn; the one asking lost its own as its exchange came
-        Assert.Equal([TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(1)], DelaysSince(0));
+        await Until(() =>
+        {
+            return _time.Armed.Count == 3;
+        });
+
+        // one idle timer per connection as drawn; the one asking lost its own as its exchange came;
+        // its exchange timer counts from its hand-off, its head's 40 ms first (spec 15.7)
+        Assert.Equal([TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2), HeadDelay], DelaysSince(0));
         Assert.True(_time.Armed[0].IsCleared);
 
+        // its head goes, and the rest of its timeout is armed
+        _time.Advance(HeadDelay);
+
+        using var asking = await asked;
+
+        Assert.Equal((200, TimeSpan.FromSeconds(1) - HeadDelay), ((int)asking.StatusCode, _time.Armed[^1].Delay));
+
         // past the first's rest, which its exchange stopped: nothing closes
-        _time.Advance(TimeSpan.FromSeconds(0.6));
+        _time.Advance(TimeSpan.FromSeconds(0.6) - HeadDelay);
 
         Assert.Empty(_closes);
 
@@ -3177,6 +3271,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         {
             await asking.Write(PostHead(connectionToken, "Content-Length: 8"));
             await asking.Write(EnvelopeOf(EnvelopeKind.Request, 1));
+            await HeadsGo();
 
             Assert.Equal(200, (await asking.ReadHead()).Status);
 
@@ -3430,8 +3525,8 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         await Start(new HttpTransportServerOptions { InactivityTimeout = TimeSpan.FromSeconds(2) });
 
         var (connectionToken, connectionHandle) = await Connect();
-        using var first = await Fetch(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 1)));
-        using var second = await Fetch(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 3)));
+        using var first = await UnansweredOf(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 1)));
+        using var second = await UnansweredOf(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 3)));
         var before = _time.Armed.Count;
 
         // one answered, the other still waiting: no rest yet
@@ -3446,15 +3541,16 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
 
         Assert.Equal([TimeSpan.FromSeconds(2)], DelaysSince(before));
 
-        // a request waits for its answer for ever, and a connection rests for ever: no timer
+        // a request waits for its answer for ever, and a connection rests for ever: no timer but its
+        // head's delay (spec 15.7), and nothing armed for the rest of an exchange timeout of never
         await Start(new HttpTransportServerOptions { ExchangeTimeout = Timeout.InfiniteTimeSpan, InactivityTimeout = Timeout.InfiniteTimeSpan });
         before = _time.Armed.Count;
 
         var forever = await Connect();
-        using var asking = await Fetch(PostOf(forever.ConnectionToken, EnvelopeOf(EnvelopeKind.Request, 1)));
+        using var asking = await UnansweredOf(PostOf(forever.ConnectionToken, EnvelopeOf(EnvelopeKind.Request, 1)));
 
         Assert.Equal(200, (int)asking.StatusCode);
-        Assert.Empty(DelaysSince(before));
+        Assert.Equal([HeadDelay], DelaysSince(before));
     }
 
     [Fact]
@@ -3942,7 +4038,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         await Start();
 
         var (connectionToken, connectionHandle) = await Connect(true);
-        using var asking = await Fetch(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 1)));
+        using var asking = await UnansweredOf(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 1)));
         var notification = EnvelopeOf(EnvelopeKind.Notification, 1);
 
         await _server.Send(new TransportMessage(notification, false), connectionHandle).WaitAsync(Patience, Cancelled);
@@ -4037,7 +4133,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
 
         // a request waiting, a cancel before its request, a body still coming, a listen held, and an
         // outbox of two envelopes
-        using var asking = await Fetch(PostOf(other.ConnectionToken, EnvelopeOf(EnvelopeKind.Request, 1)));
+        using var asking = await UnansweredOf(PostOf(other.ConnectionToken, EnvelopeOf(EnvelopeKind.Request, 1)));
         using var cancelling = await Fetch(PostOf(other.ConnectionToken, EnvelopeOf(EnvelopeKind.Cancel, 3)));
         using var coming = await Wire.Open(_port);
 
@@ -4206,6 +4302,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
 
         await stalled.Write(PostHead(connectionToken, $"Content-Length: {request.Length}"));
         await stalled.Write(request);
+        await HeadsGo();
         Assert.Equal(200, (await stalled.ReadHead()).Status);
 
         // an answer of 240 bytes, given the grace alone, its socket taking none of it
@@ -4621,6 +4718,8 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
             Assert.Equal(204, (int)answered.StatusCode);
         }
 
+        await HeadsGo();
+
         using var asked = await request;
 
         Assert.Equal(200, (int)asked.StatusCode);
@@ -4713,5 +4812,163 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
                 return new HttpTransportServer(new HttpTransportServerOptions { Procedures = [new ProcedureAddress(1, 0)] });
             }).Message);
         await client.Disconnect().WaitAsync(Patience, Cancelled);
+    }
+
+    // createHTTPTransportServer, its head's delay
+
+    [Fact]
+    public async Task Answers_a_request_whole_when_its_answer_comes_before_40_ms_passed_from_its_hand_off_its_content_length_with_its_head_over_HTTP_1_1()
+    {
+        await Start();
+
+        var (connectionToken, connectionHandle) = await Connect();
+        var answer = EnvelopeOf(EnvelopeKind.Failure, 5);
+
+        // a turn after its hand-off, as the router answers it, the clock never advanced
+        _server.Message += (_, _) =>
+        {
+            _ = Task.Run(() =>
+            {
+                return _server.Send(new TransportMessage(answer, false), connectionHandle);
+            });
+        };
+
+        using var response = await Fetch(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 5)));
+
+        Assert.Equal((200, HttpVersion.Version11), ((int)response.StatusCode, response.Version));
+        Assert.Equal(HttpTransport.MediaType, response.Content.Headers.ContentType?.MediaType);
+        Assert.Equal(answer.Length, response.Content.Headers.ContentLength);
+        Assert.Null(HeaderOf(response, "transfer-encoding"));
+        Assert.Equal(answer, await BytesOf(response));
+    }
+
+    [Fact]
+    public async Task Sends_the_head_of_a_request_still_unanswered_40_ms_after_its_hand_off_then_its_answer_chunked_over_HTTP_1_1()
+    {
+        await Start();
+
+        var (connectionToken, connectionHandle) = await Connect();
+        var answer = EnvelopeOf(EnvelopeKind.Result, 7);
+        using var wire = await HandedOn((connectionToken, 7));
+
+        // one timer for its head and its exchange: its head's delay first
+        Assert.Equal(HeadDelay, _time.Armed[^1].Delay);
+
+        _time.Advance(HeadDelay - TimeSpan.FromMilliseconds(1));
+
+        Assert.Equal(0, wire.Available);
+
+        _time.Advance(TimeSpan.FromMilliseconds(1));
+
+        var head = await wire.ReadHead();
+
+        Assert.Equal((200, HttpTransport.MediaType, "chunked"), (head.Status, head.Headers["content-type"], head.Headers.GetValueOrDefault("transfer-encoding")));
+        Assert.False(head.Headers.ContainsKey("content-length"));
+        // then armed again, for what is left of its exchange timeout
+        Assert.Equal(TimeSpan.FromMinutes(5) - HeadDelay, _time.Armed[^1].Delay);
+
+        await _server.Send(new TransportMessage(answer, false), connectionHandle).WaitAsync(Patience, Cancelled);
+
+        var body = await wire.ReadOctets(answer.Length + 10);
+
+        Assert.Equal([.. "8\r\n"u8, .. answer, .. "\r\n0\r\n\r\n"u8], body);
+    }
+
+    [Fact]
+    public async Task Counts_a_request_s_exchange_timeout_from_its_hand_off_the_40_ms_of_its_head_within_it()
+    {
+        await Start(new HttpTransportServerOptions { ExchangeTimeout = TimeSpan.FromMilliseconds(100) });
+
+        var (connectionToken, connectionHandle) = await Connect();
+        using var wire = await HandedOn((connectionToken, 9));
+
+        _time.Advance(HeadDelay);
+
+        Assert.Equal(200, (await wire.ReadHead()).Status);
+
+        _time.Advance(TimeSpan.FromMilliseconds(100) - HeadDelay - TimeSpan.FromMilliseconds(1));
+
+        Assert.Equal([connectionHandle], _server.ConnectionHandles);
+        Assert.Empty(_closes);
+
+        _time.Advance(TimeSpan.FromMilliseconds(1));
+
+        // its connection lost, and its exchange cut after its head, never ended
+        Assert.Equal([(false, connectionHandle)], _closes);
+        Assert.True(await wire.IsClosed());
+    }
+
+    [Fact]
+    public async Task Cuts_a_request_whose_exchange_timeout_is_40_ms_or_less_at_that_timeout_its_head_going_with_its_cut()
+    {
+        await Start(new HttpTransportServerOptions { ExchangeTimeout = TimeSpan.FromMilliseconds(10) });
+
+        var (connectionToken, connectionHandle) = await Connect();
+        using var wire = await HandedOn((connectionToken, 11));
+        var armedAt = _time.Armed.Count - 1;
+
+        // its exchange timer alone, at its timeout
+        Assert.Equal(TimeSpan.FromMilliseconds(10), _time.Armed[armedAt].Delay);
+
+        _time.Advance(TimeSpan.FromMilliseconds(9));
+
+        Assert.Equal(0, wire.Available);
+
+        _time.Advance(TimeSpan.FromMilliseconds(1));
+
+        string seen;
+
+        // its head, then its cut; or, the cut overtaking its head on the socket, the exchange lost
+        // before any status, as the conformance file lets it be
+        try
+        {
+            seen = (await wire.ReadHead()).Status.ToString(CultureInfo.InvariantCulture);
+        }
+        catch (IOException)
+        {
+            seen = "lost";
+        }
+
+        Assert.Contains(seen, (string[])["200", "lost"]);
+        Assert.Equal([(false, connectionHandle)], _closes);
+        Assert.True(await wire.IsClosed());
+        // one timer armed for it, at 10 ms, and none after
+        Assert.Equal([TimeSpan.FromMilliseconds(10)], DelaysSince(armedAt));
+    }
+
+    [Fact]
+    public async Task Ends_a_request_cancelled_before_its_head_went_204_empty_and_one_cancelled_after_it_200_empty()
+    {
+        await Start();
+
+        var (connectionToken, _) = await Connect();
+
+        // cancelled with the clock unadvanced: its head never went, and it ends 204, empty
+        using (var early = await HandedOn((connectionToken, 13)))
+        {
+            using var cancel = await Fetch(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Cancel, 13)));
+
+            Assert.Equal(204, (int)cancel.StatusCode);
+
+            var (head, body) = await early.Read();
+
+            Assert.Equal(204, head.Status);
+            Assert.False(head.Headers.ContainsKey("transfer-encoding"));
+            Assert.Empty(body);
+        }
+
+        // cancelled once its head went, 40 ms after its hand-off: its 200 ends with no body
+        using var late = await HandedOn((connectionToken, 15));
+
+        _time.Advance(HeadDelay);
+
+        Assert.Equal(200, (await late.ReadHead()).Status);
+
+        using var cancelled = await Fetch(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Cancel, 15)));
+
+        Assert.Equal(204, (int)cancelled.StatusCode);
+        var ended = await late.ReadOctets(5);
+
+        Assert.Equal("0\r\n\r\n"u8.ToArray(), ended);
     }
 }

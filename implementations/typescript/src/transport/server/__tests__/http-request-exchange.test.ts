@@ -8,6 +8,7 @@ import {
   CONNECTION_TOKEN_HEADER,
   ENVELOPE_KINDS,
   REFUSAL_HEADER,
+  HEAD_DELAY_MILLISECONDS,
   HTTP_REFUSALS,
 } from '../http-transport-server';
 import type { IHTTPResponseLike } from '../types';
@@ -167,8 +168,10 @@ test.describe('createHTTPTransportServer, its edges', () => {
 
   // spec 15.12.4
   test('reads a body up to its limit exactly, declared or counted, refuses one declared past it before any of it, and gives back the bytes each held', async () => {
+    const clock = createTestClock();
     const { connectScripted, events, exchangeOf, fake, server } = await startScripted({
       bodyBytesBudget: 24,
+      clock,
       maximumBodyBytes: 16,
     });
     const { connectionToken } = connectScripted();
@@ -188,6 +191,8 @@ test.describe('createHTTPTransportServer, its edges', () => {
       envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 3 }),
       new Uint8Array(8),
     ]);
+    // their heads, once each waited 40 ms for its answer (spec 15.7)
+    clock.tick(HEAD_DELAY_MILLISECONDS);
 
     expect([declared.response.status, counted.response.status]).toEqual([200, 200]);
     expect(namesOf(events, 'message')).toHaveLength(2);
@@ -201,10 +206,12 @@ test.describe('createHTTPTransportServer, its edges', () => {
     const filling = exchangeOf(connectionToken, { 'content-length': '16' });
 
     fake.feed(filling.request, [envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 7, extra: 8 })]);
+    clock.tick(HEAD_DELAY_MILLISECONDS);
     expect(filling.response.status).toBe(200);
     expect(server.gauges().counts['bodyBytes']).toBe(8);
     expect(namesOf(events, 'message')).toHaveLength(3);
     fake.feed(holding.request, [new Uint8Array(8)]);
+    clock.tick(HEAD_DELAY_MILLISECONDS);
     expect(holding.response.status).toBe(200);
     expect(server.gauges().counts['bodyBytes']).toBe(0);
     expect(namesOf(events, 'message')).toHaveLength(4);

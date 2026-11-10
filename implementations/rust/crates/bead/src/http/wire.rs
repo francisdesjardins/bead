@@ -221,7 +221,8 @@ pub(crate) type Closed = Box<dyn FnOnce(bool) + Send>;
 // what an answer carries
 enum Carried {
     Whole(Option<Bytes>),
-    // * a sender dropped before its end cuts the exchange
+    // * a sender dropped before its end cuts the exchange, a turn later: a head hyper still holds
+    // goes out first, as a close sends the head of each request it cuts (spec 15.7)
     Streamed(mpsc::UnboundedReceiver<Piece>),
 }
 
@@ -229,6 +230,9 @@ enum Carried {
 pub(crate) struct AnswerBody {
     carried: Carried,
     is_whole: bool,
+    // its sender went before its end: it yielded a turn, so hyper wrote out the head it held, and
+    // is cut at the next poll
+    is_cut: bool,
     closed: Option<Closed>,
     // the flow it settles as hyper lets it go
     flow: Option<Arc<Flow>>,
@@ -252,6 +256,7 @@ impl AnswerBody {
             // an empty one hyper never polls
             is_whole: bytes.is_none(),
             carried: Carried::Whole(bytes),
+            is_cut: false,
             closed: None,
             flow: None,
         }
@@ -265,6 +270,7 @@ impl AnswerBody {
             Self {
                 carried: Carried::Streamed(receiver),
                 is_whole: false,
+                is_cut: false,
                 closed: None,
                 flow: None,
             },
@@ -336,6 +342,12 @@ impl Body for AnswerBody {
                 this.ended();
 
                 Poll::Ready(None)
+            }
+            Poll::Ready(None) if !this.is_cut => {
+                this.is_cut = true;
+                context.waker().wake_by_ref();
+
+                Poll::Pending
             }
             Poll::Ready(None) => Poll::Ready(Some(Err(Cut))),
         }

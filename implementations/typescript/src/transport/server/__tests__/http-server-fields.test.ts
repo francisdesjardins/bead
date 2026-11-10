@@ -608,7 +608,7 @@ test.describe('createHTTPTransportServer, CORS', () => {
     const connectionHandle = server.clients.at(-1)
       ?.connectionHandle as TransportServerConnectionHandle;
 
-    // a request with its Authorization, its head going as it is handed on, then answered
+    // a request with its Authorization, its head going 40 ms after it is handed on, then answered
     const request = post(url, {
       body: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }),
       connectionToken,

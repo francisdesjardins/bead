@@ -9,7 +9,8 @@ use crate::constants::{EnvelopeKind, RESERVATION};
 use crate::http::peer::Told as Heard;
 use crate::http::peer::*;
 use crate::router::types::LIMIT_DEFAULTS;
-use crate::testing::{patience, rest};
+use crate::testing::wire::text_of_latin1;
+use crate::testing::{SteppingClock, patience, rest};
 
 mod life;
 mod listens;
@@ -352,7 +353,7 @@ async fn draws_a_connection_on_a_connect_a_token_of_16_bytes_a_201_and_connectio
 }
 
 #[tokio::test]
-async fn pairs_each_answer_with_the_exchange_of_its_request_whatever_the_order_the_head_going_as_the_request_is_handed_on()
+async fn pairs_each_answer_with_the_exchange_of_its_request_whatever_the_order_the_head_going_40_ms_after_the_request_is_handed_on()
  {
     let started = started(&HttpTransportServerOptions::default()).await;
     let (handle, token) = connect(&started).await;
@@ -2459,5 +2460,363 @@ async fn clients_is_a_copy_without_the_sockets() {
         "those it holds now, in order"
     );
     assert_eq!(handles_of(&clients), [first], "the copy as it was");
+    started.stop().await;
+}
+
+// ── Its head's delay ───────────────────────────────────────────────────────────────────────────
+
+// a request handed on over a socket of the test's own, what its socket reads kept octet for octet
+struct HandedOn {
+    socket: TcpStream,
+    read: Vec<u8>,
+    is_closed: bool,
+}
+
+impl HandedOn {
+    // reads on until `done` holds of what it read, or its socket ends, within `within`
+    async fn read_until<F: Fn(&str) -> bool + Send + Sync>(
+        &mut self,
+        (done, within): (F, Duration),
+    ) {
+        use tokio::io::AsyncReadExt as _;
+
+        let mut chunk = [0_u8; 4_096];
+
+        patience(within, async {
+            while !done(&self.text()) && !self.is_closed {
+                match self.socket.read(&mut chunk).await {
+                    Ok(0) | Err(_) => self.is_closed = true,
+                    Ok(count) => self.read.extend_from_slice(&chunk[..count]),
+                }
+            }
+        })
+        .await
+        .ok();
+    }
+
+    // what it read, as text
+    fn text(&self) -> String {
+        text_of_latin1(&self.read)
+    }
+
+    // whether it reads nothing within a moment
+    async fn is_silent(&mut self) -> bool {
+        self.read_until((|_: &str| false, Duration::from_millis(50)))
+            .await;
+        self.read.is_empty()
+    }
+
+    // its head, in lower case, once it came whole
+    async fn head(&mut self) -> String {
+        self.read_until((|text: &str| text.contains("\r\n\r\n"), PATIENCE))
+            .await;
+
+        let text = self.text();
+
+        text.split_once("\r\n\r\n")
+            .map_or(text.as_str(), |(head, _)| head)
+            .to_lowercase()
+    }
+
+    // what it read after its head
+    fn after_head(&self) -> String {
+        self.text()
+            .split_once("\r\n\r\n")
+            .map(|(_, rest)| rest.to_owned())
+            .unwrap_or_default()
+    }
+}
+
+// a request of `call_id` on `token`'s connection, handed on over a socket of its own
+async fn handed_on(started: &Started, (token, call_id): (&str, u32)) -> HandedOn {
+    use tokio::io::AsyncWriteExt as _;
+
+    let handed = started.recorder.told().messages.len();
+    let mut socket = TcpStream::connect((HOST, started.port)).await.unwrap();
+    let request = envelope_of(REQUEST, (call_id, 0));
+
+    socket
+        .write_all(post_head_of(started.port, (token, request.len())).as_bytes())
+        .await
+        .unwrap();
+    socket.write_all(&request).await.unwrap();
+    started.recorder.messages(handed.saturating_add(1)).await;
+
+    assert_eq!(
+        gauge(&started.server, "waitingExchanges"),
+        1,
+        "its request waiting"
+    );
+
+    HandedOn {
+        socket,
+        read: Vec::new(),
+        is_closed: false,
+    }
+}
+
+// a server on `clock`, its exchange timeout `exchange_timeout` where one is given
+async fn started_on(clock: &Arc<SteppingClock>, exchange_timeout: Option<Duration>) -> Started {
+    started(&HttpTransportServerOptions {
+        clock: Some(Arc::<SteppingClock>::clone(clock)),
+        exchange_timeout,
+        ..HttpTransportServerOptions::default()
+    })
+    .await
+}
+
+// spec 15.7
+#[tokio::test]
+async fn answers_a_request_whole_when_its_answer_comes_before_40_ms_passed_from_its_hand_off_its_content_length_with_its_head_over_http_1_1()
+ {
+    let clock = SteppingClock::new(SystemTime::UNIX_EPOCH);
+    let started = started_on(&clock, None).await;
+    let (_, token) = connect(&started).await;
+    let answer = envelope_of(FAILURE, (5, 0));
+    let answered = answer.clone();
+
+    // a turn after its hand-off, as the router answers it, the clock never advanced
+    started.server.listen(Arc::new(Hearing {
+        server: started.server.clone(),
+        heard: move |server: &HttpTransportServer,
+                     _: &TransportMessage,
+                     handle: &ConnectionHandle| {
+            let server = server.clone();
+            let handle = Arc::clone(handle);
+            let message = TransportMessage {
+                data: Bytes::from(answered.clone()),
+                credential: None,
+                address: None,
+                port: None,
+                may_overtake: false,
+                is_text: false,
+            };
+
+            drop(crate::testing::spawn(async move {
+                drop(server.send(message, &handle));
+            }));
+        },
+    }));
+
+    let response = posted_on(&started, (&token, envelope_of(REQUEST, (5, 0)))).await;
+
+    assert_eq!(response.head.status, 200, "its status");
+    assert_eq!(
+        response.head.fields.get("content-type").map(String::as_str),
+        Some(BEAD_MEDIA_TYPE),
+        "of Bead's type"
+    );
+    assert_eq!(
+        (
+            response.head.fields.get("content-length").cloned(),
+            response.head.fields.get("transfer-encoding").cloned()
+        ),
+        (Some(answer.len().to_string()), None),
+        "its length with its head"
+    );
+    assert_eq!(response.body, answer, "its answer");
+    started.stop().await;
+}
+
+// spec 15.7
+#[tokio::test]
+async fn sends_the_head_of_a_request_still_unanswered_40_ms_after_its_hand_off_then_its_answer_chunked_over_http_1_1()
+ {
+    let clock = SteppingClock::new(SystemTime::UNIX_EPOCH);
+    let started = started_on(&clock, None).await;
+    let (handle, token) = connect(&started).await;
+    let answer = envelope_of(RESULT, (7, 0));
+    let mut waiting = handed_on(&started, (&token, 7)).await;
+
+    // one timer for its head and its exchange: its head's delay first
+    until(|| clock.dues() == [Duration::from_millis(40)]).await;
+    clock.advance(Duration::from_millis(39)).await;
+
+    assert!(
+        waiting.is_silent().await,
+        "nothing read: {:?}",
+        waiting.text()
+    );
+
+    clock.advance(Duration::from_millis(1)).await;
+
+    let head = waiting.head().await;
+
+    assert!(head.starts_with("http/1.1 200 "), "its head: {head}");
+    assert!(
+        head.contains(&format!("\r\ncontent-type: {BEAD_MEDIA_TYPE}")),
+        "of Bead's type: {head}"
+    );
+    assert!(
+        head.contains("\r\ntransfer-encoding: chunked"),
+        "chunked: {head}"
+    );
+    assert!(!head.contains("content-length"), "no length: {head}");
+    // then armed again, for what is left of its exchange timeout
+    assert_eq!(
+        clock.dues(),
+        [EXCHANGE_TIMEOUT.saturating_sub(Duration::from_millis(40))],
+        "the rest of its exchange timeout"
+    );
+
+    started.send(&answer, &handle).await.unwrap();
+    waiting
+        .read_until((|text: &str| text.ends_with("\r\n0\r\n\r\n"), PATIENCE))
+        .await;
+
+    assert_eq!(
+        waiting.after_head(),
+        format!("8\r\n{}\r\n0\r\n\r\n", text_of_latin1(&answer)),
+        "its answer, chunked"
+    );
+    started.stop().await;
+}
+
+// spec 15.7
+#[tokio::test]
+async fn counts_a_request_s_exchange_timeout_from_its_hand_off_the_40_ms_of_its_head_within_it() {
+    let clock = SteppingClock::new(SystemTime::UNIX_EPOCH);
+    let started = started_on(&clock, Some(Duration::from_millis(100))).await;
+    let (handle, token) = connect(&started).await;
+    let mut waiting = handed_on(&started, (&token, 9)).await;
+
+    until(|| clock.dues() == [Duration::from_millis(40)]).await;
+    clock.advance(Duration::from_millis(40)).await;
+
+    let head = waiting.head().await;
+
+    assert!(head.starts_with("http/1.1 200 "), "its head: {head}");
+
+    clock.advance(Duration::from_millis(59)).await;
+
+    assert_eq!(
+        started
+            .server
+            .clients()
+            .into_iter()
+            .map(|client| client.connection_handle)
+            .collect::<Vec<_>>(),
+        [Arc::clone(&handle)],
+        "its connection still drawn"
+    );
+    assert!(started.recorder.told().closes.is_empty(), "nothing closed");
+
+    clock.advance(Duration::from_millis(1)).await;
+
+    // its connection lost, and its exchange cut after its head, never ended
+    assert_eq!(
+        started.recorder.closes(1).await,
+        [(false, handle)],
+        "closed, as lost"
+    );
+    waiting.read_until((|_: &str| false, PATIENCE)).await;
+
+    assert!(waiting.is_closed, "its socket ended");
+    assert!(
+        !waiting.text().contains("\r\n0\r\n\r\n"),
+        "never ended: {:?}",
+        waiting.text()
+    );
+    started.stop().await;
+}
+
+// spec 15.7
+#[tokio::test]
+async fn cuts_a_request_whose_exchange_timeout_is_40_ms_or_less_at_that_timeout_its_head_going_with_its_cut()
+ {
+    let clock = SteppingClock::new(SystemTime::UNIX_EPOCH);
+    let started = started_on(&clock, Some(Duration::from_millis(10))).await;
+    let (handle, token) = connect(&started).await;
+    let mut waiting = handed_on(&started, (&token, 11)).await;
+
+    // its exchange timer alone, at its timeout
+    until(|| clock.dues() == [Duration::from_millis(10)]).await;
+    clock.advance(Duration::from_millis(9)).await;
+
+    assert!(
+        waiting.is_silent().await,
+        "nothing read: {:?}",
+        waiting.text()
+    );
+
+    clock.advance(Duration::from_millis(1)).await;
+
+    let head = waiting.head().await;
+
+    assert!(head.starts_with("http/1.1 200 "), "its head: {head}");
+    assert_eq!(
+        started.recorder.closes(1).await,
+        [(false, handle)],
+        "closed, as lost"
+    );
+    waiting.read_until((|_: &str| false, PATIENCE)).await;
+
+    assert!(waiting.is_closed, "its socket ended");
+    assert!(
+        !waiting.text().contains("\r\n0\r\n\r\n"),
+        "never ended: {:?}",
+        waiting.text()
+    );
+    // one timer armed for it, at 10 ms, and none after
+    assert!(
+        clock.dues().is_empty(),
+        "none armed after: {:?}",
+        clock.dues()
+    );
+    started.stop().await;
+}
+
+// spec 15.6, 15.7
+#[tokio::test]
+async fn ends_a_request_cancelled_before_its_head_went_204_empty_and_one_cancelled_after_it_200_empty()
+ {
+    let clock = SteppingClock::new(SystemTime::UNIX_EPOCH);
+    let started = started_on(&clock, None).await;
+    let (_, token) = connect(&started).await;
+    let head_delay = Duration::from_millis(40);
+
+    // cancelled with the clock unadvanced: its head never went, and it ends 204, empty
+    let mut early = handed_on(&started, (&token, 13)).await;
+
+    until(|| clock.dues() == [head_delay]).await;
+
+    assert_eq!(
+        posted_on(&started, (&token, envelope_of(CANCEL, (13, 0))))
+            .await
+            .head
+            .status,
+        204,
+        "its cancel"
+    );
+
+    let head = early.head().await;
+
+    assert!(head.starts_with("http/1.1 204 "), "its head: {head}");
+    assert!(!head.contains("transfer-encoding"), "no body: {head}");
+    assert_eq!(early.after_head(), "", "empty");
+
+    // cancelled once its head went, 40 ms after its hand-off: its 200 ends with no body
+    until(|| !clock.dues().contains(&head_delay)).await;
+
+    let mut late = handed_on(&started, (&token, 15)).await;
+
+    until(|| clock.dues() == [head_delay]).await;
+    clock.advance(head_delay).await;
+
+    let head = late.head().await;
+
+    assert!(head.starts_with("http/1.1 200 "), "its head: {head}");
+    assert_eq!(
+        posted_on(&started, (&token, envelope_of(CANCEL, (15, 0))))
+            .await
+            .head
+            .status,
+        204,
+        "its cancel"
+    );
+    late.read_until((|text: &str| text.ends_with("\r\n\r\n0\r\n\r\n"), PATIENCE))
+        .await;
+
+    assert_eq!(late.after_head(), "0\r\n\r\n", "ended with no body");
     started.stop().await;
 }

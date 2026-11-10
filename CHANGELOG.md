@@ -56,6 +56,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `TransportMessage`'s `is_text`, which reports it `ENVELOPE_MALFORMED` with its connection; its
   activity is stamped; its in-memory and broker transports refuse to send one (spec 15.2; decision
   0049).
+- Over HTTP, a request's head waits 40 ms for its answer on every side: an answer within them goes
+  whole, its head with it and its length in content-length, one write; a request that takes longer
+  gets its head then and its answer chunked, as before; one cancelled before its head ends 204 (spec
+  15.6, 15.7; decision 0020).
 
 ### Removed
 

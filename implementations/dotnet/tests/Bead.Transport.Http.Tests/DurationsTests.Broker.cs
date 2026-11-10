@@ -181,10 +181,9 @@ public sealed partial class DurationsTests
         {
             participant.Error += reported.Enqueue;
             await participant.Start();
-            adapter.Lose();
 
             // its broker holds its id's link of another start already: its first attempt is refused
-            await adapter.Start();
+            await adapter.LoseThenStart();
 
             var watch = Stopwatch.StartNew();
 

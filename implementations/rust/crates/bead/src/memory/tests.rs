@@ -2353,3 +2353,56 @@ async fn a_transport_given_no_list_takes_every_procedure_and_one_given_an_empty_
         "given an empty list, none taken"
     );
 }
+
+#[tokio::test]
+async fn gives_nothing_for_no_list_and_for_a_list_what_it_names_each_address_once() {
+    assert!(taking(None).expect("built").inner.procedures.is_none());
+
+    let server = taking(Some(vec![
+        address_of(2, 1),
+        address_of(2, 1),
+        address_of(65_535, 65_535),
+    ]))
+    .expect("built");
+    let taken = server.inner.procedures.as_ref().expect("a list given");
+
+    assert_eq!(taken.len(), 2, "each address once");
+    assert_eq!(
+        [
+            address_of(2, 1),
+            address_of(65_535, 65_535),
+            address_of(1, 2),
+            address_of(2, 2),
+        ]
+        .map(|address| taken.contains(&address)),
+        [true, true, false, false]
+    );
+    assert!(
+        !taking(Some(Vec::new()))
+            .expect("built")
+            .inner
+            .procedures
+            .as_ref()
+            .expect("an empty list given")
+            .contains(&address_of(1, 1))
+    );
+}
+
+// The flag names whether the trait's method has a list to ask: no optional function on this side.
+#[tokio::test]
+async fn gives_a_takes_procedure_by_its_one_list_whatever_the_connection_and_none_for_no_list() {
+    let server = taking(Some(vec![address_of(2, 1)])).expect("built");
+    let first = Arc::from("type=WS;ip=127.0.0.1;port=1;ordinal=1");
+    let second = Arc::from("type=HTTP;ip=127.0.0.1;ordinal=9");
+
+    assert!(!taking(None).expect("built").names_procedures());
+    assert!(server.names_procedures());
+    assert_eq!(
+        [
+            server.takes_procedure(&first, address_of(2, 1)),
+            server.takes_procedure(&second, address_of(2, 1)),
+            server.takes_procedure(&first, address_of(2, 2)),
+        ],
+        [true, true, false]
+    );
+}
