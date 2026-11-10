@@ -195,7 +195,7 @@ export const listenOn = async (
 
 /**
  * The shared half of every transport server: the events, the ready state, the connection registry,
- * `clients`, `closeAll`, and the guards around `start` and `stop`.
+ * `clients`, and the guards around `start` and `stop`.
  *
  * `define` receives the server being built, the registry its transport fills, and the `tell` its
  * transport calls its listeners by, and returns what only that transport knows — the clock it
@@ -313,16 +313,6 @@ export const createTransportServer = <Socket extends object, Request>(
       await implementation.close(connection);
 
       return true;
-    },
-    closeAll: () => {
-      return Promise.all(
-        connections
-          .keys()
-          .map((connectionHandle) => {
-            return server.close(connectionHandle);
-          })
-          .toArray()
-      );
     },
     // what its application says stands in front of it is believed first, whatever it listens on;
     // before its first start, no bound address makes it secure

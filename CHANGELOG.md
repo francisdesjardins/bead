@@ -57,6 +57,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   activity is stamped; its in-memory and broker transports refuse to send one (spec 15.2; decision
   0049).
 
+### Removed
+
+- **Breaking:** `closeAll` from the TypeScript side's transport servers, and `CloseAll` from the C#
+  side's HTTP and WebSocket servers: a server that ends its connections stops (spec 15.1; decision
+  0049).
+
 ### Fixed
 
 - The TypeScript side counts a text message against `maximumUntakenBytes` by its UTF-8 bytes, as

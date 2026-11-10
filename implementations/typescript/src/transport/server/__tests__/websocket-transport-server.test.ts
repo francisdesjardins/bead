@@ -646,42 +646,6 @@ for (const [label, Tracked] of IMPLEMENTATIONS) {
         await expect(server.close('type=WS;ip=0.0.0.0;port=1;ordinal=1')).resolves.toBe(false);
         expect(closes).toEqual([]);
       });
-
-      test('"closeAll" closes every connection', async () => {
-        await expect(server.closeAll()).resolves.toEqual([]);
-        const second = createWebSocketTransportClient({ WebSocket: Tracked });
-        const connectionHandles: string[] = [];
-        const closed: [boolean, string][] = [];
-        const codes: number[] = [];
-        server.on('connection', ({ socket }) => {
-          socket.on('close', (code) => {
-            codes.push(code);
-          });
-        });
-        server.on('close', (clean, connectionHandle) => {
-          connectionHandles.push(connectionHandle);
-          closed.push([clean, connectionHandle]);
-        });
-
-        await connectClient(client);
-        await connectClient(second);
-        const handles = server.clients.map(({ connectionHandle }) => {
-          return connectionHandle;
-        });
-
-        await expect(server.closeAll()).resolves.toEqual([true, true]);
-        expect(connectionHandles).toHaveLength(2);
-        expect(server.clients).toHaveLength(0);
-        expect(closed).toEqual(
-          expect.arrayContaining(
-            handles.map((handle) => {
-              return [true, handle];
-            })
-          )
-        );
-        expect(server.isOpen()).toBe(true);
-        expect(codes).toEqual([1000, 1000]);
-      });
     });
 
     test.describe('WebSocketTransportServer #stop', () => {

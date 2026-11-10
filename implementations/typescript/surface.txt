@@ -3574,7 +3574,6 @@ src/transport/server/types.ts ITransportServer
     readonly type: TRANSPORTS
     carriesCredential(connectionHandle: TransportServerConnectionHandle): boolean
     close(connectionHandle: TransportServerConnectionHandle): Promise<boolean>
-    closeAll(): Promise<boolean[]>
     isSecure(connectionHandle: TransportServerConnectionHandle): boolean
     emit<K extends TRANSPORT_SERVER_EVENTS>(event: K, ...params: TransportServerEventMap<Socket, Request>[K]): boolean
     events<K extends TRANSPORT_SERVER_EVENTS>(event: K, options?: IEventIteratorOptions): AsyncIterableIterator<TransportServerEventMap<Socket, Request>[K], undefined>

@@ -172,7 +172,6 @@ export interface ITransportServer<
   carriesCredential(connectionHandle: TransportServerConnectionHandle): boolean;
   /** Closes one connection. Resolves `false` for an unknown handle, otherwise `true` once it closed. */
   close(connectionHandle: TransportServerConnectionHandle): Promise<boolean>;
-  closeAll(): Promise<boolean[]>;
   /**
    * Whether a connection is secure (spec 13.4): as its application says what stands in front of
    * the server, when it says, whatever the server listens on; otherwise by what the server listens
