@@ -2115,6 +2115,7 @@ crate::router::types
     pub address: Option<String>
     pub port: Option<u16>
     pub may_overtake: bool
+    pub is_text: bool
     implements Debug
     derives Clone, Default, Eq, PartialEq
   enum RouterActivity #[non_exhaustive]

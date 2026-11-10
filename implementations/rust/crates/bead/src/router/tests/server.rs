@@ -987,3 +987,57 @@ async fn drops_what_an_error_listener_throws_the_next_error_listener_told_and_th
     );
     assert_eq!(heard[0].1, Some(first()), "with its connection");
 }
+
+// spec 15.2, 15.12
+#[tokio::test]
+async fn counts_a_text_message_by_its_utf_8_bytes_then_reports_it_envelope_malformed_with_its_connection_handing_nothing_on()
+ {
+    let served = Served::new(&RouterServerOptions {
+        intake: Some(crate::router::types::IntakeLimitsOptions {
+            maximum_untaken_envelopes: None,
+            maximum_untaken_bytes: Some(4),
+        }),
+        ..RouterServerOptions::default()
+    });
+
+    served.transport.open(&first(), true);
+
+    // * two characters of two bytes each in UTF-8, four bytes: its bound reached as it is handed
+    served.transport.deliver_message(
+        &crate::router::types::TransportMessage {
+            data: Bytes::from("éé"),
+            is_text: true,
+            ..crate::router::types::TransportMessage::default()
+        },
+        &first(),
+    );
+
+    assert!(
+        served.transport.is_paused(&first()),
+        "paused as it is handed"
+    );
+
+    served.settle().await;
+
+    // its report follows, its count released in that turn: nothing handed on
+    assert_eq!(
+        served.reported(),
+        ["ENVELOPE_MALFORMED first"],
+        "reported with its connection"
+    );
+    assert!(
+        matches!(&locked(&served.reports)[0].0, RouterError::Failure(failure) if failure.detail() == "an envelope is binary, not a string"),
+        "said why"
+    );
+    assert_eq!(
+        served
+            .transport
+            .pauses()
+            .iter()
+            .map(|(is_paused, handle)| (*is_paused, name_of(Some(handle))))
+            .collect::<Vec<_>>(),
+        [(true, "first".to_owned()), (false, "first".to_owned())],
+        "paused, then resumed as its count is released"
+    );
+    assert!(served.sent_since().is_empty(), "nothing answered");
+}

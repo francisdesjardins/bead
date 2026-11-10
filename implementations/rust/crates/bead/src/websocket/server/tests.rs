@@ -927,46 +927,62 @@ async fn keeps_a_connection_whose_connection_listener_throws_its_messages_heard_
     stopped(&server).await;
 }
 
+// spec 15.2
 #[tokio::test]
-async fn delivers_binary_with_its_connection_s_address_and_port_stamping_the_activity_and_reports_text_as_envelope_malformed_handing_nothing()
- {
+async fn delivers_text_as_text_and_binary_as_bytes_stamping_the_activity() {
+    let stepping = SteppingClock::new(dated_at());
     let (server, recorder, port) = started(&WebSocketTransportServerOptions {
-        clock: Some(dated()),
+        clock: Some(Arc::<SteppingClock>::clone(&stepping)),
         ..briefly_closing()
     })
     .await;
     let mut client = client(port).await;
     let handle = recorder.connections(1).await.remove(0);
+    let second = Duration::from_secs(1);
 
     assert_eq!(server.clients()[0].last_activity, None, "none before");
 
+    stepping.advance(second).await;
     client.send(Message::text("hi")).await.unwrap();
-    client.send(binary(&[1, 2])).await.unwrap();
 
-    let (message, on) = recorder.messages(1).await.remove(0);
-    let errors = recorder.errors(1).await;
+    // * a text message is handed on as it came, marked so, for its router to judge: its transport
+    // reports nothing of it
+    let (text, on) = recorder.messages(1).await.remove(0);
 
-    assert_eq!(&*message.data, &[1, 2], "the binary one alone");
+    assert_eq!(&*text.data, b"hi", "the text, as its bytes");
+    assert!(text.is_text, "marked text");
     assert_eq!(on, handle, "its connection");
-    assert_eq!(message.address.as_deref(), Some("127.0.0.1"), "its address");
+    assert_eq!(text.address.as_deref(), Some("127.0.0.1"), "its address");
     assert_eq!(
-        message.port,
+        text.port,
         Some(server.clients()[0].port.unwrap()),
         "its port"
     );
-    assert_eq!(message.credential, None, "no credential");
-    assert_eq!(
-        errors,
-        vec![(
-            "local server protocol failure 1 ENVELOPE_MALFORMED: an envelope is binary, not a string".to_owned(),
-            Some(Arc::clone(&handle))
-        )],
-        "the text reported"
-    );
+    assert_eq!(text.credential, None, "no credential");
     assert_eq!(
         server.clients()[0].last_activity,
-        Some(dated_at()),
-        "stamped on its clock"
+        dated_at().checked_add(second),
+        "stamped by the text, on its clock"
+    );
+
+    // each message stamps it again
+    stepping.advance(second).await;
+    client.send(binary(&[1, 2])).await.unwrap();
+
+    let (bytes, on) = recorder.messages(2).await.remove(1);
+
+    assert_eq!(&*bytes.data, &[1, 2], "the binary one");
+    assert!(!bytes.is_text, "not marked text");
+    assert_eq!(on, handle, "its connection");
+    assert_eq!(
+        server.clients()[0].last_activity,
+        dated_at().checked_add(second * 2),
+        "stamped by the binary"
+    );
+    assert_eq!(
+        recorder.count(|told| told.errors.len()),
+        0,
+        "nothing reported"
     );
     stopped(&server).await;
 }

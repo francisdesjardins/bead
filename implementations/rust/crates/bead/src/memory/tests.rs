@@ -1173,7 +1173,8 @@ async fn a_connect_given_up_its_client_let_go_as_its_server_draws_it_leaves_no_c
     assert!(ends.server.clients().is_empty(), "no connection held");
 }
 
-// a platform's shape: a message's data is bytes, so what is no bytes is no message to send
+// a platform's shape: a message's data is bytes, so what is no bytes is no message to send; a
+// text message is no envelope, refused as it is sent (spec 15.2)
 // debugging 9.7
 #[tokio::test]
 async fn refuses_a_send_or_a_disconnect_unless_open_and_a_send_of_what_is_no_bytes() {
@@ -1218,7 +1219,7 @@ async fn refuses_a_send_or_a_disconnect_unless_open_and_a_send_of_what_is_no_byt
         "nothing moved"
     );
 
-    // * open
+    // * open: a text refused before anything goes, its connection kept
     let connecting = client.connect(&MemoryTransportClientConnectOptions::new(
         ends.server.clone(),
     ));
@@ -1226,6 +1227,30 @@ async fn refuses_a_send_or_a_disconnect_unless_open_and_a_send_of_what_is_no_byt
     ends.clock.settle().await;
     connecting.await.expect("connected");
     ends.server_told();
+
+    let text = client
+        .send(TransportMessage {
+            data: Bytes::from_static(b"hi"),
+            is_text: true,
+            ..TransportMessage::default()
+        })
+        .expect_err("a text");
+
+    assert_eq!(
+        misuse_of(&text).as_deref(),
+        Some("an in-memory connection carries envelopes, as bytes"),
+        "a misuse: {text:?}"
+    );
+    client.send(message_of(&[2], None)).expect("kept");
+    ends.clock.settle().await;
+    assert_eq!(
+        ends.server_told(),
+        [format!(
+            "heard 02 on {FIRST} carrying None from Some(\"local\") None"
+        )],
+        "the bytes alone heard"
+    );
+
     // * closed: its send a disconnection, its disconnect refused by its ready state
     client
         .disconnect(&TransportClientDisconnectOptions::default())
@@ -1246,6 +1271,17 @@ async fn refuses_a_send_or_a_disconnect_unless_open_and_a_send_of_what_is_no_byt
         matches!(&unclosed, TransportError::ReadyState(refusal) if refusal.got() == ReadyState::Closed),
         "a ready state's error: {unclosed:?}"
     );
+}
+
+// the misuse a send's refusal stands for, by its words
+fn misuse_of(error: &RouterError) -> Option<String> {
+    let RouterError::Other(error) = error else {
+        return None;
+    };
+
+    error
+        .downcast_ref::<ProgrammerError>()
+        .map(ToString::to_string)
 }
 
 // what a send in a state gives: sent, its ready state's refusal or a disconnection
@@ -1896,6 +1932,25 @@ async fn drops_what_an_end_it_no_longer_holds_receives_and_refuses_to_send_what_
     let ends = Ends::started().await;
     let (client, at_client) = ends.connected((None, None)).await;
     let handle: ConnectionHandle = Arc::from(FIRST);
+
+    // * a text is no envelope: refused before anything goes, its connection kept (spec 15.2)
+    let text = ends
+        .server
+        .send(
+            TransportMessage {
+                data: Bytes::from_static(b"hi"),
+                is_text: true,
+                ..TransportMessage::default()
+            },
+            &handle,
+        )
+        .expect_err("a text");
+
+    assert_eq!(
+        misuse_of(&text).as_deref(),
+        Some("an in-memory connection carries envelopes, as bytes"),
+        "a misuse: {text:?}"
+    );
 
     client.send(message_of(&[1], None)).expect("sent");
     ends.clock.settle().await;

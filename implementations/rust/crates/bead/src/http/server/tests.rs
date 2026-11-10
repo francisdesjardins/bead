@@ -327,6 +327,7 @@ async fn answers_an_answer_sent_as_its_request_is_handed_on_in_one_go() {
                 address: None,
                 port: None,
                 may_overtake: false,
+                is_text: false,
             };
 
             drop(server.send(message, handle));
@@ -396,6 +397,7 @@ async fn hands_a_request_on_with_its_authorization_whole_and_any_other_envelope_
                     address: None,
                     port: None,
                     may_overtake: false,
+                    is_text: false,
                 };
 
                 drop(server.send(answer, handle));
@@ -1470,6 +1472,7 @@ async fn keeps_a_connection_whose_refused_exchange_lost_its_socket_and_closes_on
         address: None,
         port: None,
         may_overtake: false,
+        is_text: false,
     };
     let Sent::Later(sending) = started.server.send(message, &handle).unwrap() else {
         panic!("an answer settles later");
@@ -2122,6 +2125,7 @@ async fn loses_an_answer_whose_client_reads_slower_than_minimum_send_bytes_per_s
         address: None,
         port: None,
         may_overtake: false,
+        is_text: false,
     };
     let Sent::Later(sending) = started.server.send(message, &handle).unwrap() else {
         panic!("an answer settles later");

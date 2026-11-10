@@ -35,6 +35,7 @@ const LOOPBACK: &str = "127.0.0.1";
 #[derive(Default)]
 struct Told {
     messages: Vec<Bytes>,
+    texts: Vec<bool>,
     closes: Vec<(bool, bool)>,
     errors: Vec<String>,
     reconnects: usize,
@@ -56,6 +57,10 @@ impl Recorder {
         self.told.lock().unwrap().messages.clone()
     }
 
+    fn texts(&self) -> Vec<bool> {
+        self.told.lock().unwrap().texts.clone()
+    }
+
     fn closes(&self) -> Vec<(bool, bool)> {
         self.told.lock().unwrap().closes.clone()
     }
@@ -67,7 +72,10 @@ impl Recorder {
 
 impl ClientListener for Recorder {
     fn on_message(&self, message: TransportMessage) {
-        self.record(|told| told.messages.push(message.data));
+        self.record(|told| {
+            told.texts.push(message.is_text);
+            told.messages.push(message.data);
+        });
     }
 
     fn on_close(&self, was_clean: bool, is_quick: bool) {
@@ -2186,8 +2194,9 @@ async fn delivers_a_fragmented_message_whole_then_the_next_message_separately() 
 
 // ── Its "message" event ──────────────────────────────────────────────────────────────────────
 
+// spec 15.2
 #[tokio::test]
-async fn emits_what_the_server_sends_text_as_a_string_binary_as_an_array_buffer() {
+async fn emits_what_the_server_sends_text_as_text_binary_as_bytes() {
     let server = hearing(None).await;
     let client = client();
     let recorder = recorded(&client);
@@ -2199,21 +2208,15 @@ async fn emits_what_the_server_sends_text_as_a_string_binary_as_an_array_buffer(
     upgraded.send(Message::text("text"));
     upgraded.send(Message::Binary(Bytes::from_static(b"binary")));
 
-    // * a text message is no envelope: reported, handed nothing; a binary one handed whole
+    // * each handed on whole, a text one marked so: its router judges it, its transport reports
+    // nothing of it (spec 15.2)
     assert_eq!(
-        messages_within(&recorder, 1).await,
-        [Bytes::from_static(b"binary")],
-        "the binary one"
+        messages_within(&recorder, 2).await,
+        [Bytes::from_static(b"text"), Bytes::from_static(b"binary")],
+        "both, in order"
     );
-    assert_eq!(
-        recorder
-            .errors()
-            .iter()
-            .map(|error| error.ends_with("ENVELOPE_MALFORMED: an envelope is binary, not a string"))
-            .collect::<Vec<_>>(),
-        [true],
-        "the text one reported"
-    );
+    assert_eq!(recorder.texts(), [true, false], "the text one marked");
+    assert!(recorder.errors().is_empty(), "nothing reported");
     client.dispose();
 }
 

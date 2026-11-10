@@ -1992,6 +1992,7 @@ impl ServerInner {
                 address: exchange.facts.address.clone(),
                 port: Some(exchange.facts.port),
                 may_overtake: false,
+                is_text: false,
             };
             let connection = Arc::clone(&exchange.connection);
 

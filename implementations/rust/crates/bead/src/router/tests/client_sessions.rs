@@ -101,8 +101,21 @@ async fn reports_bytes_that_are_not_an_envelope_and_an_envelope_of_a_kind_it_doe
             ..TransportMessage::default()
         });
     }
+    // a text message is no envelope, whatever its bytes (spec 15.2)
+    scripted.transport.deliver_message(&TransportMessage {
+        data: Bytes::from_static(b"text"),
+        is_text: true,
+        ..TransportMessage::default()
+    });
     scripted.settle().await;
-    assert_eq!(scripted.codes(), ["ENVELOPE_MALFORMED", "KIND_UNSUPPORTED"]);
+    assert_eq!(
+        scripted.codes(),
+        [
+            "ENVELOPE_MALFORMED",
+            "KIND_UNSUPPORTED",
+            "ENVELOPE_MALFORMED"
+        ]
+    );
 }
 
 #[tokio::test]

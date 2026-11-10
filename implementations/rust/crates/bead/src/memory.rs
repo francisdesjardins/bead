@@ -36,6 +36,9 @@ use crate::transport::{
 #[cfg(test)]
 mod tests;
 
+// what refuses a text message at either end, as the other sides word it (spec 15.2)
+const TEXT_REFUSED: &str = "an in-memory connection carries envelopes, as bytes";
+
 /// The type an in-memory connection's handle names.
 pub const TRANSPORT_MEMORY: &str = "MEMORY";
 
@@ -405,6 +408,13 @@ impl ServerTransport for MemoryTransportServer {
         message: TransportMessage,
         connection_handle: &ConnectionHandle,
     ) -> Result<Sent, RouterError> {
+        // refused before it goes, the connection kept: a text message is no envelope (spec 15.2)
+        if message.is_text {
+            return Err(RouterError::Other(Arc::new(ProgrammerError::new(
+                TEXT_REFUSED,
+            ))));
+        }
+
         let peer = locked(&self.inner.state)
             .connections
             .get(connection_handle)
@@ -1386,6 +1396,13 @@ impl RouterClientTransport for MemoryTransportClient {
                 }
             }
         };
+
+        // refused before it goes, the connection kept: a text message is no envelope (spec 15.2)
+        if message.is_text {
+            return Err(RouterError::Other(Arc::new(ProgrammerError::new(
+                TEXT_REFUSED,
+            ))));
+        }
 
         // refused before it goes, the connection kept: a field could not carry it as it is
         if let Some(credential) = &message.credential

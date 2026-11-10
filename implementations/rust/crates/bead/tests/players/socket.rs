@@ -261,7 +261,7 @@ pub(crate) fn read_response(response: &Value) -> Result<(), String> {
 
 // ── The server under test ────────────────────────────────────────────────────────────────────
 
-// what the server reported to its application, through its router or its transport, and the
+// what the server reported to its application, through its router, and the
 // refusals its transport told
 #[derive(Default)]
 struct Told {
@@ -276,25 +276,16 @@ fn code_of(error: &RouterError) -> Value {
     }
 }
 
-// what a transport tells: its refusals, and over WebSocket its reports
+// * what a transport tells: its refusals alone; every report is its router's, a text message's
+// ENVELOPE_MALFORMED among them (spec 15.2), as the other sides' players hear them, a connection
+// failed or dropped by its transport told by its transport alone
 struct AtTransport {
     told: Arc<Told>,
-    hears_reports: bool,
 }
 
 impl ServerListener for AtTransport {
     fn on_refusal(&self, refusal: &TransportServerRefusal) {
         locked(&self.told.refusals).push_back(refusal.clone());
-    }
-
-    // * over WebSocket, what the transport reports is the server's report to its application, as
-    // its router's is: a text message's ENVELOPE_MALFORMED among it, which the other sides' router
-    // reports; over HTTP the router's reports alone are heard, as the other sides' players hear
-    // them, a connection dropped behind its outbox's bound told by its transport alone
-    fn on_error(&self, error: &RouterError, connection_handle: Option<&ConnectionHandle>) {
-        if self.hears_reports {
-            locked(&self.told.reports).push_back((code_of(error), connection_handle.cloned()));
-        }
     }
 }
 
@@ -491,7 +482,6 @@ fn server_of(case: &Value, (clock, told): (&SharedClock, &Arc<Told>)) -> Result<
     ));
     built.transport().listen(Arc::new(AtTransport {
         told: Arc::clone(told),
-        hears_reports: !is_http,
     }));
     bead_interop::offer_interop(built.server()).map_err(|error| error.to_string())?;
 

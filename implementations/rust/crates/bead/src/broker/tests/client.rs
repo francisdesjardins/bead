@@ -20,7 +20,7 @@ use crate::broker::participant::{BrokerParticipant, BrokerParticipantOptions, Br
 use crate::broker::server::{BrokerTransportServer, BrokerTransportServerOptions};
 use crate::clock::SharedClock;
 use crate::duration::{DurationRefusal, NEVER};
-use crate::errors::{Refusal, TransportError};
+use crate::errors::{ProgrammerError, Refusal, TransportError};
 use crate::router::types::{RouterError, TransportMessage};
 use crate::testing::SteppingClock;
 use crate::transport::{
@@ -533,6 +533,25 @@ async fn refuses_to_send_a_credential_no_field_carries_or_what_is_no_envelope_ke
             .to_string(),
         "a credential holds visible ASCII, spaces and tabs alone, none first or last",
         "refused"
+    );
+    assert_eq!(client.ready_state(), ReadyState::Open, "kept");
+
+    // * a text is no envelope: refused before anything goes, its connection kept (spec 15.2)
+    let text = client
+        .send(TransportMessage {
+            is_text: true,
+            ..data(b"hi")
+        })
+        .expect_err("a text");
+
+    assert!(
+        matches!(&text, RouterError::Other(error) if error.downcast_ref::<ProgrammerError>().is_some()),
+        "a misuse: {text:?}"
+    );
+    assert_eq!(
+        text.to_string(),
+        "a broker connection carries envelopes, as bytes",
+        "said why"
     );
     assert_eq!(client.ready_state(), ReadyState::Open, "kept");
 

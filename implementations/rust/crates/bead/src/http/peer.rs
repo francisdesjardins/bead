@@ -192,6 +192,7 @@ impl Started {
             address: None,
             port: None,
             may_overtake: false,
+            is_text: false,
         };
 
         match self.server.send(message, connection)? {

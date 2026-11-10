@@ -1029,6 +1029,13 @@ impl ServerTransport for BrokerTransportServer {
         message: TransportMessage,
         connection_handle: &ConnectionHandle,
     ) -> Result<Sent, RouterError> {
+        // refused before it goes, the connection kept: a text message is no envelope (spec 15.2)
+        if message.is_text {
+            return Err(RouterError::Other(Arc::new(ProgrammerError::new(
+                crate::broker::TEXT_REFUSED,
+            ))));
+        }
+
         let held = {
             let state = locked(&self.inner.state);
 

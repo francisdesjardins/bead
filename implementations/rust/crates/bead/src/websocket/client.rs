@@ -29,10 +29,8 @@ use tungstenite::error::Error as WsError;
 
 use crate::HEARTBEAT;
 use crate::clock::{Schedule, SharedClock, SystemClock, Timer};
-use crate::constants::{ProtocolCode, RouterSide};
 use crate::duration::{NEVER, hold};
 use crate::errors::{ConnectError, ProgrammerError, ReadyStateError, TransportError};
-use crate::failure::Failure;
 use crate::judgement::security::is_secure;
 use crate::net::bounds::hold_count;
 use crate::net::racing::{RacingOptions, connect_racing, host_of};
@@ -339,8 +337,8 @@ struct Opened {
 /// runs on its clock; a connect given up by its timeout, its signal or its dispose drops what it
 /// opened.
 ///
-/// Once open, each binary message is handed on `on_message`; a text message is
-/// `ENVELOPE_MALFORMED`, reported on `on_error`, handed nothing. A message past
+/// Once open, each message is handed on `on_message`, a text one marked `is_text`, for its router
+/// to report as no envelope (spec 15.2). A message past
 /// `maximum_message_bytes` fails its connection with 1009, reported on `on_error` naming
 /// `maximumMessageBytes`, then its unclean close; a protocol error is reported alike, failed with
 /// 1002. A server gone without its closing handshake tells its unclean close alone.
@@ -806,8 +804,8 @@ impl ClientInner {
         }
     }
 
-    // a message whole, handed on unless its connection is gone or closing; a text one reported,
-    // as no envelope
+    // a message whole, handed on unless its connection is gone or closing; a text one marked so,
+    // for its router to judge (spec 15.2)
     fn deliver(&self, serial: u64, (data, is_text): (Bytes, bool)) {
         {
             let state = locked(&self.state);
@@ -824,17 +822,9 @@ impl ClientInner {
             }
         }
 
-        if is_text {
-            self.report(&RouterError::Failure(
-                Failure::protocol(ProtocolCode::ENVELOPE_MALFORMED, RouterSide::Client)
-                    .saying("an envelope is binary, not a string"),
-            ));
-
-            return;
-        }
-
         let message = TransportMessage {
             data,
+            is_text,
             ..TransportMessage::default()
         };
 

@@ -602,6 +602,8 @@ pub struct TransportMessage {
     pub port: Option<u16>,
     /// Whether it came by a way that keeps no order with its call's answer.
     pub may_overtake: bool,
+    /// Whether it came as a text message, which is no envelope (spec 15.2).
+    pub is_text: bool,
 }
 
 impl fmt::Debug for TransportMessage {
@@ -614,6 +616,7 @@ impl fmt::Debug for TransportMessage {
             .field("address", &self.address)
             .field("port", &self.port)
             .field("may_overtake", &self.may_overtake)
+            .field("is_text", &self.is_text)
             .field(
                 "credential",
                 &format_args!("{}", carried_or_none(self.credential.as_ref())),

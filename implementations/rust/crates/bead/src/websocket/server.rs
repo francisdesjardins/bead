@@ -19,10 +19,8 @@ use tokio::net::TcpStream;
 use tungstenite::protocol::Role;
 
 use crate::clock::{SharedClock, SystemClock};
-use crate::constants::{ProtocolCode, RouterSide};
 use crate::duration::{hold, hold_finite};
 use crate::errors::ProgrammerError;
-use crate::failure::Failure;
 use crate::failure::ProcedureAddress;
 use crate::identity::procedures_taken_of;
 use crate::judgement::handshake::{
@@ -203,10 +201,10 @@ pub(crate) struct ServerInner {
 ///
 /// An upgrade it takes is answered 101, with no subprotocol and no extension, and its connection
 /// drawn under its handle, `type=WS;ip=…;port=…;ordinal=…`, told on `on_connection` before any
-/// frame it read with the head. Each binary message is handed with the connection's address, its
-/// port and its upgrade's credential: its `Authorization`, as it came and trimmed, unless it
-/// carries an `Origin`, whose page's browser writes its own authentication; a text message is
-/// `ENVELOPE_MALFORMED`, reported on `on_error`, handed nothing. A message past
+/// frame it read with the head. Each message is handed with the connection's address, its port and
+/// its upgrade's credential: its `Authorization`, as it came and trimmed, unless it carries an
+/// `Origin`, whose page's browser writes its own authentication; a text message is handed alike,
+/// marked `is_text`, for its router to report as no envelope (spec 15.2). A message past
 /// `maximum_message_bytes` fails its connection with 1009, reported on `on_error` naming
 /// `maximumMessageBytes`, then dropped at its peer's end or its close timeout, unclean; a protocol
 /// error is reported alike, failed with 1002. A peer that drops without its closing handshake tells
@@ -650,20 +648,10 @@ impl ServerInner {
         self.ended(&handle, &ended);
     }
 
-    // a message whole, handed on with its connection's address and port and its upgrade's
-    // credential; a text one reported, as no envelope
+    // a message whole, its activity stamped as it is read, then handed on with its connection's
+    // address and port and its upgrade's credential; a text one marked so, for its router to judge
+    // (spec 15.2)
     fn deliver(&self, (handle, peer): (&ConnectionHandle, &Peer), (data, is_text): (Bytes, bool)) {
-        if is_text {
-            let error = RouterError::Failure(
-                Failure::protocol(ProtocolCode::ENVELOPE_MALFORMED, RouterSide::Server)
-                    .saying("an envelope is binary, not a string"),
-            );
-
-            self.report((&error, Some(handle)));
-
-            return;
-        }
-
         let now = self.clock.wall();
 
         if let Some(held) = locked(&self.state).connections.get_mut(handle) {
@@ -676,6 +664,7 @@ impl ServerInner {
             address: Some(peer.address.clone()),
             port: Some(peer.port),
             may_overtake: false,
+            is_text,
         };
 
         self.tell((

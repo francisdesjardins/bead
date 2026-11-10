@@ -947,6 +947,13 @@ impl RouterClientTransport for BrokerTransportClient {
             }
         };
 
+        // refused before it goes, the connection kept: a text message is no envelope (spec 15.2)
+        if message.is_text {
+            return Err(RouterError::Other(Arc::new(ProgrammerError::new(
+                crate::broker::TEXT_REFUSED,
+            ))));
+        }
+
         // refused before it goes, the connection kept: a field could not carry it as it is
         if let Some(credential) = &message.credential
             && !is_field_value(credential)

@@ -198,7 +198,7 @@ fn a_transport_message_writes_whether_its_transport_carried_a_credential_never_t
 
     assert_eq!(
         format!("{carrying:?}"),
-        "TransportMessage { data: 3 bytes, address: None, port: None, may_overtake: true, credential: carried }",
+        "TransportMessage { data: 3 bytes, address: None, port: None, may_overtake: true, is_text: false, credential: carried }",
         "its bytes counted, whether a credential came"
     );
     assert!(
@@ -209,7 +209,7 @@ fn a_transport_message_writes_whether_its_transport_carried_a_credential_never_t
                 ..TransportMessage::default()
             }
         )
-        .ends_with("may_overtake: false, credential: none }"),
+        .ends_with("may_overtake: false, is_text: false, credential: none }"),
         "none carried"
     );
 }
