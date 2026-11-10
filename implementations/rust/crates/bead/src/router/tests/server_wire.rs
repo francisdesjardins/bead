@@ -25,7 +25,11 @@ use crate::{
 };
 
 use super::server::news;
-use super::{PATIENCE, locked, token};
+use super::{PATIENCE, locked};
+
+fn token() -> crate::session_token::SessionToken {
+    crate::session_token::SessionToken::new([7; 16]).expect("the source's token")
+}
 use crate::testing::pair::echo;
 
 fn asked() -> RequestDependencies<TextCodec, TextCodec> {
