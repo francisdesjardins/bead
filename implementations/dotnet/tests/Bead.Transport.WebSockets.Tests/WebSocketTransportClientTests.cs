@@ -2141,6 +2141,46 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         }
     }
 
+    // spec 15.2
+    [Fact]
+    public async Task Emits_what_the_server_sends_text_as_text_binary_as_bytes()
+    {
+        using var listener = new Listener(IPAddress.Loopback);
+        var messages = Channel.CreateUnbounded<TransportMessage>();
+        var errors = Channel.CreateUnbounded<Exception>();
+
+        _client.Message += (message) =>
+        {
+            messages.Writer.TryWrite(message);
+        };
+        _client.Error += (reason) =>
+        {
+            errors.Writer.TryWrite(reason);
+        };
+
+        var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
+        var (peer, head) = await listener.Next();
+
+        using (peer)
+        using (var server = await Listener.Answer(peer, head))
+        {
+            await connecting.WaitAsync(Patience, Cancelled);
+            await server.SendAsync(Encoding.UTF8.GetBytes("text"), WebSocketMessageType.Text, true, Cancelled);
+            await server.SendAsync(Encoding.UTF8.GetBytes("binary"), WebSocketMessageType.Binary, true, Cancelled);
+
+            var text = await Next(messages);
+            var binary = await Next(messages);
+
+            // * each handed on whole, a text one marked so: its router judges it, its transport reports
+            // nothing of it (spec 15.2)
+            Assert.Equal("text"u8.ToArray(), text.Bytes.ToArray());
+            Assert.True(text.IsText);
+            Assert.Equal("binary"u8.ToArray(), binary.Bytes.ToArray());
+            Assert.False(binary.IsText);
+            Assert.True(errors.Reader.Count == 0);
+        }
+    }
+
     [Fact]
     public async Task Hears_the_next_message_after_a_message_listener_throws_the_throw_reported()
     {
