@@ -1842,7 +1842,7 @@ async fn http_exchange_timeout_by_server(given: Option<Duration>) -> Played {
     request.extend_from_slice(&[0xA1, 0x10, 0, 0, 0, 0, 0, 1]);
     drive.write_bytes(&request).await?;
 
-    // its head goes once it is handed on, its timer armed then, its body's pace gone with its body
+    // its timer armed once it is handed on, its body's pace gone with its body
     for _ in 0..1_000 {
         let counts = drive.server.gauges().map(|gauges| gauges.counts);
         let is_handed = counts.is_some_and(|counts| {
@@ -1856,7 +1856,19 @@ async fn http_exchange_timeout_by_server(given: Option<Duration>) -> Played {
         bead::testing::rest(Duration::from_millis(5)).await;
     }
 
-    let due = drive.due(1).await;
+    // * one timer from its hand-off, its head's 40 ms first (spec 15.7): past them, or never, its
+    // head goes at them and what is left of its timeout is armed then; at them or under, the one
+    // due is its timeout's, whose close sends its head
+    let head_delay = Duration::from_millis(40);
+    let mut due = drive.due(1).await;
+
+    if due == Ok(head_delay) {
+        drive.clock.advance(head_delay).await;
+
+        if !drive.server.clients().is_empty() {
+            due = due_of(&drive.clock.dues()).map(|left| left.saturating_add(head_delay));
+        }
+    }
 
     drive.stop().await?;
 

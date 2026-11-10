@@ -573,6 +573,15 @@ pub(crate) async fn until<F: Fn() -> bool + Send + Sync>(holds: F) {
     .expect("what was waited for, within patience");
 }
 
+/// Moves `clock` 40 ms once a request is handed on, its head's delay armed: a request still
+/// unanswered then gets its head (spec 15.7).
+pub(crate) async fn head_delayed(clock: &crate::testing::SteppingClock) {
+    let delay = Duration::from_millis(40);
+
+    until(|| clock.dues().contains(&delay)).await;
+    clock.advance(delay).await;
+}
+
 /// A socket of the test's own whose writing goes on at full speed, a mebibyte at a time, until
 /// its socket fails or `limit` bytes went, while what comes is read.
 pub(crate) struct Pumped {
