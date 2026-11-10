@@ -39,6 +39,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `port`, as on the C# and Rust sides.
 - **Breaking:** on the Rust side a server transport's `start` leaves `ServerTransport`: each server
   starts itself and gives the `TransportServerAddress` it listens at.
+- **Breaking:** what a listener of an `error` event throws — a transport's, server or client, a
+  router's, a broker participant's or a gateway's — is dropped on every side, the listeners after
+  it told: as a connection drops, an HTTP `send` no longer rejects with it, nor the C# side's `Send`
+  throws it; over WebSocket it no longer reaches Node's `uncaughtException` or Kestrel; and the Rust
+  side's participant no longer tells an error listener's panic to its error listeners (spec 15.1,
+  debugging 2.2, 13.9; decision 0023).
 
 ### Fixed
 

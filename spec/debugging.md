@@ -21,6 +21,8 @@ that hold what of them a test can. The why of each rule is in the decisions:
   payloads it writes (4.3, 10.1);
 - [0017](../docs/decisions/0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md): the
   names it reads (1.2, 6.10, 7.3, 8.3);
+- [0023](../docs/decisions/0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md):
+  what a listener of the router's or a participant's error event throws (2.2, 13.9);
 - [0033](../docs/decisions/0033-a-side-bounds-what-a-peer-holds-of-it.md): a call past those its
   connection has it answer, and a requester's call past its bounds (9.4, 9.6);
 - [0035](../docs/decisions/0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md):
@@ -61,9 +63,10 @@ peer never knows whether it listens.
 2.2. A listener's error never changes a call. An error a listener throws, the trace's or the one a
 filter wraps, MUST be reported, as section 9.0 of `spec.md` reports an error: through its router's
 error event, with the call's connection on a server, through which its service manager reports its
-own. A listener is synchronous: what it returns is not awaited, and an error it raises once it
-returned is its platform's, outside this guard. The call goes on as if nobody listened: its outcome,
-its answer and what goes on the wire are the same.
+own. A listener of that error event is called within a guard as well: what it throws is dropped,
+and the listeners after it are called (`spec.md` 15.1). A listener is synchronous: what it returns
+is not awaited, and an error it raises once it returned is its platform's, outside this guard. The
+call goes on as if nobody listened: its outcome, its answer and what goes on the wire are the same.
 
 2.3. A side calls each listener within a guard, and counts on a path no listener runs on.
 
@@ -639,9 +642,10 @@ let go and held again, between two reads. A pull costs nothing while nobody read
 no byte copied or decoded for the trace, and no topic joined. Each event is told synchronously at
 its site within a guard, in the participant's own turn, one at a time, as an envelope is told in its
 router's, so ordered per participant. A listener's error is reported through the participant's
-`error` event, and the listeners after it are still called. The participant goes on as if nobody
-listens. A listener filters what it receives, as 0013's call listener does; there is no per-kind
-selection at the source.
+`error` event, and the listeners after it are still called. What a listener of that `error` event
+throws is dropped (`spec.md` 15.1). The participant goes on as if nobody listens. A listener
+filters what it receives, as 0013's call listener does; there is no per-kind selection at the
+source.
 
 13.10. Twin tests hold each event and verdict, a takeover and no later transition, a link lost with
 the ordinals it ends and restored as another incarnation, each name a stop lets go told before its
