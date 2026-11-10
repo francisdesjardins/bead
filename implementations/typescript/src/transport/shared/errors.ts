@@ -1,6 +1,6 @@
 // dependencies
 
-import { READY_STATE_NAMES, type ReadyState } from './ready-state';
+import { READY_STATE_NAMES, ReadyState } from './ready-state';
 import { thrownMessage } from './thrown-message';
 
 // helpers
@@ -23,6 +23,25 @@ export const toCancelError = (signal: AbortSignal): CancelError => {
   const reason: unknown = signal.reason;
 
   return new CancelError(undefined, { cause: reason });
+};
+
+/**
+ * What a transport client refuses a send with while it is not open (debugging 9.7): before its
+ * open, uninitialized or connecting, its ready state's {@link ReadyStateError}; once its state is a
+ * close's — closing, closed or reconnecting — a {@link DisconnectError}, as a call pending when the
+ * close came fails, for the two are one race with a close.
+ */
+export const notOpenOf = (state: ReadyState): DisconnectError | ReadyStateError => {
+  if (state === ReadyState.UNINITIALIZED || state === ReadyState.CONNECTING) {
+    return new ReadyStateError(state, ReadyState.OPEN);
+  }
+
+  // ! open, its connection already let go, is a close's too: the turn that lost it marks it closed
+  return new DisconnectError(
+    state === ReadyState.OPEN
+      ? 'the transport client lost its connection, not open'
+      : `the transport client is ${READY_STATE_NAMES[state].toLowerCase()}, not open`
+  );
 };
 
 /** `reason` itself when it is an `Error`, otherwise a {@link GenericError} carrying it as `cause`. */
@@ -77,6 +96,14 @@ export class ConnectError extends GenericError {
   public override readonly name: string = 'ConnectError';
 }
 
+/**
+ * A call whose connection closed before its answer came, or was not open as it started — closing,
+ * closed or reconnecting — or whose side was disposed.
+ */
+export class DisconnectError extends GenericError {
+  public override readonly name: string = 'DisconnectError';
+}
+
 /** A misuse of the API, or a `delay` function that threw. */
 export class ProgrammerError extends GenericError {
   public override readonly name: string = 'ProgrammerError';
@@ -84,7 +111,10 @@ export class ProgrammerError extends GenericError {
 
 /**
  * A transport client asked for what its state does not allow, in the C# side's words: `the
- * transport client is uninitialized, not open`.
+ * transport client is uninitialized, not open`; the C# side's `ReadyStateException` is its twin. A
+ * send is refused so before its open alone, uninitialized or connecting, a send once its state is a
+ * close's being a {@link DisconnectError}; a close or a disconnect unless open is refused so in any
+ * state.
  */
 export class ReadyStateError extends GenericError {
   public override readonly name: string = 'ReadyStateError';

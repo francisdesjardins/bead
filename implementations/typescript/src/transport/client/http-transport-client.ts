@@ -21,6 +21,7 @@ import {
   ConnectError,
   GenericError,
   ProgrammerError,
+  notOpenOf,
   ReadyStateError,
   reasonMessage,
   toError,
@@ -945,7 +946,7 @@ export const createHTTPTransportClient = (
           const connection = drawn;
 
           if (!client.isOpen() || connection === undefined) {
-            return Promise.reject(new ReadyStateError(getReadyState(client), ReadyState.OPEN));
+            return Promise.reject(notOpenOf(getReadyState(client)));
           }
 
           // refused before it goes, the connection kept: a field could not carry it as it is, and

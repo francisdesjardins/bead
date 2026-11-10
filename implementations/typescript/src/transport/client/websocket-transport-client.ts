@@ -16,6 +16,7 @@ import { createPromise } from '../shared/create-promise';
 import {
   ConnectError,
   ProgrammerError,
+  notOpenOf,
   ReadyStateError,
   tooBigOf,
   wrapReason,
@@ -701,9 +702,7 @@ export const createWebSocketTransportClient = (
             const { socket } = client;
 
             if (!client.isOpen() || socket === null) {
-              return (
-                reject(new ReadyStateError(getReadyState(client), ReadyState.OPEN)), undefined
-              );
+              return (reject(notOpenOf(getReadyState(client))), undefined);
             }
 
             socket.send(data);

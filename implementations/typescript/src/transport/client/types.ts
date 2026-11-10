@@ -179,8 +179,10 @@ export interface ITransportClient<
   /**
    * Resolves once the message is on its way, not once it is delivered: over a socket, once the
    * socket has accepted it; over HTTP, on the head of its exchange's answer — the server had it — or
-   * on its exchange lost, which closes the connection. Rejects with a {@link ReadyStateError} unless
-   * OPEN, and over HTTP with a {@link GenericError} on a refusal the server marked, nothing tried; the
+   * on its exchange lost, which closes the connection. Rejects, nothing sent, with a
+   * {@link ReadyStateError} before its open, uninitialized or connecting, and with a
+   * {@link DisconnectError} once its state is a close's, closing, closed or reconnecting (debugging
+   * 9.7); over HTTP with a {@link GenericError} on a refusal the server marked, nothing tried; the
    * socket's own error passes through. Its credential goes over HTTP in the `Authorization` of its
    * `POST`, over a WebSocket in its upgrade's, which its connect is given; a worker carries none.
    */

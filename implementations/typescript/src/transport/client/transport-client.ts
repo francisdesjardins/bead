@@ -38,6 +38,7 @@ export { CLOSE_EVENT, ERROR_EVENT, MESSAGE_EVENT } from '../shared/constants';
 export {
   CancelError,
   ConnectError,
+  DisconnectError,
   GenericError,
   ProgrammerError,
   ReadyStateError,

@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { createWorkerTransportServer } from '../../server/worker-transport-server';
-import { createTestClock, delaysOn } from '../../shared/__tests__/fixtures';
+import { createTestClock, delaysOn, sendRefusalOf } from '../../shared/__tests__/fixtures';
 import {
   CancelError,
   ConnectError,
@@ -9,6 +9,7 @@ import {
   ReadyStateError,
   TimeoutError,
 } from '../../shared/errors';
+import { ReadyState } from '../../shared/ready-state';
 import type { ITransportMessage } from '../../shared/types';
 import { dispose } from '../transport-client';
 import type { ITransportClientInternal } from '../types';
@@ -498,6 +499,85 @@ test.describe('createWorkerTransportClient', () => {
     (client as ITransportClientInternal<object, never>)[dispose]();
     scope.port1.close();
     scope.port2.close();
+  });
+
+  // debugging 9.7
+  test('refuses a send by its ready state before the open and as a disconnection after it, in each state it holds', async () => {
+    await using started = await startWorker();
+    // * its worker as the page holds it, which holds what it is posted while the test says so
+    const posts: (() => void)[] = [];
+    const holding = { isHolding: false };
+    const worker: IWorkerLike = {
+      ...started.worker,
+      postMessage: (message, transfer) => {
+        if (holding.isHolding) {
+          posts.push(() => {
+            started.worker.postMessage(message, transfer);
+          });
+        } else {
+          started.worker.postMessage(message, transfer);
+        }
+      },
+    };
+    await using client = createWorkerTransportClient({ worker });
+    const refusals: Awaited<ReturnType<typeof sendRefusalOf>>[] = [];
+
+    // never connected
+    refusals.push(await sendRefusalOf(client));
+
+    // connecting, its port held by its worker
+    holding.isHolding = true;
+
+    const connecting = client.connect();
+
+    refusals.push(await sendRefusalOf(client));
+    holding.isHolding = false;
+    posts.shift()?.();
+    await connecting;
+
+    // open, the send going
+    refusals.push(await sendRefusalOf(client));
+
+    // closing left out: its disconnect is closing and closed within one turn; closed, a disconnect
+    // refused by its state too
+    await client.disconnect();
+    refusals.push(await sendRefusalOf(client));
+    await expect(client.disconnect()).rejects.toMatchObject({
+      got: ReadyState.CLOSED,
+      name: 'ReadyStateError',
+    });
+
+    // reconnecting, its port held by its worker, then ended by its signal
+    const ending = new AbortController();
+
+    holding.isHolding = true;
+
+    const reconnecting = client.reconnect({ signal: ending.signal });
+
+    refusals.push(await sendRefusalOf(client));
+    ending.abort();
+    await expect(reconnecting).rejects.toBeInstanceOf(CancelError);
+
+    // closed by a connect that started and failed: cancelled, its port held
+    const cancelling = new AbortController();
+    const cancelled = client.connect({ signal: cancelling.signal });
+
+    cancelling.abort();
+    await expect(cancelled).rejects.toBeInstanceOf(CancelError);
+    refusals.push(await sendRefusalOf(client));
+
+    expect(refusals).toEqual([
+      [
+        'ReadyStateError',
+        ReadyState.UNINITIALIZED,
+        'the transport client is uninitialized, not open',
+      ],
+      ['ReadyStateError', ReadyState.CONNECTING, 'the transport client is connecting, not open'],
+      'sent',
+      ['DisconnectError', undefined, 'the transport client is closed, not open'],
+      ['DisconnectError', undefined, 'the transport client is reconnecting, not open'],
+      ['DisconnectError', undefined, 'the transport client is closed, not open'],
+    ]);
   });
 
   test('refuses to send or disconnect before it opens, and to send what is no bytes', async () => {

@@ -2,8 +2,10 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
 import { createWebSocketTransportClient } from '../../../transport/client/websocket-transport-client';
 import { createEmitter } from '../../../transport/shared/emitter';
+import { notOpenOf } from '../../../transport/shared/errors';
 import { createHold } from '../../../transport/shared/hold';
 import { nextTask } from '../../../transport/shared/later-task';
+import { ReadyState } from '../../../transport/shared/ready-state';
 import type { ITransportMessage } from '../../../transport/shared/types';
 import { bytesOf, readEnvelope } from '../../shared/envelope';
 import { toSessionToken } from '../../shared/identifiers';
@@ -118,7 +120,8 @@ const notificationEnvelopeOf = (callId: number, payload = Uint8Array.of(5)): Out
  * A transport that records what is sent, read as the server reads it, and the credential carried
  * beside it, delivers what a test gives, and carries a credential, securely, unless told otherwise.
  * Paused by its router, it holds what the test delivers, in order, until resumed; `pauses` holds
- * each pause, `true`, and resume.
+ * each pause, `true`, and resume. Its `control.readyState` other than open refuses a send as every
+ * client transport refuses one while not open.
  */
 const createScriptedTransport = ({
   carries = () => {
@@ -135,7 +138,10 @@ const createScriptedTransport = ({
   // each envelope sent, as its bytes went
   const raw: Uint8Array[] = [];
   const carried: (string | undefined)[] = [];
-  const control = { sendError: undefined as Error | undefined };
+  const control = {
+    readyState: ReadyState.OPEN as ReadyState,
+    sendError: undefined as Error | undefined,
+  };
   const pauses: boolean[] = [];
   const hold = createHold((message: ITransportMessage) => {
     emitter.emit('message', message);
@@ -155,6 +161,10 @@ const createScriptedTransport = ({
       hold.resume();
     },
     send: ({ credential, data }) => {
+      if (control.readyState !== ReadyState.OPEN) {
+        return Promise.reject(notOpenOf(control.readyState));
+      }
+
       carried.push(credential);
       raw.push(bytesOf(data).slice());
       sent.push(
@@ -3024,6 +3034,55 @@ test.describe('createRouterClient', () => {
           return (reason as FailureError).code;
         })
       ).toEqual([ProtocolCode.SESSION_REQUIRED, ProtocolCode.DESTINATION_UNREACHABLE]);
+    });
+
+    // debugging 9.6, 9.7
+    test('counts a call to a client not open by its transport state, error before the open and closed after it', async () => {
+      const metricsRegistry = createMetricsRegistry();
+      const { control, sent, transport } = createScriptedTransport();
+      using router = createRouterClient(transport, { clock: createTestClock(), metricsRegistry });
+      const series = router.declareRequester(service);
+      const failures: [string, number | undefined][] = [];
+
+      for (const readyState of [
+        ReadyState.UNINITIALIZED,
+        ReadyState.CONNECTING,
+        ReadyState.CLOSING,
+        ReadyState.CLOSED,
+        ReadyState.RECONNECTING,
+      ]) {
+        control.readyState = readyState;
+
+        const reason: unknown = await router
+          .request(new Uint8Array(0), { options, procedure: service, series })
+          .then(
+            () => {
+              return new Error('answered');
+            },
+            (caught: unknown) => {
+              return caught;
+            }
+          );
+        const { got, name } = reason as Error & { got?: number };
+
+        failures.push([name, got]);
+      }
+
+      // * before its open, its ready state's refusal; once its state is a close's, a disconnection
+      expect(failures).toEqual([
+        ['ReadyStateError', ReadyState.UNINITIALIZED],
+        ['ReadyStateError', ReadyState.CONNECTING],
+        ['DisconnectError', undefined],
+        ['DisconnectError', undefined],
+        ['DisconnectError', undefined],
+      ]);
+      expect(countedOf(metricsRegistry)).toEqual([
+        made('duration_seconds_count{} 5'),
+        made('handled_total{outcome="closed"} 3'),
+        made('handled_total{outcome="error"} 2'),
+        made('started_total{} 5'),
+      ]);
+      expect(sent).toEqual([]);
     });
 
     // debugging 9.3, spec 13.4

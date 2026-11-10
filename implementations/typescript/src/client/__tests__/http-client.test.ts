@@ -6,7 +6,13 @@ import {
   BEAD_MEDIA_TYPE,
   CONNECTION_TOKEN_HEADER,
 } from '../../transport/client/http-transport-client';
-import { createHTTPClient, SERVER_FAILURES } from '../http-client';
+import { ReadyState } from '../../transport/shared/ready-state';
+import {
+  createHTTPClient,
+  DisconnectError,
+  ReadyStateError,
+  SERVER_FAILURES,
+} from '../http-client';
 
 // helpers
 
@@ -119,5 +125,43 @@ test.describe('createHTTPClient', () => {
 
     await expect(calling).rejects.toThrow();
     expect(client.transport.isClosed()).toBe(true);
+  });
+
+  // debugging 9.7
+  test('fails a call before it connects by its ready state, sending nothing', async () => {
+    const fake = createFakeFetch();
+    await using client = createHTTPClient({ transport: { fetch: fake.fetch, isListening: false } });
+    const failing = client.services.getRequest(echo, { serializer: text })('hi')();
+
+    await expect(failing).rejects.toBeInstanceOf(ReadyStateError);
+    await expect(failing).rejects.toMatchObject({
+      expected: ReadyState.OPEN,
+      got: ReadyState.UNINITIALIZED,
+    });
+    expect(fake.calls).toEqual([]);
+  });
+
+  // debugging 9.7
+  test('fails a call once disconnected as a disconnection, sending nothing', async () => {
+    // a server that draws the connection and lets it go
+    const fake = createFakeFetch((init) => {
+      return init.method === 'POST'
+        ? responseOf({ headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22) }, status: 201 })
+        : responseOf({ status: 204 });
+    });
+    await using client = createHTTPClient({ transport: { fetch: fake.fetch, isListening: false } });
+
+    await client.connect({ host: 'localhost', port: 8_080 });
+    await client.transport.disconnect();
+
+    const failing = client.services.getRequest(echo, { serializer: text })('hi')();
+
+    await expect(failing).rejects.toBeInstanceOf(DisconnectError);
+    await expect(failing).rejects.toThrow('the transport client is closed, not open');
+    expect(
+      fake.calls.map(({ init }) => {
+        return init.method;
+      })
+    ).toEqual(['POST', 'DELETE']);
   });
 });

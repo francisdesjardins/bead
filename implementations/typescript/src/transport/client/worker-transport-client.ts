@@ -4,7 +4,13 @@
 
 import { CLOSE_EVENT, MESSAGE_EVENT, WORKER_MESSAGES } from '../shared/constants';
 import { createPromise } from '../shared/create-promise';
-import { ConnectError, GenericError, ProgrammerError, ReadyStateError } from '../shared/errors';
+import {
+  ConnectError,
+  GenericError,
+  notOpenOf,
+  ProgrammerError,
+  ReadyStateError,
+} from '../shared/errors';
 import { createHold } from '../shared/hold';
 import {
   getReadyState,
@@ -229,7 +235,7 @@ export const createWorkerTransportClient = ({
           const open = port;
 
           if (!client.isOpen() || open === undefined) {
-            return Promise.reject(new ReadyStateError(getReadyState(client), ReadyState.OPEN));
+            return Promise.reject(notOpenOf(getReadyState(client)));
           }
 
           const bytes = transferableOf(data);

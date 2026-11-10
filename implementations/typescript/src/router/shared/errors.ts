@@ -16,6 +16,8 @@ import type {
   RouterSide,
 } from './types';
 
+export { DisconnectError } from '../../transport/shared/errors';
+
 // interfaces
 
 /** Where a failure belongs, besides what it says: the call it failed and the envelope that said it. */
@@ -93,11 +95,6 @@ export const redactHeader = (header: EnvelopeHeader): RedactedHeader => {
  */
 export class CapacityError extends GenericError {
   public override readonly name: string = 'CapacityError';
-}
-
-/** A request whose connection closed before its answer came. */
-export class DisconnectError extends GenericError {
-  public override readonly name: string = 'DisconnectError';
 }
 
 /**
