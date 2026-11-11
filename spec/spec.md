@@ -1584,8 +1584,11 @@ listen after it is the last — lost too, the client counts the connection lost.
 the count.
 
 15.11. HTTP carries no transfer: a request's body is in before its answer goes, so no credit could
-come back. Both sides of an HTTP connection set `maximumTransfers` to 0, and a payload is what one
-envelope holds.
+come back. An HTTP server or client sets `maximumTransfers` to 0, `chunkBytes` to
+`maximumEnvelopeBytes` and `windowBytes` to twice it, so a payload is what one envelope holds. Built
+as one, it refuses limits that give `maximumTransfers` other than 0, as limits that do not hold
+together are refused (section 12.2), and replaces a `chunkBytes` or a `windowBytes` given: those ask
+for nothing HTTP drops, since every payload they let go whole still goes whole.
 
 15.12. A server bounds what its clients hold, and times what is under way, by these names; a client
 bounds what it reads, an answer or an envelope a batch brings, by `maximumBodyBytes`, its default
