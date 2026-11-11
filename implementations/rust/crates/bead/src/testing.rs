@@ -33,6 +33,8 @@ mod platform;
 mod reading_clock;
 pub mod scripted;
 #[cfg(test)]
+pub(crate) mod service_port;
+#[cfg(test)]
 pub(crate) mod sessions;
 #[cfg(test)]
 pub(crate) mod surface;

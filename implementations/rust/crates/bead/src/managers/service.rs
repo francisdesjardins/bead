@@ -33,13 +33,13 @@ use crate::router::core::{AdmissionRequest, AdmitFn, Answerer, Handler, RequestR
 use crate::router::server::{NotifyFilter, RouterServer};
 use crate::router::types::{
     BoxFuture, CallSession, ConnectionHandle, NotifyRequest, RequestCredential,
-    ResolvedRequestOptions, RouterAnswer, RouterError, RouterLimits, RouterRequest,
-    SessionIdentifier, Signal,
+    ResolvedRequestOptions, RouterAnswer, RouterError, RouterRequest, SessionIdentifier, Signal,
 };
 use crate::transport::{Listened, ListenerId, caught};
 use crate::violations::{Judged, detail_bound_of, is_refused, violations_detail_of};
 
 mod notification;
+mod port;
 #[cfg(test)]
 pub(crate) mod tests;
 
@@ -47,6 +47,7 @@ pub use notification::{
     Notification, NotificationCallback, NotificationDependencies, NotificationRegistration,
     Unsubscribe,
 };
+pub(crate) use port::RouterLike;
 
 // ── Traced values ────────────────────────────────────────────────────────────────────────────
 
@@ -121,75 +122,6 @@ pub enum ServiceRouter {
     Server(RouterServer),
     /// A client's router.
     Client(RouterClient),
-}
-
-impl ServiceRouter {
-    fn side(&self) -> RouterSide {
-        match self {
-            Self::Server(_) => RouterSide::Server,
-            Self::Client(_) => RouterSide::Client,
-        }
-    }
-
-    fn limits(&self) -> RouterLimits {
-        match self {
-            Self::Server(router) => router.limits(),
-            Self::Client(router) => router.limits(),
-        }
-    }
-
-    fn clock(&self) -> SharedClock {
-        match self {
-            Self::Server(router) => router.clock(),
-            Self::Client(router) => router.clock(),
-        }
-    }
-
-    pub(crate) fn report(&self, error: &RouterError, connection_handle: Option<&ConnectionHandle>) {
-        match self {
-            Self::Server(router) => router.report(error, connection_handle),
-            Self::Client(router) => router.report(error),
-        }
-    }
-
-    fn declare_requester(
-        &self,
-        procedure: &Procedure,
-    ) -> Result<Option<ProcedureSeries>, ProgrammerError> {
-        match self {
-            Self::Server(router) => router.declare_requester(procedure),
-            Self::Client(router) => router.declare_requester(procedure),
-        }
-    }
-
-    fn register_resolver(
-        &self,
-        (procedure, handler): (&Procedure, Handler),
-    ) -> Result<(), ProgrammerError> {
-        match self {
-            Self::Server(router) => router.register_resolver((procedure, handler)),
-            Self::Client(router) => router.register_resolver((procedure, handler)),
-        }
-    }
-
-    fn request(
-        &self,
-        payload: Bytes,
-        request: RouterRequest,
-    ) -> Result<crate::router::server::Call, ProgrammerError> {
-        match self {
-            Self::Server(router) => router.request(payload, request),
-            Self::Client(router) => router.request(payload, request),
-        }
-    }
-
-    // spawns `future`, counted as the router's work
-    pub(crate) fn cover<F: Future<Output = ()> + Send + 'static>(&self, future: F) {
-        match self {
-            Self::Server(router) => router.owner().cover(future),
-            Self::Client(router) => router.owner().cover(future),
-        }
-    }
 }
 
 // ── Options ──────────────────────────────────────────────────────────────────────────────────
@@ -347,7 +279,10 @@ impl<Req: PayloadCodec, Res: PayloadCodec> RequestDependencies<Req, Res> {
 // ── The manager ──────────────────────────────────────────────────────────────────────────────
 
 struct Inner {
+    // the router it was given, as `router` gives it back and a server's notifier sends through it
     router: ServiceRouter,
+    // what it runs over: its router, through the port
+    port: Arc<dyn RouterLike>,
     clock: SharedClock,
     close_connection: Option<CloseConnection>,
     timeout: Duration,
@@ -438,7 +373,7 @@ impl Inner {
             return;
         }
 
-        let side = self.router.side();
+        let side = self.port.side();
         let duration = step.is_answered.then(|| {
             u64::try_from(
                 self.clock
@@ -480,7 +415,7 @@ impl Inner {
             }));
 
             if let Err(panicked) = called {
-                self.router.report(
+                self.port.report(
                     &crate::transport::panic_error(&*panicked),
                     step.connection_handle.as_ref(),
                 );
@@ -496,7 +431,7 @@ impl Inner {
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| listener(procedure)));
 
             if let Err(panicked) = called {
-                self.router
+                self.port
                     .report(&crate::transport::panic_error(&*panicked), None);
             }
         }
@@ -530,7 +465,18 @@ impl ServiceManager {
         router: ServiceRouter,
         options: &ServiceManagerOptions,
     ) -> Result<Self, ProgrammerError> {
-        let below = router.clock();
+        let port = port::port_of(&router);
+
+        Self::over((router, port), options)
+    }
+
+    // a manager over `router`, which it reads through `port`: the router's own, or, in this crate's
+    // tests, a double's, `router` then one of its side that nothing calls through
+    pub(crate) fn over(
+        (router, port): (ServiceRouter, Arc<dyn RouterLike>),
+        options: &ServiceManagerOptions,
+    ) -> Result<Self, ProgrammerError> {
+        let below = port.clock();
         let clock = crate::clock::clock_of(&crate::clock::LayeredClocks {
             beneath: Some(&below),
             given: options.clock.as_ref(),
@@ -548,6 +494,7 @@ impl ServiceManager {
         Ok(Self {
             inner: Arc::new(Inner {
                 router,
+                port,
                 clock,
                 close_connection: options.close_connection.clone(),
                 timeout,
@@ -644,7 +591,7 @@ impl ServiceManager {
         Req::Value: Clone + fmt::Debug + Sync,
         Res::Value: Clone + fmt::Debug + Sync,
     {
-        self.client_router((procedure, Maker::Request))?;
+        self.checked((procedure, Maker::Request))?;
 
         Ok(Request {
             shared: self.requester_of(procedure, (dependencies, DebugType::Request))?,
@@ -670,7 +617,7 @@ impl ServiceManager {
         Req::Value: Clone + fmt::Debug + Sync,
         Res::Value: Clone + fmt::Debug + Sync,
     {
-        self.server_router((procedure, Maker::Command))?;
+        self.checked((procedure, Maker::Command))?;
 
         Ok(Command {
             made: Handle::Made(self.requester_of(procedure, (dependencies, DebugType::Command))?),
@@ -680,26 +627,24 @@ impl ServiceManager {
     // * the side first: a maker that is not its router's way declares nothing (spec 16.11); then
     // spec 16.10's three reasons for its way, its router's once the side holds; then, by its
     // maker, the maker's own. A maker refused declares nothing
+    fn checked(&self, (procedure, maker): (&Procedure, Maker)) -> Result<(), ProgrammerError> {
+        if self.inner.port.side() != maker.side() {
+            return Err(ProgrammerError::new(maker.refusal()));
+        }
+
+        check_declaration(procedure)?;
+        check_procedure_kind(procedure, maker.way())?;
+
+        Ok(())
+    }
+
+    // as `checked`, for a resolver that notifies, whose notifier sends through its server's router
+    // itself: the side read from the router it was given
     fn server_router(
         &self,
         (procedure, maker): (&Procedure, Maker),
     ) -> Result<&RouterServer, ProgrammerError> {
         let ServiceRouter::Server(router) = &self.inner.router else {
-            return Err(ProgrammerError::new(maker.refusal()));
-        };
-
-        check_declaration(procedure)?;
-        check_procedure_kind(procedure, maker.way())?;
-
-        Ok(router)
-    }
-
-    // as `server_router`, for a maker of a client's router
-    fn client_router(
-        &self,
-        (procedure, maker): (&Procedure, Maker),
-    ) -> Result<&RouterClient, ProgrammerError> {
-        let ServiceRouter::Client(router) = &self.inner.router else {
             return Err(ProgrammerError::new(maker.refusal()));
         };
 
@@ -719,7 +664,7 @@ impl ServiceManager {
         Req: PayloadCodec,
         Res: PayloadCodec,
     {
-        let series = self.inner.router.declare_requester(procedure)?;
+        let series = self.inner.port.declare_requester(procedure)?;
 
         Ok(Arc::new(RequestShared {
             manager: Arc::clone(&self.inner),
@@ -736,7 +681,7 @@ impl ServiceManager {
         &self,
         (procedure, before_request): (&Procedure, Option<&BeforeRequest>),
     ) -> Result<(), ProgrammerError> {
-        let side = self.inner.router.side();
+        let side = self.inner.port.side();
 
         if let Some(refusal) = before_request.and_then(BeforeRequest::refusal)
             && !(refusal
@@ -770,7 +715,7 @@ impl ServiceManager {
         Req: PayloadCodec,
         Res: PayloadCodec,
     {
-        self.server_router((procedure, Maker::RequestResolver))?;
+        self.checked((procedure, Maker::RequestResolver))?;
         self.assert_refusal((procedure, dependencies.before_request.as_ref()))?;
 
         Ok(ResolverOf {
@@ -798,7 +743,7 @@ impl ServiceManager {
         Req: PayloadCodec,
         Res: PayloadCodec,
     {
-        self.client_router((procedure, Maker::CommandResolver))?;
+        self.checked((procedure, Maker::CommandResolver))?;
         self.assert_refusal((procedure, dependencies.before_request.as_ref()))?;
 
         Ok(ResolverOf {
@@ -1116,6 +1061,16 @@ enum Maker {
 }
 
 impl Maker {
+    // the side whose router it is made on (spec 16.11)
+    const fn side(self) -> RouterSide {
+        match self {
+            Self::Request | Self::Notification | Self::CommandResolver => RouterSide::Client,
+            Self::Command | Self::RequestResolver | Self::NotificationResolver => {
+                RouterSide::Server
+            }
+        }
+    }
+
     // the way it declares in, its router's once the side holds (spec 16.11)
     const fn way(self) -> DeclarationWay {
         match self {
@@ -1463,7 +1418,7 @@ where
         let (on_call_id, call_id) = oneshot::channel::<u32>();
         let close_on_timeout = resolved.close_on_timeout.unwrap_or(false);
         let destination_id = resolved.destination_id;
-        let requested = manager.router.request(encoded, {
+        let requested = manager.port.request(encoded, {
             let mut request = RouterRequest::new(procedure.clone(), &resolved);
 
             request.series.clone_from(&shared.series);
@@ -1478,10 +1433,11 @@ where
         let shared = Arc::clone(self);
         let connection_handle = resolved.connection_handle;
 
-        manager.router.cover(async move {
+        manager.port.cover(Box::pin(async move {
             let manager = &shared.manager;
             let procedure = &shared.procedure;
-            // the call's id, once its router drew it; none for a call refused first
+            // the call's id, once its router drew it; none for a call refused first, or made over a
+            // router that draws none
             let call_id = match traced {
                 Some(_) => call_id.await.ok(),
                 None => None,
@@ -1535,7 +1491,7 @@ where
                         Err(refused) => {
                             let failure = Failure::protocol(
                                 ProtocolCode::PAYLOAD_UNDECODABLE,
-                                manager.router.side(),
+                                manager.port.side(),
                             )
                             // ! a detail of the side's own words: its codec's reason, in spec 17.2's
                             // words; the rest in its cause
@@ -1582,7 +1538,7 @@ where
             };
 
             drop(reply.send(outcome));
-        });
+        }));
 
         Ok(ServiceCall { outcome })
     }
@@ -1597,7 +1553,7 @@ fn refusal_of<Req: PayloadCodec, Res: PayloadCodec>(
     let Some(validate) = shared.dependencies.validate.as_ref() else {
         return Ok(None);
     };
-    let limits = shared.manager.router.limits();
+    let limits = shared.manager.port.limits();
     let maximum_bytes = detail_bound_of(
         usize::try_from(limits.maximum_detail_bytes).unwrap_or(usize::MAX),
         usize::try_from(limits.maximum_envelope_bytes).unwrap_or(usize::MAX),
@@ -1610,7 +1566,7 @@ fn refusal_of<Req: PayloadCodec, Res: PayloadCodec>(
 
     Ok(is_refused(&judged).then(|| {
         CallError::Failure(
-            Failure::protocol(ProtocolCode::PAYLOAD_INVALID, shared.manager.router.side())
+            Failure::protocol(ProtocolCode::PAYLOAD_INVALID, shared.manager.port.side())
                 .saying(violations_detail_of(&judged, maximum_bytes))
                 .of_call(Some(shared.procedure.address()), destination_id),
         )
@@ -1829,7 +1785,7 @@ where
             && failure.is_application()
             && !listed.contains(&failure.code().get())
         {
-            shared.manager.router.report(
+            shared.manager.port.report(
                 &RouterError::Other(Arc::new(ProgrammerError::new(format!(
                     "{} answers failure {}, which it does not list",
                     shared.procedure.procedure_name,
@@ -1840,7 +1796,7 @@ where
         }
 
         let told = traced(failure.record());
-        let answer = resolver_failure_of(failure, shared.manager.router.side())
+        let answer = resolver_failure_of(failure, shared.manager.port.side())
             .map(RouterAnswer::Failure)
             .map_err(ResolverError::other);
 
@@ -1883,7 +1839,7 @@ where
                         || step.clone(),
                         |record| Step {
                             error: Some(Arc::new(CallError::Failure(
-                                Failure::answered(record, shared.manager.router.side()).about(
+                                Failure::answered(record, shared.manager.port.side()).about(
                                     &EnvelopeHeader::Failure(FailureHeader {
                                         call_id: shared.call_id,
                                         credential: None,
@@ -1916,7 +1872,7 @@ where
                 }
 
                 let failed =
-                    Failure::protocol(ProtocolCode::PROCEDURE_FAILED, shared.manager.router.side())
+                    Failure::protocol(ProtocolCode::PROCEDURE_FAILED, shared.manager.port.side())
                         .record();
 
                 drop(shared.answerer.respond(RouterAnswer::Failure(failed)).await);
@@ -2001,7 +1957,7 @@ where
             dependencies,
             call_type,
         } = self;
-        let side = manager.inner.router.side();
+        let side = manager.inner.port.side();
         let admit = dependencies
             .before_request
             .as_ref()
@@ -2030,10 +1986,7 @@ where
             notifies,
         };
 
-        manager
-            .inner
-            .router
-            .register_resolver((&procedure, handler))
+        manager.inner.port.register_resolver(&procedure, handler)
     }
 }
 
@@ -2058,7 +2011,7 @@ where
     Res::Value: Clone + fmt::Debug + Sync,
 {
     fn failure(&self, code: ProtocolCode) -> FailureRecord {
-        Failure::protocol(code, self.manager.router.side()).record()
+        Failure::protocol(code, self.manager.port.side()).record()
     }
 
     #[expect(
@@ -2123,7 +2076,7 @@ where
                     .respond(RouterAnswer::Failure(
                         Failure::protocol(
                             ProtocolCode::PAYLOAD_UNDECODABLE,
-                            self.manager.router.side(),
+                            self.manager.port.side(),
                         )
                         // ! a detail of the side's own words: its codec's reason, in spec 17.2's
                         // words; the rest of the refusal goes no further
@@ -2164,7 +2117,7 @@ where
 
         // * a payload that reads is judged by its rules before the callback (spec 18.2)
         if let Some(validate) = &self.validate {
-            let limits = manager.router.limits();
+            let limits = manager.port.limits();
             let maximum_bytes = detail_bound_of(
                 usize::try_from(limits.maximum_detail_bytes).unwrap_or(usize::MAX),
                 usize::try_from(limits.maximum_envelope_bytes).unwrap_or(usize::MAX),
@@ -2204,10 +2157,9 @@ where
             };
 
             if is_refused(&judged) {
-                let failure =
-                    Failure::protocol(ProtocolCode::PAYLOAD_INVALID, manager.router.side())
-                        .saying(violations_detail_of(&judged, maximum_bytes))
-                        .record();
+                let failure = Failure::protocol(ProtocolCode::PAYLOAD_INVALID, manager.port.side())
+                    .saying(violations_detail_of(&judged, maximum_bytes))
+                    .record();
 
                 if let Some(step) = &step {
                     manager.trace(

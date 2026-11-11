@@ -23,6 +23,7 @@ use crate::managers::service::{
 use crate::payloads::{CodecRefusal, JsonCodec, PayloadCodec};
 use crate::router::types::RequestCredential;
 use crate::testing::pair::{Pair, PairOptions, echo};
+use crate::testing::service_port::FakeRouter;
 
 mod filters;
 
@@ -421,6 +422,43 @@ async fn tells_a_call_its_router_refuses_before_drawing_an_id_with_none_its_tx_s
             (DebugDirection::Rx, None, None, true)
         ],
         "its tx step, then its rx step with why, no call id and no connection"
+    );
+}
+
+// debugging 4.4
+#[tokio::test]
+async fn tells_a_call_made_over_a_router_that_draws_no_id_with_none_its_tx_step_then_its_rx_step() {
+    let router = FakeRouter::client();
+    let manager = router.manager();
+    let seen = recorded(&manager);
+
+    *locked(&router.control().call_id) = None;
+
+    let answered = asking(&manager)
+        .call(json!({ "text": "x" }), &RequestOptions::default())
+        .expect("a call made");
+    let answered = crate::testing::patience(Duration::from_secs(10), answered)
+        .await
+        .expect("answered in time");
+
+    assert_eq!(
+        answered.expect("an answer"),
+        json!({ "text": "x" }),
+        "its payload, echoed"
+    );
+
+    let steps: Vec<_> = locked(&seen)
+        .iter()
+        .map(|(_, event)| (event.direction, event.call_id, value_of(event.rx.as_ref())))
+        .collect();
+
+    assert_eq!(
+        steps,
+        vec![
+            (DebugDirection::Tx, None, None),
+            (DebugDirection::Rx, None, Some(json!({ "text": "x" })))
+        ],
+        "its tx step, then its rx step with its answer, neither with a call id"
     );
 }
 
