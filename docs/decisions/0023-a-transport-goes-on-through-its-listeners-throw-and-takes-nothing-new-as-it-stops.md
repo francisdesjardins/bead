@@ -174,9 +174,10 @@ callbacks, by a decision of its own that meets the Tenth Man.
 **No conformance case holds it.** No step of `spec/transports.json` installs a listener of the
 application's, and every side's runner plays a `stop` to its end before the next step, so no step
 sends into a stop's window. Twin tests hold it on each side, by the same sentence, each window opened
-by a listener the stop calls, a head written in two halves or a scripted `WebSocketServer`, but the
-Rust side's 1001 guard, which none of its tests reaches, as the matrix's row for a stop at the
-WebSocket server says:
+by a listener the stop calls, a head written in two halves or a scripted `WebSocketServer`; the
+Rust side's 1001 guard is reached by
+`closes_going_away_a_connection_whose_accept_a_stop_crossed`, which hands a socket to registration
+after the stop's snapshot:
 `draws a connection whose connection listener throws, the next listener told, the throw reported with it`;
 `hands on a request whose message listener throws, its answer still written, the throw reported with its connection`;
 `refuses a connect that comes as it stops, busy, told when to come back, drawing nothing`;

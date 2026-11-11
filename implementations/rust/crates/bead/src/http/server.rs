@@ -459,6 +459,8 @@ enum Told {
 pub(crate) struct ServerInner {
     me: Weak<Self>,
     runtime: Handle,
+    #[cfg(test)]
+    loopback_binding: Mutex<Option<crate::net::loopbacks::LoopbackBinding>>,
     // the platform's clock, which its timers that bound the platform's socket run on
     platform: SharedClock,
     // the clock it stamps and times bodies on, and the one it was given
@@ -717,7 +719,16 @@ impl ServerInner {
         self: &Arc<Self>,
         options: &TransportServerStartOptions,
     ) -> Result<TransportServerAddress, RouterError> {
-        let Bound { listeners, address } = bind(&self.runtime, options)?;
+        #[cfg(test)]
+        let supplied = locked(&self.loopback_binding).take();
+        #[cfg(test)]
+        let bound = supplied.as_ref().map_or_else(
+            || bind(&self.runtime, options),
+            |binding| crate::net::listening::bind_with_loopback(&self.runtime, (options, binding)),
+        );
+        #[cfg(not(test))]
+        let bound = bind(&self.runtime, options);
+        let Bound { listeners, address } = bound?;
         let listening: Vec<Listening> = listeners
             .into_iter()
             .map(|listener| {
@@ -2534,6 +2545,8 @@ impl HttpTransportServer {
         let inner = Arc::new_cyclic(|me| ServerInner {
             me: Weak::clone(me),
             runtime,
+            #[cfg(test)]
+            loopback_binding: Mutex::default(),
             platform,
             clock,
             given: options.clock.clone(),

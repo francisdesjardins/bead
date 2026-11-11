@@ -182,6 +182,23 @@ pub(crate) fn bind(
     runtime: &Handle,
     options: &TransportServerStartOptions,
 ) -> Result<Bound, RouterError> {
+    bind_with_loopback(
+        runtime,
+        (
+            options,
+            &LoopbackBinding::new(
+                options.port.unwrap_or(PORT),
+                options.find_open_port.unwrap_or(false),
+            ),
+        ),
+    )
+}
+
+/// Binds a server with the loopback binding its tests supply.
+pub(crate) fn bind_with_loopback(
+    runtime: &Handle,
+    (options, binding): (&TransportServerStartOptions, &LoopbackBinding),
+) -> Result<Bound, RouterError> {
     let address = options
         .address
         .clone()
@@ -209,7 +226,7 @@ pub(crate) fn bind(
                     .map(|address| listener_on(*address, port))
                     .collect::<io::Result<Vec<_>>>()
             },
-            &LoopbackBinding::new(port, find_open_port),
+            binding,
         )
         .map_err(io_error)?;
 
