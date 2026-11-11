@@ -32,6 +32,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The details gate reads a helper's call by the arguments at the positions that reach its sinks, and
   the whole call where its arguments do not split plainly, so a router's state handed beside a
   reason that stays with the side carries no detail (decision 0006).
+- An answer's trace step is told once, after its router settled the answer, on every side: with no
+  error, with the refusal, or with the failure its router answered in its place; its duration ends
+  with that settling. An answer refused or answered in its place is no longer told twice (debugging
+  4.2, decision 0013).
 
 ### Removed
 
