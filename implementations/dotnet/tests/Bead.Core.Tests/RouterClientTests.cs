@@ -99,6 +99,57 @@ public sealed partial class RouterClientTests
     // definition
 
     [Fact]
+    public async Task Keeps_the_replacement_bound_when_its_predecessor_is_cancelled_before_its_answer()
+    {
+        using var scripted = new ScriptedRouter();
+        var notification = new ScriptedNotification(Service);
+
+        await scripted.Router.RegisterNotification(notification).WaitAsync(Patience, Cancelled);
+
+        var first = scripted.Router.Request(ReadOnlyMemory<byte>.Empty, RequestOf(notification));
+        var second = scripted.Router.Request(ReadOnlyMemory<byte>.Empty, RequestOf(notification));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+        {
+            return first.WaitAsync(Patience, Cancelled);
+        });
+        scripted.Transport.Deliver(ResultOf(3));
+        await second.WaitAsync(Patience, Cancelled);
+        scripted.Transport.Deliver(NotificationOf(3, 7));
+        await scripted.Settle();
+
+        Assert.Equal([7], notification.Triggered);
+        Assert.Empty(scripted.Errors);
+        Assert.Equal([(EnvelopeKind.Request, 1u), (EnvelopeKind.Cancel, 1u), (EnvelopeKind.Request, 3u)], scripted.Transport.Calls);
+    }
+
+    [Fact]
+    public async Task Keeps_the_subscription_when_its_replacement_is_refused_before_drawing_a_call_id()
+    {
+        using var scripted = new ScriptedRouter();
+        var notification = new ScriptedNotification(Service);
+
+        await scripted.Router.RegisterNotification(notification).WaitAsync(Patience, Cancelled);
+
+        var first = scripted.Router.Request(ReadOnlyMemory<byte>.Empty, RequestOf(notification));
+
+        scripted.Transport.Deliver(ResultOf(1));
+        await first.WaitAsync(Patience, Cancelled);
+        var refused = await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return scripted.Router.Request(new byte[0x100_0001], RequestOf(notification)).WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.Equal((ushort)ProtocolCode.PayloadTooLarge, refused.Code);
+        scripted.Transport.Deliver(NotificationOf(1, 7));
+        await scripted.Settle();
+
+        Assert.Equal([7], notification.Triggered);
+        Assert.Empty(scripted.Errors);
+        Assert.Equal([(EnvelopeKind.Request, 1u)], scripted.Transport.Calls);
+    }
+
+    [Fact]
     public async Task Sends_each_call_in_the_order_it_is_made_whatever_order_it_is_awaited_in()
     {
         using var scripted = new ScriptedRouter();
