@@ -15,6 +15,22 @@ public sealed class MemoryTransportClientTests
 {
     // constants
 
+    [Fact]
+    public async Task Takes_a_field_s_value_as_a_credential_visible_ASCII_spaces_and_tabs_alone_none_first_or_last()
+    {
+        await using var client = new MemoryTransportClient();
+
+        foreach (var value in new[] { "", "Interop sub=ada", "Bearer mF_9.B5f-4.1JqM", "a\tb", "~!" })
+        {
+            Assert.True(client.Carries(value), value);
+        }
+
+        foreach (var value in new[] { " Bearer x", "x ", "\tx", "Interop\nsub=ada", "café", "a\u007fb" })
+        {
+            Assert.False(client.Carries(value), value);
+        }
+    }
+
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
 
     private const string Carried = "Interop sub=ada";
