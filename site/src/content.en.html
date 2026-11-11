@@ -913,8 +913,9 @@
   <h2 id="courtier-h">Over a broker</h2>
   <p class="gist">
     A topic-based publish/subscribe broker is one more transport, and Bead never becomes a network
-    of its own there. Each side holds its core, an in-memory broker for tests, and two bindings:
-    MQTT 5, and AMQP 1.0 on RabbitMQ 4 (§15.16 to §15.38).
+    of its own there. Each side holds its core, an in-memory broker for tests, and its bindings:
+    MQTT 5 on every side, and AMQP 1.0 on RabbitMQ 4 for the TypeScript and C# sides (§15.16 to
+    §15.38).
   </p>
   <p>
     A participant is a side’s link to its broker. Its identifier is the identity the broker
@@ -954,7 +955,8 @@
       is a shared subscription, <code>$share/&lt;name&gt;/bead/s/&lt;name&gt;</code>. Each packet
       is counted to the byte under each end’s maximum size. A participant’s will announces its
       departure to the peers. The TypeScript side goes through MQTT.js, the C# side through
-      MQTTnet, and both are played against Mosquitto.
+      MQTTnet, the Rust side through a client of its own, the feature <code>mqtt</code> of its core,
+      over TCP, TLS or a WebSocket. All three are played against Mosquitto.
     </p>
     <h3 id="courtier-amqp">Over AMQP 1.0</h3>
     <p>
@@ -962,8 +964,8 @@
       queue that ends with it. The deployment provisions each name’s queue, and the broker delivers
       each of its messages to a single member. Each message follows a single profile, counted to the
       byte. AMQP 1.0 has no will: Bead’s heartbeat alone says a peer went quiet. The TypeScript side
-      goes through rhea, the C# side through AMQPNetLite, and both are played against RabbitMQ 4. No
-      page reaches an AMQP 1.0 broker.
+      goes through rhea, the C# side through AMQPNetLite, and both are played against RabbitMQ 4. The
+      Rust side’s binding is ahead. No page reaches an AMQP 1.0 broker.
     </p>
     <p>
       In both cases, a deployment’s broker authenticates each link, by a password or a TLS client
@@ -1526,8 +1528,8 @@
   <p class="gist">
     Bead is a protocol: a specification, conformance files every implementation plays, and an
     interop service. The repository holds three implementations. TypeScript and C# are at
-    behavioural parity. Rust has its core and its WebSocket and HTTP transports, and each part it
-    lacks is a row of the support matrix, ahead.
+    behavioural parity. Rust has its core, its WebSocket and HTTP transports and its MQTT 5 binding,
+    and each part it lacks is a row of the support matrix, ahead.
   </p>
   <div class="table-wrap">
     <table class="compare">
@@ -1561,8 +1563,7 @@
           <td>WebSocket, HTTP, Web Worker, in memory, a broker over MQTT 5 or AMQP 1.0, and joined</td>
           <td>WebSocket, HTTP on Kestrel, in memory, a broker over MQTT 5 or AMQP 1.0, and joined</td>
           <td>
-            WebSocket and HTTP on hyper, in memory, the broker’s core over an in-memory broker, and
-            joined
+            WebSocket and HTTP on hyper, in memory, a broker over MQTT 5, and joined
           </td>
         </tr>
         <tr>
@@ -1575,9 +1576,10 @@
     </table>
   </div>
   <p class="space">
-    On the Rust side, next come the bindings to a broker, the gateway and <code>beadc</code>’s Rust
-    target, each by a decision of its own. Its WebSocket and HTTP transports meet the other two
-    sides in the interop, both ways. The core also compiles for <code>wasm32-unknown-unknown</code>.
+    On the Rust side, next come the binding over AMQP 1.0, the gateway and <code>beadc</code>’s Rust
+    target, each by a decision of its own. Its WebSocket, HTTP and MQTT 5 transports meet the other
+    two sides in the interop, both ways. The core also compiles for
+    <code>wasm32-unknown-unknown</code>.
   </p>
   <p>
     Parity holds down to the field. When one platform cannot do what another can, every side keeps
@@ -1611,8 +1613,8 @@
   <h3 id="implantations-conformite">What each implementation plays</h3>
   <p>
     Each unit of the specification is cited by a conformance file, or carries the reason none
-    cites it. The three sides call each other in CI over WebSocket and HTTP, and the TypeScript and
-    C# sides over MQTT 5 and AMQP 1.0 too, and through their gateways.
+    cites it. The three sides call each other in CI over WebSocket, HTTP and MQTT 5, and the
+    TypeScript and C# sides over AMQP 1.0 too, and through their gateways.
   </p>
   <details class="more">
     <summary>The conformance files, in figures</summary>
@@ -1709,8 +1711,7 @@
   <ul class="rules">
     <li>
       <strong>Rust in full</strong
-      ><span>Its MQTT 5 and AMQP 1.0 bindings, its gateway and its target in
-        <code>beadc</code>.</span>
+      ><span>Its AMQP 1.0 binding, its gateway and its target in <code>beadc</code>.</span>
     </li>
     <li>
       <strong>Rules in CEL</strong
