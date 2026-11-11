@@ -683,6 +683,27 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Ends_a_start_stopped_before_its_socket_opens_and_starts_a_fresh_link_afterwards()
+    {
+        await using var adapter = AdapterOf();
+        var (_, downs) = HeardOf(adapter);
+        var starting = adapter.Start();
+
+        await adapter.Stop();
+        Assert.Equal("the link of ada stopped", Assert.IsType<IOException>(await FailureOf(() =>
+        {
+            return starting;
+        })).Message);
+        Assert.Empty(downs);
+        Assert.False(adapter.IsLinked);
+
+        await LinkUp((adapter, _script));
+
+        Assert.True(adapter.IsLinked);
+        await adapter.Stop();
+    }
+
+    [Fact]
     public async Task Reports_no_payload_room_when_its_sender_s_bound_cannot_hold_a_message_and_refuses_even_an_empty_publication()
     {
         _script.MaxMessageSize = 1;
