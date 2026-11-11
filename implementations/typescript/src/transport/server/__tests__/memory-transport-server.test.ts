@@ -30,6 +30,49 @@ const turn = (): Promise<void> => {
 // definition
 
 test.describe('createMemoryTransportServer', () => {
+  test('an envelope or a close a listener of the transport sends within its turn comes behind what was sent before it', async () => {
+    for (const closes of [false, true]) {
+      await using server = createMemoryTransportServer();
+      await using client = createMemoryTransportClient();
+      const heard: unknown[] = [];
+
+      await server.start();
+      await client.connect({ server });
+
+      const handle = server.clients[0]?.connectionHandle;
+
+      expect(handle).toBeDefined();
+
+      if (handle === undefined) {
+        throw new Error('no connection');
+      }
+
+      server.on('message', ({ data }, connectionHandle) => {
+        expect([...new Uint8Array(data as ArrayBuffer)]).toEqual([0xff]);
+
+        if (closes) {
+          void server.close(connectionHandle);
+        } else {
+          void server.send({ data: new Uint8Array([2]) }, connectionHandle);
+        }
+      });
+      client.on('message', ({ data }) => {
+        heard.push([...new Uint8Array(data as ArrayBuffer)]);
+      });
+      client.on('close', (wasClean, isQuick) => {
+        heard.push(['closed', wasClean, isQuick]);
+      });
+
+      const trigger = client.send({ data: new Uint8Array([0xff]) });
+      const firstSent = server.send({ data: new Uint8Array([1]) }, handle);
+
+      await Promise.all([trigger, firstSent]);
+      await turn();
+
+      expect(heard).toEqual(closes ? [[1], ['closed', false, false]] : [[1], [2]]);
+    }
+  });
+
   // spec 15.13
   test('hands its router the address and the port its client gave as it connected', async () => {
     // a clock that never moves: what the server reads of it is the instant it starts at
