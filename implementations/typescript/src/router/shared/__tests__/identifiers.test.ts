@@ -110,6 +110,41 @@ test.describe('sideOfCallId', () => {
 });
 
 test.describe('session tokens', () => {
+  test('holds 16 bytes, not all zero, and refuses any other', () => {
+    const bytes = Uint8Array.from({ length: 16 }, (_, index) => {
+      return index;
+    });
+    const token = toSessionToken(bytes);
+
+    expect(toSessionTokenBytes(token)).toEqual(bytes);
+    expect(toSessionToken(bytes.slice())).toBe(token);
+
+    for (const length of [0, 15, 17]) {
+      expect(() => {
+        return toSessionToken(new Uint8Array(length).fill(1));
+      }).toThrow(`a session token is 16 bytes, not all zero; got ${String(length)}`);
+    }
+
+    expect(() => {
+      return toSessionToken(new Uint8Array(16));
+    }).toThrow('a session token is 16 bytes, not all zero; got 16');
+  });
+
+  test('draws a token none holds, and tells one from another', () => {
+    const held = toSessionToken(new Uint8Array(16).fill(7));
+    const drawn = drawSessionToken((candidate) => {
+      return isSameSessionToken(candidate, held);
+    });
+
+    expect(isSameSessionToken(drawn, held)).toBe(false);
+    expect(isSameSessionToken(drawn, drawn)).toBe(true);
+    expect(
+      toSessionTokenBytes(drawn).some((byte) => {
+        return byte !== 0;
+      })
+    ).toBe(true);
+  });
+
   test('spell 16 bytes in unpadded base64url, and back', () => {
     const bytes = Uint8Array.from({ length: 16 }, (_, index) => {
       return index * 17;
