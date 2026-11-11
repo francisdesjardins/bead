@@ -689,6 +689,10 @@ test.describe('createMqttBrokerAdapter', () => {
       BROKER_DELIVERIES.AT_MOST_ONCE,
       false,
     ]);
+    // its bound counts no Packet Identifier, which a QoS 0 PUBLISH has none of
+    expect(quick.maximumPayloadBytes(INBOX)).toBe(
+      largestPayload('bead/i/ada', LARGEST_PACKET_SIZE, { qos: 0 })
+    );
     expect(await quick.publish({ payload, topic: INBOX })).toBe(BROKER_PUBLISHED.TAKEN);
     expect(((await quickLink.next('publish')) as IPublishPacket).qos).toBe(0);
     await quick.stop();
@@ -1162,6 +1166,24 @@ test.describe('createMqttBrokerAdapter', () => {
     await adapter.stop();
   });
 
+  test('reports no payload room where its CONNACK’s Maximum Packet Size cannot hold a PUBLISH to the topic, and refuses even an empty publication (spec 15.28)', async () => {
+    const adapter = adapterOf(script);
+    const link = await linkUp({ adapter, script }, { properties: { maximumPacketSize: 16 } });
+
+    expect(adapter.maximumPayloadBytes(INBOX)).toBe(0);
+    await expect(adapter.publish({ payload: new Uint8Array(), topic: INBOX })).rejects.toThrow(
+      "past its broker's Maximum Packet Size, 16 bytes"
+    );
+    expect(adapter.isLinked).toBe(true);
+    await sleep(50);
+    expect(
+      link.packets.filter(({ cmd }) => {
+        return cmd === 'publish';
+      })
+    ).toHaveLength(0);
+    await adapter.stop();
+  });
+
   test('tells its link up once its CONNACK came, and bounds what it publishes by that CONNACK’s Maximum Packet Size, the last link’s while it is down (spec 15.30)', async () => {
     const adapter = adapterOf(script);
     const read = (): [boolean, number] => {
@@ -1458,6 +1480,10 @@ test.describe('createMqttBrokerAdapter', () => {
     expect(
       adapterOf(script, { maximumPacketSize: 4_096 }).receiveBound(['bead', 'i', 'peer'])
     ).toBe(4_072);
+    // * a topic whose PUBLISH alone passes the bound leaves no payload any room
+    expect(
+      adapterOf(script, { maximumPacketSize: 4_096 }).receiveBound(['bead', 'i', 'p'.repeat(4_096)])
+    ).toBe(0);
     expect(MAXIMUM_PACKET_SIZE).toBe(16_777_216);
 
     // a bound whose receive bound is under 1,024 is refused as its participant is built, and one
