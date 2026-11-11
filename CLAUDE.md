@@ -166,10 +166,11 @@ titles that hold one write it `’`, and the citation does the same.
 - `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features --locked`,
   `cargo clippy -p francisdesjardins-bead --lib --locked`, `cargo clippy -p francisdesjardins-bead
   --lib --features websocket --locked`, `cargo clippy -p francisdesjardins-bead --lib --features
-  http --locked`, `cargo clippy -p francisdesjardins-bead --lib --features testing --locked
-  --target wasm32-unknown-unknown`, `cargo test --workspace --all-features --locked`, `cargo doc
-  --workspace --no-deps --all-features --locked`, `cargo build --workspace --locked` and `cargo
-  deny --locked check` pass, from its folder.
+  http --locked`, `cargo clippy -p francisdesjardins-bead --lib --features mqtt --locked`, `cargo
+  clippy -p francisdesjardins-bead --lib --features testing --locked --target
+  wasm32-unknown-unknown`, `cargo test --workspace --all-features --locked`, `cargo doc --workspace
+  --no-deps --all-features --locked`, `cargo build --workspace --locked` and `cargo deny --locked
+  check` pass, from its folder.
 
 ## The Bead page
 
