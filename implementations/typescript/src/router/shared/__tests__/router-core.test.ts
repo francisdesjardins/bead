@@ -207,17 +207,24 @@ test.describe('createRouterCore', () => {
     await checkSubscriptionResult(true);
   });
 
-  test('a ready chunk refusal is observed before a later successful final chunk', async () => {
-    const refused = new Error('the transport refused the chunk');
-    const { port } = createPort();
+  /**
+   * A core that answers its peer's request on call 1 with a result of 100 bytes, its opening and two
+   * chunks under `limits`: its `held`th send waits for the test to settle it, the others go as they
+   * come. Nothing is credited yet.
+   */
+  const answerHolding = async (held: number) => {
+    const { port, sent } = createPort();
+    const holding = Promise.withResolvers<void>();
     let sends = 0;
-    using core = createRouterCore(
+    const core = createRouterCore(
       {
         ...port,
         send: (bytes, handle) => {
+          const going = port.send(bytes, handle);
+
           sends += 1;
 
-          return sends === 2 ? Promise.reject(refused) : port.send(bytes, handle);
+          return sends === held ? holding.promise : going;
         },
       },
       { limits }
@@ -232,11 +239,59 @@ test.describe('createRouterCore', () => {
       { payload: patternOf(100) },
       { connectionHandle: 'a', header: seen[0]?.header ?? headerOf(1) }
     );
+    const kinds = () => {
+      return sent.map(({ envelope }) => {
+        return envelope?.kind;
+      });
+    };
+
+    return { core, holding, kinds, responding };
+  };
+
+  // spec 12.7
+  test('a chunk refused after the last one went fails the answer', async () => {
+    const refused = new Error('the transport refused the chunk');
+    const { core: answering, holding, kinds, responding } = await answerHolding(2);
+    using core = answering;
     const failed = expect(responding).rejects.toBe(refused);
 
     core.receive(creditOf(1, 100), 'a');
+    await sleep(0);
+    expect(kinds()).toEqual([EnvelopeKind.RESULT, EnvelopeKind.CHUNK, EnvelopeKind.CHUNK]);
+    holding.reject(refused);
     await failed;
-    expect(sends).toBe(3);
+  });
+
+  // spec 12.7
+  test('an opening refused after the last chunk went fails the answer', async () => {
+    const refused = new Error('the transport refused the opening');
+    const { core: answering, holding, kinds, responding } = await answerHolding(1);
+    using core = answering;
+    const failed = expect(responding).rejects.toBe(refused);
+
+    core.receive(creditOf(1, 100), 'a');
+    await sleep(0);
+    expect(kinds()).toEqual([EnvelopeKind.RESULT, EnvelopeKind.CHUNK, EnvelopeKind.CHUNK]);
+    holding.reject(refused);
+    await failed;
+  });
+
+  // spec 12.7
+  test('an opening that goes after the last chunk holds the answer until it went', async () => {
+    const { core: answering, holding, kinds, responding } = await answerHolding(1);
+    using core = answering;
+    let isAnswered = false;
+
+    void responding.then(() => {
+      isAnswered = true;
+    });
+    core.receive(creditOf(1, 100), 'a');
+    await sleep(0);
+    expect(kinds()).toEqual([EnvelopeKind.RESULT, EnvelopeKind.CHUNK, EnvelopeKind.CHUNK]);
+    expect(isAnswered).toBe(false);
+    holding.resolve();
+    await responding;
+    expect(isAnswered).toBe(true);
   });
 
   test.describe('takes what comes in', () => {
