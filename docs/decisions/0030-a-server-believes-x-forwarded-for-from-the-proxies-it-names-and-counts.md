@@ -204,8 +204,11 @@ balancer by `130.211.0.0/22`, `35.191.0.0/16` and its forwarding rule's address,
 ranges, an AWS ALB by its VPC's network. **One it cannot name is counted**, a PaaS router such as
 Heroku's, `unnamedProxies: 1`, beside a list of the proxies it can name. A count one too high shows
 its client's own address where a proxy's was expected, in a told refusal and in `clients`; one too
-low, the proxy's, which `largestAddressConnections` near its ceiling warns of. The TypeScript and C#
-sides' READMEs show the list first and the count for the router.
+low, the proxy's, which `largestAddressConnections` near its ceiling warns of. The
+[TypeScript](../../implementations/typescript/README.md),
+[C#](../../implementations/dotnet/README.md) and
+[Rust](../../implementations/rust/README.md#listening-and-proxies) sides' READMEs show the list first
+and the count for the router.
 
 **A bound keyed by address counts the users of one NAT as one and an IPv6 network's addresses as
 many**: behind a carrier-grade or a corporate NAT, the 65th user is refused 503 whatever the list

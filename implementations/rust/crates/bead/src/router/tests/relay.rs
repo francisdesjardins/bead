@@ -1876,6 +1876,57 @@ async fn counts_elsewhere_in_leg_bs_payload_bound_and_forwards_its_carried_crede
 }
 
 #[tokio::test]
+async fn answers_an_elsewhere_destination_unreachable_over_a_leg_b_whose_upgrade_carried_the_relay_s_own_credential()
+ {
+    let (served, relay) = fixture(&admitting()).await;
+    let leg_b = super::client_credentials::upgraded("Interop sub=relay", None);
+
+    relay::register(
+        &relay,
+        (
+            leg_b.router.as_relay_target(),
+            &DestinationOptions {
+                audience: Some("bead-interop".to_owned()),
+                destination_id: Some(7),
+                ..DestinationOptions::default()
+            },
+        ),
+    )
+    .expect("leg B registered");
+
+    let answers = Arc::new(Answers::default());
+    let request = presenting(Credential::Elsewhere, (7, Some("Bearer mF_9.B5f-4.1JqM")));
+    let request = RequestResolverProps {
+        is_admitted: false,
+        carried: request.carried,
+        ..props(&answers, request.header)
+    };
+
+    (handler(&served, 7).await.resolve)(request)
+        .await
+        .expect("the relay's answer");
+    assert_eq!(*locked(&answers.0), [RouterAnswer::Failure(
+        Failure::protocol(ProtocolCode::DESTINATION_UNREACHABLE, RouterSide::Server)
+            .saying("destination 7 is unreachable: its transport does not carry the credential ELSEWHERE stands for beside an envelope: none, or another")
+            .record()
+    )]);
+    assert_eq!(served.transport.sent(), []);
+    assert_eq!(leg_b.transport.sent(), []);
+    assert!(
+        refusal(
+            handler(&served, 7).await.as_ref(),
+            &presenting(Credential::Elsewhere, (7, Some("Interop sub=relay")))
+        )
+        .is_none(),
+        "the bytes leg B carried go"
+    );
+    assert_eq!(served.reported(), Vec::<String>::new());
+    assert_eq!(leg_b.codes(), Vec::<String>::new());
+    leg_b.router.dispose().await;
+    served.router.dispose().await;
+}
+
+#[tokio::test]
 async fn holds_a_payload_to_what_one_envelope_holds_behind_leg_bs_header_with_its_credential_call_by_call_for_a_target_that_takes_no_transfer()
  {
     let (served, relay) = fixture(&admitting()).await;

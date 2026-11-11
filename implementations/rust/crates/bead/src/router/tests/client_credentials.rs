@@ -6,6 +6,7 @@ use bytes::Bytes;
 
 use super::client::Notified;
 use super::{Scripted, TIMEOUT, answered, failure_of, locked, request_of, result_of, token};
+use crate::clock::SharedClock;
 use crate::constants::{CredentialScheme, FailureScope, ProtocolCode, RouterSide};
 use crate::credentials::{Credentials, JwtKeySet};
 use crate::envelope::{Credential, Envelope};
@@ -14,11 +15,158 @@ use crate::failure::{Failure, FailureOrigin};
 use crate::jwt_verifier::{JwtAlgorithm, JwtKey};
 use crate::router::client::{RouterClient, RouterClientOptions};
 use crate::router::server::Call;
-use crate::router::types::{RequestCredential, RouterLimitsOptions, TransportMessage};
+use crate::router::types::{RequestCredential, RouterError, RouterLimitsOptions, TransportMessage};
+use crate::testing::SteppingClock;
 use crate::testing::scripted::{ScriptedClient, bytes_of, envelope_of};
 use crate::testing::surface::Consumer;
 
+use crate::transport::{ClientListener, ReadyState, RouterClientTransport, Sent};
+
 const CARRIED: &str = "Bearer mF_9.B5f-4.1JqM";
+
+// A WebSocket upgrade carries these bytes alone; its messages and listeners are scripted.
+#[derive(Debug)]
+struct Upgraded {
+    transport: Arc<ScriptedClient>,
+    credential: &'static str,
+}
+
+impl RouterClientTransport for Upgraded {
+    fn send(&self, message: TransportMessage) -> Result<Sent, RouterError> {
+        self.transport.send(message)
+    }
+
+    fn listen(&self, listener: Arc<dyn ClientListener>) {
+        self.transport.listen(listener);
+    }
+
+    fn unlisten(&self, listener: &Arc<dyn ClientListener>) {
+        self.transport.unlisten(listener);
+    }
+
+    fn pause(&self) {
+        self.transport.pause();
+    }
+
+    fn resume(&self) {
+        self.transport.resume();
+    }
+
+    fn clock(&self) -> Option<SharedClock> {
+        self.transport.clock()
+    }
+
+    fn ready_state(&self) -> ReadyState {
+        self.transport.ready_state()
+    }
+
+    fn is_secure(&self) -> bool {
+        true
+    }
+
+    fn carries(&self, credential: &str) -> bool {
+        credential == self.credential
+    }
+}
+
+pub(super) fn upgraded(carried: &'static str, credential: Option<RequestCredential>) -> Scripted {
+    let clock = SteppingClock::new(super::january_first());
+    let transport = ScriptedClient::new(Arc::<SteppingClock>::clone(&clock));
+    let router = RouterClient::new(
+        Arc::new(Upgraded {
+            transport: Arc::clone(&transport),
+            credential: carried,
+        }),
+        &RouterClientOptions {
+            credential,
+            ..RouterClientOptions::default()
+        },
+    )
+    .expect("a router over the upgrade");
+    let errors = Arc::new(Mutex::new(Vec::new()));
+    let hearing = Arc::clone(&errors);
+
+    router.on_error(Arc::new(move |error| {
+        locked(&hearing).push(error.clone());
+    }));
+
+    Scripted {
+        clock,
+        transport,
+        router,
+        errors,
+    }
+}
+
+async fn unreachable(call: Call) -> Failure {
+    let CallError::Failure(failure) = answered(call).await.expect_err("DESTINATION_UNREACHABLE")
+    else {
+        panic!("a protocol failure")
+    };
+
+    assert_eq!(failure.code(), ProtocolCode::DESTINATION_UNREACHABLE.get());
+    assert_eq!(failure.origin(), FailureOrigin::Local);
+    assert_eq!(failure.side(), Some(RouterSide::Client));
+    assert_eq!(
+        failure.detail(),
+        "its transport does not carry the credential ELSEWHERE stands for beside an envelope: none, or another"
+    );
+    failure
+}
+
+#[tokio::test]
+async fn fails_an_elsewhere_over_a_transport_that_carries_none_before_it_goes_or_over_a_websocket_whose_upgrade_carried_other_bytes_destination_unreachable_nothing_sent_the_default_kept_no_event()
+ {
+    let scripted = scripted(elsewhere());
+    let withdrawn = withdrawals(&scripted);
+
+    scripted.transport.carry(false);
+
+    for credential in [
+        None,
+        Some(RequestCredential::Elsewhere("Bearer renewed".to_owned())),
+    ] {
+        unreachable(ask(&scripted, credential)).await;
+    }
+    assert_eq!(presented(&scripted), []);
+
+    let jwt = ask(&scripted, Some(jwt()));
+    succeed(&scripted, (1, jwt)).await;
+    assert_eq!(presented(&scripted), [(1, Some(jwt_header("a.b.c")), None)]);
+    assert_eq!(scripted.router.credential(), Some(elsewhere()));
+    assert_eq!(*locked(&withdrawn), []);
+    assert_eq!(scripted.codes(), Vec::<String>::new());
+
+    let over_upgrade = upgraded("Interop sub=bob", Some(elsewhere()));
+    let withdrawn = withdrawals(&over_upgrade);
+    let refused = unreachable(ask(&over_upgrade, None)).await;
+
+    assert!(
+        !format!("{:?}", refused.record()).contains(CARRIED),
+        "no credential in its refusal"
+    );
+    assert_eq!(presented(&over_upgrade), []);
+
+    let carried = ask(
+        &over_upgrade,
+        Some(RequestCredential::Elsewhere("Interop sub=bob".to_owned())),
+    );
+
+    succeed(&over_upgrade, (1, carried)).await;
+    assert_eq!(
+        presented(&over_upgrade),
+        [(
+            1,
+            Some(Credential::Elsewhere),
+            Some("Interop sub=bob".to_owned())
+        )]
+    );
+    assert_eq!(over_upgrade.router.credential(), Some(elsewhere()));
+    assert_eq!(*locked(&withdrawn), []);
+    assert_eq!(over_upgrade.codes(), Vec::<String>::new());
+    over_upgrade.router.dispose().await;
+    scripted.router.dispose().await;
+}
 
 fn jwt() -> RequestCredential {
     RequestCredential::Jwt("a.b.c".to_owned())
@@ -199,7 +347,7 @@ async fn a_calls_own_credential_wins_over_the_default_none_presents_none_whateve
 #[tokio::test]
 async fn refuses_opaque_as_its_default_credential_and_a_jwt_under_limits_that_hold_no_header_of_1020_bytes()
  {
-    let transport = ScriptedClient::new(crate::testing::SteppingClock::new(super::january_first()));
+    let transport = ScriptedClient::new(SteppingClock::new(super::january_first()));
     for credential in [RequestCredential::Opaque, RequestCredential::None] {
         RouterClient::new(
             Arc::<ScriptedClient>::clone(&transport),
@@ -268,7 +416,7 @@ async fn refuses_opaque_as_its_default_credential_and_a_jwt_under_limits_that_ho
 
 #[tokio::test]
 async fn refuses_as_it_is_built_keys_or_a_key_set_without_an_audience() {
-    let transport = ScriptedClient::new(crate::testing::SteppingClock::new(super::january_first()));
+    let transport = ScriptedClient::new(SteppingClock::new(super::january_first()));
     for mut credentials in [
         Credentials {
             keys: vec![key()],
