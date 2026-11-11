@@ -772,6 +772,14 @@ bench's comparison in CI, and its broker trial plays every case no row of the ma
 - **The interop service's descriptors written by hand**, held by a test against
   `spec/interop-blueprint.json`, an open row of the matrix; beadc's Rust target, ahead, generates
   them.
+- **A port beneath the service manager**, the inner half of the matrix's row
+  `Rust's service manager over a router of the application's own`: the manager reads its router
+  through a `pub(crate)` trait, `RouterLike`, which Bead's two routers take each through a wrapper
+  of its own, its registration of a notification held as it is made and its future waiting for the
+  subscription, its call free to draw no id; the twins of that row's three tests play over the test
+  kit's router through it, at one allocation more per call, the work a call covers boxed for the
+  port. Its public half, a `ServiceRouter` variant over it and an answer for its resolvers, is the
+  row's.
 - **The funnel, a rule to keep**: a change that spawns or reads time goes through `platform` or
   the clock, or fails clippy; a test reaches them through the kit; a target that stays native names
   its exemption and its reason. A core dependency that does not build for the browser's target
@@ -894,8 +902,8 @@ A third round met the draft that gave the Rust core its small APIs for eight row
 C# sides share: eleven objections, each checked against its probe before it was answered, eight
 accepted, three in part, none refused. It brought into the change the rule spec 9.3 and 9.4 hold
 every side to, an answer or a subscription going only to a request its router dispatched, which the
-TypeScript and C# sides keep by refusing any other header; when the Rust port beneath the service
-manager comes is the user's to choose.
+TypeScript and C# sides keep by refusing any other header. The Rust port beneath the service
+manager holds, the inner half of the matrix's row; its public half is the row's.
 
 | Objection                                                                                                                                                                                                                                                                                                        | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
