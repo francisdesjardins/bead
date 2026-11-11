@@ -39,13 +39,15 @@ test.describe('mountTabs', () => {
 
     // * from the last, the right arrow comes back to the first, and the left one goes round too
     await page.keyboard.press('ArrowRight');
+    await expect(selected).toHaveText('Packages');
+    await page.keyboard.press('ArrowRight');
     await expect(selected).toHaveText('Try it');
     await page.keyboard.press('ArrowLeft');
-    await expect(selected).toHaveText('Code');
+    await expect(selected).toHaveText('Packages');
     await page.keyboard.press('Home');
     await expect(page.getByRole('tab', { name: 'Try it' })).toBeFocused();
     await page.keyboard.press('End');
-    await expect(selected).toHaveText('Code');
+    await expect(selected).toHaveText('Packages');
 
     // one tab stop for the tabs: the one selected
     await expect(page.locator('#scene-tabs [tabindex="0"]')).toHaveCount(1);

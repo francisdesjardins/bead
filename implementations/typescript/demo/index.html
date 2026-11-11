@@ -920,6 +920,414 @@
         }
       }
 
+      /* ── the packages: a blueprint cut into beadc.yaml's outputs ─────────── */
+
+      /* the packages beside what they hold: the scenes' column widens for them */
+      .scenes:has(> #packages-scene:not([hidden])) {
+        max-width: 1280px;
+      }
+
+      .planner {
+        display: grid;
+        align-items: start;
+        gap: var(--app-space-6);
+      }
+
+      @media (min-width: 1100px) {
+        .planner {
+          grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+        }
+      }
+
+      .planner-packages,
+      .planner-view,
+      .planner-editor {
+        display: grid;
+        align-content: start;
+        gap: var(--app-space-4);
+        min-width: 0;
+      }
+
+      .planner-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--app-space-2) var(--app-space-4);
+      }
+
+      .planner-drop {
+        display: grid;
+        gap: var(--app-space-3);
+        padding: var(--app-space-4);
+        border: 1px dashed var(--app-divider);
+        border-radius: var(--app-radius-md);
+      }
+
+      .planner-drop[data-over] {
+        border-color: var(--app-accent);
+        background: var(--app-flame-wash);
+      }
+
+      /* the file's input unseen, its label the button */
+      .planner-file {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        min-height: var(--touch);
+        padding: 0 var(--app-space-4);
+        border-radius: var(--app-radius-md);
+        background: var(--app-primary);
+        color: var(--app-primary-ink);
+        font-weight: 500;
+        cursor: pointer;
+      }
+
+      .planner-file:hover {
+        background: var(--app-primary-hover);
+      }
+
+      .planner-file:has(input:focus-visible),
+      .planner select:focus-visible,
+      .planner-choice input:focus-visible {
+        outline: 2px solid var(--app-ring);
+        outline-offset: 2px;
+      }
+
+      .planner-file input {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      #planner-summary .mono {
+        font-family: var(--app-font-mono);
+      }
+
+      .planner-error,
+      #planner-reading[data-refused] {
+        color: var(--app-error);
+      }
+
+      .planner-error[hidden] {
+        display: none;
+      }
+
+      .planner-package-head {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: end;
+        gap: var(--app-space-2) var(--app-space-4);
+      }
+
+      .planner-field {
+        display: grid;
+        gap: var(--app-space-1);
+        min-width: 0;
+      }
+
+      /* the folder takes its own line where the head has no room for it */
+      .planner-folder {
+        flex: 1 1 14rem;
+      }
+
+      .planner select {
+        min-height: var(--touch);
+        padding: 0 var(--app-space-3);
+        border: 1px solid var(--app-divider);
+        border-radius: var(--app-radius-md);
+        background: var(--app-paper);
+        color: var(--app-text);
+        font: inherit;
+      }
+
+      .planner button.quiet {
+        border-color: transparent;
+        background: none;
+        color: var(--app-text-secondary);
+      }
+
+      .planner button.quiet:hover {
+        color: var(--app-error);
+      }
+
+      .planner-writes {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: var(--app-space-2);
+      }
+
+      .planner-writes button[aria-pressed='true'] {
+        border-color: var(--app-accent);
+        background: var(--app-flame-wash);
+      }
+
+      .planner-side {
+        display: grid;
+        gap: var(--app-space-3);
+        min-width: 0;
+        padding: var(--app-space-3);
+        border: 1px solid var(--app-divider);
+        border-radius: var(--app-radius-md);
+        background: var(--raised);
+      }
+
+      .planner-transport {
+        background: var(--app-paper);
+      }
+
+      .planner-side-head {
+        overflow-wrap: anywhere;
+      }
+
+      .planner-key {
+        color: var(--app-accent);
+      }
+
+      .planner-modes,
+      .planner-checks {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: var(--app-space-1) var(--app-space-4);
+      }
+
+      .planner-choice {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--app-space-2);
+        min-height: 32px;
+        cursor: pointer;
+      }
+
+      .planner-choice input {
+        width: 16px;
+        height: 16px;
+        margin: 0;
+        accent-color: var(--app-primary);
+      }
+
+      .count-of {
+        color: var(--app-text-tertiary);
+        font: var(--app-text-xs) var(--app-font-mono);
+      }
+
+      /* a selection among several reads as one of them: a rule down its side */
+      .planner-selection {
+        display: grid;
+        gap: var(--app-space-2);
+        padding-left: var(--app-space-3);
+        border-left: 2px solid var(--app-accent);
+      }
+
+      .planner-picks {
+        display: grid;
+        gap: var(--app-space-2);
+      }
+
+      @media (min-width: 520px) {
+        .planner-picks {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+
+      .planner-pick {
+        min-width: 0;
+        border: 1px solid var(--app-divider);
+        border-radius: var(--app-radius-md);
+        background: var(--app-paper);
+      }
+
+      .planner-pick summary {
+        display: flex;
+        align-items: center;
+        gap: var(--app-space-2);
+        min-height: var(--touch);
+        padding: 0 var(--app-space-3);
+        cursor: pointer;
+      }
+
+      .planner-pick-body {
+        display: grid;
+        gap: var(--app-space-1);
+        max-height: 260px;
+        overflow-y: auto;
+        padding: 0 var(--app-space-3) var(--app-space-3);
+      }
+
+      .planner-service {
+        display: grid;
+      }
+
+      /* a service's procedures under its whole */
+      .planner-service > .planner-choice ~ .planner-choice {
+        padding-left: var(--app-space-6);
+      }
+
+      .planner-procedure {
+        display: inline-flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: var(--app-space-1) var(--app-space-2);
+      }
+
+      .stale {
+        color: var(--app-error);
+      }
+
+      .chip.kind-notifies,
+      .chip.reads {
+        color: var(--app-info);
+      }
+
+      .chip.kind-command {
+        color: var(--app-warn);
+      }
+
+      .planner-findings {
+        display: grid;
+        gap: var(--app-space-2);
+      }
+
+      .planner-note {
+        padding: var(--app-space-2) var(--app-space-3);
+        border-left: 3px solid var(--app-divider);
+        border-radius: var(--app-radius-md);
+        background: var(--app-paper);
+        overflow-wrap: anywhere;
+      }
+
+      .planner-note.bad {
+        border-left-color: var(--app-error);
+        background: var(--bad-soft);
+      }
+
+      .planner-note.warn {
+        border-left-color: var(--app-warn);
+        background: var(--app-warn-wash);
+      }
+
+      .planner-note.ok {
+        border-left-color: var(--app-ok);
+        background: var(--app-ok-wash);
+      }
+
+      .planner-note .rule {
+        margin-right: var(--app-space-2);
+        font: 600 var(--app-text-xs) var(--app-font-mono);
+      }
+
+      /* the matrix scrolls within its own box, its head and its first column held: the page keeps
+         its width */
+      .planner-matrix {
+        max-height: 70vh;
+        overflow: auto;
+        border: 1px solid var(--app-divider);
+        border-radius: var(--app-radius-md);
+        background: var(--app-paper);
+      }
+
+      .planner-matrix table {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+        font-size: var(--app-text-sm);
+      }
+
+      .planner-matrix th,
+      .planner-matrix td {
+        padding: var(--app-space-1) var(--app-space-2);
+        border-bottom: 1px solid var(--app-divider);
+        text-align: left;
+        vertical-align: middle;
+      }
+
+      .planner-matrix td {
+        text-align: center;
+      }
+
+      .planner-matrix tbody tr:last-child > * {
+        border-bottom: 0;
+      }
+
+      .planner-matrix thead th {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        min-width: 88px;
+        background: var(--app-paper);
+        font-weight: 500;
+        vertical-align: bottom;
+      }
+
+      .planner-matrix .planner-procedure-head {
+        position: sticky;
+        left: 0;
+        z-index: 2;
+        min-width: 180px;
+        border-right: 1px solid var(--app-divider);
+        background: var(--app-paper);
+        font-weight: 400;
+      }
+
+      .planner-matrix thead .planner-procedure-head {
+        z-index: 3;
+      }
+
+      .planner-count,
+      .planner-column {
+        display: block;
+        font: var(--app-text-xs) var(--app-font-mono);
+        overflow-wrap: anywhere;
+      }
+
+      .planner-count {
+        color: var(--app-accent);
+      }
+
+      .planner-what {
+        display: block;
+        color: var(--app-text-tertiary);
+        font-size: var(--app-text-xs);
+        font-weight: 400;
+      }
+
+      .dot {
+        display: inline-block;
+        width: 11px;
+        height: 11px;
+        border: 1.5px solid var(--app-divider);
+        border-radius: var(--app-radius-pill);
+      }
+
+      .dot.is-held {
+        border-color: var(--app-accent);
+        background: var(--app-accent);
+      }
+
+      /* a procedure no server class holds */
+      tr.is-unserved .planner-procedure code {
+        color: var(--app-warn);
+      }
+
+      .planner-listing {
+        display: grid;
+        gap: var(--app-space-1);
+        min-width: 0;
+      }
+
+      .planner-empty {
+        padding: var(--app-space-4);
+      }
+
+      #planner-yaml {
+        max-height: 60vh;
+      }
+
       /* ── the wire: one log at a time, newest first, folded until asked ──── */
 
       .wire {
@@ -1268,6 +1676,15 @@
             data-scene="code"
           >
             Code
+          </button>
+          <button
+            id="scene-packages"
+            type="button"
+            role="tab"
+            aria-controls="packages-scene"
+            data-scene="packages"
+          >
+            Packages
           </button>
         </div>
 
@@ -1649,6 +2066,106 @@ What it answers shows once the sign-up is sent.</pre>
               <code>d(rx), -token</code>, and <code>e(notification)</code> for the envelopes. The
               Bead DevTools panel filters every view; <code>-metrics, -stats</code> leaves polling
               out of its Broker view where DATA joins its call. Uncertain captures stay visible.
+            </p>
+          </section>
+        </div>
+
+        <div
+          id="packages-scene"
+          class="scene"
+          role="tabpanel"
+          aria-labelledby="scene-packages"
+          hidden
+        >
+          <section class="card" aria-labelledby="planner-h">
+            <h2 id="planner-h">One contract, several packages</h2>
+            <p class="note">
+              Cut a blueprint into the outputs of <code>beadc.yaml</code>: each writes a
+              <code>server</code>, a <code>client</code> and a <code>gateway</code> over its own
+              selection of procedures, and each transport of its server takes the procedures it is
+              given. Every choice comes from the blueprint; nothing is typed. What each class holds
+              and what <code>beadc generate</code> would refuse are beadc's own code, run in this
+              page.
+            </p>
+            <div id="planner-drop" class="planner-drop">
+              <div class="buttons">
+                <label class="planner-file">
+                  <input type="file" id="planner-file" accept=".json,application/json" />
+                  <span>Open a blueprint</span>
+                </label>
+                <button type="button" data-blueprint="demo">The demo's blueprint</button>
+                <button type="button" data-blueprint="shop">A shop, for example</button>
+              </div>
+              <p class="note">
+                Or drop here a <code>bead-blueprint/1</code> file, which
+                <code>beadc blueprint</code> writes; it stays in this browser. The page reads its
+                services and their procedures alone: a blueprint's own checks are
+                <code>beadc check</code>'s.
+              </p>
+              <p id="planner-summary" class="detail"></p>
+              <p id="planner-error" class="planner-error" role="alert" hidden></p>
+            </div>
+          </section>
+
+          <div class="planner">
+            <section class="planner-packages" aria-labelledby="planner-packages-h">
+              <div class="planner-row">
+                <h2 id="planner-packages-h">Packages</h2>
+                <div class="buttons">
+                  <button type="button" data-add-package="typescript">
+                    Add a TypeScript package
+                  </button>
+                  <button type="button" data-add-package="csharp">Add a C# package</button>
+                </div>
+              </div>
+              <div id="planner-editor" class="planner-editor"></div>
+            </section>
+
+            <section class="planner-view" aria-labelledby="planner-view-h">
+              <h2 id="planner-view-h">What each class holds</h2>
+              <div id="planner-findings" class="planner-findings" aria-live="polite"></div>
+              <div
+                id="planner-matrix"
+                class="planner-matrix"
+                role="region"
+                aria-label="Procedures by package and class"
+                tabindex="0"
+              ></div>
+              <p class="note">
+                A filled dot: the class holds the procedure. The server class holds its resolvers,
+                its notifiers and the requesters of its commands; the client class its requesters,
+                its notifications and the resolvers of the commands it answers; the gateway its
+                routes. A transport's column is what it takes: a request to any other procedure is
+                answered <code>SERVICE_UNKNOWN</code> or <code>PROCEDURE_UNKNOWN</code>.
+              </p>
+              <details class="fold" open>
+                <summary>The procedures each transport takes</summary>
+                <div id="planner-transports" class="fold-body"></div>
+              </details>
+              <details class="fold" open>
+                <summary>The gateway's routes</summary>
+                <div id="planner-routes" class="fold-body"></div>
+              </details>
+            </section>
+          </div>
+
+          <section class="card" aria-labelledby="planner-yaml-h">
+            <h2 id="planner-yaml-h"><code>beadc.yaml</code>'s outputs</h2>
+            <pre id="planner-yaml" class="code" tabindex="0"></pre>
+            <div class="planner-row">
+              <button type="button" id="planner-copy">Copy the YAML</button>
+              <span id="planner-copied" class="note" role="status"></span>
+            </div>
+            <p id="planner-reading" class="detail"></p>
+            <p class="note">
+              Each folder and each transport's key is derived from what its package holds, never
+              from its place in the list: removing a package renames no other. To name them
+              otherwise, rename them in <code>beadc.yaml</code>; a key of
+              <code>server.transports</code> is the member of
+              <code>SERVED_PROCEDURES</code> (TypeScript) or <code>ServedProcedures</code> (C#) the
+              application hands its transport. The file around these outputs keeps its
+              <code>version</code> and its <code>source</code>: what depends on the disk, the
+              <code>.proto</code> roots among it, stays <code>beadc generate</code>'s.
             </p>
           </section>
         </div>

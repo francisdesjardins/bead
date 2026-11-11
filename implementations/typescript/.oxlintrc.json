@@ -158,6 +158,24 @@
       }
     },
     {
+      // the package's sources import bare, a consumer's bundler resolving them: `tsconfig.json`
+      // takes a `.ts` import for the demo's reach into the builder alone
+      "files": ["src/**/*.ts"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "regex": "^\\.{1,2}/.*\\.[cm]?ts$",
+                "message": "the package's sources import bare: drop the extension"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
       // a test may wait on the platform's own timers, or test one: the clock it gives Bead is its
       // own
       "files": ["**/__tests__/**"],

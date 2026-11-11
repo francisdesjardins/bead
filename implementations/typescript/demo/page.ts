@@ -33,6 +33,7 @@ import {
 import { drawGlyph, GLYPH_BYTES, GLYPH_SIDE } from './glyph';
 import { createQuietCalls, watchDebug } from './debug';
 import { SignUpProcedures } from './gen/typescript/demo/v1/sign_up_bead';
+import { mountPackages } from './packages';
 import { mountScenes } from './scenes';
 import { mountSides } from './sides';
 // ! types alone: the module itself is loaded apart, over MQTT 5 alone
@@ -991,6 +992,8 @@ watchDebug(client, { quiet: READS });
 // the sign-up, its request held to the rules of its .proto
 mountSignUp(client, { reasonOf });
 mountSides();
+// the Packages tab: a blueprint cut into beadc.yaml's outputs, by the builder's own code
+mountPackages();
 // the scenes, one a tab, and the wire beside them
 mountScenes();
 

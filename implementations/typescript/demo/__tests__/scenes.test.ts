@@ -6,7 +6,7 @@ import { PLAYGROUND, serveFolder } from '../../devtools/__tests__/fixtures';
 
 // constants
 
-const SCENES = Object.freeze(['calls', 'rules', 'openapi', 'server', 'code'] as const);
+const SCENES = Object.freeze(['calls', 'rules', 'openapi', 'server', 'code', 'packages'] as const);
 
 // helpers
 
