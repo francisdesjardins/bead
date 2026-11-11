@@ -134,4 +134,20 @@ public sealed class RouterLimitsTests
         RouterLimits.WholeEnvelopeOf(RouterLimits.Default with { MaximumEnvelopeBytes = 4_096 }).Validate();
         Assert.Equal(0, RouterLimits.WholeEnvelopeOf(RouterLimits.Default with { MaximumTransfers = 4 }).MaximumTransfers);
     }
+
+    // spec 15.11; the TypeScript and Rust helper's refusal, beside this side's normalization
+    [Fact(Skip = "divergence: C# discards a supplied transfer count; TypeScript and Rust refuse it")]
+    public async Task Gives_limits_a_router_holds_together_and_refuses_a_transfer_asked_for()
+    {
+        await using var transport = new MemoryTransportServer();
+        using var router = new RouterServer(transport, new RouterServerOptions
+        {
+            Limits = RouterLimits.WholeEnvelopeOf(RouterLimits.Default with { MaximumEnvelopeBytes = 4_096 }),
+        });
+
+        Assert.Throws<ArgumentException>(() =>
+        {
+            return RouterLimits.WholeEnvelopeOf(RouterLimits.Default with { MaximumTransfers = 4 });
+        });
+    }
 }
