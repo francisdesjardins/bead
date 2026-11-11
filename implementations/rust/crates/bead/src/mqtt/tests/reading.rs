@@ -4,6 +4,103 @@
 use super::*;
 
 #[tokio::test]
+#[cfg_attr(
+    windows,
+    ignore = "divergence: the small receive window does not establish a blocked writer on Windows; its stop settles before the deadline"
+)]
+async fn resets_its_socket_once_its_disconnect_cannot_leave_within_its_connect_timeout() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::sync::oneshot;
+
+    use crate::testing::SteppingClock;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (reading, read) = oneshot::channel::<()>();
+    let peer = spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+
+        // the peer keeps a small receive window and reads no publication until the stop settles
+        socket2::SockRef::from(&socket)
+            .set_recv_buffer_size(1_024)
+            .unwrap();
+
+        let mut header = [0; 2];
+
+        socket.read_exact(&mut header).await.unwrap();
+        assert_eq!(header[0], 0x10, "its first packet is a CONNECT");
+        assert!(
+            header[1] < 128,
+            "the short CONNECT has one Remaining Length byte"
+        );
+
+        let mut connect = vec![0; usize::from(header[1])];
+
+        socket.read_exact(&mut connect).await.unwrap();
+        socket
+            .write_all(&connack(&Connack::default()))
+            .await
+            .unwrap();
+        read.await.unwrap();
+
+        let failed = socket.read_to_end(&mut Vec::new()).await.unwrap_err();
+
+        assert_eq!(
+            failed.kind(),
+            std::io::ErrorKind::ConnectionReset,
+            "the timed-out stop resets its blocked socket"
+        );
+    });
+    let clock = SteppingClock::new(crate::testing::instants::new_year());
+    let timeout = Duration::from_millis(100);
+    let mut options = MqttBrokerAdapterOptions::new(format!("mqtt://127.0.0.1:{port}"), ID);
+
+    options.password = Some(PASSWORD.to_owned());
+    options.clock = Some(Arc::<SteppingClock>::clone(&clock));
+    options.delivery = Some(BrokerDelivery::AtMostOnce);
+    options.connect_timeout = Some(timeout);
+
+    let adapter = adapter_of(&options);
+    let heard = heard_of(&adapter);
+
+    adapter.start(BrokerStart::default()).await.unwrap();
+    assert_eq!(
+        adapter
+            .publish(BrokerPublication::new(
+                inbox(),
+                Bytes::from(vec![0; 8_388_608])
+            ))
+            .await
+            .unwrap(),
+        BrokerPublished::Taken,
+        "the QoS 0 publication is handed to its writer"
+    );
+
+    let stopping = spawn(adapter.stop());
+
+    until(|| clock.dues().contains(&timeout)).await;
+    assert!(
+        !stopping.is_finished(),
+        "the blocked DISCONNECT waits within its own timeout"
+    );
+    clock.advance(timeout).await;
+    crate::testing::patience(PATIENCE, stopping)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!adapter.is_linked(), "its stop settles after the deadline");
+    assert!(
+        heard.downs().is_empty(),
+        "its own stop reports no link loss"
+    );
+    reading.send(()).unwrap();
+    crate::testing::patience(PATIENCE, peer)
+        .await
+        .unwrap()
+        .unwrap();
+}
+
+#[tokio::test]
 async fn keeps_passwords_and_provider_details_out_of_its_debug_output() {
     let script = script().await;
     let options = options_of(&script);
