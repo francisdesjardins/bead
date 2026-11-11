@@ -44,7 +44,9 @@ with the hash of its text. The why of each rule is in the decisions:
   the blueprint its routes come from, and the document its builder writes (3.9, 11);
 - [0048](../docs/decisions/0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md):
   the procedures an output's `gateway` selects, its routes, its document and its client (3.1, 11.1,
-  12.1).
+  12.1);
+- [0049](../docs/decisions/0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md):
+  a request's target, read raw and refused as a page's browser writes it (3.6).
 
 **Version: 0.4.0**. Its conformance file repeats it as its `transcodingVersion`, and follows its
 schema in [`schemas/`](schemas/). It moves by `spec.md`'s rule, under a version of its own
