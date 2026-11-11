@@ -4,7 +4,7 @@
 - **Scope**: the protocol, and every implementation's server transports: the handle a transport
   names each connection by, in section 15.1 of [`spec/spec.md`](../../spec/spec.md), and what 14.4
   says of a destination's next connection; a client's address read from an IPv4-mapped one, in
-  15.12; the forms both sides write. HTTP's token and its draw are
+  15.12; the forms every side writes. HTTP's token and its draw are
   [0020](0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md)'s, and a stop
   [0023](0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md)'s.
 
@@ -85,15 +85,15 @@ literals, the author's style for a value whose form a type can state.
 **14.4 follows**: a destination's next connection is always another handle, so once its connection
 closed a destination is unreachable until it is registered anew.
 
-**A client's address is read as IPv4 when an IPv6 socket carries it mapped** (spec 15.12), on both
-sides, in the handle, a client's address and `maximumConnectionsPerAddress`, the socket's address
+**A client's address is read as IPv4 when an IPv6 socket carries it mapped** (spec 15.12), on every
+side, in the handle, a client's address and `maximumConnectionsPerAddress`, the socket's address
 mapped before a trusted proxy's is read.
 
 ## Consequences
 
 **The WebSocket handle carries its ordinal**: on the TypeScript side `generateHandle` takes
 `{ ip, ordinal, port, type }` and writes every form, and the socket form of
-`TransportServerConnectionHandle` ends in its ordinal. Both sides' test literals of a socket's
+`TransportServerConnectionHandle` ends in its ordinal. Every side's test literals of a socket's
 handle carry the ordinal, so twin tests read one form.
 
 **No conformance case holds it.** No step of `spec/transports.json` names the address or the port a
@@ -101,14 +101,16 @@ socket opens from or connects to, and one that did would bind to a platform's so
 on Windows cannot open the second socket, macOS has no `127.0.0.2`. The handle is not on the wire;
 the crossing of sessions a handle given twice brings is, and twin tests hold it, by the same sentence
 ([0004](0004-one-behaviour-in-every-language.md)), which `docs/support.md` names among what no entry
-plays: each WebSocket transport server's
-`names each connection by its peer’s port and the rank it came at, two sockets from one address and port among them, and gives no handle twice`
-and `closes each of two sockets from one address and port on its own, each its own close told`;
-each WebSocket server's
-`keeps two sockets from one address and port, to two of its addresses, as two connections, each in its own session, and closes both going away as it stops`,
-on real sockets, skipped where the platform cannot open two sockets from one port, the TypeScript
-one on Linux alone; and each transport server's
-`names a client that comes over IPv4 to a dual-stack listener by its IPv4 address`.
+plays: the TypeScript and C# WebSocket transport servers' `names each connection by its peer’s port
+and the rank it came at, two sockets from one address and port among them, and gives no handle
+twice` and `closes each of two sockets from one address and port on its own, each its own close
+told`, the Rust one's
+`names_each_connection_by_its_peer_s_port_and_the_rank_it_came_at_and_gives_no_handle_twice` naming
+two connections from two ports; each WebSocket server's `keeps two sockets from one address and
+port, to two of its addresses, as two connections, each in its own session, and closes both going
+away as it stops`, on real sockets, skipped where the platform cannot open two sockets from one
+port, the TypeScript one on Linux alone and the Rust one everywhere but macOS; and each transport
+server's `names a client that comes over IPv4 to a dual-stack listener by its IPv4 address`.
 
 ## The Tenth Man
 

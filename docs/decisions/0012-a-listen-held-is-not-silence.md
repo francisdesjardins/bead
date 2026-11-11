@@ -32,12 +32,12 @@ connection timeouts runs â€” the server's own, a session's connection timeout â€
 anew from its end, as the Bayeux long poll counts its interval from the end of a poll, and as the
 HTTP transport's own `inactivityTimeout` counts. The transport tells a listen taken, past its
 refusals, and its end (15.1; a listen is 15.9's): `listen` on the TypeScript side, `Listen` on the
-C# side, an optional event of the transport's contract that a transport without listens never
-raises. A connection's session's session timeout, and its `lastActivity`, count messages alone: a
-connection's session idles out alike over every transport. Over WebSocket, and over a Web Worker
-alike, a peer that only hears is silent: it speaks now and then, or is given a connection timeout
-without end. A transport that keeps no connection of its own states what silence is on it, with what
-stands for a connection there
+C# side, `on_listen` on the Rust side, an optional event of the transport's contract that a
+transport without listens never raises. A connection's session's session timeout, and its
+`lastActivity`, count messages alone: a connection's session idles out alike over every transport.
+Over WebSocket, and over a Web Worker alike, a peer that only hears is silent: it speaks now and
+then, or is given a connection timeout without end. A transport that keeps no connection of its own
+states what silence is on it, with what stands for a connection there
 ([0020](0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md)).
 
 **A connection without a session is its server's.** With no connection's session yet, or its
@@ -61,20 +61,22 @@ nothing.
 **An application that wants an idle connection or session closed gives its timeouts**: none ends one
 by default, and the session manager's documentation names ASVS's values.
 
-**Every server counts the listens a connection holds**, `listening` among its gauges on both sides,
-which a health check reads as it reads the others; both session managers reset either timeout alone.
+**Every server counts the listens a connection holds**, `listening` among its gauges on every side,
+which a health check reads as it reads the others; every side's session manager resets either
+timeout alone.
 
-**A listen that takes another's place is told before the end of the one it replaces**, on both
-sides: the TypeScript transport tells the new listen before it ends the one it replaces, and the C#
-transport's replaced listen tells its end once its replacer is told held, so a count of the listens
-held never falls to 0 as one takes over. Each side's HTTP transport server's twin of a listen told,
-in `http-transport-server.test.ts` and `HttpTransportServerTests`, holds the order: held, held,
-ended.
+**A listen that takes another's place is told before the end of the one it replaces**, on every
+side: the TypeScript transport tells the new listen before it ends the one it replaces, the C#
+transport's replaced listen tells its end once its replacer is told held, and the Rust transport
+tells the new listen as it takes it, the one it replaces telling its end from a turn of its own, so
+a count of the listens held never falls to 0 as one takes over. Each side's HTTP transport server's
+twin of a listen told, in `http-transport-server.test.ts`, `HttpTransportServerTests` and the Rust
+side's `http/server/tests/listens.rs`, holds the order: held, held, ended.
 
-**One order differs, and the cases wait it out.** The C# transport arms a listen's wait before
-it tells the listen, the TypeScript one after; in the transports' file, an `until timer` waits for
-the earliest timer armed to be the one it names, and alone so due, so a timer the listen is about to
-clear never fires first.
+**One order differs, and the cases wait it out.** The C# and Rust transports arm a listen's wait
+before they tell the listen, the TypeScript one after; in the transports' file, an `until timer`
+waits for the earliest timer armed to be the one it names, and alone so due, so a timer the listen
+is about to clear never fires first.
 
 **A WebSocket peer that only hears needs to speak**, or a connection timeout without end: its pings
 are the platform's, and reach no layer

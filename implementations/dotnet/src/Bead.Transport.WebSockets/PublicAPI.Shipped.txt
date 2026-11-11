@@ -100,7 +100,6 @@ Bead.Transport.WebSockets.WebSocketTransportServer.CarriesCredential(string! con
 Bead.Transport.WebSockets.WebSocketTransportServer.Clients.get -> System.Collections.Generic.IReadOnlyList<Bead.TransportServerClient!>!
 Bead.Transport.WebSockets.WebSocketTransportServer.Clock.get -> System.TimeProvider!
 Bead.Transport.WebSockets.WebSocketTransportServer.Close -> System.Action<bool, string!>?
-Bead.Transport.WebSockets.WebSocketTransportServer.CloseAll() -> System.Threading.Tasks.Task<bool[]!>!
 Bead.Transport.WebSockets.WebSocketTransportServer.CloseConnection(string! connectionHandle) -> System.Threading.Tasks.Task<bool>!
 Bead.Transport.WebSockets.WebSocketTransportServer.Connection -> System.Action<string!>?
 Bead.Transport.WebSockets.WebSocketTransportServer.ConnectionHandles.get -> System.Collections.Generic.IReadOnlyCollection<string!>!
@@ -116,7 +115,7 @@ Bead.Transport.WebSockets.WebSocketTransportServer.Refusal -> System.Action<Bead
 Bead.Transport.WebSockets.WebSocketTransportServer.Resume(string! connectionHandle) -> void
 Bead.Transport.WebSockets.WebSocketTransportServer.Send(Bead.TransportMessage message, string! connectionHandle) -> System.Threading.Tasks.Task!
 Bead.Transport.WebSockets.WebSocketTransportServer.Shutdown() -> System.Threading.Tasks.Task!
-Bead.Transport.WebSockets.WebSocketTransportServer.Start(Bead.Transport.WebSockets.WebSocketTransportStartOptions? options = null) -> System.Threading.Tasks.Task<Bead.TransportServerAddress>!
+Bead.Transport.WebSockets.WebSocketTransportServer.Start(Bead.TransportServerStartOptions? options = null) -> System.Threading.Tasks.Task<Bead.TransportServerAddress>!
 Bead.Transport.WebSockets.WebSocketTransportServer.Stop() -> System.Threading.Tasks.Task!
 Bead.Transport.WebSockets.WebSocketTransportServer.TakesProcedure(string! connectionHandle, Bead.ProcedureAddress address) -> bool
 Bead.Transport.WebSockets.WebSocketTransportServer.Type.get -> string!
@@ -157,18 +156,6 @@ Bead.Transport.WebSockets.WebSocketTransportServerOptions.TrustedProxies.init ->
 Bead.Transport.WebSockets.WebSocketTransportServerOptions.UnnamedProxies.get -> int
 Bead.Transport.WebSockets.WebSocketTransportServerOptions.UnnamedProxies.init -> void
 Bead.Transport.WebSockets.WebSocketTransportServerOptions.WebSocketTransportServerOptions() -> void
-Bead.Transport.WebSockets.WebSocketTransportStartOptions
-Bead.Transport.WebSockets.WebSocketTransportStartOptions.<Clone>$() -> Bead.Transport.WebSockets.WebSocketTransportStartOptions!
-Bead.Transport.WebSockets.WebSocketTransportStartOptions.Address.get -> string!
-Bead.Transport.WebSockets.WebSocketTransportStartOptions.Address.init -> void
-Bead.Transport.WebSockets.WebSocketTransportStartOptions.CancellationToken.get -> System.Threading.CancellationToken
-Bead.Transport.WebSockets.WebSocketTransportStartOptions.CancellationToken.init -> void
-Bead.Transport.WebSockets.WebSocketTransportStartOptions.Equals(Bead.Transport.WebSockets.WebSocketTransportStartOptions? other) -> bool
-Bead.Transport.WebSockets.WebSocketTransportStartOptions.FindOpenPort.get -> bool
-Bead.Transport.WebSockets.WebSocketTransportStartOptions.FindOpenPort.init -> void
-Bead.Transport.WebSockets.WebSocketTransportStartOptions.Port.get -> int
-Bead.Transport.WebSockets.WebSocketTransportStartOptions.Port.init -> void
-Bead.Transport.WebSockets.WebSocketTransportStartOptions.WebSocketTransportStartOptions() -> void
 const Bead.Transport.WebSockets.WebSocketRefusals.Busy = "busy" -> string!
 const Bead.Transport.WebSockets.WebSocketRefusals.Host = "host-refused" -> string!
 const Bead.Transport.WebSockets.WebSocketRefusals.Malformed = "malformed" -> string!
@@ -191,9 +178,6 @@ override Bead.Transport.WebSockets.WebSocketTransportClientOptions.ToString() ->
 override Bead.Transport.WebSockets.WebSocketTransportServerOptions.Equals(object? obj) -> bool
 override Bead.Transport.WebSockets.WebSocketTransportServerOptions.GetHashCode() -> int
 override Bead.Transport.WebSockets.WebSocketTransportServerOptions.ToString() -> string!
-override Bead.Transport.WebSockets.WebSocketTransportStartOptions.Equals(object? obj) -> bool
-override Bead.Transport.WebSockets.WebSocketTransportStartOptions.GetHashCode() -> int
-override Bead.Transport.WebSockets.WebSocketTransportStartOptions.ToString() -> string!
 static Bead.Transport.WebSockets.WebSocketClientOptions.operator !=(Bead.Transport.WebSockets.WebSocketClientOptions? left, Bead.Transport.WebSockets.WebSocketClientOptions? right) -> bool
 static Bead.Transport.WebSockets.WebSocketClientOptions.operator ==(Bead.Transport.WebSockets.WebSocketClientOptions? left, Bead.Transport.WebSockets.WebSocketClientOptions? right) -> bool
 static Bead.Transport.WebSockets.WebSocketServerOptions.operator !=(Bead.Transport.WebSockets.WebSocketServerOptions? left, Bead.Transport.WebSockets.WebSocketServerOptions? right) -> bool
@@ -204,5 +188,3 @@ static Bead.Transport.WebSockets.WebSocketTransportClientOptions.operator !=(Bea
 static Bead.Transport.WebSockets.WebSocketTransportClientOptions.operator ==(Bead.Transport.WebSockets.WebSocketTransportClientOptions? left, Bead.Transport.WebSockets.WebSocketTransportClientOptions? right) -> bool
 static Bead.Transport.WebSockets.WebSocketTransportServerOptions.operator !=(Bead.Transport.WebSockets.WebSocketTransportServerOptions? left, Bead.Transport.WebSockets.WebSocketTransportServerOptions? right) -> bool
 static Bead.Transport.WebSockets.WebSocketTransportServerOptions.operator ==(Bead.Transport.WebSockets.WebSocketTransportServerOptions? left, Bead.Transport.WebSockets.WebSocketTransportServerOptions? right) -> bool
-static Bead.Transport.WebSockets.WebSocketTransportStartOptions.operator !=(Bead.Transport.WebSockets.WebSocketTransportStartOptions? left, Bead.Transport.WebSockets.WebSocketTransportStartOptions? right) -> bool
-static Bead.Transport.WebSockets.WebSocketTransportStartOptions.operator ==(Bead.Transport.WebSockets.WebSocketTransportStartOptions? left, Bead.Transport.WebSockets.WebSocketTransportStartOptions? right) -> bool

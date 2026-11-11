@@ -24,7 +24,7 @@ fi
 
 set -euo pipefail
 
-image="${BEADC_IMAGE:-ghcr.io/francisdesjardins/beadc:0.11.0}"
+image="${BEADC_IMAGE:-ghcr.io/francisdesjardins/beadc:0.12.0}"
 engine="${BEADC_ENGINE:-docker}"
 
 # ! a line feed alone, as beadc.ps1 writes it
