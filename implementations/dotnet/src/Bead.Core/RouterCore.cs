@@ -374,7 +374,8 @@ internal sealed partial class RouterCore : IDisposable
     }
 
     // a result as a transfer: its opening, then each chunk credited; its call stays open until the
-    // last chunk is handed off, and the answer goes out once that one did
+    // last chunk is handed off, and the answer goes out once every envelope of it went, the last
+    // chunk ending the call as it is handed off
     private Task SendResult(OutgoingTransfer outgoing, (string ConnectionHandle, AnsweringCall Answering, ResultHeader Header) answered)
     {
         var (connectionHandle, answering, header) = answered;
@@ -382,6 +383,10 @@ internal sealed partial class RouterCore : IDisposable
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var isOpen = true;
         var generation = 0;
+
+        // the sends handed to the transport and not heard back from, and whether the last chunk went
+        var pending = 0;
+        var isLastGone = false;
         ITimer? timer = null;
         Sending? sending = null;
 
@@ -399,12 +404,29 @@ internal sealed partial class RouterCore : IDisposable
             }
         }
 
-        // the call goes with it: its call id is the peer's to open again
+        // the call goes with it, while open: its call id is the peer's to open again; the answer
+        // fails with the first refusal, and one after it settled is dropped
         void Fail(Exception reason)
         {
-            Stop();
-            _answeringCalls.Close(call, answering);
+            if (isOpen)
+            {
+                Stop();
+                _answeringCalls.Close(call, answering);
+            }
+
             completion.TrySetException(reason);
+        }
+
+        // ! every envelope of the transfer goes before its answer does: a refusal, whenever it comes,
+        // fails it (spec 12.7)
+        void Heard()
+        {
+            pending -= 1;
+
+            if (isLastGone && pending == 0)
+            {
+                completion.TrySetResult();
+            }
         }
 
         // what the transfer does sets its timer going again — never once it stopped
@@ -451,10 +473,14 @@ internal sealed partial class RouterCore : IDisposable
             Stop();
             EndAnswered(answering, (CallOutcome.Result, null));
             _answeringCalls.Close(call, answering);
+            isLastGone = true;
         }
 
+        // * counted before it is handed off, so the last chunk's own send is in the count as it goes
         async Task SendChunk(Chunk chunk)
         {
+            pending += 1;
+
             try
             {
                 await _writer.Deliver(PayloadPlacement.ChunkEnvelopeOf(header.CallId, chunk), (connectionHandle, chunk.IsLast ? Sent : Progress));
@@ -466,14 +492,13 @@ internal sealed partial class RouterCore : IDisposable
                 return;
             }
 
-            if (chunk.IsLast)
-            {
-                completion.TrySetResult();
-            }
+            Heard();
         }
 
         async Task SendOpening()
         {
+            pending += 1;
+
             try
             {
                 await _writer.Deliver(new Envelope { Header = header with { Total = outgoing.Total }, Payload = outgoing.Opening }, connectionHandle);
@@ -481,7 +506,11 @@ internal sealed partial class RouterCore : IDisposable
             catch (Exception reason)
             {
                 Fail(reason);
+
+                return;
             }
+
+            Heard();
         }
 
         void Send(Chunk chunk)

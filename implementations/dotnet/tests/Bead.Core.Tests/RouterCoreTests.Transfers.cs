@@ -57,17 +57,19 @@ public sealed partial class RouterCoreTests
         await CheckSubscriptionResult(true);
     }
 
+    // a result of 100 bytes goes as an opening of 28, then a chunk of 48 and the last of 24
     [Fact]
-    public async Task A_ready_chunk_refusal_is_observed_before_a_later_successful_final_chunk()
+    public async Task A_chunk_refused_after_the_last_one_went_fails_the_answer()
     {
         var server = new Peer(RouterSide.Server);
         using var core = server.Core;
         var resolver = server.Resolve();
         var refused = new IOException("the transport refused the chunk");
+        var held = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         server.OnSend = (envelope) =>
         {
-            return envelope.Header is ChunkHeader { IsLast: false } ? Task.FromException(refused) : Task.CompletedTask;
+            return envelope.Header is ChunkHeader { IsLast: false } ? held.Task : Task.CompletedTask;
         };
         await server.Deliver(new Envelope { Header = RequestOf(1), Payload = new byte[] { 1 } });
 
@@ -75,10 +77,82 @@ public sealed partial class RouterCoreTests
 
         await server.Settle();
         await server.Deliver(CreditOf(1, 100));
+        await server.Settle();
+        Assert.Equal(
+            [(EnvelopeKind.Result, false), (EnvelopeKind.Chunk, false), (EnvelopeKind.Chunk, true)],
+            server.Sent.Select((envelope) =>
+            {
+                return (envelope.Kind, envelope.Header is ChunkHeader { IsLast: true });
+            }));
+        held.SetException(refused);
         Assert.Same(refused, await Assert.ThrowsAsync<IOException>(() =>
         {
             return responding.WaitAsync(Patience, TestContext.Current.CancellationToken);
         }));
+    }
+
+    [Fact]
+    public async Task An_opening_refused_after_the_last_chunk_went_fails_the_answer()
+    {
+        var server = new Peer(RouterSide.Server);
+        using var core = server.Core;
+        var resolver = server.Resolve();
+        var refused = new IOException("the transport refused the opening");
+        var held = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        server.OnSend = (envelope) =>
+        {
+            return envelope.Header is ResultHeader ? held.Task : Task.CompletedTask;
+        };
+        await server.Deliver(new Envelope { Header = RequestOf(1), Payload = new byte[] { 1 } });
+
+        var responding = resolver.Answer(0, PatternOf(100));
+
+        await server.Settle();
+        await server.Deliver(CreditOf(1, 100));
+        await server.Settle();
+        Assert.Equal(
+            [EnvelopeKind.Result, EnvelopeKind.Chunk, EnvelopeKind.Chunk],
+            server.Sent.Select((envelope) =>
+            {
+                return envelope.Kind;
+            }));
+        held.SetException(refused);
+        Assert.Same(refused, await Assert.ThrowsAsync<IOException>(() =>
+        {
+            return responding.WaitAsync(Patience, TestContext.Current.CancellationToken);
+        }));
+    }
+
+    [Fact]
+    public async Task An_opening_that_goes_after_the_last_chunk_holds_the_answer_until_it_went()
+    {
+        var server = new Peer(RouterSide.Server);
+        using var core = server.Core;
+        var resolver = server.Resolve();
+        var held = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        server.OnSend = (envelope) =>
+        {
+            return envelope.Header is ResultHeader ? held.Task : Task.CompletedTask;
+        };
+        await server.Deliver(new Envelope { Header = RequestOf(1), Payload = new byte[] { 1 } });
+
+        var responding = resolver.Answer(0, PatternOf(100));
+
+        await server.Settle();
+        await server.Deliver(CreditOf(1, 100));
+        await server.Settle();
+        Assert.Equal(
+            [EnvelopeKind.Result, EnvelopeKind.Chunk, EnvelopeKind.Chunk],
+            server.Sent.Select((envelope) =>
+            {
+                return envelope.Kind;
+            }));
+        Assert.False(responding.IsCompleted);
+        held.SetResult();
+        await responding.WaitAsync(Patience, TestContext.Current.CancellationToken);
+        Assert.Empty(server.Reports);
     }
     // constants
 
