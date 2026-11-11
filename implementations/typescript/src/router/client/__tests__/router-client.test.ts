@@ -265,6 +265,66 @@ const notificationOf = (
 // definition
 
 test.describe('createRouterClient', () => {
+  test('sends each call in the order it is made, whatever order it is awaited in', async () => {
+    const { deliver, sent, transport } = createScriptedTransport();
+    using router = createRouterClient(transport);
+    const calls = [1, 2, 3].map((value) => {
+      return router.request(Uint8Array.of(value), { options, procedure: service });
+    });
+
+    await nextTask();
+
+    for (const [callId, text] of [
+      [1, 'a'],
+      [3, 'b'],
+      [5, 'c'],
+    ] as const) {
+      deliver(resultOf(callId, { payload: encoder.encode(text) }));
+    }
+
+    const answers: string[] = [];
+
+    for (const call of calls.reverse()) {
+      answers.push(decoder.decode((await call).payload));
+    }
+
+    expect(
+      sent.flatMap((envelope) => {
+        return envelope?.kind === EnvelopeKind.REQUEST ? [[...envelope.payload]] : [];
+      })
+    ).toEqual([[1], [2], [3]]);
+    expect(answers).toEqual(['c', 'b', 'a']);
+  });
+
+  test('an envelope a listener hands its router within a turn is taken behind what came before it', async () => {
+    const { deliver, transport } = createScriptedTransport();
+    using router = createRouterClient(transport);
+    const heard: number[] = [];
+
+    router.on('debug', ({ direction, header }) => {
+      if (direction !== 'rx' || header.kind !== EnvelopeKind.RESULT) {
+        return;
+      }
+
+      heard.push(header.callId);
+
+      if (header.callId === 1) {
+        deliver(resultOf(5, { payload: encoder.encode('c') }));
+      }
+    });
+
+    const calls = [1, 2, 3].map((value) => {
+      return router.request(Uint8Array.of(value), { options, procedure: service });
+    });
+
+    await nextTask();
+    deliver(resultOf(1, { payload: encoder.encode('a') }));
+    deliver(resultOf(3, { payload: encoder.encode('b') }));
+    await Promise.all(calls);
+
+    expect(heard).toEqual([1, 3, 5]);
+  });
+
   test('takes any transport of this package', () => {
     const transport = createWebSocketTransportClient();
     using router = createRouterClient(transport);
