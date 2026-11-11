@@ -664,6 +664,9 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         var quickLink = await LinkUp((quick, _script));
 
         Assert.Equal((BrokerDelivery.AtMostOnce, (BrokerCapabilities)0), (quick.Delivery, quick.Capabilities & BrokerCapabilities.NoSubscriber));
+
+        // its bound counts no Packet Identifier, which a QoS 0 PUBLISH has none of
+        Assert.Equal(MqttPackets.LargestPayload(("bead/i/ada", MqttPackets.LargestPacketSize), new MqttPublishShape(0, true)), quick.MaximumPayloadBytes(Inbox));
         Assert.Equal(BrokerPublished.Taken, await quick.Publish(new BrokerPublication { Topic = Inbox, Payload = payload }).WaitAsync(Patience, Cancelled));
         Assert.Equal(MqttQualityOfServiceLevel.AtMostOnce, (await quickLink.Next<MqttPublishPacket>()).QualityOfServiceLevel);
         await quick.Stop();
@@ -1077,6 +1080,9 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
 
         Assert.Equal(16_777_188, server.ReceiveBound(["bead", "i", "server"]));
         Assert.Equal(4_072, peer.ReceiveBound(["bead", "i", "peer"]));
+
+        // * a topic whose PUBLISH alone passes the bound leaves no payload any room
+        Assert.Equal(0, peer.ReceiveBound(["bead", "i", new string('p', 4_096)]));
         Assert.Equal(16_777_216, MqttPackets.MaximumPacketSize);
 
         // a bound whose receive bound is under 1,024 is refused as its participant is built, and one
