@@ -1937,6 +1937,90 @@ async fn closes_its_link_no_disconnect_on_a_packet_past_its_own_maximum_packet_s
     }
 }
 
+// spec 15.29
+#[tokio::test]
+async fn loses_its_link_once_on_a_packet_past_its_maximum_packet_size_beside_its_connack_in_one_read()
+ {
+    let script = script().await;
+    let mut options = options_of(&script);
+
+    options.maximum_packet_size = Some(1_100);
+
+    let adapter = adapter_of(&options);
+    let heard = heard_of(&adapter);
+    let starting = adapter.start(BrokerStart::default());
+    let link = script.link(PATIENCE).await.unwrap();
+    let mut bytes = connack(&Connack::default());
+
+    bytes.extend_from_slice(&[0x32, 0x80, 0x80, 0x80, 0x08]);
+    link.send(bytes);
+    assert!(
+        link.closed(PATIENCE).await,
+        "closed at its length, no body sent"
+    );
+    let outcome = crate::testing::patience(PATIENCE, starting).await.unwrap();
+
+    assert!(
+        outcome.is_ok(),
+        "its CONNACK accepts its start: {outcome:?}"
+    );
+    assert_eq!(heard.downs(), vec![down(false)], "lost once");
+    assert!(heard.messages().is_empty(), "nothing handed on");
+    assert!(!adapter.is_linked(), "down");
+    assert_eq!(
+        link.kinds(),
+        vec![Kind::Connect],
+        "no DISCONNECT, no PUBACK"
+    );
+    adapter.stop().await;
+    script.dispose();
+}
+
+// spec 15.29
+#[tokio::test]
+async fn loses_its_link_once_on_a_packet_past_its_maximum_packet_size_after_its_connack_before_its_caller_resumes()
+ {
+    let script = script().await;
+    let mut options = options_of(&script);
+
+    options.maximum_packet_size = Some(1_100);
+
+    let adapter = adapter_of(&options);
+    let heard = heard_of(&adapter);
+    let starting = adapter.start(BrokerStart::default());
+    let link = script.link(PATIENCE).await.unwrap();
+
+    // * the owner accepts its CONNACK and marks its link up in one turn; the caller leaves its
+    // start future unpolled until the later header loses the link
+    link.send(connack(&Connack::default()));
+    until(|| adapter.is_linked()).await;
+    assert!(
+        adapter.is_linked(),
+        "its CONNACK is accepted before the header"
+    );
+    link.send(vec![0x32, 0x80, 0x80, 0x80, 0x08]);
+    assert!(
+        link.closed(PATIENCE).await,
+        "closed at its length, no body sent"
+    );
+    let outcome = crate::testing::patience(PATIENCE, starting).await.unwrap();
+
+    assert!(
+        outcome.is_ok(),
+        "its accepted start keeps its outcome: {outcome:?}"
+    );
+    assert_eq!(heard.downs(), vec![down(false)], "lost once");
+    assert!(heard.messages().is_empty(), "nothing handed on");
+    assert!(!adapter.is_linked(), "down");
+    assert_eq!(
+        link.kinds(),
+        vec![Kind::Connect],
+        "no DISCONNECT, no PUBACK"
+    );
+    adapter.stop().await;
+    script.dispose();
+}
+
 // spec 15.30
 #[tokio::test]
 async fn announces_as_its_receive_bound_the_largest_payload_of_a_message_to_its_inbox_within_its_maximum_packet_size_a_life_counted()
