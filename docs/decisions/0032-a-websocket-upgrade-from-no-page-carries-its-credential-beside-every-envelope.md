@@ -318,9 +318,9 @@ connect fails, and a send or a listen loses its connection`, hyper following non
 `docs/support.md`; the C# one's
 `Refuses_a_given_handler_that_would_follow_a_redirect_AllowAutoRedirect_named_before_any_exchange`
 and the browser project's `names no status of a redirect answered to a page of its server’s own
-origin`, each a platform row of `docs/support.md`; the TypeScript and C# router clients' `fails an
+origin`, each a platform row of `docs/support.md`; each router client's `fails an
 ELSEWHERE over a transport that carries none before it goes, …`, or over a WebSocket whose upgrade
-carried other bytes; and their relays' `answers an ELSEWHERE DESTINATION_UNREACHABLE over a leg B
+carried other bytes; and each relay's `answers an ELSEWHERE DESTINATION_UNREACHABLE over a leg B
 whose upgrade carried the relay’s own credential`. The interop pair, `an ELSEWHERE goes in each
 POST’s Authorization over HTTP and in its upgrade’s over a WebSocket: whoami answers the sub it
 names`, is the one test in which one side's client writes the field and the other side's server
