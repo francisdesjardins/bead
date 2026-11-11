@@ -14,6 +14,77 @@ namespace Bead.Tests;
 /// </summary>
 public sealed partial class RouterServerTests : IDisposable
 {
+    [Fact]
+    public async Task A_request_its_transport_tells_once_its_router_is_disposed_reaches_no_resolver()
+    {
+        Start();
+        var resolved = 0;
+
+        Router.RegisterResolver(new RawResolver(Echo, (_) =>
+        {
+            resolved += 1;
+
+            return Task.CompletedTask;
+        }));
+        Router.Dispose();
+        Deliver(First, RequestOf(1, payload: "hi"));
+        await Settle();
+
+        Assert.Equal(0, resolved);
+        Assert.Empty(_transport.Sent);
+        Assert.Empty(_errors);
+    }
+
+    [Fact]
+    public async Task A_session_provider_s_error_or_panic_is_reported_and_refuses_only_its_call()
+    {
+        foreach (var throws in new[] { false, true })
+        {
+            Start(new RouterServerOptions
+            {
+                SessionOf = (request, _) =>
+                {
+                    if (request.Header.CallId == 1)
+                    {
+                        if (throws)
+                        {
+                            throw new InvalidOperationException("the session provider failed");
+                        }
+
+                        return ValueTask.FromException<CallSession?>(new InvalidOperationException("the session provider failed"));
+                    }
+
+                    return ValueTask.FromResult<CallSession?>(null);
+                },
+            });
+            var admitted = new List<uint>();
+
+            Services.GetRequestResolver(Echo, new RequestResolverDependencies<string, string>
+            {
+                Serializer = Text,
+                BeforeRequest = new BeforeRequest((request) =>
+                {
+                    admitted.Add(request.Header.CallId);
+
+                    return true;
+                }),
+            })((_request, response) =>
+            {
+                return response.Answer("ok");
+            });
+            Deliver(First, RequestOf(1));
+            Deliver(First, RequestOf(3));
+            await Settle();
+
+            Assert.Equal([3u], admitted);
+            Assert.Equal("", _transport.Sent[0].Envelope.Failure?.Detail);
+            Assert.Equal(["first failure 1 ProcedureFailed", "first result 3 ok"], SentSince());
+            Assert.Equal(["the session provider failed first"], Reported());
+            Assert.Equal(0, (await Router.Gauges()).Counts["answeringCalls"]);
+            Router.Dispose();
+            _errors.Clear();
+        }
+    }
     // constants
 
     private const string First = "type=WS;ip=127.0.0.1;port=50001;ordinal=1";
