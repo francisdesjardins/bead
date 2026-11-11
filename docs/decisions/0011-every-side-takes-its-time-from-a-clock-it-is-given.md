@@ -95,6 +95,14 @@ the clock it is given, where Node waits a millisecond at least and .NET fires at
 fraction, which both drop. How a side holds a duration an application gives it, between that floor
 and that ceiling, is [0014](0014-every-place-that-takes-a-duration-is-a-row-of-one-file.md)'s.
 
+**A timer its clock refuses leaves the side as it was.** What arms a timer prepares it before it
+commits anything: a session manager stores a session, or changes a timeout, only once every timer it
+needs is armed, and a reset arms the successor before it stops the timer it replaces, so a refusal
+stores nothing and tells nothing. A wait the timer would bound fails at once, its cause the clock's
+error: a key set's deadline (spec 13.9.3). A session's activity stamps before it restarts its
+timers, on every side alike. The round that settled it is
+[0004](0004-one-behaviour-in-every-language.md)'s, on the converse twins' six divergences.
+
 **`advance` steps.** It settles the side; takes the earliest timer due by now plus its milliseconds;
 sets both readings to that due; fires it; settles; and so on, then sets the readings to now plus its
 milliseconds. A callback reads its own due, a timer it arms counts from there, and a periodic timer

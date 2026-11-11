@@ -24,6 +24,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   it first, each card's result beside its buttons; the wire, its calls and its envelopes, folds
   into a drawer on a desktop and a sheet on a phone until it is opened.
 
+### Removed
+
+- The Rust side's `ResolverError::Failure` and `From<Failure> for ResolverError`: a resolver, an
+  admission or a verifier fails with `ResolverError::other`, a `Failure` among what it takes,
+  answered `PROCEDURE_FAILED` with no detail and reported as itself, as on every side; a procedure
+  answers its own failure through its answerer (spec 9.0, 9.5, decision 0044).
+
+### Fixed
+
+- A session manager whose clock refuses a timer leaves what it held: a new session is not stored
+  and the timers prepared for it are stopped, and a timeout set or reset keeps the stored one and its
+  running timer, telling nothing, on the TypeScript and C# sides as on the Rust side (decision
+  0011).
+- A key set's deadline whose timer the clock refuses fails the calls waiting for it with the key
+  set's ask failure, the clock's error its cause, and starts no ask: the TypeScript side no longer
+  holds every later call of that issuer until its own signal ends it, nor the C# side the calls that
+  waited for the deadline, and the Rust side's next call asks at once (spec 13.9.3).
+- A result sent as a transfer is told it went only once its transport took every envelope of it,
+  and fails with the first refusal its transport gives, whenever it comes: an opening or a chunk
+  refused after the last chunk went fails its answer on every side, where the answer resolved and
+  the refusal was lost (spec 12.7).
+
 ## [0.12.0] - 2026-11-10
 
 ### Added
