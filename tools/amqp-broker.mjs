@@ -666,6 +666,11 @@ const startInDocker = (broker, { folder, password }) => {
     [
       'run',
       '--rm',
+      // ! as the host's own user where it has one: the files it writes into the run's folder are
+      // then the host's to remove at the stop, which a root of the container's leaves it unable to
+      ...(process.getuid === undefined
+        ? []
+        : ['--user', `${String(process.getuid())}:${String(process.getgid())}`]),
       '--mount',
       `type=bind,source=${folder},target=${MOUNTED}`,
       '--entrypoint',
