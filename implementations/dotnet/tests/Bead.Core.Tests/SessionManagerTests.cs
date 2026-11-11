@@ -31,6 +31,26 @@ public sealed class SessionManagerTests
     // definition
 
     [Fact]
+    public void Draws_a_token_none_holds_and_tells_one_from_another()
+    {
+        using var sessions = new SessionManager<string>();
+        var held = TokenOf(7);
+
+        sessions.Set(sessions.Create(Handle) with { SessionToken = held });
+
+        var drawn = sessions.Set(sessions.Create(Other)).SessionToken!.Value;
+        var bytes = new byte[16];
+
+        drawn.CopyTo(bytes);
+        Assert.False(drawn.FixedTimeEquals(held));
+        Assert.True(drawn.FixedTimeEquals(drawn));
+        Assert.Contains(bytes, (value) =>
+        {
+            return value != 0;
+        });
+    }
+
+    [Fact]
     public void Draws_a_token_for_a_session_without_one_anew_each_time_and_keeps_one_given()
     {
         using var sessions = new SessionManager<string>();
