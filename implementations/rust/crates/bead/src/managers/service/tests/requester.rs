@@ -31,6 +31,80 @@ fn result(call_id: u32, payload: Bytes) -> Envelope {
     }
 }
 
+// Rust's unwind boundary contains a callback panic separately from a returned error.
+#[tokio::test]
+async fn a_deprecated_listener_s_panic_is_reported_and_later_listeners_and_calls_go_on() {
+    let fixture = ClientFixture::new();
+    let ServiceRouter::Client(router) = fixture.manager.router() else {
+        panic!("the manager holds its client router");
+    };
+
+    assert!(
+        Arc::ptr_eq(&router.transport(), &fixture.router.transport()),
+        "the manager's router is its supplied router"
+    );
+
+    let reported = Arc::new(Mutex::new(Vec::new()));
+    let reporting = Arc::clone(&reported);
+
+    fixture.router.on_error(Arc::new(move |error| {
+        locked(&reporting).push(error.to_string());
+    }));
+    fixture
+        .manager
+        .on_deprecated(Arc::new(|_| panic!("a deprecated listener panics")));
+
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let hearing = Arc::clone(&seen);
+
+    fixture.manager.on_deprecated(Arc::new(move |procedure| {
+        locked(&hearing).push(procedure.clone());
+    }));
+
+    let deprecated = Procedure {
+        deprecation: Some(Deprecation::default()),
+        ..echo()
+    };
+    let requester = fixture
+        .manager
+        .get_request(&deprecated, RequestDependencies::new(TextCodec, TextCodec))
+        .unwrap();
+
+    for (id, payload) in [(1, "one"), (3, "two")] {
+        let call = requester
+            .call(payload.to_owned(), &RequestOptions::default())
+            .unwrap();
+
+        fixture.clock.settle().await;
+        fixture
+            .transport
+            .deliver(&result(id, Bytes::copy_from_slice(payload.as_bytes())));
+        assert_eq!(
+            crate::testing::patience(Duration::from_secs(5), call)
+                .await
+                .unwrap()
+                .unwrap(),
+            payload,
+            "a listener's panic does not end its call or the next"
+        );
+    }
+
+    assert_eq!(
+        *locked(&seen),
+        [deprecated.clone(), deprecated],
+        "the listener after the panic hears both calls"
+    );
+    assert_eq!(
+        *locked(&reported),
+        [
+            "a listener panicked: a deprecated listener panics",
+            "a listener panicked: a deprecated listener panics"
+        ],
+        "each panic reaches the router once"
+    );
+    fixture.router.dispose().await;
+}
+
 fn command() -> Procedure {
     Procedure {
         procedure_kind: Some(ProcedureKind::Command),
