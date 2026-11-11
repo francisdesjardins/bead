@@ -182,3 +182,149 @@ async fn fails_its_start_over_a_websocket_whose_upgrade_answers_no_subprotocol_m
     adapter.stop().await;
     patience(PATIENCE, peer).await.unwrap().unwrap();
 }
+
+#[tokio::test]
+async fn loses_its_link_once_its_mqtt_websocket_peer_closes_or_ends_without_a_close_frame() {
+    for clean in [false, true] {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let adapter = adapter_of(&options_over(&listener));
+        let heard = heard_of(&adapter);
+        let (offered, _offers) = mpsc::unbounded_channel();
+        let (ending, ended) = tokio::sync::oneshot::channel::<()>();
+        let peer = spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            let mut peer = tokio_tungstenite::accept_hdr_async(
+                socket,
+                Answered {
+                    subprotocol: Some("mqtt"),
+                    offered,
+                },
+            )
+            .await
+            .unwrap();
+
+            assert_eq!(binary_of(&mut peer).await[0], 0x10, "a CONNECT");
+            peer.send(Message::Binary(Bytes::from(connack(&Connack::default()))))
+                .await
+                .unwrap();
+            ended.await.unwrap();
+
+            if clean {
+                peer.close(None).await.unwrap();
+            }
+        });
+
+        adapter.start(BrokerStart::default()).await.unwrap();
+        assert!(
+            adapter.is_linked(),
+            "clean {clean}: linked before its peer ends"
+        );
+        ending.send(()).unwrap();
+        until(|| !heard.downs().is_empty()).await;
+        assert_eq!(heard.downs(), vec![down(false)], "clean {clean}: lost once");
+        assert!(
+            !adapter.is_linked(),
+            "clean {clean}: the connection ends its link"
+        );
+        adapter.stop().await;
+        patience(PATIENCE, peer).await.unwrap().unwrap();
+    }
+}
+
+#[tokio::test]
+async fn ends_its_mqtt_websocket_with_a_close_frame_after_its_disconnect_packet() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let adapter = adapter_of(&options_over(&listener));
+    let heard = heard_of(&adapter);
+    let (offered, _offers) = mpsc::unbounded_channel();
+    let peer = spawn(async move {
+        let (socket, _) = listener.accept().await.unwrap();
+        let mut peer = tokio_tungstenite::accept_hdr_async(
+            socket,
+            Answered {
+                subprotocol: Some("mqtt"),
+                offered,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(binary_of(&mut peer).await[0], 0x10, "a CONNECT");
+        peer.send(Message::Binary(Bytes::from(connack(&Connack::default()))))
+            .await
+            .unwrap();
+        assert_eq!(
+            binary_of(&mut peer).await,
+            [0xE0, 0],
+            "its clean DISCONNECT"
+        );
+        assert_eq!(
+            peer.next().await.unwrap().unwrap(),
+            Message::Close(None),
+            "its WebSocket close follows"
+        );
+    });
+
+    adapter.start(BrokerStart::default()).await.unwrap();
+    adapter.stop().await;
+    patience(PATIENCE, peer).await.unwrap().unwrap();
+    assert!(!adapter.is_linked(), "stopped");
+    assert!(
+        heard.downs().is_empty(),
+        "its own stop reports no lost link"
+    );
+}
+
+#[tokio::test]
+async fn loses_its_link_on_a_websocket_frame_past_its_packet_bound_and_frame_head() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mut options = options_over(&listener);
+
+    options.maximum_packet_size = Some(1_024);
+
+    let adapter = adapter_of(&options);
+    let heard = heard_of(&adapter);
+    let (offered, _offers) = mpsc::unbounded_channel();
+    let (sending, sent) = tokio::sync::oneshot::channel::<()>();
+    let peer = spawn(async move {
+        let (socket, _) = listener.accept().await.unwrap();
+        let mut peer = tokio_tungstenite::accept_hdr_async(
+            socket,
+            Answered {
+                subprotocol: Some("mqtt"),
+                offered,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(binary_of(&mut peer).await[0], 0x10, "a CONNECT");
+        peer.send(Message::Binary(Bytes::from(connack(&Connack::default()))))
+            .await
+            .unwrap();
+        sent.await.unwrap();
+        // its frame is too large even with the 14 bytes a frame's head takes at most
+        peer.send(Message::Binary(Bytes::from(vec![0; 1_039])))
+            .await
+            .unwrap();
+
+        while let Some(Ok(message)) = peer.next().await {
+            assert!(
+                !matches!(message, Message::Binary(_)),
+                "no DISCONNECT on the failed connection"
+            );
+        }
+    });
+
+    adapter.start(BrokerStart::default()).await.unwrap();
+    sending.send(()).unwrap();
+    until(|| !heard.downs().is_empty()).await;
+    assert_eq!(
+        heard.downs(),
+        vec![down(false)],
+        "its oversized frame loses the link once"
+    );
+    assert!(!adapter.is_linked(), "down");
+    adapter.stop().await;
+    patience(PATIENCE, peer).await.unwrap().unwrap();
+}

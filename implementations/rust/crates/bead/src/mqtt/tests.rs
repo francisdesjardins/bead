@@ -32,6 +32,7 @@ use crate::testing::parcels::{self, ParcelFields, ParcelReading};
 use crate::testing::{Instant, rest, spawn, tls};
 
 mod fixture;
+mod reading;
 mod websocket;
 
 const ID: &str = "ada";
