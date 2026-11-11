@@ -46,12 +46,16 @@ codec on Buffa, under a toolchain, lints denied whole and a CI job of its own
 ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)); and its
 transports over WebSocket (RFC 6455) and HTTP/1.1 and HTTP/2 (RFC 9110, 9112, 9113), features of
 its core, with the interop both ways with the TypeScript and C# sides
-([0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)).
+([0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md));
+and its MQTT 5 binding, a feature of its core and a client of its own over its sockets, with the
+interop both ways over it ([0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)).
 It plays the conformance files it reaches, each part it lacks a row of the support matrix ahead
 ([0004](0004-one-behaviour-in-every-language.md)). Ahead, in this order:
 
-- **Rust's broker bindings**, MQTT 5 and AMQP 1.0; then its gateway; and beadc's Rust target, with
-  `examples/hello`'s Rust half, the lists of the procedures a server's transports take
+- **Rust's AMQP 1.0 binding**, its client one of the three branches
+  [0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)
+  weighs; then its gateway; and beadc's Rust target, with `examples/hello`'s Rust half, the lists of
+  the procedures a server's transports take
   ([0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md))
   and the validators of a blueprint's rules generated for it, or beadc refusing to generate them
   ([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)),
