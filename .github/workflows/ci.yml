@@ -605,13 +605,15 @@ jobs:
           restore-keys: yarn-cache-${{ runner.os }}-node${{ env.NODE_VERSION }}-
       - run: $YARN install --immutable
         working-directory: implementations/typescript
-      - name: RabbitMQ 4.4.0 by its digest, a password drawn for this run
+      - name: RabbitMQ 4.4.0 by its digest, a password and TLS certificates drawn for this run
         run: node tools/amqp-broker.mjs start --github-env
       # the cases over AMQP 1.0, the adapter against the fixture, and the TypeScript client over
-      # AMQP 1.0
-      - run: $YARN test:amqp
+      # AMQP 1.0, with the participants over TLS and SASL EXTERNAL among the adapter twins
+      - name: TypeScript AMQP 1.0, TLS and SASL EXTERNAL included
+        run: $YARN test:amqp
         working-directory: implementations/typescript
-      - run: dotnet test --project tests/Bead.Transport.Amqp.Tests
+      - name: C# AMQP 1.0, TLS and SASL EXTERNAL included
+        run: dotnet test --project tests/Bead.Transport.Amqp.Tests
         working-directory: implementations/dotnet
       - run: dotnet test --project tests/Bead.Interop.Tests --filter-trait "transport=AMQP"
         working-directory: implementations/dotnet
