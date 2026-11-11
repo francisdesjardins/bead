@@ -104,7 +104,7 @@ public sealed class SessionManagerTests
         }
     }
 
-    [Fact(Skip = "divergence: a timer refusal leaves the new session stored")]
+    [Fact]
     public void A_timer_refusal_stores_no_session_and_cancels_every_timer_prepared_for_it()
     {
         foreach (var refuseAt in new[] { 0, 1 })
@@ -135,7 +135,7 @@ public sealed class SessionManagerTests
         }
     }
 
-    [Fact(Skip = "divergence: a timer refusal changes the stored timeout and stops its live timer")]
+    [Fact]
     public void A_timer_refusal_keeps_a_stored_timeout_and_its_live_timer_and_tells_nothing()
     {
         foreach (var connection in new[] { true, false })

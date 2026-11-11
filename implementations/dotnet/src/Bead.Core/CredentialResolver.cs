@@ -370,7 +370,9 @@ internal sealed class CredentialResolver
     }
 
     // an ask that goes now for an issuer, the calls given waiting on it, each come before it went,
-    // its deadline a minute past the reading at which it goes and its timer armed. Under the lock
+    // its deadline a minute past the reading at which it goes and its timer armed; a timer the clock
+    // refuses fails them at once, the clock's error its cause, and no ask goes, setting no deadline
+    // (spec 13.9.3). Under the lock
     private void Go(IssuerKeys issuer, (LinkedList<Waiter> Waiters, Effects Effects) going)
     {
         var minute = new Minute { Deadline = going.Effects.Now + _minute, Asked = going.Waiters };
@@ -381,17 +383,27 @@ internal sealed class CredentialResolver
         }
 
         // ! its work posted where the side runs, so the ask it may send goes from there
-        minute.Timer = _clock.CreateTimer(
-            (_) =>
-            {
-                _post(() =>
+        try
+        {
+            minute.Timer = _clock.CreateTimer(
+                (_) =>
                 {
-                    OnDeadline(issuer, minute);
-                });
-            },
-            null,
-            KeySetMinute,
-            Timeout.InfiniteTimeSpan);
+                    _post(() =>
+                    {
+                        OnDeadline(issuer, minute);
+                    });
+                },
+                null,
+                KeySetMinute,
+                Timeout.InfiniteTimeSpan);
+        }
+        catch (Exception reason)
+        {
+            Fail(going.Waiters, (new InvalidOperationException($"the key set's ask for {issuer.Name} failed", reason), going.Effects));
+
+            return;
+        }
+
         issuer.Minute = minute;
         going.Effects.Asking.Add((issuer, minute));
     }
