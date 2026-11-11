@@ -150,3 +150,78 @@ fn ready_state_error_names_both_states() {
         super::ReadyStateError::new(ReadyState::Open, ReadyState::Closed)
     );
 }
+
+// Rust's From, `ResolverError::other` and Error adapters keep one diagnostic and the cause chain
+// it already names.
+#[test]
+fn converting_a_failure_or_ready_state_keeps_its_diagnostic_and_source_chain() {
+    use crate::constants::{ProtocolCode, RouterSide};
+    use crate::failure::Failure;
+    use crate::transport::ReadyState;
+
+    let failure = Failure::protocol(ProtocolCode::PROCEDURE_FAILED, RouterSide::Server)
+        .caused_by(Arc::new(Context(Leaf)));
+    let expected = chain(&failure);
+    let call = CallError::from(failure.clone());
+    let resolver = ResolverError::other(failure);
+
+    assert_eq!(
+        chain(&call),
+        expected,
+        "conversion adds no wrapper to a call failure"
+    );
+    assert_eq!(
+        chain(&resolver),
+        expected,
+        "conversion adds no wrapper to a resolver failure"
+    );
+
+    let state = super::ReadyStateError::new(ReadyState::Closed, ReadyState::Open);
+
+    for words in [
+        chain(&CallError::ReadyState(state.clone())),
+        chain(&TransportError::from(state)),
+    ] {
+        assert_eq!(
+            words,
+            ["the transport client is closed, not open"],
+            "a ready-state error has no invented cause"
+        );
+    }
+
+    assert_eq!(
+        chain(&TransportError::from(ConnectError::caused(
+            "connect",
+            Arc::new(Context(Leaf))
+        ))),
+        ["connect", "context", "leaf"],
+        "From keeps a connect's cause"
+    );
+    assert_eq!(
+        chain(&TransportError::TimedOut(
+            core::time::Duration::from_millis(1)
+        )),
+        ["timed out after 1ms"],
+        "a timeout has no source"
+    );
+    assert_eq!(
+        chain(&CallError::Cancelled(None)),
+        ["the call was cancelled"],
+        "a cancellation has no source"
+    );
+    assert_eq!(
+        chain(&CallError::Disconnected("gone".to_owned())),
+        ["gone"],
+        "a disconnect has no source"
+    );
+    assert_eq!(
+        chain(&CallError::TimedOut(core::time::Duration::from_millis(1))),
+        ["no answer came in 1 milliseconds"],
+        "a call timeout has no source"
+    );
+    assert_eq!(
+        super::Disposed.to_string(),
+        "the router is disposed",
+        "a disposed owner names its refusal"
+    );
+}

@@ -222,3 +222,51 @@ fn is_the_client_for_an_odd_call_id_and_the_server_for_an_even_one() {
 fn is_no_side_for_0_which_is_no_call_id() {
     assert_eq!(RouterSide::of_call_id(0), None, "no side");
 }
+
+// The Rust surface's typed conversions keep the wire's open numeric spaces.
+#[test]
+fn converts_open_numeric_codes_without_losing_unknown_values_and_names_procedure_kinds() {
+    use core::num::NonZeroU16;
+
+    use super::{CredentialScheme, ProcedureKind};
+
+    for number in [0, 1, 2, 3, 4, u16::MAX] {
+        assert_eq!(
+            CredentialScheme::from(number).get(),
+            number,
+            "a scheme keeps its whole u16"
+        );
+    }
+
+    for (number, expected) in [(64, "PROCEDURE_FAILED"), (77, "77"), (u16::MAX, "65535")] {
+        let code = ProtocolCode::from(NonZeroU16::new(number).unwrap());
+
+        assert_eq!(code.get().get(), number, "a protocol code keeps its number");
+        assert_eq!(
+            code.to_string(),
+            expected,
+            "a known code has its name, an unknown its number"
+        );
+    }
+
+    for (name, kind) in [
+        ("command", ProcedureKind::Command),
+        ("notifies", ProcedureKind::Notifies),
+        ("request", ProcedureKind::Request),
+    ] {
+        assert_eq!(
+            ProcedureKind::named(name),
+            Some(kind),
+            "the kind reads by its blueprint name"
+        );
+        assert_eq!(kind.as_str(), name, "the name round trips");
+    }
+
+    for unknown in ["", "Request", "notification", "request "] {
+        assert_eq!(
+            ProcedureKind::named(unknown),
+            None,
+            "{unknown:?} names no kind"
+        );
+    }
+}

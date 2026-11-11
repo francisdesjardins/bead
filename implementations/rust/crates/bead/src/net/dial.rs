@@ -14,6 +14,9 @@ use tokio_rustls::client::TlsStream;
 use crate::net::racing::{RacingOptions, connect_racing};
 use crate::net::tls::connect_tls;
 
+#[cfg(test)]
+mod tests;
+
 /// A client's socket: in the clear, or under TLS.
 #[derive(Debug)]
 pub(crate) enum ClientSocket {
