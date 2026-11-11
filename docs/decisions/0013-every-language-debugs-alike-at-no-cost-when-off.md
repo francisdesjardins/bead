@@ -3,10 +3,13 @@
 - **Status**: accepted
 - **Scope**: a companion document, `spec/debugging.md`, with its own version, and its conformance
   files, `spec/debug-filters.json` and `spec/metrics.json`; every implementation's service manager,
-  routers, broker participant, debug filter and registry; debugging 13, the trace of a participant's
-  parcels; the support matrix. Debugging 4.3 and 10.1 are
-  [0016](0016-a-json-payload-has-one-form-whichever-side-writes-it.md)'s too, and debugging 1.2,
-  6.10, 7.3 and 8.3 [0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md)'s.
+  routers, broker participant, debug filter and registry; debugging 9.7, what a call to a client
+  whose transport is not open fails with and counts, and 9.6's rows for it; debugging 13, the trace
+  of a participant's parcels; the support matrix. Debugging 4.3 and 10.1 are
+  [0016](0016-a-json-payload-has-one-form-whichever-side-writes-it.md)'s too, debugging 1.2, 6.10,
+  7.3 and 8.3 [0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md)'s, and
+  debugging 9.7's call that a closing connection's teardown fails
+  [0001](0001-the-envelope-sits-at-fixed-offsets.md)'s.
 
 ## Context
 

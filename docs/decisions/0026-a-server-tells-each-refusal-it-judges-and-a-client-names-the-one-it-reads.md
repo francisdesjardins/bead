@@ -4,9 +4,12 @@
 - **Scope**: the protocol, and every implementation's server transports and clients, over HTTP and
   at a WebSocket's address: in [`spec/spec.md`](../../spec/spec.md), the refusal a server's
   transport tells (15.1, and 15.2's refusals told), what a client names of a refusal it reads
-  (15.6), the octets a request's field and its target may hold (15.12, and transcoding 3.6), and
-  how its method is compared (15.6, and 15.2's step 3). The marks and their order are 15.6's; a
-  server's hosts and the address it listens on are
+  (15.6), the octets a request's field and its target may hold (15.12, and transcoding 3.6), and how
+  its method is compared (15.6, and 15.2's step 3). The marks and their order are 15.6's; which
+  visible characters a target holds, by the sets a page's browser percent-encodes under the URL
+  Standard, and a `#` anywhere, is
+  [0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)'s;
+  a server's hosts and the address it listens on are
   [0024](0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md)'s; the
   guard a listener is called within is
   [0023](0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md)'s;
@@ -92,24 +95,26 @@ The options weighed:
 ## Decision
 
 **A server's transport tells each refusal it judges of its own** (spec 15.1), one event per refusal,
-`refusal` on the TypeScript side and `Refusal` on the C# side, its record `ITransportServerRefusal`
-and `TransportServerRefusal`: a request it refuses as it arrives, in 15.6's order, the bounds' and a
-stop's 503 among them, a token's 400 and its 404 when no connection holds it; or a body it refuses
-as it comes; each marked. It never tells the 404 `connection-unknown` that ends an exchange or a
-listen it had taken as their connection closes, which `close` tells, nor what HTTP answers of its
-own, unmarked: its 400, and its 408 to a head that does not come whole within `headersTimeout`,
-which the platform's parser writes before the transport reads anything of the request
+`refusal` on the TypeScript side, `Refusal` on the C# side and a listener's `on_refusal` on the Rust
+side, its record `ITransportServerRefusal`, and `TransportServerRefusal` on the C# and Rust sides: a
+request it refuses as it arrives, in 15.6's order, the bounds' and a stop's 503 among them, a
+token's 400 and its 404 when no connection holds it; or a body it refuses as it comes; each marked.
+It never tells the 404 `connection-unknown` that ends an exchange or a listen it had taken as their
+connection closes, which `close` tells, nor what HTTP answers of its own, unmarked: its 400, and its
+408 to a head that does not come whole within `headersTimeout`, which the platform's parser writes
+before the transport reads anything of the request
 ([0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)). One writer per side holds the line: the
 TypeScript side's `finish` tells, `endWith` and `answer` never; the C# side's `Finish` tells,
 `EndWith` never, a held listen ended as its connection goes written through `EndWith` as every other
-close's 404 is. At a WebSocket's address every refusal is an upgrade's as it arrives, so each is
-told.
+close's 404 is; the Rust side's `finish` tells, its responder's `end` never, through which every
+close's 404 is written, a held listen's among them. At a WebSocket's address every refusal is an
+upgrade's as it arrives, so each is told.
 
-**It carries six members**, named alike on both sides: `address`, the client's as 15.12 states it,
+**It carries six members**, named alike on every side: `address`, the client's as 15.12 states it,
 the one `clients` reports; `authority`, the request's as it came, its port included, `""` for an
 empty `Host`, none when it names none; `origin`, the `Origin` as it came, its lines joined ", "
-([RFC 9110 §5.3](https://www.rfc-editor.org/rfc/rfc9110#section-5.3)), none when absent; `port`,
-the socket's peer port, the proxy's connection's behind a trusted proxy; `reason`, the mark; and
+([RFC 9110 §5.3](https://www.rfc-editor.org/rfc/rfc9110#section-5.3)), none when absent; `port`, the
+socket's peer port, the proxy's connection's behind a trusted proxy; `reason`, the mark; and
 `status`. Never the target, where a page's WebSocket URL puts a token since its socket cannot set a
 field, nor the connection's token (15.4), a credential, any other field or the body. It names no
 connection: a refusal is a request's, and at a WebSocket's address none exists yet. Its record is
@@ -118,7 +123,8 @@ built only when a listener listens.
 **A listener's throw is reported with no connection**: the TypeScript guard reports the last
 argument as the handle when it is a string, `''` otherwise, as the C# guard reads a one-argument
 event's argument `as string`; the C# `Error` carries the empty handle for a `Refusal` listener's
-throw alone, never for the server's own failure.
+throw alone, never for the server's own failure; the Rust side catches a listener's panic and
+reports it on `on_error` with no handle, `a listener panicked: …`.
 
 **A request's field values are visible ASCII, spaces and tabs, and none at either end of a value**
 (spec 15.12; [RFC 9113 §8.2.1](https://www.rfc-editor.org/rfc/rfc9113#section-8.2.1)): one that
@@ -128,11 +134,12 @@ it, at both transports; one that starts or ends with a space or a tab has its st
 HTTP/2 alike, HTTP/1.1's parsers stripping that whitespace first
 ([0029](0029-a-listen-names-its-cursor-and-its-wait-in-fields-of-its-own.md)). Under
 [0004](0004-one-behaviour-in-every-language.md)'s rule, where one side takes Y and the other Y and
-Z, every one takes Y: Y is what both servers take. Each side writes the 400 its server does not, the
-C# side for a control character Kestrel takes, the TypeScript side for an octet past ASCII Node
-takes, as its server writes its own, with none of the fields every response on the path carries
-([0027](0027-an-http-server-answers-cors-to-the-origins-it-names-and-to-no-other.md)). So every
-string a refusal carries is printable, and the same on both sides.
+Z, every one takes Y: Y is what every server takes. Each side writes the 400 its server does not,
+the C# side for a control character Kestrel takes, the TypeScript side for an octet past ASCII Node
+takes, the Rust side for an octet past ASCII httparse takes, under hyper and in its own read of a
+WebSocket's head, as its server writes its own, with none of the fields every response on the path
+carries ([0027](0027-an-http-server-answers-cors-to-the-origins-it-names-and-to-no-other.md)). So
+every string a refusal carries is printable, and the same on every side.
 
 **A request's target is visible ASCII, and its path's percent-decoding holds no NUL** (spec 15.12):
 one that holds a control character, HTAB and a bare CR among them, a space, DEL or an octet past
@@ -148,17 +155,21 @@ another is invalid ([RFC 9112 §3](https://www.rfc-editor.org/rfc/rfc9112#sectio
 among them by [§2.2](https://www.rfc-editor.org/rfc/rfc9112#section-2.2)). Node's parser answers
 every such octet over HTTP/1.1, and nghttp2 resets a control character, a space or DEL in `:path`;
 Kestrel takes a control character, HTAB, a bare CR and DEL in an HTTP/1.1 target, and each but NUL,
-an octet past ASCII in UTF-8 among them, in `:path`. Each side writes what its server does not: the
-C# side through `HostsAndOrigins.IsVisibleTarget`, over every protocol, beside its fields'
-predicate, the TypeScript side through `isVisibleTarget`, beside `hasVisibleFields`. A NUL
-percent-encoded in a path is the one encoded octet refused, since Kestrel refuses it before an
-application runs and RFC 3986 §2.1 allows it: every side keeps to Kestrel's, a row of
-`docs/support.md`'s "Leveled down"; `%00` in a query, and every other octet percent-encoded, are
-taken. Of the visible characters a URI leaves out, what a page's browser always percent-encodes
-where it stands, `"`, `<` and `>` in a path or a query, and `^`, `` ` ``, `{` and `}` in a path, is
-answered 400 unmarked, and a target that holds a `#` anywhere is answered alike; `\`, `|`, and
-`^`, `` ` ``, `{` and `}` in a query are taken as they came, as a page sends them
+an octet past ASCII in UTF-8 among them, in `:path`; httparse answers a control character in an
+HTTP/1.1 target, and h2 resets a control character, a space, DEL or NUL in `:path`. Each side writes
+what its server does not: the C# side through `HostsAndOrigins.IsVisibleTarget`, over every
+protocol, beside its fields' predicate, the TypeScript side through `isVisibleTarget`, beside
+`hasVisibleFields`, the Rust side through `is_visible_target`, beside `has_visible_fields`, over
+HTTP and at a WebSocket's address. A NUL percent-encoded in a path is the one encoded octet refused,
+since Kestrel refuses it before an application runs and RFC 3986 §2.1 allows it: every side keeps to
+Kestrel's, a row of `docs/support.md`'s "Leveled down"; `%00` in a query, and every other octet
+percent-encoded, are taken. Of the visible characters a URI leaves out, what a page's browser always
+percent-encodes where it stands, `"`, `<` and `>` in a path or a query, and `^`, `` ` ``, `{` and
+`}` in a path, is answered 400 unmarked, and a target that holds a `#` anywhere is answered alike;
+`\`, `|`, and `^`, `` ` ``, `{` and `}` in a query are taken as they came, as a page sends them
 ([0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)).
+The Rust side's HTTP address alone serves a target that holds a `#` cut at it, hyper's `http::Uri`
+cutting it before the transport reads it: a platform row of `docs/support.md`, `A # in a target`.
 
 **A request's method is compared as it came** (spec 15.6, and 15.2's step 3): a case-sensitive
 token ([RFC 9110 §9.1](https://www.rfc-editor.org/rfc/rfc9110#section-9.1)), so `get` is no `GET`.
@@ -180,13 +191,14 @@ unmarked, before the transport reads it, a platform row of `docs/support.md`,
 "the server drew no connection: {status} {reason}", an unmarked status by its number alone; the
 WebSocket connect, "the server refused the upgrade: {status} {reason}", over `ws` through
 `unexpected-response` and on the C# side through `CollectHttpResponseDetails`, its error's type and
-cause kept. Over the global `WebSocket` it reads nothing past its close 1006, a platform row of
-`docs/support.md`.
+cause kept, and on the Rust side through the response tungstenite's `Error::Http` carries. Over the
+global `WebSocket` it reads nothing past its close 1006, a platform row of `docs/support.md`.
 
 ## Consequences
 
-**Every server transport carries a public event and a record type**, on both sides, and
-`IServerTransport`, `IServerTransportLike` and the TypeScript event map carry it.
+**Every server transport carries a public event and a record type**, on every side, and
+`IServerTransport`, `IServerTransportLike`, the TypeScript event map and the Rust side's
+`ServerListener` carry it.
 
 **`spec/transports.json` checks each marked refusal's tell**: every marked `expect` holds `told`,
 computed by its generator from the request its step sent, its port `{port}`, which each runner fills
@@ -199,25 +211,28 @@ and told by none, a tab taken.
 client that listened comes back once with a token no longer held, a burst of arrival 404s, told,
 since a token guessed is a request refused; the operator reads the restart's echo by its reason.
 
-**A request holding a control character in a field, or an octet past ASCII, is refused 400 on both
-sides**, each side writing the 400 its platform does not: the C# side for a control character
-Kestrel takes, the TypeScript side for an octet past ASCII Node takes.
+**A request holding a control character in a field, or an octet past ASCII, is refused 400 on every
+side**, each side writing the 400 its platform does not: the C# side for a control character Kestrel
+takes, the TypeScript side for an octet past ASCII Node takes, the Rust side for an octet past ASCII
+httparse takes, which refuses a control character first.
 
-**A target past visible ASCII is refused on both sides alike**: two cases of
-`spec/transports.json`, over HTTP and at a WebSocket's address, send the octets the rule names in a
-path and in a query, in absolute-form and from a host not taken, and `%00` in a path, each answered
-400 unmarked and told by none, one percent-encoded taken; an exchange of `spec/transcoding.json`
-pins it at a gateway, a path no route matches answered 400, not 404. Over HTTP/2, Kestrel ends the
-session on NUL or on a lone octet that is no UTF-8 in `:path`, as on a field, where Node resets the
-stream: the platform row of `docs/support.md` names both.
+**A target past visible ASCII is refused on every side alike**: two cases of `spec/transports.json`,
+over HTTP and at a WebSocket's address, send the octets the rule names in a path and in a query, in
+absolute-form and from a host not taken, and `%00` in a path, each answered 400 unmarked and told by
+none, one percent-encoded taken; an exchange of `spec/transcoding.json` pins it at a gateway, a path
+no route matches answered 400, not 404. Over HTTP/2, Kestrel ends the session on NUL or on a lone
+octet that is no UTF-8 in `:path`, as on a field, and h2 on such a lone octet, where Node resets the
+stream: the platform row of `docs/support.md` names each.
 
 **Over HTTP/2, each platform answers part of it before its transport reads the request**: Node's
 HTTP/2 parser, nghttp2, drops a field whose value holds a control character, so the TypeScript
 side's transport judges the request without it, where the C# side's resets the stream, and so does
 it drop a value padded at either end unless the application's `createServer` is given
 `strictFieldWhitespaceValidation: false`; Kestrel ends the session, `GOAWAY`, on an octet that is no
-UTF-8, where the TypeScript side's transport resets the stream. A platform row of `docs/support.md`
-names both; neither takes a request past what one without the field would be.
+UTF-8, where the TypeScript side's transport resets the stream; and h2 ends the session, `GOAWAY`,
+on a field holding a control character but a tab, as it decodes the head, where the C# side's
+transport resets the stream. A platform row of `docs/support.md` names each; none takes a request
+past what one without the field would be.
 
 **A method's case is held by two cases of `spec/transports.json`**, each refusal told: over HTTP,
 `get`, a `post` of Bead's type that would draw a connection were the method folded, and `BEAD`,
@@ -234,23 +249,24 @@ Rust sides', is the row's.
 [0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)'s measured gates are a call's, and a
 refusal is no call.
 
-**The gate.** `spec/transports.json`, played by both sides; twins by the same sentence
+**The gate.** `spec/transports.json`, played by every side, a case's `differs` excusing a side by a
+platform row of `docs/support.md`, the TypeScript side from a method's two cases and the Rust side's
+HTTP address from a `#` among them; twins by the same sentence
 ([0004](0004-one-behaviour-in-every-language.md)) for what no step reaches: each HTTP transport
-server's
-`tells each refusal it judges of its own, its status, its reason, the request’s authority and origin and the client’s address and port, and nothing of HTTP’s own`
-and its `tells no refusal of the 404 that ends an exchange or a listen as its connection closes, …`;
-each WebSocket transport server's sentence at its address; each side's field predicate,
-`isVisibleField` and `IsVisibleField`, over one table, and its target predicate, `isVisibleTarget`
-and `IsVisibleTarget`, over another; each HTTP transport server's
-`resets over HTTP/2 the stream of a request whose target holds a control character, a space, DEL or an octet past ASCII, PROTOCOL_ERROR, and tells nothing`,
-each WebSocket handshake's
-`refuses first, unmarked, a target holding an octet other than visible ASCII or a path whose percent-decoding holds NUL, …`,
-and each gateway's
-`resets over HTTP/2 the stream of a request whose target or a field holds an octet past visible ASCII, PROTOCOL_ERROR, nothing written`;
-each transport server's
-`refuses as it would though a refusal listener throws, the throw reported with no connection`; each
-WebSocket client's `names the status and the reason of an upgrade refused`, and each HTTP client's
-connect named with its reason. `docs/support.md` names them.
+server's `tells each refusal it judges of its own, its status, its reason, the request’s authority
+and origin and the client’s address and port, and nothing of HTTP’s own` and its `tells no refusal
+of the 404 that ends an exchange or a listen as its connection closes, …`; each WebSocket transport
+server's sentence at its address; each side's field predicate, `isVisibleField`, `IsVisibleField`
+and `is_visible_field`, over one table, and its target predicate, `isVisibleTarget`,
+`IsVisibleTarget` and `is_visible_target`, over another; each HTTP transport server's `resets over
+HTTP/2 the stream of a request whose target holds a control character, a space, DEL or an octet past
+ASCII, PROTOCOL_ERROR, and tells nothing`, each WebSocket handshake's `refuses first, unmarked, a
+target holding an octet other than visible ASCII or a path whose percent-decoding holds NUL, …`, and
+each gateway's `resets over HTTP/2 the stream of a request whose target or a field holds an octet
+past visible ASCII, PROTOCOL_ERROR, nothing written`; each transport server's `refuses as it would
+though a refusal listener throws, the throw reported with no connection`; each WebSocket client's
+`names the status and the reason of an upgrade refused`, and each HTTP client's connect named with
+its reason. `docs/support.md` names them.
 
 ## The Tenth Man
 

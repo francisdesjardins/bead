@@ -72,6 +72,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   a WebSocket's address, a `head` refused 405 where a `HEAD` is answered 426; the TypeScript side,
   whose parser refuses such a method 400 first, is excused from both; its schema takes a request's
   method as any token, in any case (decision 0026).
+- The documents are brought to 0.12.0: the records, the READMEs and the support matrix state what
+  holds and where Bead goes. Decision 0049 is accepted.
 
 ### Removed
 

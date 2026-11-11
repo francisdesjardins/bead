@@ -7,8 +7,9 @@
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 Bead is an exploration: how far one `.proto` file, a generator and a hybrid binary protocol can go —
-a specification with its conformance files, two implementations at parity and the core of a
-third, and the tools around them. It is a personal project, kept at its author's pace.
+a specification with its conformance files, two implementations at parity and a third, its core
+and its transports over WebSocket and HTTP, and the tools around them. It is a personal project,
+kept at its author's pace.
 
 Bead is a binary wire protocol for calls between a client and a server: a request and its result or
 failure, a subscription and its notifications, the commands a server sends back, cancels, sessions,

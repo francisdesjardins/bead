@@ -7,8 +7,10 @@
 ## Context
 
 Bead is a protocol before it is a package. It has a TypeScript implementation and a C# one, and a
-Rust one, its core, each part it lacks a row of [the support matrix](../support.md) ahead
-([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)); a builder
+Rust one, its core and its transports over WebSocket and HTTP, each part it lacks a row of
+[the support matrix](../support.md) ahead
+([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md),
+[0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)); a builder
 generates servers and clients in the first two from the same definitions
 ([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)), and
 a constrained C side besides is where Bead goes. Implementations of the same bytes drift unless
@@ -66,13 +68,19 @@ and its exchanges
 **The interop runs both ways, and is required.** Each implementation's interop server offers the
 interop service over WebSocket and over HTTP, and over MQTT 5 and over AMQP 1.0 against a real
 broker of each binding, and each implementation's client calls every other's server over each: the
-C# client against the TypeScript server, and the TypeScript client against the C# server; and each
-side's generated HTTP client calls the other side's gateway, the two served OpenAPI documents
-compared byte for byte (`HttpInteropTests.cs`, `interop.test.ts`). Each side finds the other from
-the directory that holds `spec/spec.md`, and starts its server. Where the other runtime is missing,
-the interop is skipped, saying so; `BEAD_INTEROP_REQUIRED=1` turns the skip into a failure, and CI
-sets it. Over a broker, where `BEAD_MQTT_URL` or `BEAD_AMQP_URL` names none, it is skipped alike,
-and `BEAD_MQTT_REQUIRED=1` and `BEAD_AMQP_REQUIRED=1`, which CI sets, fail it instead.
+C# client against the TypeScript server, and the TypeScript client against the C# server; over
+WebSocket and over HTTP, the Rust client against every side's server, and the TypeScript and C#
+clients against the Rust server
+([0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md));
+and the TypeScript and C# sides' generated HTTP clients call each other's gateway, the two served
+OpenAPI documents compared byte for byte (`HttpInteropTests.cs`, `interop.test.ts`). Each side finds
+the others from the directory that holds `spec/spec.md`, and starts their servers. Where another
+runtime is missing, the interop is skipped, saying so; `BEAD_INTEROP_REQUIRED=1` turns the skip
+into a failure, and CI sets it. The Rust server is the binary `BEAD_INTEROP_RUST_SERVER` names,
+which the other sides call where it names one and skip, saying so, where it names none; the Rust
+client's trials run where `BEAD_INTEROP_RUST=1` asks, and fail where they cannot start a server; CI's
+`interop-rust` sets both. Over a broker, where `BEAD_MQTT_URL` or `BEAD_AMQP_URL` names none, it is
+skipped alike, and `BEAD_MQTT_REQUIRED=1` and `BEAD_AMQP_REQUIRED=1`, which CI sets, fail it instead.
 
 **One vocabulary, its steps named by who acts.** A step is what the test does — `send` an envelope,
 an HTTP request or a WebSocket message; `open` a connection, again once it closed; `close` it;
@@ -147,7 +155,7 @@ against its harness.
 **The transports' file plays a server in exact octets.** The implementation is the server, the
 interop service behind it, and the test is a peer of its own, over sockets of its own. The generator
 renders each request to its octets — its request line, its fields in their order and their case, its
-body, in pieces when a case holds one back — so both sides' peers write the same bytes, and only a
+body, in pieces when a case holds one back — so every side's peers write the same bytes, and only a
 given or captured value is put in: the server's `{host}`, a connection's `{token}`. A response is
 read as the file's `$comment` says: one socket per exchange unless a case says otherwise; its
 status; its fields by name, in any case; its body by its length, or de-chunked. Over a WebSocket,
@@ -163,7 +171,7 @@ classes — `token`, `delay-seconds`, `http-date` — never by a free pattern. A
 plays by the names section 15 gives them, in a table as section 12.2 names the router's limits, and
 the file's `defaults` holds their defaults, which each side checks against its own; the bound per
 address is played from one source, through the address a proxy on the same machine forwards, which
-section 15.12 states as both sides take it:
+section 15.12 states as every side takes it:
 
 ```json
 {
@@ -224,7 +232,7 @@ section 15.12 states as both sides take it:
 
 **A step over a socket is done when its bytes come, or when a gauge says so.** An `expect` waits for
 its bytes within a patience. What sends no byte — a listen held, a call id buried, a request waiting
-— is waited on with `until` and one of the gauges both servers name alike: `connections`,
+— is waited on with `until` and one of the gauges every side's servers name alike: `connections`,
 `addresses`, `bodyBytes`, `listens`, `waitingExchanges`, `buriedCallIds`, `outboxEnvelopes`. Silence
 is asserted only after an `until`, never after a sleep, and a send whose outcome turns on an earlier
 one comes after an `expect` or an `until`. A race a case sets on purpose is one whose outcome is the
@@ -232,10 +240,10 @@ same in either order, or whose order an `until` fixes. A gauge is read, and a re
 scripted, because a gauge shows what the wire does not — a listen held sends nothing — where a
 scripted refusal stands in for what the wire can show.
 
-**A WebSocket's ping and a broker's heartbeat play on the real clock.** Both sides ping and drop a
-peer that leaves a ping unanswered (section 15.3); the C# side's platform times it, which no clock
-given reaches. Over a broker, each side pings a connection silent for its `heartbeat`, and closes
-with 4001 one whose peer answers nothing, on its platform's clock (section 15.21). A few cases are
+**A WebSocket's ping and a broker's heartbeat play on the real clock.** Every side pings and drops a
+peer that leaves a ping unanswered (section 15.3); the C# side's platform times it, and the Rust
+side's `SystemClock`, which no clock given reaches. Over a broker, each side pings a connection
+silent for its `heartbeat`, and closes with 4001 one whose peer answers nothing, on its platform's clock (section 15.21). A few cases are
 marked as played in real time: over a WebSocket, at a heartbeat of 200 ms, a ping seen within its
 bounds, and a peer that never answers dropped within its own; over each broker, at a heartbeat of
 500 ms, a silent connection pinged, none whose peer sends, and one whose peer answers nothing
@@ -355,8 +363,8 @@ every requester presenting none or `OPAQUE` shares behind it (sections 14.3 and 
 across languages in the interop, ahead, plays in their place
 ([0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)); its leg B refused or lost
 there over HTTP (section 14.5, its fourth and fifth rows), whose responses the twins script, which
-the transports' client part over HTTP and a WebSocket, ahead, plays; HTTP/2 and TLS, which both
-servers serve, an open row of the matrix naming both; keep-alive, pipelining and a connection used
+the transports' client part over HTTP and a WebSocket, ahead, plays; HTTP/2 and TLS, which every
+side's HTTP server serves, an open row of the matrix; keep-alive, pipelining and a connection used
 again, which one socket per exchange leaves out; and the transport's contract with its router — its
 events, its handles, its gauges.
 
@@ -384,19 +392,26 @@ roles ([0038](0038-over-a-broker-a-connection-is-placed-once-at-its-open-named-b
 **`spec/check.py` holds the frame**, in the spec job, and reports group by group which sides' tests
 name each file and group, failing on one a side never names. It reads the tests' sources: it sees
 what a test names, not the entries it plays, so a report of what each side plays is a gate owed
-([0006](0006-a-rule-has-its-gate.md)). The transports' harnesses check, on the TypeScript and C#
-sides, that they played every case but those excused for their language, and so do the codecs'
-harnesses on those two sides, the C# and Rust sides' identities' and every side's durations', each
-checking that what it skips is what its language is excused from or has ahead; the Rust side's
-transports' harness plays every case over a broker, each under a name of its own, its other cases
-ahead; the other harnesses skip what is excused in their loops, and check nothing more.
+([0006](0006-a-rule-has-its-gate.md)). The transports' harnesses check, on every side, that they
+played every case but those excused for their language, the Rust side's over HTTP, over WebSocket
+and over the in-memory broker, each case under a name of its own, its cases over MQTT 5 and AMQP
+1.0 ahead (`crates/bead/tests/transports.rs`); so do the codecs' harnesses on the TypeScript and C#
+sides, the C# and Rust sides' identities' and every side's durations', each checking that what it
+skips is what its language is excused from or has ahead; the other harnesses skip what is excused
+in their loops, and check nothing more.
 
-**The interop needs both runtimes in one place.** In CI, the `dotnet` job runs it: it installs the
-TypeScript side for its interop server, runs the C# tests, the C# client's interop among them, then
-the TypeScript side's `test:interop`, and its `test:browser`, whose page of another origin calls
-both sides' HTTP servers in Chromium. The `typescript` job leaves out the tests of the C# server.
-Over MQTT 5 and over AMQP 1.0, the jobs `mqtt` and `amqp` run it both ways, each against a broker
-of the run's own, on the runner's host.
+**The interop needs its runtimes in one place.** In CI, the `dotnet` job runs it between the
+TypeScript and C# sides: it installs the TypeScript side for its interop server, runs the C# tests,
+the C# client's interop among them, then the TypeScript side's `test:interop`, and its
+`test:browser`, whose page of another origin calls both sides' HTTP servers in Chromium. The
+`typescript` job leaves out the tests of the C# server. The `rust` job builds the Rust interop
+server and its trials' test binary once, on Linux, and `interop-rust` runs them both ways, over
+WebSocket and over HTTP, in the Playwright image with no Rust toolchain: the Rust client against
+every side's server, the TypeScript and C# clients against the Rust server, and the page of another
+origin against every side's HTTP server, the Rust one among them
+([0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)). Over MQTT 5 and
+over AMQP 1.0, the jobs `mqtt` and `amqp` run it both ways between the TypeScript and C# sides, each
+against a broker of the run's own, on the runner's host.
 
 **A language is whole with every vector, conversation and transport case passing, and with interop
 against every language already here**: a client of each against a server of each other, N × (N − 1)
@@ -513,7 +528,7 @@ the twins.
 
 ### On the fixes of 0.3.0
 
-The order of an HTTP exchange's refusals, stated as both sides play it, a `Content-Length` read as
+The order of an HTTP exchange's refusals, stated as every side plays it, a `Content-Length` read as
 its number; the TypeScript side's reader of a JSON name that holds an escape; where each stock
 `proto` library reads what protobuf refuses, four open rows, which
 [0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)

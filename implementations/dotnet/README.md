@@ -11,8 +11,8 @@ warning an error, one serial scheduler a router, and how the surface maps in .NE
 
 ## Build and test
 
-The .NET 10 SDK, as `global.json` pins it, with the test runner, Microsoft.Testing.Platform. From
-this folder:
+The .NET 10 SDK, as `global.json` pins it, that one and no later, a new one coming by Dependabot's
+pull request, with the test runner, Microsoft.Testing.Platform. From this folder:
 
 ```sh
 dotnet format Bead.slnx --verify-no-changes --exclude ../../builder/test/golden/csharp interop/Bead.Interop/Generated tests/Bead.Protobuf.Tests/Generated
@@ -443,8 +443,12 @@ the listens, the outboxes and the server's life, under one lock on the C# side.
 
 - **HTTP's transport** sets the shared behaviour where Kestrel's defaults would differ: no body
   limit of Kestrel's, so a body past the limit is the marked 413 and one past the budget the marked
-  503; a refusal of HTTP/1 whose body it does not read says `connection: close`; `X-Forwarded-For`,
-  on both transports, is read by one rule of its own, `TrustedProxies`, as the section below says.
+  503; a refusal of HTTP/1 whose body it does not read says `connection: close`; a method, which
+  Kestrel hands on whatever its token, is compared ordinally, as it came, on both transports, never
+  as `HttpMethods` compares it, so `get` is no `GET` and is refused 405 `method-refused` as any
+  method the path or the WebSocket's address does not take (RFC 9110 §9.1, spec 15.2, 15.6);
+  `X-Forwarded-For`, on both transports, is read by one rule of its own, `TrustedProxies`, as the
+  section below says.
   Kestrel's `MinRequestBodyDataRate` and `MinResponseDataRate` are none, Bead's own rules in their
   place (spec 15.12): a body that comes slower than `MinimumBodyBytesPerSecond`, 240, once
   `BodyGracePeriod`, 5 s, passed is refused 408 `too-slow`, marked and told, its connection kept;
@@ -469,10 +473,9 @@ the listens, the outboxes and the server's life, under one lock on the C# side.
   `BeadHttpClient` is its client, as .NET's own is `HttpClient`.
   The connection's token, in `bead-connection-token`, is readable by script, where a socket is not:
   off the machine, HTTPS.
-- **The transports** hold the same ready states on the TypeScript and C# sides, and the client
-  reconnects alike, its delay, attempts, token and tap, its router rejecting what waited on the
-  connection replaced; a fixed delay out of bounds is refused as `Reconnect` is called, nothing
-  changed.
+- **The transports** hold the same ready states on every side, and the client reconnects alike,
+  its delay, attempts, token and tap, its router rejecting what waited on the connection replaced;
+  a fixed delay out of bounds is refused as `Reconnect` is called, nothing changed.
   Neither client reads a `Retry-After`: a reconnection waits its own schedule, whatever a refusal's
   `Retry-After` asks (spec 15.7). A server listens on `localhost` unless `Start` is given an
   `Address`: both loopbacks, `127.0.0.1` and `::1`, on one port, so no other process can answer a
@@ -626,22 +629,35 @@ So is a request whose target holds an octet other than visible ASCII, in its pat
 whose path's percent-decoding holds NUL, `%00`: Kestrel takes a control character, HTAB, a bare CR
 and DEL in a target, which the transports and the gateway refuse over every protocol through
 `HostsAndOrigins.IsVisibleTarget`, and refuses `%00` in a path itself; `%00` in a query, and every
-other octet percent-encoded, are taken.
+other octet percent-encoded, `%23` among them, are taken.
+So is one whose target holds a `#` anywhere, since no form of a request-target carries a fragment
+(RFC 9112 §3.2), or a visible character a URI leaves out that a page's browser always
+percent-encodes where it stands — `"`, `<` or `>` in a path or a query, `^`, `` ` ``, `{` or `}`
+in a path, by the URL Standard's path and query percent-encode sets — which make the request-line
+invalid (RFC 9112 §3): Kestrel refuses a literal `#` itself since .NET 10.0.15, 400 in an HTTP/1.x
+target and its stream reset over HTTP/2, and `IsVisibleTarget` refuses it alike, with the rest of
+the set, wherever Kestrel hands a target on. The other visible characters a URI leaves out, `\` and
+`|`, and `^`, `` ` ``, `{` and `}` in a query, are taken as they came, as a page's browser sends
+them unencoded (spec 15.12).
 So is one whose value starts or ends with a space or a tab, which RFC 9113 §8.2.1 calls malformed
 over HTTP/2, where Kestrel hands it on and the transport resets its stream; over HTTP/1.1 the parser
 strips it first (RFC 9110 §5.5).
 
-A request names its authority by its target when the target is in absolute-form, `http://` or
-`https://` in lower case, its `Host` judged as one field line alone, which an HTTP/1.0 request may
-leave out (RFC 9112 §3.2.2), for which both servers set Kestrel's `AllowHostHeaderOverride` and read
-the authority from the target as it came, never as Kestrel's `Uri` normalizes it; over HTTP/2, by its `:authority`, a `host` beside it
-ignored (RFC 9113 §8.3.1), which Kestrel puts in the `Host`; otherwise by its `Host`. An authority
-is a host and an optional port of 15.12's grammar, RFC 3986's narrowed: no userinfo, no
-percent-encoded octet, no `*`, `+`, `,`, `;` or `=` in a name, no `IPvFuture` literal, no colon
-without a port. Kestrel
-answers an HTTP/1.1 request without a `Host`, or with two, or with an authority that is none, 400
-before the application runs, unmarked, and resets the stream of such an HTTP/2 request,
-`PROTOCOL_ERROR`, nothing written; the transport answers alike what Kestrel reads past.
+A request names its authority by its target when the target is in absolute-form, its `Host` judged
+as one field line alone, which an HTTP/1.0 request may leave out (RFC 9112 §3.2.2), for which both
+servers set Kestrel's `AllowHostHeaderOverride` and read the authority from the target as it came,
+never as Kestrel's `Uri` normalizes it; over HTTP/2, by its `:authority`, a `host` beside it
+ignored (RFC 9113 §8.3.1), which Kestrel puts in the `Host`; otherwise by its `Host`. Spec 15.12
+reads an absolute-form target's scheme, `http` or `https`, in any case (RFC 3986 §3.1); Kestrel
+reads one in lower case alone, `http://` or `https://`, and answers any other 400 before the
+transport runs, and `HostsAndOrigins.TargetAuthorityOf` reads it alike, a row of
+[`docs/support.md`](../../docs/support.md#differences),
+`A target in absolute-form, its scheme's case`. An authority is a host and an optional port of
+15.12's grammar, RFC 3986's narrowed: no userinfo, no percent-encoded octet, no `*`, `+`, `,`, `;`
+or `=` in a name, no `IPvFuture` literal, no colon without a port. Kestrel answers an HTTP/1.1
+request without a `Host`, or with two, or with an authority that is none, 400 before the
+application runs, unmarked, and resets the stream of such an HTTP/2 request, `PROTOCOL_ERROR`,
+nothing written; the transport answers alike what Kestrel reads past.
 
 Every server takes `localhost`, a name under `.localhost`, an IPv6 address in brackets and an IPv4
 address, by the request's host, its port aside: no name a browser fetches is written as an IP

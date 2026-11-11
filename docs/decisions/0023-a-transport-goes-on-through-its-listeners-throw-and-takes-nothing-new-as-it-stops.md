@@ -72,7 +72,8 @@ its close as a server goes down is 1001, going away
 
 **A transport goes on through its listener's throw** (spec 15.1). Each listener of a transport's
 event, a connection opened, an envelope, a listen, a close or a reconnection, is called within its
-own guard, on every transport, server and client, on both sides: what one throws is reported, as
+own guard, on every transport, server and client, on every side, the Rust side's socket transports
+among them: what one throws is reported, as
 spec 9.0 reports an error, through its transport's `error` event with the connection it was told of;
 the listeners after it are called all the same; and the transport goes on as if it returned. Its
 connection is drawn and its 201 written, or its socket kept; its envelope is handed on, and the
@@ -82,10 +83,10 @@ throw refuses no connection, fails no exchange and closes nothing. It is
 to the transports, and the DOM's inner invoke is its standard. A listener of an `error` event, every
 one a side tells — its transport's, its router's, its broker participant's, its gateway's — is
 called within a guard too: what it throws is dropped, reported nowhere, since reporting it would
-tell the event that threw, and the listeners after it are called all the same. It is how every
-side's participant and both gateways already tell their `error`, carried to the transports and the
-routers, and HTML's report of an exception is its standard: it fires no `error` for one its own
-`error` listener raised
+tell the event that threw, and the listeners after it are called all the same. Every side's
+participant and both gateways tell their `error` so, and so do the transports and the routers;
+HTML's report of an exception is its standard: it fires no `error` for one its own `error` listener
+raised
 ([WHATWG HTML §8.1.4.6](https://html.spec.whatwg.org/multipage/webappapis.html#report-an-exception)).
 What a listener returns is its platform's: a side awaits nothing of it.
 
@@ -99,7 +100,11 @@ A server's transport, as the server gives it, carries `error` and `refusal` as e
 `IServerTransportLike` on the TypeScript side, `IServerTransport` on the C# side. So an application
 hears its transport's through its server, whichever transport it built,
 `server.transport.on('error', …)` and `server.Transport.Error`, where a socket's error already goes,
-and a client's on the client transport it built.
+and a client's on the client transport it built. On the Rust side a transport's listener is a
+`ServerListener` or a `ClientListener`, given to its `listen`: one given to
+`server.transport().listen(…)` hears its errors by `on_error` and its refusals by `on_refusal`, one
+given to a client transport its errors by `on_error`, and every listener of a transport is told what
+one of them panics.
 
 **Once its stop began, a server takes nothing new** (spec 15.2, 15.6, 15.7). A server's transport
 stops when its application stops it (spec 15.1). Over HTTP it draws no connection, a connect it
@@ -111,26 +116,27 @@ connection. At a WebSocket's address, an upgrade it would take is refused 503 `b
 `Retry-After` 1, marked and stamped as 15.6 says, the last of 15.2's steps. A client may wait longer
 than its reconnection's delay, as a `Retry-After` asks (spec 15.7,
 [RFC 9110 §10.2.3](https://www.rfc-editor.org/rfc/rfc9110#section-10.2.3)): the field binds no
-recipient, so the spec leaves the choice to each client. Bead's own clients read none, and a
-reconnection waits its schedule, a Features row of the support matrix. A request refused for what it
-is — its host, its path, its origin, its method, its token's form, and a connect's type and its own
-400 — is refused so whether or not a stop began: what a request is comes before when it came. An
-exchange's type, its `Authorization` and its length are judged once its connection is found, and a
-stopping server finds none: the 404 comes first. Spec 15.6 gives the whole order. On the TypeScript
-side, Node's `shouldUpgradeCallback` says false once the HTTP server that received the request no
-longer serves, and the transport's `request` listener answers the refusal.
+recipient, so the spec leaves the choice to each client. Bead's own clients read none for a
+reconnection, which waits its schedule, a Features row of the support matrix. A request refused
+for what it is — its host, its path, its origin, its method, its token's form, and a connect's type
+and its own 400 — is refused so whether or not a stop began: what a request is comes before when it
+came. An exchange's type, its `Authorization` and its length are judged once its connection is
+found, and a stopping server finds none: the 404 comes first. Spec 15.6 gives the whole order. On
+the TypeScript side, Node's `shouldUpgradeCallback` says false once the HTTP server that received
+the request no longer serves, and the transport's `request` listener answers the refusal.
 
 **A connection whose opening handshake completes as the stop begins is closed going away, 1001**
 (spec 15.3), by a guard at registration. No pass of the stop looks again for one: on the C# side,
 the host's `StopAsync` waits on the request the guard closes, bounded by the close timeout; on the
 TypeScript side, `ws` takes no upgrade once closed, and the guard is reached by an injected
-`WebSocketServer` that delivers a connection after its `close()`.
+`WebSocketServer` that delivers a connection after its `close()`; on the Rust side, the guard reads
+the server's state once the connection is registered, the stop having taken its snapshot.
 
 ## Consequences
 
 **A throw nobody listens for is unseen, on every side alike**: the cost
 [0013](0013-every-language-debugs-alike-at-no-cost-when-off.md) takes for a debug listener. A throw
-ends neither process. A listener's rejection is its platform's: Node's unhandled rejection ends its
+ends no process. A listener's rejection is its platform's: Node's unhandled rejection ends its
 process, and an async listener of a C# event is `async void`, whose exception ends its process. So a
 listener catches its own. On the C# side, the threading analyzers' VSTHRD100 and VSTHRD101 find
 such a listener at build: Bead's own projects are held to them
@@ -154,7 +160,7 @@ for every transport, and is a decision of its own, which meets the Tenth Man.
 late errors go to its logger alone, so the C# side raises `Error` for a listener's throw and none
 for those.
 
-**No platform row for a stop crossed by an arrival**: both sides answer it alike, the TypeScript
+**No platform row for a stop crossed by an arrival**: every side answers it alike, the TypeScript
 side through Node's `shouldUpgradeCallback` and `request`, which are the transport's own. The
 matrix's row for a stop at the WebSocket server names what each side waits on.
 
@@ -162,13 +168,15 @@ matrix's row for a stop at the WebSocket server names what each side waits on.
 default: a transport delivers a burst in one synchronous turn, so a bound on what waits between two
 reads ends a loop that is not behind. A bound that tells its loop of a lag and lets it go on, as
 tokio's `broadcast` tells `Lagged` or .NET's `BoundedChannelFullMode.DropOldest` drops, is ahead,
-for both sides at once with an iterator on the C# side, by a decision of its own that meets the Tenth
-Man.
+for the TypeScript and C# sides at once with an iterator on the C# side, the Rust side's events being
+callbacks, by a decision of its own that meets the Tenth Man.
 
 **No conformance case holds it.** No step of `spec/transports.json` installs a listener of the
-application's, and both runners play a `stop` to its end before the next step, so no step sends into
-a stop's window. Twin tests hold it on each side, by the same sentence, each window opened by a
-listener the stop calls, a head written in two halves or a scripted `WebSocketServer`:
+application's, and every side's runner plays a `stop` to its end before the next step, so no step
+sends into a stop's window. Twin tests hold it on each side, by the same sentence, each window opened
+by a listener the stop calls, a head written in two halves or a scripted `WebSocketServer`, but the
+Rust side's 1001 guard, which none of its tests reaches, as the matrix's row for a stop at the
+WebSocket server says:
 `draws a connection whose connection listener throws, the next listener told, the throw reported with it`;
 `hands on a request whose message listener throws, its answer still written, the throw reported with its connection`;
 `refuses a connect that comes as it stops, busy, told when to come back, drawing nothing`;
