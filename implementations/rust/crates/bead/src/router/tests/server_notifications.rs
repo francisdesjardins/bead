@@ -16,6 +16,7 @@ use crate::managers::service::{
     Notifier, NotifyOptions, RequestResolverDependencies, ResolverCallback, Response,
 };
 use crate::payloads::TextCodec;
+use crate::router::core::{Dispatch, Handler, Side};
 use crate::router::server::RouterServerOptions;
 use crate::router::types::ConnectionHandle;
 use crate::testing::scripted::handle_of;
@@ -239,6 +240,68 @@ async fn a_callback_that_subscribes_before_it_answers_gets_its_requests_call_id_
         .await;
     served.settle().await;
     assert_eq!(served.sent_since(), ["first notification 7 flash"]);
+    assert_eq!(served.reported(), Vec::<String>::new());
+}
+
+// spec 9.3, 11.2
+#[tokio::test]
+async fn a_subscription_goes_only_to_a_request_this_router_dispatched_a_copy_of_its_header_is_refused_and_subscribes_nothing()
+ {
+    let served = served();
+    let handed = Arc::new(Mutex::new(Vec::new()));
+    let recording = Arc::clone(&handed);
+    served
+        .router
+        .register_resolver((
+            &news(),
+            Handler {
+                resolve: Arc::new(move |request| {
+                    locked(&recording).push(request);
+                    Box::pin(async { Ok(()) })
+                }),
+                admit: None,
+                maximum_payload_bytes: None,
+                forwards_credentials: false,
+                notifies: true,
+            },
+        ))
+        .expect("news registered");
+    served.transport.deliver(&subscribing_of(1), &first());
+    served.settle().await;
+    let request = {
+        let handed = locked(&handed);
+        assert_eq!(handed.len(), 1);
+        handed[0].clone()
+    };
+    let copy = Arc::new(Dispatch {
+        id: u64::MAX,
+        connection_handle: Arc::clone(&request.connection_handle),
+        header: request.header.clone(),
+        handler: Mutex::new(None),
+        session: Mutex::new(None),
+        answered: Mutex::new(None),
+        origin: (None, None),
+    });
+    served
+        .router
+        .owner()
+        .run(move |state| {
+            // ! no Rust caller can build this dispatch: the sealed answerer keeps its own, so
+            // no Rust caller reaches the programmer's error the other sides throw for a copy.
+            assert!(matches!(
+                state.subscribe(&copy),
+                Err(CallError::Cancelled(Some(1)))
+            ));
+            assert!(state.in_flight.is_empty());
+        })
+        .await
+        .expect("the copy refused");
+    assert_eq!(subscriptions(&served).await, Vec::new());
+
+    // its own answerer subscribes it, the copy having marked nothing
+    assert_eq!(request.answerer.subscribe().await.expect("subscribed"), 1);
+    assert_eq!(subscriptions(&served).await, [(first(), 1)]);
+    assert_eq!(served.transport.take(), Vec::new());
     assert_eq!(served.reported(), Vec::<String>::new());
 }
 
