@@ -106,42 +106,50 @@ test.describe('createRouterCore', () => {
     }
   });
 
-  test('answers a resolver’s own failure as it is, and any other error PROCEDURE_FAILED with no detail and reported', async () => {
-    test.skip(
-      true,
-      'divergence: a rejected application FailureError is reported and answered PROCEDURE_FAILED'
-    );
+  test('answers a failure its resolver answers as it is, and any error it fails with PROCEDURE_FAILED with no detail and reported, a failure of its own among them', async () => {
     const { port, sent, reported } = createPort();
     using core = createRouterCore(port);
-    const own = new FailureError({
-      code: 21,
-      detail: 'nothing to echo',
-      scope: FailureScope.APPLICATION,
-    });
+    const failure = { code: 21, detail: 'nothing to echo', scope: FailureScope.APPLICATION };
+    const thrown = new FailureError(failure);
     const other = new Error('internal: 10.0.0.5:8443');
 
     core.registerResolver(
-      Object.assign((props: IRequestResolverProps<Handle>) => {
-        return Promise.reject(
-          props.payload[0] === 'o'.charCodeAt(0) && props.payload.length === 3 ? own : other
-        );
-      }, echo)
+      Object.assign(
+        async ({ connectionHandle, header, payload }: IRequestResolverProps<Handle>) => {
+          const asked = new TextDecoder().decode(payload);
+
+          // a procedure answers its own failure through its answerer (spec 9.0, 9.5)
+          if (asked === 'own') {
+            await core.respond({ failure }, { connectionHandle, header });
+
+            return;
+          }
+
+          throw asked === 'thrown' ? thrown : other;
+        },
+        echo
+      )
     );
     core.receive(requestOf(1, { payload: new TextEncoder().encode('own') }), 'a');
-    core.receive(requestOf(3, { payload: new TextEncoder().encode('other') }), 'a');
+    core.receive(requestOf(3, { payload: new TextEncoder().encode('thrown') }), 'a');
+    core.receive(requestOf(5, { payload: new TextEncoder().encode('other') }), 'a');
     await sleep(0);
 
     expect(
       sent.map(({ envelope }) => {
         return envelope?.kind === EnvelopeKind.FAILURE
-          ? [envelope.failure.code, envelope.failure.detail]
+          ? [envelope.header.callId, envelope.failure.code, envelope.failure.detail]
           : envelope?.kind;
       })
     ).toEqual([
-      [21, 'nothing to echo'],
-      [ProtocolCode.PROCEDURE_FAILED, ''],
+      [1, 21, 'nothing to echo'],
+      [3, ProtocolCode.PROCEDURE_FAILED, ''],
+      [5, ProtocolCode.PROCEDURE_FAILED, ''],
     ]);
-    expect(reported).toEqual([[other, 'a']]);
+    expect(reported).toEqual([
+      [thrown, 'a'],
+      [other, 'a'],
+    ]);
   });
 
   const checkSubscriptionResult = async (includesPattern: boolean): Promise<void> => {
