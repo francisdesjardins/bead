@@ -1,6 +1,6 @@
 [package]
 name = "francisdesjardins-bead-interop-server"
-description = "The Rust server of Bead's interop service, over WebSocket and over HTTP, which the other sides' clients call, and the Rust client's trials against each side's server."
+description = "The Rust server of Bead's interop service, over WebSocket, over HTTP and over MQTT 5, which the other sides' clients call, and the Rust client's trials against each side's server."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -19,12 +19,12 @@ name = "bead-interop-server"
 path = "src/main.rs"
 
 [dependencies]
-bead = { workspace = true, features = ["websocket", "http"] }
+bead = { workspace = true, features = ["websocket", "http", "mqtt"] }
 bead-interop = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "time", "net"] }
 
 [dev-dependencies]
-bead = { workspace = true, features = ["testing", "websocket", "http"] }
+bead = { workspace = true, features = ["testing", "websocket", "http", "mqtt"] }
 tokio = { workspace = true, features = ["rt", "time", "net", "sync"] }
 tokio-util = { workspace = true }
 bytes = { workspace = true }

@@ -31,7 +31,10 @@ namespace Bead.Interop.Tests;
 /// (<c>node tools/amqp-broker.mjs run -- dotnet test</c>), or fail where <c>BEAD_AMQP_REQUIRED=1</c>.
 /// Against the Rust server too, over WebSocket and over HTTP, the cases of the trait
 /// <c>server=Rust</c>, where <c>BEAD_INTEROP_RUST_SERVER</c> names its built binary; skipped,
-/// saying so, where it names none.
+/// saying so, where it names none. Over MQTT 5 as well, where both it and <c>BEAD_MQTT_URL</c> are
+/// given: the Rust server's participant <c>rs-server</c>, linked with the run's password, serves
+/// <c>interop-rs</c>, which <c>cs-client</c> calls, and <c>interop-both</c> in the group; those cases
+/// carry <c>transport=MQTT</c> too, and are skipped, saying so, where either is missing.
 /// </summary>
 public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTests.MqttSide mqtt, InteropTests.AmqpSide amqp, InteropTests.RustServer rust) : IClassFixture<InteropTests.MqttSide>, IClassFixture<InteropTests.AmqpSide>
 {
@@ -50,10 +53,12 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     // the same, against the Rust server
     private const string RustWebSocket = "Rust, WebSocket";
     private const string RustHttp = "Rust, HTTP";
+    private const string RustMqtt = "Rust, MQTT";
 
     private const string NoBroker = MqttFixture.Reason;
     private const string NoAmqpBroker = AmqpFixture.Reason;
     private const string NoRust = RustServer.Reason;
+    private const string NoRustMqtt = "no Rust server or no broker: BEAD_INTEROP_RUST_SERVER names no bead-interop-server built, or BEAD_MQTT_URL is not set (node tools/mqtt-broker.mjs start)";
 
     // asked once: whether Node answers, and the TypeScript side it starts the server from is installed
     private static readonly Lazy<bool> CanStartTypeScript = new(() =>
@@ -121,6 +126,18 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
         get
         {
             return RustServer.Path is not null;
+        }
+    }
+
+    /// <summary>
+    /// Whether the interop runs against the Rust server over MQTT 5: one is named, and a broker is
+    /// given, or asked for.
+    /// </summary>
+    public static bool IsRustMqttInterop
+    {
+        get
+        {
+            return IsRustInterop && MqttFixture.IsGiven;
         }
     }
 
@@ -198,16 +215,13 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     // WebSocket's upgrade carrying the credential given
     private async Task<Connected> ConnectedOver(string transport, string? credential = null)
     {
-        if (transport is Mqtt or Amqp)
+        if (transport is Mqtt or Amqp or RustMqtt)
         {
-            // ! the TypeScript server is the broker's participant `interop-ts`: started and ready
-            // before the connect, or the broker knows no participant of that name
-            await server.Ports();
-
+            var name = await NameServedOver(transport);
             var link = await LinkedOver(transport);
             var broker = new BrokerClient(link.Participant.Client());
 
-            await broker.Transport.Connect(new BrokerTransportClientConnectOptions { Server = "interop-ts", CancellationToken = Cancelled });
+            await broker.Transport.Connect(new BrokerTransportClientConnectOptions { Server = name, CancellationToken = Cancelled });
 
             return new Connected(broker, broker.DisposeAsync);
         }
@@ -235,6 +249,21 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
         });
     }
 
+    // ! the name a server serves alone over a broker, its participant started and ready before a
+    // connect, or the broker knows no participant of that name: the TypeScript server's
+    // `interop-ts`, or the Rust server's `interop-rs` over MQTT 5
+    private async Task<string> NameServedOver(string transport)
+    {
+        if (transport is RustMqtt)
+        {
+            return await rust.ServedOverMqtt();
+        }
+
+        await server.Ports();
+
+        return "interop-ts";
+    }
+
     // where the TypeScript server listens, over WebSocket and over HTTP
     private async Task<(int Port, int HttpPort)> TypeScriptPorts()
     {
@@ -251,6 +280,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [InlineData(RustWebSocket, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(RustHttp, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
+    [InlineData(RustMqtt, Skip = NoRustMqtt, SkipUnless = nameof(IsRustMqttInterop), Traits = ["server", "Rust", "transport", "MQTT"])]
     [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task Echo_and_bytes_answer_as_the_service_says(string transport)
     {
@@ -267,6 +297,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [InlineData(RustWebSocket, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(RustHttp, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
+    [InlineData(RustMqtt, Skip = NoRustMqtt, SkipUnless = nameof(IsRustMqttInterop), Traits = ["server", "Rust", "transport", "MQTT"])]
     [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task A_value_outside_ASCII_its_members_in_another_order_echoed_equal(string transport)
     {
@@ -283,6 +314,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [InlineData(WebSocket)]
     [InlineData(RustWebSocket, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
+    [InlineData(RustMqtt, Skip = NoRustMqtt, SkipUnless = nameof(IsRustMqttInterop), Traits = ["server", "Rust", "transport", "MQTT"])]
     [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task A_payload_that_goes_as_a_transfer_comes_back_as_one_and_so_does_a_result_too_large_for_one_envelope(string transport)
     {
@@ -303,6 +335,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [InlineData(RustWebSocket, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(RustHttp, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
+    [InlineData(RustMqtt, Skip = NoRustMqtt, SkipUnless = nameof(IsRustMqttInterop), Traits = ["server", "Rust", "transport", "MQTT"])]
     [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task Fail_answers_with_its_own_failure_raised_by_the_server(string transport)
     {
@@ -326,6 +359,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [InlineData(RustWebSocket, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(RustHttp, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
+    [InlineData(RustMqtt, Skip = NoRustMqtt, SkipUnless = nameof(IsRustMqttInterop), Traits = ["server", "Rust", "transport", "MQTT"])]
     [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task Refuses_what_the_protocol_refuses(string transport)
     {
@@ -359,6 +393,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [InlineData(RustWebSocket, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(RustHttp, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
+    [InlineData(RustMqtt, Skip = NoRustMqtt, SkipUnless = nameof(IsRustMqttInterop), Traits = ["server", "Rust", "transport", "MQTT"])]
     [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task A_request_its_rules_refuse_is_answered_PAYLOAD_INVALID_its_violations_in_its_detail(string transport)
     {
@@ -386,6 +421,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [InlineData(RustWebSocket, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(RustHttp, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
+    [InlineData(RustMqtt, Skip = NoRustMqtt, SkipUnless = nameof(IsRustMqttInterop), Traits = ["server", "Rust", "transport", "MQTT"])]
     [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task Checked_answers_the_count_of_the_names_its_rules_take(string transport)
     {
@@ -400,6 +436,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [InlineData(RustWebSocket, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(RustHttp, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
+    [InlineData(RustMqtt, Skip = NoRustMqtt, SkipUnless = nameof(IsRustMqttInterop), Traits = ["server", "Rust", "transport", "MQTT"])]
     [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task A_call_cancelled_by_its_token_is_cancelled_at_the_server_too(string transport)
     {
@@ -424,6 +461,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [InlineData(RustWebSocket, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(RustHttp, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
+    [InlineData(RustMqtt, Skip = NoRustMqtt, SkipUnless = nameof(IsRustMqttInterop), Traits = ["server", "Rust", "transport", "MQTT"])]
     [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task A_call_past_its_timeout_is_cancelled_at_the_server_too(string transport)
     {
@@ -443,6 +481,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [InlineData(RustWebSocket, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(RustHttp, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
+    [InlineData(RustMqtt, Skip = NoRustMqtt, SkipUnless = nameof(IsRustMqttInterop), Traits = ["server", "Rust", "transport", "MQTT"])]
     [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task Answers_the_command_the_server_asks(string transport)
     {
@@ -459,6 +498,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [InlineData(RustWebSocket, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(RustHttp, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
+    [InlineData(RustMqtt, Skip = NoRustMqtt, SkipUnless = nameof(IsRustMqttInterop), Traits = ["server", "Rust", "transport", "MQTT"])]
     [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task An_unpaced_subscription_hears_each_tick(string transport)
     {
@@ -487,6 +527,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [InlineData(RustWebSocket, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(RustHttp, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
+    [InlineData(RustMqtt, Skip = NoRustMqtt, SkipUnless = nameof(IsRustMqttInterop), Traits = ["server", "Rust", "transport", "MQTT"])]
     [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task A_paced_subscription_waits_for_its_callback_to_settle_before_the_next_comes(string transport)
     {
@@ -522,6 +563,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [InlineData(RustWebSocket, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(RustHttp, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
+    [InlineData(RustMqtt, Skip = NoRustMqtt, SkipUnless = nameof(IsRustMqttInterop), Traits = ["server", "Rust", "transport", "MQTT"])]
     [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task Learns_a_session_opened_from_its_answer_and_its_end_too(string transport)
     {
@@ -546,6 +588,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [InlineData(RustWebSocket, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(RustHttp, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
+    [InlineData(RustMqtt, Skip = NoRustMqtt, SkipUnless = nameof(IsRustMqttInterop), Traits = ["server", "Rust", "transport", "MQTT"])]
     [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task A_call_presenting_the_session_it_learned_runs_in_it_the_session_opened_anew_presented_anew_and_none_presented_once_it_ended(string transport)
     {
@@ -586,6 +629,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [InlineData(RustWebSocket, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(RustHttp, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
+    [InlineData(RustMqtt, Skip = NoRustMqtt, SkipUnless = nameof(IsRustMqttInterop), Traits = ["server", "Rust", "transport", "MQTT"])]
     [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task Login_and_register_hold_a_duration_as_section_1_4_does_a_fraction_rounded_one_under_a_millisecond_or_past_2_31_minus_1_refused_with_PROCEDURE_FAILED_nothing_opened_or_registered(string transport)
     {
@@ -638,6 +682,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [InlineData(RustWebSocket, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(RustHttp, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
+    [InlineData(RustMqtt, Skip = NoRustMqtt, SkipUnless = nameof(IsRustMqttInterop), Traits = ["server", "Rust", "transport", "MQTT"])]
     [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task A_JWT_presented_by_default_runs_in_its_credential_s_session_whoami_answers_its_sub_and_logout_is_refused_ACCESS_DENIED(string transport)
     {
@@ -693,6 +738,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [InlineData(RustWebSocket, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(RustHttp, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
+    [InlineData(RustMqtt, Skip = NoRustMqtt, SkipUnless = nameof(IsRustMqttInterop), Traits = ["server", "Rust", "transport", "MQTT"])]
     [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task An_ELSEWHERE_goes_in_each_POST_s_Authorization_over_HTTP_and_in_its_upgrade_s_over_a_WebSocket_whoami_answers_the_sub_it_names(string transport)
     {
@@ -734,10 +780,11 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
 
     [Theory]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
+    [InlineData(RustMqtt, Skip = NoRustMqtt, SkipUnless = nameof(IsRustMqttInterop), Traits = ["server", "Rust", "transport", "MQTT"])]
     [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task A_name_served_by_two_in_one_group_answers_each_of_sixteen_connections_and_no_OPEN_reaches_both(string transport)
     {
-        await server.Ports();
+        await NameServedOver(transport);
 
         var link = await LinkedOver(transport);
         var before = link.Adapter.AcceptedTwice;
@@ -757,6 +804,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
 
     [Theory]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
+    [InlineData(RustMqtt, Skip = NoRustMqtt, SkipUnless = nameof(IsRustMqttInterop), Traits = ["server", "Rust", "transport", "MQTT"])]
     [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task A_parcel_its_broker_delivers_twice_is_answered_once(string transport)
     {
@@ -776,11 +824,12 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
         }
     }
 
-    [Fact(Skip = NoBroker, SkipUnless = nameof(IsMqttInterop))]
-    [Trait("transport", "MQTT")]
-    public async Task A_string_of_100_000_characters_goes_in_parts_both_ways_under_its_broker_s_Maximum_Packet_Size()
+    [Theory]
+    [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
+    [InlineData(RustMqtt, Skip = NoRustMqtt, SkipUnless = nameof(IsRustMqttInterop), Traits = ["server", "Rust", "transport", "MQTT"])]
+    public async Task A_string_of_100_000_characters_goes_in_parts_both_ways_under_its_broker_s_Maximum_Packet_Size(string transport)
     {
-        await using var client = await ConnectedOver(Mqtt);
+        await using var client = await ConnectedOver(transport);
         var text = new string('y', 100_000);
 
         // compared, not diffed: a hundred thousand characters would bury a failure
@@ -789,11 +838,11 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
 
     [Theory]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
+    [InlineData(RustMqtt, Skip = NoRustMqtt, SkipUnless = nameof(IsRustMqttInterop), Traits = ["server", "Rust", "transport", "MQTT"])]
     [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task A_link_cut_at_its_relay_closes_its_connection_unclean_as_a_dropped_socket_does(string transport)
     {
-        await server.Ports();
-
+        var name = await NameServedOver(transport);
         var link = await LinkedOver(transport);
         await using var client = new BrokerClient(link.Participant.Client());
         var closes = new ConcurrentQueue<bool>();
@@ -802,7 +851,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
         {
             closes.Enqueue(isClean);
         };
-        await client.Transport.Connect(new BrokerTransportClientConnectOptions { Server = "interop-ts", CancellationToken = Cancelled });
+        await client.Transport.Connect(new BrokerTransportClientConnectOptions { Server = name, CancellationToken = Cancelled });
         Assert.Equal("\"before\"", (await new InteropClient(client).Echo(JsonOf("\"before\""))().WaitAsync(Patience, Cancelled)).GetRawText());
         link.Relay.Cut();
         await Until(() =>
@@ -821,11 +870,11 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
 
     [Theory]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
+    [InlineData(RustMqtt, Skip = NoRustMqtt, SkipUnless = nameof(IsRustMqttInterop), Traits = ["server", "Rust", "transport", "MQTT"])]
     [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task A_link_lost_connects_anew_and_the_next_connection_through_the_name_is_answered(string transport)
     {
-        await server.Ports();
-
+        var name = await NameServedOver(transport);
         var link = await LinkedOver(transport);
         var former = link.Participant.Incarnation;
 
@@ -838,11 +887,11 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
 
         await using var next = new BrokerClient(link.Participant.Client());
 
-        await next.Transport.Connect(new BrokerTransportClientConnectOptions { Server = "interop-ts", CancellationToken = Cancelled });
+        await next.Transport.Connect(new BrokerTransportClientConnectOptions { Server = name, CancellationToken = Cancelled });
         Assert.Equal("\"after\"", (await new InteropClient(next).Echo(JsonOf("\"after\""))().WaitAsync(Patience, Cancelled)).GetRawText());
     }
 
-    // the C# client's link over a broker, MQTT 5's or AMQP 1.0's
+    // the C# client's link over a broker, MQTT 5's or AMQP 1.0's, whichever server it calls
     private Task<Linked> LinkedOver(string transport)
     {
         return transport == Amqp ? amqp.Linked() : mqtt.Linked();
@@ -1391,16 +1440,17 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
                 WorkingDirectory = TypeScript(),
             }) ?? throw new InvalidOperationException("node did not start");
 
-            var (port, httpPort, gatewayPort) = await PortsOf(process);
+            var (port, httpPort, gatewayPort, _) = await PortsOf(process);
 
             return (process, (port, httpPort, gatewayPort ?? throw new InvalidOperationException("the TypeScript interop server said no gatewayPort")));
         }
 
         /// <summary>
-        /// The ports an interop server's first line of them says, <c>{"port":n,"httpPort":m}</c>, and
-        /// its gateway's where it serves one: what comes before, a build's lines, is passed over.
+        /// The ports an interop server's first line of them says, <c>{"port":n,"httpPort":m}</c>, its
+        /// gateway's where it serves one, and the names it serves over MQTT 5 where it says them,
+        /// <c>"mqtt":[…]</c>: what comes before, a build's lines, is passed over.
         /// </summary>
-        internal static async Task<(int Port, int HttpPort, int? GatewayPort)> PortsOf(Process process)
+        internal static async Task<(int Port, int HttpPort, int? GatewayPort, IReadOnlyList<string> Mqtt)> PortsOf(Process process)
         {
             while (await process.StandardOutput.ReadLineAsync(TestContext.Current.CancellationToken) is { } line)
             {
@@ -1411,8 +1461,14 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
                     if (document.RootElement.TryGetProperty("port", out var port) && document.RootElement.TryGetProperty("httpPort", out var httpPort))
                     {
                         int? gatewayPort = document.RootElement.TryGetProperty("gatewayPort", out var gateway) ? gateway.GetInt32() : null;
+                        IReadOnlyList<string> mqtt = document.RootElement.TryGetProperty("mqtt", out var names)
+                            ? [.. names.EnumerateArray().Select((name) =>
+                            {
+                                return name.GetString() ?? "";
+                            })]
+                            : [];
 
-                        return (port.GetInt32(), httpPort.GetInt32(), gatewayPort);
+                        return (port.GetInt32(), httpPort.GetInt32(), gatewayPort, mqtt);
                     }
                 }
                 catch (JsonException)
@@ -1428,8 +1484,11 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     /// <summary>
     /// The Rust server of the interop service, the binary <c>BEAD_INTEROP_RUST_SERVER</c> names,
     /// built (<c>cargo build -p francisdesjardins-bead-interop-server</c>), never built here: started
-    /// once for every class, on the first test that asks its ports, and stopped by closing its input.
-    /// It serves no gateway nor broker, which are ahead on the Rust side.
+    /// once for every class, on the first test that asks its ports or its name, and stopped by
+    /// closing its input. It reads the run's variables as its own: over MQTT 5, where
+    /// <c>BEAD_MQTT_URL</c> names a broker, its participant <c>rs-server</c>, linked with
+    /// <c>BEAD_MQTT_PASSWORD</c>, serves <c>interop-rs</c> alone and <c>interop-both</c> in the group.
+    /// It serves no gateway, nor AMQP 1.0, which are ahead on the Rust side.
     /// </summary>
     public sealed class RustServer : IAsyncDisposable
     {
@@ -1439,6 +1498,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
         private readonly SemaphoreSlim _starting = new(1, 1);
         private Process? _process;
         private (int Port, int HttpPort) _ports;
+        private IReadOnlyList<string> _mqtt = [];
 
         /// <summary>The binary <c>BEAD_INTEROP_RUST_SERVER</c> names, or none.</summary>
         public static string? Path
@@ -1464,9 +1524,9 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
                         RedirectStandardOutput = true,
                         UseShellExecute = false,
                     }) ?? throw new InvalidOperationException("the Rust interop server did not start");
-                    var (port, httpPort, _) = await TypeScriptServer.PortsOf(process);
+                    var (port, httpPort, _, mqtt) = await TypeScriptServer.PortsOf(process);
 
-                    (_process, _ports) = (process, (port, httpPort));
+                    (_process, _ports, _mqtt) = (process, (port, httpPort), mqtt);
                 }
 
                 return _ports;
@@ -1475,6 +1535,22 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
             {
                 _starting.Release();
             }
+        }
+
+        /// <summary>
+        /// The name it serves alone over MQTT 5, <c>interop-rs</c>, once started and linked: a server
+        /// whose first line names it not fails the case, saying so.
+        /// </summary>
+        public async Task<string> ServedOverMqtt()
+        {
+            await Ports();
+
+            if (!_mqtt.Contains("interop-rs"))
+            {
+                throw new InvalidOperationException("the Rust interop server serves no interop-rs over MQTT 5: its first line names none, so BEAD_MQTT_URL reached it unset, or its binary predates its MQTT 5 binding");
+            }
+
+            return "interop-rs";
         }
 
         public async ValueTask DisposeAsync()

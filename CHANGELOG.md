@@ -7,6 +7,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- The Rust side's MQTT 5 binding, the feature `mqtt` of its core, a client of Bead's own over TCP,
+  TLS or a WebSocket: `MqttBrokerAdapter` and its options and defaults; it plays
+  `spec/transports.json`'s cases over MQTT 5, `mqttPublishBounds` and its places of
+  `spec/durations.json`, and the interop runs both ways over it (decision 0050).
+
 ## [0.12.0] - 2026-11-10
 
 ### Added

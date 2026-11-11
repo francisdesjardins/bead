@@ -936,7 +936,8 @@
   <p class="gist">
     Un courtier de publication-abonnement à sujets est un transport de plus, et Bead n’y devient
     jamais un réseau à lui. Chaque côté en tient le cœur, un courtier en mémoire pour les tests, et
-    deux liaisons : MQTT 5, et AMQP 1.0 sur RabbitMQ 4 (§15.16 à §15.38).
+    ses liaisons : MQTT 5 de tous les côtés, et AMQP 1.0 sur RabbitMQ 4 des côtés TypeScript et C#
+    (§15.16 à §15.38).
   </p>
   <p>
     Un participant est le lien d’un côté vers son courtier. Son identifiant est l’identité que le
@@ -978,8 +979,9 @@
       servi par un groupe est un abonnement partagé,
       <code>$share/&lt;nom&gt;/bead/s/&lt;nom&gt;</code>. Chaque paquet est compté à l’octet sous la
       taille maximale de chaque bout. Le testament d’un participant annonce son départ aux pairs. Le
-      côté TypeScript passe par MQTT.js, le côté C# par MQTTnet, et les deux sont joués contre
-      Mosquitto.
+      côté TypeScript passe par MQTT.js, le côté C# par MQTTnet, le côté Rust par un client à lui,
+      la fonctionnalité <code>mqtt</code> de son cœur, sur TCP, TLS ou un WebSocket. Les trois sont
+      joués contre Mosquitto.
     </p>
     <h3 id="courtier-amqp">Sur AMQP 1.0</h3>
     <p>
@@ -988,7 +990,7 @@
       chaque message à un seul membre. Chaque message suit un seul profil, compté à l’octet.
       AMQP 1.0 n’a pas de testament : le battement de Bead dit seul qu’un pair s’est tu. Le côté
       TypeScript passe par rhea, le côté C# par AMQPNetLite, et les deux sont joués contre
-      RabbitMQ 4. Aucune page n’atteint un courtier AMQP 1.0.
+      RabbitMQ 4. La liaison du côté Rust est à venir. Aucune page n’atteint un courtier AMQP 1.0.
     </p>
     <p>
       Dans les deux cas, le courtier d’un déploiement authentifie chaque lien, par un mot de passe
@@ -1568,8 +1570,8 @@
   <p class="gist">
     Bead est un protocole : une spécification, des fichiers de conformance que chaque implantation
     joue, et un service d’interop. Le dépôt en tient trois implantations. TypeScript et C# sont à
-    parité de comportement. Rust a son cœur et ses transports WebSocket et HTTP, et chaque partie
-    qui lui manque est une ligne de la matrice de support, à venir.
+    parité de comportement. Rust a son cœur, ses transports WebSocket et HTTP et sa liaison
+    MQTT 5, et chaque partie qui lui manque est une ligne de la matrice de support, à venir.
   </p>
   <div class="table-wrap">
     <table class="compare">
@@ -1604,8 +1606,7 @@
           <td>WebSocket, HTTP, Web Worker, en mémoire, un courtier sur MQTT 5 ou AMQP 1.0, et joints</td>
           <td>WebSocket, HTTP sur Kestrel, en mémoire, un courtier sur MQTT 5 ou AMQP 1.0, et joints</td>
           <td>
-            WebSocket et HTTP sur hyper, en mémoire, le cœur du courtier sur un courtier en mémoire,
-            et joints
+            WebSocket et HTTP sur hyper, en mémoire, un courtier sur MQTT 5, et joints
           </td>
         </tr>
         <tr>
@@ -1618,8 +1619,8 @@
     </table>
   </div>
   <p class="space">
-    Côté Rust, viennent ensuite les liaisons à un courtier, la passerelle et la cible Rust de
-    <code>beadc</code>, chacune par une décision à elle. Ses transports WebSocket et HTTP
+    Côté Rust, viennent ensuite la liaison sur AMQP 1.0, la passerelle et la cible Rust de
+    <code>beadc</code>, chacune par une décision à elle. Ses transports WebSocket, HTTP et MQTT 5
     rencontrent les deux autres côtés dans l’interop, dans les deux sens. Le cœur se compile aussi
     pour <code>wasm32-unknown-unknown</code>.
   </p>
@@ -1658,7 +1659,7 @@
   <p>
     Chaque unité de la spécification est citée par un fichier de conformance, ou porte la raison
     pour laquelle aucun ne la cite. Les trois côtés s’appellent les uns les autres dans la CI sur
-    WebSocket et HTTP, et les côtés TypeScript et C# aussi sur MQTT 5 et AMQP 1.0, et par leurs
+    WebSocket, HTTP et MQTT 5, et les côtés TypeScript et C# aussi sur AMQP 1.0, et par leurs
     passerelles.
   </p>
   <details class="more">
@@ -1761,8 +1762,7 @@
   <ul class="rules">
     <li>
       <strong>Rust au complet</strong
-      ><span>Ses liaisons MQTT 5 et AMQP 1.0, sa passerelle et sa cible dans
-        <code>beadc</code>.</span>
+      ><span>Sa liaison AMQP 1.0, sa passerelle et sa cible dans <code>beadc</code>.</span>
     </li>
     <li>
       <strong>Des règles en CEL</strong
