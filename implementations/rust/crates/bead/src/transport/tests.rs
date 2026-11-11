@@ -101,6 +101,66 @@ fn a_transport_counts_nothing_unless_it_says_so() {
     assert_eq!(Clockless(Arc::clone(&counting)).gauges(), None);
 }
 
+// These are the Rust traits' defaults for a transport supplied by the application.
+#[test]
+fn a_transport_offers_no_security_or_carried_credential_unless_it_says_so() {
+    use super::{RouterClientTransport, ServerTransport};
+    use crate::testing::SteppingClock;
+    use crate::testing::clockless::Clockless;
+    use crate::testing::scripted::{ScriptedClient, ScriptedServer, handle_of};
+
+    let clock = SteppingClock::new(crate::testing::instants::new_year());
+    let client = Clockless(ScriptedClient::new(Arc::<SteppingClock>::clone(&clock)));
+    let server = Clockless(ScriptedServer::new(clock));
+    let handle = handle_of(1);
+
+    assert!(
+        !client.is_secure(),
+        "a custom client claims no secure leg by default"
+    );
+    assert!(
+        !client.carries("Bearer secret"),
+        "a custom client promises to carry no credential"
+    );
+    assert!(
+        !server.is_secure(&handle),
+        "a custom server claims no secure leg by default"
+    );
+    assert!(
+        !server.carries_credential(&handle),
+        "a custom server promises to carry no credential"
+    );
+    assert!(
+        server.is_two_way(&handle),
+        "a custom server carries both directions by default"
+    );
+    assert_eq!(
+        server.transport_type(),
+        None,
+        "a custom server draws no type name by default"
+    );
+    assert!(
+        !server.names_procedures(),
+        "a custom server holds no procedure selection by default"
+    );
+
+    for address in [
+        crate::failure::ProcedureAddress {
+            service_id: 1,
+            procedure_id: 1,
+        },
+        crate::failure::ProcedureAddress {
+            service_id: u16::MAX,
+            procedure_id: u16::MAX,
+        },
+    ] {
+        assert!(
+            server.takes_procedure(&handle, address),
+            "a custom server takes any procedure by default"
+        );
+    }
+}
+
 // what a server's listener hears, each told as a line
 struct Hearing {
     told: Arc<Mutex<Vec<String>>>,
