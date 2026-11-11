@@ -11,6 +11,75 @@ namespace Bead.Tests;
 /// </summary>
 public sealed partial class RouterCoreTests
 {
+    private static async Task CheckSubscriptionResult(bool includesPattern)
+    {
+        var samples = includesPattern ? new[] { (37, false), (100, false), (100, true) } : [(37, false), (100, false)];
+
+        foreach (var (length, patterned) in samples)
+        {
+            var server = new Peer(RouterSide.Server, Chunked with { MaximumEnvelopeBytes = 64 });
+            using var core = server.Core;
+            var resolver = server.Resolve();
+
+            await server.Deliver(new Envelope { Header = RequestOf(1) with { OpensSubscription = true }, Payload = length == 37 ? ReadOnlyMemory<byte>.Empty : new byte[] { 1 } });
+            var refused = await Assert.ThrowsAsync<FailureException>(() =>
+            {
+                return resolver.Answer(0, patterned ? PatternOf(length) : new byte[length]).WaitAsync(Patience, TestContext.Current.CancellationToken);
+            });
+
+            Assert.Equal((ushort)ProtocolCode.PayloadTooLarge, refused.Code);
+            Assert.Equal("a subscription's result goes in one envelope, of 64 bytes at most", refused.Detail);
+            Assert.Equal(0, server.BeforeAnswers);
+            Assert.Empty(server.Sent);
+            Assert.Empty(server.Reports);
+
+            if (length == 37)
+            {
+                await resolver.Answer(0, new byte[36]).WaitAsync(Patience, TestContext.Current.CancellationToken);
+                Assert.Equal(1, server.BeforeAnswers);
+                Assert.Equal(new ResultHeader { CallId = 1 }, Assert.Single(server.Sent).Header);
+                Assert.Equal(new byte[36], server.Sent[0].Payload.ToArray());
+            }
+
+            Assert.Empty(server.Reports);
+        }
+    }
+
+    [Fact]
+    public async Task A_subscriptions_result_stays_within_one_envelope_before_the_side_hears_of_it()
+    {
+        await CheckSubscriptionResult(false);
+    }
+
+    [Fact]
+    public async Task Refuse_a_transfer_for_a_subscriptions_result_before_the_side_hears_of_it()
+    {
+        await CheckSubscriptionResult(true);
+    }
+
+    [Fact]
+    public async Task A_ready_chunk_refusal_is_observed_before_a_later_successful_final_chunk()
+    {
+        var server = new Peer(RouterSide.Server);
+        using var core = server.Core;
+        var resolver = server.Resolve();
+        var refused = new IOException("the transport refused the chunk");
+
+        server.OnSend = (envelope) =>
+        {
+            return envelope.Header is ChunkHeader { IsLast: false } ? Task.FromException(refused) : Task.CompletedTask;
+        };
+        await server.Deliver(new Envelope { Header = RequestOf(1), Payload = new byte[] { 1 } });
+
+        var responding = resolver.Answer(0, PatternOf(100));
+
+        await server.Settle();
+        await server.Deliver(CreditOf(1, 100));
+        Assert.Same(refused, await Assert.ThrowsAsync<IOException>(() =>
+        {
+            return responding.WaitAsync(Patience, TestContext.Current.CancellationToken);
+        }));
+    }
     // constants
 
     // limits that send a payload of more than 64 bytes as a transfer: an opening of a request
