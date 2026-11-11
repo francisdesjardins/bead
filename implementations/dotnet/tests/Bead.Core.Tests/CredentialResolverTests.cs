@@ -13,6 +13,35 @@ namespace Bead.Tests;
 /// </summary>
 public sealed class CredentialResolverTests
 {
+    private sealed class RefusingTimerClock : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow()
+        {
+            return Start;
+        }
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            throw new InvalidOperationException("the clock refuses this timer");
+        }
+    }
+
+    [Fact(Skip = "divergence: the clock refusal reaches the caller without the key-set failure wrapper")]
+    public async Task A_timer_refusal_releases_the_waiting_call_without_starting_an_unbounded_key_set_ask()
+    {
+        var keySet = new RecordingKeySet(SetIssuer);
+        var resolver = ResolverOf(new Credentials { Audience = Audience, KeySet = keySet.KeySet }, new RefusingTimerClock());
+        var named = Credential.Jwt(SignedOf((Second, "set-1"), ClaimsOf(SetIssuer)));
+        var failure = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        {
+            return ResolvedOf((resolver, named));
+        });
+
+        Assert.Equal($"the key set's ask for {SetIssuer} failed", failure.Message);
+        Assert.Equal("the clock refuses this timer", failure.InnerException?.Message);
+        Assert.Empty(keySet.Asks);
+    }
+
     // constants
 
     private const string Issuer = "https://hs256.example";
@@ -408,6 +437,24 @@ public sealed class CredentialResolverTests
 
         // a side that takes no JWT holds what limits it holds
         CredentialResolver.AssertLimits(held with { ChunkBytes = 64, MaximumEnvelopeBytes = 64, WindowBytes = 128 }, false);
+    }
+
+    [Fact]
+    public void Holds_a_JWT_s_header_in_a_chunk_and_an_envelope_of_1_024_bytes_at_least()
+    {
+        CredentialResolver.AssertLimits(RouterLimits.Default, true);
+
+        foreach (var limits in new[]
+        {
+            RouterLimits.Default with { ChunkBytes = 1_023 },
+            RouterLimits.Default with { ChunkBytes = 1_023, MaximumEnvelopeBytes = 1_023 },
+        })
+        {
+            Assert.Throws<ArgumentException>(() =>
+            {
+                CredentialResolver.AssertLimits(limits, true);
+            });
+        }
     }
 
     [Fact]

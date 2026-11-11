@@ -82,6 +82,23 @@ const codeOf = (outcome: ChunkOutcome | IProtocolFailure): number | string => {
 
 // definition
 
+test('clamps an outgoing opening to its payload, and sends no chunk past its end', () => {
+  test.skip(
+    true,
+    'divergence: an oversized opening leaves credit and sent offsets past the payload'
+  );
+  const payload = new TextEncoder().encode('abc');
+
+  for (const openingBytes of [3, 4, Number.MAX_SAFE_INTEGER]) {
+    const outgoing = createOutgoingTransfer(payload, { openingBytes, payloadBytesPerChunk: 8 });
+
+    expect(outgoing.opening).toEqual(payload);
+    expect(outgoing.creditEnd).toBe(3);
+    outgoing.grant(Number.MAX_SAFE_INTEGER);
+    expect(outgoing.nextChunk()).toBeUndefined();
+  }
+});
+
 test.describe('chunkPayloadBytes', () => {
   test('sizes a chunk as what an envelope of the chunk size holds past its header, an envelope at most', () => {
     const limits = { chunkBytes: 1_048_576, maximumEnvelopeBytes: 16_778_240 };

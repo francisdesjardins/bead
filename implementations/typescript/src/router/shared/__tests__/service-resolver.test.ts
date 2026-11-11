@@ -33,6 +33,51 @@ import {
 // definition
 
 test.describe('createServiceManager', () => {
+  test('a self-admitting resolver refuses before decoding and tells no trace on a failed admission', async () => {
+    for (const throws of [false, true]) {
+      const { calls, router } = createFakeRouter();
+      const manager = createServiceManager(router);
+      const seen = recordDebug(manager);
+      const failure = new Error('the admission fails');
+      const beforeRequest: IBeforeRequest = Object.assign(
+        () => {
+          if (throws) {
+            throw failure;
+          }
+
+          return false;
+        },
+        { refusal: SERVER_FAILURES.sessionRequired }
+      );
+      let reached = 0;
+      const resolver = manager.getRequestResolver(echo, {
+        beforeRequest,
+        serializer: serverSerializer,
+      })(() => {
+        reached += 1;
+
+        return Promise.resolve();
+      });
+      const resolving = resolver(propsOf(encoder.encode('{not json')));
+
+      if (throws) {
+        await expect(resolving).rejects.toBe(failure);
+      } else {
+        await resolving;
+      }
+
+      expect(calls.respond).toEqual([
+        {
+          request: { connectionHandle, header },
+          response: {
+            failure: throws ? SERVER_FAILURES.procedureFailed : SERVER_FAILURES.sessionRequired,
+          },
+        },
+      ]);
+      expect([reached, seen]).toEqual([0, []]);
+    }
+  });
+
   test.describe('getRequestResolver', () => {
     test('traces an application failure as the answer with its request and duration', async () => {
       const clock = createTestClock(1_000);

@@ -30,6 +30,179 @@ public sealed class SessionManagerTests
 
     // definition
 
+    private sealed class RefusingTimerClock : TimeProvider
+    {
+        private readonly FakeTimeProvider _clock = new();
+        private int _calls;
+
+        internal int RefuseAt { get; set; } = -1;
+
+        internal List<ObservedTimer> Timers { get; } = [];
+
+        public override DateTimeOffset GetUtcNow()
+        {
+            return _clock.GetUtcNow();
+        }
+
+        public override long GetTimestamp()
+        {
+            return _clock.GetTimestamp();
+        }
+
+        public override long TimestampFrequency
+        {
+            get
+            {
+                return _clock.TimestampFrequency;
+            }
+        }
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            if (_calls++ == RefuseAt)
+            {
+                throw new InvalidOperationException("the clock refuses this timer");
+            }
+
+            var timer = new ObservedTimer(_clock.CreateTimer(callback, state, dueTime, period), dueTime);
+
+            Timers.Add(timer);
+
+            return timer;
+        }
+    }
+
+    private sealed class ObservedTimer : ITimer
+    {
+        private readonly ITimer _timer;
+
+        internal ObservedTimer(ITimer timer, TimeSpan due)
+        {
+            _timer = timer;
+            Due = due;
+        }
+
+        internal TimeSpan Due { get; }
+
+        internal bool IsDisposed { get; private set; }
+
+        public bool Change(TimeSpan dueTime, TimeSpan period)
+        {
+            return _timer.Change(dueTime, period);
+        }
+
+        public void Dispose()
+        {
+            IsDisposed = true;
+            _timer.Dispose();
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            IsDisposed = true;
+            await _timer.DisposeAsync();
+        }
+    }
+
+    [Fact(Skip = "divergence: a timer refusal leaves the new session stored")]
+    public void A_timer_refusal_stores_no_session_and_cancels_every_timer_prepared_for_it()
+    {
+        foreach (var refuseAt in new[] { 0, 1 })
+        {
+            var clock = new RefusingTimerClock { RefuseAt = refuseAt };
+            using var sessions = new SessionManager<string>(new SessionManagerOptions { Clock = clock });
+            var told = new List<string>();
+
+            sessions.Created += (_) =>
+            {
+                told.Add("created");
+            };
+            Assert.Equal("the clock refuses this timer", Assert.Throws<InvalidOperationException>(() =>
+            {
+                return sessions.Set(sessions.Create(Handle) with
+                {
+                    ConnectionInactivityTimeout = TimeSpan.FromMilliseconds(10),
+                    SessionInactivityTimeout = TimeSpan.FromMilliseconds(20),
+                });
+            }).Message);
+            Assert.False(sessions.Has(Handle));
+            Assert.Empty(sessions.GetAll());
+            Assert.Empty(told);
+            Assert.All(clock.Timers, (timer) =>
+            {
+                Assert.True(timer.IsDisposed);
+            });
+        }
+    }
+
+    [Fact(Skip = "divergence: a timer refusal changes the stored timeout and stops its live timer")]
+    public void A_timer_refusal_keeps_a_stored_timeout_and_its_live_timer_and_tells_nothing()
+    {
+        foreach (var connection in new[] { true, false })
+        {
+            var clock = new RefusingTimerClock();
+            using var sessions = new SessionManager<string>(new SessionManagerOptions { Clock = clock });
+            var stored = sessions.Set(sessions.Create(Handle) with
+            {
+                ConnectionInactivityTimeout = TimeSpan.FromMilliseconds(10),
+                SessionInactivityTimeout = TimeSpan.FromMilliseconds(20),
+            });
+            var live = clock.Timers.ToArray();
+            var told = new List<string>();
+
+            sessions.ConnectionInactivityTimeoutChanged += (_) =>
+            {
+                told.Add("connection");
+            };
+            sessions.SessionInactivityTimeoutChanged += (_) =>
+            {
+                told.Add("session");
+            };
+            clock.RefuseAt = 2;
+
+            Assert.Equal("the clock refuses this timer", Assert.Throws<InvalidOperationException>(() =>
+            {
+                if (connection)
+                {
+                    return sessions.UpdateConnectionInactivityTimeout(stored with { ConnectionInactivityTimeout = TimeSpan.FromMilliseconds(30) });
+                }
+
+                return sessions.UpdateSessionInactivityTimeout(stored with { SessionInactivityTimeout = TimeSpan.FromMilliseconds(30) });
+            }).Message);
+            Assert.Equal(stored, sessions.Get(Handle));
+            Assert.Equal(live, clock.Timers);
+            Assert.All(live, (timer) =>
+            {
+                Assert.False(timer.IsDisposed);
+            });
+            Assert.Equal([TimeSpan.FromMilliseconds(10), TimeSpan.FromMilliseconds(20)], live.Select((timer) =>
+            {
+                return timer.Due;
+            }));
+            Assert.Empty(told);
+        }
+    }
+
+    [Fact]
+    public void Draws_a_token_none_holds_and_tells_one_from_another()
+    {
+        using var sessions = new SessionManager<string>();
+        var held = TokenOf(7);
+
+        sessions.Set(sessions.Create(Handle) with { SessionToken = held });
+
+        var drawn = sessions.Set(sessions.Create(Other)).SessionToken!.Value;
+        var bytes = new byte[16];
+
+        drawn.CopyTo(bytes);
+        Assert.False(drawn.FixedTimeEquals(held));
+        Assert.True(drawn.FixedTimeEquals(drawn));
+        Assert.Contains(bytes, (value) =>
+        {
+            return value != 0;
+        });
+    }
+
     [Fact]
     public void Draws_a_token_for_a_session_without_one_anew_each_time_and_keeps_one_given()
     {

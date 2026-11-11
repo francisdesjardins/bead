@@ -151,7 +151,7 @@ async fn a_client_sends_again_a_non_request_refused_busy_once_its_retry_after_pa
 
 // spec 15.6, 15.7, 15.12
 #[tokio::test]
-async fn a_client_whose_exchangetimeout_is_never_sends_again_a_non_request_refused_busy_past_2_31_minus_1_ms()
+async fn a_client_whose_exchange_timeout_is_never_sends_again_a_non_request_refused_busy_past_2_31_minus_1_ms()
  {
     let clock = stepping_from_2026();
     let faked = on_clock_of(

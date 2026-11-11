@@ -291,3 +291,17 @@ test.describe('namesOnce', () => {
     expect(namesOnce(`{"${BACKSLASH}ud800":1}`)).toBe(false);
   });
 });
+
+test('carries raw bytes as they are, and text in UTF-8 read strictly, its byte order mark kept', () => {
+  const bytes = new Uint8Array([0, 255, 7]);
+
+  expect(PAYLOAD_CODECS.raw.decode(bytes)).toEqual(bytes);
+  expect(PAYLOAD_CODECS.raw.encode(bytes)).toEqual(bytes);
+  expect(PAYLOAD_CODECS.text.decode(utf8('\uFEFFhé'))).toBe('\uFEFFhé');
+
+  for (const refused of [new Uint8Array([0x68, 0xc3]), new Uint8Array([0xed, 0xa0, 0x80])]) {
+    expect(() => {
+      return PAYLOAD_CODECS.text.decode(refused);
+    }).toThrow();
+  }
+});

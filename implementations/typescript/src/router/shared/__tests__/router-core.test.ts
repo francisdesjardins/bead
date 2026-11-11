@@ -83,6 +83,154 @@ const PACKAGE = JSON.parse(
 // definition
 
 test.describe('createRouterCore', () => {
+  test('refuses a last call id of zero or its peer’s parity before a router starts', () => {
+    for (const [failures, refused, accepted] of [
+      [CLIENT_FAILURES, [0, 2, 8, 0xfffffffe], [1, 0xffffffff]],
+      [SERVER_FAILURES, [0, 1, 7, 0xffffffff], [2, 0xfffffffe]],
+    ] as const) {
+      const { port, sent } = createPort({ failures });
+
+      for (const lastCallId of refused) {
+        expect(() => {
+          return createRouterCore(port, { lastCallId });
+        }).toThrow(ProgrammerError);
+      }
+
+      for (const lastCallId of accepted) {
+        using core = createRouterCore(port, { lastCallId });
+
+        expect(core.gauges().counts['pendingCalls']).toBe(0);
+      }
+
+      expect(sent).toEqual([]);
+    }
+  });
+
+  test('answers a resolver’s own failure as it is, and any other error PROCEDURE_FAILED with no detail and reported', async () => {
+    test.skip(
+      true,
+      'divergence: a rejected application FailureError is reported and answered PROCEDURE_FAILED'
+    );
+    const { port, sent, reported } = createPort();
+    using core = createRouterCore(port);
+    const own = new FailureError({
+      code: 21,
+      detail: 'nothing to echo',
+      scope: FailureScope.APPLICATION,
+    });
+    const other = new Error('internal: 10.0.0.5:8443');
+
+    core.registerResolver(
+      Object.assign((props: IRequestResolverProps<Handle>) => {
+        return Promise.reject(
+          props.payload[0] === 'o'.charCodeAt(0) && props.payload.length === 3 ? own : other
+        );
+      }, echo)
+    );
+    core.receive(requestOf(1, { payload: new TextEncoder().encode('own') }), 'a');
+    core.receive(requestOf(3, { payload: new TextEncoder().encode('other') }), 'a');
+    await sleep(0);
+
+    expect(
+      sent.map(({ envelope }) => {
+        return envelope?.kind === EnvelopeKind.FAILURE
+          ? [envelope.failure.code, envelope.failure.detail]
+          : envelope?.kind;
+      })
+    ).toEqual([
+      [21, 'nothing to echo'],
+      [ProtocolCode.PROCEDURE_FAILED, ''],
+    ]);
+    expect(reported).toEqual([[other, 'a']]);
+  });
+
+  const checkSubscriptionResult = async (includesPattern: boolean): Promise<void> => {
+    for (const sample of [
+      { length: 37, requestPayload: new Uint8Array(0), patterned: false },
+      { length: 100, requestPayload: new Uint8Array([1]), patterned: false },
+      ...(includesPattern
+        ? [{ length: 100, requestPayload: new Uint8Array([1]), patterned: true }]
+        : []),
+    ]) {
+      let told = 0;
+      const { port, sent, reported } = createPort({
+        beforeAnswer: () => {
+          told += 1;
+
+          return undefined;
+        },
+      });
+      using core = createRouterCore(port, { limits });
+      const seen: IRequestResolverProps<Handle>[] = [];
+
+      core.registerResolver(resolverOf(echo, seen));
+      core.receive(requestOf(1, { opensSubscription: true, payload: sample.requestPayload }), 'a');
+      await sleep(0);
+
+      const target = { connectionHandle: 'a' as const, header: seen[0]?.header ?? headerOf(1) };
+
+      await expect(
+        core.respond(
+          { payload: sample.patterned ? patternOf(sample.length) : new Uint8Array(sample.length) },
+          target
+        )
+      ).rejects.toMatchObject({
+        code: ProtocolCode.PAYLOAD_TOO_LARGE,
+        detail: "a subscription's result goes in one envelope, of 64 bytes at most",
+      });
+      expect([told, sent, reported]).toEqual([0, [], []]);
+
+      if (sample.length === 37) {
+        await core.respond({ payload: new Uint8Array(36) }, target);
+        expect(told).toBe(1);
+        expect(piecesOf(sent)).toEqual([[EnvelopeKind.RESULT, 1, undefined, 36]]);
+        expect(sent[0]?.envelope).toMatchObject({ payload: new Uint8Array(36) });
+      }
+
+      expect(reported).toEqual([]);
+    }
+  };
+
+  test('a subscription’s result stays within one envelope before the side hears of it', async () => {
+    await checkSubscriptionResult(false);
+  });
+
+  test('refuse a transfer for a subscription’s result before the side hears of it', async () => {
+    await checkSubscriptionResult(true);
+  });
+
+  test('a ready chunk refusal is observed before a later successful final chunk', async () => {
+    const refused = new Error('the transport refused the chunk');
+    const { port } = createPort();
+    let sends = 0;
+    using core = createRouterCore(
+      {
+        ...port,
+        send: (bytes, handle) => {
+          sends += 1;
+
+          return sends === 2 ? Promise.reject(refused) : port.send(bytes, handle);
+        },
+      },
+      { limits }
+    );
+    const seen: IRequestResolverProps<Handle>[] = [];
+
+    core.registerResolver(resolverOf(echo, seen));
+    core.receive(requestOf(1, { payload: new Uint8Array([1]) }), 'a');
+    await sleep(0);
+
+    const responding = core.respond(
+      { payload: patternOf(100) },
+      { connectionHandle: 'a', header: seen[0]?.header ?? headerOf(1) }
+    );
+    const failed = expect(responding).rejects.toBe(refused);
+
+    core.receive(creditOf(1, 100), 'a');
+    await failed;
+    expect(sends).toBe(3);
+  });
+
   test.describe('takes what comes in', () => {
     // debugging 5.2
     test('read, traced, then dispatched; what does not read is reported, not traced', async () => {

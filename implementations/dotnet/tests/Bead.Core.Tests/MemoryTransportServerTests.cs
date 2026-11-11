@@ -37,6 +37,54 @@ public sealed class MemoryTransportServerTests
     // definition
 
     [Fact]
+    public async Task An_envelope_or_a_close_a_listener_of_the_transport_sends_within_its_turn_comes_behind_what_was_sent_before_it()
+    {
+        foreach (var closes in new[] { false, true })
+        {
+            var scheduler = new SerialScheduler();
+            await using var server = new MemoryTransportServer(new MemoryTransportServerOptions { Scheduler = scheduler });
+            await using var client = new MemoryTransportClient(new MemoryTransportClientOptions { Scheduler = scheduler });
+            var heard = new List<string>();
+
+            await server.Start();
+            await client.Connect(new MemoryTransportClientConnectOptions { Server = server, CancellationToken = Cancelled });
+
+            server.Message += (message, handle) =>
+            {
+                Assert.Equal([0xff], message.Bytes.ToArray());
+
+                if (closes)
+                {
+                    _ = server.CloseConnection(handle);
+                }
+                else
+                {
+                    _ = server.Send(new TransportMessage(new byte[] { 2 }, false), handle);
+                }
+            };
+            client.Message += (message) =>
+            {
+                heard.Add(Convert.ToHexString(message.Bytes.Span));
+            };
+            client.Close += (wasClean, isQuick) =>
+            {
+                heard.Add($"closed {wasClean} {isQuick}");
+            };
+
+            scheduler.Post(() =>
+            {
+                _ = client.Send(new TransportMessage(new byte[] { 0xff }, false));
+                _ = server.Send(new TransportMessage(new byte[] { 1 }, false), First);
+            });
+            await scheduler.WhenIdle().WaitAsync(Patience, Cancelled);
+
+            string[] expected = closes ? ["01", "closed False False"] : ["01", "02"];
+
+            Assert.Equal(expected, heard);
+        }
+    }
+
+    [Fact]
     public async Task Draws_a_handle_of_type_MEMORY_for_each_connect_and_gives_none_twice()
     {
         var scheduler = new SerialScheduler();

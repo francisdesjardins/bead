@@ -13,6 +13,34 @@ namespace Bead.Tests;
 /// </summary>
 public sealed class ClocksTests
 {
+    [Fact]
+    public void Holds_a_duration_to_the_nearest_millisecond_from_1_ms_to_its_ceiling_never_and_0_as_each_place_takes_them()
+    {
+        Assert.Equal(TimeSpan.FromMilliseconds(2), Clocks.AssertHeld(("a timeout", "Duration"), TimeSpan.FromMilliseconds(1.5)));
+        Assert.Equal(TimeSpan.FromMilliseconds(1), Clocks.AssertHeld(("a timeout", "Duration"), TimeSpan.FromMilliseconds(1.499)));
+        Assert.Equal(Timeout.InfiniteTimeSpan, Clocks.AssertHeld(("a timeout", "Duration"), Timeout.InfiniteTimeSpan));
+        Assert.Equal(TimeSpan.Zero, Clocks.AssertHeldDelay(("a delay", "Duration"), TimeSpan.Zero));
+
+        var cases = new (Func<(string, string), TimeSpan, TimeSpan> Hold, string Name, TimeSpan Given)[]
+        {
+            (Clocks.AssertHeld, "a timeout", TimeSpan.Zero),
+            (Clocks.AssertHeld, "a timeout", TimeSpan.FromMilliseconds(0.999)),
+            (Clocks.AssertHeld, "a timeout", Clocks.LongestTimer + TimeSpan.FromMilliseconds(1)),
+            (Clocks.AssertHeldFinite, "a period", Timeout.InfiniteTimeSpan),
+            (Clocks.AssertHeldDelay, "a delay", Timeout.InfiniteTimeSpan),
+        };
+
+        foreach (var (hold, name, given) in cases)
+        {
+            var refused = Assert.Throws<ArgumentOutOfRangeException>(() =>
+            {
+                return hold((name, "Duration"), given);
+            });
+
+            Assert.StartsWith(name, refused.Message, StringComparison.Ordinal);
+        }
+    }
+
     // constants
 
     private static readonly JsonElement Root = Load();

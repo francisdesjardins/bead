@@ -48,6 +48,81 @@ const record = (sessions: ISessionManager<IUser>, event: SESSION_MANAGER_EVENTS)
 
 // definition
 
+test('a timer refusal stores no session and cancels every timer prepared for it', () => {
+  test.skip(true, 'divergence: a timer refusal leaves the new session stored');
+  for (const refuseAt of [0, 1]) {
+    const clock = createTestClock();
+    const arm = clock.setTimeout.bind(clock);
+    let calls = 0;
+
+    clock.setTimeout = (callback, delay) => {
+      if (calls++ === refuseAt) {
+        throw new Error('the clock refuses this timer');
+      }
+
+      return arm(callback, delay);
+    };
+
+    using sessions = createSessionManager({ clock });
+    const told: string[] = [];
+
+    sessions.on('created', () => {
+      told.push('created');
+    });
+
+    expect(() => {
+      sessions.set({
+        ...sessions.create(first),
+        connectionInactivityTimeout: 10,
+        sessionInactivityTimeout: 20,
+      });
+    }).toThrow('the clock refuses this timer');
+    expect(sessions.has(first)).toBe(false);
+    expect(sessions.getAll()).toEqual([]);
+    expect(told).toEqual([]);
+    expect(delaysOn(clock)).toEqual([]);
+  }
+});
+
+test('a timer refusal keeps a stored timeout and its live timer, and tells nothing', () => {
+  test.skip(
+    true,
+    'divergence: a timer refusal changes the stored timeout and stops its live timer'
+  );
+  for (const kind of ['connection', 'session'] as const) {
+    const clock = createTestClock();
+    using sessions = createSessionManager({ clock });
+    const stored = sessions.set({
+      ...sessions.create(first),
+      connectionInactivityTimeout: 10,
+      sessionInactivityTimeout: 20,
+    });
+    const live = delaysOn(clock);
+    const told: string[] = [];
+
+    sessions.on('connectionInactivityTimeoutChanged', () => {
+      told.push('connection');
+    });
+    sessions.on('sessionInactivityTimeoutChanged', () => {
+      told.push('session');
+    });
+    clock.setTimeout = () => {
+      throw new Error('the clock refuses this timer');
+    };
+
+    expect(() => {
+      if (kind === 'connection') {
+        sessions.updateConnectionInactivityTimeout({ ...stored, connectionInactivityTimeout: 30 });
+      } else {
+        sessions.updateSessionInactivityTimeout({ ...stored, sessionInactivityTimeout: 30 });
+      }
+    }).toThrow('the clock refuses this timer');
+    expect(sessions.get(first)).toEqual(stored);
+    expect(delaysOn(clock)).toEqual(live);
+    expect(told).toEqual([]);
+  }
+});
+
 test.describe('createTimers', () => {
   test('setting a timer stops the one it replaces, and create starts a connection over', () => {
     const clock = createTestClock();

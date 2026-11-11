@@ -8,7 +8,7 @@ import {
   duesOn,
   type TestClock,
 } from '../../../transport/shared/__tests__/fixtures';
-import { CredentialScheme } from '../constants';
+import { CredentialScheme, LIMIT_DEFAULTS } from '../constants';
 import {
   assertLimitsHoldJwt,
   createCredentialResolver,
@@ -167,6 +167,36 @@ const outcomeOf = (resolution: Promise<unknown>): { current: unknown } => {
 };
 
 // definition
+
+test('a timer refusal releases the waiting call without starting an unbounded key set ask', async () => {
+  test.skip(
+    true,
+    'divergence: the clock refusal reaches the caller without the key-set failure wrapper'
+  );
+  const clock = createTestClock(NOW);
+  const { asks, keySet } = createKeySet();
+
+  clock.setTimeout = () => {
+    throw new Error('the clock refuses this timer');
+  };
+
+  const resolver = createCredentialResolver({ audience: AUDIENCE, keySet }, { clock });
+  const failure = await resolver
+    .resolve(
+      jwtOf(tokenOf(claimsOf(SET_ISSUER), { key: SET_KEY_BYTES, kid: 'set-1' })),
+      new AbortController().signal
+    )
+    .catch((reason: unknown) => {
+      return reason;
+    });
+
+  expect(failure).toMatchObject({
+    message: `the key set's ask for ${SET_ISSUER} failed`,
+    cause: { message: 'the clock refuses this timer' },
+  });
+  expect(asks).toEqual([]);
+  expect(duesOn(clock)).toEqual([]);
+});
 
 test.describe('createCredentialResolver', () => {
   test('fails every waiter when a key set rejects without a reason and accepts its next answer at the deadline', async () => {
@@ -1819,6 +1849,23 @@ test.describe('createCredentialResolver', () => {
 });
 
 test.describe('assertLimitsHoldJwt', () => {
+  test('holds a JWT’s header in a chunk and an envelope of 1,024 bytes at least', () => {
+    expect(JWT_LIMIT_BYTES).toBe(1_024);
+
+    expect(() => {
+      assertLimitsHoldJwt(LIMIT_DEFAULTS);
+    }).not.toThrow();
+
+    for (const limits of [
+      { ...LIMIT_DEFAULTS, chunkBytes: 1_023 },
+      { ...LIMIT_DEFAULTS, chunkBytes: 1_023, maximumEnvelopeBytes: 1_023 },
+    ]) {
+      expect(() => {
+        assertLimitsHoldJwt(limits);
+      }).toThrow(ProgrammerError);
+    }
+  });
+
   test('refuses limits whose chunk or envelope is under 1,024 bytes, and takes them from 1,024', () => {
     expect(JWT_LIMIT_BYTES).toBe(1_024);
     expect(() => {
