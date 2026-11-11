@@ -304,4 +304,14 @@ test.describe('checkProcedureKind', () => {
       }).not.toThrow();
     }
   });
+
+  test('names a kind no table names, as a caller without types may state it, by its value', () => {
+    expect(() => {
+      checkProcedureKind({ ...echo, procedureKind: 'stream' as ProcedureKind }, 'server-requester');
+    }).toThrow(
+      new ProgrammerError(
+        `"echo" at 2/1 is against its kind: kind stream, which a requester on a server's router does not take; it takes a command (spec 16.11)`
+      )
+    );
+  });
 });
