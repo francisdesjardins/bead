@@ -686,6 +686,19 @@ test.describe('createAmqpBrokerAdapter', () => {
     await adapter.stop();
   });
 
+  test('ends a start stopped before its socket opens and starts a fresh link afterwards', async () => {
+    const adapter = adapterOf(script);
+    const { downs } = heardOf(adapter);
+    const starting = settledOf(adapter.start());
+
+    await adapter.stop();
+    expect(await starting).toEqual(new GenericError('the link of ada stopped'));
+    expect([adapter.isLinked, downs]).toEqual([false, []]);
+    await inboxUp({ adapter, script });
+    expect(adapter.isLinked).toBe(true);
+    await adapter.stop();
+  });
+
   test('fails an inbox declaration left unanswered within connectTimeout and closes its connection without telling a loss', async () => {
     const adapter = adapterOf(script, { connectTimeout: 1_000 });
     const { downs } = heardOf(adapter);
