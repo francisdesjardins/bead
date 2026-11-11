@@ -954,6 +954,98 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Loses_its_link_once_on_a_packet_past_its_Maximum_Packet_Size_beside_its_CONNACK_in_one_read_spec_15_29()
+    {
+        await using var adapter = AdapterOf((options) =>
+        {
+            return options with { MaximumPacketSize = 1_100 };
+        });
+        var (messages, downs) = HeardOf(adapter);
+        var starting = adapter.Start();
+        var link = await _script.Link();
+
+        // * one broker write: a successful CONNACK followed by a header alone
+        await link.Write([0x20, 0x03, 0, 0, 0, 0x32, 0x80, 0x80, 0x80, 0x08]);
+        await link.Closed.WaitAsync(Patience, Cancelled);
+        var failure = await Record.ExceptionAsync(() =>
+        {
+            return starting.WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.Null(failure);
+        Assert.Equal([new BrokerDown()], downs);
+        Assert.Empty(messages);
+        Assert.False(adapter.IsLinked);
+        Assert.IsType<MqttConnectPacket>(Assert.Single(link.Packets));
+    }
+
+    [Fact(Skip = "divergence: its accepted CONNACK fails its start as lost as it connected and reports no link loss")]
+    public async Task Loses_its_link_once_on_a_packet_past_its_Maximum_Packet_Size_after_its_CONNACK_before_its_caller_resumes_spec_15_29()
+    {
+        await using var adapter = AdapterOf((options) =>
+        {
+            return options with { MaximumPacketSize = 1_100 };
+        });
+        var (messages, downs) = HeardOf(adapter);
+        var held = new HeldContinuation();
+        var previous = SynchronizationContext.Current;
+        Task starting;
+
+        // * hold the adapter's await of ConnectAsync after MQTTnet accepts its CONNACK,
+        // while its receiving loop keeps reading and the adapter has not counted itself up
+        SynchronizationContext.SetSynchronizationContext(held);
+        try
+        {
+            starting = adapter.Start();
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previous);
+        }
+
+        var link = await _script.Link();
+
+        await link.Write([0x20, 0x03, 0, 0, 0]);
+        var resume = await held.Posted.Task.WaitAsync(Patience, Cancelled);
+
+        try
+        {
+            Assert.False(starting.IsCompleted);
+            Assert.False(adapter.IsLinked);
+            await link.Write([0x32, 0x80, 0x80, 0x80, 0x08]);
+            await link.Closed.WaitAsync(Patience, Cancelled);
+        }
+        finally
+        {
+            resume();
+        }
+
+        var failure = await Record.ExceptionAsync(() =>
+        {
+            return starting.WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.Null(failure);
+        Assert.Equal([new BrokerDown()], downs);
+        Assert.Empty(messages);
+        Assert.False(adapter.IsLinked);
+        Assert.IsType<MqttConnectPacket>(Assert.Single(link.Packets));
+    }
+
+    private sealed class HeldContinuation : SynchronizationContext
+    {
+        public TaskCompletionSource<Action> Posted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public override void Post(SendOrPostCallback callback, object? state)
+        {
+            Assert.True(Posted.TrySetResult(() =>
+            {
+                callback(state);
+            }), "the adapter posts one continuation after its CONNACK");
+        }
+    }
+
+    [Fact]
     public async Task Announces_as_its_receive_bound_the_largest_payload_of_a_message_to_its_inbox_within_its_Maximum_Packet_Size_a_life_counted_spec_15_30()
     {
         await using var server = AdapterOf();
