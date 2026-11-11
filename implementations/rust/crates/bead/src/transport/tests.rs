@@ -1,7 +1,14 @@
 //! The transports' shared parts: what a credential beside an envelope may be, where a transport
-//! stands, and how a reconnection waits by default.
+//! stands, how a reconnection waits by default, and how a server's listeners are told within its
+//! guard.
 
-use super::{RECONNECT_DEFAULTS, ReadyState, TransportClientReconnectDelay, is_field_value};
+use std::sync::{Arc, Mutex, PoisonError};
+
+use super::{
+    Listeners, RECONNECT_DEFAULTS, ReadyState, ServerListener, TransportClientReconnectDelay,
+    TransportServerRefusal, is_field_value, tell_server,
+};
+use crate::router::types::{ConnectionHandle, RouterError};
 
 mod reconnection;
 
@@ -92,4 +99,128 @@ fn a_transport_counts_nothing_unless_it_says_so() {
     counting.count_as(Some(counted.clone()));
     assert_eq!(counting.gauges(), Some(counted));
     assert_eq!(Clockless(Arc::clone(&counting)).gauges(), None);
+}
+
+// what a server's listener hears, each told as a line
+struct Hearing {
+    told: Arc<Mutex<Vec<String>>>,
+}
+
+impl ServerListener for Hearing {
+    fn on_refusal(&self, refusal: &TransportServerRefusal) {
+        self.told
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(format!("refused {} {}", refusal.status, refusal.reason));
+    }
+
+    fn on_error(&self, error: &RouterError, connection_handle: Option<&ConnectionHandle>) {
+        self.told
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(format!("error {error} on {connection_handle:?}"));
+    }
+}
+
+// a listener of refusals that panics
+struct Refusing;
+
+impl ServerListener for Refusing {
+    fn on_refusal(&self, _refusal: &TransportServerRefusal) {
+        panic!("a refusal listener that throws");
+    }
+}
+
+#[test]
+fn reports_a_throw_of_a_listener_told_no_connection_with_the_empty_handle() {
+    let listeners: Listeners<dyn ServerListener> = Listeners::default();
+    let told = Arc::new(Mutex::new(Vec::new()));
+    let mut refusal = TransportServerRefusal::new(403, "host-refused");
+
+    refusal.address = Some("127.0.0.1".to_owned());
+    refusal.authority = Some("rebind.example:8080".to_owned());
+    refusal.port = Some(50_000);
+    listeners.add(Arc::new(Refusing));
+    listeners.add(Arc::new(Hearing {
+        told: Arc::clone(&told),
+    }));
+
+    // a refusal names no connection: its listener's panic is reported with none, and the listeners
+    // after it are told all the same
+    tell_server(
+        &listeners,
+        (
+            |listener: &dyn ServerListener| listener.on_refusal(&refusal),
+            None,
+        ),
+    );
+
+    assert_eq!(
+        *told.lock().unwrap_or_else(PoisonError::into_inner),
+        [
+            "error a listener panicked: a refusal listener that throws on None",
+            "refused 403 host-refused",
+        ],
+        "the panic reported with no connection, and the refusal told after it"
+    );
+}
+
+// spec 15.1: an error listener's panic is dropped, so telling an error cannot recurse.
+#[test]
+fn tell_error_tells_error_to_each_listener_within_a_guard_dropping_what_one_throws() {
+    struct Report {
+        reason: RouterError,
+        connection_handle: Option<ConnectionHandle>,
+    }
+
+    struct HearingErrors {
+        told: Arc<Mutex<Vec<Report>>>,
+    }
+
+    impl ServerListener for HearingErrors {
+        fn on_error(&self, reason: &RouterError, connection_handle: Option<&ConnectionHandle>) {
+            self.told
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(Report {
+                    reason: reason.clone(),
+                    connection_handle: connection_handle.cloned(),
+                });
+        }
+    }
+
+    struct Panicking;
+
+    impl ServerListener for Panicking {
+        fn on_error(&self, _: &RouterError, _: Option<&ConnectionHandle>) {
+            panic!("an error listener that throws");
+        }
+    }
+
+    let listeners: Listeners<dyn ServerListener> = Listeners::default();
+    let told = Arc::new(Mutex::new(Vec::new()));
+    let error: Arc<dyn std::error::Error + Send + Sync> =
+        Arc::new(crate::errors::ProgrammerError::new("told"));
+    let reason = RouterError::Other(Arc::clone(&error));
+    let handle = crate::testing::scripted::handle_of(1);
+    let tell =
+        |listener: &(dyn ServerListener + 'static)| listener.on_error(&reason, Some(&handle));
+
+    // nobody listening: nothing told and nothing thrown
+    listeners.each((tell, |_| {}));
+    listeners.add(Arc::new(Panicking));
+    listeners.add(Arc::new(HearingErrors {
+        told: Arc::clone(&told),
+    }));
+    listeners.each((tell, |_| {}));
+
+    let told = told.lock().unwrap_or_else(PoisonError::into_inner);
+
+    assert_eq!(told.len(), 1, "the panic reaches nobody");
+    assert_eq!(told[0].connection_handle.as_ref(), Some(&handle));
+    assert!(
+        matches!(&told[0].reason, RouterError::Other(heard) if Arc::ptr_eq(heard, &error)),
+        "the error given reaches the listener after the one that panics"
+    );
+    drop(told);
 }

@@ -523,3 +523,61 @@ async fn credits_a_notification_ahead_of_its_result_and_its_window_after_no_furt
         "its window no further than it reaches"
     );
 }
+
+// spec 15.1
+#[tokio::test]
+async fn drops_what_an_error_listener_throws_the_next_error_listener_told_and_the_call_goes_on() {
+    let clock = crate::testing::SteppingClock::new(super::january_first());
+    let transport = crate::testing::scripted::ScriptedClient::new(Arc::<
+        crate::testing::SteppingClock,
+    >::clone(&clock));
+    let carried: Arc<dyn crate::transport::RouterClientTransport> =
+        Arc::<crate::testing::scripted::ScriptedClient>::clone(&transport);
+    let router = crate::router::client::RouterClient::new(
+        carried,
+        &crate::router::client::RouterClientOptions::default(),
+    )
+    .expect("a router built");
+    let heard: Arc<Mutex<Vec<RouterError>>> = Arc::default();
+    let hearing = Arc::clone(&heard);
+    let is_thrown = Arc::new(core::sync::atomic::AtomicBool::new(false));
+
+    // a debug listener that throws once, on the request it sends
+    router.on_debug(Arc::new(move |_, _| {
+        assert!(
+            is_thrown.swap(true, core::sync::atomic::Ordering::SeqCst),
+            "listener bug"
+        );
+    }));
+    router.on_error(Arc::new(|_: &RouterError| {
+        panic!("an error listener that throws")
+    }));
+    router.on_error(Arc::new(move |error: &RouterError| {
+        locked(&hearing).push(error.clone());
+    }));
+
+    let answering = router
+        .request(Bytes::new(), super::request_of((None, super::TIMEOUT)))
+        .expect("a call");
+
+    clock.settle().await;
+    transport.deliver(&result_of(1, None));
+
+    // * the debug listener's throw told the next error listener, and the throw of the first
+    // dropped: the call answered with its result
+    assert!(super::answered(answering).await.is_ok(), "answered");
+    assert_eq!(transport.sent().len(), 1, "its request sent");
+
+    let heard = locked(&heard).clone();
+
+    assert_eq!(
+        heard.len(),
+        1,
+        "the debug listener's throw alone: {heard:?}"
+    );
+    assert!(
+        heard[0].to_string().contains("listener bug"),
+        "the debug listener's: {}",
+        heard[0]
+    );
+}

@@ -28,7 +28,7 @@ public sealed record WebSocketServerOptions
 ///     Server = new ServerOptions { CloseOnCommandTimeout = true },
 /// });
 ///
-/// await server.Transport.Start(new WebSocketTransportStartOptions { Port = port });
+/// await server.Transport.Start(new TransportServerStartOptions { Port = port });
 /// </code>
 /// </example>
 /// <typeparam name="TData">What a session keeps.</typeparam>

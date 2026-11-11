@@ -1,6 +1,9 @@
 namespace Bead;
 
-/// <summary>A request whose connection closed, or whose router was disposed, before its answer came.</summary>
+/// <summary>
+/// A call whose connection closed before its answer came, or was not open as it started — closing,
+/// closed or reconnecting — or whose side was disposed.
+/// </summary>
 public sealed class DisconnectException : Exception
 {
     /// <summary>A disconnection, saying why.</summary>

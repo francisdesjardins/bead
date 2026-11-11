@@ -31,7 +31,7 @@ use crate::router::types::{BoxFuture, ConnectionHandle, RouterError, TransportMe
 use crate::transport::{
     CONNECT_TIMEOUT, ClientListener, Connect, Listeners, RECONNECTION_CANCELLED, ReadyState,
     RouterClientTransport, Sent, TransportClientDisconnectOptions, TransportClientReconnectOptions,
-    attempting, first_of, hold_reconnection, is_field_value, joined,
+    attempting, first_of, hold_reconnection, is_field_value, joined, refused_unless_open,
 };
 
 /// What may wait on a connection for its broker, by default: a WebSocket's own bound, since a
@@ -145,6 +145,7 @@ impl ClientInner {
             |error: RouterError| {
                 for heard in &listeners {
                     // ! a listener of errors that panics would loop: its panic is dropped
+                    // (spec 15.1)
                     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         heard.on_error(&error);
                     }))
@@ -156,7 +157,7 @@ impl ClientInner {
 
     fn report(&self, error: &RouterError) {
         for listener in self.listeners.all() {
-            // ! a listener of errors that panics would loop: its panic is dropped
+            // ! a listener of errors that panics would loop: its panic is dropped (spec 15.1)
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| listener.on_error(error)))
                 .ok();
         }
@@ -699,8 +700,8 @@ impl BrokerTransportClient {
 
             let Some(held) = held else {
                 return Err(TransportError::ReadyState(ReadyStateError::new(
-                    state.ready.name(),
-                    ReadyState::Open.name(),
+                    state.ready,
+                    ReadyState::Open,
                 )));
             };
 
@@ -941,13 +942,17 @@ impl RouterClientTransport for BrokerTransportClient {
             match (state.held, state.ready) {
                 (Some(held), ReadyState::Open) => held,
                 (_, ready) => {
-                    return Err(RouterError::Other(Arc::new(ReadyStateError::new(
-                        ready.name(),
-                        ReadyState::Open.name(),
-                    ))));
+                    return Err(refused_unless_open(ready));
                 }
             }
         };
+
+        // refused before it goes, the connection kept: a text message is no envelope (spec 15.2)
+        if message.is_text {
+            return Err(RouterError::Other(Arc::new(ProgrammerError::new(
+                crate::broker::TEXT_REFUSED,
+            ))));
+        }
 
         // refused before it goes, the connection kept: a field could not carry it as it is
         if let Some(credential) = &message.credential

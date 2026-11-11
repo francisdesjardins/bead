@@ -8,8 +8,8 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use serde_json::{Value, json};
 
 use super::{
-    AdmissionRule, DescriptorInit, ListedFailure, ServiceProcedure, ServiceServer,
-    ServiceServerOptions, failures_of, request_of,
+    AdmissionRule, DescriptorInit, ListedFailure, ServiceClient, ServiceClientOptions,
+    ServiceProcedure, ServiceServer, ServiceServerOptions, failures_of, request_of,
 };
 use crate::client::ClientOptions;
 use crate::constants::ProtocolCode;
@@ -26,6 +26,7 @@ use crate::router::types::RouterError;
 use crate::testing::pair::{Pair, PairOptions, echo};
 use crate::violations::{Judged, Violation};
 
+mod client;
 mod descriptors;
 mod failures;
 mod server;
@@ -141,15 +142,26 @@ async fn counts_a_call_its_rules_refuse_before_it_goes_as_payload_invalid_starte
         },
     ));
 
-    let validating = manager
-        .get_request(
-            &echo(),
-            RequestDependencies {
-                validate: Some(Arc::new(|value, options| Ok(judge(value, options)))),
-                ..RequestDependencies::new(JsonCodec, JsonCodec)
-            },
-        )
-        .expect("echo asked");
+    let descriptor = request_of(DescriptorInit {
+        procedure: echo(),
+        admission: AdmissionRule::None,
+        failures: vec![],
+        request: JsonCodec,
+        result: JsonCodec,
+        validate: Some(Arc::new(|value, options| Ok(judge(value, options)))),
+    })
+    .expect("echo described");
+    let validating = ServiceClient::new(
+        vec![ServiceProcedure::from(&descriptor)],
+        &pair.client,
+        &ServiceClientOptions {
+            validates: Some(true),
+            ..ServiceClientOptions::default()
+        },
+    )
+    .expect("its validating client side")
+    .requester_of(&descriptor)
+    .expect("echo's requester");
 
     // * the call queued on its router's owner, then a read queued right behind it: what the call
     // did in its own turn is counted by then, and nothing after
@@ -261,7 +273,9 @@ async fn sends_an_unlisted_code_as_written_and_reports_it() {
         .iter()
         .map(|(error, _)| match error {
             RouterError::Other(error) => error.to_string(),
-            RouterError::Failure(failure) => failure.to_string(),
+            other @ (RouterError::Failure(_)
+            | RouterError::ReadyState(_)
+            | RouterError::Disconnected(_)) => other.to_string(),
         })
         .collect();
 

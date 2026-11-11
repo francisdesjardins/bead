@@ -3,39 +3,48 @@
 Bead is a binary wire protocol: the envelopes of a request, its result or failure, the notifications
 of a subscription and the commands a server sends back, written at fixed offsets. This workspace is
 its Rust implementation, at behavioural parity with the TypeScript and C# sides in what it holds: the
-same behaviour, played from the same conformance files in [`spec/`](../../spec/). It holds its core:
-the envelope's codec; the client and server routers with their service, session and notification
-managers, and the service layer's server half, its client half ahead in the core; sessions and
-credentials with a `JWT`'s verification; the clock it is given and every duration held as spec 1.4
-holds it; the trace, the filter and the registry, and a participant's trace of its parcels; the
-in-memory transport; the broker's core over an in-memory broker, and the joined transport; and the
-`proto` payload's codec on Buffa — playing every conformance file its core reaches, each part it
-lacks a row of [`docs/support.md`](../../docs/support.md)'s differences, ahead with the stage that
-brings it. The
-rules its code keeps — one owner per router, traits and composition, no unsafe code, two parameters
-then an options struct, every warning an error — are
-[decision 0044](../../docs/decisions/0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)'s.
+same behaviour, played from the same conformance files in [`spec/`](../../spec/), and proven against
+the other sides in the interop. It holds the envelope's codec; the client and server routers with
+their service, session and notification managers, and the service layer, its server half and its
+client half; sessions and credentials with a `JWT`'s verification; the clock it is given and every
+duration held as spec 1.4 holds it; the trace, the filter and the registry, and a participant's
+trace of its parcels; the WebSocket and HTTP transports, server and client, features of the core
+over tokio's sockets, and the in-memory transport; the broker's core over an in-memory broker, and
+the joined transport; and the `proto` payload's codec on Buffa — playing every conformance file it
+reaches, each part it lacks a row of [`docs/support.md`](../../docs/support.md)'s differences, ahead
+with the stage that brings it. The rules its code keeps — one owner per router, traits and
+composition, no unsafe code, two parameters then an options struct, every warning an error — are
+[decision 0044](../../docs/decisions/0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)'s;
+its sockets are
+[decision 0049](../../docs/decisions/0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)'s.
 
 ## Build and test
 
 Rust 1.99.1 and edition 2024, as `rust-toolchain.toml` pins them, which rustup installs with clippy,
-rustfmt and llvm-tools, and the target `wasm32-unknown-unknown`. On Windows, the MSVC build tools'
-C++ linker, and no C compiler beyond it, the core being pure Rust; or the GNU host, with a
-MinGW-w64's `dlltool` on the `PATH`, which `windows-sys` asks of it. From this folder:
+rustfmt and llvm-tools, and the target `wasm32-unknown-unknown`. The core is pure Rust; its socket
+transports' TLS, aws-lc-rs, is built by the platform's C compiler, so a build with `websocket` or
+`http`, the workspace's among them, needs one: on Windows, the MSVC build tools, their C compiler
+and their linker; or the GNU host, with a MinGW-w64's `dlltool` on the `PATH`, which `windows-sys`
+asks of it. From this folder:
 
 ```sh
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features --locked
-cargo clippy -p francisdesjardins-bead --lib --all-features --locked --target wasm32-unknown-unknown
+cargo clippy -p francisdesjardins-bead --lib --locked
+cargo clippy -p francisdesjardins-bead --lib --features websocket --locked
+cargo clippy -p francisdesjardins-bead --lib --features http --locked
+cargo clippy -p francisdesjardins-bead --lib --features testing --locked --target wasm32-unknown-unknown
 cargo test --workspace --all-features --locked
 cargo doc --workspace --no-deps --all-features --locked
 cargo build --workspace --locked
 cargo deny --locked check
 ```
 
-The second clippy checks the core for the browser's WebAssembly, never runs it: what the core links
-builds there, and `.cargo/config.toml` gives getrandom its `unsupported` backend on that target
-alone, so that no dependency is added for it.
+The second, the third and the fourth lint the core's library with no feature and with each socket
+transport's alone, `websocket` and `http` (decision 0049), so that each builds on its own. The fifth
+checks the core for the browser's WebAssembly, never runs it, by its features, no socket among them:
+what the core links builds there, and `.cargo/config.toml` gives getrandom its `unsupported` backend
+on that target alone, so that no dependency is added for it.
 
 Every warning of rustc, clippy and rustdoc is an error, by `.cargo/config.toml`'s `[build] warnings
 = "deny"`, as `TreatWarningsAsErrors` is on the C# side; `CARGO_BUILD_WARNINGS=warn` releases one
@@ -58,6 +67,22 @@ cargo llvm-cov --workspace --all-features --locked --json --summary-only --ignor
 node ../../tools/coverage-report.mjs coverage/rust.json --under implementations/rust/crates/bead/src --under implementations/rust/crates/bead-protobuf/src --floor rust
 ```
 
+## Features
+
+`francisdesjardins-bead` builds its core with no feature, and each feature adds to it, as Cargo's
+features are additive:
+
+- `websocket`: the WebSocket transport, server and client (RFC 6455), on tungstenite, its server
+  reading its own head; `WebSocketServer` and `WebSocketClient` over them;
+- `http`: the HTTP transport, server and client (RFC 9110, 9112), on hyper, HTTP/2 beside HTTP/1.1
+  under TLS on the server (RFC 9113); `HttpServer` and `HttpClient` over them;
+- `testing`: the test kit, `bead::testing`, which the tests alone turn on: no API.
+
+Either socket feature brings TLS on rustls over aws-lc-rs, a client verifying by the platform's own
+verifier, and `bead::rustls`, the rustls it builds, for an application's `ServerConfig` or
+`ClientConfig`. What judges a request, a head, a target, a host, an origin and a WebSocket's
+handshake, is always built, as is the HTTP policy, so the fuzz targets reach it with no feature.
+
 ## Layout
 
 A virtual workspace, its packages `francisdesjardins-bead*`, their libraries `bead*`, none published
@@ -77,6 +102,9 @@ crates/
                                 spec/interop-blueprint.json as beadc writes the other sides',
                                 which beadc's Rust target, ahead, generates; its resolvers and its
                                 credentials
+  bead-interop-server/          the interop service's server, bead-interop-server, over WebSocket
+                                and HTTP, which the other sides' clients call; and under tests/,
+                                the Rust client's trials against each side's server
   bead-house/                   the side's own checks that no lint holds: the parameter rule, the
                                 options struct's shape, each library crate's public surface
                                 against its list under surfaces/, no tuple on that surface, the
@@ -96,13 +124,14 @@ tools/check-protobuf.mjs        the check of the tests' descriptor set, as proto
 Bead takes the application's tokio runtime and starts none of its own: the runtime enables its time
 driver, by `enable_all` or `enable_time`, or a router, the in-memory transport and broker, a
 broker's participant and `SystemClock` refuse to be built on it, the runtime given or the current
-one. Each router is one owner, a task of that runtime that holds its state and runs its jobs one at
-a time, in the order they came; an operation goes as it is made, and dropping its future cancels
-nothing. A router's transport holds it, so it lives as long as its connection does, its last handle
-dropped or not; one that neither its application nor its transport holds ends with its owner, but
-a resolver a service manager registered holds that manager, and so its router, which then ends by
-its dispose. A job that panics past the guards of the sites the spec lets throw ends its router at
-once, each call it waits on failed with that panic for its reason.
+one; a socket's transport asks its IO driver too, by `enable_all` or `enable_io`, and refuses
+likewise. Each router is one owner, a task of that runtime that holds its state and runs its jobs
+one at a time, in the order they came; an operation goes as it is made, and dropping its future
+cancels nothing. A router's transport holds it, so it lives as long as its connection does, its last
+handle dropped or not; one that neither its application nor its transport holds ends with its owner,
+but a resolver a service manager registered holds that manager, and so its router, which then ends
+by its dispose. A job that panics past the guards of the sites the spec lets throw ends its router
+at once, each call it waits on failed with that panic for its reason.
 
 The core spawns and yields through one private module, `platform`, and reads time through its
 clock alone (decision 0011): clippy's `disallowed-methods` and `disallowed-types`, in `clippy.toml`,
@@ -123,12 +152,17 @@ that measures real time, is exempted once, at its root, with its reason.
 | `payloads`, `json`, `violations`                               | the codecs of spec 17, `raw`, `text` and `json`; a `json` value's reader and writer; `PAYLOAD_INVALID`'s detail (spec 18)                          |
 | `router`                                                       | the core both routers share, the client's and the server's, the relay, the admissions Bead gives, and transfers                                    |
 | `owner`                                                        | one owner per router: its jobs from one queue, in order, what a turn defers and what a listener makes within it at the tail                        |
-| `platform`                                                     | what the core spawns on, the application's tokio runtime, its time driver checked: the one place it spawns                                         |
+| `platform`                                                     | what the core spawns on, the application's tokio runtime, its time driver checked, a socket's IO driver too: the one place it spawns               |
 | `managers`                                                     | the service manager, a server's notifications and their pacing, its sessions                                                                       |
 | `service`                                                      | a service's procedures as typed descriptors, its failures, and the service server                                                                  |
 | `server`, `client`                                             | a server, and a client: a transport, its router and its services, built together                                                                   |
 | `credentials`, `jwt_verifier`, `session_token`, `call_session` | what resolves a `JWT` and an `ELSEWHERE`, a `JWT`'s verification (spec 13.8), a session's token, a call's session                                  |
 | `transport`, `memory`                                          | what a router takes its envelopes from and hands them to, and the in-memory transport (spec 15.13)                                                 |
+| `life`                                                         | the life every transport server shares: its ready state, and the guards around its start, its stop and its dispose                                 |
+| `websocket`                                                    | the WebSocket transport (spec 15.2, 15.3), behind `websocket`: its server, its client, the connection either end runs, its heartbeat, its facades  |
+| `http`                                                         | the HTTP transport (spec 15.4 to 15.11), behind `http`: its server, on hyper, its client, its exchanges and fields, its facades                    |
+| `net`                                                          | what a transport over a socket does alike: `localhost` bound, a socket's bounds, a close in stages, a name's addresses raced, TLS                  |
+| `judgement`, `http_policy`                                     | what a server judges of a request, pure and always built: a head, a target, a host, an origin, proxies, a handshake; and the HTTP policy           |
 | `broker`                                                       | the broker's core: its participant, its parcel, its sequence, its heartbeat, its transports and the in-memory broker                               |
 | `joined`                                                       | the joined transport, a server's transports through one (spec 15.14)                                                                               |
 | `debug`, `metrics`                                             | the trace and the `debug` filter, a participant's trace of its parcels (debugging 13), and the metrics registry (`spec/debugging.md`)              |
@@ -188,15 +222,22 @@ patience, a monotonic instant and the wall clock's reading. It is no API: an app
 the feature on. What the conformance players, the fuzz targets, the interop service and the bench
 reach that the API does not offer, the envelope's codec among it, is `bead::internal`, hidden from
 the docs and outside SemVer, as the C# side's members reach theirs by `InternalsVisibleTo`; no
-feature turns it on. `BEAD_HOUSE_WRITE=1 cargo test -p francisdesjardins-bead-house` writes each
+feature turns it on.
+
+The interop runs from `crates/bead-interop-server`: its trials, `cargo test -p
+francisdesjardins-bead-interop-server --test interop`, a trial a case, a transport and a server,
+named by the TypeScript side's sentence in snake case, play the Rust client against the TypeScript,
+C# and Rust servers once `BEAD_INTEROP_RUST=1` asks, and are ignored otherwise, saying so; the
+other sides' interop tests start the binary `BEAD_INTEROP_RUST_SERVER` names
+([the root README](../../README.md#interop-both-ways)). `BEAD_HOUSE_WRITE=1 cargo test -p francisdesjardins-bead-house` writes each
 crate's list of its public items anew, its diff the change's to review.
 
 ## Fuzzing and the bench
 
 `node ../../tools/fuzz.mjs build rust`, then `run rust
-envelope|payload-codecs|debug-filter|jwt|broker-parcel|proto-codecs`, fuzzes the side's six targets
-with cargo-fuzz on the nightly the tool pins by its date, on Linux or WSL; the transports' two come
-with them. [`fuzz.yml`](../../.github/workflows/fuzz.yml) runs the six every week, each ten minutes,
+envelope|payload-codecs|http-fields|debug-filter|jwt|ws-handshake|broker-parcel|proto-codecs`,
+fuzzes the side's eight targets with cargo-fuzz on the nightly the tool pins by its date, on Linux
+or WSL. [`fuzz.yml`](../../.github/workflows/fuzz.yml) runs the eight every week, each ten minutes,
 its corpus kept between runs ([the root README](../../README.md#fuzzing)).
 `crates/bead/tests/envelope_fuzz.rs` and `broker_parcel_fuzz.rs` feed the envelope readers and the
 parcel's seeded mutations of `spec/vectors.json` in the suite, from `bead::testing::mutations`, the

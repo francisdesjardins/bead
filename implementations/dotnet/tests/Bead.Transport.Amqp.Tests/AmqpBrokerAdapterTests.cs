@@ -2165,8 +2165,8 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
                 return frame.Performative is Attach { Role: false } attach && (attach.Target as Target)?.Address is null;
             };
 
-            // ! held and counted before the END: the replacement sender may attach as its session
-            // ends or as the next publication asks for it, and either ATTACH must be the one held
+            // ! held and counted before the END: only the next publication begins the replacement
+            // sender, and its ATTACH must be the one held, however soon after the END it comes
             _script.Holding = isSending;
             var sending = connection.Frames.Count;
 

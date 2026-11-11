@@ -307,8 +307,8 @@ public sealed partial class RouterServerTests
         Assert.Equal(["pause first", "resume first"], _transport.Paces);
         Assert.Equal(["this listener breaks, on purpose first"], Reported());
 
-        // * a text message's report runs the application's handler in its job, whose throw the
-        // scheduler goes on past: its count released in the job's finally all the same
+        // * a text message's report runs the application's handler in its job, whose throw is
+        // dropped (spec 15.1): its count released all the same
         Router.Error += (reason, _) =>
         {
             if (reason is FailureException)
@@ -324,6 +324,37 @@ public sealed partial class RouterServerTests
 
         Assert.Equal(["pause first", "resume first", "pause first", "resume first"], _transport.Paces);
         Assert.False(_transport.IsPaused(First));
+    }
+
+    // spec 15.2, 15.12.17
+    [Fact]
+    public async Task Counts_a_text_message_by_its_UTF_8_bytes_then_reports_it_ENVELOPE_MALFORMED_with_its_connection_handing_nothing_on()
+    {
+        Start(new RouterServerOptions { Intake = new IntakeLimits { MaximumUntakenBytes = 4 } });
+
+        var taken = TakenBy();
+        var reported = new List<(string Report, string? ConnectionHandle, bool IsPaused)>();
+
+        Router.Error += (reason, connectionHandle) =>
+        {
+            var report = reason is FailureException failure ? $"{(ProtocolCode)failure.Code} {failure.Detail}" : reason.Message;
+
+            reported.Add((report, connectionHandle, _transport.IsPaused(First)));
+        };
+        _transport.Open(First);
+
+        // * four bytes in two UTF-16 code units: its bound reached, counted before it is reported
+        _transport.DeliverText(First, "éé");
+
+        Assert.True(_transport.IsPaused(First));
+
+        await Settle();
+
+        // reported paused, released in that turn, and nothing handed on or answered
+        Assert.Equal([($"{ProtocolCode.EnvelopeMalformed} an envelope is binary, not a string", (string?)First, true)], reported);
+        Assert.Equal(["pause first", "resume first"], _transport.Paces);
+        Assert.Empty(taken);
+        Assert.Empty(SentSince());
     }
 
     // spec 15.12.17

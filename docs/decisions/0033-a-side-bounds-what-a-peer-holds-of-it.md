@@ -130,8 +130,8 @@ bodies `bodyBytesBudget` bounds.
 15.12 reads it, judged at 15.2's step 8 beside its stop: an upgrade past them is refused 503 `busy`,
 its `Retry-After` 1, marked and told, before its 101
 ([RFC 9110 §15.6.4](https://www.rfc-editor.org/rfc/rfc9110#section-15.6.4),
-[RFC 6455 §4.2.2](https://www.rfc-editor.org/rfc/rfc6455#section-4.2.2)). An upgrade takes its
-place as it is judged — under a lock of its own on the C# side, in the one turn Node runs the
+[RFC 6455 §4.2.2](https://www.rfc-editor.org/rfc/rfc6455#section-4.2.2)). An upgrade takes its place
+as it is judged — under a lock of its own on the C# and Rust sides, in the one turn Node runs the
 judgement, the upgrade and `connection` in on the TypeScript side — and gives it back as its
 connection closes or its handshake fails, so upgrades that cross take no more places than are left.
 An HTTP server's and a WebSocket server's are counted apart, each by its own server. Node's
@@ -163,25 +163,27 @@ platform's socket does ([0011](0011-every-side-takes-its-time-from-a-clock-it-is
 exception). The C# HTTP transport sets Kestrel's `MinResponseDataRate` to none, Bead's rule in its
 place: Kestrel's would abort unreported, its bound unnamed.
 
-**A head is held to `headersTimeout`, 30 s**, never without end, on both transports' servers, by the
-platform's parser, which alone sees a head before it is whole: its 408 is HTTP's own, unmarked and
-told by none, and comes past its time and within 2 seconds of it, on the platform's clock. The
-TypeScript transport sets `headersTimeout`, `requestTimeout` 0 and `connectionsCheckingInterval`
-1,000 on every server it listens on, its WebSocket server's own and each one an application's
-`createServer` builds, before the `listen` it calls itself, so Node's 408 comes at its check each
-second, within a second of its time: 2,051 ms for a `headersTimeout` of 2,000 with the interval set,
-30,013 ms without. The C# transports set Kestrel's `RequestHeadersTimeout`, whose deadline
-`TimeoutControl.AssignTimeout` sets a heartbeat past its time and `CheckForTimeout` meets on the
-first heartbeat after it, each second: a connection's first head is answered 1 to 2 seconds past its
-time, a kept connection's 0 to 2. That timing is the platform's, a row of the Differences: the
-heartbeat is internal, a timeout shortened by a heartbeat would refuse a kept connection's head up
-to a second early, and a timer of the transport's own would parse the head this record leaves to the
-platform's parser. **A body is held to `minimumBodyBytesPerSecond`, 240, past `bodyGracePeriod`,
-5 s**, never without end, Bead's own, on the server's clock
-([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)), alike on both sides: one that
-brought _R_ bytes and none more by its head's reading plus max(`bodyGracePeriod`,
-⌈_R_ × 1,000 / `minimumBodyBytesPerSecond`⌉) ms is refused 408 `too-slow`, marked and told as a 413
-counted as it comes is
+**A head is held to `headersTimeout`, 30 s**, never without end, on both transports' servers, its
+408 unmarked and told by none, past its time and within 2 seconds of it, on the platform's clock. On
+the TypeScript and C# sides the platform's parser holds it, which alone sees a head before it is
+whole, and its 408 is HTTP's own. The TypeScript transport sets `headersTimeout`, `requestTimeout` 0
+and `connectionsCheckingInterval` 1,000 on every server it listens on, its WebSocket server's own
+and each one an application's `createServer` builds, before the `listen` it calls itself, so Node's
+408 comes at its check each second, within a second of its time: 2,051 ms for a `headersTimeout` of
+2,000 with the interval set, 30,013 ms without. The C# transports set Kestrel's
+`RequestHeadersTimeout`, whose deadline `TimeoutControl.AssignTimeout` sets a heartbeat past its
+time and `CheckForTimeout` meets on the first heartbeat after it, each second: a connection's first
+head is answered 1 to 2 seconds past its time, a kept connection's 0 to 2. That timing is the
+platform's, a row of the Differences: the heartbeat is internal, a timeout shortened by a heartbeat
+would refuse a kept connection's head up to a second early, and a timer of the transport's own would
+parse the head this record leaves to the platform's parser. On the Rust side, a cell of the same
+row, the transports write the 408 themselves: at a WebSocket's address past a deadline on their own
+read of the head, over HTTP once hyper's header timer, on a `Timer` of Bead's, fires. **A body is
+held to `minimumBodyBytesPerSecond`, 240, past `bodyGracePeriod`, 5 s**, never without end, Bead's
+own, on the server's clock ([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)),
+alike on every side: one that brought _R_ bytes and none more by its head's reading plus
+max(`bodyGracePeriod`, ⌈_R_ × 1,000 / `minimumBodyBytesPerSecond`⌉) ms is refused 408 `too-slow`,
+marked and told as a 413 counted as it comes is
 ([0026](0026-a-server-tells-each-refusal-it-judges-and-a-client-names-the-one-it-reads.md)), its
 Bead connection kept. A trickle charges `bodyBytesBudget` as it comes, never as declared. Kestrel's
 `MinRequestBodyDataRate` is set to none and Node's `requestTimeout` to 0, Bead's rate in their
@@ -209,15 +211,16 @@ below.
 drains what still comes until the peer's close or its close timeout, then ends the connection, its
 close unclean whatever code the peer answers with, and reports it, naming the bound and its value,
 `… is closed with 1009: a message past its maximumMessageBytes, N bytes`. **A side's close timeout,
-5 s by default, bounds each closing handshake it begins**, its 1009 among them, both clients' over
-`ws` and .NET included, the TypeScript client giving `ws` its `closeTimeout`: a peer that has not
-answered by then is dropped; a client over the global `WebSocket` leaves its close to its platform.
+5 s by default, bounds each closing handshake it begins**, its 1009 among them, a client's over
+`ws`, over .NET and on the Rust side included, the TypeScript client giving `ws` its `closeTimeout`:
+a peer that has not answered by then is dropped; a client over the global `WebSocket` leaves its
+close to its platform.
 
 **A transport tells on its `error` what it ends a connection for of its own**, a client's as a
 server's, as spec 15.1 lists it: a protocol error on it; a message it fails with 1009, or over HTTP
 an envelope past its `maximumBodyBytes`, an answer's or a batch's, and a connection a server drops
-behind a bound, each naming the bound in the spec's spelling and its value, the same words on both
-sides; a batch that does not read, saying what of it does not; a Web Worker client's worker that
+behind a bound, each naming the bound in the spec's spelling and its value, the same words on every
+side; a batch that does not read, saying what of it does not; a Web Worker client's worker that
 errs, named by its message and where its script threw it; and a broker connection lost to a gap, a
 bound or a parcel that does not read, naming it, and a message a broker's participant takes that is
 no parcel, which it drops and which ends no connection (spec 15.17, 15.19, 15.20). It tells a
@@ -263,8 +266,8 @@ behind a large burst holds its backlog until the heartbeat drops it; where the h
 the bound alone holds it. A body at exactly 240 bytes a second holds its socket and its place as
 long as it keeps the rate, as Kestrel's, IIS's and Apache's rules let it; the bound per address
 bounds how many. A client's own queue toward a server that stops reading is its application's. Over
-HTTP/2, a head is HEADERS and CONTINUATION frames, which nghttp2 and Kestrel bound their own way,
-and no test holds.
+HTTP/2, a head is HEADERS and CONTINUATION frames, which nghttp2, Kestrel and hyper's `h2` bound
+their own way, and no test holds.
 
 **Ahead, each by a decision of its own that meets the Tenth Man**: a bound on the payload bytes of
 the calls a connection has answered, as HTTP/2's connection window; a raise of
@@ -313,8 +316,9 @@ come whole within headersTimeout, at its address and its WebSocket’s, past it 
 of it`, and the TypeScript side's `sets headersTimeout, no requestTimeout and a
 connectionsCheckingInterval of a second on every server createServer builds, its 408 within a second
 of its time`, beside the C# side's
-`Sets_its_HeadersTimeout_and_no_body_rate_of_Kestrel_s_on_every_listener`, so a change of the
-platform's fails a test. `docs/support.md` names them.
+`Sets_its_HeadersTimeout_and_no_body_rate_of_Kestrel_s_on_every_listener`, the Rust side holding
+hyper's timer by the 408's twin, so a change of the platform's fails a test. `docs/support.md` names
+them.
 
 ## The Tenth Man
 

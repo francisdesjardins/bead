@@ -2,9 +2,10 @@
 
 - **Status**: accepted
 - **Scope**: the protocol, and every implementation's transports, server and client: the guard on a
-  transport's listeners in section 15.1 of [`spec/spec.md`](../../spec/spec.md), and what a stop
-  answers what arrives as it runs, 15.2, 15.3, 15.6 and 15.7; the bounds a WebSocket server's
-  upgrade is judged by beside its stop, 15.2's step 8, are
+  transport's listeners in section 15.1 of [`spec/spec.md`](../../spec/spec.md), and what a
+  listener of any `error` event a side tells throws: a transport's, a router's, a broker
+  participant's, a gateway's; and what a stop answers what arrives as it runs, 15.2, 15.3, 15.6 and
+  15.7; the bounds a WebSocket server's upgrade is judged by beside its stop, 15.2's step 8, are
   [0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)'s. HTTP's draw of a connection is
   [0020](0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md)'s, and a debug listener's
   throw [0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)'s.
@@ -71,16 +72,23 @@ its close as a server goes down is 1001, going away
 
 **A transport goes on through its listener's throw** (spec 15.1). Each listener of a transport's
 event, a connection opened, an envelope, a listen, a close or a reconnection, is called within its
-own guard, on every transport, server and client, on both sides: what one throws is reported, as
+own guard, on every transport, server and client, on every side, the Rust side's socket transports
+among them: what one throws is reported, as
 spec 9.0 reports an error, through its transport's `error` event with the connection it was told of;
 the listeners after it are called all the same; and the transport goes on as if it returned. Its
 connection is drawn and its 201 written, or its socket kept; its envelope is handed on, and the
 router's answer written; its close is done; its reconnection goes on to its attempts. A listener's
 throw refuses no connection, fails no exchange and closes nothing. It is
 [0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)'s rule for a debug listener, carried
-to the transports, and the DOM's inner invoke is its standard. A listener of the transport's `error`
-that throws is its platform's, as a listener of a router's `error` is, and so is what a listener
-returns: a side awaits nothing of it.
+to the transports, and the DOM's inner invoke is its standard. A listener of an `error` event, every
+one a side tells — its transport's, its router's, its broker participant's, its gateway's — is
+called within a guard too: what it throws is dropped, reported nowhere, since reporting it would
+tell the event that threw, and the listeners after it are called all the same. Every side's
+participant and both gateways tell their `error` so, and so do the transports and the routers;
+HTML's report of an exception is its standard: it fires no `error` for one its own `error` listener
+raised
+([WHATWG HTML §8.1.4.6](https://html.spec.whatwg.org/multipage/webappapis.html#report-an-exception)).
+What a listener returns is its platform's: a side awaits nothing of it.
 
 **The transport's `error` is where it is told.** Every TypeScript transport carries one, and its
 emitter returns `false` for an `error` nobody listens to, so a report ends nothing. On the C# side,
@@ -92,7 +100,11 @@ A server's transport, as the server gives it, carries `error` and `refusal` as e
 `IServerTransportLike` on the TypeScript side, `IServerTransport` on the C# side. So an application
 hears its transport's through its server, whichever transport it built,
 `server.transport.on('error', …)` and `server.Transport.Error`, where a socket's error already goes,
-and a client's on the client transport it built.
+and a client's on the client transport it built. On the Rust side a transport's listener is a
+`ServerListener` or a `ClientListener`, given to its `listen`: one given to
+`server.transport().listen(…)` hears its errors by `on_error` and its refusals by `on_refusal`, one
+given to a client transport its errors by `on_error`, and every listener of a transport is told what
+one of them panics.
 
 **Once its stop began, a server takes nothing new** (spec 15.2, 15.6, 15.7). A server's transport
 stops when its application stops it (spec 15.1). Over HTTP it draws no connection, a connect it
@@ -104,26 +116,27 @@ connection. At a WebSocket's address, an upgrade it would take is refused 503 `b
 `Retry-After` 1, marked and stamped as 15.6 says, the last of 15.2's steps. A client may wait longer
 than its reconnection's delay, as a `Retry-After` asks (spec 15.7,
 [RFC 9110 §10.2.3](https://www.rfc-editor.org/rfc/rfc9110#section-10.2.3)): the field binds no
-recipient, so the spec leaves the choice to each client. Bead's own clients read none, and a
-reconnection waits its schedule, a Features row of the support matrix. A request refused for what it
-is — its host, its path, its origin, its method, its token's form, and a connect's type and its own
-400 — is refused so whether or not a stop began: what a request is comes before when it came. An
-exchange's type, its `Authorization` and its length are judged once its connection is found, and a
-stopping server finds none: the 404 comes first. Spec 15.6 gives the whole order. On the TypeScript
-side, Node's `shouldUpgradeCallback` says false once the HTTP server that received the request no
-longer serves, and the transport's `request` listener answers the refusal.
+recipient, so the spec leaves the choice to each client. Bead's own clients read none for a
+reconnection, which waits its schedule, a Features row of the support matrix. A request refused
+for what it is — its host, its path, its origin, its method, its token's form, and a connect's type
+and its own 400 — is refused so whether or not a stop began: what a request is comes before when it
+came. An exchange's type, its `Authorization` and its length are judged once its connection is
+found, and a stopping server finds none: the 404 comes first. Spec 15.6 gives the whole order. On
+the TypeScript side, Node's `shouldUpgradeCallback` says false once the HTTP server that received
+the request no longer serves, and the transport's `request` listener answers the refusal.
 
 **A connection whose opening handshake completes as the stop begins is closed going away, 1001**
 (spec 15.3), by a guard at registration. No pass of the stop looks again for one: on the C# side,
 the host's `StopAsync` waits on the request the guard closes, bounded by the close timeout; on the
 TypeScript side, `ws` takes no upgrade once closed, and the guard is reached by an injected
-`WebSocketServer` that delivers a connection after its `close()`.
+`WebSocketServer` that delivers a connection after its `close()`; on the Rust side, the guard reads
+the server's state once the connection is registered, the stop having taken its snapshot.
 
 ## Consequences
 
-**A throw nobody listens for is unseen, on both sides alike**: the cost
+**A throw nobody listens for is unseen, on every side alike**: the cost
 [0013](0013-every-language-debugs-alike-at-no-cost-when-off.md) takes for a debug listener. A throw
-ends neither process. A listener's rejection is its platform's: Node's unhandled rejection ends its
+ends no process. A listener's rejection is its platform's: Node's unhandled rejection ends its
 process, and an async listener of a C# event is `async void`, whose exception ends its process. So a
 listener catches its own. On the C# side, the threading analyzers' VSTHRD100 and VSTHRD101 find
 such a listener at build: Bead's own projects are held to them
@@ -131,6 +144,11 @@ such a listener at build: Bead's own projects are held to them
 as the C# README says. A listener of Bead's own that throws, its router's or its server's, is
 reported the same way, and a connection it leaves untracked lives until its transport closes it,
 over HTTP at its `inactivityTimeout`.
+
+**What a listener of an `error` event throws is seen nowhere**, on every side alike: an error
+listener catches its own, as every listener does, or its bug is unseen; on the Rust side the
+platform's panic hook prints a panic before Bead catches it, as at every site it catches one, the
+matrix's row "A panic under `panic = "abort"`".
 
 **An application listens for errors in two places**: on its router, for what spec 9.0 reports, and
 on its transport, for what it ends a connection for of its own
@@ -142,7 +160,7 @@ for every transport, and is a decision of its own, which meets the Tenth Man.
 late errors go to its logger alone, so the C# side raises `Error` for a listener's throw and none
 for those.
 
-**No platform row for a stop crossed by an arrival**: both sides answer it alike, the TypeScript
+**No platform row for a stop crossed by an arrival**: every side answers it alike, the TypeScript
 side through Node's `shouldUpgradeCallback` and `request`, which are the transport's own. The
 matrix's row for a stop at the WebSocket server names what each side waits on.
 
@@ -150,13 +168,15 @@ matrix's row for a stop at the WebSocket server names what each side waits on.
 default: a transport delivers a burst in one synchronous turn, so a bound on what waits between two
 reads ends a loop that is not behind. A bound that tells its loop of a lag and lets it go on, as
 tokio's `broadcast` tells `Lagged` or .NET's `BoundedChannelFullMode.DropOldest` drops, is ahead,
-for both sides at once with an iterator on the C# side, by a decision of its own that meets the Tenth
-Man.
+for the TypeScript and C# sides at once with an iterator on the C# side, the Rust side's events being
+callbacks, by a decision of its own that meets the Tenth Man.
 
 **No conformance case holds it.** No step of `spec/transports.json` installs a listener of the
-application's, and both runners play a `stop` to its end before the next step, so no step sends into
-a stop's window. Twin tests hold it on each side, by the same sentence, each window opened by a
-listener the stop calls, a head written in two halves or a scripted `WebSocketServer`:
+application's, and every side's runner plays a `stop` to its end before the next step, so no step
+sends into a stop's window. Twin tests hold it on each side, by the same sentence, each window opened
+by a listener the stop calls, a head written in two halves or a scripted `WebSocketServer`, but the
+Rust side's 1001 guard, which none of its tests reaches, as the matrix's row for a stop at the
+WebSocket server says:
 `draws a connection whose connection listener throws, the next listener told, the throw reported with it`;
 `hands on a request whose message listener throws, its answer still written, the throw reported with its connection`;
 `refuses a connect that comes as it stops, busy, told when to come back, drawing nothing`;
@@ -164,14 +184,24 @@ listener the stop calls, a head written in two halves or a scripted `WebSocketSe
 `refuses an upgrade that comes as it stops, 503 busy, told when to come back`;
 `closes going away a connection whose accept a stop crossed`; the clients'
 `hears the next message after a message listener throws, the throw reported` and
-`reconnects though a reconnect listener throws, the throw reported, the next listener told`; and
-the servers' `hears its transport's error and refusal through the server's transport`
+`reconnects though a reconnect listener throws, the throw reported, the next listener told`; the
+servers' `hears its transport's error and refusal through the server's transport`; and, for a
+listener of an `error` event that throws,
+`drops behind maximumOutboxBytes a connection whose error listener throws, telling its close all the same and dropping what it threw`,
+`closes with 1009, and drops behind maximumUnsentBytes, a connection whose error listener throws, telling its close all the same and dropping what it threw`
+and
+`fails its connection on a protocol error whose error listener throws, telling its close all the same and dropping what it threw`
+at the transports, the routers'
+`drops what an error listener throws, the next error listener told, and the call goes on`, the
+participants' `drops what an error listener throws, the next error listener told, and the participant goes on`
+and the gateways'
+`writes a text or a raw stream’s data as a JSON string and a result it cannot read as a call’s failure`
 ([0004](0004-one-behaviour-in-every-language.md)).
 
 ## The Tenth Man
 
 The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)) in
-two rounds. Their objections, each with the answer that holds:
+three rounds. Their objections, each with the answer that holds:
 
 ### On a transport's listener that throws, and a stop crossed by an arrival
 
@@ -190,3 +220,13 @@ two rounds. Their objections, each with the answer that holds:
 | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | "As .NET's unobserved exception may" names the wrong mechanism: a C# listener is an `Action<…>` event, so an async lambda is `async void`, whose exception always ends the process                                      | Accepted: the transports' events are `Action<…>`. This record and the C# README say that an async listener of a C# event is `async void`: its exception ends the process, as Node's unhandled rejection does, so a listener catches its own |
 | "A client of Bead reads no Retry-After", as spec text, binds every client, since a unit no entry cites binds a side all the same. So a third-party client that honours the field, as RFC 9110 allows, would not conform | Accepted: spec 15.7 says instead that a client MAY wait longer than its reconnection's delay, as a `Retry-After` asks (RFC 9110 §10.2.3). That Bead's own clients read none is in both READMEs and in the matrix's Features                 |
+
+### On an error listener's own throw
+
+| Objection                                                                                                                                                                                                                                                                                                                | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 0023 already settled an error listener's throw, and refused the mechanism proposed, a rethrow: its Decision makes an error listener's throw "its platform's", its Tenth Man row says "no throw is told uncaught", and spec 15.1 says the same; the drop is a revision of 0023 and 15.1, not a line of `debugging.md` 2.2 | Accepted: the drop revises 0023's Decision and 15.1's sentence, and adds 2.2's line, all three saying it alike. The one behaviour every platform can give is the throw caught where the event is told and dropped, the next listener called: what the Rust side must do (0044) and does, and HTML's report of an exception (§8.1.4.6), which fires no `error` for one its own `error` listener raised. Every `error` event Bead tells, a router's among them, through one guarded report a side                                                                                                                                                                                                                                                                                                                                                                                                  |
+| The premise misreads one rule as two: both TypeScript paths, and the C# side's, are 0023's "its platform's", the throw landing where the frame that told the event puts it; the lone divergence is the Rust side's catch, forced by 0044, which a platform row could hold with no code changed                           | In part: the premise is rewritten, three sides following one written rule. The row is refused: TypeScript and C# can drop the throw, so no platform imposes the difference, and "its platform's" is itself five outcomes — a rejected `send`, a crash, Kestrel's log, an unobserved task, a drop — one word for a crash and a silence, which 0023 refused for every other listener                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| "Left to the platform" is three behaviours: Node exits, .NET exits or writes to a `Trace` no file uses, Rust prints and goes on; rethrowing on the thread pool is worse than today and fails every exchange, against 15.1's "fails no exchange"                                                                          | Accepted: no rethrow on any side. The twin tests assert that the `send` settles as with no listener, the close is told, a second error listener hears the error, and nothing reaches the process (`trapUncaught` sees nothing on TypeScript)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| The precedent is Bead's own, uncited: every side's participant already drops what an error listener throws; 15.1's sentence names a transport's and a router's `error` alone, so a participant's or a gateway's twin would cite a unit that does not say it; no participant twin asserts the drop                        | Accepted, its evidence corrected: the TypeScript and C# participants and both gateways drop it, the C# gateway stopping at the first listener that throws; the Rust participant tells an error listener's panic once more to every error listener before it drops the second, and comes to the plain drop with every report of its side. 15.1 names every `error` event a side tells — a transport's, a router's, a broker participant's, a gateway's — and debugging 2.2 and 13.9 and transcoding's gateway unit each cite it. This record cites the participants and the gateways as the precedent and HTML as the standard, in that order. A twin on each side's participant, `drops what an error listener throws, the next error listener told, and the participant goes on`, which the Rust side's re-report fails; the gateway's twin on both sides that have one gains a second listener |
+| The drop is a silence on two sides and a print on the third: HTML still offers the exception to a developer console, Bead to none, while the Rust panic hook prints it; the record owes the cost of having no logger                                                                                                     | Accepted: the Consequences say it — what a listener of an `error` event throws is seen nowhere, on every side alike; an error listener catches its own, as every listener does, or its bug is unseen; the Rust side's panic hook, the platform's, prints a panic first, as at every site Bead catches one, and the row "A panic under `panic = "abort"`" says so in its Rust cell. The TypeScript and C# READMEs, which say a listener catches its own, say an error listener's too. A logger for what Bead drops stays a decision of its own                                                                                                                                                                                                                                                                                                                                                    |

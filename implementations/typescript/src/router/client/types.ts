@@ -220,7 +220,10 @@ export type RouterClientEventMap = {
    * to `error`, and changes nothing of the envelope.
    */
   debug: [info: IRouterDebugInfo];
-  /** What went wrong with an envelope no call was waiting on, or in a resolver or a notification. */
+  /**
+   * What went wrong with an envelope no call was waiting on, or in a resolver or a notification.
+   * What a listener of it throws is dropped, the listeners after it told all the same (spec 15.1).
+   */
   error: [error: Error];
 };
 

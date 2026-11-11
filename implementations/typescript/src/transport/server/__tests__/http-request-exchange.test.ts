@@ -8,7 +8,8 @@ import {
   CONNECTION_TOKEN_HEADER,
   ENVELOPE_KINDS,
   REFUSAL_HEADER,
-  REFUSALS,
+  HEAD_DELAY_MILLISECONDS,
+  HTTP_REFUSALS,
 } from '../http-transport-server';
 import type { IHTTPResponseLike } from '../types';
 import {
@@ -58,8 +59,8 @@ test.describe('createHTTPTransportServer', () => {
     };
 
     expect([twice([BEARER, BEARER]), twice([BEARER, ''])]).toEqual([
-      [400, REFUSALS.MALFORMED, 'close'],
-      [400, REFUSALS.MALFORMED, 'close'],
+      [400, HTTP_REFUSALS.MALFORMED, 'close'],
+      [400, HTTP_REFUSALS.MALFORMED, 'close'],
     ]);
     expect(namesOf(events, 'message')).toEqual([]);
     await server.stop();
@@ -88,7 +89,7 @@ test.describe('createHTTPTransportServer', () => {
       return reason;
     });
 
-    expect(declared).toEqual([413, REFUSALS.TOO_LARGE]);
+    expect(declared).toEqual([413, HTTP_REFUSALS.TOO_LARGE]);
     // the socket closes behind a 413 on HTTP/1.1: its client may see it, or the reset
     expect(counted instanceof Response ? String(counted.status) : 'reset').toMatch(
       /^(?:413|reset)$/u
@@ -155,7 +156,7 @@ test.describe('createHTTPTransportServer, its edges', () => {
         endless.response.headers?.[REFUSAL_HEADER],
         endless.response.headers?.['connection'],
         endless.request.isDestroyed,
-      ]).toEqual([413, REFUSALS.TOO_LARGE, 'close', false]);
+      ]).toEqual([413, HTTP_REFUSALS.TOO_LARGE, 'close', false]);
     }
     expect(
       namesOf(events, 'message').map(([, bytes]) => {
@@ -167,8 +168,10 @@ test.describe('createHTTPTransportServer, its edges', () => {
 
   // spec 15.12.4
   test('reads a body up to its limit exactly, declared or counted, refuses one declared past it before any of it, and gives back the bytes each held', async () => {
+    const clock = createTestClock();
     const { connectScripted, events, exchangeOf, fake, server } = await startScripted({
       bodyBytesBudget: 24,
+      clock,
       maximumBodyBytes: 16,
     });
     const { connectionToken } = connectScripted();
@@ -188,6 +191,8 @@ test.describe('createHTTPTransportServer, its edges', () => {
       envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 3 }),
       new Uint8Array(8),
     ]);
+    // their heads, once each waited 40 ms for its answer (spec 15.7)
+    clock.tick(HEAD_DELAY_MILLISECONDS);
 
     expect([declared.response.status, counted.response.status]).toEqual([200, 200]);
     expect(namesOf(events, 'message')).toHaveLength(2);
@@ -201,10 +206,12 @@ test.describe('createHTTPTransportServer, its edges', () => {
     const filling = exchangeOf(connectionToken, { 'content-length': '16' });
 
     fake.feed(filling.request, [envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 7, extra: 8 })]);
+    clock.tick(HEAD_DELAY_MILLISECONDS);
     expect(filling.response.status).toBe(200);
     expect(server.gauges().counts['bodyBytes']).toBe(8);
     expect(namesOf(events, 'message')).toHaveLength(3);
     fake.feed(holding.request, [new Uint8Array(8)]);
+    clock.tick(HEAD_DELAY_MILLISECONDS);
     expect(holding.response.status).toBe(200);
     expect(server.gauges().counts['bodyBytes']).toBe(0);
     expect(namesOf(events, 'message')).toHaveLength(4);
@@ -316,10 +323,10 @@ test.describe('createHTTPRequestExchange', () => {
     }
 
     expect(ends).toEqual([
-      { reason: REFUSALS.MALFORMED, status: 400 },
-      { reason: REFUSALS.TOO_LARGE, status: 413 },
+      { reason: HTTP_REFUSALS.MALFORMED, status: 400 },
+      { reason: HTTP_REFUSALS.TOO_LARGE, status: 413 },
       // * told when to come back, which a client waits for before it sends again (spec 15.6)
-      { headers: { 'retry-after': '1' }, reason: REFUSALS.BUSY, status: 429 },
+      { headers: { 'retry-after': '1' }, reason: HTTP_REFUSALS.BUSY, status: 429 },
     ]);
     expect(asked).toEqual(['finish', 'finish', 'admitExchange', 'finish']);
   });
@@ -406,7 +413,7 @@ test.describe('createHTTPTransportServer, a body as it comes', () => {
       refusals.map(({ reason, status }) => {
         return [status, reason];
       })
-    ).toEqual([[408, REFUSALS.TOO_SLOW]]);
+    ).toEqual([[408, HTTP_REFUSALS.TOO_SLOW]]);
     expect([bodyBytes(), namesOf(events, 'message'), namesOf(events, 'close')]).toEqual([
       0,
       [],

@@ -67,6 +67,7 @@ import {
   BEAD_MEDIA_TYPE,
   CONNECTION_TOKEN_HEADER,
   createHTTPTransportServer,
+  HEAD_DELAY_MILLISECONDS,
   httpPolicyOf,
   type IHTTPTransportServerOptions,
   LISTEN_HEADER,
@@ -819,9 +820,14 @@ const connectOn = (fake: FakeHTTPServer, isListening: boolean): string => {
 const heldByHTTPServer = async (
   {
     drawn,
+    heldFrom = (_clock, due) => {
+      return due;
+    },
     measured,
   }: {
     drawn: (fake: FakeHTTPServer) => string;
+    /** The duration held, from the due of the one timer `measured` left pending. */
+    heldFrom?: (clock: TestClock, due: number) => number;
     measured: (fake: FakeHTTPServer, connectionToken: string) => void;
   },
   options?: Partial<IHTTPTransportServerOptions>
@@ -853,12 +859,15 @@ const heldByHTTPServer = async (
 
     // a body's pace is armed as it comes, and goes once it is whole: the timers left are held
     return {
-      held: dueOf(
-        armed
-          .filter(({ handle }) => {
-            return !cleared.includes(handle);
-          })
-          .map(delayOf)
+      held: heldFrom(
+        clock,
+        dueOf(
+          armed
+            .filter(({ handle }) => {
+              return !cleared.includes(handle);
+            })
+            .map(delayOf)
+        )
       ),
     };
   } finally {
@@ -868,17 +877,35 @@ const heldByHTTPServer = async (
 
 // an exchange handed on, waiting its answer, its connection's rest without end
 const exchangeOfServer: Way = (given) => {
+  let asking: ReturnType<FakeHTTPServer['exchange']> | undefined;
+
   return heldByHTTPServer(
     {
       drawn: (fake) => {
         return connectOn(fake, false);
       },
+      // * one timer from its hand-off, its head's 40 ms first (spec 15.7): past them, or never,
+      // its head goes at them and the rest of its timeout is armed then; at them or under, the
+      // one due is its timeout's, whose close sends its head
+      heldFrom: (clock, due) => {
+        if (due !== HEAD_DELAY_MILLISECONDS) {
+          return due;
+        }
+
+        const { armed } = timersBy(clock, () => {
+          clock.tick(HEAD_DELAY_MILLISECONDS);
+        });
+
+        expect(asking?.response.status, 'its head, at 40 ms').toBe(200);
+
+        return asking?.response.isDestroyed === true ? due : due + dueOf(armed.map(delayOf));
+      },
       measured: (fake, connectionToken) => {
-        const { request } = fake.exchange({
+        asking = fake.exchange({
           headers: { 'content-type': BEAD_MEDIA_TYPE, [CONNECTION_TOKEN_HEADER]: connectionToken },
         });
 
-        fake.feed(request, [REQUEST]);
+        fake.feed(asking.request, [REQUEST]);
       },
     },
     { inactivityTimeout: Infinity, ...optionOf('exchangeTimeout', given) }

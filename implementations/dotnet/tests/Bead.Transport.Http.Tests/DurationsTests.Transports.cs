@@ -23,12 +23,15 @@ public sealed partial class DurationsTests
 {
     // constants
 
-    private static readonly HttpTransportStartOptions Loopback = new() { Address = Host, FindOpenPort = true };
+    private static readonly TransportServerStartOptions Loopback = new() { Address = Host, FindOpenPort = true };
 
     // a wait no bound of a server's reaches
     private const long LongestWait = 999_999_999_999_999;
 
     private static readonly string Token = new('T', 22);
+
+    // what a request's head waits for its answer from its hand-off (spec 15.7)
+    private static readonly TimeSpan HeadDelay = TimeSpan.FromMilliseconds(40);
 
     // a Retry-After that asks longer than a timer holds, in whole seconds
     private static readonly string PastTheCeiling = Math.Ceiling(Clocks.LongestTimer.TotalSeconds).ToString(CultureInfo.InvariantCulture);
@@ -36,20 +39,57 @@ public sealed partial class DurationsTests
     // httpTransport.exchangeTimeout by its server, httpTransport.inactivityTimeout by its server, httpTransportServer.maximumWait
 
     // the transport server's options, as it is built: the due of the timer it arms for an exchange
-    // handed on, waiting its answer; never, none armed; refused, no server built
+    // handed on, waiting its answer, counted from its hand-off; never, none armed; refused, no
+    // server built
     private static Task<Observed> ExchangeTimeoutByServer(TimeSpan? given)
     {
         // its connection's own timer never armed, so the exchange's alone is read
         return HttpServerOf(given is { } timeout ? new HttpTransportServerOptions { ExchangeTimeout = timeout, InactivityTimeout = Never } : new HttpTransportServerOptions { InactivityTimeout = Never }, async (drive) =>
         {
+            var handedOn = 0;
+            var closed = 0;
+
+            drive.Server.Message += (_, _) =>
+            {
+                Interlocked.Increment(ref handedOn);
+            };
+            drive.Server.Close += (_, _) =>
+            {
+                Interlocked.Increment(ref closed);
+            };
+
             using var asking = PostOf(drive.Url, (await drive.Connect(false), EnvelopeOf(EnvelopeKind.Request, 1)));
+            var head = drive.Http.SendAsync(asking, HttpCompletionOption.ResponseHeadersRead, Cancelled);
 
-            // its head says the router has it, its timer armed
-            using var head = await drive.Http.SendAsync(asking, HttpCompletionOption.ResponseHeadersRead, Cancelled).WaitAsync(Patience, Cancelled);
+            // handed on, its one timer armed
+            await Until(() =>
+            {
+                return Volatile.Read(ref handedOn) == 1 && drive.Clock.Dues().Count == 1;
+            });
 
-            Assert.Equal(200, (int)head.StatusCode);
+            var due = DueOf(drive.Clock.Dues());
 
-            return drive.Clock.Dues();
+            // * one timer from its hand-off, its head's 40 ms first (spec 15.7): past them, or never,
+            // its head goes at them and the rest of its timeout is armed then; at them or under, the
+            // one due is its timeout's, whose close sends its head
+            if (due != HeadDelay)
+            {
+                return [due];
+            }
+
+            await drive.Clock.Advance(HeadDelay);
+
+            if (Volatile.Read(ref closed) == 1)
+            {
+                return [due];
+            }
+
+            // its head says the router has it
+            using var response = await head.WaitAsync(Patience, Cancelled);
+
+            Assert.Equal(200, (int)response.StatusCode);
+
+            return drive.Clock.Dues() is [var rest] ? [due + rest] : [];
         });
     }
 

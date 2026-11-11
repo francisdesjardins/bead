@@ -212,7 +212,7 @@ in their order, the TypeScript adapter keeping that queue itself on `sendable`. 
 or a name no deployment provisioned; `rejected`, or any other outcome, refuses it, naming its error.
 A publication past its sender's ATTACH `max-message-size`, counted, is refused as it is asked. The
 TypeScript side writes the profile itself and hands rhea the bytes; the C# side has AMQPNetLite
-2.5.4 write them, whose encodings are the profile's, pinned by the lockfile and
+2.5.5 write them, whose encodings are the profile's, pinned by the lockfile and
 `Directory.Packages.props` and held to the profile by `amqpMessages`. The reference is the spec's
 writer, `spec/generators/amqp_messages.py`, which both sides play.
 
@@ -294,7 +294,7 @@ costs a name its subscription and, at a second loss, the link; a contract that l
 one subscription lost, the link kept, would serve it better, and is not written: AMQP 1.0 alone
 would use it.
 
-**The C# side's bytes are AMQPNetLite 2.5.4's**: an upgrade that writes another encoding fails
+**The C# side's bytes are AMQPNetLite 2.5.5's**: an upgrade that writes another encoding fails
 `amqpMessages` before anything ships. The TypeScript side writes its own and is held by the same
 group.
 

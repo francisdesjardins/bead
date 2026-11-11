@@ -9,7 +9,6 @@ import {
   CLOSE_EVENT,
   CONNECTION_TOKEN_HEADER,
   CONNECTION_UNKNOWN,
-  ERROR_EVENT,
   LISTEN_HEADER,
   MESSAGE_EVENT,
   REFUSAL_HEADER,
@@ -22,6 +21,7 @@ import {
   ConnectError,
   GenericError,
   ProgrammerError,
+  notOpenOf,
   ReadyStateError,
   reasonMessage,
   toError,
@@ -101,12 +101,10 @@ interface IReading {
 
 /** What an omitted connect option resolves to. */
 export const CONNECT_DEFAULTS = Object.freeze({
-  host: 'localhost',
   pathname: '/bead',
-  port: 80,
   secured: false,
   timeout: 30_000,
-} satisfies IHTTPTransportClientConnectOptions);
+} satisfies Omit<IHTTPTransportClientConnectOptions, 'host' | 'port'>);
 
 /** How long a disconnect waits on the server before it lets the connection go all the same. */
 export const DISCONNECT_TIMEOUT = 5_000;
@@ -386,7 +384,7 @@ export const createHTTPTransportClient = (
   const wait = assertHeldDelay('wait', givenWait);
 
   return createTransportClient<IHTTPClientConnection, IHTTPTransportClientConnectOptions>(
-    (client, { tell }) => {
+    (client, { report, tell }) => {
       let drawn: IDrawn | undefined;
       // settles the connect in flight, so a dispose under it cannot leave it pending
       let rejectConnect: ((reason: Error) => void) | undefined;
@@ -483,13 +481,11 @@ export const createHTTPTransportClient = (
         if (!client.isReconnecting()) {
           setReadyStateClosed(client);
 
-          try {
-            if (failure !== undefined) {
-              client.emit(ERROR_EVENT, failure);
-            }
-          } finally {
-            tell(CLOSE_EVENT, [false, false]);
+          if (failure !== undefined) {
+            report(failure);
           }
+
+          tell(CLOSE_EVENT, [false, false]);
         }
       };
 
@@ -752,6 +748,12 @@ export const createHTTPTransportClient = (
       };
 
       return {
+        assertConnect: ({ host, port }) => {
+          // what its type requires, and a caller in JavaScript may still leave out
+          if (typeof host !== 'string' || typeof port !== 'number') {
+            throw new ProgrammerError('a connect names the host and the port it reaches');
+          }
+        },
         // * any field value, in each `POST`'s `Authorization`
         carries: isFieldValue,
         clock,
@@ -932,20 +934,19 @@ export const createHTTPTransportClient = (
 
           client.socket = null;
           setReadyStateClosed(client);
-          try {
-            if (failure !== undefined) {
-              client.emit(ERROR_EVENT, failure);
-            }
-          } finally {
-            tell(CLOSE_EVENT, [isClean, isQuick]);
+
+          if (failure !== undefined) {
+            report(failure);
           }
+
+          tell(CLOSE_EVENT, [isClean, isQuick]);
         },
 
         send: ({ credential, data }) => {
           const connection = drawn;
 
           if (!client.isOpen() || connection === undefined) {
-            return Promise.reject(new ReadyStateError(getReadyState(client), ReadyState.OPEN));
+            return Promise.reject(notOpenOf(getReadyState(client)));
           }
 
           // refused before it goes, the connection kept: a field could not carry it as it is, and

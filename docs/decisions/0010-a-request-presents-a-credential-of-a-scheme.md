@@ -519,8 +519,8 @@ could overtake it. The order of section 9.2, a cancel during resolution and a tr
 credit are stated, and played by a conversation whose verifier settles late, on the server's clock.
 Verifying a `JWT` costs the TypeScript and C# sides no dependency: Web Crypto on the TypeScript
 side, in Node and in a browser alike; `ECDsa` and `HMACSHA256` on the C# side; a key imported from
-its JWK, JSON and base64url on both. The Rust side verifies on RustCrypto, `p256`, `hmac` and
-`sha2` ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)). A
+its JWK, JSON and base64url on each of the two. The Rust side verifies on RustCrypto, `p256`, `hmac`
+and `sha2` ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)). A
 key set is the application's to fetch.
 
 **The relays' table plays in the conversations, and `Authorization` in the transports' file**

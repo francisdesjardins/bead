@@ -889,7 +889,7 @@ public sealed class HttpTransportClientTests
         {
             var started = new Started();
 
-            started.Port = (await started.Server.Start(new HttpTransportStartOptions { Address = Host, FindOpenPort = true, CancellationToken = Cancelled })).Port;
+            started.Port = (await started.Server.Start(new TransportServerStartOptions { Address = Host, FindOpenPort = true, CancellationToken = Cancelled })).Port;
 
             return started;
         }
@@ -1550,10 +1550,10 @@ public sealed class HttpTransportClientTests
         Assert.Equal((true, connectionHandle), closed);
         Assert.True(started.Closes.Reader.Count == 0);
         Assert.Equal(ReadyState.Closed, client.ReadyState);
-        await Assert.ThrowsAsync<DisconnectException>(() =>
+        Assert.Equal(ReadyState.Closed, (await Assert.ThrowsAsync<ReadyStateException>(() =>
         {
             return client.CloseConnection();
-        });
+        })).Got);
         await Assert.ThrowsAsync<DisconnectException>(() =>
         {
             return client.Send(new TransportMessage(new byte[8], false));
@@ -1933,7 +1933,7 @@ public sealed class HttpTransportClientTests
         foreach (var address in Addresses.ReachedByLocalhost())
         {
             await using var server = new HttpTransportServer();
-            var port = (await server.Start(new HttpTransportStartOptions { Address = address, FindOpenPort = true, CancellationToken = Cancelled })).Port;
+            var port = (await server.Start(new TransportServerStartOptions { Address = address, FindOpenPort = true, CancellationToken = Cancelled })).Port;
             await using var client = new HttpTransportClient(NotListening);
             var started = TimeProvider.System.GetTimestamp();
 
@@ -1947,6 +1947,81 @@ public sealed class HttpTransportClientTests
         {
             Assert.True(connect.Took < TimeSpan.FromSeconds(1.5), $"{connect.Address}: {connect.Took}");
         });
+    }
+
+    // debugging 9.7
+    [Fact]
+    public async Task Refuses_a_send_by_its_ready_state_before_the_open_and_as_a_disconnection_after_it_in_each_state_it_holds()
+    {
+        // * a server whose every answer the test gives, a DELETE's among them
+        using var fetch = new Fetch { IsDeleteHeld = true };
+        await using var client = new HttpTransportClient(NotListening with { Handler = fetch });
+        var target = new HttpTransportClientConnectOptions { Host = Host, Port = 8_080 };
+        var refusals = new List<string>();
+
+        // never connected: a close refused by its state too
+        refusals.Add(await SendRefusals.Of(client));
+        Assert.Equal(ReadyState.Uninitialized, (await Assert.ThrowsAsync<ReadyStateException>(() =>
+        {
+            return client.CloseConnection();
+        })).Got);
+
+        // connecting, its POST held
+        var connecting = client.Connect(target with { CancellationToken = Cancelled });
+
+        refusals.Add(await SendRefusals.Of(client));
+        (await fetch.CallOf(0)).Answer(DrawnOf(false));
+        await connecting.WaitAsync(Patience, Cancelled);
+
+        // open, the send going
+        var sending = SendRefusals.Of(client);
+
+        (await fetch.CallOf(1)).Answer(new Answer { Status = 204 });
+        refusals.Add(await sending);
+
+        // closing, its DELETE held
+        var closing = client.CloseConnection();
+
+        refusals.Add(await SendRefusals.Of(client));
+        (await fetch.CallOf(2)).Answer(new Answer { Status = 204 });
+        await closing.WaitAsync(Patience, Cancelled);
+
+        // closed by its own close
+        refusals.Add(await SendRefusals.Of(client));
+
+        // reconnecting, its POST held, then ended by its token
+        using var ending = new CancellationTokenSource();
+        var reconnecting = client.Reconnect(new TransportClientReconnectOptions { CancellationToken = ending.Token });
+
+        await fetch.CallOf(3);
+        refusals.Add(await SendRefusals.Of(client));
+        await ending.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+        {
+            return reconnecting.WaitAsync(Patience, Cancelled);
+        });
+
+        // closed by a connect that started and failed: its network failed
+        var failing = client.Connect(target with { CancellationToken = Cancelled });
+
+        (await fetch.CallOf(4)).Fail();
+        await Assert.ThrowsAsync<HttpRequestException>(() =>
+        {
+            return failing.WaitAsync(Patience, Cancelled);
+        });
+        refusals.Add(await SendRefusals.Of(client));
+
+        Assert.Equal(
+            [
+                "ReadyStateException Uninitialized: the transport client is uninitialized, not open",
+                "ReadyStateException Connecting: the transport client is connecting, not open",
+                "sent",
+                "DisconnectException: the transport client is closing, not open",
+                "DisconnectException: the transport client is closed, not open",
+                "DisconnectException: the transport client is reconnecting, not open",
+                "DisconnectException: the transport client is closed, not open",
+            ],
+            refusals);
     }
 
     // spec 15.15

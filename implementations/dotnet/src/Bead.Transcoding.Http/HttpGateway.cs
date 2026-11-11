@@ -318,7 +318,7 @@ public sealed class HttpGateway : IAsyncDisposable
             context.Response.Headers.AccessControlExposeHeaders = "*";
 
             // 6. a preflight from an origin it lists: the methods its path's routes take
-            if (HttpMethods.IsOptions(request.Method) && request.Headers.ContainsKey(HeaderNames.AccessControlRequestMethod))
+            if (IsMethod(request, "OPTIONS") && request.Headers.ContainsKey(HeaderNames.AccessControlRequestMethod))
             {
                 await Preflight(context, isDocument ? ["GET", "HEAD"] : MethodsOf(matched));
 
@@ -336,7 +336,7 @@ public sealed class HttpGateway : IAsyncDisposable
             return;
         }
 
-        var method = HttpMethods.IsHead(request.Method) ? "GET" : request.Method;
+        var method = IsMethod(request, "HEAD") ? "GET" : request.Method;
 
         if (isDocument)
         {
@@ -466,9 +466,15 @@ public sealed class HttpGateway : IAsyncDisposable
             return true;
         }
 
-        var isRead = HttpMethods.IsGet(context.Request.Method) || HttpMethods.IsHead(context.Request.Method);
+        var isRead = IsMethod(context.Request, "GET") || IsMethod(context.Request, "HEAD");
 
         return isRead && asked.Matched.TryGetValue("GET", out var served) && served.Route.NoSideEffects;
+    }
+
+    // whether a request's method is the one named: a method is case-sensitive (RFC 9110 §9.1)
+    private static bool IsMethod(HttpRequest request, string method)
+    {
+        return string.Equals(request.Method, method, StringComparison.Ordinal);
     }
 
     // each method's route that answers a raw path, by 3.5's precedence among that method's; HEAD as GET
@@ -1334,7 +1340,7 @@ public sealed class HttpGateway : IAsyncDisposable
         response.ContentType = "application/json";
         response.ContentLength = _document!.Length;
 
-        if (!HttpMethods.IsHead(context.Request.Method))
+        if (!IsMethod(context.Request, "HEAD"))
         {
             await WriteSlices(context, _document);
         }
@@ -1358,7 +1364,7 @@ public sealed class HttpGateway : IAsyncDisposable
         response.ContentType = answer.ContentType;
         response.ContentLength = answer.Body.Length;
 
-        if (!HttpMethods.IsHead(context.Request.Method) && answer.Body.Length > 0)
+        if (!IsMethod(context.Request, "HEAD") && answer.Body.Length > 0)
         {
             await WriteSlices(context, answer.Body);
         }
@@ -1534,20 +1540,14 @@ public sealed class HttpGateway : IAsyncDisposable
         return IsHttp1(context.Request) ? HostsAndOrigins.TargetAuthorityOf(context.Features.Get<IHttpRequestFeature>()?.RawTarget) : null;
     }
 
-    // a request's target as it came (3.6): an absolute-form target's path and query, its authority aside
+    // a request's target as it came (3.6): an absolute-form target's path and query, its authority
+    // aside (spec 15.12)
+    // ! never Request.Path, which decodes it, but where Kestrel gives no RawTarget
     private static string RawTargetOf(HttpContext context)
     {
         var raw = context.Features.Get<IHttpRequestFeature>()?.RawTarget ?? (context.Request.Path + context.Request.QueryString).ToString();
 
-        if (raw.StartsWith('/'))
-        {
-            return raw;
-        }
-
-        var scheme = raw.IndexOf("://", StringComparison.Ordinal);
-        var slash = scheme < 0 ? -1 : raw.IndexOf('/', scheme + 3);
-
-        return slash < 0 ? "/" : raw[slash..];
+        return HostsAndOrigins.TargetRestOf(raw);
     }
 
     private string? AddressOf(HttpContext context)
@@ -1562,16 +1562,11 @@ public sealed class HttpGateway : IAsyncDisposable
         return Bead.TrustedProxies.ClientAddressOf(remote, (forwarded.Count == 0 ? null : forwarded.ToString(), _proxyTrust));
     }
 
+    // each error listener within a guard that drops what it throws, the listeners after it told:
+    // the exchange answers on (spec 15.1)
     private void Report(Exception reason)
     {
-        try
-        {
-            Error?.Invoke(reason);
-        }
-        catch (Exception thrown) when (thrown is not OutOfMemoryException)
-        {
-            // a listener's throw goes no further: the exchange answers on
-        }
+        ListenerGuard.TellError(Error, reason);
     }
 
     // its options' members, each its policy's where the policy gives one, one given in it and beside

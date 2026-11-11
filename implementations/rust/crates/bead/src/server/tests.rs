@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use serde_json::json;
 
-use super::{HealthStatus, LayerGauges, ServerGauges, health_of, layer_gauges_of};
+use super::{HealthCheck, HealthStatus, LayerGauges, ServerGauges, health_of, layer_gauges_of};
 use crate::managers::sessions::SessionEvent;
 use crate::router::types::{ConnectionHandle, Gauges};
 use crate::session_token::SessionToken;
@@ -91,73 +91,146 @@ async fn gauges_each_layer_and_passes_a_server_that_keeps_nothing_it_should_not(
     );
 }
 
+// the twins of `health.test.ts` and `HealthTests`
 #[test]
-fn sets_a_layer_s_gauges_against_the_connections_its_transport_holds() {
-    let held: ConnectionHandle = Arc::from("type=MEMORY;ip=local;ordinal=1");
-    let gone: ConnectionHandle = Arc::from("type=MEMORY;ip=local;ordinal=2");
+fn keeps_a_layer_s_counts_ceilings_and_anomalies_and_counts_as_orphans_the_connections_held_nowhere_else()
+ {
+    let handle = |name: &str| -> ConnectionHandle { Arc::from(name) };
     let gauges = Gauges {
-        connection_handles: [Arc::clone(&held), gone].into_iter().collect(),
-        ..Gauges::default()
+        anomalies: vec!["odd".to_owned()],
+        ceilings: BTreeMap::from([("calls", 4)]),
+        connection_handles: ["a", "b", "c"].map(handle).into_iter().collect(),
+        counts: BTreeMap::from([("calls", 3)]),
     };
 
     assert_eq!(
-        layer_gauges_of(gauges, &BTreeSet::from([held])).orphans,
-        1,
-        "the one its transport no longer holds"
+        layer_gauges_of(gauges, &BTreeSet::from([handle("a")])),
+        LayerGauges {
+            anomalies: vec!["odd".to_owned()],
+            ceilings: BTreeMap::from([("calls", 4)]),
+            counts: BTreeMap::from([("calls", 3)]),
+            orphans: 2,
+        },
+        "its counts, its ceilings, its anomalies, and its orphans, no handle among them"
     );
 }
 
+// a check of `observed`, saying `output` where it says something
+fn check_of(
+    (observed_value, status): (u64, HealthStatus),
+    output: Option<&str>,
+) -> Vec<HealthCheck> {
+    vec![HealthCheck {
+        observed_value,
+        output: output.map(str::to_owned),
+        status,
+    }]
+}
+
 #[test]
-fn warns_of_a_count_at_four_fifths_of_its_ceiling_and_fails_an_orphan_or_an_anomaly() {
-    let layer = |(count, ceiling): (u64, u64)| LayerGauges {
-        ceilings: BTreeMap::from([("transfers", ceiling)]),
-        counts: BTreeMap::from([("transfers", count)]),
-        ..LayerGauges::default()
-    };
-    let status_of = |router: LayerGauges| {
-        health_of(&ServerGauges {
-            router,
-            ..ServerGauges::default()
-        })
-        .status
-    };
-
-    assert_eq!(
-        status_of(layer((3, 4))),
-        HealthStatus::Pass,
-        "3 of 4 short of four fifths"
-    );
-    assert_eq!(
-        status_of(layer((4, 5))),
-        HealthStatus::Warn,
-        "4 of 5 at four fifths"
-    );
-    assert_eq!(
-        status_of(LayerGauges {
-            orphans: 1,
-            ..LayerGauges::default()
-        }),
-        HealthStatus::Fail,
-        "an orphan fails"
-    );
-
-    let failed = health_of(&ServerGauges {
-        sessions: LayerGauges {
-            anomalies: vec!["a session of no connection".to_owned()],
+fn passes_a_server_with_no_orphan_no_anomaly_and_each_count_under_its_ceiling() {
+    let health = health_of(&ServerGauges {
+        transport: LayerGauges {
+            ceilings: BTreeMap::from([("connections", 10)]),
+            counts: BTreeMap::from([("connections", 7), ("listens", 3)]),
             ..LayerGauges::default()
         },
         ..ServerGauges::default()
     });
+    let quiet = check_of((0, HealthStatus::Pass), None);
+    let mut checks: BTreeMap<String, Vec<HealthCheck>> =
+        ["router", "server", "sessions", "transport"]
+            .into_iter()
+            .flat_map(|layer| {
+                [
+                    (format!("{layer}:anomalies"), quiet.clone()),
+                    (format!("{layer}:orphans"), quiet.clone()),
+                ]
+            })
+            .collect();
 
-    assert_eq!(failed.status, HealthStatus::Fail, "an anomaly fails");
+    checks.insert(
+        "transport:connections".to_owned(),
+        check_of((7, HealthStatus::Pass), Some("7 of 10")),
+    );
+    assert_eq!(health.checks, checks, "each check");
+    assert_eq!(health.status, HealthStatus::Pass, "passed");
+}
+
+#[test]
+fn warns_of_a_count_from_its_warning_share_of_its_ceiling_and_fails_an_orphan_or_an_anomaly_the_worst_standing()
+ {
+    let connections = |count: u64| LayerGauges {
+        ceilings: BTreeMap::from([("connections", 10)]),
+        counts: BTreeMap::from([("connections", count)]),
+        ..LayerGauges::default()
+    };
+    let near = health_of(&ServerGauges {
+        transport: connections(8),
+        ..ServerGauges::default()
+    });
+
     assert_eq!(
-        failed
-            .checks
-            .get("sessions:anomalies")
-            .and_then(|checks| checks.first())
-            .and_then(|check| check.output.clone()),
-        Some("a session of no connection".to_owned()),
-        "said what it found"
+        (
+            near.status,
+            near.checks.get("transport:connections").cloned()
+        ),
+        (
+            HealthStatus::Warn,
+            Some(check_of((8, HealthStatus::Warn), Some("8 of 10")))
+        ),
+        "a count at its warning share"
+    );
+    assert!(
+        (super::WARNING_RATIO - 0.8).abs() < f64::EPSILON,
+        "four fifths"
+    );
+
+    let failing = health_of(&ServerGauges {
+        router: LayerGauges {
+            orphans: 2,
+            ..LayerGauges::default()
+        },
+        sessions: LayerGauges {
+            anomalies: vec!["one".to_owned(), "two".to_owned()],
+            ..LayerGauges::default()
+        },
+        transport: connections(9),
+        ..ServerGauges::default()
+    });
+
+    assert_eq!(failing.status, HealthStatus::Fail, "the worst standing");
+    assert_eq!(
+        (
+            failing.checks.get("router:orphans").cloned(),
+            failing.checks.get("sessions:anomalies").cloned()
+        ),
+        (
+            Some(check_of(
+                (2, HealthStatus::Fail),
+                Some("2 connections kept that the transport no longer holds")
+            )),
+            Some(check_of((2, HealthStatus::Fail), Some("one; two")))
+        ),
+        "an orphan and an anomaly fail"
+    );
+    // a warning after a failure leaves it the worst
+    assert_eq!(
+        health_of(&ServerGauges {
+            router: LayerGauges {
+                orphans: 1,
+                ..LayerGauges::default()
+            },
+            transport: LayerGauges {
+                ceilings: BTreeMap::from([("connections", 1)]),
+                counts: BTreeMap::from([("connections", 1)]),
+                ..LayerGauges::default()
+            },
+            ..ServerGauges::default()
+        })
+        .status,
+        HealthStatus::Fail,
+        "the failure standing"
     );
 }
 

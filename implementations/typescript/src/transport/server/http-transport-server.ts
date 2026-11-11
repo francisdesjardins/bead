@@ -76,7 +76,7 @@ import {
   linesOf,
   listeningOf,
   preflightOf,
-  REFUSALS,
+  HTTP_REFUSALS,
   refuseMalformed,
   RESPONSE_HEADERS,
   sendHead,
@@ -120,9 +120,9 @@ export type {
   IHTTPServerLike,
   IHTTPTransportServerOptions,
 } from './types';
-export { ENVELOPE_KINDS, ENVELOPE_PREFIX, REFUSALS } from './http-server-fields';
+export { ENVELOPE_KINDS, ENVELOPE_PREFIX, HTTP_REFUSALS } from './http-server-fields';
 export { HTTP_POLICY_MEMBERS, httpPolicyOf } from './http-policy';
-export type { IHTTPPolicy, IHTTPPolicyInit, IHTTPPolicyOption } from './http-policy';
+export type { IHTTPPolicy, IHTTPPolicyOption, IHTTPPolicyOptions } from './http-policy';
 export {
   HEADERS_TIMEOUT,
   MAXIMUM_CONNECTIONS,
@@ -230,6 +230,14 @@ export const START_DEFAULTS = Object.freeze({
  */
 export const BURIAL_MILLISECONDS = 5_000;
 
+/**
+ * How long a request's head waits for its answer from its hand-off: 40 ms. An answer within them
+ * goes whole, its head with it and its length in `content-length`; a request still unanswered then
+ * gets its head alone, and its answer after it (spec 15.7). The exchange timeout counts from the
+ * hand-off, those 40 ms within it.
+ */
+export const HEAD_DELAY_MILLISECONDS = 40;
+
 // a token: 16 bytes from `crypto`, in base64url without padding, as a session's
 const TOKEN_BYTES = 16;
 const TOKEN_PATTERN = /^[\w-]{22}$/u;
@@ -289,8 +297,9 @@ const unref = (timer: TimeoutId): void => {
  *
  * Each `POST` carries one envelope, of type `application/prs.bead`. The transport reads its layout,
  * kind and call id, and nothing else: a request's exchange waits under its call id — from its first
- * 8 bytes — for the answer the router sends on it, whose head goes out as the request is handed on,
- * so the requester knows the router has it; any other envelope is handed on and its exchange ends
+ * 8 bytes — for the answer the router sends on it: one within {@link HEAD_DELAY_MILLISECONDS} of
+ * its hand-off goes whole, and a request still unanswered then gets its head alone, so the
+ * requester knows the router has it; any other envelope is handed on and its exchange ends
  * 204. A request is handed on with its credential, the `Authorization` field of its `POST` as it
  * came, its surrounding whitespace removed, and none when the field is empty or absent; no other
  * exchange's is read, and a `POST` with two is refused 400. An answer, and what a listen brings
@@ -299,8 +308,8 @@ const unref = (timer: TimeoutId): void => {
  * in `bead-refusal`. To a page of an origin `origins` names, it answers CORS (spec 15.12): its
  * preflight 204, and every answer once its origin is judged naming it and exposing every field, no
  * credential allowed. An exchange lost — its response closed before the transport ended it — closes
- * the connection, as a socket that drops does; so do a request unanswered past `exchangeTimeout` and
- * a connection idle past `inactivityTimeout`.
+ * the connection, as a socket that drops does; so do a request unanswered past `exchangeTimeout`,
+ * counted from its hand-off, and a connection idle past `inactivityTimeout`.
  *
  * A connection its router paused hands on nothing (spec 15.12): each envelope read whole waits at
  * its gate, in order, its body still charged to `bodyBytesBudget`, its request's head and any
@@ -324,8 +333,8 @@ const unref = (timer: TimeoutId): void => {
  * past `maximumOutboxBytes` or an answer its socket held past its deadline at
  * `minimumSendBytesPerSecond` past `sendGracePeriod`, a {@link GenericError} naming the bound in the
  * spec's spelling and its value, told once, as its connection ends, its end begun, before its
- * unclean `close`, so a listener that throws keeps nothing open; and what a listener of its events
- * threw, as it threw. A client gone, an exchange lost, or a connection closed past
+ * unclean `close`, so a listener that throws keeps nothing open; and what a listener of its other
+ * events threw, as it threw. A client gone, an exchange lost, or a connection closed past
  * `exchangeTimeout` or `inactivityTimeout` emits no `error`: its unclean `close` tells it.
  *
  * @example
@@ -392,7 +401,7 @@ export const createHTTPTransportServer = (
   const drawn = new Map<TransportServerConnectionHandle, IDrawn>();
 
   const transport = createTransportServer<IDrawnConnection, IDrawingRequest>(
-    (server, connections, { isHeard, tell }) => {
+    (server, connections, { isHeard, report, tell }) => {
       // the servers the start under way, or the last, built and keeps: one an address bound, each
       // by the application's `createServer`, configured alike
       const httpServers = new Set<IHTTPServerLike>();
@@ -536,8 +545,8 @@ export const createHTTPTransportServer = (
       };
 
       // ! a connection behind its bounds is dropped, its close unclean, then reported, naming the
-      // bound, so an operator tells it from a network that failed; once, as it ends, and its close
-      // told even when a listener of `error` throws, which is Node's (spec 15.1)
+      // bound, so an operator tells it from a network that failed; once, as it ends, its close told
+      // after, what a listener of `error` throws dropped (spec 15.1)
       const drop = (connection: IDrawn, why: string): void => {
         const { connectionHandle } = connection;
 
@@ -545,11 +554,8 @@ export const createHTTPTransportServer = (
           return;
         }
 
-        try {
-          server.emit(ERROR_EVENT, droppedOf(connectionHandle, why), connectionHandle);
-        } finally {
-          tell(CLOSE_EVENT, [false, connectionHandle]);
-        }
+        report(droppedOf(connectionHandle, why), connectionHandle);
+        tell(CLOSE_EVENT, [false, connectionHandle]);
       };
 
       // an answer's bytes, held to the pace its socket takes them at; `late` hears, naming the
@@ -656,7 +662,9 @@ export const createHTTPTransportServer = (
         const wait = countOf(request, WAIT_HEADER);
 
         if (!connection.isListening) {
-          return (finish(exchange, { reason: REFUSALS.LISTEN_UNDECLARED, status: 409 }), undefined);
+          return (
+            finish(exchange, { reason: HTTP_REFUSALS.LISTEN_UNDECLARED, status: 409 }), undefined
+          );
         }
 
         if (
@@ -665,7 +673,7 @@ export const createHTTPTransportServer = (
           wait === undefined ||
           after > connection.sequence
         ) {
-          return (finish(exchange, { reason: REFUSALS.MALFORMED, status: 400 }), undefined);
+          return (finish(exchange, { reason: HTTP_REFUSALS.MALFORMED, status: 400 }), undefined);
         }
 
         const kept = connection.outbox.filter(({ sequence }) => {
@@ -745,7 +753,7 @@ export const createHTTPTransportServer = (
         // a connect carries no body, and says whether it listens in the one way; a socket already
         // gone reports no address
         if (hasBody(request) || address === undefined || isListening === undefined) {
-          return (finish(exchange, { reason: REFUSALS.MALFORMED, status: 400 }), undefined);
+          return (finish(exchange, { reason: HTTP_REFUSALS.MALFORMED, status: 400 }), undefined);
         }
 
         // none is drawn once a stop began, as none past the bounds: busy, told when to come back
@@ -755,7 +763,7 @@ export const createHTTPTransportServer = (
           drawn.size >= maximumConnections ||
           heldBy(address) >= maximumConnectionsPerAddress
         ) {
-          const busy = { headers: { 'retry-after': '1' }, reason: REFUSALS.BUSY, status: 503 };
+          const busy = { headers: { 'retry-after': '1' }, reason: HTTP_REFUSALS.BUSY, status: 503 };
 
           return (finish(exchange, busy), undefined);
         }
@@ -881,7 +889,7 @@ export const createHTTPTransportServer = (
             const { callId, kind } = prefix;
 
             if (layout < ENVELOPE_PREFIX.firstLayout || layout > ENVELOPE_PREFIX.lastLayout) {
-              return { reason: REFUSALS.MALFORMED, status: 400 };
+              return { reason: HTTP_REFUSALS.MALFORMED, status: 400 };
             }
 
             if (kind !== ENVELOPE_KINDS.REQUEST) {
@@ -892,11 +900,11 @@ export const createHTTPTransportServer = (
 
             // a client's call ids are odd, and none is 0
             if (callId % 2 === 0) {
-              return { reason: REFUSALS.MALFORMED, status: 400 };
+              return { reason: HTTP_REFUSALS.MALFORMED, status: 400 };
             }
 
             if (connection.waiting.has(callId)) {
-              return { reason: REFUSALS.CALL_WAITING, status: 409 };
+              return { reason: HTTP_REFUSALS.CALL_WAITING, status: 409 };
             }
 
             if (connection.waiting.size >= maximumWaitingExchanges) {
@@ -954,13 +962,28 @@ export const createHTTPTransportServer = (
           waitAfterHandOff: (connection, state, { callId }) => {
             return connection.waiting.get(callId) === state;
           },
+          // * one timer from the hand-off: the head's delay first, then what is left of the
+          // exchange timeout; one of 40 ms or less is the exchange timer alone, whose close sends
+          // the head and cuts the exchange (spec 15.7)
           armExchangeTimer: (connection, state) => {
-            if (exchangeTimeout !== Infinity) {
-              state.timer = clock.setTimeout(() => {
-                closeDrawn(connection, false);
-              }, exchangeTimeout);
-              unref(state.timer);
-            }
+            state.timer = clock.setTimeout(
+              () => {
+                if (exchangeTimeout <= HEAD_DELAY_MILLISECONDS) {
+                  closeDrawn(connection, false);
+                } else if (!state.isEnded) {
+                  sendHead(state.response);
+
+                  if (exchangeTimeout !== Infinity) {
+                    state.timer = clock.setTimeout(() => {
+                      closeDrawn(connection, false);
+                    }, exchangeTimeout - HEAD_DELAY_MILLISECONDS);
+                    unref(state.timer);
+                  }
+                }
+              },
+              Math.min(HEAD_DELAY_MILLISECONDS, exchangeTimeout)
+            );
+            unref(state.timer);
           },
           message: (connection, message) => {
             tell(MESSAGE_EVENT, [message, connection.connectionHandle]);
@@ -997,9 +1020,9 @@ export const createHTTPTransportServer = (
       const onExchange: HTTPRequestListener = (request, response) => {
         const exchange = { request, response };
 
-        // * a field or a target past visible ASCII before anything else: Node's parser answers a
-        // control character itself, and drops a padded field over HTTP/2 unless
-        // `strictFieldWhitespaceValidation` is false
+        // * a field or a target past visible ASCII, or a target holding a #, before anything else:
+        // Node's parser answers a control character itself and hands a # on, nghttp2 in :path too,
+        // and drops a padded field over HTTP/2 unless `strictFieldWhitespaceValidation` is false
         if (!hasVisibleFields(request.rawHeaders) || !isVisibleTarget(request.url)) {
           return (refuseMalformed(exchange), undefined);
         }
@@ -1013,11 +1036,11 @@ export const createHTTPTransportServer = (
         const { authority } = named;
 
         if (!isTakenHost(authority, hosts)) {
-          return (finish(exchange, { reason: REFUSALS.HOST, status: 403 }), undefined);
+          return (finish(exchange, { reason: HTTP_REFUSALS.HOST, status: 403 }), undefined);
         }
 
         if (targetOf(request)?.path !== pathname) {
-          return (finish(exchange, { reason: REFUSALS.PATH, status: 404 }), undefined);
+          return (finish(exchange, { reason: HTTP_REFUSALS.PATH, status: 404 }), undefined);
         }
 
         // an exchange from the server's own origin, by a host it takes by name, or one it was told;
@@ -1025,7 +1048,7 @@ export const createHTTPTransportServer = (
         const origin = headerOf(request, 'origin');
 
         if (!isTakenOrigin(origin, { host: ownAuthorityOf(authority, hosts), origins })) {
-          return (finish(exchange, { reason: REFUSALS.ORIGIN, status: 403 }), undefined);
+          return (finish(exchange, { reason: HTTP_REFUSALS.ORIGIN, status: 403 }), undefined);
         }
 
         // the origin the server answers CORS to, as it came: one `origins` names
@@ -1051,7 +1074,7 @@ export const createHTTPTransportServer = (
         if (request.method !== 'GET' && request.method !== 'POST' && request.method !== 'DELETE') {
           const refused = {
             headers: { allow: 'GET, POST, DELETE' },
-            reason: REFUSALS.METHOD,
+            reason: HTTP_REFUSALS.METHOD,
             status: 405,
           };
 
@@ -1062,14 +1085,14 @@ export const createHTTPTransportServer = (
 
         if (connectionToken === undefined && request.method === 'POST') {
           if (!isBeadBody(request)) {
-            return (finish(exchange, { reason: REFUSALS.TYPE, status: 415 }), undefined);
+            return (finish(exchange, { reason: HTTP_REFUSALS.TYPE, status: 415 }), undefined);
           }
 
           return (onConnect(exchange), undefined);
         }
 
         if (connectionToken === undefined || !TOKEN_PATTERN.test(connectionToken)) {
-          return (finish(exchange, { reason: REFUSALS.MALFORMED, status: 400 }), undefined);
+          return (finish(exchange, { reason: HTTP_REFUSALS.MALFORMED, status: 400 }), undefined);
         }
 
         // none is held once a stop began: an exchange learns its connection is gone, as the stop's
@@ -1092,7 +1115,7 @@ export const createHTTPTransportServer = (
         }
 
         if (!isBeadBody(request)) {
-          return (finish(exchange, { reason: REFUSALS.TYPE, status: 415 }), undefined);
+          return (finish(exchange, { reason: HTTP_REFUSALS.TYPE, status: 415 }), undefined);
         }
 
         return (receive(exchange, connection), undefined);
@@ -1138,7 +1161,7 @@ export const createHTTPTransportServer = (
             const entry = {
               instance,
               onError: (error: Error): void => {
-                server.emit(ERROR_EVENT, error, '');
+                report(error, '');
               },
             };
 
@@ -1178,7 +1201,7 @@ export const createHTTPTransportServer = (
                 const addressInfo = instance.address();
 
                 entry.onError = (error) => {
-                  server.emit(ERROR_EVENT, error, '');
+                  report(error, '');
                 };
 
                 resolve({

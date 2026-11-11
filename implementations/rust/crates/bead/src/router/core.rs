@@ -693,6 +693,7 @@ pub(crate) fn reported_call(error: CallError) -> RouterError {
         CallError::Other(error) => RouterError::Other(error),
         other @ (CallError::Cancelled(_)
         | CallError::Disconnected(_)
+        | CallError::ReadyState(_)
         | CallError::TimedOut(_)
         | CallError::Refused(_)) => RouterError::Other(Arc::new(other)),
     }
@@ -911,6 +912,8 @@ fn limits_side<S: Side>(state: &mut S) -> RouterSide {
 pub(crate) fn call_error_of(error: RouterError) -> CallError {
     match error {
         RouterError::Failure(failure) => CallError::Failure(failure),
+        RouterError::ReadyState(error) => CallError::ReadyState(error),
+        RouterError::Disconnected(reason) => CallError::Disconnected(reason),
         RouterError::Other(error) => CallError::Other(error),
     }
 }
@@ -943,8 +946,26 @@ fn report_failure<S: Side>(
 
 // ── Reading ──────────────────────────────────────────────────────────────────────────────────
 
-/// Takes a message from `handle`: read, traced, then dispatched by kind.
+/// Takes a message from `handle`: a text one, which is no envelope, reported `ENVELOPE_MALFORMED`
+/// and handed nothing on, counted by its bytes as it was handed (spec 15.2); any other read.
 pub(crate) fn receive<S: Side>(
+    state: &mut S,
+    (message, handle): (TransportMessage, &ConnectionHandle),
+) {
+    if message.is_text {
+        let failure = state
+            .core()
+            .failure(ProtocolCode::ENVELOPE_MALFORMED)
+            .saying("an envelope is binary, not a string");
+
+        return state.report(reported(failure), handle);
+    }
+
+    receive_envelope(state, (message, handle));
+}
+
+/// Takes an envelope's bytes from `handle`: read, traced, then dispatched by kind.
+fn receive_envelope<S: Side>(
     state: &mut S,
     (message, handle): (TransportMessage, &ConnectionHandle),
 ) {
@@ -957,6 +978,7 @@ pub(crate) fn receive<S: Side>(
         address,
         port,
         may_overtake,
+        ..
     } = message;
     let prefix = match read_prefix(&data, side) {
         Ok(prefix) => prefix,

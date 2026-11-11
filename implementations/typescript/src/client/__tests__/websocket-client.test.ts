@@ -1,7 +1,10 @@
 import { expect, test } from '@playwright/test';
 import type { WebSocket as WsWebSocket, WebSocketServer } from 'ws';
+import { WebSocketServer as WsServer } from 'ws';
+import { createWebSocketServer } from '../../server/websocket-server';
 import {
   allClosed,
+  createTestClock,
   host,
   IMPLEMENTATIONS,
   portOf,
@@ -13,12 +16,15 @@ import { CLOSE_TIMEOUT } from '../../transport/client/websocket-transport-client
 import { bytesOf, readEnvelope, writeEnvelope } from '../../router/shared/envelope';
 import { CredentialScheme } from '../../router/shared/constants';
 import { toSessionToken } from '../../router/shared/identifiers';
+import { ReadyState } from '../../transport/shared/ready-state';
+import { CancelError, ProgrammerError } from '../../transport/shared/errors';
 import type { Announcement, Envelope, IFailure, OutgoingEnvelope } from '../../router/shared/types';
 import {
   createWebSocketClient,
   DisconnectError,
   FailureError,
   FailureScope,
+  ReadyStateError,
   SERVER_FAILURES,
   TimeoutError,
   type WebSocketClient,
@@ -91,7 +97,7 @@ const startEnvelopeServer = async () => {
     socket.send(writeEnvelope(envelope));
   };
 
-  return { nextEnvelope, send, server };
+  return { nextEnvelope, received, send, server };
 };
 
 /** The answer to `request`, on its call id: a result, or a failure, announcing a session or not. */
@@ -195,6 +201,176 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS) {
       await client[Symbol.asyncDispose]();
       await stopServer(server);
       await allClosed();
+    });
+
+    test('runs its router on its transport’s clock, which times a request out', async () => {
+      const clock = createTestClock();
+      await using timed = createWebSocketClient({
+        transport: { clock, WebSocket: TrackedWebSocket },
+      });
+
+      expect([timed.transport.clock, timed.router.clock]).toEqual([clock, clock]);
+      await timed.connect({ host, port: portOf(server) });
+
+      const calling = timed.services.getRequest(echo, { serializer })('wait')({ timeout: 1_000 });
+      const refused = expect(calling).rejects.toBeInstanceOf(TimeoutError);
+
+      await envelopes.nextEnvelope();
+      clock.tick(1_000);
+      await refused;
+    });
+
+    test('cancels a call at the server when its token is cancelled', async () => {
+      await using serving = createWebSocketServer({ transport: { WebSocketServer: WsServer } });
+      const entered = Promise.withResolvers<void>();
+      let cancelled = 0;
+
+      serving.services.getRequestResolver(echo, { serializer: text })((request) => {
+        entered.resolve();
+
+        return new Promise((resolve) => {
+          request.signal.addEventListener(
+            'abort',
+            () => {
+              cancelled += 1;
+              resolve(undefined);
+            },
+            { once: true }
+          );
+        });
+      });
+      const { port } = await serving.transport.start({ address: host, findOpenPort: true });
+      await using callingClient = createWebSocketClient({
+        transport: { WebSocket: TrackedWebSocket },
+      });
+
+      await callingClient.connect({ host, port });
+      const controller = new AbortController();
+      const calling = callingClient.services.getRequest(echo, { serializer })('wait')({
+        signal: controller.signal,
+      });
+      const refused = expect(calling).rejects.toBeInstanceOf(CancelError);
+
+      await entered.promise;
+      controller.abort();
+      await refused;
+      await expect
+        .poll(() => {
+          return cancelled;
+        })
+        .toBe(1);
+    });
+
+    test('takes its layers apart in reverse, rejecting what waits as disposed, then closing', async () => {
+      const errors: Error[] = [];
+      const closes: boolean[][] = [];
+      const calling = client.services.getRequest(echo, { serializer })('wait')();
+      const refused = expect(calling).rejects.toThrow('the router was disposed before the answer');
+
+      client.router.on('error', (error) => {
+        errors.push(error);
+      });
+      client.transport.on('close', (...flags) => {
+        closes.push(flags);
+      });
+      await envelopes.nextEnvelope();
+      await client[Symbol.asyncDispose]();
+      await refused;
+      expect(closes).toEqual([[true, false]]);
+      expect(errors).toEqual([]);
+    });
+
+    test('rejects what waits once the server stops', async () => {
+      const closes: boolean[][] = [];
+      const calling = client.services.getRequest(echo, { serializer })('wait')();
+      const refused = expect(calling).rejects.toBeInstanceOf(DisconnectError);
+
+      client.transport.on('close', (...flags) => {
+        closes.push(flags);
+      });
+      await envelopes.nextEnvelope();
+      for (const socket of server.clients) {
+        socket.close(1001);
+      }
+      await stopServer(server);
+      await refused;
+      expect(closes).toEqual([[false, false]]);
+    });
+
+    test('refuses a connect while open and a message limit below its envelope’s', async () => {
+      await expect(client.connect({ host, port: portOf(server) })).rejects.toBeInstanceOf(
+        ProgrammerError
+      );
+      expect(() => {
+        return createWebSocketClient({ transport: { maxPayload: 64 } });
+      }).toThrow(ProgrammerError);
+    });
+
+    test('connects, disconnects and reconnects through its transport, with the options given', async () => {
+      const closes: boolean[][] = [];
+
+      client.transport.on('close', (...flags) => {
+        closes.push(flags);
+      });
+      await client.disconnect({ isClean: false });
+      expect(closes).toEqual([[false, false]]);
+      expect(client.transport.isClosed()).toBe(true);
+
+      const controller = new AbortController();
+
+      controller.abort();
+      await expect(client.reconnect({ signal: controller.signal })).rejects.toBeInstanceOf(
+        CancelError
+      );
+      expect(client.transport.isClosed()).toBe(true);
+      await client.reconnect({ maximumAttempts: 1 });
+      expect(client.transport.isOpen()).toBe(true);
+      expect(client.router.transport).toBe(client.transport);
+
+      const calling = client.services.getRequest(echo, { serializer })('a')();
+      const request = await envelopes.nextEnvelope();
+
+      envelopes.send(request.socket, answerTo(request, { payload: text.encode('a') }));
+      await expect(calling).resolves.toBe('a');
+    });
+
+    test('a dispose cancels a reconnection under way, and a token given still cancels it too', async () => {
+      await using other = createWebSocketClient({ transport: { WebSocket: TrackedWebSocket } });
+
+      await other.connect({ host, port: portOf(server) });
+      await stopServer(server);
+
+      const controller = new AbortController();
+      const byDispose = expect(client.reconnect({ delay: 60_000 })).rejects.toBeInstanceOf(
+        CancelError
+      );
+      const bySignal = expect(
+        other.reconnect({ delay: 60_000, signal: controller.signal })
+      ).rejects.toBeInstanceOf(CancelError);
+
+      await client[Symbol.asyncDispose]();
+      controller.abort();
+      await byDispose;
+      await bySignal;
+      expect([client.transport.isClosed(), other.transport.isClosed()]).toEqual([true, true]);
+    });
+
+    test('rejects what waits as replaced once its transport reconnects', async () => {
+      const calling = client.services.getRequest(echo, { serializer })('wait')();
+      const refused = expect(calling).rejects.toThrow(
+        'the connection was replaced before the answer'
+      );
+
+      await envelopes.nextEnvelope();
+      await client.reconnect();
+      await refused;
+      expect(client.transport.isOpen()).toBe(true);
+
+      const following = client.services.getRequest(echo, { serializer })('a')();
+      const request = await envelopes.nextEnvelope();
+
+      envelopes.send(request.socket, answerTo(request, { payload: text.encode('a') }));
+      await expect(following).resolves.toBe('a');
     });
 
     test('sends a request as an envelope, resolves with its result, and learns the session', async () => {
@@ -342,6 +518,32 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS) {
       request.socket.close(1001);
 
       await expect(answering).rejects.toBeInstanceOf(DisconnectError);
+    });
+
+    // debugging 9.7
+    test('fails a call before it connects by its ready state, sending nothing', async () => {
+      await using unconnected = createWebSocketClient({
+        transport: { WebSocket: TrackedWebSocket },
+      });
+      const failing = unconnected.services.getRequest(echo, { serializer })('hello')();
+
+      await expect(failing).rejects.toBeInstanceOf(ReadyStateError);
+      await expect(failing).rejects.toMatchObject({
+        expected: ReadyState.OPEN,
+        got: ReadyState.UNINITIALIZED,
+      });
+      expect(envelopes.received).toEqual([]);
+    });
+
+    // debugging 9.7
+    test('fails a call once disconnected as a disconnection, sending nothing', async () => {
+      await client.disconnect();
+
+      const failing = client.services.getRequest(echo, { serializer })('hello')();
+
+      await expect(failing).rejects.toBeInstanceOf(DisconnectError);
+      await expect(failing).rejects.toThrow('the transport client is closed, not open');
+      expect(envelopes.received).toEqual([]);
     });
   });
 }

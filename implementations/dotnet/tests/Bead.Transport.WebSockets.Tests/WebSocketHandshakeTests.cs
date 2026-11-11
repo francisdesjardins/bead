@@ -390,6 +390,16 @@ public sealed class WebSocketHandshakeTests
                 ("GET http://user@localhost/ HTTP/1.1", [], 400, null),
                 ("GET http://127.0.0.1/ HTTP/1.0", ["Host"], 426, WebSocketRefusals.Upgrade),
                 ("GET http://rebind.example/ HTTP/1.0", ["Host"], 403, WebSocketRefusals.Host),
+
+                // a target that holds a # anywhere, or a character a browser always encodes where it
+                // stands, is an invalid request-line, whatever its host
+                ("GET /#x HTTP/1.1", ["Host: localhost"], 400, null),
+                ("GET /#<\" HTTP/1.1", ["Host: localhost"], 400, null),
+                ("GET /?a#b HTTP/1.1", ["Host: elsewhere.test"], 400, null),
+                ("GET http://127.0.0.1/#{} HTTP/1.1", [], 400, null),
+                ("GET /?a%23b HTTP/1.1", ["Host: localhost"], 101, null),
+                ("GET /< HTTP/1.1", ["Host: localhost"], 400, null),
+                ("GET /?a\"b HTTP/1.1", ["Host: elsewhere.test"], 400, null),
             })
             {
                 var actual = AnswerOf((start, fields), options);

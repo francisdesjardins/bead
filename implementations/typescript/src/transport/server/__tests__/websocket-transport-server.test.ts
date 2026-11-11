@@ -646,42 +646,6 @@ for (const [label, Tracked] of IMPLEMENTATIONS) {
         await expect(server.close('type=WS;ip=0.0.0.0;port=1;ordinal=1')).resolves.toBe(false);
         expect(closes).toEqual([]);
       });
-
-      test('"closeAll" closes every connection', async () => {
-        await expect(server.closeAll()).resolves.toEqual([]);
-        const second = createWebSocketTransportClient({ WebSocket: Tracked });
-        const connectionHandles: string[] = [];
-        const closed: [boolean, string][] = [];
-        const codes: number[] = [];
-        server.on('connection', ({ socket }) => {
-          socket.on('close', (code) => {
-            codes.push(code);
-          });
-        });
-        server.on('close', (clean, connectionHandle) => {
-          connectionHandles.push(connectionHandle);
-          closed.push([clean, connectionHandle]);
-        });
-
-        await connectClient(client);
-        await connectClient(second);
-        const handles = server.clients.map(({ connectionHandle }) => {
-          return connectionHandle;
-        });
-
-        await expect(server.closeAll()).resolves.toEqual([true, true]);
-        expect(connectionHandles).toHaveLength(2);
-        expect(server.clients).toHaveLength(0);
-        expect(closed).toEqual(
-          expect.arrayContaining(
-            handles.map((handle) => {
-              return [true, handle];
-            })
-          )
-        );
-        expect(server.isOpen()).toBe(true);
-        expect(codes).toEqual([1000, 1000]);
-      });
     });
 
     test.describe('WebSocketTransportServer #stop', () => {
@@ -3386,7 +3350,7 @@ test.describe('WebSocketTransportServer, its bounds', () => {
   });
 
   // spec 15.1
-  test('closes with 1009, and drops behind maximumUnsentBytes, a connection whose error listener throws, telling its close all the same', async () => {
+  test('closes with 1009, and drops behind maximumUnsentBytes, a connection whose error listener throws, telling its close all the same and dropping what it threw', async () => {
     using uncaught = trapUncaught();
     await using started = await startDated({
       heartbeat: Infinity,
@@ -3396,12 +3360,16 @@ test.describe('WebSocketTransportServer, its bounds', () => {
     });
     const { port, server } = started;
     const reported: string[] = [];
+    const heard: string[] = [];
     const closes: unknown[] = [];
 
     server.on('error', (error) => {
       reported.push(error.message);
 
       throw new Error('an error listener that throws');
+    });
+    server.on('error', (error) => {
+      heard.push(error.message);
     });
     server.on('close', (wasClean, connectionHandle) => {
       closes.push([wasClean, connectionHandle]);
@@ -3446,17 +3414,18 @@ test.describe('WebSocketTransportServer, its bounds', () => {
         [false, tooBigHandle],
         [false, behindHandle],
       ]);
-    expect(reported).toEqual([
-      `${tooBigHandle} is closed with 1009: a message past its maximumMessageBytes, 64 bytes`,
-      `${behindHandle} is dropped: what waits for its socket would pass maximumUnsentBytes, 65536 bytes`,
+    // * what the listener threw is dropped: the listener after it told each error, and nothing else
+    expect([reported, heard]).toEqual([
+      [
+        `${tooBigHandle} is closed with 1009: a message past its maximumMessageBytes, 64 bytes`,
+        `${behindHandle} is dropped: what waits for its socket would pass maximumUnsentBytes, 65536 bytes`,
+      ],
+      [
+        `${tooBigHandle} is closed with 1009: a message past its maximumMessageBytes, 64 bytes`,
+        `${behindHandle} is dropped: what waits for its socket would pass maximumUnsentBytes, 65536 bytes`,
+      ],
     ]);
-    // what the listener threw was Node's, once each
-    expect(
-      uncaught.thrown.map((error) => {
-        return (error as Error).message;
-      })
-    ).toEqual(['an error listener that throws', 'an error listener that throws']);
-    expect(server.clients).toEqual([]);
+    expect([uncaught.thrown, server.clients]).toEqual([[], []]);
     socket.destroy();
   });
 
@@ -3571,5 +3540,107 @@ test.describe('WebSocketTransportServer, a connection its router paused', () => 
     expect(performance.now() - startedAt).toBeLessThan(1_500);
     // what it held dropped with it
     expect(heard).toEqual([]);
+  });
+});
+
+// * the head is Node's to read: what it takes, waits for and refuses, as the Rust side's own read
+test.describe('WebSocketTransportServer, the head it reads', () => {
+  test('reads a head whole, its method, its target and its fields as they came, an octet past ASCII refused 400 unmarked', async () => {
+    await using started = await startDated({ hosts: ['bead.test'] });
+    const { port, server } = started;
+    const connection = nextServerEvent(server, 'connection');
+    const opened = await answerFromOf(
+      port,
+      requestOf('GET /bead?x=1 HTTP/1.1', ['X-Other:  caf\t'])
+    );
+    const [{ request }] = await connection;
+
+    expect([opened.answer, request.method, request.url]).toEqual([[101, null], 'GET', '/bead?x=1']);
+    expect(
+      (await answerFromOf(port, requestOf('GET / HTTP/1.1', ['X-Other: café']))).answer
+    ).toEqual([400, null]);
+  });
+
+  test('waits for a head not whole', async () => {
+    await using started = await startDated({ hosts: ['bead.test'] });
+    const { port, server } = started;
+    const whole = requestOf('GET / HTTP/1.1');
+    const socket = await openTcp(port);
+    let answer = '';
+
+    socket.on('data', (chunk: Buffer) => {
+      answer += chunk.toString('latin1');
+    });
+    socket.write(whole.slice(0, -1));
+    await sleep(200);
+
+    expect([answer, server.clients]).toEqual(['', []]);
+    socket.write(whole.slice(-1));
+    await expect
+      .poll(() => {
+        return answer.split('\r\n')[0];
+      })
+      .toBe('HTTP/1.1 101 Switching Protocols');
+    socket.destroy();
+  });
+
+  test('answers 408 a head that did not come within its headers timeout, unmarked', async () => {
+    await using started = await startDated({ headersTimeout: 100, hosts: ['bead.test'] });
+    const { port, server } = started;
+    const refusals = refusalsOf(server);
+    const { answer } = await answerFromOf(port, 'GET / HTTP/1.1\r\nHost: bead.test\r\n');
+
+    expect([answer, refusals]).toEqual([[408, null], []]);
+  });
+
+  test('refuses 431 a head past 16 KiB, its request line among it, as Node’s maxHeaderSize bounds it, and takes 101 fields', async () => {
+    await using started = await startDated({ hosts: ['bead.test'] });
+    const { port } = started;
+    const length = requestOf('GET / HTTP/1.1').length;
+    const padded = (total: number) => {
+      return requestOf('GET / HTTP/1.1', [`X-Pad: ${'a'.repeat(total - length - 9)}`]);
+    };
+    const fields = Array.from({ length: 96 }, (_, index) => {
+      return `X-${String(index)}: ${String(index)}`;
+    });
+
+    expect((await answerFromOf(port, padded(16_384))).answer).toEqual([101, null]);
+    expect((await answerFromOf(port, padded(16_640))).answer).toEqual([431, null]);
+    expect(
+      (await answerFromOf(port, requestOf(`GET /${'a'.repeat(16_640)} HTTP/1.1`))).answer
+    ).toEqual([431, null]);
+    expect((await answerFromOf(port, requestOf('GET / HTTP/1.1', fields))).answer).toEqual([
+      101,
+      null,
+    ]);
+  });
+
+  test('refuses 400 a head HTTP does not read, a control character in its target or a value among it, and answers a version but 1.1 426 upgrade-required', async () => {
+    await using started = await startDated({ hosts: ['bead.test'] });
+    const { port, server } = started;
+    const answers: unknown[] = [];
+
+    for (const malformed of [
+      requestOf('GET /a\u0001b HTTP/1.1'),
+      requestOf('GET /a\u007fb HTTP/1.1'),
+      requestOf('GET /a b HTTP/1.1'),
+      requestOf('GET / HTTP/1.1', ['X-Other: a\u0007b']),
+      requestOf('GET / HTTP/1.1').replace('\r\n\r\n', '\r\nno colon\r\n\r\n'),
+      requestOf('GET / HTTP/1.1', ['bad name: x']),
+      requestOf('G(T / HTTP/1.1'),
+    ]) {
+      answers.push((await answerFromOf(port, malformed)).answer);
+    }
+
+    expect(answers).toEqual(
+      Array.from({ length: 7 }, () => {
+        return [400, null];
+      })
+    );
+    expect((await answerFromOf(port, requestOf('GET / HTTP/2.0'))).answer).toEqual([
+      426,
+      'upgrade-required',
+    ]);
+    expect(server.clients).toHaveLength(0);
   });
 });

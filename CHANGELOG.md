@@ -7,6 +7,94 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-10
+
+### Added
+
+- The Rust side's service client, `ServiceClient` and `ServiceClientOptions`, the twin of the other
+  sides' (decision 0044).
+- The Rust side's transport over WebSocket (RFC 6455), client and server, the feature `websocket`
+  of its core, with `WebSocketServer` and `WebSocketClient` and the defaults the other sides
+  export; it plays `spec/transports.json`'s cases over WebSocket and its places of
+  `spec/durations.json` (decision 0049).
+- The Rust side's transport over HTTP, client and server, the feature `http` of its core: the
+  server on hyper's HTTP/1.1 and its HTTP/2 under TLS, the client on hyper's pooled HTTP/1.1, with
+  `HttpServer` and `HttpClient` and the defaults the other sides export; it plays
+  `spec/transports.json`'s cases over HTTP and its places of `spec/durations.json` (decision 0049).
+- The interop with the Rust side, both ways, over WebSocket and HTTP: the Rust client against the
+  TypeScript and C# interop servers, and their clients against the Rust one,
+  `bead-interop-server`, in CI's `interop-rust` job (decision 0049).
+
+### Changed
+
+- The spec moves to 0.13.0 (`spec-v0.13.0`), its companion, `spec/debugging.md`, to 0.8.0
+  (`debugging-v0.8.0`), and the transcoding's companion, `spec/transcoding.md`, to 0.4.0
+  (`transcoding-v0.4.0`).
+- **Breaking:** a request's target is read as a page's browser writes it, on every side: `"`, `<`
+  or `>` in its path or its query, `^`, `` ` ``, `{` or `}` in its path, or a `#` anywhere in it,
+  answered 400 unmarked (RFC 9112 §3, §3.2), `%23` taken; and an absolute-form target's scheme is
+  read in any case (RFC 3986 §3.1), but by Kestrel on the C# side; the Rust side's HTTP address, on
+  hyper, serves a target cut at its `#` (spec 15.12, transcoding 3.6; decision 0049).
+- **Breaking:** the TypeScript side's `REFUSALS` is `HTTP_REFUSALS`.
+- **Breaking:** the TypeScript side's `IHTTPPolicyInit` is `IHTTPPolicyOptions`.
+- **Breaking:** the C# side's `WebSocketTransportStartOptions` and `HttpTransportStartOptions` are
+  one `TransportServerStartOptions`, in `Bead.Core`.
+- **Breaking:** on the TypeScript side a WebSocket or HTTP client's connect names its `host` and its
+  `port`, as on the C# and Rust sides.
+- **Breaking:** on the Rust side a server transport's `start` leaves `ServerTransport`: each server
+  starts itself and gives the `TransportServerAddress` it listens at.
+- **Breaking:** what a listener of an `error` event throws — a transport's, server or client, a
+  router's, a broker participant's or a gateway's — is dropped on every side, the listeners after
+  it told: as a connection drops, an HTTP `send` no longer rejects with it, nor the C# side's `Send`
+  throws it; over WebSocket it no longer reaches Node's `uncaughtException` or Kestrel; and the Rust
+  side's participant no longer tells an error listener's panic to its error listeners (spec 15.1,
+  debugging 2.2, 13.9; decision 0023).
+- **Breaking:** a call to a client whose transport is not open fails by the transport's state:
+  before its open, uninitialized or connecting, by its ready state, counted `error` — on the C#
+  side a `ReadyStateException`, new, where a `DisconnectException` counted `closed`, as is its
+  transport client's `CloseConnection` unless open; on the Rust side `CallError::ReadyState`, new;
+  once its state is a close's, closing, closed or reconnecting, a failed connect's among them, as a
+  disconnection, counted `closed`, on the TypeScript and Rust sides as on the C# side (debugging
+  9.6, 9.7; decision 0013).
+- **Breaking:** the Rust side's WebSocket transports hand a text message to their router, marked by
+  `TransportMessage`'s `is_text`, which reports it `ENVELOPE_MALFORMED` with its connection; its
+  activity is stamped; its in-memory and broker transports refuse to send one (spec 15.2; decision
+  0049).
+- Over HTTP, a request's head waits 40 ms for its answer on every side: an answer within them goes
+  whole, its head with it and its length in content-length, one write; a request that takes longer
+  gets its head then and its answer chunked, as before; one cancelled before its head ends 204 (spec
+  15.6, 15.7; decision 0020).
+- `spec.md` 15.6 compares a method as it came, a case-sensitive token (RFC 9110 §9.1): `get` is
+  no `GET`, and any method the path does not take, an extension method among them, is refused 405,
+  its `Allow` naming those it takes, never the 501 of a method a server does not recognize; 15.2's
+  step 3 compares alike. `spec/transports.json` adds one case over HTTP, which holds the method's
+  place after the path and the origin and an `options` that asks a preflight as none, and one at
+  a WebSocket's address, a `head` refused 405 where a `HEAD` is answered 426; the TypeScript side,
+  whose parser refuses such a method 400 first, is excused from both; its schema takes a request's
+  method as any token, in any case (decision 0026).
+- The documents are brought to 0.12.0: the records, the READMEs and the support matrix state what
+  holds and where Bead goes. Decision 0049 is accepted.
+
+### Removed
+
+- **Breaking:** `closeAll` from the TypeScript side's transport servers, and `CloseAll` from the C#
+  side's HTTP and WebSocket servers: a server that ends its connections stops (spec 15.1; decision
+  0049).
+
+### Fixed
+
+- The C# side's HTTP transport server and gateway compare request methods as they came, a
+  case-sensitive token (RFC 9110 §9.1), so `get` is refused 405 as any method the path does not
+  take.
+- The TypeScript side counts a text message against `maximumUntakenBytes` by its UTF-8 bytes, as
+  the wire carried it, not by its UTF-16 code units (spec 15.12).
+- The C# side's HTTP transport server matches its pathname against the target as it came, as the
+  TypeScript side does, where Kestrel's decoded path let `/b%65ad` reach `/bead`; and its gateway
+  keeps the query of an absolute-form target that names no path, `http://bead.test?x`.
+- A publication over AMQP 1.0 asked as its broker ends its sending session, or detaches its sender,
+  goes on another that it begins, on the C# side, where it could be refused with nothing sent
+  (spec 15.33).
+
 ## [0.11.0] - 2026-11-09
 
 ### Added
@@ -2533,7 +2621,8 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
   workflows.
 - The licence, Apache-2.0.
 
-[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.11.0...develop
+[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.12.0...develop
+[0.12.0]: https://github.com/francisdesjardins/bead/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/francisdesjardins/bead/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/francisdesjardins/bead/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/francisdesjardins/bead/compare/v0.8.0...v0.9.0

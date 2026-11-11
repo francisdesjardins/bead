@@ -32,6 +32,8 @@ with the hash of its text. The why of each rule is in the decisions:
 - [0042](../docs/decisions/0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md):
   a request that leaves a required field unset, refused where its server would refuse it, and where
   it is placed (4.5, 5.2, 5.6, 7.4, 11);
+- [0023](../docs/decisions/0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md):
+  what a listener of a gateway's error event throws;
 - [0002](../docs/decisions/0002-a-subscription-goes-at-its-clients-pace.md): a stream at its
   reader's pace (8.8);
 - [0024](../docs/decisions/0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md),
@@ -44,7 +46,7 @@ with the hash of its text. The why of each rule is in the decisions:
   the procedures an output's `gateway` selects, its routes, its document and its client (3.1, 11.1,
   12.1).
 
-**Version: 0.3.0**. Its conformance file repeats it as its `transcodingVersion`, and follows its
+**Version: 0.4.0**. Its conformance file repeats it as its `transcodingVersion`, and follows its
 schema in [`schemas/`](schemas/). It moves by `spec.md`'s rule, under a version of its own
 ([0008](../docs/decisions/0008-three-version-axes-and-names-qualified-by-their-owner.md)): the minor
 when a gateway that conforms to its last version must change to conform to this one, the patch when
@@ -170,8 +172,9 @@ its text exactly, `*` one segment, and `**` zero or more, as `http.proto` has it
 last but its verb. A target that holds an octet other than visible ASCII, or a path whose
 percent-decoding holds NUL, is what HTTP refuses of its own (section 10.1, step 1), answered as
 section 15.12 of `spec.md` answers it — 400 unmarked over HTTP/1.1, its stream reset over HTTP/2 —
-before anything else of it is judged; `#` and the other visible characters a URI leaves out are
-characters of its path or its query, matched and decoded as any other.
+before anything else of it is judged; a `#` anywhere in it, and a character a page's browser always
+percent-encodes where it stands, are refused with them, as section 15.12 of `spec.md` reads both; `\`, `|`, and `^`, `` ` ``, `{` and `}` in a query are characters of its path or its query,
+matched and decoded as any other.
 
 3.7. A path's verb is what follows the last `:` of its last segment that is not percent-encoded, and
 that segment is matched without it; a path whose last segment holds no such `:` has none. A route
@@ -545,7 +548,8 @@ application's: a code between it and its server, its server's answer it could no
 its server takes none of, its call's timeout, its exchange's connection closed, a result section 5.7
 refuses, what no gate foresaw. What it reports no problem's member carries, and an answer for an
 error of its own carries its code alone, as section 9.0 has one: `DESTINATION_UNREACHABLE` and what
-no gate foresaw, with no detail.
+no gate foresaw, with no detail. What a listener of its `error` throws is dropped, and the exchange
+answers on (section 15.1 of `spec.md`).
 
 7.7. A refusal of the gateway's own is marked in `bead-refusal`, as section 15.6 of `spec.md` marks
 a transport's, so that a client tells it from a call's answer, and a gateway MUST write its body as

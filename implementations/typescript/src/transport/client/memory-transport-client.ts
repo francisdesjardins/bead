@@ -4,7 +4,13 @@
 
 import { CLOSE_EVENT, MESSAGE_EVENT } from '../shared/constants';
 import { createPromise } from '../shared/create-promise';
-import { ConnectError, ProgrammerError, ReadyStateError, toError } from '../shared/errors';
+import {
+  ConnectError,
+  notOpenOf,
+  ProgrammerError,
+  ReadyStateError,
+  toError,
+} from '../shared/errors';
 import { createHold } from '../shared/hold';
 import {
   getReadyState,
@@ -302,7 +308,7 @@ export const createMemoryTransportClient = ({
           const end = current?.end;
 
           if (!client.isOpen() || end === undefined) {
-            return Promise.reject(new ReadyStateError(getReadyState(client), ReadyState.OPEN));
+            return Promise.reject(notOpenOf(getReadyState(client)));
           }
 
           // refused before it goes, the connection kept: a field could not carry it as it is

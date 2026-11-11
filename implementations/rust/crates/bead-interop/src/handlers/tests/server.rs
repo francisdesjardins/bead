@@ -67,10 +67,6 @@ impl ServerTransport for Wire {
         self.transport.clock()
     }
 
-    fn start(&self) -> BoxFuture<Result<(), RouterError>> {
-        self.transport.start()
-    }
-
     fn stop(&self) -> BoxFuture<Result<(), RouterError>> {
         self.transport.stop()
     }

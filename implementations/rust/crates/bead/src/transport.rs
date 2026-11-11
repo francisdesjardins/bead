@@ -18,7 +18,9 @@ use tokio_util::sync::CancellationToken;
 
 use crate::clock::{Schedule, SharedClock};
 use crate::duration::hold_delay;
-use crate::errors::{ConnectError, ProgrammerError, ReconnectError, TransportError};
+use crate::errors::{
+    ConnectError, ProgrammerError, ReadyStateError, ReconnectError, TransportError,
+};
 use crate::failure::ProcedureAddress;
 use crate::router::types::{BoxFuture, ConnectionHandle, Gauges, RouterError, TransportMessage};
 
@@ -89,6 +91,24 @@ impl ReadyState {
     }
 }
 
+/// What a client transport's send is refused with while it is not open (debugging 9.7): before its
+/// open, uninitialized or connecting, its ready state's refusal; once its state is a close's,
+/// closing, closed or reconnecting, a disconnection, as a call pending when the close came fails.
+pub(crate) fn refused_unless_open(ready: ReadyState) -> RouterError {
+    match ready {
+        ReadyState::Uninitialized | ReadyState::Connecting => {
+            RouterError::ReadyState(ReadyStateError::new(ready, ReadyState::Open))
+        }
+        // ! open reaches it only with no connection held, which no client keeps: a disconnection
+        ReadyState::Open | ReadyState::Closing | ReadyState::Closed | ReadyState::Reconnecting => {
+            RouterError::Disconnected(format!(
+                "the transport client is {}, not open",
+                ready.said()
+            ))
+        }
+    }
+}
+
 /// A refusal a transport server judged of its own (spec 15.1).
 ///
 /// A request it refused as it arrived, or whose body it refused as it came, marked in
@@ -143,6 +163,51 @@ pub struct TransportServerClient {
     pub last_activity: Option<SystemTime>,
     /// Its transport's type: [`crate::TRANSPORT_MEMORY`] or [`crate::TRANSPORT_BROKER`].
     pub transport_type: &'static str,
+}
+
+/// Where a transport server listens, over WebSocket as over HTTP.
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
+pub struct TransportServerStartOptions {
+    /// The address it listens on (spec 15.12): `localhost` when none, both loopbacks, `127.0.0.1`
+    /// and `::1` on one port, a keyword never resolved, so no other process answers a client that
+    /// reaches it by `localhost` on the other family; a port another socket holds on either fails
+    /// the start, and a port drawn is drawn again, eight times at most. Where the IPv6 loopback is
+    /// absent it listens on `127.0.0.1` alone, and reports it. Or an IP address written bare, which
+    /// it listens on alone: `0.0.0.0` or `::` for every interface, which a container, or any server
+    /// another machine reaches, needs, its hosts named beside. RFC 3986's `IPv4address` or
+    /// `IPv6address`, with no brackets, no zone, and not IPv4-mapped; another name or any other form
+    /// is a [`ProgrammerError`] as it starts, which ends Closed.
+    pub address: Option<String>,
+    /// The port it listens on: 80 when none; 0 lets the system pick one, as `find_open_port` does.
+    pub port: Option<u16>,
+    /// Whether it takes any free port instead, which its start then gives: false when none.
+    pub find_open_port: Option<bool>,
+    /// What gives up on the start, ending Closed.
+    pub signal: Option<CancellationToken>,
+}
+
+/// Where a transport server listens, as its start gives it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct TransportServerAddress {
+    /// What it bound: the address it was given, `localhost` when both loopbacks took it, and
+    /// `127.0.0.1` where the IPv6 loopback is absent; [`crate::MEMORY_ADDRESS`] in memory, a
+    /// participant's id over a broker.
+    pub address: String,
+    /// The port it listens on: 0 where it serves none, in memory and over a broker.
+    pub port: u16,
+}
+
+impl TransportServerAddress {
+    /// Where a server listens: at `address`, on `port`.
+    #[must_use]
+    pub fn new<A: Into<String>>(address: A, port: u16) -> Self {
+        Self {
+            address: address.into(),
+            port,
+        }
+    }
 }
 
 /// What hears a transport server's events.
@@ -243,15 +308,9 @@ pub trait ServerTransport: Send + Sync + fmt::Debug {
         true
     }
 
-    /// Starts it.
-    ///
-    /// # Errors
-    ///
-    /// A [`RouterError`] when its options or state are refused, or its listener cannot start.
-    fn start(&self) -> BoxFuture<Result<(), RouterError>>;
-
     /// Stops it, closing every connection; settles at once when it never started or stopped
-    /// already, and shares a stop under way.
+    /// already, and shares a stop under way. Each server starts itself, by a `start` of its own,
+    /// which gives the [`TransportServerAddress`] it listens at.
     ///
     /// # Errors
     ///
@@ -293,7 +352,10 @@ pub trait RouterClientTransport: Send + Sync + fmt::Debug {
     ///
     /// # Errors
     ///
-    /// What refuses it before it is handed over: a connection not open, say.
+    /// What refuses it before it is handed over: before its open, uninitialized or connecting, a
+    /// [`RouterError::ReadyState`]; once its state is a close's, closing, closed or reconnecting, a
+    /// [`RouterError::Disconnected`] (debugging 9.7); a text message where its connection carries
+    /// bytes alone, say.
     fn send(&self, message: TransportMessage) -> Result<Sent, RouterError>;
 
     /// Hears its events from now on.
@@ -534,6 +596,29 @@ impl<L: ?Sized> Listened<Arc<L>> {
             }
         }
     }
+}
+
+/// Tells each of a transport server's `listeners` within a guard (spec 15.1): what one panics is
+/// reported to every listener's `on_error`, with the connection it was told of, none for an event
+/// that names none, a refusal's, and the listeners after it are told all the same.
+pub(crate) fn tell_server<C: Fn(&dyn ServerListener)>(
+    listeners: &Listeners<dyn ServerListener>,
+    (call, connection_handle): (C, Option<&ConnectionHandle>),
+) {
+    let heard = listeners.all();
+
+    listeners.each((
+        |listener: &(dyn ServerListener + 'static)| call(listener),
+        |error: RouterError| {
+            for listener in &heard {
+                // ! a listener of errors that panics would loop: its panic is dropped (spec 15.1)
+                catch_unwind(AssertUnwindSafe(|| {
+                    listener.on_error(&error, connection_handle);
+                }))
+                .ok();
+            }
+        },
+    ));
 }
 
 /// What the application's code panicked with, as an error a side reports: what panicked, and its

@@ -250,6 +250,7 @@ pub struct ScriptedClient {
     sending: Mutex<Sending>,
     carrying: AtomicBool,
     secure: AtomicBool,
+    ready: Mutex<ReadyState>,
     paced: Mutex<Paced>,
     pauses: Mutex<Vec<bool>>,
 }
@@ -275,6 +276,7 @@ impl ScriptedClient {
             sending: Mutex::default(),
             carrying: AtomicBool::new(true),
             secure: AtomicBool::new(true),
+            ready: Mutex::new(ReadyState::Open),
             paced: Mutex::default(),
             pauses: Mutex::default(),
         })
@@ -301,6 +303,12 @@ impl ScriptedClient {
     /// Reports whether this connection protects the credentials it carries.
     pub fn secure(&self, secure: bool) {
         self.secure.store(secure, Ordering::SeqCst);
+    }
+
+    /// Holds its ready state at `ready` from now on: unless open, each send is refused as every
+    /// client transport refuses it, sending nothing (debugging 9.7).
+    pub fn ready_as(&self, ready: ReadyState) {
+        *locked(&self.ready) = ready;
     }
 
     /// Hands its router `envelope`, as its server sent it.
@@ -422,6 +430,13 @@ impl ScriptedClient {
 
 impl RouterClientTransport for ScriptedClient {
     fn send(&self, message: TransportMessage) -> Result<Sent, RouterError> {
+        let ready = *locked(&self.ready);
+
+        // refused by the one refusal every client transport gives while it is not open
+        if ready != ReadyState::Open {
+            return Err(crate::transport::refused_unless_open(ready));
+        }
+
         let sending = locked(&self.sending).clone();
 
         // handed over, whatever it then says
@@ -473,7 +488,7 @@ impl RouterClientTransport for ScriptedClient {
     }
 
     fn ready_state(&self) -> ReadyState {
-        ReadyState::Open
+        *locked(&self.ready)
     }
 }
 
@@ -635,7 +650,15 @@ impl ScriptedServer {
 
     /// Reports an error from a connection, or the transport's own when none.
     pub fn report(&self, error: &RouterError, connection_handle: Option<&ConnectionHandle>) {
-        self.tell(|listener| listener.on_error(error, connection_handle));
+        let listeners = locked(&self.listeners).clone();
+
+        for listener in listeners {
+            // ! a listener of errors that panics would loop: its panic is dropped (spec 15.1)
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                listener.on_error(error, connection_handle);
+            }))
+            .ok();
+        }
     }
 
     /// Tells its listeners the request its transport refused.
@@ -860,10 +883,6 @@ impl ServerTransport for ScriptedServer {
 
     fn carries_credential(&self, connection_handle: &ConnectionHandle) -> bool {
         locked(&self.carrying).contains(connection_handle)
-    }
-
-    fn start(&self) -> BoxFuture<Result<(), RouterError>> {
-        Box::pin(async { Ok(()) })
     }
 
     fn stop(&self) -> BoxFuture<Result<(), RouterError>> {

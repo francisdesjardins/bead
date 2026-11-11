@@ -192,33 +192,6 @@ public sealed record WebSocketTransportServerOptions
     public IReadOnlyCollection<ProcedureAddress>? Procedures { get; init; }
 }
 
-/// <summary>Where a transport server listens.</summary>
-public sealed record WebSocketTransportStartOptions
-{
-    /// <summary>
-    /// The address it listens on (spec 15.12): <c>localhost</c> by default, both loopbacks,
-    /// <c>127.0.0.1</c> and <c>::1</c> on one port, as Kestrel's <c>ListenLocalhost</c> binds them, so
-    /// no other process answers a client that reaches it by <c>localhost</c> on the other family; a
-    /// port another socket holds on either fails the start, and a port drawn is drawn again, eight
-    /// times at most. Where the IPv6 loopback is absent it listens on <c>127.0.0.1</c> alone, and
-    /// reports it. Or an IP address written bare, which it listens on alone: <c>0.0.0.0</c> or
-    /// <c>::</c> for every interface, which a container, or any server another machine reaches,
-    /// needs, its hosts named beside. RFC 3986's <c>IPv4address</c> or <c>IPv6address</c>, with no
-    /// brackets, no zone, and not IPv4-mapped; another name or any other form is an
-    /// <see cref="ArgumentException"/> as it starts, which ends Closed.
-    /// </summary>
-    public string Address { get; init; } = Loopbacks.Localhost;
-
-    /// <summary>The port it listens on.</summary>
-    public int Port { get; init; } = 80;
-
-    /// <summary>Whether it takes any free port instead.</summary>
-    public bool FindOpenPort { get; init; }
-
-    /// <summary>What gives up on the start.</summary>
-    public CancellationToken CancellationToken { get; init; }
-}
-
 /// <summary>
 /// A transport server over WebSocket connections, on Kestrel: one envelope per binary message, a
 /// connection named <c>type=WS;ip=…;port=…;ordinal=…</c>, by its client's address, read past the
@@ -303,7 +276,7 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         _isSecure = _options.Secure ?? false;
         _listeners = new ListenerGuard((reason, connectionHandle) =>
         {
-            Error?.Invoke(reason, connectionHandle ?? "");
+            ListenerGuard.TellError(Error, (reason, connectionHandle ?? ""));
         });
     }
 
@@ -486,9 +459,9 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     /// Closed — a second start even while the first is under way; one that fails ends Closed, ready
     /// to start again.
     /// </summary>
-    public Task<TransportServerAddress> Start(WebSocketTransportStartOptions? options = null)
+    public Task<TransportServerAddress> Start(TransportServerStartOptions? options = null)
     {
-        var start = options ?? new WebSocketTransportStartOptions();
+        var start = options ?? new TransportServerStartOptions();
 
         return _life.Start(() =>
         {
@@ -508,13 +481,13 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     }
 
     // listens where it is told, localhost on both loopbacks, and gives where
-    private async Task<TransportServerAddress> Starting((WebSocketTransportStartOptions Start, CancellationToken Token) call)
+    private async Task<TransportServerAddress> Starting((TransportServerStartOptions Start, CancellationToken Token) call)
     {
         var (start, cancellationToken) = call;
 
         // ! an IP address by RFC 3986's grammar before the platform's parser reads it: it takes 0 for
         // 0.0.0.0, every interface, and 127.1, octal, hexadecimal and a zone besides
-        HostsAndOrigins.AssertAddress(start.Address, nameof(WebSocketTransportStartOptions.Address));
+        HostsAndOrigins.AssertAddress(start.Address, nameof(TransportServerStartOptions.Address));
 
         var ((application, port), address) = start.Address == Loopbacks.Localhost
             ? await Loopbacks.Bind(
@@ -588,15 +561,6 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
 
             throw;
         }
-    }
-
-    /// <summary>
-    /// Closes every connection with 1000, as <see cref="CloseConnection"/> closes one, and gives what
-    /// each close gave; none without a connection.
-    /// </summary>
-    public Task<bool[]> CloseAll()
-    {
-        return Task.WhenAll(_connections.Keys.Select(CloseConnection));
     }
 
     /// <summary>
@@ -998,28 +962,23 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     // * a connection's end, told once its read ended, its close or its abort begun: its one error,
     // when it has one, then its close, unclean whenever this side ended it of its own, whatever the
     // peer answered; so a listener of Error that throws stops nothing, and its close is told all
-    // the same, what it threw going on to Kestrel (spec 15.1)
+    // the same, what it threw dropped (spec 15.1)
     private void Ended(Held held, (Exception? Failure, string ConnectionHandle) end)
     {
         var (failure, connectionHandle) = end;
         var connection = held.Connection;
 
-        try
+        if (failure is not null)
         {
-            if (failure is not null)
-            {
-                Error?.Invoke(failure, connectionHandle);
-            }
+            ListenerGuard.TellError(Error, (failure, connectionHandle));
         }
-        finally
-        {
-            // a connection the registry no longer holds tells no close: the stop's clear took it
-            if (_connections.TryRemove(new KeyValuePair<string, Held>(connectionHandle, held)))
-            {
-                var isClean = failure is null && !connection.IsEndedHere && connection.Socket.CloseStatus == WebSocketCloseStatus.NormalClosure;
 
-                _listeners.Tell(Close, (isClean, connectionHandle));
-            }
+        // a connection the registry no longer holds tells no close: the stop's clear took it
+        if (_connections.TryRemove(new KeyValuePair<string, Held>(connectionHandle, held)))
+        {
+            var isClean = failure is null && !connection.IsEndedHere && connection.Socket.CloseStatus == WebSocketCloseStatus.NormalClosure;
+
+            _listeners.Tell(Close, (isClean, connectionHandle));
         }
     }
 

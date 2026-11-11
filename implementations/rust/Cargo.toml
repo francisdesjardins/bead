@@ -11,7 +11,7 @@ exclude = ["fuzz", "tools/protobuf-conformance"]
 [workspace.package]
 # the product's one version, which tools/release.mjs moves with the TypeScript manifest and the
 # C# side's Directory.Build.props
-version = "0.11.0"
+version = "0.12.0"
 edition = "2024"
 # the floor is the pin, rust-toolchain.toml's
 rust-version = "1.99.1"
@@ -40,6 +40,36 @@ hmac = { version = "0.13.0", default-features = false }
 sha2 = { version = "0.11.1", default-features = false }
 sha1 = { version = "0.11.0", default-features = false }
 getrandom = { version = "0.4.3", default-features = false }
+# RFC 9112 §2-§5's head, read by the WebSocket server and the fuzz targets: the version
+# tungstenite's own lock takes
+httparse = { version = "1.10.1", default-features = false, features = ["std"] }
+# the socket transports' (decision 0049): a listener's IPV6_V6ONLY and a socket dropped with
+# SO_LINGER 0; the request and response types and their status codes; RFC 6455's frames, masking,
+# ping and close over tokio, the handshake's head read and written by Bead; and the Stream and Sink
+# a WebSocket's connection is driven by
+socket2 = { version = "0.6.5", default-features = false }
+http = { version = "1.5.0", default-features = false, features = ["std"] }
+tungstenite = { version = "0.30.0", default-features = false, features = ["handshake"] }
+tokio-tungstenite = { version = "0.30.0", default-features = false, features = ["handshake"] }
+futures-util = { version = "0.3.34", default-features = false, features = ["sink", "std"] }
+# a host read as the URL Standard's host parser reads it, its domain to ASCII by UTS #46, as the
+# other sides' `URL` and `UrlHost` read one
+idna = { version = "1.1.0", default-features = false, features = ["std", "compiled_data"] }
+# TLS for the socket transports (RFC 8446, RFC 7301), on aws-lc-rs's provider, given to every
+# config by name, and a server's certificate verified by the platform's own verifier
+rustls = { version = "0.23.46", default-features = false, features = ["std", "aws_lc_rs", "tls12", "logging"] }
+tokio-rustls = { version = "0.26.6", default-features = false, features = ["aws_lc_rs", "tls12", "logging"] }
+rustls-platform-verifier = { version = "0.7.1", default-features = false }
+# the HTTP transport's (decision 0049): RFC 9112's server and RFC 9113's over tokio's sockets, and
+# RFC 9112's client, pooled, its timer and its executor Bead's own, its bodies read and written by Bead; a stream reset with its
+# reason; an HTTP date (RFC 9110 §5.6.7), the one hyper writes, on every response both socket
+# servers write themselves
+hyper = { version = "1.12.0", default-features = false }
+hyper-util = { version = "0.1.21", default-features = false }
+h2 = { version = "0.4.20", default-features = false }
+# the HTTP client's: the connector hyper-util's pool takes, a service of a URI
+tower-service = { version = "0.3.3", default-features = false }
+httpdate = { version = "1.0.3", default-features = false }
 libtest-mimic = { version = "0.8.2" }
 syn = { version = "3.0.9", default-features = false, features = ["full", "parsing", "visit"] }
 proc-macro2 = { version = "1.0.107", default-features = false, features = ["span-locations"] }

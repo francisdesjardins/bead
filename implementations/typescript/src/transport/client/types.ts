@@ -32,7 +32,11 @@ export interface ITransportClientConnectOptions {
   timeout?: number | undefined;
 }
 
-/** What a connect over the network takes besides: where it goes. */
+/**
+ * What a connect over the network takes besides: where it goes, its host and its port named, as on
+ * every side; a connect that leaves either out is refused with a {@link ProgrammerError}, the state
+ * untouched.
+ */
 export interface ITransportClientAddressOptions extends ITransportClientConnectOptions {
   /** The host to reach. */
   host: string;
@@ -175,8 +179,10 @@ export interface ITransportClient<
   /**
    * Resolves once the message is on its way, not once it is delivered: over a socket, once the
    * socket has accepted it; over HTTP, on the head of its exchange's answer — the server had it — or
-   * on its exchange lost, which closes the connection. Rejects with a {@link ReadyStateError} unless
-   * OPEN, and over HTTP with a {@link GenericError} on a refusal the server marked, nothing tried; the
+   * on its exchange lost, which closes the connection. Rejects, nothing sent, with a
+   * {@link ReadyStateError} before its open, uninitialized or connecting, and with a
+   * {@link DisconnectError} once its state is a close's, closing, closed or reconnecting (debugging
+   * 9.7); over HTTP with a {@link GenericError} on a refusal the server marked, nothing tried; the
    * socket's own error passes through. Its credential goes over HTTP in the `Authorization` of its
    * `POST`, over a WebSocket in its upgrade's, which its connect is given; a worker carries none.
    */
@@ -246,6 +252,11 @@ export interface ITransportClientImplementation<
 /** What {@link createTransportClient} gives its transport beside the client. */
 export interface ITransportClientDefineOptions {
   /**
+   * Tells `error` to each of its listeners within a guard (spec 15.1): what one throws is dropped,
+   * and the listeners after it are told all the same. Returns whether it had any.
+   */
+  readonly report: (error: Error) => boolean;
+  /**
    * Calls each listener of a `message` or a `close` within a guard (spec 15.1): what one throws is
    * reported through `error`, and the listeners after it are called all the same. Returns whether
    * `event` had any.
@@ -280,7 +291,8 @@ export type TransportClientEventMap = {
    * client does; and, once open, what the client closes its connection for of its own — a protocol
    * error, a message or an envelope past its bound, a batch that does not read — once, as the
    * connection ends, before its `close` (spec 15.1). A connect that fails rejects; a server or a
-   * network that ends the connection shows as `close` alone.
+   * network that ends the connection shows as `close` alone. What a listener of it throws is
+   * dropped, the listeners after it told all the same.
    */
   error: [error: Error];
   /**
@@ -417,7 +429,7 @@ export interface IWebSocketTransportClientConnectOptions extends ITransportClien
    * failure while the attempt's signal stays live.
    */
   credentialProvider?: ((options: { signal: AbortSignal }) => string | Promise<string>) | undefined;
-  /** Prefixed with a single leading slash. */
+  /** The path the server listens on, prefixed with a single leading slash; `/` by default. */
   pathname?: string | undefined;
   /** The subprotocols offered in the handshake. */
   protocols?: string[] | undefined;

@@ -541,7 +541,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
                 _notifications.TargetOf(target.CallId, target.ConnectionHandle).Series?.Failed();
             }
 
-            Error?.Invoke(unwritten, null);
+            ListenerGuard.TellError(Error, (unwritten, null));
 
             return Task.CompletedTask;
         });
@@ -772,7 +772,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
     {
         _core.Post(() =>
         {
-            Error?.Invoke(reason, connectionHandle);
+            ListenerGuard.TellError(Error, (reason, connectionHandle));
         });
     }
 
@@ -1059,7 +1059,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
         }
         catch (Exception reason)
         {
-            Error?.Invoke(reason, call.ConnectionHandle);
+            ListenerGuard.TellError(Error, (reason, call.ConnectionHandle));
         }
     }
 
@@ -1083,7 +1083,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
         }
         catch (Exception reason)
         {
-            Error?.Invoke(reason, call.ConnectionHandle);
+            ListenerGuard.TellError(Error, (reason, call.ConnectionHandle));
         }
     }
 
@@ -1108,7 +1108,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
         }
         catch (Exception reason)
         {
-            Error?.Invoke(reason, call.ConnectionHandle);
+            ListenerGuard.TellError(Error, (reason, call.ConnectionHandle));
         }
     }
 
@@ -1157,14 +1157,8 @@ public sealed class RouterServer : IRouterLike, IDisposable
         {
             _core.Post(() =>
             {
-                try
-                {
-                    Error?.Invoke(FailureException.OfProtocol(ProtocolCode.EnvelopeMalformed, RouterSide.Server, "an envelope is binary, not a string"), connectionHandle);
-                }
-                finally
-                {
-                    Taken();
-                }
+                ListenerGuard.TellError(Error, (FailureException.OfProtocol(ProtocolCode.EnvelopeMalformed, RouterSide.Server, "an envelope is binary, not a string"), connectionHandle));
+                Taken();
             });
 
             return;
@@ -1185,7 +1179,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
         {
             _core.Post(() =>
             {
-                Error?.Invoke(reason, connectionHandle);
+                ListenerGuard.TellError(Error, (reason, connectionHandle));
             });
         }
     }
@@ -1201,7 +1195,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
         {
             _core.Post(() =>
             {
-                Error?.Invoke(reason, connectionHandle);
+                ListenerGuard.TellError(Error, (reason, connectionHandle));
             });
         }
     }
@@ -1345,7 +1339,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
 
         public void Report(Exception reason, string? connectionHandle)
         {
-            server.Error?.Invoke(reason, connectionHandle);
+            ListenerGuard.TellError(server.Error, (reason, connectionHandle));
         }
 
         public SessionToken? SessionTokenOf(string connectionHandle)
@@ -1410,7 +1404,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
                 }
                 catch (Exception reason)
                 {
-                    server.Error?.Invoke(reason, refusal.ConnectionHandle);
+                    ListenerGuard.TellError(server.Error, (reason, refusal.ConnectionHandle));
                 }
             }
         }
@@ -1442,7 +1436,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
                 }
                 catch (Exception reason)
                 {
-                    server.Error?.Invoke(reason, envelope.ConnectionHandle);
+                    ListenerGuard.TellError(server.Error, (reason, envelope.ConnectionHandle));
                 }
             }
         }

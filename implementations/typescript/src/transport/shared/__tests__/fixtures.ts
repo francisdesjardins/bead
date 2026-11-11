@@ -82,6 +82,24 @@ export const allClosed = async () => {
 };
 
 /**
+ * What a send of one byte on `client` came to (debugging 9.7): `sent`, or the name of what refused
+ * it, the ready state its refusal names when it is the ready state's, and its words.
+ */
+export const sendRefusalOf = async (client: {
+  send(message: { data: Uint8Array }): Promise<void>;
+}): Promise<string | [name: string, got: number | undefined, message: string]> => {
+  try {
+    await client.send({ data: Uint8Array.of(1) });
+
+    return 'sent';
+  } catch (reason) {
+    const { got, message, name } = reason as Error & { got?: number };
+
+    return [name, got, message];
+  }
+};
+
+/**
  * What a test's listeners throw meanwhile, which reaches Node as an uncaught exception: taken from
  * the runner's own listeners, which would fail the test, and given back to them once it ends.
  */

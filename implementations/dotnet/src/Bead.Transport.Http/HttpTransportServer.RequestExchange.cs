@@ -66,7 +66,7 @@ public sealed partial class HttpTransportServer
 
             internal required Func<(TConnection Connection, Waiting Waiting, TransportMessage Message), Task<HandOff>> HandOn { get; init; }
 
-            internal required Func<(TConnection Connection, Waiting Waiting, uint CallId), bool> WaitAfterHandOff { get; init; }
+            internal required Action<(TConnection Connection, Waiting Waiting, uint CallId)> WaitAfterHandOff { get; init; }
 
             internal required Func<HttpContext, End, Task> Finish { get; init; }
 
@@ -346,9 +346,8 @@ public sealed partial class HttpTransportServer
             return waiting.IsCancelled ? (null, Nothing) : (body.AsSpan(0, length).ToArray(), null);
         }
 
-        // an envelope whole, handed on: a request waits for its answer, its head going now so its client
-        // knows the router has it; a cancel ends the exchange of its call, or buries its call id; any
-        // other ends empty
+        // an envelope whole, handed on: a request waits for its answer, its head waiting 40 ms for it;
+        // a cancel ends the exchange of its call, or buries its call id; any other ends empty
         private async Task<End?> Hand(HttpContext context, (TConnection Connection, Waiting Waiting, byte[] Envelope) call)
         {
             var (connection, waiting, envelope) = call;
@@ -401,12 +400,10 @@ public sealed partial class HttpTransportServer
                 return await Reply(context, (connection, waiting));
             }
 
-            var isWaiting = _port.WaitAfterHandOff((connection, waiting, callId));
-
-            if (isWaiting)
-            {
-                await HttpServerFields.SendHead(context);
-            }
+            // still waiting — not answered as it came — its head waits 40 ms for its answer, then goes
+            // alone, so its client knows the router has it; and it waits for its answer no longer than
+            // it may (spec 15.7)
+            _port.WaitAfterHandOff((connection, waiting, callId));
 
             return await Reply(context, (connection, waiting));
         }
@@ -430,7 +427,18 @@ public sealed partial class HttpTransportServer
         private async Task<End?> Reply(HttpContext context, (TConnection Connection, Waiting Waiting) call)
         {
             var (connection, waiting) = call;
-            var ending = await waiting.Ended.Task.WaitAsync(context.RequestAborted);
+            var ended = waiting.Ended.Task;
+
+            // * its head goes here, on its own flow, never on its timer's: once its request waited
+            // 40 ms unanswered; an answer within them goes whole, its length with its head (spec 15.7)
+            await Task.WhenAny(ended, waiting.HeadDue.Task).WaitAsync(context.RequestAborted);
+
+            if (!ended.IsCompleted)
+            {
+                await HttpServerFields.SendHead(context);
+            }
+
+            var ending = await ended.WaitAsync(context.RequestAborted);
 
             if (ending.IsGone)
             {
@@ -532,7 +540,8 @@ public sealed partial class HttpTransportServer
         // the transport ended it — an answer, a 204, a refusal, its connection closed — so its close is no loss
         public bool IsEnded { get; set; }
 
-        // ends its connection, as lost, once its request waited past the exchange timeout
+        // sends its head once its request waited 40 ms unanswered, then ends its connection, as lost,
+        // once it waited past the exchange timeout, counted from its hand-off (spec 15.7)
         public ITimer? Timer { get; set; }
 
         // what its body holds of the server's budget, until handed on or ended
@@ -542,6 +551,9 @@ public sealed partial class HttpTransportServer
         public PipeReader? Reading { get; set; }
 
         public TaskCompletionSource<Ending> Ended { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        // its request waited 40 ms unanswered from its hand-off: its head goes alone (spec 15.7)
+        public TaskCompletionSource HeadDue { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         // its answer, once written: what its send settles on
         public TaskCompletionSource Written { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);

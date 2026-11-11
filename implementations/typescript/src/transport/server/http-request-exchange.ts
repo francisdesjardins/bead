@@ -13,8 +13,7 @@ import {
   type IEnd,
   type IExchangeIn,
   linesOf,
-  REFUSALS,
-  sendHead,
+  HTTP_REFUSALS,
   UNKNOWN_CONNECTION,
 } from './http-server-fields';
 import type { IHTTPRequestLike, IHTTPResponseLike } from './types';
@@ -92,7 +91,11 @@ export interface IHTTPRequestExchangePort<Connection> {
     state: IExchange,
     options: { callId: number }
   ) => boolean;
-  /** Ends an exchange's connection, as lost, once its request waited past `exchangeTimeout`. */
+  /**
+   * Arms a waiting exchange's one timer: its head's delay, which sends its head alone once its
+   * request waited 40 ms unanswered, then the rest of `exchangeTimeout`, which ends its connection,
+   * as lost, once its request waited past it (spec 15.7).
+   */
   armExchangeTimer: (connection: Connection, state: IExchange) => void;
   /**
    * An envelope handed on to the router, with the credential its exchange carried, and the address
@@ -114,8 +117,8 @@ export interface IHTTPRequestExchangePort<Connection> {
 export interface IHTTPRequestExchange<Connection> {
   /**
    * One envelope: its body read into one buffer under its limits, its prefix checked from its first
-   * 8 bytes, then handed on; a request's head sent and its timer armed, its answer written by the
-   * server's `send`.
+   * 8 bytes, then handed on; a request's timer armed, its head waiting 40 ms for its answer, which
+   * the server's `send` writes.
    */
   receive: (exchange: IExchangeIn, connection: Connection) => void;
 }
@@ -135,7 +138,7 @@ const FIRST_BODY_BYTES = 65_536;
 // for before it sends a non-request again (spec 15.6)
 export const BUSY_EXCHANGES: IEnd = Object.freeze({
   headers: Object.freeze({ 'retry-after': '1' }),
-  reason: REFUSALS.BUSY,
+  reason: HTTP_REFUSALS.BUSY,
   status: 429,
 });
 
@@ -191,11 +194,11 @@ export const createHTTPRequestExchange = <Connection>(
     // ! a field that is no list is not combined (RFC 9110 §5.3): two are refused before either
     // could be taken for the other
     if (authorizations.length > 1) {
-      return (port.finish(exchange, { reason: REFUSALS.MALFORMED, status: 400 }), undefined);
+      return (port.finish(exchange, { reason: HTTP_REFUSALS.MALFORMED, status: 400 }), undefined);
     }
 
     if (Number.isFinite(declared) && declared > maximumBodyBytes) {
-      return (port.finish(exchange, { reason: REFUSALS.TOO_LARGE, status: 413 }), undefined);
+      return (port.finish(exchange, { reason: HTTP_REFUSALS.TOO_LARGE, status: 413 }), undefined);
     }
 
     // a bound on what one connection has under way, cancels included, well past what its
@@ -264,7 +267,7 @@ export const createHTTPRequestExchange = <Connection>(
 
           if (!port.isEnded(state)) {
             release();
-            endEarly({ reason: REFUSALS.TOO_SLOW, status: 408 });
+            endEarly({ reason: HTTP_REFUSALS.TOO_SLOW, status: 408 });
           }
         },
         // ! a millisecond at least, counted whole: Bead arms no timer for less (decision 0011)
@@ -324,11 +327,11 @@ export const createHTTPRequestExchange = <Connection>(
         unpace();
         release();
 
-        return (endEarly({ reason: REFUSALS.TOO_LARGE, status: 413 }), undefined);
+        return (endEarly({ reason: HTTP_REFUSALS.TOO_LARGE, status: 413 }), undefined);
       }
 
       if (isOverBudget) {
-        const busy = { headers: { 'retry-after': '1' }, reason: REFUSALS.BUSY, status: 503 };
+        const busy = { headers: { 'retry-after': '1' }, reason: HTTP_REFUSALS.BUSY, status: 503 };
 
         unpace();
         release();
@@ -382,7 +385,7 @@ export const createHTTPRequestExchange = <Connection>(
       if (prefix === undefined) {
         release();
 
-        return (endEarly({ reason: REFUSALS.MALFORMED, status: 400 }), undefined);
+        return (endEarly({ reason: HTTP_REFUSALS.MALFORMED, status: 400 }), undefined);
       }
 
       const { callId, kind } = prefix;
@@ -403,11 +406,10 @@ export const createHTTPRequestExchange = <Connection>(
         port.beginHandOff(state);
         port.message(connection, { ...port.originOf(request), credential, data: envelope });
 
-        // still waiting — not answered as it came — its head goes now, so its client knows the
-        // router has it; and it waits for its answer no longer than it may
+        // still waiting — not answered as it came — its head waits 40 ms for its answer, then
+        // goes alone, so its client knows the router has it; and it waits for its answer no
+        // longer than it may (spec 15.7)
         if (port.waitAfterHandOff(connection, state, { callId })) {
-          sendHead(response);
-
           port.armExchangeTimer(connection, state);
         }
       };

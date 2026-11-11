@@ -43,18 +43,35 @@ test.describe('createIntake', () => {
   });
 
   // spec 15.12.18
-  test('counts a text frame by its characters and a Blob by its size', () => {
+  test('counts a text frame by its UTF-8 bytes and a Blob by its size', () => {
     const { intake, paces } = recording({ maximumUntakenBytes: 4, maximumUntakenEnvelopes: 64 });
 
-    intake.handed('a', 'abc');
-    intake.handed('b', new Blob(['abcd']));
+    // four bytes in two UTF-16 code units
+    intake.handed('a', 'éé');
+    intake.handed('b', new Blob(['abc']));
 
-    expect(paces).toEqual(['pause b']);
+    expect(paces).toEqual(['pause a']);
 
-    intake.handed('a', 'd');
+    intake.handed('b', 'd');
 
-    expect(paces).toEqual(['pause b', 'pause a']);
+    expect(paces).toEqual(['pause a', 'pause b']);
     intake.end();
+
+    // as `TextEncoder` writes each: a surrogate pair in four bytes, a lone surrogate as U+FFFD
+    const texts = ['a', 'é', '€', '\u{1f600}', '\ud800', '\udc00a', 'a\u{1f600}\ud800é'];
+
+    for (const text of texts) {
+      const bytes = new TextEncoder().encode(text).byteLength;
+      const below = recording({ maximumUntakenBytes: bytes + 1, maximumUntakenEnvelopes: 64 });
+      const at = recording({ maximumUntakenBytes: bytes, maximumUntakenEnvelopes: 64 });
+
+      below.intake.handed('a', text);
+      at.intake.handed('a', text);
+
+      expect([text, below.paces, at.paces]).toEqual([text, [], ['pause a']]);
+      below.intake.end();
+      at.intake.end();
+    }
   });
 
   // spec 15.12.17

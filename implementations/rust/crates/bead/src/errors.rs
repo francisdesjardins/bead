@@ -11,6 +11,7 @@ use crate::debug::FilterRefusal;
 use crate::duration::DurationRefusal;
 use crate::failure::Failure;
 use crate::identity::IdentityRefusal;
+use crate::transport::ReadyState;
 
 #[cfg(test)]
 mod tests;
@@ -84,8 +85,12 @@ pub enum CallError {
     /// Cancelled by its signal: its answer is not waited on, and the peer, once it went, is sent a
     /// cancel. Its call id is present once drawn; a signal cancelled before it starts draws none.
     Cancelled(Option<u32>),
-    /// Its connection closed before its answer came, or its router was disposed, saying why.
+    /// A call whose connection closed before its answer came, or was not open as it started —
+    /// closing, closed or reconnecting — or whose side was disposed, saying why (debugging 9.7).
     Disconnected(String),
+    /// Refused by its transport's ready state before its open: uninitialized or connecting
+    /// (debugging 9.7).
+    ReadyState(ReadyStateError),
     /// No answer came within its timeout.
     TimedOut(Duration),
     /// Refused as it started, before it went, as its side judged it.
@@ -113,6 +118,7 @@ impl fmt::Display for CallError {
             Self::Cancelled(Some(call_id)) => write!(formatter, "call {call_id} was cancelled"),
             Self::Cancelled(None) => formatter.write_str("the call was cancelled"),
             Self::Disconnected(reason) => formatter.write_str(reason),
+            Self::ReadyState(error) => write!(formatter, "{error}"),
             Self::TimedOut(timeout) => {
                 write!(
                     formatter,
@@ -131,6 +137,7 @@ impl Error for CallError {
         match self {
             Self::Failure(failure) => failure.source(),
             Self::Refused(error) => error.source(),
+            Self::ReadyState(error) => error.source(),
             Self::Other(error) => {
                 let source: &(dyn Error + 'static) = error.as_ref();
                 source.source()
@@ -259,15 +266,27 @@ impl Error for CapacityError {}
 /// uninitialized, not open`, in the other sides' words.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReadyStateError {
-    got: &'static str,
-    expected: &'static str,
+    got: ReadyState,
+    expected: ReadyState,
 }
 
 impl ReadyStateError {
-    /// A state `got` where `expected` was needed, each by its name.
+    /// A state `got` where `expected` was needed.
     #[must_use]
-    pub fn new(got: &'static str, expected: &'static str) -> Self {
+    pub const fn new(got: ReadyState, expected: ReadyState) -> Self {
         Self { got, expected }
+    }
+
+    /// The state it was in.
+    #[must_use]
+    pub const fn got(&self) -> ReadyState {
+        self.got
+    }
+
+    /// The state it needed.
+    #[must_use]
+    pub const fn expected(&self) -> ReadyState {
+        self.expected
     }
 }
 
@@ -276,8 +295,8 @@ impl fmt::Display for ReadyStateError {
         write!(
             formatter,
             "the transport client is {}, not {}",
-            self.got.to_lowercase(),
-            self.expected.to_lowercase()
+            self.got.said(),
+            self.expected.said()
         )
     }
 }

@@ -5,6 +5,8 @@
 // keeps it for every exchange at the connection's one URL (spec 15.9; decision 0029), which the
 // conformance cases hold on the wire alone. The C# server is built and started by .NET: where
 // .NET is not installed, its half is skipped, saying so, or fails where `BEAD_INTEROP_REQUIRED=1`.
+// The Rust server is the binary `BEAD_INTEROP_RUST_SERVER` names, built: where it names none, its
+// half is skipped, saying so.
 // A page of its server's own origin, that server answering its connect with a redirect, shows what
 // a page's fetch reads of one: no status (spec 15.6).
 
@@ -36,21 +38,40 @@ const HAS_DOTNET = spawnSync('dotnet', ['--version'], { stdio: 'ignore' }).statu
 /** Whether the C# half must run: a path to the other side gone wrong then fails, not skips. */
 const REQUIRED = process.env['BEAD_INTEROP_REQUIRED'] === '1';
 
-/** Each side's interop server: how it starts, and whether it can here. */
+/** The Rust interop server, built, where one is named. */
+const RUST_SERVER = process.env['BEAD_INTEROP_RUST_SERVER'];
+
+/**
+ * Each side's interop server: how it starts, whether it can here, and why not; whether a run that
+ * requires the interop fails where it cannot.
+ */
 const SERVERS = [
   {
     args: ['interop/serve.ts'],
     command: process.execPath,
     cwd: PACKAGE,
+    isRequired: REQUIRED,
     isRunnable: true,
     label: 'TypeScript',
+    unrunnable: '',
   },
   {
     args: ['run', '--project', 'interop/Bead.Interop.Server'],
     command: 'dotnet',
     cwd: DOTNET,
+    isRequired: REQUIRED,
     isRunnable: HAS_DOTNET,
     label: 'C#',
+    unrunnable: 'it builds and starts a .NET program, and .NET is not installed',
+  },
+  {
+    args: [],
+    command: RUST_SERVER ?? '',
+    cwd: PACKAGE,
+    isRequired: false,
+    isRunnable: RUST_SERVER !== undefined,
+    label: 'Rust',
+    unrunnable: 'no Rust server: BEAD_INTEROP_RUST_SERVER names no bead-interop-server built',
   },
 ] as const;
 
@@ -181,10 +202,7 @@ const startServer = async (
 
 for (const each of SERVERS) {
   test.describe(`a page of another origin, against the ${each.label} server`, () => {
-    test.skip(
-      !each.isRunnable && !REQUIRED,
-      'it builds and starts a .NET program, and .NET is not installed'
-    );
+    test.skip(!each.isRunnable && !each.isRequired, each.unrunnable);
     test.describe.configure({ mode: 'serial' });
 
     let served: Awaited<ReturnType<typeof servePage>> | undefined;
@@ -197,7 +215,7 @@ for (const each of SERVERS) {
 
       if (!each.isRunnable) {
         throw new Error(
-          'BEAD_INTEROP_REQUIRED=1 asks for the C# server, and .NET is not installed'
+          `BEAD_INTEROP_REQUIRED=1 asks for the ${each.label} server: ${each.unrunnable}`
         );
       }
 

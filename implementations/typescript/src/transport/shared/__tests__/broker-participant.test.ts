@@ -27,7 +27,7 @@ import {
 import { createMqttBrokerAdapter } from '../mqtt-broker-adapter';
 import { noop } from '../noop';
 import type { BrokerTopic, IBrokerAdapter, IBrokerMessage } from '../types';
-import { createTestClock } from './fixtures';
+import { createTestClock, trapUncaught } from './fixtures';
 import { createMqttScript, type IScriptedLink } from './mqtt-script';
 
 // interfaces
@@ -1524,6 +1524,56 @@ test.describe('broker participant', () => {
       ['start, its will to deploy/d/bob', 'subscribe deploy/i/bob'],
     ]);
 
+    await participant.stop();
+  });
+
+  // spec 15.1
+  test('drops what an error listener throws, the next error listener told, and the participant goes on', async () => {
+    using uncaught = trapUncaught();
+    const broker = createMemoryBroker();
+    const peer = await peerOf(broker, { id: 'acceptor', isServing: true });
+    const participant = createBrokerParticipant({ adapter: broker.adapter({ id: 'ada' }) });
+    const heard: string[] = [];
+
+    participant.on('error', () => {
+      throw new Error('an error listener that throws');
+    });
+    participant.on('error', ({ message }) => {
+      heard.push(message);
+    });
+    await participant.start();
+
+    // a report of its own: a message that is no parcel
+    await peer.adapter.publish({ payload: Uint8Array.of(0xb1), topic: ['bead', 'i', 'ada'] });
+    await settled();
+
+    // * it takes the next parcel: the ACCEPT that opens its connection
+    const client = participant.transportClient();
+    const connecting = client.connect({ server: 'interop' });
+
+    await settled();
+
+    const open = peer.heard.at(-1)?.parcel;
+
+    expect(open?.kind).toBe(ParcelKind.OPEN);
+
+    if (open !== undefined) {
+      await peer.adapter.publish({
+        payload: acceptOf(open, { acceptor: HALF, id: 'acceptor' }),
+        topic: ['bead', 'i', 'ada'],
+      });
+    }
+
+    await connecting;
+
+    // the report told the next listener once, the throw of the first told to none
+    expect([client.isOpen(), heard, uncaught.thrown]).toEqual([
+      true,
+      ["a message to the inbox of ada is no parcel: 1 bytes, under a parcel's 28"],
+      [],
+    ]);
+
+    await client.disconnect();
     await participant.stop();
   });
 

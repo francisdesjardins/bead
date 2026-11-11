@@ -1,8 +1,30 @@
 // dependencies
 
+import { ERROR_EVENT } from './constants';
 import type { EmitterEventMap, IEmitter, IEmitterRegistration } from './types';
 
+// helpers
+
+/** Drops what a listener of `error` threw, the guard every `error` a side tells is told within. */
+export const dropThrown = (): void => {
+  // ! the one place a side drops a listener's throw, since reporting it would tell the event that
+  // threw: reported nowhere, the listeners after it told all the same (spec 15.1)
+};
+
 // definition
+
+/**
+ * Tells `error` to each listener of `emitter` within a guard (spec 15.1): what one throws is
+ * dropped, reported nowhere, and the listeners after it are told the error they were to hear, as an
+ * `error` listener's own exception fires no `error` again in HTML's report of an exception. What a
+ * listener returns, or settles to later, is its platform's. Returns whether `error` had any.
+ */
+export const tellError = <E extends EmitterEventMap<E> & { [ERROR_EVENT]: unknown[] }>(
+  emitter: IEmitter<E>,
+  params: E[ERROR_EVENT]
+): boolean => {
+  return emitter.emitEach(ERROR_EVENT, { onError: dropThrown, params });
+};
 
 /**
  * The part of Node's `EventEmitter` a transport uses, typed per event and without `events`, so the
@@ -12,7 +34,8 @@ import type { EmitterEventMap, IEmitter, IEmitterRegistration } from './types';
  * the latest registration of `f`. Listeners run in registration order over a snapshot, so one added
  * or removed mid-emit changes the next emit, not this one. Unlike Node, an `error` nobody listens to
  * makes `emit` return `false` instead of throwing. `emitEach` calls each listener within a guard, for
- * what must never fail its emitter — a debug listener's trace: what one throws goes to `onError`.
+ * what must never fail its emitter — a debug listener's trace: what one throws goes to `onError`;
+ * {@link tellError} tells `error` so.
  */
 export const createEmitter = <E extends EmitterEventMap<E>>(): IEmitter<E> => {
   let registrationsByEvent: { [K in keyof E]?: IEmitterRegistration<E[K]>[] } = {};

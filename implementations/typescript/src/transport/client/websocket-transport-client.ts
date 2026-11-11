@@ -5,7 +5,6 @@
 import {
   CLOSE_EVENT,
   CLOSE_TIMEOUT,
-  ERROR_EVENT,
   MESSAGE_EVENT,
   REFUSAL_HEADER,
   TRANSPORT_WEBSOCKET_BINARYTYPE,
@@ -17,6 +16,7 @@ import { createPromise } from '../shared/create-promise';
 import {
   ConnectError,
   ProgrammerError,
+  notOpenOf,
   ReadyStateError,
   tooBigOf,
   wrapReason,
@@ -70,12 +70,10 @@ export const MAXIMUM_MESSAGE_BYTES = 16_778_240;
 
 /** What an omitted connect option resolves to. */
 export const CONNECT_DEFAULTS = Object.freeze({
-  host: 'localhost',
-  pathname: '',
-  port: 80,
+  pathname: '/',
   secured: false,
   timeout: 30_000,
-} satisfies IWebSocketTransportClientConnectOptions);
+} satisfies Omit<IWebSocketTransportClientConnectOptions, 'host' | 'port'>);
 
 // helpers
 
@@ -207,7 +205,7 @@ export const createWebSocketTransportClient = (
   const closeTimeout = assertHeld('a close timeout', givenCloseTimeout);
 
   return createTransportClient<IWebSocketLike, IWebSocketTransportClientConnectOptions>(
-    (client, { tell }) => {
+    (client, { report, tell }) => {
       // settle the connect or the disconnect in flight, so a socket dropped under either cannot leave
       // it pending, and the client with it
       let rejectConnect: ((reason: Error) => void) | undefined;
@@ -283,7 +281,12 @@ export const createWebSocketTransportClient = (
         // * a credential crosses the upgrade, so one the upgrade cannot carry as given is refused
         // before anything moves
         assertConnect: (connectOptions) => {
-          const { credential, credentialProvider } = connectOptions;
+          const { credential, credentialProvider, host, port } = connectOptions;
+
+          // what its type requires, and a caller in JavaScript may still leave out
+          if (typeof host !== 'string' || typeof port !== 'number') {
+            throw new ProgrammerError('a connect names the host and the port it reaches');
+          }
 
           if (credential === undefined && credentialProvider === undefined) {
             return;
@@ -444,8 +447,8 @@ export const createWebSocketTransportClient = (
                       return (hold.offer({ credential: undefined, data: data as Data }), undefined);
                     };
 
-                    // * its end: its one error, then its close, told even when a listener of
-                    // `error` throws, which is Node's or the page's (spec 15.1)
+                    // * its end: its one error, then its close, what a listener of `error` throws
+                    // dropped (spec 15.1)
                     socket.onclose = () => {
                       stopBeating();
                       hold.drop();
@@ -453,13 +456,11 @@ export const createWebSocketTransportClient = (
                       if (!client.isReconnecting()) {
                         setReadyStateClosed(client);
 
-                        try {
-                          if (failure !== undefined) {
-                            client.emit(ERROR_EVENT, failure);
-                          }
-                        } finally {
-                          tell(CLOSE_EVENT, [false, false]);
+                        if (failure !== undefined) {
+                          report(failure);
                         }
+
+                        tell(CLOSE_EVENT, [false, false]);
                       }
                     };
 
@@ -701,9 +702,7 @@ export const createWebSocketTransportClient = (
             const { socket } = client;
 
             if (!client.isOpen() || socket === null) {
-              return (
-                reject(new ReadyStateError(getReadyState(client), ReadyState.OPEN)), undefined
-              );
+              return (reject(notOpenOf(getReadyState(client))), undefined);
             }
 
             socket.send(data);

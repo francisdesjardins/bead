@@ -13,7 +13,17 @@ on:
   workflow_dispatch:
     inputs:
       baseline:
-        description: The tag to measure against; the newest v* by semver when empty
+        description: What to measure against, a tag, a branch or a commit's full sha; the newest v* by semver when empty
+        required: false
+        default: ''
+        type: string
+      sides:
+        description: The sides to measure, by comma, from typescript, csharp and rust; every side when empty
+        required: false
+        default: ''
+        type: string
+      filter:
+        description: One measure's id or name, each side's bench measuring it alone; every measure when empty
         required: false
         default: ''
         type: string
@@ -41,6 +51,35 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # ── Sides ────────────────────────────────────────────────────────────────────
+  # The matrix of the sides asked for, each with its timeout; a push asks for every side
+  sides:
+    name: Sides
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    outputs:
+      include: ${{ steps.sides.outputs.include }}
+    steps:
+      - name: The sides
+        id: sides
+        env:
+          REQUESTED: ${{ inputs.sides }}
+        shell: bash
+        run: |
+          all='[{"side":"typescript","timeout":330},{"side":"csharp","timeout":330},{"side":"rust","timeout":60}]'
+          include="$(node -e '
+            const all = JSON.parse(process.argv[1]);
+            const asked = (process.env.REQUESTED ?? "").split(",").map((side) => side.trim()).filter(Boolean);
+            const unknown = asked.filter((side) => !all.some((entry) => entry.side === side));
+            if (unknown.length > 0) {
+              console.error(`no such side: ${unknown.join(", ")}`);
+              process.exit(2);
+            }
+            const taken = asked.length === 0 ? all : all.filter((entry) => asked.includes(entry.side));
+            process.stdout.write(JSON.stringify(taken));
+          ' "$all")"
+          echo "include=$include" >> "$GITHUB_OUTPUT"
+
   # ── Bench ────────────────────────────────────────────────────────────────────
   # One job a side, each on a runner of its own. The TypeScript and C# benches each start the other
   # side's interop server, so both of their jobs install Node, .NET and the TypeScript side in each
@@ -49,18 +88,13 @@ jobs:
   # Nothing is cached: one run a release, its builds minutes against its hours of measure.
   bench:
     name: Bench (${{ matrix.side }})
+    needs: sides
     runs-on: ubuntu-26.04
     timeout-minutes: ${{ matrix.timeout }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - side: typescript
-            timeout: 330
-          - side: csharp
-            timeout: 330
-          - side: rust
-            timeout: 60
+        include: ${{ fromJSON(needs.sides.outputs.include) }}
     defaults:
       run:
         shell: bash
@@ -71,27 +105,30 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
-      # The tag named, or the newest v* by semver, a pre-release before its release, checked out
-      # beside the candidate as a worktree. ! A tag that holds no bench source of the side gives no
-      # baseline: the candidate is measured alone, and says so. The source is read from
-      # tools/bench-release.mjs's SOURCES, its one place in this workflow.
+      # The ref named — a tag, a branch or a commit's full sha, fetched as GitHub serves any of
+      # them — or the newest v* by semver, a pre-release before its release, checked out beside the
+      # candidate as a worktree. ! A baseline that holds no bench source of the side gives none: the
+      # candidate is measured alone, and says so. The source is read from tools/bench-release.mjs's
+      # SOURCES, its one place in this workflow.
       - name: The baseline
         id: baseline
         env:
           REQUESTED: ${{ inputs.baseline }}
         run: |
           if [ -n "$REQUESTED" ]; then
-            git fetch --no-tags --depth=1 origin "+refs/tags/$REQUESTED:refs/tags/$REQUESTED"
+            git fetch --no-tags --depth=1 origin "$REQUESTED"
             tag="$REQUESTED"
+            ref="$(git rev-parse FETCH_HEAD)"
           else
             git fetch --no-tags --depth=1 origin '+refs/tags/v*:refs/tags/v*'
             tag="$(git -c versionsort.suffix=- tag --list 'v*' --sort=-version:refname | sed -n 1p)"
+            ref="$tag"
           fi
           source="$(node --input-type=module -e "import { SOURCES } from './tools/bench-release.mjs'; process.stdout.write(SOURCES[process.env.SIDE]);")"
           tree="$RUNNER_TEMP/baseline"
           found=false
-          if [ -n "$tag" ] && git cat-file -e "$tag:$source" 2>/dev/null; then
-            git worktree add --detach "$tree" "$tag"
+          if [ -n "$ref" ] && git cat-file -e "$ref:$source" 2>/dev/null; then
+            git worktree add --detach "$tree" "$ref"
             found=true
           fi
           {
@@ -141,12 +178,16 @@ jobs:
         env:
           TREE: ${{ steps.baseline.outputs.tree }}
           FOUND: ${{ steps.baseline.outputs.found }}
+          FILTER: ${{ inputs.filter }}
         run: |
           mkdir -p "$RUNNER_TEMP/bench"
           set -- "$SIDE" --output "$RUNNER_TEMP/bench/candidate.json" \
             --processes "$BENCH_PROCESSES" --runs "$BENCH_RUNS" --seconds "$BENCH_SECONDS"
           if [ "$FOUND" = true ]; then
             set -- "$@" --tree "$TREE" --baseline-output "$RUNNER_TEMP/bench/baseline.json"
+          fi
+          if [ -n "$FILTER" ]; then
+            set -- "$@" --filter "$FILTER"
           fi
           node tools/bench-release.mjs "$@"
       # Exit 1, a regression, is advisory: a warning, and the job stays green. Exit 2 fails it: a

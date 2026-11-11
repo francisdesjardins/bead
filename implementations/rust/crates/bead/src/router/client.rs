@@ -157,7 +157,7 @@ fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 impl ClientListeners {
     fn report(&self, error: &RouterError) {
         for listener in self.error.all() {
-            // ! a listener of errors that panics would loop: its panic is dropped
+            // ! a listener of errors that panics would loop: its panic is dropped (spec 15.1)
             let called = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| listener(error)));
 
             drop(called);
@@ -704,6 +704,8 @@ impl ClientListener for Bridge {
 }
 
 struct Shared {
+    #[cfg(test)]
+    requester_probe: Mutex<Option<crate::testing::scripted::RequesterProbe>>,
     owner: Owner<ClientState>,
     disposal: Disposal,
     clock: SharedClock,
@@ -860,6 +862,8 @@ impl RouterClient {
 
         Ok(Self {
             shared: Arc::new(Shared {
+                #[cfg(test)]
+                requester_probe: Mutex::new(None),
                 owner,
                 disposal,
                 clock,
@@ -881,6 +885,24 @@ impl RouterClient {
 
     pub(crate) fn owner(&self) -> &Owner<ClientState> {
         &self.shared.owner
+    }
+
+    #[cfg(test)]
+    pub(crate) fn observe_requester(&self, probe: crate::testing::scripted::RequesterProbe) {
+        *self
+            .shared
+            .requester_probe
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(probe);
+    }
+
+    #[cfg(test)]
+    fn requester_probe(&self) -> Option<crate::testing::scripted::RequesterProbe> {
+        self.shared
+            .requester_probe
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     /// What a relay's destination names to call through it.
@@ -996,11 +1018,17 @@ impl RouterClient {
         check_declaration(procedure)?;
         check_procedure_kind(procedure, DeclarationWay::ClientRequester)?;
 
-        self.shared
+        let series = self
+            .shared
             .metrics
             .as_ref()
             .map(|metrics| metrics.declare_requester(procedure))
-            .transpose()
+            .transpose()?;
+        #[cfg(test)]
+        if let Some(probe) = self.requester_probe() {
+            (probe.declared)(procedure, series.as_ref());
+        }
+        Ok(series)
     }
 
     /// Registers a resolver of the command `procedure`.

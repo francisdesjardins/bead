@@ -11,7 +11,7 @@ import {
   MESSAGE_EVENT,
   REFUSAL_EVENT,
 } from '../shared/constants';
-import { createEmitter } from '../shared/emitter';
+import { createEmitter, tellError } from '../shared/emitter';
 import { ProgrammerError, toError } from '../shared/errors';
 import { gaugesOf } from '../shared/gauges';
 import { createEventMethods } from '../shared/lifecycle';
@@ -180,15 +180,17 @@ export const joinTransports = <const Transports extends readonly IJoinableTransp
 
         emitter.emitEach(event, {
           onError: (error) => {
-            emitter.emit(ERROR_EVENT, toError(error), connectionHandle);
+            tellError(emitter, [toError(error), connectionHandle]);
           },
           params,
         });
       });
     }
 
+    // * told on within a guard, as every `error` is: what a listener of it throws is dropped (spec
+    // 15.1)
     transport.on(ERROR_EVENT, (error, connectionHandle) => {
-      emitter.emit(ERROR_EVENT, error, connectionHandle);
+      tellError(emitter, [error, connectionHandle]);
     });
   }
 

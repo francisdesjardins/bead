@@ -2113,6 +2113,10 @@ public sealed partial class RouterClientTests
         // what a send fails with, once set: what it was given is recorded all the same
         public Exception? Refusal { get; set; }
 
+        // its state: a send in any but Open refused before it is recorded, by the refusal every
+        // client transport gives (debugging 9.7)
+        public ReadyState ReadyState { get; set; } = ReadyState.Open;
+
         // whether it carries a credential beside an envelope, and is secure: in process, it is both;
         // once told one, it carries that one alone, as a WebSocket carries its upgrade's
         public bool CarriesCredential { get; set; } = true;
@@ -2305,6 +2309,11 @@ public sealed partial class RouterClientTests
 
         public Task Send(TransportMessage message)
         {
+            if (ReadyState != ReadyState.Open)
+            {
+                return Task.FromException(NotOpen.Of(ReadyState));
+            }
+
             var bytes = message.Bytes;
 
             lock (_gate)

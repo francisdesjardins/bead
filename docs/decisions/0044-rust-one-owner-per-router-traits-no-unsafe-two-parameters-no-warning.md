@@ -1,16 +1,16 @@
 # 0044 — The Rust side owns each router's state in one task, starts each operation as it is made, composes traits, forbids unsafe code, takes two parameters and an options struct, and builds without a warning
 
 - **Status**: accepted
-- **Scope**: the Rust side, `implementations/rust`, its core before any socket
+- **Scope**: the Rust side, `implementations/rust`, its core with no socket feature
   ([0036](0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md)):
   the envelope's and a parcel's codecs, the routers, client and server, the managers and the service
-  layer's server half, its client half ahead in the core, sessions and credentials with a `JWT`'s
-  verification, the clock and the durations, the trace, the filter and the registry and a
-  participant's trace of its parcels, the transports' generic part, the in-memory transport and the
-  interop service; the broker's core, the in-memory broker and the joined transport; the `proto`
-  payload's codec, on Buffa; and every conformance file the core plays over them; the workspace, its
-  toolchain, its lints, its gates, its CI job and its coverage floor; and the Rust side as a partial
-  side, whose rule is [0004](0004-one-behaviour-in-every-language.md)'s. This record is
+  layer, its server half and its client half, sessions and credentials with a `JWT`'s verification,
+  the clock and the durations, the trace, the filter and the registry and a participant's trace of
+  its parcels, the transports' generic part, the in-memory transport and the interop service; the
+  broker's core, the in-memory broker and the joined transport; the `proto` payload's codec, on
+  Buffa; and every conformance file the core plays over them; the workspace, its toolchain, its
+  lints, its gates, its CI job and its coverage floor; and the Rust side as a partial side, whose
+  rule is [0004](0004-one-behaviour-in-every-language.md)'s. This record is
   [0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md)'s twin for Rust, each rendering
   for its sides the public surface [0047](0047-every-side-shows-one-public-surface.md) shapes; the
   toolchain's place is [0005](0005-a-toolchain-per-language.md)'s, the names and the versions
@@ -21,12 +21,14 @@
   makes from within a telling and a dispose's two marks, on every side,
   [0045](0045-a-router-takes-what-its-application-makes-in-one-queue-behind-the-turn-that-tells-it.md)'s,
   and a connection's reads paced by what its router has not taken, on every side,
-  [0046](0046-a-router-paces-each-connections-reads-by-what-it-has-not-taken.md)'s. Ahead: Rust's
-  service client, the client half of its service layer, in its core; then its transports over
-  sockets, WebSocket (RFC 6455) and HTTP/1.1 and HTTP/2 (RFC 9110, 9112, 9113), with the interop
-  both ways with the TypeScript and C# sides; then its broker bindings, MQTT 5 and AMQP 1.0; its
-  gateway; and beadc's Rust target, with `examples/hello`'s Rust half and the validators of a
-  blueprint's rules generated for it, or beadc refusing to generate them
+  [0046](0046-a-router-paces-each-connections-reads-by-what-it-has-not-taken.md)'s. Its transports
+  over sockets, WebSocket (RFC 6455) and HTTP/1.1 and HTTP/2 (RFC 9110, 9112, 9113), features of its
+  core, with the interop both ways with the TypeScript and C# sides, are
+  [0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)'s.
+  Ahead: its broker bindings, MQTT 5 and AMQP 1.0; its gateway; and beadc's Rust target, with
+  `examples/hello`'s Rust half, the lists of the procedures a server's transports take
+  ([0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md))
+  and the validators of a blueprint's rules generated for it, or beadc refusing to generate them
   ([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)),
   each stage under a record of its own. The crate's layout and its modules are its README's.
 
@@ -102,7 +104,8 @@ counts the receiver.
   adds, and holds no rustdoc warning.
 - **Debugging left out by Cargo features**: a Z the other sides lack, and a second build.
 - **aws-lc-rs**, rustls' default provider, for the core's crypto: C and assembly, a native build and
-  no Miri, for the TLS of a later stage alone.
+  no Miri; the socket features' TLS alone takes it
+  ([0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)).
 - **cargo-nextest**: a second runner, where Cargo's own runs the doc tests among the rest.
 - **A minimal beadc target with the core** for the interop's descriptors: beadc's Rust target is a
   stage of its own, ahead, which generates them; the descriptors are written by hand and held to the
@@ -112,11 +115,12 @@ counts the receiver.
 
 ### The core, and the stages after it
 
-| Crate                  | What it holds                                                                                                                                                                                                                                                                                                                                                                                                           | What it plays                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `bead`, `bead-interop` | `bead`: the envelope's codec, the routers, the service layer's server half, its managers, sessions, credentials and a `JWT`'s verification, the clock and the durations, the trace, the filter and the registry, the transports' generic part, the in-memory transport, the client and server facades, `bead::json`, and the test kit `bead::testing` behind the feature `testing`; `bead-interop`, the interop service | `spec/vectors.json` but its broker's groups; `spec/conversations.json` through a scripted transport and through the in-memory pair; `spec/clocks.json`; `spec/durations.json` but its transports' places; `spec/identities.json` but the ids no `u16` and no `u32` holds; `spec/codecs.json`'s `raw`, `text` and `json` entries; `spec/debug-filters.json` and `spec/metrics.json` whole; `spec/validations.json`'s details; the spec's and the companion's twins but those of its transports |
-| `bead`                 | the broker's core, its participant and the trace of its parcels, its parcel, its sequence, its heartbeat and its transports, the in-memory broker, the joined transport                                                                                                                                                                                                                                                 | `parcels` and `parcelRefusals`; the cases over the in-memory broker of `spec/transports.json`; the conversations through a broker pair; the broker's places of `spec/durations.json`; spec 15.14's twins                                                                                                                                                                                                                                                                                      |
-| `bead-protobuf`        | the `proto` payload's codec, on Buffa 0.9.2: the check of a payload's records, the required walk, the typed codec and the dynamic one                                                                                                                                                                                                                                                                                   | `spec/codecs.json`'s `proto` entries, the two values a typed message cannot hold through the dynamic message; protobuf's conformance suite through a Rust testee of `tools/protobuf-conformance.mjs`                                                                                                                                                                                                                                                                                          |
+| Crate                                                     | What it holds                                                                                                                                                                                                                                                                                                                                                                                                                                  | What it plays                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bead`, `bead-interop`                                    | `bead`: the envelope's codec, the routers, the service layer, its server half and its client half, its managers, sessions, credentials and a `JWT`'s verification, the clock and the durations, the trace, the filter and the registry, the transports' generic part, the in-memory transport, the client and server facades, `bead::json`, and the test kit `bead::testing` behind the feature `testing`; `bead-interop`, the interop service | `spec/vectors.json` but its broker's groups; `spec/conversations.json` through a scripted transport and through the in-memory pair; `spec/clocks.json`; `spec/durations.json` but its transports' places; `spec/identities.json` but the ids no `u16` and no `u32` holds; `spec/codecs.json`'s `raw`, `text` and `json` entries; `spec/debug-filters.json` and `spec/metrics.json` whole; `spec/validations.json`'s details; the spec's and the companion's twins but those of its transports |
+| `bead`                                                    | the broker's core, its participant and the trace of its parcels, its parcel, its sequence, its heartbeat and its transports, the in-memory broker, the joined transport                                                                                                                                                                                                                                                                        | `parcels` and `parcelRefusals`; the cases over the in-memory broker of `spec/transports.json`; the conversations through a broker pair; the broker's places of `spec/durations.json`; spec 15.14's twins                                                                                                                                                                                                                                                                                      |
+| `bead-protobuf`                                           | the `proto` payload's codec, on Buffa 0.9.2: the check of a payload's records, the required walk, the typed codec and the dynamic one                                                                                                                                                                                                                                                                                                          | `spec/codecs.json`'s `proto` entries, the two values a typed message cannot hold through the dynamic message; protobuf's conformance suite through a Rust testee of `tools/protobuf-conformance.mjs`                                                                                                                                                                                                                                                                                          |
+| `bead` with `websocket` and `http`, `bead-interop-server` | the WebSocket and HTTP transports, server and client, their facades and their TLS ([0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)); `bead-interop-server`, the interop service's server over both, and the Rust client's trials against each side's                                                                                                                         | the cases over HTTP and over WebSocket of `spec/transports.json`; their places of `spec/durations.json`; spec 15.10's and 15.12's twins; the interop both ways with the TypeScript and C# sides                                                                                                                                                                                                                                                                                               |
 
 The broker's core sits in `bead`, since the C# side's `Bead.Core` holds the broker's core and the
 in-memory broker, and its cases need no socket; the `proto` codec stands apart, since the router
@@ -125,13 +129,16 @@ plays**, deleting its rows ahead ([0004](0004-one-behaviour-in-every-language.md
 `spec/check.py`'s `SIDES` holding the side's twins, its reads and its counts, so a change that
 reaches across the languages lands on the three sides. Of the service layer, the core holds the
 descriptors, the failures' catalogue, the managers' requesters and resolvers and the server of one
-service, `ServiceServer`; its client half, the twin of `createServiceClient` and of
-`ServiceClient<TService>`, is ahead in the core, the matrix's open row `Rust's service client`.
-Ahead, in this order: Rust's service client, the client half of its service layer, in its core;
-then its transports over sockets, WebSocket (RFC 6455) and HTTP/1.1 and HTTP/2 (RFC 9110, 9112,
-9113), with the interop both ways with the TypeScript and C# sides; then its broker bindings,
-MQTT 5 and AMQP 1.0; its gateway; and beadc's Rust target, with `examples/hello`'s Rust half and
-the validators of a blueprint's rules generated for it, or beadc refusing to generate them
+service, `ServiceServer`, and its client half, `ServiceClient`, the twin of `createServiceClient`
+and of `ServiceClient<TService>`. Its transports over sockets, WebSocket (RFC 6455) and HTTP/1.1
+and HTTP/2 (RFC 9110, 9112, 9113), the features `websocket` and `http` of its core, play the cases
+over HTTP and over WebSocket and their places of `spec/durations.json`, and the interop runs both
+ways with the TypeScript and C# sides, under
+[0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md).
+Ahead, in this order: its broker bindings, MQTT 5 and AMQP 1.0; its gateway; and beadc's Rust
+target, with `examples/hello`'s Rust half, the lists of the procedures a server's transports take
+([0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md))
+and the validators of a blueprint's rules generated for it, or beadc refusing to generate them
 ([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)),
 each stage under a record of its own.
 
@@ -140,10 +147,9 @@ each stage under a record of its own.
 The Rust side is a partial side, under [0004](0004-one-behaviour-in-every-language.md)'s rule: each
 part it does not play is an open row of [the support matrix](../support.md), ahead with the stage
 that brings it, and, where a conformance file plays that part, a row of `spec/check.py`'s `AHEAD`:
-`Rust's transports over HTTP and WebSocket`, `Rust's gateway`, `Rust's broker bindings` and
-`Rust's beadc target`, each a row of the matrix and of `AHEAD`; `Rust's service client`,
-`Rust's service manager over a router of the application's own` and `Rust's interop`, which no
-conformance file plays, rows of the matrix alone. **Its tests are told from its sources by a
+`Rust's gateway`, `Rust's broker bindings` and `Rust's beadc target`, each a row of the matrix and
+of `AHEAD`; `Rust's service manager over a router of the application's own`, which no conformance
+file plays, a row of the matrix alone. **Its tests are told from its sources by a
 predicate**, since a suffix does not tell them, both being `.rs`: a module's
 `tests.rs`, a crate's `tests/` and the test kit, `src/testing.rs` and `src/testing/`, so a doc
 comment on a source's item never stands for a twin.
@@ -155,12 +161,13 @@ comment on a source's item never stands for a twin.
   `benches/`, `bead-bench`, the in-memory bench 0036 asks of each side.
 - **The crates mirror the C# assemblies**, not the TypeScript package's subpath exports: a crate is
   Rust's unit of dependency and of `forbid(unsafe_code)`, as an assembly is .NET's. `bead` is
-  `Bead.Core`'s twin, `bead-protobuf` `Bead.Protobuf`'s, `bead-interop` the interop service's;
+  `Bead.Core`'s twin, `bead-protobuf` `Bead.Protobuf`'s, `bead-interop` the interop service's,
+  `bead-interop-server` its server and the Rust client's trials against each side's;
   `bead-house`, dev only, holds the house's own checks. The crates of the stages ahead are named
-  already, so no rename follows: `bead-transport-websocket`, `bead-transport-http`,
-  `bead-transport-mqtt`, `bead-transport-amqp`, `bead-transcoding`, `bead-transcoding-http`,
-  `bead-interop-server`; a part that needs the core's inside and ships to applications, a transport,
-  comes instead as a feature of the core ([0047](0047-every-side-shows-one-public-surface.md)).
+  already, so no rename follows: `bead-transport-mqtt`, `bead-transport-amqp`, `bead-transcoding`
+  and `bead-transcoding-http`; a part that needs the core's inside and ships to applications, a
+  transport, comes instead as a feature of the core
+  ([0047](0047-every-side-shows-one-public-surface.md)).
 - **Packages qualified by their owner, libraries short**, as NuGet's `FrancisDesjardins.Bead.*`
   over the assemblies `Bead.*`
   ([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)): the package
@@ -571,8 +578,10 @@ its own, `not its type`, as a codec an application writes does (spec 17.2), serd
 the type is the application's, and the matrix's row says so. Its other refusals say 17.2's words.
 
 **A `JWT`'s verification** on RustCrypto: ES256 by `p256`, its signature R‖S's 64 bytes and nothing
-else, HS256 by `hmac`'s constant-time check; pure Rust, so no C toolchain on Windows and
-`forbid(unsafe_code)` costs nothing. base64url by Bead's own strict decoder. An `OPAQUE` token's
+else, HS256 by `hmac`'s constant-time check; pure Rust, so the core with no feature needs no C toolchain
+on Windows, its socket transports' TLS, aws-lc-rs, alone built by the platform's C compiler
+([0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)),
+and `forbid(unsafe_code)` costs nothing. base64url by Bead's own strict decoder. An `OPAQUE` token's
 bytes by `getrandom`, the system's source. **No `thiserror`**: a dozen error types, each a short
 hand-written `Display`. **No `tracing`** in the core; an optional bridge from the Rust side's trace
 to `tracing` is ahead. **No credential in a string** (spec 15.1): a type that holds a credential, a
@@ -698,24 +707,28 @@ byte, and **always built**: no Cargo feature leaves debugging out, which would b
 ### The CI job, fuzz and bench
 
 CI's `rust` job ([0006](0006-a-rule-has-its-gate.md)), on Linux: `cargo fmt --check`, `cargo clippy
---workspace --all-targets --all-features --locked`, the browser target's `cargo clippy -p
-francisdesjardins-bead --lib --all-features --locked --target wasm32-unknown-unknown`, `cargo doc`,
-a build on the default features alone, `cargo deny --locked check`, the tests under coverage held to
-the floor, and the fuzz targets built on the dated nightly, never run; on Windows, `cargo test
---workspace --all-features --locked`, as the user's MSVC toolchain builds it. The registry and the
-target are cached by the lock and the toolchain, cargo-deny and cargo-llvm-cov installed prebuilt,
-each checked by its SHA-256, and `ci-ok` needs the job. **Fuzz**: cargo-fuzz on the nightly, on
-Linux or WSL, through `tools/fuzz.mjs`, by hand and ten minutes a target every week
-([0006](0006-a-rule-has-its-gate.md)), its six targets the twins the core holds, `envelope`,
-`payload-codecs`, `debug-filter`, `jwt`, `broker-parcel` and `proto-codecs`, `http-fields` and
-`ws-handshake` coming with the transports; its suite holds the envelope readers' and the parcel
-reader's seeded mutations, the same inputs as the other sides'. **Bench**: `bead-bench`, the
-in-memory bench, each fresh process writing
-`bead-bench/1`, which `tools/bench-release.mjs rust` merges into `bead-bench/2` for
-`tools/bench-compare.mjs`. The gates every side shares hold it too: `tools/check-details.mjs` reads
-its sources, `tools/check-names.mjs` and `tools/check-durations.mjs` its surface lists, the
-differential its testee, a release reads its bench's comparison in CI, and its broker trial
-plays every case no row of the matrix excuses it from ([0006](0006-a-rule-has-its-gate.md)).
+--workspace --all-targets --all-features --locked`, the core's lib linted with no feature, with
+`websocket` alone and with `http` alone (`cargo clippy -p francisdesjardins-bead --lib --locked`,
+`--features websocket`, `--features http`), the browser target's `cargo clippy -p
+francisdesjardins-bead --lib --features testing --locked --target wasm32-unknown-unknown`, by its
+features, no socket among them
+([0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)),
+`cargo doc`, a build on the default features alone, `cargo deny --locked check`, the tests under
+coverage held to the floor, and the fuzz targets built on the dated nightly, never run; on Windows,
+`cargo test --workspace --all-features --locked`, as the user's MSVC toolchain builds it. The
+registry and the target are cached by the lock and the toolchain, cargo-deny and cargo-llvm-cov
+installed prebuilt, each checked by its SHA-256, and `ci-ok` needs the job. **Fuzz**: cargo-fuzz on
+the nightly, on Linux or WSL, through `tools/fuzz.mjs`, by hand and ten minutes a target every week
+([0006](0006-a-rule-has-its-gate.md)), its eight targets the twins of the other sides' eight,
+`envelope`, `payload-codecs`, `http-fields`, `debug-filter`, `jwt`, `ws-handshake`, `broker-parcel`
+and `proto-codecs`, each reaching the core through `bead::internal` with no feature; its suite holds
+the envelope readers' and the parcel reader's seeded mutations, the same inputs as the other sides'.
+**Bench**: `bead-bench`, the in-memory bench, each fresh process writing `bead-bench/1`, which
+`tools/bench-release.mjs rust` merges into `bead-bench/2` for `tools/bench-compare.mjs`. The gates
+every side shares hold it too: `tools/check-details.mjs` reads its sources, `tools/check-names.mjs`
+and `tools/check-durations.mjs` its surface lists, the differential its testee, a release reads its
+bench's comparison in CI, and its broker trial plays every case no row of the matrix excuses it from
+([0006](0006-a-rule-has-its-gate.md)).
 
 ## Consequences
 
@@ -745,8 +758,10 @@ plays every case no row of the matrix excuses it from ([0006](0006-a-rule-has-it
   `serde_json` whole: the price of RFC 8785, spec 17.5's checks and a NaN refused.
 - **Options by assignment**: a line more than a literal, for options that never break a caller.
 - **The time driver's check**: one caught panic at the construction of a part built on a misbuilt
-  runtime, a router, the in-memory transport or broker, a broker's participant or a clock, through
-  the application's panic hook, and under `panic = "abort"` an abort there.
+  runtime, a router, the in-memory transport or broker, a broker's participant, a clock or a socket
+  transport, whose IO driver is checked so too
+  ([0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)),
+  through the application's panic hook, and under `panic = "abort"` an abort there.
 - **Types that hold less**: values of `spec/codecs.json`, inputs of `spec/durations.json` and ids no
   `u16` or `u32` holds are excused from Rust, each by its row; no `proto` entry is, the two values a
   typed message cannot hold being played through the dynamic message, a platform row of the matrix.

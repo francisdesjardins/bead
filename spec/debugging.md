@@ -21,6 +21,8 @@ that hold what of them a test can. The why of each rule is in the decisions:
   payloads it writes (4.3, 10.1);
 - [0017](../docs/decisions/0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md): the
   names it reads (1.2, 6.10, 7.3, 8.3);
+- [0023](../docs/decisions/0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md):
+  what a listener of the router's or a participant's error event throws (2.2, 13.9);
 - [0033](../docs/decisions/0033-a-side-bounds-what-a-peer-holds-of-it.md): a call past those its
   connection has it answer, and a requester's call past its bounds (9.4, 9.6);
 - [0035](../docs/decisions/0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md):
@@ -30,7 +32,7 @@ that hold what of them a test can. The why of each rule is in the decisions:
 - [0048](../docs/decisions/0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md):
   a call its connection's transport does not take, counted under its procedure (7.6, 7.7, 8.3).
 
-**Version: 0.7.0**. Each of its conformance files repeats it as its `debuggingVersion`, and follows
+**Version: 0.8.0**. Each of its conformance files repeats it as its `debuggingVersion`, and follows
 its schema in [`schemas/`](schemas/). It moves by `spec.md`'s rule, under a version of its own
 ([0008](../docs/decisions/0008-three-version-axes-and-names-qualified-by-their-owner.md)): the minor
 when an implementation that conforms to its last version must change to conform to this one, the
@@ -61,9 +63,10 @@ peer never knows whether it listens.
 2.2. A listener's error never changes a call. An error a listener throws, the trace's or the one a
 filter wraps, MUST be reported, as section 9.0 of `spec.md` reports an error: through its router's
 error event, with the call's connection on a server, through which its service manager reports its
-own. A listener is synchronous: what it returns is not awaited, and an error it raises once it
-returned is its platform's, outside this guard. The call goes on as if nobody listened: its outcome,
-its answer and what goes on the wire are the same.
+own. A listener of that error event is called within a guard as well: what it throws is dropped,
+and the listeners after it are called (`spec.md` 15.1). A listener is synchronous: what it returns
+is not awaited, and an error it raises once it returned is its platform's, outside this guard. The
+call goes on as if nobody listened: its outcome, its answer and what goes on the wire are the same.
 
 2.3. A side calls each listener within a guard, and counts on a path no listener runs on.
 
@@ -436,25 +439,34 @@ subscription and is refused in its own answer, its queue past its bounds before 
 
 9.6. Each call a side makes ends as one of these, the sections `spec.md`'s:
 
-| A call this side makes                                                                                                                                                        | `outcome`   | `code`                            |
-| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | --------------------------------- |
-| it asks for `OPAQUE` and its side knows no session, or would present a default withdrawn, before it goes (13.4)                                                               | `failure`   | `SESSION_REQUIRED`                |
-| it presents a credential its transport cannot carry, before it goes (13.4)                                                                                                    | `failure`   | `DESTINATION_UNREACHABLE`         |
-| no call id is free, or its calls waiting on the connection number `maximumAnsweringCalls`, before it goes (9.1)                                                               | `failure`   | `CAPACITY_EXCEEDED`               |
-| its payload past its limit, a transfer its side sends none of, or one its header leaves no opening, past 1,020 bytes or without a byte within `chunkBytes` (12.1, 12.2, 12.3) | `failure`   | `PAYLOAD_TOO_LARGE`               |
-| its value its rules refuse, before it goes, in the turn it started (18.2)                                                                                                     | `failure`   | `PAYLOAD_INVALID`                 |
-| a result comes whole (9.7, 12.6), whether its requester decodes it or not                                                                                                     | `result`    |                                   |
-| a failure comes (9.7), passed on by relays or not (7.5)                                                                                                                       | `failure`   | its name, `application`, `_OTHER` |
-| its router ends it once it went: an answer that does not read (9.6.3), its result's transfer refused (12.3, 12.6)                                                             | `failure`   | its name                          |
-| its time passes (9.9), or its transfer's inactivity (12.7, 12.8)                                                                                                              | `timeout`   |                                   |
-| its caller cancels it (10.1)                                                                                                                                                  | `cancelled` |                                   |
-| its connection is not open as it starts, or closes, or the side is disposed (9.10)                                                                                            | `closed`    |                                   |
-| anything else its router fails it with: a transport that refuses its request                                                                                                  | `error`     |                                   |
+| A call this side makes                                                                                                                                                           | `outcome`   | `code`                            |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | --------------------------------- |
+| it asks for `OPAQUE` and its side knows no session, or would present a default withdrawn, before it goes (13.4)                                                                  | `failure`   | `SESSION_REQUIRED`                |
+| it presents a credential its transport cannot carry, before it goes (13.4)                                                                                                       | `failure`   | `DESTINATION_UNREACHABLE`         |
+| no call id is free, or its calls waiting on the connection number `maximumAnsweringCalls`, before it goes (9.1)                                                                  | `failure`   | `CAPACITY_EXCEEDED`               |
+| its payload past its limit, a transfer its side sends none of, or one its header leaves no opening, past 1,020 bytes or without a byte within `chunkBytes` (12.1, 12.2, 12.3)    | `failure`   | `PAYLOAD_TOO_LARGE`               |
+| its value its rules refuse, before it goes, in the turn it started (18.2)                                                                                                        | `failure`   | `PAYLOAD_INVALID`                 |
+| a result comes whole (9.7, 12.6), whether its requester decodes it or not                                                                                                        | `result`    |                                   |
+| a failure comes (9.7), passed on by relays or not (7.5)                                                                                                                          | `failure`   | its name, `application`, `_OTHER` |
+| its router ends it once it went: an answer that does not read (9.6.3), its result's transfer refused (12.3, 12.6)                                                                | `failure`   | its name                          |
+| its time passes (9.9), or its transfer's inactivity (12.7, 12.8)                                                                                                                 | `timeout`   |                                   |
+| its caller cancels it (10.1)                                                                                                                                                     | `cancelled` |                                   |
+| its connection is not open as it starts — one its side no longer holds, or a client's transport closing, closed or reconnecting — or closes, or the side is disposed (9.7, 9.10) | `closed`    |                                   |
+| anything else its router fails it with: a transport that refuses its request, a client's transport before its open, uninitialized or connecting, among them (9.7)                | `error`     |                                   |
 
 9.7. A call to a connection that is not open fails with the type a connection that closes fails it
-with, and counts alike, `closed`: the two are one race with a close. A call made on a connection
-that closes fails and counts so too, even when the signal it was given is that of a call the close
-ends: never as a cancel. Each side's two types are the support matrix's.
+with, and counts alike, `closed`: the two are one race with a close. A client's connection is not
+open once its transport's state is a close's — closing, closed or reconnecting — however it came to
+be so: a close, a connection lost, or a connect that started and failed, refused by its server or
+ended as `spec.md` 15.15 ends one, which leaves its client closed. Before its open, its transport
+uninitialized or connecting, a client has no close to race: its transport refuses the call by its
+ready state, and it counts `error`, as the WebSocket API's `send()` throws an `InvalidStateError`
+in CONNECTING alone and leaves a connection closing or closed, a failed one among them, to its close
+([WHATWG WebSockets §3.1](https://websockets.spec.whatwg.org/#dom-websocket-send),
+[§4](https://websockets.spec.whatwg.org/#feedback-from-the-protocol)). A connect refused before it
+moves leaves the state as it was. A call made on a connection that closes fails and counts so too,
+even when the signal it was given is that of a call the close ends: never as a cancel. Each side's
+types are the support matrix's.
 
 9.8. The metrics count what the wire carried, and the trace tells what the side made of it. A result
 its requester cannot decode came as a result, and is counted so at both ends; the trace tells the
@@ -639,9 +651,10 @@ let go and held again, between two reads. A pull costs nothing while nobody read
 no byte copied or decoded for the trace, and no topic joined. Each event is told synchronously at
 its site within a guard, in the participant's own turn, one at a time, as an envelope is told in its
 router's, so ordered per participant. A listener's error is reported through the participant's
-`error` event, and the listeners after it are still called. The participant goes on as if nobody
-listens. A listener filters what it receives, as 0013's call listener does; there is no per-kind
-selection at the source.
+`error` event, and the listeners after it are still called. What a listener of that `error` event
+throws is dropped (`spec.md` 15.1). The participant goes on as if nobody listens. A listener
+filters what it receives, as 0013's call listener does; there is no per-kind selection at the
+source.
 
 13.10. Twin tests hold each event and verdict, a takeover and no later transition, a link lost with
 the ordinals it ends and restored as another incarnation, each name a stop lets go told before its

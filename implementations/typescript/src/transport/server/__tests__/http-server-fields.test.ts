@@ -10,7 +10,7 @@ import {
   ENVELOPE_KINDS,
   LISTEN_HEADER,
   REFUSAL_HEADER,
-  REFUSALS,
+  HTTP_REFUSALS,
   SEQUENCE_HEADER,
   WAIT_HEADER,
 } from '../http-transport-server';
@@ -144,7 +144,7 @@ test.describe('createHTTPTransportServer, its edges', () => {
     const { events, fake, server } = await startScripted({ hosts: ['bead.test'] });
     const refusals = refusalsOf(server);
     const cases: [string, string, number, string | undefined][] = [
-      ['origin', 'http://a.example\tb', 403, REFUSALS.ORIGIN],
+      ['origin', 'http://a.example\tb', 403, HTTP_REFUSALS.ORIGIN],
       ['x-other', 'x \ty', 201, undefined],
       ['x-other', '', 201, undefined],
     ];
@@ -174,7 +174,7 @@ test.describe('createHTTPTransportServer, its edges', () => {
         refusals.map((refusal) => {
           return refusal.reason;
         })
-      ).toEqual([REFUSALS.ORIGIN]);
+      ).toEqual([HTTP_REFUSALS.ORIGIN]);
     } finally {
       await server.stop();
     }
@@ -230,6 +230,10 @@ test.describe('createHTTPTransportServer, its edges', () => {
       statusOf(bead, { url: 'http://bead.example:8443/bead' }),
       statusOf({ ...bead, host: 'rebound.example' }, { url: 'https://bead.example/bead' }),
       statusOf({ ...bead, host: 'bad host' }, { url: 'http://localhost/bead?after=1' }),
+      // its scheme read in any case, and a target holding a #, which HTTP refuses of its own
+      statusOf(bead, { url: 'HTTP://bead.example/bead' }),
+      statusOf(bead, { url: 'hTtPs://bead.example/bead#after' }),
+      statusOf(bead, { url: '/bead#/elsewhere' }),
       statusOf(bead, { url: 'http://rebound.example/bead' }),
       statusOf(bead, { url: 'http://bead.example' }),
       statusOf(bead, { url: 'http://bead.example?after=1' }),
@@ -239,7 +243,6 @@ test.describe('createHTTPTransportServer, its edges', () => {
       statusOf(bead, { url: 'http://a%41.test/bead' }),
       statusOf(bead, { url: 'http://127.0.0.1:/bead' }),
       statusOf(bead, { url: 'http://user@bead.example/bead' }),
-      statusOf(bead, { url: 'HTTP://bead.example/bead' }),
       statusOf(bead, { url: 'ftp://bead.example/bead' }),
       statusOf(
         { ...bead, host: ['bead.example', 'bead.example'] },
@@ -248,33 +251,43 @@ test.describe('createHTTPTransportServer, its edges', () => {
       statusOf({ ...bead, host: '' }),
       statusOf(bead, { url: '/' }),
       statusOf({ ...bead, host: 'rebound.example' }, { url: 'http://bead.example/bead' }),
+      // its path matched as it came, an octet percent-encoded not the letter it encodes, %23 a
+      // character of its path or its query
+      statusOf(bead, { url: '/b%65ad' }),
+      statusOf(bead, { url: '/bead%23' }),
+      statusOf(bead, { url: '/bead?a%23b' }),
     ]).toEqual([
       [201, undefined],
-      [404, REFUSALS.PATH],
-      [404, REFUSALS.PATH],
+      [404, HTTP_REFUSALS.PATH],
+      [404, HTTP_REFUSALS.PATH],
       [201, undefined],
-      [403, REFUSALS.ORIGIN],
-      [403, REFUSALS.HOST],
+      [403, HTTP_REFUSALS.ORIGIN],
+      [403, HTTP_REFUSALS.HOST],
       [400, undefined],
       [201, undefined],
-      [415, REFUSALS.TYPE],
+      [415, HTTP_REFUSALS.TYPE],
       [201, undefined],
-      [403, REFUSALS.HOST],
+      [403, HTTP_REFUSALS.HOST],
       [201, undefined],
       [201, undefined],
       [201, undefined],
-      [403, REFUSALS.HOST],
-      [404, REFUSALS.PATH],
-      [404, REFUSALS.PATH],
+      [201, undefined],
+      [400, undefined],
+      [400, undefined],
+      [403, HTTP_REFUSALS.HOST],
+      [404, HTTP_REFUSALS.PATH],
+      [404, HTTP_REFUSALS.PATH],
       [400, undefined],
       [400, undefined],
       [400, undefined],
       [400, undefined],
       [400, undefined],
       [400, undefined],
-      [400, undefined],
-      [403, REFUSALS.HOST],
-      [404, REFUSALS.PATH],
+      [403, HTTP_REFUSALS.HOST],
+      [404, HTTP_REFUSALS.PATH],
+      [201, undefined],
+      [404, HTTP_REFUSALS.PATH],
+      [404, HTTP_REFUSALS.PATH],
       [201, undefined],
     ]);
 
@@ -301,18 +314,29 @@ test.describe('createHTTPTransportServer, its edges', () => {
     // no host at all, which an HTTP/1.0 request may name, where hosts are listed; and none beside
     // a target in absolute-form, which names it
     expect([response.status, absolute.response.status]).toEqual([403, 201]);
-    expect(untargeted.response.headers?.[REFUSAL_HEADER]).toBe(REFUSALS.PATH);
+    expect(untargeted.response.headers?.[REFUSAL_HEADER]).toBe(HTTP_REFUSALS.PATH);
     await server.stop();
     await using started = await startTransport({ hosts: ['bead.example'] });
     const port = Number(new URL(started.url).port);
 
-    for (const target of ['http:///', 'HTTP://127.0.0.1/']) {
+    const answerOf = async (target: string) => {
       const { answer } = await rawAnswerOf(
         port,
         `POST ${target} HTTP/1.1\r\nHost: bead.example\r\nContent-Type: ${BEAD_MEDIA_TYPE}\r\nContent-Length: 0\r\n\r\n`
       );
 
-      expect(answer, target).toEqual([400, null]);
+      return answer;
+    };
+
+    // a target with no authority, or holding what a page's browser always percent-encodes
+    for (const target of ['http:///', '/be"ad', 'hTtP://127.0.0.1/be{}ad']) {
+      expect(await answerOf(target), target).toEqual([400, null]);
+    }
+    expect(namesOf(started.events, 'connection')).toEqual([]);
+    // its scheme in any case, and a # anywhere refused, whatever follows it
+    expect(await answerOf('HTTP://127.0.0.1/elsewhere')).toEqual([404, HTTP_REFUSALS.PATH]);
+    for (const target of ['/elsewhere#/bead', '/bead#x', 'http://127.0.0.1/bead#x']) {
+      expect(await answerOf(target), target).toEqual([400, null]);
     }
     expect(namesOf(started.events, 'connection')).toEqual([]);
   });
@@ -334,10 +358,10 @@ test.describe('createHTTPTransportServer, its edges', () => {
       statusOf({ [CONNECTION_TOKEN_HEADER]: connectionToken, 'content-encoding': '' }),
       statusOf({ [LISTEN_HEADER]: '' }),
     ]).toEqual([
-      [400, REFUSALS.MALFORMED],
-      [403, REFUSALS.ORIGIN],
-      [415, REFUSALS.TYPE],
-      [400, REFUSALS.MALFORMED],
+      [400, HTTP_REFUSALS.MALFORMED],
+      [403, HTTP_REFUSALS.ORIGIN],
+      [415, HTTP_REFUSALS.TYPE],
+      [400, HTTP_REFUSALS.MALFORMED],
     ]);
     await server.stop();
   });
@@ -393,7 +417,7 @@ test.describe('createHTTPTransportServer, listening', () => {
       statusOf(at('/bead?after=0&wait=0', {})),
     ]).toEqual(
       Array.from({ length: 11 }, () => {
-        return [400, REFUSALS.MALFORMED];
+        return [400, HTTP_REFUSALS.MALFORMED];
       })
     );
 
@@ -555,7 +579,7 @@ test.describe('createHTTPTransportServer, CORS', () => {
 
     const bare = await fetch(url, { headers: { origin: PAGE }, method: 'OPTIONS' });
 
-    expect([bare.status, bare.headers.get(REFUSAL_HEADER)]).toEqual([405, REFUSALS.METHOD]);
+    expect([bare.status, bare.headers.get(REFUSAL_HEADER)]).toEqual([405, HTTP_REFUSALS.METHOD]);
     expect(await bytesOf(bare)).toEqual([]);
     await expect
       .poll(() => {
@@ -566,7 +590,7 @@ test.describe('createHTTPTransportServer, CORS', () => {
       refusals.map(({ reason }) => {
         return reason;
       })
-    ).toEqual([REFUSALS.METHOD]);
+    ).toEqual([HTTP_REFUSALS.METHOD]);
   });
 
   // spec 15.4, 15.9, 15.12
@@ -591,7 +615,7 @@ test.describe('createHTTPTransportServer, CORS', () => {
     const connectionHandle = server.clients.at(-1)
       ?.connectionHandle as TransportServerConnectionHandle;
 
-    // a request with its Authorization, its head going as it is handed on, then answered
+    // a request with its Authorization, its head going 40 ms after it is handed on, then answered
     const request = post(url, {
       body: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }),
       connectionToken,
@@ -718,15 +742,15 @@ test.describe('createHTTPTransportServer, CORS', () => {
       null,
       null,
       null,
-      REFUSALS.METHOD,
-      REFUSALS.TYPE,
-      REFUSALS.TYPE,
-      REFUSALS.METHOD,
-      REFUSALS.MALFORMED,
-      REFUSALS.MALFORMED,
+      HTTP_REFUSALS.METHOD,
+      HTTP_REFUSALS.TYPE,
+      HTTP_REFUSALS.TYPE,
+      HTTP_REFUSALS.METHOD,
+      HTTP_REFUSALS.MALFORMED,
+      HTTP_REFUSALS.MALFORMED,
       null,
-      REFUSALS.CONNECTION_UNKNOWN,
-      REFUSALS.CONNECTION_UNKNOWN,
+      HTTP_REFUSALS.CONNECTION_UNKNOWN,
+      HTTP_REFUSALS.CONNECTION_UNKNOWN,
     ]);
     expect(bare.headers.get('allow')).toBe('GET, POST, DELETE');
     expect(namesOf(events, 'message')).toHaveLength(4);
@@ -788,26 +812,26 @@ test.describe('createHTTPTransportServer, CORS', () => {
     ]).toEqual([
       unnamed(201, null),
       unnamed(201, null),
-      unnamed(405, REFUSALS.METHOD),
-      unnamed(405, REFUSALS.METHOD),
-      unnamed(403, REFUSALS.ORIGIN),
-      unnamed(403, REFUSALS.ORIGIN),
-      unnamed(403, REFUSALS.HOST),
-      unnamed(404, REFUSALS.PATH),
-      unnamed(400, REFUSALS.MALFORMED),
+      unnamed(405, HTTP_REFUSALS.METHOD),
+      unnamed(405, HTTP_REFUSALS.METHOD),
+      unnamed(403, HTTP_REFUSALS.ORIGIN),
+      unnamed(403, HTTP_REFUSALS.ORIGIN),
+      unnamed(403, HTTP_REFUSALS.HOST),
+      unnamed(404, HTTP_REFUSALS.PATH),
+      unnamed(400, HTTP_REFUSALS.MALFORMED),
     ]);
     expect(
       refusals.map(({ reason }) => {
         return reason;
       })
     ).toEqual([
-      REFUSALS.METHOD,
-      REFUSALS.METHOD,
-      REFUSALS.ORIGIN,
-      REFUSALS.ORIGIN,
-      REFUSALS.HOST,
-      REFUSALS.PATH,
-      REFUSALS.MALFORMED,
+      HTTP_REFUSALS.METHOD,
+      HTTP_REFUSALS.METHOD,
+      HTTP_REFUSALS.ORIGIN,
+      HTTP_REFUSALS.ORIGIN,
+      HTTP_REFUSALS.HOST,
+      HTTP_REFUSALS.PATH,
+      HTTP_REFUSALS.MALFORMED,
     ]);
 
     // HTTP's own 400, from a page it names: two hosts, and a field of an octet past ASCII
@@ -896,7 +920,7 @@ test.describe('createHTTPTransportServer, the refusals it tells', () => {
         rawConnectOf(authority, 'Origin: http://a.example\tb\r\n')
       );
 
-      expect(tabbed.answer).toEqual([403, REFUSALS.ORIGIN]);
+      expect(tabbed.answer).toEqual([403, HTTP_REFUSALS.ORIGIN]);
       expect(
         PATH_FIELDS.filter((name) => {
           return tabbed.fields.has(name);
@@ -908,7 +932,7 @@ test.describe('createHTTPTransportServer, the refusals it tells', () => {
           authority,
           origin: 'http://a.example\tb',
           port: tabbed.localPort,
-          reason: REFUSALS.ORIGIN,
+          reason: HTTP_REFUSALS.ORIGIN,
           status: 403,
         },
       ]);

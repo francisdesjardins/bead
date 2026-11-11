@@ -13,6 +13,7 @@ using Bead.Transport.WebSockets;
 // later would take the former over, which then connects no more (spec 15.21); over AMQP 1.0 the
 // later would be refused while the former holds its inbox (spec 15.33)
 [assembly: AssemblyFixture(typeof(Bead.Interop.Tests.InteropTests.TypeScriptServer))]
+[assembly: AssemblyFixture(typeof(Bead.Interop.Tests.InteropTests.RustServer))]
 
 namespace Bead.Interop.Tests;
 
@@ -28,8 +29,11 @@ namespace Bead.Interop.Tests;
 /// the TypeScript one; where none is given, those cases are skipped, saying so, or fail where
 /// <c>BEAD_MQTT_REQUIRED=1</c>. Over AMQP 1.0 alike, where <c>BEAD_AMQP_URL</c> names a RabbitMQ
 /// (<c>node tools/amqp-broker.mjs run -- dotnet test</c>), or fail where <c>BEAD_AMQP_REQUIRED=1</c>.
+/// Against the Rust server too, over WebSocket and over HTTP, the cases of the trait
+/// <c>server=Rust</c>, where <c>BEAD_INTEROP_RUST_SERVER</c> names its built binary; skipped,
+/// saying so, where it names none.
 /// </summary>
-public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTests.MqttSide mqtt, InteropTests.AmqpSide amqp) : IClassFixture<InteropTests.MqttSide>, IClassFixture<InteropTests.AmqpSide>
+public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTests.MqttSide mqtt, InteropTests.AmqpSide amqp, InteropTests.RustServer rust) : IClassFixture<InteropTests.MqttSide>, IClassFixture<InteropTests.AmqpSide>
 {
     // constants
 
@@ -43,8 +47,13 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     private const string Mqtt = "MQTT";
     private const string Amqp = "AMQP";
 
+    // the same, against the Rust server
+    private const string RustWebSocket = "Rust, WebSocket";
+    private const string RustHttp = "Rust, HTTP";
+
     private const string NoBroker = MqttFixture.Reason;
     private const string NoAmqpBroker = AmqpFixture.Reason;
+    private const string NoRust = RustServer.Reason;
 
     // asked once: whether Node answers, and the TypeScript side it starts the server from is installed
     private static readonly Lazy<bool> CanStartTypeScript = new(() =>
@@ -103,6 +112,15 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
         get
         {
             return IsInterop && AmqpFixture.IsGiven;
+        }
+    }
+
+    /// <summary>Whether the interop runs against the Rust server: <c>BEAD_INTEROP_RUST_SERVER</c> names one.</summary>
+    public static bool IsRustInterop
+    {
+        get
+        {
+            return RustServer.Path is not null;
         }
     }
 
@@ -176,14 +194,16 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
         Assert.Equal(expected, Snapshot(heard));
     }
 
-    // a client of the TypeScript server, connected over a transport, a WebSocket's upgrade carrying
-    // the credential given
+    // a client of the TypeScript server, or of the Rust one, connected over a transport, a
+    // WebSocket's upgrade carrying the credential given
     private async Task<Connected> ConnectedOver(string transport, string? credential = null)
     {
-        var (port, httpPort, _) = await server.Ports();
-
         if (transport is Mqtt or Amqp)
         {
+            // ! the TypeScript server is the broker's participant `interop-ts`: started and ready
+            // before the connect, or the broker knows no participant of that name
+            await server.Ports();
+
             var link = await LinkedOver(transport);
             var broker = new BrokerClient(link.Participant.Client());
 
@@ -192,7 +212,9 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
             return new Connected(broker, broker.DisposeAsync);
         }
 
-        if (transport == WebSocket)
+        var (port, httpPort) = transport is RustWebSocket or RustHttp ? await rust.Ports() : await TypeScriptPorts();
+
+        if (transport is WebSocket or RustWebSocket)
         {
             var client = new WebSocketClient();
 
@@ -213,11 +235,21 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
         });
     }
 
+    // where the TypeScript server listens, over WebSocket and over HTTP
+    private async Task<(int Port, int HttpPort)> TypeScriptPorts()
+    {
+        var (port, httpPort, _) = await server.Ports();
+
+        return (port, httpPort);
+    }
+
     // definition
 
     [Theory(Skip = Reason, SkipUnless = nameof(IsInterop))]
     [InlineData(WebSocket)]
     [InlineData(Http)]
+    [InlineData(RustWebSocket, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
+    [InlineData(RustHttp, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
     [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task Echo_and_bytes_answer_as_the_service_says(string transport)
@@ -232,6 +264,8 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [Theory(Skip = Reason, SkipUnless = nameof(IsInterop))]
     [InlineData(WebSocket)]
     [InlineData(Http)]
+    [InlineData(RustWebSocket, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
+    [InlineData(RustHttp, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
     [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task A_value_outside_ASCII_its_members_in_another_order_echoed_equal(string transport)
@@ -247,6 +281,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     // HTTP carries no transfer: a payload is what one envelope holds
     [Theory(Skip = Reason, SkipUnless = nameof(IsInterop))]
     [InlineData(WebSocket)]
+    [InlineData(RustWebSocket, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
     [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task A_payload_that_goes_as_a_transfer_comes_back_as_one_and_so_does_a_result_too_large_for_one_envelope(string transport)
@@ -265,6 +300,8 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [Theory(Skip = Reason, SkipUnless = nameof(IsInterop))]
     [InlineData(WebSocket)]
     [InlineData(Http)]
+    [InlineData(RustWebSocket, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
+    [InlineData(RustHttp, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
     [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task Fail_answers_with_its_own_failure_raised_by_the_server(string transport)
@@ -286,6 +323,8 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [Theory(Skip = Reason, SkipUnless = nameof(IsInterop))]
     [InlineData(WebSocket)]
     [InlineData(Http)]
+    [InlineData(RustWebSocket, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
+    [InlineData(RustHttp, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
     [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task Refuses_what_the_protocol_refuses(string transport)
@@ -317,6 +356,8 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [Theory(Skip = Reason, SkipUnless = nameof(IsInterop))]
     [InlineData(WebSocket)]
     [InlineData(Http)]
+    [InlineData(RustWebSocket, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
+    [InlineData(RustHttp, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
     [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task A_request_its_rules_refuse_is_answered_PAYLOAD_INVALID_its_violations_in_its_detail(string transport)
@@ -342,6 +383,8 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [Theory(Skip = Reason, SkipUnless = nameof(IsInterop))]
     [InlineData(WebSocket)]
     [InlineData(Http)]
+    [InlineData(RustWebSocket, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
+    [InlineData(RustHttp, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
     [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task Checked_answers_the_count_of_the_names_its_rules_take(string transport)
@@ -354,6 +397,8 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [Theory(Skip = Reason, SkipUnless = nameof(IsInterop))]
     [InlineData(WebSocket)]
     [InlineData(Http)]
+    [InlineData(RustWebSocket, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
+    [InlineData(RustHttp, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
     [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task A_call_cancelled_by_its_token_is_cancelled_at_the_server_too(string transport)
@@ -376,6 +421,8 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [Theory(Skip = Reason, SkipUnless = nameof(IsInterop))]
     [InlineData(WebSocket)]
     [InlineData(Http)]
+    [InlineData(RustWebSocket, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
+    [InlineData(RustHttp, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
     [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task A_call_past_its_timeout_is_cancelled_at_the_server_too(string transport)
@@ -393,6 +440,8 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [Theory(Skip = Reason, SkipUnless = nameof(IsInterop))]
     [InlineData(WebSocket)]
     [InlineData(Http)]
+    [InlineData(RustWebSocket, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
+    [InlineData(RustHttp, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
     [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task Answers_the_command_the_server_asks(string transport)
@@ -407,6 +456,8 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [Theory(Skip = Reason, SkipUnless = nameof(IsInterop))]
     [InlineData(WebSocket)]
     [InlineData(Http)]
+    [InlineData(RustWebSocket, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
+    [InlineData(RustHttp, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
     [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task An_unpaced_subscription_hears_each_tick(string transport)
@@ -433,6 +484,8 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [Theory(Skip = Reason, SkipUnless = nameof(IsInterop))]
     [InlineData(WebSocket)]
     [InlineData(Http)]
+    [InlineData(RustWebSocket, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
+    [InlineData(RustHttp, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
     [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task A_paced_subscription_waits_for_its_callback_to_settle_before_the_next_comes(string transport)
@@ -466,6 +519,8 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [Theory(Skip = Reason, SkipUnless = nameof(IsInterop))]
     [InlineData(WebSocket)]
     [InlineData(Http)]
+    [InlineData(RustWebSocket, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
+    [InlineData(RustHttp, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
     [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task Learns_a_session_opened_from_its_answer_and_its_end_too(string transport)
@@ -488,6 +543,8 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [Theory(Skip = Reason, SkipUnless = nameof(IsInterop))]
     [InlineData(WebSocket)]
     [InlineData(Http)]
+    [InlineData(RustWebSocket, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
+    [InlineData(RustHttp, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
     [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task A_call_presenting_the_session_it_learned_runs_in_it_the_session_opened_anew_presented_anew_and_none_presented_once_it_ended(string transport)
@@ -526,6 +583,8 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [Theory(Skip = Reason, SkipUnless = nameof(IsInterop))]
     [InlineData(WebSocket)]
     [InlineData(Http)]
+    [InlineData(RustWebSocket, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
+    [InlineData(RustHttp, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
     [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task Login_and_register_hold_a_duration_as_section_1_4_does_a_fraction_rounded_one_under_a_millisecond_or_past_2_31_minus_1_refused_with_PROCEDURE_FAILED_nothing_opened_or_registered(string transport)
@@ -576,6 +635,8 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [Theory(Skip = Reason, SkipUnless = nameof(IsInterop))]
     [InlineData(WebSocket)]
     [InlineData(Http)]
+    [InlineData(RustWebSocket, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
+    [InlineData(RustHttp, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
     [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task A_JWT_presented_by_default_runs_in_its_credential_s_session_whoami_answers_its_sub_and_logout_is_refused_ACCESS_DENIED(string transport)
@@ -629,11 +690,13 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
     [Theory(Skip = Reason, SkipUnless = nameof(IsInterop))]
     [InlineData(WebSocket)]
     [InlineData(Http)]
+    [InlineData(RustWebSocket, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
+    [InlineData(RustHttp, Skip = NoRust, SkipUnless = nameof(IsRustInterop), Traits = ["server", "Rust"])]
     [InlineData(Mqtt, Skip = NoBroker, SkipUnless = nameof(IsMqttInterop), Traits = ["transport", "MQTT"])]
     [InlineData(Amqp, Skip = NoAmqpBroker, SkipUnless = nameof(IsAmqpInterop), Traits = ["transport", "AMQP"])]
     public async Task An_ELSEWHERE_goes_in_each_POST_s_Authorization_over_HTTP_and_in_its_upgrade_s_over_a_WebSocket_whoami_answers_the_sub_it_names(string transport)
     {
-        if (transport == WebSocket)
+        if (transport is WebSocket or RustWebSocket)
         {
             // its upgrade carries none: a call presenting one fails before it goes
             await using var bare = await ConnectedOver(transport);
@@ -653,7 +716,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
         Assert.Equal("\"ada\"", (await whoami(new RequestOptions { Credential = Credential.Elsewhere("Interop sub=ada") }).WaitAsync(Patience, Cancelled)).GetRawText());
 
         // over a broker, as over HTTP, each request carries its own (spec 15.22)
-        if (transport != WebSocket)
+        if (transport is not (WebSocket or RustWebSocket))
         {
             return;
         }
@@ -1328,16 +1391,28 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
                 WorkingDirectory = TypeScript(),
             }) ?? throw new InvalidOperationException("node did not start");
 
-            // what comes before the ports, a build's lines, is passed over
+            var (port, httpPort, gatewayPort) = await PortsOf(process);
+
+            return (process, (port, httpPort, gatewayPort ?? throw new InvalidOperationException("the TypeScript interop server said no gatewayPort")));
+        }
+
+        /// <summary>
+        /// The ports an interop server's first line of them says, <c>{"port":n,"httpPort":m}</c>, and
+        /// its gateway's where it serves one: what comes before, a build's lines, is passed over.
+        /// </summary>
+        internal static async Task<(int Port, int HttpPort, int? GatewayPort)> PortsOf(Process process)
+        {
             while (await process.StandardOutput.ReadLineAsync(TestContext.Current.CancellationToken) is { } line)
             {
                 try
                 {
                     using var document = JsonDocument.Parse(line);
 
-                    if (document.RootElement.TryGetProperty("port", out var port) && document.RootElement.TryGetProperty("httpPort", out var httpPort) && document.RootElement.TryGetProperty("gatewayPort", out var gatewayPort))
+                    if (document.RootElement.TryGetProperty("port", out var port) && document.RootElement.TryGetProperty("httpPort", out var httpPort))
                     {
-                        return (process, (port.GetInt32(), httpPort.GetInt32(), gatewayPort.GetInt32()));
+                        int? gatewayPort = document.RootElement.TryGetProperty("gatewayPort", out var gateway) ? gateway.GetInt32() : null;
+
+                        return (port.GetInt32(), httpPort.GetInt32(), gatewayPort);
                     }
                 }
                 catch (JsonException)
@@ -1346,7 +1421,78 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server, InteropTe
                 }
             }
 
-            throw new InvalidOperationException("the TypeScript interop server ended before it said its ports");
+            throw new InvalidOperationException("the interop server ended before it said its ports");
+        }
+    }
+
+    /// <summary>
+    /// The Rust server of the interop service, the binary <c>BEAD_INTEROP_RUST_SERVER</c> names,
+    /// built (<c>cargo build -p francisdesjardins-bead-interop-server</c>), never built here: started
+    /// once for every class, on the first test that asks its ports, and stopped by closing its input.
+    /// It serves no gateway nor broker, which are ahead on the Rust side.
+    /// </summary>
+    public sealed class RustServer : IAsyncDisposable
+    {
+        /// <summary>Why its cases are skipped where no Rust server is named.</summary>
+        public const string Reason = "no Rust server: BEAD_INTEROP_RUST_SERVER names no bead-interop-server built";
+
+        private readonly SemaphoreSlim _starting = new(1, 1);
+        private Process? _process;
+        private (int Port, int HttpPort) _ports;
+
+        /// <summary>The binary <c>BEAD_INTEROP_RUST_SERVER</c> names, or none.</summary>
+        public static string? Path
+        {
+            get
+            {
+                return Environment.GetEnvironmentVariable("BEAD_INTEROP_RUST_SERVER") is { Length: > 0 } path ? path : null;
+            }
+        }
+
+        /// <summary>The ports it listens on, over WebSocket and over HTTP, once started.</summary>
+        public async Task<(int Port, int HttpPort)> Ports()
+        {
+            await _starting.WaitAsync(TestContext.Current.CancellationToken);
+
+            try
+            {
+                if (_process is null)
+                {
+                    var process = Process.Start(new ProcessStartInfo(Path ?? throw new InvalidOperationException(Reason))
+                    {
+                        RedirectStandardInput = true,
+                        RedirectStandardOutput = true,
+                        UseShellExecute = false,
+                    }) ?? throw new InvalidOperationException("the Rust interop server did not start");
+                    var (port, httpPort, _) = await TypeScriptServer.PortsOf(process);
+
+                    (_process, _ports) = (process, (port, httpPort));
+                }
+
+                return _ports;
+            }
+            finally
+            {
+                _starting.Release();
+            }
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            if (_process is { } process)
+            {
+                process.StandardInput.Close();
+
+                if (!process.WaitForExit(TimeSpan.FromSeconds(10)))
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+
+                process.Dispose();
+            }
+
+            _starting.Dispose();
+            await ValueTask.CompletedTask;
         }
     }
 }

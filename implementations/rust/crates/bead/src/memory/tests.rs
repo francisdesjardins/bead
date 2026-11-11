@@ -1173,17 +1173,23 @@ async fn a_connect_given_up_its_client_let_go_as_its_server_draws_it_leaves_no_c
     assert!(ends.server.clients().is_empty(), "no connection held");
 }
 
-// a platform's shape: a message's data is bytes, so what is no bytes is no message to send
+// a platform's shape: a message's data is bytes, so what is no bytes is no message to send; a
+// text message is no envelope, refused as it is sent (spec 15.2)
+// debugging 9.7
 #[tokio::test]
 async fn refuses_a_send_or_a_disconnect_unless_open_and_a_send_of_what_is_no_bytes() {
     let ends = Ends::started().await;
     let (client, _) = ends.client();
 
-    // * never connected: nothing to send on, nor to close
+    // * never connected: nothing to send on, nor to close; its send refused by its ready state
     let unsent = client
         .send(message_of(&[1], None))
         .expect_err("never connected");
 
+    assert!(
+        matches!(&unsent, RouterError::ReadyState(refusal) if refusal.got() == ReadyState::Uninitialized),
+        "its ready state's refusal: {unsent:?}"
+    );
     assert_eq!(
         unsent.to_string(),
         "the transport client is uninitialized, not open",
@@ -1212,6 +1218,168 @@ async fn refuses_a_send_or_a_disconnect_unless_open_and_a_send_of_what_is_no_byt
         ReadyState::Uninitialized,
         "nothing moved"
     );
+
+    // * open: a text refused before anything goes, its connection kept
+    let connecting = client.connect(&MemoryTransportClientConnectOptions::new(
+        ends.server.clone(),
+    ));
+
+    ends.clock.settle().await;
+    connecting.await.expect("connected");
+    ends.server_told();
+
+    let text = client
+        .send(TransportMessage {
+            data: Bytes::from_static(b"hi"),
+            is_text: true,
+            ..TransportMessage::default()
+        })
+        .expect_err("a text");
+
+    assert_eq!(
+        misuse_of(&text).as_deref(),
+        Some("an in-memory connection carries envelopes, as bytes"),
+        "a misuse: {text:?}"
+    );
+    client.send(message_of(&[2], None)).expect("kept");
+    ends.clock.settle().await;
+    assert_eq!(
+        ends.server_told(),
+        [format!(
+            "heard 02 on {FIRST} carrying None from Some(\"local\") None"
+        )],
+        "the bytes alone heard"
+    );
+
+    // * closed: its send a disconnection, its disconnect refused by its ready state
+    client
+        .disconnect(&TransportClientDisconnectOptions::default())
+        .expect("open");
+
+    let unsent = client.send(message_of(&[3], None)).expect_err("closed");
+
+    assert!(
+        matches!(&unsent, RouterError::Disconnected(reason) if reason == "the transport client is closed, not open"),
+        "a disconnection: {unsent:?}"
+    );
+
+    let unclosed = client
+        .disconnect(&TransportClientDisconnectOptions::default())
+        .expect_err("closed");
+
+    assert!(
+        matches!(&unclosed, TransportError::ReadyState(refusal) if refusal.got() == ReadyState::Closed),
+        "a ready state's error: {unclosed:?}"
+    );
+}
+
+// the misuse a send's refusal stands for, by its words
+fn misuse_of(error: &RouterError) -> Option<String> {
+    let RouterError::Other(error) = error else {
+        return None;
+    };
+
+    error
+        .downcast_ref::<ProgrammerError>()
+        .map(ToString::to_string)
+}
+
+// what a send in a state gives: sent, its ready state's refusal or a disconnection
+fn sent_in(sent: Result<crate::transport::Sent, RouterError>) -> String {
+    match sent {
+        Ok(_) => "sent".to_owned(),
+        Err(RouterError::ReadyState(refusal)) => format!("ready state {}", refusal.got().name()),
+        Err(RouterError::Disconnected(reason)) => format!("disconnected: {reason}"),
+        Err(other) => format!("other: {other}"),
+    }
+}
+
+// debugging 9.7
+// * CLOSING is left out: its disconnect passes it within its call, closed as it returns
+#[tokio::test]
+async fn refuses_a_send_by_its_ready_state_before_the_open_and_as_a_disconnection_after_it_in_each_state_it_holds()
+ {
+    let ends = Ends::unstarted();
+    let (client, _) = ends.client();
+    let mut told = Vec::new();
+
+    // never connected
+    told.push((
+        "UNINITIALIZED",
+        sent_in(client.send(message_of(&[1], None))),
+    ));
+
+    // a connect its server, not started, refuses: closed
+    client
+        .connect(&MemoryTransportClientConnectOptions::new(
+            ends.server.clone(),
+        ))
+        .await
+        .expect_err("its server not started");
+    told.push((
+        "CLOSED, failed",
+        sent_in(client.send(message_of(&[1], None))),
+    ));
+
+    // a reconnection's wait held on the clock
+    let reconnecting = crate::testing::spawn(
+        client
+            .reconnect(&TransportClientReconnectOptions {
+                delay: Some(TransportClientReconnectDelay::Fixed(Duration::from_millis(
+                    60,
+                ))),
+                ..TransportClientReconnectOptions::default()
+            })
+            .expect("reconnecting"),
+    );
+
+    ends.clock.settle().await;
+    assert_eq!(client.ready_state(), ReadyState::Reconnecting);
+    told.push(("RECONNECTING", sent_in(client.send(message_of(&[1], None)))));
+    ends.server.start().await.expect("started");
+    ends.clock.advance(Duration::from_millis(60)).await;
+    reconnecting.await.expect("joined").expect("reconnected");
+    told.push(("OPEN", sent_in(client.send(message_of(&[1], None)))));
+
+    // closed by its own disconnect
+    client
+        .disconnect(&TransportClientDisconnectOptions::default())
+        .expect("open");
+    told.push(("CLOSED", sent_in(client.send(message_of(&[1], None)))));
+
+    // a connect its server holds until a later turn of its pipe
+    let connecting = client.connect(&MemoryTransportClientConnectOptions::new(
+        ends.server.clone(),
+    ));
+
+    assert_eq!(client.ready_state(), ReadyState::Connecting);
+    told.push(("CONNECTING", sent_in(client.send(message_of(&[1], None)))));
+    ends.clock.settle().await;
+    connecting.await.expect("connected");
+
+    assert_eq!(
+        told,
+        [
+            ("UNINITIALIZED", "ready state UNINITIALIZED".to_owned()),
+            (
+                "CLOSED, failed",
+                "disconnected: the transport client is closed, not open".to_owned()
+            ),
+            (
+                "RECONNECTING",
+                "disconnected: the transport client is reconnecting, not open".to_owned()
+            ),
+            ("OPEN", "sent".to_owned()),
+            (
+                "CLOSED",
+                "disconnected: the transport client is closed, not open".to_owned()
+            ),
+            ("CONNECTING", "ready state CONNECTING".to_owned()),
+        ],
+        "each state's"
+    );
+    client.dispose();
+    ends.server.stop().await.expect("stopped");
 }
 
 // spec 15.13
@@ -1765,6 +1933,25 @@ async fn drops_what_an_end_it_no_longer_holds_receives_and_refuses_to_send_what_
     let (client, at_client) = ends.connected((None, None)).await;
     let handle: ConnectionHandle = Arc::from(FIRST);
 
+    // * a text is no envelope: refused before anything goes, its connection kept (spec 15.2)
+    let text = ends
+        .server
+        .send(
+            TransportMessage {
+                data: Bytes::from_static(b"hi"),
+                is_text: true,
+                ..TransportMessage::default()
+            },
+            &handle,
+        )
+        .expect_err("a text");
+
+    assert_eq!(
+        misuse_of(&text).as_deref(),
+        Some("an in-memory connection carries envelopes, as bytes"),
+        "a misuse: {text:?}"
+    );
+
     client.send(message_of(&[1], None)).expect("sent");
     ends.clock.settle().await;
 
@@ -2164,5 +2351,58 @@ async fn a_transport_given_no_list_takes_every_procedure_and_one_given_an_empty_
             .into_iter()
             .all(|address| !none.takes_procedure(&handle, address)),
         "given an empty list, none taken"
+    );
+}
+
+#[tokio::test]
+async fn gives_nothing_for_no_list_and_for_a_list_what_it_names_each_address_once() {
+    assert!(taking(None).expect("built").inner.procedures.is_none());
+
+    let server = taking(Some(vec![
+        address_of(2, 1),
+        address_of(2, 1),
+        address_of(65_535, 65_535),
+    ]))
+    .expect("built");
+    let taken = server.inner.procedures.as_ref().expect("a list given");
+
+    assert_eq!(taken.len(), 2, "each address once");
+    assert_eq!(
+        [
+            address_of(2, 1),
+            address_of(65_535, 65_535),
+            address_of(1, 2),
+            address_of(2, 2),
+        ]
+        .map(|address| taken.contains(&address)),
+        [true, true, false, false]
+    );
+    assert!(
+        !taking(Some(Vec::new()))
+            .expect("built")
+            .inner
+            .procedures
+            .as_ref()
+            .expect("an empty list given")
+            .contains(&address_of(1, 1))
+    );
+}
+
+// The flag names whether the trait's method has a list to ask: no optional function on this side.
+#[tokio::test]
+async fn gives_a_takes_procedure_by_its_one_list_whatever_the_connection_and_none_for_no_list() {
+    let server = taking(Some(vec![address_of(2, 1)])).expect("built");
+    let first = Arc::from("type=WS;ip=127.0.0.1;port=1;ordinal=1");
+    let second = Arc::from("type=HTTP;ip=127.0.0.1;ordinal=9");
+
+    assert!(!taking(None).expect("built").names_procedures());
+    assert!(server.names_procedures());
+    assert_eq!(
+        [
+            server.takes_procedure(&first, address_of(2, 1)),
+            server.takes_procedure(&second, address_of(2, 1)),
+            server.takes_procedure(&first, address_of(2, 2)),
+        ],
+        [true, true, false]
     );
 }

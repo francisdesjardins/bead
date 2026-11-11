@@ -11,6 +11,7 @@ import type { TransportServerConnectionHandle } from '../../server/types';
 import {
   CancelError,
   ConnectError,
+  DisconnectError,
   GenericError,
   ProgrammerError,
   ReadyStateError,
@@ -22,9 +23,11 @@ import {
   createTestClock,
   delaysOn,
   reachedByLocalhost,
+  sendRefusalOf,
   tcpSocketsClosed,
   timersUntil,
 } from '../../shared/__tests__/fixtures';
+import { ReadyState } from '../../shared/ready-state';
 import {
   AFTER_HEADER,
   BEAD_BATCH_MEDIA_TYPE,
@@ -43,12 +46,13 @@ import {
   WAIT_HEADER,
   type FetchLike,
   type HTTPTransportClient,
+  type IHTTPTransportClientConnectOptions,
   type IHTTPTransportClientOptions,
 } from '../http-transport-client';
 import { dispose } from '../transport-client';
 import type { ITransportMessage } from '../../shared/types';
 import type { ITransportClientInternal } from '../types';
-import { createFakeFetch, responseOf } from './fake-fetch';
+import { createFakeFetch, type IFakeCall, responseOf } from './fake-fetch';
 
 // helpers
 
@@ -763,7 +767,7 @@ test.describe('createHTTPTransportClient', () => {
     expect(client.isClosed()).toBe(true);
     expect(client.socket).toBeNull();
     await expect(client.disconnect()).rejects.toBeInstanceOf(ReadyStateError);
-    await expect(client.send({ data: new Uint8Array(8) })).rejects.toBeInstanceOf(ReadyStateError);
+    await expect(client.send({ data: new Uint8Array(8) })).rejects.toBeInstanceOf(DisconnectError);
   });
 
   test('closes once the server says the connection is gone, after rejecting the exchange that learned it', async () => {
@@ -1160,6 +1164,85 @@ test.describe('createHTTPTransportClient', () => {
   });
 
   // spec 15.15
+  // debugging 9.7
+  test('refuses a send by its ready state before the open and as a disconnection after it, in each state it holds', async () => {
+    // * a server whose every answer the test gives
+    const fake = createFakeFetch();
+    await using client = createHTTPTransportClient({ isListening: false, fetch: fake.fetch });
+    const refusals: Awaited<ReturnType<typeof sendRefusalOf>>[] = [];
+    const callOf = async (index: number): Promise<IFakeCall | undefined> => {
+      await expect
+        .poll(() => {
+          return fake.calls.length;
+        })
+        .toBeGreaterThan(index);
+
+      return fake.calls[index];
+    };
+    const answer = async (index: number, response: Parameters<IFakeCall['answer']>[0]) => {
+      (await callOf(index))?.answer(response);
+    };
+
+    // never connected: a disconnect refused by its state too
+    refusals.push(await sendRefusalOf(client));
+    await expect(client.disconnect()).rejects.toMatchObject({
+      got: ReadyState.UNINITIALIZED,
+      name: 'ReadyStateError',
+    });
+
+    // connecting, its POST held
+    const connecting = client.connect({ host, port: 8_080 });
+
+    refusals.push(await sendRefusalOf(client));
+    await answer(0, { headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22) }, status: 201 });
+    await connecting;
+
+    // open, the send going
+    const sending = sendRefusalOf(client);
+
+    await answer(1, { status: 204 });
+    refusals.push(await sending);
+
+    // closing, its DELETE held
+    const disconnecting = client.disconnect();
+
+    refusals.push(await sendRefusalOf(client));
+    await answer(2, { status: 204 });
+    await disconnecting;
+
+    // closed by its own disconnect
+    refusals.push(await sendRefusalOf(client));
+
+    // reconnecting, its POST held, then ended by its signal
+    const ending = new AbortController();
+    const reconnecting = client.reconnect({ signal: ending.signal });
+
+    refusals.push(await sendRefusalOf(client));
+    ending.abort();
+    await expect(reconnecting).rejects.toBeInstanceOf(CancelError);
+
+    // closed by a connect that started and failed: its network failed
+    const failing = client.connect({ host, port: 8_080 });
+
+    (await callOf(4))?.fail();
+    await expect(failing).rejects.toBeInstanceOf(ConnectError);
+    refusals.push(await sendRefusalOf(client));
+
+    expect(refusals).toEqual([
+      [
+        'ReadyStateError',
+        ReadyState.UNINITIALIZED,
+        'the transport client is uninitialized, not open',
+      ],
+      ['ReadyStateError', ReadyState.CONNECTING, 'the transport client is connecting, not open'],
+      'sent',
+      ['DisconnectError', undefined, 'the transport client is closing, not open'],
+      ['DisconnectError', undefined, 'the transport client is closed, not open'],
+      ['DisconnectError', undefined, 'the transport client is reconnecting, not open'],
+      ['DisconnectError', undefined, 'the transport client is closed, not open'],
+    ]);
+  });
+
   test('refuses to connect where no connection is drawn, and lets go of one drawn as it gave up', async () => {
     const refused = createFakeFetch();
     const client = createHTTPTransportClient({ isListening: false, fetch: refused.fetch });
@@ -1233,7 +1316,19 @@ test.describe('createHTTPTransportClient', () => {
     await expect(lateConnecting).rejects.toBeInstanceOf(TimeoutError);
     await expect(lateConnecting).rejects.toThrow(new TimeoutError(20));
     expect(slow.calls[0]?.init.signal?.aborted).toBe(true);
-    expect(CONNECT_DEFAULTS.pathname).toBe('/bead');
+    expect(CONNECT_DEFAULTS).toEqual({ pathname: '/bead', secured: false, timeout: 30_000 });
+
+    // no host or no port, which its type requires and a caller in JavaScript may still leave out:
+    // refused before anything moves, nothing fetched
+    const unnamed = createFakeFetch();
+    const unaddressed = createHTTPTransportClient({ isListening: false, fetch: unnamed.fetch });
+
+    for (const given of [{ port: 80 }, { host }, {}]) {
+      await expect(
+        unaddressed.connect(given as unknown as IHTTPTransportClientConnectOptions)
+      ).rejects.toThrow(new ProgrammerError('a connect names the host and the port it reaches'));
+    }
+    expect([unaddressed.isUninitialized(), unnamed.calls]).toEqual([true, []]);
   });
 
   test('a drop aborts what is in flight, tells the server, and a dispose while connecting rejects the connect', async () => {

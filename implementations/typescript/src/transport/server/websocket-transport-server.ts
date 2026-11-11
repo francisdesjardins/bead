@@ -196,7 +196,7 @@ const upgradeCredentialOf = (request: IIncomingMessageLike): string | undefined 
  * `GenericError` naming the bound in the spec's spelling and its value, the 1009's keeping
  * `ws`'s own error as its `cause`; each told once, as its connection ends, its close begun, before
  * its unclean `close`, so a listener that throws keeps nothing open; and what a listener of its
- * events threw, as it threw. A peer that drops without its closing handshake, its TCP connection
+ * other events threw, as it threw. A peer that drops without its closing handshake, its TCP connection
  * ended or reset, emits no `error`: its unclean `close` tells it; nor does a peer its heartbeat
  * drops, nor its own drop of a peer that never answered a close within `closeTimeout`. Each
  * connection is pinged every `heartbeat`, and dropped when it left a ping unanswered: a peer gone
@@ -279,7 +279,7 @@ export const createWebSocketTransportServer = (
   const decoder = new TextDecoder();
 
   return createTransportServer<IServerSocketLike, IDrawingRequest>(
-    (server, connections, { isHeard, tell }) => {
+    (server, connections, { isHeard, report, tell }) => {
       // what the start under way, or the last, opened and keeps: one listener an address bound
       const listeners = new Set<IListener>();
       // the rank of the last connection taken, across its starts: no handle is given twice
@@ -608,8 +608,8 @@ export const createWebSocketTransportServer = (
           beating.answer();
         });
 
-        // * its end: its one error, then its close, unclean once it failed, told even when a listener
-        // of `error` throws, which is Node's (spec 15.1); a stop's clear tells none
+        // * its end: its one error, then its close, unclean once it failed, what a listener of
+        // `error` throws dropped (spec 15.1); a stop's clear tells none
         socket.on(CLOSE_EVENT, (code) => {
           beating.stop();
           paces.get(socket)?.stop();
@@ -617,15 +617,13 @@ export const createWebSocketTransportServer = (
 
           const failure = failures.get(socket);
 
-          try {
-            if (failure !== undefined) {
-              server.emit(ERROR_EVENT, failure, connectionHandle);
-            }
-          } finally {
-            if (connections.get(connectionHandle) === connection) {
-              connections.delete(connectionHandle);
-              tell(CLOSE_EVENT, [code === 1000 && failure === undefined, connectionHandle]);
-            }
+          if (failure !== undefined) {
+            report(failure, connectionHandle);
+          }
+
+          if (connections.get(connectionHandle) === connection) {
+            connections.delete(connectionHandle);
+            tell(CLOSE_EVENT, [code === 1000 && failure === undefined, connectionHandle]);
           }
         });
 
@@ -736,7 +734,7 @@ export const createWebSocketTransportServer = (
 
               instance.on(ERROR_EVENT, (error) => {
                 if (isListening) {
-                  return (server.emit(ERROR_EVENT, error, ''), undefined);
+                  return (report(error, ''), undefined);
                 }
 
                 release();

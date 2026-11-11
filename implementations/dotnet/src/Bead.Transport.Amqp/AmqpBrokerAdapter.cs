@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Net.Security;
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using Amqp;
@@ -780,10 +781,10 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
                 break;
             }
-            // ! its library answers its broker's END before it marks the session ended, under the
-            // lock its Send waits on: a publication asked in between finds the session still held,
-            // and its Send refuses it with nothing sent. It came after the end, so the next session
-            // carries it (spec 15.33), once; never on a link stopping or lost, whose end is its own
+            // ! its broker's END or DETACH read once the sender was chosen: its Send refuses it with
+            // nothing sent, the sending marked ended as the END was read. It came after the end, so
+            // the next session carries it (spec 15.33), once; never on a link stopping or lost, whose
+            // end is its own
             catch (AmqpException) when (!isBegunAgain && sending.IsEnded && !link.IsStopping && !link.IsEnded)
             {
                 isBegunAgain = true;
@@ -1257,6 +1258,8 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         var (link, isInbox) = asked;
         var (session, begun) = AmqpEndpoints.Begin(link.Connection!);
         var sending = new Sending(session);
+
+        link.Sendings.Add(session, sending);
 
         try
         {
@@ -1764,16 +1767,29 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     }
 
     // what its library tells of its connection: its OPEN's hostname its virtual host's alone, its
-    // broker's channel-max read, and a CLOSE it sends of its own
+    // broker's channel-max read, a CLOSE it sends of its own, and a sending session's end as it is read
     private sealed class Opening((Incarnation Link, string? VirtualHost) opening, Action<Close> closing) : IHandler
     {
         public bool CanHandle(EventId id)
         {
-            return id is EventId.ConnectionLocalOpen or EventId.ConnectionRemoteOpen or EventId.ConnectionLocalClose;
+            return id is EventId.ConnectionLocalOpen or EventId.ConnectionRemoteOpen or EventId.ConnectionLocalClose or EventId.SessionRemoteClose or EventId.LinkRemoteClose;
         }
 
         public void Handle(Event protocolEvent)
         {
+            // ! told before its library answers its broker's END or DETACH, and before it marks the
+            // session or the sender closed: a publication that reads the answer finds its sending
+            // ended, and begins another (spec 15.33). A sending session holds its one sender
+            if (protocolEvent.Id is EventId.SessionRemoteClose or EventId.LinkRemoteClose)
+            {
+                if (protocolEvent.Session is { } session && opening.Link.Sendings.TryGetValue(session, out var sending))
+                {
+                    sending.EndedByBroker();
+                }
+
+                return;
+            }
+
             if (protocolEvent.Context is Close close)
             {
                 closing(close);
@@ -1807,6 +1823,9 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
     private sealed class Sending(Session session)
     {
+        // its broker's END or DETACH read: its library marks it closed only once it answered it
+        private volatile bool _isEndedByBroker;
+
         public Session Session { get; } = session;
 
         public SenderLink? Sender { get; set; }
@@ -1817,8 +1836,13 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         {
             get
             {
-                return Session.IsClosed || Sender is null || Sender.IsClosed;
+                return _isEndedByBroker || Session.IsClosed || Sender is null || Sender.IsClosed;
             }
+        }
+
+        public void EndedByBroker()
+        {
+            _isEndedByBroker = true;
         }
     }
 
@@ -1880,6 +1904,9 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         public Task<Sending>? Parcels { get; set; }
 
         public Task<Sending>? Opens { get; set; }
+
+        // each sending session begun on it, by its session, which its library's events name
+        public ConditionalWeakTable<Session, Sending> Sendings { get; } = new();
 
         public Receiving? Inbox { get; set; }
 

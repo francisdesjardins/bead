@@ -607,29 +607,6 @@ test.describe('createTransportServer', () => {
     expect(server.clients).toHaveLength(0);
   });
 
-  test('"closeAll" closes every connection, and resolves to nothing without one', async () => {
-    const { calls, register, server } = createStubServer();
-    const closed: [boolean, string][] = [];
-
-    server.on('close', (clean, connectionHandle) => {
-      closed.push([clean, connectionHandle]);
-    });
-
-    await server.start();
-    await expect(server.closeAll()).resolves.toEqual([]);
-
-    register(A);
-    register(B);
-    await expect(server.closeAll()).resolves.toEqual([true, true]);
-    expect(server.clients).toHaveLength(0);
-    expect(closed).toEqual([
-      [true, A],
-      [true, B],
-    ]);
-    expect(calls).toEqual(['start', `close:${A}`, `close:${B}`]);
-    expect(server.isOpen()).toBe(true);
-  });
-
   test('"send" to an unknown handle resolves without reaching the transport', async () => {
     const { calls, register, server } = createStubServer();
 

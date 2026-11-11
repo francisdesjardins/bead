@@ -17,13 +17,7 @@ import {
   portOf,
 } from '../shared/broker-participant';
 import { assertHeldFinite, type TimeoutId } from '../shared/clock';
-import {
-  CLOSE_EVENT,
-  CONNECTION_EVENT,
-  ERROR_EVENT,
-  MESSAGE_EVENT,
-  REFUSAL_EVENT,
-} from '../shared/constants';
+import { CLOSE_EVENT, CONNECTION_EVENT, MESSAGE_EVENT, REFUSAL_EVENT } from '../shared/constants';
 import { notServedOf, ProgrammerError } from '../shared/errors';
 import { gaugesOf } from '../shared/gauges';
 import { transferableOf } from '../shared/transferable';
@@ -202,7 +196,7 @@ export const createBrokerTransportServer = (
   };
 
   const transport = createTransportServer<IBrokerPeer, undefined>(
-    (server, connections, { tell }) => {
+    (server, connections, { report, tell }) => {
       const { clock } = port;
 
       peerOf = (handle) => {
@@ -211,7 +205,7 @@ export const createBrokerTransportServer = (
 
       // * what its participant reports of its own names no connection: a message that is no parcel
       participant.on('error', (error) => {
-        server.emit(ERROR_EVENT, error, '');
+        report(error, '');
       });
 
       // every connection it holds, half-open ones among them, by its opener's id and half
@@ -246,7 +240,7 @@ export const createBrokerTransportServer = (
       const replace = (): void => {
         for (const name of served) {
           wantOf(name).catch((reason: unknown) => {
-            server.emit(ERROR_EVENT, notServedOf(name, reason), '');
+            report(notServedOf(name, reason), '');
           });
         }
       };
@@ -333,7 +327,7 @@ export const createBrokerTransportServer = (
                 replace();
               },
               report: (error) => {
-                server.emit(ERROR_EVENT, error, entry.handle ?? '');
+                report(error, entry.handle ?? '');
               },
               subject: () => {
                 return entry.handle ?? `a half-open connection of ${id}`;

@@ -134,17 +134,19 @@ fn each_error_enum_displays_its_cause_once_and_keeps_its_sources() {
 fn ready_state_error_names_both_states() {
     use crate::transport::ReadyState;
 
-    let error = super::ReadyStateError::new(ReadyState::Closed.name(), ReadyState::Open.name());
+    let error = super::ReadyStateError::new(ReadyState::Closed, ReadyState::Open);
     assert_eq!(
         error.to_string(),
         "the transport client is closed, not open"
     );
+    assert_eq!(error.got(), ReadyState::Closed);
+    assert_eq!(error.expected(), ReadyState::Open);
     assert_eq!(
         error,
-        super::ReadyStateError::new(ReadyState::Closed.name(), ReadyState::Open.name())
+        super::ReadyStateError::new(ReadyState::Closed, ReadyState::Open)
     );
     assert_ne!(
         error,
-        super::ReadyStateError::new(ReadyState::Open.name(), ReadyState::Closed.name())
+        super::ReadyStateError::new(ReadyState::Open, ReadyState::Closed)
     );
 }

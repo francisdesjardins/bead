@@ -3,7 +3,7 @@
 // dependencies
 
 import { clockOf } from '../../transport/shared/clock';
-import { createEmitter } from '../../transport/shared/emitter';
+import { createEmitter, tellError } from '../../transport/shared/emitter';
 import { ProgrammerError, toError } from '../../transport/shared/errors';
 import { createEventMethods } from '../../transport/shared/lifecycle';
 import { CLOSE_EVENT, MESSAGE_EVENT, RECONNECT_EVENT } from '../../transport/shared/constants';
@@ -236,9 +236,10 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
 
   let sessionToken: SessionToken | undefined;
 
-  // an error nobody waits on still has somewhere to go, when someone listens
+  // an error nobody waits on still has somewhere to go, when someone listens; what a listener of
+  // it throws is dropped (spec 15.1)
   const report = (error: Error): void => {
-    emitter.emit('error', error);
+    tellError(emitter, [error]);
   };
   // what a debug listener throws is reported, and the envelope goes on as if nobody listened
   const reportThrown = (error: unknown): void => {

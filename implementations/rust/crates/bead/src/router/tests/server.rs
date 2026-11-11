@@ -907,3 +907,137 @@ async fn answers_a_relayed_result_past_leg_a_s_limit_procedure_failed_with_no_de
         "reported with leg A's connection"
     );
 }
+
+// spec 15.1
+#[tokio::test]
+async fn drops_what_an_error_listener_throws_the_next_error_listener_told_and_the_call_goes_on() {
+    let clock = SteppingClock::new(super::january_first());
+    let transport = ScriptedServer::new(Arc::<SteppingClock>::clone(&clock));
+    let carried: Arc<dyn crate::transport::ServerTransport> =
+        Arc::<ScriptedServer>::clone(&transport);
+    let router =
+        RouterServer::new(carried, &RouterServerOptions::default()).expect("a router built");
+    let services = ServiceManager::new(
+        ServiceRouter::Server(router.clone()),
+        &ServiceManagerOptions::default(),
+    )
+    .expect("a manager built");
+    let heard: Reports = Arc::default();
+    let hearing = Arc::clone(&heard);
+    let is_thrown = Arc::new(core::sync::atomic::AtomicBool::new(false));
+
+    // a debug listener that throws once, on the request it takes
+    router.on_debug(Arc::new(move |_, _| {
+        assert!(
+            is_thrown.swap(true, core::sync::atomic::Ordering::SeqCst),
+            "listener bug"
+        );
+    }));
+    router.on_error(Arc::new(|_, _| panic!("an error listener that throws")));
+    router.on_error(Arc::new(
+        move |error: &RouterError, handle: Option<&ConnectionHandle>| {
+            locked(&hearing).push((error.clone(), handle.cloned()));
+        },
+    ));
+    services
+        .get_request_resolver(
+            &echo(),
+            RequestResolverDependencies::new(TextCodec, TextCodec),
+        )
+        .expect("echo resolved")
+        .on(Arc::new(|request, response: Response<TextCodec>| {
+            response.result(request.payload)
+        }))
+        .expect("echo registered");
+    transport.open(&first(), true);
+    transport.deliver(&request_of((1, &echo(), "hi")), &first());
+    clock.settle().await;
+
+    // * the debug listener's throw told the next error listener, with its connection, and the
+    // throw of the first dropped: the call answered with its result
+    let answers: Vec<(String, u32, String)> = transport
+        .take()
+        .iter()
+        .map(|(handle, envelope)| {
+            let Envelope::Result { payload, .. } = envelope else {
+                panic!("a result alone, not {envelope:?}");
+            };
+
+            (name_of(Some(handle)), envelope.call_id(), text_of(payload))
+        })
+        .collect();
+
+    assert_eq!(
+        answers,
+        [("first".to_owned(), 1, "hi".to_owned())],
+        "answered"
+    );
+
+    let heard = locked(&heard).clone();
+
+    assert_eq!(
+        heard.len(),
+        1,
+        "the debug listener's throw alone: {heard:?}"
+    );
+    assert!(
+        heard[0].0.to_string().contains("listener bug"),
+        "the debug listener's: {}",
+        heard[0].0
+    );
+    assert_eq!(heard[0].1, Some(first()), "with its connection");
+}
+
+// spec 15.2, 15.12
+#[tokio::test]
+async fn counts_a_text_message_by_its_utf_8_bytes_then_reports_it_envelope_malformed_with_its_connection_handing_nothing_on()
+ {
+    let served = Served::new(&RouterServerOptions {
+        intake: Some(crate::router::types::IntakeLimitsOptions {
+            maximum_untaken_envelopes: None,
+            maximum_untaken_bytes: Some(4),
+        }),
+        ..RouterServerOptions::default()
+    });
+
+    served.transport.open(&first(), true);
+
+    // * two characters of two bytes each in UTF-8, four bytes: its bound reached as it is handed
+    served.transport.deliver_message(
+        &crate::router::types::TransportMessage {
+            data: Bytes::from("éé"),
+            is_text: true,
+            ..crate::router::types::TransportMessage::default()
+        },
+        &first(),
+    );
+
+    assert!(
+        served.transport.is_paused(&first()),
+        "paused as it is handed"
+    );
+
+    served.settle().await;
+
+    // its report follows, its count released in that turn: nothing handed on
+    assert_eq!(
+        served.reported(),
+        ["ENVELOPE_MALFORMED first"],
+        "reported with its connection"
+    );
+    assert!(
+        matches!(&locked(&served.reports)[0].0, RouterError::Failure(failure) if failure.detail() == "an envelope is binary, not a string"),
+        "said why"
+    );
+    assert_eq!(
+        served
+            .transport
+            .pauses()
+            .iter()
+            .map(|(is_paused, handle)| (*is_paused, name_of(Some(handle))))
+            .collect::<Vec<_>>(),
+        [(true, "first".to_owned()), (false, "first".to_owned())],
+        "paused, then resumed as its count is released"
+    );
+    assert!(served.sent_since().is_empty(), "nothing answered");
+}

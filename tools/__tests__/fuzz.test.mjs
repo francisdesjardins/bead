@@ -88,20 +88,8 @@ describe('the targets', () => {
     assert.deepEqual(TARGETS.typescript, [...TWINS, 'blueprint']);
   });
 
-  test('knows the Rust side’s targets, the twins its core holds', () => {
-    assert.deepEqual(TARGETS.rust, [
-      'envelope',
-      'payload-codecs',
-      'debug-filter',
-      'jwt',
-      'broker-parcel',
-      'proto-codecs',
-    ]);
-    assert.ok(
-      TARGETS.rust.every((target) => {
-        return TWINS.includes(target);
-      })
-    );
+  test('knows the Rust side’s targets, every twin', () => {
+    assert.deepEqual(TARGETS.rust, TWINS);
     assert.match(SIDES.rust, /implementations[\\/]rust[\\/]fuzz$/u);
     assert.deepEqual(argumentsOf(['run', 'rust', 'jwt']), {
       command: 'run',
@@ -110,7 +98,7 @@ describe('the targets', () => {
       inputs: [],
       flags: [],
     });
-    assert.equal(argumentsOf(['run', 'rust', 'http-fields']), undefined);
+    assert.equal(argumentsOf(['run', 'rust', 'blueprint']), undefined);
   });
 
   test("keep each in its side's folder, and the blueprint's beside beadc", () => {

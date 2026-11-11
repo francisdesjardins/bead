@@ -19,7 +19,12 @@ import {
 } from '../../../router/shared/constants';
 import { healthOf, layerGaugesOf } from '../../../server/health';
 import { CancelError, ProgrammerError } from '../../shared/errors';
-import { createTestClock, tcpSocketsClosed, timersBy } from '../../shared/__tests__/fixtures';
+import {
+  createTestClock,
+  tcpSocketsClosed,
+  timersBy,
+  trapUncaught,
+} from '../../shared/__tests__/fixtures';
 import {
   AFTER_HEADER,
   BEAD_BATCH_MEDIA_TYPE,
@@ -31,6 +36,7 @@ import {
   createHTTPTransportServer,
   ENVELOPE_KINDS,
   EXCHANGE_TIMEOUT,
+  HEAD_DELAY_MILLISECONDS,
   INACTIVITY_TIMEOUT,
   LISTEN_HEADER,
   MAXIMUM_BODY_BYTES,
@@ -41,7 +47,7 @@ import {
   MAXIMUM_WAITING_EXCHANGES,
   PATHNAME,
   REFUSAL_HEADER,
-  REFUSALS,
+  HTTP_REFUSALS,
   SEQUENCE_HEADER,
   START_DEFAULTS,
   WAIT_HEADER,
@@ -95,6 +101,77 @@ const PROTOCOL_ERROR = http2Constants.NGHTTP2_PROTOCOL_ERROR;
 test.describe('createHTTPTransportServer', () => {
   test.afterAll(async () => {
     await tcpSocketsClosed();
+  });
+
+  test('refuses 431 a head past 16 KiB, its request line among it, as Node’s maxHeaderSize bounds it, and takes 101 fields, over HTTP', async () => {
+    await using started = await startTransport();
+    const port = portOf(started.url);
+
+    for (const head of [
+      rawConnectOf(host, `X-Large: ${'x'.repeat(16_384)}\r\n`),
+      `POST /${'x'.repeat(16_384)} HTTP/1.1\r\nHost: ${host}\r\n\r\n`,
+    ]) {
+      expect((await rawAnswerOf(port, head)).answer).toEqual([431, null]);
+    }
+    const fields = Array.from({ length: 101 }, (_, index) => {
+      return `X-${String(index)}: x\r\n`;
+    }).join('');
+
+    expect((await rawAnswerOf(port, rawConnectOf(host, fields))).answer).toEqual([201, null]);
+  });
+
+  test('refuses an extension method on the wire 400 unmarked', async () => {
+    await using started = await startTransport();
+
+    for (const method of ['BEAD', 'get']) {
+      const head = `${method} /bead HTTP/1.1\r\nHost: ${host}\r\nContent-Length: 0\r\n\r\n`;
+
+      expect((await rawAnswerOf(portOf(started.url), head)).answer).toEqual([400, null]);
+    }
+    expect(started.server.clients).toEqual([]);
+    expect(namesOf(started.events, 'refusal')).toEqual([]);
+  });
+
+  test('answers 400 unmarked an HTTP/2 preface where HTTP/1.1 alone is served', async () => {
+    await using started = await startTransport();
+
+    expect(
+      (await rawAnswerOf(portOf(started.url), 'PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n')).answer
+    ).toEqual([400, null]);
+    expect(started.server.clients).toEqual([]);
+  });
+
+  test('closes an idle kept-alive socket without another response', async () => {
+    await using started = await startTransport({
+      createServer: (listener) => {
+        const server = createServer(listener);
+
+        server.keepAliveTimeout = 100;
+
+        return server;
+      },
+    });
+    const { read, socket } = await rawSocketOn(portOf(started.url));
+
+    try {
+      socket.write(rawConnectOf(host));
+      await expect
+        .poll(() => {
+          return read.text.includes('\r\n\r\n');
+        })
+        .toBe(true);
+      expect(read.text).toMatch(/^HTTP\/1\.1 201 /u);
+      const answer = read.text;
+
+      await expect
+        .poll(() => {
+          return read.isClosed;
+        })
+        .toBe(true);
+      expect(read.text).toBe(answer);
+    } finally {
+      socket.destroy();
+    }
   });
 
   // spec 15.12.4
@@ -190,7 +267,7 @@ test.describe('createHTTPTransportServer', () => {
     expect(second.connectionToken).not.toBe(connectionToken);
   });
 
-  test('pairs each answer with the exchange of its request, whatever the order, the head going as the request is handed on', async () => {
+  test('pairs each answer with the exchange of its request, whatever the order, the head going 40 ms after the request is handed on', async () => {
     await using started = await startTransport();
     const { events, server, url } = started;
     const { connectionHandle, connectionToken } = await connect(url, server);
@@ -424,20 +501,20 @@ test.describe('createHTTPTransportServer', () => {
     ];
 
     expect(await Promise.all(refusals)).toEqual([
-      [404, REFUSALS.PATH],
-      [405, REFUSALS.METHOD],
-      [403, REFUSALS.ORIGIN],
-      [415, REFUSALS.TYPE],
-      [415, REFUSALS.TYPE],
-      [415, REFUSALS.TYPE],
-      [400, REFUSALS.MALFORMED],
-      [400, REFUSALS.MALFORMED],
-      [404, REFUSALS.CONNECTION_UNKNOWN],
-      [400, REFUSALS.MALFORMED],
-      [400, REFUSALS.MALFORMED],
-      [400, REFUSALS.MALFORMED],
-      [400, REFUSALS.MALFORMED],
-      [400, REFUSALS.MALFORMED],
+      [404, HTTP_REFUSALS.PATH],
+      [405, HTTP_REFUSALS.METHOD],
+      [403, HTTP_REFUSALS.ORIGIN],
+      [415, HTTP_REFUSALS.TYPE],
+      [415, HTTP_REFUSALS.TYPE],
+      [415, HTTP_REFUSALS.TYPE],
+      [400, HTTP_REFUSALS.MALFORMED],
+      [400, HTTP_REFUSALS.MALFORMED],
+      [404, HTTP_REFUSALS.CONNECTION_UNKNOWN],
+      [400, HTTP_REFUSALS.MALFORMED],
+      [400, HTTP_REFUSALS.MALFORMED],
+      [400, HTTP_REFUSALS.MALFORMED],
+      [400, HTTP_REFUSALS.MALFORMED],
+      [400, HTTP_REFUSALS.MALFORMED],
     ]);
 
     const method = await fetch(url, { method: 'PUT' });
@@ -510,8 +587,8 @@ test.describe('createHTTPTransportServer', () => {
         [page, ['xn--a', 'http://xn--a'], ['xn--a'], ['xn--a.test'], ['xn---bad-cpa.test']]
       )
     ).toEqual([
-      [403, REFUSALS.ORIGIN],
-      [403, REFUSALS.ORIGIN],
+      [403, HTTP_REFUSALS.ORIGIN],
+      [403, HTTP_REFUSALS.ORIGIN],
       [201, null],
       [201, null],
       [201, null],
@@ -526,9 +603,9 @@ test.describe('createHTTPTransportServer', () => {
     ).toEqual([
       [201, null],
       [201, null],
-      [403, REFUSALS.HOST],
-      [403, REFUSALS.HOST],
-      [403, REFUSALS.HOST],
+      [403, HTTP_REFUSALS.HOST],
+      [403, HTTP_REFUSALS.HOST],
+      [403, HTTP_REFUSALS.HOST],
     ]);
   });
 
@@ -544,7 +621,7 @@ test.describe('createHTTPTransportServer', () => {
       post(url, { body: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 7 }), connectionToken })
     );
 
-    expect([first.status, again]).toEqual([200, [409, REFUSALS.CALL_WAITING]]);
+    expect([first.status, again]).toEqual([200, [409, HTTP_REFUSALS.CALL_WAITING]]);
     await server.send({ data: envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 7 }) }, connectionHandle);
     expect(await bytesOf(first)).toEqual([...envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 7 })]);
   });
@@ -563,7 +640,7 @@ test.describe('createHTTPTransportServer', () => {
 
     // one address, one connection: busy, and told when to come back
     expect([response.status, response.headers.get('retry-after')]).toEqual([503, '1']);
-    expect(response.headers.get(REFUSAL_HEADER)).toBe(REFUSALS.BUSY);
+    expect(response.headers.get(REFUSAL_HEADER)).toBe(HTTP_REFUSALS.BUSY);
 
     const waiting = await post(url, {
       body: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }),
@@ -578,7 +655,7 @@ test.describe('createHTTPTransportServer', () => {
       connectionToken,
     });
 
-    expect([waiting.status, crowded, cancel.status]).toEqual([200, [429, REFUSALS.BUSY], 204]);
+    expect([waiting.status, crowded, cancel.status]).toEqual([200, [429, HTTP_REFUSALS.BUSY], 204]);
     await server.send({ data: envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1 }) }, connectionHandle);
     await waiting.arrayBuffer();
 
@@ -589,7 +666,7 @@ test.describe('createHTTPTransportServer', () => {
       })
     );
 
-    expect(heavy).toEqual([503, REFUSALS.BUSY]);
+    expect(heavy).toEqual([503, HTTP_REFUSALS.BUSY]);
   });
 
   // spec 15.5.2, 15.6.13, 15.12.17
@@ -635,7 +712,7 @@ test.describe('createHTTPTransportServer', () => {
       crowded.status,
       crowded.headers.get(REFUSAL_HEADER),
       crowded.headers.get('retry-after'),
-    ]).toEqual([429, REFUSALS.BUSY, '1']);
+    ]).toEqual([429, HTTP_REFUSALS.BUSY, '1']);
 
     server.resume(connectionHandle);
 
@@ -677,50 +754,8 @@ test.describe('createHTTPTransportServer', () => {
     await server.close(connectionHandle);
 
     // * what waited at its gate goes with it, its charge released, and nothing of it handed on
-    expect(await refusalOf(held)).toEqual([404, REFUSALS.CONNECTION_UNKNOWN]);
+    expect(await refusalOf(held)).toEqual([404, HTTP_REFUSALS.CONNECTION_UNKNOWN]);
     expect([namesOf(events, 'message'), server.gauges().counts['bodyBytes'] ?? 0]).toEqual([[], 0]);
-  });
-
-  test('"closeAll" closes every connection cleanly, and gives nothing without one', async () => {
-    await using started = await startTransport();
-    const { events, server, url } = started;
-
-    await expect(server.closeAll()).resolves.toEqual([]);
-
-    const waitingConnection = await connect(url, server);
-    const response = await post(url, { headers: { [LISTEN_HEADER]: '?1' } });
-    const listeningToken = response.headers.get(CONNECTION_TOKEN_HEADER) ?? '';
-    const listeningHandle = server.clients.at(-1)!.connectionHandle;
-    const waiting = await post(url, {
-      body: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }),
-      connectionToken: waitingConnection.connectionToken,
-    });
-    const listen = fetch(url, {
-      headers: {
-        [CONNECTION_TOKEN_HEADER]: listeningToken,
-        [AFTER_HEADER]: '0',
-        [WAIT_HEADER]: '20000',
-      },
-    });
-
-    await expect
-      .poll(() => {
-        return server.gauges().counts['listens'];
-      })
-      .toBe(1);
-    await expect(server.closeAll()).resolves.toEqual([true, true]);
-    expect(server.clients).toEqual([]);
-    expect(server.gauges().connectionHandles).toEqual(new Set());
-    expect(namesOf(events, 'close')).toHaveLength(2);
-    expect(namesOf(events, 'close')).toEqual(
-      expect.arrayContaining([
-        ['close', true, waitingConnection.connectionHandle],
-        ['close', true, listeningHandle],
-      ])
-    );
-    await expect(waiting.arrayBuffer()).rejects.toThrow();
-    expect(await refusalOf(listen)).toEqual([404, REFUSALS.CONNECTION_UNKNOWN]);
-    expect(server.isOpen()).toBe(true);
   });
 
   test('closes a connection on its DELETE; a request handed on learns it by its exchange cut', async () => {
@@ -748,7 +783,7 @@ test.describe('createHTTPTransportServer', () => {
       post(url, { body: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 3 }), connectionToken })
     );
 
-    expect(after).toEqual([404, REFUSALS.CONNECTION_UNKNOWN]);
+    expect(after).toEqual([404, HTTP_REFUSALS.CONNECTION_UNKNOWN]);
     // an answer for it goes nowhere
     await expect(
       server.send({ data: envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1 }) }, connectionHandle)
@@ -1113,9 +1148,9 @@ test.describe('createHTTPTransportServer', () => {
     await server.stop();
 
     expect(answers).toEqual([
-      [503, REFUSALS.BUSY, '1', 0],
-      [415, REFUSALS.TYPE],
-      [400, REFUSALS.MALFORMED],
+      [503, HTTP_REFUSALS.BUSY, '1', 0],
+      [415, HTTP_REFUSALS.TYPE],
+      [400, HTTP_REFUSALS.MALFORMED],
     ]);
     expect(
       namesOf(events, 'connection').map((event) => {
@@ -1170,13 +1205,13 @@ test.describe('createHTTPTransportServer', () => {
     await server.stop();
 
     expect(answers).toEqual([
-      [true, 404, REFUSALS.CONNECTION_UNKNOWN],
-      [400, REFUSALS.MALFORMED],
-      [403, REFUSALS.ORIGIN],
-      [404, REFUSALS.CONNECTION_UNKNOWN],
-      [404, REFUSALS.CONNECTION_UNKNOWN],
-      [404, REFUSALS.CONNECTION_UNKNOWN],
-      [404, REFUSALS.CONNECTION_UNKNOWN],
+      [true, 404, HTTP_REFUSALS.CONNECTION_UNKNOWN],
+      [400, HTTP_REFUSALS.MALFORMED],
+      [403, HTTP_REFUSALS.ORIGIN],
+      [404, HTTP_REFUSALS.CONNECTION_UNKNOWN],
+      [404, HTTP_REFUSALS.CONNECTION_UNKNOWN],
+      [404, HTTP_REFUSALS.CONNECTION_UNKNOWN],
+      [404, HTTP_REFUSALS.CONNECTION_UNKNOWN],
     ]);
     expect(namesOf(events, 'message')).toEqual([]);
   });
@@ -1207,7 +1242,7 @@ test.describe('createHTTPTransportServer', () => {
     await server.stop();
 
     for (const listen of held) {
-      expect(await refusalOf(listen)).toEqual([404, REFUSALS.CONNECTION_UNKNOWN]);
+      expect(await refusalOf(listen)).toEqual([404, HTTP_REFUSALS.CONNECTION_UNKNOWN]);
     }
   });
 
@@ -1638,12 +1673,12 @@ test.describe('createHTTPTransportServer, over TLS', () => {
     ).toEqual([
       [201, undefined],
       [201, undefined],
-      [403, REFUSALS.HOST],
+      [403, HTTP_REFUSALS.HOST],
       [201, undefined],
-      [403, REFUSALS.ORIGIN],
+      [403, HTTP_REFUSALS.ORIGIN],
       [201, undefined],
       [201, undefined],
-      [403, REFUSALS.HOST],
+      [403, HTTP_REFUSALS.HOST],
     ]);
 
     await using named = await startSecure({ hosts: ['bead.test'] });
@@ -1665,9 +1700,9 @@ test.describe('createHTTPTransportServer, over TLS', () => {
       ])
     ).toEqual([
       [201, undefined],
-      [403, REFUSALS.HOST],
+      [403, HTTP_REFUSALS.HOST],
       [201, undefined],
-      [403, REFUSALS.ORIGIN],
+      [403, HTTP_REFUSALS.ORIGIN],
     ]);
 
     const before = connections.length;
@@ -1776,6 +1811,42 @@ test.describe('createHTTPTransportServer, over TLS', () => {
       201,
       undefined,
     ]);
+  });
+
+  test('resets over HTTP/2 the stream of a request whose target holds a #, PROTOCOL_ERROR, nothing written, and serves one that holds an encoded #', async () => {
+    await using started = await startSecure();
+    const { server, session } = started;
+    const told: unknown[] = [];
+    const connections: unknown[] = [];
+
+    server.on('refusal', (refusal) => {
+      told.push(refusal);
+    });
+    server.on('connection', (...params) => {
+      connections.push(params);
+    });
+
+    // ! nghttp2 hands a # in :path on, and Node with it: the transport alone resets it
+    expect(
+      await Promise.all(
+        ['/bead#x', '/bead#', '/bead?x#y', '/elsewhere#/bead'].map((path) => {
+          return resetOf(session, { ':path': path });
+        })
+      )
+    ).toEqual(
+      Array.from({ length: 4 }, () => {
+        return PROTOCOL_ERROR;
+      })
+    );
+    expect(told).toEqual([]);
+    expect(connections).toEqual([]);
+    // %23 is a character of its query, and of its path
+    expect(await answerOverHTTP2(session, { ':path': '/bead?a%23b' })).toEqual([201, undefined]);
+    expect(await answerOverHTTP2(session, { ':path': '/bead%23' })).toEqual([
+      404,
+      HTTP_REFUSALS.PATH,
+    ]);
+    expect(connections).toHaveLength(1);
   });
 
   test('takes over HTTP/2 a request with a field holding a control character but a tab, or whose value starts or ends with a space or a tab, which Node’s parser drops before the transport reads the request', async () => {
@@ -2283,7 +2354,7 @@ test.describe('createHTTPTransportServer, its edges', () => {
 
     expect([response.status, response.headers?.[REFUSAL_HEADER], checkOf()]).toEqual([
       503,
-      REFUSALS.BUSY,
+      HTTP_REFUSALS.BUSY,
       [{ observedValue: 5, output: '5 of 5', status: 'warn' }],
     ]);
     await server.stop();
@@ -2359,6 +2430,8 @@ test.describe('createHTTPTransportServer, its edges', () => {
     const late = exchangeOf(connectionToken);
 
     fake.feed(late.request, [envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 5 })]);
+    // its head, once it waited 40 ms for its answer (spec 15.7)
+    clock.tick(HEAD_DELAY_MILLISECONDS);
 
     expect([late.response.status, burials]).toEqual([200, 3]);
 
@@ -2373,7 +2446,7 @@ test.describe('createHTTPTransportServer, its edges', () => {
       late.response.isDestroyed,
       coming.response.status,
       coming.response.headers?.[REFUSAL_HEADER],
-    ]).toEqual([true, 404, REFUSALS.CONNECTION_UNKNOWN]);
+    ]).toEqual([true, 404, HTTP_REFUSALS.CONNECTION_UNKNOWN]);
     expect(namesOf(events, 'close')).toEqual([['close', true, connectionHandle]]);
     await server.stop();
   });
@@ -2395,19 +2468,34 @@ test.describe('createHTTPTransportServer, its edges', () => {
       fake.feed(asking.request, [envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 })]);
 
       // one idle timer per connection as drawn; the one asking lost its own as its exchange came,
-      // and its body's pace, armed at its head and again at its bytes, went once it was whole
+      // and its body's pace, armed at its head and again at its bytes, went once it was whole; its
+      // exchange timer counts from its hand-off, its head's 40 ms first (spec 15.7)
       const delays = clock.armed.map(({ delay }) => {
         return delay;
       });
 
-      expect(delays).toEqual([2_000, 2_000, BODY_GRACE_PERIOD, BODY_GRACE_PERIOD, 1_000]);
+      expect(delays).toEqual([
+        2_000,
+        2_000,
+        BODY_GRACE_PERIOD,
+        BODY_GRACE_PERIOD,
+        HEAD_DELAY_MILLISECONDS,
+      ]);
       expect(clock.cleared).toEqual(
         [0, 2, 3].map((index) => {
           return clock.armed[index]?.handle;
         })
       );
 
-      clock.tick(999);
+      // its head goes, and the rest of its timeout is armed
+      clock.tick(HEAD_DELAY_MILLISECONDS);
+
+      expect([asking.response.status, clock.armed.at(-1)?.delay]).toEqual([
+        200,
+        1_000 - HEAD_DELAY_MILLISECONDS,
+      ]);
+
+      clock.tick(999 - HEAD_DELAY_MILLISECONDS);
 
       expect(namesOf(events, 'close')).toEqual([]);
 
@@ -2471,7 +2559,7 @@ test.describe('createHTTPTransportServer, its edges', () => {
 
     expect([third.response.status, third.response.headers?.[REFUSAL_HEADER]]).toEqual([
       429,
-      REFUSALS.BUSY,
+      HTTP_REFUSALS.BUSY,
     ]);
 
     // closed, then each body's socket gone: the connection closes once
@@ -2505,7 +2593,7 @@ test.describe('createHTTPTransportServer, its edges', () => {
       // a body of no declared length, chunked, is a body all the same
       headersOf(1, { 'transfer-encoding': 'chunked' })?.['connection'],
       [malformed?.[REFUSAL_HEADER], malformed?.['connection']],
-    ]).toEqual(['close', undefined, 'close', [REFUSALS.MALFORMED, 'close']]);
+    ]).toEqual(['close', undefined, 'close', [HTTP_REFUSALS.MALFORMED, 'close']]);
     await server.stop();
   });
 
@@ -2519,7 +2607,10 @@ test.describe('createHTTPTransportServer, its edges', () => {
       socket: { remoteAddress: '10.0.0.2', remotePort: 40_001 },
     });
 
-    expect([response.status, response.headers?.[REFUSAL_HEADER]]).toEqual([503, REFUSALS.BUSY]);
+    expect([response.status, response.headers?.[REFUSAL_HEADER]]).toEqual([
+      503,
+      HTTP_REFUSALS.BUSY,
+    ]);
     await server.stop();
   });
 
@@ -2565,7 +2656,7 @@ test.describe('createHTTPTransportServer, its edges', () => {
       coming.response.status,
       coming.response.headers?.[REFUSAL_HEADER],
       coming.response.isDestroyed,
-    ]).toEqual([404, REFUSALS.CONNECTION_UNKNOWN, false]);
+    ]).toEqual([404, HTTP_REFUSALS.CONNECTION_UNKNOWN, false]);
 
     // the rest of it changes nothing
     coming.request.emit(
@@ -2601,7 +2692,7 @@ test.describe('createHTTPTransportServer, its edges', () => {
         })
         .toBe(true);
       expect(read.text).toMatch(/^HTTP\/1\.1 404/u);
-      expect(read.text).toContain(`${REFUSAL_HEADER}: ${REFUSALS.CONNECTION_UNKNOWN}`);
+      expect(read.text).toContain(`${REFUSAL_HEADER}: ${HTTP_REFUSALS.CONNECTION_UNKNOWN}`);
       socket.write(envelope.subarray(12));
       await expect
         .poll(() => {
@@ -2643,7 +2734,7 @@ test.describe('createHTTPTransportServer, its edges', () => {
 
       expect([coming.response.status, coming.response.headers?.[REFUSAL_HEADER]]).toEqual([
         404,
-        REFUSALS.CONNECTION_UNKNOWN,
+        HTTP_REFUSALS.CONNECTION_UNKNOWN,
       ]);
     }
 
@@ -2690,7 +2781,8 @@ test.describe('createHTTPTransportServer, its edges', () => {
     ).toEqual([2_000]);
     await server.stop();
 
-    // a request waits for its answer for ever, and a connection rests for ever: no timer
+    // a request waits for its answer for ever, and a connection rests for ever: no timer but its
+    // head's delay (spec 15.7)
     const foreverClock = createTestClock();
     const forever = await startScripted({
       clock: foreverClock,
@@ -2703,13 +2795,24 @@ test.describe('createHTTPTransportServer, its edges', () => {
       forever.fake.feed(asking.request, [envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 })]);
     });
 
-    // its body's pace alone was armed, and went once its body was whole
+    // its body's pace, which went once its body was whole, and its head's delay
     expect([
       asking.response.status,
-      armedForever.filter(({ handle }) => {
-        return !cleared.includes(handle);
-      }),
-    ]).toEqual([200, []]);
+      armedForever
+        .filter(({ handle }) => {
+          return !cleared.includes(handle);
+        })
+        .map(({ delay }) => {
+          return delay;
+        }),
+    ]).toEqual([undefined, [HEAD_DELAY_MILLISECONDS]]);
+
+    // its head goes, and nothing is armed for the rest of an exchange timeout of never
+    const { armed: armedAfter } = timersBy(foreverClock, () => {
+      foreverClock.tick(HEAD_DELAY_MILLISECONDS);
+    });
+
+    expect([asking.response.status, armedAfter]).toEqual([200, []]);
     await forever.server.stop();
   });
 
@@ -2734,8 +2837,8 @@ test.describe('createHTTPTransportServer, its edges', () => {
         ];
       })
     ).toEqual([
-      [404, REFUSALS.CONNECTION_UNKNOWN, undefined],
-      [404, REFUSALS.CONNECTION_UNKNOWN, 'close'],
+      [404, HTTP_REFUSALS.CONNECTION_UNKNOWN, undefined],
+      [404, HTTP_REFUSALS.CONNECTION_UNKNOWN, 'close'],
     ]);
     await server.stop();
 
@@ -2775,7 +2878,7 @@ test.describe('createHTTPTransportServer, its edges', () => {
         const head = wire.read.text.split('\r\n\r\n')[0] ?? '';
 
         expect(head).toMatch(/^HTTP\/1\.1 404/u);
-        expect(head).toContain(`${REFUSAL_HEADER}: ${REFUSALS.CONNECTION_UNKNOWN}`);
+        expect(head).toContain(`${REFUSAL_HEADER}: ${HTTP_REFUSALS.CONNECTION_UNKNOWN}`);
         expect(/\r\nconnection: close\r?$/imu.test(head)).toBe(connection);
       }
 
@@ -3000,13 +3103,13 @@ test.describe('createHTTPTransportServer, listening', () => {
       statusOf(oddly),
       statusOf(untold),
     ]).toEqual([
-      [409, REFUSALS.LISTEN_UNDECLARED],
-      [400, REFUSALS.MALFORMED],
-      [400, REFUSALS.MALFORMED],
-      [400, REFUSALS.MALFORMED],
-      [400, REFUSALS.MALFORMED],
-      [400, REFUSALS.MALFORMED],
-      [400, REFUSALS.MALFORMED],
+      [409, HTTP_REFUSALS.LISTEN_UNDECLARED],
+      [400, HTTP_REFUSALS.MALFORMED],
+      [400, HTTP_REFUSALS.MALFORMED],
+      [400, HTTP_REFUSALS.MALFORMED],
+      [400, HTTP_REFUSALS.MALFORMED],
+      [400, HTTP_REFUSALS.MALFORMED],
+      [400, HTTP_REFUSALS.MALFORMED],
     ]);
 
     // `?0` says it does not
@@ -3083,9 +3186,9 @@ test.describe('createHTTPTransportServer, listening', () => {
           return [response.status, response.headers?.[REFUSAL_HEADER]];
         })
       ).toEqual([
-        [409, REFUSALS.LISTEN_UNDECLARED],
-        [400, REFUSALS.MALFORMED],
-        [400, REFUSALS.MALFORMED],
+        [409, HTTP_REFUSALS.LISTEN_UNDECLARED],
+        [400, HTTP_REFUSALS.MALFORMED],
+        [400, HTTP_REFUSALS.MALFORMED],
       ]);
     });
 
@@ -3148,7 +3251,7 @@ test.describe('createHTTPTransportServer, listening', () => {
 
     expect([waiting.response.status, waiting.response.headers?.[REFUSAL_HEADER]]).toEqual([
       404,
-      REFUSALS.CONNECTION_UNKNOWN,
+      HTTP_REFUSALS.CONNECTION_UNKNOWN,
     ]);
     expect([MAXIMUM_OUTBOX_BYTES, MAXIMUM_WAIT]).toEqual([2 * MAXIMUM_BODY_BYTES, 30_000]);
     await server.stop();
@@ -3206,12 +3309,15 @@ test.describe('createHTTPTransportServer, listening', () => {
   });
 
   test('keeps a notification for a listen, even on the call id of a request still waiting, which it never answers', async () => {
-    const { connectScripted, exchangeOf, fake, listenOf, server } = await startScripted();
+    const clock = createTestClock();
+    const { connectScripted, exchangeOf, fake, listenOf, server } = await startScripted({ clock });
     const { connectionHandle, connectionToken } = connectScripted({ isListening: true });
     const asking = exchangeOf(connectionToken);
     const notification = envelopeOf(EnvelopeKind.NOTIFICATION, { callId: 1 });
 
     fake.feed(asking.request, [envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 })]);
+    // its head, once it waited 40 ms for its answer (spec 15.7)
+    clock.tick(HEAD_DELAY_MILLISECONDS);
     await server.send({ data: notification }, connectionHandle);
 
     expect([asking.response.status, asking.response.body]).toEqual([200, undefined]);
@@ -3370,7 +3476,7 @@ test.describe('createHTTPTransportServer, listening', () => {
 
     expect([response.status, response.headers?.[REFUSAL_HEADER]]).toEqual([
       404,
-      REFUSALS.CONNECTION_UNKNOWN,
+      HTTP_REFUSALS.CONNECTION_UNKNOWN,
     ]);
     const deaf = connectScripted();
 
@@ -3380,7 +3486,7 @@ test.describe('createHTTPTransportServer, listening', () => {
 
     expect([afterDeaf.response.status, afterDeaf.response.headers?.[REFUSAL_HEADER]]).toEqual([
       404,
-      REFUSALS.CONNECTION_UNKNOWN,
+      HTTP_REFUSALS.CONNECTION_UNKNOWN,
     ]);
     await server.stop();
   });
@@ -3452,22 +3558,22 @@ test.describe('createHTTPTransportServer, the refusals it tells', () => {
         told({
           authority: 'rebind.example:8080',
           origin: 'http://rebind.example:8080, null',
-          reason: REFUSALS.HOST,
+          reason: HTTP_REFUSALS.HOST,
           status: 403,
         }),
-        told({ authority: 'elsewhere.test:81', reason: REFUSALS.HOST, status: 403 }),
-        told({ authority: undefined, reason: REFUSALS.HOST, status: 403 }),
-        told({ reason: REFUSALS.PATH, status: 404 }),
-        told({ origin: 'https://elsewhere.test', reason: REFUSALS.ORIGIN, status: 403 }),
-        told({ reason: REFUSALS.METHOD, status: 405 }),
-        told({ reason: REFUSALS.TYPE, status: 415 }),
-        told({ reason: REFUSALS.CONNECTION_UNKNOWN, status: 404 }),
+        told({ authority: 'elsewhere.test:81', reason: HTTP_REFUSALS.HOST, status: 403 }),
+        told({ authority: undefined, reason: HTTP_REFUSALS.HOST, status: 403 }),
+        told({ reason: HTTP_REFUSALS.PATH, status: 404 }),
+        told({ origin: 'https://elsewhere.test', reason: HTTP_REFUSALS.ORIGIN, status: 403 }),
+        told({ reason: HTTP_REFUSALS.METHOD, status: 405 }),
+        told({ reason: HTTP_REFUSALS.TYPE, status: 415 }),
+        told({ reason: HTTP_REFUSALS.CONNECTION_UNKNOWN, status: 404 }),
         {
           address: '10.0.0.1',
           authority: 'bead.localhost',
           origin: undefined,
           port: 40_000,
-          reason: REFUSALS.TOO_LARGE,
+          reason: HTTP_REFUSALS.TOO_LARGE,
           status: 413,
         },
       ]);
@@ -3484,63 +3590,63 @@ test.describe('createHTTPTransportServer, the refusals it tells', () => {
       [
         'POST /bead HTTP/1.1\r\nHost: rebind.example:8080\r\nOrigin: http://a.example\r\nOrigin: http://b.example\r\nContent-Length: 0\r\n\r\n',
         403,
-        REFUSALS.HOST,
+        HTTP_REFUSALS.HOST,
         'rebind.example:8080',
         'http://a.example, http://b.example',
       ],
       [
         `POST http://rebind.example/bead HTTP/1.1\r\nHost: ${own}\r\nContent-Length: 0\r\n\r\n`,
         403,
-        REFUSALS.HOST,
+        HTTP_REFUSALS.HOST,
         'rebind.example',
         undefined,
       ],
       [
         'POST /bead HTTP/1.1\r\nHost: \r\nContent-Length: 0\r\n\r\n',
         403,
-        REFUSALS.HOST,
+        HTTP_REFUSALS.HOST,
         '',
         undefined,
       ],
       [
         'POST /bead HTTP/1.0\r\nContent-Length: 0\r\n\r\n',
         403,
-        REFUSALS.HOST,
+        HTTP_REFUSALS.HOST,
         undefined,
         undefined,
       ],
       [
         `POST /other HTTP/1.1\r\nHost: ${own}\r\nContent-Length: 0\r\n\r\n`,
         404,
-        REFUSALS.PATH,
+        HTTP_REFUSALS.PATH,
         own,
         undefined,
       ],
       [
         `POST /bead HTTP/1.1\r\nHost: ${own}\r\nOrigin: http://elsewhere.example\r\nContent-Length: 0\r\n\r\n`,
         403,
-        REFUSALS.ORIGIN,
+        HTTP_REFUSALS.ORIGIN,
         own,
         'http://elsewhere.example',
       ],
       [
         `PUT /bead HTTP/1.1\r\nHost: ${own}\r\nContent-Length: 0\r\n\r\n`,
         405,
-        REFUSALS.METHOD,
+        HTTP_REFUSALS.METHOD,
         own,
         undefined,
       ],
       [
         `POST /bead HTTP/1.1\r\nHost: ${own}\r\nContent-Type: text/plain\r\nContent-Length: 0\r\n\r\n`,
         415,
-        REFUSALS.TYPE,
+        HTTP_REFUSALS.TYPE,
         own,
         undefined,
       ],
       [
         rawConnectOf(own, `${CONNECTION_TOKEN_HEADER}: ${'A'.repeat(22)}\r\n`),
         404,
-        REFUSALS.CONNECTION_UNKNOWN,
+        HTTP_REFUSALS.CONNECTION_UNKNOWN,
         own,
         undefined,
       ],
@@ -3576,8 +3682,8 @@ test.describe('createHTTPTransportServer, the refusals it tells', () => {
     );
 
     expect([answer, behind.answer]).toEqual([
-      [403, REFUSALS.HOST],
-      [403, REFUSALS.HOST],
+      [403, HTTP_REFUSALS.HOST],
+      [403, HTTP_REFUSALS.HOST],
     ]);
     expect(localPort).toBeGreaterThan(0);
     expect(behind.localPort).toBeGreaterThan(0);
@@ -3587,7 +3693,7 @@ test.describe('createHTTPTransportServer, the refusals it tells', () => {
         authority: 'rebind.example',
         origin: undefined,
         port: Number(localPort),
-        reason: REFUSALS.HOST,
+        reason: HTTP_REFUSALS.HOST,
         status: 403,
       },
       {
@@ -3595,7 +3701,7 @@ test.describe('createHTTPTransportServer, the refusals it tells', () => {
         authority: 'rebind.example',
         origin: undefined,
         port: Number(behind.localPort),
-        reason: REFUSALS.HOST,
+        reason: HTTP_REFUSALS.HOST,
         status: 403,
       }
     );
@@ -3698,21 +3804,21 @@ test.describe('createHTTPTransportServer, the refusals it tells', () => {
 
     expect([refused.response.status, refused.response.headers?.[REFUSAL_HEADER]]).toEqual([
       404,
-      REFUSALS.CONNECTION_UNKNOWN,
+      HTTP_REFUSALS.CONNECTION_UNKNOWN,
     ]);
     await server.stop();
     stopped.read();
 
     expect(ends).toEqual(
       Array.from({ length: 7 }, () => {
-        return [404, REFUSALS.CONNECTION_UNKNOWN];
+        return [404, HTTP_REFUSALS.CONNECTION_UNKNOWN];
       })
     );
     expect(
       refusals.map(({ reason }) => {
         return reason;
       })
-    ).toEqual([REFUSALS.CONNECTION_UNKNOWN]);
+    ).toEqual([HTTP_REFUSALS.CONNECTION_UNKNOWN]);
     expect(namesOf(events, 'close')).toHaveLength(7);
   });
 
@@ -3728,21 +3834,21 @@ test.describe('createHTTPTransportServer, the refusals it tells', () => {
     const after = refusalsOf(server);
 
     expect(await refusalOf(post(url, { headers: { origin: 'http://elsewhere.example' } }))).toEqual(
-      [403, REFUSALS.ORIGIN]
+      [403, HTTP_REFUSALS.ORIGIN]
     );
     expect(await refusalOf(fetch(`${url}/other`, { method: 'POST' }))).toEqual([
       404,
-      REFUSALS.PATH,
+      HTTP_REFUSALS.PATH,
     ]);
     expect(await refusalOf(post(url, { connectionToken: 'A'.repeat(22) }))).toEqual([
       404,
-      REFUSALS.CONNECTION_UNKNOWN,
+      HTTP_REFUSALS.CONNECTION_UNKNOWN,
     ]);
     expect(
       after.map((refusal) => {
         return refusal.reason;
       })
-    ).toEqual([REFUSALS.ORIGIN, REFUSALS.PATH, REFUSALS.CONNECTION_UNKNOWN]);
+    ).toEqual([HTTP_REFUSALS.ORIGIN, HTTP_REFUSALS.PATH, HTTP_REFUSALS.CONNECTION_UNKNOWN]);
     expect(namesOf(events, 'error')).toEqual([
       ['error', 'a refusal listener that throws', ''],
       ['error', 'a refusal listener that throws', ''],
@@ -4098,7 +4204,7 @@ test.describe('createHTTPTransportServer, its bounds', () => {
 
     expect([after.response.status, after.response.headers?.[REFUSAL_HEADER]]).toEqual([
       404,
-      REFUSALS.CONNECTION_UNKNOWN,
+      HTTP_REFUSALS.CONNECTION_UNKNOWN,
     ]);
     await server.stop();
   });
@@ -4135,7 +4241,7 @@ test.describe('createHTTPTransportServer, its bounds', () => {
 
     expect([next.response.status, next.response.headers?.[REFUSAL_HEADER]]).toEqual([
       404,
-      REFUSALS.CONNECTION_UNKNOWN,
+      HTTP_REFUSALS.CONNECTION_UNKNOWN,
     ]);
     await server.stop();
   });
@@ -4201,14 +4307,19 @@ test.describe('createHTTPTransportServer, its bounds', () => {
   });
 
   // spec 15.1
-  test('drops behind maximumOutboxBytes a connection whose error listener throws, telling its close all the same', async () => {
+  test('drops behind maximumOutboxBytes a connection whose error listener throws, telling its close all the same and dropping what it threw', async () => {
+    using uncaught = trapUncaught();
     const { connectScripted, events, exchangeOf, fake, server } = await startScripted({
       maximumOutboxBytes: 64,
     });
     const { connectionHandle, connectionToken } = connectScripted({ isListening: true });
+    const heard: string[] = [];
 
     server.on('error', () => {
       throw new Error('an error listener that throws');
+    });
+    server.on('error', (error) => {
+      heard.push(error.message);
     });
 
     await server.send(
@@ -4216,10 +4327,14 @@ test.describe('createHTTPTransportServer, its bounds', () => {
       connectionHandle
     );
 
-    // what the listener threw is Node's: it reaches the send under way, the connection dropped first
+    // * what the listener threw is dropped: the send settles as with no listener, the listener
+    // after it told the drop and nothing else
     await expect(
       server.send({ data: envelopeOf(NOTIFICATION, { callId: 2, extra: 40 }) }, connectionHandle)
-    ).rejects.toThrow('an error listener that throws');
+    ).resolves.toBeUndefined();
+    expect(heard).toEqual([
+      `${connectionHandle} is dropped: its outbox would pass maximumOutboxBytes, 64 bytes`,
+    ]);
     expect(
       events.filter(([name]) => {
         return name === 'error' || name === 'close';
@@ -4232,7 +4347,7 @@ test.describe('createHTTPTransportServer, its bounds', () => {
       ],
       ['close', false, connectionHandle],
     ]);
-    expect(server.clients).toEqual([]);
+    expect([server.clients, uncaught.thrown]).toEqual([[], []]);
 
     const after = exchangeOf(connectionToken);
 
@@ -4240,7 +4355,7 @@ test.describe('createHTTPTransportServer, its bounds', () => {
 
     expect([after.response.status, after.response.headers?.[REFUSAL_HEADER]]).toEqual([
       404,
-      REFUSALS.CONNECTION_UNKNOWN,
+      HTTP_REFUSALS.CONNECTION_UNKNOWN,
     ]);
     await server.stop();
   });
@@ -4355,6 +4470,232 @@ test.describe('createHTTPTransportServer, its bounds', () => {
           ...options,
         });
       }).toThrow(new ProgrammerError(refusal));
+    }
+  });
+});
+
+test.describe('createHTTPTransportServer, its head’s delay', () => {
+  test.afterAll(async () => {
+    await tcpSocketsClosed();
+  });
+
+  // a request handed on, on a raw socket of its own, its timers on the test clock
+  const handOn = async (
+    started: Awaited<ReturnType<typeof startTransport>>,
+    { callId, connectionToken }: { callId: number; connectionToken: string }
+  ) => {
+    const { events, server, url } = started;
+    const handed = namesOf(events, 'message').length;
+    const raw = await rawSocketOn(portOf(url));
+    const request = envelopeOf(ENVELOPE_KINDS.REQUEST, { callId });
+
+    raw.socket.write(postHeadOf(connectionToken, request.length));
+    raw.socket.write(request);
+    await expect
+      .poll(() => {
+        return namesOf(events, 'message').length;
+      })
+      .toBe(handed + 1);
+    expect(server.gauges().counts['waitingExchanges']).toBe(1);
+
+    return raw;
+  };
+
+  // the head a raw socket read, in lower case, once it came whole
+  const headOf = async (read: { text: string }) => {
+    await expect
+      .poll(() => {
+        return read.text.includes('\r\n\r\n');
+      })
+      .toBe(true);
+
+    return read.text.slice(0, read.text.indexOf('\r\n\r\n')).toLowerCase();
+  };
+
+  // what a raw socket read after its head
+  const afterHeadOf = (read: { text: string }) => {
+    return read.text.slice(read.text.indexOf('\r\n\r\n') + 4);
+  };
+
+  test('answers a request whole when its answer comes before 40 ms passed from its hand-off, its content-length with its head, over HTTP/1.1 (spec 15.7)', async () => {
+    const clock = createTestClock();
+
+    await using started = await startTransport({ clock });
+    const { server, url } = started;
+    const { connectionHandle, connectionToken } = await connect(url, server);
+    const answer = envelopeOf(ENVELOPE_KINDS.FAILURE, { callId: 5 });
+
+    // a turn after its hand-off, as the router answers it, the clock never advanced
+    server.on('message', () => {
+      setImmediate(() => {
+        void server.send({ data: answer }, connectionHandle);
+      });
+    });
+
+    const response = await post(url, {
+      body: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 5 }),
+      connectionToken,
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toBe(BEAD_MEDIA_TYPE);
+    expect(response.headers.get('content-length')).toBe(String(answer.length));
+    expect(response.headers.get('transfer-encoding')).toBeNull();
+    expect(await bytesOf(response)).toEqual([...answer]);
+  });
+
+  test('sends the head of a request still unanswered 40 ms after its hand-off, then its answer chunked, over HTTP/1.1 (spec 15.7)', async () => {
+    const clock = createTestClock();
+
+    await using started = await startTransport({ clock });
+    const { server, url } = started;
+    const { connectionHandle, connectionToken } = await connect(url, server);
+    const answer = envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 7 });
+    const { read, socket } = await handOn(started, { callId: 7, connectionToken });
+
+    try {
+      // one timer for its head and its exchange: its head's delay first
+      expect(clock.armed.at(-1)?.delay).toBe(HEAD_DELAY_MILLISECONDS);
+
+      await clock.tickAsync(HEAD_DELAY_MILLISECONDS - 1);
+
+      expect(read.text).toBe('');
+
+      await clock.tickAsync(1);
+
+      const head = await headOf(read);
+
+      expect(head).toMatch(/^http\/1\.1 200 /u);
+      expect(head).toContain(`\r\ncontent-type: ${BEAD_MEDIA_TYPE}`);
+      expect(head).toContain('\r\ntransfer-encoding: chunked');
+      expect(head).not.toContain('content-length');
+      // then armed again, for what is left of its exchange timeout
+      expect(clock.armed.at(-1)?.delay).toBe(EXCHANGE_TIMEOUT - HEAD_DELAY_MILLISECONDS);
+
+      await server.send({ data: answer }, connectionHandle);
+      await expect
+        .poll(() => {
+          return read.text.endsWith('\r\n0\r\n\r\n');
+        })
+        .toBe(true);
+      expect(afterHeadOf(read)).toBe(`8\r\n${Buffer.from(answer).toString('latin1')}\r\n0\r\n\r\n`);
+    } finally {
+      socket.destroy();
+    }
+  });
+
+  test('counts a request’s exchange timeout from its hand-off, the 40 ms of its head within it (spec 15.7)', async () => {
+    const clock = createTestClock();
+
+    await using started = await startTransport({ clock, exchangeTimeout: 100 });
+    const { events, server, url } = started;
+    const { connectionHandle, connectionToken } = await connect(url, server);
+    const { read, socket } = await handOn(started, { callId: 9, connectionToken });
+
+    try {
+      await clock.tickAsync(HEAD_DELAY_MILLISECONDS);
+
+      expect(await headOf(read)).toMatch(/^http\/1\.1 200 /u);
+
+      await clock.tickAsync(100 - HEAD_DELAY_MILLISECONDS - 1);
+
+      expect(server.gauges().connectionHandles).toEqual(new Set([connectionHandle]));
+      expect(namesOf(events, 'close')).toEqual([]);
+
+      await clock.tickAsync(1);
+
+      // its connection lost, and its exchange cut after its head, never ended
+      expect(namesOf(events, 'close')).toEqual([['close', false, connectionHandle]]);
+      await expect
+        .poll(() => {
+          return read.isClosed;
+        })
+        .toBe(true);
+      expect(read.text).not.toContain('\r\n0\r\n\r\n');
+    } finally {
+      socket.destroy();
+    }
+  });
+
+  test('cuts a request whose exchange timeout is 40 ms or less at that timeout, its head going with its cut (spec 15.7)', async () => {
+    const clock = createTestClock();
+
+    await using started = await startTransport({ clock, exchangeTimeout: 10 });
+    const { events, server, url } = started;
+    const { connectionHandle, connectionToken } = await connect(url, server);
+    const { read, socket } = await handOn(started, { callId: 11, connectionToken });
+    const armedAt = clock.armed.length - 1;
+
+    try {
+      // its exchange timer alone, at its timeout
+      expect(clock.armed[armedAt]?.delay).toBe(10);
+
+      await clock.tickAsync(9);
+
+      expect(read.text).toBe('');
+
+      await clock.tickAsync(1);
+
+      expect(await headOf(read)).toMatch(/^http\/1\.1 200 /u);
+      expect(namesOf(events, 'close')).toEqual([['close', false, connectionHandle]]);
+      await expect
+        .poll(() => {
+          return read.isClosed;
+        })
+        .toBe(true);
+      expect(read.text).not.toContain('\r\n0\r\n\r\n');
+      // one timer armed for it, at 10 ms, and none after
+      expect(
+        clock.armed.slice(armedAt).map(({ delay }) => {
+          return delay;
+        })
+      ).toEqual([10]);
+    } finally {
+      socket.destroy();
+    }
+  });
+
+  test('ends a request cancelled before its head went 204, empty, and one cancelled after it 200, empty (spec 15.6, 15.7)', async () => {
+    const clock = createTestClock();
+
+    await using started = await startTransport({ clock });
+    const { server, url } = started;
+    const { connectionToken } = await connect(url, server);
+    const cancelOf = (callId: number) => {
+      return post(url, { body: envelopeOf(ENVELOPE_KINDS.CANCEL, { callId }), connectionToken });
+    };
+
+    // cancelled with the clock unadvanced: its head never went, and it ends 204, empty
+    const early = await handOn(started, { callId: 13, connectionToken });
+
+    try {
+      expect((await cancelOf(13)).status).toBe(204);
+
+      const head = await headOf(early.read);
+
+      expect(head).toMatch(/^http\/1\.1 204 /u);
+      expect(head).not.toContain('transfer-encoding');
+      expect(afterHeadOf(early.read)).toBe('');
+    } finally {
+      early.socket.destroy();
+    }
+
+    // cancelled once its head went, 40 ms after its hand-off: its 200 ends with no body
+    const late = await handOn(started, { callId: 15, connectionToken });
+
+    try {
+      await clock.tickAsync(HEAD_DELAY_MILLISECONDS);
+
+      expect(await headOf(late.read)).toMatch(/^http\/1\.1 200 /u);
+      expect((await cancelOf(15)).status).toBe(204);
+      await expect
+        .poll(() => {
+          return late.read.text.endsWith('\r\n\r\n0\r\n\r\n');
+        })
+        .toBe(true);
+      expect(afterHeadOf(late.read)).toBe('0\r\n\r\n');
+    } finally {
+      late.socket.destroy();
     }
   });
 });

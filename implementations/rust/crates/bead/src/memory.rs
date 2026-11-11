@@ -21,6 +21,7 @@ use crate::duration::hold;
 use crate::errors::{ConnectError, ProgrammerError, ReadyStateError, TransportError};
 use crate::failure::ProcedureAddress;
 use crate::identity::procedures_taken_of;
+use crate::life::Life;
 use crate::ordered::Ordered;
 use crate::owner::{Owner, WeakOwner};
 use crate::platform::runtime_of;
@@ -28,12 +29,15 @@ use crate::router::types::{BoxFuture, ConnectionHandle, Gauges, RouterError, Tra
 use crate::transport::{
     CONNECT_TIMEOUT, ClientListener, Connect, Listeners, RECONNECTION_CANCELLED, ReadyState,
     RouterClientTransport, Sent, ServerListener, ServerTransport, TransportClientDisconnectOptions,
-    TransportClientReconnectOptions, TransportServerClient, attempting, first_of,
-    hold_reconnection, is_field_value,
+    TransportClientReconnectOptions, TransportServerAddress, TransportServerClient, attempting,
+    first_of, hold_reconnection, is_field_value, refused_unless_open, tell_server,
 };
 
 #[cfg(test)]
 mod tests;
+
+// what refuses a text message at either end, as the other sides word it (spec 15.2)
+const TEXT_REFUSED: &str = "an in-memory connection carries envelopes, as bytes";
 
 /// The type an in-memory connection's handle names.
 pub const TRANSPORT_MEMORY: &str = "MEMORY";
@@ -89,7 +93,6 @@ struct Connection {
 }
 
 struct ServerState {
-    ready: ReadyState,
     connections: Ordered<ConnectionHandle, Connection>,
     ordinal: u64,
     serial: u64,
@@ -101,6 +104,7 @@ struct ServerInner {
     procedures: Option<BTreeSet<ProcedureAddress>>,
     clock: SharedClock,
     pipe: Owner<Pipe>,
+    life: Life,
     state: Mutex<ServerState>,
     listeners: Listeners<dyn ServerListener>,
 }
@@ -130,20 +134,7 @@ impl ServerInner {
         &self,
         (call, connection_handle): (C, Option<&ConnectionHandle>),
     ) {
-        let listeners = self.listeners.all();
-
-        self.listeners.each((
-            |listener: &(dyn ServerListener + 'static)| call(listener),
-            |error: RouterError| {
-                for heard in &listeners {
-                    // ! a listener of errors that panics would loop: its panic is dropped
-                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        heard.on_error(&error, connection_handle);
-                    }))
-                    .ok();
-                }
-            },
-        ));
+        tell_server(&self.listeners, (call, connection_handle));
     }
 
     fn is_held(&self, (handle, serial): (&ConnectionHandle, u64)) -> bool {
@@ -201,36 +192,36 @@ impl ServerInner {
                 return;
             }
 
-            let drawn = {
+            let ready = server.life.ready_state();
+            let drawn = if ready == ReadyState::Open {
                 let mut state = locked(&server.state);
 
-                if state.ready == ReadyState::Open {
-                    state.ordinal = state.ordinal.saturating_add(1);
-                    state.serial = state.serial.saturating_add(1);
+                state.ordinal = state.ordinal.saturating_add(1);
+                state.serial = state.serial.saturating_add(1);
 
-                    let handle: ConnectionHandle = Arc::from(format!(
-                        "type={TRANSPORT_MEMORY};ip={};ordinal={}",
-                        peer.address, state.ordinal
-                    ));
-                    let serial = state.serial;
+                let handle: ConnectionHandle = Arc::from(format!(
+                    "type={TRANSPORT_MEMORY};ip={};ordinal={}",
+                    peer.address, state.ordinal
+                ));
+                let serial = state.serial;
 
-                    state.connections.insert(
-                        Arc::clone(&handle),
-                        Connection {
-                            serial,
-                            address: peer.address.clone(),
-                            port: peer.port,
-                            peer: Arc::clone(&peer),
-                            last_activity: None,
-                            is_paused: false,
-                            held: VecDeque::new(),
-                        },
-                    );
+                state.connections.insert(
+                    Arc::clone(&handle),
+                    Connection {
+                        serial,
+                        address: peer.address.clone(),
+                        port: peer.port,
+                        peer: Arc::clone(&peer),
+                        last_activity: None,
+                        is_paused: false,
+                        held: VecDeque::new(),
+                    },
+                );
+                drop(state);
 
-                    Ok((handle, serial))
-                } else {
-                    Err(state.ready)
-                }
+                Ok((handle, serial))
+            } else {
+                Err(ready)
             };
 
             match drawn {
@@ -283,6 +274,34 @@ impl ServerInner {
             ));
         }
     }
+
+    // its stop's body, its life closing: every connection ended in one later turn of the pipe, in
+    // the order they came, each told, clean, and its client told in a turn of its own
+    fn stopping(self: &Arc<Self>) -> BoxFuture<Result<(), RouterError>> {
+        let (reply, stopped) = oneshot::channel::<()>();
+        let inner = Arc::clone(self);
+
+        self.later(move || {
+            let held: Vec<(ConnectionHandle, u64)> = locked(&inner.state)
+                .connections
+                .iter()
+                .map(|(handle, connection)| (Arc::clone(handle), connection.serial))
+                .collect();
+
+            for (handle, serial) in held {
+                inner.end((&handle, serial), (true, true));
+            }
+
+            locked(&inner.state).connections.clear();
+            reply.send(()).ok();
+        });
+
+        Box::pin(async move {
+            drop(stopped.await);
+
+            Ok(())
+        })
+    }
 }
 
 impl MemoryTransportServer {
@@ -304,6 +323,7 @@ impl MemoryTransportServer {
             None => Arc::new(SystemClock::on(runtime.clone())),
         };
         let pipe = Owner::spawn((&runtime, &clock), |_: WeakOwner<Pipe>| Pipe);
+        let covered = pipe.downgrade();
 
         Ok(Self {
             inner: Arc::new(ServerInner {
@@ -311,8 +331,8 @@ impl MemoryTransportServer {
                 procedures,
                 clock,
                 pipe,
+                life: Life::new(Box::new(move |future| covered.cover(future))),
                 state: Mutex::new(ServerState {
-                    ready: ReadyState::Uninitialized,
                     connections: Ordered::new(),
                     ordinal: 0,
                     serial: 0,
@@ -325,7 +345,32 @@ impl MemoryTransportServer {
     /// Where it stands.
     #[must_use]
     pub fn ready_state(&self) -> ReadyState {
-        locked(&self.inner.state).ready
+        self.inner.life.ready_state()
+    }
+
+    /// Takes connects from now on, and gives where: [`MEMORY_ADDRESS`], port 0, since it serves no
+    /// port.
+    ///
+    /// # Errors
+    ///
+    /// A [`ProgrammerError`] once it is disposed, its state kept (decision 0003); then unless
+    /// Uninitialized or Closed, a second start even while the first is under way.
+    pub fn start(&self) -> BoxFuture<Result<TransportServerAddress, RouterError>> {
+        self.inner
+            .life
+            .start(|| Box::pin(async { Ok(TransportServerAddress::new(MEMORY_ADDRESS, 0)) }))
+    }
+
+    /// Stops it, as its stop does, then ends it for good: a start after it is its application's
+    /// misuse (decision 0003); a later dispose settles with the first.
+    ///
+    /// # Errors
+    ///
+    /// What its stop is refused with: a dispose while it starts, say.
+    pub fn dispose(&self) -> BoxFuture<Result<(), RouterError>> {
+        let inner = Arc::clone(&self.inner);
+
+        self.inner.life.dispose(move || inner.stopping())
     }
 
     /// Whether its router holds `connection_handle` paused, as a test reads it.
@@ -363,6 +408,13 @@ impl ServerTransport for MemoryTransportServer {
         message: TransportMessage,
         connection_handle: &ConnectionHandle,
     ) -> Result<Sent, RouterError> {
+        // refused before it goes, the connection kept: a text message is no envelope (spec 15.2)
+        if message.is_text {
+            return Err(RouterError::Other(Arc::new(ProgrammerError::new(
+                TEXT_REFUSED,
+            ))));
+        }
+
         let peer = locked(&self.inner.state)
             .connections
             .get(connection_handle)
@@ -476,72 +528,12 @@ impl ServerTransport for MemoryTransportServer {
         Some(TRANSPORT_MEMORY)
     }
 
-    fn start(&self) -> BoxFuture<Result<(), RouterError>> {
-        let refused = {
-            let mut state = locked(&self.inner.state);
-
-            if matches!(state.ready, ReadyState::Uninitialized | ReadyState::Closed) {
-                state.ready = ReadyState::Open;
-
-                None
-            } else {
-                Some(state.ready)
-            }
-        };
-
-        Box::pin(async move {
-            refused.map_or(Ok(()), |ready| {
-                Err(RouterError::Other(Arc::new(ProgrammerError::new(format!(
-                    "the transport server is already {}",
-                    ready.said()
-                )))))
-            })
-        })
-    }
-
-    // every connection ended in one later turn, in the order they came: none drawn in a turn
-    // before it is left open, and none is drawn after it; it opens within its start's call, so no
-    // stop finds it starting
+    // * its stop, its life's: every connection ended in one later turn, in the order they came, none
+    // drawn after it
     fn stop(&self) -> BoxFuture<Result<(), RouterError>> {
-        {
-            let mut state = locked(&self.inner.state);
-
-            if matches!(state.ready, ReadyState::Uninitialized | ReadyState::Closed) {
-                return Box::pin(async { Ok(()) });
-            }
-
-            state.ready = ReadyState::Closing;
-        }
-
-        let (reply, stopped) = oneshot::channel::<()>();
         let inner = Arc::clone(&self.inner);
 
-        self.inner.later(move || {
-            let held: Vec<(ConnectionHandle, u64)> = locked(&inner.state)
-                .connections
-                .iter()
-                .map(|(handle, connection)| (Arc::clone(handle), connection.serial))
-                .collect();
-
-            for (handle, serial) in held {
-                inner.end((&handle, serial), (true, true));
-            }
-
-            {
-                let mut state = locked(&inner.state);
-
-                state.connections.clear();
-                state.ready = ReadyState::Closed;
-            }
-
-            reply.send(()).ok();
-        });
-
-        Box::pin(async move {
-            drop(stopped.await);
-
-            Ok(())
-        })
+        self.inner.life.stop(move || inner.stopping())
     }
 
     fn gauges(&self) -> Option<Gauges> {
@@ -789,6 +781,7 @@ impl ClientInner {
             |error: RouterError| {
                 for heard in &listeners {
                     // ! a listener of errors that panics would loop: its panic is dropped
+                    // (spec 15.1)
                     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         heard.on_error(&error);
                     }))
@@ -1218,8 +1211,8 @@ impl MemoryTransportClient {
 
             if state.ready != ReadyState::Open || state.current.is_none() {
                 return Err(TransportError::ReadyState(ReadyStateError::new(
-                    state.ready.name(),
-                    ReadyState::Open.name(),
+                    state.ready,
+                    ReadyState::Open,
                 )));
             }
 
@@ -1399,13 +1392,17 @@ impl RouterClientTransport for MemoryTransportClient {
             match (&state.current, state.ready) {
                 (Some((end, _)), ReadyState::Open) => end.clone(),
                 (_, ready) => {
-                    return Err(RouterError::Other(Arc::new(ReadyStateError::new(
-                        ready.name(),
-                        ReadyState::Open.name(),
-                    ))));
+                    return Err(refused_unless_open(ready));
                 }
             }
         };
+
+        // refused before it goes, the connection kept: a text message is no envelope (spec 15.2)
+        if message.is_text {
+            return Err(RouterError::Other(Arc::new(ProgrammerError::new(
+                TEXT_REFUSED,
+            ))));
+        }
 
         // refused before it goes, the connection kept: a field could not carry it as it is
         if let Some(credential) = &message.credential

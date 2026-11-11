@@ -94,8 +94,11 @@ to one meaning of `advance`. The why of each rule is in the decisions:
   and 15.23;
 - [0048](../docs/decisions/0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md):
   the procedures a server's transport takes, sections 9.2, 9.11, 9.12, 15.1 and 15.14.
+- [0049](../docs/decisions/0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md):
+  a request's target, read as a page's browser writes it, and a WebSocket's text message at its
+  router, sections 15.2 and 15.12.
 
-**Version: 0.12.0**, of layout `0xA1`, its broker parcels of layout `0xB1`. Each of its
+**Version: 0.13.0**, of layout `0xA1`, its broker parcels of layout `0xB1`. Each of its
 conformance files repeats it as its `specVersion`, and follows its schema in
 [`schemas/`](schemas/). The interop's blueprint,
 [`interop-blueprint.json`](interop-blueprint.json), and what its service does,
@@ -1219,10 +1222,15 @@ each listener of its transport's events — a connection opened, an envelope, a 
 refusal, a reconnection — within a guard, as it calls a debug listener (`debugging.md` 2.2, 2.3):
 what one throws is reported, as section 9.0 reports an error, by its transport with the connection
 it was told of; the listeners after it are called all the same, and the transport goes on as if it
-returned. A side awaits nothing a listener returns: what it settles to later is its platform's, as
-is what a listener of the transport's own `error` throws. A listener's throw refuses no connection,
-fails no exchange and closes nothing. What a side's transport reports on its `error`, a client's as
-a server's, is what it ends a connection for of its own — a protocol error on it; a message it fails
+returned. A side awaits nothing a listener returns: what it settles to later is its platform's.
+Every `error` event a side tells — its transport's, its router's, its broker participant's, its
+gateway's — calls each listener within a guard too: what one throws is dropped, reported nowhere,
+since reporting it would tell the event that threw; the listeners after it are called all the same,
+and the side goes on as if it returned, as an `error` listener's own exception fires no `error`
+again in HTML's report of an exception
+([WHATWG HTML §8.1.4.6](https://html.spec.whatwg.org/multipage/webappapis.html#report-an-exception)).
+A listener's throw refuses no connection, fails no exchange and closes nothing. What a side's
+transport reports on its `error`, a client's as a server's, is what it ends a connection for of its own — a protocol error on it; a message it fails
 with 1009, or over HTTP an envelope past its `maximumBodyBytes`, an answer's or a batch's, and a
 connection a server drops behind a bound, each naming the bound and its value (sections 15.3,
 15.12); a batch that does not read, saying what of it does not (section 15.9); a Web Worker client's
@@ -1274,9 +1282,11 @@ scheme.
 ### WebSocket
 
 15.2. Each envelope is one binary message ([RFC 6455](https://www.rfc-editor.org/rfc/rfc6455)), and
-each binary message one envelope. A text message is no envelope: the receiver reports it as
-`ENVELOPE_MALFORMED`, and answers nothing. No subprotocol is required. A WebSocket upgrade that
-carries no `Origin` carries one credential, toward its server alone: its `Authorization` field
+each binary message one envelope. A text message is no envelope: its transport hands it on, and its
+router reports it as `ENVELOPE_MALFORMED`, as section 9.0 reports an error, and answers nothing; it
+counts as a message its router has not taken by the bytes it came as (section 15.12). No
+subprotocol is required. A WebSocket upgrade that carries no `Origin` carries one credential,
+toward its server alone: its `Authorization` field
 ([RFC 9110 §11.6.2](https://www.rfc-editor.org/rfc/rfc9110#section-11.6.2),
 [RFC 6455 §10.5](https://www.rfc-editor.org/rfc/rfc6455#section-10.5)), as it came, whole — its
 auth-scheme included — its surrounding whitespace removed, none when the field is empty or absent.
@@ -1317,8 +1327,8 @@ WebSocket's address in this order, and answers the first that applies:
    `bead-refusal` `host-refused`, whatever else it holds, since a page that rebinds its name to the
    server's address is its own origin by its authority, and `hosts` is what refuses it — under `*`,
    which takes it here, step 7 does, its origin none of the server's own (section 15.12).
-3. A method other than `GET` or `HEAD` is refused 405, its `Allow` naming both
-   ([RFC 9110 §15.5.6](https://www.rfc-editor.org/rfc/rfc9110#section-15.5.6)).
+3. A method other than `GET` or `HEAD`, compared as it came (section 15.6), is refused 405, its
+   `Allow` naming both ([RFC 9110 §15.5.6](https://www.rfc-editor.org/rfc/rfc9110#section-15.5.6)).
 4. A request that asks no WebSocket is answered 426, `upgrade-required`, its `Upgrade` naming
    `websocket` ([RFC 9110 §15.5.22](https://www.rfc-editor.org/rfc/rfc9110#section-15.5.22)): a
    `HEAD`, which cannot switch; an `HTTP/1.0` request, whose `Upgrade` is ignored; one whose
@@ -1440,11 +1450,11 @@ the request ran: the client counts the exchange lost.
 | ------ | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 200    |                                       | the request is with the router; its answer is the body — or, to a listen, a batch                                                                                                                                                                                            |
 | 201    |                                       | a connection drawn, its token in `bead-connection-token`                                                                                                                                                                                                                     |
-| 204    |                                       | handed on, nothing to come back: a cancel, anything but a request, a request held off; a `DELETE` done; a listen that brought nothing; a preflight from an origin the server lists (section 15.12)                                                                           |
+| 204    |                                       | handed on, nothing to come back: a cancel, anything but a request, a request held off or cancelled before its head went; a `DELETE` done; a listen that brought nothing; a preflight from an origin the server lists (section 15.12)                                         |
 | 400    | `malformed`                           | a connect with a body, no token or a malformed one, not an envelope, a request on the server's parity, two `Authorization` fields; a listen without `bead-after`, a count that is none, or a `bead-after` past what was sent; a WebSocket's upgrade malformed (section 15.2) |
 | 403    | `host-refused`, `origin-refused`      | a host not among those the server takes, whatever the request at a WebSocket's address; an exchange, or a WebSocket's upgrade, from an origin neither the server's nor among those it takes                                                                                  |
 | 404    | `path-unknown`, `connection-unknown`  | not the path; the connection is gone — closed, or its server stopping                                                                                                                                                                                                        |
-| 405    | `method-refused`                      | neither `GET`, `POST` nor `DELETE`, which `Allow` names; at a WebSocket's address, neither `GET` nor `HEAD`, which `Allow` names                                                                                                                                             |
+| 405    | `method-refused`                      | neither `GET`, `POST` nor `DELETE`, compared as they came, which `Allow` names; at a WebSocket's address, neither `GET` nor `HEAD`, which `Allow` names                                                                                                                      |
 | 408    | `too-slow`                            | a body that came slower than `minimumBodyBytesPerSecond` once `bodyGracePeriod` passed (section 15.12)                                                                                                                                                                       |
 | 409    | `call-waiting`, `listen-undeclared`   | a request on a call id already waiting; a listen whose client did not say at connect it listens                                                                                                                                                                              |
 | 413    | `too-large`                           | a body past the envelope's limit                                                                                                                                                                                                                                             |
@@ -1462,22 +1472,39 @@ carries the first two.
 A server judges a request at its path in this order, and answers the first that applies. What HTTP
 refuses of its own, its HTTP server answers, unmarked (section 15.12); then a host the server does
 not take, 403; a path not its own, 404; an origin it does not take, 403; a preflight from an origin
-it lists, answered 204 (section 15.12); a method but `GET`, `POST` or `DELETE`, 405. A `POST` that
-presents no token connects: no type, or another than `application/prs.bead`, or a body encoded,
-415; the connect's own 400; then, once its stop began, or past `maximumConnections` or
-`maximumConnectionsPerAddress`, 503. Any other request is judged by its token: none, or one of
-another form, 400; once the server's stop began, the 404 marked `connection-unknown`, the token not
-looked up; a token it does not hold, the same 404. A `DELETE` then ends its connection. A listen is
-refused 409 when its client did not say it listens, then 400 for a body or its counts (section
-15.9). A `POST` is refused 415 for its type or its encoding, then 400 for two `Authorization`
-fields, 413 for a length it declares past `maximumBodyBytes`, and 429 past what its connection has
-under way, each before its body is read; what its body brings is judged as it comes (section 15.5):
-past `maximumBodyBytes` 413, past the budget 503, slower than its rate 408 (section 15.12).
+it lists, answered 204 (section 15.12); a method but `GET`, `POST` or `DELETE`, 405. A method is
+compared as it came, a case-sensitive token
+([RFC 9110 §9.1](https://www.rfc-editor.org/rfc/rfc9110#section-9.1)): `get` is no `GET`, and is
+refused 405 as any method the path does not take, an extension method among them, its `Allow`
+naming the three — never the 501 §9.1 suggests for a method a server does not recognize
+([RFC 9110 §15.6.2](https://www.rfc-editor.org/rfc/rfc9110#section-15.6.2)), since what a server
+recognizes beyond the path's methods is its HTTP parser's, which no two platforms share, and
+`Allow` tells a client what to send where 501 tells nothing; a WebSocket's address compares alike
+(section 15.2, step 3). A `POST` that presents no token connects: no type, or another than
+`application/prs.bead`, or a body encoded, 415; the connect's own 400; then, once its stop began, or
+past `maximumConnections` or `maximumConnectionsPerAddress`, 503. Any other request is judged by its
+token: none, or one of another form, 400; once the server's stop began, the 404 marked
+`connection-unknown`, the token not looked up; a token it does not hold, the same 404. A `DELETE`
+then ends its connection. A listen is refused 409 when its client did not say it listens, then 400
+for a body or its counts (section 15.9). A `POST` is refused 415 for its type or its encoding, then
+400 for two `Authorization` fields, 413 for a length it declares past `maximumBodyBytes`, and 429
+past what its connection has under way, each before its body is read; what its body brings is judged
+as it comes (section 15.5): past `maximumBodyBytes` 413, past the budget 503, slower than its rate
+408 (section 15.12).
 
-15.7. A client's send settles on the head of its answer: a 2xx says the server had the envelope. An
-exchange lost — a network that failed, an answer that could not be written, a request unanswered
-past the exchange timeout, 5 minutes by default, or an envelope still refused `busy` past it from
-its first send (section 15.6) — closes the connection at both ends, as a socket that drops does;
+15.7. A client's send settles on the head of its answer: a 2xx says the server had the envelope. A
+server waits 40 ms from a request's hand-off for its answer: one that comes within them goes whole,
+its head with it and its length in `content-length`
+([RFC 9110 §8.6](https://www.rfc-editor.org/rfc/rfc9110#section-8.6)), as TCP holds back an
+acknowledgement to ride with its data
+([RFC 9293 §3.8.6.3](https://www.rfc-editor.org/rfc/rfc9293#section-3.8.6.3)); a request still
+unanswered then gets its head, a 200 with no length, and its answer after it, chunked over HTTP/1.1
+([RFC 9112 §7.1](https://www.rfc-editor.org/rfc/rfc9112#section-7.1)). A client reads either
+([RFC 9112 §6.3](https://www.rfc-editor.org/rfc/rfc9112#section-6.3)). The exchange timeout counts
+from the hand-off, those 40 ms within it. An exchange lost — a network that failed, an answer that
+could not be written, a request unanswered past the exchange timeout, 5 minutes by default, or an
+envelope still refused `busy` past it from its first send (section 15.6) — closes the connection at
+both ends, as a socket that drops does;
 the exchanges it handed on are cut, never answered. So does the 404 marked
 `connection-unknown`. An answer whose socket still holds it past its deadline (section 15.12) is an
 answer that could not be written. A request handed on is never refused: when its connection closes,
@@ -1654,12 +1681,13 @@ port      = 1*DIGIT
 `IPv6address`, `IPv4address` and `unreserved` are RFC 3986's, and `DIGIT` is RFC 5234's core rule
 ([Appendix B.1](https://www.rfc-editor.org/rfc/rfc5234#appendix-B.1)). An authority that is not of
 it is no host, a userinfo and a colon with no port among them. A target in absolute-form is read
-when it is `http://` or `https://`, its scheme in lower case as HTTP servers read it, then an
-authority that is not empty
-([RFC 9110 §4.2.1](https://www.rfc-editor.org/rfc/rfc9110#section-4.2.1)). A server answers 400, as
-HTTP does, an HTTP/1.1 request without a `Host`, and one with more than one `Host` field line, a
-target in absolute-form it does not read, or an authority that is no host, before it reads anything
-else of it ([RFC 9112 §3.2](https://www.rfc-editor.org/rfc/rfc9112#section-3.2)): no refusal of the
+when its scheme is `http` or `https`, in any case
+([RFC 3986 §3.1](https://www.rfc-editor.org/rfc/rfc3986#section-3.1)), then `://` and an authority
+that is not empty ([RFC 9110 §4.2.1](https://www.rfc-editor.org/rfc/rfc9110#section-4.2.1)). A
+server answers 400, as HTTP does, an HTTP/1.1 request without a `Host`, and one with more than one
+`Host` field line, a target in absolute-form it does not read, or an authority that is no host,
+before it reads anything else of it
+([RFC 9112 §3.2](https://www.rfc-editor.org/rfc/rfc9112#section-3.2)): no refusal of the
 transport's own, unmarked. The `Host` beside a target in absolute-form is judged as one field line
 alone, which an HTTP/1.0 request may leave out. Over HTTP/2, it resets the stream of a request that
 names no host, with neither `:authority` nor `host`, whatever its hosts, `*` among them
@@ -1689,10 +1717,20 @@ another is invalid, answered 400 rather than read on
 ([RFC 9112 §3](https://www.rfc-editor.org/rfc/rfc9112#section-3)), a bare CR in it among them
 ([RFC 9112 §2.2](https://www.rfc-editor.org/rfc/rfc9112#section-2.2)). So is a path whose
 percent-decoding holds NUL, `%00`. What a target percent-encodes is otherwise no octet of it, and
-is taken, `%01` and `%7F` among them, and `%00` in a query. The visible characters a URI leaves out,
-`"`, `#`, `<`, `>`, `\`, `^`, `` ` ``, `{`, `|` and `}`, are taken as they came, as a page's browser
-sends some of them unencoded in a query
-([URL Standard](https://url.spec.whatwg.org/#query-percent-encode-set)); a `#` opens no fragment.
+is taken, `%01`, `%7F` and `%23` among them, and `%00` in a query. A `#` anywhere in a target, since
+no form of a request-target carries a fragment
+([RFC 9112 §3.2](https://www.rfc-editor.org/rfc/rfc9112#section-3.2)), and a visible character a
+URI leaves out ([RFC 3986 §2](https://www.rfc-editor.org/rfc/rfc3986#section-2)) that a page's
+browser always percent-encodes where it stands — `"`, `<` or `>` in a path or a query, `^`, `` ` ``,
+`{` or `}` in a path, by the
+[URL Standard](https://url.spec.whatwg.org/#path-percent-encode-set)'s path and query
+percent-encode sets, which hold `#` too — make the request-line invalid, answered alike, 400
+unmarked over HTTP/1.1, with none of the fields every response on the path carries, and its stream
+reset `PROTOCOL_ERROR` over HTTP/2, before anything else of the request is judged
+([RFC 9112 §3](https://www.rfc-editor.org/rfc/rfc9112#section-3)). The other visible characters a
+URI leaves out, `\`, `|`, and `^`, `` ` ``, `{` and `}` in a query, are taken as they came, as a
+page's browser sends them unencoded
+([URL Standard](https://url.spec.whatwg.org/#query-percent-encode-set)).
 An empty `Host` is a host, and so is a name of invalid punycode. It takes the hosts a request may
 name besides those every server takes, `hosts`, and the origins an exchange may come from besides
 its own, `origins`, none when not given. Its own is its request's authority under `http` or `https`,

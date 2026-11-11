@@ -32,6 +32,47 @@ public sealed class HttpGatewayTests
 {
     private const string Origin = "https://app.example";
 
+    [Fact]
+    public async Task Refuses_lowercase_methods_on_a_route_and_the_document_405_method_refused()
+    {
+        var started = await Started();
+        var drawn = 0;
+
+        started.Service.Memory.Connection += (_) => { Interlocked.Increment(ref drawn); };
+
+        try
+        {
+            foreach (var (method, path, allow) in new[]
+            {
+                ("get", "/v1/books/2", "GET, HEAD"),
+                ("head", "/v1/books/2", "GET, HEAD"),
+                ("post", "/api/Transcoding/echo", "POST"),
+                ("options", "/v1/books/2", "GET, HEAD"),
+                ("get", "/openapi.json", "GET, HEAD"),
+                ("head", "/openapi.json", "GET, HEAD"),
+                ("options", "/openapi.json", "GET, HEAD"),
+            })
+            {
+                var answered = await Exchanged(started.Port, OctetsOf(started.Port, new OwnCase(
+                    [$"{method} {path} HTTP/1.1", $"origin: {Origin}", "access-control-request-method: GET"], 405, "")));
+
+                Assert.Equal((405, "method-refused"), (answered.Status, answered.Fields.GetValueOrDefault("bead-refusal")));
+                Assert.Equal(allow, answered.Fields.GetValueOrDefault("allow"));
+                Assert.Equal(Origin, answered.Fields.GetValueOrDefault("access-control-allow-origin"));
+                Assert.False(answered.Fields.ContainsKey("access-control-allow-methods"));
+                using var problem = JsonDocument.Parse(answered.Body);
+
+                Assert.Equal(405, problem.RootElement.GetProperty("status").GetInt32());
+                Assert.Equal("Method Not Allowed", problem.RootElement.GetProperty("title").GetString());
+            }
+            Assert.Equal(0, Volatile.Read(ref drawn));
+        }
+        finally
+        {
+            await Stopped(started);
+        }
+    }
+
     // transcoding 2.3
     [Fact]
     public async Task Serves_a_mounted_route_without_a_remote_endpoint()
@@ -1613,11 +1654,14 @@ public sealed class HttpGatewayTests
         });
         var reported = ReportedBy(started.Gateway);
 
-        // a listener that throws: the exchange answers on
+        // * a listener that throws: what it threw dropped, the listener after it told, the exchange
+        // answering on (spec 15.1)
         started.Gateway.Error += (_) =>
         {
             throw new InvalidOperationException("a listener broke");
         };
+
+        var heard = ReportedBy(started.Gateway);
 
         async Task<(int Status, string Body)> Ticks(string path, int from)
         {
@@ -1642,6 +1686,7 @@ public sealed class HttpGatewayTests
             Assert.Equal((502, Undecodable), await Ticks("/edges-ticks", 2));
             Assert.Equal((502, Undecodable), await Ticks("/text-ticks", -1));
             Assert.Equal(2, reported.Count);
+            Assert.Equal(reported, heard);
         }
         finally
         {

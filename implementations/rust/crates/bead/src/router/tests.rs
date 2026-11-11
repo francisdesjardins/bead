@@ -115,6 +115,8 @@ mod server_requests;
 mod server_token_provider;
 mod server_unsubscribe;
 mod server_waiting;
+#[cfg(feature = "websocket")]
+mod server_wire;
 mod surface;
 mod timers;
 mod transfer;
@@ -195,7 +197,9 @@ fn codes_of(errors: &[RouterError]) -> Vec<String> {
                 .protocol_code()
                 .and_then(ProtocolCode::name)
                 .map_or_else(|| failure.to_string(), str::to_owned),
-            RouterError::Other(error) => error.to_string(),
+            other @ (RouterError::ReadyState(_)
+            | RouterError::Disconnected(_)
+            | RouterError::Other(_)) => other.to_string(),
         })
         .collect()
 }
@@ -1111,7 +1115,7 @@ mod intake {
     use crate::testing::SteppingClock;
     use crate::testing::pair::{Pair, PairOptions, echo};
     use crate::testing::scripted::bytes_of;
-    use crate::transport::{RouterClientTransport, ServerTransport};
+    use crate::transport::RouterClientTransport;
 
     // a server's router options of the intake bounds given, its envelopes then its bytes
     fn intake_of((envelopes, bytes): (u64, u64)) -> RouterServerOptions {

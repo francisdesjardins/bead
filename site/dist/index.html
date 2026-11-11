@@ -1289,7 +1289,7 @@ footer {
   </nav>
   <main id="main" tabindex="-1">
 <header class="hero">
-  <p class="eyebrow">bead 0.11.0 · spec 0.12.0 · layouts 0xA1 and 0xB1</p>
+  <p class="eyebrow">bead 0.12.0 · spec 0.13.0 · layouts 0xA1 and 0xB1</p>
   <h1>Bead</h1>
   <p class="lede">A binary protocol for calls between a client and a server, in both directions.</p>
   <div class="invite">
@@ -2346,7 +2346,7 @@ offerHello(server);
   </p>
   <p>
     A companion of the specification describes it, <code>spec/transcoding.md</code>, under its own
-    version, 0.3.0. The gateway listens on its own port,
+    version, 0.4.0. The gateway listens on its own port,
     <code>localhost</code> by default, or mounts into the application’s web server.
   </p>
   <figure class="figure">
@@ -2786,7 +2786,7 @@ data: {"code":2,"scope":"application","status":400,"title":"COUNTED","type":"htt
   </p>
   <p>
     Debugging stays beside the wire, in a companion, <code>spec/debugging.md</code>
-    0.7.0. A constrained side can leave it out of its build and still conform to
+    0.8.0. A constrained side can leave it out of its build and still conform to
     the wire.
   </p>
 
@@ -3019,8 +3019,8 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
   <p class="gist">
     Bead is a protocol: a specification, conformance files every implementation plays, and an
     interop service. The repository holds three implementations. TypeScript and C# are at
-    behavioural parity. Rust has its core, and each part it lacks is a row of the support matrix,
-    ahead.
+    behavioural parity. Rust has its core and its WebSocket and HTTP transports, and each part it
+    lacks is a row of the support matrix, ahead.
   </p>
   <div class="table-wrap">
     <table class="compare">
@@ -3046,15 +3046,17 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
             transfers, relays, debugging and metrics
           </td>
           <td>
-            The routers, sessions and JWTs, debugging and metrics, the server half of the service
-            layer
+            The routers, the service layer, sessions and JWTs, debugging and metrics
           </td>
         </tr>
         <tr>
           <th scope="row">The transports</th>
           <td>WebSocket, HTTP, Web Worker, in memory, a broker over MQTT 5 or AMQP 1.0, and joined</td>
           <td>WebSocket, HTTP on Kestrel, in memory, a broker over MQTT 5 or AMQP 1.0, and joined</td>
-          <td>In memory, the broker’s core over an in-memory broker, and joined</td>
+          <td>
+            WebSocket and HTTP on hyper, in memory, the broker’s core over an in-memory broker, and
+            joined
+          </td>
         </tr>
         <tr>
           <th scope="row">The HTTP/JSON gateway</th>
@@ -3066,10 +3068,9 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
     </table>
   </div>
   <p class="space">
-    On the Rust side, next come the client half of the service layer, the WebSocket and HTTP
-    transports with the interop, the bindings to a broker, the gateway and <code>beadc</code>’s Rust
-    target, each by a decision of its own. The core also compiles for
-    <code>wasm32-unknown-unknown</code>.
+    On the Rust side, next come the bindings to a broker, the gateway and <code>beadc</code>’s Rust
+    target, each by a decision of its own. Its WebSocket and HTTP transports meet the other two
+    sides in the interop, both ways. The core also compiles for <code>wasm32-unknown-unknown</code>.
   </p>
   <p>
     Parity holds down to the field. When one platform cannot do what another can, every side keeps
@@ -3103,8 +3104,8 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
   <h3 id="implantations-conformite">What each implementation plays</h3>
   <p>
     Each unit of the specification is cited by a conformance file, or carries the reason none
-    cites it. The TypeScript and C# sides call each other in CI, over WebSocket, HTTP, MQTT 5 and
-    AMQP 1.0, and through their gateways.
+    cites it. The three sides call each other in CI over WebSocket and HTTP, and the TypeScript and
+    C# sides over MQTT 5 and AMQP 1.0 too, and through their gateways.
   </p>
   <details class="more">
     <summary>The conformance files, in figures</summary>
@@ -3117,7 +3118,7 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
         parcels.</li>
       <li><strong>The conversations</strong>: 189 exchanges between clients
         and the interop server, relays included.</li>
-      <li><strong>The transports’ cases</strong>: 255 exchanges over HTTP,
+      <li><strong>The transports’ cases</strong>: 268 exchanges over HTTP,
         WebSocket and a broker, written byte by byte.</li>
       <li><strong>The durations</strong>: 35 places that take a duration,
         and what each makes of 19 inputs.</li>
@@ -3129,7 +3130,7 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
       <li><strong>Transcoding</strong>: 26 templates, 192
         readings, 78 writings, 66 bindings,
         46 failures, 10 event streams and
-        78 exchanges.</li>
+        79 exchanges.</li>
       <li><strong>Fuzzing</strong>: each suite fuzzes its readers on mutations of the vectors, and
         <code>tools/fuzz.mjs</code> fuzzes each side’s parsers, guided by coverage.</li>
     </ul>
@@ -3226,8 +3227,8 @@ disallowed-methods = [
   <ul class="rules">
     <li>
       <strong>Rust in full</strong
-      ><span>The client of its service layer, its WebSocket and HTTP transports with the interop, its
-        MQTT 5 and AMQP 1.0 bindings, its gateway and its target in <code>beadc</code>.</span>
+      ><span>Its MQTT 5 and AMQP 1.0 bindings, its gateway and its target in
+        <code>beadc</code>.</span>
     </li>
     <li>
       <strong>Rules in CEL</strong
@@ -3376,7 +3377,7 @@ disallowed-methods = [
   </nav>
   <main id="main" tabindex="-1">
 <header class="hero">
-  <p class="eyebrow">bead 0.11.0 · spécification 0.12.0 · dispositions 0xA1 et 0xB1</p>
+  <p class="eyebrow">bead 0.12.0 · spécification 0.13.0 · dispositions 0xA1 et 0xB1</p>
   <h1>Bead</h1>
   <p class="lede">Un protocole binaire pour les appels entre un client et un serveur, dans les deux sens.</p>
   <div class="invite">
@@ -4458,7 +4459,7 @@ offerHello(server);
   </p>
   <p>
     Un compagnon de la spécification la décrit, <code>spec/transcoding.md</code>, sous sa propre
-    version, 0.3.0. La passerelle écoute sur son propre port,
+    version, 0.4.0. La passerelle écoute sur son propre port,
     <code>localhost</code> par défaut, ou se monte dans le serveur web de l’application.
   </p>
   <figure class="figure">
@@ -4912,7 +4913,7 @@ data: {"code":2,"scope":"application","status":400,"title":"COUNTED","type":"htt
   </p>
   <p>
     Le débogage reste à côté du fil, dans un compagnon, <code>spec/debugging.md</code>
-    0.7.0. Un côté contraint peut le laisser hors de sa compilation et rester
+    0.8.0. Un côté contraint peut le laisser hors de sa compilation et rester
     conforme au fil.
   </p>
 
@@ -5148,8 +5149,8 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
   <p class="gist">
     Bead est un protocole : une spécification, des fichiers de conformance que chaque implantation
     joue, et un service d’interop. Le dépôt en tient trois implantations. TypeScript et C# sont à
-    parité de comportement. Rust a son cœur, et chaque partie qui lui manque est une ligne de la
-    matrice de support, à venir.
+    parité de comportement. Rust a son cœur et ses transports WebSocket et HTTP, et chaque partie
+    qui lui manque est une ligne de la matrice de support, à venir.
   </p>
   <div class="table-wrap">
     <table class="compare">
@@ -5175,15 +5176,18 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
             abonnements, les transferts, les relais, le débogage et les métriques
           </td>
           <td>
-            Les routeurs, les sessions et les JWT, le débogage et les métriques, la moitié serveur
-            de la couche des services
+            Les routeurs, la couche des services, les sessions et les JWT, le débogage et les
+            métriques
           </td>
         </tr>
         <tr>
           <th scope="row">Les transports</th>
           <td>WebSocket, HTTP, Web Worker, en mémoire, un courtier sur MQTT 5 ou AMQP 1.0, et joints</td>
           <td>WebSocket, HTTP sur Kestrel, en mémoire, un courtier sur MQTT 5 ou AMQP 1.0, et joints</td>
-          <td>En mémoire, le cœur du courtier sur un courtier en mémoire, et joints</td>
+          <td>
+            WebSocket et HTTP sur hyper, en mémoire, le cœur du courtier sur un courtier en mémoire,
+            et joints
+          </td>
         </tr>
         <tr>
           <th scope="row">La passerelle HTTP/JSON</th>
@@ -5195,10 +5199,10 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
     </table>
   </div>
   <p class="space">
-    Côté Rust, viennent ensuite la moitié client de la couche des services, les transports
-    WebSocket et HTTP avec l’interop, les liaisons à un courtier, la passerelle et la cible Rust de
-    <code>beadc</code>, chacune par une décision à elle. Le cœur se compile aussi pour
-    <code>wasm32-unknown-unknown</code>.
+    Côté Rust, viennent ensuite les liaisons à un courtier, la passerelle et la cible Rust de
+    <code>beadc</code>, chacune par une décision à elle. Ses transports WebSocket et HTTP
+    rencontrent les deux autres côtés dans l’interop, dans les deux sens. Le cœur se compile aussi
+    pour <code>wasm32-unknown-unknown</code>.
   </p>
   <p>
     La parité tient jusqu’au champ. Quand une plateforme ne peut pas ce qu’une autre peut, tous les
@@ -5234,8 +5238,9 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
   <h3 id="implantations-conformite">Ce que chaque implantation joue</h3>
   <p>
     Chaque unité de la spécification est citée par un fichier de conformance, ou porte la raison
-    pour laquelle aucun ne la cite. Les côtés TypeScript et C# s’appellent l’un l’autre dans la CI,
-    sur WebSocket, HTTP, MQTT 5 et AMQP 1.0, et par leurs passerelles.
+    pour laquelle aucun ne la cite. Les trois côtés s’appellent les uns les autres dans la CI sur
+    WebSocket et HTTP, et les côtés TypeScript et C# aussi sur MQTT 5 et AMQP 1.0, et par leurs
+    passerelles.
   </p>
   <details class="more">
     <summary>Les fichiers de conformance, en chiffres</summary>
@@ -5248,7 +5253,7 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
         les parcelles d’un courtier.</li>
       <li><strong>Les conversations</strong> : 189 échanges entre des clients
         et le serveur d’interop, relais compris.</li>
-      <li><strong>Les cas des transports</strong> : 255 échanges HTTP,
+      <li><strong>Les cas des transports</strong> : 268 échanges HTTP,
         WebSocket et sur un courtier, écrits octet par octet.</li>
       <li><strong>Les durées</strong> : 35 endroits qui prennent une
         durée, et ce que chacun fait de 19 entrées.</li>
@@ -5260,7 +5265,7 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
       <li><strong>Le transcodage</strong> : 26 gabarits,
         192 lectures, 78 écritures,
         66 liaisons, 46 échecs,
-        10 flux d’évènements et 78 échanges.</li>
+        10 flux d’évènements et 79 échanges.</li>
       <li><strong>Le fuzzing</strong> : chaque suite passe ses lecteurs au fuzzing sur des
         mutations des vecteurs, et <code>tools/fuzz.mjs</code> y passe les analyseurs de chaque
         côté, guidé par la couverture.</li>
@@ -5362,8 +5367,8 @@ disallowed-methods = [
   <ul class="rules">
     <li>
       <strong>Rust au complet</strong
-      ><span>Le client de sa couche des services, ses transports WebSocket et HTTP avec l’interop,
-        ses liaisons MQTT 5 et AMQP 1.0, sa passerelle et sa cible dans <code>beadc</code>.</span>
+      ><span>Ses liaisons MQTT 5 et AMQP 1.0, sa passerelle et sa cible dans
+        <code>beadc</code>.</span>
     </li>
     <li>
       <strong>Des règles en CEL</strong

@@ -512,6 +512,7 @@ fn traced_failure_of(error: &CallError) -> Option<Traced> {
         CallError::Failure(failure) => Some(Arc::new(failure.record())),
         CallError::Cancelled(_)
         | CallError::Disconnected(_)
+        | CallError::ReadyState(_)
         | CallError::TimedOut(_)
         | CallError::Refused(_)
         | CallError::Other(_) => None,

@@ -1,12 +1,18 @@
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net;
+using System.Net.Security;
 using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading.Channels;
 using Bead.Tests;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Time.Testing;
 
 namespace Bead.Transport.WebSockets.Tests;
@@ -396,7 +402,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         {
             _connections.Writer.TryWrite(connectionHandle);
         };
-        _port = (await _server.Start(new WebSocketTransportStartOptions { Address = Host, FindOpenPort = true, CancellationToken = Cancelled })).Port;
+        _port = (await _server.Start(new TransportServerStartOptions { Address = Host, FindOpenPort = true, CancellationToken = Cancelled })).Port;
     }
 
     public async ValueTask DisposeAsync()
@@ -1235,6 +1241,82 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
                 return connecting.WaitAsync(Patience, Cancelled);
             });
         }
+
+        // a real upgrade and binary messages in both directions, trusting the peer's certificate alone
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using var made = new CertificateRequest("CN=127.0.0.1", key, HashAlgorithmName.SHA256)
+            .CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
+        using var certificate = X509CertificateLoader.LoadPkcs12(made.Export(X509ContentType.Pfx), null);
+        var builder = WebApplication.CreateSlimBuilder();
+
+        builder.Logging.ClearProviders();
+        builder.WebHost.ConfigureKestrel((options) =>
+        {
+            options.Listen(IPAddress.Loopback, 0, (listen) =>
+            {
+                listen.Protocols = HttpProtocols.Http1AndHttp2;
+                listen.UseHttps(certificate);
+            });
+        });
+        await using var application = builder.Build();
+        var accepted = new TaskCompletionSource<WebSocket>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var released = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        application.UseWebSockets();
+        application.Run(async (context) =>
+        {
+            using var socket = await context.WebSockets.AcceptWebSocketAsync();
+
+            accepted.TrySetResult(socket);
+            await released.Task;
+        });
+        await application.StartAsync(Cancelled);
+
+        using var invoker = new HttpMessageInvoker(new SocketsHttpHandler
+        {
+            SslOptions = new SslClientAuthenticationOptions
+            {
+                RemoteCertificateValidationCallback = (_, offered, _, _) =>
+                {
+                    return offered is not null && offered.GetCertHashString() == certificate.GetCertHashString();
+                },
+            },
+        });
+        await using var secured = new WebSocketTransportClient(new WebSocketTransportClientOptions { Invoker = invoker });
+        var messages = Channel.CreateUnbounded<TransportMessage>();
+
+        secured.Message += (message) =>
+        {
+            messages.Writer.TryWrite(message);
+        };
+
+        try
+        {
+            await secured.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = new Uri(application.Urls.Single()).Port, Secured = true, CancellationToken = Cancelled });
+            var socket = await accepted.Task.WaitAsync(Patience, Cancelled);
+            var buffer = new byte[16];
+
+            await secured.Send(new TransportMessage("hello"u8.ToArray(), false));
+            var received = await socket.ReceiveAsync(buffer, Cancelled).WaitAsync(Patience, Cancelled);
+
+            Assert.Equal((WebSocketMessageType.Binary, true, "hello"), (received.MessageType, received.EndOfMessage, Encoding.UTF8.GetString(buffer, 0, received.Count)));
+            await socket.SendAsync("again"u8.ToArray(), WebSocketMessageType.Binary, true, Cancelled);
+            var heard = await Next(messages);
+
+            Assert.Equal("again", Encoding.UTF8.GetString(heard.Bytes.Span));
+            Assert.False(heard.IsText);
+            Assert.True(secured.IsSecure);
+
+            var closing = secured.CloseConnection();
+
+            Assert.Equal(WebSocketMessageType.Close, (await socket.ReceiveAsync(buffer, Cancelled).WaitAsync(Patience, Cancelled)).MessageType);
+            await socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "", Cancelled);
+            await closing.WaitAsync(Patience, Cancelled);
+        }
+        finally
+        {
+            released.TrySetResult();
+        }
     }
 
     [Fact]
@@ -1276,7 +1358,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         }
 
         await using var server = new WebSocketTransportServer();
-        var port = (await server.Start(new WebSocketTransportStartOptions { Address = "::1", FindOpenPort = true, CancellationToken = Cancelled })).Port;
+        var port = (await server.Start(new TransportServerStartOptions { Address = "::1", FindOpenPort = true, CancellationToken = Cancelled })).Port;
 
         foreach (var host in new[] { "::1", "[::1]" })
         {
@@ -1344,21 +1426,102 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         });
     }
 
+    // debugging 9.7
+    [Fact]
+    public async Task Refuses_a_send_by_its_ready_state_before_the_open_and_as_a_disconnection_after_it_in_each_state_it_holds()
+    {
+        using var listener = new Listener(IPAddress.Loopback);
+        await using var client = new WebSocketTransportClient();
+        var target = new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled };
+        var refusals = new List<string>();
+
+        // never connected
+        refusals.Add(await SendRefusals.Of(client));
+
+        // connecting, its handshake unanswered
+        var connecting = client.Connect(target);
+        var (peer, head) = await listener.Next();
+
+        refusals.Add(await SendRefusals.Of(client));
+
+        using (peer)
+        using (var server = await Listener.Answer(peer, head))
+        {
+            await connecting.WaitAsync(Patience, Cancelled);
+
+            // open, the send going
+            refusals.Add(await SendRefusals.Of(client));
+
+            // closing, its close unanswered while the server's end reads nothing
+            var closing = client.CloseConnection();
+
+            refusals.Add(await SendRefusals.Of(client));
+
+            // then answered: what was sent read, then the close
+            WebSocketReceiveResult received;
+
+            do
+            {
+                received = await server.ReceiveAsync(new byte[16], Cancelled).WaitAsync(Patience, Cancelled);
+            }
+            while (received.MessageType != WebSocketMessageType.Close);
+
+            await server.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, null, Cancelled);
+            await closing.WaitAsync(Patience, Cancelled);
+        }
+
+        // closed by its own close
+        refusals.Add(await SendRefusals.Of(client));
+
+        // reconnecting, its handshake unanswered, then ended by its token
+        using var ending = new CancellationTokenSource();
+        var reconnecting = client.Reconnect(new TransportClientReconnectOptions { CancellationToken = ending.Token });
+        var (unanswered, _) = await listener.Next();
+
+        using (unanswered)
+        {
+            refusals.Add(await SendRefusals.Of(client));
+            await ending.CancelAsync();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            {
+                return reconnecting.WaitAsync(Patience, Cancelled);
+            });
+        }
+
+        // closed by a connect that started and failed: its server refusing it
+        await ConnectRefused(client, listener);
+        refusals.Add(await SendRefusals.Of(client));
+
+        Assert.Equal(
+            [
+                "ReadyStateException Uninitialized: the transport client is uninitialized, not open",
+                "ReadyStateException Connecting: the transport client is connecting, not open",
+                "sent",
+                "DisconnectException: the transport client is closing, not open",
+                "DisconnectException: the transport client is closed, not open",
+                "DisconnectException: the transport client is reconnecting, not open",
+                "DisconnectException: the transport client is closed, not open",
+            ],
+            refusals);
+    }
+
     [Fact]
     public async Task Refuses_a_close_before_it_connects_and_once_closed()
     {
-        await Assert.ThrowsAsync<DisconnectException>(() =>
+        Assert.Equal(ReadyState.Uninitialized, (await Assert.ThrowsAsync<ReadyStateException>(() =>
         {
             return _client.CloseConnection();
-        });
+        })).Got);
 
         await _client.Connect(Target with { CancellationToken = Cancelled });
         await _client.CloseConnection().WaitAsync(Patience, Cancelled);
 
-        Assert.Equal("the transport client is closed, not open", (await Assert.ThrowsAsync<DisconnectException>(() =>
+        var refused = await Assert.ThrowsAsync<ReadyStateException>(() =>
         {
             return _client.CloseConnection();
-        })).Message);
+        });
+
+        Assert.Equal((ReadyState.Closed, "the transport client is closed, not open"), (refused.Got, refused.Message));
     }
 
     [Fact]
@@ -1405,10 +1568,10 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
             // the server's end reads nothing, so it never answers the close
             var first = _client.CloseConnection();
 
-            await Assert.ThrowsAsync<DisconnectException>(() =>
+            Assert.Equal(ReadyState.Closing, (await Assert.ThrowsAsync<ReadyStateException>(() =>
             {
                 return _client.CloseConnection();
-            });
+            })).Got);
             await _client.DisposeAsync();
 
             // well within the close timeout, 5 s, which only a close nothing settled waits out
@@ -1930,14 +2093,19 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Fails_its_connection_on_a_protocol_error_whose_error_listener_throws_telling_its_close_all_the_same()
+    public async Task Fails_its_connection_on_a_protocol_error_whose_error_listener_throws_telling_its_close_all_the_same_and_dropping_what_it_threw()
     {
         using var listener = new Listener(IPAddress.Loopback);
         var closes = ClosesOf(_client);
+        var heard = new ConcurrentQueue<Exception>();
 
         _client.Error += (_) =>
         {
             throw new InvalidOperationException("an error listener that throws");
+        };
+        _client.Error += (reason) =>
+        {
+            heard.Enqueue(reason);
         };
 
         var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
@@ -1949,8 +2117,10 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
             await connecting.WaitAsync(Patience, Cancelled);
             await peer.GetStream().WriteAsync(ReservedFrame, Cancelled);
 
-            // what the listener threw goes on to the task no one awaits, the platform's
             Assert.Equal((false, false), await Next(closes));
+            // * what the listener threw is dropped: the listener after it told the failure, and
+            // nothing else
+            Assert.Equal(WebSocketError.Faulted, Assert.IsType<WebSocketException>(Assert.Single(heard)).WebSocketErrorCode);
             Assert.Equal(ReadyState.Closed, _client.ReadyState);
         }
     }
@@ -2050,6 +2220,46 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
             _client.Resume();
 
             Assert.Equal(new byte[] { 7 }, (await Next(messages)).Bytes.ToArray());
+        }
+    }
+
+    // spec 15.2
+    [Fact]
+    public async Task Emits_what_the_server_sends_text_as_text_binary_as_bytes()
+    {
+        using var listener = new Listener(IPAddress.Loopback);
+        var messages = Channel.CreateUnbounded<TransportMessage>();
+        var errors = Channel.CreateUnbounded<Exception>();
+
+        _client.Message += (message) =>
+        {
+            messages.Writer.TryWrite(message);
+        };
+        _client.Error += (reason) =>
+        {
+            errors.Writer.TryWrite(reason);
+        };
+
+        var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
+        var (peer, head) = await listener.Next();
+
+        using (peer)
+        using (var server = await Listener.Answer(peer, head))
+        {
+            await connecting.WaitAsync(Patience, Cancelled);
+            await server.SendAsync(Encoding.UTF8.GetBytes("text"), WebSocketMessageType.Text, true, Cancelled);
+            await server.SendAsync(Encoding.UTF8.GetBytes("binary"), WebSocketMessageType.Binary, true, Cancelled);
+
+            var text = await Next(messages);
+            var binary = await Next(messages);
+
+            // * each handed on whole, a text one marked so: its router judges it, its transport reports
+            // nothing of it (spec 15.2)
+            Assert.Equal("text"u8.ToArray(), text.Bytes.ToArray());
+            Assert.True(text.IsText);
+            Assert.Equal("binary"u8.ToArray(), binary.Bytes.ToArray());
+            Assert.False(binary.IsText);
+            Assert.True(errors.Reader.Count == 0);
         }
     }
 
@@ -2839,7 +3049,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         foreach (var address in Addresses.ReachedByLocalhost())
         {
             await using var server = new WebSocketTransportServer();
-            var port = (await server.Start(new WebSocketTransportStartOptions { Address = address, FindOpenPort = true, CancellationToken = Cancelled })).Port;
+            var port = (await server.Start(new TransportServerStartOptions { Address = address, FindOpenPort = true, CancellationToken = Cancelled })).Port;
             await using var client = new WebSocketTransportClient();
             var started = TimeProvider.System.GetTimestamp();
 

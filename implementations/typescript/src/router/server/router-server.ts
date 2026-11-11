@@ -7,7 +7,7 @@ import type {
   TransportServerEventMap,
 } from '../../transport/server/types';
 import { clockOf } from '../../transport/shared/clock';
-import { createEmitter } from '../../transport/shared/emitter';
+import { createEmitter, tellError } from '../../transport/shared/emitter';
 import { CancelError, ProgrammerError, toError } from '../../transport/shared/errors';
 import { CLOSE_EVENT, CONNECTION_EVENT, MESSAGE_EVENT } from '../../transport/shared/constants';
 import { gaugesOf, mergeGauges } from '../../transport/shared/gauges';
@@ -249,8 +249,9 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
     notifications,
   });
 
+  // what a listener of `error` throws is dropped (spec 15.1)
   const report = (error: Error, connectionHandle?: TransportServerConnectionHandle): void => {
-    emitter.emit('error', error, connectionHandle);
+    tellError(emitter, [error, connectionHandle]);
   };
 
   // the series a subscription of `procedure` counts into, as it subscribes; none uncounted, which

@@ -642,6 +642,28 @@ async fn refuses_to_send_what_is_no_envelope_keeping_the_connection_and_holds_a_
 
     let handle = locked(&told.opened).first().cloned().expect("a handle");
 
+    // * a text is no envelope: refused before anything goes (spec 15.2)
+    let text = server
+        .send(
+            TransportMessage {
+                data: bytes::Bytes::from_static(b"hi"),
+                is_text: true,
+                ..TransportMessage::default()
+            },
+            &handle,
+        )
+        .expect_err("a text");
+
+    assert!(
+        matches!(&text, RouterError::Other(error) if error.downcast_ref::<ProgrammerError>().is_some()),
+        "a misuse: {text:?}"
+    );
+    assert_eq!(
+        text.to_string(),
+        "a broker connection carries envelopes, as bytes",
+        "said why"
+    );
+
     // what it sends is an envelope's bytes, which its type holds alone: one goes, the connection kept
     server
         .send(

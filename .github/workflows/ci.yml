@@ -98,8 +98,8 @@ jobs:
   # examples, the generated `Probe` held to its generator, its public surface held to
   # `surface.txt` with its options parameters, the generated interop's types and lint, then its
   # tests, on the current line under coverage, held to the side's floor. The interop against the C#
-  # server runs in the .NET job. On the current line and on the floor
-  # `engines.node` declares, so the floor holds by a run.
+  # server runs in the .NET job, against the Rust one in the interop-rust job. On the current line
+  # and on the floor `engines.node` declares, so the floor holds by a run.
   typescript:
     name: TypeScript (Node ${{ matrix.node }})
     needs: playwright
@@ -134,11 +134,11 @@ jobs:
       - run: $YARN install --immutable
       - run: $YARN check
       - if: matrix.node != '26'
-        run: $YARN test --grep-invert "the C# server of the interop service"
+        run: $YARN test --grep-invert "the (C#|Rust) server of the interop service"
       # On the current line, the same tests under c8, then what they ran held to the TypeScript
       # side's floor in tools/coverage-floors.json, the report in the run's summary.
       - if: matrix.node == '26'
-        run: $YARN test:coverage --grep-invert "the C# server of the interop service"
+        run: $YARN test:coverage --grep-invert "the (C#|Rust) server of the interop service"
       - if: matrix.node == '26'
         name: Coverage, held to its floor
         working-directory: .
@@ -180,7 +180,8 @@ jobs:
   # TypeScript server, which `dotnet test` starts with Node, then the TypeScript client against the
   # C# server; then a page of another origin in Chromium against both sides' HTTP servers, what
   # proves a browser reads their CORS answer. Only the TypeScript side is installed, for its interop
-  # server and its page; Chromium is the Playwright image's.
+  # server and its page; Chromium is the Playwright image's. The interop with the Rust side, its
+  # cases and its fixture, is the interop-rust job's.
   #
   # `BEAD_INTEROP_REQUIRED=1` turns an interop that would skip into one that fails: here a skip
   # could only be a path to the other side gone wrong.
@@ -220,10 +221,11 @@ jobs:
       # the bench, outside Bead.slnx, built so that a release's measure finds it whole
       - run: dotnet build -c Release tools/Bead.Benchmarks
       # the tests under coverage, one cobertura report per test project, then what they ran held to
-      # the C# side's floor in tools/coverage-floors.json, the report in the run's summary
+      # the C# side's floor in tools/coverage-floors.json, the report in the run's summary; the
+      # interop's fixture against the Rust server left to the interop-rust job
       - run: >-
           dotnet test --solution Bead.slnx --coverage --coverage-output-format cobertura
-          --results-directory TestResults/coverage
+          --results-directory TestResults/coverage --filter-not-trait "server=Rust"
       - name: Coverage, held to its floor
         run: >-
           node ../../tools/coverage-report.mjs TestResults/coverage/*.cobertura.xml
@@ -235,7 +237,7 @@ jobs:
           name: coverage-csharp
           path: implementations/dotnet/TestResults/coverage/*.cobertura.xml
           retention-days: 14
-      - run: $YARN test:interop
+      - run: $YARN test:interop --grep-invert "the Rust server"
         working-directory: implementations/typescript
       - run: $YARN test:browser
         working-directory: implementations/typescript
@@ -243,12 +245,14 @@ jobs:
   # ── Rust ─────────────────────────────────────────────────────────────────────
   # The Rust side's own gate (decision 0044): its toolchain from its rust-toolchain.toml, a warning
   # an error by its .cargo/config.toml, `[build] warnings = "deny"`; its format, its lints, the
-  # core's lints on the browser's WebAssembly target, its documentation, a build on the default
+  # core's library linted with no feature and with each socket transport's alone, the core's lints
+  # on the browser's WebAssembly target, its documentation, a build on the default
   # features alone, where what the test kit alone reaches is left out, its dependencies' advisories,
   # licences, bans and sources, then its tests, bead-house's holding each library crate's public
   # surface to its list, and its conformance players under coverage, lines and regions on the pinned
   # stable, held to the side's floor in tools/coverage-floors.json; and its fuzz targets built on
-  # the nightly pinned by its date, never run. On Windows, its tests alone, as
+  # the nightly pinned by its date, never run. On Linux too, the interop's server and its trials'
+  # test binary, built once and handed to the interop-rust job. On Windows, its tests alone, as
   # the user's MSVC toolchain builds them. The registry and the target are cached by the lock and
   # the toolchain; every build is `--locked`.
   rust:
@@ -293,16 +297,48 @@ jobs:
         run: cargo fmt --all -- --check
       - if: matrix.os == 'ubuntu-26.04'
         run: cargo clippy --workspace --all-targets --all-features --locked
-      # the core checked for the browser's WebAssembly, never run, the target rust-toolchain.toml's:
-      # what it links builds there, its spawning and its time through crate::platform and the clock
-      # alone; getrandom's backend for the target is .cargo/config.toml's
+      # the core's library linted with no feature, then with each socket transport's alone, so
+      # that each builds on its own (decision 0049)
       - if: matrix.os == 'ubuntu-26.04'
-        run: cargo clippy -p francisdesjardins-bead --lib --all-features --locked --target wasm32-unknown-unknown
+        run: cargo clippy -p francisdesjardins-bead --lib --locked
+      - if: matrix.os == 'ubuntu-26.04'
+        run: cargo clippy -p francisdesjardins-bead --lib --features websocket --locked
+      - if: matrix.os == 'ubuntu-26.04'
+        run: cargo clippy -p francisdesjardins-bead --lib --features http --locked
+      # the core checked for the browser's WebAssembly, never run, the target rust-toolchain.toml's,
+      # by its features, no socket among them, which mio refuses there: what it links builds there,
+      # its spawning and its time through crate::platform and the clock alone; getrandom's backend
+      # for the target is .cargo/config.toml's
+      - if: matrix.os == 'ubuntu-26.04'
+        run: cargo clippy -p francisdesjardins-bead --lib --features testing --locked --target wasm32-unknown-unknown
       - if: matrix.os == 'ubuntu-26.04'
         run: cargo doc --workspace --no-deps --all-features --locked
       # the default features alone: what the test kit alone reaches is cfg'd out, or a warning
       - if: matrix.os == 'ubuntu-26.04'
         run: cargo build --workspace --locked
+      # the interop's server and its trials' test binary, for the interop-rust job, which has no
+      # Rust toolchain: each one's path read from cargo's JSON, the test binary's named by a hash,
+      # both copied to one folder under the names that job runs them by
+      - if: matrix.os == 'ubuntu-26.04'
+        name: The interop's server and its trials, built
+        run: |
+          server="$(cargo build -p francisdesjardins-bead-interop-server --locked --message-format=json \
+            | jq -r 'select(.reason == "compiler-artifact" and .target.name == "bead-interop-server" and .executable != null) | .executable')"
+          trials="$(cargo test -p francisdesjardins-bead-interop-server --no-run --locked --message-format=json \
+            | jq -r 'select(.reason == "compiler-artifact" and .target.name == "interop" and .executable != null) | .executable')"
+          test -f "$server"
+          test -f "$trials"
+          mkdir -p "$RUNNER_TEMP/rust-interop"
+          cp "$server" "$RUNNER_TEMP/rust-interop/bead-interop-server"
+          cp "$trials" "$RUNNER_TEMP/rust-interop/interop"
+      # kept a day: the interop-rust job of the same run reads it, nothing after
+      - if: matrix.os == 'ubuntu-26.04'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rust-interop
+          path: ${{ runner.temp }}/rust-interop/
+          if-no-files-found: error
+          retention-days: 1
       - if: matrix.os == 'ubuntu-26.04'
         run: cargo deny --locked check
       # the tests under instrumentation, every test binary's profile merged into one LLVM export,
@@ -352,6 +388,69 @@ jobs:
         env:
           # a newer compiler's warnings are no gate of the pinned one's
           CARGO_BUILD_WARNINGS: warn
+
+  # ── Interop with the Rust side ───────────────────────────────────────────────
+  # The interop with the Rust side, both ways, over WebSocket and over HTTP (decision 0049): the
+  # Rust client's trials against each side's server, the TypeScript client and the C# one against
+  # the Rust server, then a page of another origin in Chromium against its HTTP server, what proves
+  # a browser reads its CORS answer. The Rust server and the trials' test binary are the Rust job's,
+  # built once on its Linux leg, so no Rust toolchain and no C compiler here; it needs both of that
+  # job's legs, the Windows one's tests among them. In the Playwright image the .NET job runs, Ubuntu
+  # 26.04 as the Rust job's runner, so the binaries find the glibc they were linked against; .NET and
+  # the TypeScript side installed as the .NET job has them, for the servers the trials start and for
+  # the clients against the Rust one, the C# server built first so that no trial waits on its build.
+  #
+  # `BEAD_INTEROP_REQUIRED=1` turns an interop that would skip into one that fails, and
+  # `BEAD_INTEROP_RUST=1` asks for the Rust trials, which are ignored otherwise.
+  interop-rust:
+    name: Interop with the Rust side
+    needs: [playwright, rust]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    # the image of the Playwright the TypeScript side pins, for the page of another origin's Chromium
+    container:
+      image: mcr.microsoft.com/playwright:v${{ needs.playwright.outputs.version }}-resolute
+      options: --ipc=host
+    env:
+      BEAD_INTEROP_REQUIRED: 1
+      BEAD_INTEROP_RUST: 1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: implementations/dotnet/global.json
+          cache: true
+          cache-dependency-path: implementations/dotnet/**/packages.lock.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: $YARN install --immutable
+        working-directory: implementations/typescript
+      - run: dotnet build interop/Bead.Interop.Server
+        working-directory: implementations/dotnet
+      - run: dotnet build tests/Bead.Interop.Tests
+        working-directory: implementations/dotnet
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: rust-interop
+          path: rust-interop
+      # ! the container's paths, from the shell: in a container job, `github.workspace` names the
+      # runner's host path, which the container does not see. An artifact keeps no mode, so each
+      # binary is made executable again.
+      - name: The Rust side's binaries, where the runs find them
+        run: |
+          chmod +x rust-interop/bead-interop-server rust-interop/interop
+          echo "BEAD_INTEROP_ROOT=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+          echo "BEAD_INTEROP_RUST_SERVER=$GITHUB_WORKSPACE/rust-interop/bead-interop-server" >> "$GITHUB_ENV"
+      - name: The Rust client against each side's server
+        run: rust-interop/interop
+      - run: $YARN test:interop --grep "the Rust server"
+        working-directory: implementations/typescript
+      - run: dotnet test --project tests/Bead.Interop.Tests --filter-trait "server=Rust"
+        working-directory: implementations/dotnet
+      # every server among the page's targets, the Rust one with them
+      - run: $YARN test:browser
+        working-directory: implementations/typescript
 
   # ── MQTT 5 ───────────────────────────────────────────────────────────────────
   # The cases over MQTT 5, each adapter against the fixture over TCP and WebSocket, the interop over
@@ -958,6 +1057,7 @@ jobs:
         typescript,
         dotnet,
         rust,
+        interop-rust,
         mqtt,
         amqp,
         builder,

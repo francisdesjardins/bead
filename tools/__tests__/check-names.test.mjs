@@ -302,6 +302,25 @@ describe('the lists', () => {
     assert.deepEqual([...names.get('CallError').variants], ['Failure', 'Disconnected']);
   });
 
+  test('reads a Rust name a feature holds as any other, its mark aside', () => {
+    const names = rustNamesOf([
+      [
+        'crate',
+        '  use websocket::server::TRANSPORT_WEBSOCKET #[cfg(feature = "websocket")]',
+        '  use websocket::server::WebSocketTransportServer #[cfg(feature = "websocket")]',
+        'crate::websocket::server',
+        '  const TRANSPORT_WEBSOCKET: &str #[cfg(feature = "websocket")]',
+        '  struct WebSocketTransportServer #[cfg(feature = "websocket")]',
+        '',
+      ].join('\n'),
+    ]);
+
+    assert.deepEqual(kindsOf(names), {
+      TRANSPORT_WEBSOCKET: 'constant',
+      WebSocketTransportServer: 'record',
+    });
+  });
+
   test('reads the titles of the Differences alone', () => {
     assert.deepEqual([...differencesOf(SUPPORT)], ["The WebSocket transport's name"]);
   });

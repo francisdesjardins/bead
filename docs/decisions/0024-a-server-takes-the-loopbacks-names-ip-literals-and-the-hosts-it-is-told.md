@@ -196,18 +196,21 @@ origin, which is `http://` or `https://` followed by that authority, port includ
 ([RFC 6454 §4](https://www.rfc-editor.org/rfc/rfc6454#section-4)). The C# side sets
 `AllowHostHeaderOverride` on both transports, RFC 9112 §3.2.2's conforming form of Kestrel; the
 TypeScript side reads the authority and the path from the target by hand, as it reads the rest of a
-request, never through a URL parser. Both read it as it came, where Kestrel's `Uri` drops a userinfo
-and an empty port: a target in absolute-form is read when it is `http://` or `https://`, its scheme
-in lower case as Kestrel reads it though
-[RFC 3986 §3.1](https://www.rfc-editor.org/rfc/rfc3986#section-3.1) reads a scheme in any case,
-then an authority of 15.12's grammar that is not empty
+request, never through a URL parser; the Rust side reads the head's own bytes at a WebSocket's
+address and hyper's `Uri` over HTTP
+([0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)).
+Each reads it as it came, where Kestrel's `Uri` drops a userinfo and an empty port: a target in
+absolute-form is read when its scheme is `http` or `https` in any ASCII case, as
+[RFC 3986 §3.1](https://www.rfc-editor.org/rfc/rfc3986#section-3.1) reads a scheme, Kestrel's
+refusal of one not in lower case a row of the matrix's Differences, then `://` and an authority of
+15.12's grammar that is not empty
 ([RFC 9110 §4.2.1](https://www.rfc-editor.org/rfc/rfc9110#section-4.2.1)), so a userinfo, which
 [RFC 9110 §4.2.4](https://www.rfc-editor.org/rfc/rfc9110#section-4.2.4) has a recipient treat as an
 error, and a colon with no port are none; any other is answered 400. The `Host` beside it is judged
 as one field line, its form not, as Kestrel judges it under the option, and an HTTP/1.0 request
 may leave it out. No browser sends an absolute-form target to an origin server,
 and a client that writes the target writes the `Host` too, so taking the target's over a differing
-`Host` reopens no rebinding. RFC 9113's SHOULD is followed by neither side: Kestrel hands the C#
+`Host` reopens no rebinding. RFC 9113's SHOULD is followed by no side: Kestrel hands the C#
 application `:authority` alone, and a page cannot write `host`, a forbidden header name.
 
 **A host is of 15.12's grammar**, a restriction of RFC 3986 §3.2.2 written in
@@ -217,8 +220,8 @@ Kestrel's refusals are its source, under [0004](0004-one-behaviour-in-every-lang
 where one side does Y and another can do Y and Z, every one does Y; the spec gives no platform as
 its reason. A host that is not of it is answered as its version of HTTP answers a malformed request:
 400, unmarked, over HTTP/1.1; over HTTP/2 the stream reset `PROTOCOL_ERROR`, no response written
-([RFC 9113 §8.1.1](https://www.rfc-editor.org/rfc/rfc9113#section-8.1.1)), whose response first is
-a MAY neither side takes.
+([RFC 9113 §8.1.1](https://www.rfc-editor.org/rfc/rfc9113#section-8.1.1)), whose response first is a
+MAY no side takes.
 
 **Every server takes `localhost`, a name that ends in `.localhost`, an IPv6 address in brackets and
 an `IPv4address`**, written as its list, the rebinding argument its reason: an IP literal names no
@@ -233,34 +236,33 @@ case-insensitively, in the form the field carries it.
 **`hosts` takes the hosts it lists besides those**, each a host without its port: `hosts: []` is the
 default alone, a list from a configuration that came empty meaning no more than none, and
 `hosts: ['*']` takes every host, an empty one and none, the opt-out the user chose for keeping the
-option's type on both sides, `readonly string[]` and `IReadOnlyList<string>`, and
-`spec/transports.json`'s schema. `*` is no host under 15.12's grammar, so the entry means nothing
-else. It takes a page that rebinds its name at the host's test, and makes no origin its own by a
-host it did not name, so the origin's test refuses that page, 403 `origin-refused`, told with its
-origin: every request a page makes without a token carries an `Origin`
-([Fetch §3.1](https://fetch.spec.whatwg.org/#origin-header)). A server's own origin is its request's
-authority only when that authority's host is taken by name, one every server takes or one `hosts`
-lists (spec 15.12): a name the server checked, never the one a rebound page's browser resolved (RFC
-6454 §5), as the `Host` test that defends against rebinding asks (Jackson et al., "Protecting
-Browsers from DNS Rebinding Attacks", 2007). Refusing `*` at start on a loopback or private address
-is not taken: it decides nothing for `0.0.0.0` and `::`, and behind the own-origin rule a rebound
-page reaches no exchange.
+option's type a list of strings on every side, `readonly string[]`, `IReadOnlyList<string>` and the
+Rust side's `Vec<String>`, and `spec/transports.json`'s schema. `*` is no host under 15.12's
+grammar, so the entry means nothing else. It takes a page that rebinds its name at the host's test,
+and makes no origin its own by a host it did not name, so the origin's test refuses that page, 403
+`origin-refused`, told with its origin: every request a page makes without a token carries an
+`Origin` ([Fetch §3.1](https://fetch.spec.whatwg.org/#origin-header)). A server's own origin is its
+request's authority only when that authority's host is taken by name, one every server takes or one
+`hosts` lists (spec 15.12): a name the server checked, never the one a rebound page's browser
+resolved (RFC 6454 §5), as the `Host` test that defends against rebinding asks (Jackson et al.,
+"Protecting Browsers from DNS Rebinding Attacks", 2007). Refusing `*` at start on a loopback or
+private address is not taken: it decides nothing for `0.0.0.0` and `::`, and behind the own-origin
+rule a rebound page reaches no exchange.
 
 **A server is refused as it is built a misconfigured list**, as Bead refuses a timeout of 0
-(`ProgrammerError` on the TypeScript side, `ArgumentException` on the C# side, naming the entry): a
-`hosts` entry with a port, an empty one, one that is no host (a Unicode IDN among them, which the
-field never carries), or `*` beside another; an `origins` entry that is `*`, its message saying that
-no origin wildcard exists and that taking every page is `hosts: ['*']`'s and an origin check's
-absence; one that is `null`, its message saying that a browser sends it for every page with no
-origin of its own, a sandboxed frame of any site among them, and to serve the page from an origin
+(`ProgrammerError` on the TypeScript and Rust sides, `ArgumentException` on the C# side, naming the
+entry): a `hosts` entry with a port, an empty one, one that is no host (a Unicode IDN among them,
+which the field never carries), or `*` beside another; an `origins` entry that is `*`, its message
+saying that no origin wildcard exists and that taking every page is `hosts: ['*']`'s and an origin
+check's absence; one that is `null`, its message saying that a browser sends it for every page with
+no origin of its own, a sandboxed frame of any site among them, and to serve the page from an origin
 and name that one (RFC 6454 §6.2; OWASP's HTML5 Security Cheat Sheet, CWE-942); or one that is not
-an origin as
-[RFC 6454 §6.2](https://www.rfc-editor.org/rfc/rfc6454#section-6.2) serializes it: its scheme and
-host in lower case, the host ASCII and of 15.12's grammar, no port where it is the scheme's default
-(`http` and `ws` 80, `https` and `wss` 443), nothing after. A scheme of another kind, an
-extension's or an app shell's, is taken as written, since a browser serializes it so. CORS's
-`Access-Control-Allow-Origin: *` is a response header, never a list a server compares against, and
-one no Bead server writes
+an origin as [RFC 6454 §6.2](https://www.rfc-editor.org/rfc/rfc6454#section-6.2) serializes it: its
+scheme and host in lower case, the host ASCII and of 15.12's grammar, no port where it is the
+scheme's default (`http` and `ws` 80, `https` and `wss` 443), nothing after. A scheme of another
+kind, an extension's or an app shell's, is taken as written, since a browser serializes it so.
+CORS's `Access-Control-Allow-Origin: *` is a response header, never a list a server compares
+against, and one no Bead server writes
 ([0027](0027-an-http-server-answers-cors-to-the-origins-it-names-and-to-no-other.md)).
 
 **403 `host-refused` stays**, on every listener, under TLS or not: 421 means "retry over a different
@@ -270,48 +272,50 @@ own 400, before the method; the origin after. `origins` never widens `hosts`: a 
 `origins` still asks the server by a host it takes.
 
 **A server listens on `localhost`, both loopbacks, unless it is given an address** (spec 15.12),
-on both transports of both sides, as Kestrel's `ListenLocalhost` does: `127.0.0.1` and `::1` on one
+on both transports of every side, as Kestrel's `ListenLocalhost` does: `127.0.0.1` and `::1` on one
 port, `localhost` a keyword the start takes and never resolves, as 13.4 takes it. It binds
 `127.0.0.1` first, on the port it is given or on one drawn there, then `::1` on that port, IPv6
 alone; a port another socket holds on either family fails the start, and a port drawn is drawn
 again, eight times at most. **Where the IPv6 loopback is absent**, its bind refused for want of the
 address or of the family, it listens on `127.0.0.1` alone **and reports `127.0.0.1`**, where Kestrel
 reports `localhost`: told, never silent. Both loopbacks leave the capture by the other family no
-address. The TypeScript HTTP transport calls the application's
-`createServer(listener, { address })` once per address it binds, `127.0.0.1` then `::1`, and a port
-drawn again listens again on the instances built; every instance is to be configured alike — a
-certificate rotated, an SNI context added, a timeout, a `tlsClientError` listener — since an
-application that keeps "the" server would reach one family. The C# side binds `IPAddress.Loopback`
-and `IPAddress.IPv6Loopback` itself in one Kestrel application, its port drawn by a socket when
-`FindOpenPort`, its fallback by rebuilding the application on `127.0.0.1` alone; never
-`ListenLocalhost`. A listener that couples transports, should a decision ever bring one, binds the
-pair once for those it serves, by this rule. The address keeps the network out, and `hosts` a page
-on the server's own machine that rebinds its name to the loopback, which the address cannot; neither
-stands for the other. A server the network reaches is one its application opened, `0.0.0.0` or
-`::`, and names its hosts.
+address. The TypeScript HTTP transport calls the application's `createServer(listener, { address })`
+once per address it binds, `127.0.0.1` then `::1`, and a port drawn again listens again on the
+instances built; every instance is to be configured alike — a certificate rotated, an SNI context
+added, a timeout, a `tlsClientError` listener — since an application that keeps "the" server would
+reach one family. The C# side binds `IPAddress.Loopback` and `IPAddress.IPv6Loopback` itself in one
+Kestrel application, its port drawn by a socket when `FindOpenPort`, its fallback by rebuilding the
+application on `127.0.0.1` alone; never `ListenLocalhost`. The Rust side binds the two itself, its
+port drawn as the C# side draws it, by one module both its servers share. A listener that couples
+transports, should a decision ever bring one, binds the pair once for those it serves, by this rule.
+The address keeps the network out, and `hosts` a page on the server's own machine that rebinds its
+name to the loopback, which the address cannot; neither stands for the other. A server the network
+reaches is one its application opened, `0.0.0.0` or `::`, and names its hosts.
 
 **An address given is `localhost` or an IP address, by RFC 3986's grammar**: `localhost`, exactly,
 no other case, no `localhost.` and no name under `.localhost`; or an `IPv4address` or an
 `IPv6address` of [RFC 3986 §3.2.2](https://www.rfc-editor.org/rfc/rfc3986#section-3.2.2), written
 bare, no brackets and no zone, and not IPv4-mapped, an IPv4 node's address being written as one
 ([RFC 4291 §2.5.5.2](https://www.rfc-editor.org/rfc/rfc4291#section-2.5.5.2)), which it listens on
-alone. Both sides test an IP address with the matchers this decision writes for a host, extracted
-to a bare form, `isIPAddress` and `IsIpAddress`, which stay predicates of IP literals, never `isIP`
-nor `TryParse` alone, so that `0` binds no interface on either. Any other is refused as the start
-begins, `ProgrammerError` and `ArgumentException`, "a server listens on an IP address, or on
-localhost, both loopbacks, not …", "write ::1, not [::1]" for a bracketed one, the transport ending
-closed as a failed start does. The wildcards are IP addresses, and taken.
+alone. Every side tests an IP address with the matchers this decision writes for a host, extracted
+to a bare form, `isIPAddress`, `IsIpAddress` and `is_ip_address`, which stay predicates of IP
+literals, never `isIP` nor `TryParse` alone, so that `0` binds no interface on any. Any other is
+refused as the start begins, `ProgrammerError` on the TypeScript and Rust sides and
+`ArgumentException` on the C# side, "a server listens on an IP address, or on localhost, both
+loopbacks, not …", "write ::1, not [::1]" for a bracketed one, the transport ending closed as a
+failed start does. The wildcards are IP addresses, and taken.
 
 **13.4's server half reads that address alone**: a server is on the loopback when its address is in
 127.0.0.0/8, is `::1`, or is `localhost`, both. The forms the URL parser normalizes, `127.1`,
 `127.0.0.1.` and the localhost names, stay what a client's URL may name; an IPv4-mapped address is
 refused, so 13.4 meets none.
 
-**Both C# clients race the address families of a name**, as RFC 8305 asks and as Node's clients and
-the browsers do: one connect resolves the name in the platform's order (RFC 6724), interleaves the
-families, starts an attempt every 250 ms until one connects, and cancels the rest, under the HTTP
-client's default handler and the WebSocket client's connect; a `Handler` the application gives keeps
-its own behaviour. The TypeScript side has it from Node.
+**The C# and Rust clients race the address families of a name**, as RFC 8305 asks and as Node's
+clients and the browsers do: one connect resolves the name in the platform's order (RFC 6724),
+interleaves the families, starts an attempt every 250 ms until one connects, and cancels the rest,
+under the HTTP client's default handler and the WebSocket client's connect; a `Handler` the
+application gives keeps its own behaviour; the Rust side's HTTP and WebSocket clients, which take no
+handler, by a connector of their own. The TypeScript side has it from Node.
 
 ## Consequences
 
@@ -325,7 +329,7 @@ writes its upstream's address as the `Host`, nginx's default `$proxy_host`, send
 it judges of its own
 ([0026](0026-a-server-tells-each-refusal-it-judges-and-a-client-names-the-one-it-reads.md)). The
 refusal is 403 with `bead-refusal: host-refused`, which `curl -i` and a browser's network panel
-show; both HTTP clients and both WebSocket clients, over `ws` and on the C# side, name it; the
+show; every side's HTTP client and WebSocket client, the TypeScript one over `ws`, name it; the
 server's `refusal` event carries the authority to add to `hosts`. A page's WebSocket reads none, a
 close 1006 and nothing more.
 
@@ -342,14 +346,14 @@ resolver that does not keep it local stays, stated in 15.12.
 **A container, or any server another machine reaches, says `0.0.0.0` or `::`**, and names its hosts:
 a container's loopback is its own, which a published port never reaches. A deployment that relies on
 listening on every interface without saying it meets a refused or reset connection from outside,
-never a Bead refusal, since no socket opens: both READMEs say it where they say how to start a
-server.
+never a Bead refusal, since no socket opens: the TypeScript and C# sides' READMEs say it where they
+say how to start a server.
 
 **A server on its defaults is secure by 13.4**, so a command of its own that presents a `JWT` goes;
 a proxy on the same machine that serves the network in the clear says `secure: false`, as one does
 behind any server it reaches on the loopback.
 
-**An address that is a name, or a form outside the grammar, fails the start**, on both sides.
+**An address that is a name, or a form outside the grammar, fails the start**, on every side.
 
 **A server on its defaults leaves no loopback port to another process**: no other process binds
 `[::1]:p` beside it, on Windows or Linux, under `SO_REUSEADDR` on Windows too, nor any wildcard on
@@ -369,26 +373,33 @@ factory that ignores the argument builds them alike.
 seconds a connect by `localhost`, against a server given `127.0.0.1` alone; every Bead client and
 every browser races.
 
-**The gate.** The cases of `spec/transports.json` that cite 15.12, played by both sides: the hosts
-every server takes, a list adding to them, `[]`, `*` and the origins it makes none of its own, an
-absolute-form target, over HTTP and at a WebSocket's address, and the forms a host is not, answered
-400 as HTTP answers them. A build refusal and HTTP/2 are no step: twin tests hold them, by the same
-sentence ([0004](0004-one-behaviour-in-every-language.md)), each side's `hosts and origins` tests
-for the predicate, the grammar and the build refusals, and the HTTP transport servers' tests over
-TLS for HTTP/2's `:authority` and its reset, which `docs/support.md` names among what no entry
-plays. The listening address has no step, every runner starting on `127.0.0.1`: twins hold it, each
-transport server's `listens on localhost when given no address, both loopbacks on one port, reached
-by 127.0.0.1, by [::1] and by localhost, reports localhost, and is secure there`, `refuses to start
-on localhost when another socket holds the other loopback’s port, ending closed`, `draws a port on
-localhost again when the IPv6 loopback holds the one drawn on IPv4`, `listens on 127.0.0.1 alone
-where the IPv6 loopback is absent, and reports 127.0.0.1`, `refuses to start on an address that is
-no bare IP address, ending closed` over the table of forms above, `localhost` taken, and `is secure
-on the IPv6 loopback or an address in 127.0.0.0/8, and not on a wildcard`; the TypeScript HTTP
-transport's `calls the application’s createServer once per address it binds, 127.0.0.1 then ::1 on
-localhost, each told its address`, held on the C# side, which builds no server of the
-application's, by `Serves_every_address_it_binds_by_one_configuration`; each side's `isIPAddress`
-and `IsIpAddress` over that table; each client's `connects by a name to a server that listens on
-one loopback family alone, whichever it is`; and the C# side's race, `HappyEyeballsTests`.
+**The gate.** The cases of `spec/transports.json` that cite 15.12, played by every side but where a
+case's `differs` excuses one by a platform row of `docs/support.md`, the C# side from an
+absolute-form target whose scheme is not in lower case among them: the hosts every server takes, a
+list adding to them, `[]`, `*` and the origins it makes none of its own, an absolute-form target,
+over HTTP and at a WebSocket's address, and the forms a host is not, answered 400 as HTTP answers
+them. A build refusal and HTTP/2 are no step: twin tests hold them, by the same sentence
+([0004](0004-one-behaviour-in-every-language.md)), each side's `hosts and origins` tests for the
+predicate, the grammar and the build refusals, the Rust side's in `judgement/hosts`, and the HTTP
+transport servers' tests over TLS for HTTP/2's `:authority` and its reset, which `docs/support.md`
+names among what no entry plays. The listening address has no step, every runner starting on
+`127.0.0.1`: twins hold it, each transport server's `listens on localhost when given no address,
+both loopbacks on one port, reached by 127.0.0.1, by [::1] and by localhost, reports localhost, and
+is secure there`, `refuses to start on localhost when another socket holds the other loopback’s
+port, ending closed`, `draws a port on localhost again when the IPv6 loopback holds the one drawn on
+IPv4`, `listens on 127.0.0.1 alone where the IPv6 loopback is absent, and reports 127.0.0.1`,
+`refuses to start on an address that is no bare IP address, ending closed` over the table of forms
+above, `localhost` taken, and `is secure on the IPv6 loopback or an address in 127.0.0.0/8, and not
+on a wildcard`, the Rust side holding the draw and the fallback once for both its servers, in the
+binding they share, by `draws_another_port_for_an_occupied_loopback_in_the_platform_bind_failure`
+and `falls_back_to_ipv4_only_for_an_absent_loopback_in_the_platform_bind_failure`; the TypeScript
+HTTP transport's `calls the application’s createServer once per address it binds, 127.0.0.1 then ::1
+on localhost, each told its address`, held on the C# and Rust sides, which build no server of the
+application's, by `Serves_every_address_it_binds_by_one_configuration` and
+`serves_every_address_it_binds_by_one_configuration`; each side's `isIPAddress`, `IsIpAddress` and
+`is_ip_address` over that table; each client's `connects by a name to a server that listens on one
+loopback family alone, whichever it is`; and the race, the C# side's `HappyEyeballsTests` and their
+Rust twins in `net/racing`.
 
 ## The Tenth Man
 

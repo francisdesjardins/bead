@@ -20,8 +20,8 @@ use crate::broker::participant::{BrokerParticipant, BrokerParticipantOptions, Br
 use crate::broker::server::{BrokerTransportServer, BrokerTransportServerOptions};
 use crate::clock::SharedClock;
 use crate::duration::{DurationRefusal, NEVER};
-use crate::errors::{Refusal, TransportError};
-use crate::router::types::TransportMessage;
+use crate::errors::{ProgrammerError, Refusal, TransportError};
+use crate::router::types::{RouterError, TransportMessage};
 use crate::testing::SteppingClock;
 use crate::transport::{
     ClientListener, ReadyState, RouterClientTransport, ServerTransport,
@@ -536,6 +536,25 @@ async fn refuses_to_send_a_credential_no_field_carries_or_what_is_no_envelope_ke
     );
     assert_eq!(client.ready_state(), ReadyState::Open, "kept");
 
+    // * a text is no envelope: refused before anything goes, its connection kept (spec 15.2)
+    let text = client
+        .send(TransportMessage {
+            is_text: true,
+            ..data(b"hi")
+        })
+        .expect_err("a text");
+
+    assert!(
+        matches!(&text, RouterError::Other(error) if error.downcast_ref::<ProgrammerError>().is_some()),
+        "a misuse: {text:?}"
+    );
+    assert_eq!(
+        text.to_string(),
+        "a broker connection carries envelopes, as bytes",
+        "said why"
+    );
+    assert_eq!(client.ready_state(), ReadyState::Open, "kept");
+
     // * not clean: a RESET, its server told unclean
     client
         .disconnect(&TransportClientDisconnectOptions {
@@ -557,7 +576,130 @@ async fn refuses_to_send_a_credential_no_field_carries_or_what_is_no_envelope_ke
         [(false, "type=BROKER;participant=client;ordinal=1".to_owned())],
         "told unclean"
     );
+
+    // * closed: its send a disconnection, its disconnect refused by its ready state (debugging 9.7)
+    let unsent = client.send(data(&[0xA1])).expect_err("closed");
+
+    assert!(
+        matches!(&unsent, RouterError::Disconnected(reason) if reason == "the transport client is closed, not open"),
+        "a disconnection: {unsent:?}"
+    );
+
+    let unclosed = client
+        .disconnect(&TransportClientDisconnectOptions::default())
+        .expect_err("closed");
+
+    assert!(
+        matches!(&unclosed, TransportError::ReadyState(refusal) if refusal.got() == ReadyState::Closed),
+        "a ready state's error: {unclosed:?}"
+    );
     pair.stop().await;
+}
+
+// what a send in a state gives: sent, its ready state's refusal or a disconnection
+fn sent_in(sent: Result<crate::transport::Sent, RouterError>) -> String {
+    match sent {
+        Ok(_) => "sent".to_owned(),
+        Err(RouterError::ReadyState(refusal)) => format!("ready state {}", refusal.got().name()),
+        Err(RouterError::Disconnected(reason)) => format!("disconnected: {reason}"),
+        Err(other) => format!("other: {other}"),
+    }
+}
+
+// debugging 9.7
+// * CLOSING is left out: its disconnect passes it within its call, closed as it returns, its CLOSE
+// posted to its participant and never awaited
+#[tokio::test]
+async fn refuses_a_send_by_its_ready_state_before_the_open_and_as_a_disconnection_after_it_in_each_state_it_holds()
+ {
+    let broker = broker();
+    let ada = participant_of(
+        &adapter_of(&broker, "ada"),
+        &BrokerParticipantOptions::default(),
+    );
+    let (peer, heard) = peer_of(&broker, ("acceptor", &[&["bead", "s", "interop"]])).await;
+    let client = ada
+        .client(&BrokerTransportClientOptions::default())
+        .expect("a client");
+    let mut told = Vec::new();
+
+    // never connected
+    told.push(("UNINITIALIZED", sent_in(client.send(data(&[0xA1])))));
+
+    // its OPEN unanswered
+    let refusing =
+        crate::testing::spawn(client.connect(&BrokerTransportClientConnectOptions::new("interop")));
+    let opener = opener_of(&heard).await;
+
+    assert_eq!(client.ready_state(), ReadyState::Connecting);
+    told.push(("CONNECTING", sent_in(client.send(data(&[0xA1])))));
+
+    // a connect its server refused: closed
+    publish_to(
+        &peer,
+        (
+            INBOX,
+            write_parcel(&Parcel {
+                opener,
+                sequence: 1,
+                status: Some(400),
+                ..Parcel::of(kinds::REFUSE)
+            })
+            .expect("written")
+            .to_vec(),
+        ),
+    )
+    .await;
+    refusing
+        .await
+        .expect("joined")
+        .expect_err("refused by its server");
+    told.push(("CLOSED, failed", sent_in(client.send(data(&[0xA1])))));
+
+    // a reconnection's attempt, its OPEN unanswered
+    locked(&heard.messages).clear();
+
+    let reconnecting = crate::testing::spawn(
+        client
+            .reconnect(&TransportClientReconnectOptions::default())
+            .expect("reconnecting"),
+    );
+    let opener = opener_of(&heard).await;
+
+    assert_eq!(client.ready_state(), ReadyState::Reconnecting);
+    told.push(("RECONNECTING", sent_in(client.send(data(&[0xA1])))));
+    publish_to(&peer, (INBOX, accept_of(opener))).await;
+    reconnecting.await.expect("joined").expect("reconnected");
+    told.push(("OPEN", sent_in(client.send(data(&[0xA1])))));
+
+    // closed by its own disconnect
+    client
+        .disconnect(&TransportClientDisconnectOptions::default())
+        .expect("open");
+    told.push(("CLOSED", sent_in(client.send(data(&[0xA1])))));
+
+    assert_eq!(
+        told,
+        [
+            ("UNINITIALIZED", "ready state UNINITIALIZED".to_owned()),
+            ("CONNECTING", "ready state CONNECTING".to_owned()),
+            (
+                "CLOSED, failed",
+                "disconnected: the transport client is closed, not open".to_owned()
+            ),
+            (
+                "RECONNECTING",
+                "disconnected: the transport client is reconnecting, not open".to_owned()
+            ),
+            ("OPEN", "sent".to_owned()),
+            (
+                "CLOSED",
+                "disconnected: the transport client is closed, not open".to_owned()
+            ),
+        ],
+        "each state's"
+    );
+    ada.stop().await;
 }
 
 #[tokio::test]

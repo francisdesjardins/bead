@@ -221,7 +221,7 @@ async fn a_notification_that_does_not_decode_fails_here_for_the_router_to_report
     let reports = locked(&pair.client_reports).clone();
     let failure = reports.iter().find_map(|error| match error {
         RouterError::Failure(failure) => Some(failure.clone()),
-        RouterError::Other(_) => None,
+        RouterError::ReadyState(_) | RouterError::Disconnected(_) | RouterError::Other(_) => None,
     });
     let failure = failure.expect("a failure reported");
 

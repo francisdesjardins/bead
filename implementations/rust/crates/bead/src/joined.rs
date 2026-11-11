@@ -58,6 +58,7 @@ impl JoinedInner {
             |error: RouterError| {
                 for heard in &listeners {
                     // ! a listener of errors that panics would loop: its panic is dropped
+                    // (spec 15.1)
                     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         heard.on_error(&error, connection_handle);
                     }))
@@ -375,11 +376,6 @@ impl ServerTransport for JoinedServerTransport {
         self.inner
             .owner_of(connection_handle)
             .is_some_and(|owner| owner.takes_procedure(connection_handle, address))
-    }
-
-    // * it starts nothing: an application starts each transport it joined, where it listens
-    fn start(&self) -> BoxFuture<Result<(), RouterError>> {
-        Box::pin(async { Ok(()) })
     }
 
     // every transport it joined, settled once all have, failing as the first that refused its stop

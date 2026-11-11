@@ -57,6 +57,8 @@
     <Compile Include="../Shared/JsonPayloads.cs" Link="JsonPayloads.cs" />
     <!-- the addresses a server listens on, and the forms it refuses, as the TypeScript side's tests hold them -->
     <Compile Include="../Shared/Addresses.cs" Link="Addresses.cs" />
+    <!-- what a client transport's send gives in each state, as the TypeScript side's sendRefusalOf reads it -->
+    <Compile Include="../Shared/SendRefusals.cs" Link="SendRefusals.cs" />
     <!-- the seeded mutations of the conformance files' bytes, the other sides' generator, and what a
          broker's parcel reader and writer hold of any bytes, which the broker-parcel fuzz target shares -->
     <Compile Include="../Shared/Mutations.cs" Link="Mutations.cs" />

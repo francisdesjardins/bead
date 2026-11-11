@@ -867,10 +867,9 @@ public sealed class BrokerParticipantTests
             reported.TrySetResult(reason);
         };
         await participant.Start();
-        adapter.Lose();
 
         // * each attempt is refused, and the wait before the next one is cut short
-        await adapter.Start();
+        await adapter.LoseThenStart();
         await cancelling.CancelAsync();
         Assert.Equal("the link of ada went down, and its reconnection ended: the reconnection was cancelled", (await reported.Task.WaitAsync(BrokerPair.Patience, Cancelled)).Message);
         Assert.False(participant.IsLinked);
@@ -920,8 +919,7 @@ public sealed class BrokerParticipantTests
         var reported = Hearing(participant);
 
         await participant.Start();
-        adapter.Lose();
-        await adapter.Start();
+        await adapter.LoseThenStart();
         await BrokerPair.Until(
             () =>
             {
@@ -1179,10 +1177,8 @@ public sealed class BrokerParticipantTests
 
         await throwing.Start();
         await tapping.Start();
-        ada.Lose();
-        await ada.Start();
-        bob.Lose();
-        await bob.Start();
+        await ada.LoseThenStart();
+        await bob.LoseThenStart();
         await BrokerPair.Until(
             () =>
             {
@@ -1455,6 +1451,36 @@ public sealed class BrokerParticipantTests
             return (message, "");
         }), told);
         Assert.Equal((0, ReadyState.Open, 1), (heard.Count, client.ReadyState, pair.Server.Clients.Count));
+    }
+
+    // spec 15.1
+    [Fact]
+    public async Task Drops_what_an_error_listener_throws_the_next_error_listener_told_and_the_participant_goes_on()
+    {
+        await using var pair = await BrokerPair.Of();
+        var tester = pair.Broker.Adapter(new MemoryBrokerAdapterOptions { Id = "tester" });
+        var heard = new ConcurrentQueue<string>();
+
+        pair.ClientParticipant.Error += (_) =>
+        {
+            throw new InvalidOperationException("an error listener that throws");
+        };
+        pair.ClientParticipant.Error += (reason) =>
+        {
+            heard.Enqueue(reason.Message);
+        };
+        await tester.Start();
+
+        // a report of its own: a message that is no parcel
+        await tester.Publish(new BrokerPublication { Topic = ["bead", "i", "client"], Payload = (byte[])[0xB1] });
+        await pair.Scheduler.WhenIdle();
+
+        // * it takes the next parcel: the ACCEPT that opens its connection
+        await using var client = await pair.Connect();
+
+        // the report told the next listener once, the throw of the first told to none
+        Assert.Equal(ReadyState.Open, client.ReadyState);
+        Assert.Equal(["a message to the inbox of client is no parcel: 1 bytes, under a parcel's 28"], heard);
     }
 
     // spec 15.12.17, 15.23.5

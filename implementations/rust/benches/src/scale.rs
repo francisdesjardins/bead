@@ -89,10 +89,6 @@ impl ServerTransport for Stage {
         Some(Arc::clone(&self.clock))
     }
 
-    fn start(&self) -> BoxFuture<Result<(), RouterError>> {
-        Box::pin(async { Ok(()) })
-    }
-
     fn stop(&self) -> BoxFuture<Result<(), RouterError>> {
         Box::pin(async { Ok(()) })
     }
