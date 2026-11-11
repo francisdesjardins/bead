@@ -3362,6 +3362,42 @@ test.describe('broker participant', () => {
     await clients[Symbol.asyncDispose]();
   });
 
+  test('reports a name its broker refuses as it links anew, leaves it unheld, and keeps its link (spec 15.21)', async () => {
+    const broker = createMemoryBroker();
+    const inner = broker.adapter({ id: 'server' });
+    let asked = 0;
+    const refusing = Object.assign(Object.create(inner) as IBrokerAdapter, {
+      subscribe: (topic: BrokerTopic, options?: Parameters<IBrokerAdapter['subscribe']>[1]) => {
+        // * its name served at its first link, refused at the next
+        if (topic[1] === 's') {
+          asked += 1;
+
+          if (asked > 1) {
+            return Promise.reject(
+              new GenericError('its broker refused the subscription to bead/s/interop: 0x87')
+            );
+          }
+        }
+
+        return inner.subscribe(topic, options);
+      },
+    });
+    const participant = createBrokerParticipant({ adapter: refusing, reconnect: { delay: 0 } });
+    const reported = hearing(participant);
+
+    await participant.transportServer({ names: ['interop'] }).start();
+    expect([...participant.names], 'served').toEqual(['interop']);
+    inner.lose();
+    await until(() => {
+      return reported.length > 0;
+    }, 'its refusal reported');
+    expect(wordsOf(reported), 'reported').toEqual([
+      'the name interop is not served: its broker refused its subscription, its broker refused the subscription to bead/s/interop: 0x87',
+    ]);
+    expect([participant.isLinked, [...participant.names]], 'linked, unheld').toEqual([true, []]);
+    await participant.stop();
+  });
+
   test('reports a name whose adapter throws as it is asked to let it go at its stop, as one that refuses, and stops all the same (spec 15.21)', async () => {
     const broker = createMemoryBroker();
     const letting = lettingOf(broker.adapter({ id: 'server' }));
