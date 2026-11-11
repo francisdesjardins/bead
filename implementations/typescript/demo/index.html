@@ -7,65 +7,87 @@
     <link rel="canonical" href="https://francisdesjardins.ca/playground/bead/" />
     <meta
       name="description"
-      content="Bead, a binary call protocol in TypeScript and C#, tried in the page: calls, subscriptions at the client's pace, transfers, cancellation, payload rules, and the same sign-up over HTTP and JSON with its OpenAPI document."
+      content="Bead, a binary call protocol, one surface in TypeScript, C# and Rust, tried in the page: calls, subscriptions at the client's pace, transfers, cancellation, payload rules, and the same sign-up over HTTP and JSON with its OpenAPI document."
     />
     <link rel="stylesheet" href="penumbra/tokens.system.css" />
     <link rel="stylesheet" href="penumbra/tokens.skin.base.css" />
     <style>
-      /* the demo's skin over penumbra's two sheets: its typefaces, its brand, and the colours it
-         draws with, each declared here on purpose */
+      /* the demo's skin over penumbra's two sheets: francisdesjardins.ca's brand, the eleven
+         declarations of its tokens.skin.css and the violet neutrals it paints with, and the colours
+         the demo draws with of its own; the faces are the site's, on the system's fallbacks, since
+         the page fetches no font file */
       :root {
         color-scheme: light dark;
-        --app-font-body: system-ui, -apple-system, 'Segoe UI', sans-serif;
-        --app-font-mono: ui-monospace, 'Cascadia Mono', 'SF Mono', Consolas, monospace;
+        --app-font-display: 'Newsreader', 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
+        --app-font-body:
+          'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
+        --app-font-mono: 'Geist Mono', ui-monospace, 'Cascadia Code', 'SF Mono', Menlo, monospace;
         /* a board of rows reads denser than a page of prose */
         --app-lh-body: 1.45;
 
-        --app-flame: #0b6e5a;
-        --app-flame-wash: rgb(11 110 90 / 0.1);
-        --app-accent: #0b6e5a;
-        --app-ring: #0b6e5a;
+        --app-primary: #c13584;
+        --app-primary-ink: #ffffff;
+        --app-primary-hover: #9d2a6b;
+        --app-accent: #c13584;
+        --app-flame: #c13584;
+        --app-flame-wash: rgb(193 53 132 / 0.1);
+        --app-ring: #ff69b4;
+        --app-glow: 0 0 0 1px rgb(255 105 180 / 0.55), 0 0 32px -10px rgb(255 105 180 / 0.4);
 
-        --app-bg: #eef2f0;
-        --app-paper: #ffffff;
-        --app-text: #14201c;
-        --app-text-secondary: #5d6b66;
-        --app-divider: #dce3e0;
+        --app-bg: #f5f2f8;
+        --app-paper: #fdfcfe;
+        --app-text: #17111d;
+        --app-text-secondary: #4a4055;
+        --app-text-tertiary: #6d6278;
+        --app-divider: rgb(23 17 29 / 0.12);
         --app-error: #b91c1c;
-        --app-ok: #15803d;
-        --app-ok-wash: rgb(21 128 61 / 0.12);
-        --app-warn: #a16207;
-        --app-warn-wash: rgb(161 98 7 / 0.12);
+        --app-ok: #047857;
+        --app-ok-wash: rgb(4 120 87 / 0.1);
+        --app-info: #0369a1;
+        --app-warn: #92400e;
+        --app-warn-wash: rgb(146 64 14 / 0.1);
 
-        /* the demo's own: the ground of what is code, a refusal's wash, and a write's mark */
-        --raised: #f6f8f7;
+        /* the demo's own: the ground of what is code, a refusal's wash, a write's mark, and the
+           shadow the wire's sheet casts over the page */
+        --raised: #f1ecf5;
         --bad-soft: rgb(185 28 28 / 0.1);
         --write: #b4460f;
+        --sheet-shadow: 0 -8px 24px rgb(23 17 29 / 0.12);
         /* code reads a step under the body, between penumbra's two smallest */
         --text-code: 0.75rem;
+        /* what a finger is sure to hit, on a phone */
+        --touch: 44px;
       }
 
       @media (prefers-color-scheme: dark) {
         :root {
-          --app-flame: #3cc7a6;
-          --app-flame-wash: rgb(60 199 166 / 0.13);
-          --app-accent: #3cc7a6;
-          --app-ring: #3cc7a6;
+          /* the light fuchsia cannot carry white: its ink goes dark, its hover brightens */
+          --app-primary: #ff8bc4;
+          --app-primary-ink: #3d0b28;
+          --app-primary-hover: #ffaed5;
+          --app-accent: #ff8bc4;
+          --app-flame: #ff8bc4;
+          --app-flame-wash: rgb(255 139 196 / 0.14);
+          --app-ring: #ffaed5;
+          --app-glow: 0 0 0 1px rgb(255 174 213 / 0.5), 0 0 32px -8px rgb(255 174 213 / 0.35);
 
-          --app-bg: #0b100e;
-          --app-paper: #131b18;
-          --app-text: #e2ebe7;
-          --app-text-secondary: #93a39d;
-          --app-divider: #25302c;
+          --app-bg: #0c0910;
+          --app-paper: #15111c;
+          --app-text: #f2ecf5;
+          --app-text-secondary: #b2a7bf;
+          --app-text-tertiary: #8d8199;
+          --app-divider: rgb(242 236 245 / 0.14);
           --app-error: #f87171;
-          --app-ok: #4ade80;
-          --app-ok-wash: rgb(74 222 128 / 0.12);
-          --app-warn: #facc15;
-          --app-warn-wash: rgb(250 204 21 / 0.12);
+          --app-ok: #34d399;
+          --app-ok-wash: rgb(52 211 153 / 0.14);
+          --app-info: #38bdf8;
+          --app-warn: #fbbf24;
+          --app-warn-wash: rgb(251 191 36 / 0.14);
 
-          --raised: #18221e;
+          --raised: #1c1625;
           --bad-soft: rgb(248 113 113 / 0.12);
           --write: #f0a45b;
+          --sheet-shadow: 0 -8px 24px rgb(0 0 0 / 0.5);
         }
       }
 
@@ -78,7 +100,7 @@
         background: var(--app-bg);
         color: var(--app-text);
         /* ! on the body, never the root: penumbra's scale is in rem, which the root's size sets */
-        font: var(--app-text-sm) / var(--app-lh-body) var(--app-font-body);
+        font: var(--app-text-md) / var(--app-lh-body) var(--app-font-body);
       }
 
       /* served as files alone, the page has its worker and no server: what needs one is not shown */
@@ -101,6 +123,10 @@
         color: var(--app-accent);
       }
 
+      a:hover {
+        color: var(--app-text);
+      }
+
       code {
         font: var(--text-code) var(--app-font-mono);
         overflow-wrap: anywhere;
@@ -111,56 +137,61 @@
         overflow-wrap: anywhere;
       }
 
-      /* ── the bar: what this is, how it is connected, and who ─────────────── */
+      /* read by a screen reader, never shown */
+      .unseen {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+      }
+
+      /* ── the bar: where it comes from, how it is connected, who, and the wire ─ */
 
       .topbar {
-        display: flex;
-        flex-wrap: wrap;
-        align-items: center;
-        gap: var(--app-space-3) var(--app-space-5);
-        padding: var(--app-space-3) var(--app-space-4);
         border-bottom: 1px solid var(--app-divider);
         background: var(--app-paper);
       }
 
-      .brand {
-        display: grid;
-        /* a hairline between the way back and the title */
-        gap: 1px;
-        margin-right: auto;
-      }
-
-      /* the way back to the site, and the way to the code */
-      .ways {
+      .topbar-inner {
         display: flex;
-        gap: var(--app-space-3);
-        font-size: var(--text-code);
+        flex-wrap: wrap;
+        align-items: center;
+        gap: var(--app-space-3) var(--app-space-6);
+        max-width: 1360px;
+        margin: 0 auto;
+        padding: var(--app-space-3) max(var(--app-space-4), 3vw);
       }
 
-      .ways a {
+      .brand {
+        display: flex;
+        flex: 1 1 auto;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: var(--app-space-1) var(--app-space-3);
+      }
+
+      .back {
+        font-size: var(--app-text-sm);
         text-decoration: none;
       }
 
-      h1 {
-        font-size: var(--app-text-base);
-        font-weight: 650;
-        letter-spacing: var(--app-tracking-snug);
+      .wordmark {
+        font: 600 var(--app-text-lg) / var(--app-lh-tight) var(--app-font-display);
+        letter-spacing: -0.02em;
       }
 
-      h1 span {
-        margin-left: var(--app-space-1);
-        color: var(--app-text-secondary);
+      .tag {
+        color: var(--app-text-tertiary);
         font-size: var(--app-text-sm);
-        font-weight: 400;
-        letter-spacing: 0;
       }
 
+      /* the transports, a segmented control: one a link, the one in use marked */
       .transports {
         display: flex;
-        gap: var(--app-space-1);
-        /* the pill's inset, a hair inside its edge */
+        gap: 2px;
         padding: 3px;
-        border: 1px solid var(--app-divider);
         border-radius: var(--app-radius-pill);
         background: var(--raised);
       }
@@ -170,11 +201,15 @@
       }
 
       .transports a {
-        padding: 3px var(--app-space-3);
+        display: inline-grid;
+        place-items: center;
+        min-height: 36px;
+        padding: 0 var(--app-space-3);
         border-radius: var(--app-radius-pill);
         color: var(--app-text-secondary);
-        font-weight: 550;
+        font-size: var(--app-text-sm);
         text-decoration: none;
+        white-space: nowrap;
       }
 
       .transports a:hover {
@@ -183,48 +218,35 @@
 
       .transports a[aria-current] {
         background: var(--app-paper);
-        color: var(--app-accent);
-        box-shadow: 0 0 0 1px var(--app-divider);
+        color: var(--app-text);
+        font-weight: 600;
+        box-shadow: 0 1px 2px rgb(23 17 29 / 0.08);
       }
 
       .status {
         display: flex;
         flex-wrap: wrap;
-        gap: var(--app-space-2);
-      }
-
-      .status div {
-        display: flex;
         align-items: center;
-        gap: var(--app-space-2);
-        min-width: 0;
-        padding: 3px var(--app-space-3);
-        border: 1px solid var(--app-divider);
-        border-radius: var(--app-radius-pill);
-        background: var(--raised);
+        gap: var(--app-space-2) var(--app-space-3);
+        font-size: var(--app-text-sm);
       }
 
-      .status dt {
+      /* a connection says how it stands by a light, as a status bar does; its whole sentence is
+         its title */
+      #connection {
         color: var(--app-text-secondary);
-        font-size: var(--app-text-xs);
-        letter-spacing: 0.06em;
-        text-transform: uppercase;
+        white-space: nowrap;
       }
 
-      .status dd {
-        overflow-wrap: anywhere;
-      }
-
-      /* a connection says how it stands by a light, as a status bar does */
       #connection::before {
         content: '';
         display: inline-block;
-        width: 7px;
-        height: 7px;
+        width: 8px;
+        height: 8px;
         margin-right: var(--app-space-2);
         border-radius: 50%;
         background: var(--app-warn);
-        vertical-align: 1px;
+        vertical-align: 0;
       }
 
       #connection[data-state='open']::before {
@@ -235,11 +257,110 @@
         background: var(--app-error);
       }
 
+      /* who the calls are made as, by a role; the session's detail is its title */
+      #identity {
+        padding: 3px var(--app-space-3);
+        border-radius: var(--app-radius-pill);
+        background: var(--app-flame-wash);
+        color: var(--app-accent);
+        font-weight: 600;
+        white-space: nowrap;
+      }
+
+      #identity[data-role='none'] {
+        background: var(--raised);
+        color: var(--app-text-secondary);
+      }
+
+      /* how many envelopes crossed, on what opens the wire */
+      .count {
+        min-width: 1.75em;
+        padding: 1px 7px;
+        border-radius: var(--app-radius-pill);
+        background: var(--app-primary);
+        color: var(--app-primary-ink);
+        font: 500 var(--text-code) var(--app-font-mono);
+        font-variant-numeric: tabular-nums;
+        text-align: center;
+      }
+
+      button.wire-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--app-space-2);
+        min-height: 36px;
+        font-size: var(--app-text-sm);
+      }
+
+      /* ── the controls: a button, a field, a tab ─────────────────────────── */
+
+      button {
+        min-height: var(--touch);
+        padding: 0 var(--app-space-4);
+        border: 1px solid var(--app-divider);
+        border-radius: var(--app-radius-md);
+        background: var(--app-paper);
+        color: var(--app-text);
+        font: inherit;
+        font-weight: 500;
+        text-align: left;
+        cursor: pointer;
+        transition:
+          border-color var(--app-quick) var(--app-ease),
+          background var(--app-quick) var(--app-ease);
+      }
+
+      button:hover {
+        border-color: var(--app-accent);
+      }
+
+      button:focus-visible,
+      a:focus-visible,
+      pre:focus-visible,
+      summary:focus-visible,
+      [role='tabpanel']:focus-visible,
+      .field input:focus-visible,
+      .check input:focus-visible,
+      .unbound:focus-visible {
+        outline: 2px solid var(--app-ring);
+        outline-offset: 2px;
+      }
+
+      /* a write, refused without the permission, marked by a dot before its words */
+      button.write::before {
+        content: '';
+        display: inline-block;
+        width: 7px;
+        height: 7px;
+        margin-right: var(--app-space-2);
+        border-radius: var(--app-radius-pill);
+        background: var(--write);
+        vertical-align: 1px;
+      }
+
+      .buttons {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--app-space-2);
+      }
+
+      /* a phone's buttons, two a row, each as wide as the other */
+      @media (max-width: 600px) {
+        .buttons {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .buttons button {
+          text-align: center;
+        }
+      }
+
       /* ── the sign-up: a field a row, its violations under it ─────────────── */
 
       .form {
         display: grid;
-        gap: var(--app-space-2);
+        gap: var(--app-space-3);
       }
 
       .field {
@@ -254,20 +375,13 @@
 
       .field input {
         width: 100%;
-        min-height: 30px;
+        min-height: 36px;
         padding: var(--app-space-1) var(--app-space-2);
         border: 1px solid var(--app-divider);
         border-radius: var(--app-radius-md);
         background: var(--raised);
         color: var(--app-text);
         font: var(--app-text-sm) var(--app-font-mono);
-      }
-
-      .field input:focus-visible,
-      .check input:focus-visible,
-      .unbound:focus-visible {
-        outline: 2px solid var(--app-ring);
-        outline-offset: 2px;
       }
 
       .field input[aria-invalid='true'] {
@@ -314,13 +428,14 @@
         display: flex;
         align-items: center;
         gap: var(--app-space-2);
+        min-height: var(--touch);
         font-weight: 600;
         cursor: pointer;
       }
 
       .check input {
-        width: 15px;
-        height: 15px;
+        width: 18px;
+        height: 18px;
         margin: 0;
         accent-color: var(--app-accent);
       }
@@ -333,52 +448,74 @@
       /* a phone zooms into a field whose text is smaller than 16px */
       @media (max-width: 600px) {
         .field input {
+          min-height: var(--touch);
           font-size: 16px;
         }
       }
 
-      /* ── the board: the scenes, one a tab, and the logs beside them ──────── */
+      /* ── the page: the intro, the scenes one a tab, and the wire beside them ─ */
 
-      .dashboard {
+      .layout {
         display: grid;
-        gap: var(--app-space-3);
-        max-width: 760px;
+        grid-template-columns: minmax(0, 1fr);
+        gap: var(--app-space-8);
+        align-items: start;
+        max-width: 1360px;
         margin: 0 auto;
-        padding: var(--app-space-3) var(--app-space-4) var(--app-space-4);
+        padding: var(--app-space-10) max(var(--app-space-4), 3vw) var(--app-space-14);
       }
 
-      .scenes,
+      .scenes {
+        display: grid;
+        align-content: start;
+        gap: var(--app-space-6);
+        width: 100%;
+        max-width: 860px;
+        min-width: 0;
+        margin: 0 auto;
+      }
+
+      .intro {
+        display: grid;
+        gap: var(--app-space-3);
+      }
+
+      h1 {
+        font: 500 2.5rem / 1.12 var(--app-font-display);
+        letter-spacing: var(--app-tracking-tight);
+        text-wrap: balance;
+      }
+
+      .intro p {
+        max-width: 62ch;
+        color: var(--app-text-secondary);
+        font-size: 1.0625rem;
+        line-height: 1.6;
+      }
+
       .scene,
       .column {
         display: grid;
         align-content: start;
-        gap: var(--app-space-3);
+        gap: var(--app-space-4);
         min-width: 0;
-      }
-
-      /* a card is as tall as what it holds, never as its neighbour */
-      .scene {
-        align-items: start;
       }
 
       .scene[hidden] {
         display: none;
       }
 
-      .intro {
-        max-width: var(--app-measure);
-        font-size: var(--app-text-md);
-      }
-
+      /* the scenes' tabs, on one line: past a phone's width, they scroll within it */
       .scene-tabs {
         display: flex;
-        flex-wrap: wrap;
         gap: var(--app-space-1);
+        overflow-x: auto;
         border-bottom: 1px solid var(--app-divider);
+        scrollbar-width: thin;
       }
 
       .scene-tabs [role='tab'] {
-        min-height: var(--app-space-8);
+        flex: none;
         /* the selected tab's bar lies on the list's hairline */
         margin-bottom: -1px;
         padding: 0 var(--app-space-3);
@@ -387,32 +524,26 @@
         border-radius: var(--app-radius-md) var(--app-radius-md) 0 0;
         background: none;
         color: var(--app-text-secondary);
-        font-weight: 600;
-      }
-
-      /* a phone's width holds the five tabs on one line */
-      @media (max-width: 600px) {
-        .scene-tabs [role='tab'] {
-          padding: 0 var(--app-space-2);
-        }
+        font-weight: 500;
+        white-space: nowrap;
       }
 
       .scene-tabs [role='tab']:hover {
-        border-color: transparent;
         background: var(--app-flame-wash);
         color: var(--app-text);
       }
 
       .scene-tabs [role='tab'][aria-selected='true'] {
         border-bottom-color: var(--app-accent);
-        color: var(--app-accent);
+        color: var(--app-text);
+        font-weight: 600;
       }
 
-      /* what to try first, in its order */
+      /* what to try first, in its order: each done ticked, the one to do next marked */
       .steps {
         display: flex;
         flex-wrap: wrap;
-        gap: var(--app-space-1) var(--app-space-5);
+        gap: var(--app-space-2) var(--app-space-5);
         padding: 0;
         color: var(--app-text-secondary);
         list-style: none;
@@ -420,118 +551,115 @@
       }
 
       .steps li {
+        display: flex;
+        align-items: center;
+        gap: var(--app-space-2);
         counter-increment: step;
       }
 
       .steps li::before {
         content: counter(step);
-        display: inline-grid;
+        display: grid;
+        flex: none;
         place-items: center;
-        width: 18px;
-        height: 18px;
-        margin-right: var(--app-space-2);
+        width: 22px;
+        height: 22px;
         border-radius: var(--app-radius-pill);
-        background: var(--app-flame-wash);
-        color: var(--app-accent);
-        font-size: var(--app-text-xs);
-        font-weight: 650;
+        background: var(--raised);
+        color: var(--app-text-secondary);
+        font: 500 var(--text-code) var(--app-font-mono);
       }
 
-      /* a scene of two: what to do, and what it does */
-      @media (min-width: 900px) {
-        .scene.split {
-          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-        }
+      .steps li[aria-current] {
+        color: var(--app-text);
+      }
 
-        .scene.split > .steps {
-          grid-column: 1 / -1;
-        }
+      .steps li[aria-current]::before {
+        background: var(--app-primary);
+        color: var(--app-primary-ink);
+      }
+
+      .steps li[data-done]::before {
+        content: '✓';
+        background: var(--app-ok-wash);
+        color: var(--app-ok);
       }
 
       .card {
         display: grid;
-        gap: var(--app-space-2);
+        align-content: start;
+        gap: var(--app-space-3);
         min-width: 0;
-        padding: var(--app-space-3);
+        padding: var(--app-space-5) var(--app-space-6);
         border: 1px solid var(--app-divider);
         border-radius: var(--app-radius-lg);
         background: var(--app-paper);
-        box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
+      }
+
+      /* a scene's card: what to do, and beside it what it did */
+      .scene-card {
+        gap: var(--app-space-4) var(--app-space-8);
+      }
+
+      @media (min-width: 700px) {
+        .scene-card {
+          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        }
+      }
+
+      .card-do {
+        display: grid;
+        align-content: start;
+        gap: var(--app-space-3);
+        min-width: 0;
+      }
+
+      .card-result {
+        display: grid;
+        align-content: start;
+        gap: var(--app-space-2);
+        min-width: 0;
+        padding: var(--app-space-4);
+        border-radius: var(--app-radius-md);
+        background: var(--raised);
       }
 
       h2 {
-        color: var(--app-text-secondary);
+        font-size: 1.0625rem;
+        font-weight: 600;
+        line-height: var(--app-lh-snug);
+      }
+
+      .label {
+        color: var(--app-text-tertiary);
         font-size: var(--app-text-xs);
-        font-weight: 650;
-        letter-spacing: 0.08em;
+        font-weight: 500;
+        letter-spacing: var(--app-tracking-label);
         text-transform: uppercase;
       }
 
-      .buttons {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: var(--app-space-2);
-      }
-
-      button {
-        min-height: 30px;
-        padding: var(--app-space-1) var(--app-space-3);
-        border: 1px solid var(--app-divider);
-        border-radius: var(--app-radius-md);
-        background: var(--raised);
-        color: var(--app-text);
-        font: inherit;
-        font-weight: 550;
-        text-align: left;
-        cursor: pointer;
-        transition:
-          border-color var(--app-quick) var(--app-ease),
-          background var(--app-quick) var(--app-ease);
-      }
-
-      button:hover {
-        border-color: var(--app-accent);
-        background: var(--app-flame-wash);
-      }
-
-      button:focus-visible,
-      .transports a:focus-visible,
-      pre:focus-visible {
-        outline: 2px solid var(--app-ring);
-        outline-offset: 2px;
-      }
-
-      /* a write, refused without the permission */
-      button.write {
-        box-shadow: inset 3px 0 0 var(--write);
-      }
-
-      #result {
-        min-height: 38px;
-        font-size: var(--app-text-md);
+      /* what a scene's last call said */
+      .outcome {
         font-weight: 500;
         overflow-wrap: anywhere;
       }
 
-      .metric {
-        display: flex;
-        align-items: baseline;
-        gap: var(--app-space-3);
+      .detail {
+        color: var(--app-text-tertiary);
+        font: var(--text-code) / 1.5 var(--app-font-mono);
+        overflow-wrap: anywhere;
+      }
+
+      #identity-who {
+        font-size: var(--app-text-base);
+        font-weight: 500;
+        overflow-wrap: anywhere;
       }
 
       #counter {
         color: var(--app-accent);
-        font: 650 var(--app-text-2xl) / var(--app-lh-tight) var(--app-font-mono);
+        font: 500 3.25rem / 1 var(--app-font-display);
         font-variant-numeric: tabular-nums;
-      }
-
-      .label {
-        margin-right: var(--app-space-1);
-        color: var(--app-text-secondary);
-        font-size: var(--app-text-xs);
-        font-weight: 650;
-        letter-spacing: 0.06em;
-        text-transform: uppercase;
       }
 
       /* a glyph's 1448 pixels a side, shown small: they cross as a transfer either way */
@@ -539,13 +667,14 @@
         display: flex;
         align-items: center;
         gap: var(--app-space-4);
+        min-width: 0;
       }
 
       .glyph canvas {
         width: 112px;
         height: 112px;
         flex: none;
-        border-radius: var(--app-radius-lg);
+        border-radius: var(--app-radius-md);
         box-shadow: 0 0 0 1px var(--app-divider);
       }
 
@@ -553,29 +682,28 @@
         display: none;
       }
 
-      .facts {
-        display: grid;
-        grid-template-columns: max-content minmax(0, 1fr);
-        gap: var(--app-space-2) var(--app-space-3);
-        align-items: baseline;
+      /* ── the server: its verdict, four figures, then what folds ──────────── */
+
+      .server-head {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: var(--app-space-2) var(--app-space-4);
       }
 
-      .facts dt {
-        color: var(--app-text-secondary);
-      }
-
-      .facts dd {
-        overflow-wrap: anywhere;
+      .server-head h2 {
+        font: 500 2.125rem / var(--app-lh-tight) var(--app-font-display);
+        letter-spacing: -0.02em;
       }
 
       /* the verdict, coloured as health checks are read */
       #health {
-        justify-self: start;
-        padding: 1px var(--app-space-2);
+        padding: var(--app-space-1) var(--app-space-3);
         border-radius: var(--app-radius-pill);
         background: var(--app-warn-wash);
         color: var(--app-warn);
-        font-weight: 650;
+        font-weight: 600;
+        overflow-wrap: anywhere;
       }
 
       #health[data-status='pass'] {
@@ -589,6 +717,80 @@
         color: var(--app-error);
       }
 
+      .figures {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: var(--app-space-3);
+      }
+
+      @media (max-width: 760px) {
+        .figures {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+
+      .figure {
+        display: grid;
+        align-content: start;
+        gap: var(--app-space-1);
+        min-width: 0;
+        padding: var(--app-space-4);
+        border: 1px solid var(--app-divider);
+        border-radius: var(--app-radius-lg);
+        background: var(--app-paper);
+      }
+
+      .figure dt {
+        color: var(--app-text-tertiary);
+        font-size: var(--app-text-xs);
+        letter-spacing: var(--app-tracking-label);
+        text-transform: uppercase;
+      }
+
+      .figure .value {
+        font: 500 2.125rem / 1 var(--app-font-display);
+        font-variant-numeric: tabular-nums;
+        overflow-wrap: anywhere;
+      }
+
+      .figure .note {
+        font-size: var(--app-text-sm);
+      }
+
+      /* what folds: each a card, its summary what it holds */
+      .fold {
+        min-width: 0;
+        border: 1px solid var(--app-divider);
+        border-radius: var(--app-radius-lg);
+        background: var(--app-paper);
+      }
+
+      .fold summary {
+        display: flex;
+        align-items: center;
+        gap: var(--app-space-2);
+        min-height: var(--touch);
+        padding: var(--app-space-2) var(--app-space-5);
+        font-weight: 500;
+        cursor: pointer;
+      }
+
+      /* a flex summary loses its marker: the fold draws its own */
+      .fold summary::before {
+        content: '▸';
+        color: var(--app-text-tertiary);
+      }
+
+      .fold[open] summary::before {
+        content: '▾';
+      }
+
+      .fold-body {
+        display: grid;
+        gap: var(--app-space-3);
+        padding: 0 var(--app-space-5) var(--app-space-4);
+      }
+
       .gauges {
         display: grid;
         gap: var(--app-space-2);
@@ -598,7 +800,7 @@
 
       .gauges li {
         display: grid;
-        grid-template-columns: 70px minmax(0, 1fr);
+        grid-template-columns: 80px minmax(0, 1fr);
         gap: var(--app-space-2);
         align-items: baseline;
       }
@@ -638,7 +840,7 @@
 
       /* a procedure's name is longer than a layer's */
       .metrics li {
-        grid-template-columns: 84px minmax(0, 1fr);
+        grid-template-columns: 96px minmax(0, 1fr);
       }
 
       /* ── what is code: a document, an exchange, an exposition, a file ───── */
@@ -656,18 +858,9 @@
         font: var(--app-text-xs) / 1.5 var(--app-font-mono);
       }
 
-      .exposition {
-        min-width: 0;
-      }
-
-      .exposition summary {
-        color: var(--app-text-secondary);
-        font-weight: 600;
-        cursor: pointer;
-      }
-
       .exposition pre {
-        margin-top: var(--app-space-2);
+        max-height: 60vh;
+        margin: 0 var(--app-space-5) var(--app-space-4);
       }
 
       /* ── the two sides: one role a tab, its two files side by side ──────── */
@@ -679,18 +872,23 @@
       }
 
       .sides-tabs [role='tab'] {
-        min-height: 0;
-        padding: var(--app-space-1) var(--app-space-3);
-        border: 1px solid var(--app-divider);
+        min-height: 36px;
+        padding: 0 var(--app-space-3);
         border-radius: var(--app-radius-pill);
         background: var(--raised);
         color: var(--app-text-secondary);
-        font-weight: 600;
+        font-weight: 500;
       }
 
       .sides-tabs [role='tab'][aria-selected='true'] {
         border-color: var(--app-accent);
-        color: var(--app-accent);
+        color: var(--app-text);
+      }
+
+      @media (max-width: 600px) {
+        .sides-tabs [role='tab'] {
+          min-height: var(--touch);
+        }
       }
 
       .sides {
@@ -711,7 +909,7 @@
         font: var(--app-text-xs) / var(--app-lh-snug) var(--app-font-mono);
       }
 
-      /* a file is the one scroll of its own a scene keeps, beside the logs */
+      /* a file is the one scroll of its own a scene keeps */
       .sides pre {
         max-height: 70vh;
       }
@@ -722,145 +920,717 @@
         }
       }
 
-      /* ── the logs: newest first, each line by the way it went ───────────── */
+      /* ── the packages: a blueprint cut into beadc.yaml's outputs ─────────── */
 
-      .logs,
-      .logs-body {
+      /* the packages beside what they hold: the scenes' column widens for them */
+      .scenes:has(> #packages-scene:not([hidden])) {
+        max-width: 1280px;
+      }
+
+      .planner {
+        display: grid;
+        align-items: start;
+        gap: var(--app-space-6);
+      }
+
+      @media (min-width: 1100px) {
+        .planner {
+          grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+        }
+      }
+
+      .planner-packages,
+      .planner-view,
+      .planner-editor {
         display: grid;
         align-content: start;
-        gap: var(--app-space-3);
+        gap: var(--app-space-4);
         min-width: 0;
       }
 
-      .logs-toggle {
-        justify-self: end;
-        min-height: 0;
-        padding: var(--app-space-1) var(--app-space-3);
-        border-radius: var(--app-radius-pill);
-        color: var(--app-text-secondary);
-        font-weight: 600;
+      .planner-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--app-space-2) var(--app-space-4);
       }
 
-      .logs[data-folded] .logs-body {
+      .planner-drop {
+        display: grid;
+        gap: var(--app-space-3);
+        padding: var(--app-space-4);
+        border: 1px dashed var(--app-divider);
+        border-radius: var(--app-radius-md);
+      }
+
+      .planner-drop[data-over] {
+        border-color: var(--app-accent);
+        background: var(--app-flame-wash);
+      }
+
+      /* the file's input unseen, its label the button */
+      .planner-file {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        min-height: var(--touch);
+        padding: 0 var(--app-space-4);
+        border-radius: var(--app-radius-md);
+        background: var(--app-primary);
+        color: var(--app-primary-ink);
+        font-weight: 500;
+        cursor: pointer;
+      }
+
+      .planner-file:hover {
+        background: var(--app-primary-hover);
+      }
+
+      .planner-file:has(input:focus-visible),
+      .planner select:focus-visible,
+      .planner-choice input:focus-visible {
+        outline: 2px solid var(--app-ring);
+        outline-offset: 2px;
+      }
+
+      .planner-file input {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      #planner-summary .mono {
+        font-family: var(--app-font-mono);
+      }
+
+      .planner-error,
+      #planner-reading[data-refused] {
+        color: var(--app-error);
+      }
+
+      .planner-error[hidden] {
+        display: none;
+      }
+
+      .planner-package-head {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: end;
+        gap: var(--app-space-2) var(--app-space-4);
+      }
+
+      .planner-field {
+        display: grid;
+        gap: var(--app-space-1);
+        min-width: 0;
+      }
+
+      /* the folder takes its own line where the head has no room for it */
+      .planner-folder {
+        flex: 1 1 14rem;
+      }
+
+      .planner select {
+        min-height: var(--touch);
+        padding: 0 var(--app-space-3);
+        border: 1px solid var(--app-divider);
+        border-radius: var(--app-radius-md);
+        background: var(--app-paper);
+        color: var(--app-text);
+        font: inherit;
+      }
+
+      .planner button.quiet {
+        border-color: transparent;
+        background: none;
+        color: var(--app-text-secondary);
+      }
+
+      .planner button.quiet:hover {
+        color: var(--app-error);
+      }
+
+      .planner-writes {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: var(--app-space-2);
+      }
+
+      .planner-writes button[aria-pressed='true'] {
+        border-color: var(--app-accent);
+        background: var(--app-flame-wash);
+      }
+
+      .planner-side {
+        display: grid;
+        gap: var(--app-space-3);
+        min-width: 0;
+        padding: var(--app-space-3);
+        border: 1px solid var(--app-divider);
+        border-radius: var(--app-radius-md);
+        background: var(--raised);
+      }
+
+      .planner-transport {
+        background: var(--app-paper);
+      }
+
+      .planner-side-head {
+        overflow-wrap: anywhere;
+      }
+
+      .planner-key {
+        color: var(--app-accent);
+      }
+
+      .planner-modes,
+      .planner-checks {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: var(--app-space-1) var(--app-space-4);
+      }
+
+      .planner-choice {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--app-space-2);
+        min-height: 32px;
+        cursor: pointer;
+      }
+
+      .planner-choice input {
+        width: 16px;
+        height: 16px;
+        margin: 0;
+        accent-color: var(--app-primary);
+      }
+
+      .count-of {
+        color: var(--app-text-tertiary);
+        font: var(--app-text-xs) var(--app-font-mono);
+      }
+
+      /* a selection among several reads as one of them: a rule down its side */
+      .planner-selection {
+        display: grid;
+        gap: var(--app-space-2);
+        padding-left: var(--app-space-3);
+        border-left: 2px solid var(--app-accent);
+      }
+
+      .planner-picks {
+        display: grid;
+        gap: var(--app-space-2);
+      }
+
+      @media (min-width: 520px) {
+        .planner-picks {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+
+      .planner-pick {
+        min-width: 0;
+        border: 1px solid var(--app-divider);
+        border-radius: var(--app-radius-md);
+        background: var(--app-paper);
+      }
+
+      .planner-pick summary {
+        display: flex;
+        align-items: center;
+        gap: var(--app-space-2);
+        min-height: var(--touch);
+        padding: 0 var(--app-space-3);
+        cursor: pointer;
+      }
+
+      .planner-pick-body {
+        display: grid;
+        gap: var(--app-space-1);
+        max-height: 260px;
+        overflow-y: auto;
+        padding: 0 var(--app-space-3) var(--app-space-3);
+      }
+
+      .planner-service {
+        display: grid;
+      }
+
+      /* a service's procedures under its whole */
+      .planner-service > .planner-choice ~ .planner-choice {
+        padding-left: var(--app-space-6);
+      }
+
+      .planner-procedure {
+        display: inline-flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: var(--app-space-1) var(--app-space-2);
+      }
+
+      .stale {
+        color: var(--app-error);
+      }
+
+      .chip.kind-notifies,
+      .chip.reads {
+        color: var(--app-info);
+      }
+
+      .chip.kind-command {
+        color: var(--app-warn);
+      }
+
+      .planner-findings {
+        display: grid;
+        gap: var(--app-space-2);
+      }
+
+      .planner-note {
+        padding: var(--app-space-2) var(--app-space-3);
+        border-left: 3px solid var(--app-divider);
+        border-radius: var(--app-radius-md);
+        background: var(--app-paper);
+        overflow-wrap: anywhere;
+      }
+
+      .planner-note.bad {
+        border-left-color: var(--app-error);
+        background: var(--bad-soft);
+      }
+
+      .planner-note.warn {
+        border-left-color: var(--app-warn);
+        background: var(--app-warn-wash);
+      }
+
+      .planner-note.ok {
+        border-left-color: var(--app-ok);
+        background: var(--app-ok-wash);
+      }
+
+      .planner-note .rule {
+        margin-right: var(--app-space-2);
+        font: 600 var(--app-text-xs) var(--app-font-mono);
+      }
+
+      /* the matrix scrolls within its own box, its head and its first column held: the page keeps
+         its width */
+      .planner-matrix {
+        max-height: 70vh;
+        overflow: auto;
+        border: 1px solid var(--app-divider);
+        border-radius: var(--app-radius-md);
+        background: var(--app-paper);
+      }
+
+      .planner-matrix table {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+        font-size: var(--app-text-sm);
+      }
+
+      .planner-matrix th,
+      .planner-matrix td {
+        padding: var(--app-space-1) var(--app-space-2);
+        border-bottom: 1px solid var(--app-divider);
+        text-align: left;
+        vertical-align: middle;
+      }
+
+      .planner-matrix td {
+        text-align: center;
+      }
+
+      .planner-matrix tbody tr:last-child > * {
+        border-bottom: 0;
+      }
+
+      .planner-matrix thead th {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        min-width: 88px;
+        background: var(--app-paper);
+        font-weight: 500;
+        vertical-align: bottom;
+      }
+
+      .planner-matrix .planner-procedure-head {
+        position: sticky;
+        left: 0;
+        z-index: 2;
+        min-width: 180px;
+        border-right: 1px solid var(--app-divider);
+        background: var(--app-paper);
+        font-weight: 400;
+      }
+
+      .planner-matrix thead .planner-procedure-head {
+        z-index: 3;
+      }
+
+      .planner-count,
+      .planner-column {
+        display: block;
+        font: var(--app-text-xs) var(--app-font-mono);
+        overflow-wrap: anywhere;
+      }
+
+      .planner-count {
+        color: var(--app-accent);
+      }
+
+      .planner-what {
+        display: block;
+        color: var(--app-text-tertiary);
+        font-size: var(--app-text-xs);
+        font-weight: 400;
+      }
+
+      .dot {
+        display: inline-block;
+        width: 11px;
+        height: 11px;
+        border: 1.5px solid var(--app-divider);
+        border-radius: var(--app-radius-pill);
+      }
+
+      .dot.is-held {
+        border-color: var(--app-accent);
+        background: var(--app-accent);
+      }
+
+      /* a procedure no server class holds */
+      tr.is-unserved .planner-procedure code {
+        color: var(--app-warn);
+      }
+
+      .planner-listing {
+        display: grid;
+        gap: var(--app-space-1);
+        min-width: 0;
+      }
+
+      .planner-empty {
+        padding: var(--app-space-4);
+      }
+
+      #planner-yaml {
+        max-height: 60vh;
+      }
+
+      /* ── the wire: one log at a time, newest first, folded until asked ──── */
+
+      .wire {
+        min-width: 0;
+        border: 1px solid var(--app-divider);
+        border-radius: var(--app-radius-lg);
+        background: var(--app-paper);
+      }
+
+      .wire-body {
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr) auto;
+        min-height: 0;
+      }
+
+      .wire-head {
+        display: flex;
+        align-items: center;
+        gap: var(--app-space-3);
+        padding: var(--app-space-3) var(--app-space-3) var(--app-space-3) var(--app-space-5);
+        border-bottom: 1px solid var(--app-divider);
+      }
+
+      .wire-head h2 {
+        flex: 1;
+        font-size: var(--app-text-md);
+      }
+
+      /* Calls or Envelopes, a segmented control */
+      .switch {
+        display: flex;
+        gap: 2px;
+        padding: 3px;
+        border-radius: var(--app-radius-pill);
+        background: var(--raised);
+      }
+
+      .switch [role='tab'] {
+        min-height: 32px;
+        padding: 0 var(--app-space-3);
+        border: 0;
+        border-radius: var(--app-radius-pill);
+        background: transparent;
+        color: var(--app-text-secondary);
+        font-size: var(--app-text-sm);
+      }
+
+      .switch [role='tab'][aria-selected='true'] {
+        background: var(--app-paper);
+        color: var(--app-text);
+        font-weight: 600;
+        box-shadow: 0 1px 2px rgb(23 17 29 / 0.08);
+      }
+
+      button.wire-fold {
+        display: grid;
+        place-items: center;
+        width: 36px;
+        min-height: 36px;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: var(--app-text-secondary);
+        font-size: 1.25rem;
+      }
+
+      .log {
+        min-height: 0;
+        overflow: auto;
+      }
+
+      .log[hidden] {
         display: none;
       }
 
       .log ol {
-        height: 50vh;
-        overflow: auto;
-        padding: 0;
+        padding: var(--app-space-2) 0;
         list-style: none;
         font: var(--text-code) / 1.55 var(--app-font-mono);
         font-variant-numeric: tabular-nums;
       }
 
       .log li {
-        padding: 2px 0 2px var(--app-space-2);
-        border-bottom: 1px solid var(--app-divider);
-        box-shadow: inset 2px 0 0 var(--app-accent);
+        padding: 3px var(--app-space-5);
         white-space: pre-wrap;
         overflow-wrap: anywhere;
       }
 
+      /* in, as information comes; out, in the page's own ink */
+      .log .arrow {
+        color: var(--app-info);
+      }
+
       .log li[data-direction='tx'] {
-        box-shadow: inset 2px 0 0 var(--app-text-secondary);
         color: var(--app-text-secondary);
       }
 
-      /* a desktop: the scenes, and the logs in a rail beside them that stays as the page scrolls,
-         each log scrolling within its own half */
-      @media (min-width: 1100px) {
-        .dashboard {
-          grid-template-columns: minmax(0, 1fr) minmax(340px, 420px);
-          align-items: start;
-          width: 100%;
-          max-width: 1680px;
+      .log li[data-direction='tx'] .arrow {
+        color: var(--app-accent);
+      }
+
+      .wire-note {
+        padding: var(--app-space-3) var(--app-space-5) var(--app-space-4);
+        border-top: 1px solid var(--app-divider);
+        color: var(--app-text-tertiary);
+        font-size: var(--app-text-sm);
+      }
+
+      /* the bar a phone folds the wire into */
+      button.wire-sheet {
+        display: none;
+        align-items: center;
+        gap: var(--app-space-3);
+        width: 100%;
+        min-height: 56px;
+        border: 0;
+        border-radius: var(--app-radius-xl) var(--app-radius-xl) 0 0;
+        background: transparent;
+        font-weight: 600;
+      }
+
+      .wire-sheet span:first-child {
+        flex: 1;
+      }
+
+      .wire-sheet::after {
+        content: '▴';
+        color: var(--app-text-tertiary);
+      }
+
+      .wire:not([data-folded]) .wire-sheet::after {
+        content: '▾';
+      }
+
+      /* a desktop: the wire in a drawer at the right that stays as the page scrolls, gone while
+         folded */
+      @media (min-width: 900px) {
+        .layout:has(.wire:not([data-folded])) {
+          grid-template-columns: minmax(0, 1fr) 400px;
         }
 
-        .dashboard:has(.logs[data-folded]) {
-          grid-template-columns: minmax(0, 1fr) auto;
-        }
-
-        .logs {
+        .wire {
           position: sticky;
-          top: var(--app-space-3);
+          top: var(--app-space-6);
+          display: grid;
+          max-height: calc(100dvh - 2 * var(--app-space-6));
+          overflow: hidden;
+        }
+
+        .wire[data-folded] {
+          display: none;
+        }
+      }
+
+      /* a phone: the wire a sheet at the bottom, its bar always in reach; the page leaves room
+         for it */
+      @media (max-width: 899px) {
+        .layout {
+          padding-bottom: calc(56px + var(--app-space-10));
+        }
+
+        h1 {
+          font-size: 1.75rem;
+        }
+
+        .topbar-inner {
+          gap: var(--app-space-3);
+        }
+
+        .transports {
+          display: grid;
+          grid-auto-columns: minmax(0, 1fr);
+          grid-auto-flow: column;
+          width: 100%;
+        }
+
+        .transports a {
+          min-height: var(--touch);
+          padding: 0 var(--app-space-1);
+        }
+
+        button.wire-toggle {
+          display: none;
+        }
+
+        .wire {
+          position: fixed;
+          right: 0;
+          bottom: 0;
+          left: 0;
+          z-index: 10;
+          display: grid;
           grid-template-rows: auto minmax(0, 1fr);
-          height: calc(100dvh - 2 * var(--app-space-3));
+          max-height: 75dvh;
+          border-width: 1px 0 0;
+          border-radius: var(--app-radius-xl) var(--app-radius-xl) 0 0;
+          box-shadow: var(--sheet-shadow);
         }
 
-        .logs[data-folded] {
-          height: auto;
+        button.wire-sheet {
+          display: flex;
         }
 
-        .logs-body {
-          grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
-          align-content: stretch;
-          min-height: 0;
+        .wire[data-folded] .wire-body {
+          display: none;
         }
 
-        .log {
-          grid-template-rows: auto auto minmax(0, 1fr);
-          min-height: 0;
+        .wire-head {
+          padding-top: 0;
         }
 
-        .log ol {
-          height: auto;
-          min-height: 0;
+        .wire-head h2 {
+          position: absolute;
+          width: 1px;
+          height: 1px;
+          overflow: hidden;
+          clip-path: inset(50%);
+        }
+
+        .switch [role='tab'],
+        button.wire-fold {
+          min-height: var(--touch);
+        }
+
+        .switch {
+          flex: 1;
+        }
+
+        .switch [role='tab'] {
+          flex: 1;
+          text-align: center;
+        }
+
+        .card {
+          padding: var(--app-space-4);
+        }
+
+        .card-result {
+          padding: var(--app-space-3) var(--app-space-4);
         }
       }
     </style>
   </head>
   <body data-bead-pathname="%BEAD_PATHNAME%">
     <header class="topbar">
-      <div class="brand">
-        <p class="ways">
-          <a href="/" data-static>← Home</a>
-          <a href="https://github.com/francisdesjardins/bead">Source on GitHub</a>
+      <div class="topbar-inner">
+        <p class="brand">
+          <a class="back" href="/" data-static>← francisdesjardins.ca</a>
+          <span class="wordmark">Bead</span>
+          <span class="tag">demo</span>
         </p>
-        <h1>
-          Bead
-          <span data-served>a client and a server, on one port</span>
-          <span data-static>a client, and its server in a Web Worker</span>
-        </h1>
+        <nav class="transports" aria-label="Transport">
+          <span data-served
+            ><a href="?transport=ws" title="One socket, both ways">WebSocket</a
+            ><a
+              href="?transport=http"
+              title="What the server sends of its own comes back by a long poll, a GET it holds up to 30 s"
+              >HTTP</a
+            ><a
+              href="?transport=mqtt"
+              title="Through a broker of MQTT 5, where the demo runs beside one: node tools/mqtt-broker.mjs run -- yarn demo"
+              >MQTT 5</a
+            ></span
+          >
+          <a
+            href="?transport=worker"
+            title="The Bead server and the identity provider run in the page itself: nothing else answers but the files"
+            >Web Worker</a
+          >
+        </nav>
+        <p class="status">
+          <span class="unseen">Connection:</span>
+          <span id="connection" title="connecting…">connecting…</span>
+          <span class="unseen">Identity:</span>
+          <span id="identity" data-role="none" title="logged out">logged out</span>
+          <button
+            type="button"
+            id="wire-toggle"
+            class="wire-toggle"
+            aria-expanded="false"
+            aria-controls="wire"
+            title="What crossed the transport: the envelopes, the server's reads aside"
+          >
+            The wire <span class="count" data-wire-count>0</span>
+          </button>
+        </p>
       </div>
-      <nav class="transports" aria-label="Transport">
-        <span data-served
-          ><a href="?transport=ws" title="One socket, both ways">WebSocket</a
-          ><a
-            href="?transport=http"
-            title="What the server sends of its own comes back by a long poll, a GET it holds up to 30 s"
-            >HTTP</a
-          ><a
-            href="?transport=mqtt"
-            title="Through a broker of MQTT 5, where the demo runs beside one: node tools/mqtt-broker.mjs run -- yarn demo"
-            >MQTT 5</a
-          ></span
-        >
-        <a
-          href="?transport=worker"
-          title="The Bead server and the identity provider run in the page itself: nothing else answers but the files"
-          >Web Worker</a
-        >
-      </nav>
-      <dl class="status">
-        <div>
-          <dt>Connection</dt>
-          <dd id="connection">connecting…</dd>
-        </div>
-        <div>
-          <dt>Identity</dt>
-          <dd id="identity">logged out</dd>
-        </div>
-      </dl>
     </header>
 
-    <main class="dashboard">
-      <div class="scenes">
-        <p class="intro">
-          Bead is a binary call protocol, one surface in TypeScript and in C#, the same over a
-          WebSocket, over HTTP or in a Web Worker. Each tab shows a side of it; the logs follow
-          every call that crosses.
-        </p>
+    <div class="layout">
+      <main class="scenes">
+        <div class="intro">
+          <h1>
+            <span data-served>A client and a server, on one port</span>
+            <span data-static>A client, and its server in a Web Worker</span>
+          </h1>
+          <p>
+            Bead is a binary call protocol, one surface in TypeScript, C# and Rust, over a
+            WebSocket, over HTTP or in a Web Worker. Try a scene: its result shows in its card, and
+            the wire shows what crossed. Its source is
+            <a href="https://github.com/francisdesjardins/bead">on GitHub</a>.
+          </p>
+        </div>
         <div id="scene-tabs" class="scene-tabs" role="tablist" aria-label="What to see of Bead">
           <button
             id="scene-calls"
@@ -869,7 +1639,7 @@
             aria-controls="calls-scene"
             data-scene="calls"
           >
-            Calls
+            Try it
           </button>
           <button
             id="scene-rules"
@@ -907,17 +1677,27 @@
           >
             Code
           </button>
+          <button
+            id="scene-packages"
+            type="button"
+            role="tab"
+            aria-controls="packages-scene"
+            data-scene="packages"
+          >
+            Packages
+          </button>
         </div>
 
-        <div id="calls-scene" class="scene split" role="tabpanel" aria-labelledby="scene-calls">
-          <ol class="steps" aria-label="To try first">
-            <li>Log in as a writer</li>
-            <li>Subscribe, then burst</li>
-            <li>Send a glyph, or start a slow call and cancel it</li>
+        <div id="calls-scene" class="scene" role="tabpanel" aria-labelledby="scene-calls">
+          <ol id="steps" class="steps" aria-label="To try first">
+            <li data-step="writer" aria-current="step">Log in as a writer</li>
+            <li data-step="burst">Subscribe, then burst</li>
+            <li data-step="glyph">Send a glyph, or start a slow call and cancel it</li>
           </ol>
-          <div class="column">
-            <section class="card" aria-labelledby="identity-h">
-              <h2 id="identity-h">Identity</h2>
+
+          <section class="card scene-card" aria-labelledby="identity-h">
+            <div class="card-do">
+              <h2 id="identity-h">Who you are</h2>
               <p class="note">
                 An access token, a JWT each call presents in its header: a read needs one that
                 holds, a write one whose scope holds <code>write</code>.
@@ -928,11 +1708,22 @@
                 <button type="button" data-action="forged">Forged token</button>
                 <button type="button" data-action="logout">Log out</button>
               </div>
-            </section>
+            </div>
+            <div class="card-result">
+              <p class="label">Identity</p>
+              <p id="identity-who">logged out</p>
+              <p id="identity-session" class="detail"></p>
+              <p id="identity-outcome" class="outcome note" data-outcome role="status">—</p>
+            </div>
+          </section>
 
-            <section class="card" aria-labelledby="counter-h">
-              <h2 id="counter-h">Counter</h2>
-              <p class="note">Subscribe, then burst: see the counter's value.</p>
+          <section class="card scene-card" aria-labelledby="counter-h">
+            <div class="card-do">
+              <h2 id="counter-h">A counter, paced</h2>
+              <p class="note">
+                Subscribe, then burst: five changes come as two notifications, paced — the first,
+                then the latest — and five signals merge into two reads.
+              </p>
               <div class="buttons">
                 <button type="button" data-action="read">Read</button>
                 <button type="button" class="write" data-action="increment">Increment</button>
@@ -941,49 +1732,29 @@
                   Subscribe (value + signal)
                 </button>
               </div>
-            </section>
+            </div>
+            <div class="card-result">
+              <p class="label">Counter</p>
+              <span id="counter">—</span>
+              <p class="note">2 subscriptions: the value, paced; the signal, merged by the page</p>
+              <p class="detail"><span class="label">Last burst</span> <span id="burst">—</span></p>
+              <p id="counter-outcome" class="outcome note" data-outcome role="status">—</p>
+            </div>
+          </section>
 
-            <section class="card" aria-labelledby="transfers-h">
-              <h2 id="transfers-h">Transfers</h2>
-              <p class="note">A glyph drawn at random, 8 MiB: it crosses in chunks.</p>
+          <section class="card scene-card" aria-labelledby="transfers-h">
+            <div class="card-do">
+              <h2 id="transfers-h">8 MiB, in chunks</h2>
+              <p class="note">
+                A glyph drawn at random crosses in chunks, each sent as the other end grants credit.
+              </p>
               <div class="buttons">
                 <button type="button" class="write" data-action="upload">Send a glyph</button>
                 <button type="button" data-action="download">Receive a glyph</button>
               </div>
-            </section>
-
-            <section class="card" aria-labelledby="calls-h">
-              <h2 id="calls-h">Calls</h2>
-              <p class="note">Slow, cancelled, timed out, failed — and the server asking back.</p>
-              <div class="buttons">
-                <button type="button" data-action="slow">Slow call (5 s)</button>
-                <button type="button" data-action="cancel">Cancel it</button>
-                <button type="button" data-action="timeout">Timeout (1 s)</button>
-                <button type="button" data-action="fail">Procedure fails</button>
-                <button type="button" data-action="ask">Server asks my time</button>
-              </div>
-            </section>
-          </div>
-
-          <div class="column">
-            <section class="card" aria-labelledby="result-h">
-              <h2 id="result-h">Result</h2>
-              <p id="result">—</p>
-            </section>
-
-            <section class="card" aria-labelledby="value-h">
-              <h2 id="value-h">Counter's value</h2>
-              <div class="metric"><span id="counter">—</span></div>
-              <p class="note">2 subscriptions: the value, paced; the signal, merged by the page</p>
-              <p class="note"><span class="label">Last burst</span> <span id="burst">—</span></p>
-              <p class="note">
-                Subscribed, five changes come as two notifications, paced — the first, then the
-                latest — and five signals merged into two reads.
-              </p>
-            </section>
-
-            <section class="card" aria-labelledby="glyph-h">
-              <h2 id="glyph-h">Glyph</h2>
+            </div>
+            <div class="card-result">
+              <p class="label">Glyph</p>
               <div class="glyph">
                 <canvas
                   id="glyph"
@@ -995,17 +1766,30 @@
                 ></canvas>
                 <span id="glyph-caption" class="note">none yet: send one, or receive one</span>
               </div>
-            </section>
-          </div>
+              <p id="glyph-outcome" class="outcome note" data-outcome role="status">—</p>
+            </div>
+          </section>
+
+          <section class="card scene-card" aria-labelledby="calls-h">
+            <div class="card-do">
+              <h2 id="calls-h">Calls that end otherwise</h2>
+              <p class="note">Slow, cancelled, timed out, failed — and the server asking back.</p>
+              <div class="buttons">
+                <button type="button" data-action="slow">Slow call (5 s)</button>
+                <button type="button" data-action="cancel">Cancel it</button>
+                <button type="button" data-action="timeout">Timeout (1 s)</button>
+                <button type="button" data-action="fail">Procedure fails</button>
+                <button type="button" data-action="ask">Server asks my time</button>
+              </div>
+            </div>
+            <div class="card-result">
+              <p class="label">Result</p>
+              <p id="calls-outcome" class="outcome" data-outcome role="status">—</p>
+            </div>
+          </section>
         </div>
 
-        <div
-          id="rules-scene"
-          class="scene split"
-          role="tabpanel"
-          aria-labelledby="scene-rules"
-          hidden
-        >
+        <div id="rules-scene" class="scene" role="tabpanel" aria-labelledby="scene-rules" hidden>
           <ol class="steps" aria-label="To try first">
             <li>Sign up the valid one it holds</li>
             <li>Break several fields, and sign up</li>
@@ -1142,64 +1926,88 @@ What it answers shows once the sign-up is sent.</pre>
           </section>
         </div>
 
-        <div
-          id="server-scene"
-          class="scene split"
-          role="tabpanel"
-          aria-labelledby="scene-server"
-          hidden
-        >
-          <section class="card" aria-labelledby="server-h">
-            <h2 id="server-h">Server</h2>
-            <p class="note">
-              Read every second, its health and what each layer holds by a <code>stats</code> call,
-              the calls it answered by the <code>metrics</code> call beside, both left out of the
-              logs and of those counts: a median estimated within its bucket.
-            </p>
-            <p class="note" id="tabs" hidden>
-              Open this page in a second tab: each tab is a client of this one server, which counts
-              them, and they share its counter.
-            </p>
-            <dl class="facts">
-              <dt>Health</dt>
-              <dd id="health">—</dd>
-              <dt>Answers</dt>
-              <dd id="durations">—</dd>
-            </dl>
-            <ul id="gauges" class="gauges" aria-label="What each layer holds, and its ceiling"></ul>
-          </section>
+        <div id="server-scene" class="scene" role="tabpanel" aria-labelledby="scene-server" hidden>
+          <div class="server-head">
+            <h2 id="server-h">The server, every second</h2>
+            <span id="health">—</span>
+          </div>
+          <p class="note">
+            Read every second, its health and what each layer holds by a <code>stats</code> call,
+            the calls it answered by the <code>metrics</code> call beside, over Bead itself, both
+            left out of the wire and of these counts.
+          </p>
+          <p class="note" id="tabs" hidden>
+            Open this page in a second tab: each tab is a client of this one server, which counts
+            them, and they share its counter.
+          </p>
+          <dl class="figures">
+            <div class="figure">
+              <dt>Calls answered</dt>
+              <dd id="answered" class="value">—</dd>
+              <dd class="note">by the server, the reads aside</dd>
+            </div>
+            <div class="figure">
+              <dt>Median</dt>
+              <dd id="median" class="value">—</dd>
+              <dd id="mean" class="note">estimated within its bucket</dd>
+            </div>
+            <div class="figure">
+              <dt>Connections</dt>
+              <dd id="connections" class="value">—</dd>
+              <dd class="note">a client a tab</dd>
+            </div>
+            <div class="figure">
+              <dt>Subscriptions</dt>
+              <dd id="subscriptions" class="value">—</dd>
+              <dd class="note">the server notifies</dd>
+            </div>
+          </dl>
 
-          <section class="card" aria-labelledby="metrics-h">
-            <h2 id="metrics-h">Metrics</h2>
-            <p class="note">
-              What each end's metrics registry counts, every second: the server's by a
-              <code>metrics</code> call, over Bead itself, so a server in a Web Worker answers it as
-              a Node one does<span data-served
-                >, and <code>/metrics</code> serves it to a scraper</span
-              >; this tab's client's, in the page. The reads are left out, the durations estimated
-              within their buckets.
-            </p>
-            <p class="label">Server</p>
-            <ul
-              id="server-metrics"
-              class="gauges metrics"
-              aria-label="What the server counted, by procedure"
-            ></ul>
-            <p class="label">This tab's client</p>
-            <ul
-              id="client-metrics"
-              class="gauges metrics"
-              aria-label="What this tab's client counted, by procedure"
-            ></ul>
-            <details id="server-exposition" class="exposition">
-              <summary>The server's exposition, as a scrape reads it</summary>
-              <pre></pre>
-            </details>
-            <details id="client-exposition" class="exposition">
-              <summary>The client's exposition</summary>
-              <pre></pre>
-            </details>
-          </section>
+          <details class="fold" open>
+            <summary>Per procedure, what the server answered</summary>
+            <div class="fold-body">
+              <p class="note">
+                What each end's metrics registry counts, every second: the server's by a
+                <code>metrics</code> call, over Bead itself, so a server in a Web Worker answers it
+                as a Node one does<span data-served
+                  >, and <code>/metrics</code> serves it to a scraper</span
+                >. The reads are left out, the durations estimated within their buckets.
+              </p>
+              <ul
+                id="server-metrics"
+                class="gauges metrics"
+                aria-label="What the server counted, by procedure"
+              ></ul>
+            </div>
+          </details>
+          <details class="fold">
+            <summary>Per procedure, what this tab's client made</summary>
+            <div class="fold-body">
+              <ul
+                id="client-metrics"
+                class="gauges metrics"
+                aria-label="What this tab's client counted, by procedure"
+              ></ul>
+            </div>
+          </details>
+          <details class="fold">
+            <summary>What each layer holds: router, server, sessions, transport</summary>
+            <div class="fold-body">
+              <ul
+                id="gauges"
+                class="gauges"
+                aria-label="What each layer holds, and its ceiling"
+              ></ul>
+            </div>
+          </details>
+          <details id="server-exposition" class="fold exposition">
+            <summary>The server's exposition, as a scrape reads it</summary>
+            <pre></pre>
+          </details>
+          <details id="client-exposition" class="fold exposition">
+            <summary>The client's exposition</summary>
+            <pre></pre>
+          </details>
         </div>
 
         <div id="code-scene" class="scene" role="tabpanel" aria-labelledby="scene-code" hidden>
@@ -1249,39 +2057,189 @@ What it answers shows once the sign-up is sent.</pre>
               </figure>
             </div>
           </section>
-        </div>
-      </div>
 
-      <aside id="logs" class="logs" aria-label="What went across">
-        <button
-          type="button"
-          id="logs-toggle"
-          class="logs-toggle"
-          aria-expanded="true"
-          aria-controls="logs-body"
-        >
-          Hide the logs
-        </button>
-        <div id="logs-body" class="logs-body">
-          <section class="card log" aria-labelledby="calls-log-h">
-            <h2 id="calls-log-h">Calls, newest first</h2>
+          <section id="go-deeper" class="card" aria-labelledby="go-deeper-h">
+            <h2 id="go-deeper-h">Go deeper</h2>
             <p class="note">
-              → goes out, ← comes in. In the console too, with no reload:
+              What the wire shows goes to the console too, with no reload:
               <code>localStorage.setItem('bead:debug', '*')</code>, or a filter such as
               <code>d(rx), -token</code>, and <code>e(notification)</code> for the envelopes. The
               Bead DevTools panel filters every view; <code>-metrics, -stats</code> leaves polling
               out of its Broker view where DATA joins its call. Uncertain captures stay visible.
             </p>
-            <ol id="calls-log"></ol>
-          </section>
-          <section class="card log" aria-labelledby="envelopes-log-h">
-            <h2 id="envelopes-log-h">Envelopes, newest first</h2>
-            <p class="note">What crossed the transport, as the client read and wrote it.</p>
-            <ol id="envelopes-log"></ol>
           </section>
         </div>
+
+        <div
+          id="packages-scene"
+          class="scene"
+          role="tabpanel"
+          aria-labelledby="scene-packages"
+          hidden
+        >
+          <section class="card" aria-labelledby="planner-h">
+            <h2 id="planner-h">One contract, several packages</h2>
+            <p class="note">
+              Cut a blueprint into the outputs of <code>beadc.yaml</code>: each writes a
+              <code>server</code>, a <code>client</code> and a <code>gateway</code> over its own
+              selection of procedures, and each transport of its server takes the procedures it is
+              given. Every choice comes from the blueprint; nothing is typed. What each class holds
+              and what <code>beadc generate</code> would refuse are beadc's own code, run in this
+              page.
+            </p>
+            <div id="planner-drop" class="planner-drop">
+              <div class="buttons">
+                <label class="planner-file">
+                  <input type="file" id="planner-file" accept=".json,application/json" />
+                  <span>Open a blueprint</span>
+                </label>
+                <button type="button" data-blueprint="demo">The demo's blueprint</button>
+                <button type="button" data-blueprint="shop">A shop, for example</button>
+              </div>
+              <p class="note">
+                Or drop here a <code>bead-blueprint/1</code> file, which
+                <code>beadc blueprint</code> writes; it stays in this browser. The page reads its
+                services and their procedures alone: a blueprint's own checks are
+                <code>beadc check</code>'s.
+              </p>
+              <p id="planner-summary" class="detail"></p>
+              <p id="planner-error" class="planner-error" role="alert" hidden></p>
+            </div>
+          </section>
+
+          <div class="planner">
+            <section class="planner-packages" aria-labelledby="planner-packages-h">
+              <div class="planner-row">
+                <h2 id="planner-packages-h">Packages</h2>
+                <div class="buttons">
+                  <button type="button" data-add-package="typescript">
+                    Add a TypeScript package
+                  </button>
+                  <button type="button" data-add-package="csharp">Add a C# package</button>
+                </div>
+              </div>
+              <div id="planner-editor" class="planner-editor"></div>
+            </section>
+
+            <section class="planner-view" aria-labelledby="planner-view-h">
+              <h2 id="planner-view-h">What each class holds</h2>
+              <div id="planner-findings" class="planner-findings" aria-live="polite"></div>
+              <div
+                id="planner-matrix"
+                class="planner-matrix"
+                role="region"
+                aria-label="Procedures by package and class"
+                tabindex="0"
+              ></div>
+              <p class="note">
+                A filled dot: the class holds the procedure. The server class holds its resolvers,
+                its notifiers and the requesters of its commands; the client class its requesters,
+                its notifications and the resolvers of the commands it answers; the gateway its
+                routes. A transport's column is what it takes: a request to any other procedure is
+                answered <code>SERVICE_UNKNOWN</code> or <code>PROCEDURE_UNKNOWN</code>.
+              </p>
+              <details class="fold" open>
+                <summary>The procedures each transport takes</summary>
+                <div id="planner-transports" class="fold-body"></div>
+              </details>
+              <details class="fold" open>
+                <summary>The gateway's routes</summary>
+                <div id="planner-routes" class="fold-body"></div>
+              </details>
+            </section>
+          </div>
+
+          <section class="card" aria-labelledby="planner-yaml-h">
+            <h2 id="planner-yaml-h"><code>beadc.yaml</code>'s outputs</h2>
+            <pre id="planner-yaml" class="code" tabindex="0"></pre>
+            <div class="planner-row">
+              <button type="button" id="planner-copy">Copy the YAML</button>
+              <span id="planner-copied" class="note" role="status"></span>
+            </div>
+            <p id="planner-reading" class="detail"></p>
+            <p class="note">
+              Each folder and each transport's key is derived from what its package holds, never
+              from its place in the list: removing a package renames no other. To name them
+              otherwise, rename them in <code>beadc.yaml</code>; a key of
+              <code>server.transports</code> is the member of
+              <code>SERVED_PROCEDURES</code> (TypeScript) or <code>ServedProcedures</code> (C#) the
+              application hands its transport. The file around these outputs keeps its
+              <code>version</code> and its <code>source</code>: what depends on the disk, the
+              <code>.proto</code> roots among it, stays <code>beadc generate</code>'s.
+            </p>
+          </section>
+        </div>
+      </main>
+
+      <aside id="wire" class="wire" aria-label="The wire" data-folded>
+        <button
+          type="button"
+          id="wire-sheet"
+          class="wire-sheet"
+          aria-expanded="false"
+          aria-controls="wire-body"
+        >
+          <span>The wire</span> <span class="count" data-wire-count>0</span>
+        </button>
+        <div id="wire-body" class="wire-body">
+          <div class="wire-head">
+            <h2 id="wire-h">The wire</h2>
+            <div id="wire-tabs" class="switch" role="tablist" aria-label="What to follow">
+              <button
+                id="wire-calls"
+                type="button"
+                role="tab"
+                aria-controls="calls-panel"
+                data-log="calls"
+              >
+                Calls
+              </button>
+              <button
+                id="wire-envelopes"
+                type="button"
+                role="tab"
+                aria-controls="envelopes-panel"
+                data-log="envelopes"
+              >
+                Envelopes
+              </button>
+            </div>
+            <button
+              type="button"
+              id="wire-fold"
+              class="wire-fold"
+              aria-label="Fold the wire"
+              aria-controls="wire-body"
+            >
+              ×
+            </button>
+          </div>
+          <div
+            id="calls-panel"
+            class="log"
+            role="tabpanel"
+            aria-labelledby="wire-calls"
+            tabindex="0"
+          >
+            <ol id="calls-log"></ol>
+          </div>
+          <div
+            id="envelopes-panel"
+            class="log"
+            role="tabpanel"
+            aria-labelledby="wire-envelopes"
+            tabindex="0"
+            hidden
+          >
+            <ol id="envelopes-log"></ol>
+          </div>
+          <p class="wire-note">
+            Newest first: → goes out, ← comes in. The console and the DevTools extension follow
+            every call too: see <a href="#code" data-go-deeper>Code › Go deeper</a>.
+          </p>
+        </div>
       </aside>
-    </main>
+    </div>
     <script type="module" src="./page.js"></script>
   </body>
 </html>

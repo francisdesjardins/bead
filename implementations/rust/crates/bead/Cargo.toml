@@ -51,6 +51,20 @@ http = [
   "dep:rustls-platform-verifier",
   "dep:httpdate",
 ]
+# the MQTT 5 binding, a broker adapter of Bead's own over tokio's sockets, its TCP, its TLS and its
+# WebSocket of subprotocol mqtt (decision 0050)
+mqtt = [
+  "tokio/net",
+  "tokio/io-util",
+  "dep:socket2",
+  "dep:futures-util",
+  "dep:rustls",
+  "dep:tokio-rustls",
+  "dep:rustls-platform-verifier",
+  "dep:http",
+  "dep:tungstenite",
+  "dep:tokio-tungstenite",
+]
 
 [dependencies]
 tokio = { workspace = true, features = ["rt", "sync", "time"] }
@@ -90,7 +104,7 @@ tower-service = { workspace = true, optional = true }
 
 [dev-dependencies]
 # the crate itself, with its test kit: one copy of bead for the unit tests and the players
-bead = { package = "francisdesjardins-bead", path = ".", features = ["testing", "websocket", "http"] }
+bead = { package = "francisdesjardins-bead", path = ".", features = ["testing", "websocket", "http", "mqtt"] }
 bead-interop = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 libtest-mimic = { workspace = true }
@@ -144,6 +158,11 @@ name = "envelope_fuzz"
 
 [[test]]
 name = "broker_parcel_fuzz"
+
+# seeded mutations of the packets a broker sends, fed to the MQTT 5 client's reader
+[[test]]
+name = "mqtt_packets_fuzz"
+required-features = ["mqtt"]
 
 [lints]
 workspace = true

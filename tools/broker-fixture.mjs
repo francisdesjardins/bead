@@ -29,9 +29,10 @@ export const INTEROP = Object.freeze({
   servers: Object.freeze({
     'ts-server': ['interop-ts', 'interop-both'],
     'cs-server': ['interop-cs', 'interop-both'],
+    'rs-server': ['interop-rs', 'interop-both'],
   }),
-  clients: Object.freeze(['ts-client', 'cs-client']),
-  names: Object.freeze(['interop-ts', 'interop-cs', 'interop-both']),
+  clients: Object.freeze(['ts-client', 'cs-client', 'rs-client']),
+  names: Object.freeze(['interop-ts', 'interop-cs', 'interop-rs', 'interop-both']),
 });
 
 // the user a start links as to see its broker up, granted nothing a participant is

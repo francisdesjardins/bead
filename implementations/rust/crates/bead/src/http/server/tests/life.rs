@@ -1444,3 +1444,158 @@ async fn resolves_false_closing_a_handle_nobody_holds() {
     assert!(!started.server.close(&nobody).await, "none held");
     started.stop().await;
 }
+
+#[tokio::test]
+async fn draws_a_port_on_localhost_again_when_the_ipv6_loopback_holds_the_one_drawn_on_ipv4() {
+    use crate::net::loopbacks::{LoopbackBinding, draw_port, listener_on};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let Ok(holder) = listener_on("::1".parse().unwrap(), 0) else {
+        return;
+    };
+    let occupied = holder.local_addr().unwrap().port();
+    let draws = Arc::new(AtomicUsize::new(0));
+    let count = Arc::clone(&draws);
+    let server = HttpTransportServer::new(&HttpTransportServerOptions::default()).unwrap();
+
+    *super::super::locked(&server.inner.loopback_binding) = Some(LoopbackBinding {
+        port: 0,
+        find_open_port: true,
+        draw_port: Box::new(move || {
+            if count.fetch_add(1, Ordering::SeqCst) == 0 {
+                Ok(occupied)
+            } else {
+                loop {
+                    let port = draw_port()?;
+                    if port != occupied {
+                        break Ok(port);
+                    }
+                }
+            }
+        }),
+        ipv6_refusal: None,
+    });
+    let bound = server
+        .start(&TransportServerStartOptions {
+            find_open_port: Some(true),
+            ..TransportServerStartOptions::default()
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(draws.load(Ordering::SeqCst), 2, "a second draw");
+    assert_eq!(bound.address, "localhost");
+    assert_ne!(bound.port, occupied);
+    assert_eq!(server.ready_state(), ReadyState::Open);
+    assert!(
+        listener_on("127.0.0.1".parse().unwrap(), occupied).is_ok(),
+        "the first IPv4 listener let go"
+    );
+    for address in ["127.0.0.1", "::1"] {
+        let _socket = tokio::net::TcpStream::connect((address, bound.port))
+            .await
+            .unwrap();
+    }
+    let response = posted(bound.port, &Post::default()).await;
+    assert_eq!(response.head.status, 201);
+    assert!(server.is_secure(&server.clients()[0].connection_handle));
+    server.stop().await.unwrap();
+    for address in ["127.0.0.1", "::1"] {
+        assert!(
+            listener_on(address.parse().unwrap(), bound.port).is_ok(),
+            "{address} let go"
+        );
+    }
+
+    // eight draws at most, then the last error; a given port is tried once
+    for find_open_port in [true, false] {
+        let server = HttpTransportServer::new(&HttpTransportServerOptions::default()).unwrap();
+        let refusals = Arc::new(AtomicUsize::new(0));
+        let count = Arc::clone(&refusals);
+        *super::super::locked(&server.inner.loopback_binding) = Some(LoopbackBinding {
+            port: occupied,
+            find_open_port,
+            draw_port: Box::new(move || Ok(occupied)),
+            ipv6_refusal: Some(Box::new(move |_port| {
+                count.fetch_add(1, Ordering::SeqCst);
+                Some(io::Error::from(io::ErrorKind::AddrInUse))
+            })),
+        });
+        let refused = server
+            .start(&TransportServerStartOptions {
+                port: Some(occupied),
+                find_open_port: Some(find_open_port),
+                ..TransportServerStartOptions::default()
+            })
+            .await
+            .unwrap_err();
+        let RouterError::Other(error) = refused else {
+            panic!("an io error")
+        };
+        assert_eq!(
+            error.downcast_ref::<io::Error>().map(io::Error::kind),
+            Some(io::ErrorKind::AddrInUse)
+        );
+        assert_eq!(
+            refusals.load(Ordering::SeqCst),
+            if find_open_port { 8 } else { 1 }
+        );
+        assert_eq!(server.ready_state(), ReadyState::Closed);
+        assert!(
+            listener_on("127.0.0.1".parse().unwrap(), occupied).is_ok(),
+            "no listener left"
+        );
+    }
+}
+
+#[tokio::test]
+async fn listens_on_127_0_0_1_alone_where_the_ipv6_loopback_is_absent_and_reports_127_0_0_1() {
+    use crate::net::loopbacks::{FAMILY_NOT_SUPPORTED, LoopbackBinding, draw_port, listener_on};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    for error in [
+        io::Error::from(io::ErrorKind::AddrNotAvailable),
+        io::Error::from_raw_os_error(FAMILY_NOT_SUPPORTED),
+    ] {
+        let server = HttpTransportServer::new(&HttpTransportServerOptions::default()).unwrap();
+        let draws = Arc::new(AtomicUsize::new(0));
+        let count = Arc::clone(&draws);
+        let kind = error.kind();
+        let raw = error.raw_os_error();
+        *super::super::locked(&server.inner.loopback_binding) = Some(LoopbackBinding {
+            port: 0,
+            find_open_port: true,
+            draw_port: Box::new(move || {
+                count.fetch_add(1, Ordering::SeqCst);
+                draw_port()
+            }),
+            ipv6_refusal: Some(Box::new(move |_port| {
+                Some(raw.map_or_else(|| io::Error::from(kind), io::Error::from_raw_os_error))
+            })),
+        });
+        let bound = server
+            .start(&TransportServerStartOptions {
+                find_open_port: Some(true),
+                ..TransportServerStartOptions::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(bound.address, "127.0.0.1");
+        assert_eq!(draws.load(Ordering::SeqCst), 1);
+        assert_eq!(server.ready_state(), ReadyState::Open);
+        let response = posted(bound.port, &Post::default()).await;
+        assert_eq!(response.head.status, 201);
+        assert!(server.is_secure(&server.clients()[0].connection_handle));
+        if listener_on("::1".parse().unwrap(), 0).is_ok() {
+            assert!(
+                listener_on("::1".parse().unwrap(), bound.port).is_ok(),
+                "IPv6 left alone"
+            );
+        }
+        server.stop().await.unwrap();
+        assert!(
+            listener_on("127.0.0.1".parse().unwrap(), bound.port).is_ok(),
+            "IPv4 let go"
+        );
+    }
+}

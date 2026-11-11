@@ -25,7 +25,9 @@
   over sockets, WebSocket (RFC 6455) and HTTP/1.1 and HTTP/2 (RFC 9110, 9112, 9113), features of its
   core, with the interop both ways with the TypeScript and C# sides, are
   [0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)'s.
-  Ahead: its broker bindings, MQTT 5 and AMQP 1.0; its gateway; and beadc's Rust target, with
+  Its broker bindings, MQTT 5 and AMQP 1.0, features of its core, are
+  [0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)'s.
+  Ahead: its AMQP 1.0 binding; its gateway; and beadc's Rust target, with
   `examples/hello`'s Rust half, the lists of the procedures a server's transports take
   ([0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md))
   and the validators of a blueprint's rules generated for it, or beadc refusing to generate them
@@ -121,6 +123,7 @@ counts the receiver.
 | `bead`                                                    | the broker's core, its participant and the trace of its parcels, its parcel, its sequence, its heartbeat and its transports, the in-memory broker, the joined transport                                                                                                                                                                                                                                                                        | `parcels` and `parcelRefusals`; the cases over the in-memory broker of `spec/transports.json`; the conversations through a broker pair; the broker's places of `spec/durations.json`; spec 15.14's twins                                                                                                                                                                                                                                                                                      |
 | `bead-protobuf`                                           | the `proto` payload's codec, on Buffa 0.9.2: the check of a payload's records, the required walk, the typed codec and the dynamic one                                                                                                                                                                                                                                                                                                          | `spec/codecs.json`'s `proto` entries, the two values a typed message cannot hold through the dynamic message; protobuf's conformance suite through a Rust testee of `tools/protobuf-conformance.mjs`                                                                                                                                                                                                                                                                                          |
 | `bead` with `websocket` and `http`, `bead-interop-server` | the WebSocket and HTTP transports, server and client, their facades and their TLS ([0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)); `bead-interop-server`, the interop service's server over both, and the Rust client's trials against each side's                                                                                                                         | the cases over HTTP and over WebSocket of `spec/transports.json`; their places of `spec/durations.json`; spec 15.10's and 15.12's twins; the interop both ways with the TypeScript and C# sides                                                                                                                                                                                                                                                                                               |
+| `bead` with `mqtt` and `amqp`, `bead-interop-server`      | the MQTT 5 adapter and its client, over the core's sockets ([0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)), and the AMQP 1.0 adapter, ahead; `bead-interop-server` over MQTT 5                                                                                                                                                                                       | the cases over MQTT 5 of `spec/transports.json`; `mqttPublishBounds`; the places of `mqttBrokerAdapter`; the twins of 15.25 to 15.31; the interop over MQTT 5 both ways                                                                                                                                                                                                                                                                                                                       |
 
 The broker's core sits in `bead`, since the C# side's `Bead.Core` holds the broker's core and the
 in-memory broker, and its cases need no socket; the `proto` codec stands apart, since the router
@@ -135,8 +138,11 @@ and HTTP/2 (RFC 9110, 9112, 9113), the features `websocket` and `http` of its co
 over HTTP and over WebSocket and their places of `spec/durations.json`, and the interop runs both
 ways with the TypeScript and C# sides, under
 [0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md).
-Ahead, in this order: its broker bindings, MQTT 5 and AMQP 1.0; its gateway; and beadc's Rust
-target, with `examples/hello`'s Rust half, the lists of the procedures a server's transports take
+Its broker bindings, MQTT 5 and AMQP 1.0, features of its core, are
+[0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)'s,
+its MQTT 5 binding a client of its own over its sockets. Ahead, in this order: its AMQP 1.0
+binding; its gateway; and beadc's Rust target, with `examples/hello`'s Rust half, the lists of the
+procedures a server's transports take
 ([0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md))
 and the validators of a blueprint's rules generated for it, or beadc refusing to generate them
 ([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)),
@@ -147,12 +153,12 @@ each stage under a record of its own.
 The Rust side is a partial side, under [0004](0004-one-behaviour-in-every-language.md)'s rule: each
 part it does not play is an open row of [the support matrix](../support.md), ahead with the stage
 that brings it, and, where a conformance file plays that part, a row of `spec/check.py`'s `AHEAD`:
-`Rust's gateway`, `Rust's broker bindings` and `Rust's beadc target`, each a row of the matrix and
+`Rust's gateway`, `Rust's AMQP 1.0 binding` and `Rust's beadc target`, each a row of the matrix and
 of `AHEAD`; `Rust's service manager over a router of the application's own`, which no conformance
-file plays, a row of the matrix alone. **Its tests are told from its sources by a
-predicate**, since a suffix does not tell them, both being `.rs`: a module's
-`tests.rs`, a crate's `tests/` and the test kit, `src/testing.rs` and `src/testing/`, so a doc
-comment on a source's item never stands for a twin.
+file plays, a row of the matrix alone. **Its tests are told from its sources by a predicate**, since
+a suffix does not tell them, both being `.rs`: a module's `tests.rs`, a crate's `tests/` and the
+test kit, `src/testing.rs` and `src/testing/`, so a doc comment on a source's item never stands for
+a twin.
 
 ### The workspace and its names
 
@@ -164,10 +170,12 @@ comment on a source's item never stands for a twin.
   `Bead.Core`'s twin, `bead-protobuf` `Bead.Protobuf`'s, `bead-interop` the interop service's,
   `bead-interop-server` its server and the Rust client's trials against each side's;
   `bead-house`, dev only, holds the house's own checks. The crates of the stages ahead are named
-  already, so no rename follows: `bead-transport-mqtt`, `bead-transport-amqp`, `bead-transcoding`
-  and `bead-transcoding-http`; a part that needs the core's inside and ships to applications, a
-  transport, comes instead as a feature of the core
-  ([0047](0047-every-side-shows-one-public-surface.md)).
+  already, so no rename follows: `bead-transcoding` and `bead-transcoding-http`. A part that needs
+  the core's inside and ships to applications, a transport, comes as a feature of the core
+  ([0047](0047-every-side-shows-one-public-surface.md)): its sockets
+  ([0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md))
+  and its broker bindings
+  ([0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)).
 - **Packages qualified by their owner, libraries short**, as NuGet's `FrancisDesjardins.Bead.*`
   over the assemblies `Bead.*`
   ([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)): the package
@@ -399,9 +407,10 @@ carries one `#[expect]` at its root with its reason.
 **The core compiles for the browser's target**, `wasm32-unknown-unknown`: CI runs clippy over its
 library there, so a dependency or an API that does not build in a page (tokio's `net` or
 `rt-multi-thread`, a native TLS stack, `std::os`) fails the change that brings it, and the socket
-transports and the broker bindings sit in features of the core that the check leaves out by name,
-each reaching the core's inside by `pub(crate)`. The target is checked, never run: the folder's
-`.cargo/config.toml` gives getrandom its `unsupported` backend on it,
+transports and the broker bindings sit in features of the core, `websocket`, `http`, `mqtt` and
+`amqp`, AMQP 1.0's ahead, that the check leaves out by name, each reaching the core's inside by
+`pub(crate)`. The target is checked, never run: the folder's `.cargo/config.toml` gives getrandom
+its `unsupported` backend on it,
 `--cfg getrandom_backend="unsupported"`, the backend getrandom names for this case, which adds no
 dependency and no lock entry, keeps `wasm_js` out of the library as getrandom asks, and has no
 effect on a crate that depends on Bead. A draw there is an error, which each of Bead's draws already
@@ -708,10 +717,10 @@ byte, and **always built**: no Cargo feature leaves debugging out, which would b
 
 CI's `rust` job ([0006](0006-a-rule-has-its-gate.md)), on Linux: `cargo fmt --check`, `cargo clippy
 --workspace --all-targets --all-features --locked`, the core's lib linted with no feature, with
-`websocket` alone and with `http` alone (`cargo clippy -p francisdesjardins-bead --lib --locked`,
-`--features websocket`, `--features http`), the browser target's `cargo clippy -p
-francisdesjardins-bead --lib --features testing --locked --target wasm32-unknown-unknown`, by its
-features, no socket among them
+`websocket` alone, with `http` alone and with `mqtt` alone (`cargo clippy -p francisdesjardins-bead
+--lib --locked`, `--features websocket`, `--features http`, `--features mqtt`), the browser
+target's `cargo clippy -p francisdesjardins-bead --lib --features testing --locked --target
+wasm32-unknown-unknown`, by its features, no socket and no broker binding among them
 ([0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)),
 `cargo doc`, a build on the default features alone, `cargo deny --locked check`, the tests under
 coverage held to the floor, and the fuzz targets built on the dated nightly, never run; on Windows,

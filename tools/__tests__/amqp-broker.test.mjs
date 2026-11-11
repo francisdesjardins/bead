@@ -124,8 +124,10 @@ describe('the broker the cases play against', () => {
       'peer',
       'ts-server',
       'cs-server',
+      'rs-server',
       'ts-client',
       'cs-client',
+      'rs-client',
       'fixture',
     ]);
   });
@@ -254,7 +256,13 @@ describe('the definitions it imports', () => {
       definitions.queues.map((queue) => {
         return queue.name;
       }),
-      ['bead.s.interop', 'bead.s.interop-ts', 'bead.s.interop-cs', 'bead.s.interop-both']
+      [
+        'bead.s.interop',
+        'bead.s.interop-ts',
+        'bead.s.interop-cs',
+        'bead.s.interop-rs',
+        'bead.s.interop-both',
+      ]
     );
     assert.ok(
       definitions.queues.every((queue) => {

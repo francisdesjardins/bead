@@ -137,3 +137,49 @@ pub fn client_config() -> Result<Arc<ClientConfig>, rustls::Error> {
             .with_no_client_auth(),
     ))
 }
+
+/// A client's config that trusts the certificate alone and presents it as its own.
+///
+/// It trusts as [`client_config`] does, and its certificate is a client's its broker ties to its
+/// id, as the TypeScript side's broker tests give `TLS_FIXTURE`'s `cert` and `key`.
+///
+/// # Errors
+///
+/// What rustls refuses it for.
+pub fn certified_client_config() -> Result<Arc<ClientConfig>, rustls::Error> {
+    let certificate = CertificateDer::from_pem_slice(CERTIFICATE.as_bytes())
+        .map_err(|_unread| refused("certificate"))?;
+    let key = PrivateKeyDer::from_pem_slice(KEY.as_bytes()).map_err(|_unread| refused("key"))?;
+    let provider = provider();
+    let pinned = Pinned {
+        certificate: certificate.clone(),
+        algorithms: provider.signature_verification_algorithms,
+    };
+
+    Ok(Arc::new(
+        ClientConfig::builder_with_provider(provider)
+            .with_safe_default_protocol_versions()?
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(pinned))
+            .with_client_auth_cert(vec![certificate], key)?,
+    ))
+}
+
+/// A client's config that presents the certificate as its own and trusts no authority at all:
+/// every server's certificate, the fixture's among them, chains to none it trusts.
+///
+/// # Errors
+///
+/// What rustls refuses it for.
+pub fn untrusting_client_config() -> Result<Arc<ClientConfig>, rustls::Error> {
+    let certificate = CertificateDer::from_pem_slice(CERTIFICATE.as_bytes())
+        .map_err(|_unread| refused("certificate"))?;
+    let key = PrivateKeyDer::from_pem_slice(KEY.as_bytes()).map_err(|_unread| refused("key"))?;
+
+    Ok(Arc::new(
+        ClientConfig::builder_with_provider(provider())
+            .with_safe_default_protocol_versions()?
+            .with_root_certificates(rustls::RootCertStore::empty())
+            .with_client_auth_cert(vec![certificate], key)?,
+    ))
+}

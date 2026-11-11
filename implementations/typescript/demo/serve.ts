@@ -13,6 +13,12 @@ import { fileURLToPath } from 'node:url';
 const DEMO = new URL('./', import.meta.url);
 const SERVER = new URL('dist/server.mjs', DEMO);
 
+/**
+ * The package's folder, where the page's `yaml` is found: the Packages tab's and the builder's
+ * `config.ts`'s alike, one copy, whether `builder/` has its own installed or not.
+ */
+const PACKAGE = fileURLToPath(new URL('../', DEMO));
+
 // helpers
 
 const pathOf = (relative: string): string => {
@@ -25,6 +31,8 @@ const pathOf = (relative: string): string => {
 // left to the package that has them
 await Promise.all([
   build({
+    absWorkingDir: PACKAGE,
+    alias: { yaml: 'yaml' },
     bundle: true,
     entryPoints: [pathOf('page.ts')],
     format: 'esm',

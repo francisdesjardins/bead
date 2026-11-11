@@ -10,8 +10,9 @@
   `amqpBrokerAdapter.idleTimeout` and `amqpBrokerAdapter.connectTimeout` of
   [`spec/durations.json`](../../spec/durations.json); `tools/amqp-broker.mjs`, the broker every run
   plays against, on `tools/broker-fixture.mjs`, which `tools/mqtt-broker.mjs` shares; the adapters
-  over rhea and AMQPNetLite and their twins; the interop over AMQP 1.0 and its CI job. The core it
-  binds is
+  over rhea and AMQPNetLite and their twins, the Rust side's ahead
+  ([0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md));
+  the interop over AMQP 1.0 and its CI job. The core it binds is
   [0038](0038-over-a-broker-a-connection-is-placed-once-at-its-open-named-by-both-its-ends.md)'s,
   [0039](0039-a-brokers-transport-numbers-its-parcels-and-sends-an-envelope-in-parts-under-its-peers-bound.md)'s
   and

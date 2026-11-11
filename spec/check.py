@@ -228,10 +228,10 @@ AHEAD = {
             'ways': (('httpTransportServer.sendGracePeriod', 'gateway'), ('httpTransportServer.headersTimeout', 'gateway'),
                      ('httpTransportServer.bodyGracePeriod', 'gateway')),
         },
-        "Rust's broker bindings": {
-            'transports': ('mqtt', 'amqp'),
-            'groups': ('mqttPublishBounds', 'amqpMessages', 'amqpPublishBounds'),
-            'places': ('mqttBrokerAdapter', 'amqpBrokerAdapter'),
+        "Rust's AMQP 1.0 binding": {
+            'transports': ('amqp',),
+            'groups': ('amqpMessages', 'amqpPublishBounds'),
+            'places': ('amqpBrokerAdapter',),
         },
         "Rust's beadc target": {'groups': ('verdicts',)},
     },

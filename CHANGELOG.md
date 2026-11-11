@@ -7,6 +7,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- The Rust side's MQTT 5 binding, the feature `mqtt` of its core, a client of Bead's own over TCP,
+  TLS or a WebSocket: `MqttBrokerAdapter` and its options and defaults; it plays
+  `spec/transports.json`'s cases over MQTT 5, `mqttPublishBounds` and its places of
+  `spec/durations.json`, and the interop runs both ways over it (decision 0050).
+- The demo's Packages tab: a blueprint, the demo's own or one opened, cut into the outputs of
+  `beadc.yaml` by the builder's own `cutOf`, `selectionFindingsOf` and `parseConfig`, run in the
+  page: what each class holds, the findings `beadc generate` would refuse, the procedures each
+  transport takes, the gateway's routes, and the YAML to copy.
+
+### Changed
+
+- The demo takes francisdesjardins.ca's palette and type, and lays its scenes in one column, Try
+  it first, each card's result beside its buttons; the wire, its calls and its envelopes, folds
+  into a drawer on a desktop and a sheet on a phone until it is opened.
+
 ## [0.12.0] - 2026-11-10
 
 ### Added

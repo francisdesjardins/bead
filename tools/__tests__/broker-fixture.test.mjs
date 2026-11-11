@@ -91,9 +91,9 @@ describe('the run’s own broker', () => {
   });
 
   test('names the interop’s participants and the readiness check’s user, the same over every broker', () => {
-    assert.deepEqual(Object.keys(INTEROP.servers), ['ts-server', 'cs-server']);
-    assert.deepEqual(INTEROP.clients, ['ts-client', 'cs-client']);
-    assert.deepEqual(INTEROP.names, ['interop-ts', 'interop-cs', 'interop-both']);
+    assert.deepEqual(Object.keys(INTEROP.servers), ['ts-server', 'cs-server', 'rs-server']);
+    assert.deepEqual(INTEROP.clients, ['ts-client', 'cs-client', 'rs-client']);
+    assert.deepEqual(INTEROP.names, ['interop-ts', 'interop-cs', 'interop-rs', 'interop-both']);
     assert.equal(READINESS_USER, 'fixture');
   });
 });
