@@ -103,7 +103,8 @@ jobs:
 
   # ── Rust ─────────────────────────────────────────────────────────────────────
   # The Rust side's targets under cargo-fuzz, on the nightly its sanitizer needs, the one
-  # tools/fuzz.mjs pins by its date and CI's fuzz build takes.
+  # tools/fuzz.mjs pins by its date and CI's fuzz build takes: every twin, and `mqtt-packets`, its
+  # MQTT 5 client's reader of a broker's packets, its alone.
   rust:
     name: Fuzz (rust)
     runs-on: ubuntu-26.04
