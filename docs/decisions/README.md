@@ -90,6 +90,10 @@ that meets the Tenth Man:
   destination, in the twin tests' place for a relay's two legs' limits and the session its
   requesters share ([0004](0004-one-behaviour-in-every-language.md),
   [0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md));
+- **MQTT 5's DISCONNECT of 0x95 on a packet past a participant's own Maximum Packet Size**, every
+  side sending it before it closes, by a guard of the TypeScript adapter's own on its stream, which
+  MQTT.js gives no other way to write it first
+  ([0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md));
 - **the DevTools extension on Firefox**, its own glue beside the core every browser shares, and an
   adapter's own gauges in its Broker view, MQTT 5's Receive Maximum and its PUBACKs to settle among
   them ([0015](0015-a-pages-client-announces-itself-to-a-devtools-hook.md));
@@ -217,6 +221,7 @@ table.
 | [0036](0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md) | An in-memory transport joins two routers of one process, and a server takes several transports through one                                                         | accepted |
 | [0046](0046-a-router-paces-each-connections-reads-by-what-it-has-not-taken.md)                                            | A router paces each connection's reads by what it has not taken                                                                                                    | accepted |
 | [0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)         | The Rust side's sockets are features of its core, HTTP on hyper and a WebSocket's head read by Bead, and a target is read as a page's browser writes it            | accepted |
+| [0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)   | The Rust side's broker bindings are features of its core, MQTT 5 a client of its own over its sockets                                                              | accepted |
 
 ### Over a broker
 
