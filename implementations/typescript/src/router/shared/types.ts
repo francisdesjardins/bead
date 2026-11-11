@@ -599,14 +599,23 @@ export interface IRouterCore<Handle extends string> {
   readonly limits: IRouterLimits;
 
   /**
-   * The failure the call of a request this side dispatched was answered with, kept once its call
-   * closed: so its resolver, answering after it, finds the failure its router answered in its place.
-   * None for a request answered otherwise, not yet answered, or never dispatched.
+   * The failure the router answered a request this side dispatched with in its resolver's place,
+   * kept once its call closed: so its resolver, its own answer settled, tells it. None for a request
+   * its resolver answered, a failure among them, not yet answered, or never dispatched.
    */
   answeredOf(request: {
     connectionHandle: Handle;
     header: IHandedRequestHeader;
   }): IFailure | undefined;
+  /**
+   * Answers a request this side dispatched with `failure`, in its resolver's place, as `respond`
+   * does — a server's subscription past its bounds (spec 11.10), a refusal, a resolver that failed
+   * (spec 9.5) — and records it for `answeredOf` once it is the call's answer, whether it goes or not.
+   */
+  answerInPlace(
+    failure: IFailure,
+    request: { connectionHandle: Handle; header: IHandedRequestHeader }
+  ): Promise<void>;
   /**
    * Cancels a call this side opened: one still waiting is rejected with a {@link CancelError}, the
    * peer is sent a cancel, and the call id is reserved for `timeout` — the call's own when it is
@@ -957,8 +966,8 @@ export interface IRouterLike<Handle extends string = ConnectionHandle> {
 
   /**
    * The failure the router answered a request with in its resolver's place — a server's, as the
-   * subscription the request opens queued past its bounds (spec 11.10) — read as its resolver
-   * answers, whose answer then goes nowhere; none while the request is its resolver's to answer.
+   * subscription the request opens queued past its bounds (spec 11.10) — read once its resolver's
+   * answer settled, which then went nowhere; never a failure its resolver answered.
    */
   answeredOf(
     request: Pick<IRequestResolverProps<Handle>, 'connectionHandle' | 'header'>
@@ -1331,9 +1340,9 @@ export interface IDebugEvent {
   connectionHandle: string | undefined;
   direction: DebugDirection;
   /**
-   * How long the call took once it answered, in whole milliseconds of its router clock's monotonic
-   * reading, a fraction dropped; `undefined` before, and for a notification. A span's duration, as
-   * .NET's `Activity.Duration` and an OpenTelemetry span carry it.
+   * How long the call took once its answer settled, went or not, in whole milliseconds of its router
+   * clock's monotonic reading, a fraction dropped; `undefined` before, and for a notification. A
+   * span's duration, as .NET's `Activity.Duration` and an OpenTelemetry span carry it.
    */
   duration: number | undefined;
   options: IResolvedRequestOptions | undefined;
@@ -1876,9 +1885,10 @@ export type RequestResolverCallback<
 export type ServiceManagerEventMap = {
   /**
    * `error` is what the call failed with, or `null`; on a `tx` step, why its `tx` did not go out — a
-   * notification that could not go, an answer its router refused, told again at its start, or none,
-   * from a resolver that failed before it answered. What a listener throws is reported through the
-   * router's `error` — with the call's connection, on a server — and changes nothing of the call.
+   * notification that could not go; an answer, told once its router settled it, with what its router
+   * refused it with or the failure it answered in its place; or none, from a resolver that failed
+   * before it answered. What a listener throws is reported through the router's `error` — with the
+   * call's connection, on a server — and changes nothing of the call.
    */
   debug: [error: unknown, info: IDebugEvent];
   /** A deprecated procedure was called; its `deprecation` says what to use instead, when it says. */

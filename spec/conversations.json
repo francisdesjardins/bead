@@ -6285,6 +6285,57 @@
       ]
     },
     {
+      "name": "a connection that closes ends its transfers, and the budget they held credits a transfer another connection's opening starved",
+      "clauses": [
+        "12.4",
+        "12.10"
+      ],
+      "limits": {
+        "chunkBytes": 64,
+        "windowBytes": 128,
+        "bufferedBytesBudget": 256,
+        "maximumPayloadBytes": 256
+      },
+      "steps": [
+        {
+          "open": "first"
+        },
+        {
+          "open": "second"
+        },
+        {
+          "send": "A1 10 04 05  00 00 00 01  00 01 00 01  00 00 00 00 00 00 00 C8 | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71",
+          "on": "first"
+        },
+        {
+          "expect": {
+            "kind": 21,
+            "callId": 1,
+            "paced": false,
+            "creditEnd": 172
+          },
+          "on": "first"
+        },
+        {
+          "send": "A1 10 04 05  00 00 00 01  00 01 00 01  00 00 00 00 00 00 00 C8 | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71",
+          "on": "second"
+        },
+        {
+          "close": true,
+          "on": "first"
+        },
+        {
+          "expect": {
+            "kind": 21,
+            "callId": 1,
+            "paced": false,
+            "creditEnd": 172
+          },
+          "on": "second"
+        }
+      ]
+    },
+    {
       "name": "a cancel ends the transfer of a result, and a credit after it is dropped in silence",
       "clauses": [
         "12.7",

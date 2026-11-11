@@ -37,9 +37,9 @@ use crate::metrics::{MetricsRegistry, NotificationSeries, ProcedureSeries, Route
 use crate::ordered::Ordered;
 use crate::owner::{Owner, WeakOwner};
 use crate::router::core::{
-    BeforeAnswer, Core, Dispatch, Disposal, Handler, Resolution, Resolved, Resolvers, Responded,
-    SessionRequest as CoreSessionRequest, Side, Undo, Unresolved, is_answering, reported,
-    reported_call, respond,
+    BeforeAnswer, CallAnswer, Core, Dispatch, Disposal, Handler, Resolution, Resolved, Resolvers,
+    Responded, SessionRequest as CoreSessionRequest, Side, Undo, Unresolved, answer_in_place,
+    is_answering, reported, reported_call,
 };
 use crate::router::intake::Intake;
 use crate::router::requester::CoreRequest;
@@ -1323,19 +1323,20 @@ fn exceed(state: &mut ServerState, call: CallAddress) {
         Some(request) => {
             let handle = Arc::clone(&call.connection_handle);
 
-            respond(
+            // * the router's own answer in its resolver's place, held for its manager to tell
+            answer_in_place(
                 state,
-                (
-                    RouterAnswer::Failure(failure.record()),
-                    request,
-                    Some(Box::new(
+                CallAnswer {
+                    answer: RouterAnswer::Failure(failure.record()),
+                    dispatch: request,
+                    done: Some(Box::new(
                         move |state: &mut ServerState, outcome: Result<(), CallError>| {
                             if let Err(error) = outcome {
                                 state.report(reported_call(error), &handle);
                             }
                         },
                     )),
-                ),
+                },
             );
         }
     }

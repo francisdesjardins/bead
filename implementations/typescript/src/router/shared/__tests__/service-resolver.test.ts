@@ -873,7 +873,7 @@ test.describe('createServiceManager', () => {
     });
 
     // debugging 4.2 and 4.2.4
-    test('tells an answer its router cannot send again at its start, with why beside it', async () => {
+    test('tells an answer its router cannot send once, with why beside it', async () => {
       const start = Date.UTC(2026, 0, 1);
       const clock = createTestClock(start);
       const { calls, router } = createFakeRouter('server', clock);
@@ -913,7 +913,6 @@ test.describe('createServiceManager', () => {
         })
       ).toEqual([
         ['rx', undefined, null, start, undefined],
-        ['tx', { text: 'hi' }, null, start, 10],
         ['tx', { text: 'hi' }, tooLong, start, 15],
       ]);
       expect(
@@ -921,6 +920,197 @@ test.describe('createServiceManager', () => {
           return response.failure;
         })
       ).toEqual([SERVER_FAILURES.procedureFailed]);
+    });
+
+    // debugging 4.2: a call answered nothing tells no failure (spec 9.4)
+    test('tells with no failure an answer that did not go once its call was cancelled', async () => {
+      const clock = createTestClock(1_000);
+      const { router } = createFakeRouter('server', clock);
+      const manager = createServiceManager(router);
+      const seen = recordDebug(manager);
+      const controller = new AbortController();
+      const respond = router.respond;
+      const gone = new Error('the call was cancelled');
+      let heard: unknown;
+
+      // its requester cancels as the answer goes, 5 ms after it is handed over: it goes nowhere
+      router.respond = async (response, request) => {
+        if (response.failure !== undefined) {
+          return respond(response, request);
+        }
+
+        await clock.tickAsync(5);
+        controller.abort();
+
+        throw gone;
+      };
+
+      const resolver = manager.getRequestResolver(echo, { serializer: serverSerializer })(async (
+        request,
+        response
+      ) => {
+        await clock.tickAsync(10);
+        heard = await response(request.payload).catch((reason: unknown) => {
+          return reason;
+        });
+      });
+
+      await resolver(propsOf(encode({ text: 'hi' }), controller.signal));
+
+      expect(heard).toBe(gone);
+      expect(
+        seen.map(({ error, info }) => {
+          return [info.direction, info.tx, error, info.startedAt, info.duration];
+        })
+      ).toEqual([
+        ['rx', undefined, null, 1_000, undefined],
+        ['tx', { text: 'hi' }, null, 1_000, 15],
+      ]);
+    });
+
+    // debugging 4.2; the router replaces the answer while respond settles
+    test('tells once the failure its router answered in its place as its answer went to it', async () => {
+      const clock = createTestClock(1_000);
+      const { router } = createFakeRouter('server', clock);
+      const manager = createServiceManager(router);
+      const seen = recordDebug(manager);
+      const exceeded = {
+        ...SERVER_FAILURES.capacityExceeded,
+        detail: 'the notifications queued for call 7 went past their bounds',
+      };
+      let held: ReturnType<typeof router.answeredOf>;
+
+      router.answeredOf = (target) => {
+        return target.header === header ? held : undefined;
+      };
+      router.respond = async () => {
+        await clock.tickAsync(5);
+        held = exceeded;
+      };
+
+      const resolver = manager.getRequestResolver(echo, { serializer: serverSerializer })(async (
+        request,
+        response
+      ) => {
+        await clock.tickAsync(10);
+
+        return response(request.payload);
+      });
+
+      await resolver(propsOf(encode({ text: 'hi' })));
+
+      const steps = [...seen];
+
+      // a failure its own resolver answers is told once, with none beside it: the router holds it
+      // not
+      seen.length = 0;
+      held = undefined;
+      router.respond = () => {
+        return Promise.resolve();
+      };
+      await manager.getRequestResolver(
+        { ...echo, procedureId: 2, procedureName: 'fail' },
+        { serializer: serverSerializer }
+      )((_request, response) => {
+        return response(null, { code: 7 });
+      })(propsOf(encode({ text: 'hi' })));
+
+      expect(
+        seen.map(({ error, info }) => {
+          return [info.direction, info.type, error];
+        })
+      ).toEqual([
+        ['rx', 'request', null],
+        ['tx', 'request', null],
+      ]);
+      expect(
+        steps.map(({ error, info }) => {
+          return [info.direction, error !== null, info.tx, info.startedAt, info.duration];
+        })
+      ).toEqual([
+        ['rx', false, undefined, 1_000, undefined],
+        ['tx', true, { text: 'hi' }, 1_000, 15],
+      ]);
+
+      expect(steps[1]?.error).toBeInstanceOf(FailureError);
+      expect(steps[1]?.error).toMatchObject({
+        ...exceeded,
+        header: { callId: 7, kind: 0x12 },
+        origin: 'local',
+        side: 'server',
+      });
+    });
+
+    // debugging 4.2: the step waits on the answer's settling, not on its resolver, which returned
+    test('tells once its router settled it an answer nobody waits on', async () => {
+      const exceeded = {
+        ...SERVER_FAILURES.capacityExceeded,
+        detail: 'the notifications queued for call 7 went past their bounds',
+      };
+
+      // an answer that goes, then one its router answers in its place as it goes
+      for (const inPlace of [undefined, exceeded]) {
+        const clock = createTestClock(1_000);
+        const { router } = createFakeRouter('server', clock);
+        const manager = createServiceManager(router);
+        const seen = recordDebug(manager);
+        const gate = Promise.withResolvers<void>();
+        const answers: Promise<void>[] = [];
+        // what its router answered in its place, once it did
+        const record: { held?: typeof inPlace } = {};
+
+        router.answeredOf = (target) => {
+          return target.header === header ? record.held : undefined;
+        };
+        router.respond = () => {
+          return gate.promise;
+        };
+
+        const resolver = manager.getRequestResolver(echo, { serializer: serverSerializer })(async (
+          request,
+          response
+        ) => {
+          await clock.tickAsync(10);
+          // handed to its router, and not waited on
+          answers.push(response(request.payload));
+        });
+
+        await resolver(propsOf(encode({ text: 'hi' })));
+
+        // its resolver returned; its answer is still going
+        expect(
+          seen.map(({ info }) => {
+            return info.direction;
+          })
+        ).toEqual(['rx']);
+
+        clock.tick(5);
+        record.held = inPlace;
+        gate.resolve();
+        await Promise.all(answers);
+
+        expect(
+          seen.map(({ error, info }) => {
+            return [
+              info.direction,
+              info.tx,
+              error instanceof FailureError ? [error.code, error.detail] : error,
+              info.startedAt,
+              info.duration,
+            ];
+          }),
+          String(inPlace?.code)
+        ).toEqual([
+          ['rx', undefined, null, 1_000, undefined],
+          [
+            'tx',
+            { text: 'hi' },
+            inPlace === undefined ? null : [inPlace.code, inPlace.detail],
+            1_000,
+            15,
+          ],
+        ]);
+      }
     });
 
     // debugging 4.2

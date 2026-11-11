@@ -2,7 +2,7 @@
 //! to a request answered while its holder was in flight.
 
 use core::num::NonZeroU16;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use bytes::Bytes;
 use tokio_util::sync::CancellationToken;
@@ -511,6 +511,89 @@ async fn tells_the_failure_its_router_answered_in_the_resolvers_place() {
         ]
     );
     assert_eq!(paced.served.reported(), Vec::<String>::new());
+}
+
+// debugging 4.2: a resolver that sends notifications past its queue's bounds, none awaited, then
+// answers, all in its own flow
+#[tokio::test]
+async fn tells_once_with_the_failure_its_router_answered_in_its_place_an_answer_given_behind_notifications_that_went_past_their_bounds()
+ {
+    let served = Served::new(&RouterServerOptions {
+        pacing: Some(PacingLimitsOptions {
+            maximum_queued_notifications: Some(1),
+            ..PacingLimitsOptions::default()
+        }),
+        ..RouterServerOptions::default()
+    });
+    served.transport.open(&first(), true);
+    let notifying: Arc<OnceLock<Notifier<TextCodec>>> = Arc::default();
+    let notifier = Arc::clone(&notifying);
+    let made = served
+        .services
+        .get_notification_resolver(
+            &news(),
+            NotificationResolverDependencies::new(
+                RequestResolverDependencies::new(TextCodec, TextCodec),
+                TextCodec,
+            ),
+        )
+        .expect("a resolver")
+        .on(Arc::new(move |_request, response: Response<TextCodec>| {
+            let notifier = Arc::clone(&notifier);
+            Box::pin(async move {
+                response
+                    .register_notification()
+                    .await
+                    .map_err(ResolverError::other)?;
+                let notifier = notifier.get().expect("its notifier");
+                for word in ["a", "b", "c"] {
+                    // * sent as it is made: the future dropped waits on nothing it sends
+                    drop(notifier.notify(word.to_owned(), &NotifyOptions::default()));
+                }
+                response.result("ok".to_owned()).await
+            })
+        }))
+        .expect("a callback");
+    assert!(notifying.set(made).is_ok(), "its notifier set once");
+    let told = Arc::new(Mutex::new(Vec::new()));
+    let telling = Arc::clone(&told);
+    served.services.on_debug(Arc::new(move |error, event| {
+        if event.call_id == Some(3) {
+            let code = error.map(|error| {
+                let error = error.downcast_ref::<CallError>().expect("a call error");
+                let CallError::Failure(failure) = error else {
+                    panic!("a failure")
+                };
+                failure.code()
+            });
+            locked(&telling).push((
+                event.direction,
+                event.tx.as_ref().map(|value| format!("{value:?}")),
+                code,
+            ));
+        }
+    }));
+    served.transport.deliver(&request((3, true, "")), &first());
+    served.settle().await;
+    assert_eq!(
+        served.sent_since(),
+        [
+            "first notification 3 a",
+            "first failure 3 CAPACITY_EXCEEDED"
+        ]
+    );
+    assert_eq!(
+        *locked(&told),
+        [
+            (DebugDirection::Rx, None, None),
+            (
+                DebugDirection::Tx,
+                Some("\"ok\"".to_owned()),
+                Some(ProtocolCode::CAPACITY_EXCEEDED.get())
+            ),
+        ]
+    );
+    assert_eq!(served.reported(), Vec::<String>::new());
 }
 
 #[tokio::test]

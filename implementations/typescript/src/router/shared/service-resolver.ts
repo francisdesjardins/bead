@@ -249,9 +249,6 @@ export const createServiceResolver = <Handle extends string>(
 
         isAnswered = true;
 
-        // a request its router answered in its place takes this answer nowhere: its step is told
-        // once, with the failure its router answered, and nothing failed here
-        const answered = router.answeredOf(target);
         const step =
           started === undefined
             ? undefined
@@ -266,6 +263,26 @@ export const createServiceResolver = <Handle extends string>(
                 type,
               } as const);
 
+        try {
+          // a call its router answered in its place settles this answer without error, and takes it
+          // nowhere
+          await router.respond(routerAnswer, target);
+        } catch (reason) {
+          // an answer the router could not send — too large, say — is answered as failed, so its
+          // requester does not wait out its timeout; a call no longer answered tells no failure
+          if (step !== undefined) {
+            trace(procedure, signal.aborted ? step : { ...step, error: reason });
+          }
+
+          await router.respond({ failure: router.failures.procedureFailed }, target).catch(noop);
+
+          throw reason;
+        }
+
+        // * told once its router settled it: with the failure its router answered in its place, or
+        // with none, its tx gone or its call no longer answered (debugging 4.2)
+        const answered = signal.aborted ? undefined : router.answeredOf(target);
+
         if (step !== undefined) {
           trace(
             procedure,
@@ -278,25 +295,6 @@ export const createServiceResolver = <Handle extends string>(
                   }),
                 }
           );
-        }
-
-        if (answered !== undefined) {
-          return;
-        }
-
-        try {
-          await router.respond(routerAnswer, target);
-        } catch (reason) {
-          // an answer the router could not send — too large, say — is told again at its start with
-          // why, and answered as failed, so its requester does not wait out its timeout; a call no
-          // longer answered takes neither
-          if (step !== undefined && !signal.aborted) {
-            trace(procedure, { ...step, error: reason });
-          }
-
-          await router.respond({ failure: router.failures.procedureFailed }, target).catch(noop);
-
-          throw reason;
         }
       };
       const response: INotificationResponse<ResponsePayload, Failure> = Object.assign(answer, {

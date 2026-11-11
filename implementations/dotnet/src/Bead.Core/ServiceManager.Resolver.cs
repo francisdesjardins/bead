@@ -334,26 +334,16 @@ public sealed partial class ServiceManager
 
                 IsAnswered = true;
 
-                // * a request its router answered in its place takes this answer nowhere: its step is
-                // told once, with the failure its router answered, and nothing failed here
-                // (spec/debugging.md 4.2)
-                if (ToldInPlace(answered))
-                {
-                    return;
-                }
-
-                // traced once its request was, to whoever listens
-                Told(answered, null);
-
                 try
                 {
+                    // a call its router answered in its place settles without error, and takes this
+                    // answer nowhere
                     await resolver._router.Respond(answer, Target);
                 }
                 catch (Exception reason)
                 {
-                    // an answer the router could not send — too large, say — is told again at its
-                    // start with why, and answered as failed, so its requester does not wait out its
-                    // timeout
+                    // an answer the router could not send — too large, say — is told with why, and
+                    // answered as failed, so its requester does not wait out its timeout
                     Told(answered, reason);
 
                     await resolver.AnswerFailed(Target);
@@ -361,36 +351,20 @@ public sealed partial class ServiceManager
                     throw;
                 }
 
-                ToldLate(answered, answer);
+                // * told once its router settled it: with the failure its router answered in its
+                // place, before this answer reached it or while it went, or with none, its tx gone
+                // (spec/debugging.md 4.2)
+                ToldSettled(answered);
             }
 
-            // whether its router answered its request in its place, its step told with that failure;
+            // its answer's step once its router settled it: with the failure its router answered in
+            // its place, which its record alone says, or with none;
             // ! no local of its own in Send, whose state machine a request allocates
-            private bool ToldInPlace(object? answered)
+            private void ToldSettled(object? answered)
             {
-                if (resolver._router.AnsweredOf(Target) is not { } inPlace)
-                {
-                    return false;
-                }
-
                 if (answering.Started.HasValue)
                 {
-                    Told(answered, FailureOf(inPlace));
-                }
-
-                return true;
-            }
-
-            // ! its router answered in its place on its own thread while this answer went to it, so
-            // it went nowhere: told again at its start, with the failure its router answered; never
-            // the failure this answer was
-            private void ToldLate(object? answered, RouterAnswer answer)
-            {
-                if (answering.Started.HasValue
-                    && resolver._router.AnsweredOf(Target) is { } late
-                    && !ReferenceEquals(late, answer.Failure))
-                {
-                    Told(answered, FailureOf(late));
+                    Told(answered, resolver._router.AnsweredOf(Target) is { } inPlace ? FailureOf(inPlace) : null);
                 }
             }
 
@@ -403,18 +377,19 @@ public sealed partial class ServiceManager
                 };
             }
 
-            // ! tells its answer's step, or why it did not go, to whoever listens; built here, out of
-            // the async Send, so that a request holds no step of its own while nobody listens. A call
-            // no longer answered takes no failure
+            // ! tells its answer's step, once, and why it did not go, to whoever listens; built here,
+            // out of the async Send, so that a request holds no step of its own while nobody listens.
+            // A call no longer answered — cancelled, gone with its connection, its router disposed —
+            // tells its step with no failure
             private void Told(object? answered, Exception? reason)
             {
-                if (answering.Started is { } started && (reason is null || !answering.Signal.IsCancellationRequested))
+                if (answering.Started is { } started)
                 {
                     resolver.Traced(new DebugStep(DebugDirection.Tx, resolver.Type)
                     {
                         CallId = Target.Header.CallId,
                         ConnectionHandle = Target.ConnectionHandle,
-                        Error = reason,
+                        Error = answering.Signal.IsCancellationRequested ? null : reason,
                         IsAnswered = true,
                         Rx = answering.Request,
                         Started = started,
