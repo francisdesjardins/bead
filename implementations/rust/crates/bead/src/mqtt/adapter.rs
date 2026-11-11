@@ -13,13 +13,14 @@
 //! other property, counted to its byte and refused past its CONNACK's Maximum Packet Size, held to
 //! its CONNACK's Receive Maximum, later ones waiting in their order, no other packet delayed for
 //! them; its PUBACK of 0x10 says no subscriber, of 0x80 or more refuses it. Each message is handed
-//! on before its PUBACK, which goes once it is settled. A packet past its own Maximum Packet Size
-//! closes its network connection, no DISCONNECT, its link lost. A DISCONNECT of 0x8E tells its link
-//! taken over; any other end, lost. Its stop takes no publication, sends what waits on the quota and
-//! awaits each PUBACK, fails what has not gone by then, sends an UNSUBSCRIBE for each filter its link
-//! asked or holds, one filter a packet, all at once, and awaits their UNSUBACKs, all within one
-//! connect timeout of its call, then sends a DISCONNECT of 0x00 within a connect timeout of its
-//! own, so that no will goes. Its leg is secure under TLS or to the loopback.
+//! on before its PUBACK, which goes once it is settled. A packet past its own Maximum Packet Size,
+//! read at its Remaining Length, closes its network connection, no DISCONNECT, its link lost. A
+//! DISCONNECT of 0x8E tells its link taken over; any other end, lost. Its stop takes no
+//! publication, sends what waits on the quota and awaits each PUBACK, fails what has not gone by
+//! then, sends an UNSUBSCRIBE for each filter its link asked or holds, one filter a packet, all at
+//! once, and awaits their UNSUBACKs, all within one connect timeout of its call, then sends a
+//! DISCONNECT of 0x00 within a connect timeout of its own, so that no will goes. Its leg is secure
+//! under TLS or to the loopback.
 //!
 //! Its state is one owner's (decision 0044): each operation posts its job as it is made, and its
 //! future only waits; its network connection's reads and its end come back to that owner as jobs

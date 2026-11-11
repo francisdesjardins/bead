@@ -212,6 +212,106 @@ fn refuses_a_packet_past_its_bound_as_its_remaining_length_is_read() {
         Ok(MqttReading::Partial),
         "within it, its body awaited"
     );
+
+    // the same header one byte a read: awaited until its length is whole, then refused
+    assert_eq!(read_packet(&[0x32], 999), Ok(MqttReading::Partial), "32");
+    assert_eq!(
+        read_packet(&[0x32, 0xE5], 999),
+        Ok(MqttReading::Partial),
+        "32 E5"
+    );
+    assert_eq!(
+        read_packet(&[0x32, 0xE5, 0x07], 999),
+        Err(MqttRefusal::PastMaximum {
+            size: 1_000,
+            maximum: 999,
+        }),
+        "refused at 07"
+    );
+
+    // a packet within the bound, then that header, in one read: the first taken whole
+    let bytes = [0xD0, 0x00, 0x32, 0xE5, 0x07];
+
+    assert_eq!(
+        read_packet(&bytes, 999),
+        Ok(MqttReading::Packet {
+            packet: MqttPacket::Pingresp,
+            length: 2,
+        }),
+        "the first whole"
+    );
+    assert_eq!(
+        read_packet(&bytes[2..], 999),
+        Err(MqttRefusal::PastMaximum {
+            size: 1_000,
+            maximum: 999,
+        }),
+        "then the second refused"
+    );
+}
+
+#[test]
+fn refuses_a_packet_past_its_bound_whatever_its_kind() {
+    // a first byte of the reserved type 0, its length 16,777,221 bytes in all
+    assert_eq!(
+        read_packet(&[0x00, 0x80, 0x80, 0x80, 0x08], 1_100),
+        Err(MqttRefusal::PastMaximum {
+            size: 16_777_221,
+            maximum: 1_100,
+        }),
+        "past its bound, not malformed"
+    );
+
+    // within the bound, its kind refused as before
+    assert!(
+        matches!(
+            read_packet(&[0x00, 0x00], 1_100),
+            Err(MqttRefusal::Malformed(_))
+        ),
+        "malformed within it"
+    );
+    assert!(
+        matches!(read_packet(&[0x00], 1_100), Err(MqttRefusal::Malformed(_))),
+        "malformed alone, its length not yet read"
+    );
+}
+
+#[test]
+fn reads_a_packet_at_its_bound_and_the_next_in_the_same_read_as_they_came() {
+    // a PUBLISH of 1,100 bytes in all: 1, 2 of its Remaining Length, 1,097 of its body
+    let mut bytes = vec![0x30, 0xC9, 0x08, 0x00, 0x01, b'x', 0x00];
+
+    bytes.resize(1_100, 0xAB);
+    bytes.extend_from_slice(&[0xD0, 0x00]);
+
+    match read_packet(&bytes, 1_100) {
+        Ok(MqttReading::Packet {
+            packet: MqttPacket::Publish(publish),
+            length,
+        }) => {
+            assert_eq!(length, 1_100, "the packet at its bound, whole");
+            assert_eq!(publish.payload.len(), 1_093, "its payload");
+        }
+        other => panic!("read as {other:?}"),
+    }
+
+    assert_eq!(
+        read_packet(&bytes[1_100..], 1_100),
+        Ok(MqttReading::Packet {
+            packet: MqttPacket::Pingresp,
+            length: 2,
+        }),
+        "then the PINGRESP"
+    );
+
+    // a Remaining Length of five bytes
+    assert!(
+        matches!(
+            read_packet(&[0x32, 0x80, 0x80, 0x80, 0x80, 0x01], 1_100),
+            Err(MqttRefusal::Malformed(_))
+        ),
+        "malformed"
+    );
 }
 
 #[test]

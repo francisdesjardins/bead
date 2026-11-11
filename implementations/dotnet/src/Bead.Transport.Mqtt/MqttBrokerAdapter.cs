@@ -18,10 +18,11 @@ namespace Bead.Transport.Mqtt;
 /// counted to its byte before it goes and held to its CONNACK's Receive Maximum, its PUBACK's 0x10
 /// read as no subscriber; each message handed on before its PUBACK, which goes once its participant
 /// settled it; a will of its GONE; at a stop, an UNSUBSCRIBE of each filter it asked or holds, then
-/// a DISCONNECT of 0x00, and one of 0x8E read as its link taken over. MQTTnet's automation is off:
-/// no reconnection, resubscription, offline queue or alias; each incarnation is a client of its
-/// own, every late callback of a former one doing nothing. The TypeScript side's adapter over
-/// MQTT.js does the same.
+/// a DISCONNECT of 0x00, and one of 0x8E read as its link taken over. A packet past its own Maximum
+/// Packet Size, read at its Remaining Length, closes its network connection, no DISCONNECT, its link
+/// lost. MQTTnet's automation is off: no reconnection, resubscription, offline queue or alias; each
+/// incarnation is a client of its own, every late callback of a former one doing nothing. The
+/// TypeScript side's adapter over MQTT.js does the same.
 /// </summary>
 public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 {
@@ -221,8 +222,20 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     /// </summary>
     public async Task Start(BrokerStart? start = null)
     {
-        var client = new MqttClientFactory().CreateMqttClient();
-        var link = new Link(client);
+        Link? guarded = null;
+        var client = new MqttClientFactory().CreateMqttClient(new GuardedAdapterFactory(new MqttPacketGuardOptions
+        {
+            MaximumPacketSize = _options.MaximumPacketSize,
+            PastMaximum = (size) =>
+            {
+                // ! its link set before its CONNECT goes, so before any packet is read
+                if (guarded is not null)
+                {
+                    PastMaximum((guarded, size));
+                }
+            },
+        }));
+        var link = guarded = new Link(client);
 
         lock (_gate)
         {
@@ -280,6 +293,11 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             try
             {
                 connected = await client.ConnectAsync(OptionsOf((start?.Will, password)), linked.Token);
+            }
+            // * a packet past its own Maximum Packet Size, its CONNACK's among them, read before it
+            catch (Exception) when (link.PastMaximum is not null)
+            {
+                throw link.PastMaximum;
             }
             // * the timeout's, whatever its cancel ended after it: MQTTnet tells the link down as it gives up
             catch (Exception reason) when (timeout.IsCancellationRequested && !token.IsCancellationRequested)
@@ -902,15 +920,29 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             {
                 Interlocked.Exchange(ref link.LastSent, TimeProvider.System.GetTimestamp());
             }
-            else if (inspected.Buffer.Length > _options.MaximumPacketSize)
-            {
-                // ! a Protocol Error (MQTT 5.0 §3.1.2.11.4, §4.13.1): its incarnation retired before
-                // the packet is decoded, so its message reaches no core, its network connection closed
-                End((link, new BrokerDown()), new IOException(string.Create(CultureInfo.InvariantCulture, $"a packet of {inspected.Buffer.Length} bytes came past the Maximum Packet Size of {Id}, {_options.MaximumPacketSize} bytes")));
-            }
 
             return Task.CompletedTask;
         };
+    }
+
+    // a packet past its own Maximum Packet Size, a Protocol Error (MQTT 5.0 §3.1.2.11.4, §4.13.1),
+    // judged at its Remaining Length by its channel's guard, on MQTTnet's receive loop: its link
+    // lost, or its start failed where its CONNACK had not come
+    private void PastMaximum((Link Link, long Size) past)
+    {
+        var (link, size) = past;
+        var reason = new IOException(string.Create(CultureInfo.InvariantCulture, $"the link of {Id} went down: its broker sent a packet of {size} bytes, past its Maximum Packet Size, {_options.MaximumPacketSize} bytes"));
+
+        lock (_gate)
+        {
+            // ! a link ended already keeps the reason it ended for
+            if (!link.IsEnded)
+            {
+                link.PastMaximum = reason;
+            }
+        }
+
+        End((link, new BrokerDown()), reason);
     }
 
     // a message received, handed on before its PUBACK, which its participant's settle sends, once,
@@ -1038,8 +1070,9 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         End((link, new BrokerDown()), new IOException($"the link of {Id} was retired: what it was asked was given up once it may have gone"));
     }
 
-    // an incarnation's end, once: told down where it was up, then what it awaits failed, its quota
-    // ended, and its client let go of, which closes its network connection without a DISCONNECT
+    // an incarnation's end, once, on a packet past its own Maximum Packet Size as on any other cause:
+    // told down where it was up, then what it awaits failed, its quota ended, and its client let go
+    // of, which closes its network connection without a DISCONNECT
     private void End((Link Link, BrokerDown? Down) ending, Exception reason)
     {
         var (link, down) = ending;
@@ -1124,6 +1157,9 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         public bool IsStopping { get; set; }
 
         public Exception? Ended { get; set; }
+
+        // set by its guard before it ends it, so that its start fails with it, never as a stop's end
+        public IOException? PastMaximum { get; set; }
 
         public ITimer? Pinger { get; set; }
     }

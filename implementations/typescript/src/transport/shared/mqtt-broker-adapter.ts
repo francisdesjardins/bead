@@ -23,6 +23,7 @@ import {
   publishBytes,
   topicOf,
 } from './mqtt-packets';
+import { guardPacketSize } from './mqtt-packet-guard';
 import { isSecureUrl } from './secure';
 import { withSlicedSends } from './sliced-sends';
 import type {
@@ -242,8 +243,9 @@ const assertAuthentication = ({
  * UNSUBSCRIBE for each filter its link asked or holds, one filter a packet, all at once, and awaits
  * their UNSUBACKs, all within one connectTimeout of its call, then sends a DISCONNECT of 0x00
  * within a connectTimeout of its own, so that no will goes: once it settled, its broker hands
- * it nothing. Its leg is secure under TLS or to the loopback. In a page, its WebSocket sends no
- * message past 16 KiB, which Chromium sends as one frame.
+ * it nothing. A packet past its own Maximum Packet Size, read at its Remaining Length, closes its
+ * network connection, no DISCONNECT, its link lost. Its leg is secure under TLS or to the loopback.
+ * In a page, its WebSocket sends no message past 16 KiB, which Chromium sends as one frame.
  *
  * @example
  * const adapter = createMqttBrokerAdapter({ id: 'server', password, url: 'mqtts://broker:8883' });
@@ -862,6 +864,18 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
           resolve();
         });
         client.connect();
+        guardPacketSize(client.stream, {
+          maximumPacketSize,
+          // * its start failed, naming it, where its CONNACK had not come, its link lost after
+          onPastMaximum: (size) => {
+            const error = new GenericError(
+              `the link of ${id} went down: its broker sent a packet of ${String(size)} bytes, past its Maximum Packet Size, ${String(maximumPacketSize)} bytes`
+            );
+
+            fail(error);
+            retire(held, error);
+          },
+        });
       });
     } catch (reason) {
       retire(held, toError(reason));

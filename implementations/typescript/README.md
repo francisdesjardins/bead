@@ -1412,7 +1412,8 @@ goes; held to its CONNACK's Receive Maximum, which MQTT.js does not keep, later 
 their order. Its PUBACK of 0x10 is no subscriber, read on `packetreceive`, since MQTT.js's own
 callback hides it; 0x80 or more refuses it. Each message is handed on inside MQTT.js's
 `customHandleAcks`, its PUBACK sent once the core settles it, which it does as it takes it; a packet
-past its own Maximum Packet Size closes the link, no DISCONNECT (a row of
+past its own Maximum Packet Size, read at its Remaining Length by a guard of the adapter's own on
+MQTT.js's stream, closes the link, no DISCONNECT (a row of
 [`docs/support.md`](../../docs/support.md)'s "Leveled down"). Its leg is secure under TLS or to the
 loopback. The deployment's half — its access control by the participant's id, its Client Identifier
 tied to what it authenticated, its queues and its receive maximum — is spec 15.31's.

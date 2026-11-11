@@ -894,8 +894,8 @@ fn kind_of(first: u8) -> Result<(u8, u8), MqttRefusal> {
 /// The packet at the front of `bytes`, as a client reads it from its broker, or the want of more
 /// bytes.
 ///
-/// A packet past `maximum_packet_size` is refused as soon as its Remaining Length is read, before
-/// its body comes (spec 15.29).
+/// A packet past `maximum_packet_size`, whatever its kind, is refused as soon as its Remaining
+/// Length is read, before its body comes (spec 15.29).
 ///
 /// # Errors
 ///
@@ -904,8 +904,9 @@ pub fn read_packet(bytes: &[u8], maximum_packet_size: u32) -> Result<MqttReading
     let Some((first, after)) = bytes.split_first() else {
         return Ok(MqttReading::Partial);
     };
-    let (kind, flags) = kind_of(*first)?;
     let Some((remaining, width)) = variable_of(after)? else {
+        kind_of(*first)?;
+
         return Ok(MqttReading::Partial);
     };
     let size = 1_u64
@@ -919,6 +920,7 @@ pub fn read_packet(bytes: &[u8], maximum_packet_size: u32) -> Result<MqttReading
         });
     }
 
+    let (kind, flags) = kind_of(*first)?;
     let start = width.saturating_add(1);
     let end = usize::try_from(remaining)
         .ok()

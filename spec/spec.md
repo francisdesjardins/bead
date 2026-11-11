@@ -2235,9 +2235,13 @@ asked, and never sent.
 
 15.29. A participant acknowledges a PUBLISH of QoS 1 with a PUBACK of Reason Code 0x00 once its core
 took its parcel (section 15.19), never with one of 0x80 or more. It drops in silence, and
-acknowledges, a PUBLISH whose RETAIN is 1. A packet past its own Maximum Packet Size is a Protocol
-Error: it closes its network connection, its link lost
-([MQTT 5.0 §4.13.1](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html)).
+acknowledges, a PUBLISH whose RETAIN is 1. A packet past its own Maximum Packet Size, counted from
+its fixed header's Remaining Length as section 15.30 counts one, is a Protocol Error
+([MQTT 5.0 §3.1.2.11.4, §4.13.1](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html)):
+as it reads that length, before the packet's body comes, it closes its network connection,
+reading nothing more of it, its link lost, or its start failed where its CONNACK had not come. It
+sends no DISCONNECT before it closes ([`docs/support.md`](../docs/support.md), "Leveled down"),
+and its broker publishes its will.
 
 15.30. A PUBLISH of N bytes of payload to a topic of T bytes in UTF-8 counts S = 1 + v(R) + R bytes,
 where R = 2 + T + Q + v(P) + P + N, Q is 2 at QoS 1 and 0 at QoS 0, P is 5 with a Message Expiry
