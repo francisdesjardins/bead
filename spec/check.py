@@ -228,9 +228,6 @@ AHEAD = {
             'ways': (('httpTransportServer.sendGracePeriod', 'gateway'), ('httpTransportServer.headersTimeout', 'gateway'),
                      ('httpTransportServer.bodyGracePeriod', 'gateway')),
         },
-        "Rust's MQTT 5 binding": {
-            'transports': ('mqtt',),
-        },
         "Rust's AMQP 1.0 binding": {
             'transports': ('amqp',),
             'groups': ('amqpMessages', 'amqpPublishBounds'),
