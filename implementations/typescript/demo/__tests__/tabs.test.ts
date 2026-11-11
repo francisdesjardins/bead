@@ -39,11 +39,11 @@ test.describe('mountTabs', () => {
 
     // * from the last, the right arrow comes back to the first, and the left one goes round too
     await page.keyboard.press('ArrowRight');
-    await expect(selected).toHaveText('Calls');
+    await expect(selected).toHaveText('Try it');
     await page.keyboard.press('ArrowLeft');
     await expect(selected).toHaveText('Code');
     await page.keyboard.press('Home');
-    await expect(page.getByRole('tab', { name: 'Calls' })).toBeFocused();
+    await expect(page.getByRole('tab', { name: 'Try it' })).toBeFocused();
     await page.keyboard.press('End');
     await expect(selected).toHaveText('Code');
 

@@ -43,7 +43,7 @@ test.describe('mountScenes', () => {
     await served?.close();
   });
 
-  test('shows the calls first, then the scene a tab chooses, its fragment in the address, Back the one before', async ({
+  test('shows what to try first, then the scene a tab chooses, its fragment in the address, Back the one before', async ({
     page,
   }) => {
     await page.goto(served?.url ?? '');
@@ -59,10 +59,10 @@ test.describe('mountScenes', () => {
     await page.goBack();
     await expect(page.locator('#calls-scene')).toBeVisible();
     expect(await shownOf(page)).toEqual(['calls']);
-    await expect(page.locator('#scene-tabs [aria-selected="true"]')).toHaveText('Calls');
+    await expect(page.locator('#scene-tabs [aria-selected="true"]')).toHaveText('Try it');
   });
 
-  test('opens the scene its fragment names, and the calls for a fragment of none', async ({
+  test('opens the scene its fragment names, and what to try for a fragment of none', async ({
     page,
   }) => {
     await page.goto(`${served?.url ?? ''}#openapi`);
@@ -78,23 +78,77 @@ test.describe('mountScenes', () => {
     await expect(page.locator('#openapi-scene')).toBeVisible();
   });
 
-  test('folds the logs away, and keeps them folded at the next visit', async ({ page }) => {
-    const toggle = page.locator('#logs-toggle');
+  test('keeps the wire folded until it is opened, and open at the next visit', async ({ page }) => {
+    const toggle = page.locator('#wire-toggle');
 
     await page.goto(served?.url ?? '');
-    await expect(page.locator('#logs-body')).toBeVisible();
+    await expect(page.locator('#wire-body')).toBeHidden();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+
+    await toggle.click();
+    await expect(page.locator('#wire-body')).toBeVisible();
     await expect(toggle).toHaveAttribute('aria-expanded', 'true');
 
-    await toggle.click();
-    await expect(page.locator('#logs-body')).toBeHidden();
+    await page.reload();
+    await expect(page.locator('#wire-body')).toBeVisible();
+
+    await page.getByRole('button', { name: 'Fold the wire' }).click();
+    await expect(page.locator('#wire-body')).toBeHidden();
     await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    await expect(toggle).toHaveText('Show the logs');
 
     await page.reload();
-    await expect(page.locator('#logs-body')).toBeHidden();
+    await expect(page.locator('#wire-body')).toBeHidden();
+  });
 
-    await toggle.click();
-    await expect(page.locator('#logs-body')).toBeVisible();
-    await expect(toggle).toHaveText('Hide the logs');
+  test('shows the calls or the envelopes, and counts what crossed on what opens the wire', async ({
+    page,
+  }) => {
+    await page.goto(served?.url ?? '');
+    await expect(page.locator('#connection')).toHaveAttribute('data-state', 'open');
+    await page.click('button[data-action="reader"]');
+    await expect(page.locator('#wire-toggle .count')).not.toHaveText('0');
+
+    await page.locator('#wire-toggle').click();
+    await expect(page.locator('#calls-log')).toBeVisible();
+    await expect(page.locator('#calls-log li').first()).toContainText('whoami');
+    await expect(page.locator('#envelopes-log')).toBeHidden();
+
+    await page.getByRole('tab', { name: 'Envelopes' }).click();
+    await expect(page.locator('#envelopes-log')).toBeVisible();
+    await expect(page.locator('#calls-log')).toBeHidden();
+    await expect(page.locator('#envelopes-log li')).toHaveCount(
+      Number(await page.locator('#wire-toggle .count').textContent())
+    );
+  });
+
+  test('lays the page out on a phone with nothing wider than it, the wire a sheet at the bottom', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(served?.url ?? '');
+
+    for (const scene of SCENES) {
+      await page.goto(`${served?.url ?? ''}#${scene}`);
+      expect(
+        await page.evaluate(() => {
+          return document.documentElement.scrollWidth <= document.documentElement.clientWidth;
+        }),
+        scene
+      ).toBe(true);
+    }
+
+    const sheet = page.locator('#wire-sheet');
+
+    await expect(page.locator('#wire-toggle')).toBeHidden();
+    await expect(sheet).toBeVisible();
+    await expect(page.locator('#wire-body')).toBeHidden();
+    await sheet.click();
+    await expect(page.locator('#wire-body')).toBeVisible();
+    await expect(sheet).toHaveAttribute('aria-expanded', 'true');
+
+    // a link out of the sheet folds it, which would cover where it goes
+    await page.getByRole('link', { name: 'Code › Go deeper' }).click();
+    await expect(page.locator('#code-scene')).toBeVisible();
+    await expect(page.locator('#wire-body')).toBeHidden();
   });
 });
