@@ -128,34 +128,33 @@ The options weighed:
 
 ## Decision
 
-**`trustedProxies`, `TrustedProxies`, names the proxies a server believes**, over HTTP and over
-WebSocket alike (spec 15.12):
-addresses and networks in one list, as nginx, Express, Caddy and Traefik take them; each an IP
-address in the form a server listens on
+**`trustedProxies`, `TrustedProxies`, `trusted_proxies`, names the proxies a server believes**, over
+HTTP and over WebSocket alike (spec 15.12): addresses and networks in one list, as nginx, Express,
+Caddy and Traefik take them; each an IP address in the form a server listens on
 ([0024](0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md)), or that
 address, `/` and its prefix's length, its bits past the prefix zero ("write 10.0.0.0/8, not
-10.1.2.3/8", as Python's strict parse; each side tests the bits itself, since neither platform
-does). None by default; the loopback is trusted only when listed. Any other entry is refused as the
-transport is built, `ProgrammerError` and `ArgumentException`, naming it: a name, which another host
-resolves otherwise, a prefix past its family's bits, and **a network of prefix 0**, `0.0.0.0/0` or
-`::/0`, which would trust what every client writes. That refusal is a tripwire for the line copied
-from a forum, as `origins` refuses `*`, not a wall: two halves written on purpose are the same
-hole.
+10.1.2.3/8", as Python's strict parse; each side tests the bits itself, since no platform does).
+None by default; the loopback is trusted only when listed. Any other entry is refused as the
+transport is built, `ProgrammerError` on the TypeScript and Rust sides and `ArgumentException` on
+the C# side, naming it: a name, which another host resolves otherwise, a prefix past its family's
+bits, and **a network of prefix 0**, `0.0.0.0/0` or `::/0`, which would trust what every client
+writes. That refusal is a tripwire for the line copied from a forum, as `origins` refuses `*`, not a
+wall: two halves written on purpose are the same hole.
 
-**`unnamedProxies`, `UnnamedProxies`, counts the proxies on every path to the server that
-`trustedProxies` does not name**, one for each proxy whose addresses its platform does not publish,
-over HTTP and over WebSocket alike (spec 15.12): a whole number from 0 to 8, 0 by default, refused
-as the transport is built otherwise, `ProgrammerError` and `ArgumentException` naming
-`unnamedProxies` — a fraction, `NaN` and `Infinity` among it, the count of every hop, which would
-trust what every client writes. A proxy whose addresses are published is listed, never counted.
-**The composition is Bead's own**, and departs from each peer's: Envoy refuses a count beside a
-list, Traefik ignores the list once a depth is set, ASP.NET Core ANDs its limit with its lists, and
-Express counts by index; here a listed proxy costs none of the count, wherever it stands, so the
-count serves the path no peer's serves, a listed proxy in front of an unnamed one, and a proxy both
-named and counted gives the client one entry it wrote, which a case pins. **A count is believed as
-told**: a request that reaches the server by a path with fewer such proxies, straight to its socket
-or past a proxy it counts, is read by entries its client wrote; a server so reachable names its
-proxies instead, and 15.12 says so.
+**`unnamedProxies`, `UnnamedProxies`, `unnamed_proxies`, counts the proxies on every path to the
+server that `trustedProxies` does not name**, one for each proxy whose addresses its platform does
+not publish, over HTTP and over WebSocket alike (spec 15.12): a whole number from 0 to 8, 0 by
+default, refused as the transport is built otherwise, `ProgrammerError` or `ArgumentException`
+naming `unnamedProxies` — a fraction, `NaN` and `Infinity` among it, the count of every hop, which
+would trust what every client writes. A proxy whose addresses are published is listed, never
+counted. **The composition is Bead's own**, and departs from each peer's: Envoy refuses a count
+beside a list, Traefik ignores the list once a depth is set, ASP.NET Core ANDs its limit with its
+lists, and Express counts by index; here a listed proxy costs none of the count, wherever it stands,
+so the count serves the path no peer's serves, a listed proxy in front of an unnamed one, and a
+proxy both named and counted gives the client one entry it wrote, which a case pins. **A count is
+believed as told**: a request that reaches the server by a path with fewer such proxies, straight to
+its socket or past a proxy it counts, is read by entries its client wrote; a server so reachable
+names its proxies instead, and 15.12 says so.
 
 **The walk goes from the right** (nginx's `real_ip_recursive`, Express's `proxy-addr`): from the
 socket's address, while the address reached is one the list holds, or one it does not while fewer
@@ -205,8 +204,8 @@ balancer by `130.211.0.0/22`, `35.191.0.0/16` and its forwarding rule's address,
 ranges, an AWS ALB by its VPC's network. **One it cannot name is counted**, a PaaS router such as
 Heroku's, `unnamedProxies: 1`, beside a list of the proxies it can name. A count one too high shows
 its client's own address where a proxy's was expected, in a told refusal and in `clients`; one too
-low, the proxy's, which `largestAddressConnections` near its ceiling warns of. Both READMEs show the
-list first and the count for the router.
+low, the proxy's, which `largestAddressConnections` near its ceiling warns of. The TypeScript and C#
+sides' READMEs show the list first and the count for the router.
 
 **A bound keyed by address counts the users of one NAT as one and an IPv6 network's addresses as
 many**: behind a carrier-grade or a corporate NAT, the 65th user is refused 503 whatever the list
@@ -217,7 +216,7 @@ says; an IPv6 host holds a /64 or more ([RFC 6177](https://www.rfc-editor.org/rf
 **Ahead, each by a decision of its own**: `Forwarded`; IPv6 keyed by a prefix; a per-address value
 fit for a NAT; each for an HTTP server and a WebSocket server at once.
 
-**The gate.** `spec/transports.json`, played by both sides. Over HTTP: the bound behind a proxy
+**The gate.** `spec/transports.json`, played by every side. Over HTTP: the bound behind a proxy
 named; a field from a socket no entry holds, not read; the walk past two networks, what a client
 wrote to the left never read; an entry that is no address ending the walk at its proxy; a refusal
 behind a proxy telling the client's address and the proxy's port; an entry's node forms and its one
@@ -225,17 +224,17 @@ form; behind the proxies it counts, the client that many hops from the socket; a
 addresses the list does not hold alone; a listed socket and a count of 2 reading the entry its
 client wrote; an entry that is no address, and the field's end, ending the walk within the count;
 and 0 counting none. Over WebSocket: an upgrade's refusals behind proxies named, telling the client
-the walk reaches, in the node forms and the one form, and the proxy's port; a field from a socket
-no entry holds, not read; and a refusal behind the proxies it counts. The generator walks the field
-by the same rule, with Python's `ipaddress` for the networks. Twins by the same sentence
+the walk reaches, in the node forms and the one form, and the proxy's port; a field from a socket no
+entry holds, not read; and a refusal behind the proxies it counts. The generator walks the field by
+the same rule, with Python's `ipaddress` for the networks. Twins by the same sentence
 ([0004](0004-one-behaviour-in-every-language.md)) hold what no step reaches: the build refusals, on
-each server transport, `refuses as it is built a trustedProxies entry that is a name or a network
-of prefix 0, or an unnamedProxies past 8`, and in each side's walk module `refuses an
-unnamedProxies that is not a whole number from 0 to 8, Infinity among it, as the server is built`;
-the walk and the grammar function by function, `spends unnamedProxies on each address
-trustedProxies does not hold, none on one it holds, and stops at the first past the count` among
-them; the dual-stack socket; a WebSocket connection's handle named by its client's address; and the
-gauge with the health it warns on. `docs/support.md` names them.
+each server transport, `refuses as it is built a trustedProxies entry that is a name or a network of
+prefix 0, or an unnamedProxies past 8`, and in each side's walk module `refuses an unnamedProxies
+that is not a whole number from 0 to 8, Infinity among it, as the server is built`; the walk and the
+grammar function by function, `spends unnamedProxies on each address trustedProxies does not hold,
+none on one it holds, and stops at the first past the count` among them; the dual-stack socket; a
+WebSocket connection's handle named by its client's address; and the gauge with the health it warns
+on. `docs/support.md` names them.
 
 ## The Tenth Man
 

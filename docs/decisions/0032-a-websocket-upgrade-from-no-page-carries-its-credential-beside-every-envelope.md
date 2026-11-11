@@ -1,15 +1,15 @@
 # 0032 — A WebSocket upgrade from no page carries its credential beside every envelope of its connection, a client follows no redirect, and a connect bounds what it awaits
 
 - **Status**: accepted
-- **Scope**: the protocol, every implementation's WebSocket transports, both HTTP clients' check of
-  a credential's form and their redirects, the routers' check of what a transport carries, and what
-  every transport client's connect awaits and what ends it: in
-  [`spec/spec.md`](../../spec/spec.md), 15.1's transport credential, 15.2's credential of an upgrade
-  and its step 6, 15.5's field value, 15.6's redirect, 13.4's call failed before it goes, and
-  14.2's and 14.3's leg B; the cases of `spec/transports.json` on an upgrade's credential; the
-  interop's pair on `ELSEWHERE`. What a request presents and how its credential resolves are
-  [0010](0010-a-request-presents-a-credential-of-a-scheme.md)'s; the hosts and origins an upgrade
-  is judged by,
+- **Scope**: the protocol, every implementation's WebSocket transports, every HTTP client's check of
+  a credential's form and its redirects, the routers' check of what a transport carries, and what
+  every transport client's connect awaits and what ends it: in [`spec/spec.md`](../../spec/spec.md),
+  15.1's transport credential, 15.2's credential of an upgrade and its step 6, 15.5's field value,
+  15.6's redirect, 13.4's call failed before it goes, and 14.2's and 14.3's leg B; the cases of
+  `spec/transports.json` on an upgrade's credential; the interop's pair on `ELSEWHERE`. What a
+  request presents and how its credential resolves are
+  [0010](0010-a-request-presents-a-credential-of-a-scheme.md)'s; the hosts and origins an upgrade is
+  judged by,
   [0024](0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md)'s; a
   refusal told and what a client names of one,
   [0026](0026-a-server-tells-each-refusal-it-judges-and-a-client-names-the-one-it-reads.md)'s.
@@ -160,32 +160,33 @@ toward a client: a server's command that presents `ELSEWHERE` over a WebSocket f
 goes, `DESTINATION_UNREACHABLE`. No server reads a credential from a target's query, a cookie or a
 subprotocol.
 
-**Each side's servers read the field by one function**, `credentialOf` and `CredentialOf`, across
-its lines as `X-Forwarded-For` is read, where both server transports reach it; the WebSocket server
-adds the `Origin` rule, the HTTP server keeping its own, since 15.12's CORS keeps a page's
-credential off another origin's `POST`. The per-connection `carriesCredential(handle)` of a server
-is false. Since the upgrade's `Authorization` is a credential, 15.1's "no event … carries that
-credential" reaches it: **the TypeScript `connection` event shows the upgrade headers aside**, a
-frozen copy of its method, target and remote address and port, as the HTTP server shows a connect;
-the C# event carries the handle alone.
+**Each side's servers read the field by one function**, `credentialOf`, `CredentialOf` and
+`credential_of`, across its lines as `X-Forwarded-For` is read, where both server transports reach
+it; the WebSocket server adds the `Origin` rule, the HTTP server keeping its own, since 15.12's CORS
+keeps a page's credential off another origin's `POST`. The per-connection
+`carriesCredential(handle)` of a server is false. Since the upgrade's `Authorization` is a
+credential, 15.1's "no event … carries that credential" reaches it: **the TypeScript `connection`
+event shows the upgrade headers aside**, a frozen copy of its method, target and remote address and
+port, as the HTTP server shows a connect; the C# event carries the handle alone.
 
 **A client writes the credential its connect is given, a string or a provider**: `credential` and
 `credentialProvider` on the TypeScript side, `Credential` and `CredentialProvider` on the C# side,
-two members of one name on both, not a TypeScript union a C# record cannot mirror
-([0004](0004-one-behaviour-in-every-language.md)); both given are refused as the connect is asked.
-The provider is called at each attempt, the first connect's and every reconnection's, before its
-upgrade goes, with the attempt's signal or token; a provider that throws fails that attempt, its
-throw the cause, counted as a refused connect; a value that is no field value fails it as a string
-would, never tried again. Written through `ws`'s `headers` and `SetRequestHeader`. **A credential is
-refused before it goes**, `ProgrammerError` and `ArgumentException`, the state untouched: one that
-is no field value — anything but visible ASCII, spaces and tabs, or a space or a tab first or last
-([RFC 9110 §5.5](https://www.rfc-editor.org/rfc/rfc9110#section-5.5)), which both HTTP clients
-refuse too (spec 15.5), so both ends compare one form; one over a URL in the clear off the loopback
+`credential` and `credential_provider` on the Rust side, two members of one name on every side, not
+a TypeScript union a C# record cannot mirror ([0004](0004-one-behaviour-in-every-language.md)); both
+given are refused as the connect is asked. The provider is called at each attempt, the first
+connect's and every reconnection's, before its upgrade goes, with the attempt's signal or token; a
+provider that throws fails that attempt, its throw the cause, counted as a refused connect; a value
+that is no field value fails it as a string would, never tried again. Written through `ws`'s
+`headers` and `SetRequestHeader`. **A credential is refused before it goes**, `ProgrammerError` and
+`ArgumentException`, the state untouched: one that is no field value — anything but visible ASCII,
+spaces and tabs, or a space or a tab first or last
+([RFC 9110 §5.5](https://www.rfc-editor.org/rfc/rfc9110#section-5.5)), which every HTTP client
+refuses too (spec 15.5), so both ends compare one form; one over a URL in the clear off the loopback
 (spec 13.4), its upgrade being where it would cross; and, on the TypeScript side, one given to a
-client whose `WebSocket` constructor has not `ws`'s shape, its prototype without `ping`,
-`terminate` and `on` as functions, judged of the constructor before the socket is built and before
-a provider is called — a page's `WebSocket`, a wrapper or a subclass of it, and Node's global among
-them — its message naming `ws` and the envelope's `JWT`.
+client whose `WebSocket` constructor has not `ws`'s shape, its prototype without `ping`, `terminate`
+and `on` as functions, judged of the constructor before the socket is built and before a provider is
+called — a page's `WebSocket`, a wrapper or a subclass of it, and Node's global among them — its
+message naming `ws` and the envelope's `JWT`.
 
 **A client follows no redirect** (spec 15.6), which
 [RFC 9110 §15.4](https://www.rfc-editor.org/rfc/rfc9110#section-15.4) leaves to it: a redirect —
@@ -210,14 +211,15 @@ and Fetch's serializer drops it and lowercases the host. The C# side asks for a 
 `RequestMessage` whose `RequestUri` differs from the URI the exchange was sent to, the connect's or
 the connection's, never the request's own, which a following handler moves in place; `Uri`'s
 equality ignores a default port and the host's case. Once caught, a connect fails `the server drew
-no connection: a redirect followed`, the same string on both sides, with nothing to release; a send
-resolves and loses its connection, released, its answer never read; a listen loses its connection at
-once, released, its batch never read, `'broken'` and `Listened.Broken`, since listening again would
-go through the same following `fetch`. The release's `DELETE` carries the token alone, to the origin
-first: reaching the server, it ends the connection whose token crossed, and redirected too, it
-carries the token to the place that answered the redirect, which holds it already when the redirect
-names one target. Neither side catches a wrapper that builds its own response from what it
-followed: the `fetch` and `Handler` docs say one given follows no redirect.
+no connection: a redirect followed`, the same string on the TypeScript and C# sides, with nothing to
+release, hyper following none on the Rust side; a send resolves and loses its connection, released,
+its answer never read; a listen loses its connection at once, released, its batch never read,
+`'broken'` and `Listened.Broken`, since listening again would go through the same following `fetch`.
+The release's `DELETE` carries the token alone, to the origin first: reaching the server, it ends
+the connection whose token crossed, and redirected too, it carries the token to the place that
+answered the redirect, which holds it already when the redirect names one target. Neither side
+catches a wrapper that builds its own response from what it followed: the `fetch` and `Handler` docs
+say one given follows no redirect.
 
 **The C# side refuses at construction a given handler that would follow.** It walks
 `DelegatingHandler.InnerHandler` to the innermost handler of the `Handler` given, and an
@@ -261,10 +263,10 @@ already cancelled waits for it to settle, within its own bound, before it calls 
 since under a refresh token's rotation two refreshes at once revoke the grant
 ([RFC 9700 §4.14.2](https://www.rfc-editor.org/rfc/rfc9700#section-4.14.2)); only a live call is
 joined. The attempt's own token decides: a cancellation it did not make is the provider's failure,
-`the credential provider failed`, on both sides. The end is told to the provider guarded, never
+`the credential provider failed`, on every side. The end is told to the provider guarded, never
 inline, so a callback's throw or block reaches neither the refusal nor the connect; and on the C#
-side the pending call is published under the client's lock and the provider called once the lock
-is released, so a provider that works before it returns holds no dispose, send or close.
+side the pending call is published under the client's lock and the provider called once the lock is
+released, so a provider that works before it returns holds no dispose, send or close.
 
 ## Consequences
 
@@ -289,19 +291,19 @@ connect on the 3xx, and its application gives the connect the URL the server mov
 upgrade and refuses before the 101, bound by this record's rule on an upgrade that carries an
 `Origin`; and a credential replaced in place on a live connection, SignalR's refresh.
 
-**The gate.** `spec/transports.json`, over WebSocket, played by both sides: the upgrade's
-credential beside every envelope, as it came and trimmed, standing for nothing but `ELSEWHERE`;
-none from an upgrade without one or with an empty one; none from an upgrade that carries an
-`Origin` the server takes; two `Authorization` fields refused 400 before the origin; an end the
-wall clock reached as the verifier settles, the connection staying. Twins by the same sentence
+**The gate.** `spec/transports.json`, over WebSocket, played by every side: the upgrade's credential
+beside every envelope, as it came and trimmed, standing for nothing but `ELSEWHERE`; none from an
+upgrade without one or with an empty one; none from an upgrade that carries an `Origin` the server
+takes; two `Authorization` fields refused 400 before the origin; an end the wall clock reached as
+the verifier settles, the connection staying. Twins by the same sentence
 ([0004](0004-one-behaviour-in-every-language.md)) hold what no runner plays, a client's above all:
 each WebSocket server's `hands every envelope of a connection its upgrade’s Authorization, as it
 came and trimmed, and carries none toward its client` and `carries no credential from an upgrade
 that carries an Origin, its own or one it takes, whatever its Authorization`; each WebSocket
 client's `writes the credential it is given on its upgrade, and carries those bytes alone`, `calls
 its credential provider at each attempt, a reconnection’s included, and carries the bytes it
-handed`, `refuses a credential that is no field value, a space or a tab first or last among them,
-or over a URL in the clear off the loopback, before its upgrade goes`, `refuses a credential and a
+handed`, `refuses a credential that is no field value, a space or a tab first or last among them, or
+over a URL in the clear off the loopback, before its upgrade goes`, `refuses a credential and a
 credential provider given together` and `fails its connect on a redirect answered to its upgrade,
 naming its status`, and the TypeScript one's `refuses a credential over a WebSocket constructor
 without ws’s shape, a page’s and Node’s global among them`, a platform row of `docs/support.md`;
@@ -309,19 +311,20 @@ each HTTP client's `refuses a credential with a space or a tab first or last bef
 `fails its connect on a redirect, 301, 302, 303, 307 or 308, naming its status, its target hearing
 nothing`, `counts a send answered with a redirect, 301, 302, 303, 307 or 308, lost, its target
 hearing nothing`, `listens again after a listen answered with a redirect, its target hearing
-nothing`, `leaves a redirect’s bead-refusal unread: a send so answered is lost, and a listen
-listened again` and `catches a redirect followed all the same: its connect fails, and a send or a
-listen loses its connection`, each over real sockets, a target that records every request beside the
-origin that answers the redirect; the C# one's
+nothing` and `leaves a redirect’s bead-refusal unread: a send so answered is lost, and a listen
+listened again`, each over real sockets, a target that records every request beside the origin that
+answers the redirect; the TypeScript and C# ones' `catches a redirect followed all the same: its
+connect fails, and a send or a listen loses its connection`, hyper following none, a platform row of
+`docs/support.md`; the C# one's
 `Refuses_a_given_handler_that_would_follow_a_redirect_AllowAutoRedirect_named_before_any_exchange`
 and the browser project's `names no status of a redirect answered to a page of its server’s own
-origin`, each a platform row of `docs/support.md`;
-each router client's `fails an ELSEWHERE over a transport that carries none before it goes, …`, or
-over a WebSocket whose upgrade carried other bytes; and each relay's `answers an ELSEWHERE
-DESTINATION_UNREACHABLE over a leg B whose upgrade carried the relay’s own credential`. The interop
-pair, `an ELSEWHERE goes in each POST’s Authorization over HTTP and in its upgrade’s over a
-WebSocket: whoami answers the sub it names`, is the one test in which one side's client writes the
-field and the other side's server reads it.
+origin`, each a platform row of `docs/support.md`; the TypeScript and C# router clients' `fails an
+ELSEWHERE over a transport that carries none before it goes, …`, or over a WebSocket whose upgrade
+carried other bytes; and their relays' `answers an ELSEWHERE DESTINATION_UNREACHABLE over a leg B
+whose upgrade carried the relay’s own credential`. The interop pair, `an ELSEWHERE goes in each
+POST’s Authorization over HTTP and in its upgrade’s over a WebSocket: whoami answers the sub it
+names`, is the one test in which one side's client writes the field and the other side's server
+reads it.
 
 ## The Tenth Man
 

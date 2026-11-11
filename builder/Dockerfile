@@ -16,7 +16,7 @@
 # base named once, for its FROM and its labels. A release bumps both by hand, and shellcheck's in
 # ci.yml with them
 ARG NODE_IMAGE=node:26.13.0-trixie-slim
-ARG NODE_DIGEST=sha256:e4db4c914bf8ad241bd24804fc25d272d89bad97e68cdc8a1414862790a02c39
+ARG NODE_DIGEST=sha256:5adad64f9a1fca2d51972caa65983634c8a774eb300d72b20f7f2a0f60368072
 # ! the licences of what the image adds to its base, its label's expression, which
 # tools/licenses.mjs holds every package to; the base's own are its, under base.name and
 # /usr/share/doc

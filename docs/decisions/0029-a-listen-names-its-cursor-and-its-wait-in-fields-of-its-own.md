@@ -130,10 +130,10 @@ under its delays, with no loop; every Bead client writes `bead-after` on every l
 **A field value that starts or ends with a space or a tab is malformed** (spec 15.12; RFC 9113
 §8.2.1), judged with the rest of
 [0026](0026-a-server-tells-each-refusal-it-judges-and-a-client-names-the-one-it-reads.md)'s field
-rule, before anything else of the request, on every field: over HTTP/2 both sides reset its stream
-`PROTOCOL_ERROR`, as for a control character. Over HTTP/1.1 and at a WebSocket's address the parsers
-strip that whitespace first, no part of the value (RFC 9110 §5.5), so the rule changes nothing
-there.
+rule, before anything else of the request, on every field: over HTTP/2 every side resets its stream
+`PROTOCOL_ERROR`, as it does a character past ASCII. Over HTTP/1.1 and at a WebSocket's address the
+parsers strip that whitespace first, no part of the value (RFC 9110 §5.5), so the rule changes
+nothing there.
 
 **`Vary` stays `Origin` alone**: `cache-control: no-store` stands on every response on the path, so
 no cache stores a listen's answer for `Vary` to select among, and `bead-connection-token` already
@@ -153,22 +153,22 @@ Whether a Firefox entry outlives its host's DNS TTL is unmeasured, a hostname of
 **A stale client is refused, loses its connection and reconnects**, under its reconnection policy's
 delays; a tab of an earlier bundle meets the 400 once per connection.
 
-**Each side carries an RFC 9651 Item parser**, `parseItem` on the TypeScript side and
-`StructuredFields.ParseItem` on the C# side, tested on httpwg's `structured-field-tests` for Items,
-their bare items and their parameters, and shared by the client's reading of `bead-listen` and
-`bead-sequence`. A parameter on any of the four fields is free for a later version to give a
-meaning.
+**Each side carries an RFC 9651 Item parser**, `parseItem` on the TypeScript side,
+`StructuredFields.ParseItem` on the C# side and `parse_item` on the Rust side, tested on httpwg's
+`structured-field-tests` for Items, their bare items and their parameters, and shared by the
+client's reading of `bead-listen` and `bead-sequence`. A parameter on any of the four fields is free
+for a later version to give a meaning.
 
-**Over HTTP/2, Node's default parser drops a padded field where the C# side resets the stream**, a
-platform row of `docs/support.md` beside the control character's: an application gives
-`createServer` `strictFieldWhitespaceValidation: false` for the TypeScript side to reset as the C#
-side does. Neither request is taken past what one without the field would be: a dropped
-`bead-after` leaves a listen refused 400, a dropped `Authorization` an anonymous request, a dropped
-`Origin` a request that names none.
+**Over HTTP/2, Node's default parser drops a padded field where the C# and Rust sides reset the
+stream**, a platform row of `docs/support.md` beside the control character's: an application gives
+`createServer` `strictFieldWhitespaceValidation: false` for the TypeScript side to reset as the
+others do. Neither request is taken past what one without the field would be: a dropped `bead-after`
+leaves a listen refused 400, a dropped `Authorization` an anonymous request, a dropped `Origin` a
+request that names none.
 
 **`Prefer` stays free** for an application's own use, and `Last-Event-ID` for an `EventSource`'s.
 
-**The gate.** `spec/transports.json`, played by both sides: every listen writes its counts in
+**The gate.** `spec/transports.json`, played by every side: every listen writes its counts in
 fields; the case of a `bead-after` that does not parse, is no Integer or is below 0, its parameters
 ignored; the case of a count in two lines or as a list; the case of a listen without `bead-after`,
 whatever its target holds, and of a `bead-wait` left out; `bead-listen`'s parameter ignored at
@@ -176,7 +176,8 @@ connect. Twins by the same sentence ([0004](0004-one-behaviour-in-every-language
 step reaches: each side's Item parser, the counts read from several lines, the client listening at
 its connection's URL alone, the field predicate's ends and the HTTP/2 reset of a padded value; the
 Playwright project, a page of another origin listening through a stream of batches on one preflight
-in Chromium, against both servers. `docs/support.md` names them.
+in Chromium, against every side's server, the TypeScript and C# ones in CI's .NET job and the Rust
+one in its `interop-rust` job. `docs/support.md` names them.
 
 ## The Tenth Man
 

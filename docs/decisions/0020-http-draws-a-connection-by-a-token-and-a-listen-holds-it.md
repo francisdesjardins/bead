@@ -2,7 +2,8 @@
 
 - **Status**: accepted
 - **Scope**: the protocol, and every implementation's HTTP transport: the HTTP part of section 15 of
-  [`spec/spec.md`](../../spec/spec.md). What every transport owes is
+  [`spec/spec.md`](../../spec/spec.md), a request's head and the 40 ms it waits for its answer, 15.6
+  and 15.7, among it. What every transport owes is
   [0001](0001-the-envelope-sits-at-fixed-offsets.md)'s, a connection's timeouts
   [0012](0012-a-listen-held-is-not-silence.md)'s, the credential a transport carries
   [0010](0010-a-request-presents-a-credential-of-a-scheme.md)'s, and the redirects a client follows
@@ -69,6 +70,12 @@ The client fails the call with the failure, and reports the result that follows 
 (spec 15.9). The failure withdraws no default: a call's own answer comes in its `POST`'s body alone
 (spec 13.4, 15.9; the round in [0010](0010-a-request-presents-a-credential-of-a-scheme.md), Security
 for 0.2.0).
+
+**A head waits on its server's clock.** On the C# side, and on the Rust side over a runtime of
+several workers, its timer fires beside a resolver that computes, so the 40 ms cap its head; where
+one thread runs them all, the TypeScript side's or a Rust runtime of one, a resolver that holds it
+delays its head as it delays every exchange, timer and socket of its server, and one that yields has
+its head go at 40 ms.
 
 **A connection lives as long as its client listens or speaks**: silence is counted between listens,
 never while one is held ([0012](0012-a-listen-held-is-not-silence.md)).

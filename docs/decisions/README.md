@@ -39,10 +39,10 @@ transport, never a network of its own
 and AMQP 1.0's on RabbitMQ 4
 ([0043](0043-over-amqp-1-0-a-participant-is-one-connection-whose-exclusive-inbox-ends-with-it-and-a-parcel-one-message-of-one-profile-each-counted-to-its-byte.md))
 — and proven byte for byte by the conformance files and the interop. Its third language, Rust, has
-its core: the envelope's codec, its routers and managers, the service layer, its sessions and
-credentials, the trace, the filter and the registry, the in-memory transport, the broker's core over
-an in-memory broker with the joined transport, and its `proto` codec on Buffa, under a toolchain,
-lints denied whole and a CI job of its own
+its core: the envelope's codec, its routers and managers, the service layer, its server half and its
+client half, its sessions and credentials, the trace, the filter and the registry, the in-memory
+transport, the broker's core over an in-memory broker with the joined transport, and its `proto`
+codec on Buffa, under a toolchain, lints denied whole and a CI job of its own
 ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)); and its
 transports over WebSocket (RFC 6455) and HTTP/1.1 and HTTP/2 (RFC 9110, 9112, 9113), features of
 its core, with the interop both ways with the TypeScript and C# sides
@@ -75,10 +75,13 @@ that meets the Tenth Man:
 - what [0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md) keeps
   ahead of the Rust side's trace: an optional bridge from it to `tracing`;
 - **the core in a page and in a worker**, the Rust side's and the C# side's in one stage, with its
-  executor, its clock and its tests, then what it serves there: the transports in a page, the Web
-  Worker transport, the DevTools hook from their clients, its contract then a document every side
-  reads ([0015](0015-a-pages-client-announces-itself-to-a-devtools-hook.md)), and a Rust worker for
-  the demo ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md));
+  executor, its clock and its tests, then what it serves there: the transports in a page, the Rust
+  side's client over the page's `WebSocket` and `fetch` among them
+  ([0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)),
+  the Web Worker transport, the DevTools hook from their clients, its contract then a document every
+  side reads ([0015](0015-a-pages-client-announces-itself-to-a-devtools-hook.md)), and a Rust
+  worker for the demo
+  ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md));
 - **the transports' client part** of the conformance over HTTP and a WebSocket, as the broker's
   cases have one, with the outcomes the spec names for a client's call
   ([0004](0004-one-behaviour-in-every-language.md)) and the defaults of a client's durations
@@ -93,6 +96,9 @@ that meets the Tenth Man:
 - **a counted call's cost, measured**: a call counted against one not counted, on each side, a
   measure beside those the benches take
   ([0013](0013-every-language-debugs-alike-at-no-cost-when-off.md));
+- **the Rust bench's loopback layers**, beside its in-memory one, as the TypeScript and C# benches
+  measure theirs
+  ([0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md));
 - **a constrained C side**, which builds debugging by its switches
   ([0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)), refuses a declaration out of
   its range alone ([0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md))
@@ -210,7 +216,7 @@ table.
 | [0032](0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md)                             | A WebSocket upgrade from no page carries its credential beside every envelope of its connection, a client follows no redirect, and a connect bounds what it awaits | accepted |
 | [0036](0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md) | An in-memory transport joins two routers of one process, and a server takes several transports through one                                                         | accepted |
 | [0046](0046-a-router-paces-each-connections-reads-by-what-it-has-not-taken.md)                                            | A router paces each connection's reads by what it has not taken                                                                                                    | accepted |
-| [0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)         | The Rust side's sockets are features of its core, HTTP on hyper and a WebSocket's head read by Bead, and a target is read as a page's browser writes it            | proposed |
+| [0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)         | The Rust side's sockets are features of its core, HTTP on hyper and a WebSocket's head read by Bead, and a target is read as a page's browser writes it            | accepted |
 
 ### Over a broker
 
@@ -269,7 +275,7 @@ table.
 
 ## Writing one
 
-The next decision is 0049. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
+The next decision is 0050. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
 the decision, not its subject. The title may grow with the record; the file's name stays, unless it
 would mislead.
 

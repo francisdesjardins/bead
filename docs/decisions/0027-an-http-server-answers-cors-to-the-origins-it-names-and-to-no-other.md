@@ -131,20 +131,20 @@ Firefox caches the names an answer lists and never `*`: reflected, it caches eve
 requests carry, a tracing field among them, as ASP.NET Core's `AllowAnyHeader` and Express's `cors`
 answer. `*` stays since Chromium and WebKit cache it, and keep covering every name with it. The
 reflected value has passed the field rule before it is echoed, and grants nothing `*` did not: a
-reflected name is one the browser would send. Joined by `", "` explicitly, both servers write one
-value for one preflight, Node handing two lines as `a, b` and Kestrel's `StringValues.ToString()` as
-`a,b`. No `Vary` names `Access-Control-Request-Headers`: the answer is an `OPTIONS` response, which
-no cache stores ([RFC 9110 §9.3.7](https://www.rfc-editor.org/rfc/rfc9110#section-9.3.7)), and
-`Vary` only selects among stored responses; Express's `Vary` is the precedent not taken. Bead's
-request fields named besides, which save Firefox one preflight of the opening, are not taken: an
-enumeration 15.12, both servers and the generator keep current with every field Bead adds, which
-stale breaks nothing and buys only that preflight. The answer is the same whatever method the
-preflight asks: the browser judges its request against it, and the server keeps no state. A
-preflight is no refusal: nothing marks it, nothing tells it, it draws no connection and counts
-against no bound. A preflight from an origin not taken is 403 `origin-refused` as any request is,
-told, which names the page to add. Any other `OPTIONS`, from a listed origin with no
-`Access-Control-Request-Method`, from the server's own origin or from none, is 405 `method-refused`
-as any method but `GET`, `POST` and `DELETE`.
+reflected name is one the browser would send. Joined by `", "` explicitly, every server writes one
+value for one preflight, Node handing two lines as `a, b`, Kestrel's `StringValues.ToString()` as
+`a,b` and hyper each line apart. No `Vary` names `Access-Control-Request-Headers`: the answer is an
+`OPTIONS` response, which no cache stores
+([RFC 9110 §9.3.7](https://www.rfc-editor.org/rfc/rfc9110#section-9.3.7)), and `Vary` only selects
+among stored responses; Express's `Vary` is the precedent not taken. Bead's request fields named
+besides, which save Firefox one preflight of the opening, are not taken: an enumeration 15.12, every
+server and the generator keep current with every field Bead adds, which stale breaks nothing and
+buys only that preflight. The answer is the same whatever method the preflight asks: the browser
+judges its request against it, and the server keeps no state. A preflight is no refusal: nothing
+marks it, nothing tells it, it draws no connection and counts against no bound. A preflight from an
+origin not taken is 403 `origin-refused` as any request is, told, which names the page to add. Any
+other `OPTIONS`, from a listed origin with no `Access-Control-Request-Method`, from the server's own
+origin or from none, is 405 `method-refused` as any method but `GET`, `POST` and `DELETE`.
 
 **Every response written to a request whose `Origin` `origins` names, once that origin is judged,
 whatever its status, carries `access-control-allow-origin`**, the `Origin` as it came, and
@@ -156,9 +156,10 @@ sets both in one place, once the origin's 403 has passed, before every writer.
 
 **`vary: Origin` on every response on the path** beside `cache-control: no-store` and
 `x-content-type-options: nosniff` (spec 15.6), since which one a request gets turns on its
-`Origin`, **but HTTP's own 400, which carries none of the three, on every side**: Node's parser and
-Kestrel answer some of it before any transport reads the request, so none is the one rule every
-server keeps. The C# side writes its own 400 as the TypeScript side's `refuseMalformed` does.
+`Origin`, **but HTTP's own 400, which carries none of the three, on every side**: Node's parser,
+Kestrel and hyper answer some of it before any transport reads the request, so none is the one rule
+every server keeps. The C# and Rust sides write their own 400 as the TypeScript side's
+`refuseMalformed` does.
 
 **No answer carries `Access-Control-Allow-Credentials`.** Bead's credential is in the envelope's
 block or in the `Authorization` a client's script writes (15.5), never a cookie, a TLS client
@@ -195,8 +196,8 @@ no listed page is told `method-refused`.
 
 **A refusal judged before the origin stays unreadable to a page**, as a refused preflight is.
 
-**Every response on the path but HTTP's own 400 carries `vary`**, and the C# side's own 400 carries
-none of the path's fields
+**Every response on the path but HTTP's own 400 carries `vary`**, and the 400 the C# and Rust sides
+write of their own carries none of the path's fields
 ([0026](0026-a-server-tells-each-refusal-it-judges-and-a-client-names-the-one-it-reads.md)).
 
 **On the TypeScript side, `IHTTPResponseLike` requires `setHeader`**, which `node:http`,
@@ -218,18 +219,19 @@ answer expires: every exchange of a connection is at one URL
 ([0029](0029-a-listen-names-its-cursor-and-its-wait-in-fields-of-its-own.md)), which every engine
 keys its preflight cache by.
 
-**The gate.** `spec/transports.json`'s four CORS cases, played by both sides: a listed origin's
+**The gate.** `spec/transports.json`'s four CORS cases, played by every side: a listed origin's
 preflight; every answer to it once judged; a preflight judged as every request before its origin; an
 `OPTIONS` that is no preflight and an exchange from the server's own origin or from none.
 `unmarked()` holds HTTP's own 400 to none of the path's fields over HTTP and at a WebSocket's
 address, and the WebSocket upgrade from a taken origin to none of CORS's. Twins by the same sentence
 ([0004](0004-one-behaviour-in-every-language.md)) hold what no step reaches: the preflight over
-HTTP/2, the fields on each writer, the listed origin's predicate, `isListedOrigin` and
-`IsListedOrigin`. A Playwright configuration of its own, the TypeScript side's
+HTTP/2, the fields on each writer, the listed origin's predicate, `isListedOrigin`, `IsListedOrigin`
+and `is_listed_origin`. A Playwright configuration of its own, the TypeScript side's
 `playwright.browser.config.ts`, runs the HTTP client in Chromium from a page of another origin
-against both servers, in CI's .NET job, the one proof that a browser reads the answer; Firefox's and
-WebKit's reading of the answer and of `*`, and their preflight caches, are this record's
-measurement. `docs/support.md` names them.
+against the TypeScript and C# servers in CI's .NET job and against the Rust server in its
+`interop-rust` job, the one proof that a browser reads the answer; Firefox's and WebKit's reading of
+the answer and of `*`, and their preflight caches, are this record's measurement. `docs/support.md`
+names them.
 
 ## The Tenth Man
 

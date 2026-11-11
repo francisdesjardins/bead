@@ -56,9 +56,14 @@ the global `WebSocket`, whose `error` cannot be told from a drop, tells its clos
 `ws` is given it; over the global `WebSocket`, the client's close is its platform's to bound. A
 WebSocket server judges a request at its address in the order of spec 15.2: 400 as HTTP answers it
 to a field holding a control character but a tab or an octet past ASCII, to a target holding an
-octet other than visible ASCII or a path whose percent-decoding holds NUL, to a `Host` missing,
-repeated or no host, or to a target in absolute-form that names none; 403 to a host it does not
-take, whatever the request; 405 to a method but `GET` or `HEAD`; 426 to a request that asks no
+octet other than visible ASCII, a `#` or a character a page's browser always percent-encodes where
+it stands, or a path whose percent-decoding holds NUL, to a `Host` missing, repeated or no host, or
+to a target in absolute-form it does not read or that names none (see [HTTP](#http)); 403 to a host
+it does not take, whatever the request; 405 to a method but `GET` or `HEAD`, compared as it came,
+its `Allow` naming both — Node's parser answers first, 400 unmarked, a method its table does not
+hold, an extension method or one not in upper case, `get` and `head` among them, so the judgement's
+405 meets the methods it knows, `POST` say ([`docs/support.md`](../../docs/support.md#differences),
+`A method Node's HTTP parser does not know`); 426 to a request that asks no
 WebSocket, a `HEAD` and an `HTTP/1.0` request among them, and to a version but 13, the one it
 speaks; 400 to a malformed upgrade, two `Authorization` lines among it; 403 to an `Origin` neither
 its own nor among `origins`; 503 `busy`, its `Retry-After` 1, to an upgrade it would take past
@@ -978,7 +983,12 @@ under TLS — built on `node:https`'s server, or `node:http2`'s `createSecureSer
 loopback address it listens on.
 
 A client's `send` settles on the head of its answer, so a caller — a relay, say — knows whether the
-server had the envelope: a 2xx resolves, the server sending its head as it hands the request on.
+server had the envelope: a 2xx resolves. The server waits 40 ms from a request's hand-off for its
+answer, `HEAD_DELAY_MILLISECONDS`: one that comes within them goes whole, its head with it and its
+length in `content-length`; a request still unanswered then gets its head, a 200 with no length,
+and its answer after it, chunked over HTTP/1.1; one cancelled before its head went ends 204, empty,
+and one cancelled after it a 200 with no body (spec 15.6, 15.7). `exchangeTimeout` counts from the
+hand-off, those 40 ms within it.
 Each refusal of the transport's own is marked in `bead-refusal`, and rejects: nothing was tried. A
 status nothing marked — a gateway's 502, a proxy's 404 — may come after the request ran, so it
 counts as the exchange lost. An exchange lost — a network that failed, an answer that could not be
@@ -1004,11 +1014,11 @@ redirect followed", and a send or a listen loses its connection, nothing of the 
 | ------ | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 200    |                                       | the request is with the router; its answer is the body — or, to a listen, a batch                                                                                                                                                                                           |
 | 201    |                                       | a connection drawn, its token in `bead-connection-token`                                                                                                                                                                                                                    |
-| 204    |                                       | handed on, nothing to come back: a cancel, anything but a request, a request held off; a `DELETE` done; a listen that brought nothing; a preflight from an origin `origins` names                                                                                           |
+| 204    |                                       | handed on, nothing to come back: a cancel, anything but a request, a request held off or cancelled before its head went; a `DELETE` done; a listen that brought nothing; a preflight from an origin `origins` names                                                         |
 | 400    | `malformed`                           | a connect with a body, no token or a malformed one, not an envelope, a request on the server's parity, a `POST` with two `Authorization` fields; a listen without `bead-after`, a count that is none, or a `bead-after` past what was sent; a WebSocket's upgrade malformed |
 | 403    | `host-refused`, `origin-refused`      | a host neither every server's nor among `hosts`, or none, whatever the request; an exchange, or a WebSocket's upgrade, whose `Origin` is neither the server's own nor among `origins`                                                                                       |
 | 404    | `path-unknown`, `connection-unknown`  | not the path; the connection is gone                                                                                                                                                                                                                                        |
-| 405    | `method-refused`                      | neither `GET`, `POST` nor `DELETE`, which `Allow` names; at a WebSocket's address, neither `GET` nor `HEAD`, which `Allow` names                                                                                                                                            |
+| 405    | `method-refused`                      | neither `GET`, `POST` nor `DELETE`, compared as they came, which `Allow` names; at a WebSocket's address, neither `GET` nor `HEAD`, which `Allow` names                                                                                                                     |
 | 408    | `too-slow`                            | a body that came slower than `minimumBodyBytesPerSecond` once `bodyGracePeriod` passed                                                                                                                                                                                      |
 | 409    | `call-waiting`, `listen-undeclared`   | a request on a call id already waiting; a listen whose client did not say at connect it listens                                                                                                                                                                             |
 | 413    | `too-large`                           | a body past the envelope's limit                                                                                                                                                                                                                                            |
@@ -1032,27 +1042,39 @@ are held to `minimumSendBytesPerSecond` past `sendGracePeriod`, as at a WebSocke
 past its deadline is an exchange lost, its connection dropped at both ends, reported on `error` as
 its connection closes, naming its bounds and their values.
 
-A request names its authority by its target when the target is in absolute-form, `http://` or
-`https://` in lower case, read as it came, its `Host` judged as one field line alone, which an
-HTTP/1.0 request may leave out (RFC 9112 §3.2.2); over HTTP/2, by its `:authority`, a `host` beside
-it ignored (RFC 9113 §8.3.1); otherwise by its `Host`. An authority is a host and an optional port
-of spec 15.12's grammar, RFC 3986's narrowed: no userinfo, no percent-encoded octet, no `*`, `+`,
-`,`, `;` or `=` in a name, no `IPvFuture` literal, no colon without a port. An HTTP/1.1 request
-without a `Host`, and one with two `Host` fields or an authority that is none, is answered 400 as
-HTTP answers it, unmarked, before anything else of it is read (RFC 9112 §3.2); over HTTP/2, its
+A request names its authority by its target when the target is in absolute-form, its scheme `http`
+or `https` in any ASCII case, `HTTP://` among them, then `://` (spec 15.12, RFC 3986 §3.1), its
+authority read as it came, its `Host` judged as one field line alone, which an HTTP/1.0 request may
+leave out (RFC 9112 §3.2.2); over HTTP/2, by its `:authority`, a `host` beside it ignored (RFC 9113
+§8.3.1); otherwise by its `Host`. An authority is a host and an optional port of spec 15.12's
+grammar, RFC 3986's narrowed: no userinfo, no percent-encoded octet, no `*`, `+`, `,`, `;` or `=`
+in a name, no `IPvFuture` literal, no colon without a port. An HTTP/1.1 request without a `Host`,
+and one with two `Host` fields, a target in absolute-form of another scheme or an authority that is
+none, is answered 400 as HTTP answers it, unmarked, before anything else of it is read (RFC 9112
+§3.2); over HTTP/2, its
 stream is reset, `PROTOCOL_ERROR`, nothing written (RFC 9113 §8.1.1). An empty `Host` is a host, and
 so is a name of invalid punycode. So is a request answered whose field holds a control character but
 a tab, or an octet past ASCII: RFC 9110 §5.5 calls the first invalid and keeps the second out of
 every field defined since, and Node's parser answers the first itself. So is one whose target holds
 an octet other than visible ASCII, in its path or its query, or whose path's percent-decoding holds
-NUL, `%00`: a target holds a URI's characters (RFC 3986 §2); Node's parser answers each such octet
-itself over HTTP/1.1, and nghttp2 resets a control character in `:path`, the transport the rest;
-`%00` in a query, and every other octet percent-encoded, are taken. So is one whose field value
-starts or ends with a space or a tab, which RFC 9113 §8.2.1 calls malformed over HTTP/2; over
-HTTP/1.1 the parser strips it first (RFC 9110 §5.5). Node's HTTP/2 parser drops a field whose value
-starts or ends with a space or a tab, and a control character's, so the request is judged without
-it; a server created with `strictFieldWhitespaceValidation: false` hands the padded value to the
-transport, which resets the stream `PROTOCOL_ERROR`, as the C# side does.
+NUL, `%00`: a target holds a URI's characters (RFC 3986 §2). So is one whose target holds a `#`
+anywhere, since no form of a request-target carries a fragment (RFC 9112 §3.2), or a visible
+character a URI leaves out that a page's browser always percent-encodes where it stands — `"`,
+`<` or `>` in a path or a query, `^`, `` ` ``, `{` or `}` in a path, by the URL Standard's path and
+query percent-encode sets — which make the request-line invalid (RFC 9112 §3). Node's parser
+answers each octet other than visible ASCII itself over HTTP/1.1, and hands on a `#` and the
+characters a page's browser percent-encodes; nghttp2 resets a control character, a space or DEL in
+`:path`, and hands on a `#`, and an octet past ASCII as the character of its Latin-1 code; the
+transport answers what they hand on, through `isVisibleTarget`: 400 unmarked over HTTP/1.1, its
+stream reset `PROTOCOL_ERROR` over HTTP/2. `%00` in a query, and every other octet
+percent-encoded, `%23` among them, are taken, and so are the other visible characters a URI leaves
+out, `\` and `|`, and `^`, `` ` ``, `{` and `}` in a query, as they came, as a page's browser sends
+them unencoded (spec 15.12). So is one whose field value starts or ends with a space or a tab,
+which RFC 9113 §8.2.1 calls malformed over HTTP/2; over HTTP/1.1 the parser strips it first
+(RFC 9110 §5.5). Node's HTTP/2 parser drops a field whose value starts or ends with a space or a
+tab, and a control character's, so the request is judged without it; a server created with
+`strictFieldWhitespaceValidation: false` hands the padded value to the transport, which resets the
+stream `PROTOCOL_ERROR`, as the C# side does.
 
 Every server takes `localhost`, a name under `.localhost`, an IPv6 address in brackets and an IPv4
 address, by the request's host, its port aside: no name a browser fetches is written as an IP
