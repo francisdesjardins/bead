@@ -1,8 +1,13 @@
 //! Bead's Rust client against each side's server of the interop service, the TypeScript one, the
-//! C# one and the Rust one, over WebSocket and over HTTP: the same procedures, failures and cancel,
-//! a command the server asks, subscriptions, sessions and credentials. A trial a case, a transport
-//! and a server, named by the TypeScript side's sentence in snake case; HTTP carries no transfer, so
-//! the case of a transfer is WebSocket's alone.
+//! C# one and the Rust one, over WebSocket, over HTTP and over MQTT 5: the same procedures, failures
+//! and cancel, a command the server asks, subscriptions, sessions and credentials, and what a
+//! broker alone has. A trial a case, a transport and a server, named by the TypeScript side's
+//! sentence in snake case; HTTP carries no transfer, so the case of a transfer is WebSocket's and
+//! MQTT 5's. Over MQTT 5, where `BEAD_MQTT_URL` names a broker (`node tools/mqtt-broker.mjs start`),
+//! its participant `rs-client`, through a relay of its own, calls each side's name, `interop-ts`,
+//! `interop-cs` or `interop-rs`, and the name every side serves in a group, `interop-both`; each
+//! server links as its own participant, given that broker; skipped, saying so, where none is given,
+//! and failed where `BEAD_MQTT_REQUIRED=1` asks for one.
 //!
 //! The trials run where `BEAD_INTEROP_RUST=1` asks, and are ignored otherwise, a trial saying so: the
 //! TypeScript server starts by `node interop/serve.ts`, which its installed side bundles, the C#
@@ -21,20 +26,27 @@
 )]
 
 use core::time::Duration;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::error::Error;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitCode, Stdio};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, LazyLock, Mutex, MutexGuard, PoisonError};
 use std::time::{Instant, UNIX_EPOCH};
 
+use bead::testing::link_relay::{LinkRelay, LinkRelayOptions};
+use bead::testing::parcels::{self, ParcelReading};
 use bead::testing::{patience, rest, wall_now};
 use bead::{
-    CallError, Client, ClientListener, ClientOptions, CodecRefusal, Failure, FailureOrigin,
-    FailureScope, HttpTransportClient, HttpTransportClientConnectOptions,
-    HttpTransportClientOptions, JsonCodec, NotificationCallback, NotificationDependencies,
+    BoxFuture, BrokerAdapter, BrokerCapabilities, BrokerDelivery, BrokerDown, BrokerError,
+    BrokerListener, BrokerMessage, BrokerParticipant, BrokerParticipantOptions, BrokerPublication,
+    BrokerPublished, BrokerStart, BrokerSubscription, BrokerTransportClient,
+    BrokerTransportClientConnectOptions, BrokerTransportClientOptions, CallError, Client,
+    ClientListener, ClientOptions, CodecRefusal, Failure, FailureOrigin, FailureScope,
+    HttpTransportClient, HttpTransportClientConnectOptions, HttpTransportClientOptions, JsonCodec,
+    MqttBrokerAdapter, MqttBrokerAdapterOptions, NotificationCallback, NotificationDependencies,
     PayloadCodec, Procedure, ProtocolCode, RawCodec, ReadyState, RegistrationOptions,
     RequestCredential, RequestDependencies, RequestOptions, RouterClientTransport, RouterError,
     RouterSide, Sent, SharedClock, TransportMessage, WebSocketClient, WebSocketClientOptions,
@@ -72,6 +84,12 @@ const TRANSFERRED: usize = 3 * 1_048_576;
 const BASE64URL: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
 const SKIPPED: &str = "the interop against each side's server is skipped: BEAD_INTEROP_RUST=1 asks for it, which starts the TypeScript server with Node, the C# one with .NET and the Rust one";
+
+const NO_BROKER: &str = "the interop over MQTT 5 is skipped: no broker, BEAD_MQTT_URL is not set (node tools/mqtt-broker.mjs start)";
+
+// the Rust client's participant over a broker, and the name every side serves in a group
+const BROKER_CLIENT: &str = "rs-client";
+const BOTH: &str = "interop-both";
 
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
@@ -116,6 +134,15 @@ impl Side {
         }
     }
 
+    // the name it serves alone over a broker
+    const fn served(self) -> &'static str {
+        match self {
+            Self::TypeScript => "interop-ts",
+            Self::CSharp => "interop-cs",
+            Self::Rust => "interop-rs",
+        }
+    }
+
     // how it starts: the command the other sides' interop tests run, from its side's folder
     fn command(self) -> Result<Command, String> {
         let root = root()?;
@@ -144,10 +171,14 @@ impl Side {
             )),
         };
 
-        // ! over a broker, each side's server links as its participant of its own: one started
-        // here would take over the one another run links, so none links
+        // ! over a broker, each side's server links as its participant of its own: over MQTT 5,
+        // given the broker this run plays over, else none, since one started here would take over
+        // the one another run links; over AMQP 1.0, none, its binding ahead on this side
+        if !is_mqtt_given() {
+            command.env_remove("BEAD_MQTT_URL");
+        }
+
         command
-            .env_remove("BEAD_MQTT_URL")
             .env_remove("BEAD_AMQP_URL")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -299,15 +330,298 @@ fn stop_every_server() {
 enum Over {
     WebSocket,
     Http,
+    Mqtt,
 }
 
 impl Over {
-    const ALL: [Self; 2] = [Self::WebSocket, Self::Http];
+    const ALL: [Self; 3] = [Self::WebSocket, Self::Http, Self::Mqtt];
 
     const fn name(self) -> &'static str {
         match self {
             Self::WebSocket => "websocket",
             Self::Http => "http",
+            Self::Mqtt => "mqtt",
+        }
+    }
+}
+
+// whether a broker is given for the MQTT 5 leg
+fn is_mqtt_given() -> bool {
+    std::env::var_os("BEAD_MQTT_URL").is_some_and(|url| !url.is_empty())
+}
+
+// ── The broker's link ────────────────────────────────────────────────────────────────────────────
+
+/// The Rust client's link over MQTT 5 while its cases run: its participant, through a relay a case
+/// cuts, its adapter copying each message where a case asks, and the count of the ACCEPTs it read
+/// for an opener's half it had read one for already.
+struct BrokerLink {
+    participant: BrokerParticipant,
+    relay: LinkRelay,
+    is_copying: Arc<AtomicBool>,
+    accepted_twice: Arc<AtomicU64>,
+}
+
+impl core::fmt::Debug for BrokerLink {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter.debug_struct("BrokerLink").finish_non_exhaustive()
+    }
+}
+
+// what hears the adapter for its participant: each message handed on, twice where it copies, each
+// ACCEPT's opener noted
+struct Hearing {
+    inner: Arc<dyn BrokerListener>,
+    is_copying: Arc<AtomicBool>,
+    accepted_twice: Arc<AtomicU64>,
+    accepted: Mutex<HashSet<String>>,
+}
+
+impl BrokerListener for Hearing {
+    fn on_message(&self, message: &BrokerMessage) {
+        if let ParcelReading::Parcel(parcel) = parcels::read(message.payload())
+            && parcel.kind == 2
+            && !locked(&self.accepted).insert(parcel.opener)
+        {
+            self.accepted_twice.fetch_add(1, Ordering::SeqCst);
+        }
+
+        self.inner.on_message(message);
+
+        // * delivered twice, as a broker that redelivers does: answered once all the same
+        if self.is_copying.load(Ordering::SeqCst) {
+            self.inner.on_message(message);
+        }
+    }
+
+    fn on_down(&self, down: BrokerDown) {
+        self.inner.on_down(down);
+    }
+}
+
+// the MQTT 5 adapter, its listeners heard through `Hearing`
+struct Copied {
+    inner: MqttBrokerAdapter,
+    is_copying: Arc<AtomicBool>,
+    accepted_twice: Arc<AtomicU64>,
+    wrapped: Mutex<Vec<(usize, Arc<dyn BrokerListener>)>>,
+}
+
+impl core::fmt::Debug for Copied {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("Copied")
+            .field("inner", &self.inner)
+            .finish_non_exhaustive()
+    }
+}
+
+impl BrokerAdapter for Copied {
+    fn transport_type(&self) -> &str {
+        self.inner.transport_type()
+    }
+
+    fn id(&self) -> &str {
+        self.inner.id()
+    }
+
+    fn capabilities(&self) -> BrokerCapabilities {
+        self.inner.capabilities()
+    }
+
+    fn delivery(&self) -> BrokerDelivery {
+        self.inner.delivery()
+    }
+
+    fn is_secure(&self) -> bool {
+        self.inner.is_secure()
+    }
+
+    fn receive_bound(&self, topic: &[String]) -> u64 {
+        self.inner.receive_bound(topic)
+    }
+
+    fn maximum_payload_bytes(&self, topic: &[String]) -> u64 {
+        self.inner.maximum_payload_bytes(topic)
+    }
+
+    fn listen(&self, listener: Arc<dyn BrokerListener>) {
+        let key = Arc::as_ptr(&listener).cast::<()>().addr();
+        let copying: Arc<dyn BrokerListener> = Arc::new(Hearing {
+            inner: listener,
+            is_copying: Arc::clone(&self.is_copying),
+            accepted_twice: Arc::clone(&self.accepted_twice),
+            accepted: Mutex::default(),
+        });
+
+        locked(&self.wrapped).push((key, Arc::clone(&copying)));
+        self.inner.listen(copying);
+    }
+
+    fn unlisten(&self, listener: &Arc<dyn BrokerListener>) {
+        let key = Arc::as_ptr(listener).cast::<()>().addr();
+        let mut wrapped = locked(&self.wrapped);
+
+        if let Some(index) = wrapped.iter().position(|(held, _)| *held == key) {
+            let (_, copying) = wrapped.remove(index);
+
+            drop(wrapped);
+            self.inner.unlisten(&copying);
+        }
+    }
+
+    fn start(&self, options: BrokerStart) -> BoxFuture<Result<(), BrokerError>> {
+        self.inner.start(options)
+    }
+
+    fn subscribe(
+        &self,
+        topic: &[String],
+        options: BrokerSubscription,
+    ) -> BoxFuture<Result<(), BrokerError>> {
+        self.inner.subscribe(topic, options)
+    }
+
+    fn unsubscribe(&self, topic: &[String]) -> BoxFuture<Result<(), BrokerError>> {
+        self.inner.unsubscribe(topic)
+    }
+
+    fn publish(
+        &self,
+        publication: BrokerPublication,
+    ) -> BoxFuture<Result<BrokerPublished, BrokerError>> {
+        self.inner.publish(publication)
+    }
+
+    fn stop(&self) -> BoxFuture<()> {
+        self.inner.stop()
+    }
+}
+
+// the runtime every case over MQTT 5 runs on, its link's tasks among them, for the whole run
+static BROKER_RUNTIME: LazyLock<Result<tokio::runtime::Runtime, String>> = LazyLock::new(|| {
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .map_err(|error| error.to_string())
+});
+
+// the link, once the first case over MQTT 5 linked it
+static BROKER_LINK: Mutex<Option<Result<Arc<BrokerLink>, String>>> = Mutex::new(None);
+
+// the host and the port an `mqtt://` URL names
+fn host_and_port(url: &str) -> Result<(String, u16), String> {
+    let authority = url
+        .strip_prefix("mqtt://")
+        .ok_or_else(|| format!("{url} is no mqtt:// URL"))?
+        .split('/')
+        .next()
+        .unwrap_or_default();
+    let (host, port) = authority
+        .rsplit_once(':')
+        .ok_or_else(|| format!("{url} names no port"))?;
+    let port = port
+        .parse()
+        .map_err(|_unread| format!("{url} names no port"))?;
+
+    Ok((host.trim_matches(['[', ']']).to_owned(), port))
+}
+
+// the link of `rs-client` through a relay of its own, started
+async fn broker_link() -> Result<Arc<BrokerLink>, String> {
+    let url = std::env::var("BEAD_MQTT_URL").map_err(|_unset| NO_BROKER.to_owned())?;
+    let (host, port) = host_and_port(&url)?;
+    let relay = LinkRelay::to((&host, port), &LinkRelayOptions::default())
+        .await
+        .map_err(|error| error.to_string())?;
+    let mut options =
+        MqttBrokerAdapterOptions::new(format!("mqtt://127.0.0.1:{}", relay.port()), BROKER_CLIENT);
+
+    options.password = std::env::var("BEAD_MQTT_PASSWORD").ok();
+
+    let is_copying = Arc::new(AtomicBool::new(false));
+    let accepted_twice = Arc::new(AtomicU64::new(0));
+    let adapter = Copied {
+        inner: MqttBrokerAdapter::new(&options).map_err(|error| error.to_string())?,
+        is_copying: Arc::clone(&is_copying),
+        accepted_twice: Arc::clone(&accepted_twice),
+        wrapped: Mutex::default(),
+    };
+    let participant =
+        BrokerParticipant::new(Arc::new(adapter), &BrokerParticipantOptions::default())
+            .map_err(|error| error.to_string())?;
+
+    patience(PATIENCE, participant.start())
+        .await
+        .map_err(|_elapsed| "its participant not linked in time".to_owned())?
+        .map_err(|error| error.to_string())?;
+
+    Ok(Arc::new(BrokerLink {
+        participant,
+        relay,
+        is_copying,
+        accepted_twice,
+    }))
+}
+
+// the link, linked at the first case over MQTT 5; unable to link, every case of it fails, saying why
+async fn link_of_broker() -> Result<Arc<BrokerLink>, String> {
+    let held = locked(&BROKER_LINK).clone();
+
+    if let Some(held) = held {
+        return held;
+    }
+
+    let linked = broker_link().await;
+
+    *locked(&BROKER_LINK) = Some(linked.clone());
+
+    linked
+}
+
+// the link let go, once every trial ran
+fn stop_the_broker_link() {
+    let Some(Ok(link)) = locked(&BROKER_LINK).take() else {
+        return;
+    };
+
+    if let Ok(runtime) = BROKER_RUNTIME.as_ref() {
+        runtime.block_on(async move {
+            link.participant.dispose().await;
+            link.relay.dispose();
+        });
+    }
+}
+
+// a client of Bead over the broker's client transport, connected to the name `server`
+async fn brokered(server: &str) -> Result<(Client, BrokerTransportClient), String> {
+    let link = link_of_broker().await?;
+    let transport = link
+        .participant
+        .client(&BrokerTransportClientOptions::default())
+        .map_err(|error| error.to_string())?;
+    let client = Client::new(Arc::new(transport.clone()), &ClientOptions::default())
+        .map_err(|error| error.to_string())?;
+    let connected = patience(
+        PATIENCE,
+        transport.connect(&BrokerTransportClientConnectOptions::new(server)),
+    )
+    .await;
+
+    match connected {
+        Ok(Ok(())) => Ok((client, transport)),
+        Ok(Err(error)) => {
+            client.dispose().await;
+            transport.dispose();
+
+            Err(format!("not connected to {server}: {error}"))
+        }
+        Err(_elapsed) => {
+            client.dispose().await;
+            transport.dispose();
+
+            Err(format!("not connected to {server} in time"))
         }
     }
 }
@@ -388,20 +702,32 @@ impl RouterClientTransport for InOrder {
     }
 }
 
-// a client connected over one transport or the other, over HTTP its envelopes in order
+// a client connected over one transport or another, over HTTP its envelopes in order
 enum Connected {
     WebSocket(WebSocketClient),
     Http {
         transport: Arc<HttpTransportClient>,
         client: Client,
     },
+    Broker {
+        transport: BrokerTransportClient,
+        client: Client,
+    },
 }
 
 impl Connected {
     // a client of the server at `ports`, connected over `over`, its upgrade carrying `credential`
-    // over WebSocket
-    async fn new(over: Over, (ports, credential): (Ports, Option<&str>)) -> Result<Self, String> {
+    // over WebSocket; over a broker, to the name `side` serves alone
+    async fn new(
+        (over, side): (Over, Side),
+        (ports, credential): (Ports, Option<&str>),
+    ) -> Result<Self, String> {
         let connected = match over {
+            Over::Mqtt => {
+                let (client, transport) = brokered(side.served()).await?;
+
+                return Ok(Self::Broker { transport, client });
+            }
             Over::WebSocket => {
                 let client = WebSocketClient::new(&WebSocketClientOptions::default())
                     .map_err(|error| error.to_string())?;
@@ -452,7 +778,7 @@ impl Connected {
     const fn client(&self) -> &Client {
         match self {
             Self::WebSocket(client) => client.client(),
-            Self::Http { client, .. } => client,
+            Self::Http { client, .. } | Self::Broker { client, .. } => client,
         }
     }
 
@@ -460,6 +786,10 @@ impl Connected {
         match self {
             Self::WebSocket(client) => client.dispose().await,
             Self::Http { transport, client } => {
+                client.dispose().await;
+                transport.dispose();
+            }
+            Self::Broker { transport, client } => {
                 client.dispose().await;
                 transport.dispose();
             }
@@ -512,6 +842,7 @@ fn failure_of<T: core::fmt::Debug>(outcome: Result<T, CallError>) -> Result<Fail
 
 // a case played: its client, the server's ports, the interop's descriptors
 struct Case {
+    side: Side,
     over: Over,
     ports: Ports,
     connected: Connected,
@@ -749,10 +1080,15 @@ enum Which {
     Elsewhere,
     Durations,
     Transfer,
+    Group,
+    Copied,
+    InParts,
+    Cut,
+    Lost,
 }
 
 impl Which {
-    const ALL: [Self; 19] = [
+    const ALL: [Self; 24] = [
         Self::Echo,
         Self::OutsideAscii,
         Self::Bytes,
@@ -772,6 +1108,11 @@ impl Which {
         Self::Elsewhere,
         Self::Durations,
         Self::Transfer,
+        Self::Group,
+        Self::Copied,
+        Self::InParts,
+        Self::Cut,
+        Self::Lost,
     ];
 
     // the TypeScript side's sentence, in snake case
@@ -816,12 +1157,49 @@ impl Which {
             Self::Transfer => {
                 "a_payload_that_goes_as_a_transfer_comes_back_as_one_and_so_does_a_result_too_large_for_one_envelope"
             }
+            Self::Group => {
+                "a_name_served_by_two_in_one_group_answers_each_of_sixteen_connections_and_no_open_reaches_both"
+            }
+            Self::Copied => "a_parcel_its_broker_delivers_twice_is_answered_once",
+            Self::InParts => {
+                "a_string_of_100_000_characters_goes_in_parts_both_ways_under_its_brokers_maximum_packet_size"
+            }
+            Self::Cut => {
+                "a_link_cut_at_its_relay_closes_its_connection_unclean_as_a_dropped_socket_does"
+            }
+            Self::Lost => {
+                "a_link_lost_connects_anew_and_the_next_connection_through_the_name_is_answered"
+            }
         }
     }
 
-    // HTTP carries no transfer: a payload is what one envelope holds
+    // HTTP carries no transfer: a payload is what one envelope holds; what a broker alone has is
+    // played over MQTT 5 alone
     fn is_played_over(self, over: Over) -> bool {
-        !matches!(self, Self::Transfer) || over == Over::WebSocket
+        match self {
+            Self::Transfer => over != Over::Http,
+            Self::Group | Self::Copied | Self::InParts | Self::Cut | Self::Lost => {
+                over == Over::Mqtt
+            }
+            Self::Echo
+            | Self::OutsideAscii
+            | Self::Bytes
+            | Self::Fail
+            | Self::Unknown
+            | Self::Refused
+            | Self::Invalid
+            | Self::Checked
+            | Self::CancelledBySignal
+            | Self::PastTimeout
+            | Self::Command
+            | Self::Unpaced
+            | Self::Paced
+            | Self::Session
+            | Self::Presented
+            | Self::Jwt
+            | Self::Elsewhere
+            | Self::Durations => true,
+        }
     }
 
     async fn play(self, case: &mut Case) -> Result<(), String> {
@@ -845,6 +1223,11 @@ impl Which {
             Self::Elsewhere => elsewhere(case).await,
             Self::Durations => durations(case).await,
             Self::Transfer => transfer(case).await,
+            Self::Group => group(case).await,
+            Self::Copied => copied(case).await,
+            Self::InParts => in_parts(case).await,
+            Self::Cut => cut(case).await,
+            Self::Lost => lost(case).await,
         }
     }
 }
@@ -1342,7 +1725,11 @@ async fn elsewhere(case: &mut Case) -> Result<(), String> {
 
         // given the credential at its connect, which writes it on the upgrade
         case.connected.dispose().await;
-        case.connected = Connected::new(case.over, (case.ports, Some("Interop sub=ada"))).await?;
+        case.connected = Connected::new(
+            (case.over, case.side),
+            (case.ports, Some("Interop sub=ada")),
+        )
+        .await?;
     }
 
     equal(
@@ -1477,6 +1864,141 @@ async fn transfer(case: &Case) -> Result<(), String> {
     })
 }
 
+// ── What a broker alone has (spec 15.18 to 15.21, 15.25 to 15.31) ────────────────────────────────
+
+async fn group(case: &Case) -> Result<(), String> {
+    let link = link_of_broker().await?;
+    let before = link.accepted_twice.load(Ordering::SeqCst);
+    let interop = &case.procedures;
+
+    for index in 0..16 {
+        let (client, transport) = brokered(BOTH).await?;
+        let called = client
+            .services()
+            .get_request(
+                interop.echo.procedure(),
+                RequestDependencies::new(JsonCodec, JsonCodec),
+            )
+            .and_then(|requester| {
+                requester.call(json!({ "index": index }), &RequestOptions::default())
+            });
+        let outcome = outcome_of(called).await;
+
+        client.dispose().await;
+        transport.dispose();
+        equal(&answer_of(outcome?)?, &json!({ "index": index }))?;
+    }
+
+    // ! the count proves one group of a member of each side: two would hand each OPEN to both
+    equal(&link.accepted_twice.load(Ordering::SeqCst), &before)
+}
+
+async fn copied(case: &Case) -> Result<(), String> {
+    let link = link_of_broker().await?;
+    let none = RequestOptions::default();
+
+    link.is_copying.store(true, Ordering::SeqCst);
+
+    let echoed = case
+        .answer((&case.procedures.echo, json!({ "copied": true })), &none)
+        .await;
+    let sent = case
+        .answer((&case.procedures.bytes, json!({ "length": 10 })), &none)
+        .await;
+
+    link.is_copying.store(false, Ordering::SeqCst);
+    equal(&echoed?, &json!({ "copied": true }))?;
+    equal(&sent?, &json!("xxxxxxxxxx"))
+}
+
+async fn in_parts(case: &Case) -> Result<(), String> {
+    let long: String = core::iter::repeat_n('y', 100_000).collect();
+    let echoed = case
+        .answer(
+            (&case.procedures.echo, Value::String(long.clone())),
+            &RequestOptions::default(),
+        )
+        .await?;
+
+    // compared, not diffed: a hundred thousand characters would bury a failure
+    hold(echoed.as_str() == Some(long.as_str()), || {
+        "echoed otherwise".to_owned()
+    })
+}
+
+// what a client's transport told of its close: whether it was clean
+struct Closes(Mutex<Vec<bool>>);
+
+impl ClientListener for Closes {
+    fn on_close(&self, was_clean: bool, _is_quick: bool) {
+        locked(&self.0).push(was_clean);
+    }
+}
+
+// until `holds` holds, within the patience
+async fn reaching<F: Fn() -> bool>(holds: F) -> bool {
+    for _ in 0..500 {
+        if holds() {
+            return true;
+        }
+
+        rest(Duration::from_millis(20)).await;
+    }
+
+    holds()
+}
+
+async fn cut(case: &Case) -> Result<(), String> {
+    let link = link_of_broker().await?;
+    let Connected::Broker { transport, .. } = &case.connected else {
+        return Err("a case of a broker's alone".to_owned());
+    };
+    let closes = Arc::new(Closes(Mutex::new(Vec::new())));
+
+    transport.listen(Arc::<Closes>::clone(&closes));
+    equal(
+        &case
+            .answer(
+                (&case.procedures.echo, json!("before")),
+                &RequestOptions::default(),
+            )
+            .await?,
+        &json!("before"),
+    )?;
+    link.relay.cut();
+    hold(reaching(|| *locked(&closes.0) == [false]).await, || {
+        format!("closed {:?}, not unclean once", locked(&closes.0))
+    })?;
+    hold(reaching(|| link.participant.is_linked()).await, || {
+        "its participant not linked anew".to_owned()
+    })
+}
+
+async fn lost(case: &Case) -> Result<(), String> {
+    let link = link_of_broker().await?;
+    let former = link.participant.incarnation();
+
+    link.relay.cut();
+    hold(
+        reaching(|| link.participant.is_linked() && link.participant.incarnation() != former).await,
+        || "its participant not linked anew".to_owned(),
+    )?;
+
+    let (client, transport) = brokered(case.side.served()).await?;
+    let called = client
+        .services()
+        .get_request(
+            case.procedures.echo.procedure(),
+            RequestDependencies::new(JsonCodec, JsonCodec),
+        )
+        .and_then(|requester| requester.call(json!("after"), &RequestOptions::default()));
+    let outcome = outcome_of(called).await;
+
+    client.dispose().await;
+    transport.dispose();
+    equal(&answer_of(outcome?)?, &json!("after"))
+}
+
 // ── The trials ───────────────────────────────────────────────────────────────────────────────────
 
 // a trial a case, a transport and a server
@@ -1497,17 +2019,14 @@ impl Played {
         )
     }
 
-    // its server's ports, then the case on a client of its own, let go of whatever it found
+    // its server's ports, then the case on a client of its own, let go of whatever it found; over
+    // MQTT 5, on the runtime its broker's link runs on
     fn run(self) -> Result<(), String> {
         let ports = ports_of(self.side)?;
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|error| error.to_string())?;
-
-        runtime.block_on(async move {
-            let connected = Connected::new(self.over, (ports, None)).await?;
+        let played = async move {
+            let connected = Connected::new((self.over, self.side), (ports, None)).await?;
             let mut case = Case {
+                side: self.side,
                 over: self.over,
                 ports,
                 connected,
@@ -1518,7 +2037,20 @@ impl Played {
             case.connected.dispose().await;
 
             outcome
-        })
+        };
+
+        if self.over == Over::Mqtt {
+            return BROKER_RUNTIME
+                .as_ref()
+                .map_err(Clone::clone)?
+                .block_on(played);
+        }
+
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|error| error.to_string())?
+            .block_on(played)
     }
 }
 
@@ -1530,8 +2062,14 @@ fn main() -> ExitCode {
     // * one at a time, as the other sides' interop runs: two cases on one server share its relay
     arguments.test_threads.get_or_insert(1);
 
+    // * over MQTT 5, skipped where no broker is given and none is asked for
+    let is_mqtt_skipped =
+        !is_mqtt_given() && std::env::var("BEAD_MQTT_REQUIRED").as_deref() != Ok("1");
+
     if !is_asked {
         trials.push(Trial::test(SKIPPED, || Ok(())).with_ignored_flag(true));
+    } else if is_mqtt_skipped {
+        trials.push(Trial::test(NO_BROKER, || Ok(())).with_ignored_flag(true));
     }
 
     for side in Side::ALL {
@@ -1541,10 +2079,11 @@ fn main() -> ExitCode {
                 .filter(|which| which.is_played_over(over))
             {
                 let played = Played { side, over, which };
+                let is_skipped = !is_asked || (over == Over::Mqtt && is_mqtt_skipped);
 
                 trials.push(
                     Trial::test(played.name(), move || played.run().map_err(Failed::from))
-                        .with_ignored_flag(!is_asked),
+                        .with_ignored_flag(is_skipped),
                 );
             }
         }
@@ -1552,6 +2091,7 @@ fn main() -> ExitCode {
 
     let conclusion = libtest_mimic::run(&arguments, trials);
 
+    stop_the_broker_link();
     stop_every_server();
 
     conclusion.exit_code()
