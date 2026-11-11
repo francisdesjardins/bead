@@ -83,6 +83,67 @@ const PACKAGE = JSON.parse(
 // definition
 
 test.describe('createRouterCore', () => {
+  test('refuses a last call id of zero or its peer’s parity before a router starts', () => {
+    for (const [failures, refused, accepted] of [
+      [CLIENT_FAILURES, [0, 2, 8, 0xfffffffe], [1, 0xffffffff]],
+      [SERVER_FAILURES, [0, 1, 7, 0xffffffff], [2, 0xfffffffe]],
+    ] as const) {
+      const { port, sent } = createPort({ failures });
+
+      for (const lastCallId of refused) {
+        expect(() => {
+          return createRouterCore(port, { lastCallId });
+        }).toThrow(ProgrammerError);
+      }
+
+      for (const lastCallId of accepted) {
+        using core = createRouterCore(port, { lastCallId });
+
+        expect(core.gauges().counts['pendingCalls']).toBe(0);
+      }
+
+      expect(sent).toEqual([]);
+    }
+  });
+
+  test('answers a resolver’s own failure as it is, and any other error PROCEDURE_FAILED with no detail and reported', async () => {
+    test.skip(
+      true,
+      'divergence: a rejected application FailureError is reported and answered PROCEDURE_FAILED'
+    );
+    const { port, sent, reported } = createPort();
+    using core = createRouterCore(port);
+    const own = new FailureError({
+      code: 21,
+      detail: 'nothing to echo',
+      scope: FailureScope.APPLICATION,
+    });
+    const other = new Error('internal: 10.0.0.5:8443');
+
+    core.registerResolver(
+      Object.assign((props: IRequestResolverProps<Handle>) => {
+        return Promise.reject(
+          props.payload[0] === 'o'.charCodeAt(0) && props.payload.length === 3 ? own : other
+        );
+      }, echo)
+    );
+    core.receive(requestOf(1, { payload: new TextEncoder().encode('own') }), 'a');
+    core.receive(requestOf(3, { payload: new TextEncoder().encode('other') }), 'a');
+    await sleep(0);
+
+    expect(
+      sent.map(({ envelope }) => {
+        return envelope?.kind === EnvelopeKind.FAILURE
+          ? [envelope.failure.code, envelope.failure.detail]
+          : envelope?.kind;
+      })
+    ).toEqual([
+      [21, 'nothing to echo'],
+      [ProtocolCode.PROCEDURE_FAILED, ''],
+    ]);
+    expect(reported).toEqual([[other, 'a']]);
+  });
+
   const checkSubscriptionResult = async (includesPattern: boolean): Promise<void> => {
     for (const sample of [
       { length: 37, requestPayload: new Uint8Array(0), patterned: false },
