@@ -104,7 +104,7 @@ tower-service = { workspace = true, optional = true }
 
 [dev-dependencies]
 # the crate itself, with its test kit: one copy of bead for the unit tests and the players
-bead = { package = "francisdesjardins-bead", path = ".", features = ["testing", "websocket", "http"] }
+bead = { package = "francisdesjardins-bead", path = ".", features = ["testing", "websocket", "http", "mqtt"] }
 bead-interop = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 libtest-mimic = { workspace = true }
@@ -158,6 +158,11 @@ name = "envelope_fuzz"
 
 [[test]]
 name = "broker_parcel_fuzz"
+
+# seeded mutations of the packets a broker sends, fed to the MQTT 5 client's reader
+[[test]]
+name = "mqtt_packets_fuzz"
+required-features = ["mqtt"]
 
 [lints]
 workspace = true

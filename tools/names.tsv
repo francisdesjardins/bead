@@ -1,4 +1,4 @@
-# alone: typescript 296, csharp 61, rust 78
+# alone: typescript 293, csharp 61, rust 78
 # concept	typescript	csharp	rust	class
 ACCEPT_TIMEOUT	ACCEPT_TIMEOUT [constant]	-	ACCEPT_TIMEOUT [constant]	same
 AccessRefusal	IAccessRefusal [record]	AccessRefusal [record]	AccessRefusal [record]	same
@@ -152,6 +152,7 @@ JwtKey	IJwtKey [record]	JwtKey [record]	JwtKey [record]	same
 JwtKeySet	IJwtKeySet [record]	JwtKeySet [record]	JwtKeySet [record]	same
 JwtRefusal	-	-	JwtRefusal [choice]	own: a Result's error, where the other sides throw (0044)
 JwtSetKey	IJwtSetKey [record]	JwtSetKey [record]	JwtSetKey [record]	same
+KEEP_ALIVE	KEEP_ALIVE [constant]	-	KEEP_ALIVE [constant]	same
 LayerGauges	ILayerGauges [record]	LayerGauges [record]	LayerGauges [record]	same
 LIMIT_DEFAULTS	LIMIT_DEFAULTS [constant]	LimitDefaults [constant]	LIMIT_DEFAULTS [constant]	same
 ListedFailure	IListedFailure [record]	-	ListedFailure [record]	same
@@ -160,6 +161,7 @@ MAXIMUM_CONNECTIONS	MAXIMUM_CONNECTIONS [constant]	-	MAXIMUM_CONNECTIONS [consta
 MAXIMUM_CONNECTIONS_PER_ADDRESS	MAXIMUM_CONNECTIONS_PER_ADDRESS [constant]	-	MAXIMUM_CONNECTIONS_PER_ADDRESS [constant]	same
 MAXIMUM_ENVELOPE_PARTS_BYTES	MAXIMUM_ENVELOPE_PARTS_BYTES [constant]	-	MAXIMUM_ENVELOPE_PARTS_BYTES [constant]	same
 MAXIMUM_MESSAGE_BYTES	MAXIMUM_MESSAGE_BYTES [constant]	-	MAXIMUM_MESSAGE_BYTES [constant]	same
+MAXIMUM_PACKET_SIZE	MAXIMUM_PACKET_SIZE [constant]	-	MAXIMUM_PACKET_SIZE [constant]	same
 MAXIMUM_UNSENT_BYTES	MAXIMUM_UNSENT_BYTES [constant]	-	MAXIMUM_UNSENT_BYTES [constant]	same
 MemoryBroker	IMemoryBroker [record], createMemoryBroker [function]	MemoryBroker [record]	MemoryBroker [record]	same
 MemoryBrokerAdapter	IMemoryBrokerAdapter [record]	MemoryBrokerAdapter [record]	MemoryBrokerAdapter [record]	same
@@ -179,8 +181,9 @@ MetricsRegistry	IMetricsRegistry [record], createMetricsRegistry [function]	Metr
 MetricsRegistryOptions	IMetricsRegistryOptions [record]	MetricsRegistryOptions [record]	MetricsRegistryOptions [record]	same
 MINIMUM_BODY_BYTES_PER_SECOND	MINIMUM_BODY_BYTES_PER_SECOND [constant]	-	MINIMUM_BODY_BYTES_PER_SECOND [constant]	same
 MINIMUM_SEND_BYTES_PER_SECOND	MINIMUM_SEND_BYTES_PER_SECOND [constant]	-	MINIMUM_SEND_BYTES_PER_SECOND [constant]	same
-MqttBrokerAdapter	IMqttBrokerAdapter [record], createMqttBrokerAdapter [function]	MqttBrokerAdapter [record]	-	same
-MqttBrokerAdapterOptions	IMqttBrokerAdapterOptions [record]	MqttBrokerAdapterOptions [record]	-	same
+MQTT_CONNECT_TIMEOUT	-	-	MQTT_CONNECT_TIMEOUT [constant]	own: the MQTT 5 adapter's connect timeout, 30 s, which the TypeScript side exports as its module's CONNECT_TIMEOUT; the root's is the transport client's (0050)
+MqttBrokerAdapter	IMqttBrokerAdapter [record], createMqttBrokerAdapter [function]	MqttBrokerAdapter [record]	MqttBrokerAdapter [record]	same
+MqttBrokerAdapterOptions	IMqttBrokerAdapterOptions [record]	MqttBrokerAdapterOptions [record]	MqttBrokerAdapterOptions [record]	same
 NEVER	-	-	NEVER [constant]	own: never, which each other platform has of its own, Infinity and Timeout.InfiniteTimeSpan (0044)
 Notification	INotification [record]	INotification [record]	Notification [record]	same
 NotificationDependencies	INotificationDependencies [record]	NotificationDependencies [record]	NotificationDependencies [record]	same
@@ -305,6 +308,7 @@ TimerCallback	-	-	TimerCallback [function type]	own: the platform's clock and it
 TracedEnvelope	-	TracedEnvelope [record]	TracedEnvelope [record]	same
 TRANSPORT_BROKER	TRANSPORT_BROKER [constant]	-	TRANSPORT_BROKER [constant]	same
 TRANSPORT_MEMORY	TRANSPORT_MEMORY [constant]	-	TRANSPORT_MEMORY [constant]	same
+TRANSPORT_MQTT	TRANSPORT_MQTT [constant]	-	TRANSPORT_MQTT [constant]	same
 TRANSPORT_WEBSOCKET	TRANSPORT_WEBSOCKET [constant]	-	TRANSPORT_WEBSOCKET [constant]	same
 TransportClientDisconnectOptions	ITransportClientDisconnectOptions [record]	TransportClientDisconnectOptions [record]	TransportClientDisconnectOptions [record]	same
 TransportClientReconnectDelay	TransportClientReconnectDelay [choice]	TransportClientReconnectDelay [record]	TransportClientReconnectDelay [choice]	same
@@ -528,7 +532,6 @@ Jwk	Jwk [record]	-	-	alone
 JwtAgainst	-	-	JwtAgainst [record]	alone
 JwtSessionIdentifier	-	-	JwtSessionIdentifier [choice]	alone
 JwtVerdict	-	-	JwtVerdict [choice]	alone
-KEEP_ALIVE	KEEP_ALIVE [constant]	-	-	alone
 KeySetAnswer	-	-	KeySetAnswer [record]	alone
 KeySetAsk	-	-	KeySetAsk [function type]	alone
 LAST_ACTIVITY_CHANGED_EVENT	LAST_ACTIVITY_CHANGED_EVENT [constant]	-	-	alone
@@ -548,7 +551,6 @@ MAXIMUM_EXCHANGES	MAXIMUM_EXCHANGES [constant]	-	-	alone
 MAXIMUM_EXCHANGES_PER_ADDRESS	MAXIMUM_EXCHANGES_PER_ADDRESS [constant]	-	-	alone
 MAXIMUM_MESSAGE_SIZE	MAXIMUM_MESSAGE_SIZE [constant]	-	-	alone
 MAXIMUM_OUTBOX_BYTES	MAXIMUM_OUTBOX_BYTES [constant]	-	MAXIMUM_OUTBOX_BYTES [constant]	same
-MAXIMUM_PACKET_SIZE	MAXIMUM_PACKET_SIZE [constant]	-	-	alone
 MAXIMUM_WAIT	MAXIMUM_WAIT [constant]	-	MAXIMUM_WAIT [constant]	same
 MAXIMUM_WAITING_EXCHANGES	MAXIMUM_WAITING_EXCHANGES [constant]	-	MAXIMUM_WAITING_EXCHANGES [constant]	same
 MEMORY_ADDRESS	-	-	MEMORY_ADDRESS [constant]	alone
@@ -708,7 +710,6 @@ TracedValue	-	-	TracedValue [record]	alone
 TRANSPORT_AMQP	TRANSPORT_AMQP [constant]	-	-	alone
 TRANSPORT_CLIENT_EVENTS	TRANSPORT_CLIENT_EVENTS [choice]	-	-	alone
 TRANSPORT_HTTP	TRANSPORT_HTTP [constant]	-	TRANSPORT_HTTP [constant]	same
-TRANSPORT_MQTT	TRANSPORT_MQTT [constant]	-	-	alone
 TRANSPORT_SERVER_EVENTS	TRANSPORT_SERVER_EVENTS [choice]	-	-	alone
 TRANSPORT_WEBSOCKET_BINARYTYPE	TRANSPORT_WEBSOCKET_BINARYTYPE [constant]	-	-	alone
 TRANSPORT_WORKER	TRANSPORT_WORKER [constant]	-	-	alone

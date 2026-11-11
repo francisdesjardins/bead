@@ -30,6 +30,8 @@ mod life;
 mod managers;
 mod memory;
 mod metrics;
+#[cfg(feature = "mqtt")]
+mod mqtt;
 #[cfg(any(feature = "websocket", feature = "http", feature = "mqtt"))]
 mod net;
 mod ordered;
@@ -151,6 +153,12 @@ pub use metrics::{
     MetricsRegistry, MetricsRegistryOptions, NotificationSeries, ProcedureSeries, ResolverSeries,
     RouterMetrics,
 };
+#[cfg(feature = "mqtt")]
+pub use mqtt::adapter::{
+    KEEP_ALIVE, MQTT_CONNECT_TIMEOUT, MqttBrokerAdapter, MqttBrokerAdapterOptions, TRANSPORT_MQTT,
+};
+#[cfg(feature = "mqtt")]
+pub use mqtt::packets::MAXIMUM_PACKET_SIZE;
 #[cfg(any(feature = "websocket", feature = "http"))]
 pub use net::bounds::{HEADERS_TIMEOUT, MINIMUM_SEND_BYTES_PER_SECOND, SEND_GRACE_PERIOD};
 #[cfg(any(feature = "websocket", feature = "mqtt"))]
@@ -233,6 +241,12 @@ pub mod internal {
     pub use crate::identity::{are_one_name, is_procedure_name};
     pub use crate::judgement::{handshake, head, hosts, items, proxies, security, url_host};
     pub use crate::jwt_verifier::{ReadJwt, read_jwt, verify_jwt};
+    #[cfg(feature = "mqtt")]
+    pub use crate::mqtt::packets::{
+        LARGEST_PACKET_SIZE, LARGEST_REMAINING_LENGTH, MqttAcknowledgement, MqttConnack,
+        MqttDisconnect, MqttPacket, MqttPublish, MqttPublishShapeOptions, MqttReading, MqttRefusal,
+        largest_payload, publish_bytes, read_packet, width_of, write_publish,
+    };
     pub use crate::router::types::{limits_of, session_key_of, whole_envelope_limits_of};
 }
 
