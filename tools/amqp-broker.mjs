@@ -10,18 +10,20 @@
 //   node tools/amqp-broker.mjs stop [<broker>]
 //   node tools/amqp-broker.mjs run -- <command…>
 //
-// start prints BEAD_AMQP_URL, BEAD_AMQP_PASSWORD and BEAD_AMQP_BROKER as PowerShell's `$env:` lines,
+// start prints BEAD_AMQP_URL, BEAD_AMQP_TLS_URL, BEAD_AMQP_CA, BEAD_AMQP_CERTIFICATES,
+// BEAD_AMQP_PASSWORD and BEAD_AMQP_BROKER as PowerShell's `$env:` lines,
 // or, with --github-env, appends them to $GITHUB_ENV, the password masked first. stop removes that
 // broker and its folder, BEAD_AMQP_BROKER's by default. run starts a broker, runs the command with
 // those variables set, and stops the broker whatever the command's end, its exit code the command's.
 // Its files go to the run's temporary folder (TMP). Exit 1 on a broker that does not come up, 2 on a
 // usage error. What is no broker's own is `tools/broker-fixture.mjs`'s.
 
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { rmSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createConnection } from 'node:net';
 import { join } from 'node:path';
+import { connect as connectTls } from 'node:tls';
 
 import {
   INTEROP,
@@ -46,8 +48,9 @@ export { INTEROP };
 export const IMAGE =
   'rabbitmq:4.4.0-management@sha256:c200fd496482cda18c412be4e6f244830e1e75949b8cf5f0e887cea9ea456109';
 
-// the port RabbitMQ listens on inside its container, AMQP over TCP
+// the ports RabbitMQ listens on inside its container, AMQP over TCP and over TLS
 const AMQP_PORT = 5672;
+const AMQPS_PORT = 5671;
 
 // ! three heartbeats of silence and the broker's close, about 40 s at 10, are how long an id's next
 // link waits after its former one went silent (spec 15.38), which a twin waits out
@@ -276,6 +279,15 @@ export const definitionsOf = (broker, { password, saltOf = () => randomBytes(4) 
 export const configurationOf = (broker, { definitions }) => {
   return [
     `listeners.tcp.default = ${AMQP_PORT}`,
+    `listeners.ssl.default = ${AMQPS_PORT}`,
+    'ssl_options.cacertfile = /bead/ca.pem',
+    'ssl_options.certfile = /bead/server.pem',
+    'ssl_options.keyfile = /bead/server.key',
+    'ssl_options.verify = verify_peer',
+    'ssl_options.fail_if_no_peer_cert = false',
+    'ssl_cert_login_from = common_name',
+    'auth_mechanisms.1 = PLAIN',
+    'auth_mechanisms.2 = EXTERNAL',
     `max_message_size = ${broker.maximumMessageSize}`,
     'loopback_users = none',
     `heartbeat = ${HEARTBEAT}`,
@@ -361,15 +373,24 @@ export const frameOf = (type, body) => {
 };
 
 // a sasl-init of PLAIN, its response the user, as its authorization and authentication ids, and its
-// password (RFC 4616, AMQP 1.0 §5.3.3.2)
-export const saslInitFrame = ({ user, password }) => {
-  const response = Buffer.concat([
-    Buffer.from([0]),
-    Buffer.from(user, 'utf8'),
-    Buffer.from([0]),
-    Buffer.from(password, 'utf8'),
-  ]);
-  return frameOf(1, performativeOf(DESCRIPTOR.init, [symbolOf('PLAIN'), binaryOf(response)]));
+// password; or EXTERNAL with an empty authorization id, the certificate naming its user
+// (RFC 4616, RFC 4422 appendix A, AMQP 1.0 §5.3.3.2)
+export const saslInitFrame = ({ user, password, isExternal = false }) => {
+  const response = isExternal
+    ? Buffer.alloc(0)
+    : Buffer.concat([
+        Buffer.from([0]),
+        Buffer.from(user, 'utf8'),
+        Buffer.from([0]),
+        Buffer.from(password, 'utf8'),
+      ]);
+  return frameOf(
+    1,
+    performativeOf(DESCRIPTOR.init, [
+      symbolOf(isExternal ? 'EXTERNAL' : 'PLAIN'),
+      binaryOf(response),
+    ])
+  );
 };
 
 // an OPEN of its container-id alone (AMQP 1.0 §2.7.1)
@@ -472,11 +493,14 @@ export const closeConditionOf = (body) => {
 };
 
 // one authenticated OPEN to the broker on that port, settled with null once its OPEN came and its
-// CLOSE carried no error, or with what went wrong: SASL PLAIN as the readiness check's user, an OPEN
-// answered, then a CLOSE of no error answered
-export const openOf = (port, password) => {
+// CLOSE carried no error, or with what went wrong: SASL PLAIN in clear or EXTERNAL over TLS as the
+// readiness check's user, an OPEN answered, then a CLOSE of no error answered
+export const openOf = (port, password, { tls } = {}) => {
   return new Promise((settle) => {
-    const socket = createConnection({ host: '127.0.0.1', port });
+    const socket =
+      tls === undefined
+        ? createConnection({ host: '127.0.0.1', port })
+        : connectTls({ host: '127.0.0.1', port, servername: 'localhost', ...tls });
     let received = Buffer.alloc(0);
     let opened = false;
     let settled = false;
@@ -504,14 +528,18 @@ export const openOf = (port, password) => {
       const { type, descriptor, body } = item.frame;
 
       if (type === 1 && descriptor === DESCRIPTOR.mechanisms) {
-        socket.write(saslInitFrame({ user: READINESS_USER, password }));
+        socket.write(
+          saslInitFrame({ user: READINESS_USER, password, isExternal: tls !== undefined })
+        );
       } else if (type === 1 && descriptor === DESCRIPTOR.outcome) {
         const code = outcomeCodeOf(body);
 
         if (code === 0) {
           socket.write(Buffer.concat([AMQP_HEADER, openFrame(READINESS_USER)]));
         } else {
-          end(`the broker answered its SASL PLAIN with the code ${code}`);
+          end(
+            `the broker answered its SASL ${tls === undefined ? 'PLAIN' : 'EXTERNAL'} with the code ${code}`
+          );
         }
       } else if (type === 0 && descriptor === DESCRIPTOR.open) {
         opened = true;
@@ -530,7 +558,7 @@ export const openOf = (port, password) => {
     socket.setTimeout(5_000, () => {
       end('no answer');
     });
-    socket.on('connect', () => {
+    socket.on(tls === undefined ? 'connect' : 'secureConnect', () => {
       socket.write(SASL_HEADER);
     });
     socket.on('data', (data) => {
@@ -541,8 +569,8 @@ export const openOf = (port, password) => {
         read(item);
       }
     });
-    socket.on('error', () => {
-      end('no answer');
+    socket.on('error', (error) => {
+      end(error.message);
     });
     socket.on('close', () => {
       end('no answer');
@@ -554,6 +582,19 @@ export const openOf = (port, password) => {
 
 // where the container reads its files: the run's folder, mounted read-only
 const MOUNTED = '/bead';
+
+// ! fresh keys for this run alone, never a machine's trust store; a two-day lifetime spans the run
+const CERTIFICATES_SCRIPT = [
+  'cd /bead',
+  'mkdir clients',
+  'openssl req -x509 -newkey rsa:2048 -noenc -keyout ca.key -out ca.pem -days 2 -subj "/CN=Bead AMQP fixture" -addext "basicConstraints=critical,CA:TRUE" -addext "keyUsage=critical,keyCertSign,cRLSign"',
+  'printf "%s\\n" "basicConstraints=critical,CA:FALSE" "keyUsage=critical,digitalSignature,keyEncipherment" "extendedKeyUsage=serverAuth" "subjectAltName=DNS:localhost,IP:127.0.0.1" > server.ext',
+  'openssl req -new -newkey rsa:2048 -noenc -keyout server.key -out server.csr -subj "/CN=localhost"',
+  'openssl x509 -req -in server.csr -CA ca.pem -CAkey ca.key -CAcreateserial -out server.pem -days 2 -extfile server.ext',
+  'printf "%s\\n" "basicConstraints=critical,CA:FALSE" "keyUsage=critical,digitalSignature" "extendedKeyUsage=clientAuth" > client.ext',
+  'for user in $(cat tls-users); do openssl req -new -newkey rsa:2048 -noenc -keyout "clients/$user.key" -out "clients/$user.csr" -subj "/CN=$user"; openssl x509 -req -in "clients/$user.csr" -CA ca.pem -CAkey ca.key -CAcreateserial -out "clients/$user.pem" -days 2 -extfile client.ext; done',
+  'chmod 0644 server.key clients/*.key',
+].join('\n');
 
 // whether the broker's container still runs: one whose broker could not start ends at once
 const isUp = (name) => {
@@ -577,7 +618,7 @@ const isRunning = (name) => {
 
 // ! a running node and an open port prove nothing of its definitions: the broker is up once it runs
 // and its readiness user's OPEN is answered
-const awaitReady = async ({ broker, port, password }) => {
+const awaitReady = async ({ broker, port, tlsPort, password, folder }) => {
   const deadline = Date.now() + READY_WITHIN;
   let problem = 'its node never ran';
 
@@ -590,6 +631,16 @@ const awaitReady = async ({ broker, port, password }) => {
       problem = await openOf(port, password);
 
       if (problem === null) {
+        problem = await openOf(tlsPort, password, {
+          tls: {
+            ca: readFileSync(join(folder, 'ca.pem')),
+            cert: readFileSync(join(folder, 'clients', `${READINESS_USER}.pem`)),
+            key: readFileSync(join(folder, 'clients', `${READINESS_USER}.key`)),
+          },
+        });
+      }
+
+      if (problem === null) {
         return;
       }
     }
@@ -598,13 +649,42 @@ const awaitReady = async ({ broker, port, password }) => {
   }
 
   throw new Error(
-    `no broker answered an OPEN on 127.0.0.1:${port} within ${READY_WITHIN / 1000} s: ${problem}`
+    `no broker answered its clear and TLS OPENs on 127.0.0.1:${port}/${tlsPort} within ${READY_WITHIN / 1000} s: ${problem}`
   );
 };
 
 const startInDocker = (broker, { folder, password }) => {
   const name = containerNameOf(KIND);
   const configuration = join(folder, 'rabbitmq.conf');
+
+  pullImage(IMAGE);
+  writeFileSync(join(folder, 'tls-users'), `${usersOf(broker).join('\n')}\n`);
+  // * the image's OpenSSL makes a CA, a localhost server and one client per authenticated id;
+  // the broker maps each client's common name to that id through SASL EXTERNAL
+  execFileSync(
+    'docker',
+    [
+      'run',
+      '--rm',
+      // ! as the host's own user where it has one: the files it writes into the run's folder are
+      // then the host's to remove at the stop, which a root of the container's leaves it unable to
+      ...(process.getuid === undefined
+        ? []
+        : ['--user', `${String(process.getuid())}:${String(process.getgid())}`]),
+      '--mount',
+      `type=bind,source=${folder},target=${MOUNTED}`,
+      '--entrypoint',
+      'sh',
+      IMAGE,
+      '-ec',
+      CERTIFICATES_SCRIPT,
+    ],
+    { stdio: 'pipe' }
+  );
+  writeFileSync(
+    join(folder, 'enabled_plugins'),
+    '[rabbitmq_management,rabbitmq_prometheus,rabbitmq_auth_mechanism_ssl].\n'
+  );
 
   writeFileSync(
     configuration,
@@ -615,13 +695,11 @@ const startInDocker = (broker, { folder, password }) => {
     `${JSON.stringify(definitionsOf(broker, { password }), null, 2)}\n`
   );
 
-  pullImage(IMAGE);
-
   const ports = runContainer(KIND, {
     name,
     folder,
     image: IMAGE,
-    ports: [AMQP_PORT],
+    ports: [AMQP_PORT, AMQPS_PORT],
     args: [
       // what the broker writes stays in the container's memory, owned by its user
       '--tmpfs',
@@ -630,10 +708,12 @@ const startInDocker = (broker, { folder, password }) => {
       `type=bind,source=${folder},target=${MOUNTED},readonly`,
       '--mount',
       `type=bind,source=${configuration},target=/etc/rabbitmq/rabbitmq.conf,readonly`,
+      '--mount',
+      `type=bind,source=${join(folder, 'enabled_plugins')},target=/etc/rabbitmq/enabled_plugins,readonly`,
     ],
   });
 
-  return { broker: name, port: ports[AMQP_PORT] };
+  return { broker: name, port: ports[AMQP_PORT], tlsPort: ports[AMQPS_PORT] };
 };
 
 // ── Start and stop ────────────────────────────────────────────────────────────
@@ -647,7 +727,7 @@ export const start = async () => {
 
   try {
     started = startInDocker(broker, { folder, password });
-    await awaitReady({ ...started, password });
+    await awaitReady({ ...started, password, folder });
   } catch (error) {
     if (started !== undefined) {
       process.stderr.write(logsOf(started.broker));
@@ -661,6 +741,9 @@ export const start = async () => {
 
   return {
     BEAD_AMQP_URL: `amqp://127.0.0.1:${started.port}`,
+    BEAD_AMQP_TLS_URL: `amqps://localhost:${started.tlsPort}`,
+    BEAD_AMQP_CA: join(folder, 'ca.pem'),
+    BEAD_AMQP_CERTIFICATES: join(folder, 'clients'),
     BEAD_AMQP_PASSWORD: password,
     BEAD_AMQP_BROKER: started.broker,
   };
