@@ -6,7 +6,7 @@ use super::*;
 #[tokio::test]
 #[cfg_attr(
     windows,
-    ignore = "divergence: the small receive window does not establish a blocked writer on Windows; its stop settles before the deadline"
+    ignore = "fixture: a small receive window blocks no writer on Windows, so the stop settles before its deadline; Linux runs it"
 )]
 async fn resets_its_socket_once_its_disconnect_cannot_leave_within_its_connect_timeout() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};

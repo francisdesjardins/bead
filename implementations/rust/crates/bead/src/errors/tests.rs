@@ -151,7 +151,8 @@ fn ready_state_error_names_both_states() {
     );
 }
 
-// Rust's From and Error adapters keep one diagnostic and the cause chain it already names.
+// Rust's From, `ResolverError::other` and Error adapters keep one diagnostic and the cause chain
+// it already names.
 #[test]
 fn converting_a_failure_or_ready_state_keeps_its_diagnostic_and_source_chain() {
     use crate::constants::{ProtocolCode, RouterSide};
@@ -162,7 +163,7 @@ fn converting_a_failure_or_ready_state_keeps_its_diagnostic_and_source_chain() {
         .caused_by(Arc::new(Context(Leaf)));
     let expected = chain(&failure);
     let call = CallError::from(failure.clone());
-    let resolver = ResolverError::from(failure);
+    let resolver = ResolverError::other(failure);
 
     assert_eq!(
         chain(&call),
