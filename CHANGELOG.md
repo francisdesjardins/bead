@@ -61,6 +61,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A connection that closes credits the transfers of other connections that the budget it gives back
   starved, on the Rust side as on the others, which reserved their credit and never sent it, so they
   stalled (spec 12.10).
+- An HTTP server or client given limits that ask for a transfer refuses them as it is built on the
+  C# side, as on the TypeScript and Rust sides (spec 15.11).
 
 ## [0.12.0] - 2026-11-10
 

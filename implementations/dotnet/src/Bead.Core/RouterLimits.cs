@@ -13,19 +13,30 @@ public sealed record RouterLimits
     // and its record
     private const int FailureOverheadBytes = 8 + Credential.AnnouncementBytes + 4;
 
+    private readonly int _maximumTransfers = 4;
+
     /// <summary>The limits a router holds by when its options say nothing.</summary>
     public static RouterLimits Default { get; } = new();
 
     /// <summary>
     /// A router's limits over a transport that carries each envelope whole and no transfer — HTTP's,
     /// whose body is the envelope: no transfer either way, a payload up to what one envelope holds,
-    /// and a window the rules want and nothing reads. Its transfers are none whatever
-    /// <paramref name="limits"/> say, where the TypeScript side refuses others given: a record's
-    /// default cannot tell given from not.
+    /// and a window the rules want and nothing reads. <paramref name="limits"/> that ask for a
+    /// transfer, a <see cref="MaximumTransfers"/> given other than 0, are an
+    /// <see cref="ArgumentException"/>; the chunk and the window are replaced, given or not.
     /// </summary>
     internal static RouterLimits WholeEnvelopeOf(RouterLimits? limits)
     {
         var given = limits ?? Default;
+
+        // ! a transfer asked for over a transport that carries none would fail a call far from its
+        // cause: refused as it is built (spec 15.11)
+        if (given.IsMaximumTransfersGiven && given.MaximumTransfers != 0)
+        {
+            throw new ArgumentException(
+                $"a transport of whole envelopes carries no transfer: {nameof(MaximumTransfers)} is 0, not {given.MaximumTransfers}",
+                nameof(limits));
+        }
 
         return given with
         {
@@ -66,8 +77,26 @@ public sealed record RouterLimits
     /// <summary>A whole payload, in bytes, sent in one envelope or as a transfer.</summary>
     public int MaximumPayloadBytes { get; init; } = LimitDefaults.MaximumPayloadBytes;
 
-    /// <summary>The transfers a connection receives at once; 0 sends and takes none.</summary>
-    public int MaximumTransfers { get; init; } = 4;
+    /// <summary>
+    /// The transfers a connection receives at once; 0 sends and takes none. A transport of whole
+    /// envelopes refuses any other given.
+    /// </summary>
+    public int MaximumTransfers
+    {
+        get
+        {
+            return _maximumTransfers;
+        }
+        init
+        {
+            _maximumTransfers = value;
+            IsMaximumTransfersGiven = true;
+        }
+    }
+
+    // whether MaximumTransfers was given, its default among what may be, so a transport of whole
+    // envelopes refuses a transfer asked for and takes the default unasked
+    internal bool IsMaximumTransfersGiven { get; private init; }
 
     /// <summary>
     /// How long a transfer waits for its next chunk or credit before it stalls: from 1 to 2³¹ − 1
