@@ -411,7 +411,7 @@ async fn raises_reconnect_once_as_it_starts_open_or_closed_and_not_on_a_misuse()
 }
 
 #[tokio::test]
-async fn throws_a_reconnectexception_carrying_the_last_failure_ending_closed() {
+async fn throws_a_reconnect_exception_carrying_the_last_failure_ending_closed() {
     let faked = connect_refused(&not_listening()).await;
     let reconnecting = faked
         .client
@@ -562,7 +562,7 @@ async fn refuses_a_fixed_delay_out_of_bounds_as_reconnect_is_called_nothing_chan
 // which its stop answers, and the attempt after meets a server stopping, which draws no
 // connection, or nothing listening at all
 #[tokio::test]
-async fn throws_a_reconnectexception_from_what_its_connect_threw_when_the_server_is_gone() {
+async fn throws_a_reconnect_exception_from_what_its_connect_threw_when_the_server_is_gone() {
     // a listener that reconnects as the client closes, once
     struct Reconnecting {
         client: HttpTransportClient,
