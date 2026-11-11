@@ -2906,6 +2906,12 @@ test.describe('broker participant', () => {
 
     await expect(refused, 'a misuse').rejects.toBeInstanceOf(ProgrammerError);
     await expect(refused, 'its words').rejects.toThrow('the participant ada is stopping');
+
+    // * a connect while its stop is under way fails, as one that stop overtook does
+    await expect(
+      participant.transportClient().connect({ server: 'interop' }),
+      'a connect as it stops'
+    ).rejects.toThrow('the participant ada stopped as it connected');
     holding.releases.shift()?.();
     await stopping;
     expect(participant.isLinked, 'down').toBe(false);
@@ -3352,6 +3358,29 @@ test.describe('broker participant', () => {
     expect(participant.names.size, 'none held once stopped').toBe(0);
     expect(server.gauges().counts['names'], 'none counted').toBe(0);
     letting.holding.isHoldingStops = false;
+    await participant[Symbol.asyncDispose]();
+    await clients[Symbol.asyncDispose]();
+  });
+
+  test('reports a name whose adapter throws as it is asked to let it go at its stop, as one that refuses, and stops all the same (spec 15.21)', async () => {
+    const broker = createMemoryBroker();
+    const letting = lettingOf(broker.adapter({ id: 'server' }));
+    const { clients, participant } = await lettingServerOf(broker, letting);
+    const reported = hearing(participant);
+
+    const { unsubscribe } = letting.held;
+
+    // * its name's alone: what else it lets go, it lets go as it would
+    letting.held.unsubscribe = (topic) => {
+      if (topic[1] === 's') {
+        throw new GenericError('an adapter that throws as it is asked');
+      }
+
+      return unsubscribe(topic);
+    };
+    await participant.stop();
+    expect(wordsOf(reported), 'reported').toEqual(['an adapter that throws as it is asked']);
+    expect([participant.isLinked, participant.names.size], 'stopped').toEqual([false, 0]);
     await participant[Symbol.asyncDispose]();
     await clients[Symbol.asyncDispose]();
   });
