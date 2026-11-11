@@ -99,6 +99,27 @@ public sealed partial class RouterClientTests
     // definition
 
     [Fact]
+    public async Task A_command_its_transport_tells_once_its_router_is_disposed_reaches_no_resolver()
+    {
+        using var scripted = new ScriptedRouter();
+        var resolved = 0;
+
+        scripted.Router.RegisterResolver(new ScriptedResolver(Service with { ProcedureId = 9, ProcedureName = "clock" }, (_) =>
+        {
+            resolved += 1;
+
+            return Task.CompletedTask;
+        }));
+        scripted.Router.Dispose();
+        scripted.Transport.Deliver(new Envelope { Header = RequestHeaderOf(2) with { ProcedureId = 9 } });
+        await scripted.Settle();
+
+        Assert.Equal(0, resolved);
+        Assert.Empty(scripted.Transport.Calls);
+        Assert.Empty(scripted.Errors);
+    }
+
+    [Fact]
     public async Task Keeps_the_replacement_bound_when_its_predecessor_is_cancelled_before_its_answer()
     {
         using var scripted = new ScriptedRouter();
