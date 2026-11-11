@@ -154,6 +154,83 @@ test('propagates a bind failure whose platform errors name no absent loopback or
   expect(closed).toBe(1);
 });
 
+test('propagates a bind failure that names no code as it is', async () => {
+  const reason = new Error('bind');
+  let closed = 0;
+
+  await expect(
+    listenOn(
+      (address) => {
+        if (address === '::1') {
+          return Promise.reject(reason);
+        }
+        return Promise.resolve({
+          port: 42000,
+          close: () => {
+            closed += 1;
+          },
+        });
+      },
+      { address: 'localhost', findOpenPort: true, port: 0 }
+    )
+  ).rejects.toBe(reason);
+  expect(closed).toBe(1);
+});
+
+test('lets its IPv4 bind go and binds no more once its signal aborts after it, or between two draws', async () => {
+  const occupied = Object.assign(new Error('bind'), { code: 'EADDRINUSE' });
+
+  for (const between of [false, true]) {
+    const controller = new AbortController();
+    const calls: { address: string; port: number }[] = [];
+    let closed = 0;
+    const listening = listenOn(
+      (address, port) => {
+        calls.push({ address, port });
+
+        // * the abort comes as the IPv4 bind ends, or as the IPv6 bind fails for a port held
+        if (address === '127.0.0.1' && !between) {
+          controller.abort();
+        }
+
+        if (address === '::1') {
+          controller.abort();
+
+          return Promise.reject(occupied);
+        }
+
+        return Promise.resolve({
+          port: 42000,
+          close: () => {
+            closed += 1;
+          },
+        });
+      },
+      { address: 'localhost', findOpenPort: true, port: 0, signal: controller.signal }
+    );
+
+    const reason = await listening.then(
+      () => {
+        return undefined;
+      },
+      (failure: unknown) => {
+        return failure;
+      }
+    );
+
+    expect(reason, String(between)).toBe(controller.signal.reason);
+    expect(calls, String(between)).toEqual(
+      between
+        ? [
+            { address: '127.0.0.1', port: 0 },
+            { address: '::1', port: 42000 },
+          ]
+        : [{ address: '127.0.0.1', port: 0 }]
+    );
+    expect(closed, String(between)).toBe(1);
+  }
+});
+
 type StubDefineOptions = ITransportServerDefineOptions<{ id: string }, undefined>;
 
 /**
