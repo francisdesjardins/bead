@@ -271,9 +271,15 @@ internal sealed class ScriptedLink
         while (true)
         {
             Task heard;
+            bool isClosed;
 
             lock (_packets)
             {
+                // ! closed is read before the search, under the lock: the reader adds each packet
+                // before it closes, so an end seen here has every packet it read in _unread, and a
+                // packet that came between the search and a later look at the end is never missed
+                isClosed = _closed.Task.IsCompleted;
+
                 var at = _unread.FindIndex((packet) =>
                 {
                     return packet is T;
@@ -293,7 +299,7 @@ internal sealed class ScriptedLink
 
             var left = deadline - DateTimeOffset.UtcNow;
 
-            if (left <= TimeSpan.Zero || _closed.Task.IsCompleted)
+            if (left <= TimeSpan.Zero || isClosed)
             {
                 throw new TimeoutException($"no {typeof(T).Name} came within its time");
             }
