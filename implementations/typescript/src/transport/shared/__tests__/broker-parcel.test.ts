@@ -11,6 +11,7 @@ import {
   encodeParcel,
   type IParcel,
   isToken,
+  KIND_NAMES,
   kindNamed,
   ParcelFlag,
   ParcelKind,
@@ -244,6 +245,39 @@ test.describe('broker parcel', () => {
         readParcel(encodeParcel({ acceptor: half, kind: 0x80, opener: half, sequence })),
         String(sequence)
       ).toMatchObject({ reason: 'an advisory parcel with no sequence', refused: 'does-not-read' });
+    }
+  });
+
+  test('encodes for a test’s own peer a field it leaves out as zeros, and refuses a half that is not 8 bytes', () => {
+    const half = fromHexadecimal('11 12 13 14 15 16 17 18');
+    const prefix = { acceptor: half, opener: half, sequence: 3 };
+
+    for (const [left, whole] of [
+      [
+        { ...prefix, kind: ParcelKind.PONG },
+        { ...prefix, answers: 0, kind: ParcelKind.PONG },
+      ],
+      [
+        { ...prefix, kind: ParcelKind.CLOSE },
+        { ...prefix, code: 0, kind: ParcelKind.CLOSE },
+      ],
+      [
+        { ...prefix, id: 'ada', kind: ParcelKind.GONE },
+        { ...prefix, id: 'ada', incarnation: new Uint8Array(), kind: ParcelKind.GONE },
+      ],
+    ] as const) {
+      expect(hexadecimalOf(encodeParcel(left)), KIND_NAMES[left.kind]).toBe(
+        hexadecimalOf(encodeParcel(whole))
+      );
+    }
+
+    for (const halves of [
+      { acceptor: half, opener: half.subarray(1) },
+      { acceptor: half.subarray(1), opener: half },
+    ]) {
+      expect(() => {
+        return encodeParcel({ ...halves, kind: ParcelKind.PING, sequence: 2 });
+      }).toThrow(new ProgrammerError('a half is 8 bytes'));
     }
   });
 });
