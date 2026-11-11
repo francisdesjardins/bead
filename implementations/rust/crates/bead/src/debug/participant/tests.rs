@@ -7,7 +7,8 @@ use bytes::Bytes;
 
 use super::{ParcelVerdict, ParticipantDebugEvent, ParticipantDebugListener};
 use crate::broker::adapter::{
-    BrokerAdapter, BrokerDown, BrokerListener, BrokerMessage, BrokerPublication, BrokerSubscription,
+    BrokerAdapter, BrokerDown, BrokerListener, BrokerMessage, BrokerPublication, BrokerStart,
+    BrokerSubscription,
 };
 use crate::broker::client::{
     BrokerTransportClient, BrokerTransportClientConnectOptions, BrokerTransportClientOptions,
@@ -56,7 +57,23 @@ impl BrokerListener for Accepting {
     fn on_down(&self, _down: BrokerDown) {}
 }
 
+/// A peer's ear: each OPEN it heard, in its order.
+struct Opening(Arc<Mutex<Vec<Parcel>>>);
+
+impl BrokerListener for Opening {
+    fn on_message(&self, message: &BrokerMessage) {
+        if let ParcelRead::Parcel(parcel) = read_parcel(message.payload())
+            && parcel.kind == kinds::OPEN
+        {
+            locked(&self.0).push(parcel);
+        }
+    }
+
+    fn on_down(&self, _down: BrokerDown) {}
+}
+
 struct TracePair {
+    broker: MemoryBroker,
     clock: Arc<SteppingClock>,
     server_clock: Arc<SteppingClock>,
     client_adapter: MemoryBrokerAdapter,
@@ -142,6 +159,7 @@ impl TracePair {
             .expect("the ACCEPT reaches the client");
 
         Self {
+            broker,
             clock,
             server_clock,
             client_adapter,
@@ -372,6 +390,79 @@ async fn traces_each_incoming_verdict_once_after_judgment_and_names_a_loss_by_it
     clippy::too_many_lines,
     reason = "the twin plays every leg's trace in one connection's history"
 )]
+// debugging 13.4
+#[tokio::test]
+async fn traces_a_refuse_its_connect_awaited_as_taken_and_an_accept_no_connect_awaits_as_no_pair_held_the_reset_it_draws_with_its_parcel()
+ {
+    let pair = TracePair::of().await;
+    let peer = pair
+        .broker
+        .adapter(&MemoryBrokerAdapterOptions::new("peer"))
+        .expect("an adapter");
+    let opens = Arc::new(Mutex::new(Vec::new()));
+
+    // * a peer that holds a name and refuses each OPEN to it
+    peer.listen(Arc::new(Opening(Arc::clone(&opens))));
+    peer.start(BrokerStart::default()).await.expect("started");
+    peer.subscribe(
+        &["bead".to_owned(), "s".to_owned(), "refusing".to_owned()],
+        BrokerSubscription::default(),
+    )
+    .await
+    .expect("subscribed");
+    locked(&pair.events).clear();
+
+    let client = pair
+        .client_participant
+        .client(&BrokerTransportClientOptions::default())
+        .expect("a client");
+    let connecting = client.connect(&BrokerTransportClientConnectOptions::new("refusing"));
+
+    settle(&pair.clock, &pair.server_clock).await;
+
+    let open = locked(&opens).first().cloned().expect("its OPEN heard");
+
+    peer.publish(BrokerPublication::new(
+        ["bead", "i", "client"],
+        written(&Parcel {
+            opener: open.opener,
+            sequence: 1,
+            status: Some(503),
+            ..Parcel::of(kinds::REFUSE)
+        }),
+    ))
+    .await
+    .expect("published");
+    assert!(connecting.await.is_err(), "its connect refused");
+    pair.send(written(&Parcel {
+        opener: 0xa100_0000_0000_0009,
+        ..pair.accept.clone()
+    }))
+    .await;
+    assert_eq!(
+        incoming(&pair.events)
+            .iter()
+            .map(|event| (event.kind.clone(), event.verdict))
+            .collect::<Vec<_>>(),
+        [
+            (Some("REFUSE".to_owned()), Some(ParcelVerdict::Taken)),
+            (Some("ACCEPT".to_owned()), Some(ParcelVerdict::PairNotHeld)),
+        ],
+        "each verdict"
+    );
+    assert_eq!(
+        locked(&pair.events)
+            .iter()
+            .filter(|event| event.direction == Some(DebugDirection::Tx)
+                && event.kind.as_deref() == Some("RESET"))
+            .count(),
+        1,
+        "the RESET it draws"
+    );
+    peer.stop().await;
+    pair.stop().await;
+}
+
 // debugging 13.3, 13.7
 #[tokio::test]
 async fn traces_parcel_attempts_and_third_leg_handles_without_carried_bytes_credentials_or_an_acceptor_s_half()

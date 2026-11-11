@@ -2692,6 +2692,19 @@ async fn refuses_a_start_while_its_stop_is_under_way_and_links_anew_at_a_start_a
         "the participant ada is stopping",
         "its words"
     );
+
+    // * a connect while its stop is under way fails, as one that stop overtook does
+    assert_eq!(
+        error_of(
+            participant
+                .client(&BrokerTransportClientOptions::default())
+                .expect("a client")
+                .connect(&BrokerTransportClientConnectOptions::new("interop"))
+                .await
+        ),
+        "the participant ada stopped as it connected",
+        "a connect as it stops"
+    );
     assert!(holding.release_stop(), "released");
     stopping.await.expect("joined");
     assert!(!participant.is_linked(), "down");
