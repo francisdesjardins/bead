@@ -80,6 +80,22 @@ const text = {
 const TOKEN = toSessionToken(new Uint8Array(16).fill(1));
 const OTHER_TOKEN = toSessionToken(new Uint8Array(16).fill(2));
 
+test('refuses a router that presents a JWT by default within limits too small for it', () => {
+  const { transport } = createScriptedTransport();
+  const limits = { chunkBytes: 512, maximumEnvelopeBytes: 512, windowBytes: 1_024 };
+
+  expect(() => {
+    return createRouterClient(transport, {
+      credential: { scheme: CredentialScheme.JWT, token: 'a.b.c' },
+      limits,
+    });
+  }).toThrow(/1,024 bytes at least/u);
+
+  using router = createRouterClient(transport, { credentials: {}, limits });
+
+  expect(router.credential).toBeUndefined();
+});
+
 // what an answer announces: the session, by its token; another; its end
 const OPAQUE = Object.freeze({ scheme: CredentialScheme.OPAQUE, token: TOKEN });
 const OTHER_OPAQUE = Object.freeze({ scheme: CredentialScheme.OPAQUE, token: OTHER_TOKEN });

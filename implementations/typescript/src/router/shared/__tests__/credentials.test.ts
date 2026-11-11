@@ -8,7 +8,7 @@ import {
   duesOn,
   type TestClock,
 } from '../../../transport/shared/__tests__/fixtures';
-import { CredentialScheme } from '../constants';
+import { CredentialScheme, LIMIT_DEFAULTS } from '../constants';
 import {
   assertLimitsHoldJwt,
   createCredentialResolver,
@@ -1819,6 +1819,23 @@ test.describe('createCredentialResolver', () => {
 });
 
 test.describe('assertLimitsHoldJwt', () => {
+  test('holds a JWT’s header in a chunk and an envelope of 1,024 bytes at least', () => {
+    expect(JWT_LIMIT_BYTES).toBe(1_024);
+
+    expect(() => {
+      assertLimitsHoldJwt(LIMIT_DEFAULTS);
+    }).not.toThrow();
+
+    for (const limits of [
+      { ...LIMIT_DEFAULTS, chunkBytes: 1_023 },
+      { ...LIMIT_DEFAULTS, chunkBytes: 1_023, maximumEnvelopeBytes: 1_023 },
+    ]) {
+      expect(() => {
+        assertLimitsHoldJwt(limits);
+      }).toThrow(ProgrammerError);
+    }
+  });
+
   test('refuses limits whose chunk or envelope is under 1,024 bytes, and takes them from 1,024', () => {
     expect(JWT_LIMIT_BYTES).toBe(1_024);
     expect(() => {
