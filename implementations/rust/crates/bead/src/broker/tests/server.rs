@@ -36,7 +36,8 @@ use crate::identity::IdentityRefusal;
 use crate::router::types::{BoxFuture, ConnectionHandle, RouterError, TransportMessage};
 use crate::transport::{
     ReadyState, RouterClientTransport, ServerListener, ServerTransport,
-    TransportClientDisconnectOptions,
+    TransportClientDisconnectOptions, TransportClientReconnectDelay,
+    TransportClientReconnectOptions,
 };
 
 type Settled = oneshot::Sender<Result<(), BrokerError>>;
@@ -1020,6 +1021,73 @@ async fn refuses_its_start_once_its_participant_is_disposed_its_state_kept() {
         ReadyState::Uninitialized,
         "its state kept"
     );
+}
+
+// spec 15.21
+#[tokio::test]
+async fn reports_a_name_its_broker_refuses_as_it_links_anew_leaves_it_unheld_and_keeps_its_link() {
+    let broker = broker();
+    let inner = adapter_of(&broker, "server");
+    let holding = Arc::new(Holding::of(inner.clone()));
+    let adapter: Arc<dyn BrokerAdapter> = Arc::<Holding>::clone(&holding);
+    let participant = BrokerParticipant::new(
+        adapter,
+        &BrokerParticipantOptions {
+            reconnect: Some(TransportClientReconnectOptions {
+                delay: Some(TransportClientReconnectDelay::Fixed(
+                    core::time::Duration::ZERO,
+                )),
+                ..TransportClientReconnectOptions::default()
+            }),
+            ..BrokerParticipantOptions::default()
+        },
+    )
+    .expect("a participant");
+    let server = participant
+        .server(&BrokerTransportServerOptions::new(["interop"]))
+        .expect("a server");
+    let told = Arc::new(ServerTold::default());
+
+    server.listen(Arc::new(AtServer(Arc::clone(&told))));
+
+    let starting = crate::testing::spawn(server.start());
+
+    until(
+        || locked(&holding.subscribing).len() == 1,
+        "its name asked of its broker",
+    )
+    .await;
+    Holding::settle(&holding.subscribing, Ok(()));
+    starting.await.expect("joined").expect("started");
+    assert_eq!(names_of(&server), Some(1), "served");
+
+    // * its link lost: as it links anew, its broker refuses its name
+    inner.lose();
+    until(
+        || locked(&holding.subscribing).len() == 1,
+        "its name asked anew as it links anew",
+    )
+    .await;
+    Holding::settle(
+        &holding.subscribing,
+        Err(BrokerError::failed(
+            "its broker refused the subscription to bead/s/interop: 0x87",
+        )),
+    );
+    until(|| !locked(&told.errors).is_empty(), "its refusal reported").await;
+    assert_eq!(
+        locked(&told.errors)
+            .iter()
+            .map(|(message, _)| message.clone())
+            .collect::<Vec<_>>(),
+        [
+            "the name interop is not served: its broker refused its subscription, its broker refused the subscription to bead/s/interop: 0x87"
+        ],
+        "reported"
+    );
+    assert!(participant.is_linked(), "its link kept");
+    assert_eq!(names_of(&server), Some(0), "unheld");
+    participant.stop().await;
 }
 
 #[tokio::test]

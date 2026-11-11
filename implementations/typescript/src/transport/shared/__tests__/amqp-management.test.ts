@@ -8,7 +8,7 @@
 import { once } from 'node:events';
 import { expect, test } from '@playwright/test';
 import rhea, { type Connection, type Sender } from 'rhea';
-import { GenericError } from '../errors';
+import { CancelError, GenericError } from '../errors';
 import { bindInbox, declareInbox, deleteInbox, requestOf } from '../amqp-management';
 import { createAmqpScript, type IAmqpScript, type IAmqpScriptedLink } from './amqp-script';
 
@@ -66,6 +66,54 @@ test.describe('the AMQP management', () => {
 
   test.afterEach(async () => {
     await script[Symbol.asyncDispose]();
+  });
+
+  test('waits for its sender’s credit before sending a management request', async () => {
+    script.policy.credit = 0;
+
+    const { connection, link } = await connectionTo(script);
+    const asking = heldRequest(connection, '/queues/bead.i.ada');
+    const sending = await link.attachOf('/management', { role: 'sender' });
+
+    await link.attachOf('/management', { role: 'receiver' });
+    expect(link.requests).toEqual([]);
+    link.grantCredit(sending, 1);
+    expect(await asking).toEqual({ answer: { body: null, status: 200 } });
+    expect(
+      link.requests.map(({ method, path }) => {
+        return { method, path };
+      })
+    ).toEqual([{ method: 'GET', path: '/queues/bead.i.ada' }]);
+    await link.until(() => {
+      return link.ended.includes(sending.session);
+    });
+    connection.close();
+  });
+
+  test('ends a rhea request cancelled before its peer’s BEGIN once that BEGIN arrives', async () => {
+    const { connection, link } = await connectionTo(script);
+    const giving = new AbortController();
+    const reason = new Error('given up before BEGIN');
+    const asking = requestOf(connection, {
+      method: 'GET',
+      path: '/queues/bead.i.ada',
+      signal: giving.signal,
+    });
+
+    giving.abort(reason);
+    await expect(asking).rejects.toBeInstanceOf(CancelError);
+    await expect(asking).rejects.toMatchObject({ cause: reason });
+    await link.until(() => {
+      return link.sessions.length === 1 && link.ended.includes(link.sessions[0] as never);
+    });
+    expect(link.requests).toEqual([]);
+    expect(
+      link.attaches.filter(({ role }) => {
+        return role === 'receiver';
+      })
+    ).toEqual([]);
+    expect(connection.is_open()).toBe(true);
+    connection.close();
   });
 
   test('pairs its sender and receiver under one name on a session of its own, one after the other, and matches each answer by its correlation-id', async () => {

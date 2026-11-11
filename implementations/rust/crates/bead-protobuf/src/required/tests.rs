@@ -19,7 +19,9 @@ use buffa::MessageField;
 use super::{Place, bounded, check_required, unset_of};
 use crate::records::ProtoSchema;
 use crate::testing::codecs::{self, Probe};
-use crate::testing::test::{Alone, Back, Edges, Leveled, Loop, Requiring, RequiringView};
+use crate::testing::test::{
+    Alone, Back, Edges, Keyed, KeyedView, Leveled, Loop, Requiring, RequiringView,
+};
 
 // the pool of the tests' messages, as their generated code embeds it
 fn pool() -> Arc<DescriptorPool> {
@@ -177,6 +179,89 @@ fn takes_a_map_s_values_by_key_in_18_5_s_order_whatever_order_the_map_holds_them
         .expect("a view of Requiring");
 
     assert_eq!(path_of(&view, &schema), expected, "a view's map");
+
+    let schema = ProtoSchema::of::<Keyed>();
+    let must = || Value::Message(message_of("bead.test.Must", vec![]));
+    let by_flag: MapValue = [(MapKey::Bool(true), must()), (MapKey::Bool(false), must())]
+        .into_iter()
+        .collect();
+    let expected = Some(vec![
+        "by_flag".to_owned(),
+        "Bool(false)".to_owned(),
+        "must".to_owned(),
+    ]);
+
+    assert_eq!(
+        path_of(
+            &message_of("bead.test.Keyed", vec![("by_flag", Value::Map(by_flag))]),
+            &schema
+        ),
+        expected,
+    );
+
+    let bytes =
+        hexadecimal::bytes_of("0A 04 08 01 12 00 0A 04 08 00 12 00").expect("bytes in hexadecimal");
+    let view: KeyedView<'_> = DecodeOptions::new()
+        .decode_view(&bytes)
+        .expect("a view of Keyed");
+
+    assert_eq!(path_of(&view, &schema), expected, "a view's boolean map");
+
+    for keys in [vec![-2, -10, 10, 2], vec![10, 2]] {
+        let first = if keys.len() == 4 { -10 } else { 2 };
+        let by_number: MapValue = keys
+            .into_iter()
+            .map(|key| (MapKey::I32(key), must()))
+            .collect();
+
+        assert_eq!(
+            path_of(
+                &message_of(
+                    "bead.test.Keyed",
+                    vec![("by_number", Value::Map(by_number))]
+                ),
+                &schema
+            ),
+            Some(vec![
+                "by_number".to_owned(),
+                format!("I32({first})"),
+                "must".to_owned()
+            ]),
+        );
+    }
+}
+
+#[test]
+fn walks_the_chosen_message_of_a_oneof_and_skips_its_other_members_and_an_unset_choice() {
+    let schema = ProtoSchema::of::<Keyed>();
+
+    for message in [
+        message_of("bead.test.Keyed", vec![]),
+        message_of("bead.test.Keyed", vec![("word", text("another"))]),
+        message_of(
+            "bead.test.Keyed",
+            vec![(
+                "chosen",
+                Value::Message(message_of("bead.test.Must", vec![("must", Value::I32(0))])),
+            )],
+        ),
+    ] {
+        assert_eq!(path_of(&message, &schema), None);
+    }
+
+    assert_eq!(
+        path_of(
+            &message_of(
+                "bead.test.Keyed",
+                vec![(
+                    "chosen",
+                    Value::Message(message_of("bead.test.Must", vec![]))
+                )]
+            ),
+            &schema
+        ),
+        Some(vec!["chosen".to_owned(), "must".to_owned()]),
+    );
 }
 
 #[test]

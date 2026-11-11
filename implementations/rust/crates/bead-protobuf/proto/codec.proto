@@ -45,6 +45,15 @@ message Alone {
   optional Alone alone = 1;
 }
 
+message Keyed {
+  map<bool, Must> by_flag = 1;
+  map<int32, Must> by_number = 2;
+  oneof choice {
+    Must chosen = 3;
+    string word = 4;
+  }
+}
+
 // A closed enum as a repeated field's item, expanded and packed, and as a map's value, each kept
 // as the item or the value it is (the leveled row of docs/support.md), and a singular one, set
 // aside (spec 17.9.8).

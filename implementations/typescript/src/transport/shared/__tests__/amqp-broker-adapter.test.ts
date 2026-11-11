@@ -345,6 +345,27 @@ test.describe('createAmqpBrokerAdapter', () => {
     }).toThrow('a TLS client certificate is carried over amqps');
   });
 
+  test('fails its start over TLS where its broker’s certificate chains to no authority it trusts', async () => {
+    await using secured = await createAmqpScript({ tls: TLS_FIXTURE });
+
+    for (const authentication of [{ password: PASSWORD }, { tls: TLS_FIXTURE }]) {
+      const adapter = createAmqpBrokerAdapter({
+        connectTimeout: 1_000,
+        id: ID,
+        url: secured.url,
+        ...authentication,
+      });
+      const { downs } = heardOf(adapter);
+      const failure = await settledOf(adapter.start());
+
+      expect(failure).toBeInstanceOf(GenericError);
+      expect(String(failure)).toContain('self-signed certificate');
+      expect(String(failure)).not.toContain(PASSWORD);
+      expect([adapter.isLinked, downs]).toEqual([false, []]);
+      await adapter.stop();
+    }
+  });
+
   test('refuses its inbox when either management link is refused and closes its connection without telling a loss', async () => {
     for (const refused of ['sender', 'receiver'] as const) {
       const adapter = adapterOf(script);
@@ -592,6 +613,88 @@ test.describe('createAmqpBrokerAdapter', () => {
     const next = await inboxUp({ adapter, script });
 
     expect(next.connection).not.toBe(link.connection);
+    expect(adapter.isLinked).toBe(true);
+    await adapter.stop();
+  });
+
+  test('fails its start when a sending session ends before its sender attaches and opens a fresh link afterwards', async () => {
+    script.policy.attach = ({ address, role }) => {
+      return address === undefined && role === 'sender'
+        ? { endSession: { condition: 'amqp:unauthorized-access' } }
+        : 'take';
+    };
+
+    const adapter = adapterOf(script);
+    const { downs } = heardOf(adapter);
+    const starting = settledOf(adapter.start());
+    const link = await script.link();
+
+    expect(String(await starting)).toContain('amqp:unauthorized-access');
+    await link.closed;
+    expect([downs, adapter.isLinked, link.deliveries, link.requests]).toEqual([[], false, [], []]);
+    script.policy.attach = () => {
+      return 'take';
+    };
+
+    const next = await inboxUp({ adapter, script });
+
+    expect(next.connection).not.toBe(link.connection);
+    expect(adapter.isLinked).toBe(true);
+    await adapter.stop();
+  });
+
+  test('reports no payload room when its sender’s bound cannot hold a message and refuses even an empty publication', async () => {
+    script.policy.maximumMessageSize = 1;
+
+    const adapter = adapterOf(script);
+    const { downs } = heardOf(adapter);
+    const link = await inboxUp({ adapter, script });
+
+    for (const topic of [INBOX, NAME]) {
+      expect(adapter.maximumPayloadBytes(topic)).toBe(0);
+      await expect(adapter.publish({ payload: new Uint8Array(), topic })).rejects.toThrow(
+        "past its sender's max-message-size, 1 bytes"
+      );
+    }
+
+    expect([adapter.isLinked, downs, link.deliveries]).toEqual([true, [], []]);
+    await adapter.stop();
+  });
+
+  test('ends its start once stopped in the microtask after its password is answered and asks anew at its next start', async () => {
+    let asks = 0;
+    const adapter = adapterOf(script, {
+      passwordProvider: () => {
+        asks += 1;
+
+        if (asks === 1) {
+          queueMicrotask(() => {
+            queueMicrotask(() => {
+              void adapter.stop();
+            });
+          });
+        }
+
+        return PASSWORD;
+      },
+    });
+
+    await expect(adapter.start()).rejects.toThrow('the link of ada stopped as it started');
+    expect(adapter.isLinked).toBe(false);
+    await inboxUp({ adapter, script });
+    expect([asks, adapter.isLinked]).toEqual([2, true]);
+    await adapter.stop();
+  });
+
+  test('ends a start stopped before its socket opens and starts a fresh link afterwards', async () => {
+    const adapter = adapterOf(script);
+    const { downs } = heardOf(adapter);
+    const starting = settledOf(adapter.start());
+
+    await adapter.stop();
+    expect(await starting).toEqual(new GenericError('the link of ada stopped'));
+    expect([adapter.isLinked, downs]).toEqual([false, []]);
+    await inboxUp({ adapter, script });
     expect(adapter.isLinked).toBe(true);
     await adapter.stop();
   });

@@ -2593,8 +2593,11 @@ test.describe('createHTTPTransportClient, a server busy or a router behind', () 
         return reason;
       });
 
+    // * the first with no Retry-After, which waits the server's own second (RFC 9110 §10.2.3)
     for (let index = 6; index < 17; index += 1) {
-      (await posted(index))?.answer(busy(429, '1'));
+      (await posted(index))?.answer(
+        index === 6 ? { headers: { [REFUSAL_HEADER]: 'busy' }, status: 429 } : busy(429, '1')
+      );
       await clock.tickAsync(1_000);
     }
 

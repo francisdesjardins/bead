@@ -664,6 +664,9 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         var quickLink = await LinkUp((quick, _script));
 
         Assert.Equal((BrokerDelivery.AtMostOnce, (BrokerCapabilities)0), (quick.Delivery, quick.Capabilities & BrokerCapabilities.NoSubscriber));
+
+        // its bound counts no Packet Identifier, which a QoS 0 PUBLISH has none of
+        Assert.Equal(MqttPackets.LargestPayload(("bead/i/ada", MqttPackets.LargestPacketSize), new MqttPublishShape(0, true)), quick.MaximumPayloadBytes(Inbox));
         Assert.Equal(BrokerPublished.Taken, await quick.Publish(new BrokerPublication { Topic = Inbox, Payload = payload }).WaitAsync(Patience, Cancelled));
         Assert.Equal(MqttQualityOfServiceLevel.AtMostOnce, (await quickLink.Next<MqttPublishPacket>()).QualityOfServiceLevel);
         await quick.Stop();
@@ -774,6 +777,27 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         })).Message, StringComparison.Ordinal);
         await Task.Delay(50, Cancelled);
         Assert.Single(link.PacketsOf<MqttPublishPacket>());
+        await adapter.Stop();
+    }
+
+    [Fact]
+    public async Task Reports_no_payload_room_where_its_CONNACK_s_Maximum_Packet_Size_cannot_hold_a_PUBLISH_to_the_topic_and_refuses_even_an_empty_publication_spec_15_28()
+    {
+        await using var adapter = AdapterOf();
+        var answer = ScriptedLink.ConnAck();
+
+        answer.MaximumPacketSize = 16;
+
+        var link = await LinkUp((adapter, _script), (answer, null));
+
+        Assert.Equal(0, adapter.MaximumPayloadBytes(Inbox));
+        Assert.Contains("past its broker's Maximum Packet Size, 16 bytes", Assert.IsType<ArgumentException>(await FailureOf(() =>
+        {
+            return adapter.Publish(new BrokerPublication { Topic = Inbox, Payload = Array.Empty<byte>() });
+        })).Message, StringComparison.Ordinal);
+        Assert.True(adapter.IsLinked);
+        await Task.Delay(50, Cancelled);
+        Assert.Empty(link.PacketsOf<MqttPublishPacket>());
         await adapter.Stop();
     }
 
@@ -1056,6 +1080,9 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
 
         Assert.Equal(16_777_188, server.ReceiveBound(["bead", "i", "server"]));
         Assert.Equal(4_072, peer.ReceiveBound(["bead", "i", "peer"]));
+
+        // * a topic whose PUBLISH alone passes the bound leaves no payload any room
+        Assert.Equal(0, peer.ReceiveBound(["bead", "i", new string('p', 4_096)]));
         Assert.Equal(16_777_216, MqttPackets.MaximumPacketSize);
 
         // a bound whose receive bound is under 1,024 is refused as its participant is built, and one

@@ -99,6 +99,18 @@ public sealed class ProtoRequiredTests
             ["by_key", "a", "count"],
             PathOf(new Requiring { ByKey = { ["b"] = new Needs { Name = "x" }, ["a"] = new Needs { Name = "y" } } })
         );
+        Assert.Equal(["by_flag", false, "must"], PathOf(new Keyed { ByFlag = { [true] = new Must(), [false] = new Must() } }));
+        Assert.Equal(["by_number", -10, "must"], PathOf(new Keyed { ByNumber = { [-2] = new Must(), [-10] = new Must(), [10] = new Must(), [2] = new Must() } }));
+        Assert.Equal(["by_number", 2, "must"], PathOf(new Keyed { ByNumber = { [10] = new Must(), [2] = new Must() } }));
+    }
+
+    [Fact]
+    public void Walks_the_chosen_message_of_a_oneof_and_skips_its_other_members_and_an_unset_choice()
+    {
+        Assert.Null(PathOf(new Keyed()));
+        Assert.Null(PathOf(new Keyed { Word = "another" }));
+        Assert.Equal(["chosen", "must"], PathOf(new Keyed { Chosen = new Must() }));
+        Assert.Null(PathOf(new Keyed { Chosen = new Must { Must_ = 0 } }));
     }
 
     [Fact]

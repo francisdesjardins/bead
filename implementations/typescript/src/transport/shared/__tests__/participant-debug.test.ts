@@ -663,3 +663,59 @@ test('keeps only each parcel kind’s body fields and the prefix when no body re
     })
   ).toMatchObject({ carriedBytes: undefined, hasCredential: undefined, more: undefined });
 });
+
+// debugging 13.4
+test('traces a REFUSE its connect awaited as taken, and an ACCEPT no connect awaits as no pair held, the RESET it draws with its parcel', async () => {
+  const pair = await pairOf();
+  const peer = pair.broker.adapter({ id: 'peer' });
+
+  try {
+    const { accept, events } = pair;
+
+    // * a peer that holds a name and refuses each OPEN to it
+    peer.on('message', ({ payload, settle }) => {
+      const read = readParcel(payload);
+
+      settle();
+
+      if ('parcel' in read && read.parcel.kind === ParcelKind.OPEN) {
+        const refusal = writeParcel({
+          acceptor: new Uint8Array(8),
+          kind: ParcelKind.REFUSE,
+          opener: read.parcel.opener,
+          sequence: 1,
+          status: 503,
+        });
+
+        void peer.publish({ payload: refusal, topic: ['bead', 'i', 'client'] });
+      }
+    });
+    await peer.start();
+    await peer.subscribe(['bead', 's', 'refusing']);
+    events.length = 0;
+    await expect(
+      pair.clientParticipant.transportClient().connect({ server: 'refusing' })
+    ).rejects.toThrow();
+    await pair.send(writeParcel({ ...accept, opener: Uint8Array.of(0xa1, 0, 0, 0, 0, 0, 0, 9) }));
+    expect(
+      events
+        .filter(({ direction }) => {
+          return direction === 'rx';
+        })
+        .map(({ kind, verdict }) => {
+          return [kind, verdict];
+        })
+    ).toEqual([
+      ['REFUSE', 'taken'],
+      ['ACCEPT', 'pair-not-held'],
+    ]);
+    expect(
+      events.filter(({ direction, kind }) => {
+        return direction === 'tx' && kind === 'RESET';
+      })
+    ).toHaveLength(1);
+  } finally {
+    await peer.stop();
+    await pair.stop();
+  }
+});

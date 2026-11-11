@@ -44,3 +44,12 @@ message Back {
 message Alone {
   optional Alone alone = 1;
 }
+
+message Keyed {
+  map<bool, Must> by_flag = 1;
+  map<int32, Must> by_number = 2;
+  oneof choice {
+    Must chosen = 3;
+    string word = 4;
+  }
+}

@@ -404,6 +404,57 @@ public sealed class BrokerTransportServerTests
         Assert.Equal(0, server.Gauges().Counts["names"]);
     }
 
+    // spec 15.21
+    [Fact]
+    public async Task Reports_a_name_its_broker_refuses_as_it_links_anew_leaves_it_unheld_and_keeps_its_link()
+    {
+        var broker = new MemoryBroker();
+        var inner = broker.Adapter(new MemoryBrokerAdapterOptions { Id = "server" });
+        var holding = new HoldingAdapter(inner);
+        await using var participant = new BrokerParticipant(holding, new BrokerParticipantOptions
+        {
+            Reconnect = new TransportClientReconnectOptions { Delay = new TransportClientReconnectDelay(TimeSpan.Zero) },
+        });
+        await using var server = participant.Server(new BrokerTransportServerOptions { Names = ["interop"] });
+        var reported = new ConcurrentQueue<string>();
+
+        server.Error += (reason, connectionHandle) =>
+        {
+            reported.Enqueue(reason.Message);
+        };
+
+        var starting = server.Start();
+
+        await BrokerPair.Until(
+            () =>
+            {
+                return holding.Subscribing.Count == 1;
+            },
+            "its name asked of its broker");
+        holding.Subscribing.Dequeue().SetResult();
+        await starting.WaitAsync(BrokerPair.Patience, Cancelled);
+        Assert.Equal(1, server.Gauges().Counts["names"]);
+
+        // * its link lost: as it links anew, its broker refuses its name
+        inner.Lose();
+        await BrokerPair.Until(
+            () =>
+            {
+                return holding.Subscribing.Count == 1;
+            },
+            "its name asked anew as it links anew");
+        holding.Subscribing.Dequeue().SetException(new IOException("its broker refused the subscription to bead/s/interop: 0x87"));
+        await BrokerPair.Until(
+            () =>
+            {
+                return !reported.IsEmpty;
+            },
+            "its refusal reported");
+        Assert.Equal(["the name interop is not served: its broker refused its subscription, its broker refused the subscription to bead/s/interop: 0x87"], reported);
+        Assert.True(participant.IsLinked);
+        Assert.Equal(0, server.Gauges().Counts["names"]);
+    }
+
     [Fact]
     public async Task Serves_its_name_again_in_its_group_once_a_connection_closes_as_its_broker_lets_it_go_and_reports_a_name_its_broker_refuses_to_let_go_or_to_serve_again()
     {

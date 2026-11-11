@@ -38,6 +38,40 @@ public sealed class ParticipantDebugEventTests
         }
     }
 
+    // debugging 13.4
+    [Fact]
+    public async Task Traces_a_REFUSE_its_connect_awaited_as_taken_and_an_ACCEPT_no_connect_awaits_as_no_pair_held_the_RESET_it_draws_with_its_parcel()
+    {
+        await using var pair = await TracePair.Of();
+        var peer = pair.Broker.Adapter(new MemoryBrokerAdapterOptions { Id = "peer" });
+
+        // * a peer that holds a name and refuses each OPEN to it
+        peer.Message += (message) =>
+        {
+            message.Settle();
+
+            if (BrokerParcels.Read(message.Payload).Parcel is { Kind: BrokerParcelKinds.Open } open)
+            {
+                _ = peer.Publish(new BrokerPublication
+                {
+                    Topic = ["bead", "i", "client"],
+                    Payload = BrokerParcels.Write(new BrokerParcel { Kind = BrokerParcelKinds.Refuse, Opener = open.Opener, Sequence = 1, Status = 503 }),
+                });
+            }
+        };
+        await peer.Start();
+        await peer.Subscribe(["bead", "s", "refusing"]);
+        pair.Events.Clear();
+        await Assert.ThrowsAnyAsync<Exception>(() =>
+        {
+            return pair.ClientParticipant.Client().Connect(new BrokerTransportClientConnectOptions { Server = "refusing", CancellationToken = TestContext.Current.CancellationToken });
+        });
+        await pair.Send(BrokerParcels.Write(pair.Accept with { Opener = 0xA1_00_00_00_00_00_00_09 }));
+        Assert.Equal([("REFUSE", ParcelVerdict.Taken), ("ACCEPT", ParcelVerdict.PairNotHeld)], pair.Events.Where(IsIncoming).Select((item) => { return (item.Kind, item.Verdict); }));
+        Assert.Single(pair.Events, (item) => { return item.Direction == "tx" && item.Kind == "RESET"; });
+        await peer.Stop();
+    }
+
     // debugging 13.3, 13.7
     [Fact]
     public async Task Traces_parcel_attempts_and_third_leg_handles_without_carried_bytes_credentials_or_an_acceptor_s_half()

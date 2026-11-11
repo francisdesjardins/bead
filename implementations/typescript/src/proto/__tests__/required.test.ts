@@ -6,11 +6,95 @@
 
 // dependencies
 
-import { create, type DescMessage, type MessageInitShape } from '@bufbuild/protobuf';
+import {
+  create,
+  createFileRegistry,
+  type DescMessage,
+  type MessageInitShape,
+} from '@bufbuild/protobuf';
+import {
+  FieldDescriptorProto_Label,
+  FieldDescriptorProto_Type,
+  FileDescriptorProtoSchema,
+} from '@bufbuild/protobuf/wkt';
 import { expect, test } from '@playwright/test';
 import { ProbeSchema } from '../../router/shared/__tests__/codecs_pb';
 import { RequiringSchema } from '../../transcoding/__tests__/generated/transcoding_pb';
 import { type RequiredPath, unsetNameOf, unsetPathOf } from '../required';
+
+// constants
+
+const KEYED = createFileRegistry(
+  create(FileDescriptorProtoSchema, {
+    messageType: [
+      {
+        field: [
+          {
+            label: FieldDescriptorProto_Label.REQUIRED,
+            name: 'must',
+            number: 1,
+            type: FieldDescriptorProto_Type.INT32,
+          },
+        ],
+        name: 'Must',
+      },
+      {
+        field: [
+          ...['by_flag', 'by_number'].map((name, index) => {
+            return {
+              label: FieldDescriptorProto_Label.REPEATED,
+              name,
+              number: index + 1,
+              type: FieldDescriptorProto_Type.MESSAGE,
+              typeName: `.bead.test.Keyed.${index === 0 ? 'ByFlagEntry' : 'ByNumberEntry'}`,
+            };
+          }),
+          {
+            label: FieldDescriptorProto_Label.OPTIONAL,
+            name: 'chosen',
+            number: 3,
+            oneofIndex: 0,
+            type: FieldDescriptorProto_Type.MESSAGE,
+            typeName: '.bead.test.Must',
+          },
+          {
+            label: FieldDescriptorProto_Label.OPTIONAL,
+            name: 'word',
+            number: 4,
+            oneofIndex: 0,
+            type: FieldDescriptorProto_Type.STRING,
+          },
+        ],
+        name: 'Keyed',
+        nestedType: [FieldDescriptorProto_Type.BOOL, FieldDescriptorProto_Type.INT32].map(
+          (type, index) => {
+            return {
+              field: [
+                { label: FieldDescriptorProto_Label.OPTIONAL, name: 'key', number: 1, type },
+                {
+                  label: FieldDescriptorProto_Label.OPTIONAL,
+                  name: 'value',
+                  number: 2,
+                  type: FieldDescriptorProto_Type.MESSAGE,
+                  typeName: '.bead.test.Must',
+                },
+              ],
+              name: index === 0 ? 'ByFlagEntry' : 'ByNumberEntry',
+              options: { mapEntry: true },
+            };
+          }
+        ),
+        oneofDecl: [{ name: 'choice' }],
+      },
+    ],
+    name: 'bead/test/required-maps.proto',
+    package: 'bead.test',
+    syntax: 'proto2',
+  }),
+  () => {
+    return undefined;
+  }
+).getMessage('bead.test.Keyed') as DescMessage;
 
 // helpers
 
@@ -55,6 +139,24 @@ test.describe('the walk of a required field unset', () => {
       'a',
       'count',
     ]);
+    expect(pathOf(KEYED, { byFlag: { true: {}, false: {} } })).toEqual([
+      'by_flag',
+      'false',
+      'must',
+    ]);
+    expect(pathOf(KEYED, { byNumber: { '-2': {}, '-10': {}, '10': {}, '2': {} } })).toEqual([
+      'by_number',
+      '-10',
+      'must',
+    ]);
+    expect(pathOf(KEYED, { byNumber: { '10': {}, '2': {} } })).toEqual(['by_number', '2', 'must']);
+  });
+
+  test('walks the chosen message of a oneof and skips its other members and an unset choice', () => {
+    expect(pathOf(KEYED, {})).toBeUndefined();
+    expect(pathOf(KEYED, { choice: { case: 'word', value: 'another' } })).toBeUndefined();
+    expect(pathOf(KEYED, { choice: { case: 'chosen', value: {} } })).toEqual(['chosen', 'must']);
+    expect(pathOf(KEYED, { choice: { case: 'chosen', value: { must: 0 } } })).toBeUndefined();
   });
 
   test('names the field a path leaves unset by its full name', () => {

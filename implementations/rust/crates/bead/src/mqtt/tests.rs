@@ -1051,6 +1051,18 @@ async fn publishes_at_qos_1_and_retain_0_a_life_in_whole_seconds_rounded_up_wher
     let quick_link = link_up((&quick, &script), (&Connack::default(), None)).await;
 
     assert_eq!(quick.delivery(), BrokerDelivery::AtMostOnce, "at most once");
+
+    // its bound counts no Packet Identifier, which a QoS 0 PUBLISH has none of
+    let shape = MqttPublishShapeOptions {
+        is_at_most_once: Some(true),
+        ..MqttPublishShapeOptions::default()
+    };
+
+    assert_eq!(
+        Some(quick.maximum_payload_bytes(&inbox())),
+        largest_payload("bead/i/ada", u64::from(LARGEST_PACKET_SIZE), &shape),
+        "no Packet Identifier counted"
+    );
     assert!(
         !quick
             .capabilities()
@@ -1710,6 +1722,41 @@ async fn refuses_a_publication_past_its_connacks_maximum_packet_size_before_it_g
     adapter.stop().await;
 }
 
+// spec 15.28
+#[tokio::test]
+async fn reports_no_payload_room_where_its_connacks_maximum_packet_size_cannot_hold_a_publish_to_the_topic_and_refuses_even_an_empty_publication()
+ {
+    let script = script().await;
+    let adapter = adapter_of(&options_of(&script));
+    let link = link_up(
+        (&adapter, &script),
+        (
+            &Connack {
+                maximum_packet_size: Some(16),
+                ..Connack::default()
+            },
+            None,
+        ),
+    )
+    .await;
+
+    assert_eq!(adapter.maximum_payload_bytes(&inbox()), 0, "no room");
+
+    let refused = adapter
+        .publish(BrokerPublication::new(inbox(), Bytes::new()))
+        .await
+        .unwrap_err();
+
+    assert!(
+        message_of(&refused).contains("past its broker's Maximum Packet Size, 16 bytes"),
+        "{refused}"
+    );
+    assert!(adapter.is_linked(), "its link kept");
+    rest(Duration::from_millis(50)).await;
+    assert!(sent_of(&link).is_empty(), "never sent");
+    adapter.stop().await;
+}
+
 // spec 15.30
 #[tokio::test]
 async fn tells_its_link_up_once_its_connack_came_and_bounds_what_it_publishes_by_that_connacks_maximum_packet_size_the_last_links_while_it_is_down()
@@ -2023,6 +2070,10 @@ async fn loses_its_link_once_on_a_packet_past_its_maximum_packet_size_after_its_
 
 // spec 15.30
 #[tokio::test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test repeats its own string a bounded number of times"
+)]
 async fn announces_as_its_receive_bound_the_largest_payload_of_a_message_to_its_inbox_within_its_maximum_packet_size_a_life_counted()
  {
     let script = script().await;
@@ -2041,6 +2092,12 @@ async fn announces_as_its_receive_bound_the_largest_payload_of_a_message_to_its_
         adapter_of(&options).receive_bound(&topic(&["bead", "i", "peer"])),
         4_072,
         "its own"
+    );
+    // * a topic whose PUBLISH alone passes the bound leaves no payload any room
+    assert_eq!(
+        adapter_of(&options).receive_bound(&topic(&["bead", "i", &"p".repeat(4_096)])),
+        0,
+        "no room"
     );
     assert_eq!(MAXIMUM_PACKET_SIZE, 16_777_216, "16 MiB");
 
