@@ -34,6 +34,8 @@ const ID = 'ada';
 const INBOX = Object.freeze(['bead', 'i', ID]);
 const NAME = Object.freeze(['bead', 's', 'interop']);
 const PASSWORD = 'secret';
+// how long a case waits on what its adapter does, as the script waits on a packet
+const PATIENCE = 5_000;
 
 // the Mosquitto the broker's legs play against, where one is given, and the user the WebSocket leg
 // links as, which no case and no interop leg is
@@ -165,6 +167,23 @@ const heardOf = (adapter: IMqttBrokerAdapter) => {
   });
 
   return { downs, messages };
+};
+
+/** Whether `link`'s adapter end closed within {@link PATIENCE}, its timer cleared either way. */
+const closedWithin = async (link: IScriptedLink): Promise<boolean> => {
+  const patience = new AbortController();
+
+  try {
+    return await Promise.race([
+      link.closed.then(() => {
+        return true;
+      }),
+      sleep(PATIENCE, false, { signal: patience.signal }),
+    ]);
+  } finally {
+    // ! a timer left running outlives its case, and a later case of the worker counts it
+    patience.abort();
+  }
 };
 
 /** Polls `isDone` on the real clock until it holds, within five seconds. */
@@ -1251,23 +1270,51 @@ test.describe('createMqttBrokerAdapter', () => {
     expect(await unsubackedOf(link, participant.stop())).toEqual(['bead/i/ada']);
   });
 
-  test('closes its link, no DISCONNECT, on a packet past its own Maximum Packet Size (spec 15.29)', async () => {
+  test('closes its link, no DISCONNECT, on a packet past its own Maximum Packet Size, read at its length (spec 15.29)', async () => {
     const adapter = adapterOf(script, { maximumPacketSize: 1_100 });
     const { downs, messages } = heardOf(adapter);
-    const link = await linkUp({ adapter, script });
+    const isClosedIn = async (link: IScriptedLink): Promise<void> => {
+      expect(await closedWithin(link)).toBe(true);
+      expect(
+        link.packets.filter(({ cmd }) => {
+          return cmd === 'disconnect' || cmd === 'puback';
+        })
+      ).toEqual([]);
+    };
 
-    link.send(publishOf({ messageId: 1, payload: new Uint8Array(1_100), topic: 'bead/i/ada' }));
-    await link.closed;
+    // (a) a PUBLISH of 1,118 bytes in all, whole, after its CONNACK
+    const whole = await linkUp({ adapter, script });
+
+    whole.send(publishOf({ messageId: 1, payload: new Uint8Array(1_100), topic: 'bead/i/ada' }));
+    await isClosedIn(whole);
     await until(() => {
       return downs.length > 0;
     });
     expect(downs).toEqual([{ isTakenOver: false }]);
+
+    // * (b) a fixed header alone announcing 16,777,221 bytes: judged at its length, no body awaited
+    const announced = await linkUp({ adapter, script });
+
+    announced.write(Uint8Array.of(0x32, 0x80, 0x80, 0x80, 0x08));
+    await isClosedIn(announced);
+    await until(() => {
+      return downs.length > 1;
+    });
+    expect(downs).toEqual([{ isTakenOver: false }, { isTakenOver: false }]);
+
+    // (c) its CONNACK's fixed header alone announcing as much: its start fails, no down told
+    const starting = failureOf(adapter.start());
+    const early = await script.link();
+
+    early.write(Uint8Array.of(0x20, 0x80, 0x80, 0x80, 0x08));
+    expect(await starting).toMatchObject({
+      message: expect.stringContaining('past its Maximum Packet Size'),
+    });
+    await isClosedIn(early);
+    await sleep(50);
+    expect(downs).toEqual([{ isTakenOver: false }, { isTakenOver: false }]);
     expect(messages).toEqual([]);
-    expect(
-      link.packets.filter(({ cmd }) => {
-        return cmd === 'disconnect' || cmd === 'puback';
-      })
-    ).toEqual([]);
+    expect(adapter.isLinked).toBe(false);
   });
 
   test('announces as its receive bound the largest payload of a message to its inbox within its Maximum Packet Size, a life counted (spec 15.30)', () => {
