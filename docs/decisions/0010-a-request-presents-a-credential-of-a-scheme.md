@@ -222,8 +222,8 @@ as RFC 8725 recommends:
   application's, held for good: past them, a token whose `kid` they name waits on a new ask before
   they serve, so a key its issuer withdrew stops verifying. A `kid` still unnamed by an answer to an
   ask that went after its token came is refused `SESSION_REQUIRED`, never tried against the others;
-  a call that waited on an ask that failed is refused `PROCEDURE_FAILED`, as a key set that cannot
-  be reached is. The runtime fetches nothing itself: a token's `jwk`, `jku`, `x5u` and `x5c` are
+  a call that waited on an ask that failed, or for a deadline whose timer its clock refused, is
+  refused `PROCEDURE_FAILED`, as a key set that cannot be reached is. The runtime fetches nothing itself: a token's `jwk`, `jku`, `x5u` and `x5c` are
   never read (RFC 8725 §3.10), and a token that carries `crit` is refused. A JWK serves only when
   its `alg` is its key's algorithm, or is absent and the application names it, its `use` is `sig` or
   absent, and its `key_ops`, when present, include `verify` (RFC 7517 §4.2 to §4.4);

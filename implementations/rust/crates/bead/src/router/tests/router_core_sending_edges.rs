@@ -12,8 +12,10 @@ use crate::router::types::{RouterAnswer, RouterError};
 use crate::testing::core_port::{Peer, error_of};
 use crate::testing::{patience, scripted};
 use bytes::Bytes;
+use core::task::{Context, Waker};
 use core::time::Duration;
 use std::sync::Arc;
+use tokio_util::sync::CancellationToken;
 
 pub(super) fn pattern((length, dotnet): (usize, bool)) -> Bytes {
     (0..length)
@@ -264,6 +266,25 @@ async fn refuse(peer: &Peer, (message, later): (&str, bool)) -> RouterError {
     error
 }
 
+// the next send taken, then settled with `outcome` once the token it gives is cancelled, as the
+// scripted transport's `Sending::Waiting` holds it
+async fn held(peer: &Peer, outcome: Result<(), RouterError>) -> CancellationToken {
+    let released = CancellationToken::new();
+    let releasing = released.clone();
+    peer.owner
+        .run(move |state| {
+            state
+                .sending
+                .push_back(Ok(crate::transport::Sent::Later(Box::pin(async move {
+                    releasing.cancelled().await;
+                    outcome
+                }))));
+        })
+        .await
+        .expect("the next send held");
+    released
+}
+
 fn same_error(outcome: &Result<(), CallError>, expected: &RouterError) {
     let (Err(CallError::Other(actual)), RouterError::Other(expected)) = (outcome, expected) else {
         panic!("the transport's exact error: {outcome:?}");
@@ -356,8 +377,7 @@ async fn end_a_result_whose_opening_cannot_go_out_forgetting_its_call() {
 }
 
 #[tokio::test]
-#[ignore = "divergence: a ready error future for an earlier chunk is observed after the final chunk settles the answer successfully"]
-async fn a_ready_chunk_refusal_is_observed_before_a_later_successful_final_chunk() {
+async fn a_chunk_refused_after_the_last_one_went_fails_the_answer() {
     let (peer, handed) = serving(false, &limits()).await;
     let answerer = asked(&peer, (&handed, Bytes::from_static(&[1]))).await;
     let responding = answerer.respond(RouterAnswer::Result(pattern((100, true))));
@@ -365,4 +385,51 @@ async fn a_ready_chunk_refusal_is_observed_before_a_later_successful_final_chunk
     let refused = refuse(&peer, ("the transport refused the chunk", true)).await;
     peer.receive((credit(1, 100), Arc::from("a")));
     same_error(&responding.await, &refused);
+}
+
+#[tokio::test]
+async fn an_opening_refused_after_the_last_chunk_went_fails_the_answer() {
+    let (peer, handed) = serving(false, &limits()).await;
+    let answerer = asked(&peer, (&handed, Bytes::from_static(&[1]))).await;
+    let refused = error_of("the transport refused the opening");
+    let released = held(&peer, Err(refused.clone())).await;
+    let responding = answerer.respond(RouterAnswer::Result(pattern((100, true))));
+    peer.settle().await;
+    peer.receive((credit(1, 100), Arc::from("a")));
+    peer.settle().await;
+    assert_eq!(
+        pieces(&sent(&peer).await),
+        [(100, false, 28), (28, false, 48), (76, true, 24)],
+        "every chunk went, the opening held"
+    );
+    released.cancel();
+    same_error(&responding.await, &refused);
+}
+
+#[tokio::test]
+async fn an_opening_that_goes_after_the_last_chunk_holds_the_answer_until_it_went() {
+    let (peer, handed) = serving(false, &limits()).await;
+    let answerer = asked(&peer, (&handed, Bytes::from_static(&[1]))).await;
+    let released = held(&peer, Ok(())).await;
+    let mut responding = answerer.respond(RouterAnswer::Result(pattern((100, true))));
+    peer.settle().await;
+    peer.receive((credit(1, 100), Arc::from("a")));
+    peer.settle().await;
+    assert_eq!(
+        pieces(&sent(&peer).await),
+        [(100, false, 28), (28, false, 48), (76, true, 24)],
+        "every chunk went, the opening held"
+    );
+    assert!(
+        responding
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop()))
+            .is_pending(),
+        "the answer waits for its opening"
+    );
+    released.cancel();
+    patience(Duration::from_secs(10), responding)
+        .await
+        .expect("the answer settles")
+        .expect("every envelope of the transfer went");
 }

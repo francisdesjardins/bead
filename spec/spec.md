@@ -720,6 +720,14 @@ and by the side that answers with a failure on its call id:
   its call as timed out after as long, and cancels it; the side sending a result's transfer reports
   its stall as well.
 
+A transport's refusal of an envelope of a result's transfer — its opening or a chunk, as it goes
+or once the last chunk went — ends that transfer at the side sending it, which answers nothing more
+on its call: nothing more of the transfer goes, the resolver that answered is told its answer did
+not go, and the refusal is reported (section 9.0, `debugging.md` 9.2). The first refusal to come
+is the one told; one after it is dropped in silence. That resolver is told its answer went only
+once its transport took every envelope of the transfer. A requester the payload does not reach
+whole ends its call as the stall above has it.
+
 12.8. While a payload or its result goes as a transfer, the transfer's inactivity governs the call:
 each chunk placed and each credit that grants sets it going again. The call's own timeout counts
 the wait for its answer, afresh once the last chunk of its request went.
@@ -945,8 +953,12 @@ It asks the key set, holds the keys an answer gives, and has a call wait for the
    when nothing else reads it.
 3. An ask that fails — the key set throws or rejects, answers what is not keys shaped for their
    algorithms, or is unsettled as its deadline is reached, what it settles to at or past that
-   deadline being dropped — fails the verifier of every call that waits on it (section 9.2, step 6),
-   as a key set that cannot be reached does.
+   deadline being dropped — fails the verifier of every call that waits on it (section 9.2, step
+   6), as a key set that cannot be reached does. A deadline's timer that the side's clock refuses
+   to arm (decision 0011) fails at once, as an ask that fails does, the ask it was armed for and
+   every call that waits for that deadline, the clock's error its cause; an ask so refused never
+   goes, nothing asked of the key set, and sets no deadline, so the next call of its issuer has an
+   ask go at once.
 4. The keys an answer gave are held for its issuer, beside the application's, in place of those its
    last answer gave, ten minutes from that answer on the monotonic reading: they serve while that
    reading is before the answer's plus 600,000 ms, and an ask that fails replaces none of them. The

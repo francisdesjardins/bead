@@ -26,7 +26,81 @@ public sealed class CredentialResolverTests
         }
     }
 
-    [Fact(Skip = "divergence: the clock refusal reaches the caller without the key-set failure wrapper")]
+    // a clock that arms its timers until the test has it refuse them, and counts those it holds
+    private sealed class RefusingLaterClock(FakeTimeProvider fake) : TimeProvider
+    {
+        public bool Refuses { get; set; }
+
+        // the timers armed and not disposed
+        public int Held { get; private set; }
+
+        public override long TimestampFrequency
+        {
+            get
+            {
+                return fake.TimestampFrequency;
+            }
+        }
+
+        public override DateTimeOffset GetUtcNow()
+        {
+            return fake.GetUtcNow();
+        }
+
+        public override long GetTimestamp()
+        {
+            return fake.GetTimestamp();
+        }
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            if (Refuses)
+            {
+                throw new InvalidOperationException("the clock refuses this timer");
+            }
+
+            Held += 1;
+
+            return new HeldTimer(fake.CreateTimer(callback, state, dueTime, period), () =>
+            {
+                Held -= 1;
+            });
+        }
+    }
+
+    // a timer that says once that it was disposed
+    private sealed class HeldTimer(ITimer timer, Action disposed) : ITimer
+    {
+        private bool _isDisposed;
+
+        public bool Change(TimeSpan dueTime, TimeSpan period)
+        {
+            return timer.Change(dueTime, period);
+        }
+
+        public void Dispose()
+        {
+            Release();
+            timer.Dispose();
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            Release();
+            await timer.DisposeAsync();
+        }
+
+        private void Release()
+        {
+            if (!_isDisposed)
+            {
+                _isDisposed = true;
+                disposed();
+            }
+        }
+    }
+
+    [Fact]
     public async Task A_timer_refusal_releases_the_waiting_call_without_starting_an_unbounded_key_set_ask()
     {
         var keySet = new RecordingKeySet(SetIssuer);
@@ -40,6 +114,49 @@ public sealed class CredentialResolverTests
         Assert.Equal($"the key set's ask for {SetIssuer} failed", failure.Message);
         Assert.Equal("the clock refuses this timer", failure.InnerException?.Message);
         Assert.Empty(keySet.Asks);
+    }
+
+    [Fact]
+    public async Task A_timer_refusal_at_a_deadline_fails_the_calls_that_waited_for_it_and_the_next_call_asks_at_once()
+    {
+        var fake = new FakeTimeProvider(Start);
+        var clock = new RefusingLaterClock(fake);
+        var keySet = new RecordingKeySet(SetIssuer);
+        var resolver = ResolverOf(new Credentials { Audience = Audience, KeySet = keySet.KeySet }, clock);
+        var named = Credential.Jwt(SignedOf((Second, "set-9"), ClaimsOf(SetIssuer)));
+
+        // the first ask answers set-1 alone
+        var first = ResolvedOf((resolver, Credential.Jwt(SignedOf((Second, "set-1"), ClaimsOf(SetIssuer)))));
+
+        keySet.Asks[0].Settle.SetResult([SetKeyOf((Second, "set-1"))]);
+        await first;
+
+        // a call naming set-9 waits for the deadline, whose ask's timer the clock refuses
+        var waiting = ResolvedOf((resolver, named));
+
+        Assert.False(waiting.IsCompleted);
+        clock.Refuses = true;
+        fake.Advance(TimeSpan.FromMinutes(1));
+
+        var failure = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        {
+            return waiting;
+        });
+
+        Assert.Equal($"the key set's ask for {SetIssuer} failed", failure.Message);
+        Assert.Equal("the clock refuses this timer", Assert.IsType<InvalidOperationException>(failure.InnerException).Message);
+        Assert.Single(keySet.Asks);
+        Assert.Equal(0, clock.Held);
+
+        // the clock arms again: the next call naming set-9 has its ask go at once
+        clock.Refuses = false;
+
+        var next = ResolvedOf((resolver, named));
+
+        Assert.Equal(2, keySet.Asks.Count);
+        Assert.Equal(1, clock.Held);
+        keySet.Asks[1].Settle.SetResult([SetKeyOf((Second, "set-9"))]);
+        Assert.Equal("grace", (await next)!.Identifier!.Sub);
     }
 
     // constants

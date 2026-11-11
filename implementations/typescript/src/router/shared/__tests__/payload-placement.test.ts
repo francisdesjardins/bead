@@ -243,4 +243,51 @@ test.describe('createPayloadPlacement', () => {
       false,
     ]);
   });
+
+  // spec 12.3
+  test('opens every transfer with one byte of its payload at least, and leaves one at least past its opening', () => {
+    const headers = [
+      headerOf(1),
+      { ...headerOf(1), destinationId: 0x1_0000 },
+      { callId: 1, kind: EnvelopeKind.RESULT },
+    ] as const;
+
+    for (const chunkBytes of [64, 1_024]) {
+      const placement = createPayloadPlacement(
+        SERVER_FAILURES,
+        limitsOf({ chunkBytes, maximumEnvelopeBytes: 1_024 })
+      );
+      const maximumPayloadBytes = placement.payloadLimitOf(undefined);
+
+      for (const header of headers) {
+        const placed = (length: number) => {
+          return placement.transferOf(new Uint8Array(length), { header, maximumPayloadBytes });
+        };
+        // the largest payload that goes whole
+        let whole = 0;
+
+        while (placed(whole + 1) === undefined) {
+          whole += 1;
+        }
+
+        let transfers = 0;
+
+        for (
+          let length = whole + 1;
+          length <= whole + 1 + placement.payloadBytesPerChunk + 1;
+          length += 1
+        ) {
+          const outgoing = placed(length);
+
+          if (outgoing !== undefined && 'opening' in outgoing) {
+            transfers += 1;
+            expect(outgoing.opening.length).toBeGreaterThanOrEqual(1);
+            expect(outgoing.total - outgoing.opening.length).toBeGreaterThanOrEqual(1);
+          }
+        }
+
+        expect(transfers).toBeGreaterThanOrEqual(1);
+      }
+    }
+  });
 });

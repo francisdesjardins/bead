@@ -169,10 +169,6 @@ const outcomeOf = (resolution: Promise<unknown>): { current: unknown } => {
 // definition
 
 test('a timer refusal releases the waiting call without starting an unbounded key set ask', async () => {
-  test.skip(
-    true,
-    'divergence: the clock refusal reaches the caller without the key-set failure wrapper'
-  );
   const clock = createTestClock(NOW);
   const { asks, keySet } = createKeySet();
 
@@ -196,6 +192,65 @@ test('a timer refusal releases the waiting call without starting an unbounded ke
   });
   expect(asks).toEqual([]);
   expect(duesOn(clock)).toEqual([]);
+});
+
+test('a timer refusal at a deadline fails the calls that waited for it, and the next call asks at once', async () => {
+  const clock = createTestClock(NOW);
+  const { asks, keySet } = createKeySet();
+  const arm = clock.setTimeout.bind(clock);
+  let refuses = false;
+
+  clock.setTimeout = (callback, delay) => {
+    if (refuses) {
+      throw new Error('the clock refuses this timer');
+    }
+
+    return arm(callback, delay);
+  };
+
+  const resolver = createCredentialResolver({ audience: AUDIENCE, keySet }, { clock });
+  const signal = new AbortController().signal;
+  const unnamed = jwtOf(tokenOf(claimsOf(SET_ISSUER), { key: SET_KEY_BYTES, kid: 'set-9' }));
+
+  await heldOn(resolver, asks);
+
+  const waiting = outcomeOf(resolver.resolve(unnamed, signal));
+
+  await expect
+    .poll(() => {
+      return duesOn(clock);
+    })
+    .toEqual([60_000]);
+  refuses = true;
+  await clock.tickAsync(60_000);
+  await expect
+    .poll(() => {
+      return waiting.current;
+    })
+    .toMatchObject({
+      cause: { message: 'the clock refuses this timer' },
+      message: `the key set's ask for ${SET_ISSUER} failed`,
+    });
+  expect(asks).toHaveLength(1);
+  expect(duesOn(clock)).toEqual([]);
+
+  refuses = false;
+
+  const next = outcomeOf(resolver.resolve(unnamed, signal));
+
+  await expect
+    .poll(() => {
+      return asks.length;
+    })
+    .toBe(2);
+  asks[1]?.settle.resolve([{ ...SET_KEY, jwk: { ...SET_KEY.jwk, kid: 'set-9' } }]);
+  await expect
+    .poll(() => {
+      return next.current;
+    })
+    .toMatchObject({ identifier: { sub: 'grace' } });
+  expect(duesOn(clock)).toEqual([]);
+  clock.uninstall();
 });
 
 test.describe('createCredentialResolver', () => {

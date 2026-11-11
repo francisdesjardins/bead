@@ -472,7 +472,8 @@ export const createRouterCore = <Handle extends string>(
   };
 
   // a result as a transfer: its opening, then each chunk credited; its call stays open until the
-  // last chunk is handed off, and the answer goes out once that one did, which ends the call
+  // last chunk is handed off, and the answer goes out once every envelope of it went, the last
+  // chunk ending the call as it is handed off
   const sendResult = (
     outgoing: IOutgoingTransfer,
     {
@@ -492,6 +493,9 @@ export const createRouterCore = <Handle extends string>(
     const { promise, reject, resolve } = Promise.withResolvers<void>();
     let isOpen = true;
     let timer: TimeoutId | undefined;
+    // the sends handed to the transport that have not settled, and whether the last chunk went
+    let pending = 0;
+    let isLastGone = false;
 
     // nothing more goes, and nothing more ends it
     const stop = (): void => {
@@ -500,11 +504,24 @@ export const createRouterCore = <Handle extends string>(
       clock.clearTimeout(timer);
       controller.signal.removeEventListener('abort', onAbort);
     };
-    // the call goes with it: its call id is the peer's to open again
+    // the call goes with it while it is open: its call id is the peer's to open again; once it
+    // ended, a refusal closes nothing, and fails the answer unless it settled
     const fail = (reason: unknown): void => {
-      stop();
-      answeringCalls.close(call, controller);
+      if (isOpen) {
+        stop();
+        answeringCalls.close(call, controller);
+      }
+
       reject(reason);
+    };
+    // ! every envelope of the transfer goes before its answer does: a refusal, whenever it comes,
+    // fails it (spec 12.7)
+    const went = (): void => {
+      pending -= 1;
+
+      if (isLastGone && pending === 0) {
+        resolve();
+      }
     };
     // the call's signal ends it: a cancel, the connection gone
     const onAbort = (): void => {
@@ -548,9 +565,11 @@ export const createRouterCore = <Handle extends string>(
       call,
       onCredit: progress,
       send: (chunk) => {
+        // ! counted before its hand-off, so the last chunk's own send is in the count as it goes
+        pending += 1;
         deliver(chunkEnvelopeOf(callId, chunk), {
           connectionHandle,
-          // the last one handed off answers the call
+          // the last one handed off ends the call
           onHandOff: chunk.isLast
             ? () => {
                 stop();
@@ -560,18 +579,16 @@ export const createRouterCore = <Handle extends string>(
                 }
 
                 answeringCalls.close(call, controller);
+                isLastGone = true;
               }
             : progress,
-        }).then(() => {
-          if (chunk.isLast) {
-            resolve();
-          }
-        }, fail);
+        }).then(went, fail);
       },
     });
 
     controller.signal.addEventListener('abort', onAbort, { once: true });
     progress();
+    pending += 1;
     deliver(
       {
         header: { ...header, total: outgoing.total },
@@ -579,7 +596,7 @@ export const createRouterCore = <Handle extends string>(
         payload: outgoing.opening,
       },
       { connectionHandle }
-    ).catch(fail);
+    ).then(went, fail);
 
     return promise;
   };

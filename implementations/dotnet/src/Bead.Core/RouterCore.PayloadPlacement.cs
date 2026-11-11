@@ -3,7 +3,7 @@ namespace Bead;
 internal sealed partial class RouterCore
 {
     // how a payload fits in one envelope, or opens a transfer under the held limits
-    private sealed class PayloadPlacement
+    internal sealed class PayloadPlacement
     {
         // a chunk's header: its prefix, then its offset
         private static readonly int ChunkHeaderBytes = EnvelopeCodec.HeaderBytesOf(new ChunkHeader { CallId = 1, IsLast = true, Offset = 0 });

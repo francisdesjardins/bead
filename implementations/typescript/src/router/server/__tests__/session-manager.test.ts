@@ -49,7 +49,6 @@ const record = (sessions: ISessionManager<IUser>, event: SESSION_MANAGER_EVENTS)
 // definition
 
 test('a timer refusal stores no session and cancels every timer prepared for it', () => {
-  test.skip(true, 'divergence: a timer refusal leaves the new session stored');
   for (const refuseAt of [0, 1]) {
     const clock = createTestClock();
     const arm = clock.setTimeout.bind(clock);
@@ -85,10 +84,6 @@ test('a timer refusal stores no session and cancels every timer prepared for it'
 });
 
 test('a timer refusal keeps a stored timeout and its live timer, and tells nothing', () => {
-  test.skip(
-    true,
-    'divergence: a timer refusal changes the stored timeout and stops its live timer'
-  );
   for (const kind of ['connection', 'session'] as const) {
     const clock = createTestClock();
     using sessions = createSessionManager({ clock });

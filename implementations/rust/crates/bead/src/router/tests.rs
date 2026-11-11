@@ -365,46 +365,59 @@ fn failures_of(served: &server::Served) -> Vec<(u16, String)> {
 }
 
 #[tokio::test]
-async fn answers_a_resolver_s_own_failure_as_it_is_and_any_other_error_procedure_failed_with_no_detail_and_reported()
+async fn answers_a_failure_its_resolver_answers_as_it_is_and_any_error_it_fails_with_procedure_failed_with_no_detail_and_reported_a_failure_of_its_own_among_them()
  {
     let served = resolving(Arc::new(
         |props: crate::router::core::RequestResolverProps| {
             Box::pin(async move {
-                if props.payload.as_ref() == b"own" {
-                    let code = core::num::NonZeroU16::new(21).expect("21 is no zero");
+                let code = core::num::NonZeroU16::new(21).expect("21 is no zero");
+                let failure = crate::failure::Failure::application(code, "nothing to echo");
 
-                    return Err(crate::errors::ResolverError::Failure(
-                        crate::failure::Failure::application(code, "nothing to echo"),
-                    ));
+                match props.payload.as_ref() {
+                    b"own" => {
+                        props
+                            .answerer
+                            .respond(crate::router::types::RouterAnswer::Failure(
+                                failure.record(),
+                            ))
+                            .await
+                            .map_err(crate::errors::ResolverError::other)?;
+
+                        Ok(())
+                    }
+                    b"thrown" => Err(crate::errors::ResolverError::other(failure)),
+                    _ => Err(crate::errors::ResolverError::other(std::io::Error::other(
+                        "internal: 10.0.0.5:8443",
+                    ))),
                 }
-
-                Err(crate::errors::ResolverError::other(std::io::Error::other(
-                    "internal: 10.0.0.5:8443",
-                )))
             })
         },
     ));
 
-    served
-        .transport
-        .deliver(&server::request_of((1, &echo(), "own")), &server::first());
-    served
-        .transport
-        .deliver(&server::request_of((3, &echo(), "other")), &server::first());
-    served.settle().await;
+    for (call_id, payload) in [(1, "own"), (3, "thrown"), (5, "other")] {
+        served.transport.deliver(
+            &server::request_of((call_id, &echo(), payload)),
+            &server::first(),
+        );
+        served.settle().await;
+    }
 
     assert_eq!(
         failures_of(&served),
         [
             (21, "nothing to echo".to_owned()),
+            (ProtocolCode::PROCEDURE_FAILED.get().get(), String::new()),
             (ProtocolCode::PROCEDURE_FAILED.get().get(), String::new())
         ],
-        "its own as it is, any other PROCEDURE_FAILED with no detail"
+        "its own answered as it is, any error it fails with PROCEDURE_FAILED with no detail"
     );
     assert_eq!(
         served.reported(),
-        ["internal: 10.0.0.5:8443 first"],
-        "the other error reported, with its connection"
+        [
+            "local unknown side application failure 21: nothing to echo first",
+            "internal: 10.0.0.5:8443 first"
+        ],
+        "the thrown failure and the other error reported, each with its connection"
     );
 }
 

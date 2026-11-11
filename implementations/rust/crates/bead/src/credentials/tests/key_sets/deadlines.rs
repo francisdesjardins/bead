@@ -1,6 +1,6 @@
 //! A key set's deadline is reached by its reading, even when its timer runs late.
 
-use core::sync::atomic::{AtomicI64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use core::time::Duration;
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -233,38 +233,53 @@ async fn lets_no_ask_go_as_the_last_call_that_waits_for_a_deadline_leaves_past_i
     assert_eq!(fixture.count(), 1);
 }
 
+// a clock that refuses every timer while `refusing` holds, and arms on `base` otherwise
 #[derive(Debug)]
-struct RefusingClock(Arc<SteppingClock>);
+struct RefusingClock {
+    base: Arc<SteppingClock>,
+    refusing: AtomicBool,
+}
 
 impl Clock for RefusingClock {
     fn monotonic(&self) -> Duration {
-        self.0.monotonic()
+        self.base.monotonic()
     }
     fn wall(&self) -> SystemTime {
-        self.0.wall()
+        self.base.wall()
     }
     fn arm(
         &self,
-        _schedule: Schedule,
-        _callback: TimerCallback,
+        schedule: Schedule,
+        callback: TimerCallback,
     ) -> Result<Arc<dyn Timer>, crate::errors::ProgrammerError> {
-        Err(crate::errors::ProgrammerError::new(
-            "the clock refuses this timer",
-        ))
+        if self.refusing.load(Ordering::SeqCst) {
+            return Err(crate::errors::ProgrammerError::new(
+                "the clock refuses this timer",
+            ));
+        }
+        self.base.arm(schedule, callback)
     }
     fn activity(&self) -> Option<Arc<crate::testing::Activity>> {
-        self.0.activity()
+        self.base.activity()
     }
 }
 
-#[tokio::test]
-async fn a_timer_refusal_releases_the_waiting_call_without_starting_an_unbounded_key_set_ask() {
+// the fixture on a clock that refuses its timers once told to, from `refusing`
+fn refusing(refusing: bool) -> (Fixture, Arc<RefusingClock>) {
     let mut fixture = Fixture::with(vec![], None);
+    let clock = Arc::new(RefusingClock {
+        base: Arc::clone(&fixture.clock),
+        refusing: AtomicBool::new(refusing),
+    });
     Arc::get_mut(&mut fixture.resolver.inner)
         .expect("not shared")
-        .clock = Arc::new(RefusingClock(Arc::clone(&fixture.clock)));
-    let Err(Unresolved::Other(error)) = done(fixture.named("a key")).await else {
-        panic!("the timer refusal fails the call");
+        .clock = Arc::<RefusingClock>::clone(&clock);
+    (fixture, clock)
+}
+
+fn assert_ask_refused_by_its_clock(outcome: Result<crate::router::core::Resolved, Unresolved>) {
+    let Err(Unresolved::Other(error)) = outcome else {
+        panic!("the timer refusal fails the call: {outcome:?}");
     };
     assert_eq!(
         error.to_string(),
@@ -274,6 +289,36 @@ async fn a_timer_refusal_releases_the_waiting_call_without_starting_an_unbounded
         error.source().expect("the clock's cause").to_string(),
         "the clock refuses this timer"
     );
+}
+
+#[tokio::test]
+async fn a_timer_refusal_releases_the_waiting_call_without_starting_an_unbounded_key_set_ask() {
+    let (fixture, _clock) = refusing(true);
+    assert_ask_refused_by_its_clock(done(fixture.named("a key")).await);
     assert_eq!(fixture.count(), 0, "no ask started without its deadline");
     assert_eq!(fixture.clock.dues(), [], "no timer held");
+}
+
+#[tokio::test]
+async fn a_timer_refusal_at_a_deadline_fails_the_calls_that_waited_for_it_and_the_next_call_asks_at_once()
+ {
+    let (fixture, clock) = refusing(false);
+    fixture.hold().await;
+    let mut waiting = fixture.named("set-9");
+    fixture.clock.settle().await;
+    assert_waiting(&mut waiting);
+    assert_eq!(fixture.count(), 1);
+    assert_eq!(fixture.clock.dues(), [Duration::from_mins(1)]);
+    clock.refusing.store(true, Ordering::SeqCst);
+    fixture.clock.advance(Duration::from_mins(1)).await;
+    assert_ask_refused_by_its_clock(done(waiting).await);
+    assert_eq!(fixture.count(), 1, "the refused ask never went");
+    assert_eq!(fixture.clock.dues(), [], "no timer held");
+    clock.refusing.store(false, Ordering::SeqCst);
+    let mut next = fixture.named("set-9");
+    fixture.clock.settle().await;
+    assert_waiting(&mut next);
+    assert_eq!(fixture.count(), 2, "the next call asks at once");
+    fixture.answer(1, vec![key((2, Some("set-9")))]);
+    assert_session(done(next).await, SET_ISSUER);
 }

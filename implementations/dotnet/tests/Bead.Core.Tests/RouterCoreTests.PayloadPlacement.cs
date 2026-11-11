@@ -187,4 +187,47 @@ public sealed partial class RouterCoreTests
         })).Code);
         Assert.Empty(none.Sent);
     }
+
+    // spec 12.3
+    [Fact]
+    public void Opens_every_transfer_with_one_byte_of_its_payload_at_least_and_leaves_one_at_least_past_its_opening()
+    {
+        IEnvelopeHeader[] headers = [RequestOf(1), RequestOf(1) with { DestinationId = 0x1_0000 }, new ResultHeader { CallId = 1 }];
+
+        foreach (var chunkBytes in new[] { 64, 1_024 })
+        {
+            var placement = new RouterCore.PayloadPlacement(RouterLimits.Default with { ChunkBytes = chunkBytes, MaximumEnvelopeBytes = 1_024 });
+            var maximumPayloadBytes = placement.PayloadLimitOf(null);
+
+            foreach (var header in headers)
+            {
+                (OutgoingTransfer? Transfer, Failure? Refusal) Placed(int length)
+                {
+                    return placement.TransferOf(new byte[length], (header, maximumPayloadBytes));
+                }
+
+                // the largest payload that goes whole
+                var whole = 0;
+
+                while (Placed(whole + 1) is { Transfer: null, Refusal: null })
+                {
+                    whole += 1;
+                }
+
+                var transfers = 0;
+
+                for (var length = whole + 1; length <= whole + 1 + placement.PayloadBytesPerChunk + 1; length += 1)
+                {
+                    if (Placed(length).Transfer is { } outgoing)
+                    {
+                        transfers += 1;
+                        Assert.True(outgoing.Opening.Length >= 1, $"an opening of {outgoing.Opening.Length} bytes, for {length}");
+                        Assert.True(outgoing.Total - outgoing.Opening.Length >= 1, $"an opening of {outgoing.Opening.Length} bytes, of {outgoing.Total}");
+                    }
+                }
+
+                Assert.True(transfers >= 1, $"no transfer past {whole} bytes, chunks of {chunkBytes}");
+            }
+        }
+    }
 }

@@ -103,8 +103,11 @@ so a peer cannot make it hold a byte in slivers, nor send a CHUNK whose envelope
 window past what it holds from the start each time half of the last one is used. A refusal
 (route, admission, size, capacity) falls on the opening, before any credit, so the bulk of a refused
 payload never crosses. The requester ends a transfer with a cancel, the side that answers with a
-failure; a call that received a transfer keeps its call id a while once it ends, so a late copy of a
-chunk under the credit granted is dropped in silence. A notification, a failure, and the result of a
+failure; a transport's refusal of an envelope of a result's transfer, its opening or a chunk,
+whenever it comes, ends it at its sender, and its resolver is told its answer went only once every
+envelope of it did, the first refusal to come told otherwise, as POSIX's `close(2)` reports a
+write's late error (spec 12.7); a call that received a transfer keeps its call id a while once it
+ends, so a late copy of a chunk under the credit granted is dropped in silence. A notification, a failure, and the result of a
 call that opens a subscription are never split: nothing arrives ahead of a result still coming, and
 no end of a session cuts one.
 
@@ -195,8 +198,9 @@ teardown met it with sections 9.10 and 12.10, and with debugging 9.7 and an exit
 `spec/metrics.json`, which [0013](0013-every-language-debugs-alike-at-no-cost-when-off.md) points
 here for; the chunk that makes a payload whole met it with sections 12.6 and 12.7. A failure's detail for an error of the side's own met it in
 [0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)'s round, on the answer leg A
-cannot carry, which keeps its objections and answers. Their objections, each with the answer that
-holds:
+cannot carry, which keeps its objections and answers; a transfer's late refusal met it in
+[0004](0004-one-behaviour-in-every-language.md)'s round on the converse twins' divergences. Their
+objections, each with the answer that holds:
 
 ### On a transport's order and copies
 
