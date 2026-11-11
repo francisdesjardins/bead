@@ -16,7 +16,7 @@ import { createRequire } from 'node:module';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { temporaryFolderOf } from './config.ts';
+import { temporaryFolderOf } from './config-files.ts';
 import { bufDiagnosticOf, type IDiagnostic, InputError } from './diagnostics.ts';
 import { BEADC_FILES, displayOf, holdsHttpCopy, HTTP_FILES } from './roots.ts';
 

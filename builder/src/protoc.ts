@@ -23,7 +23,7 @@ import { join, relative, sep } from 'node:path';
 import { fromBinary } from '@bufbuild/protobuf';
 import { FileDescriptorSetSchema } from '@bufbuild/protobuf/wkt';
 
-import { temporaryFolderOf } from './config.ts';
+import { temporaryFolderOf } from './config-files.ts';
 import { InputError } from './diagnostics.ts';
 import type { IBlueprint } from './model/blueprint.ts';
 import { BEADC_FILES } from './roots.ts';
