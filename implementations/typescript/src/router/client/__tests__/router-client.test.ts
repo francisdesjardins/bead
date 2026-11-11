@@ -280,6 +280,33 @@ const notificationOf = (
 
 // definition
 
+test('a command its transport tells once its router is disposed reaches no resolver', async () => {
+  const { deliver, sent, transport } = createScriptedTransport();
+  using router = createRouterClient(transport);
+  const errors = recordErrors(router);
+  let resolved = 0;
+
+  router.registerResolver(
+    Object.assign(
+      () => {
+        resolved += 1;
+
+        return Promise.resolve();
+      },
+      { ...service, procedureId: 9, procedureName: 'clock' }
+    )
+  );
+  router[Symbol.dispose]();
+  deliver({
+    header: { ...requestHeaderOf(2), procedureId: 9 },
+    kind: EnvelopeKind.REQUEST,
+    payload: new Uint8Array(0),
+  });
+  await sleep(0);
+
+  expect([resolved, sent, errors]).toEqual([0, [], []]);
+});
+
 test('keeps the replacement bound when its predecessor is cancelled before its answer', async () => {
   const { deliver, sent, transport } = createScriptedTransport();
   using router = createRouterClient(transport);
