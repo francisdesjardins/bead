@@ -12,33 +12,43 @@
     <link rel="stylesheet" href="penumbra/tokens.system.css" />
     <link rel="stylesheet" href="penumbra/tokens.skin.base.css" />
     <style>
-      /* the demo's skin over penumbra's two sheets: its typefaces, its brand, and the colours it
-         draws with, each declared here on purpose */
+      /* the demo's skin over penumbra's two sheets: francisdesjardins.ca's brand, the eleven
+         declarations of its tokens.skin.css and the violet neutrals it paints with, and the colours
+         the demo draws with of its own; the faces are the site's, on the system's fallbacks, since
+         the page fetches no font file */
       :root {
         color-scheme: light dark;
-        --app-font-body: system-ui, -apple-system, 'Segoe UI', sans-serif;
-        --app-font-mono: ui-monospace, 'Cascadia Mono', 'SF Mono', Consolas, monospace;
+        --app-font-display: 'Newsreader', 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
+        --app-font-body:
+          'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
+        --app-font-mono: 'Geist Mono', ui-monospace, 'Cascadia Code', 'SF Mono', Menlo, monospace;
         /* a board of rows reads denser than a page of prose */
         --app-lh-body: 1.45;
 
-        --app-flame: #0b6e5a;
-        --app-flame-wash: rgb(11 110 90 / 0.1);
-        --app-accent: #0b6e5a;
-        --app-ring: #0b6e5a;
+        --app-primary: #c13584;
+        --app-primary-ink: #ffffff;
+        --app-primary-hover: #9d2a6b;
+        --app-accent: #c13584;
+        --app-flame: #c13584;
+        --app-flame-wash: rgb(193 53 132 / 0.1);
+        --app-ring: #ff69b4;
+        --app-glow: 0 0 0 1px rgb(255 105 180 / 0.55), 0 0 32px -10px rgb(255 105 180 / 0.4);
 
-        --app-bg: #eef2f0;
-        --app-paper: #ffffff;
-        --app-text: #14201c;
-        --app-text-secondary: #5d6b66;
-        --app-divider: #dce3e0;
+        --app-bg: #f5f2f8;
+        --app-paper: #fdfcfe;
+        --app-text: #17111d;
+        --app-text-secondary: #4a4055;
+        --app-text-tertiary: #6d6278;
+        --app-divider: rgb(23 17 29 / 0.12);
         --app-error: #b91c1c;
-        --app-ok: #15803d;
-        --app-ok-wash: rgb(21 128 61 / 0.12);
-        --app-warn: #a16207;
-        --app-warn-wash: rgb(161 98 7 / 0.12);
+        --app-ok: #047857;
+        --app-ok-wash: rgb(4 120 87 / 0.1);
+        --app-info: #0369a1;
+        --app-warn: #92400e;
+        --app-warn-wash: rgb(146 64 14 / 0.1);
 
         /* the demo's own: the ground of what is code, a refusal's wash, and a write's mark */
-        --raised: #f6f8f7;
+        --raised: #f1ecf5;
         --bad-soft: rgb(185 28 28 / 0.1);
         --write: #b4460f;
         /* code reads a step under the body, between penumbra's two smallest */
@@ -47,23 +57,30 @@
 
       @media (prefers-color-scheme: dark) {
         :root {
-          --app-flame: #3cc7a6;
-          --app-flame-wash: rgb(60 199 166 / 0.13);
-          --app-accent: #3cc7a6;
-          --app-ring: #3cc7a6;
+          /* the light fuchsia cannot carry white: its ink goes dark, its hover brightens */
+          --app-primary: #ff8bc4;
+          --app-primary-ink: #3d0b28;
+          --app-primary-hover: #ffaed5;
+          --app-accent: #ff8bc4;
+          --app-flame: #ff8bc4;
+          --app-flame-wash: rgb(255 139 196 / 0.14);
+          --app-ring: #ffaed5;
+          --app-glow: 0 0 0 1px rgb(255 174 213 / 0.5), 0 0 32px -8px rgb(255 174 213 / 0.35);
 
-          --app-bg: #0b100e;
-          --app-paper: #131b18;
-          --app-text: #e2ebe7;
-          --app-text-secondary: #93a39d;
-          --app-divider: #25302c;
+          --app-bg: #0c0910;
+          --app-paper: #15111c;
+          --app-text: #f2ecf5;
+          --app-text-secondary: #b2a7bf;
+          --app-text-tertiary: #8d8199;
+          --app-divider: rgb(242 236 245 / 0.14);
           --app-error: #f87171;
-          --app-ok: #4ade80;
-          --app-ok-wash: rgb(74 222 128 / 0.12);
-          --app-warn: #facc15;
-          --app-warn-wash: rgb(250 204 21 / 0.12);
+          --app-ok: #34d399;
+          --app-ok-wash: rgb(52 211 153 / 0.14);
+          --app-info: #38bdf8;
+          --app-warn: #fbbf24;
+          --app-warn-wash: rgb(251 191 36 / 0.14);
 
-          --raised: #18221e;
+          --raised: #1c1625;
           --bad-soft: rgb(248 113 113 / 0.12);
           --write: #f0a45b;
         }
@@ -142,14 +159,14 @@
       }
 
       h1 {
-        font-size: var(--app-text-base);
-        font-weight: 650;
+        font: 600 var(--app-text-lg) / var(--app-lh-tight) var(--app-font-display);
         letter-spacing: var(--app-tracking-snug);
       }
 
       h1 span {
         margin-left: var(--app-space-1);
         color: var(--app-text-secondary);
+        font-family: var(--app-font-body);
         font-size: var(--app-text-sm);
         font-weight: 400;
         letter-spacing: 0;
@@ -501,9 +518,16 @@
         outline-offset: 2px;
       }
 
-      /* a write, refused without the permission */
-      button.write {
-        box-shadow: inset 3px 0 0 var(--write);
+      /* a write, refused without the permission, marked by a dot before its words */
+      button.write::before {
+        content: '';
+        display: inline-block;
+        width: 7px;
+        height: 7px;
+        margin-right: var(--app-space-2);
+        border-radius: var(--app-radius-pill);
+        background: var(--write);
+        vertical-align: 1px;
       }
 
       #result {
