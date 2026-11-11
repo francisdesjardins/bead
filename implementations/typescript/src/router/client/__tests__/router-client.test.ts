@@ -80,6 +80,22 @@ const text = {
 const TOKEN = toSessionToken(new Uint8Array(16).fill(1));
 const OTHER_TOKEN = toSessionToken(new Uint8Array(16).fill(2));
 
+test('refuses a router that presents a JWT by default within limits too small for it', () => {
+  const { transport } = createScriptedTransport();
+  const limits = { chunkBytes: 512, maximumEnvelopeBytes: 512, windowBytes: 1_024 };
+
+  expect(() => {
+    return createRouterClient(transport, {
+      credential: { scheme: CredentialScheme.JWT, token: 'a.b.c' },
+      limits,
+    });
+  }).toThrow(/1,024 bytes at least/u);
+
+  using router = createRouterClient(transport, { credentials: {}, limits });
+
+  expect(router.credential).toBeUndefined();
+});
+
 // what an answer announces: the session, by its token; another; its end
 const OPAQUE = Object.freeze({ scheme: CredentialScheme.OPAQUE, token: TOKEN });
 const OTHER_OPAQUE = Object.freeze({ scheme: CredentialScheme.OPAQUE, token: OTHER_TOKEN });
@@ -264,7 +280,168 @@ const notificationOf = (
 
 // definition
 
+test('a command its transport tells once its router is disposed reaches no resolver', async () => {
+  const { deliver, sent, transport } = createScriptedTransport();
+  using router = createRouterClient(transport);
+  const errors = recordErrors(router);
+  let resolved = 0;
+
+  router.registerResolver(
+    Object.assign(
+      () => {
+        resolved += 1;
+
+        return Promise.resolve();
+      },
+      { ...service, procedureId: 9, procedureName: 'clock' }
+    )
+  );
+  router[Symbol.dispose]();
+  deliver({
+    header: { ...requestHeaderOf(2), procedureId: 9 },
+    kind: EnvelopeKind.REQUEST,
+    payload: new Uint8Array(0),
+  });
+  await sleep(0);
+
+  expect([resolved, sent, errors]).toEqual([0, [], []]);
+});
+
+test('keeps the replacement bound when its predecessor is cancelled before its answer', async () => {
+  const { deliver, sent, transport } = createScriptedTransport();
+  using router = createRouterClient(transport);
+  const errors = recordErrors(router);
+  const triggered: Uint8Array[] = [];
+  const notification = notificationOf(triggered);
+
+  await router.registerNotification(notification);
+
+  const first = router.request(new Uint8Array(0), {
+    options,
+    procedure: service,
+    subscribes: notification,
+  });
+  const cancelled = expect(first).rejects.toBeInstanceOf(CancelError);
+  const second = router.request(new Uint8Array(0), {
+    options,
+    procedure: service,
+    subscribes: notification,
+  });
+
+  await cancelled;
+  deliver(resultOf(3));
+  await second;
+  deliver(notificationEnvelopeOf(3, new Uint8Array([7])));
+
+  expect(triggered).toEqual([new Uint8Array([7])]);
+  expect(errors).toEqual([]);
+  expect(
+    sent.map((envelope) => {
+      return [envelope?.kind, envelope?.header.callId];
+    })
+  ).toEqual([
+    [EnvelopeKind.REQUEST, 1],
+    [EnvelopeKind.CANCEL, 1],
+    [EnvelopeKind.REQUEST, 3],
+  ]);
+});
+
+test('keeps the subscription when its replacement is refused before drawing a call id', async () => {
+  const { deliver, sent, transport } = createScriptedTransport();
+  using router = createRouterClient(transport);
+  const errors = recordErrors(router);
+  const triggered: Uint8Array[] = [];
+  const notification = notificationOf(triggered);
+
+  await router.registerNotification(notification);
+
+  const first = router.request(new Uint8Array(0), {
+    options,
+    procedure: service,
+    subscribes: notification,
+  });
+
+  deliver(resultOf(1));
+  await first;
+  await expect(
+    router.request(new Uint8Array(0x100_0001), {
+      options,
+      procedure: service,
+      subscribes: notification,
+    })
+  ).rejects.toMatchObject({ code: ProtocolCode.PAYLOAD_TOO_LARGE });
+  deliver(notificationEnvelopeOf(1, new Uint8Array([7])));
+
+  expect(triggered).toEqual([new Uint8Array([7])]);
+  expect(errors).toEqual([]);
+  expect(
+    sent.map((envelope) => {
+      return [envelope?.kind, envelope?.header.callId];
+    })
+  ).toEqual([[EnvelopeKind.REQUEST, 1]]);
+});
+
 test.describe('createRouterClient', () => {
+  test('sends each call in the order it is made, whatever order it is awaited in', async () => {
+    const { deliver, sent, transport } = createScriptedTransport();
+    using router = createRouterClient(transport);
+    const calls = [1, 2, 3].map((value) => {
+      return router.request(Uint8Array.of(value), { options, procedure: service });
+    });
+
+    await nextTask();
+
+    for (const [callId, text] of [
+      [1, 'a'],
+      [3, 'b'],
+      [5, 'c'],
+    ] as const) {
+      deliver(resultOf(callId, { payload: encoder.encode(text) }));
+    }
+
+    const answers: string[] = [];
+
+    for (const call of calls.reverse()) {
+      answers.push(decoder.decode((await call).payload));
+    }
+
+    expect(
+      sent.flatMap((envelope) => {
+        return envelope?.kind === EnvelopeKind.REQUEST ? [[...envelope.payload]] : [];
+      })
+    ).toEqual([[1], [2], [3]]);
+    expect(answers).toEqual(['c', 'b', 'a']);
+  });
+
+  test('an envelope a listener hands its router within a turn is taken behind what came before it', async () => {
+    const { deliver, transport } = createScriptedTransport();
+    using router = createRouterClient(transport);
+    const heard: number[] = [];
+
+    router.on('debug', ({ direction, header }) => {
+      if (direction !== 'rx' || header.kind !== EnvelopeKind.RESULT) {
+        return;
+      }
+
+      heard.push(header.callId);
+
+      if (header.callId === 1) {
+        deliver(resultOf(5, { payload: encoder.encode('c') }));
+      }
+    });
+
+    const calls = [1, 2, 3].map((value) => {
+      return router.request(Uint8Array.of(value), { options, procedure: service });
+    });
+
+    await nextTask();
+    deliver(resultOf(1, { payload: encoder.encode('a') }));
+    deliver(resultOf(3, { payload: encoder.encode('b') }));
+    await Promise.all(calls);
+
+    expect(heard).toEqual([1, 3, 5]);
+  });
+
   test('takes any transport of this package', () => {
     const transport = createWebSocketTransportClient();
     using router = createRouterClient(transport);

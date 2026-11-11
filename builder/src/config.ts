@@ -12,9 +12,7 @@
 
 // dependencies
 
-import { existsSync, mkdirSync, mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import nodePath, { type PlatformPath } from 'node:path';
+import type { PlatformPath } from 'node:path';
 
 import { parse } from 'yaml';
 
@@ -31,7 +29,7 @@ import {
   type Selections,
 } from './model/selection.ts';
 import { NAMESPACE } from './targets/csharp/options.ts';
-import { Messages } from './targets/target.ts';
+import { Messages } from './targets/messages.ts';
 import {
   DEFAULT_HTTP_RUNTIME,
   DEFAULT_PROTO_RUNTIME,
@@ -151,8 +149,6 @@ export const CONFIG_FILE = 'beadc.yaml';
 /** The folder beadc keeps its own files in, beside `beadc.yaml`, which `init`'s `.gitignore` ignores. */
 export const BEADC_FOLDER = '.beadc';
 
-const WORKSPACE_ATTEMPTS = 3;
-
 const KEYS = new Set(['version', 'source', 'blueprint', 'outputs', 'clean', 'http', 'openapi']);
 const HTTP_KEYS = new Set(['prefix']);
 const OPENAPI_KEYS = new Set(['out', 'title', 'security', 'problemTypes']);
@@ -231,9 +227,9 @@ const isAbsoluteUri = (value: string): boolean => {
 /** Whether `target` is `folder` or under it, by `path`'s rules: no `..` out of it, no other drive. */
 export const isInside = (
   folder: string,
-  details: { readonly target: string; readonly path?: PlatformPath }
+  details: { readonly target: string; readonly path: PlatformPath }
 ): boolean => {
-  const path = details.path ?? nodePath;
+  const { path } = details;
   const relative = path.relative(folder, path.resolve(folder, details.target));
 
   return (
@@ -248,11 +244,11 @@ const documentOf = (
   text: string,
   options: {
     readonly folder: string;
-    readonly path?: PlatformPath;
+    readonly path: PlatformPath;
     readonly keys?: ReadonlySet<string>;
   }
 ): IDocument => {
-  const path = options.path ?? nodePath;
+  const { path } = options;
   const { folder } = options;
   const refuse = (reason: string): never => {
     throw new InputError(`${path.join(folder, CONFIG_FILE)}: ${reason}`);
@@ -335,14 +331,15 @@ const sourceOf = (document: IDocument): { source: Source; blueprint?: string } =
 };
 
 /**
- * Reads `text`, a `beadc.yaml` in `folder`, each path resolved by `path`'s rules, the platform's
- * unless given. Throws an {@link InputError} for a file beadc cannot take, with the fix.
+ * Reads `text`, a `beadc.yaml` in `folder`, each path resolved by `path`'s rules: the platform's
+ * `node:path` on the command line, POSIX's in a page. Throws an {@link InputError} for a file beadc
+ * cannot take, with the fix.
  */
 export const parseConfig = (
   text: string,
-  options: { readonly folder: string; readonly path?: PlatformPath }
+  options: { readonly folder: string; readonly path: PlatformPath }
 ): IConfig => {
-  const path = options.path ?? nodePath;
+  const { path } = options;
   const { folder } = options;
   const document = documentOf(text, { ...options, keys: KEYS });
   const { value, refuse, resolved } = document;
@@ -887,54 +884,7 @@ export const asksHttp = (config: Pick<IConfig, 'openapi' | 'outputs'>): boolean 
  */
 export const againstOfText = (
   text: string,
-  options: { readonly folder: string; readonly path?: PlatformPath }
+  options: { readonly folder: string; readonly path: PlatformPath }
 ): IAgainstConfig => {
   return { folder: options.folder, ...sourceOf(documentOf(text, options)) };
-};
-
-/**
- * A temporary folder of beadc's, made: under `options.folder`'s `.beadc/` where a `beadc.yaml` was
- * read; under the system's temporary folder otherwise. The caller takes it out.
- */
-export const temporaryFolderOf = (
-  prefix: string,
-  options: { readonly folder?: string } = {}
-): string => {
-  if (options.folder === undefined) {
-    return mkdtempSync(nodePath.join(tmpdir(), `beadc-${prefix}`));
-  }
-
-  const own = nodePath.join(options.folder, BEADC_FOLDER);
-
-  // * an empty-parent cleanup can land between mkdir and mkdtemp; retry just that race.
-  for (let attempt = 1; ; attempt += 1) {
-    mkdirSync(own, { recursive: true });
-
-    try {
-      return mkdtempSync(nodePath.join(own, prefix));
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || attempt === WORKSPACE_ATTEMPTS) {
-        throw error;
-      }
-    }
-  }
-};
-
-/** The `beadc.yaml` nearest `from`, upward, or none. */
-export const findConfig = (from: string): string | undefined => {
-  for (let folder = nodePath.resolve(from); ;) {
-    const candidate = nodePath.join(folder, CONFIG_FILE);
-
-    if (existsSync(candidate)) {
-      return candidate;
-    }
-
-    const parent = nodePath.dirname(folder);
-
-    if (parent === folder) {
-      return undefined;
-    }
-
-    folder = parent;
-  }
 };

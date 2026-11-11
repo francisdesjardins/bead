@@ -262,7 +262,7 @@ async fn hands_session_of_what_its_transport_carried_for_an_elsewhere_alone_what
 
 // spec 13.1
 #[tokio::test]
-async fn a_credential_whose_resolution_rejects_with_a_capacity_error_is_answered_capacity_exceeded_its_message_for_detail_and_reported_nowhere_a_failure_error_of_that_code_stays_procedure_failed_reported()
+async fn whose_resolution_rejects_with_a_capacity_error_is_answered_capacity_exceeded_its_message_for_detail_and_reported_nowhere_a_failure_error_of_that_code_stays_procedure_failed_reported()
  {
     for message in ["as many calls wait already", "too many"] {
         let (peer, handed, admitted) = serving(Some(Box::new(move |request, _| {

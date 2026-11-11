@@ -11,6 +11,149 @@ namespace Bead.Tests;
 /// </summary>
 public sealed partial class RouterCoreTests
 {
+    private static async Task CheckSubscriptionResult(bool includesPattern)
+    {
+        var samples = includesPattern ? new[] { (37, false), (100, false), (100, true) } : [(37, false), (100, false)];
+
+        foreach (var (length, patterned) in samples)
+        {
+            var server = new Peer(RouterSide.Server, Chunked with { MaximumEnvelopeBytes = 64 });
+            using var core = server.Core;
+            var resolver = server.Resolve();
+
+            await server.Deliver(new Envelope { Header = RequestOf(1) with { OpensSubscription = true }, Payload = length == 37 ? ReadOnlyMemory<byte>.Empty : new byte[] { 1 } });
+            var refused = await Assert.ThrowsAsync<FailureException>(() =>
+            {
+                return resolver.Answer(0, patterned ? PatternOf(length) : new byte[length]).WaitAsync(Patience, TestContext.Current.CancellationToken);
+            });
+
+            Assert.Equal((ushort)ProtocolCode.PayloadTooLarge, refused.Code);
+            Assert.Equal("a subscription's result goes in one envelope, of 64 bytes at most", refused.Detail);
+            Assert.Equal(0, server.BeforeAnswers);
+            Assert.Empty(server.Sent);
+            Assert.Empty(server.Reports);
+
+            if (length == 37)
+            {
+                await resolver.Answer(0, new byte[36]).WaitAsync(Patience, TestContext.Current.CancellationToken);
+                Assert.Equal(1, server.BeforeAnswers);
+                Assert.Equal(new ResultHeader { CallId = 1 }, Assert.Single(server.Sent).Header);
+                Assert.Equal(new byte[36], server.Sent[0].Payload.ToArray());
+            }
+
+            Assert.Empty(server.Reports);
+        }
+    }
+
+    [Fact]
+    public async Task A_subscriptions_result_stays_within_one_envelope_before_the_side_hears_of_it()
+    {
+        await CheckSubscriptionResult(false);
+    }
+
+    [Fact]
+    public async Task Refuse_a_transfer_for_a_subscriptions_result_before_the_side_hears_of_it()
+    {
+        await CheckSubscriptionResult(true);
+    }
+
+    // a result of 100 bytes goes as an opening of 28, then a chunk of 48 and the last of 24
+    [Fact]
+    public async Task A_chunk_refused_after_the_last_one_went_fails_the_answer()
+    {
+        var server = new Peer(RouterSide.Server);
+        using var core = server.Core;
+        var resolver = server.Resolve();
+        var refused = new IOException("the transport refused the chunk");
+        var held = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        server.OnSend = (envelope) =>
+        {
+            return envelope.Header is ChunkHeader { IsLast: false } ? held.Task : Task.CompletedTask;
+        };
+        await server.Deliver(new Envelope { Header = RequestOf(1), Payload = new byte[] { 1 } });
+
+        var responding = resolver.Answer(0, PatternOf(100));
+
+        await server.Settle();
+        await server.Deliver(CreditOf(1, 100));
+        await server.Settle();
+        Assert.Equal(
+            [(EnvelopeKind.Result, false), (EnvelopeKind.Chunk, false), (EnvelopeKind.Chunk, true)],
+            server.Sent.Select((envelope) =>
+            {
+                return (envelope.Kind, envelope.Header is ChunkHeader { IsLast: true });
+            }));
+        held.SetException(refused);
+        Assert.Same(refused, await Assert.ThrowsAsync<IOException>(() =>
+        {
+            return responding.WaitAsync(Patience, TestContext.Current.CancellationToken);
+        }));
+    }
+
+    [Fact]
+    public async Task An_opening_refused_after_the_last_chunk_went_fails_the_answer()
+    {
+        var server = new Peer(RouterSide.Server);
+        using var core = server.Core;
+        var resolver = server.Resolve();
+        var refused = new IOException("the transport refused the opening");
+        var held = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        server.OnSend = (envelope) =>
+        {
+            return envelope.Header is ResultHeader ? held.Task : Task.CompletedTask;
+        };
+        await server.Deliver(new Envelope { Header = RequestOf(1), Payload = new byte[] { 1 } });
+
+        var responding = resolver.Answer(0, PatternOf(100));
+
+        await server.Settle();
+        await server.Deliver(CreditOf(1, 100));
+        await server.Settle();
+        Assert.Equal(
+            [EnvelopeKind.Result, EnvelopeKind.Chunk, EnvelopeKind.Chunk],
+            server.Sent.Select((envelope) =>
+            {
+                return envelope.Kind;
+            }));
+        held.SetException(refused);
+        Assert.Same(refused, await Assert.ThrowsAsync<IOException>(() =>
+        {
+            return responding.WaitAsync(Patience, TestContext.Current.CancellationToken);
+        }));
+    }
+
+    [Fact]
+    public async Task An_opening_that_goes_after_the_last_chunk_holds_the_answer_until_it_went()
+    {
+        var server = new Peer(RouterSide.Server);
+        using var core = server.Core;
+        var resolver = server.Resolve();
+        var held = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        server.OnSend = (envelope) =>
+        {
+            return envelope.Header is ResultHeader ? held.Task : Task.CompletedTask;
+        };
+        await server.Deliver(new Envelope { Header = RequestOf(1), Payload = new byte[] { 1 } });
+
+        var responding = resolver.Answer(0, PatternOf(100));
+
+        await server.Settle();
+        await server.Deliver(CreditOf(1, 100));
+        await server.Settle();
+        Assert.Equal(
+            [EnvelopeKind.Result, EnvelopeKind.Chunk, EnvelopeKind.Chunk],
+            server.Sent.Select((envelope) =>
+            {
+                return envelope.Kind;
+            }));
+        Assert.False(responding.IsCompleted);
+        held.SetResult();
+        await responding.WaitAsync(Patience, TestContext.Current.CancellationToken);
+        Assert.Empty(server.Reports);
+    }
     // constants
 
     // limits that send a payload of more than 64 bytes as a transfer: an opening of a request

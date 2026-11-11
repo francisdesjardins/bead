@@ -303,3 +303,64 @@ fn places_a_payload_whole_up_to_its_envelope_as_a_transfer_past_it_and_refuses_o
     // Option<u64> admits none, a positive integer or zero; negatives, fractions, strings and
     // null are not values of this API. Its runtime guard refuses the remaining invalid value.
 }
+
+#[test]
+fn opens_every_transfer_with_one_byte_of_its_payload_at_least_and_leaves_one_at_least_past_its_opening()
+ {
+    use crate::envelope::{EnvelopeHeader, ResultHeader};
+    use crate::router::parts::{Placed, Placement};
+    use crate::router::types::limits_of;
+
+    let mut destined = scripted_header(1);
+    destined.destination_id = Some(u32::MAX);
+    let headers = [
+        EnvelopeHeader::Request(scripted_header(1)),
+        EnvelopeHeader::Request(destined),
+        EnvelopeHeader::Result(ResultHeader {
+            call_id: 1,
+            total: None,
+            credential: None,
+        }),
+    ];
+    for chunk_bytes in [64_u64, 1_024] {
+        let placement = Placement::new(
+            RouterSide::Server,
+            limits_of(&RouterLimitsOptions {
+                chunk_bytes: Some(chunk_bytes),
+                maximum_envelope_bytes: Some(1_024),
+                ..RouterLimitsOptions::default()
+            })
+            .expect("the limits"),
+        );
+        for header in &headers {
+            let place = |length: u64| {
+                placement
+                    .transfer_of(
+                        &Bytes::from(vec![0; usize::try_from(length).expect("a small payload")]),
+                        (header, u64::MAX),
+                    )
+                    .expect("a payload within its limit")
+            };
+            let mut whole = 0_u64;
+            while matches!(place(whole.saturating_add(1)), Placed::Whole) {
+                whole = whole.saturating_add(1);
+            }
+            let mut transfers = 0_u32;
+            for length in
+                whole.saturating_add(1)..=whole.saturating_add(chunk_bytes).saturating_add(1)
+            {
+                let Placed::Transfer(transfer) = place(length) else {
+                    panic!("{length} bytes past {whole} go whole");
+                };
+                let opening = u64::try_from(transfer.opening().len()).expect("an opening's length");
+                assert!(opening >= 1, "{length} bytes open with none of them");
+                assert!(
+                    transfer.total().saturating_sub(opening) >= 1,
+                    "{length} bytes open with every one of them"
+                );
+                transfers = transfers.saturating_add(1);
+            }
+            assert!(transfers >= 1, "{header:?} at {chunk_bytes} bytes a chunk");
+        }
+    }
+}

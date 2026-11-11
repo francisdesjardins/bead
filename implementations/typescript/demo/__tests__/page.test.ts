@@ -7,7 +7,7 @@
 // dependencies
 
 import { expect, test } from '@playwright/test';
-import { serveMqttDemo } from '../../devtools/__tests__/fixtures';
+import { outcomeOf, serveMqttDemo } from '../../devtools/__tests__/fixtures';
 
 // constants
 
@@ -39,16 +39,16 @@ test.describe('the demo’s page, over MQTT 5', () => {
     await page.goto(`${served.url}?transport=mqtt`);
     await expect(page.locator('#connection')).toHaveAttribute('data-state', 'open');
     await page.click('button[data-action="writer"]');
-    await expect(page.locator('#result')).toContainText('logged in as demo-writer');
+    await expect(outcomeOf(page, 'writer')).toContainText('logged in as demo-writer');
 
     // * 8,386,816 bytes in parts each way, under the broker's Maximum Packet Size
     await page.click('button[data-action="upload"]');
-    await expect(page.locator('#result')).toContainText(
+    await expect(outcomeOf(page, 'upload')).toContainText(
       /^the server received the same glyph, 8,386,816 bytes/u,
       { timeout: GLYPH_TIMEOUT }
     );
     await page.click('button[data-action="download"]');
-    await expect(page.locator('#result')).toContainText(/^a glyph received, 8,386,816 bytes/u, {
+    await expect(outcomeOf(page, 'download')).toContainText(/^a glyph received, 8,386,816 bytes/u, {
       timeout: GLYPH_TIMEOUT,
     });
     await expect(page.locator('#connection')).toHaveAttribute('data-state', 'open');

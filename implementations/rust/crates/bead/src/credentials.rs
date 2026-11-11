@@ -558,9 +558,17 @@ fn ask_now(
         signal: signal.clone(),
         waiters,
     });
+    let previous = entry.deadline;
+
     entry.deadline = Some(now.saturating_add(KEY_SET_INTERVAL));
     arm(inner, entry);
-    entry.asking.as_ref()?;
+
+    if entry.asking.is_none() {
+        // ! an ask its clock refused never went: it sets no deadline (spec 13.9.3)
+        entry.deadline = previous;
+
+        return None;
+    }
 
     let weak = Arc::downgrade(inner);
     let issuer = issuer.to_owned();

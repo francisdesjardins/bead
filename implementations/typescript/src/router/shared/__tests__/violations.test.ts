@@ -10,6 +10,7 @@ import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { FailureScope, ProtocolCode } from '../constants';
 import {
+  CLOSING_BYTES,
   createViolationHolder,
   detailBoundOf,
   type IViolation,
@@ -82,6 +83,40 @@ const readOf = (detail: string) => {
 };
 
 // definition
+
+test('refuses a request with a violation held or one counted past its bound', () => {
+  const violation: IViolation = {
+    fieldPath: 'names',
+    message: 'value is required',
+    ruleId: 'required',
+  };
+
+  expect(isRefused({ more: 0, stopped: false, violations: [] })).toBe(false);
+  expect(isRefused({ more: 0, stopped: false, violations: [violation] })).toBe(true);
+  expect(isRefused({ more: 1, stopped: false, violations: [] })).toBe(true);
+});
+
+test('writes each violation a line, then its count, and reads them back', () => {
+  const judged = {
+    more: 3,
+    stopped: false,
+    violations: ['required', 'string.min_len'].map((ruleId) => {
+      return { fieldPath: 'names', message: 'value is required', ruleId };
+    }),
+  };
+  const detail = violationsDetailOf(judged, { maximumBytes: 1_024 });
+  const read = readOf(detail);
+
+  expect(detail.split('\n')).toHaveLength(3);
+  expect(
+    read.violations.map(({ ruleId }) => {
+      return ruleId;
+    })
+  ).toEqual(['required', 'string.min_len']);
+  expect(read.more).toBe(3);
+  expect(violationsOf({ code: 64, detail, scope: FailureScope.PROTOCOL }).violations).toEqual([]);
+  expect(readOf(violationsDetailOf(judged, { maximumBytes: CLOSING_BYTES })).more).toBe(5);
+});
 
 test('keeps a full violation detail closed to smaller violations after the first refusal', () => {
   const small: IViolation = { bounds: {}, fieldPath: 'a', message: '', ruleId: 'required' };
@@ -443,7 +478,9 @@ test.describe('detailBoundOf', () => {
       1_024
     );
     expect(detailBoundOf({ maximumDetailBytes: 1_024, maximumEnvelopeBytes: 100 })).toBe(68);
+    expect(detailBoundOf({ maximumDetailBytes: 1_024, maximumEnvelopeBytes: 64 })).toBe(32);
     expect(detailBoundOf({ maximumDetailBytes: 0, maximumEnvelopeBytes: 64 })).toBe(0);
+    expect(CLOSING_BYTES).toBe(26);
   });
 });
 

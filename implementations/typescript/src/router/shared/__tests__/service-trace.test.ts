@@ -28,6 +28,36 @@ import {
 
 test.describe('createServiceManager', () => {
   test.describe('debug', () => {
+    test('reads no clock for a call once its last debug listener went', async () => {
+      const clock = createTestClock(Date.UTC(2026, 0, 1));
+      const hearing = createServiceManager(createFakeRouter('client', clock).router);
+      const notifying = createServiceManager(createFakeRouter('server', clock).router);
+      const ask = hearing.getRequest(echo, { serializer });
+      const listener = () => {
+        return undefined;
+      };
+      const readingsOf = async (): Promise<[number, number]> => {
+        const { wall, monotonic } = clock.readings;
+
+        await ask({ text: 'x' })();
+
+        return [clock.readings.wall - wall, clock.readings.monotonic - monotonic];
+      };
+      const unheard = await readingsOf();
+
+      for (const manager of [hearing, notifying]) {
+        manager.on('debug', listener);
+      }
+
+      expect(await readingsOf()).not.toEqual(unheard);
+
+      for (const manager of [hearing, notifying]) {
+        manager.off('debug', listener);
+      }
+
+      expect(await readingsOf()).toEqual(unheard);
+    });
+
     test('is on only while someone listens', () => {
       const manager = createServiceManager(createFakeRouter().router);
       const listener = () => {

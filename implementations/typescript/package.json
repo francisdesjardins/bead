@@ -95,7 +95,8 @@
     "oxlint-tsgolint": "7.0.2005",
     "rhea": "3.0.5",
     "typescript-7": "npm:typescript@7.0.2",
-    "ws": "^8.22.1"
+    "ws": "^8.22.1",
+    "yaml": "2.9.1"
   },
   "dependenciesMeta": {
     "@bufbuild/buf": {

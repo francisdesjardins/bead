@@ -542,9 +542,11 @@ pub(crate) struct Core<S> {
     // the receiving transfers of requests, by their transfer's id: the request as it waits, and
     // its handler
     pub(crate) receiving_requests: BTreeMap<u64, (Arc<Dispatch>, Arc<Handler>)>,
-    // the results sent as a transfer, by their id, and what settles each once its last chunk went
+    // the results sent as a transfer, by their id, while they are
     pub(crate) results: BTreeMap<u64, crate::router::answers::ResultSending<S>>,
-    pub(crate) settled: BTreeMap<u64, Option<Responded<S>>>,
+    // what settles each result sent as a transfer: its answer, the sends not heard back from, and
+    // whether its last chunk went
+    pub(crate) settling: BTreeMap<u64, crate::router::answers::Settling<S>>,
     pub(crate) next_id: u64,
 }
 
@@ -593,7 +595,7 @@ impl<S: Side> Core<S> {
             disposed: false,
             receiving_requests: BTreeMap::new(),
             results: BTreeMap::new(),
-            settled: BTreeMap::new(),
+            settling: BTreeMap::new(),
             next_id: 1,
         }
     }
@@ -672,11 +674,15 @@ pub(crate) fn reported(failure: Failure) -> RouterError {
     RouterError::Failure(failure)
 }
 
-/// What a resolver's error is reported as: a call's failure, a router's error, as it is; any other,
-/// as itself.
+/// What a resolver's error is reported as: a call's failure, a failure, a router's error, as it is;
+/// any other, as itself.
 pub(crate) fn reported_error_of(error: Box<dyn Error + Send + Sync>) -> RouterError {
     let error = match error.downcast::<CallError>() {
         Ok(call) => return reported_call(*call),
+        Err(error) => error,
+    };
+    let error = match error.downcast::<Failure>() {
+        Ok(failure) => return reported(*failure),
         Err(error) => error,
     };
 
@@ -1836,14 +1842,8 @@ fn resolver_failed<S: Side>(
     (dispatch, signal, error): (&Arc<Dispatch>, &Signal, ResolverError),
 ) {
     let handle = Arc::clone(&dispatch.connection_handle);
-    let error = match error {
-        // ! a resolver's own failure is answered as it is, as a thrown FailureError is
-        ResolverError::Failure(failure) if is_answering(state, dispatch) => {
-            return respond_failure_as_is(state, (failure, dispatch));
-        }
-        ResolverError::Failure(failure) => reported(failure),
-        ResolverError::Other(error) => reported_error_of(error),
-    };
+    let ResolverError::Other(error) = error;
+    let error = reported_error_of(error);
 
     if !signal.is_aborted() {
         state.report(error, &handle);
@@ -1857,10 +1857,6 @@ fn resolver_failed<S: Side>(
 
         refuse(state, (failure, dispatch));
     }
-}
-
-fn respond_failure_as_is<S: Side>(state: &mut S, (failure, dispatch): (Failure, &Arc<Dispatch>)) {
-    refuse(state, (failure, dispatch));
 }
 
 // an admission's refusal as it is answered: never SESSION_REQUIRED to a call that presented a
@@ -1907,10 +1903,8 @@ fn admit_routed<S: Side>(
     if let Some(admit) = &handler.admit {
         match admit(&request) {
             Err(error) => {
-                let reported_error = match error {
-                    ResolverError::Failure(failure) => reported(failure),
-                    ResolverError::Other(error) => RouterError::Other(Arc::from(error)),
-                };
+                let ResolverError::Other(error) = error;
+                let reported_error = reported_error_of(error);
 
                 state.report(reported_error, &handle);
 

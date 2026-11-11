@@ -56,7 +56,7 @@ fn refuses_a_request_with_a_violation_held_or_one_counted_past_its_bound() {
 }
 
 #[test]
-fn bounds_a_detail_by_the_router_s_limits() {
+fn bounds_a_detail_by_maximum_detail_bytes_and_by_an_envelope_less_its_32_bytes_beside_it() {
     assert_eq!(detail_bound_of(1_024, 16_778_240), 1_024, "its own bound");
     assert_eq!(
         detail_bound_of(1_024, 64),
@@ -64,6 +64,8 @@ fn bounds_a_detail_by_the_router_s_limits() {
         "an envelope's room beside the rest"
     );
     assert_eq!(CLOSING_BYTES, 26, "the closing line at its longest");
+    assert_eq!(detail_bound_of(1_024, 100), 68, "an envelope's room");
+    assert_eq!(detail_bound_of(0, 64), 0, "no detail's room");
 }
 
 #[test]

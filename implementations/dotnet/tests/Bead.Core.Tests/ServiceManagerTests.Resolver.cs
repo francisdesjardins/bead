@@ -9,6 +9,49 @@ namespace Bead.Tests;
 public sealed partial class ServiceManagerTests
 {
     [Fact]
+    public async Task A_self_admitting_resolver_refuses_before_decoding_and_tells_no_trace_on_a_failed_admission()
+    {
+        foreach (var throws in new[] { false, true })
+        {
+            var router = new RecordingRouter();
+            var manager = new ServiceManager(router);
+            var seen = RecordDebug(manager);
+            var failure = new InvalidOperationException("the admission fails");
+            var reached = 0;
+            var resolver = manager.GetRequestResolver(Echo, Answered(new BeforeRequest((_) =>
+            {
+                if (throws)
+                {
+                    throw failure;
+                }
+
+                return false;
+            }, Failure.OfProtocol(ProtocolCode.SessionRequired))))((_, _) =>
+            {
+                reached += 1;
+
+                return Task.CompletedTask;
+            });
+            var resolving = resolver.Handle(PropsOf("{not json"u8.ToArray()) with { IsAdmitted = false });
+
+            if (throws)
+            {
+                Assert.Same(failure, await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                {
+                    return resolving;
+                }));
+            }
+            else
+            {
+                await resolving;
+            }
+
+            Assert.Equal([new Responded(Target, null, Failure.OfProtocol(throws ? ProtocolCode.ProcedureFailed : ProtocolCode.SessionRequired))], router.Responses);
+            Assert.Equal(0, reached);
+            Assert.Empty(seen);
+        }
+    }
+    [Fact]
     public async Task Traces_an_application_failure_as_the_answer_with_its_request_and_duration()
     {
         var clock = new FakeTimeProvider(Started);

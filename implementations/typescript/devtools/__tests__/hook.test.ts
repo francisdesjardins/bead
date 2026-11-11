@@ -3,7 +3,14 @@ import { readFile } from 'node:fs/promises';
 import { EnvelopeKind } from '../../src/router/shared/constants';
 import type { ICallRecord, IEnvelopeRecord } from '../messages';
 import type { ILog } from '../model/log';
-import { assertBuilt, launchExtension, PLAYGROUND, serveFolder, serveMqttDemo } from './fixtures';
+import {
+  assertBuilt,
+  launchExtension,
+  outcomeOf,
+  PLAYGROUND,
+  serveFolder,
+  serveMqttDemo,
+} from './fixtures';
 
 // helpers
 
@@ -238,7 +245,7 @@ test.describe('the hook, the bridge and the background', () => {
         await expect(panel.locator('#broker')).toContainText('client · up');
         await expect(panel.locator('#broker')).toContainText('bead/i/client');
         await page.click('button[data-action="reader"]');
-        await expect(page.locator('#result')).toContainText('logged in as');
+        await expect(outcomeOf(page, 'reader')).toContainText('logged in as');
         await expect(panel.locator('#broker tbody')).toContainText('DATA');
         expect(cut).toBeDefined();
         cut?.();
@@ -326,7 +333,7 @@ test.describe('the hook, the bridge and the background', () => {
           ['ask', /the server asked the client its time/u],
         ] as const) {
           await page.click(`button[data-action="${action}"]`);
-          await expect(page.locator('#result')).toContainText(result);
+          await expect(outcomeOf(page, action)).toContainText(result);
         }
 
         await expect(panel.locator('#calls tr.call')).toHaveCount(6);
@@ -491,7 +498,7 @@ test.describe('the hook, the bridge and the background', () => {
 
     for (const action of ['read', 'reader', 'read']) {
       await page.click(`button[data-action="${action}"]`);
-      await expect(page.locator('#result')).not.toHaveText('—');
+      await expect(outcomeOf(page, action)).not.toHaveText('—');
     }
 
     await expect(panel.locator('#source option')).toHaveText(['All clients', 'Client 1']);

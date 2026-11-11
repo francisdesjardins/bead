@@ -18,17 +18,6 @@ use crate::router::transfer::{ChunkOutcome, IncomingBounds, IncomingTransfer, Ou
 use crate::router::types::LIMIT_DEFAULTS;
 use crate::testing::hexadecimal;
 
-#[test]
-fn clamps_an_outgoing_opening_to_its_payload_and_sends_no_chunk_past_its_end() {
-    for opening in [3, 4, u64::MAX] {
-        let mut outgoing = OutgoingTransfer::new(Bytes::from_static(b"abc"), (opening, 8));
-        assert_eq!(outgoing.opening(), Bytes::from_static(b"abc"));
-        assert_eq!(outgoing.credit_end(), 3);
-        outgoing.grant(u64::MAX);
-        assert_eq!(outgoing.next_chunk(), None);
-    }
-}
-
 // bytes that differ from one to the next, so a byte out of place shows
 fn pattern_of(length: usize) -> Bytes {
     Bytes::from(

@@ -16,6 +16,57 @@ public sealed class CallSessionTests
     // definition
 
     [Fact]
+    public void Runs_a_request_in_its_connection_s_session_when_it_presents_none_or_that_token()
+    {
+        var token = SessionToken.FromBytes(Enumerable.Repeat((byte)3, SessionToken.Bytes).ToArray());
+        var other = SessionToken.FromBytes(Enumerable.Repeat((byte)4, SessionToken.Bytes).ToArray());
+        var held = (token, (object?)null);
+
+        Assert.NotNull(CallSession.ConnectionSessionOf(null, held));
+        Assert.NotNull(CallSession.ConnectionSessionOf(Credential.Opaque(token), held));
+        Assert.Null(CallSession.ConnectionSessionOf(Credential.Opaque(other), held));
+        Assert.Null(CallSession.ConnectionSessionOf(Credential.Elsewhere(), held));
+        Assert.Null(CallSession.ConnectionSessionOf(null, (null, null)));
+    }
+
+    [Fact]
+    public void Presents_what_a_call_asks_OPAQUE_for_the_session_known_and_refuses_what_it_cannot()
+    {
+        var token = SessionToken.FromBytes(Enumerable.Repeat((byte)3, SessionToken.Bytes).ToArray());
+
+        Assert.Equal((Credential.Opaque(token), null, null), CallSession.PresentedCredentialOf(Credential.Opaque(), token));
+        var (_, _, refusal) = CallSession.PresentedCredentialOf(Credential.Opaque(), null);
+
+        Assert.Equal((ushort)ProtocolCode.SessionRequired, refusal!.Code);
+        Assert.Throws<ArgumentException>(() =>
+        {
+            CallSession.AssertPresentable(Credential.Jwt(""));
+        });
+        Assert.Equal((Credential.Elsewhere(), "x", null), CallSession.PresentedCredentialOf(Credential.Elsewhere("x"), null));
+    }
+
+    [Fact]
+    public void Fails_a_credential_its_transport_cannot_carry_DESTINATION_UNREACHABLE()
+    {
+        static bool Carries(string? credential)
+        {
+            return credential == "x";
+        }
+
+        var token = SessionToken.FromBytes(Enumerable.Repeat((byte)3, SessionToken.Bytes).ToArray());
+        var elsewhere = Credential.Elsewhere();
+        const ushort Unreachable = (ushort)ProtocolCode.DestinationUnreachable;
+
+        // an upgrade carrying x refuses y or nothing: its caller supplies that comparison
+        Assert.Null(CallSession.UncarriedOf(elsewhere, (Carries("x"), true)));
+        Assert.Equal(Unreachable, CallSession.UncarriedOf(elsewhere, (Carries("y"), true))?.Code);
+        Assert.Equal(Unreachable, CallSession.UncarriedOf(elsewhere, (Carries(null), true))?.Code);
+        Assert.Equal(Unreachable, CallSession.UncarriedOf(elsewhere, (Carries("x"), false))?.Code);
+        Assert.Equal(Unreachable, CallSession.UncarriedOf(Credential.Jwt("a"), (false, false))?.Code);
+        Assert.Null(CallSession.UncarriedOf(Credential.Opaque(token), (false, false)));
+    }
+
+    [Fact]
     public void Names_a_scheme_to_come_by_the_word_scheme_and_its_number_in_the_order_of_the_numbers()
     {
         Assert.Equal(

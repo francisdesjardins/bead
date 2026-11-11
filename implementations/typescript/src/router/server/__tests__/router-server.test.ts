@@ -457,6 +457,72 @@ const recordActivity = (router: ReturnType<typeof createRouterServer>) => {
 
 // definition
 
+test('a request its transport tells once its router is disposed reaches no resolver', async () => {
+  const { deliver, sent, transport } = createScriptedTransport();
+  using router = createRouterServer(transport);
+  const errors = recordErrors(router);
+  let resolved = 0;
+
+  router.registerResolver(
+    Object.assign(() => {
+      resolved += 1;
+
+      return Promise.resolve();
+    }, echo)
+  );
+  router[Symbol.dispose]();
+  deliver(first, requestOf(1, { payload: new TextEncoder().encode('hi') }));
+  await sleep(0);
+
+  expect([resolved, sent, errors]).toEqual([0, [], []]);
+});
+
+test('a session provider’s error or panic is reported and refuses only its call', async () => {
+  for (const throws of [false, true]) {
+    const { deliver, sent, transport } = createScriptedTransport();
+    using router = createRouterServer(transport, {
+      sessionOf: ({ header }) => {
+        if (header.callId === 1) {
+          if (throws) {
+            throw new Error('the session provider failed');
+          }
+
+          throw new TypeError('the session provider failed');
+        }
+
+        return undefined;
+      },
+    });
+    const errors = recordErrors(router);
+    const admitted: number[] = [];
+
+    createServiceManager(router).getRequestResolver(echo, {
+      serializer: answering,
+      beforeRequest: ({ header }) => {
+        admitted.push(header.callId);
+
+        return true;
+      },
+    })((_request, response) => {
+      return response('ok');
+    });
+    deliver(first, requestOf(1));
+    deliver(first, requestOf(3));
+    await sleep(0);
+
+    expect(admitted).toEqual([3]);
+    expect(answersOf(sent)).toEqual([
+      [first, 'failure', 1, ProtocolCode.PROCEDURE_FAILED],
+      [first, 'result', 3, 'ok'],
+    ]);
+    expect(sent[0]?.envelope).toMatchObject({ failure: { detail: '' } });
+    expect(errors).toEqual([
+      [expect.objectContaining({ message: 'the session provider failed' }), first],
+    ]);
+    expect(router.gauges().counts['answeringCalls']).toBe(0);
+  }
+});
+
 test.describe('createRouterServer', () => {
   test('takes this package’s transport server', () => {
     const transport = createWebSocketTransportServer({ WebSocketServer });

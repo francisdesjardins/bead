@@ -31,6 +31,45 @@ public sealed class IdentityTests
     // definition
 
     [Fact]
+    public void Names_a_procedure_by_a_lower_case_letter_then_letters_and_digits_63_at_most()
+    {
+        foreach (var name in new[] { "echo", "endSessionsOf", "a1", new string('a', 63) })
+        {
+            Assert.True(Identity.IsProcedureName(name), name);
+        }
+
+        foreach (var name in new[] { string.Empty, "Echo", "1a", "end_session", "café", new string('a', 64) })
+        {
+            Assert.False(Identity.IsProcedureName(name), name);
+        }
+    }
+
+    [Fact]
+    public void Folds_ASCII_letters_alone_as_it_compares_names()
+    {
+        Assert.True(Identity.AreOneName("echo", "eCHO"));
+        Assert.False(Identity.AreOneName("café", "cafÉ"));
+        Assert.False(Identity.AreOneName("echo", "echos"));
+    }
+
+    [Fact]
+    public void Refuses_a_declaration_out_of_its_range_then_off_its_form_then_against_its_kind()
+    {
+        Identity.Check(Echo, nameof(Echo));
+        Assert.Contains(" is out of its range: ", RefusalOf(Echo with { ServiceId = 0, ProcedureName = "Off" }), StringComparison.Ordinal);
+        Assert.Contains(" is off its form: ", RefusalOf(Echo with { ProcedureName = "Off" }), StringComparison.Ordinal);
+
+        var command = Echo with { ProcedureKind = ProcedureKind.Command };
+
+        Identity.Check(command, (DeclarationWay.ClientResolver, "procedure"));
+        Assert.Contains(" is against its kind: ", Assert.Throws<ArgumentException>(() =>
+        {
+            Identity.Check(command, (DeclarationWay.ClientRequester, "procedure"));
+        }).Message, StringComparison.Ordinal);
+        Identity.Check(Echo, (DeclarationWay.ClientRequester, "procedure"));
+    }
+
+    [Fact]
     public void Refuses_an_id_or_a_revision_out_of_its_range_service_0_and_revision_0_among_them()
     {
         // * what no C# type holds is never given (docs/support.md, "An id or a revision no typed side holds")

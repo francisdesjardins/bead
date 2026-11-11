@@ -120,6 +120,41 @@ public sealed class ViolationsTests
     // definition
 
     [Fact]
+    public void Refuses_a_request_with_a_violation_held_or_one_counted_past_its_bound()
+    {
+        var violation = new Violation { FieldPath = "names", Message = "value is required", RuleId = "required" };
+
+        Assert.False(Judged.None.Refuses);
+        Assert.True(new Judged { Violations = [violation] }.Refuses);
+        Assert.True(new Judged { More = 1, Violations = [] }.Refuses);
+    }
+
+    [Fact]
+    public void Writes_each_violation_a_line_then_its_count_and_reads_them_back()
+    {
+        var judged = new Judged
+        {
+            More = 3,
+            Violations =
+            [
+                new Violation { FieldPath = "names", Message = "value is required", RuleId = "required" },
+                new Violation { FieldPath = "names", Message = "value is required", RuleId = "string.min_len" },
+            ],
+        };
+        var detail = Violations.DetailOf(judged, 1_024);
+        var read = Violations.Of(Failure.OfProtocol(ProtocolCode.PayloadInvalid, detail));
+
+        Assert.Equal(3, detail.Split('\n').Length);
+        Assert.Equal(["required", "string.min_len"], read.Violations.Select((violation) =>
+        {
+            return violation.RuleId;
+        }));
+        Assert.Equal(3, read.More);
+        Assert.Empty(Violations.Of(Failure.OfProtocol((ProtocolCode)64, detail)).Violations);
+        Assert.Equal(5, Violations.Of(Failure.OfProtocol(ProtocolCode.PayloadInvalid, Violations.DetailOf(judged, Violations.ClosingBytes))).More);
+    }
+
+    [Fact]
     public void Keeps_a_full_violation_detail_closed_to_smaller_violations_after_the_first_refusal()
     {
         var small = new Violation { Bounds = BoundsOf("{}"), FieldPath = "a", Message = "", RuleId = "required" };

@@ -127,6 +127,69 @@ public sealed class JwtVerifierTests
 
     // definition
 
+    [Fact]
+    public void Refuses_a_key_not_shaped_for_its_algorithm_naming_its_issuer()
+    {
+        var key = new JwtKey
+        {
+            Algorithm = JwtAlgorithm.Hs256,
+            Issuer = "https://issuer.example",
+            Jwk = JsonSerializer.SerializeToElement(new { kty = "oct", k = Base64Url.EncodeToString(Enumerable.Repeat((byte)7, 32).ToArray()) }),
+        };
+
+        JwtVerifier.AssertJwtKey(([key], []));
+        var refused = Assert.Throws<ArgumentException>(() =>
+        {
+            JwtVerifier.AssertJwtKey(([key with { Jwk = ElementOf("""{"kty":"EC"}""") }], []));
+        });
+
+        Assert.Contains("https://issuer.example", refused.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Reads_a_token_s_header_and_claims_verifying_nothing_and_none_of_what_is_no_token()
+    {
+        const string HeaderText = """{"alg":"HS256","kid":"k1"}""";
+        const string ClaimsText = """{"iss":"https://issuer.example","aud":["a","b"]}""";
+        var token = $"{Base64Url.EncodeToString(Encoding.UTF8.GetBytes(HeaderText))}.{Base64Url.EncodeToString(Encoding.UTF8.GetBytes(ClaimsText))}.{Base64Url.EncodeToString("signature"u8)}";
+        var read = JwtVerifier.ReadUnverified(token);
+
+        Assert.NotNull(read);
+        Assert.True(JsonElement.DeepEquals(ElementOf(HeaderText), read.Value.Header));
+        Assert.True(JsonElement.DeepEquals(ElementOf(ClaimsText), read.Value.Claims));
+        Assert.True(JwtVerifier.NamesAudience(read.Value.Claims, ["a"]));
+        Assert.True(JwtVerifier.NamesAudience(read.Value.Claims, ["b"]));
+        Assert.True(JwtVerifier.NamesAudience(ElementOf("""{"aud":"a"}"""), ["a"]));
+        Assert.False(JwtVerifier.NamesAudience(ElementOf("{}"), ["a"]));
+
+        foreach (var refused in new[] { "", "a.b", "a.b.c.d", "!.!.!" })
+        {
+            Assert.Null(JwtVerifier.ReadUnverified(refused));
+        }
+    }
+
+    [Fact]
+    public async Task Refuses_what_is_no_token_before_any_key_is_tried()
+    {
+        var reads = 0;
+        var verdict = await JwtVerifier.VerifyJwt("not a token", new VerifyJwtProps
+        {
+            Keys = [],
+            Audiences = [],
+            Now = () =>
+            {
+                reads += 1;
+
+                return 0;
+            },
+        });
+
+        Assert.Equal(JwtRefusal.Token, verdict.Reason);
+        Assert.False(verdict.Holds);
+        Assert.Equal("Signature", JwtRefusal.Signature.ToString());
+        Assert.Equal(0, reads);
+    }
+
     /// <summary>The names of every vector of the <c>jwtVerdicts</c> group.</summary>
     public static TheoryData<string> JwtVerdicts { get; } = Vectors.NamesOf("jwtVerdicts");
 

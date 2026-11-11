@@ -391,6 +391,26 @@ export const createCredentialResolver = (
     }
   };
 
+  // a deadline's timer the clock refused: the ask it was armed for fails as an ask that fails does,
+  // its signal aborted, and every call that waits for the deadline with it, the clock's error its
+  // cause (spec 13.9.3)
+  const refuse = (entry: IIssuerKeys, reason: unknown): void => {
+    const failure = new Error(`the key set's ask for ${entry.issuer} failed`, { cause: reason });
+    const { asking, next } = entry;
+
+    if (asking !== undefined) {
+      settle(entry, { ask: asking, outcome: { failure } });
+      asking.controller.abort(failure);
+    }
+
+    for (const waiter of next) {
+      waiter.among = undefined;
+      waiter.released.reject(failure);
+    }
+
+    next.clear();
+  };
+
   // ! a key set that throws as it is asked fails as one that rejects: this function is async. It
   // settles the ask with the answer, unless a deadline that answer reached settled it first
   const answer = async (entry: IIssuerKeys, ask: IKeySetAsk): Promise<void> => {
@@ -434,11 +454,22 @@ export const createCredentialResolver = (
       waiter.isAfter = true;
     }
 
+    const { deadline } = entry;
+
     entry.next = new Set();
     disarm(entry);
     entry.asking = ask;
     entry.deadline = now + KEY_SET_INTERVAL;
     arm(entry);
+
+    // ! a deadline its clock refused failed the ask before it went: nothing is asked, and the
+    // deadline it replaced stands, so the next call asks at once
+    if (ask.isSettled) {
+      entry.deadline = deadline;
+
+      return ask;
+    }
+
     void answer(entry, ask);
 
     return ask;
@@ -480,14 +511,22 @@ export const createCredentialResolver = (
 
     const delay = Math.max(1, Math.ceil(entry.deadline - clock.performance.now()));
 
-    entry.timer = clock.setTimeout(() => {
-      entry.timer = undefined;
-      reach(entry);
+    // one the clock refuses fails at once what it was armed for, and leaves no timer
+    try {
+      entry.timer = clock.setTimeout(() => {
+        entry.timer = undefined;
+        reach(entry);
 
-      if (entry.asking !== undefined || entry.next.size > 0) {
-        arm(entry);
-      }
-    }, delay);
+        if (entry.asking !== undefined || entry.next.size > 0) {
+          arm(entry);
+        }
+      }, delay);
+    } catch (reason) {
+      refuse(entry, reason);
+
+      return;
+    }
+
     // a browser's timer has no `unref`
     (entry.timer as { unref?: () => unknown }).unref?.();
   };

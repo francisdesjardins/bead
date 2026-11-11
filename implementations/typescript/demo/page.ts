@@ -33,6 +33,7 @@ import {
 import { drawGlyph, GLYPH_BYTES, GLYPH_SIDE } from './glyph';
 import { createQuietCalls, watchDebug } from './debug';
 import { SignUpProcedures } from './gen/typescript/demo/v1/sign_up_bead';
+import { mountPackages } from './packages';
 import { mountScenes } from './scenes';
 import { mountSides } from './sides';
 // ! types alone: the module itself is loaded apart, over MQTT 5 alone
@@ -130,6 +131,8 @@ const elementOf = (id: string): HTMLElement => {
 // the lines each log is owed, written at the next frame: a burst lays the page out once, not once a
 // line
 const owed = new Map<HTMLElement, string[]>();
+// the envelopes that crossed, the reads aside, however many the log still keeps: the wire's count
+let crossed = 0;
 
 const writeLogs = (): void => {
   for (const [list, lines] of owed) {
@@ -139,10 +142,21 @@ const writeLogs = (): void => {
     for (let index = lines.length - 1; index >= 0; index -= 1) {
       const line = document.createElement('li');
       const text = lines[index] ?? '';
+      const arrow = text.slice(0, 1);
 
-      line.textContent = text;
+      // its arrow apart, for the page to colour; the line's text stays the same
+      if (arrow === '→' || arrow === '←') {
+        const mark = document.createElement('span');
+
+        mark.className = 'arrow';
+        mark.textContent = arrow;
+        line.append(mark, text.slice(1));
+      } else {
+        line.textContent = text;
+      }
+
       // which way it went, for the page to mark
-      line.dataset['direction'] = text.startsWith('→') ? 'tx' : 'rx';
+      line.dataset['direction'] = arrow === '→' ? 'tx' : 'rx';
       fragment.append(line);
     }
 
@@ -154,6 +168,10 @@ const writeLogs = (): void => {
   }
 
   owed.clear();
+
+  for (const count of document.querySelectorAll('[data-wire-count]')) {
+    count.textContent = numbers.format(crossed);
+  }
 };
 
 /** A line at the top of `list`, at the next frame; the oldest let go past the last one kept. */
@@ -426,14 +444,16 @@ const port = Number(
 );
 const pathname = document.body.dataset['beadPathname'] ?? '/';
 const shown = {
+  answered: elementOf('answered'),
   burst: elementOf('burst'),
   calls: elementOf('calls-log'),
   // each a <details>, as the page declares it
   clientExposition: elementOf('client-exposition') as HTMLDetailsElement,
   clientMetrics: elementOf('client-metrics'),
   connection: elementOf('connection'),
+  connections: elementOf('connections'),
   counter: elementOf('counter'),
-  durations: elementOf('durations'),
+  counterOutcome: elementOf('counter-outcome'),
   envelopes: elementOf('envelopes-log'),
   gauges: elementOf('gauges'),
   // a canvas, as the page declares it
@@ -441,10 +461,15 @@ const shown = {
   glyphCaption: elementOf('glyph-caption'),
   health: elementOf('health'),
   identity: elementOf('identity'),
-  result: elementOf('result'),
+  identitySession: elementOf('identity-session'),
+  identityWho: elementOf('identity-who'),
+  mean: elementOf('mean'),
+  median: elementOf('median'),
   serverExposition: elementOf('server-exposition') as HTMLDetailsElement,
   serverMetrics: elementOf('server-metrics'),
+  steps: elementOf('steps'),
   subscribe: elementOf('subscribe'),
+  subscriptions: elementOf('subscriptions'),
   tabs: elementOf('tabs'),
 };
 
@@ -493,7 +518,7 @@ const readChanged = mergedOf(async () => {
   try {
     shown.counter.textContent = await calls.read('')();
   } catch (reason) {
-    shown.result.textContent = `read refused: ${reasonOf(reason)}`;
+    shown.counterOutcome.textContent = `read refused: ${reasonOf(reason)}`;
   }
 });
 
@@ -545,6 +570,10 @@ const showStats = (stats: IServerStats): void => {
 
   shown.health.dataset['status'] = stats.health.status;
   shown.health.textContent = [stats.health.status, ...failing].join(' — ');
+  shown.connections.textContent = numbers.format(stats.gauges.server.counts['connections'] ?? 0);
+  shown.subscriptions.textContent = numbers.format(
+    stats.gauges.router.counts['notifiedSubscriptions'] ?? 0
+  );
   shown.gauges.replaceChildren(
     ...Object.entries(stats.gauges).map(([layer, { anomalies, ceilings, counts, orphans }]) => {
       const held = Object.entries(counts)
@@ -576,12 +605,12 @@ const showStats = (stats: IServerStats): void => {
   );
 };
 
-/** The calls the server answered, every procedure's together: how many, their mean, their median. */
+/** The calls the server answered, every procedure's together: how many, their median, their mean. */
 const showAnswered = ({ count, mean, median }: IAnswered): void => {
-  shown.durations.textContent =
-    count === 0
-      ? 'none yet'
-      : `${numbers.format(count)} calls, mean ${numbers.format(mean ?? 0)} ms, median about ${numbers.format(median ?? 0)} ms`;
+  shown.answered.textContent = numbers.format(count);
+  shown.median.textContent = count === 0 ? '—' : `≈ ${numbers.format(median ?? 0)} ms`;
+  shown.mean.textContent =
+    count === 0 ? 'none yet' : `mean ${numbers.format(mean ?? 0)} ms; the median within its bucket`;
 };
 
 /**
@@ -672,7 +701,7 @@ const refreshMetrics = mergedOf(async () => {
     showMetrics(shown.serverMetrics, rows);
     showExposition(shown.serverExposition, theirs);
   } catch (reason) {
-    shown.durations.textContent = `unread: ${reasonOf(reason)}`;
+    shown.mean.textContent = `unread: ${reasonOf(reason)}`;
     shown.serverMetrics.replaceChildren(
       lineOf('—', [chipOf(`unread: ${reasonOf(reason)}`, 'failure')])
     );
@@ -693,17 +722,57 @@ const showGlyph = (pixels: Uint8Array, caption: string): void => {
   shown.glyphCaption.textContent = caption;
 };
 
-// who the calls are made as, as the server read the token's claims; why not, once logged out
+// who the calls are made as, as the server read the token's claims, by a role in the bar, its whole
+// in its title and in its card; why not, once logged out
 const showIdentity = (identity: IIdentity | string): void => {
   if (typeof identity === 'string') {
-    shown.identity.textContent = identity;
+    shown.identity.textContent = 'logged out';
+    shown.identity.dataset['role'] = 'none';
+    shown.identity.title = identity;
+    shown.identityWho.textContent = identity;
+    shown.identitySession.textContent = '';
 
     return;
   }
 
   const { claims, end } = identity;
+  const who = `${claims.sub}, ${claims.roles.join(', ')} (${claims.scope})`;
+  const session = `session ${claims.sid.slice(0, 8)}…, until ${new Date(end).toLocaleTimeString('en-CA')}`;
 
-  shown.identity.textContent = `${claims.sub}, ${claims.roles.join(', ')} (${claims.scope}) — session ${claims.sid.slice(0, 8)}…, until ${new Date(end).toLocaleTimeString('en-CA')}`;
+  shown.identity.textContent = claims.roles.join(', ');
+  shown.identity.dataset['role'] = claims.roles.join(' ');
+  shown.identity.title = `${who} — ${session}`;
+  shown.identityWho.textContent = who;
+  shown.identitySession.textContent = session;
+};
+
+/** How the connection stands: its light, its first words in the bar, its whole as its title. */
+const showConnection = (state: 'closed' | 'open', said: string): void => {
+  shown.connection.dataset['state'] = state;
+  // a connection closed still says what to do, since a phone shows no title
+  shown.connection.textContent = said.startsWith('closed')
+    ? 'closed: reload'
+    : (said.split(/[,:]/u)[0] ?? said);
+  shown.connection.title = said;
+};
+
+/** A step of what to try first, done; the first one not done, the one to do. */
+const markStep = (step: string): void => {
+  const steps = [...shown.steps.querySelectorAll<HTMLElement>('[data-step]')];
+
+  for (const each of steps) {
+    each.toggleAttribute(
+      'data-done',
+      each.hasAttribute('data-done') || each.dataset['step'] === step
+    );
+    each.removeAttribute('aria-current');
+  }
+
+  steps
+    .find((each) => {
+      return !each.hasAttribute('data-done');
+    })
+    ?.setAttribute('aria-current', 'step');
 };
 
 // the token presented by every call from now on, in its header, and the server asked what it read
@@ -736,6 +805,10 @@ const ACTIONS: Readonly<Record<string, () => Promise<string>>> = Object.freeze({
     showHeard();
 
     const value = await calls.burst('')();
+
+    if (registrations.size > 0) {
+      markStep('burst');
+    }
 
     return registrations.size === 0
       ? `${String(BURST_CHANGES)} increments, counter at ${value}: subscribe to see what comes of them`
@@ -784,7 +857,16 @@ const ACTIONS: Readonly<Record<string, () => Promise<string>>> = Object.freeze({
 
     slowCall = controller;
 
-    const waited = await calls.slow('')({ signal: controller.signal, timeout: 30_000 });
+    const waited = await calls
+      .slow('')({ signal: controller.signal, timeout: 30_000 })
+      .catch((reason: unknown) => {
+        // a slow call cancelled is the third step done, and still a refusal to show
+        if (reason instanceof CancelError) {
+          markStep('glyph');
+        }
+
+        throw reason;
+      });
 
     return `answered after ${numbers.format(Number(waited))} ms`;
   },
@@ -838,11 +920,16 @@ const ACTIONS: Readonly<Record<string, () => Promise<string>>> = Object.freeze({
 
     // shown once the server says it has the same: a glyph refused never crossed
     showGlyph(payload, 'sent to the server');
+    markStep('glyph');
 
     return `the server received the same glyph, ${numbers.format(payload.length)} bytes, SHA-256 ${mine.slice(0, 16)}…`;
   },
   writer: async () => {
-    return logIn(await tokenOf('writer'));
+    const said = await logIn(await tokenOf('writer'));
+
+    markStep('writer');
+
+    return said;
   },
 });
 
@@ -876,6 +963,7 @@ services.on('debug', (error, info) => {
 
 client.router.on('debug', (info) => {
   if (!isQuiet(info)) {
+    crossed += 1;
     log(shown.envelopes, envelopeLineOf(info));
   }
 });
@@ -904,7 +992,9 @@ watchDebug(client, { quiet: READS });
 // the sign-up, its request held to the rules of its .proto
 mountSignUp(client, { reasonOf });
 mountSides();
-// the scenes, one a tab, and the logs beside them
+// the Packages tab: a blueprint cut into beadc.yaml's outputs, by the builder's own code
+mountPackages();
+// the scenes, one a tab, and the wire beside them
 mountScenes();
 
 // an exposition opened is written at once, from its last text
@@ -920,8 +1010,7 @@ document
   ?.setAttribute('aria-current', 'page');
 
 client.transport.on('close', () => {
-  shown.connection.dataset['state'] = 'closed';
-  shown.connection.textContent = 'closed: reload the page';
+  showConnection('closed', 'closed: reload the page');
   showIdentity('logged out');
 });
 
@@ -931,19 +1020,22 @@ addEventListener('pagehide', () => {
 });
 
 for (const button of document.querySelectorAll<HTMLButtonElement>('button[data-action]')) {
+  // what it says, in its scene's card
+  const outcome = button.closest('.scene-card')?.querySelector<HTMLElement>('[data-outcome]');
+
   button.addEventListener('click', () => {
     const action = ACTIONS[button.dataset['action'] ?? ''];
 
-    if (action === undefined) {
+    if (action === undefined || outcome === null || outcome === undefined) {
       return;
     }
 
     action().then(
       (said) => {
-        shown.result.textContent = said;
+        outcome.textContent = said;
       },
       (reason: unknown) => {
-        shown.result.textContent = `refused: ${reasonOf(reason)}`;
+        outcome.textContent = `refused: ${reasonOf(reason)}`;
       }
     );
   });
@@ -979,20 +1071,20 @@ for (const button of document.querySelectorAll<HTMLButtonElement>('button[data-a
         refreshMetrics();
       }
     }, STATS_MILLISECONDS);
-    shown.connection.dataset['state'] = 'open';
     // a second tab is a second client of the same server
     shown.tabs.hidden = workerClient === undefined || !isShared;
-    shown.connection.textContent =
+    showConnection(
+      'open',
       overMqtt !== undefined
         ? `connected, MQTT 5 through the name ${overMqtt.name}`
         : workerClient === undefined
           ? `connected, ${transport === 'http' ? 'HTTP' : 'WebSocket'} on ${location.host}${pathname}`
           : isShared
             ? 'connected, in a Web Worker the tabs share'
-            : 'connected, in a Web Worker of the page';
+            : 'connected, in a Web Worker of the page'
+    );
   },
   (reason: unknown) => {
-    shown.connection.dataset['state'] = 'closed';
-    shown.connection.textContent = `cannot connect: ${String(reason)}`;
+    showConnection('closed', `cannot connect: ${String(reason)}`);
   }
 );

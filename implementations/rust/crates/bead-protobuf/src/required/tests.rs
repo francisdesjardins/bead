@@ -241,7 +241,7 @@ fn looped(levels: usize) -> Loop {
 }
 
 #[test]
-fn check_required_stops_at_the_bound_and_refuses() {
+fn check_stops_at_the_bound_and_refuses() {
     // ! a walk 10,000 deep would overflow a thread of 2 MiB: it stops past 100, and the value is
     // given back unread, since its drop would recurse as deep
     #[expect(

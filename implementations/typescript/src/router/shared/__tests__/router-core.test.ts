@@ -83,6 +83,217 @@ const PACKAGE = JSON.parse(
 // definition
 
 test.describe('createRouterCore', () => {
+  test('refuses a last call id of zero or its peer’s parity before a router starts', () => {
+    for (const [failures, refused, accepted] of [
+      [CLIENT_FAILURES, [0, 2, 8, 0xfffffffe], [1, 0xffffffff]],
+      [SERVER_FAILURES, [0, 1, 7, 0xffffffff], [2, 0xfffffffe]],
+    ] as const) {
+      const { port, sent } = createPort({ failures });
+
+      for (const lastCallId of refused) {
+        expect(() => {
+          return createRouterCore(port, { lastCallId });
+        }).toThrow(ProgrammerError);
+      }
+
+      for (const lastCallId of accepted) {
+        using core = createRouterCore(port, { lastCallId });
+
+        expect(core.gauges().counts['pendingCalls']).toBe(0);
+      }
+
+      expect(sent).toEqual([]);
+    }
+  });
+
+  test('answers a failure its resolver answers as it is, and any error it fails with PROCEDURE_FAILED with no detail and reported, a failure of its own among them', async () => {
+    const { port, sent, reported } = createPort();
+    using core = createRouterCore(port);
+    const failure = { code: 21, detail: 'nothing to echo', scope: FailureScope.APPLICATION };
+    const thrown = new FailureError(failure);
+    const other = new Error('internal: 10.0.0.5:8443');
+
+    core.registerResolver(
+      Object.assign(
+        async ({ connectionHandle, header, payload }: IRequestResolverProps<Handle>) => {
+          const asked = new TextDecoder().decode(payload);
+
+          // a procedure answers its own failure through its answerer (spec 9.0, 9.5)
+          if (asked === 'own') {
+            await core.respond({ failure }, { connectionHandle, header });
+
+            return;
+          }
+
+          throw asked === 'thrown' ? thrown : other;
+        },
+        echo
+      )
+    );
+    core.receive(requestOf(1, { payload: new TextEncoder().encode('own') }), 'a');
+    core.receive(requestOf(3, { payload: new TextEncoder().encode('thrown') }), 'a');
+    core.receive(requestOf(5, { payload: new TextEncoder().encode('other') }), 'a');
+    await sleep(0);
+
+    expect(
+      sent.map(({ envelope }) => {
+        return envelope?.kind === EnvelopeKind.FAILURE
+          ? [envelope.header.callId, envelope.failure.code, envelope.failure.detail]
+          : envelope?.kind;
+      })
+    ).toEqual([
+      [1, 21, 'nothing to echo'],
+      [3, ProtocolCode.PROCEDURE_FAILED, ''],
+      [5, ProtocolCode.PROCEDURE_FAILED, ''],
+    ]);
+    expect(reported).toEqual([
+      [thrown, 'a'],
+      [other, 'a'],
+    ]);
+  });
+
+  const checkSubscriptionResult = async (includesPattern: boolean): Promise<void> => {
+    for (const sample of [
+      { length: 37, requestPayload: new Uint8Array(0), patterned: false },
+      { length: 100, requestPayload: new Uint8Array([1]), patterned: false },
+      ...(includesPattern
+        ? [{ length: 100, requestPayload: new Uint8Array([1]), patterned: true }]
+        : []),
+    ]) {
+      let told = 0;
+      const { port, sent, reported } = createPort({
+        beforeAnswer: () => {
+          told += 1;
+
+          return undefined;
+        },
+      });
+      using core = createRouterCore(port, { limits });
+      const seen: IRequestResolverProps<Handle>[] = [];
+
+      core.registerResolver(resolverOf(echo, seen));
+      core.receive(requestOf(1, { opensSubscription: true, payload: sample.requestPayload }), 'a');
+      await sleep(0);
+
+      const target = { connectionHandle: 'a' as const, header: seen[0]?.header ?? headerOf(1) };
+
+      await expect(
+        core.respond(
+          { payload: sample.patterned ? patternOf(sample.length) : new Uint8Array(sample.length) },
+          target
+        )
+      ).rejects.toMatchObject({
+        code: ProtocolCode.PAYLOAD_TOO_LARGE,
+        detail: "a subscription's result goes in one envelope, of 64 bytes at most",
+      });
+      expect([told, sent, reported]).toEqual([0, [], []]);
+
+      if (sample.length === 37) {
+        await core.respond({ payload: new Uint8Array(36) }, target);
+        expect(told).toBe(1);
+        expect(piecesOf(sent)).toEqual([[EnvelopeKind.RESULT, 1, undefined, 36]]);
+        expect(sent[0]?.envelope).toMatchObject({ payload: new Uint8Array(36) });
+      }
+
+      expect(reported).toEqual([]);
+    }
+  };
+
+  test('a subscription’s result stays within one envelope before the side hears of it', async () => {
+    await checkSubscriptionResult(false);
+  });
+
+  test('refuse a transfer for a subscription’s result before the side hears of it', async () => {
+    await checkSubscriptionResult(true);
+  });
+
+  /**
+   * A core that answers its peer's request on call 1 with a result of 100 bytes, its opening and two
+   * chunks under `limits`: its `held`th send waits for the test to settle it, the others go as they
+   * come. Nothing is credited yet.
+   */
+  const answerHolding = async (held: number) => {
+    const { port, sent } = createPort();
+    const holding = Promise.withResolvers<void>();
+    let sends = 0;
+    const core = createRouterCore(
+      {
+        ...port,
+        send: (bytes, handle) => {
+          const going = port.send(bytes, handle);
+
+          sends += 1;
+
+          return sends === held ? holding.promise : going;
+        },
+      },
+      { limits }
+    );
+    const seen: IRequestResolverProps<Handle>[] = [];
+
+    core.registerResolver(resolverOf(echo, seen));
+    core.receive(requestOf(1, { payload: new Uint8Array([1]) }), 'a');
+    await sleep(0);
+
+    const responding = core.respond(
+      { payload: patternOf(100) },
+      { connectionHandle: 'a', header: seen[0]?.header ?? headerOf(1) }
+    );
+    const kinds = () => {
+      return sent.map(({ envelope }) => {
+        return envelope?.kind;
+      });
+    };
+
+    return { core, holding, kinds, responding };
+  };
+
+  // spec 12.7
+  test('a chunk refused after the last one went fails the answer', async () => {
+    const refused = new Error('the transport refused the chunk');
+    const { core: answering, holding, kinds, responding } = await answerHolding(2);
+    using core = answering;
+    const failed = expect(responding).rejects.toBe(refused);
+
+    core.receive(creditOf(1, 100), 'a');
+    await sleep(0);
+    expect(kinds()).toEqual([EnvelopeKind.RESULT, EnvelopeKind.CHUNK, EnvelopeKind.CHUNK]);
+    holding.reject(refused);
+    await failed;
+  });
+
+  // spec 12.7
+  test('an opening refused after the last chunk went fails the answer', async () => {
+    const refused = new Error('the transport refused the opening');
+    const { core: answering, holding, kinds, responding } = await answerHolding(1);
+    using core = answering;
+    const failed = expect(responding).rejects.toBe(refused);
+
+    core.receive(creditOf(1, 100), 'a');
+    await sleep(0);
+    expect(kinds()).toEqual([EnvelopeKind.RESULT, EnvelopeKind.CHUNK, EnvelopeKind.CHUNK]);
+    holding.reject(refused);
+    await failed;
+  });
+
+  // spec 12.7
+  test('an opening that goes after the last chunk holds the answer until it went', async () => {
+    const { core: answering, holding, kinds, responding } = await answerHolding(1);
+    using core = answering;
+    let isAnswered = false;
+
+    void responding.then(() => {
+      isAnswered = true;
+    });
+    core.receive(creditOf(1, 100), 'a');
+    await sleep(0);
+    expect(kinds()).toEqual([EnvelopeKind.RESULT, EnvelopeKind.CHUNK, EnvelopeKind.CHUNK]);
+    expect(isAnswered).toBe(false);
+    holding.resolve();
+    await responding;
+    expect(isAnswered).toBe(true);
+  });
+
   test.describe('takes what comes in', () => {
     // debugging 5.2
     test('read, traced, then dispatched; what does not read is reported, not traced', async () => {

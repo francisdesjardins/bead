@@ -39,7 +39,7 @@ fn gives_several_parts_as_one_and_refuses_a_count_two_of_them_name() {
 }
 
 #[test]
-fn gives_a_part_s_gauges_what_it_does_not_give_being_none() {
+fn gives_a_part_gauges_what_it_does_not_give_being_none() {
     use super::Gauges;
     use std::collections::{BTreeMap, BTreeSet};
     use std::sync::Arc;

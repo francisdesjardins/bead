@@ -48,6 +48,22 @@ public sealed partial class RouterClientTests
     // definition
 
     [Fact]
+    public void Refuses_a_router_that_presents_a_JWT_by_default_within_limits_too_small_for_it()
+    {
+        var limits = RouterLimits.Default with { ChunkBytes = 512, MaximumEnvelopeBytes = 512, WindowBytes = 1_024 };
+        var refused = Assert.Throws<ArgumentException>(() =>
+        {
+            return new ScriptedRouter(new RouterClientOptions { Credential = Credential.Jwt("a.b.c"), Limits = limits });
+        });
+
+        Assert.Contains("1,024 bytes at least", refused.Message, StringComparison.Ordinal);
+
+        using var scripted = new ScriptedRouter(new RouterClientOptions { Credentials = new Credentials(), Limits = limits });
+
+        Assert.Null(scripted.Router.Credential);
+    }
+
+    [Fact]
     public async Task Presents_a_default_JWT_on_every_call_that_gives_none_of_its_own_and_hands_a_default_ELSEWHERE_s_carried_value_to_its_transport_with_scheme_3_in_the_block()
     {
         using var scripted = new ScriptedRouter(new RouterClientOptions { Credential = DefaultJwt });
