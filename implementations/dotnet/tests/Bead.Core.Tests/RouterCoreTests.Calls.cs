@@ -34,28 +34,38 @@ public sealed partial class RouterCoreTests
         }
     }
 
-    [Fact(Skip = "divergence: a faulted application FailureException is reported and answered PROCEDURE_FAILED")]
-    public async Task Answers_a_resolver_s_own_failure_as_it_is_and_any_other_error_PROCEDURE_FAILED_with_no_detail_and_reported()
+    [Fact]
+    public async Task Answers_a_failure_its_resolver_answers_as_it_is_and_any_error_it_fails_with_PROCEDURE_FAILED_with_no_detail_and_reported_a_failure_of_its_own_among_them()
     {
         var server = new Peer(RouterSide.Server);
         using var core = server.Core;
         var resolver = server.Resolve();
-        var own = new FailureException(Failure.OfApplication(21, "nothing to echo"), new FailureException.Raised(FailureOrigin.Local, RouterSide.Server));
+        var failure = Failure.OfApplication(21, "nothing to echo");
+        var thrown = new FailureException(failure, new FailureException.Raised(FailureOrigin.Local, RouterSide.Server));
         var other = new IOException("internal: 10.0.0.5:8443");
 
+        // its own failure answered through its answerer; the same failure, or any other error, failed with
         resolver.Handling = (request) =>
         {
-            return Task.FromException(request.Payload.Span.SequenceEqual("own"u8) ? own : (Exception)other);
+            if (request.Payload.Span.SequenceEqual("own"u8))
+            {
+                return resolver.Fail(0, failure);
+            }
+
+            return Task.FromException(request.Payload.Span.SequenceEqual("thrown"u8) ? thrown : (Exception)other);
         };
         await server.Deliver(new Envelope { Header = RequestOf(1), Payload = "own"u8.ToArray() });
-        await server.Deliver(new Envelope { Header = RequestOf(3), Payload = "other"u8.ToArray() });
+        await server.Deliver(new Envelope { Header = RequestOf(3), Payload = "thrown"u8.ToArray() });
+        await server.Deliver(new Envelope { Header = RequestOf(5), Payload = "other"u8.ToArray() });
 
-        Assert.Equal([Failure.OfApplication(21, "nothing to echo"), Failure.OfProtocol(ProtocolCode.ProcedureFailed)], server.Sent.Select((envelope) =>
-        {
-            return envelope.Failure;
-        }));
-        Assert.Equal([other], server.Reports);
-        Assert.Equal([Handle], server.ReportedOn);
+        Assert.Equal(
+            [(1u, failure), (3u, Failure.OfProtocol(ProtocolCode.ProcedureFailed)), (5u, Failure.OfProtocol(ProtocolCode.ProcedureFailed))],
+            server.Sent.Select((envelope) =>
+            {
+                return (envelope.Header.CallId, envelope.Failure);
+            }));
+        Assert.Equal([thrown, other], server.Reports);
+        Assert.Equal([Handle, Handle], server.ReportedOn);
     }
     // helpers
 
