@@ -29,6 +29,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   guard on MQTT.js's stream and the C# adapter by one on MQTTnet's channel, as the Rust side's
   client does, so its own bound bounds what it holds of a packet. It sends no DISCONNECT of 0x95,
   which Mosquitto 2.1.2 answers by deleting its will (spec 15.29, decision 0041).
+- The details gate reads a helper's call by the arguments at the positions that reach its sinks, and
+  the whole call where its arguments do not split plainly, so a router's state handed beside a
+  reason that stays with the side carries no detail (decision 0006).
 
 ### Removed
 

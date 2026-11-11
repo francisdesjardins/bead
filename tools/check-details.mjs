@@ -21,9 +21,12 @@
 // whole, by its brackets, and reports the sink's own line. Both of its lists come from the file, as
 // the TypeScript and C# patterns key on what every exception carries rather than on a name: the
 // sinks, the file's helpers among them, each `fn` or `let`-bound closure one of whose parameters,
-// whatever its name, reaches a sink's argument, taken to a fixed point; and the foreign words,
-// `.to_string()`, `.reason()`, `.message()`, and every name the file binds an error to,
-// interpolated or handed to `format!` after its literal. What it does not reach: a binding not
+// whatever its name, by its position, reaches a sink's argument, taken to a fixed point; a call to
+// it carries the arguments at those positions alone, read whole where they do not split plainly —
+// a path form, whose receiver may shift them, and a list a comparison, a shift or a closure
+// splits; a tuple is one argument, read whole whichever of its members reaches a sink; and the
+// foreign words, `.to_string()`, `.reason()`, `.message()`, and every name the file binds an error
+// to, interpolated or handed to `format!` after its literal. What it does not reach: a binding not
 // named `detail` handed to a sink later, `write!` or `push_str` into a buffer, a macro other than
 // `format!`, and a helper of another file; it reads one file at a time, as the other two do.
 // Exit 1 on a site that is not allowed, a marker that holds no site, or an allowed one gone.
@@ -68,6 +71,8 @@ const ERROR_CLOSURES =
 const ERROR_PATTERNS = /\bErr\(\s*(?:ref\s+)?(?:mut\s+)?(\w+)\s*\)/g;
 // a parameter's pattern holds these words, which name no binding
 const KEYWORDS = new Set(['mut', 'ref', 'self']);
+// a method's receiver, `self`, `mut self`, `&self`, `&mut self` or `&'a self`, typed or not
+const RECEIVER = /^\s*(?:&\s*(?:'\w+\s+)?)?(?:mut\s+)?self\b/;
 
 const blank = (text) => {
   return text.replace(/[^\n]/g, ' ');
@@ -193,9 +198,10 @@ const piecesOf = (list) => {
   return [...pieces, list.slice(from)];
 };
 
-// the names a parameter list binds, `self` aside, each pattern's before its type
-const parametersOf = (list) => {
-  return piecesOf(list).flatMap((piece) => {
+// the names a parameter list binds, by position, `self` aside, each pattern's before its type: a
+// tuple's pattern binds its names at one position
+const positionsOf = (list) => {
+  return piecesOf(list).map((piece) => {
     const pattern = piece.split(/:(?!:)/)[0];
 
     return [...pattern.matchAll(/\b[a-z_]\w*\b/g)]
@@ -208,8 +214,8 @@ const parametersOf = (list) => {
   });
 };
 
-// each `fn` and `let`-bound closure of the file: its name, the names its parameters bind, and the
-// span of its body
+// each `fn` and `let`-bound closure of the file: its name, the names its parameters bind by their
+// position in a call, and the span of its body
 const functionsOf = (bare) => {
   const found = [];
 
@@ -247,9 +253,13 @@ const functionsOf = (bare) => {
       open += 1;
     }
     if (bare[open] === '{') {
+      const list = bare.slice(at + 1, close);
+      // a method's receiver is no argument of its call: its positions start after it
+      const receiver = RECEIVER.test(piecesOf(list)[0]);
+
       found.push({
         name: match[1],
-        parameters: parametersOf(bare.slice(at + 1, close)),
+        positions: positionsOf(list).slice(receiver ? 1 : 0),
         body: [open + 1, endOf(bare, open + 1, { call: true })],
       });
     }
@@ -262,7 +272,7 @@ const functionsOf = (bare) => {
 
     found.push({
       name: match[1],
-      parameters: parametersOf(match[2]),
+      positions: positionsOf(match[2]),
       body: [start, endOf(bare, start, { call: false })],
     });
   }
@@ -287,12 +297,14 @@ const errorNamesOf = (bare) => {
   });
 };
 
-// each sink of the file, `helpers` among them: where it stands, and its argument's span
+// each sink of the file, `helpers` among them, each by the positions that reach its own sinks:
+// where it stands, and its argument's span, a helper's call one span for each argument at those
+// positions
 const sinksOf = (bare, helpers) => {
   const called = [String.raw`\.saying`, String.raw`\bFailure::application`];
 
   if (helpers.size > 0) {
-    called.push(String.raw`(?<!\bfn\s+)\b(?:${[...helpers].join('|')})`);
+    called.push(String.raw`(?<!\bfn\s+)\b(?:${[...helpers.keys()].join('|')})`);
   }
 
   const sink = new RegExp(
@@ -300,47 +312,83 @@ const sinksOf = (bare, helpers) => {
     'g'
   );
 
-  return [...bare.matchAll(sink)].map((match) => {
+  return [...bare.matchAll(sink)].flatMap((match) => {
     const start = match.index + match[0].length;
     const call = match[0].endsWith('(');
+    const end = endOf(bare, start, { call });
+    const reaching = helpers.get(/^(\w+)\s*\($/.exec(match[0])?.[1]);
 
-    return { at: match.index, start, end: endOf(bare, start, { call }) };
+    // * a path form, whose positions a receiver may shift, and a list a comparison, a shift or a
+    // closure splits, which its commas do not split plainly, are read whole
+    if (
+      reaching === undefined ||
+      bare.slice(0, match.index).endsWith('::') ||
+      /[<>|]/.test(bare.slice(start, end).replace(/->|::<[^()]*?>/g, ''))
+    ) {
+      return [{ at: match.index, start, end }];
+    }
+
+    // * a helper's call carries the arguments at the positions that reach its sinks alone
+    const spans = [];
+    let from = start;
+
+    piecesOf(bare.slice(start, end)).forEach((piece, index) => {
+      if (reaching.has(index)) {
+        spans.push({ at: match.index, start: from, end: from + piece.length });
+      }
+      from += piece.length + 1;
+    });
+
+    return spans;
   });
 };
 
-// the helpers of the file, to a fixed point: each function one of whose parameters reaches a
-// sink's argument, a helper's own call among the sinks
+// the helpers of the file, to a fixed point: each function by the positions of its parameters
+// that reach a sink's argument, a helper's own call among the sinks
 const helpersOf = ({ code, bare }) => {
   const functions = functionsOf(bare);
-  let helpers = new Set();
+  const keyOf = (map) => {
+    return JSON.stringify(
+      [...map]
+        .map(([name, positions]) => {
+          return [name, [...positions].sort()];
+        })
+        .sort()
+    );
+  };
+  let helpers = new Map();
 
   for (;;) {
     const sinks = sinksOf(bare, helpers);
-    const next = new Set(
-      functions
-        .filter(({ parameters, body: [from, to] }) => {
-          if (parameters.length === 0) {
-            return false;
-          }
+    const next = new Map();
 
-          const names = parameters.join('|');
-          const named = new RegExp(String.raw`\b(?:${names})\b`);
-          const interpolated = new RegExp(String.raw`\{(?:${names})(?=[:}])`);
+    for (const { name, positions, body } of functions) {
+      const [from, to] = body;
 
-          return sinks.some(({ at, start, end }) => {
-            return (
-              at >= from &&
-              at < to &&
-              (named.test(bare.slice(start, end)) || interpolated.test(code.slice(start, end)))
-            );
-          });
-        })
-        .map(({ name }) => {
-          return name;
-        })
-    );
+      positions.forEach((parameters, index) => {
+        if (parameters.length === 0) {
+          return;
+        }
 
-    if (next.size === helpers.size) {
+        const names = parameters.join('|');
+        const named = new RegExp(String.raw`\b(?:${names})\b`);
+        const interpolated = new RegExp(String.raw`\{(?:${names})(?=[:}])`);
+        const reaches = sinks.some(({ at, start, end }) => {
+          return (
+            at >= from &&
+            at < to &&
+            (named.test(bare.slice(start, end)) || interpolated.test(code.slice(start, end)))
+          );
+        });
+
+        if (reaches) {
+          next.set(name, new Set([...(next.get(name) ?? []), index]));
+        }
+      });
+    }
+
+    // * the positions only grow, as each helper's sinks only grow: the same key is the fixed point
+    if (keyOf(next) === keyOf(helpers)) {
       return helpers;
     }
     helpers = next;
