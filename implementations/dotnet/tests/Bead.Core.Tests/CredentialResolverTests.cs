@@ -411,6 +411,24 @@ public sealed class CredentialResolverTests
     }
 
     [Fact]
+    public void Holds_a_JWT_s_header_in_a_chunk_and_an_envelope_of_1_024_bytes_at_least()
+    {
+        CredentialResolver.AssertLimits(RouterLimits.Default, true);
+
+        foreach (var limits in new[]
+        {
+            RouterLimits.Default with { ChunkBytes = 1_023 },
+            RouterLimits.Default with { ChunkBytes = 1_023, MaximumEnvelopeBytes = 1_023 },
+        })
+        {
+            Assert.Throws<ArgumentException>(() =>
+            {
+                CredentialResolver.AssertLimits(limits, true);
+            });
+        }
+    }
+
+    [Fact]
     public async Task Has_a_token_without_a_kid_wait_on_its_issuer_s_keys_at_a_cold_start_and_counts_the_keys_held_toward_its_issuer_s_one_key()
     {
         var clock = new FakeTimeProvider(Start);
