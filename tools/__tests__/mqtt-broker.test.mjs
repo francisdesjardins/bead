@@ -49,8 +49,10 @@ describe('the broker the cases play against', () => {
       'peer',
       'ts-server',
       'cs-server',
+      'rs-server',
       'ts-client',
       'cs-client',
+      'rs-client',
       'fixture',
     ]);
   });

@@ -1,6 +1,6 @@
 crate
   mod json
-  use rustls #[cfg(any(feature = "websocket", feature = "http"))]
+  use rustls #[cfg(any(feature = "websocket", feature = "http", feature = "mqtt"))]
   use tokio::runtime::Handle
   use tokio_util::sync::CancellationToken
   use broker::adapter::BrokerAdapter
@@ -211,9 +211,17 @@ crate
   use metrics::ProcedureSeries
   use metrics::ResolverSeries
   use metrics::RouterMetrics
+  use mqtt::adapter::KEEP_ALIVE #[cfg(feature = "mqtt")]
+  use mqtt::adapter::MQTT_CONNECT_TIMEOUT #[cfg(feature = "mqtt")]
+  use mqtt::adapter::MqttBrokerAdapter #[cfg(feature = "mqtt")]
+  use mqtt::adapter::MqttBrokerAdapterOptions #[cfg(feature = "mqtt")]
+  use mqtt::adapter::TRANSPORT_MQTT #[cfg(feature = "mqtt")]
+  use mqtt::packets::MAXIMUM_PACKET_SIZE #[cfg(feature = "mqtt")]
   use net::bounds::HEADERS_TIMEOUT #[cfg(any(feature = "websocket", feature = "http"))]
   use net::bounds::MINIMUM_SEND_BYTES_PER_SECOND #[cfg(any(feature = "websocket", feature = "http"))]
   use net::bounds::SEND_GRACE_PERIOD #[cfg(any(feature = "websocket", feature = "http"))]
+  use net::credential::CredentialProvider #[cfg(any(feature = "websocket", feature = "mqtt"))]
+  use net::credential::CredentialProviderError #[cfg(any(feature = "websocket", feature = "mqtt"))]
   use payloads::CodecRefusal
   use payloads::JsonCodec
   use payloads::JsonOf
@@ -337,8 +345,6 @@ crate
   use violations::violations_detail_of
   use violations::violations_of
   use violations::words_of
-  use websocket::client::CredentialProvider #[cfg(feature = "websocket")]
-  use websocket::client::CredentialProviderError #[cfg(feature = "websocket")]
   use websocket::client::WebSocketTransportClient #[cfg(feature = "websocket")]
   use websocket::client::WebSocketTransportClientConnectOptions #[cfg(feature = "websocket")]
   use websocket::client::WebSocketTransportClientOptions #[cfg(feature = "websocket")]
@@ -1789,10 +1795,98 @@ crate::metrics
     fn declare_resolver(&self, procedure: &Procedure, notifies: bool) -> Result<ResolverSeries, ProgrammerError>
     fn declare_notification(&self, procedure: &Procedure) -> Result<NotificationSeries, ProgrammerError>
     derives Clone, Debug
+crate::mqtt::adapter
+  const MQTT_CONNECT_TIMEOUT: Duration #[cfg(feature = "mqtt")]
+  const KEEP_ALIVE: Duration #[cfg(feature = "mqtt")]
+  const TRANSPORT_MQTT: &str #[cfg(feature = "mqtt")]
+  struct MqttBrokerAdapterOptions #[non_exhaustive] #[cfg(feature = "mqtt")]
+    pub url: String #[cfg(feature = "mqtt")]
+    pub id: String #[cfg(feature = "mqtt")]
+    pub password: Option<String> #[cfg(feature = "mqtt")]
+    pub password_provider: Option<CredentialProvider> #[cfg(feature = "mqtt")]
+    pub tls: Option<Arc<ClientConfig>> #[cfg(feature = "mqtt")]
+    pub maximum_packet_size: Option<u32> #[cfg(feature = "mqtt")]
+    pub keep_alive: Option<Duration> #[cfg(feature = "mqtt")]
+    pub connect_timeout: Option<Duration> #[cfg(feature = "mqtt")]
+    pub delivery: Option<BrokerDelivery> #[cfg(feature = "mqtt")]
+    pub groups: Option<bool> #[cfg(feature = "mqtt")]
+    pub clock: Option<SharedClock> #[cfg(feature = "mqtt")]
+    pub runtime: Option<Handle> #[cfg(feature = "mqtt")]
+    fn new<U: Into<String>, I: Into<String>>(url: U, id: I) -> Self
+    implements Debug
+    derives Clone #[cfg(feature = "mqtt")]
+  struct MqttBrokerAdapter #[cfg(feature = "mqtt")]
+    fn new(options: &MqttBrokerAdapterOptions) -> Result<Self, ProgrammerError>
+    fn is_linked(&self) -> bool
+    fn unsettled(&self) -> u64
+    implements BrokerAdapter, Debug
+    derives Clone #[cfg(feature = "mqtt")]
+crate::mqtt::packets
+  const LARGEST_REMAINING_LENGTH: u32 #[cfg(feature = "mqtt")]
+  const LARGEST_PACKET_SIZE: u32 #[cfg(feature = "mqtt")]
+  const MAXIMUM_PACKET_SIZE: u32 #[cfg(feature = "mqtt")]
+  enum MqttRefusal #[cfg(feature = "mqtt")]
+    PastMaximum { size: u64, maximum: u32 } #[cfg(feature = "mqtt")]
+    Malformed(String) #[cfg(feature = "mqtt")]
+    implements Display, Error
+    derives Clone, Debug, Eq, PartialEq #[cfg(feature = "mqtt")]
+  struct MqttConnack #[non_exhaustive] #[cfg(feature = "mqtt")]
+    pub session_present: bool #[cfg(feature = "mqtt")]
+    pub reason_code: u8 #[cfg(feature = "mqtt")]
+    pub receive_maximum: Option<u16> #[cfg(feature = "mqtt")]
+    pub maximum_qos: Option<u8> #[cfg(feature = "mqtt")]
+    pub maximum_packet_size: Option<u32> #[cfg(feature = "mqtt")]
+    pub shared_subscription_available: Option<bool> #[cfg(feature = "mqtt")]
+    pub server_keep_alive: Option<u16> #[cfg(feature = "mqtt")]
+    pub reason_string: Option<String> #[cfg(feature = "mqtt")]
+    derives Clone, Debug, Default, Eq, PartialEq #[cfg(feature = "mqtt")]
+  struct MqttPublish #[non_exhaustive] #[cfg(feature = "mqtt")]
+    pub topic: String #[cfg(feature = "mqtt")]
+    pub packet_identifier: Option<u16> #[cfg(feature = "mqtt")]
+    pub retain: bool #[cfg(feature = "mqtt")]
+    pub dup: bool #[cfg(feature = "mqtt")]
+    pub message_expiry_interval: Option<u32> #[cfg(feature = "mqtt")]
+    pub payload: Bytes #[cfg(feature = "mqtt")]
+    derives Clone, Debug, Default, Eq, PartialEq #[cfg(feature = "mqtt")]
+  struct MqttAcknowledgement #[non_exhaustive] #[cfg(feature = "mqtt")]
+    pub packet_identifier: u16 #[cfg(feature = "mqtt")]
+    pub reason_codes: Vec<u8> #[cfg(feature = "mqtt")]
+    pub reason_string: Option<String> #[cfg(feature = "mqtt")]
+    fn reason_code(&self) -> u8
+    derives Clone, Debug, Default, Eq, PartialEq #[cfg(feature = "mqtt")]
+  struct MqttDisconnect #[non_exhaustive] #[cfg(feature = "mqtt")]
+    pub reason_code: u8 #[cfg(feature = "mqtt")]
+    pub reason_string: Option<String> #[cfg(feature = "mqtt")]
+    derives Clone, Debug, Default, Eq, PartialEq #[cfg(feature = "mqtt")]
+  enum MqttPacket #[non_exhaustive] #[cfg(feature = "mqtt")]
+    Connack(MqttConnack) #[cfg(feature = "mqtt")]
+    Publish(MqttPublish) #[cfg(feature = "mqtt")]
+    Puback(MqttAcknowledgement) #[cfg(feature = "mqtt")]
+    Suback(MqttAcknowledgement) #[cfg(feature = "mqtt")]
+    Unsuback(MqttAcknowledgement) #[cfg(feature = "mqtt")]
+    Pingresp #[cfg(feature = "mqtt")]
+    Disconnect(MqttDisconnect) #[cfg(feature = "mqtt")]
+    derives Clone, Debug, Eq, PartialEq #[cfg(feature = "mqtt")]
+  enum MqttReading #[cfg(feature = "mqtt")]
+    Packet { packet: MqttPacket, length: usize } #[cfg(feature = "mqtt")]
+    Partial #[cfg(feature = "mqtt")]
+    derives Clone, Debug, Eq, PartialEq #[cfg(feature = "mqtt")]
+  struct MqttPublishShapeOptions #[non_exhaustive] #[cfg(feature = "mqtt")]
+    pub is_at_most_once: Option<bool> #[cfg(feature = "mqtt")]
+    pub has_life: Option<bool> #[cfg(feature = "mqtt")]
+    derives Clone, Debug, Default #[cfg(feature = "mqtt")]
+  const fn width_of(value: u64) -> u64 #[cfg(feature = "mqtt")]
+  fn publish_bytes(topic_bytes: u64, payload: u64, options: &MqttPublishShapeOptions) -> u64 #[cfg(feature = "mqtt")]
+  fn largest_payload(topic: &str, maximum: u64, options: &MqttPublishShapeOptions) -> Option<u64> #[cfg(feature = "mqtt")]
+  fn read_packet(bytes: &[u8], maximum_packet_size: u32) -> Result<MqttReading, MqttRefusal> #[cfg(feature = "mqtt")]
+  fn write_publish(publish: &MqttPublish) -> Result<Vec<u8>, MqttRefusal> #[cfg(feature = "mqtt")]
 crate::net::bounds
-  const MINIMUM_SEND_BYTES_PER_SECOND: u64 #[cfg(any(feature = "websocket", feature = "http"))]
-  const SEND_GRACE_PERIOD: Duration #[cfg(any(feature = "websocket", feature = "http"))]
-  const HEADERS_TIMEOUT: Duration #[cfg(any(feature = "websocket", feature = "http"))]
+  const MINIMUM_SEND_BYTES_PER_SECOND: u64 #[cfg(any(feature = "websocket", feature = "http", feature = "mqtt"))] #[cfg(any(feature = "websocket", feature = "http"))]
+  const SEND_GRACE_PERIOD: Duration #[cfg(any(feature = "websocket", feature = "http", feature = "mqtt"))] #[cfg(any(feature = "websocket", feature = "http"))]
+  const HEADERS_TIMEOUT: Duration #[cfg(any(feature = "websocket", feature = "http", feature = "mqtt"))] #[cfg(any(feature = "websocket", feature = "http"))]
+crate::net::credential
+  type CredentialProviderError = Box<dyn Error + Send + Sync> #[cfg(any(feature = "websocket", feature = "http", feature = "mqtt"))] #[cfg(any(feature = "websocket", feature = "mqtt"))]
+  type CredentialProvider = Arc<dyn Fn(CancellationToken) -> BoxFuture<Result<String, CredentialProviderError>> + Send + Sync,> #[cfg(any(feature = "websocket", feature = "http", feature = "mqtt"))] #[cfg(any(feature = "websocket", feature = "mqtt"))]
 crate::payloads
   struct CodecRefusal
     fn new<R: Into<String>>(reason: R) -> Self
@@ -2455,8 +2549,6 @@ crate::violations
   fn words_of(violation: &Violation) -> Option<String>
   fn violations_of(failure: &Failure) -> ReadViolations
 crate::websocket::client
-  type CredentialProviderError = Box<dyn Error + Send + Sync> #[cfg(feature = "websocket")]
-  type CredentialProvider = Arc<dyn Fn(CancellationToken) -> BoxFuture<Result<String, CredentialProviderError>> + Send + Sync,> #[cfg(feature = "websocket")]
   struct WebSocketTransportClientOptions #[non_exhaustive] #[cfg(feature = "websocket")]
     pub clock: Option<SharedClock> #[cfg(feature = "websocket")]
     pub runtime: Option<Handle> #[cfg(feature = "websocket")]
@@ -2580,6 +2672,21 @@ crate::internal
   use crate::jwt_verifier::ReadJwt
   use crate::jwt_verifier::read_jwt
   use crate::jwt_verifier::verify_jwt
+  use crate::mqtt::packets::LARGEST_PACKET_SIZE #[cfg(feature = "mqtt")]
+  use crate::mqtt::packets::LARGEST_REMAINING_LENGTH #[cfg(feature = "mqtt")]
+  use crate::mqtt::packets::MqttAcknowledgement #[cfg(feature = "mqtt")]
+  use crate::mqtt::packets::MqttConnack #[cfg(feature = "mqtt")]
+  use crate::mqtt::packets::MqttDisconnect #[cfg(feature = "mqtt")]
+  use crate::mqtt::packets::MqttPacket #[cfg(feature = "mqtt")]
+  use crate::mqtt::packets::MqttPublish #[cfg(feature = "mqtt")]
+  use crate::mqtt::packets::MqttPublishShapeOptions #[cfg(feature = "mqtt")]
+  use crate::mqtt::packets::MqttReading #[cfg(feature = "mqtt")]
+  use crate::mqtt::packets::MqttRefusal #[cfg(feature = "mqtt")]
+  use crate::mqtt::packets::largest_payload #[cfg(feature = "mqtt")]
+  use crate::mqtt::packets::publish_bytes #[cfg(feature = "mqtt")]
+  use crate::mqtt::packets::read_packet #[cfg(feature = "mqtt")]
+  use crate::mqtt::packets::width_of #[cfg(feature = "mqtt")]
+  use crate::mqtt::packets::write_publish #[cfg(feature = "mqtt")]
   use crate::router::types::limits_of
   use crate::router::types::session_key_of
   use crate::router::types::whole_envelope_limits_of

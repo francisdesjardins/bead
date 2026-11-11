@@ -9,8 +9,9 @@
   [`spec/vectors.json`](../../spec/vectors.json); the places `mqttBrokerAdapter.keepAlive` and
   `mqttBrokerAdapter.connectTimeout` of [`spec/durations.json`](../../spec/durations.json);
   [`tools/mqtt-broker.mjs`](../../tools/mqtt-broker.mjs), the broker every run plays against; the
-  adapters over MQTT.js and MQTTnet and their twins; the interop over MQTT 5 and its CI job. The
-  core it binds is
+  adapters over MQTT.js and MQTTnet, the Rust side's own client
+  ([0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)),
+  and their twins; the interop over MQTT 5 and its CI job. The core it binds is
   [0038](0038-over-a-broker-a-connection-is-placed-once-at-its-open-named-by-both-its-ends.md)'s,
   [0039](0039-a-brokers-transport-numbers-its-parcels-and-sends-an-envelope-in-parts-under-its-peers-bound.md)'s
   and

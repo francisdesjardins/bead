@@ -24,8 +24,14 @@ pub(crate) mod clockless;
 pub(crate) mod core_port;
 pub mod durations;
 pub mod files;
+#[cfg(feature = "mqtt")]
+pub mod frame_relay;
 pub mod hexadecimal;
 pub mod instants;
+#[cfg(any(feature = "websocket", feature = "http", feature = "mqtt"))]
+pub mod link_relay;
+#[cfg(feature = "mqtt")]
+pub mod mqtt_script;
 pub mod mutations;
 pub mod pair;
 pub mod parcels;
@@ -40,7 +46,7 @@ pub(crate) mod sessions;
 pub(crate) mod surface;
 #[cfg(test)]
 mod tests;
-#[cfg(any(feature = "websocket", feature = "http"))]
+#[cfg(any(feature = "websocket", feature = "http", feature = "mqtt"))]
 pub mod tls;
 pub mod validations;
 pub mod vectors;

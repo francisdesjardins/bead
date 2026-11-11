@@ -5,8 +5,10 @@ use std::collections::BTreeMap;
 use std::process::ExitCode;
 
 use bead::internal::{
-    MAXIMUM_DETAIL_BYTES, ReadEnvelopeOptions, ReadHeader, header_bytes_of, read_envelope,
-    read_failure, read_header, read_prefix, verify_jwt, write_envelope, write_header,
+    LARGEST_PACKET_SIZE, LARGEST_REMAINING_LENGTH, MAXIMUM_DETAIL_BYTES, MqttPublish,
+    MqttPublishShapeOptions, ReadEnvelopeOptions, ReadHeader, header_bytes_of, largest_payload,
+    publish_bytes, read_envelope, read_failure, read_header, read_prefix, verify_jwt,
+    write_envelope, write_header, write_publish,
 };
 use bead::json::JsonRefusal;
 use bead::testing::instants;
@@ -769,6 +771,98 @@ fn parcels() -> Result<Vec<Trial>, String> {
     Ok(trials)
 }
 
+/// A row of `mqttPublishBounds`: a topic, a bound and a shape, and the largest payload within it
+/// and the packet it makes, none where an empty one does not fit.
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MqttPublishBound {
+    name: String,
+    topic: String,
+    maximum_packet_size: u64,
+    qos: u8,
+    expiry: bool,
+    largest_payload: Option<u64>,
+    packet_bytes: Option<u64>,
+}
+
+// the largest packet written to check the count against, so that no vector's 268 MB is allocated
+const WRITTEN_UP_TO: u64 = 17_000_000;
+
+// spec 15.30: each row's largest payload within its bound found exactly, the packet it makes counted
+// to its every byte, and that count held to the bytes the client writes a PUBLISH in
+fn mqtt_publish_bounds() -> Result<Vec<Trial>, String> {
+    let entries: Vec<MqttPublishBound> = vectors::of("mqttPublishBounds")?;
+
+    Ok(vec![Trial::test(
+        "plays_mqtt_publish_bounds_a_publish_counted_to_its_every_byte_and_the_largest_payload_within_a_bound_found_exactly",
+        move || {
+            hold(!entries.is_empty(), || "no row".to_owned())?;
+
+            for vector in &entries {
+                let name = &vector.name;
+                let mut shape = MqttPublishShapeOptions::default();
+
+                shape.is_at_most_once = Some(vector.qos == 0);
+                shape.has_life = Some(vector.expiry);
+
+                let topic_bytes = u64::try_from(vector.topic.len()).map_err(|error| error.to_string())?;
+                let found = largest_payload(&vector.topic, vector.maximum_packet_size, &shape);
+
+                hold(found == vector.largest_payload, || {
+                    format!("{name}: its largest payload {found:?}")
+                })?;
+
+                let Some(found) = found else {
+                    hold(
+                        publish_bytes(topic_bytes, 0, &shape) > vector.maximum_packet_size,
+                        || format!("{name}: an empty one fits"),
+                    )?;
+                    hold(vector.packet_bytes.is_none(), || {
+                        format!("{name}: its packet")
+                    })?;
+
+                    continue;
+                };
+                let counted = publish_bytes(topic_bytes, found, &shape);
+
+                hold(Some(counted) == vector.packet_bytes, || {
+                    format!("{name}: its packet of {counted} bytes")
+                })?;
+                // * exactly: one byte more passes the bound, or the largest Remaining Length
+                hold(
+                    publish_bytes(topic_bytes, found.saturating_add(1), &shape)
+                        > vector.maximum_packet_size
+                        || found.saturating_add(1) > u64::from(LARGEST_REMAINING_LENGTH),
+                    || format!("{name}: one byte more fits"),
+                )?;
+
+                if counted <= WRITTEN_UP_TO {
+                    let mut publish = MqttPublish::default();
+
+                    publish.topic.clone_from(&vector.topic);
+                    publish.packet_identifier = (vector.qos == 1).then_some(1);
+                    publish.message_expiry_interval = vector.expiry.then_some(60);
+                    publish.payload = Bytes::from(vec![
+                        0;
+                        usize::try_from(found).map_err(|error| error.to_string())?
+                    ]);
+
+                    let written = write_publish(&publish).map_err(|error| error.to_string())?;
+
+                    hold(u64::try_from(written.len()) == Ok(counted), || {
+                        format!("{name}: written in {} bytes", written.len())
+                    })?;
+                }
+            }
+
+            hold(LARGEST_PACKET_SIZE == 268_435_460, || {
+                "the largest packet MQTT 5 writes".to_owned()
+            })
+        },
+    )
+    .with_kind("mqttPublishBounds")])
+}
+
 fn main() -> ExitCode {
     let arguments = Arguments::from_args();
     let mut trials = Vec::new();
@@ -783,6 +877,7 @@ fn main() -> ExitCode {
         jwt_verdicts(),
         credential_refusals(),
         parcels(),
+        mqtt_publish_bounds(),
     ] {
         match group {
             Ok(group) => trials.extend(group),
