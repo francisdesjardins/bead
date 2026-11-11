@@ -1878,7 +1878,8 @@ async fn drops_a_message_whose_retain_is_1_acknowledging_it() {
 
 // spec 15.29
 #[tokio::test]
-async fn closes_its_link_no_disconnect_on_a_packet_past_its_own_maximum_packet_size() {
+async fn closes_its_link_no_disconnect_on_a_packet_past_its_own_maximum_packet_size_read_at_its_length()
+ {
     let script = script().await;
     let mut options = options_of(&script);
 
@@ -1886,6 +1887,8 @@ async fn closes_its_link_no_disconnect_on_a_packet_past_its_own_maximum_packet_s
 
     let adapter = adapter_of(&options);
     let heard = heard_of(&adapter);
+
+    // a PUBLISH of 1,118 bytes in all, after its CONNACK
     let link = link_up((&adapter, &script), (&Connack::default(), None)).await;
 
     link.send(publish(&Publish {
@@ -1897,11 +1900,41 @@ async fn closes_its_link_no_disconnect_on_a_packet_past_its_own_maximum_packet_s
     assert!(link.closed(PATIENCE).await, "closed");
     until(|| !heard.downs().is_empty()).await;
     assert_eq!(heard.downs(), vec![down(false)], "lost");
-    assert!(heard.messages().is_empty(), "nothing handed on");
+
+    // a fixed header alone, announcing 16,777,221 bytes, after the CONNACK of a second link
+    let second = link_up((&adapter, &script), (&Connack::default(), None)).await;
+
+    second.send(vec![0x32, 0x80, 0x80, 0x80, 0x08]);
+    assert!(second.closed(PATIENCE).await, "closed at its length");
+    until(|| heard.downs().len() > 1).await;
+    assert_eq!(heard.downs(), vec![down(false), down(false)], "lost too");
+
+    // a CONNACK's fixed header alone, announcing 16,777,221 bytes: its start fails
+    let starting = adapter.start(BrokerStart::default());
+    let third = script.link(PATIENCE).await.unwrap();
+
+    third.send(vec![0x20, 0x80, 0x80, 0x80, 0x08]);
+
+    let failed = starting.await.unwrap_err();
+
     assert!(
-        link.of(Kind::Disconnect).is_empty() && link.of(Kind::Puback).is_empty(),
-        "no DISCONNECT, no PUBACK"
+        message_of(&failed).contains("past its Maximum Packet Size"),
+        "{failed}"
     );
+    assert!(third.closed(PATIENCE).await, "closed before its CONNACK");
+    assert_eq!(
+        heard.downs(),
+        vec![down(false), down(false)],
+        "no down for a start"
+    );
+    assert!(heard.messages().is_empty(), "nothing handed on");
+
+    for each in [&link, &second, &third] {
+        assert!(
+            each.of(Kind::Disconnect).is_empty() && each.of(Kind::Puback).is_empty(),
+            "no DISCONNECT, no PUBACK"
+        );
+    }
 }
 
 // spec 15.30
