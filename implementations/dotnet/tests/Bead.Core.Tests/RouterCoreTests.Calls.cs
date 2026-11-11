@@ -67,6 +67,46 @@ public sealed partial class RouterCoreTests
         Assert.Equal([thrown, other], server.Reports);
         Assert.Equal([Handle, Handle], server.ReportedOn);
     }
+
+    // debugging 4.2; spec 9.5
+    [Fact]
+    public async Task Holds_for_its_manager_the_failure_it_answered_in_a_resolver_s_place_and_none_its_resolver_answered()
+    {
+        var server = new Peer(RouterSide.Server);
+        using var core = server.Core;
+        var resolver = server.Resolve();
+        var own = Failure.OfApplication(21, "nothing to echo");
+
+        // the first fails before it answers, answered PROCEDURE_FAILED in its place; the second
+        // answers a failure of its own; the third answers a result
+        resolver.Handling = (request) =>
+        {
+            if (request.Payload.Span.SequenceEqual("thrown"u8))
+            {
+                return Task.FromException(new InvalidOperationException("the resolver failed"));
+            }
+
+            return Task.CompletedTask;
+        };
+        await server.Deliver(new Envelope { Header = RequestOf(1), Payload = "thrown"u8.ToArray() });
+        await server.Deliver(new Envelope { Header = RequestOf(3), Payload = "own"u8.ToArray() });
+        await server.Deliver(new Envelope { Header = RequestOf(5), Payload = "result"u8.ToArray() });
+        await resolver.Fail(1, own);
+        await resolver.Answer(2, new byte[] { 1 });
+
+        Assert.Equal(
+            [Failure.OfProtocol(ProtocolCode.ProcedureFailed), null, null],
+            resolver.Requests.Select((props) =>
+            {
+                return core.AnsweredOf(new AnswerTarget(props.ConnectionHandle, props.Header));
+            }));
+        Assert.Equal(
+            [(1u, Failure.OfProtocol(ProtocolCode.ProcedureFailed)), (3u, own), (5u, null)],
+            server.Sent.Select((envelope) =>
+            {
+                return (envelope.Header.CallId, envelope.Failure);
+            }));
+    }
     // helpers
 
     // a call of the core's own, to a connection, given its time

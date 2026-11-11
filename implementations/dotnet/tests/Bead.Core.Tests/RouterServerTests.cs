@@ -2536,6 +2536,62 @@ public sealed partial class RouterServerTests : IDisposable
         Assert.Empty(_errors);
     }
 
+    // debugging 4.2; spec 11.10
+    [Fact]
+    public async Task Tells_once_with_the_failure_its_router_answered_in_its_place_an_answer_given_behind_notifications_that_went_past_their_bounds()
+    {
+        string[] words = ["a", "b", "c"];
+
+        Start(new RouterServerOptions { Pacing = new PacingLimits { MaximumQueuedNotifications = 1 } });
+        _transport.Open(First);
+
+        // the steps of the call: their direction, what went out, and why
+        var told = new List<(DebugDirection Direction, object? Tx, ProtocolCode? Error)>();
+
+        Services.Debug += (error, step) =>
+        {
+            if (step.CallId == 3)
+            {
+                lock (told)
+                {
+                    told.Add((step.Direction, step.Tx, error is FailureException failure ? (ProtocolCode)failure.Failure.Code : null));
+                }
+            }
+        };
+
+        INotificationResolver<string>? news = null;
+
+        // its resolver subscribes, sends three notifications past a queue of one without waiting on
+        // them, then answers, all in its own flow
+        news = NotifierOf(async (request, response) =>
+        {
+            await response.RegisterNotification();
+
+            foreach (var word in words)
+            {
+                _ = news!.Notify(word);
+            }
+
+            await response.Answer("ok");
+        });
+        Deliver(First, PacedOf(3, "hold"));
+        await Settle();
+        await Settle();
+
+        // its answer goes nowhere, told once with the failure that went in its place
+        Assert.Equal(["first notification 3 a", "first failure 3 CapacityExceeded"], SentSince());
+
+        lock (told)
+        {
+            Assert.Equal(
+                [
+                    (DebugDirection.Rx, null, null),
+                    (DebugDirection.Tx, "ok", ProtocolCode.CapacityExceeded),
+                ],
+                told);
+        }
+    }
+
     [Fact]
     public async Task Reports_the_failure_it_could_not_send_a_call_in_flight_whose_queue_went_past_its_bounds()
     {
