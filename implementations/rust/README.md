@@ -83,6 +83,52 @@ verifier, and `bead::rustls`, the rustls it builds, for an application's `Server
 `ClientConfig`. What judges a request, a head, a target, a host, an origin and a WebSocket's
 handshake, is always built, as is the HTTP policy, so the fuzz targets reach it with no feature.
 
+## Listening and proxies
+
+A WebSocket or HTTP server listens on `localhost` unless its `TransportServerStartOptions` gives
+an `address`: both loopbacks, `127.0.0.1` and `::1`, on one port (spec 15.12). Where the IPv6
+loopback is absent, it listens on `127.0.0.1` alone and reports that address. A container, or any
+server another machine reaches, says `0.0.0.0` or `::` and names its hosts in `hosts`: a
+container's loopback is its own, which a published port never reaches. An address given is
+`localhost` or an IP address written bare, `::1`, not `[::1]`; any other name fails the start, a
+`ProgrammerError`. On the loopback it is secure (spec 13.4); behind a proxy on the same machine
+that serves the network in the clear, its options say `secure: Some(false)`
+([decision 0024](../../docs/decisions/0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md)).
+
+Behind a proxy, a server over HTTP or WebSocket believes `X-Forwarded-For` from the proxies
+`trusted_proxies` names, each an IP address or a network in CIDR, `10.0.0.0/8` say, or the compose
+network's, and as many more as `unnamed_proxies` counts. From the socket's address it walks the
+field from the right: while the address reached is listed, or is unlisted and fewer than the
+count have been passed, the next entry is the client's. What a client wrote to the left of the
+first unlisted address past the count is never read. None trusts no proxy, the loopback among
+them. `Forwarded` is never read. The address reached names the connection's handle, its `clients`
+entry and its refusals; its port stays the socket's. Each entry is read in RFC 7239's node forms,
+its port dropped, IPv4-mapped as IPv4 and IPv6 as RFC 5952 writes it; an entry that does not read
+ends the walk at the proxy that wrote it.
+
+A deployment lists its proxy's network, a container's ingress or a sidecar on `127.0.0.1` among
+them. A proxy whose platform does not publish its addresses is counted, `unnamed_proxies`, from
+0 to 8, 0 by default. A listed proxy costs none of that count, wherever it stands: the count is
+of the proxies the list does not name alone. A name, a network whose bits past its prefix are
+set, a network of prefix 0, or a count past 8 is a `ProgrammerError` as the transport is built.
+A request that reaches the socket past a counted proxy is read by entries its client wrote, so a
+server reachable without that proxy lists its proxies instead
+([decision 0030](../../docs/decisions/0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-and-counts.md)).
+
+A proxy neither listed nor counted is a client as any other: each client behind it is its
+address. `maximum_connections_per_address` counts it, so a refusal whose address is the proxy's,
+or `largestAddressConnections` near its ceiling, is a proxy to list. A bound by address counts
+the users behind one NAT as one and the addresses of an IPv6 network as many.
+
+```rust
+use bead::HttpTransportServerOptions;
+
+// a sidecar on the loopback, listed, and a router before it, its addresses unpublished, counted
+let mut options = HttpTransportServerOptions::default();
+options.trusted_proxies = Some(vec!["127.0.0.1".to_owned()]);
+options.unnamed_proxies = Some(1);
+```
+
 ## Layout
 
 A virtual workspace, its packages `francisdesjardins-bead*`, their libraries `bead*`, none published

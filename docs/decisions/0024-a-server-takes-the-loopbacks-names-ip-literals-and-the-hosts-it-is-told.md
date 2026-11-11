@@ -346,7 +346,10 @@ resolver that does not keep it local stays, stated in 15.12.
 **A container, or any server another machine reaches, says `0.0.0.0` or `::`**, and names its hosts:
 a container's loopback is its own, which a published port never reaches. A deployment that relies on
 listening on every interface without saying it meets a refused or reset connection from outside,
-never a Bead refusal, since no socket opens: the TypeScript and C# sides' READMEs say it where they
+never a Bead refusal, since no socket opens: the
+[TypeScript](../../implementations/typescript/README.md),
+[C#](../../implementations/dotnet/README.md) and
+[Rust](../../implementations/rust/README.md#listening-and-proxies) sides' READMEs say it where they
 say how to start a server.
 
 **A server on its defaults is secure by 13.4**, so a command of its own that presents a `JWT` goes;
