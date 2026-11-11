@@ -128,10 +128,15 @@ jobs:
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.yarn-cache.outputs.dir }}
-          key: yarn-cache-${{ runner.os }}-node${{ matrix.node }}-${{ hashFiles('implementations/typescript/yarn.lock') }}
+          key: yarn-cache-${{ runner.os }}-node${{ matrix.node }}-${{ hashFiles('implementations/typescript/yarn.lock', 'builder/yarn.lock') }}
           restore-keys: yarn-cache-${{ runner.os }}-node${{ matrix.node }}-
       # `--immutable` fails if `yarn.lock` would change.
       - run: $YARN install --immutable
+      # the builder's packages too: the demo's Packages tab runs the builder's selection and its
+      # reading of beadc.yaml, whose types the type-check and whose `yaml` the demo's tests reach
+      # from builder/
+      - run: $YARN install --immutable
+        working-directory: builder
       - run: $YARN check
       - if: matrix.node != '26'
         run: $YARN test --grep-invert "the (C#|Rust) server of the interop service"
@@ -491,10 +496,14 @@ jobs:
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.yarn-cache.outputs.dir }}
-          key: yarn-cache-${{ runner.os }}-node${{ env.NODE_VERSION }}-${{ hashFiles('implementations/typescript/yarn.lock') }}
+          key: yarn-cache-${{ runner.os }}-node${{ env.NODE_VERSION }}-${{ hashFiles('implementations/typescript/yarn.lock', 'builder/yarn.lock') }}
           restore-keys: yarn-cache-${{ runner.os }}-node${{ env.NODE_VERSION }}-
       - run: $YARN install --immutable
         working-directory: implementations/typescript
+      # the builder's packages too: the demo's unit tests, loaded whole, reach its `yaml` from
+      # builder/ through the Packages tab's
+      - run: $YARN install --immutable
+        working-directory: builder
       - name: Mosquitto 2.1.2 by its digest, a password drawn for this run
         run: node tools/mqtt-broker.mjs start --github-env
       # the cases over MQTT 5, the adapter over WebSocket, and the TypeScript client over MQTT 5

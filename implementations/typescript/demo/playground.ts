@@ -18,6 +18,13 @@ import { fileURLToPath } from 'node:url';
 // constants
 
 const DEMO = new URL('./', import.meta.url);
+
+/**
+ * The package's folder, where the page's `yaml` is found: the Packages tab's and the builder's
+ * `config.ts`'s alike, one copy, whether `builder/` has its own installed or not.
+ */
+const PACKAGE = fileURLToPath(new URL('../', DEMO));
+
 const OUT = new URL('dist/playground/', DEMO);
 
 /** What the server fills in for its page, and what a page with no server says instead. */
@@ -50,6 +57,8 @@ await mkdir(OUT, { recursive: true });
 const [pageFile, workerFile] = await Promise.all(
   ['page', 'worker'].map(async (name) => {
     const { metafile } = await build({
+      absWorkingDir: PACKAGE,
+      alias: { yaml: 'yaml' },
       bundle: true,
       entryNames: '[name]-[hash]',
       entryPoints: [pathOf(`${name}.ts`)],

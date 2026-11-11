@@ -1605,6 +1605,10 @@
     blueprint with the last release, and says what breaks a peer already deployed or the code
     written against the API. <code>beadc</code> runs in a Docker image, and the example
     <code>examples/hello</code> plays in CI in both languages, each client against each server.
+    One contract gives several packages, each its own selection of procedures, and each transport
+    of a server takes the procedures it is given:
+    <a href="/playground/bead/#packages">the demo’s Packages tab</a> cuts a blueprint into them,
+    with <code>beadc</code>’s own code.
   </p>
   <figure class="figure">
     <figcaption>From the .proto to each language’s code</figcaption>

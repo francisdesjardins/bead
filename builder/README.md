@@ -30,7 +30,7 @@ Yarn release vendored:
 ```sh
 yarn install --immutable
 export BEADC_PROTOC="$(node tools/fetch-protoc.mjs)"   # protoc, by its pin
-yarn check        # types, the goldens' types, lint, format, buf's lint and format, the options' generated code
+yarn check        # types, the goldens' types, lint, format, buf's lint and format, the options' generated code, what reads beadc.yaml kept pure
 yarn test         # beadc's tests, the targets' goldens among them
 node src/cli.ts check ../spec/interop-blueprint.json
 node src/cli.ts blueprint --check ../spec/interop-blueprint.json
@@ -44,6 +44,7 @@ node src/cli.ts blueprint --check ../spec/interop-blueprint.json
 | `yarn buf:lint`      | `buf lint` over [`buf.yaml`](buf.yaml)'s modules: `proto/`, `test/fixtures/` and `test/messages/`                                                                                                                                                                                                   |
 | `yarn buf:format`    | `buf format --diff --exit-code` over the same                                                                                                                                                                                                                                                       |
 | `yarn options:check` | `src/generated/bead/options_pb.ts` and `src/generated/buf/validate/validate_pb.ts`, the code the front end reads Bead's options and protovalidate's through, written again apart and compared; `yarn options:generate` writes them in place                                                         |
+| `yarn pure:check`    | `src/config.ts` and `src/model/selection.ts`, which a page takes to build a `beadc.yaml`, their imports walked: none reaches the platform, `node:` or a package but `yaml`                                                                                                                          |
 | `yarn unicode:check` | `src/patterns/unicode.ts`, beadc's Unicode tables, written again from the UCD files `../spec/generators/ucd.json` pins, each held to its sha256, and compared; `yarn unicode:generate` writes it in place                                                                                           |
 | `yarn test`          | Playwright's runner, no browser: one test file a module, in `__tests__/` beside it; `BEADC_WRITE_GOLDEN=1 yarn test` writes the targets' goldens again; a test that runs protoc skips, with its reason, where none of the pin's version is found, and fails instead under `BEADC_PROTOC_REQUIRED=1` |
 | `yarn test:coverage` | the same under c8                                                                                                                                                                                                                                                                                   |

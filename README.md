@@ -501,12 +501,15 @@ BEAD_INTEROP_REQUIRED=1 yarn test:browser
 
 ## The demo
 
-A page with a button per kind of call — a read, a write, a subscription, a transfer either way, a
-cancel, a failure, a command — the calls and envelopes logged as the client sees them, and what the
-client's and the server's metrics registries count, over WebSocket, HTTP or a Web Worker, and,
-where it runs beside a broker, over MQTT 5 with `?transport=mqtt`; and a sign-up form, a service
-beadc generates from the demo's `.proto`, whose refusals by its payload rules show each violation
-under its field.
+A page of scenes, one a tab, in francisdesjardins.ca's palette and type. Try it: a card per kind
+of call — a read, a write, a subscription, a transfer either way, a cancel, a failure, a command —
+each showing its result beside its buttons, over WebSocket, HTTP or a Web Worker, and, where it runs
+beside a broker, over MQTT 5 with `?transport=mqtt`; the wire, folded until it is opened, a drawer
+on a desktop and a sheet on a phone, logs the calls and envelopes as the client sees them. Beside
+it: a sign-up form, a service beadc generates from the demo's `.proto`, whose refusals by its
+payload rules show each violation under its field; the server, and what the client's and the
+server's metrics registries count; and Packages, a blueprint cut into the outputs of `beadc.yaml`
+by the builder's own selection and reading of it, run in the page, the YAML to copy.
 
 ```sh
 cd implementations/typescript
@@ -1014,9 +1017,10 @@ images, `ubuntu-26.04`, and `windows-2025` and `ubuntu-26.04-arm` for the builde
 (regenerate, then diff, then `spec/check.py`); `playwright` (the exact version of `@playwright/test`
 the TypeScript side pins, which names Microsoft's image of it, the one the `typescript` and `dotnet`
 jobs run in, its Chromium already there); `typescript` on Node 26 and on the floor, 24.9 (install,
-check, the public surface held to its list among it, test, under coverage on Node 26, held to the
-side's floor, the demo's static build, the DevTools extension built and, on Node 26, tested in
-Chromium, the demo's tests on Node 26, and the root's files under the same formatter); `dotnet`
+the builder's packages too, which the demo's Packages tab reaches, check, the public surface held
+to its list among it, test, under coverage on Node 26, held to the side's floor, the demo's static
+build, the DevTools extension built and, on Node 26, tested in Chromium, the demo's tests on
+Node 26, and the root's files under the same formatter); `dotnet`
 (every C# package audited by NuGetAudit as it restores, format, build, the builder's C# goldens
 among its projects and each `src` project's public surface held to its `PublicAPI` lists, the C#
 bench built in Release, test under coverage, held to the side's floor, the interop both ways with

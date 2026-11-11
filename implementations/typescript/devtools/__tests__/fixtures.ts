@@ -1,4 +1,10 @@
-import { chromium, type BrowserContext, type Worker } from '@playwright/test';
+import {
+  chromium,
+  type BrowserContext,
+  type Locator,
+  type Page,
+  type Worker,
+} from '@playwright/test';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { access, readFile } from 'node:fs/promises';
@@ -35,6 +41,13 @@ export const assertBuilt = async (): Promise<void> => {
       throw new Error(`${path} is not there: run ${command} first`);
     }
   }
+};
+
+/** What the demo's page says of its last `action`, in the card of the scene that holds its button. */
+export const outcomeOf = (page: Page, action: string): Locator => {
+  return page
+    .locator('.scene-card', { has: page.locator(`button[data-action="${action}"]`) })
+    .locator('[data-outcome]');
 };
 
 /** A folder served on this machine, as a static host serves it; what closes it. */

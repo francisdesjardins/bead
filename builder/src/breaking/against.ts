@@ -13,16 +13,11 @@
 // dependencies
 
 import { existsSync, readFileSync, rmSync, statSync } from 'node:fs';
-import { join, relative, sep } from 'node:path';
+import nodePath, { join, relative, sep } from 'node:path';
 
 import { compile } from '../compile.ts';
-import {
-  againstOfText,
-  CONFIG_FILE,
-  type IAgainstConfig,
-  type Source,
-  temporaryFolderOf,
-} from '../config.ts';
+import { againstOfText, CONFIG_FILE, type IAgainstConfig, type Source } from '../config.ts';
+import { temporaryFolderOf } from '../config-files.ts';
 import { diagnosticOf, type IDiagnostic, InputError } from '../diagnostics.ts';
 import { blueprintOf } from '../front-end/blueprint-of.ts';
 import { readSet } from '../front-end/input.ts';
@@ -121,7 +116,7 @@ const folderSourceOf = (
   const own = join(folder, CONFIG_FILE);
 
   if (existsSync(own)) {
-    return againstOfText(readFileSync(own, 'utf8'), { folder });
+    return againstOfText(readFileSync(own, 'utf8'), { folder, path: nodePath });
   }
 
   const { config, current } = options;

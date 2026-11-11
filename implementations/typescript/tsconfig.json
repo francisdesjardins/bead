@@ -1,10 +1,15 @@
 {
   // The shared strictness is [tsconfig.base.json](./tsconfig.base.json) beside this file.
   //
-  // No `jsx` and no `allowImportingTsExtensions`: nothing here renders, which is this package's
-  // entry rule rather than an omission.
+  // No `jsx`: nothing here renders. `allowImportingTsExtensions` is the demo's: its Packages tab
+  // runs the builder's own selection and reading of `beadc.yaml` (`builder/src/model/selection.ts`,
+  // `builder/src/config.ts`), whose imports name their `.ts` files, as Node runs beadc. `src/` keeps
+  // its imports bare, a consumer's bundler resolving them: `.oxlintrc.json` refuses a `.ts` one
+  // there. `resolveJsonModule` is the demo's too: the tab plans its own blueprint, bundled.
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
     "lib": ["ES2024", "ESNext.Disposable", "ESNext.Iterator", "DOM"],
     "types": ["node"]
   },
