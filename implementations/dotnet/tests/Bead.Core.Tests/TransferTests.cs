@@ -61,6 +61,22 @@ public sealed class TransferTests
 
     // definition
 
+    [Fact(Skip = "divergence: reading an oversized opening throws instead of clamping it to the payload")]
+    public void Clamps_an_outgoing_opening_to_its_payload_and_sends_no_chunk_past_its_end()
+    {
+        var payload = "abc"u8.ToArray();
+
+        foreach (var opening in new[] { 3, 4, int.MaxValue })
+        {
+            var outgoing = new OutgoingTransfer(payload, (opening, 8));
+
+            Assert.Equal(payload, outgoing.Opening.ToArray());
+            Assert.Equal(3, outgoing.CreditEnd);
+            outgoing.Grant(long.MaxValue);
+            Assert.Null(outgoing.NextChunk());
+        }
+    }
+
     [Fact]
     public void Sizes_a_chunk_as_what_an_envelope_of_the_chunk_size_holds_past_its_header_an_envelope_at_most()
     {
