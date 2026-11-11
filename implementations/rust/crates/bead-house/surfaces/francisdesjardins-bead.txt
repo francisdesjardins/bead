@@ -1,6 +1,6 @@
 crate
   mod json
-  use rustls #[cfg(any(feature = "websocket", feature = "http"))]
+  use rustls #[cfg(any(feature = "websocket", feature = "http", feature = "mqtt"))]
   use tokio::runtime::Handle
   use tokio_util::sync::CancellationToken
   use broker::adapter::BrokerAdapter
@@ -214,6 +214,8 @@ crate
   use net::bounds::HEADERS_TIMEOUT #[cfg(any(feature = "websocket", feature = "http"))]
   use net::bounds::MINIMUM_SEND_BYTES_PER_SECOND #[cfg(any(feature = "websocket", feature = "http"))]
   use net::bounds::SEND_GRACE_PERIOD #[cfg(any(feature = "websocket", feature = "http"))]
+  use net::credential::CredentialProvider #[cfg(any(feature = "websocket", feature = "mqtt"))]
+  use net::credential::CredentialProviderError #[cfg(any(feature = "websocket", feature = "mqtt"))]
   use payloads::CodecRefusal
   use payloads::JsonCodec
   use payloads::JsonOf
@@ -337,8 +339,6 @@ crate
   use violations::violations_detail_of
   use violations::violations_of
   use violations::words_of
-  use websocket::client::CredentialProvider #[cfg(feature = "websocket")]
-  use websocket::client::CredentialProviderError #[cfg(feature = "websocket")]
   use websocket::client::WebSocketTransportClient #[cfg(feature = "websocket")]
   use websocket::client::WebSocketTransportClientConnectOptions #[cfg(feature = "websocket")]
   use websocket::client::WebSocketTransportClientOptions #[cfg(feature = "websocket")]
@@ -1790,9 +1790,12 @@ crate::metrics
     fn declare_notification(&self, procedure: &Procedure) -> Result<NotificationSeries, ProgrammerError>
     derives Clone, Debug
 crate::net::bounds
-  const MINIMUM_SEND_BYTES_PER_SECOND: u64 #[cfg(any(feature = "websocket", feature = "http"))]
-  const SEND_GRACE_PERIOD: Duration #[cfg(any(feature = "websocket", feature = "http"))]
-  const HEADERS_TIMEOUT: Duration #[cfg(any(feature = "websocket", feature = "http"))]
+  const MINIMUM_SEND_BYTES_PER_SECOND: u64 #[cfg(any(feature = "websocket", feature = "http", feature = "mqtt"))] #[cfg(any(feature = "websocket", feature = "http"))]
+  const SEND_GRACE_PERIOD: Duration #[cfg(any(feature = "websocket", feature = "http", feature = "mqtt"))] #[cfg(any(feature = "websocket", feature = "http"))]
+  const HEADERS_TIMEOUT: Duration #[cfg(any(feature = "websocket", feature = "http", feature = "mqtt"))] #[cfg(any(feature = "websocket", feature = "http"))]
+crate::net::credential
+  type CredentialProviderError = Box<dyn Error + Send + Sync> #[cfg(any(feature = "websocket", feature = "http", feature = "mqtt"))] #[cfg(any(feature = "websocket", feature = "mqtt"))]
+  type CredentialProvider = Arc<dyn Fn(CancellationToken) -> BoxFuture<Result<String, CredentialProviderError>> + Send + Sync,> #[cfg(any(feature = "websocket", feature = "http", feature = "mqtt"))] #[cfg(any(feature = "websocket", feature = "mqtt"))]
 crate::payloads
   struct CodecRefusal
     fn new<R: Into<String>>(reason: R) -> Self
@@ -2455,8 +2458,6 @@ crate::violations
   fn words_of(violation: &Violation) -> Option<String>
   fn violations_of(failure: &Failure) -> ReadViolations
 crate::websocket::client
-  type CredentialProviderError = Box<dyn Error + Send + Sync> #[cfg(feature = "websocket")]
-  type CredentialProvider = Arc<dyn Fn(CancellationToken) -> BoxFuture<Result<String, CredentialProviderError>> + Send + Sync,> #[cfg(feature = "websocket")]
   struct WebSocketTransportClientOptions #[non_exhaustive] #[cfg(feature = "websocket")]
     pub clock: Option<SharedClock> #[cfg(feature = "websocket")]
     pub runtime: Option<Handle> #[cfg(feature = "websocket")]

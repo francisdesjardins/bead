@@ -1,10 +1,11 @@
+use std::error::Error;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::SystemTime;
 
 use futures_util::{SinkExt, StreamExt};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpListener;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Notify, mpsc};
 use tungstenite::handshake::server::{
     Callback, ErrorResponse, Request as UpgradeRequest, Response as Answer,

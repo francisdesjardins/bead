@@ -30,7 +30,7 @@ mod life;
 mod managers;
 mod memory;
 mod metrics;
-#[cfg(any(feature = "websocket", feature = "http"))]
+#[cfg(any(feature = "websocket", feature = "http", feature = "mqtt"))]
 mod net;
 mod ordered;
 mod owner;
@@ -47,7 +47,7 @@ mod websocket;
 
 /// The TLS a socket transport speaks, re-exported so that the config an application gives one is
 /// of the version Bead builds on.
-#[cfg(any(feature = "websocket", feature = "http"))]
+#[cfg(any(feature = "websocket", feature = "http", feature = "mqtt"))]
 pub use rustls;
 /// The runtime handle accepted by Bead's runtime options.
 pub use tokio::runtime::Handle;
@@ -153,6 +153,8 @@ pub use metrics::{
 };
 #[cfg(any(feature = "websocket", feature = "http"))]
 pub use net::bounds::{HEADERS_TIMEOUT, MINIMUM_SEND_BYTES_PER_SECOND, SEND_GRACE_PERIOD};
+#[cfg(any(feature = "websocket", feature = "mqtt"))]
+pub use net::credential::{CredentialProvider, CredentialProviderError};
 pub use payloads::{CodecRefusal, JsonCodec, JsonOf, PayloadCodec, RawCodec, TextCodec};
 pub use router::admissions::{
     BeforeRequest, require_credential, require_session, share_leg_b_session,
@@ -202,8 +204,8 @@ pub use violations::{
 };
 #[cfg(feature = "websocket")]
 pub use websocket::client::{
-    CredentialProvider, CredentialProviderError, WebSocketTransportClient,
-    WebSocketTransportClientConnectOptions, WebSocketTransportClientOptions,
+    WebSocketTransportClient, WebSocketTransportClientConnectOptions,
+    WebSocketTransportClientOptions,
 };
 #[cfg(feature = "websocket")]
 pub use websocket::connection::{CLOSE_TIMEOUT, MAXIMUM_MESSAGE_BYTES};

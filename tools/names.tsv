@@ -66,7 +66,7 @@ ConnectionHandle	ConnectionHandle [scalar]	-	ConnectionHandle [scalar]	same
 ConnectionTarget	IConnectionTarget [record]	ConnectionTarget [record]	-	same
 Credential	Credential [choice]	Credential [record]	Credential [choice]	same
 Credentials	ICredentials [record]	Credentials [record]	Credentials [record]	same
-CredentialProvider	-	-	CredentialProvider [function type]	own: the function's type a WebSocket client's connect takes, which the other sides write in place, TypeScript's ({ signal }) => string | Promise<string> and C#'s Func<CancellationToken, ValueTask<string>> (0044)
+CredentialProvider	-	-	CredentialProvider [function type]	own: the function's type a WebSocket client's connect and a broker adapter's password take, which the other sides write in place, TypeScript's ({ signal }) => string | Promise<string> and C#'s Func<CancellationToken, ValueTask<string>> (0044, 0050)
 CredentialProviderError	-	-	CredentialProviderError [record]	own: a Result's error, where the other sides throw (0044)
 CredentialScheme	CredentialScheme [choice]	CredentialScheme [choice]	CredentialScheme [choice]	same
 CreditHeader	ICreditHeader [record]	CreditHeader [record]	CreditHeader [record]	same
