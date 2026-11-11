@@ -29,6 +29,20 @@ export interface ITabs {
 export const mountTabs = (list: HTMLElement, { show }: ITabsOptions): ITabs => {
   const tabs = Object.freeze([...list.querySelectorAll<HTMLButtonElement>('[role="tab"]')]);
 
+  // a list wider than a narrow screen scrolls: the tab selected is brought into it, the list alone
+  // moving, never the page
+  const bringIntoView = (tab: HTMLButtonElement): void => {
+    const shown = list.getBoundingClientRect();
+    const at = tab.getBoundingClientRect();
+
+    // ! by whole pixels, up: a scroll by a fraction is rounded down and leaves the tab cut
+    if (at.left < shown.left) {
+      list.scrollLeft -= Math.ceil(shown.left - at.left);
+    } else if (at.right > shown.right) {
+      list.scrollLeft += Math.ceil(at.right - shown.right);
+    }
+  };
+
   const select = (tab: HTMLButtonElement, { isFocused = false }: ISelectOptions = {}): void => {
     for (const each of tabs) {
       const isShown = each === tab;
@@ -41,6 +55,7 @@ export const mountTabs = (list: HTMLElement, { show }: ITabsOptions): ITabs => {
       tab.focus();
     }
 
+    bringIntoView(tab);
     show(tab);
   };
 

@@ -52,4 +52,33 @@ test.describe('mountTabs', () => {
     // one tab stop for the tabs: the one selected
     await expect(page.locator('#scene-tabs [tabindex="0"]')).toHaveCount(1);
   });
+
+  test('brings the tab its hash selects into a list a narrow screen scrolls, the page left where it is', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(`${served?.url ?? ''}#packages`);
+
+    const packages = page.getByRole('tab', { name: 'Packages' });
+
+    await expect(packages).toHaveAttribute('aria-selected', 'true');
+
+    // * across the list, whole: its scroll clips every tab's bottom pixel, so no viewport ratio
+    const [list, tab] = await Promise.all([
+      page.locator('#scene-tabs').boundingBox(),
+      packages.boundingBox(),
+    ]);
+
+    expect(list).not.toBeNull();
+    expect(tab).not.toBeNull();
+    expect(tab?.x ?? -1).toBeGreaterThanOrEqual(list?.x ?? 0);
+    expect((tab?.x ?? 0) + (tab?.width ?? 0)).toBeLessThanOrEqual(
+      (list?.x ?? 0) + (list?.width ?? 0) + 0.5
+    );
+    expect(
+      await page.evaluate(() => {
+        return window.scrollY;
+      })
+    ).toBe(0);
+  });
 });
