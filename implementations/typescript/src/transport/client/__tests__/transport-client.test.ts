@@ -180,6 +180,20 @@ test.describe('@francisdesjardins/bead/transport-client', () => {
 });
 
 test.describe('createTransportClient', () => {
+  test('takes a field’s value as a credential: visible ASCII, spaces and tabs alone, none first or last', () => {
+    for (const value of ['', 'Interop sub=ada', 'Bearer mF_9.B5f-4.1JqM', 'a\tb', '~!']) {
+      expect(entry.isFieldValue(value), value).toBe(true);
+    }
+
+    for (const value of [' Bearer x', 'x ', '\tx', 'Interop\nsub=ada', 'café', 'a\x7fb']) {
+      expect(entry.isFieldValue(value), value).toBe(false);
+    }
+  });
+
+  test('reconnects five times a second apart by default', () => {
+    expect(entry.RECONNECT_DEFAULTS).toEqual({ maximumAttempts: 5, delay: 1_000 });
+  });
+
   test('starts uninitialized with no protocol', () => {
     const { client } = createStubClient();
     expect(client.isUninitialized()).toBe(true);
