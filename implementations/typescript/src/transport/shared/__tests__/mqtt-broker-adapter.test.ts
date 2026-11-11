@@ -1537,6 +1537,31 @@ test.describe('createMqttBrokerAdapter', () => {
     await adapter.stop();
   });
 
+  test('ends its start once stopped in the microtask after its password is answered and asks anew at its next start', async () => {
+    let asks = 0;
+    const adapter = adapterOf(script, {
+      passwordProvider: () => {
+        asks += 1;
+
+        if (asks === 1) {
+          queueMicrotask(() => {
+            queueMicrotask(() => {
+              void adapter.stop();
+            });
+          });
+        }
+
+        return PASSWORD;
+      },
+    });
+
+    await expect(adapter.start()).rejects.toThrow('the link of ada stopped as it started');
+    expect(adapter.isLinked).toBe(false);
+    await linkUp({ adapter, script });
+    expect([asks, adapter.isLinked]).toEqual([2, true]);
+    await adapter.stop();
+  });
+
   test('fails its start once its password provider outlives its connect timeout, and takes no late answer', async () => {
     const late = Promise.withResolvers<string>();
     const adapter = adapterOf(script, {
@@ -1775,6 +1800,26 @@ test.describe('createMqttBrokerAdapter', () => {
     expect((connect as { username?: string }).username).toBe(ID);
     expect((connect as { password?: Buffer }).password).toBeUndefined();
     await bare.stop();
+  });
+
+  test('refuses a TLS client certificate in a page, whose browser chooses it', () => {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'process');
+
+    Object.defineProperty(globalThis, 'process', { configurable: true, value: undefined });
+
+    try {
+      expect(() => {
+        return createMqttBrokerAdapter({
+          id: ID,
+          tls: TLS_FIXTURE,
+          url: 'wss://broker.example/mqtt',
+        });
+      }).toThrow(
+        'a page chooses no TLS client certificate, its browser does: authenticate it by a password'
+      );
+    } finally {
+      Object.defineProperty(globalThis, 'process', descriptor as PropertyDescriptor);
+    }
   });
 
   test('is secure over mqtts and wss, and over mqtt and ws to the loopback alone', () => {
