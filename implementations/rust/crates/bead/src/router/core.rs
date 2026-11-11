@@ -542,9 +542,11 @@ pub(crate) struct Core<S> {
     // the receiving transfers of requests, by their transfer's id: the request as it waits, and
     // its handler
     pub(crate) receiving_requests: BTreeMap<u64, (Arc<Dispatch>, Arc<Handler>)>,
-    // the results sent as a transfer, by their id, and what settles each once its last chunk went
+    // the results sent as a transfer, by their id, while they are
     pub(crate) results: BTreeMap<u64, crate::router::answers::ResultSending<S>>,
-    pub(crate) settled: BTreeMap<u64, Option<Responded<S>>>,
+    // what settles each result sent as a transfer: its answer, the sends not heard back from, and
+    // whether its last chunk went
+    pub(crate) settling: BTreeMap<u64, crate::router::answers::Settling<S>>,
     pub(crate) next_id: u64,
 }
 
@@ -593,7 +595,7 @@ impl<S: Side> Core<S> {
             disposed: false,
             receiving_requests: BTreeMap::new(),
             results: BTreeMap::new(),
-            settled: BTreeMap::new(),
+            settling: BTreeMap::new(),
             next_id: 1,
         }
     }

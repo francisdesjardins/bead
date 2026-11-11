@@ -1,6 +1,6 @@
 //! A result too large for one envelope, sent as a transfer (spec 12): its opening, then each chunk
 //! credited; its call stays open until the last chunk is handed off, and the answer settles once
-//! that one went, which ends the call.
+//! every envelope of it went, the first refusal to come failing it (spec 12.7).
 
 use std::sync::Arc;
 
@@ -15,13 +15,30 @@ use crate::router::parts::{HeldTimer, Placement, SendingFor, cancel_timer};
 use crate::router::transfer::{Chunk, OutgoingTransfer};
 use crate::router::types::{CallAddress, SignalReason};
 
-/// A result sent as a transfer, while it is: the request it answers, its timer, what settles it.
+/// A result sent as a transfer, while it is: the request it answers, its timer, what undoes it.
 pub(crate) struct ResultSending<S> {
     pub(crate) dispatch: Arc<Dispatch>,
     pub(crate) timer: HeldTimer,
     pub(crate) finished: tokio_util::sync::CancellationToken,
     pub(crate) undo: Option<Undo<S>>,
-    pub(crate) done: Option<Responded<S>>,
+}
+
+/// What settles a result sent as a transfer: its answer, the sends handed to its transport and not
+/// heard back from, and whether its last chunk went.
+pub(crate) struct Settling<S> {
+    done: Option<Responded<S>>,
+    pending: u32,
+    is_last_gone: bool,
+}
+
+impl<S> core::fmt::Debug for Settling<S> {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("Settling")
+            .field("pending", &self.pending)
+            .field("is_last_gone", &self.is_last_gone)
+            .finish_non_exhaustive()
+    }
 }
 
 impl<S> core::fmt::Debug for ResultSending<S> {
@@ -53,34 +70,64 @@ fn stop<S: Side>(state: &mut S, id: u64) -> Option<ResultSending<S>> {
     Some(sending)
 }
 
+// one more envelope of the transfer handed to its transport, not yet heard back from
+fn went<S: Side>(state: &mut S, id: u64) {
+    if let Some(settling) = state.core().settling.get_mut(&id) {
+        settling.pending = settling.pending.saturating_add(1);
+    }
+}
+
+// the answer settles, once: with the first outcome to come, nothing after it
+fn answer<S: Side>(state: &mut S, (id, outcome): (u64, Result<(), CallError>)) {
+    if let Some(Settling {
+        done: Some(done), ..
+    }) = state.core().settling.remove(&id)
+    {
+        done(state, outcome);
+    }
+}
+
+// what the transport said of one envelope of the transfer: a refusal fails it; the last one heard
+// once the last chunk went answers it
+fn heard<S: Side>(state: &mut S, (id, outcome): (u64, Result<(), CallError>)) {
+    if let Err(error) = outcome {
+        return fail(state, (id, error));
+    }
+
+    let Some(settling) = state.core().settling.get_mut(&id) else {
+        return;
+    };
+
+    settling.pending = settling.pending.saturating_sub(1);
+
+    if settling.is_last_gone && settling.pending == 0 {
+        answer(state, (id, Ok(())));
+    }
+}
+
 /// Stops a result as its requester cancels, before another queued credit can send more.
 pub(crate) fn cancel<S: Side>(state: &mut S, call: &CallAddress) {
     let Some(SendingFor::Result(id)) = state.core().sendings.purpose_of(call) else {
         return;
     };
 
-    if let Some(sending) = stop(state, id)
-        && let Some(done) = sending.done
-    {
-        done(state, Err(CallError::Cancelled(Some(call.call_id))));
+    if stop(state, id).is_some() {
+        answer(state, (id, Err(CallError::Cancelled(Some(call.call_id)))));
     }
 }
 
 // the call goes with it: its call id is the peer's to open again; what did not go out is undone
 fn fail<S: Side>(state: &mut S, (id, error): (u64, CallError)) {
-    let Some(sending) = stop(state, id) else {
-        return;
-    };
+    if let Some(sending) = stop(state, id) {
+        if let Some(undo) = sending.undo {
+            undo(state);
+        }
 
-    if let Some(undo) = sending.undo {
-        undo(state);
+        close_answering(state, &sending.dispatch);
     }
 
-    close_answering(state, &sending.dispatch);
-
-    if let Some(done) = sending.done {
-        done(state, Err(error));
-    }
+    // ! a refusal fails the answer whenever it comes, the first to come told (spec 12.7)
+    answer(state, (id, Err(error)));
 }
 
 /// What the transfer does sets its timer going again; silent too long, it ends, and the peer is
@@ -156,7 +203,7 @@ pub(crate) fn end_counted<S: Side>(state: &mut S, (dispatch, ending): (&Dispatch
     }
 }
 
-/// Sends one chunk of a result's transfer: the last one handed off answers the call.
+/// Sends one chunk of a result's transfer: the last one handed off ends the call.
 pub(crate) fn send_chunk<S: Side>(state: &mut S, (call, id, chunk): (&CallAddress, u64, Chunk)) {
     let envelope = Placement::chunk_envelope_of(call.call_id, &chunk);
     let mut options = Deliver::to(&call.connection_handle);
@@ -172,28 +219,18 @@ pub(crate) fn send_chunk<S: Side>(state: &mut S, (call, id, chunk): (&CallAddres
             end_counted(state, (&sending.dispatch, CallEnding::Result));
             close_answering(state, &sending.dispatch);
 
-            // the answer settles once the last chunk went
-            let done = sending.done;
-
-            state.core().settled.insert(id, done);
+            // * the answer waits for every envelope of the transfer, this one counted already
+            if let Some(settling) = state.core().settling.get_mut(&id) {
+                settling.is_last_gone = true;
+            }
         }
     }));
     options.then = Some(Box::new(
-        move |state: &mut S, outcome: Result<(), CallError>| match outcome {
-            Ok(()) => {
-                if is_last && let Some(Some(done)) = state.core().settled.remove(&id) {
-                    done(state, Ok(()));
-                }
-            }
-            Err(error) => {
-                if let Some(Some(done)) = state.core().settled.remove(&id) {
-                    done(state, Err(error));
-                } else {
-                    fail(state, (id, error));
-                }
-            }
+        move |state: &mut S, outcome: Result<(), CallError>| {
+            heard(state, (id, outcome));
         },
     ));
+    went(state, id);
     deliver(state, (envelope, options));
 }
 
@@ -223,7 +260,14 @@ pub(crate) fn send_result<S: Side>(
             timer: None,
             finished: finished.clone(),
             undo,
+        },
+    );
+    core.settling.insert(
+        id,
+        Settling {
             done,
+            pending: 0,
+            is_last_gone: false,
         },
     );
 
@@ -248,11 +292,11 @@ pub(crate) fn send_result<S: Side>(
                 Some(SignalReason::Cancelled) | None => CallError::Cancelled(Some(call_id)),
                 Some(SignalReason::Disconnected(reason)) => CallError::Disconnected(reason),
             };
+            // ! a transfer still open alone: past its last chunk, only a refusal its transport
+            // gives fails it
             owner.offer(Box::new(move |state: &mut S| {
-                if let Some(sending) = stop(state, id)
-                    && let Some(done) = sending.done
-                {
-                    done(state, Err(reason));
+                if stop(state, id).is_some() {
+                    answer(state, (id, Err(reason)));
                 }
             }));
         });
@@ -264,11 +308,10 @@ pub(crate) fn send_result<S: Side>(
 
     options.then = Some(Box::new(
         move |state: &mut S, outcome: Result<(), CallError>| {
-            if let Err(error) = outcome {
-                fail(state, (id, error));
-            }
+            heard(state, (id, outcome));
         },
     ));
+    went(state, id);
     deliver(
         state,
         (
