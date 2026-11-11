@@ -1710,6 +1710,41 @@ async fn refuses_a_publication_past_its_connacks_maximum_packet_size_before_it_g
     adapter.stop().await;
 }
 
+// spec 15.28
+#[tokio::test]
+async fn reports_no_payload_room_where_its_connacks_maximum_packet_size_cannot_hold_a_publish_to_the_topic_and_refuses_even_an_empty_publication()
+ {
+    let script = script().await;
+    let adapter = adapter_of(&options_of(&script));
+    let link = link_up(
+        (&adapter, &script),
+        (
+            &Connack {
+                maximum_packet_size: Some(16),
+                ..Connack::default()
+            },
+            None,
+        ),
+    )
+    .await;
+
+    assert_eq!(adapter.maximum_payload_bytes(&inbox()), 0, "no room");
+
+    let refused = adapter
+        .publish(BrokerPublication::new(inbox(), Bytes::new()))
+        .await
+        .unwrap_err();
+
+    assert!(
+        message_of(&refused).contains("past its broker's Maximum Packet Size, 16 bytes"),
+        "{refused}"
+    );
+    assert!(adapter.is_linked(), "its link kept");
+    rest(Duration::from_millis(50)).await;
+    assert!(sent_of(&link).is_empty(), "never sent");
+    adapter.stop().await;
+}
+
 // spec 15.30
 #[tokio::test]
 async fn tells_its_link_up_once_its_connack_came_and_bounds_what_it_publishes_by_that_connacks_maximum_packet_size_the_last_links_while_it_is_down()
