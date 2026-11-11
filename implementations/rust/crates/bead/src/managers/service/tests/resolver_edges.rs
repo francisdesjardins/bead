@@ -49,9 +49,7 @@ async fn a_request_is_answered_once_a_second_answer_is_a_programmer_error_and_se
                     .await
                     .expect_err("a second answer as a failure");
                 for error in [result, failure] {
-                    let ResolverError::Other(error) = error else {
-                        panic!("a programmer error");
-                    };
+                    let ResolverError::Other(error) = error;
                     locked(&hearing).push(error.is::<crate::errors::ProgrammerError>());
                 }
                 Ok(())
@@ -100,10 +98,7 @@ async fn may_be_a_refusal_of_admission_of_the_routers_side_with_a_detail() {
         );
         let outcome = resolver.resolve(props(&recording, b"hi")).await;
         if wrong_side {
-            let ResolverError::Other(error) = outcome.expect_err("a refusal from the other side")
-            else {
-                panic!("a programmer error");
-            };
+            let ResolverError::Other(error) = outcome.expect_err("a refusal from the other side");
             assert!(error.is::<crate::errors::ProgrammerError>());
         } else {
             outcome.expect("the refusal answered");
@@ -471,10 +466,7 @@ async fn are_typed_a_refusal_of_admission_or_the_procedures_own_and_no_other() {
     let ResolverError::Other(error) = resolver
         .resolve(props(&recording, b"hi"))
         .await
-        .expect_err("a routing failure is the router's to answer")
-    else {
-        panic!("a programmer error");
-    };
+        .expect_err("a routing failure is the router's to answer");
     assert!(error.is::<crate::errors::ProgrammerError>());
     assert_eq!(
         recording.answers(),

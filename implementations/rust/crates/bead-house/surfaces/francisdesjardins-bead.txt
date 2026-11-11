@@ -997,10 +997,9 @@ crate::errors
     implements Display, Error
     derives Clone, Debug, Eq, PartialEq
   enum ResolverError #[non_exhaustive]
-    Failure(Failure)
     Other(Box<dyn Error + Send + Sync>)
     fn other<E: Into<Box<dyn Error + Send + Sync>>>(error: E) -> Self
-    implements Display, Error, From
+    implements Display, Error
     derives Debug
   struct Disposed;
     implements Display, Error

@@ -672,11 +672,15 @@ pub(crate) fn reported(failure: Failure) -> RouterError {
     RouterError::Failure(failure)
 }
 
-/// What a resolver's error is reported as: a call's failure, a router's error, as it is; any other,
-/// as itself.
+/// What a resolver's error is reported as: a call's failure, a failure, a router's error, as it is;
+/// any other, as itself.
 pub(crate) fn reported_error_of(error: Box<dyn Error + Send + Sync>) -> RouterError {
     let error = match error.downcast::<CallError>() {
         Ok(call) => return reported_call(*call),
+        Err(error) => error,
+    };
+    let error = match error.downcast::<Failure>() {
+        Ok(failure) => return reported(*failure),
         Err(error) => error,
     };
 
@@ -1836,14 +1840,8 @@ fn resolver_failed<S: Side>(
     (dispatch, signal, error): (&Arc<Dispatch>, &Signal, ResolverError),
 ) {
     let handle = Arc::clone(&dispatch.connection_handle);
-    let error = match error {
-        // ! a resolver's own failure is answered as it is, as a thrown FailureError is
-        ResolverError::Failure(failure) if is_answering(state, dispatch) => {
-            return respond_failure_as_is(state, (failure, dispatch));
-        }
-        ResolverError::Failure(failure) => reported(failure),
-        ResolverError::Other(error) => reported_error_of(error),
-    };
+    let ResolverError::Other(error) = error;
+    let error = reported_error_of(error);
 
     if !signal.is_aborted() {
         state.report(error, &handle);
@@ -1857,10 +1855,6 @@ fn resolver_failed<S: Side>(
 
         refuse(state, (failure, dispatch));
     }
-}
-
-fn respond_failure_as_is<S: Side>(state: &mut S, (failure, dispatch): (Failure, &Arc<Dispatch>)) {
-    refuse(state, (failure, dispatch));
 }
 
 // an admission's refusal as it is answered: never SESSION_REQUIRED to a call that presented a
@@ -1907,10 +1901,8 @@ fn admit_routed<S: Side>(
     if let Some(admit) = &handler.admit {
         match admit(&request) {
             Err(error) => {
-                let reported_error = match error {
-                    ResolverError::Failure(failure) => reported(failure),
-                    ResolverError::Other(error) => RouterError::Other(Arc::from(error)),
-                };
+                let ResolverError::Other(error) = error;
+                let reported_error = reported_error_of(error);
 
                 state.report(reported_error, &handle);
 
