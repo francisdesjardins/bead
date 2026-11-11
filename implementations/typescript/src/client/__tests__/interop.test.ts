@@ -1,8 +1,8 @@
 // ── Interop ───────────────────────────────────────────────────────────────────
 
 // Bead's TypeScript client against the C# server of the interop service, over WebSocket, HTTP,
-// MQTT 5 and AMQP 1.0, and the Rust one, over WebSocket and HTTP: the same procedures, failures and
-// cancel; skipped, saying so, without .NET, a broker or `BEAD_INTEROP_RUST_SERVER`.
+// MQTT 5 and AMQP 1.0, and the Rust one, over WebSocket, HTTP and MQTT 5: the same procedures,
+// failures and cancel; skipped, saying so, without .NET, a broker or `BEAD_INTEROP_RUST_SERVER`.
 
 // dependencies
 
@@ -52,6 +52,12 @@ interface IPorts {
   gatewayPort?: number;
   httpPort: number;
   port: number;
+}
+
+/** An interop server the cases call: the name it serves alone over a broker, and its ports. */
+interface IInteropServer {
+  readonly name: string;
+  readonly portsOf: () => IPorts;
 }
 
 /**
@@ -161,14 +167,14 @@ const brokerLinkOf = (label: string): IBrokerLink => {
 };
 
 /**
- * Each transport the C# server is called over: its client, how it connects to the C# server,
+ * Each transport an interop server is called over: its client, how it connects to that server,
  * whether it carries transfers, and whether it plays here.
  */
 const TRANSPORTS = [
   {
     carriesTransfers: true,
-    connect: (client: InteropTransportClient, ports: IPorts): Promise<void> => {
-      return (client as WebSocketClient).connect({ host: HOST, port: ports.port });
+    connect: (client: InteropTransportClient, server: IInteropServer): Promise<void> => {
+      return (client as WebSocketClient).connect({ host: HOST, port: server.portsOf().port });
     },
     create: (): InteropTransportClient => {
       return createWebSocketClient();
@@ -178,8 +184,8 @@ const TRANSPORTS = [
   },
   {
     carriesTransfers: false,
-    connect: (client: InteropTransportClient, ports: IPorts): Promise<void> => {
-      return (client as HTTPClient).connect({ host: HOST, port: ports.httpPort });
+    connect: (client: InteropTransportClient, server: IInteropServer): Promise<void> => {
+      return (client as HTTPClient).connect({ host: HOST, port: server.portsOf().httpPort });
     },
     create: (): InteropTransportClient => {
       return createHTTPClient({ transport: { fetch: fetchInOrder() } });
@@ -189,8 +195,8 @@ const TRANSPORTS = [
   },
   {
     carriesTransfers: true,
-    connect: (client: InteropTransportClient): Promise<void> => {
-      return (client as IClient<BrokerTransportClient>).connect({ server: 'interop-cs' });
+    connect: (client: InteropTransportClient, server: IInteropServer): Promise<void> => {
+      return (client as IClient<BrokerTransportClient>).connect({ server: server.name });
     },
     create: (): InteropTransportClient => {
       return createClient({ transport: brokerLinkOf('MQTT 5').participant.transportClient() });
@@ -200,8 +206,8 @@ const TRANSPORTS = [
   },
   {
     carriesTransfers: true,
-    connect: (client: InteropTransportClient): Promise<void> => {
-      return (client as IClient<BrokerTransportClient>).connect({ server: 'interop-cs' });
+    connect: (client: InteropTransportClient, server: IInteropServer): Promise<void> => {
+      return (client as IClient<BrokerTransportClient>).connect({ server: server.name });
     },
     create: (): InteropTransportClient => {
       return createClient({ transport: brokerLinkOf('AMQP 1.0').participant.transportClient() });
@@ -353,8 +359,8 @@ const startBrokerLink = async (
 };
 
 /**
- * The TypeScript interop server, started over the broker `variable` names beside the C# one, its
- * first line read: the other brokers' variables left out, so that each broker's run starts a
+ * The TypeScript interop server, started over the broker `variable` names beside the other side's,
+ * its first line read: the other brokers' variables left out, so that each broker's run starts a
  * participant of its own.
  */
 const startTypeScriptServer = async (variable: string): Promise<ChildProcessWithoutNullStreams> => {
@@ -441,15 +447,15 @@ const openedOnceAdmitted = async <T>(
 // definition
 
 /**
- * The interop's cases over one transport, against the server whose ports `portsOf` gives once its
- * describe has started it; over a broker, beside the TypeScript server of the name both serve.
+ * The interop's cases over one transport, against `server`, its ports given once its describe has
+ * started it; over a broker, beside the TypeScript server of the name both serve.
  */
 const describeOver = (
   { carriesTransfers, connect, create, label, skipped }: (typeof TRANSPORTS)[number],
-  portsOf: () => IPorts
+  server: IInteropServer
 ): void => {
   test.describe(`over ${label}`, () => {
-    // the TypeScript server, beside the C# one, of the name both serve in a group
+    // the TypeScript server, beside the other side's, of the name both serve in a group
     let typeScriptServer: ChildProcessWithoutNullStreams | undefined;
 
     test.skip(skipped !== undefined, skipped);
@@ -509,7 +515,7 @@ const describeOver = (
     test.beforeEach(async () => {
       client = create();
       made = undefined;
-      await connect(client, portsOf());
+      await connect(client, server);
     });
 
     test.afterEach(async () => {
@@ -746,7 +752,7 @@ const describeOver = (
         await webSocketClient.connect({
           credential: elsewhere.carried,
           host: HOST,
-          port: portsOf().port,
+          port: server.portsOf().port,
         });
       }
 
@@ -904,7 +910,7 @@ const describeOver = (
         const next = createClient({ transport: link.participant.transportClient() });
 
         try {
-          await next.connect({ server: 'interop-cs' });
+          await next.connect({ server: server.name });
           await expect(new InteropClient(next).echo('after')()).resolves.toBe('after');
         } finally {
           await next[Symbol.asyncDispose]();
@@ -913,6 +919,11 @@ const describeOver = (
     }
   });
 };
+
+// ! one worker plays the file in order: each server's describe over MQTT 5 links the broker's
+// `ts-client` and `ts-server`, which a second link of the same id at once takes over (MQTT 5.0
+// §3.1.4, 0x8E)
+test.describe.configure({ mode: 'default' });
 
 test.describe('the C# server of the interop service', () => {
   test.skip(
@@ -1060,8 +1071,11 @@ test.describe('the C# server of the interop service', () => {
   });
 
   for (const transport of TRANSPORTS) {
-    describeOver(transport, () => {
-      return ports;
+    describeOver(transport, {
+      name: 'interop-cs',
+      portsOf: () => {
+        return ports;
+      },
     });
   }
 });
@@ -1090,11 +1104,14 @@ test.describe('the Rust server of the interop service', () => {
     await exited;
   });
 
-  // * no broker nor gateway: those it serves beside are ahead on the Rust side
+  // * no AMQP 1.0 nor gateway: those it serves beside are ahead on the Rust side
   for (const transport of TRANSPORTS) {
-    if (BROKERS[transport.label] === undefined) {
-      describeOver(transport, () => {
-        return ports;
+    if (transport.label !== 'AMQP 1.0') {
+      describeOver(transport, {
+        name: 'interop-rs',
+        portsOf: () => {
+          return ports;
+        },
       });
     }
   }
