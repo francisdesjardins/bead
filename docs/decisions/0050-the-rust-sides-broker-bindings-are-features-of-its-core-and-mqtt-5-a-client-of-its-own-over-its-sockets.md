@@ -20,25 +20,26 @@
   [0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)'s,
   one behaviour and a difference a row [0004](0004-one-behaviour-in-every-language.md)'s. Ahead: the
   AMQP 1.0 binding, the open row `Rust's AMQP 1.0 binding`, and the choice of its client, which
-  this record weighs below; the lift of MQTT 5's DISCONNECT of 0x95, a round of its own.
+  this record weighs below.
 
 ## Context
 
 **What each side does.** The TypeScript side ships each binding as a subpath of its one package,
 `./mqtt-broker-adapter` and `./amqp-broker-adapter`, over MQTT.js 5.16.1 and rhea 3.0.5, optional
 peer dependencies, with Bead's own code beside them where the libraries fall short: `mqtt-packets.ts`
-counts a packet `S = 1 + v(R) + R` (15.30), `amqp-messages.ts` writes the message profile (15.35),
-and `amqp-management.ts` holds RabbitMQ's management pair. Each module exports its defaults,
-`CONNECT_TIMEOUT` among them, and a password provider of type `({ signal }) => string |
+counts a packet `S = 1 + v(R) + R` (15.30), `mqtt-packet-guard.ts` reads each received packet's
+size at its Remaining Length on MQTT.js's stream (15.29), `amqp-messages.ts` writes the message
+profile (15.35), and `amqp-management.ts` holds RabbitMQ's management pair. Each module exports its
+defaults, `CONNECT_TIMEOUT` among them, and a password provider of type `({ signal }) => string |
 Promise<string>`. The C# side ships a project each, `Bead.Transport.Mqtt` over MQTTnet 5.2.0.1603 and
 `Bead.Transport.Amqp` over AMQPNetLite.Core 2.5.5, each reaching `Bead.Core`'s inside by
-`InternalsVisibleTo`; beside the libraries, `MqttPackets`, `MqttSendQuota`, `AmqpManagement`, and an
-inspector that reads each received packet's size and ends the link past the Maximum Packet Size; it
-exports no default as a constant. The Rust side holds the adapter's contract, `BrokerAdapter` and
-`BrokerListener`, at its root, and plays the broker's cases over its in-memory broker alone; every
-feature's item sits at its root (0049), `CredentialProvider` already has the shape of both other
-sides' password providers, and `bead::internal` reaches the core's inside for the workspace's own
-members, outside SemVer.
+`InternalsVisibleTo`; beside the libraries, `MqttPackets`, `MqttSendQuota`, `AmqpManagement`, and a
+guard on MQTTnet's channel that reads each received packet's size at its Remaining Length and ends
+the link past the Maximum Packet Size; it exports no default as a constant. The Rust side holds the
+adapter's contract, `BrokerAdapter` and `BrokerListener`, at its root, and plays the broker's cases
+over its in-memory broker alone; every feature's item sits at its root (0049), `CredentialProvider`
+already has the shape of both other sides' password providers, and `bead::internal` reaches the
+core's inside for the workspace's own members, outside SemVer.
 
 **What the probes found**, each on the pinned toolchain, rustc 1.99.1, read on 2026-11-10:
 
@@ -284,10 +285,9 @@ saying so.
   alone, and with all.
 - **Three serve `interop-both`**, the TypeScript, C# and Rust servers.
 - **The Rust side keeps to every leveled row the MQTT 5 binding holds**: no DISCONNECT of 0x95, each
-  WebSocket message one frame, a Password as text. MQTT.js alone forces the first, since the C#
-  adapter's inspector and the Rust side's client read each packet's size and could send it; lifting
-  it is a guard of the TypeScript adapter's own on its stream, every side then sending it, which
-  reaches across the languages and takes a round of its own.
+  WebSocket message one frame, a Password as text. The first is
+  [0041](0041-over-mqtt-5-a-participant-is-one-clean-link-and-a-parcel-one-publish-each-counted-to-its-byte.md)'s,
+  its reason Mosquitto's will handling.
 - **The `mqtt` job builds from the `rust` job's cache**, beside it, not behind it.
 - **Ahead**: AMQP 1.0's binding, `Rust's AMQP 1.0 binding`, its client by one of the three branches
   above, its fuzz target, its cases, its groups `amqpMessages` and `amqpPublishBounds`, its places
@@ -311,5 +311,5 @@ stands, AMQP 1.0's client ahead.
 | MQTT 5's client leaves out the two codec-only crates its own probe fetched, `mqtt5-protocol` and `mqttbytes-core-next`.                                                                                                                   | Accepted. The Context names both: `mqtt5-protocol` 0.16.2, 34 releases in eleven months, three in October 2026; `mqttbytes-core-next` 0.34.0, the fork's primitives and its churn; each a reader of a broker's bytes outside the lints Bead's own eleven packets are written under. No client and no codec holds the binding as 0041 has it.                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | The CI gives `mqtt` and `amqp` `needs: rust`, serializing two twenty-minute jobs behind CI's longest, and does not say so.                                                                                                                | Accepted. The broker jobs keep their `needs`; each installs the pinned toolchain and restores the `rust` job's Linux cache read-only, then builds and runs the Rust side over its broker, beside `rust`. 0049's reason for `interop-rust`'s handed binaries, a container with no toolchain and no C compiler, does not reach jobs on the runner's host. A job building once for three consumers is weighed and refused: one more job and an artifact to spare one parallel build.                                                                                                                                                                                                                                                                             |
 | A new row of Differences, "A broker client's reader, fuzzed", is of no kind the table admits and states a gate as a behaviour.                                                                                                            | Accepted. No row. The Consequences, the Rust README and `tools/fuzz.mjs`'s doc name `mqtt-packets` as the Rust side's alone, as `blueprint` is the TypeScript side's, and why it has no twin: the other sides read a broker's bytes through their libraries.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| With the Rust side's client, two sides of three can send a DISCONNECT of 0x95; the leveled row's C# half is stale and its lift cell misstates what lifting takes.                                                                         | Accepted. The C# adapter's inspector reads each packet's size and ends the link, and MQTTnet's `MqttClientDisconnectOptionsReason` holds `PacketTooLarge`. The row's "What forces it" names MQTT.js alone, the C# and Rust sides keeping to it; its "What would lift it" is a guard of the TypeScript adapter's own on its stream, every side then sending it. The lift reaches across the languages: a round of its own.                                                                                                                                                                                                                                                                                                                                     |
+| With the Rust side's client, two sides of three can send a DISCONNECT of 0x95; the leveled row's C# half is stale and its lift cell misstates what lifting takes.                                                                         | Accepted. The C# adapter's inspector reads each packet's size and ends the link, and MQTTnet's `MqttClientDisconnectOptionsReason` holds `PacketTooLarge`. The row says what forces it and what would lift it, every side keeping to it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | "A build without the feature compiles nothing of it" contradicts codecs always built, compiled by every user of neither binding and by the browser's check.                                                                               | Accepted. Each codec is under its feature, `internal` re-exporting it under the same `cfg`, and the fuzz project, outside the workspace, turns the features on in its own manifest, which no application unifies with. 0049's head's parse is always built because the core consumes it; a broker's codec has no consumer but its feature. The fuzz build then compiles aws-lc-rs, which the `rust` job's fuzz build proves.                                                                                                                                                                                                                                                                                                                                  |

@@ -897,27 +897,60 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Closes_its_link_no_DISCONNECT_on_a_packet_past_its_own_Maximum_Packet_Size_spec_15_29()
+    public async Task Closes_its_link_no_DISCONNECT_on_a_packet_past_its_own_Maximum_Packet_Size_read_at_its_length_spec_15_29()
     {
         await using var adapter = AdapterOf((options) =>
         {
             return options with { MaximumPacketSize = 1_100 };
         });
         var (messages, downs) = HeardOf(adapter);
-        var link = await LinkUp((adapter, _script));
 
-        await link.Send(PublishOf(("bead/i/ada", new byte[1_100], 1)));
-        await link.Closed.WaitAsync(Patience, Cancelled);
+        void Unanswered(ScriptedLink closed)
+        {
+            Assert.DoesNotContain(closed.Packets, (packet) =>
+            {
+                return packet is MqttDisconnectPacket or MqttPubAckPacket;
+            });
+        }
+
+        // a PUBLISH of 1,118 bytes in all, after its CONNACK
+        var whole = await LinkUp((adapter, _script));
+
+        await whole.Send(PublishOf(("bead/i/ada", new byte[1_100], 1)));
+        await whole.Closed.WaitAsync(Patience, Cancelled);
         await Until(() =>
         {
             return !downs.IsEmpty;
         });
         Assert.Equal([new BrokerDown()], downs);
-        Assert.Empty(messages);
-        Assert.DoesNotContain(link.Packets, (packet) =>
+        Unanswered(whole);
+
+        // * its fixed header alone, announcing 16,777,221 bytes, and nothing after it: judged at its length
+        var announced = await LinkUp((adapter, _script));
+
+        await announced.Write([0x32, 0x80, 0x80, 0x80, 0x08]);
+        await announced.Closed.WaitAsync(Patience, Cancelled);
+        await Until(() =>
         {
-            return packet is MqttDisconnectPacket or MqttPubAckPacket;
+            return downs.Count == 2;
         });
+        Assert.Equal([new BrokerDown(), new BrokerDown()], downs);
+        Unanswered(announced);
+
+        // a CONNACK's fixed header announcing as much: its start fails
+        var starting = adapter.Start();
+        var refused = await _script.Link();
+
+        await refused.Write([0x20, 0x80, 0x80, 0x80, 0x08]);
+        Assert.Contains("past its Maximum Packet Size", Assert.IsType<IOException>(await FailureOf(() =>
+        {
+            return starting;
+        })).Message, StringComparison.Ordinal);
+        await refused.Closed.WaitAsync(Patience, Cancelled);
+        Unanswered(refused);
+        Assert.Equal([new BrokerDown(), new BrokerDown()], downs);
+        Assert.Empty(messages);
+        Assert.False(adapter.IsLinked);
     }
 
     [Fact]

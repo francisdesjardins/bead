@@ -95,9 +95,8 @@ that meets the Tenth Man:
   requesters share ([0004](0004-one-behaviour-in-every-language.md),
   [0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md));
 - **MQTT 5's DISCONNECT of 0x95 on a packet past a participant's own Maximum Packet Size**, every
-  side sending it before it closes, by a guard of the TypeScript adapter's own on its stream, which
-  MQTT.js gives no other way to write it first
-  ([0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md));
+  side sending it before it closes, its broker keeping its will
+  ([0041](0041-over-mqtt-5-a-participant-is-one-clean-link-and-a-parcel-one-publish-each-counted-to-its-byte.md));
 - **the DevTools extension on Firefox**, its own glue beside the core every browser shares, and an
   adapter's own gauges in its Broker view, MQTT 5's Receive Maximum and its PUBACKs to settle among
   them ([0015](0015-a-pages-client-announces-itself-to-a-devtools-hook.md));

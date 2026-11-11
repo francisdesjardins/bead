@@ -23,6 +23,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The demo takes francisdesjardins.ca's palette and type, and lays its scenes in one column, Try
   it first, each card's result beside its buttons; the wire, its calls and its envelopes, folds
   into a drawer on a desktop and a sheet on a phone until it is opened.
+- Over MQTT 5, a participant judges a received packet against its own Maximum Packet Size as it
+  reads the packet's Remaining Length, before its body comes, and closes its network connection
+  there, its link lost or its start failed, whatever the packet's type: the TypeScript adapter by a
+  guard on MQTT.js's stream and the C# adapter by one on MQTTnet's channel, as the Rust side's
+  client does, so its own bound bounds what it holds of a packet. It sends no DISCONNECT of 0x95,
+  which Mosquitto 2.1.2 answers by deleting its will (spec 15.29, decision 0041).
 
 ### Removed
 
