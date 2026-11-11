@@ -177,6 +177,69 @@ public sealed class ServerTests : IAsyncLifetime
 
     // definition
 
+    [Fact]
+    public async Task Keeps_a_session_per_connection_its_token_drawn_as_it_is_first_stored()
+    {
+        await using var server = new Server<JsonElement>(_transport, new ServerOptions
+        {
+            ConnectionInactivityTimeout = Timeout.InfiniteTimeSpan,
+            ResolverScheduler = _scheduler,
+            Scheduler = _scheduler,
+        });
+        var sessions = server.Sessions;
+
+        _transport.Open(Handle);
+        await _scheduler.WhenIdle();
+        Assert.False(sessions.Has(Handle));
+
+        var stored = sessions.Set(sessions.Create(Handle) with { Data = JsonSerializer.SerializeToElement(new { name = "ada" }) });
+
+        Assert.NotNull(stored.SessionToken);
+        Assert.True(sessions.Has(Handle));
+        Assert.Equal("ada", sessions.Get(Handle)!.Data.GetProperty("name").GetString());
+        Assert.Equal([Handle], sessions.ConnectionHandles());
+        Assert.True(sessions.Delete(Handle));
+        Assert.False(sessions.Has(Handle));
+        Assert.False(sessions.Delete(Handle));
+    }
+
+    [Fact]
+    public async Task Gauges_each_layer_and_passes_a_server_that_keeps_nothing_it_should_not()
+    {
+        Start(Timeout.InfiniteTimeSpan);
+        _transport.Open(Handle);
+        await _scheduler.WhenIdle();
+
+        Assert.Equal(0, (await Server.Gauges()).Router.Orphans);
+        Assert.Equal(HealthStatus.Pass, (await Server.Health()).Status);
+    }
+
+    [Fact]
+    public async Task Set_refuses_a_timeout_spec_1_4_does_not_hold_as_it_is_made_and_stores_nothing()
+    {
+        Start(Timeout.InfiniteTimeSpan);
+        var sessions = Server.Sessions;
+
+        _transport.Open(Handle);
+        await _scheduler.WhenIdle();
+
+        foreach (var refused in new[]
+        {
+            sessions.Create(Handle) with { ConnectionInactivityTimeout = TimeSpan.Zero },
+            sessions.Create(Handle) with { SessionInactivityTimeout = TimeSpan.FromMilliseconds(2_147_483_648) },
+        })
+        {
+            Assert.StartsWith("an inactivity timeout is a number of milliseconds from 1 to 2147483647", Assert.Throws<ArgumentOutOfRangeException>(() =>
+            {
+                sessions.Set(refused);
+            }).Message, StringComparison.Ordinal);
+        }
+
+        Assert.False(sessions.Has(Handle));
+        sessions.Set(sessions.Create(Handle));
+        Assert.True(sessions.Has(Handle));
+    }
+
     public ValueTask InitializeAsync()
     {
         return ValueTask.CompletedTask;
