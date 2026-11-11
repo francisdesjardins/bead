@@ -1051,6 +1051,16 @@ async fn publishes_at_qos_1_and_retain_0_a_life_in_whole_seconds_rounded_up_wher
     let quick_link = link_up((&quick, &script), (&Connack::default(), None)).await;
 
     assert_eq!(quick.delivery(), BrokerDelivery::AtMostOnce, "at most once");
+
+    // its bound counts no Packet Identifier, which a QoS 0 PUBLISH has none of
+    let mut shape = MqttPublishShapeOptions::default();
+
+    shape.is_at_most_once = Some(true);
+    assert_eq!(
+        Some(quick.maximum_payload_bytes(&inbox())),
+        largest_payload("bead/i/ada", u64::from(LARGEST_PACKET_SIZE), &shape),
+        "no Packet Identifier counted"
+    );
     assert!(
         !quick
             .capabilities()
@@ -2076,6 +2086,12 @@ async fn announces_as_its_receive_bound_the_largest_payload_of_a_message_to_its_
         adapter_of(&options).receive_bound(&topic(&["bead", "i", "peer"])),
         4_072,
         "its own"
+    );
+    // * a topic whose PUBLISH alone passes the bound leaves no payload any room
+    assert_eq!(
+        adapter_of(&options).receive_bound(&topic(&["bead", "i", &"p".repeat(4_096)])),
+        0,
+        "no room"
     );
     assert_eq!(MAXIMUM_PACKET_SIZE, 16_777_216, "16 MiB");
 
