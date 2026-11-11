@@ -747,7 +747,7 @@ where it is known for late, and reported elsewhere:
 | `CANCEL`       | —                     | dropped                                             | dropped: it may have crossed its answer                           |
 
 12.10. A connection that closes ends every transfer on it, at both ends; what they held of the
-budget goes to the transfers it starved.
+budget goes to the transfers it starved, on any connection, each credited then as section 12.4 says.
 
 12.11. A transfer of 20 MiB, with the limits by default:
 
