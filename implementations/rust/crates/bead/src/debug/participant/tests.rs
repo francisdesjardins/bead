@@ -386,10 +386,6 @@ async fn traces_each_incoming_verdict_once_after_judgment_and_names_a_loss_by_it
     pair.stop().await;
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "the twin plays every leg's trace in one connection's history"
-)]
 // debugging 13.4
 #[tokio::test]
 async fn traces_a_refuse_its_connect_awaited_as_taken_and_an_accept_no_connect_awaits_as_no_pair_held_the_reset_it_draws_with_its_parcel()
@@ -463,6 +459,10 @@ async fn traces_a_refuse_its_connect_awaited_as_taken_and_an_accept_no_connect_a
     pair.stop().await;
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "the twin plays every leg's trace in one connection's history"
+)]
 // debugging 13.3, 13.7
 #[tokio::test]
 async fn traces_parcel_attempts_and_third_leg_handles_without_carried_bytes_credentials_or_an_acceptor_s_half()

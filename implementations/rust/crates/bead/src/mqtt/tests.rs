@@ -1053,9 +1053,11 @@ async fn publishes_at_qos_1_and_retain_0_a_life_in_whole_seconds_rounded_up_wher
     assert_eq!(quick.delivery(), BrokerDelivery::AtMostOnce, "at most once");
 
     // its bound counts no Packet Identifier, which a QoS 0 PUBLISH has none of
-    let mut shape = MqttPublishShapeOptions::default();
+    let shape = MqttPublishShapeOptions {
+        is_at_most_once: Some(true),
+        ..MqttPublishShapeOptions::default()
+    };
 
-    shape.is_at_most_once = Some(true);
     assert_eq!(
         Some(quick.maximum_payload_bytes(&inbox())),
         largest_payload("bead/i/ada", u64::from(LARGEST_PACKET_SIZE), &shape),
@@ -2068,6 +2070,10 @@ async fn loses_its_link_once_on_a_packet_past_its_maximum_packet_size_after_its_
 
 // spec 15.30
 #[tokio::test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test repeats its own string a bounded number of times"
+)]
 async fn announces_as_its_receive_bound_the_largest_payload_of_a_message_to_its_inbox_within_its_maximum_packet_size_a_life_counted()
  {
     let script = script().await;
