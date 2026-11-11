@@ -73,6 +73,34 @@ public sealed class AmqpManagementTests : IAsyncLifetime
     // definition
 
     [Fact]
+    public async Task Waits_for_its_sender_s_credit_before_sending_a_management_request()
+    {
+        _script.ManagementCredit = 0;
+
+        var (connection, scripted) = await ConnectedOf();
+        var management = await AmqpManagement.Open(connection, Cancelled).WaitAsync(Patience, Cancelled);
+        var asking = management.Request(("GET", "/queues/bead.i.ada"), null, Cancelled);
+
+        Assert.Empty(scripted.Of<AmqpTransfer>());
+
+        var sender = scripted.Links.First((link) =>
+        {
+            return !link.IsReceiver;
+        });
+
+        await scripted.Credit((sender, 1));
+
+        var (request, _) = await scripted.NextRequest();
+        var answer = await asking.WaitAsync(Patience, Cancelled);
+
+        Assert.Equal(("GET", "/queues/bead.i.ada", "200"), (request.Method, request.Path, answer.Status));
+        Assert.Single(scripted.Of<AmqpTransfer>());
+        await management.Close(Patience);
+        await scripted.Next<End>();
+        AmqpEndpoints.CloseAtOnce(connection);
+    }
+
+    [Fact]
     public async Task Pairs_its_sender_and_receiver_under_one_name_on_a_session_of_its_own_one_after_the_other_and_matches_each_answer_by_its_correlation_id()
     {
         var (connection, scripted) = await ConnectedOf();
