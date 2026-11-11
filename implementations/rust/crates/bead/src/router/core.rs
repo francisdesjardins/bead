@@ -2650,10 +2650,14 @@ pub(crate) fn reject_pending<S: Side>(
     state: &mut S,
     (reason, handle): (&str, Option<&ConnectionHandle>),
 ) {
-    let core = state.core();
-    let credits = core.receivings.close_all(handle);
+    // its transfers first, so the budget they give back grants no credit to one about to go; the
+    // credits it grants the transfers of other connections go out (spec 12.10)
+    let credits = state.core().receivings.close_all(handle);
 
-    drop(credits);
+    send_credits(state, credits);
+
+    let core = state.core();
+
     core.sendings.close_all(handle);
     core.receiving_requests.retain(|_, (dispatch, _)| {
         handle.is_some_and(|handle| *handle != dispatch.connection_handle)

@@ -54,6 +54,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and fails with the first refusal its transport gives, whenever it comes: an opening or a chunk
   refused after the last chunk went fails its answer on every side, where the answer resolved and
   the refusal was lost (spec 12.7).
+- A connection that closes credits the transfers of other connections that the budget it gives back
+  starved, on the Rust side as on the others, which reserved their credit and never sent it, so they
+  stalled (spec 12.10).
 
 ## [0.12.0] - 2026-11-10
 
