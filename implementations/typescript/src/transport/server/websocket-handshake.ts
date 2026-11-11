@@ -242,8 +242,8 @@ export const refusalOfHandshake = (
 ): IHandshakeRefusal | undefined => {
   const { httpVersion, method } = request;
 
-  // * before anything else: Node's parser answers a control character itself, so this meets an
-  // octet past ASCII, a # it hands on, and a NUL percent-encoded in a target's path
+  // * Node's HTTP/1.1 parser answers controls and octets past ASCII in a target itself; fields
+  // can carry an octet past ASCII, targets a # it hands on or a NUL percent-encoded in their path
   if (!hasVisibleFields(request.rawHeaders) || !isVisibleTarget(request.url)) {
     return HOST_MALFORMED;
   }
