@@ -14,6 +14,25 @@ import { ProgrammerError } from '../errors';
 import { DURATIONS, givenOf, isExcused, outcomeOf, placeHolding, refusalOf } from './durations';
 
 test.describe('the clock', () => {
+  test('holds a duration to the nearest millisecond, from 1 ms to its ceiling, never and 0 as each place takes them', () => {
+    expect(assertHeld('a timeout', 1.5)).toBe(2);
+    expect(assertHeld('a timeout', 1.499)).toBe(1);
+    expect(assertHeld('a timeout', Infinity)).toBe(Infinity);
+    expect(assertHeldDelay('a delay', 0)).toBe(0);
+
+    for (const [hold, name, given] of [
+      [assertHeld, 'a timeout', 0],
+      [assertHeld, 'a timeout', 0.999],
+      [assertHeld, 'a timeout', LONGEST_TIMER + 1],
+      [assertHeldFinite, 'a period', Infinity],
+      [assertHeldDelay, 'a delay', Infinity],
+    ] as const) {
+      expect(() => {
+        return hold(name, given);
+      }).toThrow(new RegExp(`^${name}`, 'u'));
+    }
+  });
+
   test("the platform's is the globals themselves", () => {
     expect(PLATFORM_CLOCK).toBe(globalThis);
   });
