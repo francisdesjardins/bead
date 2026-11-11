@@ -280,6 +280,80 @@ const notificationOf = (
 
 // definition
 
+test('keeps the replacement bound when its predecessor is cancelled before its answer', async () => {
+  const { deliver, sent, transport } = createScriptedTransport();
+  using router = createRouterClient(transport);
+  const errors = recordErrors(router);
+  const triggered: Uint8Array[] = [];
+  const notification = notificationOf(triggered);
+
+  await router.registerNotification(notification);
+
+  const first = router.request(new Uint8Array(0), {
+    options,
+    procedure: service,
+    subscribes: notification,
+  });
+  const cancelled = expect(first).rejects.toBeInstanceOf(CancelError);
+  const second = router.request(new Uint8Array(0), {
+    options,
+    procedure: service,
+    subscribes: notification,
+  });
+
+  await cancelled;
+  deliver(resultOf(3));
+  await second;
+  deliver(notificationEnvelopeOf(3, new Uint8Array([7])));
+
+  expect(triggered).toEqual([new Uint8Array([7])]);
+  expect(errors).toEqual([]);
+  expect(
+    sent.map((envelope) => {
+      return [envelope?.kind, envelope?.header.callId];
+    })
+  ).toEqual([
+    [EnvelopeKind.REQUEST, 1],
+    [EnvelopeKind.CANCEL, 1],
+    [EnvelopeKind.REQUEST, 3],
+  ]);
+});
+
+test('keeps the subscription when its replacement is refused before drawing a call id', async () => {
+  const { deliver, sent, transport } = createScriptedTransport();
+  using router = createRouterClient(transport);
+  const errors = recordErrors(router);
+  const triggered: Uint8Array[] = [];
+  const notification = notificationOf(triggered);
+
+  await router.registerNotification(notification);
+
+  const first = router.request(new Uint8Array(0), {
+    options,
+    procedure: service,
+    subscribes: notification,
+  });
+
+  deliver(resultOf(1));
+  await first;
+  await expect(
+    router.request(new Uint8Array(0x100_0001), {
+      options,
+      procedure: service,
+      subscribes: notification,
+    })
+  ).rejects.toMatchObject({ code: ProtocolCode.PAYLOAD_TOO_LARGE });
+  deliver(notificationEnvelopeOf(1, new Uint8Array([7])));
+
+  expect(triggered).toEqual([new Uint8Array([7])]);
+  expect(errors).toEqual([]);
+  expect(
+    sent.map((envelope) => {
+      return [envelope?.kind, envelope?.header.callId];
+    })
+  ).toEqual([[EnvelopeKind.REQUEST, 1]]);
+});
+
 test.describe('createRouterClient', () => {
   test('sends each call in the order it is made, whatever order it is awaited in', async () => {
     const { deliver, sent, transport } = createScriptedTransport();
