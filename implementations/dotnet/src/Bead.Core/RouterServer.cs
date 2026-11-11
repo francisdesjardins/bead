@@ -1104,7 +1104,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
 
         try
         {
-            await _core.Respond(RouterAnswer.OfFailure(failure), new AnswerTarget(call.ConnectionHandle, request));
+            await _core.AnswerInPlace(failure, new AnswerTarget(call.ConnectionHandle, request));
         }
         catch (Exception reason)
         {

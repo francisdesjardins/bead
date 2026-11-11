@@ -10,7 +10,6 @@ use bytes::Bytes;
 use std::sync::Arc;
 
 #[tokio::test]
-#[ignore = "divergence: closing one connection drops the credits its returned budget grants another; the fix needs the frozen detail-gate fixture updated"]
 #[expect(
     clippy::disallowed_methods,
     reason = "the test slices its own fixed payload at offsets within its length"

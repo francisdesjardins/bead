@@ -1822,55 +1822,44 @@ where
 
             shared.is_answered.store(true, Ordering::Release);
 
-            // a request its router answered in its place takes this answer nowhere: its step is
-            // told once, with the failure its router answered
-            let answered = shared.answerer.answered().await;
-            let step = shared.step.clone().map(|step| Step {
-                direction: DebugDirection::Tx,
-                is_answered: true,
-                tx: Some(Arc::clone(&told)),
-                ..step
-            });
+            // a request its router answered in its place takes this answer nowhere, and settles
+            let outcome = shared.answerer.respond(answer).await;
 
-            if let Some(step) = &step {
+            // * its step told once, as its router settled it: with what its router refused it
+            // with, or with the failure its router answered in its place, before or while it went;
+            // a call no longer answered tells no failure (debugging 4.2). A future dropped before
+            // it settled tells none
+            if let Some(step) = shared.step.clone() {
+                let error = match &outcome {
+                    Err(reason) => Some(reason.clone()),
+                    Ok(()) => shared.answerer.answered().await.map(|record| {
+                        CallError::Failure(
+                            Failure::answered(&record, shared.manager.port.side()).about(
+                                &EnvelopeHeader::Failure(FailureHeader {
+                                    call_id: shared.call_id,
+                                    credential: None,
+                                }),
+                            ),
+                        )
+                    }),
+                }
+                .filter(|_| !shared.signal.is_aborted());
+
                 shared.manager.trace(
                     &shared.procedure,
-                    answered.as_ref().map_or_else(
-                        || step.clone(),
-                        |record| Step {
-                            error: Some(Arc::new(CallError::Failure(
-                                Failure::answered(record, shared.manager.port.side()).about(
-                                    &EnvelopeHeader::Failure(FailureHeader {
-                                        call_id: shared.call_id,
-                                        credential: None,
-                                    }),
-                                ),
-                            ))),
-                            ..step.clone()
-                        },
-                    ),
+                    Step {
+                        direction: DebugDirection::Tx,
+                        error: error.map(|error| -> TracedError { Arc::new(error) }),
+                        is_answered: true,
+                        tx: Some(told),
+                        ..step
+                    },
                 );
             }
 
-            if answered.is_some() {
-                return Ok(());
-            }
-
-            if let Err(reason) = shared.answerer.respond(answer).await {
-                // an answer the router could not send is told again at its start with why, and
-                // answered as failed; a call no longer answered takes neither
-                if let Some(step) = &step
-                    && !shared.signal.is_aborted()
-                {
-                    shared.manager.trace(
-                        &shared.procedure,
-                        Step {
-                            error: Some(Arc::new(reason.clone())),
-                            ..step.clone()
-                        },
-                    );
-                }
-
+            if let Err(reason) = outcome {
+                // an answer the router could not send is answered as failed; a call no longer
+                // answered takes nothing
                 let failed =
                     Failure::protocol(ProtocolCode::PROCEDURE_FAILED, shared.manager.port.side())
                         .record();

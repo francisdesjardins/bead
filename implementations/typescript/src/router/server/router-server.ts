@@ -511,7 +511,7 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
     }
 
     try {
-      await core.respond({ failure }, { connectionHandle, header: request });
+      await core.answerInPlace(failure, { connectionHandle, header: request });
     } catch (reason) {
       report(toError(reason), connectionHandle);
     }

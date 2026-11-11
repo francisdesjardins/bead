@@ -7,6 +7,8 @@
 // dependencies
 
 import { type AddressInfo, createServer } from 'node:net';
+import { mock } from 'node:test';
+import { MqttClient } from 'mqtt';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
 import { generate, type IPublishPacket, type ISubscribePacket, type Packet } from 'mqtt-packet';
@@ -1315,6 +1317,140 @@ test.describe('createMqttBrokerAdapter', () => {
     expect(downs).toEqual([{ isTakenOver: false }, { isTakenOver: false }]);
     expect(messages).toEqual([]);
     expect(adapter.isLinked).toBe(false);
+  });
+
+  test('loses its link once on a packet past its Maximum Packet Size beside its CONNACK in one read (spec 15.29)', async () => {
+    test.skip(true, 'divergence: its start fails with the guard error and reports no link loss');
+    const adapter = adapterOf(script, { maximumPacketSize: 1_100 });
+    const { downs, messages } = heardOf(adapter);
+    const connect = MqttClient.prototype.connect;
+    const clients: MqttClient[] = [];
+    const hooked = mock.method(MqttClient.prototype, 'connect', function (this: MqttClient) {
+      clients.push(this);
+
+      return connect.call(this);
+    });
+
+    try {
+      const starting = failureOf(adapter.start());
+      const link = await script.link();
+
+      const client = clients[0];
+
+      expect(client).toBeDefined();
+
+      const stream = client!.stream;
+      const push = stream.push.bind(stream);
+      const bytes = Buffer.from([0x20, 0x03, 0, 0, 0, 0x32, 0x80, 0x80, 0x80, 0x08]);
+      let received = Buffer.alloc(0);
+      let reads = 0;
+
+      // * one read at the guard, whatever chunks TCP hands the test's receiving seam
+      stream.push = (chunk: Buffer | null): boolean => {
+        if (chunk === null) {
+          return push(null);
+        }
+
+        received = Buffer.concat([received, chunk]);
+
+        if (received.length < bytes.length) {
+          return true;
+        }
+
+        expect(received).toEqual(bytes);
+        reads += 1;
+
+        return push(received);
+      };
+      link.write(bytes);
+      expect(await closedWithin(link)).toBe(true);
+      const failure = await starting;
+
+      expect(reads).toBe(1);
+      expect(failure).toBeUndefined();
+      expect(downs).toEqual([{ isTakenOver: false }]);
+      expect(messages).toEqual([]);
+      expect(adapter.isLinked).toBe(false);
+      expect(
+        link.packets.map(({ cmd }) => {
+          return cmd;
+        })
+      ).toEqual(['connect']);
+      await adapter.stop();
+    } finally {
+      hooked.mock.restore();
+      await adapter.stop();
+    }
+  });
+
+  test('loses its link once on a packet past its Maximum Packet Size after its CONNACK before its caller resumes (spec 15.29)', async () => {
+    test.skip(true, 'divergence: its accepted start succeeds but reports no link loss');
+    const adapter = adapterOf(script, { maximumPacketSize: 1_100 });
+    const { downs, messages } = heardOf(adapter);
+    const connect = MqttClient.prototype.connect;
+    const clients: MqttClient[] = [];
+    const hooked = mock.method(MqttClient.prototype, 'connect', function (this: MqttClient) {
+      clients.push(this);
+
+      return connect.call(this);
+    });
+
+    try {
+      const starting = failureOf(adapter.start());
+      const link = await script.link();
+
+      const client = clients[0];
+
+      expect(client).toBeDefined();
+
+      const held = client!;
+      const stream = held.stream;
+      const push = stream.push.bind(stream);
+      const bytes = Buffer.from([0x20, 0x03, 0, 0, 0, 0x32, 0x80, 0x80, 0x80, 0x08]);
+      let received = Buffer.alloc(0);
+      let isBetween = false;
+
+      // * the broker's header waits at the receiving seam for MQTT.js's accepted CONNACK;
+      // its connect listeners run before the adapter's awaited continuation counts it linked
+      held.once('connect', () => {
+        expect(held.connected).toBe(true);
+        expect(adapter.isLinked).toBe(false);
+        isBetween = true;
+        push(received.subarray(5));
+      });
+      stream.push = (chunk: Buffer | null): boolean => {
+        if (chunk === null) {
+          return push(null);
+        }
+
+        received = Buffer.concat([received, chunk]);
+
+        if (received.length < bytes.length) {
+          return true;
+        }
+
+        expect(received).toEqual(bytes);
+
+        return push(received.subarray(0, 5));
+      };
+      link.write(bytes);
+      expect(await closedWithin(link)).toBe(true);
+      const failure = await starting;
+
+      expect(isBetween).toBe(true);
+      expect(failure).toBeUndefined();
+      expect(downs).toEqual([{ isTakenOver: false }]);
+      expect(messages).toEqual([]);
+      expect(adapter.isLinked).toBe(false);
+      expect(
+        link.packets.map(({ cmd }) => {
+          return cmd;
+        })
+      ).toEqual(['connect']);
+    } finally {
+      hooked.mock.restore();
+      await adapter.stop();
+    }
   });
 
   test('announces as its receive bound the largest payload of a message to its inbox within its Maximum Packet Size, a life counted (spec 15.30)', () => {

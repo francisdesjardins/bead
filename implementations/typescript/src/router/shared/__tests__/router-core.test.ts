@@ -2967,6 +2967,57 @@ test.describe('createRouterCore', () => {
       expect(JSON.stringify(firstHeaders)).not.toContain(TOKEN);
       expect(JSON.stringify(firstHeaders)).not.toContain('a.b.c');
     });
+
+    // debugging 4.2, spec 9.5 and 11.10: the record a resolver reads once its answer settled
+    test('holds for its manager the failure it answered in a resolver’s place, and none its resolver answered', async () => {
+      const { control, port, reported, sent } = createPort();
+      using core = createRouterCore(port);
+      const open = openerOn(core);
+      const failing = { ...echo, procedureId: 9, procedureName: 'failing' };
+      const failed: IRequestResolverProps<Handle>[] = [];
+      const exceeded = { ...SERVER_FAILURES.capacityExceeded, detail: 'past its bounds' };
+      const [own, inPlace, unsent, answered] = [
+        await open(1),
+        await open(3),
+        await open(5, 'b'),
+        await open(7),
+      ];
+
+      core.registerResolver(
+        Object.assign((props: IRequestResolverProps<Handle>) => {
+          failed.push(props);
+
+          return Promise.reject(new Error('the resolver failed'));
+        }, failing)
+      );
+      control.sendErrors.set('b', new Error('gone'));
+
+      // its resolver's own failure; one answered in its place; one in its place that could not go
+      await core.respond({ failure: SERVER_FAILURES.accessDenied }, own);
+      await core.answerInPlace(exceeded, inPlace);
+      await expect(core.answerInPlace(exceeded, unsent)).rejects.toThrow('gone');
+      // a call its resolver answered takes no answer in its place, nor a record of one
+      await core.respond({ payload: Uint8Array.of(1) }, answered);
+      await core.answerInPlace(exceeded, answered);
+      // a resolver that fails before it answers is answered PROCEDURE_FAILED in its place
+      core.receive(requestOf(9, { procedure: failing }), 'a');
+      await sleep(0);
+
+      expect(
+        [own, inPlace, unsent, answered, ...failed].map((request) => {
+          return core.answeredOf(request);
+        })
+      ).toEqual([undefined, exceeded, exceeded, undefined, SERVER_FAILURES.procedureFailed]);
+      expect(answersOf(sent)).toEqual([
+        ['a', 'failure', 1, ProtocolCode.ACCESS_DENIED],
+        ['a', 'failure', 3, ProtocolCode.CAPACITY_EXCEEDED],
+        // handed to its transport, which refused it
+        ['b', 'failure', 5, ProtocolCode.CAPACITY_EXCEEDED],
+        ['a', 'result', 7, [1]],
+        ['a', 'failure', 9, ProtocolCode.PROCEDURE_FAILED],
+      ]);
+      expect(codesOf(reported)).toEqual([['the resolver failed', 'a']]);
+    });
   });
 
   test.describe('cancels', () => {

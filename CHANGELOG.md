@@ -29,6 +29,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   guard on MQTT.js's stream and the C# adapter by one on MQTTnet's channel, as the Rust side's
   client does, so its own bound bounds what it holds of a packet. It sends no DISCONNECT of 0x95,
   which Mosquitto 2.1.2 answers by deleting its will (spec 15.29, decision 0041).
+- The details gate reads a helper's call by the arguments at the positions that reach its sinks, and
+  the whole call where its arguments do not split plainly, so a router's state handed beside a
+  reason that stays with the side carries no detail (decision 0006).
+- An answer's trace step is told once, after its router settled the answer, on every side: with no
+  error, with the refusal, or with the failure its router answered in its place; its duration ends
+  with that settling. An answer refused or answered in its place is no longer told twice (debugging
+  4.2, decision 0013).
 
 ### Removed
 
@@ -51,6 +58,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and fails with the first refusal its transport gives, whenever it comes: an opening or a chunk
   refused after the last chunk went fails its answer on every side, where the answer resolved and
   the refusal was lost (spec 12.7).
+- A connection that closes credits the transfers of other connections that the budget it gives back
+  starved, on the Rust side as on the others, which reserved their credit and never sent it, so they
+  stalled (spec 12.10).
+- An HTTP server or client given limits that ask for a transfer refuses them as it is built on the
+  C# side, as on the TypeScript and Rust sides (spec 15.11).
 
 ## [0.12.0] - 2026-11-10
 

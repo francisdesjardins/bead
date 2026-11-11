@@ -5282,6 +5282,54 @@ test.describe('createRouterServer, its paced subscriptions', () => {
     expect(errors).toEqual([]);
   });
 
+  // debugging 4.2, spec 11.10: the resolver's own flow, no telling around it
+  test('tells once, with the failure its router answered in its place, an answer given behind notifications that went past their bounds', async () => {
+    const { deliver, open, sent, transport } = createScriptedTransport();
+    using router = createRouterServer(transport, { pacing: { maximumQueuedNotifications: 1 } });
+    const services = createServiceManager(router);
+    const errors = recordErrors(router);
+    const told: unknown[][] = [];
+
+    open(first);
+
+    // three notifications past a queue of one, not waited on, then its answer
+    const resolver = services.getNotificationResolver(news, { serializer: answering })((
+      _request,
+      response
+    ) => {
+      response.registerNotification();
+
+      for (const word of ['a', 'b', 'c']) {
+        void resolver.notify(word);
+      }
+
+      return response('ok');
+    });
+
+    services.on('debug', (error, { callId, direction, rx, tx }) => {
+      if (callId === 3) {
+        told.push([direction, rx, tx, error instanceof FailureError ? error.code : error]);
+      }
+    });
+    deliver(first, pacedOf(3, text.encode('hold')));
+    await expect
+      .poll(() => {
+        return told.length;
+      })
+      .toBe(2);
+    await sleep(0);
+
+    expect(answersOf(sent)).toEqual([
+      [first, EnvelopeKind.NOTIFICATION, 3, 'a'],
+      [first, 'failure', 3, ProtocolCode.CAPACITY_EXCEEDED],
+    ]);
+    expect(told).toEqual([
+      ['rx', 'hold', undefined, null],
+      ['tx', 'hold', 'ok', ProtocolCode.CAPACITY_EXCEEDED],
+    ]);
+    expect(errors).toEqual([]);
+  });
+
   test('reports the failure it could not send a call in flight whose queue went past its bounds', async () => {
     const { control, deliver, errors, release, resolver, router, sentSince } = createPaced({
       pacing: { maximumQueuedNotifications: 1 },

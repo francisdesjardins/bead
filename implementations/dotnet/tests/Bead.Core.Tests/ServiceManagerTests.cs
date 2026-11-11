@@ -1264,6 +1264,9 @@ public sealed partial class ServiceManagerTests
             return null;
         };
 
+        // what an answer waits on once recorded, before it settles
+        public Task RespondGate { get; set; } = Task.CompletedTask;
+
         // the failure it answered a request with in its resolver's place; none unless a test says
         public Func<AnswerTarget, Failure?> FailureAnswered { get; set; } = (_) =>
         {
@@ -1309,7 +1312,25 @@ public sealed partial class ServiceManagerTests
                 Responses.Add(new Responded(target, response.Failure is null ? Json.Decode(response.Payload) : null, response.Failure));
             }
 
-            return RespondError(response) is { } error ? Task.FromException(error) : Task.CompletedTask;
+            var error = RespondError(response);
+
+            if (!RespondGate.IsCompleted)
+            {
+                return Responding(error);
+            }
+
+            return error is not null ? Task.FromException(error) : Task.CompletedTask;
+        }
+
+        // an answer held settles as the test lets it, with the error it was given
+        private async Task Responding(Exception? error)
+        {
+            await RespondGate;
+
+            if (error is not null)
+            {
+                throw error;
+            }
         }
 
         public Task<RouterResult> Request(ReadOnlyMemory<byte> payload, RouterRequest request)

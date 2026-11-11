@@ -58,6 +58,7 @@ mod requester;
 mod requester_edges;
 mod router_core;
 mod router_core_accounting;
+mod router_core_answered_in_place;
 mod router_core_answering;
 mod router_core_credentials;
 mod router_core_crossing;

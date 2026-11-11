@@ -33,9 +33,10 @@ public interface IRouterLike
     Task Respond(RouterAnswer response, AnswerTarget target);
 
     /// <summary>
-    /// The failure the router answered a request with in its resolver's place — a server's, as the
-    /// subscription the request opens queued past its bounds (spec 11.10) — read as its resolver
-    /// answers, whose answer then goes nowhere; none while the request is its resolver's to answer.
+    /// The failure the router answered a request with in its resolver's place — a refusal of its own,
+    /// or a server's as the subscription the request opens queued past its bounds (spec 11.10) — read
+    /// once its resolver's answer settled, which then went nowhere; never a failure its resolver
+    /// answered, and none while the request is its resolver's to answer.
     /// </summary>
     Failure? AnsweredOf(AnswerTarget target);
 
@@ -602,10 +603,13 @@ public sealed partial class ServiceManager : IServiceManagerClient, IServiceMana
     /// <summary>
     /// One step of a call — a request made or answered, a command, a notification sent or heard —
     /// and the exception it failed with, or none; on a tx step, why its tx did not go out: a
-    /// notification that could not go, an answer its router refused, told again at its start, or
-    /// none, from a resolver that failed before it answered. Nothing is built, and no clock read,
-    /// while nobody hears it. A listener that throws is reported through the router, with the
-    /// call's connection on a server's, and changes nothing of the call.
+    /// notification that could not go, told at its start; an answer, told once its router settled
+    /// it, with what its router refused it with or the failure its router answered in its
+    /// resolver's place; or none, from a resolver that failed before it answered. An answer's step
+    /// is told once, whatever its outcome, and a call cancelled, gone with its connection or whose
+    /// router was disposed tells no failure. Nothing is built, and no clock read, while nobody hears
+    /// it. A listener that throws is reported through the router, with the call's connection on a
+    /// server's, and changes nothing of the call.
     /// </summary>
     public event Action<Exception?, DebugEvent>? Debug;
 

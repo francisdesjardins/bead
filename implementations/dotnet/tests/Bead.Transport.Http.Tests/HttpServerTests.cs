@@ -791,15 +791,18 @@ public sealed class HttpServerTests
         Assert.Equal(3, (await server.Gauges()).Router.Ceilings["largestQueuedNotifications"]);
     }
 
-    // the TypeScript side refuses limits that ask for a transfer; a record's default cannot tell
-    // given from not, so this side takes none whatever is given
+    // spec 15.11
     [Fact]
-    public async Task Take_no_transfer_whatever_the_limits_give()
+    public void Refuse_limits_that_ask_for_a_transfer()
     {
-        await using var server = new HttpServer<string>(new HttpServerOptions { Server = new ServerOptions { Limits = RouterLimits.Default with { MaximumTransfers = 2 } } });
-        await using var client = new BeadHttpClient(new BeadHttpClientOptions { Limits = RouterLimits.Default with { MaximumTransfers = 2 } });
-
-        Assert.Equal((0, 0), (server.Router.Limits.MaximumTransfers, client.Router.Limits.MaximumTransfers));
+        Assert.Throws<ArgumentException>(() =>
+        {
+            return new HttpServer<string>(new HttpServerOptions { Server = new ServerOptions { Limits = RouterLimits.Default with { MaximumTransfers = 2 } } });
+        });
+        Assert.Throws<ArgumentException>(() =>
+        {
+            return new BeadHttpClient(new BeadHttpClientOptions { Limits = RouterLimits.Default with { MaximumTransfers = 2 } });
+        });
     }
 
     [Fact]
