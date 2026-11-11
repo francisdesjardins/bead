@@ -2932,7 +2932,8 @@ async fn refuses_as_it_is_built_a_trusted_proxies_entry_that_is_a_name_or_a_netw
 }
 
 #[tokio::test]
-async fn keeps_a_client_that_reads_through_a_burst_of_answers_each_of_a_chunk() {
+async fn keeps_a_client_that_reads_through_a_burst_of_answers_to_the_calls_it_has_it_answer_each_of_chunk_bytes()
+ {
     let (server, recorder, port) = started(&WebSocketTransportServerOptions {
         send_grace_period: Some(Duration::from_millis(100)),
         ..briefly_closing()
