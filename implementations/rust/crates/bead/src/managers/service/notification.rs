@@ -11,8 +11,8 @@ use bytes::Bytes;
 use tokio::sync::Notify;
 
 use super::{
-    Inner, Maker, RegistrationOptions, Request, RequestDependencies, ServiceManager, Step,
-    Validate, traced,
+    Inner, Maker, RegistrationOptions, Request, RequestDependencies, RouterLike, ServiceManager,
+    Step, Validate, traced,
 };
 use crate::constants::ProtocolCode;
 use crate::debug::{DebugDirection, DebugType};
@@ -20,7 +20,7 @@ use crate::errors::{CallError, ProgrammerError};
 use crate::failure::Failure;
 use crate::identity::Procedure;
 use crate::payloads::PayloadCodec;
-use crate::router::client::{NotificationLike, RouterClient, UnregisterNotificationOptions};
+use crate::router::client::{NotificationLike, UnregisterNotificationOptions};
 use crate::router::types::{BoxFuture, RouterError};
 
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -132,7 +132,8 @@ struct State<Res, Not> {
 
 struct NotificationShared<Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec> {
     manager: Arc<Inner>,
-    router: RouterClient,
+    // its manager's router, a client's, through the port
+    router: Arc<dyn RouterLike>,
     procedure: Procedure,
     requester: Request<Req, Res>,
     codec: Not,
@@ -171,7 +172,7 @@ where
     }
 
     // held before it is asked for: a notification sent right behind the answer can come before
-    // anything waiting on the answer runs
+    // anything waiting on the answer runs; asked for once its router subscribed it
     async fn register(
         &self,
         (payload, options): (Req::Value, RegistrationOptions),
@@ -182,7 +183,8 @@ where
         let registered = async {
             self.router
                 .register_notification(Arc::clone(&liked))
-                .map_err(CallError::Refused)?;
+                .map_err(CallError::Refused)?
+                .await?;
 
             let (call_id, response) = self
                 .requester
@@ -296,8 +298,7 @@ where
             }));
 
             if let Err(panicked) = called {
-                self.manager
-                    .router
+                self.router
                     .report(&crate::transport::panic_error(&*panicked), None);
             }
         }
@@ -547,7 +548,7 @@ where
 
                     state.registering = Some(Arc::clone(&settling));
                     drop(state);
-                    shared.manager.router.cover(async move {
+                    shared.router.cover(Box::pin(async move {
                         let registered = registering.register((payload, options)).await;
 
                         {
@@ -563,7 +564,7 @@ where
                         }
 
                         settled.settle(registered);
-                    });
+                    }));
 
                     Some(settling)
                 } else {
@@ -667,7 +668,8 @@ where
     Not::Value: Clone + fmt::Debug + Sync,
 {
     // * the side first, then spec 16.10's reasons for its way, before the manager's own reasons
-    let router = manager.client_router((procedure, Maker::Notification))?;
+    manager.checked((procedure, Maker::Notification))?;
+
     let key = (procedure.service_id, procedure.procedure_id);
     let known = locked(&manager.inner.notifications).get(&key).map(|known| {
         (
@@ -728,7 +730,7 @@ where
     };
     let shared = Arc::new(NotificationShared {
         manager: Arc::clone(&manager.inner),
-        router: router.clone(),
+        router: Arc::clone(&manager.inner.port),
         procedure: procedure.clone(),
         requester,
         codec: dependencies.notification,
