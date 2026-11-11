@@ -923,6 +923,86 @@ test.describe('createServiceManager', () => {
       ).toEqual([SERVER_FAILURES.procedureFailed]);
     });
 
+    // debugging 4.2; the router replaces the answer while respond settles
+    test('tells again at its start the failure its router answered in its place as its answer went to it', async () => {
+      test.skip(
+        true,
+        'divergence: TypeScript and Rust omit the replacement failure after respond settles; C# tells it at 15 ms'
+      );
+
+      const clock = createTestClock(1_000);
+      const { router } = createFakeRouter('server', clock);
+      const manager = createServiceManager(router);
+      const seen = recordDebug(manager);
+      const exceeded = {
+        ...SERVER_FAILURES.capacityExceeded,
+        detail: 'the notifications queued for call 7 went past their bounds',
+      };
+      let held: ReturnType<typeof router.answeredOf>;
+
+      router.answeredOf = (target) => {
+        return target.header === header ? held : undefined;
+      };
+      router.respond = async () => {
+        await clock.tickAsync(5);
+        held = exceeded;
+      };
+
+      const resolver = manager.getRequestResolver(echo, { serializer: serverSerializer })(async (
+        request,
+        response
+      ) => {
+        await clock.tickAsync(10);
+
+        return response(request.payload);
+      });
+
+      await resolver(propsOf(encode({ text: 'hi' })));
+
+      const steps = [...seen];
+
+      // a failure its own resolver answers is told once
+      seen.length = 0;
+      held = undefined;
+      router.respond = (answer) => {
+        held = answer.failure;
+
+        return Promise.resolve();
+      };
+      await manager.getRequestResolver(
+        { ...echo, procedureId: 2, procedureName: 'fail' },
+        { serializer: serverSerializer }
+      )((_request, response) => {
+        return response(null, { code: 7 });
+      })(propsOf(encode({ text: 'hi' })));
+
+      expect(
+        seen.map(({ info }) => {
+          return [info.direction, info.type];
+        })
+      ).toEqual([
+        ['rx', 'request'],
+        ['tx', 'request'],
+      ]);
+      expect(
+        steps.map(({ error, info }) => {
+          return [info.direction, error !== null, info.tx, info.startedAt, info.duration];
+        })
+      ).toEqual([
+        ['rx', false, undefined, 1_000, undefined],
+        ['tx', false, { text: 'hi' }, 1_000, 10],
+        ['tx', true, { text: 'hi' }, 1_000, 15],
+      ]);
+
+      expect(steps[2]?.error).toBeInstanceOf(FailureError);
+      expect(steps[2]?.error).toMatchObject({
+        ...exceeded,
+        header: { callId: 7, kind: 0x12 },
+        origin: 'local',
+        side: 'server',
+      });
+    });
+
     // debugging 4.2
     test('tells nothing more than its request for a callback that fails on its signal, its call cancelled or gone with its connection', async () => {
       const manager = createServiceManager(createFakeRouter().router);
