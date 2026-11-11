@@ -214,6 +214,55 @@ const delaysArmed = (clock: ReturnType<typeof createTestClock>) => {
 // definition
 
 test.describe('createServer', () => {
+  test('keeps a session per connection, its token drawn as it is first stored', async () => {
+    const { open, transport } = createScriptedTransport();
+    await using server = createServer({ transport }, { connectionInactivityTimeout: Infinity });
+    const sessions = server.sessions;
+
+    open(first);
+    expect(sessions.has(first)).toBe(false);
+
+    const stored = sessions.set({ ...sessions.create(first), data: { name: 'ada' } });
+
+    expect(stored.sessionToken).toBeDefined();
+    expect(sessions.has(first)).toBe(true);
+    expect(sessions.get(first)?.data).toEqual({ name: 'ada' });
+    expect(sessions.connectionHandles()).toEqual([first]);
+    expect(sessions.delete(first)).toBe(true);
+    expect(sessions.has(first)).toBe(false);
+    expect(sessions.delete(first)).toBe(false);
+  });
+
+  test('gauges each layer and passes a server that keeps nothing it should not', async () => {
+    const { open, transport } = createScriptedTransport();
+    await using server = createServer({ transport }, { connectionInactivityTimeout: Infinity });
+
+    open(first);
+    expect(server.gauges().router.orphans).toBe(0);
+    expect(server.health().status).toBe('pass');
+  });
+
+  test('set refuses a timeout spec 1.4 does not hold as it is made, and stores nothing', async () => {
+    const { open, transport } = createScriptedTransport();
+    await using server = createServer({ transport }, { connectionInactivityTimeout: Infinity });
+    const sessions = server.sessions;
+
+    open(first);
+
+    for (const timeouts of [
+      { connectionInactivityTimeout: 0 },
+      { sessionInactivityTimeout: 2_147_483_648 },
+    ]) {
+      expect(() => {
+        sessions.set({ ...sessions.create(first), ...timeouts });
+      }).toThrow(/an inactivity timeout is a number of milliseconds from 1 to 2147483647/);
+    }
+
+    expect(sessions.has(first)).toBe(false);
+    sessions.set(sessions.create(first));
+    expect(sessions.has(first)).toBe(true);
+  });
+
   test('takes a supplied manager’s token and data in separate expiry-aware reads', async () => {
     const { ask, open, sent, transport } = createScriptedTransport();
     const inner = createSessionManager();
