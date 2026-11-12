@@ -1980,7 +1980,7 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
 
         // what is none of its four is refused as it is built, and so is an IPv6 address followed by
         // anything but its port (RFC 3986 §3.2.2), and an id that is none
-        string[] refusedUris = ["http://broker.example", "mqtt://[::1]junk:1884", "mqtt://[::1]junk", "ws://[::1]junk/mqtt"];
+        string[] refusedUris = ["http://broker.example", "mqtt://[::1]junk:1884", "mqtt://[::1]junk", "ws://[::1]junk/mqtt", "mqtt://user@[::1]junk:1884"];
         var refusedOptions = refusedUris.Select((uri) =>
         {
             return new MqttBrokerAdapterOptions { Id = Id, Uri = new Uri(uri) };

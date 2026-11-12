@@ -790,6 +790,9 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             authority = authority[..end];
         }
 
+        // its host and port, after any user it names
+        authority = authority[(authority.LastIndexOf('@') + 1)..];
+
         var bracket = authority.IndexOf(']', StringComparison.Ordinal);
 
         if (!authority.StartsWith('[') || bracket < 0)
