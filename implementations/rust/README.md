@@ -186,7 +186,9 @@ cancels nothing. A router's transport holds it, so it lives as long as its conne
 handle dropped or not; one that neither its application nor its transport holds ends with its owner,
 but a resolver a service manager registered holds that manager, and so its router, which then ends
 by its dispose. A job that panics past the guards of the sites the spec lets throw ends its router
-at once, each call it waits on failed with that panic for its reason.
+at once, each call it waits on failed with that panic for its reason. A server over a socket serves
+until its stop or its dispose while a connection it serves holds it; idle, its last handle dropped
+lets its port go.
 
 The core spawns and yields through one private module, `platform`, and reads time through its
 clock alone (decision 0011): clippy's `disallowed-methods` and `disallowed-types`, in `clippy.toml`,

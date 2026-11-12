@@ -18,6 +18,7 @@ struct Scripted {
     script: Arc<Mutex<VecDeque<io::Result<u32>>>>,
     last: io::ErrorKind,
     attempts: Arc<AtomicUsize>,
+    _alive: Arc<()>,
 }
 
 impl Accept for Scripted {
@@ -39,6 +40,8 @@ impl Accept for Scripted {
 
 // what a test sees of accepting: its attempts, the sockets it took, and its failures reported
 struct Watched {
+    // held by its listener as long as it lives
+    alive: Arc<()>,
     attempts: Arc<AtomicUsize>,
     taken: Arc<Mutex<Vec<u32>>>,
     reported: Arc<Mutex<Vec<io::ErrorKind>>>,
@@ -50,6 +53,7 @@ fn accepting_on(
     (script, last): (Vec<io::Result<u32>>, io::ErrorKind),
 ) -> Watched {
     let platform: SharedClock = Arc::<SteppingClock>::clone(stepping);
+    let alive = Arc::new(());
     let attempts = Arc::new(AtomicUsize::new(0));
     let taken = Arc::new(Mutex::new(Vec::new()));
     let reported = Arc::new(Mutex::new(Vec::new()));
@@ -62,6 +66,7 @@ fn accepting_on(
                 script: Arc::new(Mutex::new(script.into())),
                 last,
                 attempts: Arc::clone(&attempts),
+                _alive: Arc::clone(&alive),
             },
             take: move |(socket, _peer): (u32, SocketAddr), _serving: &Arc<AtomicBool>| {
                 taking
@@ -82,6 +87,7 @@ fn accepting_on(
     );
 
     Watched {
+        alive,
         attempts,
         taken,
         reported,
@@ -176,4 +182,17 @@ async fn accepts_again_at_once_after_a_connection_gone_before_it_was_taken_and_r
     patience(PATIENCE, watched.listening.ended())
         .await
         .expect("ended");
+}
+
+#[tokio::test]
+async fn ends_its_accepting_and_lets_its_listener_go_once_dropped_without_its_stop() {
+    let stepping = SteppingClock::new(SystemTime::UNIX_EPOCH);
+    let watched = accepting_on(&stepping, (Vec::new(), io::ErrorKind::Other));
+
+    until(|| stepping.dues() == [ACCEPT_PAUSE]).await;
+    assert_eq!(Arc::strong_count(&watched.alive), 2, "its listener held");
+
+    drop(watched.listening);
+    until(|| Arc::strong_count(&watched.alive) == 1).await;
+    assert!(stepping.dues().is_empty(), "its pause disarmed");
 }

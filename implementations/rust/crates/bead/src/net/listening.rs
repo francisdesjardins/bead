@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::oneshot;
-use tokio_util::sync::CancellationToken;
+use tokio_util::sync::{CancellationToken, DropGuard};
 
 use crate::clock::{Schedule, SharedClock};
 use crate::errors::{ProgrammerError, TransportError};
@@ -146,11 +146,12 @@ pub(crate) fn unmarked(status: u16) -> String {
 }
 
 /// One address a server listens on: whether that listener still serves what comes, and its
-/// accepting, which its stop ends.
+/// accepting, which its stop ends, and which ends once it is dropped, its listener let go with it.
 pub(crate) struct Listening {
     pub(crate) serving: Arc<AtomicBool>,
     stop: CancellationToken,
     task: JoinHandle<()>,
+    _dropped: DropGuard,
 }
 
 impl Listening {
@@ -393,6 +394,7 @@ where
 
     Listening {
         serving,
+        _dropped: stop.clone().drop_guard(),
         stop,
         task,
     }
