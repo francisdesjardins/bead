@@ -53,6 +53,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The Rust side's `WebSocketClient::reconnect` and `HttpClient::reconnect` settle in a task of their
   own, as they are called: a reconnection whose future is dropped no longer leaves a task and its
   watch on the signal given until the client is disposed (decision 0044).
+- The Rust side's WebSocket server holds what tungstenite keeps unwritten for a connection to its
+  write buffer, the largest message `maximumUnsentBytes` lets go and a control frame: a peer that
+  pings on and reads none of its pongs no longer grows it without bound, and a message that finds
+  it full drops the connection, reported naming the bound (spec 15.12).
 - A session manager whose clock refuses a timer leaves what it held: a new session is not stored
   and the timers prepared for it are stopped, and a timeout set or reset keeps the stored one and its
   running timer, telling nothing, on the TypeScript and C# sides as on the Rust side (decision

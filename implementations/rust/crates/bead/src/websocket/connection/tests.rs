@@ -251,3 +251,59 @@ async fn settles_a_quiet_close_when_its_peer_never_answers_dropping_it_once_its_
     assert_eq!(ended.failure, None, "no failure");
     assert_eq!(commands.unsent_bytes(), 0, "nothing held");
 }
+
+#[tokio::test]
+async fn drops_a_server_s_connection_whose_peer_reads_nothing_but_pings_once_its_pongs_fill_what_waits_for_its_socket()
+ {
+    let bounds = ConnectionBounds {
+        maximum_message_bytes: 1_024,
+        pacing: Some(Pacing {
+            maximum_unsent_bytes: 1_024,
+            ..paced()
+        }),
+        ..bounds_of(None, NEVER)
+    };
+    let (connection, commands, mut peer) = opened(bounds, 1_024).await;
+    let running = spawn(connection.run(hooks_of(&Delivered::default())));
+    let pings: Vec<u8> = (0..2_000)
+        .flat_map(|_| masked_frame(0x9, (&[7; 125], true)))
+        .collect();
+
+    // * its peer pings on and reads none of its pongs
+    patience(PATIENCE, peer.write_all(&pings))
+        .await
+        .unwrap()
+        .unwrap();
+    commands.send(Bytes::from(vec![1; 200]));
+
+    let ended = patience(PATIENCE, running).await.unwrap().unwrap();
+
+    assert!(ended.is_ended_here, "ended here");
+    assert_eq!(
+        ended.failure,
+        Some(Failed::Dropped(
+            "what waits for its socket passed maximumUnsentBytes, 1024 bytes, its peer reading none of its pongs"
+                .to_owned()
+        )),
+        "dropped, its bound named"
+    );
+    assert_eq!(commands.unsent_bytes(), 0, "nothing held");
+}
+
+#[test]
+fn holds_a_server_s_write_buffer_to_its_bound_and_leaves_a_client_s_as_tungstenite_has_it() {
+    let served = config_of(64, Some(1_024));
+    let client = config_of(64, None);
+
+    assert_eq!(served.write_buffer_size, 128 * 1_024, "its write buffer");
+    assert_eq!(
+        served.max_write_buffer_size,
+        128 * 1_024 + 1_024 + 14 + 139,
+        "its write buffer, the largest message its bound lets go, and a control frame"
+    );
+    assert_eq!(
+        client.max_write_buffer_size,
+        WebSocketConfig::default().max_write_buffer_size,
+        "a client's, as tungstenite has it"
+    );
+}

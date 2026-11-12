@@ -581,7 +581,7 @@ impl ClientInner {
         let (socket, _response) = tokio_tungstenite::client_async_with_config(
             request,
             socket,
-            Some(config_of(self.settings.maximum_message_bytes)),
+            Some(config_of(self.settings.maximum_message_bytes, None)),
         )
         .await
         .map_err(upgrade_error)?;

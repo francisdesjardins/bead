@@ -348,7 +348,10 @@ impl<S: Wire> Connection<S> {
         (socket, read): (S, Vec<u8>),
         (role, bounds): (Role, ConnectionBounds),
     ) -> (Self, Commands) {
-        let config = config_of(bounds.maximum_message_bytes);
+        let config = config_of(
+            bounds.maximum_message_bytes,
+            bounds.pacing.map(|pacing| pacing.maximum_unsent_bytes),
+        );
         let socket = WebSocketStream::from_partially_read(socket, read, role, Some(config)).await;
 
         Self::over(socket, bounds)
@@ -531,6 +534,22 @@ impl<S: Wire> Connection<S> {
                 self.close(GOING_AWAY);
             }
             Step::Written(Ok(taken)) => self.taken(taken),
+            // * its write buffer full of pongs to a peer that reads nothing but pings: what waits
+            // for its socket passed its bound (spec 15.12)
+            Step::Written(Err(WsError::WriteBufferFull(_))) => {
+                let held = self
+                    .bounds
+                    .pacing
+                    .map_or(u64::MAX, |pacing| pacing.maximum_unsent_bytes);
+
+                self.failure.get_or_insert_with(|| {
+                    Failed::Dropped(format!(
+                        "what waits for its socket passed maximumUnsentBytes, {held} bytes, its peer reading none of its pongs"
+                    ))
+                });
+                self.is_ended_here = true;
+                self.is_done = true;
+            }
             Step::Written(Err(_)) => {
                 // ! a socket that went as this went out takes nothing more: its read says the rest
                 self.writing = Writing::Broken;
@@ -712,15 +731,41 @@ impl<S: Wire> Connection<S> {
     }
 }
 
-/// What tungstenite reads a connection under: no message nor frame past `maximum_message_bytes`, no
-/// frame of a client's unmasked.
-pub(crate) fn config_of(maximum_message_bytes: u64) -> WebSocketConfig {
-    let maximum = usize::try_from(maximum_message_bytes).unwrap_or(usize::MAX);
+// tungstenite's write buffer, its default: what it holds before it writes to its socket
+const WRITE_BUFFER_BYTES: usize = 128 * 1024;
 
-    WebSocketConfig::default()
+// a frame's longest head, a client's masked (RFC 6455 §5.2), and a control frame's longest
+const FRAME_HEAD_BYTES: usize = 14;
+const CONTROL_FRAME_BYTES: usize = 125 + FRAME_HEAD_BYTES;
+
+/// What tungstenite reads a connection under: no message nor frame past `maximum_message_bytes`, no
+/// frame of a client's unmasked. A server's holds unwritten no more than its write buffer, the
+/// largest message `maximum_unsent_bytes` lets go, and a control frame: what it holds of the
+/// side's own at most, so past it only pongs to a peer that reads nothing, which wait the last
+/// alone, and a message that comes then drops the connection (spec 15.12).
+pub(crate) fn config_of(
+    maximum_message_bytes: u64,
+    maximum_unsent_bytes: Option<u64>,
+) -> WebSocketConfig {
+    let maximum = usize::try_from(maximum_message_bytes).unwrap_or(usize::MAX);
+    let config = WebSocketConfig::default()
         .max_message_size(Some(maximum))
         .max_frame_size(Some(maximum))
-        .accept_unmasked_frames(false)
+        .write_buffer_size(WRITE_BUFFER_BYTES)
+        .accept_unmasked_frames(false);
+
+    maximum_unsent_bytes.map_or(config, |unsent| {
+        config.max_write_buffer_size(write_bound_of(unsent))
+    })
+}
+
+// what tungstenite holds unwritten at most under `maximum_unsent_bytes`: always past its write
+// buffer, as tungstenite asserts
+fn write_bound_of(maximum_unsent_bytes: u64) -> usize {
+    WRITE_BUFFER_BYTES
+        .saturating_add(usize::try_from(maximum_unsent_bytes).unwrap_or(usize::MAX))
+        .saturating_add(FRAME_HEAD_BYTES)
+        .saturating_add(CONTROL_FRAME_BYTES)
 }
 
 // a close frame of `code`, no reason
