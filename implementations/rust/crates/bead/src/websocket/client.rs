@@ -14,7 +14,7 @@ use std::io;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 
 use bytes::Bytes;
-use http::header::{AUTHORIZATION, SEC_WEBSOCKET_PROTOCOL};
+use http::header::{AUTHORIZATION, SEC_WEBSOCKET_EXTENSIONS, SEC_WEBSOCKET_PROTOCOL};
 use http::{HeaderValue, Response};
 use rustls::ClientConfig;
 use tokio::sync::{oneshot, watch};
@@ -578,13 +578,21 @@ impl ClientInner {
             .await
             .map_err(connect_error)?;
         // ! no redirect followed: tungstenite fails an upgrade answered with anything but 101
-        let (socket, _response) = tokio_tungstenite::client_async_with_config(
+        let (socket, response) = tokio_tungstenite::client_async_with_config(
             request,
             socket,
             Some(config_of(self.settings.maximum_message_bytes, None)),
         )
         .await
         .map_err(upgrade_error)?;
+
+        // ! tungstenite opens on a 101 that names an extension it never offered: the client fails
+        // the connection (RFC 6455 §4.1), offering none, its socket dropped
+        if response.headers().contains_key(SEC_WEBSOCKET_EXTENSIONS) {
+            return Err(TransportError::Connect(ConnectError::new(
+                "the server's upgrade names an extension never offered (RFC 6455 §4.1)",
+            )));
+        }
 
         Ok(Opened { socket, credential })
     }
