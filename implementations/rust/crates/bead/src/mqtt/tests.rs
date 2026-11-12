@@ -771,6 +771,30 @@ async fn tells_its_link_taken_over_on_a_disconnect_of_0x8e_and_lost_on_any_other
     );
 }
 
+// spec 15.21
+#[tokio::test]
+async fn tells_its_link_taken_over_on_a_disconnect_of_0x8e_whatever_else_it_carries_a_session_expiry_interval_among_it()
+ {
+    let script = script().await;
+    let adapter = adapter_of(&options_of(&script));
+    let heard = heard_of(&adapter);
+    let link = link_up((&adapter, &script), (&Connack::default(), None)).await;
+
+    // * a DISCONNECT of 0x8E, its Session Expiry Interval of 0 and its Reason String "n", which a
+    // broker never sends together ([MQTT-3.14.2-2]) and which end its link all the same
+    // ([MQTT-3.14.4-2])
+    link.send(vec![
+        0xE0, 0x0B, 0x8E, 0x09, 0x11, 0x00, 0x00, 0x00, 0x00, 0x1F, 0x00, 0x01, b'n',
+    ]);
+    link.end();
+    until(|| !heard.downs().is_empty()).await;
+    assert_eq!(heard.downs(), vec![down(true)], "taken over");
+    assert!(!adapter.is_linked(), "down");
+    assert!(link.of(Kind::Disconnect).is_empty(), "no DISCONNECT");
+    adapter.stop().await;
+    script.dispose();
+}
+
 // ── Its subscriptions ────────────────────────────────────────────────────────────────────────
 
 // spec 15.27

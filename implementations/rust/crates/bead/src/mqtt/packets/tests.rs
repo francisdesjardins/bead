@@ -168,6 +168,18 @@ fn reads_each_acknowledgement_its_reason_code_left_out_or_given() {
         }),
         "a DISCONNECT of 0x8E"
     );
+    // * read by its Reason Code whatever it carries, a Session Expiry Interval among it, which a
+    // broker never sends ([MQTT-3.14.2-2]): its link ends either way ([MQTT-3.14.4-2])
+    assert_eq!(
+        packet(&[
+            0xE0, 0x0B, 0x8E, 0x09, 0x11, 0x00, 0x00, 0x00, 0x00, 0x1F, 0x00, 0x01, b'n',
+        ]),
+        MqttPacket::Disconnect(MqttDisconnect {
+            reason_code: 0x8E,
+            reason_string: Some("n".to_owned()),
+        }),
+        "a DISCONNECT of 0x8E, its Session Expiry Interval and its Reason String"
+    );
 }
 
 #[test]
@@ -354,7 +366,7 @@ fn refuses_what_is_malformed_and_what_no_client_reads() {
         assert!(why.contains(said), "{bytes:02X?}: {why}");
     }
 
-    let properties: [(&[u8], &str); 7] = [
+    let properties: [(&[u8], &str); 6] = [
         // a Topic Alias, which its CONNECT's Topic Alias Maximum of 0 refuses
         (
             &[0x30, 0x07, 0x00, 0x01, b'x', 0x03, 0x23, 0x00, 0x01],
@@ -382,11 +394,6 @@ fn refuses_what_is_malformed_and_what_no_client_reads() {
             &[
                 0x40, 0x09, 0x00, 0x01, 0x00, 0x05, 0x02, 0x00, 0x00, 0x00, 0x01,
             ],
-            "which its packet does not carry",
-        ),
-        // a Session Expiry Interval on a DISCONNECT, which a broker never sends ([MQTT-3.14.2-2])
-        (
-            &[0xE0, 0x07, 0x00, 0x05, 0x11, 0x00, 0x00, 0x00, 0x00],
             "which its packet does not carry",
         ),
     ];

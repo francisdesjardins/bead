@@ -99,8 +99,15 @@ const PUBLISH_PROPERTIES: [u8; 8] = [
     CONTENT_TYPE,
 ];
 const ACKNOWLEDGEMENT_PROPERTIES: [u8; 2] = [REASON_STRING, USER_PROPERTY];
-// ! no Session Expiry Interval, which a broker never sends on a DISCONNECT ([MQTT-3.14.2-2])
-const DISCONNECT_PROPERTIES: [u8; 3] = [REASON_STRING, USER_PROPERTY, SERVER_REFERENCE];
+// ! a Session Expiry Interval among them, which a broker never sends ([MQTT-3.14.2-2]): a
+// DISCONNECT is read by its Reason Code whatever it carries, its link ending either way
+// ([MQTT-3.14.4-2]), so that one of 0x8E keeps its fence (spec 15.21)
+const DISCONNECT_PROPERTIES: [u8; 4] = [
+    SESSION_EXPIRY_INTERVAL,
+    REASON_STRING,
+    USER_PROPERTY,
+    SERVER_REFERENCE,
+];
 
 // a subscription's options: QoS 1, No Local 0, Retain As Published 0, Retain Handling 2 (MQTT 5.0
 // §3.8.3.1; spec 15.27)
