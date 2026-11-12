@@ -159,8 +159,10 @@ const LONGEST_LIFE_SECONDS = 4_294_967_295;
 
 const REASON = Object.freeze({
   NO_MATCHING_SUBSCRIBERS: 0x10,
+  NO_SUBSCRIPTION_EXISTED: 0x11,
   SESSION_TAKEN_OVER: 0x8e,
   SHARED_SUBSCRIPTIONS_NOT_SUPPORTED: 0x9e,
+  SUCCESS: 0x00,
 });
 
 const ALL_CAPABILITIES = Object.freeze({ expiry: true, will: true });
@@ -231,7 +233,7 @@ const assertAuthentication = ({
  * Interval of 0. Its library reconnects nothing, subscribes nothing again and holds nothing while
  * down. Each subscription is of QoS 1, No Local 0, Retain As Published 0 and Retain Handling 2, a
  * group's its shared subscription, held once its SUBACK grants QoS 1, and let go once its UNSUBACK
- * came under 0x80, one of 0x80 or more refusing it, none within connectTimeout failing it, its link
+ * came of 0x00 or 0x11, any other code refusing it, none within connectTimeout failing it, its link
  * and its filter kept. Each publication is of QoS 1,
  * or 0 at most once, RETAIN 0, a life in whole seconds where asked and no other property, counted
  * to its byte and refused past its CONNACK's Maximum Packet Size, held to its CONNACK's Receive
@@ -1237,12 +1239,13 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
           );
           // ! its request never given up: MQTT.js reads a late UNSUBACK, which drops its record
           incarnation.client.unsubscribe(filter, (error, unsuback) => {
-            // * the UNSUBACK's own code: 0x00, or 0x11 where its broker held none, lets it go
+            // * the UNSUBACK's own code: 0x00, or 0x11 where its broker held none, lets it go, and
+            // any other refuses it (spec 15.27)
             const code = (unsuback as { granted?: number[] } | undefined)?.granted?.[0] ?? 0;
 
             if (isFailure(error)) {
               reject(toError(error));
-            } else if (code >= 0x80) {
+            } else if (code !== REASON.SUCCESS && code !== REASON.NO_SUBSCRIPTION_EXISTED) {
               reject(
                 new GenericError(
                   `the broker of ${id} refused to let the subscription to ${filter} go: ${reasonOf(code)}`
