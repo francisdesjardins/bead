@@ -305,6 +305,8 @@ enum Closing {
     ByUs,
     // failed with its status: what comes is read raw and dropped, to the peer's end or the timeout
     Failing,
+    // failing, its close gone and its write side shut
+    FailingShut,
 }
 
 // where its writing stands
@@ -491,7 +493,19 @@ impl<S: Wire> Connection<S> {
         }
 
         match self.closing {
-            Closing::Failing => {
+            Closing::Failing | Closing::FailingShut => {
+                // * its failing close flushed, its write side shut: a peer that waits on the
+                // server's end of TCP (RFC 6455 §7.1.1) ends its own, which the drain reads
+                if self.closing == Closing::Failing
+                    && self.queue.is_empty()
+                    && self.writing != Writing::Flushing
+                    && Pin::new(self.socket.get_mut())
+                        .poll_shutdown(context)
+                        .is_ready()
+                {
+                    self.closing = Closing::FailingShut;
+                }
+
                 let mut drained = [0_u8; DRAINED_BYTES];
                 let mut buffer = ReadBuf::new(&mut drained);
 

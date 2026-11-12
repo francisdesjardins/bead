@@ -70,6 +70,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The Rust side's WebSocket connections report a peer's close of a status no end sends, 1005, 1006
   or one under 1000 say, as a protocol error, answered 1002, as `ws` and .NET do, where its close
   was told unclean with no error (RFC 6455 §7.4.1, spec 15.1).
+- A Rust WebSocket connection failed with 1009 or 1002 shuts its write side once its close went, so
+  a peer that answers and waits on the server's end of TCP ends it, where it waited its close
+  timeout (RFC 6455 §7.1.1, spec 15.3).
 - A session manager whose clock refuses a timer leaves what it held: a new session is not stored
   and the timers prepared for it are stopped, and a timeout set or reset keeps the stored one and its
   running timer, telling nothing, on the TypeScript and C# sides as on the Rust side (decision

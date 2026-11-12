@@ -386,3 +386,37 @@ async fn fails_a_peer_s_close_of_a_status_no_end_sends_as_a_protocol_error_answe
 
     assert_eq!(ended.failure, None, "a peer's own 1002: no error");
 }
+
+#[tokio::test]
+async fn shuts_its_write_side_once_its_failing_close_went_so_a_peer_that_answers_and_waits_ends_it()
+{
+    let (connection, _commands, mut peer) = opened(bounds_of(None, NEVER), 1_024).await;
+    let mut frames = vec![0x82, 0xfe, 0x00, 0x41, 0, 0, 0, 0];
+
+    frames.extend([0_u8; 65]);
+    peer.write_all(&frames).await.unwrap();
+
+    let running = spawn(connection.run(hooks_of(&Delivered::default())));
+
+    // * its peer answers its close and waits on the server's end, as a client does
+    let mut close = [0_u8; 4];
+
+    patience(PATIENCE, peer.read_exact(&mut close))
+        .await
+        .unwrap()
+        .unwrap();
+    peer.write_all(&masked_frame(0x8, (&[0x03, 0xf1], true)))
+        .await
+        .unwrap();
+
+    assert_eq!(close, [0x88, 0x02, 0x03, 0xf1], "1009");
+    assert!(
+        read_all(&mut peer).await.is_empty(),
+        "its end, nothing after"
+    );
+    drop(peer);
+
+    let ended = patience(PATIENCE, running).await.unwrap().unwrap();
+
+    assert_eq!(ended.failure, Some(Failed::TooBig(64)), "too big");
+}
