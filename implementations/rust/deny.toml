@@ -1,4 +1,5 @@
-# What the Rust side's dependencies are held to (decision 0044), by cargo-deny: RustSec's advisories,
+# What the Rust side's dependencies are held to (decision 0044), by cargo-deny, in its workspace and
+# in the two projects outside it, the fuzz targets and the conformance player: RustSec's advisories,
 # a yanked crate refused; the licences allowed, each one a crate of the graph holds, an expression's
 # branch taken as it reads; crates.io alone as a source; and one version of each crate, a duplicate
 # a listed exception with its reason.
@@ -22,6 +23,12 @@ confidence-threshold = 0.93
 [[licenses.exceptions]]
 crate = "webpki-root-certs"
 allow = ["CDLA-Permissive-2.0"]
+
+# libFuzzer's runtime, LLVM's, in the fuzz targets alone, outside the workspace and distributed
+# nowhere: (MIT OR Apache-2.0) AND NCSA, NCSA a permissive licence the OSI approves
+[[licenses.exceptions]]
+crate = "libfuzzer-sys"
+allow = ["NCSA"]
 
 # the workspace's own crates, published nowhere, hold its licence
 [licenses.private]

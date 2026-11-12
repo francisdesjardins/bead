@@ -43,6 +43,8 @@ cargo test --workspace --all-features --locked
 cargo doc --workspace --no-deps --all-features --locked
 cargo build --workspace --locked
 cargo deny --locked check
+cargo deny --manifest-path fuzz/Cargo.toml --locked check
+cargo deny --manifest-path tools/protobuf-conformance/Cargo.toml --locked check
 ```
 
 The second lints each member on its default features. The third to the sixth lint the core's
@@ -57,7 +59,8 @@ Every warning of rustc, clippy and rustdoc is an error, by `.cargo/config.toml`'
 = "deny"`, as `TreatWarningsAsErrors` is on the C# side; `CARGO_BUILD_WARNINGS=warn` releases one
 run. `cargo build --workspace` builds the core on its default features alone, where what the test kit
 alone reaches is left out. `cargo deny` holds the dependencies to RustSec's advisories, the licences
-`deny.toml` allows, crates.io alone, and one version of each.
+`deny.toml` allows, crates.io alone, and one version of each, in the workspace and in the two
+projects outside it, the fuzz targets and the conformance player.
 
 `bead-protobuf`'s tests read and write messages Buffa generates in its build script from
 `crates/bead-protobuf/proto/tests.binpb`, the set protoc writes of their `.proto` files at
