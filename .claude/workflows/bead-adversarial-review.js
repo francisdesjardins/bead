@@ -11,26 +11,35 @@ export const meta = {
   ],
 };
 
-// args: { repo, scratch, venv, slug, scope, lenses?, effort?, serial? }
+// args: { scope, slug?, lenses?, effort?, model?, serial?, repo?, scratch?, venv?, toolchain? }
 // - scope: what is reviewed, in full: the ref and its commit, the versions, what is out of scope;
-// - lenses: [{ key, focus }], the five below by default;
+// - slug: the folder under `scratch`, `review` by default;
+// - lenses: [{ key, focus, effort? }], the five below by default, each at `effort` but where it
+//   names its own: a lens on the wording asks less than one on the concurrent core;
 // - effort: the reviewers', 'max' by default, as before a freeze (CLAUDE.md, the agents' effort);
+// - model: the model of the stages at xhigh or max, when it is not the session's ('fable', say),
+//   none by default: the user asks for it, or a session proposes it with its reason;
 // - serial: one agent at a time, each lens reviewed then verified before the next, where the quota
-//   asks it; the lenses run side by side otherwise.
-const required = (name) => {
-  if (!args || !args[name]) {
-    throw new Error(`args.${name} is required`);
-  }
-  return args[name];
-};
-
-const REPO = required('repo');
-const SCRATCH = required('scratch');
-const VENV = required('venv');
-const SLUG = required('slug');
-const SCOPE = required('scope');
+//   asks it; the lenses run side by side otherwise;
+// - repo, scratch, venv, toolchain: the clone, a folder outside it, the Python of `spec/check.py`
+//   and what goes first on PATH, this machine's by default.
+if (!args || !args.scope) {
+  throw new Error('args.scope is required');
+}
+const REPO = args.repo || 'D:/workspace/francisdesjardins/2025/bead';
+const SCRATCH = args.scratch || 'D:/workspace/francisdesjardins/2025/_scratch';
+const VENV = args.venv || `${SCRATCH}/venv/Scripts/python.exe`;
+const TOOLCHAIN =
+  args.toolchain ||
+  `\`${SCRATCH}/venv/Scripts\` and \`${SCRATCH}/dotnet-10.0.404\` first on PATH, \`DOTNET_ROOT\` the latter, \`NO_COLOR\` unset for Node`;
+const SCOPE = args.scope;
+const SLUG = args.slug || 'review';
 const EFFORT = args.effort || 'max';
 const OUT = `${SCRATCH}/${SLUG}`;
+// * the session's model but where `model` names another, and then only at xhigh or max
+const modelOf = (effort) => {
+  return args.model && (effort === 'xhigh' || effort === 'max') ? { model: args.model } : {};
+};
 
 const LENSES = args.lenses || [
   {
@@ -66,18 +75,20 @@ ${SCOPE}
 CLAUDE.md's rules are injected; these are the ones a stage most often misses:
 - **Change nothing in the repository**, and do not stage, commit, branch or push: write only under ${OUT}/.
 - Temporary files and probes go under ${OUT}/ and nowhere else; run builds and tests with \`TMP=${SCRATCH}/tmp TEMP=${SCRATCH}/tmp\`. \`${VENV}\` runs \`spec/check.py\` and the generators.
+- The toolchain: ${TOOLCHAIN}.
 - Run \`node .claude/local/check.mjs <file>\` from ${REPO} over every file you write, and never write a protected word.
 - Run a gate in the foreground, with a timeout that fits it (up to ten minutes); a run in the background only beside another you run at once, then one Monitor until-loop that waits on both, never sleeping and reading their output again and again.
 - Before 1.0.0, a decision record or a released behaviour yields to a standard, an industry practice, a cleaner split, stability or clarity: name it and recommend the revision outright.
 Cite file and line for every claim, and prove what can be proved by running it.`;
 
 const review = (lens) => {
+  const effort = lens.effort || EFFORT;
   return agent(
     `${COMMON}
-# Your task: review through one lens (effort ${EFFORT})
+# Your task: review through one lens (effort ${effort})
 The lens: ${lens.focus}.
 Be adversarial: look for what is wrong, missing or inconsistent, and what a reader, a peer or an attacker would trip on; say what you looked at and found sound as well, so that the silence means something. For each finding: an id (\`${lens.key}-<n>\`), what is wrong, the evidence (file and line, the probe and its output, under ${OUT}/probes-${lens.key}/), the severity you propose (blocker: the version cannot ship with it; major: it ships only fixed or declared, a row of the matrix or an open point; minor), and the remedy. Write ${OUT}/${lens.key}.md, your report whole, and return at most ten lines: what you looked at, the findings' count by severity, and that path.`,
-    { label: `review:${lens.key}`, phase: 'Review', effort: EFFORT }
+    { label: `review:${lens.key}`, phase: 'Review', effort, ...modelOf(effort) }
   );
 };
 const verify = (summary, lens) => {
@@ -87,7 +98,7 @@ const verify = (summary, lens) => {
 Read ${OUT}/${lens.key}.md. Put each finding to the code and the text it cites, and rerun its proof under ${OUT}/verify-${lens.key}/: give it a verdict, confirmed, partly or refuted, and a severity, blocker, major or minor, which may differ from the reviewer's. Refute what does not hold; default to refuted when the evidence does not reproduce. Write ${OUT}/${lens.key}-verdicts.md (a table, Id | Verdict | Severity | In short, then a section per finding) and return at most ten lines: the counts by verdict and by severity, and that path.
 The reviewer's summary:
 ${summary || '(no summary)'}`,
-    { label: `verify:${lens.key}`, phase: 'Verify', effort: 'xhigh' }
+    { label: `verify:${lens.key}`, phase: 'Verify', effort: 'xhigh', ...modelOf('xhigh') }
   );
 };
 
@@ -111,7 +122,7 @@ Read each lens's file and its verdicts in ${OUT}/ (${LENSES.map((lens) => {
   }).join(
     ', '
   )}). Write ${OUT}/review.md: the verdict first (can it ship, and under what conditions); what was looked at and found sound; then the findings kept, confirmed or partly, at the verifier's severity, duplicates across lenses merged under one id (B, M, m by severity, numbered), each with its evidence in short, its remedy and the lens files that hold the rest; the refuted ones listed at the end, each with why. Return, in French, the verdict in five lines, the counts by severity, and each blocker and major in one line.`,
-  { label: `synthesize:${SLUG}`, phase: 'Synthesize', effort: 'xhigh' }
+  { label: `synthesize:${SLUG}`, phase: 'Synthesize', effort: 'xhigh', ...modelOf('xhigh') }
 );
 
 return { review: `${OUT}/review.md`, synthesis };

@@ -11,8 +11,10 @@ export const meta = {
   ],
 };
 
-// args: { repo, scratch, venv, slug, design, branch, parts?, stages?, first?, together?,
+// args: { slug, design, branch, parts?, stages?, first?, together?, repo?, scratch?, venv?, toolchain?,
 //         specEffort?, series?, suites?, notes? }
+// - repo, scratch, venv, toolchain: the clone, a folder outside it, the Python of `spec/check.py`
+//   and what goes first on PATH, this machine's by default;
 // - design: the path of the settled design, its `design.md`: a part every stage shares under
 //   `## Shared`, then a section a stage under `## Stage: <key>`, each stage reading the shared part
 //   and its own; its `rationale.md` beside it, the reasons and the Tenth Man's table, read where a
@@ -41,9 +43,12 @@ const required = (name) => {
   return args[name];
 };
 
-const REPO = required('repo');
-const SCRATCH = required('scratch');
-const VENV = required('venv');
+const REPO = args.repo || 'D:/workspace/francisdesjardins/2025/bead';
+const SCRATCH = args.scratch || 'D:/workspace/francisdesjardins/2025/_scratch';
+const VENV = args.venv || `${SCRATCH}/venv/Scripts/python.exe`;
+const TOOLCHAIN =
+  args.toolchain ||
+  `\`${SCRATCH}/venv/Scripts\` and \`${SCRATCH}/dotnet-10.0.404\` first on PATH, \`DOTNET_ROOT\` the latter, \`NO_COLOR\` unset for Node`;
 const SLUG = required('slug');
 const DESIGN = required('design');
 const BRANCH = required('branch');
@@ -67,7 +72,7 @@ const readsOf = (key) => {
 const COMMON = `
 You work on Bead, at ${REPO}, on the branch \`${BRANCH}\`, checked out. You implement ${DESIGN}, the settled design: where it is silent, keep to the spec and the records, and say what you chose. CLAUDE.md's rules are injected; these are the ones a stage most often misses:
 - **Do not stage, commit, branch or push.**
-- Temporary files go under ${OUT}/ and nowhere else; run builds and tests with \`${TMP}\`. \`${VENV}\` runs \`spec/check.py\` and the generators.
+- Temporary files go under ${OUT}/ and nowhere else; run builds and tests with \`${TMP}\`. \`${VENV}\` runs \`spec/check.py\` and the generators; the toolchain: ${TOOLCHAIN}.
 - Run \`node .claude/local/check.mjs <file>\` from ${REPO} over every file you write, and never write a protected word.
 - Run a gate in the foreground, with a timeout that fits it (up to ten minutes); a run in the background only beside another you run at once, then one Monitor until-loop that waits on both, never sleeping and reading their output again and again.
 - Parity: a test on one side has its twin on the other, named by the same sentence (\`Underscored_sentence\` in C#, \`snake_case_sentence\` in Rust); a difference that remains is a row of \`docs/support.md\` with the test that shows it.
