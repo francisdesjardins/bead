@@ -201,6 +201,7 @@ const PIECE_BYTES: usize = 65_536;
 /// The next piece of `bytes`, [`PIECE_BYTES`] at most, none left once the last is taken.
 pub(crate) fn piece_of(bytes: &mut Option<Bytes>) -> Option<Bytes> {
     match bytes {
+        // ! split within what is left, past a piece: Bytes has no checked split
         Some(rest) if rest.len() > PIECE_BYTES => Some(rest.split_to(PIECE_BYTES)),
         _ => bytes.take(),
     }
