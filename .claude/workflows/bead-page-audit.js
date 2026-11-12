@@ -101,7 +101,7 @@ const files = BATCHES.map((batch) => {
 const synthesis = await agent(
   `${COMMON}${READ_ONLY}
 # Your task: synthesize (effort ${EFFORT})
-Read, in ${OUT}/, ${files}. List every \`<section id>\` of content.en.html and name any no batch held, with the eyebrow and the title, and audit those yourself. Write ${OUT}/report.md: the findings kept (confirmed or partly), duplicates merged, in the page's order, each with its lines, its evidence, and its fix in English and in French exactly as it is to be written into content.en.html, content.fr.html, data.mjs, a snippet or a diagram's source; then the refuted ones, a line each with why. Return, in French, at most twelve lines: the counts, each kept finding in one line, any section no batch held.`,
+Read, in ${OUT}/, ${files}. List every \`<section id>\` of content.en.html and name any no batch held, with the eyebrow and the title, and audit those yourself. Write ${OUT}/report.md: the findings kept (confirmed or partly), duplicates merged, in the page's order, each with its lines, its evidence, and its fix in English and in French exactly as it is to be written into content.en.html, content.fr.html, data.mjs, a snippet or a diagram's source; then the refuted ones, a line each with why, the fixes' HTML as the files hold it, never escaped. Return, in French, at most twelve lines: the counts, each kept finding in one line, any section no batch held. Where the harness refuses you the file, return those lines, then a line \`===== report.md =====\`, then the report whole: the next stage reads it from there.`,
   { label: 'synthesize', phase: 'Synthesize', effort: EFFORT }
 );
 
@@ -113,7 +113,9 @@ phase('Apply');
 const applied = await agent(
   `${COMMON}
 # Your task: apply (effort ${EFFORT})
-Write each fix ${OUT}/report.md keeps into site/: content.en.html and content.fr.html alike, data.mjs, a snippet, a diagram's source in both languages. Then, from site/, \`node render.mjs\` for a diagram whose source moved (it needs the Yarn project's Mermaid, a Chromium and the site's faces: README.md's "The page" says how; where it cannot run, say so and leave the diagram's fix for the session), \`node build.mjs\` and \`node check.mjs\`. Look at each section you changed, in both languages, in both themes, on a desktop and a phone width (Playwright from implementations/typescript, its screenshots under ${OUT}/shots/), and fix what breaks. Run the names check over every file \`git status --porcelain\` lists. Do not stage, commit, branch or push. Write ${OUT}/applied.md: each fix written, each left and why, the gates. Return at most ten lines.`,
+Write each fix ${OUT}/report.md keeps into site/ (where that file is missing, the report is the text after \`===== report.md =====\` below): content.en.html and content.fr.html alike, data.mjs, a snippet, a diagram's source in both languages. Then, from site/, \`node render.mjs\` for a diagram whose source moved (it needs the Yarn project's Mermaid, a Chromium and the site's faces: README.md's "The page" says how; where it cannot run, say so and leave the diagram's fix for the session), \`node build.mjs\` and \`node check.mjs\`. Look at each section you changed, in both languages, in both themes, on a desktop and a phone width (Playwright from implementations/typescript, its screenshots under ${OUT}/shots/), and fix what breaks. Run the names check over every file \`git status --porcelain\` lists. Do not stage, commit, branch or push. Write ${OUT}/applied.md: each fix written, each left and why, the gates. Return at most ten lines.
+The synthesis's return:
+${synthesis || '(none)'}`,
   { label: 'apply', phase: 'Apply', effort: EFFORT }
 );
 
