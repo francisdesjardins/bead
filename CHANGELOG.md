@@ -22,6 +22,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The spec moves to 0.14.0 (`spec-v0.14.0`), its companion, `spec/debugging.md`, to 0.9.0
+  (`debugging-v0.9.0`), and the transcoding's companion, `spec/transcoding.md`, to 0.4.1
+  (`transcoding-v0.4.1`).
 - The demo takes francisdesjardins.ca's palette and type, and lays its scenes in one column, Try
   it first, each card's result beside its buttons; the wire, its calls and its envelopes, folds
   into a drawer on a desktop and a sheet on a phone until it is opened.
