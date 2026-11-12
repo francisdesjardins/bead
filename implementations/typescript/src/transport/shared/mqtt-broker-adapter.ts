@@ -5,7 +5,6 @@
 // ! its default export alone: MQTT.js's browser build names no other, and Node's CJS one has it
 import mqtt, {
   type IClientOptions,
-  type IConnackPacket,
   type IDisconnectPacket,
   type IPublishPacket,
   type MqttClient,
@@ -244,7 +243,9 @@ const assertAuthentication = ({
  * their UNSUBACKs, all within one connectTimeout of its call, then sends a DISCONNECT of 0x00
  * within a connectTimeout of its own, so that no will goes: once it settled, its broker hands
  * it nothing. A packet past its own Maximum Packet Size, read at its Remaining Length, closes its
- * network connection, no DISCONNECT, its link lost. Its leg is secure under TLS or to the loopback.
+ * network connection, no DISCONNECT, its link lost. Its link is up as MQTT.js reads a CONNACK of
+ * 0x00 whose Maximum QoS is not 0, whatever comes after it; any other CONNACK fails its start,
+ * naming its code, and sends nothing. Its leg is secure under TLS or to the loopback.
  * In a page, its WebSocket sends no message past 16 KiB, which Chromium sends as one frame.
  *
  * @example
@@ -808,6 +809,9 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
     try {
       await new Promise<void>((resolve, reject) => {
         let lastError: Error | undefined;
+        // whether its first CONNACK was read, and whether its start settled
+        let isJudged = false;
+        let isSettled = false;
         const timer = PLATFORM_CLOCK.setTimeout(() => {
           fail(
             new GenericError(
@@ -816,6 +820,7 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
           );
         }, left);
         const fail = (error: Error): void => {
+          isSettled = true;
           PLATFORM_CLOCK.clearTimeout(timer);
           signal?.removeEventListener('abort', abort);
           reject(error);
@@ -842,31 +847,81 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
             )
           );
         });
-        client.once('connect', (connack: IConnackPacket) => {
-          PLATFORM_CLOCK.clearTimeout(timer);
-          signal?.removeEventListener('abort', abort);
+        // ! MQTT.js parses and handles within one push what its stream pushes, a CONNACK first, so
+        // this judgment precedes the guard's for a packet beside it; a bump of MQTT.js re-reads its
+        // writable's _write and handlers/index.js, and twin A pins it
+        client.on('packetreceive', (packet: Packet) => {
+          if (packet.cmd !== 'connack' || isJudged) {
+            return;
+          }
 
-          const { properties = {} } = connack;
+          isJudged = true;
+
+          // * a start already failed, by its signal or its timer, takes no CONNACK after
+          if (isSettled) {
+            return;
+          }
+
+          if (held.isRetired || held.ending !== undefined) {
+            fail(new GenericError(`the link of ${id} stopped as it started`));
+
+            return;
+          }
+
+          const { properties = {}, reasonCode: code } = packet;
+
+          // * by its own code, which MQTT.js reads in every MQTT 5 CONNACK, before MQTT.js's error:
+          // MQTT 5 names none under 0x80 (§3.2.2.2)
+          if (code !== undefined && code !== 0) {
+            const name =
+              code >= 0x80
+                ? (mqtt.ReasonCodes as Readonly<Record<number, string | undefined>>)[code]
+                : undefined;
+
+            fail(
+              new GenericError(
+                `its broker refused the link of ${id}: CONNACK ${reasonOf(code)}${name === undefined ? '' : `, ${name}`}`
+              )
+            );
+
+            return;
+          }
 
           // * its subscriptions and its will are of QoS 1, which a broker of Maximum QoS 0 refuses
           if (properties.maximumQoS === 0) {
-            reject(
+            fail(
               new GenericError(`the broker of ${id} says Maximum QoS 0, and its link is of QoS 1`)
             );
 
             return;
           }
 
+          isSettled = true;
+          PLATFORM_CLOCK.clearTimeout(timer);
+          signal?.removeEventListener('abort', abort);
           held.maximumPacketSize = properties.maximumPacketSize ?? LARGEST_PACKET_SIZE;
           held.receiveMaximum = properties.receiveMaximum ?? RECEIVE_MAXIMUM;
           held.isSharedRefused = properties.sharedSubscriptionAvailable === false;
           lastMaximumPacketSize = held.maximumPacketSize;
+          // * up as its CONNACK is read, whatever comes after it (spec 15.26)
+          held.isLinked = true;
+          // * its link lost: once, as its network connection ends, unless it was stopped
+          client.on('close', () => {
+            retire(held, new GenericError(`the link of ${id} went down`));
+          });
+
+          // * its start is over: its down's listener may start anew
+          if (asking === ask) {
+            asking = undefined;
+            isStarting = false;
+          }
+
           resolve();
         });
         client.connect();
         guardPacketSize(client.stream, {
           maximumPacketSize,
-          // * its start failed, naming it, where its CONNACK had not come, its link lost after
+          // * its start failed where no CONNACK put its link up, its link lost once one did
           onPastMaximum: (size) => {
             const error = new GenericError(
               `the link of ${id} went down: its broker sent a packet of ${String(size)} bytes, past its Maximum Packet Size, ${String(maximumPacketSize)} bytes`
@@ -882,19 +937,6 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
 
       throw toError(reason);
     }
-
-    // * its link lost: once, as its network connection ends, unless it was stopped
-    client.on('close', () => {
-      retire(held, new GenericError(`the link of ${id} went down`));
-    });
-
-    if (!client.connected) {
-      retire(held, notUp());
-
-      throw notUp();
-    }
-
-    held.isLinked = true;
   };
 
   const adapter: IMqttBrokerAdapter = {

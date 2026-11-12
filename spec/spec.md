@@ -2187,8 +2187,13 @@ broker sends no alias; its `maximumPacketSize` as its Maximum Packet Size; its `
 seconds rounded up, as its Keep Alive. Where its adapter leaves a will, the will is its
 participant's GONE to its departure, of QoS 1, RETAIN 0 and a Will Delay Interval of 0, so that its
 broker publishes it as it sees the link close without a clean end, a takeover by another link of
-its Client Identifier among them. A link is up once its CONNACK's Reason Code is 0x00; any other
-fails its start, as do a Maximum QoS of 0 and no CONNACK within `connectTimeout` of its start. Its
+its Client Identifier among them. A link is up once its CONNACK's Reason Code is 0x00 and its
+Maximum QoS is not 0, as that CONNACK is read, its packets judged in the order they came
+([MQTT 5.0 §4.2](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html)); a CONNACK of
+any other Reason Code, or of a Maximum QoS of 0, fails its start whatever comes after it, as does
+no CONNACK within `connectTimeout` of its start, and a start that fails sends no DISCONNECT. Once
+up, a link that ends other than by its stop is lost, its down told once, before or after its start
+settles, and its start succeeds all the same; its stop ends it as it ends any link up. Its
 password is one its adapter is given, or one a provider it is given answers, asked anew at each
 link's start before its network connection opens, under that start's signal and its stop, and
 within the same `connectTimeout`: an ask that outlives it, or that a stop meets, fails that start
@@ -2242,9 +2247,9 @@ acknowledges, a PUBLISH whose RETAIN is 1. A packet past its own Maximum Packet 
 its fixed header's Remaining Length as section 15.30 counts one, is a Protocol Error
 ([MQTT 5.0 §3.1.2.11.4, §4.13.1](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html)):
 as it reads that length, before the packet's body comes, it closes its network connection,
-reading nothing more of it, its link lost, or its start failed where its CONNACK had not come. It
-sends no DISCONNECT before it closes ([`docs/support.md`](../docs/support.md), "Leveled down"),
-and its broker publishes its will.
+reading nothing more of it, its link lost where it was up, or its start failed where no CONNACK had
+put it up (section 15.26). It sends no DISCONNECT before it closes
+([`docs/support.md`](../docs/support.md), "Leveled down"), and its broker publishes its will.
 
 15.30. A PUBLISH of N bytes of payload to a topic of T bytes in UTF-8 counts S = 1 + v(R) + R bytes,
 where R = 2 + T + Q + v(P) + P + N, Q is 2 at QoS 1 and 0 at QoS 0, P is 5 with a Message Expiry

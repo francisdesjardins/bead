@@ -319,6 +319,10 @@ async fn fails_its_start_on_a_connack_whose_maximum_qos_is_0_naming_it() {
     assert!(message_of(&failed).contains("Maximum QoS 0"), "{failed}");
     assert_eq!(heard.downs(), Vec::new(), "no down");
 
+    // * a start that fails sends nothing: no DISCONNECT
+    assert!(link.closed(PATIENCE).await, "closed");
+    assert_eq!(link.kinds(), vec![Kind::Connect], "no DISCONNECT");
+
     // a CONNACK that refuses fails it too, naming its reason
     let starting = adapter.start(BrokerStart::default());
     let refused = script.link(PATIENCE).await.unwrap();
@@ -2039,7 +2043,10 @@ async fn loses_its_link_once_on_a_packet_past_its_maximum_packet_size_after_its_
 
     // * the owner accepts its CONNACK and marks its link up in one turn; the caller leaves its
     // start future unpolled until the later header loses the link
-    link.send(connack(&Connack::default()));
+    link.send(connack(&Connack {
+        maximum_packet_size: Some(1_024),
+        ..Connack::default()
+    }));
     until(|| adapter.is_linked()).await;
     assert!(
         adapter.is_linked(),
@@ -2060,10 +2067,259 @@ async fn loses_its_link_once_on_a_packet_past_its_maximum_packet_size_after_its_
     assert!(heard.messages().is_empty(), "nothing handed on");
     assert!(!adapter.is_linked(), "down");
     assert_eq!(
+        adapter.maximum_payload_bytes(&inbox()),
+        largest_payload("bead/i/ada", 1_024, &MqttPublishShapeOptions::default()).unwrap(),
+        "its CONNACK's bound, the last link's"
+    );
+    assert_eq!(
         link.kinds(),
         vec![Kind::Connect],
         "no DISCONNECT, no PUBACK"
     );
+    adapter.stop().await;
+    script.dispose();
+}
+
+// spec 15.26
+#[tokio::test]
+async fn loses_its_link_once_as_its_network_connection_ends_after_its_connack_before_its_caller_resumes()
+ {
+    let script = script().await;
+    let adapter = adapter_of(&options_of(&script));
+    let heard = heard_of(&adapter);
+    let starting = adapter.start(BrokerStart::default());
+    let link = script.link(PATIENCE).await.unwrap();
+
+    // * the owner accepts its CONNACK and marks its link up in one turn; the caller leaves its
+    // start future unpolled until the end of its network connection loses the link
+    link.send(connack(&Connack::default()));
+    until(|| adapter.is_linked()).await;
+    assert!(
+        adapter.is_linked(),
+        "its CONNACK is accepted before the end"
+    );
+    link.end();
+    until(|| !heard.downs().is_empty()).await;
+    let outcome = crate::testing::patience(PATIENCE, starting).await.unwrap();
+
+    assert!(
+        outcome.is_ok(),
+        "its accepted start keeps its outcome: {outcome:?}"
+    );
+    assert_eq!(heard.downs(), vec![down(false)], "lost once");
+    assert!(heard.messages().is_empty(), "nothing handed on");
+    assert!(!adapter.is_linked(), "down");
+    assert_eq!(link.kinds(), vec![Kind::Connect], "no DISCONNECT");
+    adapter.stop().await;
+    script.dispose();
+}
+
+// spec 15.26, 15.29
+#[tokio::test]
+async fn fails_its_start_on_a_connack_that_refuses_or_says_maximum_qos_0_beside_a_packet_past_its_maximum_packet_size_in_one_read_naming_the_connack()
+ {
+    let script = script().await;
+    let mut options = options_of(&script);
+
+    options.maximum_packet_size = Some(1_100);
+
+    let answers = [
+        (
+            Connack {
+                reason_code: 0x86,
+                ..Connack::default()
+            },
+            "0x86",
+        ),
+        (
+            Connack {
+                reason_code: 0x01,
+                ..Connack::default()
+            },
+            "0x01",
+        ),
+        (
+            Connack {
+                maximum_qos: Some(0),
+                ..Connack::default()
+            },
+            "Maximum QoS 0",
+        ),
+    ];
+
+    for (answer, named) in answers {
+        let adapter = adapter_of(&options);
+        let heard = heard_of(&adapter);
+        let starting = adapter.start(BrokerStart::default());
+        let link = script.link(PATIENCE).await.unwrap();
+        let mut bytes = connack(&answer);
+
+        bytes.extend_from_slice(&[0x32, 0x80, 0x80, 0x80, 0x08]);
+        link.send(bytes);
+
+        let failed = crate::testing::patience(PATIENCE, starting)
+            .await
+            .unwrap()
+            .unwrap_err();
+        let message = message_of(&failed);
+
+        assert!(message.contains(named), "{message}");
+        assert!(
+            !message.contains("past its Maximum Packet Size"),
+            "its CONNACK names it, not the header: {message}"
+        );
+        assert!(link.closed(PATIENCE).await, "closed");
+        assert_eq!(heard.downs(), Vec::new(), "no down");
+        assert!(!adapter.is_linked(), "never up");
+        assert_eq!(link.kinds(), vec![Kind::Connect], "no DISCONNECT");
+        adapter.stop().await;
+    }
+
+    script.dispose();
+}
+
+// spec 15.26
+#[tokio::test]
+async fn stops_its_link_with_a_disconnect_of_0x00_after_its_connack_before_its_caller_resumes_its_start_succeeding_and_no_down_told()
+ {
+    let script = script().await;
+    let adapter = adapter_of(&options_of(&script));
+    let heard = heard_of(&adapter);
+    let starting = adapter.start(BrokerStart::default());
+    let link = script.link(PATIENCE).await.unwrap();
+
+    // * the owner accepts its CONNACK and marks its link up in one turn; the caller stops it
+    // before it polls its start future
+    link.send(connack(&Connack::default()));
+    until(|| adapter.is_linked()).await;
+    assert!(
+        adapter.is_linked(),
+        "its CONNACK is accepted before the stop"
+    );
+    crate::testing::patience(PATIENCE, adapter.stop())
+        .await
+        .unwrap();
+    let outcome = crate::testing::patience(PATIENCE, starting).await.unwrap();
+
+    assert!(
+        outcome.is_ok(),
+        "its accepted start keeps its outcome: {outcome:?}"
+    );
+    assert_eq!(
+        link.next(Some(Kind::Disconnect), PATIENCE).await.unwrap(),
+        Scripted::Disconnect { reason: 0 },
+        "a DISCONNECT of 0x00"
+    );
+    assert!(link.closed(PATIENCE).await, "closed");
+    assert_eq!(
+        link.kinds(),
+        vec![Kind::Connect, Kind::Disconnect],
+        "nothing else"
+    );
+    assert_eq!(heard.downs(), Vec::new(), "no down");
+    script.dispose();
+}
+
+/// A listener whose first down starts its adapter again, keeping the future that start gives.
+#[derive(Default)]
+struct Restarting {
+    adapter: Mutex<Option<MqttBrokerAdapter>>,
+    downs: Mutex<Vec<BrokerDown>>,
+    restarts: Mutex<Vec<BoxFuture<Result<(), BrokerError>>>>,
+}
+
+impl BrokerListener for Restarting {
+    fn on_message(&self, _message: &BrokerMessage) {}
+
+    fn on_down(&self, down: BrokerDown) {
+        self.downs.lock().unwrap().push(down);
+
+        let adapter = self.adapter.lock().unwrap().take();
+
+        // * an operation takes effect as it is made: its future is kept, never polled here
+        if let Some(adapter) = adapter {
+            self.restarts
+                .lock()
+                .unwrap()
+                .push(adapter.start(BrokerStart::default()));
+        }
+    }
+}
+
+// spec 15.26
+#[tokio::test]
+async fn takes_a_start_from_its_downs_listener_once_its_link_is_lost_beside_its_connack() {
+    let script = script().await;
+    let mut options = options_of(&script);
+
+    options.maximum_packet_size = Some(1_100);
+
+    let adapter = adapter_of(&options);
+    let restarting = Arc::new(Restarting {
+        adapter: Mutex::new(Some(adapter.clone())),
+        ..Restarting::default()
+    });
+
+    adapter.listen(Arc::<Restarting>::clone(&restarting));
+
+    let starting = adapter.start(BrokerStart::default());
+    let link = script.link(PATIENCE).await.unwrap();
+    let mut bytes = connack(&Connack::default());
+
+    bytes.extend_from_slice(&[0x32, 0x80, 0x80, 0x80, 0x08]);
+    link.send(bytes);
+    assert!(link.closed(PATIENCE).await, "closed at its length");
+    let outcome = crate::testing::patience(PATIENCE, starting).await.unwrap();
+
+    assert!(
+        outcome.is_ok(),
+        "its CONNACK accepts its start: {outcome:?}"
+    );
+    assert_eq!(
+        restarting.downs.lock().unwrap().clone(),
+        vec![down(false)],
+        "lost once"
+    );
+
+    // * the start its down's listener made was taken, not refused as up already: a second link
+    // comes once its CONNECT is read
+    let second = script.link(PATIENCE).await;
+
+    assert!(
+        second.is_ok_and(|link| link.connect().client_identifier == ID),
+        "a CONNECT on a second link"
+    );
+    assert_eq!(restarting.restarts.lock().unwrap().len(), 1, "one restart");
+    adapter.stop().await;
+    restarting.restarts.lock().unwrap().clear();
+    script.dispose();
+}
+
+// spec 15.21, 15.26
+#[tokio::test]
+async fn tells_its_link_taken_over_its_start_succeeding_on_a_disconnect_of_0x8e_beside_its_connack_in_one_read()
+ {
+    let script = script().await;
+    let adapter = adapter_of(&options_of(&script));
+    let heard = heard_of(&adapter);
+    let starting = adapter.start(BrokerStart::default());
+    let link = script.link(PATIENCE).await.unwrap();
+    let mut bytes = connack(&Connack::default());
+
+    bytes.extend_from_slice(&disconnect(0x8E));
+    link.send(bytes);
+    link.end();
+    until(|| !heard.downs().is_empty()).await;
+    let outcome = crate::testing::patience(PATIENCE, starting).await.unwrap();
+
+    assert!(
+        outcome.is_ok(),
+        "its CONNACK accepts its start: {outcome:?}"
+    );
+    assert_eq!(heard.downs(), vec![down(true)], "taken over");
+    assert!(heard.messages().is_empty(), "nothing handed on");
+    assert!(!adapter.is_linked(), "down");
+    assert_eq!(link.kinds(), vec![Kind::Connect], "no DISCONNECT");
     adapter.stop().await;
     script.dispose();
 }

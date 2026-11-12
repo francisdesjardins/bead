@@ -25,10 +25,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   into a drawer on a desktop and a sheet on a phone until it is opened.
 - Over MQTT 5, a participant judges a received packet against its own Maximum Packet Size as it
   reads the packet's Remaining Length, before its body comes, and closes its network connection
-  there, its link lost or its start failed, whatever the packet's type: the TypeScript adapter by a
-  guard on MQTT.js's stream and the C# adapter by one on MQTTnet's channel, as the Rust side's
-  client does, so its own bound bounds what it holds of a packet. It sends no DISCONNECT of 0x95,
-  which Mosquitto 2.1.2 answers by deleting its will (spec 15.29, decision 0041).
+  there, whatever the packet's type: the TypeScript adapter by a guard on MQTT.js's stream and the
+  C# adapter by one on MQTTnet's channel, as the Rust side's client does, so its own bound bounds
+  what it holds of a packet. Its link is lost where its CONNACK put it up, though the packet came
+  in the same read, and its start fails where none did, a CONNACK that refuses or says Maximum QoS
+  0 failing it by its own reason whatever comes beside it. It sends no DISCONNECT of 0x95, which
+  Mosquitto 2.1.2 answers by deleting its will (spec 15.26, 15.29, decision 0041).
+- Over MQTT 5, a start that fails sends no DISCONNECT, on every side: the C# adapter no longer
+  sends one of 0x00 on a CONNACK of Maximum QoS 0, which a broker that conforms never gives a
+  CONNECT whose will is of QoS 1 ([MQTT-3.2.2-12]). The TypeScript adapter names a CONNACK that
+  refuses by its code, `CONNACK 0x86, Bad User Name or Password`, as the C# and Rust sides do
+  (spec 15.26, decision 0041).
 - The details gate reads a helper's call by the arguments at the positions that reach its sinks, and
   the whole call where its arguments do not split plainly, so a router's state handed beside a
   reason that stays with the side carries no detail (decision 0006).
@@ -63,6 +70,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   stalled (spec 12.10).
 - An HTTP server or client given limits that ask for a transfer refuses them as it is built on the
   C# side, as on the TypeScript and Rust sides (spec 15.11).
+- Over MQTT 5, a link is up as its CONNACK is read, as on the Rust side: a link that ends right
+  after its CONNACK, before its start's caller resumes, is lost, its down told once, its start
+  succeeding and that CONNACK's Maximum Packet Size bounding what it publishes while it is down,
+  where the C# adapter failed its start as lost as it connected, told no down and kept the bound
+  of the link before; a DISCONNECT of 0x8E right behind the CONNACK is told as a takeover, which
+  the TypeScript adapter told as a plain loss, so its participant fences it; and a stop there sends
+  its DISCONNECT of 0x00, on the C# side once MQTTnet says it connected, so no will goes, and the
+  TypeScript adapter no longer counts up a link its stop ended (spec 15.21, 15.26, 15.30, decision
+  0041).
 
 ## [0.12.0] - 2026-11-10
 
