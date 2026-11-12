@@ -366,8 +366,17 @@ async fn a_reconnection_whose_future_is_dropped_leaves_no_task_behind_once_it_se
         );
     }
 
+    // * the client's pool lets its idle connections go within twice its idle timeout, 8 s
+    let is_settled = patience(Duration::from_secs(20), async {
+        while crate::testing::alive_tasks() > before {
+            rest(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .is_ok();
+
     assert!(
-        eventually(|| crate::testing::alive_tasks() <= before).await,
+        is_settled,
         "no task left of the reconnections, {} alive for {before}",
         crate::testing::alive_tasks()
     );
