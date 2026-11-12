@@ -126,6 +126,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The Rust side's MQTT 5 adapter runs a `keepAlive` under a second as the whole second its CONNECT
   announces, as the other sides do, where it sent a PINGREQ and lost its link on an unanswered one
   at the unrounded value (spec 15.26).
+- The Rust side's MQTT 5 adapter takes a publication at most once as its PUBLISH is written, as the
+  other sides do, where it took it as it was queued: a broker that reads nothing holds what its
+  connection has not taken within `maximumUnsentBytes`, and its Keep Alive counts from the last
+  packet written, so a steady flow no broker reads loses its link rather than growing without
+  bound; one given up before it is written retires its link, as one of QoS 1 does once sent (spec
+  15.23, 15.26).
 
 ## [0.12.0] - 2026-11-10
 

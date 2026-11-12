@@ -8,7 +8,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
+use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use crate::broker::adapter::{
@@ -1130,6 +1132,232 @@ async fn publishes_at_qos_1_and_retain_0_a_life_in_whole_seconds_rounded_up_wher
         "QoS 0"
     );
     quick.stop().await;
+}
+
+/// A broker that answers a CONNACK, then reads nothing until it is told to read again, from when
+/// it reads on to its end: its URL, what tells it, and the bytes it read once told.
+struct Stalled {
+    url: String,
+    resume: Option<tokio::sync::oneshot::Sender<()>>,
+    peer: JoinHandle<usize>,
+}
+
+impl Stalled {
+    async fn new() -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("mqtt://{}", listener.local_addr().unwrap());
+        let (resume, resumed) = tokio::sync::oneshot::channel::<()>();
+        let peer = spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buffer = vec![0_u8; 65_536];
+
+            // its CONNECT, one small write
+            assert!(socket.read(&mut buffer).await.unwrap() > 0, "its CONNECT");
+            socket
+                .write_all(&connack(&Connack::default()))
+                .await
+                .unwrap();
+
+            // ! it reads nothing more until told, and drops its socket where it never is
+            if resumed.await.is_err() {
+                return 0;
+            }
+
+            let mut read = 0_usize;
+
+            while let Ok(count) = socket.read(&mut buffer).await
+                && count > 0
+            {
+                read = read.saturating_add(count);
+            }
+
+            read
+        });
+
+        Self {
+            url,
+            resume: Some(resume),
+            peer,
+        }
+    }
+
+    fn options(&self) -> MqttBrokerAdapterOptions {
+        let mut options = MqttBrokerAdapterOptions::new(&self.url, ID);
+
+        options.password = Some(PASSWORD.to_owned());
+        options.delivery = Some(BrokerDelivery::AtMostOnce);
+
+        options
+    }
+
+    fn resume(&mut self) {
+        if let Some(resume) = self.resume.take() {
+            resume.send(()).ok();
+        }
+    }
+}
+
+/// `count` publications at most once of a MiB each to `adapter`'s inbox, each under way.
+fn mebibytes_of(
+    (adapter, count): (&MqttBrokerAdapter, usize),
+) -> Vec<JoinHandle<Result<BrokerPublished, BrokerError>>> {
+    let payload = Bytes::from(vec![0_u8; 1_048_576]);
+
+    (0..count)
+        .map(|_| spawn(adapter.publish(BrokerPublication::new(inbox(), payload.clone()))))
+        .collect()
+}
+
+// spec 15.23, 15.28
+#[tokio::test]
+async fn takes_a_publication_at_most_once_once_its_packet_is_written_holding_it_while_its_broker_reads_nothing()
+ {
+    let mut stalled = Stalled::new().await;
+    let adapter = adapter_of(&stalled.options());
+
+    adapter.start(BrokerStart::default()).await.unwrap();
+
+    // * far past what its socket holds unread
+    let publishing = mebibytes_of((&adapter, 64));
+
+    rest(Duration::from_millis(300)).await;
+
+    let settled = publishing
+        .iter()
+        .filter(|publishing| publishing.is_finished())
+        .count();
+
+    assert!(
+        settled < 64,
+        "{settled} of 64 settled while nothing is read"
+    );
+    assert!(
+        !publishing.last().unwrap().is_finished(),
+        "the last one held"
+    );
+    assert!(adapter.is_linked(), "its link up");
+
+    // * each taken once its broker reads it
+    stalled.resume();
+
+    for publishing in publishing {
+        assert_eq!(
+            crate::testing::patience(PATIENCE, publishing)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap(),
+            BrokerPublished::Taken,
+            "taken once written"
+        );
+    }
+
+    adapter.stop().await;
+    assert!(
+        crate::testing::patience(PATIENCE, stalled.peer)
+            .await
+            .unwrap()
+            .unwrap()
+            >= 64 * 1_048_576,
+        "every one read"
+    );
+}
+
+// spec 15.26, 15.28
+#[tokio::test]
+async fn loses_its_link_where_its_broker_reads_nothing_under_a_steady_flow_at_most_once_its_keep_alive_counted_from_what_was_written()
+ {
+    let stalled = Stalled::new().await;
+    let mut options = stalled.options();
+
+    options.keep_alive = Some(Duration::from_secs(1));
+
+    let adapter = adapter_of(&options);
+    let heard = heard_of(&adapter);
+
+    adapter.start(BrokerStart::default()).await.unwrap();
+
+    let mut publishing = mebibytes_of((&adapter, 16));
+    let started = Instant::now();
+
+    // * a publication each 200 ms, none of which is written: none keeps its link alive
+    while heard.downs().is_empty() && started.elapsed() < PATIENCE {
+        publishing.push(spawn(adapter.publish(publication(inbox(), &[1]))));
+        rest(Duration::from_millis(200)).await;
+    }
+
+    assert_eq!(heard.downs(), vec![down(false)], "its link lost");
+    assert!(
+        started.elapsed() < Duration::from_secs(4),
+        "within two Keep Alives of its last write"
+    );
+
+    let mut failed = 0;
+
+    for publishing in publishing {
+        match crate::testing::patience(PATIENCE, publishing)
+            .await
+            .unwrap()
+            .unwrap()
+        {
+            Ok(published) => assert_eq!(published, BrokerPublished::Taken, "taken"),
+            Err(error) => {
+                assert!(
+                    message_of(&error).contains("no PINGRESP within its Keep Alive"),
+                    "{error}"
+                );
+                failed += 1;
+            }
+        }
+    }
+
+    assert!(failed > 0, "what was not written failed with its link");
+    adapter.stop().await;
+    drop(stalled);
+}
+
+// spec 15.28
+#[tokio::test]
+async fn retires_its_link_where_a_publication_at_most_once_is_given_up_before_its_packet_is_written()
+ {
+    let stalled = Stalled::new().await;
+    let adapter = adapter_of(&stalled.options());
+    let heard = heard_of(&adapter);
+
+    adapter.start(BrokerStart::default()).await.unwrap();
+
+    let held = mebibytes_of((&adapter, 16));
+    let signal = CancellationToken::new();
+    let mut asked = publication(inbox(), &[1]);
+
+    asked.signal = Some(signal.clone());
+
+    let given_up = spawn(adapter.publish(asked));
+
+    rest(Duration::from_millis(100)).await;
+    assert!(!given_up.is_finished(), "held behind what is not written");
+    signal.cancel();
+    assert!(
+        message_of(&given_up.await.unwrap().unwrap_err()).contains("was cancelled"),
+        "given up"
+    );
+    // * it may go yet, so its link goes
+    until(|| !heard.downs().is_empty()).await;
+    assert_eq!(heard.downs(), vec![down(false)], "its link retired");
+
+    for publishing in held {
+        let outcome = crate::testing::patience(PATIENCE, publishing)
+            .await
+            .unwrap()
+            .unwrap();
+
+        if let Err(error) = outcome {
+            assert!(message_of(&error).contains("was retired"), "{error}");
+        }
+    }
+
+    adapter.stop().await;
+    drop(stalled);
 }
 
 // spec 15.28

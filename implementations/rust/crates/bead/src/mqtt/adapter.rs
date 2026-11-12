@@ -9,10 +9,11 @@
 //! Each subscription is of `QoS` 1, No Local 0, Retain As Published 0 and Retain Handling 2, a group's
 //! its shared subscription, held once its SUBACK grants `QoS` 1; one let go once its UNSUBACK came
 //! under 0x80, none within its connect timeout failing it, its link and its filter kept. Each
-//! publication is of `QoS` 1, or 0 at most once, RETAIN 0, a life in whole seconds where asked and no
-//! other property, counted to its byte and refused past its CONNACK's Maximum Packet Size, held to
-//! its CONNACK's Receive Maximum, later ones waiting in their order, no other packet delayed for
-//! them; its PUBACK of 0x10 says no subscriber, of 0x80 or more refuses it. Each message is handed
+//! publication is of `QoS` 1, or 0 at most once, taken once its PUBLISH is written, RETAIN 0, a life
+//! in whole seconds where asked and no other property, counted to its byte and refused past its
+//! CONNACK's Maximum Packet Size, held to its CONNACK's Receive Maximum, later ones waiting in their
+//! order, no other packet delayed for them; its PUBACK of 0x10 says no subscriber, of 0x80 or more
+//! refuses it. Its Keep Alive counts from the last packet written. Each message is handed
 //! on before its PUBACK, which goes once it is settled. A packet past its own Maximum Packet Size,
 //! read at its Remaining Length, closes its network connection, no DISCONNECT, its link lost. A
 //! DISCONNECT of 0x8E tells its link taken over; any other end, lost. Its stop takes no
@@ -31,7 +32,7 @@ use core::future::Future;
 use core::pin::pin;
 use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use core::time::Duration;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 use bytes::{Buf, Bytes, BytesMut};
@@ -548,7 +549,11 @@ impl BrokerAdapter for MqttBrokerAdapter {
 
 // what its writer is handed
 enum Outgoing {
-    Packet(Vec<u8>),
+    // a packet, the key of the publication at most once it takes where it is one's
+    Packet {
+        packet: Vec<u8>,
+        publication: Option<u64>,
+    },
     // its side ended once what was written went, then told
     Close,
 }
@@ -624,9 +629,16 @@ async fn writing(
         };
 
         match next {
-            Outgoing::Packet(packet) => match unless_ended(writer.send(packet), &aborted).await {
+            Outgoing::Packet {
+                packet,
+                publication,
+            } => match unless_ended(writer.send(packet), &aborted).await {
                 None => return,
-                Some(Ok(())) => {}
+                // * told its owner as it is written: what dates its keep alive, and what takes a
+                // publication at most once
+                Some(Ok(())) => owner.offer(Box::new(move |state: &mut State| {
+                    state.written((serial, publication));
+                })),
                 Some(Err(error)) => {
                     let reason = error.to_string();
 
@@ -662,6 +674,14 @@ impl Drop for Watch {
 struct Publication {
     key: u64,
     publish: MqttPublish,
+    reply: oneshot::Sender<Result<BrokerPublished, BrokerError>>,
+    // dropped as it settles
+    _watch: Option<Watch>,
+}
+
+// a publication at most once, its PUBLISH of QoS 0 handed to its writer and not yet written
+struct Unwritten {
+    key: u64,
     reply: oneshot::Sender<Result<BrokerPublished, BrokerError>>,
     // dropped as it settles
     _watch: Option<Watch>,
@@ -739,11 +759,14 @@ struct Link {
     is_taken_over: bool,
     quota: SendQuota<Publication>,
     in_flight: HashMap<u16, Publication>,
+    // in the order they were handed to its writer
+    unwritten: VecDeque<Unwritten>,
     subscribing: HashMap<u16, Subscribing>,
     unsubscribing: HashMap<u16, Unsubscribing>,
     filters: Vec<FilterRecord>,
     next_identifier: u16,
     keep_alive: Duration,
+    // when its writer last wrote a packet
     last_sent: Duration,
     is_pinged: bool,
     keep_alive_timer: Option<Arc<dyn Timer>>,
@@ -756,9 +779,26 @@ impl Drop for Link {
 }
 
 impl Link {
-    fn send(&mut self, (packet, now): (Vec<u8>, Duration)) {
-        self.last_sent = now;
-        self.outgoing.send(Outgoing::Packet(packet)).ok();
+    fn send(&self, packet: Vec<u8>) {
+        self.outgoing
+            .send(Outgoing::Packet {
+                packet,
+                publication: None,
+            })
+            .ok();
+    }
+
+    // a PUBLISH of QoS 0 handed to its writer, its publication taken once it is written
+    fn send_at_most_once(&mut self, (packet, unwritten): (Vec<u8>, Unwritten)) {
+        let publication = Some(unwritten.key);
+
+        self.unwritten.push_back(unwritten);
+        self.outgoing
+            .send(Outgoing::Packet {
+                packet,
+                publication,
+            })
+            .ok();
     }
 
     // a Packet Identifier no packet awaiting its answer holds (MQTT 5.0 §2.2.1)
@@ -1222,7 +1262,7 @@ impl State {
                 state.start_given_up(serial);
             })
         });
-        let mut link = Link {
+        let link = Link {
             serial,
             phase: Phase::Connecting {
                 reply,
@@ -1239,6 +1279,7 @@ impl State {
             is_taken_over: false,
             quota: SendQuota::new(RECEIVE_MAXIMUM),
             in_flight: HashMap::new(),
+            unwritten: VecDeque::new(),
             subscribing: HashMap::new(),
             unsubscribing: HashMap::new(),
             filters: Vec::new(),
@@ -1249,7 +1290,7 @@ impl State {
             keep_alive_timer: None,
         };
 
-        link.send((written, self.now()));
+        link.send(written);
         self.link = Some(link);
     }
 
@@ -1410,7 +1451,7 @@ impl State {
         let since = now.saturating_sub(link.last_sent);
         let due = if since >= link.keep_alive {
             link.is_pinged = true;
-            link.send((write_pingreq(), now));
+            link.send(write_pingreq());
 
             link.keep_alive
         } else {
@@ -1418,6 +1459,25 @@ impl State {
         };
 
         self.arm_keep_alive((serial, due));
+    }
+
+    // its writer wrote a packet: the last sent, and the publication at most once it took
+    fn written(&mut self, (serial, publication): (u64, Option<u64>)) {
+        let now = self.now();
+        let Some(link) = self.link_of(serial) else {
+            return;
+        };
+
+        link.last_sent = now;
+
+        let Some(key) = publication else {
+            return;
+        };
+        let written = link.unwritten.iter().position(|held| held.key == key);
+
+        if let Some(publication) = written.and_then(|index| link.unwritten.remove(index)) {
+            publication.reply.send(Ok(BrokerPublished::Taken)).ok();
+        }
     }
 
     // ── What it reads ────────────────────────────────────────────────────────────────────────
@@ -1592,7 +1652,6 @@ impl State {
 
     // * a message of a lost link is never acknowledged on the next one
     fn settled(&mut self, (serial, identifier): (u64, u16)) {
-        let now = self.now();
         let shared = Arc::clone(&self.shared);
         let Some(link) = self.link_of(serial) else {
             return;
@@ -1604,7 +1663,7 @@ impl State {
                 Some(held.saturating_sub(1))
             })
             .ok();
-        link.send((write_puback(identifier), now));
+        link.send(write_puback(identifier));
     }
 
     // ── Its publications ─────────────────────────────────────────────────────────────────────
@@ -1615,7 +1674,6 @@ impl State {
         reply: oneshot::Sender<Result<BrokerPublished, BrokerError>>,
     ) {
         let shared = Arc::clone(&self.shared);
-        let now = self.now();
         let key = self.key();
         let owner = self.owner.clone();
         let Some(link) = self.link.as_mut().filter(|link| link.is_up()) else {
@@ -1665,18 +1723,38 @@ impl State {
             ..MqttPublish::default()
         };
 
-        if is_at_most_once {
-            let outcome = write_publish(&publish)
-                .map(|written| link.send((written, now)))
-                .map(|()| BrokerPublished::Taken)
-                .map_err(|refusal| BrokerError::failed(refusal.to_string()));
+        let serial = link.serial;
 
-            reply.send(outcome).ok();
+        // * taken once its writer wrote it, so that what its connection has not taken stays
+        // counted as unsent (spec 15.23); given up before, its link retired, since it may go yet
+        if is_at_most_once {
+            match write_publish(&publish) {
+                Ok(written) => {
+                    let watch = publication.signal.map(|signal| {
+                        watch((&owner, signal), move |state: &mut Self| {
+                            state.publication_given_up((serial, key));
+                        })
+                    });
+
+                    link.send_at_most_once((
+                        written,
+                        Unwritten {
+                            key,
+                            reply,
+                            _watch: watch,
+                        },
+                    ));
+                }
+                Err(refusal) => {
+                    reply
+                        .send(Err(BrokerError::failed(refusal.to_string())))
+                        .ok();
+                }
+            }
 
             return;
         }
 
-        let serial = link.serial;
         let watch = publication.signal.clone().map(|signal| {
             watch((&owner, signal), move |state: &mut Self| {
                 state.publication_given_up((serial, key));
@@ -1712,7 +1790,6 @@ impl State {
 
     // a publication its quota took sent: its PUBLISH of QoS 1 written, its PUBACK awaited
     fn send_publication(&mut self, (serial, mut publication): (u64, Publication)) {
-        let now = self.now();
         let Some(link) = self.link_of(serial) else {
             return;
         };
@@ -1732,7 +1809,7 @@ impl State {
 
         match write_publish(&publication.publish) {
             Ok(written) => {
-                link.send((written, now));
+                link.send(written);
                 link.in_flight.insert(identifier, publication);
             }
             Err(refusal) => {
@@ -1813,6 +1890,18 @@ impl State {
                 .send(Err(shared.cancelled("a publication")))
                 .ok();
             self.given_up(serial);
+
+            return;
+        }
+
+        let unwritten = link.unwritten.iter().position(|held| held.key == key);
+
+        if let Some(publication) = unwritten.and_then(|index| link.unwritten.remove(index)) {
+            publication
+                .reply
+                .send(Err(shared.cancelled("a publication")))
+                .ok();
+            self.given_up(serial);
         }
     }
 
@@ -1841,7 +1930,6 @@ impl State {
     ) {
         let shared = Arc::clone(&self.shared);
         let id = &shared.id;
-        let now = self.now();
         let record = self.key();
         let owner = self.owner.clone();
 
@@ -1919,7 +2007,7 @@ impl State {
             filter: filter.clone(),
             record,
         });
-        link.send((written, now));
+        link.send(written);
         link.subscribing.insert(
             identifier,
             Subscribing {
@@ -1992,7 +2080,6 @@ impl State {
 
     fn unsubscribe(&mut self, topic: &[String], reply: oneshot::Sender<Result<(), BrokerError>>) {
         let shared = Arc::clone(&self.shared);
-        let now = self.now();
         let Some(link) = self.link.as_mut().filter(|link| link.is_up()) else {
             reply.send(Err(shared.not_up())).ok();
 
@@ -2024,7 +2111,7 @@ impl State {
         };
         let serial = link.serial;
 
-        link.send((written, now));
+        link.send(written);
         link.unsubscribing.insert(
             identifier,
             Unsubscribing {
@@ -2236,7 +2323,6 @@ impl State {
     // link ended, or its connect timeout passed (spec 15.26, 15.27)
     fn let_go(&mut self, serial: u64) {
         let stopped = self.shared.stopped();
-        let now = self.now();
         let Some(link) = self.link_of(serial) else {
             return;
         };
@@ -2277,7 +2363,7 @@ impl State {
             };
 
             if let Ok(written) = write_unsubscribe((identifier, &filter)) {
-                link.send((written, now));
+                link.send(written);
                 link.unsubscribing.insert(
                     identifier,
                     Unsubscribing {
@@ -2312,7 +2398,6 @@ impl State {
     // * its DISCONNECT of 0x00, so that no will goes, within a connect timeout of its own: then
     // its network connection ended at once, its broker never answering
     fn disconnect(&mut self, serial: u64) {
-        let now = self.now();
         let timeout = self.shared.connect_timeout;
         let Some(link) = self.link_of(serial) else {
             return;
@@ -2330,7 +2415,7 @@ impl State {
             }
         }
 
-        link.send((write_disconnect(), now));
+        link.send(write_disconnect());
         link.outgoing.send(Outgoing::Close).ok();
 
         let timer = self.after(timeout, move |state| state.disconnect_timed_out(serial));
@@ -2454,6 +2539,10 @@ impl State {
         }
 
         for (_, publication) in link.in_flight.drain() {
+            publication.reply.send(Err(reason.clone())).ok();
+        }
+
+        for publication in link.unwritten.drain(..) {
             publication.reply.send(Err(reason.clone())).ok();
         }
 
