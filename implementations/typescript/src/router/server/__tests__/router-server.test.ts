@@ -6399,6 +6399,43 @@ test.describe('createRouterServer, the accesses it refuses', () => {
     expect(told).toEqual([]);
   });
 
+  // spec 9.2 step 6: an ES256 key off P-256 (SEC 1 §3.2.2) fails the verifier, as Web Crypto's
+  // import refuses it, so its call is never answered SESSION_REQUIRED
+  test('answers a call under an ES256 key off its curve PROCEDURE_FAILED and reports it, never SESSION_REQUIRED', async () => {
+    const ones = Buffer.alloc(32, 1).toString('base64url');
+    const { errors, send, sent } = createRefusing({
+      clock: createTestClock(NOW),
+      credentials: {
+        audience: AUDIENCE,
+        keys: [
+          {
+            algorithm: 'ES256',
+            issuer: ISSUER,
+            jwk: { crv: 'P-256', kty: 'EC', x: ones, y: ones },
+          },
+        ],
+      },
+    });
+    const part = (value: object): string => {
+      return Buffer.from(JSON.stringify(value)).toString('base64url');
+    };
+    const token = [
+      part({ alg: 'ES256', typ: 'at+jwt' }),
+      part({ aud: AUDIENCE, exp: NOW / 1_000 + 3_600, iss: ISSUER, sub: 'grace' }),
+      Buffer.alloc(64, 1).toString('base64url'),
+    ].join('.');
+
+    send(requestOf(1, { credential: { scheme: CredentialScheme.JWT, token } }));
+    await expect
+      .poll(() => {
+        return sent.length;
+      })
+      .toBe(1);
+
+    expect(answersOf(sent)).toEqual([[first, 'failure', 1, ProtocolCode.PROCEDURE_FAILED]]);
+    expect(reportedOf(errors)).toHaveLength(1);
+  });
+
   test('refuses as it would though an accessRefused listener throws, the throw reported with its connection', async () => {
     const { errors, router, send, sent } = createRefusing();
     const thrown = new Error('an accessRefused listener that throws');
