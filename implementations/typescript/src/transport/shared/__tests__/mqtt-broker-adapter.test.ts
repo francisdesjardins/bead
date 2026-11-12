@@ -2328,10 +2328,14 @@ test.describe('createMqttBrokerAdapter', () => {
         'ws://broker.example/mqtt',
       ].map(secureOf)
     ).toEqual([true, true, true, true, true, false, false]);
-    // what is none of its four is refused as it is built, and so is an id that is none
+    // what is none of its four is refused as it is built, and so is an IPv6 address followed by
+    // anything but its port (RFC 3986 §3.2.2), and an id that is none
     for (const refused of [
       { id: ID, url: 'http://broker.example' },
       { id: ID, url: 'no url' },
+      { id: ID, url: 'mqtt://[::1]junk:1884' },
+      { id: ID, url: 'mqtt://[::1]junk' },
+      { id: ID, url: 'ws://[::1]junk/mqtt' },
       { id: '', url: 'mqtt://127.0.0.1' },
     ]) {
       expect(() => {
