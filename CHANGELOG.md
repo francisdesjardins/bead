@@ -46,6 +46,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The Rust side's WebSocket and HTTP servers pause a second on the platform's clock after an
+  accept that fails of the process' own, short of descriptors say, the first of a run reported,
+  where they accepted again at once and spun a thread; a connection gone before it was taken is
+  accepted past at once (decision 0049).
 - A session manager whose clock refuses a timer leaves what it held: a new session is not stored
   and the timers prepared for it are stopped, and a timeout set or reset keeps the stored one and its
   running timer, telling nothing, on the TypeScript and C# sides as on the Rust side (decision

@@ -39,7 +39,9 @@ use crate::net::bounds::{
     hold_count,
 };
 use crate::net::linger::close_in_stages;
-use crate::net::listening::{Bound, Listening, accepting, answer_of, bind, unmarked, within};
+use crate::net::listening::{
+    Acceptance, Bound, Listening, accepting, answer_of, bind, io_error, unmarked, within,
+};
 use crate::platform::{self, Handle};
 use crate::router::types::{BoxFuture, ConnectionHandle, Gauges, RouterError, TransportMessage};
 use crate::transport::{
@@ -317,21 +319,32 @@ impl ServerInner {
             .map(|listener| {
                 let server = Weak::clone(&self.me);
 
+                let reporting = Weak::clone(&self.me);
+
                 accepting(
                     &self.runtime,
-                    (listener, move |accepted, serving: &Arc<AtomicBool>| {
-                        let Some(inner) = server.upgrade() else {
-                            return false;
-                        };
-                        let runtime = inner.runtime.clone();
+                    Acceptance {
+                        listener,
+                        take: move |accepted, serving: &Arc<AtomicBool>| {
+                            let Some(inner) = server.upgrade() else {
+                                return false;
+                            };
+                            let runtime = inner.runtime.clone();
 
-                        drop(platform::spawn(
-                            &runtime,
-                            inner.serve(accepted, Arc::clone(serving)),
-                        ));
+                            drop(platform::spawn(
+                                &runtime,
+                                inner.serve(accepted, Arc::clone(serving)),
+                            ));
 
-                        true
-                    }),
+                            true
+                        },
+                        platform: Arc::clone(&self.platform),
+                        report: Box::new(move |error| {
+                            if let Some(inner) = reporting.upgrade() {
+                                inner.report((&io_error(error), None));
+                            }
+                        }),
+                    },
                 )
             })
             .collect();
