@@ -3281,6 +3281,14 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             {
                 return !taken;
             })));
+
+            // ! a client holds its 101 before the server holds its connection: the gauge is read
+            // once each of the four has told its connection
+            for (var told = 0; told < 4; told += 1)
+            {
+                Assert.StartsWith("type=WS;", await Next(_connections), StringComparison.Ordinal);
+            }
+
             Assert.Equal(4, _server.Gauges().Counts["connections"]);
             Assert.All(_refusals, (refusal) =>
             {
