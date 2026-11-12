@@ -445,6 +445,33 @@ test.describe('createMqttBrokerAdapter', () => {
     await adapter.stop();
   });
 
+  // spec 15.26, where the sides part: MQTT.js keeps its own under 0 and takes a longer one, where the
+  // Rust side sends no PINGREQ under 0 and the C# side keeps its own under both; a row of
+  // docs/support.md
+  test('keeps its own Keep Alive under a Server Keep Alive of 0, and takes one longer than its own (spec 15.26)', async () => {
+    const zero = adapterOf(script, { keepAlive: 1_000 });
+    const unbounded = await linkUp(
+      { adapter: zero, script },
+      { properties: { serverKeepAlive: 0 } }
+    );
+    let startedAt = Date.now();
+
+    await unbounded.next('pingreq', { within: 3_000 });
+    expect(Date.now() - startedAt).toBeLessThan(2_500);
+    unbounded.send({ cmd: 'pingresp' });
+    await zero.stop();
+
+    const longer = adapterOf(script, { keepAlive: 1_000 });
+    const link = await linkUp({ adapter: longer, script }, { properties: { serverKeepAlive: 2 } });
+
+    startedAt = Date.now();
+    await expect(link.next('pingreq', { within: 1_500 })).rejects.toThrow();
+    await link.next('pingreq', { within: 2_000 });
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(1_900);
+    link.send({ cmd: 'pingresp' });
+    await longer.stop();
+  });
+
   test('leaves a will of its GONE, QoS 1, RETAIN 0 and a Will Delay Interval of 0, and stops with a DISCONNECT of 0x00 (spec 15.26)', async () => {
     const adapter = adapterOf(script);
     const gone = writeParcel({

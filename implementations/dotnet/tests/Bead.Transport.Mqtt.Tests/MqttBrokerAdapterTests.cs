@@ -359,6 +359,32 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         await adapter.Stop();
     }
 
+    // spec 15.26, where the sides part: MQTTnet keeps its own period whatever the CONNACK names, where
+    // the Rust side sends no PINGREQ under 0 and takes a longer one, and the TypeScript side takes a
+    // longer one; a row of docs/support.md
+    [Fact]
+    public async Task Keeps_its_own_Keep_Alive_under_a_Server_Keep_Alive_of_0_or_longer_than_its_own_spec_15_26()
+    {
+        foreach (var server in new ushort[] { 0, 3 })
+        {
+            await using var adapter = AdapterOf((options) =>
+            {
+                return options with { KeepAlive = TimeSpan.FromSeconds(1) };
+            });
+            var answer = ScriptedLink.ConnAck();
+
+            answer.ServerKeepAlive = server;
+
+            var link = await LinkUp((adapter, _script), (answer, null));
+            var watch = Stopwatch.StartNew();
+
+            await link.Next<MqttPingReqPacket>(TimeSpan.FromSeconds(3));
+            Assert.True(watch.Elapsed < TimeSpan.FromMilliseconds(2_500), $"{server}: its PINGREQ went after {watch.ElapsedMilliseconds} ms");
+            await link.Send(MqttPingRespPacket.Instance);
+            await adapter.Stop();
+        }
+    }
+
     [Fact]
     public async Task Leaves_a_will_of_its_GONE_QoS_1_RETAIN_0_and_a_Will_Delay_Interval_of_0_and_stops_with_a_DISCONNECT_of_0x00_spec_15_26()
     {

@@ -99,8 +99,10 @@ or by a TLS client certificate its broker ties to the id, never both, a User Nam
 given neither; Receive Maximum 65,535; Topic Alias Maximum 0; Maximum Packet Size its
 `maximumPacketSize`, 16,777,216 by default and never without end (0033); Keep Alive its
 `keepAlive`, 30 s by default and never 0, so its will comes at 45 s, inside the 60 s a connection's
-heartbeat takes. A Server Keep Alive replaces it: MQTT.js applies it, and the C# adapter sends a
-PINGREQ once nothing went for a shorter one. A start waits `connectTimeout`, 30 s by default, for
+heartbeat takes. A Server Keep Alive replaces it where it is shorter, on every side; past that the
+sides part, a row of Differences, `An MQTT 5 Server Keep Alive of 0, or longer than its own`:
+MQTT.js keeps its own under 0 and applies a longer one, the C# adapter keeps its own, and the Rust
+side applies any, sending no PINGREQ under 0. A start waits `connectTimeout`, 30 s by default, for
 its password, where it asks its provider, and its CONNACK, which fails it on a reason but 0x00 and
 on a Maximum QoS of 0. A link is up as that CONNACK is read, in its packets' order (MQTT 5.0 §4.2,
 RFC 9293 §3.7): what ends it after, but its stop, in the same read or before its start settles, is

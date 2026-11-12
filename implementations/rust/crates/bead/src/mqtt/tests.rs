@@ -455,6 +455,73 @@ async fn keeps_a_server_keep_alive_shorter_than_its_own_a_pingreq_once_nothing_w
     adapter.stop().await;
 }
 
+// spec 15.26, where the sides part: the TypeScript side keeps its own under 0, the C# side its own
+// under 0 and under a longer one
+#[tokio::test]
+async fn sends_no_pingreq_under_a_server_keep_alive_of_0_and_takes_one_longer_than_its_own() {
+    let zero = script().await;
+    let mut options = options_of(&zero);
+
+    options.keep_alive = Some(Duration::from_secs(1));
+
+    let adapter = adapter_of(&options);
+    let link = link_up(
+        (&adapter, &zero),
+        (
+            &Connack {
+                server_keep_alive: Some(0),
+                ..Connack::default()
+            },
+            None,
+        ),
+    )
+    .await;
+
+    assert_eq!(link.connect().keep_alive, 1, "its CONNECT's Keep Alive");
+    assert!(
+        link.next(Some(Kind::Pingreq), Duration::from_millis(2_500))
+            .await
+            .is_err(),
+        "no PINGREQ under a Server Keep Alive of 0"
+    );
+    adapter.stop().await;
+
+    let longer = script().await;
+    let mut options = options_of(&longer);
+
+    options.keep_alive = Some(Duration::from_secs(1));
+
+    let adapter = adapter_of(&options);
+    let link = link_up(
+        (&adapter, &longer),
+        (
+            &Connack {
+                server_keep_alive: Some(2),
+                ..Connack::default()
+            },
+            None,
+        ),
+    )
+    .await;
+    let started = Instant::now();
+
+    assert!(
+        link.next(Some(Kind::Pingreq), Duration::from_millis(1_500))
+            .await
+            .is_err(),
+        "no PINGREQ within its own Keep Alive"
+    );
+    link.next(Some(Kind::Pingreq), Duration::from_secs(2))
+        .await
+        .unwrap();
+    assert!(
+        started.elapsed() >= Duration::from_millis(1_900),
+        "its PINGREQ once its Server Keep Alive went"
+    );
+    link.send(pingresp());
+    adapter.stop().await;
+}
+
 // spec 15.26
 #[tokio::test]
 async fn runs_a_keep_alive_under_a_second_as_its_connect_announces_it_a_whole_second_rounded_up() {
