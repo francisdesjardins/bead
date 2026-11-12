@@ -302,6 +302,9 @@ jobs:
         run: cargo fmt --all -- --check
       - if: matrix.os == 'ubuntu-26.04'
         run: cargo clippy --workspace --all-targets --all-features --locked
+      # each member on its default features too, where what a feature alone builds is left out
+      - if: matrix.os == 'ubuntu-26.04'
+        run: cargo clippy --workspace --all-targets --locked
       # the core's library linted with no feature, then with each socket transport's alone and
       # with its MQTT 5 binding's alone, so that each builds on its own (decisions 0049, 0050)
       - if: matrix.os == 'ubuntu-26.04'

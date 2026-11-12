@@ -33,6 +33,7 @@ compiler and their linker; or the GNU host, with a MinGW-w64's `dlltool` on the 
 ```sh
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features --locked
+cargo clippy --workspace --all-targets --locked
 cargo clippy -p francisdesjardins-bead --lib --locked
 cargo clippy -p francisdesjardins-bead --lib --features websocket --locked
 cargo clippy -p francisdesjardins-bead --lib --features http --locked
@@ -44,8 +45,9 @@ cargo build --workspace --locked
 cargo deny --locked check
 ```
 
-The second to the fifth lint the core's library with no feature and with each transport's alone,
-`websocket`, `http` and `mqtt` (decisions 0049, 0050), so that each builds on its own. The sixth
+The second lints each member on its default features. The third to the sixth lint the core's
+library with no feature and with each transport's alone, `websocket`, `http` and `mqtt` (decisions
+0049, 0050), so that each builds on its own. The seventh
 checks the core for the browser's WebAssembly, never runs it, by its features, no socket and no
 broker binding among them:
 what the core links builds there, and `.cargo/config.toml` gives getrandom its `unsupported` backend
