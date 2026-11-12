@@ -295,8 +295,15 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         }
 
         // answers the handshake the head asked for, and leaves the frames that follow to be read raw
-        public static async Task Upgrade(TcpClient peer, byte[] head)
+        public static Task Upgrade(TcpClient peer, byte[] head)
         {
+            return Upgrade(peer, (head, ""));
+        }
+
+        // and with `Fields`, each ended by its CRLF, beside its own
+        public static async Task Upgrade(TcpClient peer, (byte[] Head, string Fields) answer)
+        {
+            var head = answer.Head;
             var key = Encoding.ASCII.GetString(head)
                 .Split("\r\n")
                 .Single((line) =>
@@ -310,7 +317,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
 #pragma warning restore CA5350
 
             await peer.GetStream().WriteAsync(
-                Encoding.ASCII.GetBytes($"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\n\r\n"),
+                Encoding.ASCII.GetBytes($"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\n{answer.Fields}\r\n"),
                 Cancelled);
         }
 
@@ -1215,6 +1222,37 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
             return connecting.WaitAsync(Patience, Cancelled);
         });
         Assert.Equal(ReadyState.Closed, _client.ReadyState);
+    }
+
+    [Fact]
+    public async Task Fails_a_101_that_names_an_extension_it_never_offered()
+    {
+        using var listener = new Listener(IPAddress.Loopback);
+        var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
+        var (peer, head) = await listener.Next();
+
+        using (peer)
+        {
+            await Listener.Upgrade(peer, (head, "Sec-WebSocket-Extensions: permessage-deflate\r\n"));
+
+            var refused = await Assert.ThrowsAsync<WebSocketException>(() =>
+            {
+                return connecting.WaitAsync(Patience, Cancelled);
+            });
+
+            Assert.Contains("extension never offered", refused.Message, StringComparison.Ordinal);
+            Assert.Equal(ReadyState.Closed, _client.ReadyState);
+
+            // its socket let go: the listener's read meets its end
+            var buffer = new byte[1024];
+            int read;
+
+            do
+            {
+                read = await peer.GetStream().ReadAsync(buffer, Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+            }
+            while (read > 0);
+        }
     }
 
     [Fact]
