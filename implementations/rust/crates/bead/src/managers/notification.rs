@@ -2,6 +2,7 @@
 //! request that made it, held by a session of its connection's, one subscription a procedure for
 //! each; and a paced subscription's credit and queue (spec 11.7 to 11.11).
 
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -108,7 +109,7 @@ enum Slot {
 #[derive(Debug, Clone)]
 pub(crate) struct Pacing {
     limits: PacingLimits,
-    queue: Vec<(Slot, Bytes)>,
+    queue: VecDeque<(Slot, Bytes)>,
     credit_end: u64,
     queued_bytes: u64,
     sent: u64,
@@ -119,7 +120,7 @@ impl Pacing {
     pub(crate) fn new(limits: PacingLimits) -> Self {
         Self {
             limits,
-            queue: Vec::new(),
+            queue: VecDeque::new(),
             credit_end: 1,
             queued_bytes: 0,
             sent: 0,
@@ -145,9 +146,9 @@ impl Pacing {
 
         self.credit_end = self.credit_end.max(end);
 
-        while self.sent < self.credit_end && !self.queue.is_empty() {
-            let (_, payload) = self.queue.remove(0);
-
+        while self.sent < self.credit_end
+            && let Some((_, payload)) = self.queue.pop_front()
+        {
             self.queued_bytes = self
                 .queued_bytes
                 .saturating_sub(u64::try_from(payload.len()).unwrap_or(u64::MAX));
@@ -187,7 +188,7 @@ impl Pacing {
             queued.1 = payload;
         } else {
             self.queued_bytes = self.queued_bytes.saturating_add(length);
-            self.queue.push((slot, payload));
+            self.queue.push_back((slot, payload));
         }
 
         if self.queued_notifications() > self.limits.maximum_queued_notifications

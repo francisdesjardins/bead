@@ -244,7 +244,10 @@ impl IncomingTransfer {
         for (offset, bytes) in self.pieces.drain(..) {
             let start = index_of(offset);
 
-            if let Some(place) = whole.get_mut(start..start.saturating_add(bytes.len())) {
+            // ! its place is exactly its piece's length, so the copy cannot fail
+            if let Some(end) = start.checked_add(bytes.len())
+                && let Some(place) = whole.get_mut(start..end)
+            {
                 place.copy_from_slice(&bytes);
             }
         }
