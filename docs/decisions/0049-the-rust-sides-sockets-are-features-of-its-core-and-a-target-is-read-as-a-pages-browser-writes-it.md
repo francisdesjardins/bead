@@ -204,10 +204,10 @@ macOS's chain engines, on Linux the system's store read into webpki, so a path's
 fetched as the platform fetches them (RFC 5280). Where the platform checks revocation, Windows and
 macOS, it checks the end certificate's, and rustls calls the verifier within its handshake, so a
 slow OCSP responder or CRL holds a thread of the runtime while it fetches, up to 10 s on Windows;
-neither other side checks revocation by default. An application's own `ClientConfig` is taken in
-its place when given; a server's `tls` is the application's `ServerConfig`, Bead's copy of it
-offering `h2` and `http/1.1` by ALPN. A client's trust roots per platform are a row of Differences,
-`A client's trust roots`.
+neither other side's transport sets a revocation mode, leaving its platform's default. An
+application's own `ClientConfig` is taken in its place when given; a server's `tls` is the
+application's `ServerConfig`, Bead's copy of it offering `h2` and `http/1.1` by ALPN. A client's
+trust roots per platform are a row of Differences, `A client's trust roots`.
 
 ### The clocks
 
