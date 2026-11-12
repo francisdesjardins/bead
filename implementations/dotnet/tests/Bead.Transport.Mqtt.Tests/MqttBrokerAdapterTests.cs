@@ -2149,6 +2149,66 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         }
     }
 
+    // [MQTT-6.0.0-2] lets a WebSocket message hold several packets: MQTTnet reads its WebSocket as a
+    // stream of packets, each held to its Maximum Packet Size alone, where the Rust side bounds a
+    // message as a packet; a row of docs/support.md
+    [Fact]
+    public async Task Reads_a_WebSocket_message_of_two_packets_past_its_Maximum_Packet_Size_together_each_within_it()
+    {
+        using var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+
+        listener.Start();
+
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        await using var adapter = new MqttBrokerAdapter(new MqttBrokerAdapterOptions { Id = Id, Password = Password, Uri = new Uri($"ws://127.0.0.1:{port}/mqtt"), MaximumPacketSize = 1_024 });
+        var (messages, downs) = HeardOf(adapter);
+        var starting = adapter.Start();
+        using var peer = await listener.AcceptTcpClientAsync(Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+        var stream = peer.GetStream();
+        var head = new List<byte>();
+        var octet = new byte[1];
+
+        while (!Encoding.ASCII.GetString([.. head]).EndsWith("\r\n\r\n", StringComparison.Ordinal))
+        {
+            await stream.ReadExactlyAsync(octet, Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+            head.Add(octet[0]);
+        }
+
+        var key = Encoding.ASCII.GetString([.. head]).Split("\r\n").Single((line) =>
+        {
+            return line.StartsWith("Sec-WebSocket-Key:", StringComparison.OrdinalIgnoreCase);
+        })["Sec-WebSocket-Key:".Length..].Trim();
+        // the handshake's own hash, which RFC 6455 names: nothing secret rests on it
+#pragma warning disable CA5350
+        var accept = Convert.ToBase64String(SHA1.HashData(Encoding.ASCII.GetBytes($"{key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11")));
+#pragma warning restore CA5350
+
+        await stream.WriteAsync(Encoding.ASCII.GetBytes($"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\nSec-WebSocket-Protocol: mqtt\r\n\r\n"), Cancelled);
+
+        using var broker = System.Net.WebSockets.WebSocket.CreateFromStream(stream, new System.Net.WebSockets.WebSocketCreationOptions { IsServer = true, SubProtocol = "mqtt", KeepAliveInterval = TimeSpan.Zero });
+        var encoder = new MqttV5PacketEncoder(new MqttBufferWriter(4_096, 65_536));
+        var encoded = (MqttPacket packet) =>
+        {
+            return encoder.Encode(packet).Join().ToArray();
+        };
+        var publish = encoded(new MqttPublishPacket { Topic = $"bead/i/{Id}", PayloadSegment = new byte[680], QualityOfServiceLevel = MqttQualityOfServiceLevel.AtMostOnce });
+        var received = new byte[4_096];
+
+        // its CONNECT, then its CONNACK; then one message of two PUBLISHes of 700 bytes or so each
+        await broker.ReceiveAsync(received, Cancelled).WaitAsync(Patience, Cancelled);
+        await broker.SendAsync(encoded(ScriptedLink.ConnAck()), System.Net.WebSockets.WebSocketMessageType.Binary, true, Cancelled);
+        await starting.WaitAsync(Patience, Cancelled);
+        Assert.True(publish.Length < 1_024 && publish.Length * 2 > 1_024 + 14, $"{publish.Length} bytes a packet");
+        await broker.SendAsync((byte[])[.. publish, .. publish], System.Net.WebSockets.WebSocketMessageType.Binary, true, Cancelled);
+        await Until(() =>
+        {
+            return messages.Count == 2;
+        });
+
+        Assert.Equal((2, 0), (messages.Count, downs.Count));
+        Assert.True(adapter.IsLinked, "its link kept");
+    }
+
     [Fact(Skip = MqttFixture.Reason, SkipUnless = nameof(IsMqtt))]
     public async Task Carries_a_link_over_a_WebSocket_of_subprotocol_mqtt_spec_15_25()
     {

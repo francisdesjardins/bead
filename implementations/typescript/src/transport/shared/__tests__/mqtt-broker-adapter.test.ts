@@ -6,12 +6,14 @@
 
 // dependencies
 
+import { once } from 'node:events';
 import { type AddressInfo, createServer } from 'node:net';
 import { mock } from 'node:test';
 import { MqttClient } from 'mqtt';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
 import { generate, type IPublishPacket, type ISubscribePacket, type Packet } from 'mqtt-packet';
+import { WebSocketServer as WsServer } from 'ws';
 import { ParcelKind, readParcel, writeParcel } from '../broker-parcel';
 import { createBrokerParticipant } from '../broker-participant';
 import { BROKER_DELIVERIES, BROKER_PUBLISHED } from '../constants';
@@ -2651,6 +2653,69 @@ test.describe('createMqttBrokerAdapter, against a broker over MQTT 5', () => {
       'none lost'
     ).toEqual([]);
     expect(outcomes.length, 'each connect made').toBeGreaterThan(20);
+  });
+
+  // [MQTT-6.0.0-2] lets a WebSocket message hold several packets: MQTT.js reads its WebSocket as a
+  // stream of packets, each held to its Maximum Packet Size alone, where the Rust side bounds a
+  // message as a packet; a row of docs/support.md
+  test('reads a WebSocket message of two packets past its Maximum Packet Size together, each within it', async () => {
+    const broker = new WsServer({
+      handleProtocols: () => {
+        return 'mqtt';
+      },
+      host: '127.0.0.1',
+      port: 0,
+    });
+
+    await once(broker, 'listening');
+
+    const publish = generate(
+      {
+        cmd: 'publish',
+        dup: false,
+        payload: Buffer.alloc(680),
+        qos: 0,
+        retain: false,
+        topic: `bead/i/${ID}`,
+      },
+      { protocolVersion: 5 }
+    );
+    const adapter = createMqttBrokerAdapter({
+      id: ID,
+      maximumPacketSize: 1_024,
+      password: PASSWORD,
+      url: `ws://127.0.0.1:${String((broker.address() as AddressInfo).port)}/mqtt`,
+    });
+    const heard = heardOf(adapter);
+
+    adapter.on('message', (message) => {
+      message.settle();
+    });
+    expect(
+      publish.length < 1_024 && publish.length * 2 > 1_024 + 14,
+      `${String(publish.length)} bytes a packet`
+    ).toBe(true);
+    // its CONNECT, then its CONNACK; then one message of two PUBLISHes of 700 bytes or so each
+    broker.on('connection', (socket) => {
+      socket.once('message', () => {
+        socket.send(Uint8Array.from(CONNACK_BYTES));
+      });
+    });
+
+    try {
+      await adapter.start();
+      [...broker.clients][0]?.send(Buffer.concat([publish, publish]));
+      await until(() => {
+        return heard.messages.length === 2;
+      });
+      expect([heard.messages.length, heard.downs]).toEqual([2, []]);
+      expect(adapter.isLinked).toBe(true);
+    } finally {
+      await adapter.stop();
+      await new Promise((resolve) => {
+        broker.close(resolve);
+      });
+    }
   });
 
   test('carries a link over a WebSocket of subprotocol mqtt (spec 15.25)', async () => {
