@@ -515,7 +515,7 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Lets_a_subscription_go_once_its_UNSUBACK_came_naming_the_topic_itself_where_it_held_none_and_refuses_it_on_a_code_of_0x80_or_more_spec_15_27()
+    public async Task Lets_a_subscription_go_once_its_UNSUBACK_came_naming_the_topic_itself_where_it_held_none_and_refuses_it_on_any_other_code_spec_15_27()
     {
         await using var adapter = AdapterOf();
         var link = await LinkUp((adapter, _script));
@@ -536,18 +536,29 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         // * one its broker held none of is let go all the same, 0x11
         Assert.Equal("bead/d/bob", await Answered((["bead", "d", "bob"], MqttUnsubscribeReasonCode.NoSubscriptionExisted)));
         Assert.Equal("bead/d/bob", await Answered((["bead", "d", "bob"], MqttUnsubscribeReasonCode.Success)));
-        Assert.Contains("0x87", (await FailureOf(() =>
-        {
-            return Answered((["bead", "d", "eve"], MqttUnsubscribeReasonCode.NotAuthorized));
-        })).Message, StringComparison.Ordinal);
-        Assert.Contains("0x80", (await FailureOf(() =>
-        {
-            return Answered((["bead", "d", "eve"], MqttUnsubscribeReasonCode.UnspecifiedError));
-        })).Message, StringComparison.Ordinal);
 
-        // its link kept
+        var subscribing = adapter.Subscribe(["bead", "d", "eve"]);
+
+        await SubAckOf((link, 1));
+        await subscribing.WaitAsync(Patience, Cancelled);
+
+        // * any other code, under 0x80 among them, which MQTT 5 names no UNSUBACK by
+        foreach (var code in new[] { 0x01, 0x10, 0x7F, 0x80, 0x87 })
+        {
+            var refused = string.Create(CultureInfo.InvariantCulture, $"0x{code:X2}");
+
+            Assert.Contains(refused, (await FailureOf(() =>
+            {
+                return Answered((["bead", "d", "eve"], (MqttUnsubscribeReasonCode)code));
+            })).Message, StringComparison.Ordinal);
+        }
+
+        // its link kept, and the filter refused its stop's to let go
         Assert.True(adapter.IsLinked);
+        _script.IsHoldingUnsubscribes = false;
         await adapter.Stop();
+        Assert.Equal("bead/d/eve", LetGoOf(link)[^1]);
+        Assert.Equal(8, LetGoOf(link).Count);
     }
 
     [Fact]
