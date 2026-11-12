@@ -541,6 +541,25 @@ test.describe('createMqttBrokerAdapter', () => {
     expect(downs).toEqual([{ isTakenOver: true }, { isTakenOver: false }, { isTakenOver: false }]);
   });
 
+  test('tells its link taken over on a DISCONNECT of 0x8E whatever else it carries, a Session Expiry Interval among it (spec 15.21)', async () => {
+    const adapter = adapterOf(script);
+    const { downs } = heardOf(adapter);
+    const link = await linkUp({ adapter, script });
+
+    // * a DISCONNECT of 0x8E, its Session Expiry Interval of 0 and its Reason String "n", which a
+    // broker never sends together ([MQTT-3.14.2-2]) and which end its link all the same
+    // ([MQTT-3.14.4-2])
+    link.write(Uint8Array.of(0xe0, 0x0b, 0x8e, 0x09, 0x11, 0, 0, 0, 0, 0x1f, 0x00, 0x01, 0x6e));
+    link.end();
+    await until(() => {
+      return downs.length > 0;
+    });
+    expect(downs).toEqual([{ isTakenOver: true }]);
+    expect(adapter.isLinked).toBe(false);
+    expect(cmdsOf(link)).toEqual(['connect']);
+    await adapter.stop();
+  });
+
   test('subscribes at QoS 1, No Local 0, Retain As Published 0 and Retain Handling 2, a group as its shared subscription, held once its SUBACK grants QoS 1 and refused otherwise (spec 15.27)', async () => {
     const adapter = adapterOf(script);
     const link = await linkUp({ adapter, script });
