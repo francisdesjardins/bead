@@ -46,16 +46,20 @@ codec on Buffa, under a toolchain, lints denied whole and a CI job of its own
 ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)); and its
 transports over WebSocket (RFC 6455) and HTTP/1.1 and HTTP/2 (RFC 9110, 9112, 9113), features of
 its core, with the interop both ways with the TypeScript and C# sides
-([0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)).
+([0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md));
+and its MQTT 5 binding, a feature of its core and a client of its own over its sockets, with the
+interop both ways over it ([0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)).
 It plays the conformance files it reaches, each part it lacks a row of the support matrix ahead
 ([0004](0004-one-behaviour-in-every-language.md)). Ahead, in this order:
 
-- **Rust's broker bindings**, MQTT 5 and AMQP 1.0; then its gateway; and beadc's Rust target, with
-  `examples/hello`'s Rust half, the lists of the procedures a server's transports take
+- **beadc's Rust target**, with `examples/hello`'s Rust half, the lists of the procedures a server's
+  transports take
   ([0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md))
   and the validators of a blueprint's rules generated for it, or beadc refusing to generate them
-  ([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)),
-  each stage under a record of its own
+  ([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md));
+  then the Rust side's gateway; and its AMQP 1.0 binding, its client one of the three branches
+  [0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)
+  weighs, each stage under a record of its own
   ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md));
 - **a payload's rules written in CEL**, a total subset beadc compiles into each side beside the rules
   it compiles already, and then the rules
@@ -90,6 +94,9 @@ that meets the Tenth Man:
   destination, in the twin tests' place for a relay's two legs' limits and the session its
   requesters share ([0004](0004-one-behaviour-in-every-language.md),
   [0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md));
+- **MQTT 5's DISCONNECT of 0x95 on a packet past a participant's own Maximum Packet Size**, every
+  side sending it before it closes, its broker keeping its will
+  ([0041](0041-over-mqtt-5-a-participant-is-one-clean-link-and-a-parcel-one-publish-each-counted-to-its-byte.md));
 - **the DevTools extension on Firefox**, its own glue beside the core every browser shares, and an
   adapter's own gauges in its Broker view, MQTT 5's Receive Maximum and its PUBACKs to settle among
   them ([0015](0015-a-pages-client-announces-itself-to-a-devtools-hook.md));
@@ -118,15 +125,18 @@ that meets the Tenth Man:
 - what
   [0041](0041-over-mqtt-5-a-participant-is-one-clean-link-and-a-parcel-one-publish-each-counted-to-its-byte.md)
   keeps ahead over MQTT 5: an Authentication Method, MQTT 5's enhanced authentication (§4.12), and
-  EMQX played beside Mosquitto; and **the brokers' TLS played**, the fixtures' Mosquitto and
-  RabbitMQ under TLS, a client certificate and SASL EXTERNAL among it, where the matrix holds rows
-  "not tested"
-  ([0043](0043-over-amqp-1-0-a-participant-is-one-connection-whose-exclusive-inbox-ends-with-it-and-a-parcel-one-message-of-one-profile-each-counted-to-its-byte.md));
+  EMQX played beside Mosquitto; **Mosquitto under TLS played**, a client certificate among it, where
+  the matrix holds its row of MQTT 5 over TLS "not tested"; and an acknowledgement of a Reason Code
+  its packet's table does not name, and a SUBACK or an UNSUBACK whose count of codes is not one,
+  judged alike on every side;
 - what [0033](0033-a-side-bounds-what-a-peer-holds-of-it.md) keeps ahead of the bounds a side
-  keeps against a peer that holds it: a bound on the payload bytes of the calls a connection has
-  answered, as HTTP/2's connection window; a raise of `maximumAnsweringCalls` for one trusted
-  connection; a requester's queue past it; and a budget of what waits for every socket together, as
-  `bodyBytesBudget` is for bodies;
+  keeps against a peer that holds it: what bounds the resolvers a cancel leaves running, as Go's fix
+  of CVE-2023-39325 counts a handler still running against `MaxConcurrentStreams`; a bound on the
+  payload bytes of the calls a connection has answered, as HTTP/2's connection window; a raise of
+  `maximumAnsweringCalls` for one trusted connection; a requester's queue past it; and a budget of
+  what waits for every socket together, as `bodyBytesBudget` is for bodies;
+- what [0001](0001-the-envelope-sits-at-fixed-offsets.md) keeps ahead of a transfer: a budget that
+  sees every transfer it admits to its end, and a stall that names the side that caused it;
 - **one corpus read alike by every side's parsers**, held as a gate, as
   `tools/protobuf-conformance.mjs differential` holds a `proto` payload
   ([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)):
@@ -145,6 +155,9 @@ that meets the Tenth Man:
   transport carried beside an `ELSEWHERE`, both schemes at once, to the procedure that asks alone,
   as RFC 8693's token exchange or a call on its user's behalf needs
   ([0010](0010-a-request-presents-a-credential-of-a-scheme.md));
+- an ES256 key's point among the shape section 13.8 holds a key to, so that a key whose `x` and `y`
+  name no point of P-256 is refused as it is given, alike on every side and held by the conformance
+  files ([0010](0010-a-request-presents-a-credential-of-a-scheme.md));
 - a bound that tells an event iterator's loop of a lag and lets it go on, as tokio's `broadcast`
   tells `Lagged`, for the TypeScript and C# sides at once with an iterator on the C# side, the Rust
   side's events being callbacks
@@ -228,6 +241,7 @@ table.
 | [0040](0040-a-brokers-adapter-offers-bytes-at-topics-and-bead-keeps-its-own-credit-credential-and-heartbeat.md)                                                   | A broker's adapter offers bytes at topics, and Bead keeps its own credit, credential and heartbeat                                                   | accepted |
 | [0041](0041-over-mqtt-5-a-participant-is-one-clean-link-and-a-parcel-one-publish-each-counted-to-its-byte.md)                                                     | Over MQTT 5, a participant is one clean link and a parcel one PUBLISH, each counted to its byte                                                      | accepted |
 | [0043](0043-over-amqp-1-0-a-participant-is-one-connection-whose-exclusive-inbox-ends-with-it-and-a-parcel-one-message-of-one-profile-each-counted-to-its-byte.md) | Over AMQP 1.0, a participant is one connection whose exclusive inbox ends with it, and a parcel one message of one profile, each counted to its byte | accepted |
+| [0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)                                           | The Rust side's broker bindings are features of its core, MQTT 5 a client of its own over its sockets                                                | accepted |
 
 ### A server's edge
 
@@ -275,7 +289,7 @@ table.
 
 ## Writing one
 
-The next decision is 0050. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
+The next decision is 0051. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
 the decision, not its subject. The title may grow with the record; the file's name stays, unless it
 would mislead.
 

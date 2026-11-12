@@ -58,7 +58,8 @@ pub trait Clock: Send + Sync + fmt::Debug {
     /// Its wall clock's reading: what an instant a side reports is.
     fn wall(&self) -> SystemTime;
 
-    /// Arms a timer that calls `callback` as `schedule` says.
+    /// Arms a timer that calls `callback` as `schedule` says, never within this call: Bead arms
+    /// some of its timers under a lock its callbacks take.
     ///
     /// # Errors
     ///
@@ -260,6 +261,29 @@ mod native {
             ))))
         }
     }
+}
+
+/// A wall clock's reading in milliseconds since the epoch, rounded down, before the epoch too, as
+/// the other sides read it: 10.5 ms before it is −11, never −10 nor 0.
+pub(crate) fn milliseconds_since_epoch(at: SystemTime) -> i64 {
+    match at.duration_since(SystemTime::UNIX_EPOCH) {
+        Ok(since) => i64::try_from(since.as_millis()).unwrap_or(i64::MAX),
+        Err(before) => i64::try_from(before.duration().as_nanos().div_ceil(1_000_000))
+            .map_or(i64::MIN, i64::saturating_neg),
+    }
+}
+
+/// The instant `milliseconds` after the epoch, or before it when below 0; the epoch itself for one
+/// past the platform's range.
+pub(crate) fn instant_of_milliseconds(milliseconds: i64) -> SystemTime {
+    let span = Duration::from_millis(milliseconds.unsigned_abs());
+    let instant = if milliseconds < 0 {
+        SystemTime::UNIX_EPOCH.checked_sub(span)
+    } else {
+        SystemTime::UNIX_EPOCH.checked_add(span)
+    };
+
+    instant.unwrap_or(SystemTime::UNIX_EPOCH)
 }
 
 /// A layer built on another, as its clock is chosen: the clock beneath it and the one it was given,

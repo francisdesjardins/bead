@@ -1,13 +1,17 @@
-//! `spec/transports.json`'s cases over a broker (spec 15.16 to 15.24), over HTTP (spec 15.6 to
-//! 15.12) and over WebSocket (spec 15.2, 15.3, 15.12), played against the Rust side's transports.
-//! Over a broker, its broker transports over the in-memory broker: in the server role, the interop
-//! service's server on a broker server transport over the participant `server`; in the client
-//! role, a broker client transport alone over the participant `client`; the case's peers, adapters
-//! of the same broker, publishing parcels and reading their inboxes. Over HTTP and over WebSocket,
-//! the interop service's server on an HTTP or a WebSocket server, and the case's peers, each
-//! exchange on a socket of its own. A trial a case; a case a row of the support matrix excuses this
-//! side from is not played. The responses every side's reader reads alike are a trial each. The
-//! cases over MQTT 5 and AMQP 1.0 are ahead, with the stage that brings their bindings.
+//! `spec/transports.json`'s cases over a broker (spec 15.16 to 15.24), over MQTT 5 (spec 15.25 to
+//! 15.31), over HTTP (spec 15.6 to 15.12) and over WebSocket (spec 15.2, 15.3, 15.12), played
+//! against the Rust side's transports. Over a broker, its broker transports over the broker a
+//! `CaseBroker` gives, the in-memory one or the Mosquitto `BEAD_MQTT_URL` names, the twin of the C#
+//! side's `IBrokerCaseBroker`: in the server role, the interop service's server on a broker server
+//! transport over the participant `server`; in the client role, a broker client transport alone
+//! over the participant `client`; the case's peers, adapters of the same broker, publishing parcels
+//! and reading their inboxes. Over MQTT 5, each participant links through a relay of its own that a
+//! `lose` cuts, as its user with the run's password, one case at a time; skipped, saying so, where
+//! no broker is given, and failed where `BEAD_MQTT_REQUIRED=1` asks for one. Over HTTP and over
+//! WebSocket, the interop service's server on an HTTP or a WebSocket server, and the case's peers,
+//! each exchange on a socket of its own. A trial a case; a case a row of the support matrix excuses
+//! this side from is not played. The responses every side's reader reads alike are a trial each.
+//! The cases over AMQP 1.0 are ahead, with the stage that brings its binding.
 
 #![expect(
     clippy::disallowed_methods,
@@ -30,6 +34,7 @@ use std::process::ExitCode;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Instant, SystemTime};
 
+use bead::testing::link_relay::{LinkRelay, LinkRelayOptions};
 use bead::testing::parcels::{self, ParcelFields, ParcelReading};
 use bead::testing::{Difference, SteppingClock, files, hexadecimal, instants, is_excused};
 use bead::{
@@ -38,9 +43,10 @@ use bead::{
     BrokerRefusedError, BrokerStart, BrokerSubscription, BrokerTransportClient,
     BrokerTransportClientConnectOptions, BrokerTransportClientOptions, BrokerTransportServer,
     BrokerTransportServerOptions, ClientListener, ConnectionHandle, MemoryBroker,
-    MemoryBrokerAdapter, MemoryBrokerAdapterOptions, MemoryBrokerOptions, RouterClientTransport,
-    RouterError, Server, ServerListener, ServerOptions, ServerTransport, SharedClock,
-    TransportError, TransportMessage, TransportServerRefusal,
+    MemoryBrokerAdapter, MemoryBrokerAdapterOptions, MemoryBrokerOptions, MqttBrokerAdapter,
+    MqttBrokerAdapterOptions, RouterClientTransport, RouterError, Server, ServerListener,
+    ServerOptions, ServerTransport, SharedClock, TransportError, TransportMessage,
+    TransportServerRefusal,
 };
 use bytes::Bytes;
 use libtest_mimic::{Arguments, Failed, Trial};
@@ -58,7 +64,17 @@ const PLACED_GRACE: Duration = Duration::from_millis(100);
 const ROOT: &str = "bead";
 
 // the transports whose cases this side plays: the others are ahead
-const PLAYED_TRANSPORTS: [&str; 3] = ["broker", "http", "websocket"];
+const PLAYED_TRANSPORTS: [&str; 4] = ["broker", "http", "mqtt", "websocket"];
+
+// the transport of the cases over MQTT 5
+const MQTT: &str = "mqtt";
+
+const NO_BROKER: &str =
+    "skipped: no broker, BEAD_MQTT_URL is not set (node tools/mqtt-broker.mjs start)";
+
+// ! one case over a real broker at a time: each case's participant under test has the same id, and
+// a second link of an id takes the first over
+static ON_THE_BROKER: Mutex<()> = Mutex::new(());
 
 // ! every key of a case and of a step this player reads: one it does not know fails the case,
 // rather than pass it unplayed
@@ -184,7 +200,7 @@ struct Lives {
 // the adapter under test wrapped, each publication's life noted as it goes
 #[derive(Debug)]
 struct Recording {
-    inner: MemoryBrokerAdapter,
+    inner: Arc<dyn BrokerAdapter>,
     lives: Mutex<Lives>,
 }
 
@@ -322,8 +338,284 @@ impl BrokerListener for PeerHearing {
 }
 
 struct Peer {
-    adapter: MemoryBrokerAdapter,
+    adapter: Arc<dyn BrokerAdapter>,
     heard: Arc<Heard>,
+}
+
+// ── The brokers ──────────────────────────────────────────────────────────────────────────────
+
+/// The broker a case over a broker plays against: the in-memory one of the core, or a real one. It
+/// makes the adapter of each participant a case names, the one under test among them, and does to
+/// a link what a step asks; the player does the rest alike over every broker. The twin of the C#
+/// side's `IBrokerCaseBroker`.
+trait CaseBroker: Send + Sync {
+    /// The adapter of the participant `id`, not started: the one under test, a peer, or a twin.
+    fn adapter_of(&self, id: &str) -> BoxFuture<Result<Arc<dyn BrokerAdapter>, String>>;
+
+    /// Loses the link of the participant `id` without a clean end: its will published where it
+    /// left one.
+    fn lose(&self, id: &str) -> Result<(), String>;
+
+    /// Takes the link of the participant `id` over by another link of its id.
+    fn take_over(&self, id: &str) -> BoxFuture<Result<(), String>>;
+
+    /// Publishes each publication of the peer `id`, in its order, each made as it is called and
+    /// none awaited before the next, marked retained where asked, which a real broker's binding
+    /// never writes.
+    fn publish_all(
+        &self,
+        id: &str,
+        publishing: (Vec<BrokerPublication>, bool),
+    ) -> Result<Vec<BoxFuture<Result<BrokerPublished, BrokerError>>>, String>;
+
+    /// The messages the adapter of `id` handed its participant and it has not acknowledged.
+    fn unsettled_of(&self, id: &str) -> u64;
+
+    /// How long a copy of what was read may take to come after it: none in memory, where what is
+    /// idle came.
+    fn settling(&self) -> Duration;
+
+    /// Subscribes a peer of the client role to the server's name, so that it reads every OPEN to
+    /// it, as each subscriber of a topic does over a broker.
+    fn subscribe_name(
+        &self,
+        (peer, name): (&Arc<dyn BrokerAdapter>, &[String]),
+    ) -> BoxFuture<Result<(), BrokerError>> {
+        peer.subscribe(name, BrokerSubscription::default())
+    }
+
+    /// Lets go of what it holds once its case ends.
+    fn dispose(&self) -> BoxFuture<()>;
+}
+
+fn held_in<'held, T>(held: &'held HashMap<String, T>, id: &str) -> Result<&'held T, String> {
+    held.get(id).ok_or_else(|| format!("no participant {id}"))
+}
+
+/// The in-memory broker of the core, on the case's clock.
+struct MemoryCaseBroker {
+    broker: MemoryBroker,
+    adapters: Mutex<HashMap<String, MemoryBrokerAdapter>>,
+}
+
+impl CaseBroker for MemoryCaseBroker {
+    fn adapter_of(&self, id: &str) -> BoxFuture<Result<Arc<dyn BrokerAdapter>, String>> {
+        let made = self
+            .broker
+            .adapter(&MemoryBrokerAdapterOptions::new(id))
+            .map_err(|error| error.to_string());
+
+        if let Ok(adapter) = &made {
+            locked(&self.adapters).insert(id.to_owned(), adapter.clone());
+        }
+
+        Box::pin(async move {
+            let adapter: Arc<dyn BrokerAdapter> = Arc::new(made?);
+
+            Ok(adapter)
+        })
+    }
+
+    fn lose(&self, id: &str) -> Result<(), String> {
+        held_in(&locked(&self.adapters), id)?.lose();
+
+        Ok(())
+    }
+
+    fn take_over(&self, id: &str) -> BoxFuture<Result<(), String>> {
+        let taken = held_in(&locked(&self.adapters), id).map(MemoryBrokerAdapter::take_over);
+
+        Box::pin(async move { taken })
+    }
+
+    fn publish_all(
+        &self,
+        id: &str,
+        (publications, is_retained): (Vec<BrokerPublication>, bool),
+    ) -> Result<Vec<BoxFuture<Result<BrokerPublished, BrokerError>>>, String> {
+        let peer = held_in(&locked(&self.adapters), id)?.clone();
+
+        Ok(publications
+            .into_iter()
+            .map(|publication| {
+                if is_retained {
+                    peer.publish_retained(publication)
+                } else {
+                    peer.publish(publication)
+                }
+            })
+            .collect())
+    }
+
+    fn unsettled_of(&self, id: &str) -> u64 {
+        locked(&self.adapters)
+            .get(id)
+            .map_or(0, MemoryBrokerAdapter::unsettled)
+    }
+
+    fn settling(&self) -> Duration {
+        Duration::ZERO
+    }
+
+    fn dispose(&self) -> BoxFuture<()> {
+        Box::pin(async {})
+    }
+}
+
+/// The Mosquitto a case plays against: each participant's adapter linked through a relay of its
+/// own, as its user; a link lost by its relay cut; taken over by a link of the player's own under
+/// its id, which subscribes nothing, stopped clean once the case ends; what a peer publishes
+/// published in its order, its adapter keeping it.
+struct MqttCaseBroker {
+    url: String,
+    password: String,
+    relays: Mutex<HashMap<String, LinkRelay>>,
+    adapters: Mutex<HashMap<String, MqttBrokerAdapter>>,
+    takeovers: Mutex<Vec<MqttBrokerAdapter>>,
+}
+
+impl MqttCaseBroker {
+    fn linked_as(&self, (url, id): (&str, &str)) -> Result<MqttBrokerAdapter, String> {
+        let mut options = MqttBrokerAdapterOptions::new(url, id);
+
+        options.password = Some(self.password.clone());
+
+        MqttBrokerAdapter::new(&options).map_err(|error| error.to_string())
+    }
+}
+
+// the host and the port an `mqtt://` URL names
+fn host_and_port(url: &str) -> Result<(String, u16), String> {
+    let authority = url
+        .strip_prefix("mqtt://")
+        .ok_or_else(|| format!("{url} is no mqtt:// URL"))?
+        .split('/')
+        .next()
+        .unwrap_or_default();
+    let (host, port) = authority
+        .rsplit_once(':')
+        .ok_or_else(|| format!("{url} names no port"))?;
+    let port = port
+        .parse()
+        .map_err(|_unread| format!("{url} names no port"))?;
+
+    Ok((host.trim_matches(['[', ']']).to_owned(), port))
+}
+
+impl CaseBroker for Arc<MqttCaseBroker> {
+    fn adapter_of(&self, id: &str) -> BoxFuture<Result<Arc<dyn BrokerAdapter>, String>> {
+        let broker = Self::clone(self);
+        let id = id.to_owned();
+
+        Box::pin(async move {
+            let (host, port) = host_and_port(&broker.url)?;
+            let relay = LinkRelay::to((&host, port), &LinkRelayOptions::default())
+                .await
+                .map_err(|error| error.to_string())?;
+            let adapter = broker.linked_as((&format!("mqtt://127.0.0.1:{}", relay.port()), &id))?;
+
+            locked(&broker.relays).insert(id.clone(), relay);
+            locked(&broker.adapters).insert(id, adapter.clone());
+
+            let adapter: Arc<dyn BrokerAdapter> = Arc::new(adapter);
+
+            Ok(adapter)
+        })
+    }
+
+    fn lose(&self, id: &str) -> Result<(), String> {
+        held_in(&locked(&self.relays), id)?.cut();
+
+        Ok(())
+    }
+
+    fn take_over(&self, id: &str) -> BoxFuture<Result<(), String>> {
+        let broker = Self::clone(self);
+        let id = id.to_owned();
+
+        Box::pin(async move {
+            let takeover = broker.linked_as((&broker.url, &id))?;
+
+            locked(&broker.takeovers).push(takeover.clone());
+            takeover
+                .start(BrokerStart::default())
+                .await
+                .map_err(|error| error.to_string())
+        })
+    }
+
+    fn publish_all(
+        &self,
+        id: &str,
+        (publications, is_retained): (Vec<BrokerPublication>, bool),
+    ) -> Result<Vec<BoxFuture<Result<BrokerPublished, BrokerError>>>, String> {
+        // ! no participant writes a retained message, and the fixture's broker refuses one (spec
+        // 15.31)
+        hold(!is_retained, || {
+            "a case over MQTT 5 publishes nothing retained".to_owned()
+        })?;
+
+        let peer = held_in(&locked(&self.adapters), id)?.clone();
+
+        Ok(publications
+            .into_iter()
+            .map(|publication| peer.publish(publication))
+            .collect())
+    }
+
+    fn unsettled_of(&self, id: &str) -> u64 {
+        locked(&self.adapters)
+            .get(id)
+            .map_or(0, MqttBrokerAdapter::unsettled)
+    }
+
+    // * a copy over a real broker may come a moment after what was read
+    fn settling(&self) -> Duration {
+        Duration::from_millis(200)
+    }
+
+    fn dispose(&self) -> BoxFuture<()> {
+        let broker = Self::clone(self);
+
+        Box::pin(async move {
+            let takeovers: Vec<MqttBrokerAdapter> = locked(&broker.takeovers).drain(..).collect();
+
+            for takeover in takeovers {
+                takeover.stop().await;
+            }
+
+            for relay in locked(&broker.relays).values() {
+                relay.dispose();
+            }
+        })
+    }
+}
+
+// the broker a case plays against: Mosquitto over MQTT 5, the in-memory one otherwise
+fn broker_of((case, clock): (&Value, &SharedClock)) -> Result<Arc<dyn CaseBroker>, String> {
+    if case.get("transport").and_then(Value::as_str) == Some(MQTT) {
+        let url = std::env::var("BEAD_MQTT_URL").map_err(|_unset| NO_BROKER.to_owned())?;
+
+        return Ok(Arc::new(Arc::new(MqttCaseBroker {
+            url,
+            password: std::env::var("BEAD_MQTT_PASSWORD").unwrap_or_default(),
+            relays: Mutex::default(),
+            adapters: Mutex::default(),
+            takeovers: Mutex::default(),
+        })));
+    }
+
+    let options = options_of(case);
+    let mut broker_options = MemoryBrokerOptions::default();
+
+    broker_options.clock = Some(Arc::clone(clock));
+    broker_options.maximum_queued_messages =
+        options.get("maximumQueuedMessages").and_then(Value::as_u64);
+
+    Ok(Arc::new(MemoryCaseBroker {
+        broker: MemoryBroker::new(&broker_options).map_err(|error| error.to_string())?,
+        adapters: Mutex::default(),
+    }))
 }
 
 // the next message a peer is handed, or none within `within`: on its inbox or the server's name,
@@ -356,12 +648,10 @@ async fn next_of(peer: &Peer, (at_departure, within): (bool, Duration)) -> Optio
 // subscribed; in the client role the server's name `interop` as well, and the departure of the
 // participant under test
 async fn peer_of(
-    broker: &MemoryBroker,
+    broker: &dyn CaseBroker,
     (id, under, is_client, will): (&str, &str, bool, Option<&str>),
 ) -> Result<Peer, String> {
-    let adapter = broker
-        .adapter(&MemoryBrokerAdapterOptions::new(id))
-        .map_err(|error| error.to_string())?;
+    let adapter = broker.adapter_of(id).await?;
     let heard = Arc::new(Heard::default());
 
     adapter.listen(Arc::new(PeerHearing {
@@ -406,7 +696,10 @@ async fn peer_of(
     // * in the client role a peer plays the server: its name, and its departure where a will is
     // left
     if is_client {
-        topics.push(topic_of([ROOT, "s", "interop"]));
+        broker
+            .subscribe_name((&adapter, &topic_of([ROOT, "s", "interop"])))
+            .await
+            .map_err(|error| error.to_string())?;
         topics.push(topic_of([ROOT, "d", under]));
     }
 
@@ -757,7 +1050,8 @@ struct Case {
     peers: HashMap<String, Peer>,
     twin: Option<Peer>,
     told: Arc<Told>,
-    adapters: HashMap<String, MemoryBrokerAdapter>,
+    broker: Arc<dyn CaseBroker>,
+    under: String,
     // the connect's time, in the client role
     timeout: Option<Duration>,
 }
@@ -779,20 +1073,8 @@ async fn case_of((case, wall): (&Value, SystemTime)) -> Result<Case, String> {
     let under = if is_client { "client" } else { "server" };
     let clock = SteppingClock::new(wall);
     let shared: SharedClock = Arc::<SteppingClock>::clone(&clock);
-    let mut broker_options = MemoryBrokerOptions::default();
-
-    broker_options.clock = Some(Arc::clone(&shared));
-    broker_options.maximum_queued_messages =
-        options.get("maximumQueuedMessages").and_then(Value::as_u64);
-
-    let broker = MemoryBroker::new(&broker_options).map_err(|error| error.to_string())?;
-    let inner = broker
-        .adapter(&MemoryBrokerAdapterOptions::new(under))
-        .map_err(|error| error.to_string())?;
-    let mut adapters = HashMap::new();
-
-    adapters.insert(under.to_owned(), inner.clone());
-
+    let broker = broker_of((case, &shared))?;
+    let inner = broker.adapter_of(under).await?;
     let recording = Arc::new(Recording {
         inner,
         lives: Mutex::new(Lives::default()),
@@ -883,7 +1165,7 @@ async fn case_of((case, wall): (&Value, SystemTime)) -> Result<Case, String> {
         // * a twin serves the names in their group beside the server, reading each OPEN it is
         // handed
         if let Some(id) = options.get("twin").and_then(Value::as_str) {
-            let peer = peer_of(&broker, (id, under, false, None)).await?;
+            let peer = peer_of(&*broker, (id, under, false, None)).await?;
 
             for name in &names {
                 let mut subscription = BrokerSubscription::default();
@@ -896,7 +1178,6 @@ async fn case_of((case, wall): (&Value, SystemTime)) -> Result<Case, String> {
                     .map_err(|error| error.to_string())?;
             }
 
-            adapters.insert(id.to_owned(), peer.adapter.clone());
             twin = Some(peer);
         }
 
@@ -926,12 +1207,11 @@ async fn case_of((case, wall): (&Value, SystemTime)) -> Result<Case, String> {
 
     for id in ids {
         let peer = peer_of(
-            &broker,
+            &*broker,
             (&id, under, is_client, wills.get(&id).map(String::as_str)),
         )
         .await?;
 
-        adapters.insert(id.clone(), peer.adapter.clone());
         peers.insert(id, peer);
     }
 
@@ -945,7 +1225,8 @@ async fn case_of((case, wall): (&Value, SystemTime)) -> Result<Case, String> {
         peers,
         twin,
         told,
-        adapters,
+        broker,
+        under: under.to_owned(),
         timeout: duration_of(&options, "timeout"),
     })
 }
@@ -987,7 +1268,7 @@ impl Case {
         (step, values): (&Value, &HashMap<String, String>),
     ) -> Result<Vec<BoxFuture<Result<BrokerPublished, BrokerError>>>, String> {
         let from = step.get("from").and_then(Value::as_str).unwrap_or("peer");
-        let peer = self.peer(from)?;
+        self.peer(from)?;
         let topic = match step.get("to").and_then(Value::as_str) {
             Some("departure") => topic_of([ROOT, "d", from]),
             Some("inbox") => topic_of([
@@ -1003,7 +1284,7 @@ impl Case {
             other => return Err(format!("a publication to {other:?}")),
         };
         let is_retained = step.get("retained") == Some(&Value::Bool(true));
-        let mut publishing = Vec::new();
+        let mut publications = Vec::new();
 
         for item in step
             .get("publish")
@@ -1023,21 +1304,15 @@ impl Case {
                     ));
                 }
             };
-            let publication = BrokerPublication::new(topic.clone(), Bytes::from(payload));
-
-            publishing.push(if is_retained {
-                peer.adapter.publish_retained(publication)
-            } else {
-                peer.adapter.publish(publication)
-            });
+            publications.push(BrokerPublication::new(topic.clone(), Bytes::from(payload)));
         }
 
-        Ok(publishing)
+        self.broker.publish_all(from, (publications, is_retained))
     }
 
     fn gauge(&self, name: &str) -> Option<u64> {
         if name == "unsettled" {
-            return Some(self.recording.inner.unsettled());
+            return Some(self.broker.unsettled_of(&self.under));
         }
 
         self.server
@@ -1065,6 +1340,7 @@ impl Case {
 
         // * its case ends: done with for good
         self.participant.dispose().await;
+        self.broker.dispose().await;
 
         stopped
     }
@@ -1122,7 +1398,7 @@ async fn placed_of(
         take_placed(&mut placed, (from_twin, 1, "twin"));
     }
 
-    let grace = deadline_of(PLACED_GRACE);
+    let grace = deadline_of(PLACED_GRACE.max(case.broker.settling()));
 
     while Instant::now() < grace {
         let server = next_of(peer, (false, POLL)).await;
@@ -1235,17 +1511,16 @@ async fn play_steps(case: &mut Case, steps: &[Value]) -> Result<(), String> {
         }
 
         if let Some(id) = step.get("lose").and_then(Value::as_str) {
-            case.adapters
-                .get(id)
-                .ok_or_else(|| format!("{at}: no participant {id}"))?
-                .lose();
+            case.broker
+                .lose(id)
+                .map_err(|error| format!("{at}: {error}"))?;
         }
 
         if let Some(id) = step.get("takeover").and_then(Value::as_str) {
-            case.adapters
-                .get(id)
-                .ok_or_else(|| format!("{at}: no participant {id}"))?
-                .take_over();
+            case.broker
+                .take_over(id)
+                .await
+                .map_err(|error| format!("{at}: {error}"))?;
         }
 
         // * the participant under test stopped in place, or started again, each settled (spec 15.21);
@@ -1580,6 +1855,8 @@ fn trials() -> Result<Vec<Trial>, String> {
     let mut trials = Vec::new();
     // each case's name, and whether a row of the support matrix excuses this side from it
     let mut excusals = Vec::new();
+    // the same of each case over MQTT 5
+    let mut mqtt_excusals = Vec::new();
     // the names of the cases made a trial
     let mut played = HashSet::new();
 
@@ -1597,22 +1874,38 @@ fn trials() -> Result<Vec<Trial>, String> {
             .map_err(|error| format!("{name}'s differs: {error}"))?
             .unwrap_or_default();
 
-        excusals.push((name.clone(), is_excused(&differs)));
+        let transport = case
+            .get("transport")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+        // * a case named once over its transport: one over MQTT 5 shares its name with the one over
+        // the in-memory broker
+        let key = format!("{transport}: {name}");
+
+        excusals.push((key.clone(), is_excused(&differs)));
+
+        if transport == MQTT {
+            mqtt_excusals.push((key.clone(), is_excused(&differs)));
+        }
 
         // * an excused case is left out, as every other player leaves it
         if is_excused(&differs) {
             continue;
         }
 
-        let transport = case
-            .get("transport")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_owned();
+        played.insert(key);
 
-        played.insert(name.clone());
+        let is_mqtt = transport == MQTT;
+        // * over MQTT 5, skipped, saying so, where no broker is given and none is asked for
+        let is_skipped = is_mqtt
+            && std::env::var_os("BEAD_MQTT_URL").is_none()
+            && std::env::var("BEAD_MQTT_REQUIRED").as_deref() != Ok("1");
+
         trials.push(
             Trial::test(name, move || {
+                let _serial =
+                    is_mqtt.then(|| ON_THE_BROKER.lock().unwrap_or_else(PoisonError::into_inner));
                 let runtime = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
@@ -1629,7 +1922,8 @@ fn trials() -> Result<Vec<Trial>, String> {
 
                 played.map_err(Failed::from)
             })
-            .with_kind(transport),
+            .with_kind(transport)
+            .with_ignored_flag(is_skipped),
         );
     }
 
@@ -1653,6 +1947,35 @@ fn trials() -> Result<Vec<Trial>, String> {
             .with_kind("responses"),
         );
     }
+
+    // spec 15.25 to 15.31: each case over MQTT 5 played if and only if no row excuses this side from
+    // it, as the C# side's `MqttTransportsTests` holds its own
+    let mqtt_played = played.clone();
+
+    trials.insert(
+        0,
+        Trial::test(
+            "plays_every_mqtt_case_but_those_a_row_of_the_support_matrix_excuses_this_side_from",
+            move || {
+                let wrong: Vec<&String> = mqtt_excusals
+                    .iter()
+                    .filter(|(name, is_excused)| mqtt_played.contains(name) == *is_excused)
+                    .map(|(name, _)| name)
+                    .collect();
+
+                hold(!mqtt_excusals.is_empty(), || {
+                    "no case over MQTT 5".to_owned()
+                })
+                .and_then(|()| {
+                    hold(wrong.is_empty(), || {
+                        format!("played against their excusal: {wrong:?}")
+                    })
+                })
+                .map_err(Failed::from)
+            },
+        )
+        .with_kind(MQTT),
+    );
 
     // each case named once, at least one played, and each played if and only if no row excuses
     // this side from it

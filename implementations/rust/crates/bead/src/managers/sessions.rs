@@ -5,7 +5,7 @@
 use core::fmt;
 use core::time::Duration;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
 
 use serde_json::Value;
 
@@ -22,15 +22,7 @@ mod tests;
 /// What `clock`'s wall reads now, to the millisecond, as a session's activity is stamped: one stamp a
 /// millisecond, as on the other sides.
 pub(crate) fn wall_of(clock: &SharedClock) -> SystemTime {
-    let since = clock
-        .wall()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or(Duration::ZERO);
-    let milliseconds = u64::try_from(since.as_millis()).unwrap_or(u64::MAX);
-
-    UNIX_EPOCH
-        .checked_add(Duration::from_millis(milliseconds))
-        .unwrap_or(UNIX_EPOCH)
+    crate::clock::instant_of_milliseconds(crate::clock::milliseconds_since_epoch(clock.wall()))
 }
 
 /// A connection's session.

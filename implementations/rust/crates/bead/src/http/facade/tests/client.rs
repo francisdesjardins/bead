@@ -336,6 +336,55 @@ async fn connects_disconnects_and_reconnects_through_its_transport_with_the_opti
     served.server.dispose().await.expect("stopped");
 }
 
+// the Rust side's own: dropping its future cancels nothing, and holds nothing once the
+// reconnection settled
+#[tokio::test]
+async fn a_reconnection_whose_future_is_dropped_leaves_no_task_behind_once_it_settled() {
+    let served = served().await;
+    let client = served.connected().await;
+    let signal = CancellationToken::new();
+
+    assert!(
+        eventually(|| client.transport().ready_state() == ReadyState::Open).await,
+        "open"
+    );
+
+    let before = crate::testing::alive_tasks();
+
+    for _ in 0..10 {
+        drop(
+            client
+                .reconnect(&TransportClientReconnectOptions {
+                    signal: Some(signal.clone()),
+                    ..TransportClientReconnectOptions::default()
+                })
+                .expect("reconnecting"),
+        );
+        assert!(
+            eventually(|| client.transport().ready_state() == ReadyState::Open).await,
+            "reopened"
+        );
+    }
+
+    // * the client's pool lets its idle connections go within twice its idle timeout, 8 s
+    let is_settled = patience(Duration::from_secs(20), async {
+        while crate::testing::alive_tasks() > before {
+            rest(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .is_ok();
+
+    assert!(
+        is_settled,
+        "no task left of the reconnections, {} alive for {before}",
+        crate::testing::alive_tasks()
+    );
+    assert!(!signal.is_cancelled(), "the signal given untouched");
+    client.dispose().await;
+    served.server.dispose().await.expect("stopped");
+}
+
 // the C# side's own
 #[tokio::test]
 async fn a_dispose_cancels_a_reconnection_under_way_and_a_token_given_still_cancels_it_too() {

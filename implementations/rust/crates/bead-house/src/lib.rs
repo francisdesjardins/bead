@@ -2,10 +2,12 @@
 //! `check-surface.mjs` hold the TypeScript side's: the parameter rule, the options struct's shape,
 //! each library crate's public surface pinned to its list, no tuple on that surface, the count of
 //! the tuples of three elements or more a function takes, the errors a future of a Result
-//! documents, the comment tags, and every member under the workspace's lints. Its tests run them
-//! over every crate's source, and over the cases of each verdict.
+//! documents, the comment tags, no text a misread of UTF-8 left, and every member under the
+//! workspace's lints. Its tests run them over every crate's source, and over the cases of each
+//! verdict.
 
 mod members;
+mod misread;
 mod options;
 mod parameters;
 mod surface;
@@ -14,6 +16,7 @@ mod tuples;
 mod wide;
 
 pub use members::members_of;
+pub use misread::misread_of;
 pub use options::options_of;
 pub use parameters::parameters_of;
 pub use surface::surface_of;

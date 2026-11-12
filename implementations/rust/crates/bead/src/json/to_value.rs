@@ -8,6 +8,9 @@ use serde_json::{Map, Number, Value};
 
 use super::JsonRefusal;
 
+#[cfg(test)]
+mod tests;
+
 impl ser::Error for JsonRefusal {
     fn custom<T: fmt::Display>(message: T) -> Self {
         Self::NoJsonValue(message.to_string())

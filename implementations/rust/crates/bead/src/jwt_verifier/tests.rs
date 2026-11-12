@@ -112,11 +112,16 @@ const HOLDING: &str = "sub alone, named by sub";
 
 // the verdict vector that holds: its token, its keys, its audiences and its wall clock's reading
 fn holding() -> (String, Vec<JwtKey>, Vec<String>, SystemTime) {
+    verdict_named(HOLDING)
+}
+
+// the verdict vector `name`: its token, its keys, its audiences and its wall clock's reading
+fn verdict_named(name: &str) -> (String, Vec<JwtKey>, Vec<String>, SystemTime) {
     let vectors: Vec<Value> = crate::testing::vectors::of("jwtVerdicts").expect("the vectors");
     let vector = vectors
         .into_iter()
-        .find(|vector| vector.get("name") == Some(&Value::from(HOLDING)))
-        .expect("the vector that holds");
+        .find(|vector| vector.get("name") == Some(&Value::from(name)))
+        .expect("the vector named");
     let text = |name: &str| {
         vector
             .get(name)
@@ -399,4 +404,118 @@ fn reads_the_wall_clock_once_the_signature_verifies_so_a_verification_that_waits
         (JwtVerdict::Refused(JwtRefusal::Signature), 1),
         "refused at signature, no clock read"
     );
+}
+
+// ! a `String` holds no surrogate alone: the claim's value is read as null, which names nothing,
+// where the TypeScript side keeps its string of one unit and the C# side its `JsonElement` (RFC
+// 8259 §8.2), a row of docs/support.md
+#[test]
+fn reads_a_claim_holding_a_surrogate_alone_as_null_and_refuses_at_sub_a_token_whose_sub_holds_one()
+{
+    let (token, keys, audiences, now) = holding();
+    let claims = String::from_utf8(
+        base64url::decode(token.split('.').nth(1).expect("its claims").as_bytes())
+            .expect("base64url"),
+    )
+    .expect("UTF-8");
+    let alone = signed_text(
+        HEADER,
+        &format!(
+            r#"{},"name":"\ud800","kept":"a😀"}}"#,
+            claims.strip_suffix('}').expect("an object's text")
+        ),
+    );
+    let reading = move || now;
+    let against = JwtAgainst {
+        audiences: &audiences,
+        keys: &keys,
+        now: &reading,
+    };
+    let JwtVerdict::Holds { claims: held, .. } =
+        verify_jwt(alone.as_bytes(), &against).expect("judged")
+    else {
+        panic!("{alone} holds");
+    };
+
+    assert_eq!(held.get("name"), Some(&Value::Null), "a surrogate alone");
+    assert_eq!(
+        held.get("kept"),
+        Some(&Value::String("a\u{1F600}".to_owned())),
+        "a pair of surrogates, one character"
+    );
+
+    // its subject a surrogate alone: none named, refused as a token that names no subject is
+    let unnamed = signed_text(
+        HEADER,
+        &claims.replace(r#""sub":"bob""#, r#""sub":"\ud800""#),
+    );
+
+    assert!(claims.contains(r#""sub":"bob""#), "its sub replaced");
+    assert_eq!(
+        verify_jwt(unnamed.as_bytes(), &against).expect("judged"),
+        JwtVerdict::Refused(JwtRefusal::Sub),
+        "refused at sub"
+    );
+}
+
+// SEC 1 §3.2.2: a key of ES256 whose x and y name no point of P-256 is the application's fault,
+// which fails the verification, as the other sides' import of it does; never the token's
+#[test]
+fn fails_a_verification_under_an_es256_key_whose_point_is_off_its_curve_after_judging_the_signature_s_length()
+ {
+    let (token, keys, audiences, now) = verdict_named("its twin, typed at+jwt");
+    let reading = || now;
+    let [key] = keys.as_slice() else {
+        panic!("one key");
+    };
+    let y = base64url::decode(
+        key.jwk
+            .get("y")
+            .and_then(Value::as_str)
+            .expect("its y")
+            .as_bytes(),
+    )
+    .expect("its y's bytes");
+    let mut flipped = y;
+
+    if let Some(last) = flipped.last_mut() {
+        *last ^= 1;
+    }
+
+    // a bit of y flipped, then y past the field's prime
+    let prime = [
+        0xff_u8, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        0xff, 0xff, 0xff,
+    ];
+
+    for y in [flipped, prime.to_vec()] {
+        let mut off = key.clone();
+
+        off.jwk
+            .insert("y".to_owned(), Value::from(base64url::encode(&y)));
+        assert_jwt_key(&off).expect("shaped for its algorithm");
+
+        let keys = [off];
+        let against = JwtAgainst {
+            audiences: &audiences,
+            keys: &keys,
+            now: &reading,
+        };
+        let failed = verify_jwt(token.as_bytes(), &against).expect_err("the key's fault");
+
+        assert!(
+            failed.to_string().contains("point of P-256"),
+            "named: {failed}"
+        );
+
+        // a signature of another length is refused at signature first, as on the other sides
+        let (signed, _) = token.rsplit_once('.').expect("three parts");
+        let short = format!("{signed}.{}", base64url::encode(&[1_u8; 63]));
+
+        assert_eq!(
+            verify_jwt(short.as_bytes(), &against).expect("judged"),
+            JwtVerdict::Refused(JwtRefusal::Signature)
+        );
+    }
 }

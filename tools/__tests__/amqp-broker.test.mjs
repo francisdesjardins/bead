@@ -124,8 +124,10 @@ describe('the broker the cases play against', () => {
       'peer',
       'ts-server',
       'cs-server',
+      'rs-server',
       'ts-client',
       'cs-client',
+      'rs-client',
       'fixture',
     ]);
   });
@@ -135,6 +137,15 @@ describe('the broker the cases play against', () => {
 
     for (const line of [
       'listeners.tcp.default = 5672',
+      'listeners.ssl.default = 5671',
+      'ssl_options.cacertfile = /bead/ca.pem',
+      'ssl_options.certfile = /bead/server.pem',
+      'ssl_options.keyfile = /bead/server.key',
+      'ssl_options.verify = verify_peer',
+      'ssl_options.fail_if_no_peer_cert = false',
+      'ssl_cert_login_from = common_name',
+      'auth_mechanisms.1 = PLAIN',
+      'auth_mechanisms.2 = EXTERNAL',
       'max_message_size = 4096',
       'loopback_users = none',
       `heartbeat = ${HEARTBEAT}`,
@@ -254,7 +265,13 @@ describe('the definitions it imports', () => {
       definitions.queues.map((queue) => {
         return queue.name;
       }),
-      ['bead.s.interop', 'bead.s.interop-ts', 'bead.s.interop-cs', 'bead.s.interop-both']
+      [
+        'bead.s.interop',
+        'bead.s.interop-ts',
+        'bead.s.interop-cs',
+        'bead.s.interop-rs',
+        'bead.s.interop-both',
+      ]
     );
     assert.ok(
       definitions.queues.every((queue) => {
@@ -347,6 +364,16 @@ describe('AMQP 1.0, by hand', () => {
       [
         0, 0, 0, 27, 2, 1, 0, 0, 0x00, 0x53, 0x41, 0xc0, 14, 2, 0xa3, 5, 0x50, 0x4c, 0x41, 0x49,
         0x4e, 0xa0, 4, 0, 0x75, 0, 0x70,
+      ]
+    );
+  });
+
+  test('writes a sasl-init of EXTERNAL with an empty authorization identity', () => {
+    assert.deepEqual(
+      [...saslInitFrame({ isExternal: true })],
+      [
+        0, 0, 0, 26, 2, 1, 0, 0, 0, 0x53, 0x41, 0xc0, 13, 2, 0xa3, 8, 0x45, 0x58, 0x54, 0x45, 0x52,
+        0x4e, 0x41, 0x4c, 0xa0, 0,
       ]
     );
   });

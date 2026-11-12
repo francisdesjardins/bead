@@ -27,13 +27,19 @@ interface IFieldShape {
   readonly takes: number;
 }
 
+/** A field whose records hold a message: a message's, a list's items' or a map's values'. */
+export type RequiredHolder = Extract<
+  DescField,
+  { fieldKind: 'message' } | { listKind: 'message' } | { mapKind: 'message' }
+>;
+
 /**
  * What spec 17.9.7's walk takes of a message that reaches a field of `LEGACY_REQUIRED` presence:
  * those it declares, and the fields that hold a message reaching one, each by number.
  */
 export interface IRequiredShape {
   /** Its singular, repeated and map fields whose message reaches one, a group's among them. */
-  readonly holders: readonly DescField[];
+  readonly holders: readonly RequiredHolder[];
   readonly required: readonly DescField[];
 }
 
@@ -329,7 +335,7 @@ const searchRequired = (root: DescMessage): void => {
 
     return reaching.has(message) || (known !== undefined && known !== null);
   };
-  const holds = (field: DescField): boolean => {
+  const holds = (field: DescField): field is RequiredHolder => {
     const held = heldOf(field);
 
     return held !== undefined && reaches(held);

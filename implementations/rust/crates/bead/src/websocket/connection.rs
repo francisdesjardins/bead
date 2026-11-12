@@ -54,6 +54,9 @@ const ABNORMAL: u16 = 1006;
 
 // the statuses this side fails a connection with (RFC 6455 §7.4.1)
 const PROTOCOL_ERROR: u16 = 1002;
+
+// the reason tungstenite gives the 1002 it reads a peer's close of a status no end sends as
+const REWRITTEN: &str = "Protocol violation";
 const TOO_BIG: u16 = 1009;
 
 // what a failed connection reads at once of its socket, and drops
@@ -158,6 +161,27 @@ struct Shared {
     dropped: Mutex<Option<String>>,
 }
 
+impl Shared {
+    // `length` more held for its socket, judged and added at once, so senders that cross take no
+    // more than `maximum` between them; false, nothing held, past it
+    fn hold(&self, (length, maximum): (u64, u64)) -> bool {
+        self.unsent
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |held| {
+                held.checked_add(length).filter(|after| *after <= maximum)
+            })
+            .is_ok()
+    }
+
+    // `length` held no more: never below none, its end having let go of everything
+    fn release(&self, length: u64) {
+        self.unsent
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |held| {
+                Some(held.saturating_sub(length))
+            })
+            .ok();
+    }
+}
+
 /// What the side asks of a connection: each takes effect as it is made, carried out by its task.
 #[derive(Clone)]
 pub(crate) struct Commands {
@@ -189,11 +213,9 @@ impl Commands {
         let length = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
 
         if let Some(pacing) = &self.pacing {
-            let held = self.shared.unsent.load(Ordering::SeqCst);
-
             // * what waits for the socket, held (spec 15.12): an envelope that would take it past
             // its bound drops the connection
-            if held.saturating_add(length) > pacing.maximum_unsent_bytes {
+            if !self.shared.hold((length, pacing.maximum_unsent_bytes)) {
                 self.drop_behind(format!(
                     "what waits for its socket would pass maximumUnsentBytes, {} bytes",
                     pacing.maximum_unsent_bytes
@@ -202,15 +224,13 @@ impl Commands {
                 return;
             }
 
-            self.shared.unsent.fetch_add(length, Ordering::SeqCst);
-
             if let Some(pace) = &self.pace {
                 pace.hand(length);
             }
         }
 
         if self.sender.send(Command::Send(bytes)).is_err() && self.pacing.is_some() {
-            self.shared.unsent.fetch_sub(length, Ordering::SeqCst);
+            self.shared.release(length);
         }
     }
 
@@ -285,6 +305,8 @@ enum Closing {
     ByUs,
     // failed with its status: what comes is read raw and dropped, to the peer's end or the timeout
     Failing,
+    // failing, its close gone and its write side shut
+    FailingShut,
 }
 
 // where its writing stands
@@ -348,7 +370,10 @@ impl<S: Wire> Connection<S> {
         (socket, read): (S, Vec<u8>),
         (role, bounds): (Role, ConnectionBounds),
     ) -> (Self, Commands) {
-        let config = config_of(bounds.maximum_message_bytes);
+        let config = config_of(
+            bounds.maximum_message_bytes,
+            bounds.pacing.map(|pacing| pacing.maximum_unsent_bytes),
+        );
         let socket = WebSocketStream::from_partially_read(socket, read, role, Some(config)).await;
 
         Self::over(socket, bounds)
@@ -468,7 +493,19 @@ impl<S: Wire> Connection<S> {
         }
 
         match self.closing {
-            Closing::Failing => {
+            Closing::Failing | Closing::FailingShut => {
+                // * its failing close flushed, its write side shut: a peer that waits on the
+                // server's end of TCP (RFC 6455 §7.1.1) ends its own, which the drain reads
+                if self.closing == Closing::Failing
+                    && self.queue.is_empty()
+                    && self.writing != Writing::Flushing
+                    && Pin::new(self.socket.get_mut())
+                        .poll_shutdown(context)
+                        .is_ready()
+                {
+                    self.closing = Closing::FailingShut;
+                }
+
                 let mut drained = [0_u8; DRAINED_BYTES];
                 let mut buffer = ReadBuf::new(&mut drained);
 
@@ -531,6 +568,22 @@ impl<S: Wire> Connection<S> {
                 self.close(GOING_AWAY);
             }
             Step::Written(Ok(taken)) => self.taken(taken),
+            // * its write buffer full of pongs to a peer that reads nothing but pings: what waits
+            // for its socket passed its bound (spec 15.12)
+            Step::Written(Err(WsError::WriteBufferFull(_))) => {
+                let held = self
+                    .bounds
+                    .pacing
+                    .map_or(u64::MAX, |pacing| pacing.maximum_unsent_bytes);
+
+                self.failure.get_or_insert_with(|| {
+                    Failed::Dropped(format!(
+                        "what waits for its socket passed maximumUnsentBytes, {held} bytes, its peer reading none of its pongs"
+                    ))
+                });
+                self.is_ended_here = true;
+                self.is_done = true;
+            }
             Step::Written(Err(_)) => {
                 // ! a socket that went as this went out takes nothing more: its read says the rest
                 self.writing = Writing::Broken;
@@ -586,12 +639,7 @@ impl<S: Wire> Connection<S> {
     // what the socket took: what waits is less
     fn taken(&self, bytes: u64) {
         if self.pace.is_some() {
-            self.shared
-                .unsent
-                .try_update(Ordering::SeqCst, Ordering::SeqCst, |held| {
-                    Some(held.saturating_sub(bytes))
-                })
-                .ok();
+            self.shared.release(bytes);
         }
     }
 
@@ -665,6 +713,18 @@ impl<S: Wire> Connection<S> {
                     self.closing = Closing::ByUs;
                 }
 
+                // ! tungstenite reads a status no end sends, 1005 or 1006 say, as its own 1002 of a
+                // fixed reason, and answers it so: the peer broke the protocol (RFC 6455 §7.4.1)
+                if frame.as_ref().is_some_and(|frame| {
+                    u16::from(frame.code) == PROTOCOL_ERROR && frame.reason.as_str() == REWRITTEN
+                }) {
+                    self.failure.get_or_insert_with(|| {
+                        Failed::Protocol(
+                            "its peer's close carried a status no end sends".to_owned(),
+                        )
+                    });
+                }
+
                 self.peer_code = Some(frame.map_or(NO_STATUS, |frame| u16::from(frame.code)));
             }
             None
@@ -712,15 +772,41 @@ impl<S: Wire> Connection<S> {
     }
 }
 
-/// What tungstenite reads a connection under: no message nor frame past `maximum_message_bytes`, no
-/// frame of a client's unmasked.
-pub(crate) fn config_of(maximum_message_bytes: u64) -> WebSocketConfig {
-    let maximum = usize::try_from(maximum_message_bytes).unwrap_or(usize::MAX);
+// tungstenite's write buffer, its default: what it holds before it writes to its socket
+const WRITE_BUFFER_BYTES: usize = 128 * 1024;
 
-    WebSocketConfig::default()
+// a frame's longest head, a client's masked (RFC 6455 §5.2), and a control frame's longest
+const FRAME_HEAD_BYTES: usize = 14;
+const CONTROL_FRAME_BYTES: usize = 125 + FRAME_HEAD_BYTES;
+
+/// What tungstenite reads a connection under: no message nor frame past `maximum_message_bytes`, no
+/// frame of a client's unmasked. A server's holds unwritten no more than its write buffer, the
+/// largest message `maximum_unsent_bytes` lets go, and a control frame: what it holds of the
+/// side's own at most, so past it only pongs to a peer that reads nothing, which wait the last
+/// alone, and a message that comes then drops the connection (spec 15.12).
+pub(crate) fn config_of(
+    maximum_message_bytes: u64,
+    maximum_unsent_bytes: Option<u64>,
+) -> WebSocketConfig {
+    let maximum = usize::try_from(maximum_message_bytes).unwrap_or(usize::MAX);
+    let config = WebSocketConfig::default()
         .max_message_size(Some(maximum))
         .max_frame_size(Some(maximum))
-        .accept_unmasked_frames(false)
+        .write_buffer_size(WRITE_BUFFER_BYTES)
+        .accept_unmasked_frames(false);
+
+    maximum_unsent_bytes.map_or(config, |unsent| {
+        config.max_write_buffer_size(write_bound_of(unsent))
+    })
+}
+
+// what tungstenite holds unwritten at most under `maximum_unsent_bytes`: always past its write
+// buffer, as tungstenite asserts
+fn write_bound_of(maximum_unsent_bytes: u64) -> usize {
+    WRITE_BUFFER_BYTES
+        .saturating_add(usize::try_from(maximum_unsent_bytes).unwrap_or(usize::MAX))
+        .saturating_add(FRAME_HEAD_BYTES)
+        .saturating_add(CONTROL_FRAME_BYTES)
 }
 
 // a close frame of `code`, no reason

@@ -62,6 +62,9 @@ internal sealed class AmqpScript : IAsyncDisposable
     /// <summary>The credit each sender is given as it attaches: RabbitMQ's 170 unless told.</summary>
     public uint SenderCredit { get; set; } = 170;
 
+    /// <summary>The credit each management sender is given as it attaches.</summary>
+    public uint ManagementCredit { get; set; } = 100;
+
     /// <summary>The outcome each unsettled transfer to the anonymous terminus is settled with: <c>accepted</c> unless told.</summary>
     public Func<ScriptedTransfer, Outcome> Outcome { get; set; } = (_) =>
     {
@@ -509,7 +512,7 @@ internal sealed class ScriptedConnection
         }
         else if (!attach.Role)
         {
-            await Credit((link, 100));
+            await Credit((link, _script.ManagementCredit));
         }
     }
 

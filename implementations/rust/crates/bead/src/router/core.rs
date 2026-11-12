@@ -230,7 +230,8 @@ pub trait Answerer: sealed::Answerer + Send + Sync {
     /// A [`CallError`] when its answer is refused, its call is cancelled, its connection ends, or its transport fails.
     fn respond(&self, answer: RouterAnswer) -> BoxFuture<Result<(), CallError>>;
 
-    /// The failure the router answered the call with in its handler's place, read as it answers.
+    /// The failure the router answered the call with in its handler's place, never one its handler
+    /// answered.
     fn answered(&self) -> BoxFuture<Option<FailureRecord>>;
 
     /// Subscribes the call's connection to its procedure, on a server's router: the subscription's
@@ -542,9 +543,11 @@ pub(crate) struct Core<S> {
     // the receiving transfers of requests, by their transfer's id: the request as it waits, and
     // its handler
     pub(crate) receiving_requests: BTreeMap<u64, (Arc<Dispatch>, Arc<Handler>)>,
-    // the results sent as a transfer, by their id, and what settles each once its last chunk went
+    // the results sent as a transfer, by their id, while they are
     pub(crate) results: BTreeMap<u64, crate::router::answers::ResultSending<S>>,
-    pub(crate) settled: BTreeMap<u64, Option<Responded<S>>>,
+    // what settles each result sent as a transfer: its answer, the sends not heard back from, and
+    // whether its last chunk went
+    pub(crate) settling: BTreeMap<u64, crate::router::answers::Settling<S>>,
     pub(crate) next_id: u64,
 }
 
@@ -593,7 +596,7 @@ impl<S: Side> Core<S> {
             disposed: false,
             receiving_requests: BTreeMap::new(),
             results: BTreeMap::new(),
-            settled: BTreeMap::new(),
+            settling: BTreeMap::new(),
             next_id: 1,
         }
     }
@@ -672,11 +675,15 @@ pub(crate) fn reported(failure: Failure) -> RouterError {
     RouterError::Failure(failure)
 }
 
-/// What a resolver's error is reported as: a call's failure, a router's error, as it is; any other,
-/// as itself.
+/// What a resolver's error is reported as: a call's failure, a failure, a router's error, as it is;
+/// any other, as itself.
 pub(crate) fn reported_error_of(error: Box<dyn Error + Send + Sync>) -> RouterError {
     let error = match error.downcast::<CallError>() {
         Ok(call) => return reported_call(*call),
+        Err(error) => error,
+    };
+    let error = match error.downcast::<Failure>() {
+        Ok(failure) => return reported(*failure),
         Err(error) => error,
     };
 
@@ -1503,14 +1510,51 @@ pub(crate) type Responded<S> = Box<dyn FnOnce(&mut S, Result<(), CallError>) + S
 
 /// Answers a request, on its call id alone, while its call is open; once cancelled, or gone with
 /// its connection, nothing goes out.
-#[expect(
-    clippy::too_many_lines,
-    reason = "an answer held to its limits and its subscription, then written or sent as a transfer"
-)]
 pub(crate) fn respond<S: Side>(
     state: &mut S,
     (answer, dispatch, done): (RouterAnswer, Arc<Dispatch>, Option<Responded<S>>),
 ) {
+    answer_call(
+        state,
+        (
+            CallAnswer {
+                answer,
+                dispatch,
+                done,
+            },
+            false,
+        ),
+    );
+}
+
+/// A dispatched request's answer as its router sends it.
+pub(crate) struct CallAnswer<S> {
+    /// What answers it.
+    pub(crate) answer: RouterAnswer,
+    /// The request it answers.
+    pub(crate) dispatch: Arc<Dispatch>,
+    /// What settles once it went, or could not.
+    pub(crate) done: Option<Responded<S>>,
+}
+
+/// Answers a dispatched request with a failure in its resolver's place, as [`respond`] does, and
+/// holds that failure for its manager when the answer is the call's: the router's own answer,
+/// never one its resolver gave (spec 11.10, debugging 4.2).
+pub(crate) fn answer_in_place<S: Side>(state: &mut S, call: CallAnswer<S>) {
+    answer_call(state, (call, true));
+}
+
+// an answer going out on its call, the router's own in its resolver's place when `is_in_place`
+#[expect(
+    clippy::too_many_lines,
+    reason = "an answer held to its limits and its subscription, then written or sent as a transfer"
+)]
+fn answer_call<S: Side>(state: &mut S, (made, is_in_place): (CallAnswer<S>, bool)) {
+    let CallAnswer {
+        answer,
+        dispatch,
+        done,
+    } = made;
     let core = state.core();
     let handle = Arc::clone(&dispatch.connection_handle);
     let call_id = dispatch.header.call_id;
@@ -1588,7 +1632,10 @@ pub(crate) fn respond<S: Side>(
     // its answer going out: a second goes nowhere, and this one closes the call once done
     let is_its = state.core().answering.answer((&call, dispatch.id));
 
+    // ! held only for the router's own answer in its resolver's place, which its manager tells as
+    // that resolver's answer settles: a failure the resolver answered is never held
     if let RouterAnswer::Failure(failure) = &answer
+        && is_in_place
         && is_its
     {
         *locked(&dispatch.answered) = Some(failure.clone());
@@ -1660,12 +1707,12 @@ pub(crate) fn refuse<S: Side>(state: &mut S, (failure, dispatch): (Failure, &Arc
     let reported_on = Arc::clone(&dispatch.connection_handle);
     let closing = Arc::clone(dispatch);
 
-    respond(
+    answer_in_place(
         state,
-        (
-            RouterAnswer::Failure(failure.record()),
-            Arc::clone(dispatch),
-            Some(Box::new(
+        CallAnswer {
+            answer: RouterAnswer::Failure(failure.record()),
+            dispatch: Arc::clone(dispatch),
+            done: Some(Box::new(
                 move |state: &mut S, outcome: Result<(), CallError>| {
                     if let Err(error) = outcome {
                         // a refusal that never reached the transport leaves no call open behind it
@@ -1674,7 +1721,7 @@ pub(crate) fn refuse<S: Side>(state: &mut S, (failure, dispatch): (Failure, &Arc
                     }
                 },
             )),
-        ),
+        },
     );
 }
 
@@ -1836,14 +1883,8 @@ fn resolver_failed<S: Side>(
     (dispatch, signal, error): (&Arc<Dispatch>, &Signal, ResolverError),
 ) {
     let handle = Arc::clone(&dispatch.connection_handle);
-    let error = match error {
-        // ! a resolver's own failure is answered as it is, as a thrown FailureError is
-        ResolverError::Failure(failure) if is_answering(state, dispatch) => {
-            return respond_failure_as_is(state, (failure, dispatch));
-        }
-        ResolverError::Failure(failure) => reported(failure),
-        ResolverError::Other(error) => reported_error_of(error),
-    };
+    let ResolverError::Other(error) = error;
+    let error = reported_error_of(error);
 
     if !signal.is_aborted() {
         state.report(error, &handle);
@@ -1857,10 +1898,6 @@ fn resolver_failed<S: Side>(
 
         refuse(state, (failure, dispatch));
     }
-}
-
-fn respond_failure_as_is<S: Side>(state: &mut S, (failure, dispatch): (Failure, &Arc<Dispatch>)) {
-    refuse(state, (failure, dispatch));
 }
 
 // an admission's refusal as it is answered: never SESSION_REQUIRED to a call that presented a
@@ -1907,10 +1944,8 @@ fn admit_routed<S: Side>(
     if let Some(admit) = &handler.admit {
         match admit(&request) {
             Err(error) => {
-                let reported_error = match error {
-                    ResolverError::Failure(failure) => reported(failure),
-                    ResolverError::Other(error) => RouterError::Other(Arc::from(error)),
-                };
+                let ResolverError::Other(error) = error;
+                let reported_error = reported_error_of(error);
 
                 state.report(reported_error, &handle);
 
@@ -2656,10 +2691,14 @@ pub(crate) fn reject_pending<S: Side>(
     state: &mut S,
     (reason, handle): (&str, Option<&ConnectionHandle>),
 ) {
-    let core = state.core();
-    let credits = core.receivings.close_all(handle);
+    // its transfers first, so the budget they give back grants no credit to one about to go; the
+    // credits it grants the transfers of other connections go out (spec 12.10)
+    let credits = state.core().receivings.close_all(handle);
 
-    drop(credits);
+    send_credits(state, credits);
+
+    let core = state.core();
+
     core.sendings.close_all(handle);
     core.receiving_requests.retain(|_, (dispatch, _)| {
         handle.is_some_and(|handle| *handle != dispatch.connection_handle)

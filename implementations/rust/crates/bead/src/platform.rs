@@ -1,12 +1,13 @@
 //! What the core spawns and yields on: the application's tokio runtime, given or current, its time
 //! driver checked (decision 0044).
 //!
-//! The core spawns and yields nowhere else, and reads time through its clock alone (decision
-//! 0011), as clippy's `disallowed-methods` and `disallowed-types` hold it: what tokio's calls name
-//! is named here, once, so that the core keeps compiling for a browser's WebAssembly as natively.
+//! The core spawns, yields and resolves a name nowhere else, and reads time through its clock alone
+//! (decision 0011), as clippy's `disallowed-methods` and `disallowed-types` hold it: what tokio's
+//! calls name is named here, once, so that the core keeps compiling for a browser's WebAssembly as
+//! natively.
 #![expect(
     clippy::disallowed_methods,
-    reason = "the one place the core spawns, yields, finds its runtime and checks its time driver"
+    reason = "the one place the core spawns, yields, resolves a name, finds its runtime and checks its time driver"
 )]
 
 use core::future::Future;
@@ -51,7 +52,7 @@ pub(crate) fn runtime_of(
 
 /// The runtime a socket transport runs on: [`runtime_of`]'s, its IO driver checked besides, as its
 /// time driver is (decision 0049); `subject` names the transport in the refusal.
-#[cfg(any(feature = "websocket", feature = "http"))]
+#[cfg(any(feature = "websocket", feature = "http", feature = "mqtt"))]
 pub(crate) fn socket_runtime_of(
     given: Option<&Handle>,
     subject: &'static str,
@@ -94,6 +95,14 @@ where
     F::Output: Send + 'static,
 {
     runtime.spawn(future)
+}
+
+/// The addresses the system's resolver gives `host`, in its order: resolved on the current
+/// runtime's blocking pool, as `tokio::net::lookup_host` resolves them, a spawn that runs to its end
+/// whatever becomes of the connect that asked.
+#[cfg(any(feature = "websocket", feature = "http", feature = "mqtt"))]
+pub(crate) async fn lookup_host(host: &str) -> std::io::Result<Vec<std::net::SocketAddr>> {
+    Ok(tokio::net::lookup_host((host, 0)).await?.collect())
 }
 
 /// Hands its task's turn back to its tokio runtime: the task is polled again once the runtime ran

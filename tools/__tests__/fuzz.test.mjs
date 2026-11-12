@@ -6,6 +6,7 @@ import { describe, test } from 'node:test';
 import {
   argumentsOf,
   blueprintsOf,
+  EVERY_TARGET,
   folderOf,
   handshakeSeedsOf,
   headSeedsOf,
@@ -88,8 +89,9 @@ describe('the targets', () => {
     assert.deepEqual(TARGETS.typescript, [...TWINS, 'blueprint']);
   });
 
-  test('knows the Rust side’s targets, every twin', () => {
-    assert.deepEqual(TARGETS.rust, TWINS);
+  test('knows the Rust side’s targets, every twin and its MQTT 5 client’s packet reader', () => {
+    assert.deepEqual(TARGETS.rust, [...TWINS, 'mqtt-packets']);
+    assert.deepEqual(EVERY_TARGET, [...TWINS, 'blueprint', 'mqtt-packets']);
     assert.match(SIDES.rust, /implementations[\\/]rust[\\/]fuzz$/u);
     assert.deepEqual(argumentsOf(['run', 'rust', 'jwt']), {
       command: 'run',
@@ -99,6 +101,9 @@ describe('the targets', () => {
       flags: [],
     });
     assert.equal(argumentsOf(['run', 'rust', 'blueprint']), undefined);
+    assert.equal(argumentsOf(['run', 'typescript', 'mqtt-packets']), undefined);
+    assert.equal(argumentsOf(['run', 'csharp', 'mqtt-packets']), undefined);
+    assert.equal(folderOf('rust', 'mqtt-packets'), SIDES.rust);
   });
 
   test("keep each in its side's folder, and the blueprint's beside beadc", () => {
@@ -221,7 +226,7 @@ describe('the seeds', () => {
   });
 
   test('seed every target from the conformance files and the blueprints', () => {
-    assert.deepEqual(Object.keys(SEEDS), [...TARGETS.typescript]);
+    assert.deepEqual(Object.keys(SEEDS), [...EVERY_TARGET]);
 
     for (const target of TARGETS.typescript) {
       assert.ok(SEEDS[target].length > 20, `${target} has ${String(SEEDS[target].length)} seeds`);
@@ -265,6 +270,20 @@ describe('the seeds', () => {
       }),
       'no byte at all is a seed'
     );
+  });
+
+  test("seed the packet target with the Rust side's packet mutation seeds, each a whole packet, in their order and digest", () => {
+    // * the 14 packets of the Rust side's tests/mqtt_packets_fuzz.rs, a broker's to a client
+    assert.equal(SEEDS['mqtt-packets'].length, 14);
+    assert.equal(
+      digestOf(inSeedOrder(SEEDS['mqtt-packets'])),
+      'db5f9db1a9c692c6b1a72b50243647428c3e1593eb55442d2e72536525dbbae9'
+    );
+
+    // each one whole: its fixed header's Remaining Length, one byte below 128, counts the rest
+    for (const seed of SEEDS['mqtt-packets']) {
+      assert.ok(seed[1] < 0x80 && seed.length === 2 + seed[1], seed.toString('hex'));
+    }
   });
 
   test("seed the envelope target with every side's envelope mutation seeds, in their order and digest", () => {
@@ -351,6 +370,7 @@ describe('the command line', () => {
       ['csharp', 'proto-codecs'],
       ['rust', 'broker-parcel'],
       ['rust', 'proto-codecs'],
+      ['rust', 'mqtt-packets'],
     ]) {
       assert.deepEqual(argumentsOf(['run', side, target]), {
         command: 'run',

@@ -3,7 +3,12 @@
 // dependencies
 
 import type { TransportServerConnectionHandle } from '../../transport/server/types';
-import { assertHeld, type IClock, PLATFORM_CLOCK } from '../../transport/shared/clock';
+import {
+  assertHeld,
+  type IClock,
+  PLATFORM_CLOCK,
+  type TimeoutId,
+} from '../../transport/shared/clock';
 import { createEmitter } from '../../transport/shared/emitter';
 import { ProgrammerError } from '../../transport/shared/errors';
 import { gaugesOf, mergeGauges } from '../../transport/shared/gauges';
@@ -280,6 +285,45 @@ export const createSessionManager = <Data>(
     }
   };
 
+  // ! a timer is armed before anything it replaces is touched: a clock that refuses it throws here,
+  // and leaves the manager as it was (decision 0011). None for a timeout without end
+  const armOf = (
+    event: CONNECTION_INACTIVITY_TIMEOUT_REACHED_EVENT | SESSION_INACTIVITY_TIMEOUT_REACHED_EVENT,
+    {
+      connectionHandle,
+      timeout,
+    }: { connectionHandle: TransportServerConnectionHandle; timeout: number }
+  ): TimeoutId | undefined => {
+    return Number.isFinite(timeout)
+      ? clock.setTimeout(() => {
+          reach(event, connectionHandle);
+        }, timeout)
+      : undefined;
+  };
+
+  // a timer armed by `armOf` in place of the one it replaces, which stops; none stops it alone
+  const swap = (
+    event: CONNECTION_INACTIVITY_TIMEOUT_REACHED_EVENT | SESSION_INACTIVITY_TIMEOUT_REACHED_EVENT,
+    {
+      connectionHandle,
+      timeoutId,
+    }: { connectionHandle: TransportServerConnectionHandle; timeoutId: TimeoutId | undefined }
+  ): void => {
+    const isConnection = event === CONNECTION_INACTIVITY_TIMEOUT_REACHED_EVENT;
+
+    if (timeoutId === undefined) {
+      if (isConnection) {
+        timers.clearConnectionInactivityTimeout(connectionHandle);
+      } else {
+        timers.clearSessionInactivityTimeout(connectionHandle);
+      }
+    } else if (isConnection) {
+      timers.setConnectionInactivityTimeout(timeoutId, connectionHandle);
+    } else {
+      timers.setSessionInactivityTimeout(timeoutId, connectionHandle);
+    }
+  };
+
   let isDisposed = false;
 
   // stamps a session's activity now and restarts both its timers; the stored session, not a copy
@@ -397,30 +441,24 @@ export const createSessionManager = <Data>(
     resetConnectionInactivityTimeout: ({ connectionHandle }, given) => {
       const timeout = assertHeld('a connection inactivity timeout', given);
 
-      timers.clearConnectionInactivityTimeout(connectionHandle);
-
-      if (tokens.has(connectionHandle) && Number.isFinite(timeout)) {
-        timers.setConnectionInactivityTimeout(
-          clock.setTimeout(() => {
-            reach(CONNECTION_INACTIVITY_TIMEOUT_REACHED_EVENT, connectionHandle);
-          }, timeout),
-          connectionHandle
-        );
-      }
+      // the successor first, then swapped in: a refusal leaves the live timer running
+      swap(CONNECTION_INACTIVITY_TIMEOUT_REACHED_EVENT, {
+        connectionHandle,
+        timeoutId: tokens.has(connectionHandle)
+          ? armOf(CONNECTION_INACTIVITY_TIMEOUT_REACHED_EVENT, { connectionHandle, timeout })
+          : undefined,
+      });
     },
     resetSessionInactivityTimeout: ({ connectionHandle }, given) => {
       const timeout = assertHeld('a session inactivity timeout', given);
 
-      timers.clearSessionInactivityTimeout(connectionHandle);
-
-      if (tokens.has(connectionHandle) && Number.isFinite(timeout)) {
-        timers.setSessionInactivityTimeout(
-          clock.setTimeout(() => {
-            reach(SESSION_INACTIVITY_TIMEOUT_REACHED_EVENT, connectionHandle);
-          }, timeout),
-          connectionHandle
-        );
-      }
+      // the successor first, then swapped in: a refusal leaves the live timer running
+      swap(SESSION_INACTIVITY_TIMEOUT_REACHED_EVENT, {
+        connectionHandle,
+        timeoutId: tokens.has(connectionHandle)
+          ? armOf(SESSION_INACTIVITY_TIMEOUT_REACHED_EVENT, { connectionHandle, timeout })
+          : undefined,
+      });
     },
     set: (session) => {
       // a resolver that finishes once its server is gone has nowhere left to store a session
@@ -456,6 +494,36 @@ export const createSessionManager = <Data>(
         sessionToken,
       });
       const isSimilar = storedSession !== undefined && areSimilar(storedSession, nextSession);
+      // the timers follow what is stored: a new session, or one where none was, starts over with no
+      // timer, and a timeout that changed restarts its own
+      const isFresh = isNew || storedSession === undefined;
+      const restartsConnection =
+        isFresh ||
+        storedSession.connectionInactivityTimeout !== nextSession.connectionInactivityTimeout;
+      const restartsSession =
+        isFresh || storedSession.sessionInactivityTimeout !== nextSession.sessionInactivityTimeout;
+      // ! prepared before the commit: a timer the clock refuses stops the one prepared before it,
+      // and nothing is stored
+      const connectionTimeoutId = restartsConnection
+        ? armOf(CONNECTION_INACTIVITY_TIMEOUT_REACHED_EVENT, {
+            connectionHandle,
+            timeout: nextSession.connectionInactivityTimeout,
+          })
+        : undefined;
+      let sessionTimeoutId: TimeoutId | undefined;
+
+      try {
+        sessionTimeoutId = restartsSession
+          ? armOf(SESSION_INACTIVITY_TIMEOUT_REACHED_EVENT, {
+              connectionHandle,
+              timeout: nextSession.sessionInactivityTimeout,
+            })
+          : undefined;
+      } catch (reason) {
+        clock.clearTimeout(connectionTimeoutId);
+
+        throw reason;
+      }
 
       if (storedSession?.sessionToken !== undefined) {
         sessions.delete(storedSession.sessionToken);
@@ -464,27 +532,22 @@ export const createSessionManager = <Data>(
       sessions.set(sessionToken, nextSession);
       tokens.set(connectionHandle, sessionToken);
 
-      // the timers follow what is stored: a new session, or one where none was, starts over with no
-      // timer, and a timeout that changed restarts its own
-      if (isNew || storedSession === undefined) {
+      if (isFresh) {
         timers.create(connectionHandle);
       }
 
-      if (
-        isNew ||
-        storedSession?.connectionInactivityTimeout !== nextSession.connectionInactivityTimeout
-      ) {
-        manager.resetConnectionInactivityTimeout(
-          nextSession,
-          nextSession.connectionInactivityTimeout
-        );
+      if (restartsConnection) {
+        swap(CONNECTION_INACTIVITY_TIMEOUT_REACHED_EVENT, {
+          connectionHandle,
+          timeoutId: connectionTimeoutId,
+        });
       }
 
-      if (
-        isNew ||
-        storedSession?.sessionInactivityTimeout !== nextSession.sessionInactivityTimeout
-      ) {
-        manager.resetSessionInactivityTimeout(nextSession, nextSession.sessionInactivityTimeout);
+      if (restartsSession) {
+        swap(SESSION_INACTIVITY_TIMEOUT_REACHED_EVENT, {
+          connectionHandle,
+          timeoutId: sessionTimeoutId,
+        });
       }
 
       if (storedSession === undefined) {
@@ -512,10 +575,18 @@ export const createSessionManager = <Data>(
       );
       const oldTimeout = storedSession.connectionInactivityTimeout;
 
-      storedSession.connectionInactivityTimeout = newTimeout;
-
       if (newTimeout !== oldTimeout) {
-        manager.resetConnectionInactivityTimeout(storedSession, newTimeout);
+        // armed before it is stored: a refusal keeps the stored timeout and its live timer
+        const timeoutId = armOf(CONNECTION_INACTIVITY_TIMEOUT_REACHED_EVENT, {
+          connectionHandle: storedSession.connectionHandle,
+          timeout: newTimeout,
+        });
+
+        storedSession.connectionInactivityTimeout = newTimeout;
+        swap(CONNECTION_INACTIVITY_TIMEOUT_REACHED_EVENT, {
+          connectionHandle: storedSession.connectionHandle,
+          timeoutId,
+        });
         emitIfHeard(CONNECTION_INACTIVITY_TIMEOUT_CHANGED_EVENT, () => {
           return [{ newValue: newTimeout, oldValue: oldTimeout, session: copyOf(storedSession) }];
         });
@@ -575,10 +646,18 @@ export const createSessionManager = <Data>(
       );
       const oldTimeout = storedSession.sessionInactivityTimeout;
 
-      storedSession.sessionInactivityTimeout = newTimeout;
-
       if (newTimeout !== oldTimeout) {
-        manager.resetSessionInactivityTimeout(storedSession, newTimeout);
+        // armed before it is stored: a refusal keeps the stored timeout and its live timer
+        const timeoutId = armOf(SESSION_INACTIVITY_TIMEOUT_REACHED_EVENT, {
+          connectionHandle: storedSession.connectionHandle,
+          timeout: newTimeout,
+        });
+
+        storedSession.sessionInactivityTimeout = newTimeout;
+        swap(SESSION_INACTIVITY_TIMEOUT_REACHED_EVENT, {
+          connectionHandle: storedSession.connectionHandle,
+          timeoutId,
+        });
         emitIfHeard(SESSION_INACTIVITY_TIMEOUT_CHANGED_EVENT, () => {
           return [{ newValue: newTimeout, oldValue: oldTimeout, session: copyOf(storedSession) }];
         });

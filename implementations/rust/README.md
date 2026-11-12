@@ -2,47 +2,56 @@
 
 Bead is a binary wire protocol: the envelopes of a request, its result or failure, the notifications
 of a subscription and the commands a server sends back, written at fixed offsets. This workspace is
-its Rust implementation, at behavioural parity with the TypeScript and C# sides in what it holds: the
-same behaviour, played from the same conformance files in [`spec/`](../../spec/), and proven against
-the other sides in the interop. It holds the envelope's codec; the client and server routers with
-their service, session and notification managers, and the service layer, its server half and its
-client half; sessions and credentials with a `JWT`'s verification; the clock it is given and every
-duration held as spec 1.4 holds it; the trace, the filter and the registry, and a participant's
-trace of its parcels; the WebSocket and HTTP transports, server and client, features of the core
-over tokio's sockets, and the in-memory transport; the broker's core over an in-memory broker, and
-the joined transport; and the `proto` payload's codec on Buffa — playing every conformance file it
-reaches, each part it lacks a row of [`docs/support.md`](../../docs/support.md)'s differences, ahead
-with the stage that brings it. The rules its code keeps — one owner per router, traits and
-composition, no unsafe code, two parameters then an options struct, every warning an error — are
+its Rust implementation, at behavioural parity with the TypeScript and C# sides in what it holds:
+the same behaviour, played from the same conformance files in [`spec/`](../../spec/), and proven
+against the other sides in the interop. It holds the envelope's codec; the client and server routers
+with their service, session and notification managers, and the service layer, its server half and
+its client half; sessions and credentials with a `JWT`'s verification; the clock it is given and
+every duration held as spec 1.4 holds it; the trace, the filter and the registry, and a
+participant's trace of its parcels; the WebSocket and HTTP transports, server and client, features
+of the core over tokio's sockets, and the in-memory transport; the broker's core over an in-memory
+broker, its MQTT 5 binding, a feature of the core and a client of its own, and the joined transport;
+and the `proto` payload's codec on Buffa — playing every conformance file it reaches, each part it
+lacks a row of [`docs/support.md`](../../docs/support.md)'s differences, ahead with the stage that
+brings it. The rules its code keeps — one owner per router, traits and composition, no unsafe code,
+two parameters then an options struct, every warning an error — are
 [decision 0044](../../docs/decisions/0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)'s;
 its sockets are
-[decision 0049](../../docs/decisions/0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)'s.
+[decision 0049](../../docs/decisions/0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)'s,
+its broker bindings
+[decision 0050](../../docs/decisions/0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)'s.
 
 ## Build and test
 
 Rust 1.99.1 and edition 2024, as `rust-toolchain.toml` pins them, which rustup installs with clippy,
 rustfmt and llvm-tools, and the target `wasm32-unknown-unknown`. The core is pure Rust; its socket
-transports' TLS, aws-lc-rs, is built by the platform's C compiler, so a build with `websocket` or
-`http`, the workspace's among them, needs one: on Windows, the MSVC build tools, their C compiler
-and their linker; or the GNU host, with a MinGW-w64's `dlltool` on the `PATH`, which `windows-sys`
-asks of it. From this folder:
+transports' TLS, aws-lc-rs, is built by the platform's C compiler, so a build with `websocket`,
+`http` or `mqtt`, the workspace's among them, needs one: on Windows, the MSVC build tools, their C
+compiler and their linker; or the GNU host, with a MinGW-w64's `dlltool` on the `PATH`, which
+`windows-sys` asks of it. From this folder:
 
 ```sh
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features --locked
+cargo clippy --workspace --all-targets --locked
 cargo clippy -p francisdesjardins-bead --lib --locked
 cargo clippy -p francisdesjardins-bead --lib --features websocket --locked
 cargo clippy -p francisdesjardins-bead --lib --features http --locked
+cargo clippy -p francisdesjardins-bead --lib --features mqtt --locked
 cargo clippy -p francisdesjardins-bead --lib --features testing --locked --target wasm32-unknown-unknown
 cargo test --workspace --all-features --locked
 cargo doc --workspace --no-deps --all-features --locked
 cargo build --workspace --locked
 cargo deny --locked check
+cargo deny --manifest-path fuzz/Cargo.toml --locked check
+cargo deny --manifest-path tools/protobuf-conformance/Cargo.toml --locked check
 ```
 
-The second, the third and the fourth lint the core's library with no feature and with each socket
-transport's alone, `websocket` and `http` (decision 0049), so that each builds on its own. The fifth
-checks the core for the browser's WebAssembly, never runs it, by its features, no socket among them:
+The second lints each member on its default features. The third to the sixth lint the core's
+library with no feature and with each transport's alone, `websocket`, `http` and `mqtt` (decisions
+0049, 0050), so that each builds on its own. The seventh
+checks the core for the browser's WebAssembly, never runs it, by its features, no socket and no
+broker binding among them:
 what the core links builds there, and `.cargo/config.toml` gives getrandom its `unsupported` backend
 on that target alone, so that no dependency is added for it.
 
@@ -50,7 +59,8 @@ Every warning of rustc, clippy and rustdoc is an error, by `.cargo/config.toml`'
 = "deny"`, as `TreatWarningsAsErrors` is on the C# side; `CARGO_BUILD_WARNINGS=warn` releases one
 run. `cargo build --workspace` builds the core on its default features alone, where what the test kit
 alone reaches is left out. `cargo deny` holds the dependencies to RustSec's advisories, the licences
-`deny.toml` allows, crates.io alone, and one version of each.
+`deny.toml` allows, crates.io alone, and one version of each, in the workspace and in the two
+projects outside it, the fuzz targets and the conformance player.
 
 `bead-protobuf`'s tests read and write messages Buffa generates in its build script from
 `crates/bead-protobuf/proto/tests.binpb`, the set protoc writes of their `.proto` files at
@@ -76,12 +86,62 @@ features are additive:
   reading its own head; `WebSocketServer` and `WebSocketClient` over them;
 - `http`: the HTTP transport, server and client (RFC 9110, 9112), on hyper, HTTP/2 beside HTTP/1.1
   under TLS on the server (RFC 9113); `HttpServer` and `HttpClient` over them;
+- `mqtt`: MQTT 5 over a broker (decision 0041), a client of Bead's own over TCP, TLS or a WebSocket
+  of subprotocol `mqtt`; `MqttBrokerAdapter` over it, and its defaults, `MQTT_CONNECT_TIMEOUT`
+  among them;
 - `testing`: the test kit, `bead::testing`, which the tests alone turn on: no API.
 
-Either socket feature brings TLS on rustls over aws-lc-rs, a client verifying by the platform's own
-verifier, and `bead::rustls`, the rustls it builds, for an application's `ServerConfig` or
-`ClientConfig`. What judges a request, a head, a target, a host, an origin and a WebSocket's
-handshake, is always built, as is the HTTP policy, so the fuzz targets reach it with no feature.
+Each of `websocket`, `http` and `mqtt` brings TLS on rustls over aws-lc-rs, a client verifying by
+the platform's own verifier, and `bead::rustls`, the rustls it builds, for an application's
+`ServerConfig` or `ClientConfig`. What judges a request, a head, a target, a host, an origin and a
+WebSocket's handshake, is always built, as is the HTTP policy, so the fuzz targets reach it with no
+feature.
+
+## Listening and proxies
+
+A WebSocket or HTTP server listens on `localhost` unless its `TransportServerStartOptions` gives
+an `address`: both loopbacks, `127.0.0.1` and `::1`, on one port (spec 15.12). Where the IPv6
+loopback is absent, it listens on `127.0.0.1` alone and reports that address. A container, or any
+server another machine reaches, says `0.0.0.0` or `::` and names its hosts in `hosts`: a
+container's loopback is its own, which a published port never reaches. An address given is
+`localhost` or an IP address written bare, `::1`, not `[::1]`; any other name fails the start, a
+`ProgrammerError`. On the loopback it is secure (spec 13.4); behind a proxy on the same machine
+that serves the network in the clear, its options say `secure: Some(false)`
+([decision 0024](../../docs/decisions/0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md)).
+
+Behind a proxy, a server over HTTP or WebSocket believes `X-Forwarded-For` from the proxies
+`trusted_proxies` names, each an IP address or a network in CIDR, `10.0.0.0/8` say, or the compose
+network's, and as many more as `unnamed_proxies` counts. From the socket's address it walks the
+field from the right: while the address reached is listed, or is unlisted and fewer than the
+count have been passed, the next entry is the client's. What a client wrote to the left of the
+first unlisted address past the count is never read. None trusts no proxy, the loopback among
+them. `Forwarded` is never read. The address reached names the connection's handle, its `clients`
+entry and its refusals; its port stays the socket's. Each entry is read in RFC 7239's node forms,
+its port dropped, IPv4-mapped as IPv4 and IPv6 as RFC 5952 writes it; an entry that does not read
+ends the walk at the proxy that wrote it.
+
+A deployment lists its proxy's network, a container's ingress or a sidecar on `127.0.0.1` among
+them. A proxy whose platform does not publish its addresses is counted, `unnamed_proxies`, from
+0 to 8, 0 by default. A listed proxy costs none of that count, wherever it stands: the count is
+of the proxies the list does not name alone. A name, a network whose bits past its prefix are
+set, a network of prefix 0, or a count past 8 is a `ProgrammerError` as the transport is built.
+A request that reaches the socket past a counted proxy is read by entries its client wrote, so a
+server reachable without that proxy lists its proxies instead
+([decision 0030](../../docs/decisions/0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-and-counts.md)).
+
+A proxy neither listed nor counted is a client as any other: each client behind it is its
+address. `maximum_connections_per_address` counts it, so a refusal whose address is the proxy's,
+or `largestAddressConnections` near its ceiling, is a proxy to list. A bound by address counts
+the users behind one NAT as one and the addresses of an IPv6 network as many.
+
+```rust
+use bead::HttpTransportServerOptions;
+
+// a sidecar on the loopback, listed, and a router before it, its addresses unpublished, counted
+let mut options = HttpTransportServerOptions::default();
+options.trusted_proxies = Some(vec!["127.0.0.1".to_owned()]);
+options.unnamed_proxies = Some(1);
+```
 
 ## Layout
 
@@ -103,8 +163,9 @@ crates/
                                 which beadc's Rust target, ahead, generates; its resolvers and its
                                 credentials
   bead-interop-server/          the interop service's server, bead-interop-server, over WebSocket
-                                and HTTP, which the other sides' clients call; and under tests/,
-                                the Rust client's trials against each side's server
+                                and HTTP, and over MQTT 5 where BEAD_MQTT_URL names a broker,
+                                which the other sides' clients call; and under tests/, the Rust
+                                client's trials against each side's server
   bead-house/                   the side's own checks that no lint holds: the parameter rule, the
                                 options struct's shape, each library crate's public surface
                                 against its list under surfaces/, no tuple on that surface, the
@@ -131,12 +192,14 @@ cancels nothing. A router's transport holds it, so it lives as long as its conne
 handle dropped or not; one that neither its application nor its transport holds ends with its owner,
 but a resolver a service manager registered holds that manager, and so its router, which then ends
 by its dispose. A job that panics past the guards of the sites the spec lets throw ends its router
-at once, each call it waits on failed with that panic for its reason.
+at once, each call it waits on failed with that panic for its reason. A server over a socket serves
+until its stop or its dispose while a connection it serves holds it; idle, its last handle dropped
+lets its port go.
 
-The core spawns and yields through one private module, `platform`, and reads time through its
-clock alone (decision 0011): clippy's `disallowed-methods` and `disallowed-types`, in `clippy.toml`,
-refuse tokio's spawns, its yield and its timers, std's `Instant`, `SystemTime::now` and a thread of
-Bead's own anywhere else. A test takes them from the kit, `bead::testing`'s `spawn`, `yield_now`,
+The core spawns, yields and resolves a name through one private module, `platform`, and reads time
+through its clock alone (decision 0011): clippy's `disallowed-methods` and `disallowed-types`, in
+`clippy.toml`, refuse tokio's spawns, its yield, its resolver and its timers, std's `Instant`,
+`SystemTime::now` and a thread of Bead's own anywhere else. A test takes them from the kit, `bead::testing`'s `spawn`, `yield_now`,
 `rest`, `patience`, `Instant` and `wall_now`; a native target, the benches, the interop or a player
 that measures real time, is exempted once, at its root, with its reason.
 
@@ -161,6 +224,7 @@ that measures real time, is exempted once, at its root, with its reason.
 | `life`                                                         | the life every transport server shares: its ready state, and the guards around its start, its stop and its dispose                                 |
 | `websocket`                                                    | the WebSocket transport (spec 15.2, 15.3), behind `websocket`: its server, its client, the connection either end runs, its heartbeat, its facades  |
 | `http`                                                         | the HTTP transport (spec 15.4 to 15.11), behind `http`: its server, on hyper, its client, its exchanges and fields, its facades                    |
+| `mqtt`                                                         | MQTT 5 over a broker, behind `mqtt`: its packets, written and read, its link, its quota, its adapter, over TCP, TLS or a WebSocket                 |
 | `net`                                                          | what a transport over a socket does alike: `localhost` bound, a socket's bounds, a close in stages, a name's addresses raced, TLS                  |
 | `judgement`, `http_policy`                                     | what a server judges of a request, pure and always built: a head, a target, a host, an origin, proxies, a handshake; and the HTTP policy           |
 | `broker`                                                       | the broker's core: its participant, its parcel, its sequence, its heartbeat, its transports and the in-memory broker                               |
@@ -224,10 +288,24 @@ reach that the API does not offer, the envelope's codec among it, is `bead::inte
 the docs and outside SemVer, as the C# side's members reach theirs by `InternalsVisibleTo`; no
 feature turns it on.
 
+What plays against a real broker of MQTT 5 — the cases over MQTT 5 in `tests/transports.rs`, the
+adapter's twins against the broker in `src/mqtt/tests/fixture.rs`, the interop over MQTT 5 — needs
+one given by `BEAD_MQTT_URL`, and `BEAD_MQTT_WS_URL` for the adapter's link over a WebSocket, each
+link made as the broker's users with the run's password, `BEAD_MQTT_PASSWORD`; it is skipped,
+saying so, where none is, and `BEAD_MQTT_REQUIRED=1` fails it instead. The root's
+[`tools/mqtt-broker.mjs`](../../tools/mqtt-broker.mjs) starts a Mosquitto of the run's own and stops
+it whatever the command's end:
+
+```sh
+node ../../tools/mqtt-broker.mjs run -- cargo test -p francisdesjardins-bead --features testing,mqtt --locked --test transports
+node ../../tools/mqtt-broker.mjs run -- cargo test -p francisdesjardins-bead --features testing,mqtt --locked --lib mqtt::
+```
+
 The interop runs from `crates/bead-interop-server`: its trials, `cargo test -p
 francisdesjardins-bead-interop-server --test interop`, a trial a case, a transport and a server,
 named by the TypeScript side's sentence in snake case, play the Rust client against the TypeScript,
-C# and Rust servers once `BEAD_INTEROP_RUST=1` asks, and are ignored otherwise, saying so; the
+C# and Rust servers, over WebSocket, over HTTP and, where `BEAD_MQTT_URL` names a broker, over
+MQTT 5, once `BEAD_INTEROP_RUST=1` asks, and are ignored otherwise, saying so; the
 other sides' interop tests start the binary `BEAD_INTEROP_RUST_SERVER` names
 ([the root README](../../README.md#interop-both-ways)). `BEAD_HOUSE_WRITE=1 cargo test -p francisdesjardins-bead-house` writes each
 crate's list of its public items anew, its diff the change's to review.
@@ -235,13 +313,16 @@ crate's list of its public items anew, its diff the change's to review.
 ## Fuzzing and the bench
 
 `node ../../tools/fuzz.mjs build rust`, then `run rust
-envelope|payload-codecs|http-fields|debug-filter|jwt|ws-handshake|broker-parcel|proto-codecs`,
-fuzzes the side's eight targets with cargo-fuzz on the nightly the tool pins by its date, on Linux
-or WSL. [`fuzz.yml`](../../.github/workflows/fuzz.yml) runs the eight every week, each ten minutes,
+envelope|payload-codecs|http-fields|debug-filter|jwt|ws-handshake|broker-parcel|proto-codecs|mqtt-packets`,
+fuzzes the side's nine targets with cargo-fuzz on the nightly the tool pins by its date, on Linux or
+WSL: the eight every side shares, and `mqtt-packets`, its MQTT 5 client's reader of a broker's
+packets, the Rust side's alone, since the other sides read a broker's bytes through MQTT.js and
+MQTTnet. [`fuzz.yml`](../../.github/workflows/fuzz.yml) runs the nine every week, each ten minutes,
 its corpus kept between runs ([the root README](../../README.md#fuzzing)).
 `crates/bead/tests/envelope_fuzz.rs` and `broker_parcel_fuzz.rs` feed the envelope readers and the
 parcel's seeded mutations of `spec/vectors.json` in the suite, from `bead::testing::mutations`, the
-generator every side shares. `node ../../tools/bench-release.mjs rust` runs bead-bench in fresh
+generator every side shares; `mqtt_packets_fuzz.rs` feeds the MQTT 5 packets' reader seeded
+mutations of its own packets. `node ../../tools/bench-release.mjs rust` runs bead-bench in fresh
 processes, from its release build: the envelope's codec, a request written and read back, calls on
 one in-memory connection kept, and exchanges, each a client and its connection drawn, called once
 and closed; [`bench.yml`](../../.github/workflows/bench.yml) compares it with the last release's on

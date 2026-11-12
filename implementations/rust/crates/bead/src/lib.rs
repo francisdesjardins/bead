@@ -1,4 +1,4 @@
-//! Bead, a binary wire protocol, on the Rust side: its core â€” the envelope's codec, the routers
+//! Bead, a binary wire protocol, on the Rust side: its core — the envelope's codec, the routers
 //! and their service layer, sessions and credentials, the clock and the durations, debugging and
 //! metrics, the in-memory transport, the broker's core over an in-memory broker, and the joined
 //! transport (decision 0044).
@@ -30,7 +30,9 @@ mod life;
 mod managers;
 mod memory;
 mod metrics;
-#[cfg(any(feature = "websocket", feature = "http"))]
+#[cfg(feature = "mqtt")]
+mod mqtt;
+#[cfg(any(feature = "websocket", feature = "http", feature = "mqtt"))]
 mod net;
 mod ordered;
 mod owner;
@@ -47,7 +49,7 @@ mod websocket;
 
 /// The TLS a socket transport speaks, re-exported so that the config an application gives one is
 /// of the version Bead builds on.
-#[cfg(any(feature = "websocket", feature = "http"))]
+#[cfg(any(feature = "websocket", feature = "http", feature = "mqtt"))]
 pub use rustls;
 /// The runtime handle accepted by Bead's runtime options.
 pub use tokio::runtime::Handle;
@@ -151,8 +153,16 @@ pub use metrics::{
     MetricsRegistry, MetricsRegistryOptions, NotificationSeries, ProcedureSeries, ResolverSeries,
     RouterMetrics,
 };
+#[cfg(feature = "mqtt")]
+pub use mqtt::adapter::{
+    KEEP_ALIVE, MQTT_CONNECT_TIMEOUT, MqttBrokerAdapter, MqttBrokerAdapterOptions, TRANSPORT_MQTT,
+};
+#[cfg(feature = "mqtt")]
+pub use mqtt::packets::MAXIMUM_PACKET_SIZE;
 #[cfg(any(feature = "websocket", feature = "http"))]
 pub use net::bounds::{HEADERS_TIMEOUT, MINIMUM_SEND_BYTES_PER_SECOND, SEND_GRACE_PERIOD};
+#[cfg(any(feature = "websocket", feature = "mqtt"))]
+pub use net::credential::{CredentialProvider, CredentialProviderError};
 pub use payloads::{CodecRefusal, JsonCodec, JsonOf, PayloadCodec, RawCodec, TextCodec};
 pub use router::admissions::{
     BeforeRequest, require_credential, require_session, share_leg_b_session,
@@ -202,8 +212,8 @@ pub use violations::{
 };
 #[cfg(feature = "websocket")]
 pub use websocket::client::{
-    CredentialProvider, CredentialProviderError, WebSocketTransportClient,
-    WebSocketTransportClientConnectOptions, WebSocketTransportClientOptions,
+    WebSocketTransportClient, WebSocketTransportClientConnectOptions,
+    WebSocketTransportClientOptions,
 };
 #[cfg(feature = "websocket")]
 pub use websocket::connection::{CLOSE_TIMEOUT, MAXIMUM_MESSAGE_BYTES};
@@ -216,8 +226,8 @@ pub use websocket::server::{
     TRANSPORT_WEBSOCKET, WebSocketTransportServer, WebSocketTransportServerOptions,
 };
 
-/// What the workspace's own members â€” the interop service, the bench, the conformance players and
-/// the fuzz targets â€” reach that the API does not offer: outside SemVer, and no road for another
+/// What the workspace's own members — the interop service, the bench, the conformance players and
+/// the fuzz targets — reach that the API does not offer: outside SemVer, and no road for another
 /// crate. The envelope's codec is here, internal on every side as a router's core is (decision
 /// 0047), as the C# side's members reach theirs by `InternalsVisibleTo`.
 #[doc(hidden)]
@@ -231,6 +241,12 @@ pub mod internal {
     pub use crate::identity::{are_one_name, is_procedure_name};
     pub use crate::judgement::{handshake, head, hosts, items, proxies, security, url_host};
     pub use crate::jwt_verifier::{ReadJwt, read_jwt, verify_jwt};
+    #[cfg(feature = "mqtt")]
+    pub use crate::mqtt::packets::{
+        LARGEST_PACKET_SIZE, LARGEST_REMAINING_LENGTH, MqttAcknowledgement, MqttConnack,
+        MqttDisconnect, MqttPacket, MqttPublish, MqttPublishShapeOptions, MqttReading, MqttRefusal,
+        largest_payload, publish_bytes, read_packet, width_of, write_publish,
+    };
     pub use crate::router::types::{limits_of, session_key_of, whole_envelope_limits_of};
 }
 

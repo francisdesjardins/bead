@@ -11,6 +11,7 @@ import {
   isProcedureName,
 } from '../identity';
 import { createMetricsRegistry } from '../metrics-registry';
+import { ProcedureKind } from '../constants';
 import type { IProcedure } from '../types';
 
 // helpers
@@ -38,6 +39,42 @@ const reasonOf = (procedure: IProcedure): string | undefined => {
 };
 
 // definition
+
+test('names a procedure by a lower-case letter then letters and digits, 63 at most', () => {
+  for (const name of ['echo', 'endSessionsOf', 'a1', 'a'.repeat(63)]) {
+    expect(isProcedureName(name), name).toBe(true);
+  }
+
+  for (const name of ['', 'Echo', '1a', 'end_session', 'café', 'a'.repeat(64)]) {
+    expect(isProcedureName(name), name).toBe(false);
+  }
+});
+
+test('folds ASCII letters alone as it compares names', () => {
+  expect(areOneName('echo', 'eCHO')).toBe(true);
+  expect(areOneName('café', 'cafÉ')).toBe(false);
+  expect(areOneName('echo', 'echos')).toBe(false);
+});
+
+test('refuses a declaration out of its range, then off its form, then against its kind', () => {
+  expect(reasonOf(echo)).toBeUndefined();
+  expect(reasonOf({ ...echo, serviceId: 0, procedureName: 'Off' })).toBe(
+    IdentityRefusal.OUT_OF_ITS_RANGE
+  );
+  expect(reasonOf({ ...echo, procedureName: 'Off' })).toBe(IdentityRefusal.OFF_ITS_FORM);
+
+  const command = { ...echo, procedureKind: ProcedureKind.COMMAND };
+
+  expect(() => {
+    checkProcedureKind(command, 'client-resolver');
+  }).not.toThrow();
+  expect(() => {
+    checkProcedureKind(command, 'client-requester');
+  }).toThrow(/ is against its kind: /);
+  expect(() => {
+    checkProcedureKind(echo, 'client-requester');
+  }).not.toThrow();
+});
 
 test.describe('checkDeclaration', () => {
   test('takes ids from 1 to 65535 and a revision from 1 to 2³¹ − 1, under a procedure name', () => {
@@ -266,5 +303,15 @@ test.describe('checkProcedureKind', () => {
         checkProcedureKind(echo, way);
       }).not.toThrow();
     }
+  });
+
+  test('names a kind no table names, as a caller without types may state it, by its value', () => {
+    expect(() => {
+      checkProcedureKind({ ...echo, procedureKind: 'stream' as ProcedureKind }, 'server-requester');
+    }).toThrow(
+      new ProgrammerError(
+        `"echo" at 2/1 is against its kind: kind stream, which a requester on a server's router does not take; it takes a command (spec 16.11)`
+      )
+    );
   });
 });

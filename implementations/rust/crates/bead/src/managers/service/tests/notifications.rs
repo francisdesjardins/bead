@@ -14,11 +14,12 @@ use crate::failure::Failure;
 use crate::identity::{Deprecation, Procedure};
 use crate::managers::service::{
     Notification, NotificationCallback, NotificationDependencies, NotificationRegistration,
-    RegistrationOptions,
+    RegistrationOptions, ServiceManager,
 };
 use crate::payloads::{JsonCodec, TextCodec};
 use crate::router::types::BoxFuture;
 use crate::testing::pair::echo;
+use crate::testing::service_port::FakeRouter;
 
 type News = Notification<TextCodec, TextCodec, TextCodec>;
 pub(super) type Heard = Arc<Mutex<Vec<String>>>;
@@ -31,8 +32,11 @@ pub(super) fn procedure() -> Procedure {
 }
 
 pub(super) fn notification(fixture: &ClientFixture) -> News {
-    fixture
-        .manager
+    notification_of(&fixture.manager)
+}
+
+fn notification_of(manager: &ServiceManager) -> News {
+    manager
         .get_notification(
             &procedure(),
             NotificationDependencies::new(
@@ -397,6 +401,119 @@ async fn taking_the_same_registration_away_twice_leaves_another_of_the_same_call
     second.unregister().await.expect("twice");
     assert!(!fixture.router.has_notification(&notification.as_like()));
     assert_eq!(fixture.transport.sent().len(), 2);
+}
+
+#[tokio::test]
+async fn a_registration_arriving_while_the_router_subscribes_waits_for_the_subscription() {
+    let router = FakeRouter::client();
+    let notification = notification_of(&router.manager());
+    let heard = Heard::default();
+
+    router.control().subscribing.close();
+
+    let mut first = notification.register(
+        "a".to_owned(),
+        callback(&heard, "a "),
+        &RegistrationOptions::default(),
+    );
+
+    pending(&mut first).await;
+    crate::testing::patience(Duration::from_secs(10), router.holding(&procedure()))
+        .await
+        .expect("held in time");
+    // the router holds it now, and is still subscribing
+    assert!(router.holds(&procedure()), "held while it subscribes");
+
+    let mut second = notification.register(
+        "b".to_owned(),
+        callback(&heard, "b "),
+        &RegistrationOptions::default(),
+    );
+
+    // whatever can run has run: neither settles while the router subscribes
+    for _ in 0..3 {
+        crate::testing::yield_now().await;
+    }
+    pending(&mut first).await;
+    pending(&mut second).await;
+
+    router.control().subscribing.open();
+
+    crate::testing::patience(Duration::from_secs(10), &mut second)
+        .await
+        .expect("the second settled in time")
+        .expect("the second registered");
+
+    // the second waited on the first's whole registration, so the first settled before it
+    let polled =
+        core::future::poll_fn(|context| core::task::Poll::Ready(first.as_mut().poll(context)))
+            .await;
+
+    assert!(
+        matches!(polled, core::task::Poll::Ready(Ok(_))),
+        "the first registered by the time the second did"
+    );
+    assert_eq!(router.calls().requests.len(), 1, "one request for both");
+}
+
+#[tokio::test]
+async fn a_subscription_that_fails_is_undone_so_the_next_registration_starts_over() {
+    let router = FakeRouter::client();
+    let notification = notification_of(&router.manager());
+    let heard = Heard::default();
+
+    *locked(&router.control().subscribe_error) = Some(CallError::Other(Arc::new(
+        std::io::Error::other("refused by the broker"),
+    )));
+
+    let failed = crate::testing::patience(
+        Duration::from_secs(10),
+        notification.register(
+            "a".to_owned(),
+            callback(&heard, "a "),
+            &RegistrationOptions::default(),
+        ),
+    )
+    .await
+    .expect("refused in time");
+
+    assert!(
+        matches!(&failed, Err(CallError::Other(error)) if error.to_string() == "refused by the broker"),
+        "refused as its subscription was: {failed:?}"
+    );
+    assert!(!router.holds(&procedure()), "let go of");
+    // the router cancels, by default, whatever its call may have left at the other end
+    assert_eq!(
+        router.calls().unregistered,
+        [("echo".to_owned(), true)],
+        "let go of once, its call cancelled"
+    );
+
+    *locked(&router.control().subscribe_error) = None;
+
+    let registration = crate::testing::patience(
+        Duration::from_secs(10),
+        notification.register(
+            "b".to_owned(),
+            callback(&heard, "b "),
+            &RegistrationOptions::default(),
+        ),
+    )
+    .await
+    .expect("registered in time")
+    .expect("registered anew");
+
+    router.deliver(&procedure(), b"news").await;
+
+    // the first never asked: the router could not hold it
+    assert_eq!(
+        router.calls().requests.len(),
+        1,
+        "the second's request alone"
+    );
+    assert_eq!(*locked(&heard), ["b news"], "the second's callback alone");
+
+    registration.unregister().await.expect("last out");
 }
 
 #[tokio::test]

@@ -14,6 +14,77 @@ namespace Bead.Tests;
 /// </summary>
 public sealed partial class RouterServerTests : IDisposable
 {
+    [Fact]
+    public async Task A_request_its_transport_tells_once_its_router_is_disposed_reaches_no_resolver()
+    {
+        Start();
+        var resolved = 0;
+
+        Router.RegisterResolver(new RawResolver(Echo, (_) =>
+        {
+            resolved += 1;
+
+            return Task.CompletedTask;
+        }));
+        Router.Dispose();
+        Deliver(First, RequestOf(1, payload: "hi"));
+        await Settle();
+
+        Assert.Equal(0, resolved);
+        Assert.Empty(_transport.Sent);
+        Assert.Empty(_errors);
+    }
+
+    [Fact]
+    public async Task A_session_provider_s_error_or_panic_is_reported_and_refuses_only_its_call()
+    {
+        foreach (var throws in new[] { false, true })
+        {
+            Start(new RouterServerOptions
+            {
+                SessionOf = (request, _) =>
+                {
+                    if (request.Header.CallId == 1)
+                    {
+                        if (throws)
+                        {
+                            throw new InvalidOperationException("the session provider failed");
+                        }
+
+                        return ValueTask.FromException<CallSession?>(new InvalidOperationException("the session provider failed"));
+                    }
+
+                    return ValueTask.FromResult<CallSession?>(null);
+                },
+            });
+            var admitted = new List<uint>();
+
+            Services.GetRequestResolver(Echo, new RequestResolverDependencies<string, string>
+            {
+                Serializer = Text,
+                BeforeRequest = new BeforeRequest((request) =>
+                {
+                    admitted.Add(request.Header.CallId);
+
+                    return true;
+                }),
+            })((_request, response) =>
+            {
+                return response.Answer("ok");
+            });
+            Deliver(First, RequestOf(1));
+            Deliver(First, RequestOf(3));
+            await Settle();
+
+            Assert.Equal([3u], admitted);
+            Assert.Equal("", _transport.Sent[0].Envelope.Failure?.Detail);
+            Assert.Equal(["first failure 1 ProcedureFailed", "first result 3 ok"], SentSince());
+            Assert.Equal(["the session provider failed first"], Reported());
+            Assert.Equal(0, (await Router.Gauges()).Counts["answeringCalls"]);
+            Router.Dispose();
+            _errors.Clear();
+        }
+    }
     // constants
 
     private const string First = "type=WS;ip=127.0.0.1;port=50001;ordinal=1";
@@ -2463,6 +2534,62 @@ public sealed partial class RouterServerTests : IDisposable
             ],
             told);
         Assert.Empty(_errors);
+    }
+
+    // debugging 4.2; spec 11.10
+    [Fact]
+    public async Task Tells_once_with_the_failure_its_router_answered_in_its_place_an_answer_given_behind_notifications_that_went_past_their_bounds()
+    {
+        string[] words = ["a", "b", "c"];
+
+        Start(new RouterServerOptions { Pacing = new PacingLimits { MaximumQueuedNotifications = 1 } });
+        _transport.Open(First);
+
+        // the steps of the call: their direction, what went out, and why
+        var told = new List<(DebugDirection Direction, object? Tx, ProtocolCode? Error)>();
+
+        Services.Debug += (error, step) =>
+        {
+            if (step.CallId == 3)
+            {
+                lock (told)
+                {
+                    told.Add((step.Direction, step.Tx, error is FailureException failure ? (ProtocolCode)failure.Failure.Code : null));
+                }
+            }
+        };
+
+        INotificationResolver<string>? news = null;
+
+        // its resolver subscribes, sends three notifications past a queue of one without waiting on
+        // them, then answers, all in its own flow
+        news = NotifierOf(async (request, response) =>
+        {
+            await response.RegisterNotification();
+
+            foreach (var word in words)
+            {
+                _ = news!.Notify(word);
+            }
+
+            await response.Answer("ok");
+        });
+        Deliver(First, PacedOf(3, "hold"));
+        await Settle();
+        await Settle();
+
+        // its answer goes nowhere, told once with the failure that went in its place
+        Assert.Equal(["first notification 3 a", "first failure 3 CapacityExceeded"], SentSince());
+
+        lock (told)
+        {
+            Assert.Equal(
+                [
+                    (DebugDirection.Rx, null, null),
+                    (DebugDirection.Tx, "ok", ProtocolCode.CapacityExceeded),
+                ],
+                told);
+        }
     }
 
     [Fact]

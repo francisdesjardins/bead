@@ -61,4 +61,22 @@ public sealed class PayloadCodecsTests
             }, null!);
         });
     }
+
+    [Fact]
+    public void Carries_raw_bytes_as_they_are_and_text_in_utf_8_read_strictly_its_byte_order_mark_kept()
+    {
+        byte[] bytes = [0, 255, 7];
+
+        Assert.Equal(bytes, PayloadCodecs.Raw.Decode(bytes).ToArray());
+        Assert.Equal(bytes, PayloadCodecs.Raw.Encode(bytes).ToArray());
+        Assert.Equal("\uFEFFhé", PayloadCodecs.Text.Decode(Encoding.UTF8.GetBytes("\uFEFFhé")));
+
+        foreach (var refused in new byte[][] { [0x68, 0xc3], [0xed, 0xa0, 0x80] })
+        {
+            Assert.Throws<FormatException>(() =>
+            {
+                return PayloadCodecs.Text.Decode(refused);
+            });
+        }
+    }
 }

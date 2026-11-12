@@ -99,6 +99,155 @@ public sealed partial class RouterClientTests
     // definition
 
     [Fact]
+    public async Task A_command_its_transport_tells_once_its_router_is_disposed_reaches_no_resolver()
+    {
+        using var scripted = new ScriptedRouter();
+        var resolved = 0;
+
+        scripted.Router.RegisterResolver(new ScriptedResolver(Service with { ProcedureId = 9, ProcedureName = "clock" }, (_) =>
+        {
+            resolved += 1;
+
+            return Task.CompletedTask;
+        }));
+        scripted.Router.Dispose();
+        scripted.Transport.Deliver(new Envelope { Header = RequestHeaderOf(2) with { ProcedureId = 9 } });
+        await scripted.Settle();
+
+        Assert.Equal(0, resolved);
+        Assert.Empty(scripted.Transport.Calls);
+        Assert.Empty(scripted.Errors);
+    }
+
+    [Fact]
+    public async Task Keeps_the_replacement_bound_when_its_predecessor_is_cancelled_before_its_answer()
+    {
+        using var scripted = new ScriptedRouter();
+        var notification = new ScriptedNotification(Service);
+
+        await scripted.Router.RegisterNotification(notification).WaitAsync(Patience, Cancelled);
+
+        var first = scripted.Router.Request(ReadOnlyMemory<byte>.Empty, RequestOf(notification));
+        var second = scripted.Router.Request(ReadOnlyMemory<byte>.Empty, RequestOf(notification));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+        {
+            return first.WaitAsync(Patience, Cancelled);
+        });
+        scripted.Transport.Deliver(ResultOf(3));
+        await second.WaitAsync(Patience, Cancelled);
+        scripted.Transport.Deliver(NotificationOf(3, 7));
+        await scripted.Settle();
+
+        Assert.Equal([7], notification.Triggered);
+        Assert.Empty(scripted.Errors);
+        Assert.Equal([(EnvelopeKind.Request, 1u), (EnvelopeKind.Cancel, 1u), (EnvelopeKind.Request, 3u)], scripted.Transport.Calls);
+    }
+
+    [Fact]
+    public async Task Keeps_the_subscription_when_its_replacement_is_refused_before_drawing_a_call_id()
+    {
+        using var scripted = new ScriptedRouter();
+        var notification = new ScriptedNotification(Service);
+
+        await scripted.Router.RegisterNotification(notification).WaitAsync(Patience, Cancelled);
+
+        var first = scripted.Router.Request(ReadOnlyMemory<byte>.Empty, RequestOf(notification));
+
+        scripted.Transport.Deliver(ResultOf(1));
+        await first.WaitAsync(Patience, Cancelled);
+        var refused = await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return scripted.Router.Request(new byte[0x100_0001], RequestOf(notification)).WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.Equal((ushort)ProtocolCode.PayloadTooLarge, refused.Code);
+        scripted.Transport.Deliver(NotificationOf(1, 7));
+        await scripted.Settle();
+
+        Assert.Equal([7], notification.Triggered);
+        Assert.Empty(scripted.Errors);
+        Assert.Equal([(EnvelopeKind.Request, 1u)], scripted.Transport.Calls);
+    }
+
+    [Fact]
+    public async Task Sends_each_call_in_the_order_it_is_made_whatever_order_it_is_awaited_in()
+    {
+        using var scripted = new ScriptedRouter();
+        var calls = new List<Task<RouterResult>>();
+
+        foreach (var value in new byte[] { 1, 2, 3 })
+        {
+            calls.Add(scripted.Router.Request(new[] { value }, RequestOf()));
+        }
+
+        await scripted.Settle();
+
+        foreach (var (callId, payload) in new[] { (1u, "a"u8.ToArray()), (3u, "b"u8.ToArray()), (5u, "c"u8.ToArray()) })
+        {
+            scripted.Transport.Deliver(new Envelope { Header = new ResultHeader { CallId = callId }, Payload = payload });
+        }
+
+        calls.Reverse();
+        var answers = new List<string>();
+
+        foreach (var call in calls)
+        {
+            answers.Add(Convert.ToHexString((await call.WaitAsync(Patience, Cancelled)).Payload.Span));
+        }
+
+        Assert.Equal([1, 2, 3], scripted.Transport.Envelopes.Where((envelope) =>
+        {
+            return envelope.Kind == EnvelopeKind.Request;
+        }).Select((envelope) =>
+        {
+            return (int)envelope.Payload.Span[0];
+        }));
+        Assert.Equal(["63", "62", "61"], answers);
+    }
+
+    [Fact]
+    public async Task An_envelope_a_listener_hands_its_router_within_a_turn_is_taken_behind_what_came_before_it()
+    {
+        using var scripted = new ScriptedRouter();
+        var heard = new List<uint>();
+
+        scripted.Router.Debug += (direction, envelope) =>
+        {
+            if (direction != DebugDirection.Rx || envelope.Header.Kind != EnvelopeKind.Result)
+            {
+                return;
+            }
+
+            heard.Add(envelope.Header.CallId);
+
+            if (envelope.Header.CallId == 1)
+            {
+                scripted.Transport.Deliver(new Envelope { Header = new ResultHeader { CallId = 5 }, Payload = "c"u8.ToArray() });
+            }
+        };
+
+        var calls = new List<Task<RouterResult>>();
+
+        foreach (var value in new byte[] { 1, 2, 3 })
+        {
+            calls.Add(scripted.Router.Request(new[] { value }, RequestOf()));
+        }
+
+        await scripted.Settle();
+
+        // the scheduler takes both arrivals before it takes either router turn
+        scripted.Transport.Later(() =>
+        {
+            scripted.Transport.Deliver(new Envelope { Header = new ResultHeader { CallId = 1 }, Payload = "a"u8.ToArray() });
+            scripted.Transport.Deliver(new Envelope { Header = new ResultHeader { CallId = 3 }, Payload = "b"u8.ToArray() });
+        });
+        await Task.WhenAll(calls).WaitAsync(Patience, Cancelled);
+
+        Assert.Equal([1u, 3u, 5u], heard);
+    }
+
+    [Fact]
     public async Task Calls_a_procedure_with_a_payload_then_options_and_gives_its_result_decoded()
     {
         using var link = new Link();

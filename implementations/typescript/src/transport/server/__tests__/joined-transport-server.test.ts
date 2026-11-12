@@ -576,6 +576,19 @@ test.describe('joinTransports', () => {
     expect(http.asked, 'nothing asked again').toEqual([['stop']]);
   });
 
+  // decision 0003
+  test('fails its dispose with what a transport it joined failed to stop with, once every other settled', async () => {
+    const failingFake = createFake('HTTP', {
+      flags: {},
+      stopping: Promise.reject(new Error('a stop that fails')),
+    });
+    const otherFake = createFake('WS', { flags: {} });
+    const joined = joinTransports([failingFake.transport, otherFake.transport]);
+
+    await expect(joined[Symbol.asyncDispose]()).rejects.toThrow('a stop that fails');
+    expect([failingFake.asked, otherFake.asked]).toEqual([[['stop']], [['stop']]]);
+  });
+
   // spec 15.12.17, 15.14
   test('a joined transport pauses the connection on the transport that drew it', async () => {
     const webSocket = createFake('WS', { flags: {} });

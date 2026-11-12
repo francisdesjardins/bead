@@ -7,9 +7,9 @@
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 Bead is an exploration: how far one `.proto` file, a generator and a hybrid binary protocol can go —
-a specification with its conformance files, two implementations at parity and a third, its core
-and its transports over WebSocket and HTTP, and the tools around them. It is a personal project,
-kept at its author's pace.
+a specification with its conformance files, two implementations at parity and a third, its core,
+its transports over WebSocket and HTTP and its MQTT 5 binding, and the tools around them. It is a
+personal project, kept at its author's pace.
 
 Bead is a binary wire protocol for calls between a client and a server: a request and its result or
 failure, a subscription and its notifications, the commands a server sends back, cancels, sessions,
@@ -34,12 +34,14 @@ This repository holds the protocol and its implementations, side by side:
   half; sessions and credentials with a `JWT`'s verification; the clock it is given and every
   duration held as spec 1.4 holds it; the trace, the filter and the registry, and a participant's
   trace of its parcels; the WebSocket, HTTP and in-memory transports; the broker's core over an
-  in-memory broker, and the joined transport; and the `proto` payload's codec on Buffa — playing
-  every conformance file it reaches, each part it lacks a row of the support matrix ahead
+  in-memory broker, MQTT 5 over a broker, and the joined transport; and the `proto` payload's codec
+  on Buffa — playing every conformance file it reaches, each part it lacks a row of the support
+  matrix ahead
   ([0044](docs/decisions/0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md),
-  [0049](docs/decisions/0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md));
-- **an interop service** every side offers, which each other side's client calls over WebSocket and
-  HTTP, and the TypeScript and C# sides' over MQTT 5 and AMQP 1.0 too, beside a gateway whose routes
+  [0049](docs/decisions/0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md),
+  [0050](docs/decisions/0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md));
+- **an interop service** every side offers, which each other side's client calls over WebSocket,
+  HTTP and MQTT 5, and the TypeScript and C# sides' over AMQP 1.0 too, beside a gateway whose routes
   the other side's generated HTTP client calls.
 
 **Nothing is published.** No package goes to npm, NuGet or crates.io, and no image to a registry:
@@ -115,7 +117,7 @@ and AMQP 1.0 on RabbitMQ 4 its second
   commands, the server's own calls to the client.
 - **One behaviour in every language.** The spec and its conformance files are the contract. Every
   implementation plays them, the Rust side the part it reaches; the three call each other in CI over
-  WebSocket and HTTP, and the TypeScript and C# ones over MQTT 5 and AMQP 1.0 too, and through each
+  WebSocket, HTTP and MQTT 5, and the TypeScript and C# ones over AMQP 1.0 too, and through each
   other's gateway.
 - **No dependency.** The TypeScript side runs in browsers and in Node with nothing else installed;
   a project that binds `proto` brings protobuf-es, an optional peer, one over MQTT 5 brings
@@ -133,7 +135,8 @@ envelopes.
 
 ## Where Bead goes
 
-- **Next**: Rust's broker bindings, its gateway and beadc's Rust target, each a record of its own
+- **Next**: beadc's Rust target, then the Rust side's gateway and its AMQP 1.0 binding, each a
+  record of its own
   ([0044](docs/decisions/0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)),
   each a row of the [support matrix](docs/support.md#differences) ahead.
 - **Then**: a payload's rules written in CEL, a total subset beadc compiles into each side beside
@@ -308,8 +311,8 @@ nothing it generates is committed.
 
 In `implementations/rust`. Rust 1.99.1 and edition 2024, as `rust-toolchain.toml` pins them, which
 rustup installs with clippy, rustfmt, llvm-tools and the browser's target, `wasm32-unknown-unknown`;
-on Windows, the MSVC build tools: the core pure Rust, its socket transports' TLS, aws-lc-rs, built
-by the platform's C compiler
+on Windows, the MSVC build tools: the core pure Rust, its socket transports' and its MQTT 5
+binding's TLS, aws-lc-rs, built by the platform's C compiler
 ([0049](docs/decisions/0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)).
 Clippy's `pedantic`, `nursery` and `cargo` groups and chosen restriction lints are denied,
 `unsafe_code` forbidden, and every warning of rustc, clippy and rustdoc an error by its
@@ -317,21 +320,26 @@ Clippy's `pedantic`, `nursery` and `cargo` groups and chosen restriction lints a
 ([0044](docs/decisions/0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)).
 `bead-house`'s tests, among `cargo test`'s, hold what no lint holds: the parameter rule, each
 options struct's shape, each library crate's public items, their members included, to its list
-under `crates/bead-house/surfaces/`, which `BEAD_HOUSE_WRITE=1` writes anew, and no tuple on them.
+under `crates/bead-house/surfaces/`, which `BEAD_HOUSE_WRITE=1` writes anew, no tuple on them, and
+no text a misread of UTF-8 as Windows-1252 left in any source.
 Its [README](implementations/rust/README.md) describes its crates and its modules.
 
 ```sh
 cd implementations/rust
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features --locked
+cargo clippy --workspace --all-targets --locked
 cargo clippy -p francisdesjardins-bead --lib --locked
 cargo clippy -p francisdesjardins-bead --lib --features websocket --locked
 cargo clippy -p francisdesjardins-bead --lib --features http --locked
+cargo clippy -p francisdesjardins-bead --lib --features mqtt --locked
 cargo clippy -p francisdesjardins-bead --lib --features testing --locked --target wasm32-unknown-unknown
 cargo test --workspace --all-features --locked
 cargo doc --workspace --no-deps --all-features --locked
 cargo build --workspace --locked
 cargo deny --locked check
+cargo deny --manifest-path fuzz/Cargo.toml --locked check
+cargo deny --manifest-path tools/protobuf-conformance/Cargo.toml --locked check
 ```
 
 The packages are `francisdesjardins-bead*`, their libraries `bead*`, `publish = false`. Bead takes
@@ -339,7 +347,7 @@ the application's tokio runtime, which enables its time driver, `enable_all` or 
 its IO driver for a socket's transport, and starts none of its own; an operation goes as it is made,
 and dropping its future cancels nothing. The core spawns and reads time through one module and its
 clock alone, clippy's `disallowed-methods` and `disallowed-types` holding every other path, and the
-second clippy run checks that it compiles for the browser's target, which is checked, never run. Its
+last clippy run checks that it compiles for the browser's target, which is checked, never run. Its
 `proto` codec, `bead-protobuf`, is built on Buffa 0.9.2, whose generated code its tests include
 under one `#[expect]` of the workspace's lints.
 
@@ -421,9 +429,11 @@ that is no token. CI's `commits` job runs `check.mjs`.
 
 ## Interop, both ways
 
-Each side starts the others' interop servers and calls them with its own client, over WebSocket
-and over HTTP, and the TypeScript and C# sides each other's, against a broker of the run's own, over
-MQTT 5 and over AMQP 1.0 ([0049](docs/decisions/0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)):
+Each side starts the others' interop servers and calls them with its own client, over WebSocket,
+over HTTP and, against a broker of the run's own, over MQTT 5; and the TypeScript and C# sides each
+other's over AMQP 1.0 too
+([0049](docs/decisions/0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md),
+[0050](docs/decisions/0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)):
 
 - the C# client against the TypeScript server: `Bead.Interop.Tests`, run by `dotnet test`, starts
   it with Node from `implementations/typescript`, which must be installed;
@@ -471,16 +481,28 @@ and `tools/amqp-broker.mjs` a RabbitMQ 4.4.0, each by its digest under Docker, a
 the run, and `run` stops it whatever the command's end. The TypeScript client calls the C# server
 over each by `yarn test:mqtt` and `yarn test:amqp`, among the cases over that binding and its
 adapter's tests; the C# client calls the TypeScript server by `Bead.Interop.Tests`, filtered to its
-transport's trait. Where `BEAD_MQTT_URL` or `BEAD_AMQP_URL` names no broker, each skips, saying so;
-`BEAD_MQTT_REQUIRED=1` and `BEAD_AMQP_REQUIRED=1` turn that skip into a failure, as CI's jobs `mqtt`
-and `amqp` set them.
+transport's trait. Over MQTT 5, the Rust side plays its cases, `--test transports`, and its
+adapter's twins, the fixture's among them, `--lib mqtt::`, under the features `testing` and `mqtt`;
+its interop server serves over MQTT 5 too where `BEAD_MQTT_URL` names a broker, which the TypeScript
+and C# clients call, `yarn test:interop --grep "the Rust server.*over MQTT 5"` and
+`Bead.Interop.Tests` filtered to `server=Rust` and `transport=MQTT`; and its client's trials over
+MQTT 5, `-- ::mqtt::` under `BEAD_INTEROP_RUST=1`, call each side's server through the broker. Where
+`BEAD_MQTT_URL` or `BEAD_AMQP_URL` names no broker, each skips, saying so; `BEAD_MQTT_REQUIRED=1`
+and `BEAD_AMQP_REQUIRED=1` turn that skip into a failure, as CI's jobs `mqtt` and `amqp` set them.
 
 ```sh
 cd implementations/typescript && node ../../tools/mqtt-broker.mjs run -- yarn test:mqtt
 cd implementations/typescript && node ../../tools/amqp-broker.mjs run -- yarn test:amqp
 cd implementations/dotnet && node ../../tools/mqtt-broker.mjs run -- dotnet test --project tests/Bead.Interop.Tests --filter-trait "transport=MQTT"
 cd implementations/dotnet && node ../../tools/amqp-broker.mjs run -- dotnet test --project tests/Bead.Interop.Tests --filter-trait "transport=AMQP"
+cd implementations/rust && node ../../tools/mqtt-broker.mjs run -- cargo test -p francisdesjardins-bead --features testing,mqtt --locked --test transports
+cd implementations/rust && node ../../tools/mqtt-broker.mjs run -- cargo test -p francisdesjardins-bead --features testing,mqtt --locked --lib mqtt::
+cd implementations/rust && BEAD_INTEROP_RUST=1 node ../../tools/mqtt-broker.mjs run -- cargo test -p francisdesjardins-bead-interop-server --locked --test interop -- ::mqtt::
+cd implementations/typescript && node ../../tools/mqtt-broker.mjs run -- yarn test:interop --grep "the Rust server.*over MQTT 5"
+cd implementations/dotnet && node ../../tools/mqtt-broker.mjs run -- dotnet test --project tests/Bead.Interop.Tests --filter-query "/[(server=Rust)&(transport=MQTT)]"
 ```
+
+The last two start the Rust server from `BEAD_INTEROP_RUST_SERVER`, as above.
 
 A page of another origin calls each HTTP server in Chromium: `yarn test:browser`, in a Playwright
 config of its own, serves a page on `localhost` whose bundled HTTP client calls each side's interop
@@ -499,12 +521,15 @@ BEAD_INTEROP_REQUIRED=1 yarn test:browser
 
 ## The demo
 
-A page with a button per kind of call — a read, a write, a subscription, a transfer either way, a
-cancel, a failure, a command — the calls and envelopes logged as the client sees them, and what the
-client's and the server's metrics registries count, over WebSocket, HTTP or a Web Worker, and,
-where it runs beside a broker, over MQTT 5 with `?transport=mqtt`; and a sign-up form, a service
-beadc generates from the demo's `.proto`, whose refusals by its payload rules show each violation
-under its field.
+A page of scenes, one a tab, in francisdesjardins.ca's palette and type. Try it: a card per kind
+of call — a read, a write, a subscription, a transfer either way, a cancel, a failure, a command —
+each showing its result beside its buttons, over WebSocket, HTTP or a Web Worker, and, where it runs
+beside a broker, over MQTT 5 with `?transport=mqtt`; the wire, folded until it is opened, a drawer
+on a desktop and a sheet on a phone, logs the calls and envelopes as the client sees them. Beside
+it: a sign-up form, a service beadc generates from the demo's `.proto`, whose refusals by its
+payload rules show each violation under its field; the server, and what the client's and the
+server's metrics registries count; and Packages, a blueprint cut into the outputs of `beadc.yaml`
+by the builder's own selection and reading of it, run in the page, the YAML to copy.
 
 ```sh
 cd implementations/typescript
@@ -782,7 +807,10 @@ same parcel and the same bytes; `proto-codecs`, the `proto` codecs over `spec/co
 `Probe` (spec 17.9), the first three bytes drawing a path, a depth and a number of unknown groups to
 wrap what reads, which its writer then refuses as nested past 100 or writes so that its reader takes
 it back. The Rust side fuzzes all eight, over its core's judgement and codecs, with cargo-fuzz on
-the nightly `tools/fuzz.mjs` pins by its date, on Linux or WSL, from `implementations/rust/fuzz/`. The TypeScript side fuzzes a ninth, `blueprint`,
+the nightly `tools/fuzz.mjs` pins by its date, on Linux or WSL, from `implementations/rust/fuzz/`,
+and one of its own, `mqtt-packets`, its MQTT 5 client's reader of a broker's packets, which the
+other sides leave to MQTT.js and MQTTnet, so it has no twin. The TypeScript side fuzzes one of its
+own, `blueprint`,
 beadc's blueprint reader, its JSON, its schema and its rules, and its form written back and read
 again; beadc has no C# side, so it has no twin. A target lets its parser's documented refusal pass;
 any other exception or a panic, an input past 1 s, or memory past its bound, 256 MiB of its own on
@@ -923,10 +951,14 @@ against each server.
   against a broker of its own.
 - `node tools/amqp-broker.mjs start|stop|run -- <command…>`: a RabbitMQ 4.4.0 of the run's own, by
   its digest under Docker, that `spec/transports.json`'s `brokers.amqp` describes, its exchange,
-  name queues and permissions spec 15.38's, under a container name, a loopback port and a password
-  drawn for the run; `start` prints `BEAD_AMQP_URL`, `BEAD_AMQP_PASSWORD` and `BEAD_AMQP_BROKER`
-  as PowerShell's `$env:` lines, or to `$GITHUB_ENV` with `--github-env`; `run` starts one, runs
-  the command under those variables and stops it whatever the command's end. What it shares with
+  name queues and permissions spec 15.38's, under a container name, loopback ports and a password
+  drawn for the run, listening over TCP and over TLS: the image's OpenSSL makes a CA, a server
+  certificate of `localhost` and one client certificate for each authenticated id, for the run
+  alone, and the broker maps a client certificate's common name to its id through SASL EXTERNAL;
+  `start` prints `BEAD_AMQP_URL`, `BEAD_AMQP_TLS_URL`, `BEAD_AMQP_CA`, `BEAD_AMQP_CERTIFICATES`,
+  `BEAD_AMQP_PASSWORD` and `BEAD_AMQP_BROKER` as PowerShell's `$env:` lines, or to `$GITHUB_ENV`
+  with `--github-env`; `run` starts one, runs the command under those variables and stops it
+  whatever the command's end. What it shares with
   `tools/mqtt-broker.mjs`, the container's name, the ports, the password, the run's folder and the
   three commands, is `tools/broker-fixture.mjs`'s.
 - `node site/check.mjs`: the page's SVGs are their sources' renders, and its build gives the
@@ -1009,29 +1041,30 @@ images, `ubuntu-26.04`, and `windows-2025` and `ubuntu-26.04-arm` for the builde
 (regenerate, then diff, then `spec/check.py`); `playwright` (the exact version of `@playwright/test`
 the TypeScript side pins, which names Microsoft's image of it, the one the `typescript` and `dotnet`
 jobs run in, its Chromium already there); `typescript` on Node 26 and on the floor, 24.9 (install,
-check, the public surface held to its list among it, test, under coverage on Node 26, held to the
-side's floor, the demo's static build, the DevTools extension built and, on Node 26, tested in
-Chromium, the demo's tests on Node 26, and the root's files under the same formatter); `dotnet`
+the builder's packages too, which the demo's Packages tab reaches, check, the public surface held
+to its list among it, test, under coverage on Node 26, held to the side's floor, the demo's static
+build, the DevTools extension built and, on Node 26, tested in Chromium, the demo's tests on
+Node 26, and the root's files under the same formatter); `dotnet`
 (every C# package audited by NuGetAudit as it restores, format, build, the builder's C# goldens
 among its projects and each `src` project's public surface held to its `PublicAPI` lists, the C#
 bench built in Release, test under coverage, held to the side's floor, the interop both ways with
 `BEAD_INTEROP_REQUIRED=1`, each side's generated HTTP client against the other's gateway among it,
 and a page of another origin in Chromium against both HTTP servers); `mqtt` (on the runner's host, a
 Mosquitto 2.1.2 by its digest and a password drawn for the run, with `BEAD_MQTT_REQUIRED=1` and
-`BEAD_INTEROP_REQUIRED=1`: the cases over MQTT 5 on the TypeScript and C# sides, each adapter
-against it over TCP and WebSocket, the interop over MQTT 5 both ways, the demo's server and its
-page's client over it, a page's client in Chromium, and the DevTools extension following the demo's
-client over it); `amqp` (on the runner's host, a RabbitMQ 4.4.0 by its digest, its heartbeat
-lowered, and a password drawn for the run, with `BEAD_AMQP_REQUIRED=1` and
-`BEAD_INTEROP_REQUIRED=1`: the cases over AMQP 1.0 on the TypeScript and C# sides, each adapter
-against it, and the interop over AMQP 1.0 both ways, with no page leg, since no page reaches an AMQP
-1.0 broker); `rust` on Linux and Windows (on Linux, the toolchain its file pins, format, clippy, the
-core's library linted with no feature and with `websocket` and `http` each alone, the core's clippy
-for the browser's target, the documentation, a build on the default features alone, the interop's
-server and its trials' test binary built and handed on, cargo-deny, the tests' descriptor set held
-to what protoc writes at its pin, the tests under coverage, `bead-house`'s holding each library
-crate's public surface to its list among them, lines and regions held to the side's floor, and the
-fuzz targets built on the nightly pinned by its date; on Windows, the tests); `interop-rust` (in the
+`BEAD_INTEROP_REQUIRED=1`: the cases over MQTT 5 on every side, each adapter against it over TCP
+and WebSocket, the interop over MQTT 5 both ways, the Rust side's built from the `rust` job's cache,
+the demo's server and its page's client over it, a page's client in Chromium, and the DevTools
+extension following the demo's client over it); `amqp` (on the runner's host, a RabbitMQ 4.4.0 by
+its digest, its heartbeat lowered, and a password and TLS certificates drawn for the run, with
+`BEAD_AMQP_REQUIRED=1` and `BEAD_INTEROP_REQUIRED=1`: the cases over AMQP 1.0 on the TypeScript and
+C# sides, each adapter against it over TCP and over TLS with SASL EXTERNAL, and the interop over
+AMQP 1.0 both ways, with no page leg, since no page reaches an AMQP 1.0 broker); `rust` on Linux and Windows (on Linux, the toolchain its file pins, format, clippy, the
+core's library linted with no feature and with `websocket`, `http` and `mqtt` each alone, the
+core's clippy for the browser's target, the documentation, a build on the default features alone,
+the interop's server and its trials' test binary built and handed on, cargo-deny, the tests'
+descriptor set held to what protoc writes at its pin, the tests under coverage, `bead-house`'s
+holding each library crate's public surface to its list among them, lines and regions held to the
+side's floor, and the fuzz targets built on the nightly pinned by its date; on Windows, the tests); `interop-rust` (in the
 Playwright image, once `rust` ends, with no Rust toolchain and `BEAD_INTEROP_REQUIRED=1`: the Rust
 client against each side's server, the TypeScript and C# clients against the Rust server, and a page
 of another origin in Chromium against every HTTP server, the Rust one among them); `builder`

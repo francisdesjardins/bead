@@ -1,10 +1,11 @@
+use std::error::Error;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::SystemTime;
 
 use futures_util::{SinkExt, StreamExt};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpListener;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Notify, mpsc};
 use tungstenite::handshake::server::{
     Callback, ErrorResponse, Request as UpgradeRequest, Response as Answer,
@@ -544,6 +545,92 @@ async fn offers_no_extension_in_its_upgrade_permessage_deflate_among_them() {
         "no extension offered"
     );
     client.dispose();
+}
+
+// the twin of `WebSocketTransportClientTests`' own
+#[tokio::test]
+async fn fails_a_101_that_names_an_extension_it_never_offered() {
+    let mut held = holding().await;
+    let client = client();
+    let connecting = client.connect(&to(held.port));
+    let mut socket = held.next().await;
+    let asked = String::from_utf8(head_of(&mut socket).await).unwrap();
+    let key = asked
+        .lines()
+        .find_map(|line| {
+            line.split_once(':')
+                .filter(|(name, _)| name.eq_ignore_ascii_case("sec-websocket-key"))
+                .map(|(_, key)| key.trim().to_owned())
+        })
+        .unwrap();
+    let accept = tungstenite::handshake::derive_accept_key(key.as_bytes());
+
+    socket
+        .write_all(
+            format!(
+                "HTTP/1.1 101 Switching Protocols
+Upgrade: websocket
+Connection: Upgrade
+Sec-WebSocket-Accept: {accept}
+Sec-WebSocket-Extensions: permessage-deflate
+
+"
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+
+    let refused = settled(connecting).await;
+
+    assert!(
+        matches!(&refused, Err(TransportError::Connect(error)) if error.to_string().contains("extension never offered")),
+        "{refused:?}"
+    );
+    assert!(is_state(&client, ReadyState::Closed), "closed");
+    assert!(ends(&mut socket).await, "its socket let go");
+    held.stop.cancel();
+}
+
+// ! tungstenite matches `Connection` whole against `Upgrade`, where RFC 6455 §4.1 and RFC 9110 §7.6.1
+// read a list of tokens: a 101 that lists another is refused, as .NET's client and the global
+// WebSocket refuse it and `ws` opens on it, a row of docs/support.md
+#[tokio::test]
+async fn fails_a_101_whose_connection_lists_upgrade_among_other_tokens() {
+    let mut held = holding().await;
+    let client = client();
+    let connecting = client.connect(&to(held.port));
+    let mut socket = held.next().await;
+    let asked = String::from_utf8(head_of(&mut socket).await).unwrap();
+    let key = asked
+        .lines()
+        .find_map(|line| {
+            line.split_once(':')
+                .filter(|(name, _)| name.eq_ignore_ascii_case("sec-websocket-key"))
+                .map(|(_, key)| key.trim().to_owned())
+        })
+        .unwrap();
+    let accept = tungstenite::handshake::derive_accept_key(key.as_bytes());
+
+    socket
+        .write_all(
+            format!(
+                "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: keep-alive, Upgrade\r\nSec-WebSocket-Accept: {accept}\r\n\r\n"
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+
+    let refused = settled(connecting).await;
+
+    assert!(
+        matches!(&refused, Err(TransportError::Connect(error)) if error.to_string().contains("Connection")),
+        "{refused:?}"
+    );
+    assert!(is_state(&client, ReadyState::Closed), "closed");
+    assert!(ends(&mut socket).await, "its socket let go");
+    held.stop.cancel();
 }
 
 #[tokio::test]

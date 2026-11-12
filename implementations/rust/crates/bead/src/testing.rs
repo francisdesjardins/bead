@@ -24,8 +24,14 @@ pub(crate) mod clockless;
 pub(crate) mod core_port;
 pub mod durations;
 pub mod files;
+#[cfg(feature = "mqtt")]
+pub mod frame_relay;
 pub mod hexadecimal;
 pub mod instants;
+#[cfg(any(feature = "websocket", feature = "http", feature = "mqtt"))]
+pub mod link_relay;
+#[cfg(feature = "mqtt")]
+pub mod mqtt_script;
 pub mod mutations;
 pub mod pair;
 pub mod parcels;
@@ -33,18 +39,22 @@ mod platform;
 mod reading_clock;
 pub mod scripted;
 #[cfg(test)]
+pub(crate) mod service_port;
+#[cfg(test)]
 pub(crate) mod sessions;
 #[cfg(test)]
 pub(crate) mod surface;
 #[cfg(test)]
 mod tests;
-#[cfg(any(feature = "websocket", feature = "http"))]
+#[cfg(any(feature = "websocket", feature = "http", feature = "mqtt"))]
 pub mod tls;
 pub mod validations;
 pub mod vectors;
 #[cfg(any(feature = "websocket", feature = "http"))]
 pub mod wire;
 
+#[cfg(test)]
+pub(crate) use platform::alive_tasks;
 #[cfg(test)]
 pub(crate) use platform::blocking;
 pub use platform::{Instant, patience, rest, spawn, wall_now, yield_now};

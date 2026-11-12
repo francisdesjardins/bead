@@ -12,6 +12,32 @@ public sealed class SessionTokenTests
     // definition
 
     [Fact]
+    public void Holds_16_bytes_not_all_zero_and_refuses_any_other()
+    {
+        var token = SessionToken.FromBytes(Bytes);
+        var written = new byte[16];
+
+        token.CopyTo(written);
+        Assert.Equal(Bytes, written);
+        Assert.Equal(token, SessionToken.FromBytes((byte[])Bytes.Clone()));
+
+        foreach (var length in new[] { 0, 15, 17 })
+        {
+            var refused = Assert.Throws<ArgumentException>(() =>
+            {
+                return SessionToken.FromBytes(Enumerable.Repeat((byte)1, length).ToArray());
+            });
+
+            Assert.StartsWith($"a session token is 16 bytes, not all zero; got {length}", refused.Message, StringComparison.Ordinal);
+        }
+
+        Assert.StartsWith("a session token is 16 bytes, not all zero; got 16", Assert.Throws<ArgumentException>(() =>
+        {
+            return SessionToken.FromBytes(new byte[16]);
+        }).Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Spells_its_16_bytes_in_unpadded_base64url_and_reads_them_back()
     {
         var token = SessionToken.FromBytes(Bytes);

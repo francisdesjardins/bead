@@ -7,7 +7,7 @@
 // dependencies
 
 import { type DescField, type DescMessage, type Message, ScalarType } from '@bufbuild/protobuf';
-import { requiredShapeOf } from './records';
+import { type RequiredHolder, requiredShapeOf } from './records';
 import { entriesByKey } from './validate';
 
 // types
@@ -82,7 +82,7 @@ const walk = (schema: DescMessage, message: Message): RequiredPath | undefined =
 };
 
 /** The walk of what `field` holds, `value`: a message, a list's items by index, a map's values by key. */
-const walkHolder = (field: DescField, value: unknown): RequiredPath | undefined => {
+const walkHolder = (field: RequiredHolder, value: unknown): RequiredPath | undefined => {
   if (value === undefined) {
     return undefined;
   }
@@ -91,10 +91,6 @@ const walkHolder = (field: DescField, value: unknown): RequiredPath | undefined 
     case 'message':
       return walk(field.message, value as Message);
     case 'list': {
-      if (field.listKind !== 'message') {
-        return undefined;
-      }
-
       for (const [index, item] of (value as readonly Message[]).entries()) {
         const below = walk(field.message, item);
 
@@ -106,10 +102,6 @@ const walkHolder = (field: DescField, value: unknown): RequiredPath | undefined 
       return undefined;
     }
     case 'map': {
-      if (field.mapKind !== 'message') {
-        return undefined;
-      }
-
       for (const [key, item] of entriesByKey(
         value as Readonly<Record<string, Message>>,
         orderOf(field.mapKey)
@@ -123,9 +115,6 @@ const walkHolder = (field: DescField, value: unknown): RequiredPath | undefined 
 
       return undefined;
     }
-    case 'enum':
-    case 'scalar':
-      return undefined;
   }
 };
 

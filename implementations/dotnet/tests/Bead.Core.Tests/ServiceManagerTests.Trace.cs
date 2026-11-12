@@ -9,6 +9,43 @@ namespace Bead.Tests;
 public sealed partial class ServiceManagerTests
 {
     [Fact]
+    public async Task Reads_no_clock_for_a_call_once_its_last_debug_listener_went()
+    {
+        var clock = new SteppingClock(Started);
+        var hearing = new ServiceManager(new RecordingRouter(RouterSide.Client) { Clock = clock });
+        var notifying = new ServiceManager(new RecordingRouter { Clock = clock });
+        var ask = hearing.GetRequest(Echo, Asked);
+        Action<Exception?, DebugEvent> listener = (_, _) =>
+        {
+        };
+
+        async Task<(int Wall, int Monotonic)> ReadingsOf()
+        {
+            var before = clock.Readings;
+
+            await ask(new Text("x"))().WaitAsync(Patience, Cancelled);
+
+            return (clock.Readings.Wall - before.Wall, clock.Readings.Monotonic - before.Monotonic);
+        }
+
+        var unheard = await ReadingsOf();
+
+        foreach (var manager in new[] { hearing, notifying })
+        {
+            manager.Debug += listener;
+        }
+
+        Assert.NotEqual(unheard, await ReadingsOf());
+
+        foreach (var manager in new[] { hearing, notifying })
+        {
+            manager.Debug -= listener;
+        }
+
+        Assert.Equal(unheard, await ReadingsOf());
+    }
+
+    [Fact]
     public void Is_debugging_only_while_someone_listens()
     {
         var manager = new ServiceManager(new RecordingRouter());

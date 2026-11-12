@@ -1289,7 +1289,7 @@ footer {
   </nav>
   <main id="main" tabindex="-1">
 <header class="hero">
-  <p class="eyebrow">bead 0.12.0 · spec 0.13.0 · layouts 0xA1 and 0xB1</p>
+  <p class="eyebrow">bead 0.13.0 · spec 0.14.0 · layouts 0xA1 and 0xB1</p>
   <h1>Bead</h1>
   <p class="lede">A binary protocol for calls between a client and a server, in both directions.</p>
   <div class="invite">
@@ -2269,8 +2269,9 @@ offerHello(server);
   <h2 id="courtier-h">Over a broker</h2>
   <p class="gist">
     A topic-based publish/subscribe broker is one more transport, and Bead never becomes a network
-    of its own there. Each side holds its core, an in-memory broker for tests, and two bindings:
-    MQTT 5, and AMQP 1.0 on RabbitMQ 4 (§15.16 to §15.38).
+    of its own there. Each side holds its core, an in-memory broker for tests, and its bindings:
+    MQTT 5 on every side, and AMQP 1.0 on RabbitMQ 4 for the TypeScript and C# sides (§15.16 to
+    §15.38).
   </p>
   <p>
     A participant is a side’s link to its broker. Its identifier is the identity the broker
@@ -2310,7 +2311,8 @@ offerHello(server);
       is a shared subscription, <code>$share/&lt;name&gt;/bead/s/&lt;name&gt;</code>. Each packet
       is counted to the byte under each end’s maximum size. A participant’s will announces its
       departure to the peers. The TypeScript side goes through MQTT.js, the C# side through
-      MQTTnet, and both are played against Mosquitto.
+      MQTTnet, the Rust side through a client of its own, the feature <code>mqtt</code> of its core,
+      over TCP, TLS or a WebSocket. All three are played against Mosquitto.
     </p>
     <h3 id="courtier-amqp">Over AMQP 1.0</h3>
     <p>
@@ -2318,8 +2320,8 @@ offerHello(server);
       queue that ends with it. The deployment provisions each name’s queue, and the broker delivers
       each of its messages to a single member. Each message follows a single profile, counted to the
       byte. AMQP 1.0 has no will: Bead’s heartbeat alone says a peer went quiet. The TypeScript side
-      goes through rhea, the C# side through AMQPNetLite, and both are played against RabbitMQ 4. No
-      page reaches an AMQP 1.0 broker.
+      goes through rhea, the C# side through AMQPNetLite, and both are played against RabbitMQ 4. The
+      Rust side’s binding is ahead. No page reaches an AMQP 1.0 broker.
     </p>
     <p>
       In both cases, a deployment’s broker authenticates each link, by a password or a TLS client
@@ -2346,7 +2348,7 @@ offerHello(server);
   </p>
   <p>
     A companion of the specification describes it, <code>spec/transcoding.md</code>, under its own
-    version, 0.4.0. The gateway listens on its own port,
+    version, 0.4.1. The gateway listens on its own port,
     <code>localhost</code> by default, or mounts into the application’s web server.
   </p>
   <figure class="figure">
@@ -2786,7 +2788,7 @@ data: {"code":2,"scope":"application","status":400,"title":"COUNTED","type":"htt
   </p>
   <p>
     Debugging stays beside the wire, in a companion, <code>spec/debugging.md</code>
-    0.8.0. A constrained side can leave it out of its build and still conform to
+    0.9.0. A constrained side can leave it out of its build and still conform to
     the wire.
   </p>
 
@@ -3019,8 +3021,8 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
   <p class="gist">
     Bead is a protocol: a specification, conformance files every implementation plays, and an
     interop service. The repository holds three implementations. TypeScript and C# are at
-    behavioural parity. Rust has its core and its WebSocket and HTTP transports, and each part it
-    lacks is a row of the support matrix, ahead.
+    behavioural parity. Rust has its core, its WebSocket and HTTP transports and its MQTT 5 binding,
+    and each part it lacks is a row of the support matrix, ahead.
   </p>
   <div class="table-wrap">
     <table class="compare">
@@ -3054,8 +3056,7 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
           <td>WebSocket, HTTP, Web Worker, in memory, a broker over MQTT 5 or AMQP 1.0, and joined</td>
           <td>WebSocket, HTTP on Kestrel, in memory, a broker over MQTT 5 or AMQP 1.0, and joined</td>
           <td>
-            WebSocket and HTTP on hyper, in memory, the broker’s core over an in-memory broker, and
-            joined
+            WebSocket and HTTP on hyper, in memory, a broker over MQTT 5, and joined
           </td>
         </tr>
         <tr>
@@ -3068,9 +3069,10 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
     </table>
   </div>
   <p class="space">
-    On the Rust side, next come the bindings to a broker, the gateway and <code>beadc</code>’s Rust
-    target, each by a decision of its own. Its WebSocket and HTTP transports meet the other two
-    sides in the interop, both ways. The core also compiles for <code>wasm32-unknown-unknown</code>.
+    On the Rust side, next come the binding over AMQP 1.0, the gateway and <code>beadc</code>’s Rust
+    target, each by a decision of its own. Its WebSocket, HTTP and MQTT 5 transports meet the other
+    two sides in the interop, both ways. The core also compiles for
+    <code>wasm32-unknown-unknown</code>.
   </p>
   <p>
     Parity holds down to the field. When one platform cannot do what another can, every side keeps
@@ -3096,6 +3098,10 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
     blueprint with the last release, and says what breaks a peer already deployed or the code
     written against the API. <code>beadc</code> runs in a Docker image, and the example
     <code>examples/hello</code> plays in CI in both languages, each client against each server.
+    One contract gives several packages, each its own selection of procedures, and each transport
+    of a server takes the procedures it is given:
+    <a href="/playground/bead/#packages">the demo’s Packages tab</a> cuts a blueprint into them,
+    with <code>beadc</code>’s own code.
   </p>
   <figure class="figure">
     <figcaption>From the .proto to each language’s code</figcaption>
@@ -3104,8 +3110,8 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
   <h3 id="implantations-conformite">What each implementation plays</h3>
   <p>
     Each unit of the specification is cited by a conformance file, or carries the reason none
-    cites it. The three sides call each other in CI over WebSocket and HTTP, and the TypeScript and
-    C# sides over MQTT 5 and AMQP 1.0 too, and through their gateways.
+    cites it. The three sides call each other in CI over WebSocket, HTTP and MQTT 5, and the
+    TypeScript and C# sides over AMQP 1.0 too, and through their gateways.
   </p>
   <details class="more">
     <summary>The conformance files, in figures</summary>
@@ -3116,7 +3122,7 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
       <li><strong>The vectors</strong>: 460, in 16
         groups, each header’s bytes and what a reader refuses, a JWT’s verdicts and a broker’s
         parcels.</li>
-      <li><strong>The conversations</strong>: 189 exchanges between clients
+      <li><strong>The conversations</strong>: 190 exchanges between clients
         and the interop server, relays included.</li>
       <li><strong>The transports’ cases</strong>: 268 exchanges over HTTP,
         WebSocket and a broker, written byte by byte.</li>
@@ -3227,8 +3233,7 @@ disallowed-methods = [
   <ul class="rules">
     <li>
       <strong>Rust in full</strong
-      ><span>Its MQTT 5 and AMQP 1.0 bindings, its gateway and its target in
-        <code>beadc</code>.</span>
+      ><span>Its AMQP 1.0 binding, its gateway and its target in <code>beadc</code>.</span>
     </li>
     <li>
       <strong>Rules in CEL</strong
@@ -3377,7 +3382,7 @@ disallowed-methods = [
   </nav>
   <main id="main" tabindex="-1">
 <header class="hero">
-  <p class="eyebrow">bead 0.12.0 · spécification 0.13.0 · dispositions 0xA1 et 0xB1</p>
+  <p class="eyebrow">bead 0.13.0 · spécification 0.14.0 · dispositions 0xA1 et 0xB1</p>
   <h1>Bead</h1>
   <p class="lede">Un protocole binaire pour les appels entre un client et un serveur, dans les deux sens.</p>
   <div class="invite">
@@ -4380,7 +4385,8 @@ offerHello(server);
   <p class="gist">
     Un courtier de publication-abonnement à sujets est un transport de plus, et Bead n’y devient
     jamais un réseau à lui. Chaque côté en tient le cœur, un courtier en mémoire pour les tests, et
-    deux liaisons : MQTT 5, et AMQP 1.0 sur RabbitMQ 4 (§15.16 à §15.38).
+    ses liaisons : MQTT 5 de tous les côtés, et AMQP 1.0 sur RabbitMQ 4 des côtés TypeScript et C#
+    (§15.16 à §15.38).
   </p>
   <p>
     Un participant est le lien d’un côté vers son courtier. Son identifiant est l’identité que le
@@ -4422,8 +4428,9 @@ offerHello(server);
       servi par un groupe est un abonnement partagé,
       <code>$share/&lt;nom&gt;/bead/s/&lt;nom&gt;</code>. Chaque paquet est compté à l’octet sous la
       taille maximale de chaque bout. Le testament d’un participant annonce son départ aux pairs. Le
-      côté TypeScript passe par MQTT.js, le côté C# par MQTTnet, et les deux sont joués contre
-      Mosquitto.
+      côté TypeScript passe par MQTT.js, le côté C# par MQTTnet, le côté Rust par un client à lui,
+      la fonctionnalité <code>mqtt</code> de son cœur, sur TCP, TLS ou un WebSocket. Les trois sont
+      joués contre Mosquitto.
     </p>
     <h3 id="courtier-amqp">Sur AMQP 1.0</h3>
     <p>
@@ -4432,7 +4439,7 @@ offerHello(server);
       chaque message à un seul membre. Chaque message suit un seul profil, compté à l’octet.
       AMQP 1.0 n’a pas de testament : le battement de Bead dit seul qu’un pair s’est tu. Le côté
       TypeScript passe par rhea, le côté C# par AMQPNetLite, et les deux sont joués contre
-      RabbitMQ 4. Aucune page n’atteint un courtier AMQP 1.0.
+      RabbitMQ 4. La liaison du côté Rust est à venir. Aucune page n’atteint un courtier AMQP 1.0.
     </p>
     <p>
       Dans les deux cas, le courtier d’un déploiement authentifie chaque lien, par un mot de passe
@@ -4459,7 +4466,7 @@ offerHello(server);
   </p>
   <p>
     Un compagnon de la spécification la décrit, <code>spec/transcoding.md</code>, sous sa propre
-    version, 0.4.0. La passerelle écoute sur son propre port,
+    version, 0.4.1. La passerelle écoute sur son propre port,
     <code>localhost</code> par défaut, ou se monte dans le serveur web de l’application.
   </p>
   <figure class="figure">
@@ -4913,7 +4920,7 @@ data: {"code":2,"scope":"application","status":400,"title":"COUNTED","type":"htt
   </p>
   <p>
     Le débogage reste à côté du fil, dans un compagnon, <code>spec/debugging.md</code>
-    0.8.0. Un côté contraint peut le laisser hors de sa compilation et rester
+    0.9.0. Un côté contraint peut le laisser hors de sa compilation et rester
     conforme au fil.
   </p>
 
@@ -5149,8 +5156,8 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
   <p class="gist">
     Bead est un protocole : une spécification, des fichiers de conformance que chaque implantation
     joue, et un service d’interop. Le dépôt en tient trois implantations. TypeScript et C# sont à
-    parité de comportement. Rust a son cœur et ses transports WebSocket et HTTP, et chaque partie
-    qui lui manque est une ligne de la matrice de support, à venir.
+    parité de comportement. Rust a son cœur, ses transports WebSocket et HTTP et sa liaison
+    MQTT 5, et chaque partie qui lui manque est une ligne de la matrice de support, à venir.
   </p>
   <div class="table-wrap">
     <table class="compare">
@@ -5185,8 +5192,7 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
           <td>WebSocket, HTTP, Web Worker, en mémoire, un courtier sur MQTT 5 ou AMQP 1.0, et joints</td>
           <td>WebSocket, HTTP sur Kestrel, en mémoire, un courtier sur MQTT 5 ou AMQP 1.0, et joints</td>
           <td>
-            WebSocket et HTTP sur hyper, en mémoire, le cœur du courtier sur un courtier en mémoire,
-            et joints
+            WebSocket et HTTP sur hyper, en mémoire, un courtier sur MQTT 5, et joints
           </td>
         </tr>
         <tr>
@@ -5199,8 +5205,8 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
     </table>
   </div>
   <p class="space">
-    Côté Rust, viennent ensuite les liaisons à un courtier, la passerelle et la cible Rust de
-    <code>beadc</code>, chacune par une décision à elle. Ses transports WebSocket et HTTP
+    Côté Rust, viennent ensuite la liaison sur AMQP 1.0, la passerelle et la cible Rust de
+    <code>beadc</code>, chacune par une décision à elle. Ses transports WebSocket, HTTP et MQTT 5
     rencontrent les deux autres côtés dans l’interop, dans les deux sens. Le cœur se compile aussi
     pour <code>wasm32-unknown-unknown</code>.
   </p>
@@ -5229,7 +5235,10 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
     blueprint à la dernière version sortie, et dit ce qui casse un pair déjà déployé ou le code
     écrit contre l’API. <code>beadc</code> tourne dans une image Docker, et l’exemple
     <code>examples/hello</code> se joue dans la CI dans les deux langages, chaque client contre
-    chaque serveur.
+    chaque serveur. Un contrat donne plusieurs paquets, chacun sa sélection de procédures, et
+    chaque transport d’un serveur prend les procédures qu’on lui donne :
+    <a href="/playground/bead/#packages">l’onglet Packages de la démo</a> y découpe un blueprint,
+    avec le code même de <code>beadc</code>.
   </p>
   <figure class="figure">
     <figcaption>Du .proto au code de chaque langage</figcaption>
@@ -5239,7 +5248,7 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
   <p>
     Chaque unité de la spécification est citée par un fichier de conformance, ou porte la raison
     pour laquelle aucun ne la cite. Les trois côtés s’appellent les uns les autres dans la CI sur
-    WebSocket et HTTP, et les côtés TypeScript et C# aussi sur MQTT 5 et AMQP 1.0, et par leurs
+    WebSocket, HTTP et MQTT 5, et les côtés TypeScript et C# aussi sur AMQP 1.0, et par leurs
     passerelles.
   </p>
   <details class="more">
@@ -5251,7 +5260,7 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
       <li><strong>Les vecteurs</strong> : 460, en 16
         groupes, les octets de chaque en-tête et ce qu’un lecteur refuse, les verdicts d’un JWT et
         les parcelles d’un courtier.</li>
-      <li><strong>Les conversations</strong> : 189 échanges entre des clients
+      <li><strong>Les conversations</strong> : 190 échanges entre des clients
         et le serveur d’interop, relais compris.</li>
       <li><strong>Les cas des transports</strong> : 268 échanges HTTP,
         WebSocket et sur un courtier, écrits octet par octet.</li>
@@ -5367,8 +5376,7 @@ disallowed-methods = [
   <ul class="rules">
     <li>
       <strong>Rust au complet</strong
-      ><span>Ses liaisons MQTT 5 et AMQP 1.0, sa passerelle et sa cible dans
-        <code>beadc</code>.</span>
+      ><span>Sa liaison AMQP 1.0, sa passerelle et sa cible dans <code>beadc</code>.</span>
     </li>
     <li>
       <strong>Des règles en CEL</strong

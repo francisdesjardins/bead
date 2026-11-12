@@ -457,6 +457,72 @@ const recordActivity = (router: ReturnType<typeof createRouterServer>) => {
 
 // definition
 
+test('a request its transport tells once its router is disposed reaches no resolver', async () => {
+  const { deliver, sent, transport } = createScriptedTransport();
+  using router = createRouterServer(transport);
+  const errors = recordErrors(router);
+  let resolved = 0;
+
+  router.registerResolver(
+    Object.assign(() => {
+      resolved += 1;
+
+      return Promise.resolve();
+    }, echo)
+  );
+  router[Symbol.dispose]();
+  deliver(first, requestOf(1, { payload: new TextEncoder().encode('hi') }));
+  await sleep(0);
+
+  expect([resolved, sent, errors]).toEqual([0, [], []]);
+});
+
+test('a session provider’s error or panic is reported and refuses only its call', async () => {
+  for (const throws of [false, true]) {
+    const { deliver, sent, transport } = createScriptedTransport();
+    using router = createRouterServer(transport, {
+      sessionOf: ({ header }) => {
+        if (header.callId === 1) {
+          if (throws) {
+            throw new Error('the session provider failed');
+          }
+
+          throw new TypeError('the session provider failed');
+        }
+
+        return undefined;
+      },
+    });
+    const errors = recordErrors(router);
+    const admitted: number[] = [];
+
+    createServiceManager(router).getRequestResolver(echo, {
+      serializer: answering,
+      beforeRequest: ({ header }) => {
+        admitted.push(header.callId);
+
+        return true;
+      },
+    })((_request, response) => {
+      return response('ok');
+    });
+    deliver(first, requestOf(1));
+    deliver(first, requestOf(3));
+    await sleep(0);
+
+    expect(admitted).toEqual([3]);
+    expect(answersOf(sent)).toEqual([
+      [first, 'failure', 1, ProtocolCode.PROCEDURE_FAILED],
+      [first, 'result', 3, 'ok'],
+    ]);
+    expect(sent[0]?.envelope).toMatchObject({ failure: { detail: '' } });
+    expect(errors).toEqual([
+      [expect.objectContaining({ message: 'the session provider failed' }), first],
+    ]);
+    expect(router.gauges().counts['answeringCalls']).toBe(0);
+  }
+});
+
 test.describe('createRouterServer', () => {
   test('takes this package’s transport server', () => {
     const transport = createWebSocketTransportServer({ WebSocketServer });
@@ -5216,6 +5282,54 @@ test.describe('createRouterServer, its paced subscriptions', () => {
     expect(errors).toEqual([]);
   });
 
+  // debugging 4.2, spec 11.10: the resolver's own flow, no telling around it
+  test('tells once, with the failure its router answered in its place, an answer given behind notifications that went past their bounds', async () => {
+    const { deliver, open, sent, transport } = createScriptedTransport();
+    using router = createRouterServer(transport, { pacing: { maximumQueuedNotifications: 1 } });
+    const services = createServiceManager(router);
+    const errors = recordErrors(router);
+    const told: unknown[][] = [];
+
+    open(first);
+
+    // three notifications past a queue of one, not waited on, then its answer
+    const resolver = services.getNotificationResolver(news, { serializer: answering })((
+      _request,
+      response
+    ) => {
+      response.registerNotification();
+
+      for (const word of ['a', 'b', 'c']) {
+        void resolver.notify(word);
+      }
+
+      return response('ok');
+    });
+
+    services.on('debug', (error, { callId, direction, rx, tx }) => {
+      if (callId === 3) {
+        told.push([direction, rx, tx, error instanceof FailureError ? error.code : error]);
+      }
+    });
+    deliver(first, pacedOf(3, text.encode('hold')));
+    await expect
+      .poll(() => {
+        return told.length;
+      })
+      .toBe(2);
+    await sleep(0);
+
+    expect(answersOf(sent)).toEqual([
+      [first, EnvelopeKind.NOTIFICATION, 3, 'a'],
+      [first, 'failure', 3, ProtocolCode.CAPACITY_EXCEEDED],
+    ]);
+    expect(told).toEqual([
+      ['rx', 'hold', undefined, null],
+      ['tx', 'hold', 'ok', ProtocolCode.CAPACITY_EXCEEDED],
+    ]);
+    expect(errors).toEqual([]);
+  });
+
   test('reports the failure it could not send a call in flight whose queue went past its bounds', async () => {
     const { control, deliver, errors, release, resolver, router, sentSince } = createPaced({
       pacing: { maximumQueuedNotifications: 1 },
@@ -6283,6 +6397,43 @@ test.describe('createRouterServer, the accesses it refuses', () => {
       ['the verifier fails', first],
     ]);
     expect(told).toEqual([]);
+  });
+
+  // spec 9.2 step 6: an ES256 key off P-256 (SEC 1 §3.2.2) fails the verifier, as Web Crypto's
+  // import refuses it, so its call is never answered SESSION_REQUIRED
+  test('answers a call under an ES256 key off its curve PROCEDURE_FAILED and reports it, never SESSION_REQUIRED', async () => {
+    const ones = Buffer.alloc(32, 1).toString('base64url');
+    const { errors, send, sent } = createRefusing({
+      clock: createTestClock(NOW),
+      credentials: {
+        audience: AUDIENCE,
+        keys: [
+          {
+            algorithm: 'ES256',
+            issuer: ISSUER,
+            jwk: { crv: 'P-256', kty: 'EC', x: ones, y: ones },
+          },
+        ],
+      },
+    });
+    const part = (value: object): string => {
+      return Buffer.from(JSON.stringify(value)).toString('base64url');
+    };
+    const token = [
+      part({ alg: 'ES256', typ: 'at+jwt' }),
+      part({ aud: AUDIENCE, exp: NOW / 1_000 + 3_600, iss: ISSUER, sub: 'grace' }),
+      Buffer.alloc(64, 1).toString('base64url'),
+    ].join('.');
+
+    send(requestOf(1, { credential: { scheme: CredentialScheme.JWT, token } }));
+    await expect
+      .poll(() => {
+        return sent.length;
+      })
+      .toBe(1);
+
+    expect(answersOf(sent)).toEqual([[first, 'failure', 1, ProtocolCode.PROCEDURE_FAILED]]);
+    expect(reportedOf(errors)).toHaveLength(1);
   });
 
   test('refuses as it would though an accessRefused listener throws, the throw reported with its connection', async () => {

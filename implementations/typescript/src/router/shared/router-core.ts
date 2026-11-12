@@ -53,6 +53,7 @@ import type {
   ISessionRequest,
   ITransportCarried,
   OutgoingEnvelope,
+  RouterAnswer,
   RouterSide,
   SessionOf,
 } from './types';
@@ -336,8 +337,8 @@ export const createRouterCore = <Handle extends string>(
   // the call's session each request was admitted in, by the very header dispatched, for what its
   // answer does first
   const callSessions = new WeakMap<IHandedRequestHeader, ICallSession>();
-  // the failure each request dispatched was answered with, by the very header dispatched: one its
-  // router answered in its resolver's place, which its resolver's answer tells (debugging 4.2)
+  // the failure the router answered each request dispatched with in its resolver's place, by the
+  // very header dispatched, which its resolver's answer tells once settled (debugging 4.2)
   const failuresAnswered = new WeakMap<IHandedRequestHeader, IFailure>();
   // the address and port each request came from, as its transport handed them, by the very header
   // dispatched, which a refusal told names (spec 13.12, 15.1)
@@ -472,7 +473,8 @@ export const createRouterCore = <Handle extends string>(
   };
 
   // a result as a transfer: its opening, then each chunk credited; its call stays open until the
-  // last chunk is handed off, and the answer goes out once that one did, which ends the call
+  // last chunk is handed off, and the answer goes out once every envelope of it went, the last
+  // chunk ending the call as it is handed off
   const sendResult = (
     outgoing: IOutgoingTransfer,
     {
@@ -492,6 +494,9 @@ export const createRouterCore = <Handle extends string>(
     const { promise, reject, resolve } = Promise.withResolvers<void>();
     let isOpen = true;
     let timer: TimeoutId | undefined;
+    // the sends handed to the transport that have not settled, and whether the last chunk went
+    let pending = 0;
+    let isLastGone = false;
 
     // nothing more goes, and nothing more ends it
     const stop = (): void => {
@@ -500,11 +505,24 @@ export const createRouterCore = <Handle extends string>(
       clock.clearTimeout(timer);
       controller.signal.removeEventListener('abort', onAbort);
     };
-    // the call goes with it: its call id is the peer's to open again
+    // the call goes with it while it is open: its call id is the peer's to open again; once it
+    // ended, a refusal closes nothing, and fails the answer unless it settled
     const fail = (reason: unknown): void => {
-      stop();
-      answeringCalls.close(call, controller);
+      if (isOpen) {
+        stop();
+        answeringCalls.close(call, controller);
+      }
+
       reject(reason);
+    };
+    // ! every envelope of the transfer goes before its answer does: a refusal, whenever it comes,
+    // fails it (spec 12.7)
+    const went = (): void => {
+      pending -= 1;
+
+      if (isLastGone && pending === 0) {
+        resolve();
+      }
     };
     // the call's signal ends it: a cancel, the connection gone
     const onAbort = (): void => {
@@ -548,9 +566,11 @@ export const createRouterCore = <Handle extends string>(
       call,
       onCredit: progress,
       send: (chunk) => {
+        // ! counted before its hand-off, so the last chunk's own send is in the count as it goes
+        pending += 1;
         deliver(chunkEnvelopeOf(callId, chunk), {
           connectionHandle,
-          // the last one handed off answers the call
+          // the last one handed off ends the call
           onHandOff: chunk.isLast
             ? () => {
                 stop();
@@ -560,18 +580,16 @@ export const createRouterCore = <Handle extends string>(
                 }
 
                 answeringCalls.close(call, controller);
+                isLastGone = true;
               }
             : progress,
-        }).then(() => {
-          if (chunk.isLast) {
-            resolve();
-          }
-        }, fail);
+        }).then(went, fail);
       },
     });
 
     controller.signal.addEventListener('abort', onAbort, { once: true });
     progress();
+    pending += 1;
     deliver(
       {
         header: { ...header, total: outgoing.total },
@@ -579,7 +597,7 @@ export const createRouterCore = <Handle extends string>(
         payload: outgoing.opening,
       },
       { connectionHandle }
-    ).catch(fail);
+    ).then(went, fail);
 
     return promise;
   };
@@ -621,10 +639,16 @@ export const createRouterCore = <Handle extends string>(
     return outgoing;
   };
 
-  const respond: IRouterCore<Handle>['respond'] = async (
-    response,
-    { connectionHandle, header }
-  ) => {
+  // an answer to a dispatched call; one the router makes in its resolver's place records its
+  // failure for that resolver, once it is the call's answer, whether it goes or not (debugging 4.2)
+  const answerCall = async (
+    response: RouterAnswer,
+    {
+      connectionHandle,
+      header,
+      isInPlace,
+    }: { connectionHandle: Handle; header: IHandedRequestHeader; isInPlace: boolean }
+  ): Promise<void> => {
     const { callId, procedureId, serviceId } = header;
 
     // a failure's code must be one before anything is done for it
@@ -680,7 +704,7 @@ export const createRouterCore = <Handle extends string>(
     // its answer going out: a second goes nowhere, and this one closes the call once done
     answeringCalls.answer({ connectionHandle, header });
 
-    if (response.failure !== undefined) {
+    if (isInPlace && response.failure !== undefined) {
       failuresAnswered.set(header, response.failure);
     }
 
@@ -734,6 +758,17 @@ export const createRouterCore = <Handle extends string>(
     }
   };
 
+  const respond: IRouterCore<Handle>['respond'] = (response, { connectionHandle, header }) => {
+    return answerCall(response, { connectionHandle, header, isInPlace: false });
+  };
+
+  const answerInPlace: IRouterCore<Handle>['answerInPlace'] = (
+    failure,
+    { connectionHandle, header }
+  ) => {
+    return answerCall({ failure }, { connectionHandle, header, isInPlace: true });
+  };
+
   // * tells the side a call refused as its credential resolved or as it was admitted, in the turn
   // its refusal is answered, built only while someone listens; never the credential, nor a claim,
   // nor an admission's detail (spec 13.12)
@@ -775,7 +810,7 @@ export const createRouterCore = <Handle extends string>(
     failure: IFailure,
     { connectionHandle, controller, header }: IDispatched<Handle>
   ): void => {
-    respond({ failure }, { connectionHandle, header }).catch((reason: unknown) => {
+    answerInPlace(failure, { connectionHandle, header }).catch((reason: unknown) => {
       // a refusal that never reached the transport — its failure unwritable, say — leaves no call
       // open behind it
       answeringCalls.close({ callId: header.callId, connectionHandle }, controller);
@@ -1622,6 +1657,7 @@ export const createRouterCore = <Handle extends string>(
     answeredOf: ({ header }) => {
       return failuresAnswered.get(header);
     },
+    answerInPlace,
 
     cancel: requester.cancel,
     gauges: () => {

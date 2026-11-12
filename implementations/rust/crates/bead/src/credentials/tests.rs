@@ -536,3 +536,56 @@ async fn fails_a_call_alike_when_its_key_set_throws_as_it_is_asked_and_has_the_n
         );
     }
 }
+
+// the key set's ask is the application's: made once the resolver's lock is let go, as the C# side
+// makes it, so an ask that blocks stalls no other call's resolution, nor its own
+#[tokio::test]
+async fn asks_its_key_set_with_no_lock_of_its_own_held() {
+    let resolving: Arc<std::sync::OnceLock<std::sync::Weak<super::Inner>>> = Arc::default();
+    let free: Arc<std::sync::Mutex<Vec<bool>>> = Arc::default();
+    let (held, freeing) = (Arc::clone(&resolving), Arc::clone(&free));
+    let (clock, resolver) = resolver_of(&Credentials {
+        audience: Some(AUDIENCE.to_owned()),
+        key_set: Some(super::JwtKeySet {
+            ask: Arc::new(move |_issuer: String, _signal| {
+                // * what another call's resolution takes as the ask is made
+                let is_free = held
+                    .get()
+                    .and_then(std::sync::Weak::upgrade)
+                    .is_some_and(|inner| inner.state.try_lock().is_ok());
+
+                freeing.lock().expect("what the ask found").push(is_free);
+
+                Box::pin(async { Ok(vec![set_key()]) })
+            }),
+            issuers: vec![SET_ISSUER.to_owned()],
+            maximum_waiting_calls: None,
+        }),
+        ..Credentials::default()
+    });
+
+    resolving
+        .set(Arc::downgrade(&resolver.inner))
+        .expect("the resolver's state, once");
+
+    let resolving_call = crate::testing::spawn(
+        resolver.resolve((named(), tokio_util::sync::CancellationToken::new())),
+    );
+
+    clock.settle().await;
+
+    let outcome = crate::testing::patience(core::time::Duration::from_secs(10), resolving_call)
+        .await
+        .expect("resolved within its patience")
+        .expect("joined");
+
+    assert!(
+        matches!(outcome, Ok(crate::router::core::Resolved::Session(_))),
+        "its key came: {outcome:?}"
+    );
+    assert_eq!(
+        *free.lock().expect("what the ask found"),
+        [true],
+        "asked once, the resolver's lock let go"
+    );
+}

@@ -346,7 +346,10 @@ resolver that does not keep it local stays, stated in 15.12.
 **A container, or any server another machine reaches, says `0.0.0.0` or `::`**, and names its hosts:
 a container's loopback is its own, which a published port never reaches. A deployment that relies on
 listening on every interface without saying it meets a refused or reset connection from outside,
-never a Bead refusal, since no socket opens: the TypeScript and C# sides' READMEs say it where they
+never a Bead refusal, since no socket opens: the
+[TypeScript](../../implementations/typescript/README.md),
+[C#](../../implementations/dotnet/README.md) and
+[Rust](../../implementations/rust/README.md#listening-and-proxies) sides' READMEs say it where they
 say how to start a server.
 
 **A server on its defaults is secure by 13.4**, so a command of its own that presents a `JWT` goes;
@@ -390,8 +393,10 @@ port, ending closed`, `draws a port on localhost again when the IPv6 loopback ho
 IPv4`, `listens on 127.0.0.1 alone where the IPv6 loopback is absent, and reports 127.0.0.1`,
 `refuses to start on an address that is no bare IP address, ending closed` over the table of forms
 above, `localhost` taken, and `is secure on the IPv6 loopback or an address in 127.0.0.0/8, and not
-on a wildcard`, the Rust side holding the draw and the fallback once for both its servers, in the
-binding they share, by `draws_another_port_for_an_occupied_loopback_in_the_platform_bind_failure`
+on a wildcard`, the Rust side holding the draw and the fallback in each server's tests by
+`draws_a_port_on_localhost_again_when_the_ipv6_loopback_holds_the_one_drawn_on_ipv4` and
+`listens_on_127_0_0_1_alone_where_the_ipv6_loopback_is_absent_and_reports_127_0_0_1`, and in the
+binding they share by `draws_another_port_for_an_occupied_loopback_in_the_platform_bind_failure`
 and `falls_back_to_ipv4_only_for_an_absent_loopback_in_the_platform_bind_failure`; the TypeScript
 HTTP transport's `calls the application’s createServer once per address it binds, 127.0.0.1 then ::1
 on localhost, each told its address`, held on the C# and Rust sides, which build no server of the

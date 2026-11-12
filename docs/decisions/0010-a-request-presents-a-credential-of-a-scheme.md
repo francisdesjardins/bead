@@ -222,8 +222,8 @@ as RFC 8725 recommends:
   application's, held for good: past them, a token whose `kid` they name waits on a new ask before
   they serve, so a key its issuer withdrew stops verifying. A `kid` still unnamed by an answer to an
   ask that went after its token came is refused `SESSION_REQUIRED`, never tried against the others;
-  a call that waited on an ask that failed is refused `PROCEDURE_FAILED`, as a key set that cannot
-  be reached is. The runtime fetches nothing itself: a token's `jwk`, `jku`, `x5u` and `x5c` are
+  a call that waited on an ask that failed, or for a deadline whose timer its clock refused, is
+  refused `PROCEDURE_FAILED`, as a key set that cannot be reached is. The runtime fetches nothing itself: a token's `jwk`, `jku`, `x5u` and `x5c` are
   never read (RFC 8725 §3.10), and a token that carries `crit` is refused. A JWK serves only when
   its `alg` is its key's algorithm, or is absent and the application names it, its `use` is `sig` or
   absent, and its `key_ops`, when present, include `verify` (RFC 7517 §4.2 to §4.4);
@@ -534,6 +534,16 @@ plays over real sockets, since a rule that a side's own tests alone check is the
 nor its thumbprint (RFC 7638): `spec/check.py` refuses one, over the files git lists, and the demo's
 verifier refuses one ([0006](0006-a-rule-has-its-gate.md)).
 
+**An ES256 key whose `x` and `y` name no point of P-256 is taken as it is given**, on every side,
+since section 13.8's shape of a key names `EC` on `P-256`, its `x` and `y` 32 bytes each, and not
+the point (SEC 1 §3.2.2): each verification under it fails as the side reads the point, Web Crypto's
+import, .NET's `ECDsa` or RustCrypto's `p256`, and its call is answered `PROCEDURE_FAILED` and
+reported (section 9.2), never `SESSION_REQUIRED`, so its requester keeps its credential.
+
+**Ahead, by a decision of its own that meets the Tenth Man**: the point among the shape section
+13.8 holds a key to, so that such a key is refused as it is given, alike on every side and held by
+the conformance files.
+
 ## The Tenth Man
 
 What carries `ELSEWHERE` over a broker met the round of the broker's core, which
@@ -543,9 +553,11 @@ The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-th
 twelve rounds, a later one answering an earlier one's answers, the seventh and the eighth also rounds
 of [0020](0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md)'s change; the round on a
 forwarded credential's turn and on a credential that leaves a transfer no room is kept in
-[0001](0001-the-envelope-sits-at-fixed-offsets.md), At the wire's edges, and the round on the
+[0001](0001-the-envelope-sits-at-fixed-offsets.md), At the wire's edges, the round on the
 `ELSEWHERE` its default admission passes in [0004](0004-one-behaviour-in-every-language.md), On the
-text of 0.2.0. The decision's objections, each with the answer that holds:
+text of 0.2.0, and the round on a call that waited for a key set's deadline whose timer its clock
+refused in [0004](0004-one-behaviour-in-every-language.md), On the converse twins' six divergences.
+The decision's objections, each with the answer that holds:
 
 ### The block and the sessions
 

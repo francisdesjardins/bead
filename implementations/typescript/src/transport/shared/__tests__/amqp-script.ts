@@ -101,6 +101,8 @@ export interface IAmqpScriptedLink {
   readonly closed: Promise<void>;
   /** Ends it at once, as a broker that drops a link does. */
   cut(): void;
+  /** Grants the adapter's sender `credit` more, including a paired link outside rhea's name index. */
+  grantCredit(attach: IScriptedAttach, credit: number): void;
   /** The link the adapter attached to `address`, in `role`, within `within` ms. */
   attachOf(
     address: string,
@@ -548,6 +550,19 @@ export const createAmqpScript = async (options?: {
       },
       cut: () => {
         socket.resetAndDestroy();
+      },
+      grantCredit: (attach, credit) => {
+        const receiver = attach.link as Receiver;
+
+        receiver.add_credit(credit);
+
+        // ! a paired receiver leaves rhea's name index when its sender attaches: its FLOW still
+        // goes on the receiver's own handle, though the session's turn visits only indexed links
+        const indexed = (attach.session as unknown as { links: Record<string, unknown> }).links;
+
+        if (!Object.values(indexed).includes(receiver)) {
+          (receiver as unknown as { _process: () => void })._process();
+        }
       },
       releaseAttaches: () => {
         for (const release of held.splice(0)) {

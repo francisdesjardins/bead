@@ -24,7 +24,7 @@ const BACKLOG: i32 = 511;
 
 // what the platform names a family it does not offer: WSAEAFNOSUPPORT on Windows, EAFNOSUPPORT
 // elsewhere, which std reads as no kind of its own
-const FAMILY_NOT_SUPPORTED: i32 = if cfg!(windows) {
+pub(crate) const FAMILY_NOT_SUPPORTED: i32 = if cfg!(windows) {
     10_047
 } else if cfg!(any(
     target_os = "macos",

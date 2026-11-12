@@ -68,9 +68,9 @@ internal sealed partial class RouterCore : IDisposable
     // the handler each request was routed to, by the very header dispatched
     private readonly ConditionalWeakTable<RequestHeader, IRequestHandler> _handlers = [];
 
-    // the failure each request dispatched was answered with, by the very header dispatched: one its
-    // router answered in its resolver's place, which its resolver's answer tells (spec/debugging.md
-    // 4.2); read from the resolver's thread
+    // the failure the router answered each request dispatched with in its resolver's place, by the
+    // very header dispatched, never one its resolver answered: what its resolver's answer tells
+    // (spec/debugging.md 4.2); read from the resolver's thread
     private readonly ConditionalWeakTable<RequestHeader, Failure> _failuresAnswered = [];
 
     // what it counts through, at its gates: its router's; none when its router was given no registry
@@ -257,8 +257,9 @@ internal sealed partial class RouterCore : IDisposable
         Loop.Post(action);
     }
 
-    private async Task RespondOnLoop(RouterAnswer response, AnswerTarget target)
+    private async Task RespondOnLoop((RouterAnswer Response, bool IsInPlace) answer, AnswerTarget target)
     {
+        var (response, isInPlace) = answer;
         var (connectionHandle, header) = target;
         var callId = header.CallId;
         var call = new CallAddress(callId, connectionHandle);
@@ -303,7 +304,9 @@ internal sealed partial class RouterCore : IDisposable
         // its answer going out: a second goes nowhere, and this one closes the call once done
         _answeringCalls.Answer(target);
 
-        if (response.Failure is { } answeredWith)
+        // * the router's own answer in its resolver's place, once it is the call's: what its resolver's
+        // answer tells, whenever that settles (spec/debugging.md 4.2)
+        if (isInPlace && response.Failure is { } answeredWith)
         {
             _failuresAnswered.AddOrUpdate(header, answeredWith);
         }
@@ -374,7 +377,8 @@ internal sealed partial class RouterCore : IDisposable
     }
 
     // a result as a transfer: its opening, then each chunk credited; its call stays open until the
-    // last chunk is handed off, and the answer goes out once that one did
+    // last chunk is handed off, and the answer goes out once every envelope of it went, the last
+    // chunk ending the call as it is handed off
     private Task SendResult(OutgoingTransfer outgoing, (string ConnectionHandle, AnsweringCall Answering, ResultHeader Header) answered)
     {
         var (connectionHandle, answering, header) = answered;
@@ -382,6 +386,10 @@ internal sealed partial class RouterCore : IDisposable
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var isOpen = true;
         var generation = 0;
+
+        // the sends handed to the transport and not heard back from, and whether the last chunk went
+        var pending = 0;
+        var isLastGone = false;
         ITimer? timer = null;
         Sending? sending = null;
 
@@ -399,12 +407,29 @@ internal sealed partial class RouterCore : IDisposable
             }
         }
 
-        // the call goes with it: its call id is the peer's to open again
+        // the call goes with it, while open: its call id is the peer's to open again; the answer
+        // fails with the first refusal, and one after it settled is dropped
         void Fail(Exception reason)
         {
-            Stop();
-            _answeringCalls.Close(call, answering);
+            if (isOpen)
+            {
+                Stop();
+                _answeringCalls.Close(call, answering);
+            }
+
             completion.TrySetException(reason);
+        }
+
+        // ! every envelope of the transfer goes before its answer does: a refusal, whenever it comes,
+        // fails it (spec 12.7)
+        void Heard()
+        {
+            pending -= 1;
+
+            if (isLastGone && pending == 0)
+            {
+                completion.TrySetResult();
+            }
         }
 
         // what the transfer does sets its timer going again — never once it stopped
@@ -451,10 +476,14 @@ internal sealed partial class RouterCore : IDisposable
             Stop();
             EndAnswered(answering, (CallOutcome.Result, null));
             _answeringCalls.Close(call, answering);
+            isLastGone = true;
         }
 
+        // * counted before it is handed off, so the last chunk's own send is in the count as it goes
         async Task SendChunk(Chunk chunk)
         {
+            pending += 1;
+
             try
             {
                 await _writer.Deliver(PayloadPlacement.ChunkEnvelopeOf(header.CallId, chunk), (connectionHandle, chunk.IsLast ? Sent : Progress));
@@ -466,14 +495,13 @@ internal sealed partial class RouterCore : IDisposable
                 return;
             }
 
-            if (chunk.IsLast)
-            {
-                completion.TrySetResult();
-            }
+            Heard();
         }
 
         async Task SendOpening()
         {
+            pending += 1;
+
             try
             {
                 await _writer.Deliver(new Envelope { Header = header with { Total = outgoing.Total }, Payload = outgoing.Opening }, connectionHandle);
@@ -481,7 +509,11 @@ internal sealed partial class RouterCore : IDisposable
             catch (Exception reason)
             {
                 Fail(reason);
+
+                return;
             }
+
+            Heard();
         }
 
         void Send(Chunk chunk)
@@ -517,7 +549,7 @@ internal sealed partial class RouterCore : IDisposable
 
         try
         {
-            await RespondOnLoop(RouterAnswer.OfFailure(failure), target);
+            await AnswerInPlace(failure, target);
         }
         catch (Exception reason)
         {
@@ -1614,7 +1646,21 @@ internal sealed partial class RouterCore : IDisposable
 
         return Loop.Run(() =>
         {
-            return RespondOnLoop(response, target);
+            return RespondOnLoop((response, false), target);
+        });
+    }
+
+    /// <summary>
+    /// Answers a request the router dispatched with <paramref name="failure"/>, in its resolver's
+    /// place, as <see cref="Respond"/> does: a refusal of its own, or a server's as a subscription
+    /// queued past its bounds (spec 11.10). Once that answer is the call's, its failure is what
+    /// <see cref="AnsweredOf"/> gives, whether it goes or not.
+    /// </summary>
+    internal Task AnswerInPlace(Failure failure, AnswerTarget target)
+    {
+        return Loop.Run(() =>
+        {
+            return RespondOnLoop((RouterAnswer.OfFailure(failure), true), target);
         });
     }
 
@@ -1633,10 +1679,9 @@ internal sealed partial class RouterCore : IDisposable
     }
 
     /// <summary>
-    /// The failure the call of a request this side dispatched was answered with, kept once its call
-    /// closed: so its resolver, answering after it, finds the failure its router answered in its
-    /// place. None for a request answered otherwise, not yet answered, or never dispatched. From any
-    /// thread.
+    /// The failure the router answered a request it dispatched with in its resolver's place, kept
+    /// once its call closed: so its resolver, its answer settled, finds it. None for a request its
+    /// resolver answered, not yet answered, or never dispatched. From any thread.
     /// </summary>
     public Failure? AnsweredOf(AnswerTarget target)
     {

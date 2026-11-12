@@ -11,26 +11,6 @@ use crate::router::types::{
 const HOLD: &str = "the router's limits do not hold together:";
 
 #[test]
-#[ignore = "divergence: C# whole-envelope limits discard a supplied transfer count; Rust and TypeScript refuse it"]
-fn whole_envelope_limits_hold_together_and_take_no_transfer_whatever_is_given() {
-    let whole = whole_envelope_limits_of(&RouterLimitsOptions {
-        maximum_envelope_bytes: Some(4_096),
-        ..RouterLimitsOptions::default()
-    })
-    .expect("whole-envelope limits");
-    limits_of(&whole).expect("the limits hold together");
-    assert_eq!(
-        whole_envelope_limits_of(&RouterLimitsOptions {
-            maximum_transfers: Some(4),
-            ..RouterLimitsOptions::default()
-        })
-        .expect("a whole-envelope transport takes no transfer whatever is given")
-        .maximum_transfers,
-        Some(0)
-    );
-}
-
-#[test]
 fn holds_the_limits_given_over_the_defaults_frozen_and_refuses_limits_that_do_not_hold_together() {
     use crate::router::types::RouterLimits;
 

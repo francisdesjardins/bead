@@ -8,6 +8,105 @@ namespace Bead.Tests;
 /// </summary>
 public sealed partial class RouterCoreTests
 {
+    [Fact]
+    public void Refuses_a_last_call_id_of_zero_or_its_peer_s_parity_before_a_router_starts()
+    {
+        foreach (var side in new[] { RouterSide.Client, RouterSide.Server })
+        {
+            uint[] refused = side == RouterSide.Client ? [0, 2, 8, 0xfffffffe] : [0, 1, 7, 0xffffffff];
+            uint[] accepted = side == RouterSide.Client ? [1, 0xffffffff] : [2, 0xfffffffe];
+
+            foreach (var last in refused)
+            {
+                Assert.ThrowsAny<ArgumentException>(() =>
+                {
+                    return new Peer(side, lastCallId: last);
+                });
+            }
+
+            foreach (var last in accepted)
+            {
+                var peer = new Peer(side, lastCallId: last);
+                using var core = peer.Core;
+
+                Assert.Empty(peer.Sent);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task Answers_a_failure_its_resolver_answers_as_it_is_and_any_error_it_fails_with_PROCEDURE_FAILED_with_no_detail_and_reported_a_failure_of_its_own_among_them()
+    {
+        var server = new Peer(RouterSide.Server);
+        using var core = server.Core;
+        var resolver = server.Resolve();
+        var failure = Failure.OfApplication(21, "nothing to echo");
+        var thrown = new FailureException(failure, new FailureException.Raised(FailureOrigin.Local, RouterSide.Server));
+        var other = new IOException("internal: 10.0.0.5:8443");
+
+        // its own failure answered through its answerer; the same failure, or any other error, failed with
+        resolver.Handling = (request) =>
+        {
+            if (request.Payload.Span.SequenceEqual("own"u8))
+            {
+                return resolver.Fail(0, failure);
+            }
+
+            return Task.FromException(request.Payload.Span.SequenceEqual("thrown"u8) ? thrown : (Exception)other);
+        };
+        await server.Deliver(new Envelope { Header = RequestOf(1), Payload = "own"u8.ToArray() });
+        await server.Deliver(new Envelope { Header = RequestOf(3), Payload = "thrown"u8.ToArray() });
+        await server.Deliver(new Envelope { Header = RequestOf(5), Payload = "other"u8.ToArray() });
+
+        Assert.Equal(
+            [(1u, failure), (3u, Failure.OfProtocol(ProtocolCode.ProcedureFailed)), (5u, Failure.OfProtocol(ProtocolCode.ProcedureFailed))],
+            server.Sent.Select((envelope) =>
+            {
+                return (envelope.Header.CallId, envelope.Failure);
+            }));
+        Assert.Equal([thrown, other], server.Reports);
+        Assert.Equal([Handle, Handle], server.ReportedOn);
+    }
+
+    // debugging 4.2; spec 9.5
+    [Fact]
+    public async Task Holds_for_its_manager_the_failure_it_answered_in_a_resolver_s_place_and_none_its_resolver_answered()
+    {
+        var server = new Peer(RouterSide.Server);
+        using var core = server.Core;
+        var resolver = server.Resolve();
+        var own = Failure.OfApplication(21, "nothing to echo");
+
+        // the first fails before it answers, answered PROCEDURE_FAILED in its place; the second
+        // answers a failure of its own; the third answers a result
+        resolver.Handling = (request) =>
+        {
+            if (request.Payload.Span.SequenceEqual("thrown"u8))
+            {
+                return Task.FromException(new InvalidOperationException("the resolver failed"));
+            }
+
+            return Task.CompletedTask;
+        };
+        await server.Deliver(new Envelope { Header = RequestOf(1), Payload = "thrown"u8.ToArray() });
+        await server.Deliver(new Envelope { Header = RequestOf(3), Payload = "own"u8.ToArray() });
+        await server.Deliver(new Envelope { Header = RequestOf(5), Payload = "result"u8.ToArray() });
+        await resolver.Fail(1, own);
+        await resolver.Answer(2, new byte[] { 1 });
+
+        Assert.Equal(
+            [Failure.OfProtocol(ProtocolCode.ProcedureFailed), null, null],
+            resolver.Requests.Select((props) =>
+            {
+                return core.AnsweredOf(new AnswerTarget(props.ConnectionHandle, props.Header));
+            }));
+        Assert.Equal(
+            [(1u, Failure.OfProtocol(ProtocolCode.ProcedureFailed)), (3u, own), (5u, null)],
+            server.Sent.Select((envelope) =>
+            {
+                return (envelope.Header.CallId, envelope.Failure);
+            }));
+    }
     // helpers
 
     // a call of the core's own, to a connection, given its time

@@ -105,8 +105,9 @@ plays: the TypeScript and C# WebSocket transport servers' `names each connection
 and the rank it came at, two sockets from one address and port among them, and gives no handle
 twice` and `closes each of two sockets from one address and port on its own, each its own close
 told`, the Rust one's
-`names_each_connection_by_its_peer_s_port_and_the_rank_it_came_at_and_gives_no_handle_twice` naming
-two connections from two ports; each WebSocket server's `keeps two sockets from one address and
+`names_each_connection_by_its_peer_s_port_and_the_rank_it_came_at_two_sockets_from_one_address_and_port_among_them_and_gives_no_handle_twice`
+and `closes_each_of_two_sockets_from_one_address_and_port_on_its_own_each_its_own_close_told`,
+their same-port cases on Windows and Linux; each WebSocket server's `keeps two sockets from one address and
 port, to two of its addresses, as two connections, each in its own session, and closes both going
 away as it stops`, on real sockets, skipped where the platform cannot open two sockets from one
 port, the TypeScript one on Linux alone and the Rust one everywhere but macOS; and each transport

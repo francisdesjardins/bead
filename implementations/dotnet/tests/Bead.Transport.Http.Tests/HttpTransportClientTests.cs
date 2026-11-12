@@ -2595,9 +2595,10 @@ public sealed class HttpTransportClientTests
         // connection with it
         var lost = faked.Client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Cancel, (5, 0)), false));
 
+        // * the first with no Retry-After, which waits the server's own second (RFC 9110 §10.2.3)
         for (var index = 6; index < 17; index += 1)
         {
-            (await faked.Fetch.CallOf(index)).Answer(BusyOf(429, "1"));
+            (await faked.Fetch.CallOf(index)).Answer(index == 6 ? RefusalOf(429, HttpRefusals.Busy) : BusyOf(429, "1"));
 
             if (index < 16)
             {

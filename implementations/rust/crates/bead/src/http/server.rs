@@ -53,7 +53,7 @@ use crate::net::bounds::{
     HEADERS_TIMEOUT, MINIMUM_SEND_BYTES_PER_SECOND, SEND_GRACE_PERIOD, SendPace, SendPaceHooks,
     SendPaceOptions, dropped_of, hold_count, late_of,
 };
-use crate::net::listening::{Bound, Listening, accepting, bind};
+use crate::net::listening::{Acceptance, Bound, Listening, accepting, bind, io_error};
 use crate::net::tls::serving_config_of;
 use crate::platform::{self, Handle};
 use crate::router::types::{BoxFuture, ConnectionHandle, Gauges, RouterError, TransportMessage};
@@ -459,6 +459,8 @@ enum Told {
 pub(crate) struct ServerInner {
     me: Weak<Self>,
     runtime: Handle,
+    #[cfg(test)]
+    loopback_binding: Mutex<Option<crate::net::loopbacks::LoopbackBinding>>,
     // the platform's clock, which its timers that bound the platform's socket run on
     platform: SharedClock,
     // the clock it stamps and times bodies on, and the one it was given
@@ -717,24 +719,44 @@ impl ServerInner {
         self: &Arc<Self>,
         options: &TransportServerStartOptions,
     ) -> Result<TransportServerAddress, RouterError> {
-        let Bound { listeners, address } = bind(&self.runtime, options)?;
+        #[cfg(test)]
+        let supplied = locked(&self.loopback_binding).take();
+        #[cfg(test)]
+        let bound = supplied.as_ref().map_or_else(
+            || bind(&self.runtime, options),
+            |binding| crate::net::listening::bind_with_loopback(&self.runtime, (options, binding)),
+        );
+        #[cfg(not(test))]
+        let bound = bind(&self.runtime, options);
+        let Bound { listeners, address } = bound?;
         let listening: Vec<Listening> = listeners
             .into_iter()
             .map(|listener| {
                 let server = Weak::clone(&self.me);
 
+                let reporting = Weak::clone(&self.me);
+
                 accepting(
                     &self.runtime,
-                    (listener, move |accepted, _serving: &Arc<AtomicBool>| {
-                        let Some(inner) = server.upgrade() else {
-                            return false;
-                        };
-                        let runtime = inner.runtime.clone();
+                    Acceptance {
+                        listener,
+                        take: move |accepted, _serving: &Arc<AtomicBool>| {
+                            let Some(inner) = server.upgrade() else {
+                                return false;
+                            };
+                            let runtime = inner.runtime.clone();
 
-                        drop(platform::spawn(&runtime, inner.serve(accepted)));
+                            drop(platform::spawn(&runtime, inner.serve(accepted)));
 
-                        true
-                    }),
+                            true
+                        },
+                        platform: Arc::clone(&self.platform),
+                        report: Box::new(move |error| {
+                            if let Some(inner) = reporting.upgrade() {
+                                inner.report((&io_error(error), None));
+                            }
+                        }),
+                    },
                 )
             })
             .collect();
@@ -2534,6 +2556,8 @@ impl HttpTransportServer {
         let inner = Arc::new_cyclic(|me| ServerInner {
             me: Weak::clone(me),
             runtime,
+            #[cfg(test)]
+            loopback_binding: Mutex::default(),
             platform,
             clock,
             given: options.clock.clone(),

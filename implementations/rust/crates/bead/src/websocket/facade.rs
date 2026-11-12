@@ -347,12 +347,23 @@ impl WebSocketClient {
             finished.cancel();
         })?;
 
-        Ok(Box::pin(async move {
+        // * settled by a task of its own, as it is called: its future only waits, and dropping
+        // it leaves the watch on the signal given to end with the reconnection
+        let (done, settled) = oneshot::channel();
+
+        drop(platform::spawn(&self.runtime, async move {
             let reconnected = reconnecting.await;
 
             finished.cancel();
+            done.send(reconnected).ok();
+        }));
 
-            reconnected
+        Ok(Box::pin(async move {
+            settled.await.unwrap_or_else(|_gone| {
+                Err(TransportError::cancelled(
+                    "the reconnection ended with its runtime",
+                ))
+            })
         }))
     }
 

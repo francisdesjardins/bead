@@ -7,21 +7,17 @@
 use core::fmt;
 use core::future::{Future, poll_fn};
 use core::pin::{Pin, pin};
-use core::task::{Context, Poll};
+use core::task::Poll;
 use core::time::Duration;
 use std::collections::HashMap;
-use std::error::Error;
 use std::io;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 
 use bytes::Bytes;
-use http::header::{AUTHORIZATION, SEC_WEBSOCKET_PROTOCOL};
+use http::header::{AUTHORIZATION, SEC_WEBSOCKET_EXTENSIONS, SEC_WEBSOCKET_PROTOCOL};
 use http::{HeaderValue, Response};
 use rustls::ClientConfig;
-use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
-use tokio::net::TcpStream;
 use tokio::sync::{oneshot, watch};
-use tokio_rustls::client::TlsStream;
 use tokio_tungstenite::WebSocketStream;
 use tokio_util::sync::CancellationToken;
 use tungstenite::client::IntoClientRequest;
@@ -33,8 +29,10 @@ use crate::duration::{NEVER, hold};
 use crate::errors::{ConnectError, ProgrammerError, ReadyStateError, TransportError};
 use crate::judgement::security::is_secure;
 use crate::net::bounds::hold_count;
-use crate::net::racing::{RacingOptions, connect_racing, host_of};
-use crate::net::tls::{connect_tls, http1_config_of};
+use crate::net::credential::{CredentialProvider, CredentialProviderError};
+use crate::net::dial::{ClientSocket, dial};
+use crate::net::racing::{RacingOptions, host_of};
+use crate::net::tls::http1_config_of;
 use crate::platform::{self, Handle};
 use crate::router::types::{BoxFuture, RouterError, TransportMessage};
 use crate::transport::{
@@ -74,18 +72,6 @@ const NO_FIELD_VALUE: &str =
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
-
-/// What a connect's credential provider fails with.
-pub type CredentialProviderError = Box<dyn Error + Send + Sync>;
-
-/// What hands the credential an attempt's upgrade carries.
-///
-/// Called at each attempt — the connect's, and each of a reconnection's — before its upgrade goes,
-/// given a signal cancelled once the attempt ends, opened or not: a renewed credential reaches the
-/// next connection.
-pub type CredentialProvider = Arc<
-    dyn Fn(CancellationToken) -> BoxFuture<Result<String, CredentialProviderError>> + Send + Sync,
->;
 
 /// How a WebSocket transport client holds its connection.
 #[derive(Debug, Clone, Default)]
@@ -187,58 +173,9 @@ impl fmt::Debug for WebSocketTransportClientConnectOptions {
 
 // ── Its socket ───────────────────────────────────────────────────────────────────────────────
 
-/// A client's socket: in the clear, or under TLS.
-enum ClientSocket {
-    Plain(TcpStream),
-    Secured(Box<TlsStream<TcpStream>>),
-}
-
-impl AsyncRead for ClientSocket {
-    fn poll_read(
-        self: Pin<&mut Self>,
-        context: &mut Context<'_>,
-        buffer: &mut ReadBuf<'_>,
-    ) -> Poll<io::Result<()>> {
-        match self.get_mut() {
-            Self::Plain(socket) => Pin::new(socket).poll_read(context, buffer),
-            Self::Secured(socket) => Pin::new(socket.as_mut()).poll_read(context, buffer),
-        }
-    }
-}
-
-impl AsyncWrite for ClientSocket {
-    fn poll_write(
-        self: Pin<&mut Self>,
-        context: &mut Context<'_>,
-        bytes: &[u8],
-    ) -> Poll<io::Result<usize>> {
-        match self.get_mut() {
-            Self::Plain(socket) => Pin::new(socket).poll_write(context, bytes),
-            Self::Secured(socket) => Pin::new(socket.as_mut()).poll_write(context, bytes),
-        }
-    }
-
-    fn poll_flush(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<io::Result<()>> {
-        match self.get_mut() {
-            Self::Plain(socket) => Pin::new(socket).poll_flush(context),
-            Self::Secured(socket) => Pin::new(socket.as_mut()).poll_flush(context),
-        }
-    }
-
-    fn poll_shutdown(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<io::Result<()>> {
-        match self.get_mut() {
-            Self::Plain(socket) => Pin::new(socket).poll_shutdown(context),
-            Self::Secured(socket) => Pin::new(socket.as_mut()).poll_shutdown(context),
-        }
-    }
-}
-
 impl Wire for ClientSocket {
     fn abort(&self) {
-        match self {
-            Self::Plain(socket) => socket.abort(),
-            Self::Secured(socket) => socket.get_ref().0.abort(),
-        }
+        self.reset_on_drop();
     }
 }
 
@@ -632,28 +569,30 @@ impl ClientInner {
             headers.insert(SEC_WEBSOCKET_PROTOCOL, value);
         }
 
-        let socket = connect_racing((&bare, options.port), &self.racing)
+        let tls = if is_secured {
+            Some(self.upgrade_tls()?)
+        } else {
+            None
+        };
+        let socket = dial((&bare, options.port), (&self.racing, tls.as_ref()))
             .await
             .map_err(connect_error)?;
-        let socket = if is_secured {
-            let config = self.upgrade_tls()?;
-
-            ClientSocket::Secured(Box::new(
-                connect_tls((socket, &bare), &config)
-                    .await
-                    .map_err(connect_error)?,
-            ))
-        } else {
-            ClientSocket::Plain(socket)
-        };
         // ! no redirect followed: tungstenite fails an upgrade answered with anything but 101
-        let (socket, _response) = tokio_tungstenite::client_async_with_config(
+        let (socket, response) = tokio_tungstenite::client_async_with_config(
             request,
             socket,
-            Some(config_of(self.settings.maximum_message_bytes)),
+            Some(config_of(self.settings.maximum_message_bytes, None)),
         )
         .await
         .map_err(upgrade_error)?;
+
+        // ! tungstenite opens on a 101 that names an extension it never offered: the client fails
+        // the connection (RFC 6455 §4.1), offering none, its socket dropped
+        if response.headers().contains_key(SEC_WEBSOCKET_EXTENSIONS) {
+            return Err(TransportError::Connect(ConnectError::new(
+                "the server's upgrade names an extension never offered (RFC 6455 §4.1)",
+            )));
+        }
 
         Ok(Opened { socket, credential })
     }

@@ -26,6 +26,89 @@ const OTHER_TOKEN = toSessionToken(new Uint8Array(16).fill(2));
 
 // definition
 
+test('runs a request in its connection’s session when it presents none or that token', () => {
+  const token = toSessionToken(new Uint8Array(16).fill(3));
+  const other = toSessionToken(new Uint8Array(16).fill(4));
+  const held = { token };
+
+  expect(connectionSessionOf(undefined, held)).toBeDefined();
+  expect(connectionSessionOf({ scheme: CredentialScheme.OPAQUE, token }, held)).toBeDefined();
+  expect(
+    connectionSessionOf({ scheme: CredentialScheme.OPAQUE, token: other }, held)
+  ).toBeUndefined();
+  expect(connectionSessionOf({ scheme: CredentialScheme.ELSEWHERE }, held)).toBeUndefined();
+  expect(connectionSessionOf(undefined, { token: undefined })).toBeUndefined();
+});
+
+test('presents what a call asks, OPAQUE for the session known, and refuses what it cannot', () => {
+  const token = toSessionToken(new Uint8Array(16).fill(3));
+  const opaque = { scheme: CredentialScheme.OPAQUE } as const;
+
+  expect(presentedCredentialOf(opaque, { failures: CLIENT_FAILURES, token }).credential).toEqual({
+    scheme: CredentialScheme.OPAQUE,
+    token,
+  });
+  expect(() => {
+    presentedCredentialOf(opaque, { failures: CLIENT_FAILURES, token: undefined });
+  }).toThrow(expect.objectContaining({ code: ProtocolCode.SESSION_REQUIRED }));
+  expect(() => {
+    presentedCredentialOf(
+      { scheme: CredentialScheme.JWT, token: '' },
+      {
+        failures: CLIENT_FAILURES,
+        token: undefined,
+      }
+    );
+  }).toThrow(ProgrammerError);
+  expect(
+    presentedCredentialOf(
+      { carried: 'x', scheme: CredentialScheme.ELSEWHERE },
+      {
+        failures: CLIENT_FAILURES,
+        token: undefined,
+      }
+    )
+  ).toEqual({ carried: 'x', credential: { scheme: CredentialScheme.ELSEWHERE } });
+});
+
+test('fails a credential its transport cannot carry, DESTINATION_UNREACHABLE', () => {
+  const token = toSessionToken(new Uint8Array(16).fill(3));
+  const carries = (credential: string) => {
+    return credential === 'x';
+  };
+  const codeOf = (
+    credential: Parameters<typeof uncarriedOf>[0],
+    { carried, isSecure }: { carried: string | undefined; isSecure: boolean }
+  ) => {
+    return uncarriedOf(credential, { carried, carries, failures: CLIENT_FAILURES, isSecure })?.code;
+  };
+  const elsewhere = { scheme: CredentialScheme.ELSEWHERE } as const;
+  const unreachable = ProtocolCode.DESTINATION_UNREACHABLE;
+
+  expect(codeOf(elsewhere, { carried: 'x', isSecure: true })).toBeUndefined();
+  expect(codeOf(elsewhere, { carried: 'y', isSecure: true })).toBe(unreachable);
+  expect(codeOf(elsewhere, { carried: undefined, isSecure: true })).toBe(unreachable);
+  expect(codeOf(elsewhere, { carried: 'x', isSecure: false })).toBe(unreachable);
+  expect(
+    codeOf(
+      { scheme: CredentialScheme.JWT, token: 'a' },
+      {
+        carried: undefined,
+        isSecure: false,
+      }
+    )
+  ).toBe(unreachable);
+  expect(
+    codeOf(
+      { scheme: CredentialScheme.OPAQUE, token },
+      {
+        carried: undefined,
+        isSecure: false,
+      }
+    )
+  ).toBeUndefined();
+});
+
 test.describe('credentialSchemesDetailOf', () => {
   test('names a scheme to come by the word scheme and its number, in the order of the numbers', () => {
     expect(

@@ -1,5 +1,6 @@
 //! A resolver's decoded request, application answers, failures and trace.
 
+use core::task::{Context, Waker};
 use core::time::Duration;
 use std::sync::Arc;
 
@@ -286,7 +287,7 @@ async fn an_answer_the_router_cannot_send_is_answered_as_failed_and_the_callback
 }
 
 #[tokio::test]
-async fn tells_an_answer_its_router_cannot_send_again_at_its_start_with_why_beside_it() {
+async fn tells_an_answer_its_router_cannot_send_once_with_why_beside_it() {
     let fixture = Fixture::new();
     let heard = fixture.heard();
     let recording = Arc::new(Recording::default());
@@ -327,7 +328,6 @@ async fn tells_an_answer_its_router_cannot_send_again_at_its_start_with_why_besi
             .collect::<Vec<_>>(),
         [
             (DebugDirection::Rx, false, 1_767_225_600_000, None),
-            (DebugDirection::Tx, false, 1_767_225_600_000, Some(10)),
             (DebugDirection::Tx, true, 1_767_225_600_000, Some(15)),
         ]
     );
@@ -344,7 +344,7 @@ async fn tells_an_answer_its_router_cannot_send_again_at_its_start_with_why_besi
         );
     }
     assert!(
-        heard[2]
+        heard[1]
             .0
             .as_ref()
             .expect("a refusal")
@@ -354,6 +354,111 @@ async fn tells_an_answer_its_router_cannot_send_again_at_its_start_with_why_besi
         recording.answers(),
         [failed(ProtocolCode::PROCEDURE_FAILED)]
     );
+}
+
+// debugging 4.2: a call answered nothing tells no failure (spec 9.4)
+#[tokio::test]
+async fn tells_with_no_failure_an_answer_that_did_not_go_once_its_call_was_cancelled() {
+    let fixture = Fixture::new();
+    let heard = fixture.heard();
+    let recording = Arc::new(Recording::default());
+    *locked(&recording.refuse_payload) = Some(CallError::Cancelled(Some(7)));
+    *locked(&recording.delay) = Some((Arc::clone(&fixture.clock), Duration::from_millis(5)));
+    let clock = Arc::clone(&fixture.clock);
+    let resolver = resolving(
+        &fixture,
+        Arc::new(move |request, response| {
+            let clock = Arc::clone(&clock);
+            Box::pin(async move {
+                clock.advance(Duration::from_millis(10)).await;
+                // its requester cancels as it answers: its answer goes nowhere
+                request.signal.abort(SignalReason::Cancelled);
+                response
+                    .result(request.payload)
+                    .await
+                    .expect_err("the callback hears its call cancelled");
+                Ok(())
+            })
+        }),
+    );
+    resolver
+        .resolve(props(&recording, b"hi"))
+        .await
+        .expect("resolved");
+    assert_eq!(
+        locked(&heard)
+            .iter()
+            .map(|(error, step)| (
+                step.direction,
+                error.is_some(),
+                step.started_at,
+                step.duration
+            ))
+            .collect::<Vec<_>>(),
+        [
+            (DebugDirection::Rx, false, 1_767_225_600_000, None),
+            (DebugDirection::Tx, false, 1_767_225_600_000, Some(15)),
+        ]
+    );
+}
+
+// debugging 4.2, decision 0044: the answer goes as it is made, and its step is told once its router
+// settled it, whether or not anyone waits on its future
+#[tokio::test]
+async fn tells_once_its_router_settled_it_an_answer_nobody_waits_on() {
+    // its future dropped unpolled, then once polled
+    for is_polled in [false, true] {
+        let fixture = Fixture::new();
+        let heard = fixture.heard();
+        fixture
+            .manager
+            .get_request_resolver(
+                &echo(),
+                RequestResolverDependencies::new(TextCodec, TextCodec),
+            )
+            .expect("defined")
+            .on(Arc::new(move |request, response| {
+                Box::pin(async move {
+                    let mut answering = response.result(request.payload);
+                    if is_polled {
+                        // * polled once: its answer handed to its router, which has yet to settle it
+                        assert!(
+                            answering
+                                .as_mut()
+                                .poll(&mut Context::from_waker(Waker::noop()))
+                                .is_pending()
+                        );
+                    }
+                    drop(answering);
+                    Ok(())
+                })
+            }))
+            .expect("registered");
+        fixture.transport.open(&handle_of(1), true);
+        fixture.transport.deliver(
+            &Envelope::Request {
+                header: header(),
+                payload: Bytes::from_static(b"hi"),
+            },
+            &handle_of(1),
+        );
+        fixture.clock.settle().await;
+        let sent = fixture.transport.take();
+        assert!(
+            matches!(sent.as_slice(), [(_, Envelope::Result { header, payload })]
+                if header.call_id == 7 && payload.as_ref() == b"hi"),
+            "its answer went, polled {is_polled}: {sent:?}"
+        );
+        assert_eq!(
+            locked(&heard)
+                .iter()
+                .map(|(error, step)| (step.direction, error.is_some()))
+                .collect::<Vec<_>>(),
+            [(DebugDirection::Rx, false), (DebugDirection::Tx, false)],
+            "its step told, polled {is_polled}"
+        );
+        fixture.router.dispose().await;
+    }
 }
 
 #[tokio::test]

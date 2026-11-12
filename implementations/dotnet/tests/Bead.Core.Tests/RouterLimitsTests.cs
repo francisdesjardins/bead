@@ -126,12 +126,20 @@ public sealed class RouterLimitsTests
             RouterLimits.WholeEnvelopeOf(RouterLimits.Default with { ChunkBytes = 64, MaximumEnvelopeBytes = 1_024, MaximumPayloadBytes = 512, MaximumTransfers = 0 }));
     }
 
-    // the TypeScript side refuses a transfer asked for; a record's default cannot tell given from not,
-    // so this side takes none whatever is given
+    // spec 15.11
     [Fact]
-    public void Whole_envelope_limits_hold_together_and_take_no_transfer_whatever_is_given()
+    public async Task Gives_limits_a_router_holds_together_and_refuses_a_transfer_asked_for()
     {
-        RouterLimits.WholeEnvelopeOf(RouterLimits.Default with { MaximumEnvelopeBytes = 4_096 }).Validate();
-        Assert.Equal(0, RouterLimits.WholeEnvelopeOf(RouterLimits.Default with { MaximumTransfers = 4 }).MaximumTransfers);
+        await using var transport = new MemoryTransportServer();
+        using var router = new RouterServer(transport, new RouterServerOptions
+        {
+            Limits = RouterLimits.WholeEnvelopeOf(RouterLimits.Default with { MaximumEnvelopeBytes = 4_096 }),
+        });
+
+        Assert.Equal(0, router.Limits.MaximumTransfers);
+        Assert.Throws<ArgumentException>(() =>
+        {
+            return RouterLimits.WholeEnvelopeOf(RouterLimits.Default with { MaximumTransfers = 4 });
+        });
     }
 }

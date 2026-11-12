@@ -371,6 +371,25 @@ public sealed class SessionManager<TData> : IDisposable
                 SessionToken = session.SessionToken ?? Draw(),
             };
 
+            // the timers follow what is stored: a new session starts over, a timeout that changed
+            // restarts its own; each is armed before the commit, so a clock that refuses one leaves
+            // nothing stored, and the one armed before it stopped
+            var isConnectionArmed = isNew || stored?.ConnectionInactivityTimeout != connectionTimeout;
+            var isSessionArmed = isNew || stored?.SessionInactivityTimeout != sessionTimeout;
+            var connectionTimer = isConnectionArmed ? ArmOf(connectionHandle, (connectionTimeout, true)) : null;
+            ITimer? sessionTimer;
+
+            try
+            {
+                sessionTimer = isSessionArmed ? ArmOf(connectionHandle, (sessionTimeout, false)) : null;
+            }
+            catch
+            {
+                connectionTimer?.Dispose();
+
+                throw;
+            }
+
             if (stored?.SessionToken is { } replaced)
             {
                 _sessions.Remove(replaced);
@@ -379,21 +398,21 @@ public sealed class SessionManager<TData> : IDisposable
             _sessions[next.SessionToken!.Value] = next;
             _tokens[connectionHandle] = next.SessionToken.Value;
 
-            // the timers follow what is stored: a new session starts over, a timeout that changed
-            // restarts its own
             if (isNew)
             {
                 StopTimers(connectionHandle);
             }
 
-            if (isNew || stored?.ConnectionInactivityTimeout != connectionTimeout)
+            // ! placed by whether each was armed, not by whether it is null: an infinite timeout
+            // arms none, and still stops the timer it replaces
+            if (isConnectionArmed)
             {
-                ArmConnectionTimer(connectionHandle, connectionTimeout);
+                PlaceConnectionTimer(connectionHandle, connectionTimer);
             }
 
-            if (isNew || stored?.SessionInactivityTimeout != sessionTimeout)
+            if (isSessionArmed)
             {
-                ArmSessionTimer(connectionHandle, sessionTimeout);
+                PlaceSessionTimer(connectionHandle, sessionTimer);
             }
 
             var created = next;
@@ -483,14 +502,19 @@ public sealed class SessionManager<TData> : IDisposable
             held = Resolve((session.ConnectionInactivityTimeout, _connectionTimeoutDefault), nameof(Session<TData>.ConnectionInactivityTimeout));
             old = stored.ConnectionInactivityTimeout!.Value;
             updated = stored with { ConnectionInactivityTimeout = held };
-            _sessions[updated.SessionToken!.Value] = updated;
 
             if (held == old)
             {
+                _sessions[updated.SessionToken!.Value] = updated;
+
                 return updated;
             }
 
-            ArmConnectionTimer(session.ConnectionHandle, held);
+            // armed before it is stored: a clock that refuses it leaves the timeout and its timer
+            var armed = ArmOf(session.ConnectionHandle, (held, true));
+
+            _sessions[updated.SessionToken!.Value] = updated;
+            PlaceConnectionTimer(session.ConnectionHandle, armed);
         }
 
         ConnectionInactivityTimeoutChanged?.Invoke(new SessionChange<TData, TimeSpan> { Session = updated, NewValue = held, OldValue = old });
@@ -528,14 +552,19 @@ public sealed class SessionManager<TData> : IDisposable
             held = Resolve((session.SessionInactivityTimeout, _sessionTimeoutDefault), nameof(Session<TData>.SessionInactivityTimeout));
             old = stored.SessionInactivityTimeout!.Value;
             updated = stored with { SessionInactivityTimeout = held };
-            _sessions[updated.SessionToken!.Value] = updated;
 
             if (held == old)
             {
+                _sessions[updated.SessionToken!.Value] = updated;
+
                 return updated;
             }
 
-            ArmSessionTimer(session.ConnectionHandle, held);
+            // armed before it is stored: a clock that refuses it leaves the timeout and its timer
+            var armed = ArmOf(session.ConnectionHandle, (held, false));
+
+            _sessions[updated.SessionToken!.Value] = updated;
+            PlaceSessionTimer(session.ConnectionHandle, armed);
         }
 
         SessionInactivityTimeoutChanged?.Invoke(new SessionChange<TData, TimeSpan> { Session = updated, NewValue = held, OldValue = old });
@@ -643,26 +672,39 @@ public sealed class SessionManager<TData> : IDisposable
         }
     }
 
+    // the successor armed first, then swapped in: a clock that refuses it leaves the live one
     private void ArmConnectionTimer(string connectionHandle, TimeSpan timeout)
     {
-        var (connection, session) = _timers.GetValueOrDefault(connectionHandle);
-
-        connection?.Dispose();
-        _timers[connectionHandle] = (ArmOf(connectionHandle, (timeout, true)), session);
+        PlaceConnectionTimer(connectionHandle, ArmOf(connectionHandle, (timeout, true)));
     }
 
     private void ArmSessionTimer(string connectionHandle, TimeSpan timeout)
     {
+        PlaceSessionTimer(connectionHandle, ArmOf(connectionHandle, (timeout, false)));
+    }
+
+    // a connection timer armed already, in place of the one it replaces, which stops
+    private void PlaceConnectionTimer(string connectionHandle, ITimer? armed)
+    {
+        var (connection, session) = _timers.GetValueOrDefault(connectionHandle);
+
+        connection?.Dispose();
+        _timers[connectionHandle] = (armed, session);
+    }
+
+    private void PlaceSessionTimer(string connectionHandle, ITimer? armed)
+    {
         var (connection, session) = _timers.GetValueOrDefault(connectionHandle);
 
         session?.Dispose();
-        _timers[connectionHandle] = (connection, ArmOf(connectionHandle, (timeout, false)));
+        _timers[connectionHandle] = (connection, armed);
     }
 
-    // a timer that fires the session as it is then, not as it was when the timer was set
+    // a timer that fires the session as it is then, not as it was when the timer was set; its
+    // callers hold that the connection has a session, or is given one once it is armed
     private ITimer? ArmOf(string connectionHandle, (TimeSpan Timeout, bool IsConnection) timer)
     {
-        if (!_tokens.ContainsKey(connectionHandle) || timer.Timeout == Timeout.InfiniteTimeSpan)
+        if (timer.Timeout == Timeout.InfiniteTimeSpan)
         {
             return null;
         }

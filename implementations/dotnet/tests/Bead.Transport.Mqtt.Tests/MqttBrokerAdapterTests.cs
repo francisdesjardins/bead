@@ -249,11 +249,20 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         var limited = ScriptedLink.ConnAck();
 
         limited.MaximumQoS = MqttQualityOfServiceLevel.AtMostOnce;
+
+        var limiting = adapter.Start();
+        var link = await _script.Link();
+
+        await link.Send(limited);
         Assert.Contains("Maximum QoS 0", (await FailureOf(() =>
         {
-            return LinkUp((adapter, _script), (limited, null));
+            return limiting;
         })).Message, StringComparison.Ordinal);
         Assert.Empty(downs);
+
+        // * a start that fails sends nothing: no DISCONNECT
+        await link.Closed.WaitAsync(Patience, Cancelled);
+        Assert.IsType<MqttConnectPacket>(Assert.Single(link.Packets));
 
         // a CONNACK that refuses fails it too, naming its reason
         var starting = adapter.Start();
@@ -348,6 +357,32 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         Assert.True(watch.Elapsed < TimeSpan.FromMilliseconds(2_500), $"its PINGREQ went after {watch.ElapsedMilliseconds} ms");
         await link.Send(MqttPingRespPacket.Instance);
         await adapter.Stop();
+    }
+
+    // spec 15.26, where the sides part: MQTTnet keeps its own period whatever the CONNACK names, where
+    // the Rust side sends no PINGREQ under 0 and takes a longer one, and the TypeScript side takes a
+    // longer one; a row of docs/support.md
+    [Fact]
+    public async Task Keeps_its_own_Keep_Alive_under_a_Server_Keep_Alive_of_0_or_longer_than_its_own_spec_15_26()
+    {
+        foreach (var server in new ushort[] { 0, 3 })
+        {
+            await using var adapter = AdapterOf((options) =>
+            {
+                return options with { KeepAlive = TimeSpan.FromSeconds(1) };
+            });
+            var answer = ScriptedLink.ConnAck();
+
+            answer.ServerKeepAlive = server;
+
+            var link = await LinkUp((adapter, _script), (answer, null));
+            var watch = Stopwatch.StartNew();
+
+            await link.Next<MqttPingReqPacket>(TimeSpan.FromSeconds(3));
+            Assert.True(watch.Elapsed < TimeSpan.FromMilliseconds(2_500), $"{server}: its PINGREQ went after {watch.ElapsedMilliseconds} ms");
+            await link.Send(MqttPingRespPacket.Instance);
+            await adapter.Stop();
+        }
     }
 
     [Fact]
@@ -450,6 +485,27 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Tells_its_link_taken_over_on_a_DISCONNECT_of_0x8E_whatever_else_it_carries_a_Session_Expiry_Interval_among_it_spec_15_21()
+    {
+        await using var adapter = AdapterOf();
+        var (_, downs) = HeardOf(adapter);
+        var link = await LinkUp((adapter, _script));
+
+        // * a DISCONNECT of 0x8E, its Session Expiry Interval of 0 and its Reason String "n", which a
+        // broker never sends together ([MQTT-3.14.2-2]) and which end its link all the same
+        // ([MQTT-3.14.4-2])
+        await link.Write([0xE0, 0x0B, 0x8E, 0x09, 0x11, 0x00, 0x00, 0x00, 0x00, 0x1F, 0x00, 0x01, (byte)'n']);
+        link.End();
+        await Until(() =>
+        {
+            return !downs.IsEmpty;
+        });
+        Assert.Equal([new BrokerDown { IsTakenOver = true }], downs);
+        Assert.False(adapter.IsLinked);
+        Assert.IsType<MqttConnectPacket>(Assert.Single(link.Packets));
+    }
+
+    [Fact]
     public async Task Subscribes_at_QoS_1_No_Local_0_Retain_As_Published_0_and_Retain_Handling_2_a_group_as_its_shared_subscription_held_once_its_SUBACK_grants_QoS_1_and_refused_otherwise_spec_15_27()
     {
         await using var adapter = AdapterOf();
@@ -506,7 +562,7 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Lets_a_subscription_go_once_its_UNSUBACK_came_naming_the_topic_itself_where_it_held_none_and_refuses_it_on_a_code_of_0x80_or_more_spec_15_27()
+    public async Task Lets_a_subscription_go_once_its_UNSUBACK_came_naming_the_topic_itself_where_it_held_none_and_refuses_it_on_any_other_code_spec_15_27()
     {
         await using var adapter = AdapterOf();
         var link = await LinkUp((adapter, _script));
@@ -527,18 +583,29 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         // * one its broker held none of is let go all the same, 0x11
         Assert.Equal("bead/d/bob", await Answered((["bead", "d", "bob"], MqttUnsubscribeReasonCode.NoSubscriptionExisted)));
         Assert.Equal("bead/d/bob", await Answered((["bead", "d", "bob"], MqttUnsubscribeReasonCode.Success)));
-        Assert.Contains("0x87", (await FailureOf(() =>
-        {
-            return Answered((["bead", "d", "eve"], MqttUnsubscribeReasonCode.NotAuthorized));
-        })).Message, StringComparison.Ordinal);
-        Assert.Contains("0x80", (await FailureOf(() =>
-        {
-            return Answered((["bead", "d", "eve"], MqttUnsubscribeReasonCode.UnspecifiedError));
-        })).Message, StringComparison.Ordinal);
 
-        // its link kept
+        var subscribing = adapter.Subscribe(["bead", "d", "eve"]);
+
+        await SubAckOf((link, 1));
+        await subscribing.WaitAsync(Patience, Cancelled);
+
+        // * any other code, under 0x80 among them, which MQTT 5 names no UNSUBACK by
+        foreach (var code in new[] { 0x01, 0x10, 0x7F, 0x80, 0x87 })
+        {
+            var refused = string.Create(CultureInfo.InvariantCulture, $"0x{code:X2}");
+
+            Assert.Contains(refused, (await FailureOf(() =>
+            {
+                return Answered((["bead", "d", "eve"], (MqttUnsubscribeReasonCode)code));
+            })).Message, StringComparison.Ordinal);
+        }
+
+        // its link kept, and the filter refused its stop's to let go
         Assert.True(adapter.IsLinked);
+        _script.IsHoldingUnsubscribes = false;
         await adapter.Stop();
+        Assert.Equal("bead/d/eve", LetGoOf(link)[^1]);
+        Assert.Equal(8, LetGoOf(link).Count);
     }
 
     [Fact]
@@ -664,6 +731,9 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         var quickLink = await LinkUp((quick, _script));
 
         Assert.Equal((BrokerDelivery.AtMostOnce, (BrokerCapabilities)0), (quick.Delivery, quick.Capabilities & BrokerCapabilities.NoSubscriber));
+
+        // its bound counts no Packet Identifier, which a QoS 0 PUBLISH has none of
+        Assert.Equal(MqttPackets.LargestPayload(("bead/i/ada", MqttPackets.LargestPacketSize), new MqttPublishShape(0, true)), quick.MaximumPayloadBytes(Inbox));
         Assert.Equal(BrokerPublished.Taken, await quick.Publish(new BrokerPublication { Topic = Inbox, Payload = payload }).WaitAsync(Patience, Cancelled));
         Assert.Equal(MqttQualityOfServiceLevel.AtMostOnce, (await quickLink.Next<MqttPublishPacket>()).QualityOfServiceLevel);
         await quick.Stop();
@@ -774,6 +844,27 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         })).Message, StringComparison.Ordinal);
         await Task.Delay(50, Cancelled);
         Assert.Single(link.PacketsOf<MqttPublishPacket>());
+        await adapter.Stop();
+    }
+
+    [Fact]
+    public async Task Reports_no_payload_room_where_its_CONNACK_s_Maximum_Packet_Size_cannot_hold_a_PUBLISH_to_the_topic_and_refuses_even_an_empty_publication_spec_15_28()
+    {
+        await using var adapter = AdapterOf();
+        var answer = ScriptedLink.ConnAck();
+
+        answer.MaximumPacketSize = 16;
+
+        var link = await LinkUp((adapter, _script), (answer, null));
+
+        Assert.Equal(0, adapter.MaximumPayloadBytes(Inbox));
+        Assert.Contains("past its broker's Maximum Packet Size, 16 bytes", Assert.IsType<ArgumentException>(await FailureOf(() =>
+        {
+            return adapter.Publish(new BrokerPublication { Topic = Inbox, Payload = Array.Empty<byte>() });
+        })).Message, StringComparison.Ordinal);
+        Assert.True(adapter.IsLinked);
+        await Task.Delay(50, Cancelled);
+        Assert.Empty(link.PacketsOf<MqttPublishPacket>());
         await adapter.Stop();
     }
 
@@ -897,27 +988,414 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Closes_its_link_no_DISCONNECT_on_a_packet_past_its_own_Maximum_Packet_Size_spec_15_29()
+    public async Task Closes_its_link_no_DISCONNECT_on_a_packet_past_its_own_Maximum_Packet_Size_read_at_its_length_spec_15_29()
     {
         await using var adapter = AdapterOf((options) =>
         {
             return options with { MaximumPacketSize = 1_100 };
         });
         var (messages, downs) = HeardOf(adapter);
-        var link = await LinkUp((adapter, _script));
 
-        await link.Send(PublishOf(("bead/i/ada", new byte[1_100], 1)));
+        void Unanswered(ScriptedLink closed)
+        {
+            Assert.DoesNotContain(closed.Packets, (packet) =>
+            {
+                return packet is MqttDisconnectPacket or MqttPubAckPacket;
+            });
+        }
+
+        // a PUBLISH of 1,118 bytes in all, after its CONNACK
+        var whole = await LinkUp((adapter, _script));
+
+        await whole.Send(PublishOf(("bead/i/ada", new byte[1_100], 1)));
+        await whole.Closed.WaitAsync(Patience, Cancelled);
+        await Until(() =>
+        {
+            return !downs.IsEmpty;
+        });
+        Assert.Equal([new BrokerDown()], downs);
+        Unanswered(whole);
+
+        // * its fixed header alone, announcing 16,777,221 bytes, and nothing after it: judged at its length
+        var announced = await LinkUp((adapter, _script));
+
+        await announced.Write([0x32, 0x80, 0x80, 0x80, 0x08]);
+        await announced.Closed.WaitAsync(Patience, Cancelled);
+        await Until(() =>
+        {
+            return downs.Count == 2;
+        });
+        Assert.Equal([new BrokerDown(), new BrokerDown()], downs);
+        Unanswered(announced);
+
+        // a CONNACK's fixed header announcing as much: its start fails
+        var starting = adapter.Start();
+        var refused = await _script.Link();
+
+        await refused.Write([0x20, 0x80, 0x80, 0x80, 0x08]);
+        Assert.Contains("past its Maximum Packet Size", Assert.IsType<IOException>(await FailureOf(() =>
+        {
+            return starting;
+        })).Message, StringComparison.Ordinal);
+        await refused.Closed.WaitAsync(Patience, Cancelled);
+        Unanswered(refused);
+        Assert.Equal([new BrokerDown(), new BrokerDown()], downs);
+        Assert.Empty(messages);
+        Assert.False(adapter.IsLinked);
+    }
+
+    [Fact]
+    public async Task Loses_its_link_no_DISCONNECT_on_a_packet_its_client_cannot_read_spec_15_29()
+    {
+        await using var adapter = AdapterOf();
+        var (messages, downs) = HeardOf(adapter);
+        // * a PUBLISH to its inbox carrying a property MQTT 5 does not define, 0x7F, and a Remaining
+        // Length still continuing at its fourth byte (MQTT 5.0 §2.2.2.2, §1.5.5)
+        byte[] unreadable = [0x30, 0x0F, 0x00, 0x0A, .. Encoding.UTF8.GetBytes("bead/i/ada"), 0x02, 0x7F, 0x00];
+
+        async Task IsLostIn((ScriptedLink Link, int Count) lost)
+        {
+            await lost.Link.Closed.WaitAsync(Patience, Cancelled);
+            await Until(() =>
+            {
+                return downs.Count >= lost.Count;
+            });
+            Assert.Equal(Enumerable.Repeat(new BrokerDown(), lost.Count), downs);
+            Assert.False(adapter.IsLinked);
+            Assert.IsType<MqttConnectPacket>(Assert.Single(lost.Link.Packets));
+        }
+
+        byte[][] packets = [unreadable, [0x30, 0xFF, 0xFF, 0xFF, 0xFF, 0x01]];
+
+        for (var index = 0; index < packets.Length; index += 1)
+        {
+            var link = await LinkUp((adapter, _script));
+
+            await link.Write(packets[index]);
+            await IsLostIn((link, index + 1));
+        }
+
+        // and beside its CONNACK in one read: its start succeeds, and its link is lost once
+        var starting = adapter.Start();
+        var beside = await _script.Link();
+
+        await beside.Write([0x20, 0x03, 0x00, 0x00, 0x00, .. unreadable]);
+        Assert.Null(await Record.ExceptionAsync(() =>
+        {
+            return starting.WaitAsync(Patience, Cancelled);
+        }));
+        await IsLostIn((beside, 3));
+        Assert.Empty(messages);
+    }
+
+    [Fact]
+    public async Task Loses_its_link_once_on_a_packet_past_its_Maximum_Packet_Size_beside_its_CONNACK_in_one_read_spec_15_29()
+    {
+        await using var adapter = AdapterOf((options) =>
+        {
+            return options with { MaximumPacketSize = 1_100 };
+        });
+        var (messages, downs) = HeardOf(adapter);
+        var starting = adapter.Start();
+        var link = await _script.Link();
+
+        // * one broker write: a successful CONNACK followed by a header alone
+        await link.Write([0x20, 0x03, 0, 0, 0, 0x32, 0x80, 0x80, 0x80, 0x08]);
         await link.Closed.WaitAsync(Patience, Cancelled);
+        var failure = await Record.ExceptionAsync(() =>
+        {
+            return starting.WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.Null(failure);
+        Assert.Equal([new BrokerDown()], downs);
+        Assert.Empty(messages);
+        Assert.False(adapter.IsLinked);
+        Assert.IsType<MqttConnectPacket>(Assert.Single(link.Packets));
+    }
+
+    [Fact]
+    public async Task Loses_its_link_once_on_a_packet_past_its_Maximum_Packet_Size_after_its_CONNACK_before_its_caller_resumes_spec_15_29()
+    {
+        await using var adapter = AdapterOf((options) =>
+        {
+            return options with { MaximumPacketSize = 1_100 };
+        });
+        var (messages, downs) = HeardOf(adapter);
+        var held = new HeldContinuation();
+        var previous = SynchronizationContext.Current;
+        Task starting;
+
+        // * hold the adapter's await of ConnectAsync after MQTTnet accepts its CONNACK,
+        // while its receiving loop keeps reading and the adapter has not counted itself up
+        SynchronizationContext.SetSynchronizationContext(held);
+        try
+        {
+            starting = adapter.Start();
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previous);
+        }
+
+        var link = await _script.Link();
+
+        // * a CONNACK of 0x00 whose Maximum Packet Size (0x27) is 1,024 bytes
+        await link.Write([0x20, 0x08, 0, 0, 0x05, 0x27, 0, 0, 0x04, 0]);
+        var resume = await held.Posted.Task.WaitAsync(Patience, Cancelled);
+
+        try
+        {
+            Assert.False(starting.IsCompleted);
+            Assert.False(adapter.IsLinked);
+            await link.Write([0x32, 0x80, 0x80, 0x80, 0x08]);
+            await link.Closed.WaitAsync(Patience, Cancelled);
+        }
+        finally
+        {
+            resume();
+        }
+
+        var failure = await Record.ExceptionAsync(() =>
+        {
+            return starting.WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.Null(failure);
+        Assert.Equal([new BrokerDown()], downs);
+        Assert.Empty(messages);
+        Assert.False(adapter.IsLinked);
+        Assert.Equal(MqttPackets.LargestPayload(("bead/i/ada", 1_024), new MqttPublishShape(1, true)), adapter.MaximumPayloadBytes(Inbox));
+        Assert.IsType<MqttConnectPacket>(Assert.Single(link.Packets));
+    }
+
+    [Fact]
+    public async Task Loses_its_link_once_as_its_network_connection_ends_after_its_CONNACK_before_its_caller_resumes_spec_15_26()
+    {
+        await using var adapter = AdapterOf();
+        var (messages, downs) = HeardOf(adapter);
+        var held = new HeldContinuation();
+        var previous = SynchronizationContext.Current;
+        Task starting;
+
+        // * hold the adapter's await of ConnectAsync after MQTTnet accepts its CONNACK
+        SynchronizationContext.SetSynchronizationContext(held);
+        try
+        {
+            starting = adapter.Start();
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previous);
+        }
+
+        var link = await _script.Link();
+
+        await link.Write([0x20, 0x03, 0, 0, 0]);
+        var resume = await held.Posted.Task.WaitAsync(Patience, Cancelled);
+
+        try
+        {
+            Assert.False(starting.IsCompleted);
+            link.End();
+            await link.Closed.WaitAsync(Patience, Cancelled);
+        }
+        finally
+        {
+            resume();
+        }
+
+        var failure = await Record.ExceptionAsync(() =>
+        {
+            return starting.WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.Null(failure);
         await Until(() =>
         {
             return !downs.IsEmpty;
         });
         Assert.Equal([new BrokerDown()], downs);
         Assert.Empty(messages);
-        Assert.DoesNotContain(link.Packets, (packet) =>
+        Assert.False(adapter.IsLinked);
+        Assert.IsType<MqttConnectPacket>(Assert.Single(link.Packets));
+    }
+
+    [Fact]
+    public async Task Fails_its_start_on_a_CONNACK_that_refuses_or_says_Maximum_QoS_0_beside_a_packet_past_its_Maximum_Packet_Size_in_one_read_naming_the_CONNACK_spec_15_26_15_29()
+    {
+        // * one broker write each: a CONNACK, then a header alone past 1,100 bytes
+        (byte[] ConnAck, string Named)[] refusals =
+        [
+            ([0x20, 0x03, 0, 0x86, 0], "0x86"),
+            ([0x20, 0x03, 0, 0x01, 0], "0x01"),
+            ([0x20, 0x05, 0, 0, 0x02, 0x24, 0], "Maximum QoS 0"),
+        ];
+
+        foreach (var (connAck, named) in refusals)
         {
-            return packet is MqttDisconnectPacket or MqttPubAckPacket;
+            await using var adapter = AdapterOf((options) =>
+            {
+                return options with { MaximumPacketSize = 1_100 };
+            });
+            var (messages, downs) = HeardOf(adapter);
+            var starting = adapter.Start();
+            var link = await _script.Link();
+
+            await link.Write([.. connAck, 0x32, 0x80, 0x80, 0x80, 0x08]);
+            var failure = Assert.IsType<IOException>(await FailureOf(() =>
+            {
+                return starting;
+            }));
+
+            Assert.Contains(named, failure.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain("past its Maximum Packet Size", failure.Message, StringComparison.Ordinal);
+            await link.Closed.WaitAsync(Patience, Cancelled);
+            Assert.Empty(downs);
+            Assert.Empty(messages);
+            Assert.False(adapter.IsLinked);
+            Assert.IsType<MqttConnectPacket>(Assert.Single(link.Packets));
+        }
+    }
+
+    [Fact]
+    public async Task Stops_its_link_with_a_DISCONNECT_of_0x00_after_its_CONNACK_before_its_caller_resumes_its_start_succeeding_and_no_down_told_spec_15_26()
+    {
+        await using var adapter = AdapterOf();
+        var (messages, downs) = HeardOf(adapter);
+        var held = new HeldContinuation();
+        var previous = SynchronizationContext.Current;
+        Task starting;
+
+        // * hold the adapter's await of ConnectAsync after MQTTnet accepts its CONNACK
+        SynchronizationContext.SetSynchronizationContext(held);
+        try
+        {
+            starting = adapter.Start();
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previous);
+        }
+
+        var link = await _script.Link();
+
+        await link.Write([0x20, 0x03, 0, 0, 0]);
+        var resume = await held.Posted.Task.WaitAsync(Patience, Cancelled);
+
+        try
+        {
+            Assert.False(starting.IsCompleted);
+            await adapter.Stop().WaitAsync(Patience, Cancelled);
+        }
+        finally
+        {
+            resume();
+        }
+
+        var failure = await Record.ExceptionAsync(() =>
+        {
+            return starting.WaitAsync(Patience, Cancelled);
         });
+
+        Assert.Null(failure);
+        await link.Closed.WaitAsync(Patience, Cancelled);
+        Assert.Empty(downs);
+        Assert.Empty(messages);
+        Assert.False(adapter.IsLinked);
+        Assert.Collection(
+            link.Packets,
+            (packet) =>
+            {
+                Assert.IsType<MqttConnectPacket>(packet);
+            },
+            (packet) =>
+            {
+                Assert.Equal(MqttDisconnectReasonCode.NormalDisconnection, Assert.IsType<MqttDisconnectPacket>(packet).ReasonCode);
+            });
+    }
+
+    [Fact]
+    public async Task Takes_a_start_from_its_down_s_listener_once_its_link_is_lost_beside_its_CONNACK_spec_15_26()
+    {
+        await using var adapter = AdapterOf((options) =>
+        {
+            return options with { MaximumPacketSize = 1_100 };
+        });
+        var (messages, downs) = HeardOf(adapter);
+        var restarted = new TaskCompletionSource<Task>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        // * a start made as its down is told, synchronously, what it returns kept
+        adapter.Down += (_) =>
+        {
+            restarted.TrySetResult(adapter.Start());
+        };
+
+        var starting = adapter.Start();
+        var link = await _script.Link();
+
+        await link.Write([0x20, 0x03, 0, 0, 0, 0x32, 0x80, 0x80, 0x80, 0x08]);
+        var failure = await Record.ExceptionAsync(() =>
+        {
+            return starting.WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.Null(failure);
+        var restarting = await restarted.Task.WaitAsync(Patience, Cancelled);
+
+        Assert.Equal([new BrokerDown()], downs);
+        Assert.Empty(messages);
+
+        // its restart taken, never refused as up already: a second link comes, its CONNECT read
+        var next = await _script.Link();
+
+        Assert.Equal(Id, next.Connect.ClientId);
+        await next.Send(ScriptedLink.ConnAck());
+        await restarting.WaitAsync(Patience, Cancelled);
+        Assert.True(adapter.IsLinked);
+        await adapter.Stop();
+        Assert.False(adapter.IsLinked);
+    }
+
+    [Fact]
+    public async Task Tells_its_link_taken_over_its_start_succeeding_on_a_DISCONNECT_of_0x8E_beside_its_CONNACK_in_one_read_spec_15_21_15_26()
+    {
+        await using var adapter = AdapterOf();
+        var (messages, downs) = HeardOf(adapter);
+        var starting = adapter.Start();
+        var link = await _script.Link();
+
+        // * one broker write: a successful CONNACK, then a DISCONNECT of 0x8E, then its end
+        await link.Write([0x20, 0x03, 0, 0, 0, 0xE0, 0x02, 0x8E, 0]);
+        link.End();
+        var failure = await Record.ExceptionAsync(() =>
+        {
+            return starting.WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.Null(failure);
+        await link.Closed.WaitAsync(Patience, Cancelled);
+        await Until(() =>
+        {
+            return !downs.IsEmpty;
+        });
+        Assert.Equal([new BrokerDown { IsTakenOver = true }], downs);
+        Assert.Empty(messages);
+        Assert.False(adapter.IsLinked);
+        Assert.IsType<MqttConnectPacket>(Assert.Single(link.Packets));
+    }
+
+    private sealed class HeldContinuation : SynchronizationContext
+    {
+        public TaskCompletionSource<Action> Posted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public override void Post(SendOrPostCallback callback, object? state)
+        {
+            Assert.True(Posted.TrySetResult(() =>
+            {
+                callback(state);
+            }), "the adapter posts one continuation after its CONNACK");
+        }
     }
 
     [Fact]
@@ -931,6 +1409,9 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
 
         Assert.Equal(16_777_188, server.ReceiveBound(["bead", "i", "server"]));
         Assert.Equal(4_072, peer.ReceiveBound(["bead", "i", "peer"]));
+
+        // * a topic whose PUBLISH alone passes the bound leaves no payload any room
+        Assert.Equal(0, peer.ReceiveBound(["bead", "i", new string('p', 4_096)]));
         Assert.Equal(16_777_216, MqttPackets.MaximumPacketSize);
 
         // a bound whose receive bound is under 1,024 is refused as its participant is built, and one
@@ -1202,6 +1683,69 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         Assert.Equal([new BrokerDown(), new BrokerDown()], downs);
         await again.Closed.WaitAsync(Patience, Cancelled);
         await adapter.Stop();
+    }
+
+    [Fact]
+    public async Task Retires_its_link_where_a_publication_at_most_once_is_given_up_before_its_packet_is_written_spec_15_28()
+    {
+        await using var adapter = AdapterOf((options) =>
+        {
+            return options with { Delivery = BrokerDelivery.AtMostOnce };
+        });
+        var (_, downs) = HeardOf(adapter);
+        var link = await LinkUp((adapter, _script));
+        var mebibyte = new byte[1_048_576];
+        var held = new List<Task<BrokerPublished>>();
+
+        // * 64 MiB its broker does not read, so that its writer blocks; each asked in a turn of its own
+        link.Pause();
+
+        for (var index = 0; index < 64; index += 1)
+        {
+            held.Add(adapter.Publish(new BrokerPublication { Topic = Inbox, Payload = mebibyte }));
+            await Task.Yield();
+        }
+
+        using var given = new CancellationTokenSource();
+        var givenUp = adapter.Publish(new BrokerPublication { Topic = Inbox, Payload = (byte[])[1], CancellationToken = given.Token });
+
+        await Task.Delay(100, Cancelled);
+        Assert.False(givenUp.IsCompleted, "held behind what is not written");
+        await given.CancelAsync();
+        Assert.IsAssignableFrom<OperationCanceledException>(await FailureOf(() =>
+        {
+            return givenUp;
+        }));
+
+        // * it may go yet, so its link goes
+        await Until(() =>
+        {
+            return !downs.IsEmpty;
+        });
+        Assert.Equal([new BrokerDown()], downs);
+
+        foreach (var publishing in held)
+        {
+            var failure = await Record.ExceptionAsync(() =>
+            {
+                return publishing.WaitAsync(Patience, Cancelled);
+            });
+
+            if (failure is not null)
+            {
+                Assert.Equal("the link of ada was retired: what it was asked was given up once it may have gone", Assert.IsType<IOException>(failure).Message);
+            }
+        }
+
+        // * its network connection closed, no DISCONNECT: what waited never written whole
+        link.Resume();
+        await link.Closed.WaitAsync(Patience, Cancelled);
+        Assert.DoesNotContain(link.Packets, (packet) =>
+        {
+            return packet is MqttDisconnectPacket;
+        });
+        Assert.True(link.PacketsOf<MqttPublishPacket>().Count < 64, "what waited never written whole");
+        Assert.False(adapter.IsLinked);
     }
 
     [Fact]
@@ -1588,14 +2132,81 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
 
         Assert.Equal([true, true, true, true, true, false, false], uris.Select(IsSecure));
 
-        // what is none of its four is refused as it is built, and so is an id that is none
-        foreach (var refused in new[] { new MqttBrokerAdapterOptions { Id = Id, Uri = new Uri("http://broker.example") }, new MqttBrokerAdapterOptions { Id = "", Uri = new Uri("mqtt://127.0.0.1") } })
+        // what is none of its four is refused as it is built, and so is an IPv6 address followed by
+        // anything but its port (RFC 3986 §3.2.2), and an id that is none
+        string[] refusedUris = ["http://broker.example", "mqtt://[::1]junk:1884", "mqtt://[::1]junk", "ws://[::1]junk/mqtt", "mqtt://user@[::1]junk:1884"];
+        var refusedOptions = refusedUris.Select((uri) =>
+        {
+            return new MqttBrokerAdapterOptions { Id = Id, Uri = new Uri(uri) };
+        }).Append(new MqttBrokerAdapterOptions { Id = "", Uri = new Uri("mqtt://127.0.0.1") });
+
+        foreach (var refused in refusedOptions)
         {
             Assert.Throws<ArgumentException>(() =>
             {
                 return new MqttBrokerAdapter(refused);
             });
         }
+    }
+
+    // [MQTT-6.0.0-2] lets a WebSocket message hold several packets: MQTTnet reads its WebSocket as a
+    // stream of packets, each held to its Maximum Packet Size alone, where the Rust side bounds a
+    // message as a packet; a row of docs/support.md
+    [Fact]
+    public async Task Reads_a_WebSocket_message_of_two_packets_past_its_Maximum_Packet_Size_together_each_within_it()
+    {
+        using var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+
+        listener.Start();
+
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        await using var adapter = new MqttBrokerAdapter(new MqttBrokerAdapterOptions { Id = Id, Password = Password, Uri = new Uri($"ws://127.0.0.1:{port}/mqtt"), MaximumPacketSize = 1_024 });
+        var (messages, downs) = HeardOf(adapter);
+        var starting = adapter.Start();
+        using var peer = await listener.AcceptTcpClientAsync(Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+        var stream = peer.GetStream();
+        var head = new List<byte>();
+        var octet = new byte[1];
+
+        while (!Encoding.ASCII.GetString([.. head]).EndsWith("\r\n\r\n", StringComparison.Ordinal))
+        {
+            await stream.ReadExactlyAsync(octet, Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+            head.Add(octet[0]);
+        }
+
+        var key = Encoding.ASCII.GetString([.. head]).Split("\r\n").Single((line) =>
+        {
+            return line.StartsWith("Sec-WebSocket-Key:", StringComparison.OrdinalIgnoreCase);
+        })["Sec-WebSocket-Key:".Length..].Trim();
+        // the handshake's own hash, which RFC 6455 names: nothing secret rests on it
+#pragma warning disable CA5350
+        var accept = Convert.ToBase64String(SHA1.HashData(Encoding.ASCII.GetBytes($"{key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11")));
+#pragma warning restore CA5350
+
+        await stream.WriteAsync(Encoding.ASCII.GetBytes($"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\nSec-WebSocket-Protocol: mqtt\r\n\r\n"), Cancelled);
+
+        using var broker = System.Net.WebSockets.WebSocket.CreateFromStream(stream, new System.Net.WebSockets.WebSocketCreationOptions { IsServer = true, SubProtocol = "mqtt", KeepAliveInterval = TimeSpan.Zero });
+        var encoder = new MqttV5PacketEncoder(new MqttBufferWriter(4_096, 65_536));
+        var encoded = (MqttPacket packet) =>
+        {
+            return encoder.Encode(packet).Join().ToArray();
+        };
+        var publish = encoded(new MqttPublishPacket { Topic = $"bead/i/{Id}", PayloadSegment = new byte[680], QualityOfServiceLevel = MqttQualityOfServiceLevel.AtMostOnce });
+        var received = new byte[4_096];
+
+        // its CONNECT, then its CONNACK; then one message of two PUBLISHes of 700 bytes or so each
+        await broker.ReceiveAsync(received, Cancelled).WaitAsync(Patience, Cancelled);
+        await broker.SendAsync(encoded(ScriptedLink.ConnAck()), System.Net.WebSockets.WebSocketMessageType.Binary, true, Cancelled);
+        await starting.WaitAsync(Patience, Cancelled);
+        Assert.True(publish.Length < 1_024 && publish.Length * 2 > 1_024 + 14, $"{publish.Length} bytes a packet");
+        await broker.SendAsync((byte[])[.. publish, .. publish], System.Net.WebSockets.WebSocketMessageType.Binary, true, Cancelled);
+        await Until(() =>
+        {
+            return messages.Count == 2;
+        });
+
+        Assert.Equal((2, 0), (messages.Count, downs.Count));
+        Assert.True(adapter.IsLinked, "its link kept");
     }
 
     [Fact(Skip = MqttFixture.Reason, SkipUnless = nameof(IsMqtt))]

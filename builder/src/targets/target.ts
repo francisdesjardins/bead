@@ -18,15 +18,7 @@ import { beadcVersion } from '../version.ts';
 
 // types
 
-/** Where an output's messages come from, in `beadc.yaml`'s words. */
-export const Messages = Object.freeze({
-  /** The target's generator of messages writes them into the output, from buf's set. */
-  GENERATE: 'generate',
-  /** Another generator writes them: a project's own build, or a folder of their own. */
-  EXTERNAL: 'external',
-} as const);
-
-export type Messages = (typeof Messages)[keyof typeof Messages];
+export { Messages } from './messages.ts';
 
 /** A file a target writes: its path under the output's folder, with slashes, and its text. */
 export interface IGeneratedFile {

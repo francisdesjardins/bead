@@ -29,16 +29,16 @@ use bead::{
     HttpTransportServerOptions, LIMIT_DEFAULTS, LONGEST_TIMER, MemoryBroker, MemoryBrokerAdapter,
     MemoryBrokerAdapterOptions, MemoryBrokerOptions, MemoryTransportClient,
     MemoryTransportClientConnectOptions, MemoryTransportClientOptions, MemoryTransportServer,
-    MemoryTransportServerOptions, NEVER, Procedure, ProgrammerError, RawCodec, ReadyState, Refusal,
-    RelayLeg, RelayOptions, RelayRouter, RelayTarget, RequestDefaults, RequestDependencies,
-    RequestHeader, RequestOptions, ResolvedRequestOptions, RouterClient, RouterClientOptions,
-    RouterClientTransport, RouterError, RouterLimits, RouterLimitsOptions, RouterRequest,
-    RouterServer, RouterServerOptions, Sent, Server, ServerListener, ServerOptions,
-    ServerTransport, ServiceManager, ServiceManagerOptions, ServiceRouter, SessionManagerOptions,
-    SharedClock, TransportClientReconnectDelay, TransportClientReconnectOptions, TransportError,
-    TransportMessage, TransportServerStartOptions, WebSocketTransportClient,
-    WebSocketTransportClientConnectOptions, WebSocketTransportClientOptions,
-    WebSocketTransportServer, WebSocketTransportServerOptions,
+    MemoryTransportServerOptions, MqttBrokerAdapter, MqttBrokerAdapterOptions, NEVER, Procedure,
+    ProgrammerError, RawCodec, ReadyState, Refusal, RelayLeg, RelayOptions, RelayRouter,
+    RelayTarget, RequestDefaults, RequestDependencies, RequestHeader, RequestOptions,
+    ResolvedRequestOptions, RouterClient, RouterClientOptions, RouterClientTransport, RouterError,
+    RouterLimits, RouterLimitsOptions, RouterRequest, RouterServer, RouterServerOptions, Sent,
+    Server, ServerListener, ServerOptions, ServerTransport, ServiceManager, ServiceManagerOptions,
+    ServiceRouter, SessionManagerOptions, SharedClock, TransportClientReconnectDelay,
+    TransportClientReconnectOptions, TransportError, TransportMessage, TransportServerStartOptions,
+    WebSocketTransportClient, WebSocketTransportClientConnectOptions,
+    WebSocketTransportClientOptions, WebSocketTransportServer, WebSocketTransportServerOptions,
 };
 use bytes::Bytes;
 use libtest_mimic::{Arguments, Failed, Trial};
@@ -52,8 +52,8 @@ const MILLISECOND: Duration = Duration::from_millis(1);
 const OTHER_TIMEOUT: Duration = Duration::from_secs(1);
 
 // the places this side plays, by the id the file keys them by; every other is ahead, with the
-// stage that brings it: its broker bindings, its gateway
-const PLACES: [&str; 29] = [
+// stage that brings it: its AMQP 1.0 binding, its gateway
+const PLACES: [&str; 31] = [
     "call.timeout",
     "serviceManager.defaultTimeout",
     "router.reservation",
@@ -83,6 +83,8 @@ const PLACES: [&str; 29] = [
     "httpTransport.inactivityTimeout",
     "httpTransportClient.wait",
     "httpTransportClient.pause",
+    "mqttBrokerAdapter.keepAlive",
+    "mqttBrokerAdapter.connectTimeout",
 ];
 
 // the ways of each place this side has, the others its rows excuse it from
@@ -101,7 +103,9 @@ fn ways_of(place: &str) -> &'static [&'static str] {
         | "webSocketTransportServer.sendGracePeriod"
         | "httpTransportServer.maximumWait"
         | "httpTransportClient.wait"
-        | "httpTransportClient.pause" => &["options"],
+        | "httpTransportClient.pause"
+        | "mqttBrokerAdapter.keepAlive"
+        | "mqttBrokerAdapter.connectTimeout" => &["options"],
         "router.reservation" => &["reserve", "cancel"],
         "relay.timeout" => &["relay", "register"],
         "session.inactivityTimeouts" => &[
@@ -1385,6 +1389,37 @@ async fn broker_heartbeat_by_options(given: Option<Duration>) -> Played {
     }
 }
 
+// ── mqttBrokerAdapter ────────────────────────────────────────────────────────────────────────
+
+// an adapter to a broker it never links to, built with the options given: taken or refused, as
+// it is built, never without end (spec 15.26, 15.30)
+fn mqtt_adapter_of<F: FnOnce(&mut MqttBrokerAdapterOptions)>(given: F) -> Observed {
+    let mut options = MqttBrokerAdapterOptions::new("mqtt://127.0.0.1:1883", "ada");
+
+    given(&mut options);
+
+    match MqttBrokerAdapter::new(&options) {
+        Ok(_adapter) => Observed::Taken,
+        Err(refused) => Observed::Refused(refused),
+    }
+}
+
+// the adapter's options, as it is built: taken or refused
+fn mqtt_keep_alive_by_options(given: Option<Duration>) -> Played {
+    let given = given.ok_or("a Keep Alive is given")?;
+
+    Ok(mqtt_adapter_of(|options| options.keep_alive = Some(given)))
+}
+
+// the adapter's options, as it is built: taken or refused
+fn mqtt_connect_timeout_by_options(given: Option<Duration>) -> Played {
+    let given = given.ok_or("a connect timeout is given")?;
+
+    Ok(mqtt_adapter_of(|options| {
+        options.connect_timeout = Some(given);
+    }))
+}
+
 // the transport server's options, as it is built: the due of the timer an ACCEPT arms for its third
 // leg; refused, no server built
 async fn accept_timeout_by_options(given: Option<Duration>) -> Played {
@@ -2403,6 +2438,10 @@ async fn http_client_way(place: &str, given: Option<Duration>) -> Played {
 
 // ── The table ────────────────────────────────────────────────────────────────────────────────
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "one arm per place and way, as the file lists them"
+)]
 async fn play_way((place, way): (&str, &str), given: Option<Duration>) -> Played {
     match (place, way) {
         ("call.timeout", "serviceManager") => call_by_service_manager(given).await,
@@ -2447,6 +2486,8 @@ async fn play_way((place, way): (&str, &str), given: Option<Duration>) -> Played
         }
         ("transportClient.connectTimeout", "http") => connect_timeout_by_http(given).await,
         ("brokerParticipant.heartbeat", "options") => broker_heartbeat_by_options(given).await,
+        ("mqttBrokerAdapter.keepAlive", "options") => mqtt_keep_alive_by_options(given),
+        ("mqttBrokerAdapter.connectTimeout", "options") => mqtt_connect_timeout_by_options(given),
         ("brokerTransportServer.acceptTimeout", "options") => {
             accept_timeout_by_options(given).await
         }

@@ -7,6 +7,148 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-12
+
+### Added
+
+- The Rust side's MQTT 5 binding, the feature `mqtt` of its core, a client of Bead's own over TCP,
+  TLS or a WebSocket: `MqttBrokerAdapter` and its options and defaults; it plays
+  `spec/transports.json`'s cases over MQTT 5, `mqttPublishBounds` and its places of
+  `spec/durations.json`, and the interop runs both ways over it (decision 0050).
+- The demo's Packages tab: a blueprint, the demo's own or one opened, cut into the outputs of
+  `beadc.yaml` by the builder's own `cutOf`, `selectionFindingsOf` and `parseConfig`, run in the
+  page: what each class holds, the findings `beadc generate` would refuse, the procedures each
+  transport takes, the gateway's routes, and the YAML to copy.
+
+### Changed
+
+- The spec moves to 0.14.0 (`spec-v0.14.0`), its companion, `spec/debugging.md`, to 0.9.0
+  (`debugging-v0.9.0`), and the transcoding's companion, `spec/transcoding.md`, to 0.4.1
+  (`transcoding-v0.4.1`).
+- The demo takes francisdesjardins.ca's palette and type, and lays its scenes in one column, Try
+  it first, each card's result beside its buttons; the wire, its calls and its envelopes, folds
+  into a drawer on a desktop and a sheet on a phone until it is opened.
+- Over MQTT 5, a participant judges a received packet against its own Maximum Packet Size as it
+  reads the packet's Remaining Length, before its body comes, and closes its network connection
+  there, whatever the packet's type: the TypeScript adapter by a guard on MQTT.js's stream and the
+  C# adapter by one on MQTTnet's channel, as the Rust side's client does, so its own bound bounds
+  what it holds of a packet. Its link is lost where its CONNACK put it up, though the packet came
+  in the same read, and its start fails where none did, a CONNACK that refuses or says Maximum QoS
+  0 failing it by its own reason whatever comes beside it. It sends no DISCONNECT of 0x95, which
+  Mosquitto 2.1.2 answers by deleting its will (spec 15.26, 15.29, decision 0041).
+- Over MQTT 5, a start that fails sends no DISCONNECT, on every side: the C# adapter no longer
+  sends one of 0x00 on a CONNACK of Maximum QoS 0, which a broker that conforms never gives a
+  CONNECT whose will is of QoS 1 ([MQTT-3.2.2-12]). The TypeScript adapter names a CONNACK that
+  refuses by its code and its name, `CONNACK 0x86, Bad User Name or Password`, as the Rust side
+  does; the C# side gives MQTTnet's name, `BadUserNameOrPassword` (spec 15.26, decision 0041).
+- The details gate reads a helper's call by the arguments at the positions that reach its sinks, and
+  the whole call where its arguments do not split plainly, so a router's state handed beside a
+  reason that stays with the side carries no detail (decision 0006).
+- An answer's trace step is told once, after its router settled the answer, on every side: with no
+  error, with the refusal, or with the failure its router answered in its place; its duration ends
+  with that settling. An answer refused or answered in its place is no longer told twice (debugging
+  4.2, decision 0013).
+- The support matrix and decisions 0041 and 0049 correct three statements: the Rust side's HTTP
+  server bounds an HTTP/2 head by its size alone, 16 KiB as h2 counts it, and no count of its
+  fields; the TypeScript side's transport sets no bound on an HTTP/2 session, which its
+  application's `createServer` holds; and the sides part on a Server Keep Alive of 0 or longer than
+  their own, each a row of the matrix's differences.
+- The documents are brought to 0.13.0: the records, the READMEs and the support matrix state what
+  holds and where Bead goes, the Rust side's MQTT 5 binding among what holds.
+
+### Removed
+
+- The Rust side's `ResolverError::Failure` and `From<Failure> for ResolverError`: a resolver, an
+  admission or a verifier fails with `ResolverError::other`, a `Failure` among what it takes,
+  answered `PROCEDURE_FAILED` with no detail and reported as itself, as on every side; a procedure
+  answers its own failure through its answerer (spec 9.0, 9.5, decision 0044).
+
+### Fixed
+
+- The Rust side's WebSocket and HTTP servers pause a second on the platform's clock after an
+  accept that fails of the process' own, short of descriptors say, the first of a run reported,
+  where they accepted again at once and spun a thread; a connection gone before it was taken is
+  accepted past at once (decision 0049).
+- The Rust side's `WebSocketClient::reconnect` and `HttpClient::reconnect` settle in a task of their
+  own, as they are called: a reconnection whose future is dropped no longer leaves a task and its
+  watch on the signal given until the client is disposed (decision 0044).
+- The Rust side's WebSocket server holds what tungstenite keeps unwritten for a connection to its
+  write buffer, the largest message `maximumUnsentBytes` lets go and a control frame: a peer that
+  pings on and reads none of its pongs no longer grows it without bound, and a message that finds
+  it full drops the connection, reported naming the bound (spec 15.12).
+- The Rust and C# WebSocket clients fail a 101 that names an extension they never offered, its
+  socket dropped, as the TypeScript side's `ws` does, where they opened on it (RFC 6455 §4.1).
+- The Rust side's HTTP server ends an HTTP/2 session that reads no request's head within
+  `headersTimeout`, from its handshake or since its last head while it answers nothing, within its
+  linger, by GOAWAY once its preface came: a peer that sends no preface, only its SETTINGS, or a
+  head never whole, no longer holds its socket without end (spec 15.12).
+- The Rust side's WebSocket server judges and adds what waits for a connection's socket at once,
+  so senders that cross take no more than `maximumUnsentBytes` between them, and gives it back never
+  below none: its gauges no longer read a count wrapped past zero once a connection ended under a
+  send (spec 15.12).
+- The Rust side's WebSocket connections report a peer's close of a status no end sends, 1005, 1006
+  or one under 1000 say, as a protocol error, answered 1002, as `ws` and .NET do, where its close
+  was told unclean with no error (RFC 6455 §7.4.1, spec 15.1).
+- A Rust WebSocket connection failed with 1009 or 1002 shuts its write side once its close went, so
+  a peer that answers and waits on the server's end of TCP ends it, where it waited its close
+  timeout (RFC 6455 §7.1.1, spec 15.3).
+- A Rust WebSocket or HTTP server dropped idle, without its stop, lets its port go at once, where
+  its accepting held it until the next connection came (decision 0049).
+- The Rust side's service layer acts as each call is made, its future only waiting (decision
+  0044): `Notification::register` subscribes, and `NotificationRegistration::unregister` leaves,
+  even when its future is dropped, so an unregistration dropped no longer holds every registration
+  after it waiting for good; `Response::result` and `Response::failure` answer and tell their
+  trace step once the router settled the answer, whether or not anyone waits on them, as the
+  other sides do.
+- The Rust side fails a `JWT`'s verification under a key of ES256 whose `x` and `y` name no point
+  of P-256: its call answered `PROCEDURE_FAILED` and reported, as on the other sides, where it was
+  answered `SESSION_REQUIRED` and had its requester withdraw a credential that holds (spec 9.2, SEC
+  1 §3.2.2).
+- The Rust side reads a wall clock before 1970 in milliseconds rounded down, as the other sides
+  do, where it read 0 or rounded toward 0: an `ELSEWHERE` session's end, a `JWT`'s times, a
+  connection's session and a trace's instants judged against that reading (spec 13.10.2, 13.11).
+- The Rust side asks a key set once its credential resolver's lock is let go, as the C# side does:
+  an ask that blocks in its synchronous part no longer stalls every other call's `JWT` on that lock.
+- A session manager whose clock refuses a timer leaves what it held: a new session is not stored
+  and the timers prepared for it are stopped, and a timeout set or reset keeps the stored one and its
+  running timer, telling nothing, on the TypeScript and C# sides as on the Rust side (decision
+  0011).
+- A key set's deadline whose timer the clock refuses fails the calls waiting for it with the key
+  set's ask failure, the clock's error its cause, and starts no ask: the TypeScript side no longer
+  holds every later call of that issuer until its own signal ends it, nor the C# side the calls that
+  waited for the deadline, and the Rust side's next call asks at once (spec 13.9.3).
+- A result sent as a transfer is told it went only once its transport took every envelope of it,
+  and fails with the first refusal its transport gives, whenever it comes: an opening or a chunk
+  refused after the last chunk went fails its answer on every side, where the answer resolved and
+  the refusal was lost (spec 12.7).
+- A connection that closes credits the transfers of other connections that the budget it gives back
+  starved, on the Rust side as on the others, which reserved their credit and never sent it, so they
+  stalled (spec 12.10).
+- An HTTP server or client given limits that ask for a transfer refuses them as it is built on the
+  C# side, as on the TypeScript and Rust sides (spec 15.11).
+- Over MQTT 5, a link is up as its CONNACK is read, as on the Rust side: a link that ends right
+  after its CONNACK, before its start's caller resumes, is lost, its down told once, its start
+  succeeding and that CONNACK's Maximum Packet Size bounding what it publishes while it is down,
+  where the C# adapter failed its start as lost as it connected, told no down and kept the bound
+  of the link before; a DISCONNECT of 0x8E right behind the CONNACK is told as a takeover, which
+  the TypeScript adapter told as a plain loss, so its participant fences it; and a stop there sends
+  its DISCONNECT of 0x00, on the C# side once MQTTnet says it connected, so no will goes, and the
+  TypeScript adapter no longer counts up a link its stop ended (spec 15.21, 15.26, 15.30, decision
+  0041).
+- The C# MQTT 5 adapter refuses as it is built a URL whose IPv6 address is followed by anything but
+  its port, `mqtt://[::1]junk:1884` say, as the other sides do, where it dropped what followed and
+  dialled the scheme's port (RFC 3986 §3.2.2).
+- Over MQTT 5, the TypeScript adapter loses its link on a packet MQTT.js's parser refuses once its
+  CONNACK put it up, its network connection closed with no DISCONNECT and its down told once, as
+  the Rust and C# sides do, where its link stayed up and read nothing reliably after it: MQTT.js
+  tells such a refusal as its client's `error` and keeps its stream (spec 15.26, 15.29, decision
+  0041).
+- Over MQTT 5, the C# adapter retires its link on a publication at most once given up once it was
+  asked, as the other sides do, where its call waited until its broker read the packet and was
+  then taken; and the TypeScript adapter says why its retired link fails what it was asked, what
+  it was asked was given up once it may have gone, as the other sides do, where its reason ended
+  at its colon (decision 0041).
+
 ## [0.12.0] - 2026-11-10
 
 ### Added
@@ -2621,7 +2763,8 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
   workflows.
 - The licence, Apache-2.0.
 
-[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.12.0...develop
+[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.13.0...develop
+[0.13.0]: https://github.com/francisdesjardins/bead/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/francisdesjardins/bead/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/francisdesjardins/bead/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/francisdesjardins/bead/compare/v0.9.0...v0.10.0

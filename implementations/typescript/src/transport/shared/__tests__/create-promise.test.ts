@@ -1,13 +1,45 @@
 import { expect, test } from '@playwright/test';
+import { type IClock, PLATFORM_CLOCK, type TimeoutId } from '../clock';
 import { createPromise } from '../create-promise';
 import { CancelError, ConnectError, GenericError, ProgrammerError, TimeoutError } from '../errors';
 import { DURATIONS, givenOf, isExcused, outcomeOf, placeHolding, refusalOf } from './durations';
 import { createTestClock, delaysOn } from './fixtures';
 
-const activeTimeouts = () => {
-  return process.getActiveResourcesInfo().filter((resource) => {
-    return resource === 'Timeout';
-  }).length;
+// the platform's clock, each timer it arms counted until it fires or is cleared, so a test reads
+// createPromise's own timers and none another test of its worker left armed
+const recordingClock = (): IClock & { readonly armed: Set<TimeoutId>; set: number } => {
+  const armed = new Set<TimeoutId>();
+  const clock = {
+    Date: PLATFORM_CLOCK.Date,
+    performance: PLATFORM_CLOCK.performance,
+    armed,
+    set: 0,
+    clearInterval: (timer: TimeoutId | undefined) => {
+      PLATFORM_CLOCK.clearInterval(timer);
+    },
+    clearTimeout: (timer: TimeoutId | undefined) => {
+      if (timer !== undefined) {
+        armed.delete(timer);
+      }
+      PLATFORM_CLOCK.clearTimeout(timer);
+    },
+    setInterval: (callback: () => void, delay: number) => {
+      return PLATFORM_CLOCK.setInterval(callback, delay);
+    },
+    setTimeout: (callback: () => void, delay: number) => {
+      const timer: TimeoutId = PLATFORM_CLOCK.setTimeout(() => {
+        armed.delete(timer);
+        callback();
+      }, delay);
+
+      armed.add(timer);
+      clock.set += 1;
+
+      return timer;
+    },
+  };
+
+  return clock;
 };
 
 test.describe('createPromise', () => {
@@ -206,43 +238,46 @@ test.describe('createPromise', () => {
   });
 
   test('clears both timers when a delayed promise settles', async () => {
-    const before = activeTimeouts();
+    const clock = recordingClock();
 
     await createPromise(
       (resolve) => {
         resolve();
       },
-      { delay: 10, timeout: 60_000 }
+      { delay: 10, timeout: 60_000, clock }
     );
 
-    expect(activeTimeouts()).toBe(before);
+    expect(clock.set).toBe(2);
+    expect(clock.armed.size).toBe(0);
   });
 
   test('clears its timeout when the promise resolves first', async () => {
-    const before = activeTimeouts();
+    const clock = recordingClock();
 
     await createPromise(
       (resolve) => {
         resolve();
       },
-      { timeout: 60_000 }
+      { timeout: 60_000, clock }
     );
 
-    expect(activeTimeouts()).toBe(before);
+    expect(clock.set).toBe(1);
+    expect(clock.armed.size).toBe(0);
   });
 
   test('clears its timeout when the promise rejects first', async () => {
-    const before = activeTimeouts();
+    const clock = recordingClock();
 
     await expect(
       createPromise(
         (_, reject) => {
           reject(new ConnectError('refused'));
         },
-        { timeout: 60_000 }
+        { timeout: 60_000, clock }
       )
     ).rejects.toBeInstanceOf(ConnectError);
 
-    expect(activeTimeouts()).toBe(before);
+    expect(clock.set).toBe(1);
+    expect(clock.armed.size).toBe(0);
   });
 });

@@ -152,17 +152,19 @@ its words on every side:
 
 As it is built, after its id, its URL and its TLS, an adapter refuses as a programmer's error, in
 this order: a password beside its provider; either beside a client certificate; neither, over AMQP
-1.0, whose PLAIN takes a password of one octet at least
-([RFC 4616 §2](https://www.rfc-editor.org/rfc/rfc4616#section-2)) and whose ANONYMOUS is no
-mechanism of its link; and a password that is empty or holds a NUL, which a provider's answer meets
-at its start, an empty answer never taken as none, since none would lower the authentication. Over
-MQTT 5 an adapter given neither sends its id as its User Name, with no Password. A password is
-text, as SASL PLAIN's is: MQTT 5's Password, Binary Data
-([MQTT 5.0 §3.1.3.6](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html)), is kept
-to UTF-8, a row of [`docs/support.md`](../support.md)'s "Leveled down". No word carries the secret,
-and an adapter's options write a password or a provider in no string: the C# side's options say
-that one is set, never its value, as `Credential` does. The Rust side's adapters, ahead, take this
-form.
+1.0, whose PLAIN takes a password of one octet at least ([RFC 4616
+§2](https://www.rfc-editor.org/rfc/rfc4616#section-2)) and whose ANONYMOUS is no mechanism of its
+link; and a password that is empty or holds a NUL, which a provider's answer meets at its start, an
+empty answer never taken as none, since none would lower the authentication. Over MQTT 5 an adapter
+given neither sends its id as its User Name, with no Password. A password is text, as SASL PLAIN's
+is: MQTT 5's Password, Binary Data ([MQTT 5.0
+§3.1.3.6](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html)), is kept to UTF-8, a row
+of [`docs/support.md`](../support.md)'s "Leveled down". No word carries the secret, and an adapter's
+options write a password or a provider in no string: the C# side's options say that one is set,
+never its value, as `Credential` does. The Rust side's MQTT 5 adapter takes this form, its options'
+`Debug` writing whether a password or a provider is set, never its value, and its AMQP 1.0 adapter,
+ahead, takes it too
+([0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)).
 
 **A server's transport serves by its broker's word**: it starts once its broker holds each name
 it serves, a name refused failing its start, and stops once it let each go, its unsubscriptions

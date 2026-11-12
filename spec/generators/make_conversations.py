@@ -128,6 +128,10 @@ def opened(connection, two_way=True):
     return {'open': connection, **({} if two_way else {'twoWay': False})}
 
 
+def closed(connection):
+    return {'close': True, 'on': connection}
+
+
 def opened_as(connection, procedures=None, **declared):
     """A connection opened as it declares: carries and secure, and procedures, the addresses its
     transport takes (9.11), each a service id and a procedure id; absent, every one; empty, none."""
@@ -1189,6 +1193,12 @@ conversations = [
         opening(3, 'echo', LONG[:44], 200),
         opening(5, 'echo', LONG[:44], 200), failure(5, CAPACITY_EXCEEDED),
         cancel(1), credited(3, 172)]),
+    ("a connection that closes ends its transfers, and the budget they held credits a transfer another connection's opening starved", ['12.4', '12.10'], {
+        **CHUNKED, 'bufferedBytesBudget': 256, 'maximumPayloadBytes': 256}, [
+        opened('first'), opened('second'),
+        on(opening(1, 'echo', LONG[:44], 200), 'first'), on(credited(1, 172), 'first'),
+        on(opening(1, 'echo', LONG[:44], 200), 'second'),
+        closed('first'), on(credited(1, 172), 'second')]),
     ('a cancel ends the transfer of a result, and a credit after it is dropped in silence', ['12.7', '12.9.5'], CHUNKED, [
         json_request(1, 'bytes', '{"length":98}'), result_opening(1, RESULT_100[:28], 100),
         cancel(1), credit_in(1, 100)]),
@@ -1224,10 +1234,6 @@ conversations = [
 # registers its own connection as a destination on the wire
 DESTINATION_UNREACHABLE, SUBSCRIPTION_UNSUPPORTED, DESTINATION_LOST = 17, 22, 65
 DEVICE = 12
-
-
-def closed(connection):
-    return {'close': True, 'on': connection}
 
 
 def relayed(call_id, procedure, value, destination=DEVICE, flags=0x02):

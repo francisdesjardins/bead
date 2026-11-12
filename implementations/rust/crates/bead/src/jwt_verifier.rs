@@ -349,8 +349,13 @@ fn serves(key: &JwtKey) -> bool {
         }
 }
 
-// * ES256's signature is R then S, 64 bytes (RFC 7518 §3.4): never DER
-fn verifies(key: &JwtKey, (signature, signing_input): (&[u8], &[u8])) -> bool {
+// * ES256's signature is R then S, 64 bytes (RFC 7518 §3.4): never DER. A key whose x and y name
+// no point of P-256 (SEC 1 §3.2.2) is the application's fault, never the token's: it fails the
+// verification, as the other sides' import of it does
+fn verifies(
+    key: &JwtKey,
+    (signature, signing_input): (&[u8], &[u8]),
+) -> Result<bool, ProgrammerError> {
     let decoded = |name: &str| {
         string_of(&key.jwk, name)
             .and_then(|text| base64url::decode(text.as_bytes()))
@@ -360,7 +365,7 @@ fn verifies(key: &JwtKey, (signature, signing_input): (&[u8], &[u8])) -> bool {
     match key.algorithm {
         JwtAlgorithm::Es256 => {
             if signature.len() != 64 {
-                return false;
+                return Ok(false);
             }
 
             let mut point = vec![0x04];
@@ -368,26 +373,29 @@ fn verifies(key: &JwtKey, (signature, signing_input): (&[u8], &[u8])) -> bool {
             point.extend(decoded("x"));
             point.extend(decoded("y"));
 
-            let (Ok(verifying), Ok(signature)) = (
-                VerifyingKey::from_sec1_bytes(&point),
-                Signature::from_slice(signature),
-            ) else {
-                return false;
+            let verifying = VerifyingKey::from_sec1_bytes(&point).map_err(|_off_curve| {
+                ProgrammerError::new(format!(
+                    "a JWT's key of ES256 names a point of P-256 by its x and y, for the issuer {:?}",
+                    key.issuer
+                ))
+            })?;
+            let Ok(signature) = Signature::from_slice(signature) else {
+                return Ok(false);
             };
 
-            verifying.verify(signing_input, &signature).is_ok()
+            Ok(verifying.verify(signing_input, &signature).is_ok())
         }
         JwtAlgorithm::Hs256 => {
             if signature.len() != 32 {
-                return false;
+                return Ok(false);
             }
 
             let Ok(mut mac) = Hmac::<Sha256>::new_from_slice(&decoded("k")) else {
-                return false;
+                return Ok(false);
             };
 
             mac.update(signing_input);
-            mac.verify_slice(signature).is_ok()
+            Ok(mac.verify_slice(signature).is_ok())
         }
     }
 }
@@ -514,16 +522,6 @@ pub fn read_jwt(token: &[u8]) -> Option<ReadJwt> {
     Some(ReadJwt { header, claims })
 }
 
-// milliseconds since the epoch of a wall clock's reading
-fn milliseconds_since_epoch(at: SystemTime) -> i64 {
-    match at.duration_since(SystemTime::UNIX_EPOCH) {
-        Ok(since) => i64::try_from(since.as_millis()).unwrap_or(i64::MAX),
-        Err(before) => {
-            i64::try_from(before.duration().as_millis()).map_or(i64::MIN, i64::saturating_neg)
-        }
-    }
-}
-
 /// The verdict on `token`, a `JWT`, verified as section 13.8 states, step by step.
 ///
 /// The first step that fails names the verdict's reason. The wall clock is read once, as its
@@ -531,7 +529,8 @@ fn milliseconds_since_epoch(at: SystemTime) -> i64 {
 ///
 /// # Errors
 ///
-/// A [`ProgrammerError`] for a key not shaped for its algorithm.
+/// A [`ProgrammerError`] for a key not shaped for its algorithm, or one of ES256 whose `x` and `y`
+/// name no point of P-256.
 pub fn verify_jwt(token: &[u8], against: &JwtAgainst<'_>) -> Result<JwtVerdict, ProgrammerError> {
     for key in against.keys {
         assert_jwt_key(key)?;
@@ -581,12 +580,12 @@ pub fn verify_jwt(token: &[u8], against: &JwtAgainst<'_>) -> Result<JwtVerdict, 
         )
         .unwrap_or_default();
 
-    if !verifies(key, (&signature, signed)) {
+    if !verifies(key, (&signature, signed))? {
         return Ok(JwtVerdict::Refused(JwtRefusal::Signature));
     }
 
     // * W read once, as the signature has verified
-    let now = milliseconds_since_epoch((against.now)());
+    let now = crate::clock::milliseconds_since_epoch((against.now)());
 
     Ok(verdict_of(claims, (against.audiences, key, now)))
 }

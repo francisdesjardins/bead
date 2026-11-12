@@ -1810,6 +1810,12 @@ public sealed class BrokerParticipantTests
         {
             return participant.Start();
         })).Message);
+
+        // * a connect while its stop is under way fails, as one that stop overtook does
+        Assert.Equal("the participant ada stopped as it connected", (await Assert.ThrowsAsync<ConnectException>(() =>
+        {
+            return participant.Client().Connect(new BrokerTransportClientConnectOptions { Server = "interop", CancellationToken = Cancelled }).WaitAsync(BrokerPair.Patience, Cancelled);
+        })).Message);
         Assert.True(holding.ReleaseStop());
         await stopping.WaitAsync(BrokerPair.Patience, Cancelled);
         Assert.False(participant.IsLinked);

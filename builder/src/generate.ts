@@ -35,7 +35,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, join, relative, sep } from 'node:path';
+import nodePath, { dirname, join, relative, sep } from 'node:path';
 
 import type { IChecked } from './check.ts';
 import { OPTIONS_ROOT } from './compile.ts';
@@ -438,7 +438,7 @@ export const planOf = (config: IConfig, checked: IChecked): IPlan => {
 
       // ! a name a blueprint gives, its `proto.file`, may climb out of the output: refused, as
       // protoc refuses a plugin's relative name, since nothing else holds a file under its folder
-      if (!isInside(output.out, { target: path })) {
+      if (!isInside(output.out, { target: path, path: nodePath })) {
         throw new InputError(
           `generate would write ${slashed(config.folder, path)}, outside its output ${slashed(config.folder, output.out)}: a service's proto.file in the blueprint names a path that climbs out of it; name one under it, without ..`
         );

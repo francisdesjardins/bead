@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Globalization;
 using System.Net;
+using System.Security.Authentication;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
@@ -59,6 +60,91 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
         {
             return AmqpFixture.IsGiven;
         }
+    }
+
+    /// <summary>Whether the fixture's TLS listener is given, or required by CI.</summary>
+    public static bool IsTlsBroker
+    {
+        get
+        {
+            return Environment.GetEnvironmentVariable("BEAD_AMQP_TLS_URL") is { Length: > 0 } || Environment.GetEnvironmentVariable("BEAD_AMQP_REQUIRED") == "1";
+        }
+    }
+
+    [Fact(Skip = "no broker: BEAD_AMQP_TLS_URL is not set (node tools/amqp-broker.mjs start)", SkipUnless = nameof(IsTlsBroker))]
+    public async Task Starts_participants_over_amqps_with_SASL_EXTERNAL_sends_and_receives_a_parcel_and_stops_their_links()
+    {
+        var url = new Uri(Environment.GetEnvironmentVariable("BEAD_AMQP_TLS_URL") ?? throw new InvalidOperationException("BEAD_AMQP_TLS_URL is not set"));
+        var certificates = Environment.GetEnvironmentVariable("BEAD_AMQP_CERTIFICATES") ?? throw new InvalidOperationException("BEAD_AMQP_CERTIFICATES is not set");
+        using var ca = X509Certificate2.CreateFromPem(await File.ReadAllTextAsync(Environment.GetEnvironmentVariable("BEAD_AMQP_CA") ?? throw new InvalidOperationException("BEAD_AMQP_CA is not set"), Cancelled));
+        using var servingKey = X509Certificate2.CreateFromPemFile(Path.Combine(certificates, "ada.pem"), Path.Combine(certificates, "ada.key"));
+        using var callingKey = X509Certificate2.CreateFromPemFile(Path.Combine(certificates, "bob.pem"), Path.Combine(certificates, "bob.key"));
+        // * imported with their keys so SslStream can use them on Windows
+        using var servingCertificate = X509CertificateLoader.LoadPkcs12(servingKey.Export(X509ContentType.Pkcs12), null);
+        using var callingCertificate = X509CertificateLoader.LoadPkcs12(callingKey.Export(X509ContentType.Pkcs12), null);
+
+        AmqpBrokerAdapter AdapterFor(string id, X509Certificate2 certificate)
+        {
+            return new AmqpBrokerAdapter(new AmqpBrokerAdapterOptions
+            {
+                Id = id,
+                Uri = url,
+                Tls = new AmqpBrokerTlsOptions { TrustChain = new X509Certificate2Collection(ca), ClientCertificates = new X509Certificate2Collection(certificate) },
+            });
+        }
+
+        await using var servingAdapter = AdapterFor("ada", servingCertificate);
+        await using var callingAdapter = AdapterFor("bob", callingCertificate);
+        await using var serving = new BrokerParticipant(servingAdapter, new BrokerParticipantOptions { Heartbeat = Timeout.InfiniteTimeSpan });
+        await using var calling = new BrokerParticipant(callingAdapter, new BrokerParticipantOptions { Heartbeat = Timeout.InfiniteTimeSpan });
+        await using var server = serving.Server(new BrokerTransportServerOptions { Names = ["interop"] });
+        await using var client = calling.Client();
+        var received = new ConcurrentQueue<byte[]>();
+        var answered = new ConcurrentQueue<byte[]>();
+        byte[] payload = [0xA1, 0x16, 0, 2, 0, 0, 0, 1];
+
+        server.Message += (message, _) =>
+        {
+            received.Enqueue(message.Bytes.ToArray());
+        };
+        client.Message += (message) =>
+        {
+            answered.Enqueue(message.Bytes.ToArray());
+        };
+
+        try
+        {
+            await serving.Start().WaitAsync(Patience, Cancelled);
+            await calling.Start().WaitAsync(Patience, Cancelled);
+            Assert.Equal((true, true, true, true), (serving.IsLinked, calling.IsLinked, servingAdapter.IsSecure, callingAdapter.IsSecure));
+            await server.Start().WaitAsync(Patience, Cancelled);
+            await client.Connect(new BrokerTransportClientConnectOptions { Server = "interop", CancellationToken = Cancelled }).WaitAsync(Patience, Cancelled);
+            await client.Send(new TransportMessage(payload, false)).WaitAsync(Patience, Cancelled);
+            await Until(() =>
+            {
+                return received.Count == 1;
+            });
+            Assert.Equal(payload, Assert.Single(received));
+            var handle = Assert.Single(server.Clients).ConnectionHandle;
+            Assert.NotNull(handle);
+            await server.Send(new TransportMessage(payload, false), handle).WaitAsync(Patience, Cancelled);
+            await Until(() =>
+            {
+                return answered.Count == 1;
+            });
+            Assert.Equal(payload, Assert.Single(answered));
+            await client.CloseConnection().WaitAsync(Patience, Cancelled);
+            await server.Stop().WaitAsync(Patience, Cancelled);
+        }
+        finally
+        {
+            await calling.Stop().WaitAsync(Patience, Cancelled);
+            await serving.Stop().WaitAsync(Patience, Cancelled);
+        }
+
+        Assert.Equal((false, false, false, false), (calling.IsLinked, serving.IsLinked, callingAdapter.IsLinked, servingAdapter.IsLinked));
+        Assert.Equal("404", await AmqpFixture.QueueStatusOf("bead.i.ada"));
+        Assert.Equal("404", await AmqpFixture.QueueStatusOf("bead.i.bob"));
     }
 
     private static CancellationToken Cancelled
@@ -235,6 +321,35 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
     }
 
     // definition
+
+    [Fact]
+    public async Task Fails_its_start_over_TLS_where_its_broker_s_certificate_chains_to_no_authority_it_trusts()
+    {
+        await using var secured = AmqpScript.Start(Certificate.Value);
+
+        foreach (var certificate in new[] { false, true })
+        {
+            await using var adapter = new AmqpBrokerAdapter(new AmqpBrokerAdapterOptions
+            {
+                ConnectTimeout = TimeSpan.FromSeconds(1),
+                Id = Id,
+                Password = certificate ? null : Password,
+                Tls = certificate ? new AmqpBrokerTlsOptions { ClientCertificates = [Certificate.Value] } : null,
+                Uri = secured.Uri,
+            });
+            var (_, downs) = HeardOf(adapter);
+            var failure = await FailureOf(() =>
+            {
+                return adapter.Start();
+            });
+
+            Assert.IsType<IOException>(failure);
+            Assert.IsType<AuthenticationException>(failure.InnerException);
+            Assert.DoesNotContain(Password, failure.ToString(), StringComparison.Ordinal);
+            Assert.False(adapter.IsLinked);
+            Assert.Empty(downs);
+        }
+    }
 
     [Fact]
     public async Task Fails_its_queued_publications_and_pending_name_subscription_when_stopped_and_lets_none_reach_its_next_link()
@@ -528,6 +643,90 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
 
         Assert.NotSame(connection, next);
         Assert.True(adapter.IsLinked);
+    }
+
+    [Fact]
+    public async Task Fails_its_start_when_a_sending_session_ends_before_its_sender_attaches_and_opens_a_fresh_link_afterwards()
+    {
+        _script.Holding = (frame) =>
+        {
+            return frame.Performative is Attach { Role: false };
+        };
+
+        await using var adapter = AdapterOf();
+        var (_, downs) = HeardOf(adapter);
+        var starting = adapter.Start();
+        var connection = await _script.Connection();
+        var (sent, _) = await connection.Next<Attach>();
+
+        await connection.End(sent.Channel, new Error(new Symbol("amqp:unauthorized-access")));
+
+        var failure = await FailureOf(() =>
+        {
+            return starting;
+        });
+
+        Assert.Contains("amqp:unauthorized-access", failure.Message, StringComparison.Ordinal);
+        await connection.Closed.WaitAsync(Patience, Cancelled);
+        Assert.Empty(downs);
+        Assert.False(adapter.IsLinked);
+        Assert.Empty(connection.Transfers);
+        _script.Holding = (_) =>
+        {
+            return false;
+        };
+
+        var next = await LinkUp((adapter, _script));
+
+        Assert.NotSame(connection, next);
+        Assert.True(adapter.IsLinked);
+    }
+
+    [Fact]
+    public async Task Ends_a_start_stopped_before_its_socket_opens_and_starts_a_fresh_link_afterwards()
+    {
+        await using var adapter = AdapterOf();
+        var (_, downs) = HeardOf(adapter);
+        var starting = adapter.Start();
+
+        await adapter.Stop();
+        Assert.Equal("the link of ada stopped", Assert.IsType<IOException>(await FailureOf(() =>
+        {
+            return starting;
+        })).Message);
+        Assert.Empty(downs);
+        Assert.False(adapter.IsLinked);
+
+        await LinkUp((adapter, _script));
+
+        Assert.True(adapter.IsLinked);
+        await adapter.Stop();
+    }
+
+    [Fact]
+    public async Task Reports_no_payload_room_when_its_sender_s_bound_cannot_hold_a_message_and_refuses_even_an_empty_publication()
+    {
+        _script.MaxMessageSize = 1;
+
+        await using var adapter = AdapterOf();
+        var (_, downs) = HeardOf(adapter);
+        var connection = await LinkUp((adapter, _script));
+        var declared = connection.Transfers.Count;
+
+        foreach (var topic in new[] { Inbox, Name })
+        {
+            Assert.Equal(0, adapter.MaximumPayloadBytes(topic));
+            var failure = await FailureOf(() =>
+            {
+                return adapter.Publish(new BrokerPublication { Payload = ReadOnlyMemory<byte>.Empty, Topic = topic });
+            });
+
+            Assert.Contains("past its sender's max-message-size, 1 bytes", failure.Message, StringComparison.Ordinal);
+        }
+
+        Assert.True(adapter.IsLinked);
+        Assert.Empty(downs);
+        Assert.Equal(declared, connection.Transfers.Count);
     }
 
     [Fact]

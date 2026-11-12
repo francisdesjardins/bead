@@ -1,7 +1,14 @@
 import { createHmac, randomBytes } from 'node:crypto';
 import { expect, test } from '@playwright/test';
 import { ProgrammerError } from '../../../transport/shared/errors';
-import { type IJwtKey, type JwtAlgorithm, readJwt, verifyJwt } from '../jwt-verifier';
+import {
+  assertJwtKey,
+  audiencesOf,
+  type IJwtKey,
+  type JwtAlgorithm,
+  readJwt,
+  verifyJwt,
+} from '../jwt-verifier';
 import { VECTORS } from './vectors';
 
 // helpers
@@ -90,6 +97,54 @@ const readingOf = (instant: number | string): (() => number) => {
 test.describe.configure({ retries: 0 });
 
 test.describe('verifyJwt', () => {
+  test('refuses a key not shaped for its algorithm, naming its issuer', () => {
+    const key: IJwtKey = {
+      algorithm: 'HS256',
+      issuer: 'https://issuer.example',
+      jwk: { kty: 'oct', k: Buffer.alloc(32, 7).toString('base64url') },
+    };
+
+    expect(() => {
+      assertJwtKey(key);
+    }).not.toThrow();
+    expect(() => {
+      assertJwtKey({ ...key, jwk: { kty: 'EC' } });
+    }).toThrow(/https:\/\/issuer\.example/u);
+  });
+
+  test('reads a token’s header and claims, verifying nothing, and none of what is no token', () => {
+    const part = (value: object): string => {
+      return Buffer.from(JSON.stringify(value)).toString('base64url');
+    };
+    const header = { alg: 'HS256', kid: 'k1' };
+    const claims = { iss: 'https://issuer.example', aud: ['a', 'b'] };
+    const token = `${part(header)}.${part(claims)}.${Buffer.from('signature').toString('base64url')}`;
+
+    expect(readJwt(token)).toEqual({ header, claims });
+    expect(audiencesOf(claims.aud)).toEqual(['a', 'b']);
+    expect(audiencesOf('a')).toEqual(['a']);
+    expect(audiencesOf(undefined)).toEqual([]);
+
+    for (const refused of ['', 'a.b', 'a.b.c.d', '!.!.!']) {
+      expect(readJwt(refused), refused).toBeUndefined();
+    }
+  });
+
+  test('refuses what is no token before any key is tried', async () => {
+    let reads = 0;
+    const now = (): number => {
+      reads += 1;
+
+      return 0;
+    };
+
+    expect(await verifyJwt('not a token', { audience: [], keys: [], now })).toEqual({
+      holds: false,
+      reason: 'token',
+    });
+    expect(reads).toBe(0);
+  });
+
   test('throws for a key without a string issuer before reading the clock', async () => {
     const { audience, keys, now, token } = HOLDING;
     const key = { ...keys[0], issuer: null } as unknown as IJwtKey;
@@ -237,6 +292,33 @@ test.describe('verifyJwt', () => {
     expect(
       [verdict, verdict.claims, verdict.identifier, realm, realm.roles].every(Object.isFrozen)
     ).toBe(true);
+  });
+
+  // RFC 8259 §8.2: a JavaScript string keeps a surrogate alone, where the C# side keeps its
+  // `JsonElement` and the Rust side, whose `String` holds none, reads null; a row of docs/support.md
+  test('keeps a claim holding a surrogate alone as its string of one unit, and refuses at sub a token whose sub holds one', async () => {
+    const { audience, keys, now, token } = HOLDING;
+    const claims = Buffer.from(token.split('.')[1] ?? '', 'base64url').toString();
+    const verdict = await verifyJwt(
+      signedText(HEADER, `${claims.slice(0, -1)},"name":"\\ud800"}`),
+      { audience, keys, now: readingOf(now) }
+    );
+
+    if (!verdict.holds) {
+      throw new Error(`the token does not hold: ${verdict.reason}`);
+    }
+
+    expect(verdict.claims['name']).toBe('\ud800');
+
+    // its subject a surrogate alone
+    expect(claims).toContain('"sub":"bob"');
+
+    const unnamed = await verifyJwt(
+      signedText(HEADER, claims.replace('"sub":"bob"', '"sub":"\\ud800"')),
+      { audience, keys, now: readingOf(now) }
+    );
+
+    expect(unnamed).toEqual({ holds: false, reason: 'sub' });
   });
 
   for (const [name, { algorithm, jwk }] of Object.entries(UNSHAPED)) {

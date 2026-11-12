@@ -170,12 +170,12 @@ fn defect<T>(read: impl FnOnce() -> Result<T, Failure>, input: &[u8]) -> Option<
 }
 
 #[test]
-fn find_the_vectors_bytes() {
+fn finds_the_vectors_bytes() {
     assert!(seeds().len() > 100);
 }
 
 #[test]
-fn draws_what_the_c_side_draws_for_a_seed() {
+fn draws_what_the_other_sides_draw_for_a_seed() {
     let mut generator = Generator::new(1);
     assert_eq!(
         (0..8).map(|_| generator.below(1_000)).collect::<Vec<_>>(),

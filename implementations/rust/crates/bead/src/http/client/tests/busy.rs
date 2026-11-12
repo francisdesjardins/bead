@@ -129,8 +129,13 @@ async fn a_client_sends_again_a_non_request_refused_busy_once_its_retry_after_pa
     // connection with it
     let lost = sending(&faked.client, cancel(5));
 
+    // * the first with no Retry-After, which waits the server's own second (RFC 9110 §10.2.3)
     for index in 6..17 {
-        fake.call_of(index).await.answer(&busy(429, "1"));
+        fake.call_of(index).await.answer(&if index == 6 {
+            refusal(429, HTTP_REFUSALS.busy)
+        } else {
+            busy(429, "1")
+        });
 
         if index < 16 {
             armed_for(&clock, Duration::from_secs(1)).await;
@@ -151,7 +156,7 @@ async fn a_client_sends_again_a_non_request_refused_busy_once_its_retry_after_pa
 
 // spec 15.6, 15.7, 15.12
 #[tokio::test]
-async fn a_client_whose_exchangetimeout_is_never_sends_again_a_non_request_refused_busy_past_2_31_minus_1_ms()
+async fn a_client_whose_exchange_timeout_is_never_sends_again_a_non_request_refused_busy_past_2_31_minus_1_ms()
  {
     let clock = stepping_from_2026();
     let faked = on_clock_of(

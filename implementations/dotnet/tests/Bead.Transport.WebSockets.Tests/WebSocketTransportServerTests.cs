@@ -392,11 +392,37 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     // a masked client text frame, as a browser sends one
     private static byte[] TextFrame(string text)
     {
-        var payload = Encoding.UTF8.GetBytes(text);
+        return FrameOf((0x81, Encoding.UTF8.GetBytes(text)));
+    }
+
+    // the status of the next close the server sends, the frames before it passed
+    private static async Task<int> CloseCodeOf(NetworkStream stream)
+    {
+        while (true)
+        {
+            var head = new byte[2];
+
+            await stream.ReadExactlyAsync(head, Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+
+            var payload = new byte[head[1] & 0x7F];
+
+            await stream.ReadExactlyAsync(payload, Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+
+            if ((head[0] & 0x0F) == 0x8)
+            {
+                return (payload[0] << 8) | payload[1];
+            }
+        }
+    }
+
+    // a masked client frame of the first byte and the payload given, its payload under 126 bytes
+    private static byte[] FrameOf((byte First, byte[] Payload) given)
+    {
+        var payload = given.Payload;
         var mask = RandomNumberGenerator.GetBytes(4);
         var frame = new byte[6 + payload.Length];
 
-        frame[0] = 0x81;
+        frame[0] = given.First;
         frame[1] = (byte)(0x80 | payload.Length);
         mask.CopyTo(frame, 2);
 
@@ -2760,6 +2786,28 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         }
     }
 
+    // RFC 6455 §8.1 and §7.4.1: .NET closes a text message that is no UTF-8 with 1007, and a close
+    // whose reason is no UTF-8 with 1002, where `ws` sends 1007 for both and tungstenite 1002 for
+    // both; a row of docs/support.md
+    [Fact]
+    public async Task Closes_with_1007_a_text_message_that_is_no_UTF_8_and_with_1002_a_close_whose_reason_is_no_UTF_8()
+    {
+        var codes = new List<int>();
+
+        foreach (var frame in new[] { FrameOf((0x81, [0xFF, 0xFE])), FrameOf((0x88, [0x03, 0xE8, 0xFF, 0xFE])) })
+        {
+            using var tcp = await OpenTcp();
+            var stream = tcp.GetStream();
+
+            await stream.WriteAsync(HandshakeOf("GET / HTTP/1.1", $"Host: 127.0.0.1:{_port}"), Cancelled);
+            await ReadHead(stream);
+            await stream.WriteAsync(frame, Cancelled);
+            codes.Add(await CloseCodeOf(stream));
+        }
+
+        Assert.Equal([1007, 1002], codes);
+    }
+
     [Fact]
     public async Task Tells_a_peer_that_drops_without_its_closing_handshake_by_its_unclean_close_alone_no_error()
     {
@@ -3281,6 +3329,14 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             {
                 return !taken;
             })));
+
+            // ! a client holds its 101 before the server holds its connection: the gauge is read
+            // once each of the four has told its connection
+            for (var told = 0; told < 4; told += 1)
+            {
+                Assert.StartsWith("type=WS;", await Next(_connections), StringComparison.Ordinal);
+            }
+
             Assert.Equal(4, _server.Gauges().Counts["connections"]);
             Assert.All(_refusals, (refusal) =>
             {

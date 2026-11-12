@@ -144,6 +144,88 @@ describe('sitesOf', () => {
 
     assert.deepEqual(sitesOf(text, RS), []);
   });
+
+  test('a state handed on to a helper makes no helper of its caller', () => {
+    const text = [
+      'fn deliver<S: Side>(state: &mut S, envelope: Envelope) { let detail = state.detail_of(&envelope); }',
+      'fn send<S: Side>(state: &mut S, credits: Vec<Credit>) { deliver(state, credit_of(credits)); }',
+      'fn close<S: Side>(state: &mut S, (reason, handle): (&str, Option<&H>)) {',
+      '    let local = CallError::Disconnected(reason.to_owned());',
+      '    let credits = state.close_all(handle);',
+      '    send(state, credits);',
+      '}',
+      'fn end<S: Side>(state: &mut S, panicked: &Panicked) { close(state, (&panicked.to_string(), None)); }',
+    ].join('\n');
+
+    assert.deepEqual(sitesOf(text, RS), []);
+  });
+
+  test('a word parameter still makes a helper whatever the state beside it', () => {
+    const text = [
+      'fn fail<S: Side>(state: &mut S, reason: &str) { state.send(Failure::application(reason)); }',
+      'fn end<S: Side>(state: &mut S, panicked: &Panicked) { fail(state, &panicked.to_string()); }',
+    ].join('\n');
+
+    assert.deepEqual(sitesOf(text, RS), [2]);
+  });
+
+  test('a method whose word parameter reaches a sink is a helper at that argument', () => {
+    const text = [
+      'impl Probe {',
+      '    fn fail(&mut self, reason: &str) { self.send(Failure::application(reason)); }',
+      '    fn end(&mut self, panicked: &Panicked) { self.fail(&panicked.to_string()); }',
+      '}',
+    ].join('\n');
+
+    assert.deepEqual(sitesOf(text, RS), [3]);
+  });
+
+  test('reads whole a helper’s call a comparison splits', () => {
+    const text = [
+      'fn fail<S: Side>(state: &mut S, urgent: bool, reason: &str) { state.send(Failure::application(reason)); }',
+      'fn end<S: Side>(state: &mut S, error: &Error) { fail(state, state.count() < state.bound(), &error.to_string()); }',
+    ].join('\n');
+
+    assert.deepEqual(sitesOf(text, RS), [2]);
+  });
+
+  test('reads whole a helper’s call whose first argument is a comparison', () => {
+    const text = [
+      'fn fail(urgent: bool, reason: &str) -> Failure { Failure::application(reason) }',
+      'fn end(count: usize, error: &Error) -> Failure { fail(count < 4, &error.to_string()) }',
+    ].join('\n');
+
+    assert.deepEqual(sitesOf(text, RS), [2]);
+  });
+
+  test('reads whole a helper’s call a shift splits', () => {
+    const text = [
+      'fn fail(code: u32, reason: &str) -> Failure { Failure::application(reason) }',
+      'fn end(error: &Error) -> Failure { fail(1 << 4, &error.to_string()) }',
+    ].join('\n');
+
+    assert.deepEqual(sitesOf(text, RS), [2]);
+  });
+
+  test('reads whole a helper’s call a closure of two parameters splits', () => {
+    const text = [
+      'fn fail(pick: impl Fn(u8, u8) -> u8, reason: &str) -> Failure { Failure::application(reason) }',
+      'fn end(error: &Error) -> Failure { fail(|a, b| a + b, &error.to_string()) }',
+    ].join('\n');
+
+    assert.deepEqual(sitesOf(text, RS), [2]);
+  });
+
+  test('reads whole a method’s call in its path form', () => {
+    const text = [
+      'impl Probe {',
+      '    fn fail(&mut self, reason: &str) { self.send(Failure::application(reason)); }',
+      '    fn end(&mut self, error: &Error) { Self::fail(self, &error.to_string()); }',
+      '}',
+    ].join('\n');
+
+    assert.deepEqual(sitesOf(text, RS), [3]);
+  });
 });
 
 describe('markedOf', () => {

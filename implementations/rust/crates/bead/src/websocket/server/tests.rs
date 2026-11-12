@@ -1221,7 +1221,7 @@ async fn counts_the_connections_it_holds_and_gives_their_handles() {
 }
 
 #[tokio::test]
-async fn names_each_connection_by_its_peer_s_port_and_the_rank_it_came_at_and_gives_no_handle_twice()
+async fn names_each_connection_by_its_peer_s_port_and_the_rank_it_came_at_two_sockets_from_one_address_and_port_among_them_and_gives_no_handle_twice()
  {
     let (server, recorder, port) = started(&briefly_closing()).await;
     let first = client(port).await;
@@ -1253,6 +1253,197 @@ async fn names_each_connection_by_its_peer_s_port_and_the_rank_it_came_at_and_gi
 
     assert!(third.ends_with(";ordinal=3"), "no handle twice: {third}");
     stopped(&server).await;
+
+    if cfg!(target_os = "macos") {
+        // macOS routes no second address of 127.0.0.0/8 to the loopback
+        return;
+    }
+
+    for clean in [true, false] {
+        let SocketServer {
+            server,
+            recorder,
+            port,
+        } = on_every_address().await;
+        let first = client_from(SocketAddr::from(([127, 0, 0, 1], 0)), ("127.0.0.1", port)).await;
+        let local = first.get_ref().local_addr().unwrap();
+        let mut second = client_from(local, ("127.0.0.2", port)).await;
+        let handles = recorder.connections(2).await;
+
+        end_client(first, clean).await;
+        assert_eq!(recorder.closes(1).await, [(clean, Arc::clone(&handles[0]))]);
+
+        let third = client_from(local, ("127.0.0.3", port)).await;
+        let handles = recorder.connections(3).await;
+
+        for (index, handle) in handles.iter().enumerate() {
+            assert_eq!(
+                **handle,
+                format!(
+                    "type=WS;ip=127.0.0.1;port={};ordinal={}",
+                    local.port(),
+                    index + 1
+                )
+            );
+        }
+        assert_eq!(
+            server
+                .clients()
+                .iter()
+                .map(|client| Arc::clone(&client.connection_handle))
+                .collect::<Vec<_>>(),
+            handles[1..]
+        );
+        assert_eq!(server.gauges().unwrap().counts["connections"], 2);
+        assert!(
+            !server.close(&handles[0]).await,
+            "the first names no socket"
+        );
+
+        let closing = server.close(&handles[1]);
+        assert_eq!(
+            next_of(&mut second).await.unwrap().unwrap(),
+            Message::Close(Some(CloseFrame {
+                code: CloseCode::Normal,
+                reason: "".into(),
+            }))
+        );
+        while let Some(Ok(_)) = next_of(&mut second).await {}
+        assert!(patience(PATIENCE, closing).await.unwrap());
+        assert_eq!(recorder.closes(2).await[1], (true, Arc::clone(&handles[1])));
+        assert_eq!(
+            server.gauges().unwrap().connection_handles,
+            [Arc::clone(&handles[2])].into()
+        );
+        server.send(message_of(vec![1]), &handles[2]).unwrap();
+        let mut third = third;
+        assert_eq!(next_of(&mut third).await.unwrap().unwrap(), binary(&[1]));
+        stopped(&server).await;
+    }
+}
+
+// Windows and Linux route both addresses to one listener, so the peer's address and port are
+// identical on two live sockets, as in the facade's two-session twin.
+struct SocketServer {
+    server: WebSocketTransportServer,
+    recorder: Arc<Recorder>,
+    port: u16,
+}
+
+async fn on_every_address() -> SocketServer {
+    let server = WebSocketTransportServer::new(&briefly_closing()).unwrap();
+    let recorder = recorded(&server);
+    let bound = server
+        .start(&TransportServerStartOptions {
+            address: Some("0.0.0.0".to_owned()),
+            find_open_port: Some(true),
+            ..TransportServerStartOptions::default()
+        })
+        .await
+        .unwrap();
+
+    SocketServer {
+        server,
+        recorder,
+        port: bound.port,
+    }
+}
+
+async fn client_from(local: SocketAddr, (remote, port): (&str, u16)) -> Client {
+    let socket = tokio::net::TcpSocket::new_v4().unwrap();
+
+    socket.set_reuseaddr(true).unwrap();
+    socket.bind(local).unwrap();
+
+    let stream = socket
+        .connect(format!("{remote}:{port}").parse().unwrap())
+        .await
+        .unwrap();
+
+    patience(
+        PATIENCE,
+        tokio_tungstenite::client_async(format!("ws://{remote}:{port}/"), stream),
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .0
+}
+
+async fn end_client(mut client: Client, clean: bool) {
+    if clean {
+        client
+            .send(Message::Close(Some(CloseFrame {
+                code: CloseCode::Normal,
+                reason: "".into(),
+            })))
+            .await
+            .unwrap();
+        assert!(matches!(
+            next_of(&mut client).await,
+            Some(Ok(Message::Close(_)))
+        ));
+    }
+}
+
+#[tokio::test]
+async fn closes_each_of_two_sockets_from_one_address_and_port_on_its_own_each_its_own_close_told() {
+    if cfg!(target_os = "macos") {
+        // macOS routes no second address of 127.0.0.0/8 to the loopback
+        return;
+    }
+
+    for clean in [true, false] {
+        let SocketServer {
+            server,
+            recorder,
+            port,
+        } = on_every_address().await;
+        let older = client_from(SocketAddr::from(([127, 0, 0, 1], 0)), ("127.0.0.1", port)).await;
+        let local = older.get_ref().local_addr().unwrap();
+        let mut newer = client_from(local, ("127.0.0.2", port)).await;
+        let handles = recorder.connections(2).await;
+
+        assert_ne!(handles[0], handles[1]);
+        end_client(older, clean).await;
+        assert_eq!(recorder.closes(1).await, [(clean, Arc::clone(&handles[0]))]);
+        assert_eq!(
+            server.gauges().unwrap().counts,
+            [
+                ("connections", 1),
+                ("largestAddressConnections", 1),
+                ("largestUnsentBytes", 0),
+                ("unsentBytes", 0),
+            ]
+            .into()
+        );
+        server.send(message_of(vec![1]), &handles[1]).unwrap();
+        assert_eq!(next_of(&mut newer).await.unwrap().unwrap(), binary(&[1]));
+        assert_eq!(server.clients()[0].connection_handle, handles[1]);
+        assert_eq!(server.clients().len(), 1);
+
+        end_client(newer, clean).await;
+        assert_eq!(
+            recorder.closes(2).await,
+            [
+                (clean, Arc::clone(&handles[0])),
+                (clean, Arc::clone(&handles[1]))
+            ]
+        );
+        assert_eq!(
+            server.gauges().unwrap().counts,
+            [
+                ("connections", 0),
+                ("largestAddressConnections", 0),
+                ("largestUnsentBytes", 0),
+                ("unsentBytes", 0),
+            ]
+            .into()
+        );
+        assert!(server.clients().is_empty(), "no client stands");
+        assert_eq!(recorder.count(|told| told.errors.len()), 0);
+        stopped(&server).await;
+    }
 }
 
 // ── Its closes ─────────────────────────────────────────────────────────────────────────────────
@@ -1335,6 +1526,43 @@ async fn emits_error_with_the_handle_then_that_connection_s_close_on_a_protocol_
         errors[0].0
     );
     assert_eq!(closes, vec![(false, handle)], "unclean");
+    stopped(&server).await;
+}
+
+// ! tungstenite raises one `Error::Utf8` for a text message and for a close's reason that is no
+// UTF-8, so both close with 1002, where RFC 6455 §7.4.1 gives the first 1007: `ws` sends 1007 for
+// both, .NET 1007 for the text and 1002 for the reason, a row of docs/support.md
+#[tokio::test]
+async fn closes_with_1002_a_text_message_that_is_no_utf_8_and_a_close_whose_reason_is_no_utf_8() {
+    let (server, recorder, port) = started(&briefly_closing()).await;
+
+    for (index, frame) in [
+        masked_frame(0x1, (&[0xff, 0xfe], true)),
+        masked_frame(0x8, (&[0x03, 0xe8, 0xff, 0xfe], true)),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let (mut socket, _) = upgraded(port).await;
+
+        socket.write_all(&frame).await.unwrap();
+
+        let mut peer = WebSocketStream::from_raw_socket(socket, Role::Client, None).await;
+
+        assert!(
+            matches!(
+                next_of(&mut peer).await,
+                Some(Ok(Message::Close(Some(CloseFrame {
+                    code: CloseCode::Protocol,
+                    ..
+                }))))
+            ),
+            "1002, case {index}"
+        );
+        recorder.closes(index + 1).await;
+    }
+
+    assert_eq!(recorder.errors(2).await.len(), 2, "each reported");
     stopped(&server).await;
 }
 
@@ -2741,7 +2969,8 @@ async fn refuses_as_it_is_built_a_trusted_proxies_entry_that_is_a_name_or_a_netw
 }
 
 #[tokio::test]
-async fn keeps_a_client_that_reads_through_a_burst_of_answers_each_of_a_chunk() {
+async fn keeps_a_client_that_reads_through_a_burst_of_answers_to_the_calls_it_has_it_answer_each_of_chunk_bytes()
+ {
     let (server, recorder, port) = started(&WebSocketTransportServerOptions {
         send_grace_period: Some(Duration::from_millis(100)),
         ..briefly_closing()
@@ -3138,4 +3367,270 @@ async fn clients_is_a_copy_without_the_sockets() {
     assert_eq!(handles_of(&clients), [first_handle], "the copy as it was");
     drop((second, third));
     stopped(&server).await;
+}
+
+#[tokio::test]
+async fn draws_a_port_on_localhost_again_when_the_ipv6_loopback_holds_the_one_drawn_on_ipv4() {
+    use crate::net::loopbacks::{LoopbackBinding, draw_port, listener_on};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let Ok(holder) = listener_on("::1".parse().unwrap(), 0) else {
+        return;
+    };
+    let occupied = holder.local_addr().unwrap().port();
+    let draws = Arc::new(AtomicUsize::new(0));
+    let count = Arc::clone(&draws);
+    let server = WebSocketTransportServer::new(&briefly_closing()).unwrap();
+
+    *locked(&server.inner.loopback_binding) = Some(LoopbackBinding {
+        port: 0,
+        find_open_port: true,
+        draw_port: Box::new(move || {
+            if count.fetch_add(1, Ordering::SeqCst) == 0 {
+                Ok(occupied)
+            } else {
+                loop {
+                    let port = draw_port()?;
+                    if port != occupied {
+                        break Ok(port);
+                    }
+                }
+            }
+        }),
+        ipv6_refusal: None,
+    });
+    let bound = server
+        .start(&TransportServerStartOptions {
+            find_open_port: Some(true),
+            ..TransportServerStartOptions::default()
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(draws.load(Ordering::SeqCst), 2, "a second draw");
+    assert_eq!(bound.address, "localhost");
+    assert_ne!(bound.port, occupied);
+    assert_eq!(server.ready_state(), ReadyState::Open);
+    assert!(
+        listener_on("127.0.0.1".parse().unwrap(), occupied).is_ok(),
+        "the first IPv4 listener let go"
+    );
+    let recorder = recorded(&server);
+    let _ipv4 = client(bound.port).await;
+    let socket = TcpStream::connect(("::1", bound.port)).await.unwrap();
+    let (_ipv6, _) = tokio_tungstenite::client_async(format!("ws://[::1]:{}/", bound.port), socket)
+        .await
+        .unwrap();
+    let handles = recorder.connections(2).await;
+    assert!(
+        handles.iter().all(|handle| server.is_secure(handle)),
+        "both secure"
+    );
+    server.stop().await.unwrap();
+    for address in ["127.0.0.1", "::1"] {
+        assert!(
+            listener_on(address.parse().unwrap(), bound.port).is_ok(),
+            "{address} let go"
+        );
+    }
+
+    // eight draws at most, then the last error; a given port is tried once
+    for find_open_port in [true, false] {
+        let server = WebSocketTransportServer::new(&briefly_closing()).unwrap();
+        let refusals = Arc::new(AtomicUsize::new(0));
+        let count = Arc::clone(&refusals);
+        *locked(&server.inner.loopback_binding) = Some(LoopbackBinding {
+            port: occupied,
+            find_open_port,
+            draw_port: Box::new(move || Ok(occupied)),
+            ipv6_refusal: Some(Box::new(move |_port| {
+                count.fetch_add(1, Ordering::SeqCst);
+                Some(io::Error::from(io::ErrorKind::AddrInUse))
+            })),
+        });
+        let refused = server
+            .start(&TransportServerStartOptions {
+                port: Some(occupied),
+                find_open_port: Some(find_open_port),
+                ..TransportServerStartOptions::default()
+            })
+            .await
+            .unwrap_err();
+        let RouterError::Other(error) = refused else {
+            panic!("an io error")
+        };
+        assert_eq!(
+            error.downcast_ref::<io::Error>().map(io::Error::kind),
+            Some(io::ErrorKind::AddrInUse)
+        );
+        assert_eq!(
+            refusals.load(Ordering::SeqCst),
+            if find_open_port { 8 } else { 1 }
+        );
+        assert_eq!(server.ready_state(), ReadyState::Closed);
+        assert!(
+            listener_on("127.0.0.1".parse().unwrap(), occupied).is_ok(),
+            "no listener left"
+        );
+    }
+}
+
+#[tokio::test]
+async fn listens_on_127_0_0_1_alone_where_the_ipv6_loopback_is_absent_and_reports_127_0_0_1() {
+    use crate::net::loopbacks::{FAMILY_NOT_SUPPORTED, LoopbackBinding, draw_port, listener_on};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    for error in [
+        io::Error::from(io::ErrorKind::AddrNotAvailable),
+        io::Error::from_raw_os_error(FAMILY_NOT_SUPPORTED),
+    ] {
+        let server = WebSocketTransportServer::new(&briefly_closing()).unwrap();
+        let draws = Arc::new(AtomicUsize::new(0));
+        let count = Arc::clone(&draws);
+        let kind = error.kind();
+        let raw = error.raw_os_error();
+        *locked(&server.inner.loopback_binding) = Some(LoopbackBinding {
+            port: 0,
+            find_open_port: true,
+            draw_port: Box::new(move || {
+                count.fetch_add(1, Ordering::SeqCst);
+                draw_port()
+            }),
+            ipv6_refusal: Some(Box::new(move |_port| {
+                Some(raw.map_or_else(|| io::Error::from(kind), io::Error::from_raw_os_error))
+            })),
+        });
+        let bound = server
+            .start(&TransportServerStartOptions {
+                find_open_port: Some(true),
+                ..TransportServerStartOptions::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(bound.address, "127.0.0.1");
+        assert_eq!(draws.load(Ordering::SeqCst), 1);
+        assert_eq!(server.ready_state(), ReadyState::Open);
+        let recorder = recorded(&server);
+        let _client = client(bound.port).await;
+        let handle = recorder.connections(1).await.remove(0);
+        assert!(server.is_secure(&handle));
+        if listener_on("::1".parse().unwrap(), 0).is_ok() {
+            assert!(
+                listener_on("::1".parse().unwrap(), bound.port).is_ok(),
+                "IPv6 left alone"
+            );
+        }
+        server.stop().await.unwrap();
+        assert!(
+            listener_on("127.0.0.1".parse().unwrap(), bound.port).is_ok(),
+            "IPv4 let go"
+        );
+    }
+}
+
+#[tokio::test]
+async fn closes_going_away_a_connection_whose_accept_a_stop_crossed() {
+    // a silent peer holds the stop past its snapshot; the empty snapshot plays the crossing too
+    for with_silent in [true, false] {
+        let (server, recorder, port) = started(&WebSocketTransportServerOptions {
+            close_timeout: Some(NEVER),
+            ..WebSocketTransportServerOptions::default()
+        })
+        .await;
+        let mut silent = if with_silent {
+            Some(client(port).await)
+        } else {
+            None
+        };
+        if with_silent {
+            recorder.connections(1).await;
+        }
+        let stopping = server.stop();
+        assert_eq!(server.ready_state(), ReadyState::Closing);
+        if let Some(silent) = &mut silent {
+            assert!(
+                matches!(
+                    next_of(silent).await,
+                    Some(Ok(Message::Close(Some(CloseFrame {
+                        code: CloseCode::Away,
+                        ..
+                    }))))
+                ),
+                "the snapshot's 1001"
+            );
+        }
+
+        // * this socket's accept crosses the snapshot, before its connection is registered
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let mut late = TcpStream::connect(listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        let (accepted, _) = listener.accept().await.unwrap();
+        let inner = Arc::clone(&server.inner);
+        let running = crate::testing::spawn(async move {
+            inner.take_socket_after_stop(accepted).await;
+        });
+        let mut late = WebSocketStream::from_raw_socket(&mut late, Role::Client, None).await;
+        let handles = recorder.connections(if with_silent { 2 } else { 1 }).await;
+        let late_handle = handles.last().unwrap();
+        let close = patience(PATIENCE, late.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(
+                close,
+                Message::Close(Some(CloseFrame {
+                    code: CloseCode::Away,
+                    ..
+                }))
+            ),
+            "the arrival's 1001"
+        );
+        late.flush().await.unwrap();
+        patience(PATIENCE, running).await.unwrap().unwrap();
+        if let Some(silent) = &mut silent {
+            // its reply releases the stop only after the late connection ended
+            silent.flush().await.unwrap();
+        }
+        patience(PATIENCE, stopping).await.unwrap().unwrap();
+        let closes = recorder.closes(handles.len()).await;
+        assert_eq!(closes.len(), handles.len(), "each close once");
+        assert!(
+            closes.contains(&(false, Arc::clone(late_handle))),
+            "the late close told"
+        );
+        for handle in handles {
+            assert!(
+                closes.contains(&(false, handle)),
+                "going away, each its own handle"
+            );
+        }
+        assert!(server.clients().is_empty(), "none held");
+        assert_eq!(server.ready_state(), ReadyState::Closed);
+        assert_eq!(recorder.count(|told| told.errors.len()), 0);
+    }
+}
+
+// whether `port` of the IPv4 loopback comes to be bound again within the patience
+async fn is_let_go(port: u16) -> bool {
+    patience(PATIENCE, async {
+        while std::net::TcpListener::bind(("127.0.0.1", port)).is_err() {
+            rest(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .is_ok()
+}
+
+#[tokio::test]
+async fn lets_its_port_go_once_its_last_handle_is_dropped_idle_without_its_stop() {
+    let (server, _recorder, port) = started(&WebSocketTransportServerOptions::default()).await;
+
+    drop(server);
+
+    assert!(is_let_go(port).await, "its port let go");
 }

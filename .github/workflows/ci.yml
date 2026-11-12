@@ -128,10 +128,15 @@ jobs:
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.yarn-cache.outputs.dir }}
-          key: yarn-cache-${{ runner.os }}-node${{ matrix.node }}-${{ hashFiles('implementations/typescript/yarn.lock') }}
+          key: yarn-cache-${{ runner.os }}-node${{ matrix.node }}-${{ hashFiles('implementations/typescript/yarn.lock', 'builder/yarn.lock') }}
           restore-keys: yarn-cache-${{ runner.os }}-node${{ matrix.node }}-
       # `--immutable` fails if `yarn.lock` would change.
       - run: $YARN install --immutable
+      # the builder's packages too: the demo's Packages tab runs the builder's selection and its
+      # reading of beadc.yaml, whose types the type-check and whose `yaml` the demo's tests reach
+      # from builder/
+      - run: $YARN install --immutable
+        working-directory: builder
       - run: $YARN check
       - if: matrix.node != '26'
         run: $YARN test --grep-invert "the (C#|Rust) server of the interop service"
@@ -245,16 +250,16 @@ jobs:
   # ── Rust ─────────────────────────────────────────────────────────────────────
   # The Rust side's own gate (decision 0044): its toolchain from its rust-toolchain.toml, a warning
   # an error by its .cargo/config.toml, `[build] warnings = "deny"`; its format, its lints, the
-  # core's library linted with no feature and with each socket transport's alone, the core's lints
-  # on the browser's WebAssembly target, its documentation, a build on the default
-  # features alone, where what the test kit alone reaches is left out, its dependencies' advisories,
-  # licences, bans and sources, then its tests, bead-house's holding each library crate's public
-  # surface to its list, and its conformance players under coverage, lines and regions on the pinned
-  # stable, held to the side's floor in tools/coverage-floors.json; and its fuzz targets built on
-  # the nightly pinned by its date, never run. On Linux too, the interop's server and its trials'
-  # test binary, built once and handed to the interop-rust job. On Windows, its tests alone, as
-  # the user's MSVC toolchain builds them. The registry and the target are cached by the lock and
-  # the toolchain; every build is `--locked`.
+  # core's library linted with no feature, with each socket transport's alone and with its MQTT 5
+  # binding's alone, the core's lints on the browser's WebAssembly target, its documentation, a
+  # build on the default features alone, where what the test kit alone reaches is left out, its
+  # dependencies' advisories, licences, bans and sources, then its tests, bead-house's holding each
+  # library crate's public surface to its list, and its conformance players under coverage, lines
+  # and regions on the pinned stable, held to the side's floor in tools/coverage-floors.json; and
+  # its fuzz targets built on the nightly pinned by its date, never run. On Linux too, the interop's
+  # server and its trials' test binary, built once and handed to the interop-rust job. On Windows,
+  # its tests alone, as the user's MSVC toolchain builds them. The registry and the target are
+  # cached by the lock and the toolchain; every build is `--locked`.
   rust:
     name: Rust (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -297,14 +302,19 @@ jobs:
         run: cargo fmt --all -- --check
       - if: matrix.os == 'ubuntu-26.04'
         run: cargo clippy --workspace --all-targets --all-features --locked
-      # the core's library linted with no feature, then with each socket transport's alone, so
-      # that each builds on its own (decision 0049)
+      # each member on its default features too, where what a feature alone builds is left out
+      - if: matrix.os == 'ubuntu-26.04'
+        run: cargo clippy --workspace --all-targets --locked
+      # the core's library linted with no feature, then with each socket transport's alone and
+      # with its MQTT 5 binding's alone, so that each builds on its own (decisions 0049, 0050)
       - if: matrix.os == 'ubuntu-26.04'
         run: cargo clippy -p francisdesjardins-bead --lib --locked
       - if: matrix.os == 'ubuntu-26.04'
         run: cargo clippy -p francisdesjardins-bead --lib --features websocket --locked
       - if: matrix.os == 'ubuntu-26.04'
         run: cargo clippy -p francisdesjardins-bead --lib --features http --locked
+      - if: matrix.os == 'ubuntu-26.04'
+        run: cargo clippy -p francisdesjardins-bead --lib --features mqtt --locked
       # the core checked for the browser's WebAssembly, never run, the target rust-toolchain.toml's,
       # by its features, no socket among them, which mio refuses there: what it links builds there,
       # its spawning and its time through crate::platform and the clock alone; getrandom's backend
@@ -341,6 +351,12 @@ jobs:
           retention-days: 1
       - if: matrix.os == 'ubuntu-26.04'
         run: cargo deny --locked check
+      # the two projects outside the workspace, held to its deny.toml, which cargo-deny finds above
+      # each: the fuzz targets and the conformance player
+      - if: matrix.os == 'ubuntu-26.04'
+        run: cargo deny --manifest-path fuzz/Cargo.toml --locked check
+      - if: matrix.os == 'ubuntu-26.04'
+        run: cargo deny --manifest-path tools/protobuf-conformance/Cargo.toml --locked check
       # the tests under instrumentation, every test binary's profile merged into one LLVM export,
       # the unit tests, a module's tests.rs and its tests/ folder, and the test kit left out; then
       # what they ran held to the Rust side's floor
@@ -455,8 +471,12 @@ jobs:
   # ── MQTT 5 ───────────────────────────────────────────────────────────────────
   # The cases over MQTT 5, each adapter against the fixture over TCP and WebSocket, the interop over
   # MQTT 5 both ways, the internal demo's sign-up and a page's client over WebSocket, against a
-  # Mosquitto 2.1.2 of the run's own, by its digest, a password drawn for the run (decision 0041). On
-  # the runner's host, where Docker is: the Playwright image of the other jobs reaches none, and a
+  # Mosquitto 2.1.2 of the run's own, by its digest, a password drawn for the run (decision 0041).
+  # The Rust side's too (decision 0050): its cases, its adapter's twins, the fixture's among them,
+  # its client against each side's server, and the TypeScript and C# clients against its server,
+  # built here on the toolchain its rust-toolchain.toml pins, from the rust job's Linux cache, read
+  # alone; no leg of that job waited on. On the runner's host, where Docker is, and the C compiler
+  # the Rust side's TLS builds with: the Playwright image of the other jobs reaches none, and a
   # service container starts before any step could draw its password. `BEAD_MQTT_REQUIRED=1` turns a
   # case that would skip without a broker into one that fails, as `BEAD_INTEROP_REQUIRED=1` does the
   # interop's.
@@ -464,7 +484,7 @@ jobs:
     name: MQTT 5, against Mosquitto
     needs: playwright
     runs-on: ubuntu-26.04
-    timeout-minutes: 20
+    timeout-minutes: 35
     env:
       BEAD_MQTT_REQUIRED: 1
       BEAD_INTEROP_REQUIRED: 1
@@ -485,10 +505,14 @@ jobs:
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.yarn-cache.outputs.dir }}
-          key: yarn-cache-${{ runner.os }}-node${{ env.NODE_VERSION }}-${{ hashFiles('implementations/typescript/yarn.lock') }}
+          key: yarn-cache-${{ runner.os }}-node${{ env.NODE_VERSION }}-${{ hashFiles('implementations/typescript/yarn.lock', 'builder/yarn.lock') }}
           restore-keys: yarn-cache-${{ runner.os }}-node${{ env.NODE_VERSION }}-
       - run: $YARN install --immutable
         working-directory: implementations/typescript
+      # the builder's packages too: the demo's unit tests, loaded whole, reach its `yaml` from
+      # builder/ through the Packages tab's
+      - run: $YARN install --immutable
+        working-directory: builder
       - name: Mosquitto 2.1.2 by its digest, a password drawn for this run
         run: node tools/mqtt-broker.mjs start --github-env
       # the cases over MQTT 5, the adapter over WebSocket, and the TypeScript client over MQTT 5
@@ -511,6 +535,45 @@ jobs:
       # the demo's page over MQTT 5 in Chromium, a glyph sent and one received
       - run: $YARN test:demo --project page --grep "over MQTT 5"
         working-directory: implementations/typescript
+      # the Rust side: 1.99.1 and its components, as rust-toolchain.toml names them, and the rust
+      # job's Linux registry and target, by its key, restored and never saved
+      - run: rustup toolchain install
+        working-directory: implementations/rust
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            implementations/rust/target
+          key: rust-ubuntu-26.04-${{ hashFiles('implementations/rust/Cargo.lock', 'implementations/rust/rust-toolchain.toml') }}
+          restore-keys: rust-ubuntu-26.04-
+      # its cases over MQTT 5 and its vectors, then its adapter's twins, the fixture's among them
+      - run: cargo test -p francisdesjardins-bead --features testing,mqtt --locked --test transports --test vectors
+        working-directory: implementations/rust
+      - run: >-
+          cargo test -p francisdesjardins-bead --features testing,mqtt --locked --lib mqtt::
+        working-directory: implementations/rust
+      # its interop server, which the TypeScript and C# clients call, and the C# one built before
+      # the trials start it, so that no trial waits on its build
+      - run: cargo build -p francisdesjardins-bead-interop-server --locked
+        working-directory: implementations/rust
+      - run: dotnet build interop/Bead.Interop.Server
+        working-directory: implementations/dotnet
+      # the Rust client against each side's server, over MQTT 5 alone
+      - name: The Rust client against each side's server over MQTT 5
+        run: >-
+          cargo test -p francisdesjardins-bead-interop-server --locked --test interop -- ::mqtt::
+        working-directory: implementations/rust
+        env:
+          BEAD_INTEROP_RUST: 1
+      # the TypeScript and C# clients against the Rust server, over MQTT 5 alone
+      - run: $YARN test:interop --grep "the Rust server.*over MQTT 5"
+        working-directory: implementations/typescript
+        env:
+          BEAD_INTEROP_RUST_SERVER: ${{ github.workspace }}/implementations/rust/target/debug/bead-interop-server
+      - run: dotnet test --project tests/Bead.Interop.Tests --filter-query "/[(server=Rust)&(transport=MQTT)]"
+        working-directory: implementations/dotnet
+        env:
+          BEAD_INTEROP_RUST_SERVER: ${{ github.workspace }}/implementations/rust/target/debug/bead-interop-server
       # the broker start left, which a start that failed left none of
       - name: The broker stopped
         if: always()
@@ -551,13 +614,15 @@ jobs:
           restore-keys: yarn-cache-${{ runner.os }}-node${{ env.NODE_VERSION }}-
       - run: $YARN install --immutable
         working-directory: implementations/typescript
-      - name: RabbitMQ 4.4.0 by its digest, a password drawn for this run
+      - name: RabbitMQ 4.4.0 by its digest, a password and TLS certificates drawn for this run
         run: node tools/amqp-broker.mjs start --github-env
       # the cases over AMQP 1.0, the adapter against the fixture, and the TypeScript client over
-      # AMQP 1.0
-      - run: $YARN test:amqp
+      # AMQP 1.0, with the participants over TLS and SASL EXTERNAL among the adapter twins
+      - name: TypeScript AMQP 1.0, TLS and SASL EXTERNAL included
+        run: $YARN test:amqp
         working-directory: implementations/typescript
-      - run: dotnet test --project tests/Bead.Transport.Amqp.Tests
+      - name: C# AMQP 1.0, TLS and SASL EXTERNAL included
+        run: dotnet test --project tests/Bead.Transport.Amqp.Tests
         working-directory: implementations/dotnet
       - run: dotnet test --project tests/Bead.Interop.Tests --filter-trait "transport=AMQP"
         working-directory: implementations/dotnet

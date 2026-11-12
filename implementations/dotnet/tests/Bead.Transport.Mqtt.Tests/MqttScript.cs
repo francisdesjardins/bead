@@ -174,6 +174,9 @@ internal sealed class ScriptedLink
     // the last write, which the next goes after
     private Task _written = Task.CompletedTask;
 
+    // open while it reads, shut while the test holds its reads
+    private TaskCompletionSource _reading = Opened();
+
     internal ScriptedLink(MqttScript script, (Socket Socket, Stream Stream) carried)
     {
         _script = script;
@@ -248,6 +251,30 @@ internal sealed class ScriptedLink
         }
     }
 
+    /// <summary>
+    /// Holds its reads, as a broker that reads nothing does, until <see cref="Resume"/>: what the
+    /// adapter writes meanwhile waits in its buffers, a read under way ending first.
+    /// </summary>
+    public void Pause()
+    {
+        lock (_gate)
+        {
+            if (_reading.Task.IsCompleted)
+            {
+                _reading = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            }
+        }
+    }
+
+    /// <summary>Reads again what <see cref="Pause"/> held.</summary>
+    public void Resume()
+    {
+        lock (_gate)
+        {
+            _reading.TrySetResult();
+        }
+    }
+
     /// <summary>Ends it once what was written went, as a broker that closes a link does.</summary>
     public void End()
     {
@@ -271,9 +298,15 @@ internal sealed class ScriptedLink
         while (true)
         {
             Task heard;
+            bool isClosed;
 
             lock (_packets)
             {
+                // ! closed is read before the search, under the lock: the reader adds each packet
+                // before it closes, so an end seen here has every packet it read in _unread, and a
+                // packet that came between the search and a later look at the end is never missed
+                isClosed = _closed.Task.IsCompleted;
+
                 var at = _unread.FindIndex((packet) =>
                 {
                     return packet is T;
@@ -293,7 +326,7 @@ internal sealed class ScriptedLink
 
             var left = deadline - DateTimeOffset.UtcNow;
 
-            if (left <= TimeSpan.Zero || _closed.Task.IsCompleted)
+            if (left <= TimeSpan.Zero || isClosed)
             {
                 throw new TimeoutException($"no {typeof(T).Name} came within its time");
             }
@@ -418,12 +451,31 @@ internal sealed class ScriptedLink
         return new MqttV5PacketDecoder().Decode(new ReceivedMqttPacket(header[0], new ArraySegment<byte>(body), length + remaining));
     }
 
+    // a gate already open
+    private static TaskCompletionSource Opened()
+    {
+        var opened = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        opened.SetResult();
+
+        return opened;
+    }
+
     private async Task<bool> Filled(byte[] buffer)
     {
         var read = 0;
 
         while (read < buffer.Length)
         {
+            Task reading;
+
+            lock (_gate)
+            {
+                reading = _reading.Task;
+            }
+
+            await reading;
+
             var count = await _stream.ReadAsync(buffer.AsMemory(read));
 
             if (count == 0)

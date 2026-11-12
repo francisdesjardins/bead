@@ -305,19 +305,17 @@ impl Error for ReadyStateError {}
 
 /// What a resolver, an admission, a verifier or a codec the application gives fails with.
 ///
-/// The procedure's own failure, answered as it is, or any other error, answered `PROCEDURE_FAILED`
-/// with no detail and reported (spec 9.0).
+/// Answered `PROCEDURE_FAILED` with no detail and reported (spec 9.0), a [`Failure`] among them
+/// reported as itself. A procedure answers its own failure through its answerer (spec 9.5).
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum ResolverError {
-    /// The procedure's own failure, answered as it is.
-    Failure(Failure),
-    /// Anything else, answered `PROCEDURE_FAILED` with no detail and reported.
+    /// Any error, answered `PROCEDURE_FAILED` with no detail and reported.
     Other(Box<dyn Error + Send + Sync>),
 }
 
 impl ResolverError {
-    /// Any other error, answered `PROCEDURE_FAILED` with no detail and reported:
+    /// Any error, answered `PROCEDURE_FAILED` with no detail and reported:
     /// `.map_err(ResolverError::other)?` from any error.
     #[must_use]
     pub fn other<E: Into<Box<dyn Error + Send + Sync>>>(error: E) -> Self {
@@ -325,16 +323,9 @@ impl ResolverError {
     }
 }
 
-impl From<Failure> for ResolverError {
-    fn from(failure: Failure) -> Self {
-        Self::Failure(failure)
-    }
-}
-
 impl fmt::Display for ResolverError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Failure(failure) => write!(formatter, "{failure}"),
             Self::Other(error) => write!(formatter, "{error}"),
         }
     }
@@ -343,7 +334,6 @@ impl fmt::Display for ResolverError {
 impl Error for ResolverError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            Self::Failure(failure) => failure.source(),
             Self::Other(error) => {
                 let source: &(dyn Error + 'static) = error.as_ref();
                 source.source()

@@ -25,12 +25,14 @@
   over sockets, WebSocket (RFC 6455) and HTTP/1.1 and HTTP/2 (RFC 9110, 9112, 9113), features of its
   core, with the interop both ways with the TypeScript and C# sides, are
   [0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)'s.
-  Ahead: its broker bindings, MQTT 5 and AMQP 1.0; its gateway; and beadc's Rust target, with
-  `examples/hello`'s Rust half, the lists of the procedures a server's transports take
+  Its broker bindings, MQTT 5 and AMQP 1.0, features of its core, are
+  [0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)'s.
+  Ahead: beadc's Rust target, with `examples/hello`'s Rust half, the lists of the procedures a
+  server's transports take
   ([0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md))
   and the validators of a blueprint's rules generated for it, or beadc refusing to generate them
-  ([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)),
-  each stage under a record of its own. The crate's layout and its modules are its README's.
+  ([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md));
+  its gateway; and its AMQP 1.0 binding, each stage under a record of its own. The crate's layout and its modules are its README's.
 
 ## Context
 
@@ -121,6 +123,7 @@ counts the receiver.
 | `bead`                                                    | the broker's core, its participant and the trace of its parcels, its parcel, its sequence, its heartbeat and its transports, the in-memory broker, the joined transport                                                                                                                                                                                                                                                                        | `parcels` and `parcelRefusals`; the cases over the in-memory broker of `spec/transports.json`; the conversations through a broker pair; the broker's places of `spec/durations.json`; spec 15.14's twins                                                                                                                                                                                                                                                                                      |
 | `bead-protobuf`                                           | the `proto` payload's codec, on Buffa 0.9.2: the check of a payload's records, the required walk, the typed codec and the dynamic one                                                                                                                                                                                                                                                                                                          | `spec/codecs.json`'s `proto` entries, the two values a typed message cannot hold through the dynamic message; protobuf's conformance suite through a Rust testee of `tools/protobuf-conformance.mjs`                                                                                                                                                                                                                                                                                          |
 | `bead` with `websocket` and `http`, `bead-interop-server` | the WebSocket and HTTP transports, server and client, their facades and their TLS ([0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)); `bead-interop-server`, the interop service's server over both, and the Rust client's trials against each side's                                                                                                                         | the cases over HTTP and over WebSocket of `spec/transports.json`; their places of `spec/durations.json`; spec 15.10's and 15.12's twins; the interop both ways with the TypeScript and C# sides                                                                                                                                                                                                                                                                                               |
+| `bead` with `mqtt` and `amqp`, `bead-interop-server`      | the MQTT 5 adapter and its client, over the core's sockets ([0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)), and the AMQP 1.0 adapter, ahead; `bead-interop-server` over MQTT 5                                                                                                                                                                                       | the cases over MQTT 5 of `spec/transports.json`; `mqttPublishBounds`; the places of `mqttBrokerAdapter`; the twins of 15.25 to 15.31; the interop over MQTT 5 both ways                                                                                                                                                                                                                                                                                                                       |
 
 The broker's core sits in `bead`, since the C# side's `Bead.Core` holds the broker's core and the
 in-memory broker, and its cases need no socket; the `proto` codec stands apart, since the router
@@ -135,24 +138,26 @@ and HTTP/2 (RFC 9110, 9112, 9113), the features `websocket` and `http` of its co
 over HTTP and over WebSocket and their places of `spec/durations.json`, and the interop runs both
 ways with the TypeScript and C# sides, under
 [0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md).
-Ahead, in this order: its broker bindings, MQTT 5 and AMQP 1.0; its gateway; and beadc's Rust
+Its broker bindings, MQTT 5 and AMQP 1.0, features of its core, are
+[0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)'s,
+its MQTT 5 binding a client of its own over its sockets. Ahead, in this order: beadc's Rust
 target, with `examples/hello`'s Rust half, the lists of the procedures a server's transports take
 ([0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md))
 and the validators of a blueprint's rules generated for it, or beadc refusing to generate them
-([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)),
-each stage under a record of its own.
+([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md));
+its gateway; and its AMQP 1.0 binding, each stage under a record of its own.
 
 ### The partial side
 
 The Rust side is a partial side, under [0004](0004-one-behaviour-in-every-language.md)'s rule: each
 part it does not play is an open row of [the support matrix](../support.md), ahead with the stage
 that brings it, and, where a conformance file plays that part, a row of `spec/check.py`'s `AHEAD`:
-`Rust's gateway`, `Rust's broker bindings` and `Rust's beadc target`, each a row of the matrix and
+`Rust's gateway`, `Rust's AMQP 1.0 binding` and `Rust's beadc target`, each a row of the matrix and
 of `AHEAD`; `Rust's service manager over a router of the application's own`, which no conformance
-file plays, a row of the matrix alone. **Its tests are told from its sources by a
-predicate**, since a suffix does not tell them, both being `.rs`: a module's
-`tests.rs`, a crate's `tests/` and the test kit, `src/testing.rs` and `src/testing/`, so a doc
-comment on a source's item never stands for a twin.
+file plays, a row of the matrix alone. **Its tests are told from its sources by a predicate**, since
+a suffix does not tell them, both being `.rs`: a module's `tests.rs`, a crate's `tests/` and the
+test kit, `src/testing.rs` and `src/testing/`, so a doc comment on a source's item never stands for
+a twin.
 
 ### The workspace and its names
 
@@ -164,10 +169,12 @@ comment on a source's item never stands for a twin.
   `Bead.Core`'s twin, `bead-protobuf` `Bead.Protobuf`'s, `bead-interop` the interop service's,
   `bead-interop-server` its server and the Rust client's trials against each side's;
   `bead-house`, dev only, holds the house's own checks. The crates of the stages ahead are named
-  already, so no rename follows: `bead-transport-mqtt`, `bead-transport-amqp`, `bead-transcoding`
-  and `bead-transcoding-http`; a part that needs the core's inside and ships to applications, a
-  transport, comes instead as a feature of the core
-  ([0047](0047-every-side-shows-one-public-surface.md)).
+  already, so no rename follows: `bead-transcoding` and `bead-transcoding-http`. A part that needs
+  the core's inside and ships to applications, a transport, comes as a feature of the core
+  ([0047](0047-every-side-shows-one-public-surface.md)): its sockets
+  ([0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md))
+  and its broker bindings
+  ([0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)).
 - **Packages qualified by their owner, libraries short**, as NuGet's `FrancisDesjardins.Bead.*`
   over the assemblies `Bead.*`
   ([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)): the package
@@ -290,7 +297,11 @@ traits it derives or implements, its bodies not, pinned to its list in
 the surface grows by a decision ([0047](0047-every-side-shows-one-public-surface.md)); the comment tags
 of `CLAUDE.md` on plain comments alone, none on a doc comment, a doc comment being what rustc's
 tokenizer reads as one (`///`, `//!`, `/** */`, `/*! */`), so `//!` is never taken for the `!` tag;
-and every member's `[lints] workspace = true`, so no crate leaves the policy. **`//!` is kept**,
+and every member's `[lints] workspace = true`, so no crate leaves the policy. The surface names
+crates of their own before 1.0: rustls 0.23's configurations in the socket transports' `tls`
+fields, tokio-util 0.7's `CancellationToken` in every options struct, and Buffa 0.9 in
+`bead-protobuf`'s `ProtoSchema` and `DynamicCodec::new`; a breaking release of one of them, once
+taken, is a breaking release of Bead (C-STABLE). **`//!` is kept**,
 Rust's inner doc comment, the language's and its standard library's form for a module's and a
 crate's documentation: the one exception to the `!` tag, a doc comment, never the tag, though Better
 Comments shows it as one.
@@ -305,6 +316,14 @@ owner and posts its outcome as a job of its own: a turn and its continuations, a
 `when_idle` stand for the scheduler's `Post`, `Run`, `Cover` and `WhenIdle`. The router is re-cut as
 turns and continuations, its turns the other sides', not ported line by line: what `RouterCore.cs`
 does between two awaits is one job.
+
+**Beside the owner, a few states are shared under std's `Mutex`**, each held the length of a copy or
+a write, never across an `await`, which clippy's `await_holding_lock` refuses: a client's
+notifications, the series of what it hears, its session token and its default credential; a
+server's series of what it notifies; each router's resolvers; and a call's handler, its session and
+the failure its router answered in its handler's place. Each serves what is read off the owner
+synchronously, `has_notification`, a request's resolver, a call's `answered`, a gauge, or an
+operation that takes effect as it is made; the rest of a router's state is its owner's alone.
 
 **An operation takes effect when it is made; its future only waits.** Every operation the other
 sides start as it is called — `request`, `notify`, `subscribe`, `command`, `connect`, `close`,
@@ -381,13 +400,15 @@ its router, which then ends by its dispose. Twins:
 
 **The core spawns through one private module, `platform`, and reads time through its clock alone,
 as clippy's `disallowed-methods` and `disallowed-types` hold it.** `platform::spawn` is the one
-call of tokio's spawn, and `platform::runtime_of` the one reading of the current runtime and of its
-time driver, which every part of the core that takes a runtime calls with its own refusal;
+call of tokio's spawn, `platform::lookup_host` the one of its resolver, which spawns on its
+blocking pool a resolution that runs to its end whatever becomes of the connect that asked, and
+`platform::runtime_of` the one reading of the current runtime and of its time driver, which every
+part of the core that takes a runtime calls with its own refusal;
 `SystemClock`'s body is the one reader of std's `Instant`, of `SystemTime::now()` and of tokio's
 timers. Each of the two funnels sits under one `#[expect]`, and the public surface names tokio's
 `Handle`, the application's runtime being tokio's. The lists refuse every other path in every
 target clippy sees, as CI runs it: tokio's spawns, `try_current` and `current` ("spawn through
-`crate::platform`"); `block_on`, `block_in_place` and `std::thread::sleep` ("a turn awaits
+`crate::platform`"); `tokio::net::lookup_host` ("resolve through `crate::platform`"); `block_on`, `block_in_place` and `std::thread::sleep` ("a turn awaits
 nothing"); tokio's `sleep`, `sleep_until`, `interval`, `interval_at`, `timeout` and `timeout_at`,
 `SystemTime::now`, and the types `std::time::Instant` and `tokio::time::Instant`, so that every
 `elapsed()` is held too ("time through the clock"); `std::thread::spawn` ("no thread of Bead's
@@ -399,9 +420,10 @@ carries one `#[expect]` at its root with its reason.
 **The core compiles for the browser's target**, `wasm32-unknown-unknown`: CI runs clippy over its
 library there, so a dependency or an API that does not build in a page (tokio's `net` or
 `rt-multi-thread`, a native TLS stack, `std::os`) fails the change that brings it, and the socket
-transports and the broker bindings sit in features of the core that the check leaves out by name,
-each reaching the core's inside by `pub(crate)`. The target is checked, never run: the folder's
-`.cargo/config.toml` gives getrandom its `unsupported` backend on it,
+transports and the broker bindings sit in features of the core, `websocket`, `http`, `mqtt` and
+`amqp`, AMQP 1.0's ahead, that the check leaves out by name, each reaching the core's inside by
+`pub(crate)`. The target is checked, never run: the folder's `.cargo/config.toml` gives getrandom
+its `unsupported` backend on it,
 `--cfg getrandom_backend="unsupported"`, the backend getrandom names for this case, which adds no
 dependency and no lock entry, keeps `wasm_js` out of the library as getrandom asks, and has no
 effect on a crate that depends on Bead. A draw there is an error, which each of Bead's draws already
@@ -445,14 +467,15 @@ wrapper that only changes the kind takes its source's words and source, never sa
 `Result<Self, ProgrammerError>`.
 
 **What the spec lets a side throw has a Rust form at every site.** A resolver returns `Result<T,
-ResolverError>`: `ResolverError::Failure` is its procedure's own failure, answered as it is;
-`ResolverError::Other`, a boxed error, anything else, answered `PROCEDURE_FAILED` with no detail and
-reported (spec 9.0). Every other callback the spec lets throw — an admission, a verifier, a key
-set's ask, an application's codec, a rule — takes the same shape, or a boxed error where the other
-sides answer every throw alike: a rule's judgment is `Result<Judged, Box<dyn Error + Send + Sync>>`,
-its error answered `PROCEDURE_FAILED` and reported in its own words (spec 18.2). **A panic is its
-site's throw**: a resolver's seen on its `JoinHandle`, the others' within `catch_unwind`, a future's
-as it is polled, answered and reported as the throw it stands for, the transport going on
+ResolverError>`: `ResolverError::Other`, a boxed error built by `ResolverError::other` from any
+error, answered `PROCEDURE_FAILED` with no detail and reported (spec 9.0), a `Failure` among them
+reported as itself; a procedure answers its own failure through its answerer (spec 9.5). Every
+other callback the spec lets throw — an admission, a verifier, a key set's ask, an application's
+codec, a rule — takes the same shape, or a boxed error where the other sides answer every throw
+alike: a rule's judgment is `Result<Judged, Box<dyn Error + Send + Sync>>`, its error answered
+`PROCEDURE_FAILED` and reported in its own words (spec 18.2). **A panic is its site's throw**: a
+resolver's seen on its `JoinHandle`, the others' within `catch_unwind`, a future's as it is polled,
+answered and reported as the throw it stands for, the transport going on
 ([0023](0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md)).
 The sites are every place the router calls the application's code: an admission, a verifier and
 its future, a key set's ask and its future, a codec as it reads and as it writes, a rule, at a
@@ -524,7 +547,10 @@ tests, benches and fuzz targets among them, where the C# side's count reads its 
 alone: a crate's tests sit in its `src`. On the surface no item takes or gives one
 ([0047](0047-every-side-shows-one-public-surface.md)), which `bead-house`'s `tuples.rs` holds: two
 things are two parameters, a third essential thing a record of the call, `RouterRequest` or
-`NotifyRequest`, and several values given back a `#[non_exhaustive]` struct.
+`NotifyRequest`, and several values given back a `#[non_exhaustive]` struct. Two kinds of record
+stay exhaustive, so that a literal builds them: the wire's own, an envelope's header and a failure's
+`FailureRecord`, whose fields the spec fixes; and what an application builds to hand in,
+`ProcedureAddress`, `CallAddress`, `CallAsked` and `EnvelopeAsked`.
 
 ### Names, side by side
 
@@ -707,22 +733,29 @@ byte, and **always built**: no Cargo feature leaves debugging out, which would b
 ### The CI job, fuzz and bench
 
 CI's `rust` job ([0006](0006-a-rule-has-its-gate.md)), on Linux: `cargo fmt --check`, `cargo clippy
---workspace --all-targets --all-features --locked`, the core's lib linted with no feature, with
-`websocket` alone and with `http` alone (`cargo clippy -p francisdesjardins-bead --lib --locked`,
-`--features websocket`, `--features http`), the browser target's `cargo clippy -p
-francisdesjardins-bead --lib --features testing --locked --target wasm32-unknown-unknown`, by its
-features, no socket among them
+--workspace --all-targets --all-features --locked` and again on each member's default features, the
+core's lib linted with no feature, with `websocket` alone, with `http` alone and with `mqtt` alone
+(`cargo clippy -p francisdesjardins-bead --lib --locked`, `--features websocket`, `--features http`,
+`--features mqtt`), the browser target's `cargo clippy -p francisdesjardins-bead --lib --features
+testing --locked --target wasm32-unknown-unknown`, by its features, no socket and no broker binding
+among them
 ([0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)),
-`cargo doc`, a build on the default features alone, `cargo deny --locked check`, the tests under
-coverage held to the floor, and the fuzz targets built on the dated nightly, never run; on Windows,
-`cargo test --workspace --all-features --locked`, as the user's MSVC toolchain builds it. The
-registry and the target are cached by the lock and the toolchain, cargo-deny and cargo-llvm-cov
-installed prebuilt, each checked by its SHA-256, and `ci-ok` needs the job. **Fuzz**: cargo-fuzz on
-the nightly, on Linux or WSL, through `tools/fuzz.mjs`, by hand and ten minutes a target every week
-([0006](0006-a-rule-has-its-gate.md)), its eight targets the twins of the other sides' eight,
+`cargo doc`, a build on the default features alone, `cargo deny --locked check` and the same on the
+fuzz targets and the conformance player, outside the workspace, the tests under coverage held to the
+floor, and the fuzz targets built on the dated nightly, never run; on Windows, `cargo test
+--workspace --all-features --locked`, as the user's MSVC toolchain builds it. The registry and the
+target are cached by the lock and the toolchain, cargo-deny and cargo-llvm-cov installed prebuilt,
+each checked by its SHA-256, and `ci-ok` needs the job. **Fuzz**: cargo-fuzz on the nightly, on
+Linux or WSL, through `tools/fuzz.mjs`, by hand and ten minutes a target every week
+([0006](0006-a-rule-has-its-gate.md)), its nine targets: eight the twins of the other sides' eight,
 `envelope`, `payload-codecs`, `http-fields`, `debug-filter`, `jwt`, `ws-handshake`, `broker-parcel`
-and `proto-codecs`, each reaching the core through `bead::internal` with no feature; its suite holds
-the envelope readers' and the parcel reader's seeded mutations, the same inputs as the other sides'.
+and `proto-codecs`, each reading what no socket or broker feature holds, through a crate's surface,
+`bead::internal` or a test kit; and `mqtt-packets`, its MQTT 5 client's reader of a broker's
+packets, the Rust side's alone, through `bead::internal` under the feature `mqtt`, which the fuzz
+project's manifest turns on beside `testing`
+([0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)).
+Its suite holds the envelope readers' and the parcel reader's seeded mutations, the same inputs as
+the other sides', and `tests/mqtt_packets_fuzz.rs`'s, the packets a broker sends mutated, its own.
 **Bench**: `bead-bench`, the in-memory bench, each fresh process writing `bead-bench/1`, which
 `tools/bench-release.mjs rust` merges into `bead-bench/2` for `tools/bench-compare.mjs`. The gates
 every side shares hold it too: `tools/check-details.mjs` reads its sources, `tools/check-names.mjs`
@@ -772,6 +805,14 @@ bench's comparison in CI, and its broker trial plays every case no row of the ma
 - **The interop service's descriptors written by hand**, held by a test against
   `spec/interop-blueprint.json`, an open row of the matrix; beadc's Rust target, ahead, generates
   them.
+- **A port beneath the service manager**, the inner half of the matrix's row
+  `Rust's service manager over a router of the application's own`: the manager reads its router
+  through a `pub(crate)` trait, `RouterLike`, which Bead's two routers take each through a wrapper
+  of its own, its registration of a notification held as it is made and its future waiting for the
+  subscription, its call free to draw no id; the twins of that row's three tests play over the test
+  kit's router through it, at one allocation more per call, the work a call covers boxed for the
+  port. Its public half, a `ServiceRouter` variant over it and an answer for its resolvers, is the
+  row's.
 - **The funnel, a rule to keep**: a change that spawns or reads time goes through `platform` or
   the clock, or fails clippy; a test reaches them through the kit; a target that stays native names
   its exemption and its reason. A core dependency that does not build for the browser's target
@@ -858,7 +899,7 @@ in part, none refused; the form of a module's documentation was the user's to ch
 | A unit test beside its module cannot use a separate test crate's clock, that crate depending on `bead` (two copies, `E0277`); `cargo build --workspace` builds `bead` with the feature on; the feature's name fails `redundant_feature_names`.                                                                                                                                                                                                                                                                                                                                      | **Accepted.** The kit is inside the core, as tokio's `test-util`: `#[cfg(any(test, feature = "testing"))] #[doc(hidden)] pub mod testing`, `bead` its own dev-dependency with the feature (probed: one copy, a plain build on the default features). An item of the core that the kit alone reaches carries the kit's `cfg`, or `build.warnings` fails a build without the feature on its dead code; CI builds the default features and documents with all of them. `spec/check.py`'s Rust tests name `src/testing`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `unreachable_pub` and the nursery's `redundant_pub_crate` refuse every visibility of an item in a private module; the draft passed only because every probed module was public. `missing_const_for_fn` with `avoid-breaking-exported-api = false` pushes `const` onto public functions; `single_use_lifetimes` has known false positives.                                                                                                                                                                                                                                           | **Accepted.** `redundant_pub_crate` and `missing_const_for_fn` allowed at priority 1, each with its reason in the table; `single_use_lifetimes` off; `avoid-breaking-exported-api = false` kept, so the other API-shape lints judge the public surface while `0.y` lets it break. The table was run over a tree shaped like the core and passes whole; every other nursery lint stays denied, one allowed later a line of the table with its reason.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | The nightly's branch coverage counts no `match` arm and no `?`, which is how a codec and a router decide, while stable's regions see every way not taken; the nightly leg costs a hand-moved pin and an unstable flag, and its figure is not what cobertura or istanbul count.                                                                                                                                                                                                                                                                                                      | **Accepted.** Lines and regions on the pinned stable, read from `llvm-cov`'s JSON export (probed: its `type`, its version 3.1.0, each file's `summary.lines` and `summary.regions`); `tools/coverage-report.mjs` reads it, told from istanbul's JSON by its `type`; Rust's floor names `lines` and `regions`; a floor on a measure no report measured fails, for every side. The matrix's row reads `Rust counts regions where the others count branches`; the nightly serves the fuzz build alone.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| The spec's throws (9.0, 13, 15.1) have no Rust form beyond listeners; the core must play "a resolver that throws before it answers is answered PROCEDURE_FAILED, and reported", and the draft never says what a resolver returns to throw, or what its panic becomes.                                                                                                                                                                                                                                                                                                               | **Accepted.** A resolver returns `Result<T, ResolverError>`: `Failure(Failure)` answered as the procedure's own, `Other(Box<dyn Error + Send + Sync>)` answered `PROCEDURE_FAILED` with no detail and reported, the variant named `Other`, since `Error` would repeat its type's word. Admissions, verifiers, key sets and an application's codec take the same shape, or a boxed error where the other sides answer every throw alike. A panic is its site's throw. The row becomes `A panic under panic = "abort"`, every throw site.                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| The spec's throws (9.0, 13, 15.1) have no Rust form beyond listeners; the core must play "a resolver that throws before it answers is answered PROCEDURE_FAILED, and reported", and the draft never says what a resolver returns to throw, or what its panic becomes.                                                                                                                                                                                                                                                                                                               | **Accepted.** A resolver returns `Result<T, ResolverError>`: `Other(Box<dyn Error + Send + Sync>)`, a failure among them reported as itself, answered `PROCEDURE_FAILED` with no detail and reported, the variant named `Other`, since `Error` would repeat its type's word. Admissions, verifiers, key sets and an application's codec take the same shape, or a boxed error where the other sides answer every throw alike. A panic is its site's throw. The row becomes `A panic under panic = "abort"`, every throw site.                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | A resolver's NaN goes through `Value::from`, `json!`, `to_value` and `to_string` as `null` without an error, where `spec/codecs.json` and both sides refuse `not a finite number`; the excuse would hide a miswrite, and the reader's mapping of a number is unsaid.                                                                                                                                                                                                                                                                                                                | **Accepted.** `bead::json::to_value`, a `serde::Serializer` of Bead's own with its own compound serializers, so a nested NaN is refused too, is the resolver's documented road to a value; the harness gives a double through it, so NaN and Infinity are played, five entries excused, not seven. The reader reads a whole number within `i64` or `u64` as an integer, any other as the nearest double, both written back through the double.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | A runtime built without `enable_time` passes `Handle::try_current()`, and tokio panics as `SystemClock` arms its first timer, inside a Bead call.                                                                                                                                                                                                                                                                                                                                                                                                                                   | **Accepted**, its first remedy: the builder arms a zero timer once at construction, under the handle's `enter()`, within `catch_unwind`, and what tokio panics there is a `ProgrammerError` ("a router's runtime enables tokio's time driver"), probed on the current runtime, the given handle's path held by a twin of its own. Its cost stated: one caught panic through the application's hook, and under `panic = "abort"` an abort at that construction, within the panic row. The README names `enable_all` or `enable_time`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | A `#[repr(u16)]` enum cannot hold a code none of spec 8.1's names names, which the spec keeps as a number; `TryFrom<u8>` has the wrong width; `LONGEST_TIMER` in milliseconds contradicts the durations' type.                                                                                                                                                                                                                                                                                                                                                                      | **Accepted, and widened**: an open code space is a newtype with associated constants, `ProtocolCode(NonZeroU16)` as `http::StatusCode` (probed), and so is `CredentialScheme(u16)`, since spec 9.2's first step answers a scheme the receiver takes none of `CREDENTIAL_UNSUPPORTED` by its number. Closed enums stay where the spec refuses the unknown: a kind (3.3), a failure's flags (7.2), a `JWT`'s `alg` (13). `Failure::code` is a `NonZeroU16`; `LONGEST_TIMER` a `Duration`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
@@ -894,8 +935,8 @@ A third round met the draft that gave the Rust core its small APIs for eight row
 C# sides share: eleven objections, each checked against its probe before it was answered, eight
 accepted, three in part, none refused. It brought into the change the rule spec 9.3 and 9.4 hold
 every side to, an answer or a subscription going only to a request its router dispatched, which the
-TypeScript and C# sides keep by refusing any other header; when the Rust port beneath the service
-manager comes is the user's to choose.
+TypeScript and C# sides keep by refusing any other header. The Rust port beneath the service
+manager holds, the inner half of the matrix's row; its public half is the row's.
 
 | Objection                                                                                                                                                                                                                                                                                                        | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |

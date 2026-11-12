@@ -8,7 +8,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, join } from 'node:path';
+import nodePath, { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { expect, test } from '@playwright/test';
@@ -52,7 +52,7 @@ const projectOf = (yaml: string, files: Readonly<Record<string, string>> = {}): 
 };
 
 const configOf = (folder: string): IConfig => {
-  return parseConfig(readFileSync(join(folder, 'beadc.yaml'), 'utf8'), { folder });
+  return parseConfig(readFileSync(join(folder, 'beadc.yaml'), 'utf8'), { folder, path: nodePath });
 };
 
 const checkedOf = (config: IConfig): IChecked => {

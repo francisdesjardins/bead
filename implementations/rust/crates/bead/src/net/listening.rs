@@ -5,7 +5,7 @@
 
 use core::future::{Future, poll_fn};
 use core::pin::pin;
-use core::task::Poll;
+use core::task::{Context, Poll};
 use core::time::Duration;
 use std::io;
 use std::net::{IpAddr, SocketAddr};
@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::oneshot;
-use tokio_util::sync::CancellationToken;
+use tokio_util::sync::{CancellationToken, DropGuard};
 
 use crate::clock::{Schedule, SharedClock};
 use crate::errors::{ProgrammerError, TransportError};
@@ -24,6 +24,9 @@ use crate::net::loopbacks::{LOCALHOST, LoopbackBinding, bind_loopbacks, listener
 use crate::platform::{self, Handle, JoinHandle};
 use crate::router::types::{BoxFuture, RouterError};
 use crate::transport::{TransportServerAddress, TransportServerStartOptions};
+
+#[cfg(test)]
+mod tests;
 
 // the port a start names none of listens on, HTTP's
 const PORT: u16 = 80;
@@ -143,11 +146,12 @@ pub(crate) fn unmarked(status: u16) -> String {
 }
 
 /// One address a server listens on: whether that listener still serves what comes, and its
-/// accepting, which its stop ends.
+/// accepting, which its stop ends, and which ends once it is dropped, its listener let go with it.
 pub(crate) struct Listening {
     pub(crate) serving: Arc<AtomicBool>,
     stop: CancellationToken,
     task: JoinHandle<()>,
+    _dropped: DropGuard,
 }
 
 impl Listening {
@@ -182,6 +186,23 @@ pub(crate) fn bind(
     runtime: &Handle,
     options: &TransportServerStartOptions,
 ) -> Result<Bound, RouterError> {
+    bind_with_loopback(
+        runtime,
+        (
+            options,
+            &LoopbackBinding::new(
+                options.port.unwrap_or(PORT),
+                options.find_open_port.unwrap_or(false),
+            ),
+        ),
+    )
+}
+
+/// Binds a server with the loopback binding its tests supply.
+pub(crate) fn bind_with_loopback(
+    runtime: &Handle,
+    (options, binding): (&TransportServerStartOptions, &LoopbackBinding),
+) -> Result<Bound, RouterError> {
     let address = options
         .address
         .clone()
@@ -209,7 +230,7 @@ pub(crate) fn bind(
                     .map(|address| listener_on(*address, port))
                     .collect::<io::Result<Vec<_>>>()
             },
-            &LoopbackBinding::new(port, find_open_port),
+            binding,
         )
         .map_err(io_error)?;
 
@@ -243,33 +264,137 @@ pub(crate) fn bind(
     })
 }
 
-/// Accepts what comes to `listener` on `runtime` until its stop, each socket handed to `take` with
-/// whether its listener still serves, which gives false once its server is gone.
-pub(crate) fn accepting<F>(runtime: &Handle, (listener, take): (TcpListener, F)) -> Listening
+/// What a server accepts its sockets from: its listener, or a test's.
+pub(crate) trait Accept: Send + 'static {
+    /// What it accepts.
+    type Socket: Send + 'static;
+
+    /// The next socket accepted, and its peer's address; or why none was.
+    fn poll_accept(
+        &mut self,
+        context: &mut Context<'_>,
+    ) -> Poll<io::Result<(Self::Socket, SocketAddr)>>;
+}
+
+impl Accept for TcpListener {
+    type Socket = TcpStream;
+
+    fn poll_accept(
+        &mut self,
+        context: &mut Context<'_>,
+    ) -> Poll<io::Result<(TcpStream, SocketAddr)>> {
+        Self::poll_accept(self, context)
+    }
+}
+
+/// How long accepting pauses after a failure that is not of one connection: a second, as hyper's
+/// and axum's servers pause.
+pub(crate) const ACCEPT_PAUSE: Duration = Duration::from_secs(1);
+
+/// What accepting takes: where it accepts, what it hands each socket to, the clock it pauses on and
+/// what it reports a failure to.
+pub(crate) struct Acceptance<A: Accept, F> {
+    /// Where it accepts.
+    pub(crate) listener: A,
+    /// What it hands each socket to, with whether its listener still serves; false once its
+    /// server is gone, which ends it.
+    pub(crate) take: F,
+    /// The platform's clock, which its pause runs on.
+    pub(crate) platform: SharedClock,
+    /// What it reports the first failure of a run to, its server's errors.
+    pub(crate) report: Box<dyn Fn(io::Error) + Send>,
+}
+
+// whether a failed accept is one connection's, gone before it was taken: the next is taken at once
+fn is_of_one_connection(error: &io::Error) -> bool {
+    matches!(
+        error.kind(),
+        io::ErrorKind::ConnectionAborted
+            | io::ErrorKind::ConnectionReset
+            | io::ErrorKind::ConnectionRefused
+            | io::ErrorKind::Interrupted
+    )
+}
+
+// pauses `pause` on `clock`, or a turn when it arms no timer; true once `stop` ended it first
+async fn paused(clock: &SharedClock, (pause, stop): (Duration, &CancellationToken)) -> bool {
+    let (woken, wait) = oneshot::channel::<()>();
+    let mut woken = Some(woken);
+    let Ok(timer) = clock.arm(
+        Schedule::Once(pause),
+        Box::new(move || {
+            if let Some(woken) = woken.take() {
+                woken.send(()).ok();
+            }
+        }),
+    ) else {
+        platform::yield_now().await;
+
+        return stop.is_cancelled();
+    };
+    let stopped = unless_cancelled(stop, wait).await.is_none();
+
+    timer.cancel();
+
+    stopped
+}
+
+/// Accepts what comes to its listener on `runtime` until its stop, each socket handed to its
+/// `take`. A failure of one connection, gone before it was taken, accepts again at once; any
+/// other, the process short of descriptors say, pauses [`ACCEPT_PAUSE`] on the platform's clock
+/// before the next, the first of a run reported.
+pub(crate) fn accepting<A, F>(runtime: &Handle, acceptance: Acceptance<A, F>) -> Listening
 where
-    F: Fn((TcpStream, SocketAddr), &Arc<AtomicBool>) -> bool + Send + 'static,
+    A: Accept,
+    F: Fn((A::Socket, SocketAddr), &Arc<AtomicBool>) -> bool + Send + 'static,
 {
+    let Acceptance {
+        mut listener,
+        take,
+        platform: clock,
+        report,
+    } = acceptance;
     let serving = Arc::new(AtomicBool::new(true));
     let stop = CancellationToken::new();
     let accepted_serving = Arc::clone(&serving);
     let accepted_stop = stop.clone();
     let task = platform::spawn(runtime, async move {
-        while let Some(accepted) = unless_cancelled(&accepted_stop, listener.accept()).await {
+        let mut is_failing = false;
+
+        while let Some(accepted) = unless_cancelled(
+            &accepted_stop,
+            poll_fn(|context| listener.poll_accept(context)),
+        )
+        .await
+        {
             match accepted {
                 Ok((socket, peer)) => {
+                    is_failing = false;
+
                     if !take((socket, peer), &accepted_serving) {
                         return;
                     }
                 }
-                // a socket gone before it was taken, or the system short of descriptors: the next
-                // is taken in a later turn
-                Err(_) => platform::yield_now().await,
+                Err(error) if is_of_one_connection(&error) => platform::yield_now().await,
+                // ! never accepted again at once: a failure of the process' own fails the next
+                // too, and would spin its thread
+                Err(error) => {
+                    if !is_failing {
+                        is_failing = true;
+                        report(error);
+                    }
+
+                    if paused(&clock, (ACCEPT_PAUSE, &accepted_stop)).await {
+                        return;
+                    }
+                }
             }
         }
     });
 
     Listening {
         serving,
+        _dropped: stop.clone().drop_guard(),
         stop,
         task,
     }

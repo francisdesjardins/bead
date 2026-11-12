@@ -33,6 +33,9 @@ disallowed-methods = [
   { path = "tokio::task::spawn_blocking", reason = "spawn through crate::platform" },
   { path = "tokio::task::spawn_local", reason = "spawn through crate::platform" },
   { path = "tokio::task::yield_now", reason = "a turn through crate::platform, or the test kit's" },
+  # a name's resolution runs on tokio's blocking pool, a spawn of its own; reachable where tokio's
+  # net is on, a socket's feature
+  { path = "tokio::net::lookup_host", reason = "resolve through crate::platform", allow-invalid = true },
   # reachable where tokio's rt-multi-thread is on, in a test, the benches or the interop; never in
   # the library, nor on the browser's target
   { path = "tokio::task::block_in_place", reason = "a turn awaits nothing", allow-invalid = true },

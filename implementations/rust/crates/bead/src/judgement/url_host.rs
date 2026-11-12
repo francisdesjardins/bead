@@ -274,10 +274,14 @@ fn ipv6_of(text: &str) -> Option<[u16; 8]> {
         piece_index = 7;
 
         while piece_index != 0 && swaps > 0 {
-            address.swap(
-                piece_index,
-                compressed.saturating_add(swaps).saturating_sub(1),
-            );
+            let other = compressed.saturating_add(swaps).saturating_sub(1);
+
+            // WHATWG URL's IPv6 parser swaps two pieces of the eight; the same one twice is no swap
+            if piece_index != other {
+                let [one, two] = address.get_disjoint_mut([piece_index, other]).ok()?;
+
+                core::mem::swap(one, two);
+            }
             piece_index = piece_index.saturating_sub(1);
             swaps = swaps.saturating_sub(1);
         }

@@ -93,12 +93,12 @@ to one meaning of `advance`. The why of each rule is in the decisions:
   a connection's reads paced by what its router has not taken, sections 15.5 to 15.7, 15.12, 15.19
   and 15.23;
 - [0048](../docs/decisions/0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md):
-  the procedures a server's transport takes, sections 9.2, 9.11, 9.12, 15.1 and 15.14.
+  the procedures a server's transport takes, sections 9.2, 9.11, 9.12, 15.1 and 15.14;
 - [0049](../docs/decisions/0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md):
   a request's target, read as a page's browser writes it, and a WebSocket's text message at its
   router, sections 15.2 and 15.12.
 
-**Version: 0.13.0**, of layout `0xA1`, its broker parcels of layout `0xB1`. Each of its
+**Version: 0.14.0**, of layout `0xA1`, its broker parcels of layout `0xB1`. Each of its
 conformance files repeats it as its `specVersion`, and follows its schema in
 [`schemas/`](schemas/). The interop's blueprint,
 [`interop-blueprint.json`](interop-blueprint.json), and what its service does,
@@ -720,6 +720,14 @@ and by the side that answers with a failure on its call id:
   its call as timed out after as long, and cancels it; the side sending a result's transfer reports
   its stall as well.
 
+A transport's refusal of an envelope of a result's transfer — its opening or a chunk, as it goes
+or once the last chunk went — ends that transfer at the side sending it, which answers nothing more
+on its call: nothing more of the transfer goes, the resolver that answered is told its answer did
+not go, and the refusal is reported (section 9.0, `debugging.md` 9.2). The first refusal to come
+is the one told; one after it is dropped in silence. That resolver is told its answer went only
+once its transport took every envelope of the transfer. A requester the payload does not reach
+whole ends its call as the stall above has it.
+
 12.8. While a payload or its result goes as a transfer, the transfer's inactivity governs the call:
 each chunk placed and each credit that grants sets it going again. The call's own timeout counts
 the wait for its answer, afresh once the last chunk of its request went.
@@ -739,7 +747,7 @@ where it is known for late, and reported elsewhere:
 | `CANCEL`       | —                     | dropped                                             | dropped: it may have crossed its answer                           |
 
 12.10. A connection that closes ends every transfer on it, at both ends; what they held of the
-budget goes to the transfers it starved.
+budget goes to the transfers it starved, on any connection, each credited then as section 12.4 says.
 
 12.11. A transfer of 20 MiB, with the limits by default:
 
@@ -945,8 +953,12 @@ It asks the key set, holds the keys an answer gives, and has a call wait for the
    when nothing else reads it.
 3. An ask that fails — the key set throws or rejects, answers what is not keys shaped for their
    algorithms, or is unsettled as its deadline is reached, what it settles to at or past that
-   deadline being dropped — fails the verifier of every call that waits on it (section 9.2, step 6),
-   as a key set that cannot be reached does.
+   deadline being dropped — fails the verifier of every call that waits on it (section 9.2, step
+   6), as a key set that cannot be reached does. A deadline's timer that the side's clock refuses
+   to arm (decision 0011) fails at once, as an ask that fails does, the ask it was armed for and
+   every call that waits for that deadline, the clock's error its cause; an ask so refused never
+   goes, nothing asked of the key set, and sets no deadline, so the next call of its issuer has an
+   ask go at once.
 4. The keys an answer gave are held for its issuer, beside the application's, in place of those its
    last answer gave, ten minutes from that answer on the monotonic reading: they serve while that
    reading is before the answer's plus 600,000 ms, and an ask that fails replaces none of them. The
@@ -1572,8 +1584,11 @@ listen after it is the last — lost too, the client counts the connection lost.
 the count.
 
 15.11. HTTP carries no transfer: a request's body is in before its answer goes, so no credit could
-come back. Both sides of an HTTP connection set `maximumTransfers` to 0, and a payload is what one
-envelope holds.
+come back. An HTTP server or client sets `maximumTransfers` to 0, `chunkBytes` to
+`maximumEnvelopeBytes` and `windowBytes` to twice it, so a payload is what one envelope holds. Built
+as one, it refuses limits that give `maximumTransfers` other than 0, as limits that do not hold
+together are refused (section 12.2), and replaces a `chunkBytes` or a `windowBytes` given: those ask
+for nothing HTTP drops, since every payload they let go whole still goes whole.
 
 15.12. A server bounds what its clients hold, and times what is under way, by these names; a client
 bounds what it reads, an answer or an envelope a batch brings, by `maximumBodyBytes`, its default
@@ -2172,8 +2187,13 @@ broker sends no alias; its `maximumPacketSize` as its Maximum Packet Size; its `
 seconds rounded up, as its Keep Alive. Where its adapter leaves a will, the will is its
 participant's GONE to its departure, of QoS 1, RETAIN 0 and a Will Delay Interval of 0, so that its
 broker publishes it as it sees the link close without a clean end, a takeover by another link of
-its Client Identifier among them. A link is up once its CONNACK's Reason Code is 0x00; any other
-fails its start, as do a Maximum QoS of 0 and no CONNACK within `connectTimeout` of its start. Its
+its Client Identifier among them. A link is up once its CONNACK's Reason Code is 0x00 and its
+Maximum QoS is not 0, as that CONNACK is read, its packets judged in the order they came
+([MQTT 5.0 §4.2](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html)); a CONNACK of
+any other Reason Code, or of a Maximum QoS of 0, fails its start whatever comes after it, as does
+no CONNACK within `connectTimeout` of its start, and a start that fails sends no DISCONNECT. Once
+up, a link that ends other than by its stop is lost, its down told once, before or after its start
+settles, and its start succeeds all the same; its stop ends it as it ends any link up. Its
 password is one its adapter is given, or one a provider it is given answers, asked anew at each
 link's start before its network connection opens, under that start's signal and its stop, and
 within the same `connectTimeout`: an ask that outlives it, or that a stop meets, fails that start
@@ -2223,9 +2243,13 @@ asked, and never sent.
 
 15.29. A participant acknowledges a PUBLISH of QoS 1 with a PUBACK of Reason Code 0x00 once its core
 took its parcel (section 15.19), never with one of 0x80 or more. It drops in silence, and
-acknowledges, a PUBLISH whose RETAIN is 1. A packet past its own Maximum Packet Size is a Protocol
-Error: it closes its network connection, its link lost
-([MQTT 5.0 §4.13.1](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html)).
+acknowledges, a PUBLISH whose RETAIN is 1. A packet past its own Maximum Packet Size, counted from
+its fixed header's Remaining Length as section 15.30 counts one, is a Protocol Error
+([MQTT 5.0 §3.1.2.11.4, §4.13.1](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html)):
+as it reads that length, before the packet's body comes, it closes its network connection,
+reading nothing more of it, its link lost where it was up, or its start failed where no CONNACK had
+put it up (section 15.26). It sends no DISCONNECT before it closes
+([`docs/support.md`](../docs/support.md), "Leveled down"), and its broker publishes its will.
 
 15.30. A PUBLISH of N bytes of payload to a topic of T bytes in UTF-8 counts S = 1 + v(R) + R bytes,
 where R = 2 + T + Q + v(P) + P + N, Q is 2 at QoS 1 and 0 at QoS 0, P is 5 with a Message Expiry

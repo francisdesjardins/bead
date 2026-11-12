@@ -37,9 +37,9 @@ use crate::metrics::{MetricsRegistry, NotificationSeries, ProcedureSeries, Route
 use crate::ordered::Ordered;
 use crate::owner::{Owner, WeakOwner};
 use crate::router::core::{
-    BeforeAnswer, Core, Dispatch, Disposal, Handler, Resolution, Resolved, Resolvers, Responded,
-    SessionRequest as CoreSessionRequest, Side, Undo, Unresolved, is_answering, reported,
-    reported_call, respond,
+    BeforeAnswer, CallAnswer, Core, Dispatch, Disposal, Handler, Resolution, Resolved, Resolvers,
+    Responded, SessionRequest as CoreSessionRequest, Side, Undo, Unresolved, answer_in_place,
+    is_answering, reported, reported_call,
 };
 use crate::router::intake::Intake;
 use crate::router::requester::CoreRequest;
@@ -633,14 +633,7 @@ fn later_of(first: Option<i64>, second: Option<i64>) -> Option<i64> {
 }
 
 fn wall_milliseconds(state: &ServerState) -> i64 {
-    state
-        .core
-        .clock
-        .wall()
-        .duration_since(std::time::SystemTime::UNIX_EPOCH)
-        .map_or(0, |since| {
-            i64::try_from(since.as_millis()).unwrap_or(i64::MAX)
-        })
+    crate::clock::milliseconds_since_epoch(state.core.clock.wall())
 }
 
 // * the wall clock read again, never counted down: the time left ends the session, or arms the
@@ -1323,19 +1316,20 @@ fn exceed(state: &mut ServerState, call: CallAddress) {
         Some(request) => {
             let handle = Arc::clone(&call.connection_handle);
 
-            respond(
+            // * the router's own answer in its resolver's place, held for its manager to tell
+            answer_in_place(
                 state,
-                (
-                    RouterAnswer::Failure(failure.record()),
-                    request,
-                    Some(Box::new(
+                CallAnswer {
+                    answer: RouterAnswer::Failure(failure.record()),
+                    dispatch: request,
+                    done: Some(Box::new(
                         move |state: &mut ServerState, outcome: Result<(), CallError>| {
                             if let Err(error) = outcome {
                                 state.report(reported_call(error), &handle);
                             }
                         },
                     )),
-                ),
+                },
             );
         }
     }

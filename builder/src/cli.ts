@@ -29,23 +29,22 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import nodePath, { dirname, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
 import { readStandardInput, STANDARD_INPUT } from './breaking/against.ts';
 import { breaking } from './breaking/breaking.ts';
 import { checkBlueprintFile, checkRoots, type IChecked } from './check.ts';
-import { findConfig, type IConfig, parseConfig, type Source } from './config.ts';
+import { findConfig } from './config-files.ts';
+import { type IConfig, parseConfig, type Source } from './config.ts';
+import { hasError, type IDiagnostic, InputError } from './diagnostics.ts';
 import {
   ErrorFormat,
   escapeData,
   escapeProperty,
   formatDiagnostic,
   githubFileOf,
-  hasError,
-  type IDiagnostic,
-  InputError,
-} from './diagnostics.ts';
+} from './format-diagnostic.ts';
 import { formDifferencesOf, formOf, type IFormDifference } from './model/form.ts';
 import { displayOf } from './roots.ts';
 import { Category, isRuleName, RULES, Severity } from './rules.ts';
@@ -141,7 +140,10 @@ const sourceOf = (
     throw new InputError('name a root or a blueprint, or run beadc where a beadc.yaml is');
   }
 
-  const parsed = parseConfig(readFileSync(config, 'utf8'), { folder: dirname(config) });
+  const parsed = parseConfig(readFileSync(config, 'utf8'), {
+    folder: dirname(config),
+    path: nodePath,
+  });
 
   return {
     source: parsed.source,

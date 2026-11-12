@@ -9,6 +9,49 @@ namespace Bead.Tests;
 public sealed partial class ServiceManagerTests
 {
     [Fact]
+    public async Task A_self_admitting_resolver_refuses_before_decoding_and_tells_no_trace_on_a_failed_admission()
+    {
+        foreach (var throws in new[] { false, true })
+        {
+            var router = new RecordingRouter();
+            var manager = new ServiceManager(router);
+            var seen = RecordDebug(manager);
+            var failure = new InvalidOperationException("the admission fails");
+            var reached = 0;
+            var resolver = manager.GetRequestResolver(Echo, Answered(new BeforeRequest((_) =>
+            {
+                if (throws)
+                {
+                    throw failure;
+                }
+
+                return false;
+            }, Failure.OfProtocol(ProtocolCode.SessionRequired))))((_, _) =>
+            {
+                reached += 1;
+
+                return Task.CompletedTask;
+            });
+            var resolving = resolver.Handle(PropsOf("{not json"u8.ToArray()) with { IsAdmitted = false });
+
+            if (throws)
+            {
+                Assert.Same(failure, await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                {
+                    return resolving;
+                }));
+            }
+            else
+            {
+                await resolving;
+            }
+
+            Assert.Equal([new Responded(Target, null, Failure.OfProtocol(throws ? ProtocolCode.ProcedureFailed : ProtocolCode.SessionRequired))], router.Responses);
+            Assert.Equal(0, reached);
+            Assert.Empty(seen);
+        }
+    }
+    [Fact]
     public async Task Traces_an_application_failure_as_the_answer_with_its_request_and_duration()
     {
         var clock = new FakeTimeProvider(Started);
@@ -754,7 +797,7 @@ public sealed partial class ServiceManagerTests
 
     // debugging 4.2 and 4.2.4
     [Fact]
-    public async Task Tells_an_answer_its_router_cannot_send_again_at_its_start_with_why_beside_it()
+    public async Task Tells_an_answer_its_router_cannot_send_once_with_why_beside_it()
     {
         var time = new FakeTimeProvider(Started);
         var router = new RecordingRouter { Clock = time };
@@ -763,7 +806,7 @@ public sealed partial class ServiceManagerTests
         var tooLarge = FailureException.OfProtocol(ProtocolCode.PayloadTooLarge, RouterSide.Server);
         Exception? heard = null;
 
-        // the payload answer goes nowhere, 5 ms after it was told; a failure goes out
+        // the payload answer goes nowhere, 5 ms after it is handed over; a failure goes out
         router.RespondError = (answer) =>
         {
             if (answer.Failure is not null)
@@ -791,8 +834,56 @@ public sealed partial class ServiceManagerTests
         Assert.Equal<(DebugDirection, Exception?, object?, DateTimeOffset, TimeSpan?)>(
             [
                 (DebugDirection.Rx, null, null, Started, null),
-                (DebugDirection.Tx, null, new Text("hi"), Started, TimeSpan.FromMilliseconds(10)),
                 (DebugDirection.Tx, tooLarge, new Text("hi"), Started, TimeSpan.FromMilliseconds(15)),
+            ],
+            seen.Select((told) =>
+            {
+                return (told.Event.Direction, told.Error, told.Event.Tx, told.Event.StartedAt, told.Event.Duration);
+            }));
+    }
+
+    // debugging 4.2: a call answered nothing tells no failure (spec 9.4)
+    [Fact]
+    public async Task Tells_with_no_failure_an_answer_that_did_not_go_once_its_call_was_cancelled()
+    {
+        var time = new FakeTimeProvider(Started);
+        var router = new RecordingRouter { Clock = time };
+        var manager = new ServiceManager(router);
+        var seen = RecordDebug(manager);
+        using var source = new CancellationTokenSource();
+        var gone = new InvalidOperationException("the call was cancelled");
+        Exception? heard = null;
+
+        // its requester cancels as the answer goes, 5 ms after it is handed over: it goes nowhere
+        router.RespondError = (answer) =>
+        {
+            if (answer.Failure is not null)
+            {
+                return null;
+            }
+
+            time.Advance(TimeSpan.FromMilliseconds(5));
+            source.Cancel();
+
+            return gone;
+        };
+
+        var resolver = manager.GetRequestResolver(Echo, Answered())(async (request, response) =>
+        {
+            time.Advance(TimeSpan.FromMilliseconds(10));
+            heard = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            {
+                return response.Answer(request.Payload);
+            });
+        });
+
+        await resolver.Handle(PropsOf(Encode(new Text("hi"))) with { Signal = source.Token }).WaitAsync(Patience, Cancelled);
+
+        Assert.Same(gone, heard);
+        Assert.Equal<(DebugDirection, Exception?, object?, DateTimeOffset, TimeSpan?)>(
+            [
+                (DebugDirection.Rx, null, null, Started, null),
+                (DebugDirection.Tx, null, new Text("hi"), Started, TimeSpan.FromMilliseconds(15)),
             ],
             seen.Select((told) =>
             {
@@ -1157,10 +1248,9 @@ public sealed partial class ServiceManagerTests
         Assert.Null(request.TransportCredential);
     }
 
-    // debugging 4.2; the C# side's alone, whose router answers in its resolver's place on its own
-    // thread while the resolver's answer goes to it
+    // debugging 4.2
     [Fact]
-    public async Task Tells_again_at_its_start_the_failure_its_router_answered_in_its_place_as_its_answer_went_to_it()
+    public async Task Tells_once_the_failure_its_router_answered_in_its_place_as_its_answer_went_to_it()
     {
         var time = new FakeTimeProvider(Started);
         var router = new RecordingRouter { Clock = time };
@@ -1169,7 +1259,8 @@ public sealed partial class ServiceManagerTests
         var exceeded = Failure.OfProtocol(ProtocolCode.CapacityExceeded, "the notifications queued for call 7 went past their bounds");
         Failure? held = null;
 
-        // its router answers in its place 5 ms after its answer was told, before that answer reaches it
+        // its router answers in its place 5 ms after its answer is handed over, before that answer
+        // reaches it
         router.FailureAnswered = (target) =>
         {
             return ReferenceEquals(target.Header, Header) ? held : null;
@@ -1199,7 +1290,6 @@ public sealed partial class ServiceManagerTests
         Assert.Equal<(DebugDirection, bool, object?, DateTimeOffset, TimeSpan?)>(
             [
                 (DebugDirection.Rx, false, null, Started, null),
-                (DebugDirection.Tx, false, new Text("hi"), Started, TimeSpan.FromMilliseconds(10)),
                 (DebugDirection.Tx, true, new Text("hi"), Started, TimeSpan.FromMilliseconds(15)),
             ],
             seen.Select((step) =>
@@ -1207,12 +1297,10 @@ public sealed partial class ServiceManagerTests
                 return (step.Event.Direction, step.Error is not null, step.Event.Tx, step.Event.StartedAt, step.Event.Duration);
             }));
 
-        // a failure its own resolver answered is never told again
+        // a failure its own resolver answers is told once, with no error: its router holds none of it
         held = null;
-        router.RespondError = (answer) =>
+        router.RespondError = (_) =>
         {
-            held = answer.Failure;
-
             return null;
         };
         seen.Clear();
@@ -1223,5 +1311,57 @@ public sealed partial class ServiceManagerTests
         }).Handle(PropsOf(Encode(new Text("hi")))).WaitAsync(Patience, Cancelled);
 
         Assert.Equal([(DebugDirection.Rx, DebugType.Request), (DebugDirection.Tx, DebugType.Request)], StepsOf(seen));
+        Assert.Null(seen[^1].Error);
+    }
+
+    // debugging 4.2
+    [Fact]
+    public async Task Tells_once_its_router_settled_it_an_answer_nobody_waits_on()
+    {
+        var time = new FakeTimeProvider(Started);
+        var router = new RecordingRouter { Clock = time };
+        var manager = new ServiceManager(router);
+        var seen = RecordDebug(manager);
+        var settled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var told = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        router.RespondGate = settled.Task;
+        manager.Debug += (_, step) =>
+        {
+            if (step.Direction == DebugDirection.Tx)
+            {
+                told.TrySetResult();
+            }
+        };
+
+        // its resolver hands its answer over 10 ms in, and returns without waiting on it
+        var resolver = manager.GetRequestResolver(Echo, Answered())((request, response) =>
+        {
+            time.Advance(TimeSpan.FromMilliseconds(10));
+            _ = response.Answer(request.Payload);
+
+            return Task.CompletedTask;
+        });
+
+        await resolver.Handle(PropsOf(Encode(new Text("hi")))).WaitAsync(Patience, Cancelled);
+
+        // nothing told while its router holds it
+        Assert.Single(router.Responses);
+        Assert.Equal([(DebugDirection.Rx, DebugType.Request)], StepsOf(seen));
+
+        // its router settles it 5 ms later: told once, its duration ending there
+        time.Advance(TimeSpan.FromMilliseconds(5));
+        settled.SetResult();
+        await told.Task.WaitAsync(Patience, Cancelled);
+
+        Assert.Equal<(DebugDirection, Exception?, object?, DateTimeOffset, TimeSpan?)>(
+            [
+                (DebugDirection.Rx, null, null, Started, null),
+                (DebugDirection.Tx, null, new Text("hi"), Started, TimeSpan.FromMilliseconds(15)),
+            ],
+            seen.Select((step) =>
+            {
+                return (step.Event.Direction, step.Error, step.Event.Tx, step.Event.StartedAt, step.Event.Duration);
+            }));
     }
 }

@@ -32,7 +32,7 @@ that hold what of them a test can. The why of each rule is in the decisions:
 - [0048](../docs/decisions/0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md):
   a call its connection's transport does not take, counted under its procedure (7.6, 7.7, 8.3).
 
-**Version: 0.8.0**. Each of its conformance files repeats it as its `debuggingVersion`, and follows
+**Version: 0.9.0**. Each of its conformance files repeats it as its `debuggingVersion`, and follows
 its schema in [`schemas/`](schemas/). It moves by `spec.md`'s rule, under a version of its own
 ([0008](../docs/decisions/0008-three-version-axes-and-names-qualified-by-their-owner.md)): the minor
 when an implementation that conforms to its last version must change to conform to this one, the
@@ -106,43 +106,43 @@ registry is given.
 4.1. A service manager tells each step of a call to whoever listens, with the same fields on every
 side, each in its platform's case:
 
-| Field                          | What it holds                                                                                                                   |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
-| `direction`                    | `tx` for a step out, `rx` for a step in                                                                                         |
-| `type`                         | `request` or `command` for a call, by its router's side (8.2); `notification` for a notification sent or heard                  |
-| `procedureId`, `procedureName` | its procedure                                                                                                                   |
-| `serviceId`, `serviceRevision` | its procedure's service                                                                                                         |
-| `startedAt`                    | the call's start, on the wall clock; a notification's, as it is sent or heard                                                   |
-| `duration`                     | whole milliseconds of the monotonic clock, a fraction dropped, once the call answered; none before, and none for a notification |
-| `options`                      | the call's options, its defaults applied, its credential left out                                                               |
-| `rx`, `tx`                     | what came in and what went out, decoded                                                                                         |
-| the error, beside the step     | what the step failed with; a failure by its code, its scope and its detail                                                      |
-| `callId`, `connectionHandle`   | its call, as its envelopes name it (5.1): its call id, and its connection, `server` on a client; none where 4.2 names none      |
+| Field                          | What it holds                                                                                                                                             |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `direction`                    | `tx` for a step out, `rx` for a step in                                                                                                                   |
+| `type`                         | `request` or `command` for a call, by its router's side (8.2); `notification` for a notification sent or heard                                            |
+| `procedureId`, `procedureName` | its procedure                                                                                                                                             |
+| `serviceId`, `serviceRevision` | its procedure's service                                                                                                                                   |
+| `startedAt`                    | the call's start, on the wall clock; a notification's, as it is sent or heard                                                                             |
+| `duration`                     | whole milliseconds of the monotonic clock, a fraction dropped, once the call's answer settled: went, or did not; none before, and none for a notification |
+| `options`                      | the call's options, its defaults applied, its credential left out                                                                                         |
+| `rx`, `tx`                     | what came in and what went out, decoded                                                                                                                   |
+| the error, beside the step     | what the step failed with; a failure by its code, its scope and its detail                                                                                |
+| `callId`, `connectionHandle`   | its call, as its envelopes name it (5.1): its call id, and its connection, `server` on a client; none where 4.2 names none                                |
 
 A step's `rx` and `tx` may be the call's own values, not copies of them: a listener MUST NOT change
 them, since its call may still read what it changed.
 
 4.2. The steps it tells, and the call each names:
 
-| Step                                                                                               | Direction | Its call                                                    |
-| -------------------------------------------------------------------------------------------------- | --------- | ----------------------------------------------------------- |
-| a call made                                                                                        | `tx`      | its own, once its router drew its id; none if refused first |
-| its answer, or its failure                                                                         | `rx`      | the call made's                                             |
-| a request received, once admitted, decoded and judged by its rules                                 | `rx`      | its request's                                               |
-| the answer it sends, its failure to go at that start, or its resolver's failure before it answered | `tx`      | its request's                                               |
-| a notification sent, and its failure to go at that start                                           | `tx`      | none: it goes to each subscription under that one's id      |
-| a notification heard, or its failure to decode                                                     | `rx`      | none: its subscription's call names it                      |
+| Step                                                                                          | Direction | Its call                                                    |
+| --------------------------------------------------------------------------------------------- | --------- | ----------------------------------------------------------- |
+| a call made                                                                                   | `tx`      | its own, once its router drew its id; none if refused first |
+| its answer, or its failure                                                                    | `rx`      | the call made's                                             |
+| a request received, once admitted, decoded and judged by its rules                            | `rx`      | its request's                                               |
+| the answer it sends, once its router settled it, or its resolver's failure before it answered | `tx`      | its request's                                               |
+| a notification sent, and its failure to go at that start                                      | `tx`      | none: it goes to each subscription under that one's id      |
+| a notification heard, or its failure to decode                                                | `rx`      | none: its subscription's call names it                      |
 
 A `tx` step with an error says that its `tx` did not go out, and why: a notification that could not
-go; an answer its router could not send, past its limit say, told again at its start with what its
-router refused it with; an answer to a request its router already answered in its resolver's place,
-as its subscription's queue went past its bounds (`spec.md` 11.10), told once, as its resolver
-answers, with the failure its router answered it with; or none, from a resolver that failed before
-it answered, with what it failed with. A request whose answer did not go is answered
-`PROCEDURE_FAILED` in its place (`spec.md` 9.5, 12.1), unless its router answered it first, which
-the trace of envelopes tells (5.1). A call cancelled, gone with its connection, or whose router was
-disposed, is answered nothing (`spec.md` 9.4) and tells no failure; nor does a resolver that fails
-once it answered.
+go, told at its start; an answer, told once its router settled it, with what its router refused it
+with, past its limit say, or with the failure its router answered in its resolver's place, as its
+subscription's queue went past its bounds (`spec.md` 11.10), whether before its resolver answered or
+while that answer went to it; or none, from a resolver that failed before it answered, with what it
+failed with. An answer's step is told once, whatever its outcome. A request whose answer did not go
+is answered `PROCEDURE_FAILED` in its place (`spec.md` 9.5, 12.1), unless its router answered it
+first, which the trace of envelopes tells (5.1). A call cancelled, gone with its connection, or
+whose router was disposed, is answered nothing (`spec.md` 9.4) and tells no failure; nor does a
+resolver that fails once it answered.
 
 4.3. A request refused by its admission, or whose admission fails, answered `PROCEDURE_FAILED`
 (`spec.md` 9.2, step 6), or whose payload does not decode, is not traced: no step of it was told,
