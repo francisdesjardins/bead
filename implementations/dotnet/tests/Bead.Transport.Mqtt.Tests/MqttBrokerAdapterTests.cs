@@ -1978,8 +1978,15 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
 
         Assert.Equal([true, true, true, true, true, false, false], uris.Select(IsSecure));
 
-        // what is none of its four is refused as it is built, and so is an id that is none
-        foreach (var refused in new[] { new MqttBrokerAdapterOptions { Id = Id, Uri = new Uri("http://broker.example") }, new MqttBrokerAdapterOptions { Id = "", Uri = new Uri("mqtt://127.0.0.1") } })
+        // what is none of its four is refused as it is built, and so is an IPv6 address followed by
+        // anything but its port (RFC 3986 §3.2.2), and an id that is none
+        string[] refusedUris = ["http://broker.example", "mqtt://[::1]junk:1884", "mqtt://[::1]junk", "ws://[::1]junk/mqtt"];
+        var refusedOptions = refusedUris.Select((uri) =>
+        {
+            return new MqttBrokerAdapterOptions { Id = Id, Uri = new Uri(uri) };
+        }).Append(new MqttBrokerAdapterOptions { Id = "", Uri = new Uri("mqtt://127.0.0.1") });
+
+        foreach (var refused in refusedOptions)
         {
             Assert.Throws<ArgumentException>(() =>
             {

@@ -51,8 +51,9 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     /// <summary>
     /// An adapter of <see cref="MqttBrokerAdapterOptions.Id"/> to the broker at
     /// <see cref="MqttBrokerAdapterOptions.Uri"/>, not yet started. A scheme but <c>mqtt</c>,
-    /// <c>mqtts</c>, <c>ws</c> or <c>wss</c>, an empty id, or a password refused (a password and its
-    /// provider both, either beside a client certificate, or one that is empty or holds a NUL), is an
+    /// <c>mqtts</c>, <c>ws</c> or <c>wss</c>, an IPv6 address followed by anything but its port, an
+    /// empty id, or a password refused (a password and its provider both, either beside a client
+    /// certificate, or one that is empty or holds a NUL), is an
     /// <see cref="ArgumentException"/>; a bound or a duration out of its range an
     /// <see cref="ArgumentOutOfRangeException"/> naming it.
     /// </summary>
@@ -65,6 +66,11 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         if (options.Uri.Scheme is not ("mqtt" or "mqtts" or "ws" or "wss"))
         {
             throw new ArgumentException($"an MQTT broker is reached by mqtt, mqtts, ws or wss, not {options.Uri.Scheme}", nameof(options));
+        }
+
+        if (!IsAuthorityWhole(options.Uri))
+        {
+            throw new ArgumentException($"an MQTT broker's IPv6 address is followed by its port or by nothing, not {options.Uri.OriginalString}", nameof(options));
         }
 
         if (options.Tls?.ClientCertificates is not null && options.Uri.Scheme is not ("mqtts" or "wss"))
@@ -762,6 +768,38 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     private ObjectDisposedException DisposedRefusal()
     {
         return new ObjectDisposedException(null, $"the adapter of {Id} is disposed");
+    }
+
+    // * whether what follows an IP literal in its authority, as it was written, is its port or
+    // nothing (RFC 3986 §3.2.2, §3.2.3): System.Uri drops anything else, and its port with it
+    private static bool IsAuthorityWhole(Uri uri)
+    {
+        var written = uri.OriginalString;
+        var scheme = written.IndexOf("://", StringComparison.Ordinal);
+
+        if (scheme < 0)
+        {
+            return true;
+        }
+
+        var authority = written[(scheme + 3)..];
+        var end = authority.IndexOfAny(['/', '?', '#']);
+
+        if (end >= 0)
+        {
+            authority = authority[..end];
+        }
+
+        var bracket = authority.IndexOf(']', StringComparison.Ordinal);
+
+        if (!authority.StartsWith('[') || bracket < 0)
+        {
+            return true;
+        }
+
+        var after = authority[(bracket + 1)..];
+
+        return after.Length == 0 || (after[0] == ':' && after[1..].All(char.IsAsciiDigit));
     }
 
     // a Maximum Packet Size, a Four Byte Integer no larger than the largest packet MQTT 5 writes
