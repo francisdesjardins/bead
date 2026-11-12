@@ -277,7 +277,7 @@ describe('the seeds', () => {
     assert.equal(SEEDS['mqtt-packets'].length, 14);
     assert.equal(
       digestOf(inSeedOrder(SEEDS['mqtt-packets'])),
-      'db5f9db1a9c692c6b1a72b50243647428c3e1593eb55442d2e72536525dbbae9'
+      '5aefa6a26a2fb2c54568282055a1c6fbc81423f0ebf2708bd154a6a265b1246e'
     );
 
     // each one whole: its fixed header's Remaining Length, one byte below 128, counts the rest

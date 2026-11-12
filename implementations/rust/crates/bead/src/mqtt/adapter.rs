@@ -1801,7 +1801,13 @@ impl State {
                     "every Packet Identifier of its link awaits an answer",
                 )))
                 .ok();
-            link.quota.release();
+
+            // * what its room hands back sent in its turn, as after a PUBACK, whatever it frees
+            let freed = link.quota.release();
+
+            for next in freed {
+                self.send_publication((serial, next));
+            }
 
             return;
         };
