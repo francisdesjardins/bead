@@ -86,6 +86,7 @@ const LONGEST_KEEP_ALIVE: Duration = Duration::from_secs(65_535);
 const RECEIVE_MAXIMUM: u16 = 65_535;
 
 // the Reason Codes the adapter reads a meaning in (MQTT 5.0 §2.4)
+const SUCCESS: u8 = 0x00;
 const GRANTED_QOS_1: u8 = 0x01;
 const NO_MATCHING_SUBSCRIBERS: u8 = 0x10;
 const REFUSED: u8 = 0x80;
@@ -1295,11 +1296,17 @@ impl State {
             return;
         }
 
-        let refusal = if connack.reason_code >= REFUSED {
-            Some(BrokerError::failed(format!(
-                "its broker refused the link of {}: CONNACK {}",
-                shared.id,
+        let refusal = if connack.reason_code != SUCCESS {
+            // * MQTT 5 names no CONNACK Reason Code under 0x80 but its Success (MQTT 5.0 §3.2.2.2)
+            let reason = if connack.reason_code >= REFUSED {
                 reason_of(connack.reason_code)
+            } else {
+                code_of(connack.reason_code)
+            };
+
+            Some(BrokerError::failed(format!(
+                "its broker refused the link of {}: CONNACK {reason}",
+                shared.id
             )))
         } else if connack.maximum_qos == Some(0) {
             // * its subscriptions and its will are of QoS 1, which a broker of Maximum QoS 0 refuses
