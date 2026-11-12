@@ -3069,8 +3069,8 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
     </table>
   </div>
   <p class="space">
-    On the Rust side, next come the binding over AMQP 1.0, the gateway and <code>beadc</code>’s Rust
-    target, each by a decision of its own. Its WebSocket, HTTP and MQTT 5 transports meet the other
+    On the Rust side, next come <code>beadc</code>’s Rust target, the gateway and the binding over
+    AMQP 1.0, each by a decision of its own. Its WebSocket, HTTP and MQTT 5 transports meet the other
     two sides in the interop, both ways. The core also compiles for
     <code>wasm32-unknown-unknown</code>.
   </p>
@@ -3233,7 +3233,7 @@ disallowed-methods = [
   <ul class="rules">
     <li>
       <strong>Rust in full</strong
-      ><span>Its AMQP 1.0 binding, its gateway and its target in <code>beadc</code>.</span>
+      ><span>Its target in <code>beadc</code>, its gateway and its AMQP 1.0 binding.</span>
     </li>
     <li>
       <strong>Rules in CEL</strong
@@ -5205,8 +5205,8 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
     </table>
   </div>
   <p class="space">
-    Côté Rust, viennent ensuite la liaison sur AMQP 1.0, la passerelle et la cible Rust de
-    <code>beadc</code>, chacune par une décision à elle. Ses transports WebSocket, HTTP et MQTT 5
+    Côté Rust, viennent ensuite la cible Rust de <code>beadc</code>, la passerelle et la liaison sur
+    AMQP 1.0, chacune par une décision à elle. Ses transports WebSocket, HTTP et MQTT 5
     rencontrent les deux autres côtés dans l’interop, dans les deux sens. Le cœur se compile aussi
     pour <code>wasm32-unknown-unknown</code>.
   </p>
@@ -5376,7 +5376,7 @@ disallowed-methods = [
   <ul class="rules">
     <li>
       <strong>Rust au complet</strong
-      ><span>Sa liaison AMQP 1.0, sa passerelle et sa cible dans <code>beadc</code>.</span>
+      ><span>Sa cible dans <code>beadc</code>, sa passerelle et sa liaison AMQP 1.0.</span>
     </li>
     <li>
       <strong>Des règles en CEL</strong
