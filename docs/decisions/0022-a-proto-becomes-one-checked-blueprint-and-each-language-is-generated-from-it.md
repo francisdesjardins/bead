@@ -223,7 +223,8 @@ form.
 
 **The unit of generation is the service**, and one blueprint is one id space. A service gives
 `<Name>Procedures`, `<Name>Failures`, `<Name>Server`, `<Name>Client`, `<Name>Admissions` and
-`<Name>Windows`, its name its `.proto` name with a trailing `Service` taken off; in TypeScript also
+`<Name>Windows`, and `<Name>HttpClient` where an output names `gateway`, its name its `.proto` name
+with a trailing `Service` taken off; in TypeScript also
 `<Name>Resolvers`, and `<Name>ServerOptions` and `<Name>ClientOptions`, the layer's options named
 for the service, which C# names `ServiceServerOptions<<Name>Procedures>` and
 `ServiceClientOptions<<Name>Procedures>`; in C# also `<Name>Commands`, `<Name>Notifiers` and
@@ -355,8 +356,10 @@ blueprint to its schema and its form, and the two files to one list, and `--writ
 blueprint out in its form, its arrays sorted, which an author edits as they like; it writes nothing
 when a string holds a surrogate alone, and it never shortens the file it fails to write. The fixture
 `builder/test/fixtures/bead/interop/v1/interop.proto` gives a blueprint whose projection, its `proto`
-members left out, is the spec's byte for byte, which beadc's tests hold. Each side's interop code is
-generated from the blueprint; the handlers and the credentials are written.
+members left out, is the spec's byte for byte, which beadc's tests hold. The TypeScript and C#
+sides' interop code is generated from the blueprint, and the Rust side's descriptors are written by
+hand and held to it (`bead-interop/tests/blueprint.rs`) until its target; the handlers and the
+credentials are written.
 
 **Where each lives.** The builder in `builder/`, with a toolchain of its own
 ([0005](0005-a-toolchain-per-language.md)); `bead/options.proto` in `builder/proto/`; the format's

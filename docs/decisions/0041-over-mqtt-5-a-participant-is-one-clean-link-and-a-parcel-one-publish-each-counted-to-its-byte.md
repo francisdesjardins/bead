@@ -122,12 +122,12 @@ UNSUBACK that refuses, or none in time, going on to it, so no will goes ([MQTT-3
 that is down sends nothing. Once a stop settled, its broker hands the participant nothing, and its
 inbox, and a name no other member serves, find no subscriber. An UNSUBACK is its broker's word,
 which reaches the participant end to end: the subscription is deleted before it goes
-([MQTT-3.10.4-2], §3.11.3), where the DISCONNECT's sender closes the network connection itself
-([MQTT-3.14.4-2]) and a FIN its broker sends back, or the end of a session of Expiry 0, is no word
-a proxy or a gateway carries through. The UNSUBSCRIBEs go after the drain, since an UNSUBSCRIBE
-waits on no Receive Maximum and would overtake a CLOSE that does; one a filter, since an UNSUBSCRIBE
-of every filter passes a CONNACK's Maximum Packet Size, a Protocol Error that ends the link with
-0x95 and publishes the will ([MQTT-3.2.2-15], §4.13).
+([MQTT-3.10.4-1], [MQTT-3.10.4-2], §3.11.3), where the DISCONNECT's sender closes the network
+connection itself ([MQTT-3.14.4-2]) and a FIN its broker sends back, or the end of a session of
+Expiry 0, is no word a proxy or a gateway carries through. The UNSUBSCRIBEs go after the drain,
+since an UNSUBSCRIBE waits on no Receive Maximum and would overtake a CLOSE that does; one a filter,
+since an UNSUBSCRIBE of every filter passes a CONNACK's Maximum Packet Size, a Protocol Error that
+ends the link with 0x95 and publishes the will ([MQTT-3.2.2-15], §4.13).
 
 **A participant's stop lets each name it serves go first** (spec 15.18, 15.21, 15.24, 15.27): in
 its turn it hands its adapter one UNSUBSCRIBE of each name its link holds or asked, each kept wanted
@@ -162,8 +162,8 @@ SUBSCRIBE named: a filter is recorded as its SUBSCRIBE goes and kept until its U
 stop lets go of one whose SUBACK has not come, which its broker, reading a link's packets in their
 order, installed all the same. An unsubscription awaits its UNSUBACK within `connectTimeout` of its
 UNSUBSCRIBE, past which it fails, its link kept so that no will goes and its filter kept so that its
-adapter's stop lets it go again; its library's request is never cancelled, since an UNSUBACK that
-comes for no awaiter may end the link as a protocol violation, its will published.
+adapter's stop lets it go again; its library's request is never cancelled, so that a late UNSUBACK
+is still read.
 
 **A publication is QoS 1, or QoS 0 at most once, RETAIN 0, and carries nothing but a Message Expiry
 Interval** where the core asks one (spec 15.28): a parcel names its connection, an OPEN and an
@@ -173,7 +173,11 @@ PUBACK under 0x80 but 0x10 as taken, 0x10 as no subscriber, 0x80 or more as refu
 packet before it goes, refusing one past its CONNACK's bound; and refuses what is asked while its
 link is down. **The PUBACK goes once the core took the message** (spec 15.29), always 0x00, since one
 of 0x80 or more would discard it for every member of a group ([MQTT-4.8.2-6]); a message whose
-RETAIN is 1 is dropped and acknowledged; a packet past its own bound closes its network connection.
+RETAIN is 1 is dropped and acknowledged. A packet past its own bound, or one its client cannot
+read, closes its network connection with no DISCONNECT, its link lost, on every side, what each
+side's client cannot read parting them in rows of Differences; the one exception is an AUTH no
+CONNECT asked for ([MQTT-4.12.0-6]), which the C# adapter answers with MQTTnet's DISCONNECT of 0x83,
+the row `An MQTT 5 AUTH its CONNECT never asked for`.
 
 **Every bound is counted to the byte by one formula** (spec 15.30): `S = 1 + v(R) + R`,
 `R = 2 + T + Q + v(P) + P + N`, a Message Expiry Interval's five bytes counted whatever the
@@ -247,14 +251,21 @@ there, naming why, and a link from a page authenticates by a password, a row of 
 **A stop costs one UNSUBSCRIBE a subscription**, a departure a peer among them: its names' in its
 turn, their UNSUBACKs within one `connectTimeout`, then the others' in one round trip after its
 drain, before its DISCONNECT. Against a broker that answers nothing it takes up to three
-`connectTimeout`s, 90 s by default, past the 30 s an orchestrator such as Kubernetes grants a
-process before it kills it; its CLOSEs wait on none of them, since they go at its call, and a
-deployment that stops under such a grace lowers `connectTimeout`. A drain that spends its whole
-`connectTimeout` leaves the other UNSUBACKs no time, so a parcel to a stopped participant's inbox
-may still be taken, against a broker that withholds its PUBACKs that long and already fails the
-drain. A stop settles a round trip later where its broker hands it OPENs to refuse while it lets
-its names go, its adapter's drain sending the REFUSEs, and within a few milliseconds of one that
-refuses none otherwise.
+`connectTimeout`s, 90 s by default, one its names' let-go spends and two its adapter's stop spends,
+past the 30 s an orchestrator such as Kubernetes grants a process before it kills it; its CLOSEs
+wait on none of them, since they go at its call, and a deployment that stops under such a grace
+lowers `connectTimeout`. A drain that spends its whole `connectTimeout` leaves the other UNSUBACKs
+no time, so a parcel to a stopped participant's inbox may still be taken, against a broker that
+withholds its PUBACKs that long and already fails the drain. A stop settles a round trip later where
+its broker hands it OPENs to refuse while it lets its names go, its adapter's drain sending the
+REFUSEs, and within a few milliseconds of one that refuses none otherwise.
+
+**A publication at least once given up at a stop, once its packet may have gone, retires its link**,
+as it does at any other time, so its will goes: the rule holds at a stop too, alike on every side.
+
+**At most once, no PUBACK says no subscriber**: no side offers `noSubscriber` there, so a connect to
+a name with no member waits its time, as over AMQP 1.0, and a parcel to a departed peer's inbox is
+not told either, its heartbeat or its GONE finding it.
 
 **A group member's stop hands the others what follows its UNSUBACK**, and refuses 503 `busy` each
 OPEN its broker routed to it before: a reconnecting peer's next attempt places it anew, and a
@@ -265,7 +276,7 @@ member.
 
 **What a broker holds back past its window is the one residual**: a broker that keeps fewer
 publications in flight toward a participant than its Receive Maximum, as MQTT 5.0 §4.9 lets it,
-sends what it held back after the UNSUBACK, under [MQTT-3.10.4-3]'s MAY, and a stop acknowledges
+sends what it held back after the UNSUBACK, under §3.10.4's MAY, and a stop acknowledges
 and loses an OPEN among it: on Mosquitto 2.1.2, 198 of 200 at a Receive Maximum of 2, none at Bead's
 65,535. Spec 15.31 closes it as a deployment's requirement, its broker keeping in flight toward a
 server's participant up to the Receive Maximum that participant sends; closing it in the protocol
@@ -278,10 +289,11 @@ stop that settled is what the broker its link reached acknowledged, never what e
 beside Mosquitto; Mosquitto under TLS played, a client certificate among it, where the matrix holds
 its row of MQTT 5 over TLS "not tested", since the fixture's Mosquitto listens in clear on the
 loopback; and an acknowledgement of a Reason Code its packet's table does not name, and a SUBACK or
-an UNSUBACK whose count of codes is not one, judged alike on every side, beside 15.28's sentence for
-a publication at most once, by a round of its own, the rows of Differences `An MQTT 5
-acknowledgement of a Reason Code its packet's table does not name` and `An MQTT 5 SUBACK or UNSUBACK
-whose count of codes is not one` closing with it.
+an UNSUBACK whose count of codes is not one, judged alike on every side, with 15.28's sentences on
+when a publication at most once is taken and on one given up once its packet may have gone, and
+15.29's on a packet its client cannot read, by a round of its own, the rows of Differences
+`An MQTT 5 acknowledgement of a Reason Code its packet's table does not name` and `An MQTT 5 SUBACK
+or UNSUBACK whose count of codes is not one` closing with it.
 
 **Its gates**: the cases over `mqtt` and the broker cases 37 to 44 of `spec/transports.json`, a
 participant's stop among them, its inbox and its name finding no subscriber once it settled;

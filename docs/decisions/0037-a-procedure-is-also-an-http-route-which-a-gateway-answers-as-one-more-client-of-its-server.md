@@ -100,8 +100,9 @@ with a JSON Pointer of RFC 6901's fragment form. The WHATWG's
 `EventSource` reestablish its connection whenever a 200 stream's body ends, send `Last-Event-ID`
 when an event wrote an `id`, stop on any other status, 204 named for that, and dispatch an event
 with no name as `message`; it writes no header of its page's. The Fetch Standard shows a page's
-`Origin` on every request but a `GET` or a `HEAD` that is no CORS request, and Fetch Metadata's
-resource isolation policy refuses a request from another site but a navigation, which OWASP's CSRF
+`Origin` on every request but a `GET` or a `HEAD` that is no CORS request, and web.dev's
+[Fetch Metadata resource isolation policy](https://web.dev/articles/fetch-metadata) refuses a
+request from another site but a navigation, which OWASP's CSRF
 cheat sheet names as defense in depth. OpenAPI 3.1.1's base dialect only annotates `format` and
 `contentEncoding`: probed with the builder's ajv, a schema of `Everything` takes `{"at":"nope"}`, a
 tenth fraction digit, year 0000 and a 20-digit `int64`, each of which both libraries refuse.
@@ -155,13 +156,14 @@ are never kept alike in silence; one origin for `/bead` and `/api/…` comes fro
   request, as `POST /bead` carries one; by the gateway's option `bearer-jwt`, a `Bearer` token
   presented as a `JWT`. Never `OPAQUE`; no cookie, no query.
 - **Routes** (3): `POST <prefix>/<Service>/<procedure>` always, `/api` the prefix by default, and
-  `GET` there for a procedure marked `NO_SIDE_EFFECTS`, Connect's rule for its own form; each
-  `google.api.http` rule served as written, a `get` rule its author's word that its method reads,
-  `custom` refused. A path is read raw, a dot segment matching nothing; its verb splits at the last
-  unencoded `:` of its last segment; where two routes of one method match, a literal before `*`, `*`
-  before `**`, a template that ends where the path ends before a `**` of none, the order Vanguard's
-  trie walks, stated whole so no two sides part on it. The builder refuses only a tie, and a gateway
-  refuses a table that holds one as it is built, since two tables built apart may join.
+  `GET` and `HEAD` there for a procedure marked `NO_SIDE_EFFECTS`, Connect's rule for its own form;
+  each `google.api.http` rule served as written, a `get` rule its author's word that its method
+  reads, `custom` refused. A path is read raw, a dot segment matching nothing; its verb splits at
+  the last unencoded `:` of its last segment; where two routes of one method match, a literal before
+  `*`, `*` before `**`, a template that ends where the path ends before a `**` of none, the order
+  Vanguard's trie walks, stated whole so no two sides part on it. The builder refuses only a tie,
+  and a gateway refuses a table that holds one as it is built, since two tables built apart may
+  join.
 - **Binding** (4): `http.proto`'s rules alone, every value made the JSON the mapping reads, the
   query read as the WHATWG URL Standard's `application/x-www-form-urlencoded`, `+` a space; a
   `PATCH`'s absent `update_mask` filled from the keys its body holds, as grpc-gateway's
@@ -204,11 +206,11 @@ are never kept alike in silence; one origin for `/bead` and `/api/…` comes fro
   never the gateway's memory.
 - **Every body a gateway writes is paced** (10.2): a whole answer, a problem, the document and each
   event, by 15.12's `minimumSendBytesPerSecond` after `sendGracePeriod` and by `maximumUnsentBytes`,
-  what waits for the socket and the write that would add to it; a whole answer goes in slices of at
-  most 64 KiB, each its own deadline, so a reader that stops reading is dropped within minutes,
-  never the hours one deadline for its whole would give. A drop is reported, naming its bound, as
-  15.12 has a server report each; it frees its exchange's place and its socket, and cancels a
-  stream's call.
+  what its platform holds unwritten above its socket, as it shows it, and the write that would add
+  to it; a whole answer goes in slices of at most 64 KiB, each its own deadline, so a reader that
+  stops reading is dropped within minutes, never the hours one deadline for its whole would give. A
+  drop is reported, naming its bound, as 15.12 has a server report each; it frees its exchange's
+  place and its socket, and cancels a stream's call.
 - **The gates** (10) are the HTTP transport's, in 15.6's order, with Fetch Metadata's step: a
   request with no `origin` from another site refused but a navigation to `/openapi.json`, a default
   route's `GET`, or a `get` rule on a marked method. Calls and streams are bounded apart, calls by

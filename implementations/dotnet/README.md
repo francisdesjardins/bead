@@ -715,7 +715,7 @@ origin and exposes every field, so a page of a listed origin connects, calls, li
 cursor and wait in `bead-after` and `bead-wait`, which a browser's preflight cache keys, so a page
 preflights its connection's opening and not each listen. No answer carries `Access-Control-Allow-Credentials`:
 no cookie goes across origins, and a `fetch` given to the TypeScript side's client must not use
-`credentials: 'include'`. A gateway in front that answers CORS for the path stops, or replaces the
+`credentials: 'include'`. A proxy in front that answers CORS for the path stops, or replaces the
 fields rather than appends them, once the server lists the origin: two `Access-Control-Allow-Origin`
 fail the browser's check. A page of the public network reaching a server on the loopback or a
 private address needs besides its user's permission, which the browser asks (Local Network Access),

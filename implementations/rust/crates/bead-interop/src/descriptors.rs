@@ -1,6 +1,6 @@
-//! The interop service's descriptors, written by hand as beadc would write them from
-//! `spec/interop-blueprint.json`, until its Rust target generates them: each procedure's id, name,
-//! kind, admission, failures and codecs.
+//! The interop service's descriptors, written by hand and held to `spec/interop-blueprint.json`,
+//! until its Rust target generates them: each procedure's id, name, kind, admission, failures and
+//! codecs.
 
 use bead::{
     AdmissionRule, Descriptor, DescriptorInit, FailureCatalogue, JsonCodec, ListedFailure,

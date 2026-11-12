@@ -1,6 +1,6 @@
 [package]
 name = "francisdesjardins-bead-protobuf-build"
-description = "Bead's setting of Buffa's generator on the Rust side, for a build script: the code of a proto file as the proto payload's codec reads it, from the set protoc writes."
+description = "Bead's setting of Buffa's generator on the Rust side, for a build script: the code of a proto file as the proto payload's codec reads it, from a FileDescriptorSet its application's build writes."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

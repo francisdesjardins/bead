@@ -112,7 +112,7 @@ call's credentials).
 
 **What one side exports, every side exports.** A side's public surface is what an application and
 the code beadc generates call: the package's `exports` on the TypeScript side, the public types of
-its assemblies on the C# side, the public items of each crate on the Rust side. A name public on
+its assemblies on the C# side, each library crate's public items on the Rust side. A name public on
 one side and internal on another is a difference, closed to the narrower form unless a decision
 that meets the Tenth Man brings it to every side. **A default Bead declares is such a decision:
 exported on every side**, as Go's `net/http` exports `DefaultMaxHeaderBytes` and Node's `events` its

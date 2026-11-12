@@ -55,9 +55,10 @@ It plays the conformance files it reaches, each part it lacks a row of the suppo
 - **beadc's Rust target**, with `examples/hello`'s Rust half, the lists of the procedures a server's
   transports take
   ([0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md))
-  and the validators of a blueprint's rules generated for it, or beadc refusing to generate them
+  and the validators of a blueprint's rules generated for it, their runtime with them
   ([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md));
-  then the Rust side's gateway; and its AMQP 1.0 binding, its client one of the three branches
+  then the Rust side's gateway, with the HTTP client an output with `gateway` writes; and its
+  AMQP 1.0 binding, its client one of the three branches
   [0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)
   weighs, each stage under a record of its own
   ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md));
@@ -128,7 +129,9 @@ that meets the Tenth Man:
   EMQX played beside Mosquitto; **Mosquitto under TLS played**, a client certificate among it, where
   the matrix holds its row of MQTT 5 over TLS "not tested"; and an acknowledgement of a Reason Code
   its packet's table does not name, and a SUBACK or an UNSUBACK whose count of codes is not one,
-  judged alike on every side;
+  judged alike on every side, with 15.28's sentences on when a publication at most once is taken and
+  on one given up once its packet may have gone, and 15.29's on a packet its client cannot read, by
+  a round of its own, the two rows of Differences that name them closing with it;
 - what [0033](0033-a-side-bounds-what-a-peer-holds-of-it.md) keeps ahead of the bounds a side
   keeps against a peer that holds it: what bounds the resolvers a cancel leaves running, as Go's fix
   of CVE-2023-39325 counts a handler still running against `MaxConcurrentStreams`; a bound on the
