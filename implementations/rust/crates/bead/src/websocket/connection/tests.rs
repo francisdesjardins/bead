@@ -344,3 +344,45 @@ fn releases_what_its_end_let_go_of_already_to_none_never_past_it() {
         "none, never wrapped"
     );
 }
+
+#[tokio::test]
+async fn fails_a_peer_s_close_of_a_status_no_end_sends_as_a_protocol_error_answered_1002() {
+    for status in [1_005_u16, 1_006, 999] {
+        let (connection, _commands, mut peer) = opened(bounds_of(None, NEVER), 1_024).await;
+
+        peer.write_all(&masked_frame(0x8, (&status.to_be_bytes(), true)))
+            .await
+            .unwrap();
+
+        let ended = patience(PATIENCE, connection.run(hooks_of(&Delivered::default())))
+            .await
+            .unwrap();
+        let answered = read_all(&mut peer).await;
+
+        assert_eq!(
+            answered.get(2..4),
+            Some(&1_002_u16.to_be_bytes()[..]),
+            "{status}: answered 1002"
+        );
+        assert_eq!(
+            ended.failure,
+            Some(Failed::Protocol(
+                "its peer's close carried a status no end sends".to_owned()
+            )),
+            "{status}: a protocol error"
+        );
+    }
+
+    // a status an end sends is no error
+    let (connection, _commands, mut peer) = opened(bounds_of(None, NEVER), 1_024).await;
+
+    peer.write_all(&masked_frame(0x8, (&1_002_u16.to_be_bytes(), true)))
+        .await
+        .unwrap();
+
+    let ended = patience(PATIENCE, connection.run(hooks_of(&Delivered::default())))
+        .await
+        .unwrap();
+
+    assert_eq!(ended.failure, None, "a peer's own 1002: no error");
+}

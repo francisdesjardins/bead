@@ -67,6 +67,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   so senders that cross take no more than `maximumUnsentBytes` between them, and gives it back never
   below none: its gauges no longer read a count wrapped past zero once a connection ended under a
   send (spec 15.12).
+- The Rust side's WebSocket connections report a peer's close of a status no end sends, 1005, 1006
+  or one under 1000 say, as a protocol error, answered 1002, as `ws` and .NET do, where its close
+  was told unclean with no error (RFC 6455 §7.4.1, spec 15.1).
 - A session manager whose clock refuses a timer leaves what it held: a new session is not stored
   and the timers prepared for it are stopped, and a timeout set or reset keeps the stored one and its
   running timer, telling nothing, on the TypeScript and C# sides as on the Rust side (decision

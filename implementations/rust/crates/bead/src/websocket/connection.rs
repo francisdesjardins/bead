@@ -54,6 +54,9 @@ const ABNORMAL: u16 = 1006;
 
 // the statuses this side fails a connection with (RFC 6455 §7.4.1)
 const PROTOCOL_ERROR: u16 = 1002;
+
+// the reason tungstenite gives the 1002 it reads a peer's close of a status no end sends as
+const REWRITTEN: &str = "Protocol violation";
 const TOO_BIG: u16 = 1009;
 
 // what a failed connection reads at once of its socket, and drops
@@ -694,6 +697,18 @@ impl<S: Wire> Connection<S> {
             Some(Ok(Message::Close(frame))) => {
                 if self.closing == Closing::No {
                     self.closing = Closing::ByUs;
+                }
+
+                // ! tungstenite reads a status no end sends, 1005 or 1006 say, as its own 1002 of a
+                // fixed reason, and answers it so: the peer broke the protocol (RFC 6455 §7.4.1)
+                if frame.as_ref().is_some_and(|frame| {
+                    u16::from(frame.code) == PROTOCOL_ERROR && frame.reason.as_str() == REWRITTEN
+                }) {
+                    self.failure.get_or_insert_with(|| {
+                        Failed::Protocol(
+                            "its peer's close carried a status no end sends".to_owned(),
+                        )
+                    });
                 }
 
                 self.peer_code = Some(frame.map_or(NO_STATUS, |frame| u16::from(frame.code)));
