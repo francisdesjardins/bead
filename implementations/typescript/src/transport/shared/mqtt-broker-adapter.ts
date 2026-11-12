@@ -167,6 +167,9 @@ const REASON = Object.freeze({
 
 const ALL_CAPABILITIES = Object.freeze({ expiry: true, will: true });
 
+// MQTT.js's word on an acknowledgement of a kind its pending request takes none of, read whole
+const UNANSWERED_ACK = /^Protocol error: \w+ does not answer /u;
+
 const encoder = new TextEncoder();
 
 // helpers
@@ -174,6 +177,13 @@ const encoder = new TextEncoder();
 // whether a library's callback came with a failure: MQTT.js gives `null`, or nothing, for none
 const isFailure = (error: unknown): error is Error => {
   return error instanceof Error;
+};
+
+// ! its parser's refusal of a packet, which leaves its stream standing and its parser astray
+// (MQTT 5.0 §4.13.1): every other `error` MQTT.js tells of a link up ends its stream first, but its
+// word on an acknowledgement read whole; a bump of MQTT.js re-reads each `emit('error'`
+const isUnreadable = (client: MqttClient, error: Error): boolean => {
+  return !client.stream.destroyed && !UNANSWERED_ACK.test(error.message);
 };
 
 const isNode = (): boolean => {
@@ -244,10 +254,11 @@ const assertAuthentication = ({
  * UNSUBSCRIBE for each filter its link asked or holds, one filter a packet, all at once, and awaits
  * their UNSUBACKs, all within one connectTimeout of its call, then sends a DISCONNECT of 0x00
  * within a connectTimeout of its own, so that no will goes: once it settled, its broker hands
- * it nothing. A packet past its own Maximum Packet Size, read at its Remaining Length, closes its
- * network connection, no DISCONNECT, its link lost. Its link is up as MQTT.js reads a CONNACK of
- * 0x00 whose Maximum QoS is not 0, whatever comes after it; any other CONNACK fails its start,
- * naming its code, and sends nothing. Its leg is secure under TLS or to the loopback.
+ * it nothing. A packet past its own Maximum Packet Size, read at its Remaining Length, or one its
+ * client cannot read, closes its network connection, no DISCONNECT, its link lost. Its link is up
+ * as MQTT.js reads a CONNACK of 0x00 whose Maximum QoS is not 0, whatever comes after it; any other
+ * CONNACK fails its start, naming its code, and sends nothing. Its leg is secure under TLS or to the
+ * loopback.
  * In a page, its WebSocket sends no message past 16 KiB, which Chromium sends as one frame.
  *
  * @example
@@ -414,7 +425,12 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
 
           done();
           reject(error);
-          retire(incarnation, new GenericError(`the link of ${id} was retired: ${error.message}`));
+          retire(
+            incarnation,
+            new GenericError(
+              `the link of ${id} was retired: what it was asked was given up once it may have gone`
+            )
+          );
         }
       };
 
@@ -808,6 +824,28 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
       }
     });
 
+    // a packet its client cannot read before its CONNACK put its link up, which then loses it
+    let unreadable: Error | undefined;
+
+    // * a packet its client cannot read closes its network connection, no DISCONNECT, its link
+    // lost once its CONNACK put it up, and never once its stop began (spec 15.26, 15.29)
+    client.on('error', (error) => {
+      if (held.isRetired || held.ending !== undefined || !isUnreadable(client, error)) {
+        return;
+      }
+
+      const lost = new GenericError(
+        `the link of ${id} went down: its broker sent a packet its client cannot read: ${error.message}`,
+        { cause: error }
+      );
+
+      if (held.isLinked) {
+        retire(held, lost);
+      } else {
+        unreadable ??= lost;
+      }
+    });
+
     try {
       await new Promise<void>((resolve, reject) => {
         let lastError: Error | undefined;
@@ -919,6 +957,17 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
           }
 
           resolve();
+
+          // ! its parser tells its refusal of a packet as it reads it, ahead of the CONNACK it read
+          // before in that read, which MQTT.js handles after: its link up, then lost once MQTT.js
+          // handled that CONNACK, which would otherwise arm its Keep Alive on an ended client
+          const lost = unreadable;
+
+          if (lost !== undefined) {
+            queueMicrotask(() => {
+              retire(held, lost);
+            });
+          }
         });
         client.connect();
         guardPacketSize(client.stream, {

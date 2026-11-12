@@ -25,6 +25,10 @@ export interface IScriptedLink {
   end(): void;
   /** The next packet that comes, of `cmd` where given, skipping others, within `within` ms. */
   next(cmd?: Packet['cmd'], options?: { within?: number | undefined }): Promise<Packet>;
+  /** Reads nothing more of it until it resumes, as a broker that stalls does. */
+  pause(): void;
+  /** Reads again what came meanwhile, then what comes. */
+  resume(): void;
   /** Writes `packet`, as MQTT 5 encodes it. */
   send(packet: Packet): void;
   /** Writes `bytes` as they are, for what no encoder writes. */
@@ -119,6 +123,12 @@ const scriptedLinkOf = (socket: Socket): IScriptedLink => {
           });
         });
       }
+    },
+    pause: () => {
+      socket.pause();
+    },
+    resume: () => {
+      socket.resume();
     },
     send: (packet) => {
       socket.write(generate(packet, VERSION));

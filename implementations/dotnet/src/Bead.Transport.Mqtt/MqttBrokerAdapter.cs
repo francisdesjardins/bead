@@ -557,7 +557,8 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     /// its life in whole seconds rounded up where one is asked, no other property. One whose packet
     /// would pass its CONNACK's Maximum Packet Size is an <see cref="ArgumentException"/>, nothing
     /// sent; a link down, an <see cref="InvalidOperationException"/>. Given up while it waits for the
-    /// quota, it leaves unsent, its link kept; given up once sent, its link is retired.
+    /// quota, it leaves unsent, its link kept; given up once it may have gone, at either QoS, its link
+    /// is retired.
     /// </summary>
     public async Task<BrokerPublished> Publish(BrokerPublication publication)
     {
@@ -595,7 +596,20 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
         if (qos == 0)
         {
-            await Asked((link, token), link.Client.PublishAsync(message, link.Life.Token));
+            var going = Sent(() =>
+            {
+                return link.Client.PublishAsync(message, link.Life.Token);
+            });
+
+            // ! registered once it was asked, as at QoS 1: given up before its packet is written, it
+            // may go yet, so its link goes
+            using (token.Register(() =>
+            {
+                Retire(link);
+            }))
+            {
+                await Asked((link, token), going);
+            }
 
             return BrokerPublished.Taken;
         }

@@ -154,6 +154,27 @@ fn reads_each_acknowledgement_its_reason_code_left_out_or_given() {
         }),
         "an UNSUBACK of 0x11"
     );
+    // ? a Reason Code past the one filter its SUBSCRIBE or UNSUBSCRIBE named ([MQTT-3.9.3-2],
+    // [MQTT-3.11.3-2]) read as it comes, its adapter reading its first: where is such a count
+    // judged, and how? A row of docs/support.md
+    assert_eq!(
+        packet(&[0x90, 0x05, 0x00, 0x01, 0x00, 0x01, 0x01]),
+        MqttPacket::Suback(MqttAcknowledgement {
+            packet_identifier: 1,
+            reason_codes: vec![1, 1],
+            reason_string: None,
+        }),
+        "a SUBACK of two codes"
+    );
+    assert_eq!(
+        packet(&[0xB0, 0x05, 0x00, 0x02, 0x00, 0x00, 0x11]),
+        MqttPacket::Unsuback(MqttAcknowledgement {
+            packet_identifier: 2,
+            reason_codes: vec![0, 0x11],
+            reason_string: None,
+        }),
+        "an UNSUBACK of two codes"
+    );
     assert_eq!(packet(&[0xD0, 0x00]), MqttPacket::Pingresp, "a PINGRESP");
     assert_eq!(
         packet(&[0xE0, 0x00]),
@@ -167,6 +188,18 @@ fn reads_each_acknowledgement_its_reason_code_left_out_or_given() {
             reason_string: None,
         }),
         "a DISCONNECT of 0x8E"
+    );
+    // * read by its Reason Code whatever it carries, a Session Expiry Interval among it, which a
+    // broker never sends ([MQTT-3.14.2-2]): its link ends either way ([MQTT-3.14.4-2])
+    assert_eq!(
+        packet(&[
+            0xE0, 0x0B, 0x8E, 0x09, 0x11, 0x00, 0x00, 0x00, 0x00, 0x1F, 0x00, 0x01, b'n',
+        ]),
+        MqttPacket::Disconnect(MqttDisconnect {
+            reason_code: 0x8E,
+            reason_string: Some("n".to_owned()),
+        }),
+        "a DISCONNECT of 0x8E, its Session Expiry Interval and its Reason String"
     );
 }
 
@@ -316,7 +349,7 @@ fn reads_a_packet_at_its_bound_and_the_next_in_the_same_read_as_they_came() {
 
 #[test]
 fn refuses_what_is_malformed_and_what_no_client_reads() {
-    let cases: [(&[u8], &str); 18] = [
+    let cases: [(&[u8], &str); 16] = [
         (&[0xF0, 0x00], "an AUTH"),
         (&[0x10, 0x00], "a CONNECT"),
         (&[0x82, 0x00], "a SUBSCRIBE"),
@@ -335,16 +368,6 @@ fn refuses_what_is_malformed_and_what_no_client_reads() {
         ),
         (&[0x40, 0x02, 0x00, 0x00], "a Packet Identifier of 0"),
         (&[0x90, 0x03, 0x00, 0x01, 0x00], "no filter"),
-        // * a Reason Code for each filter its SUBSCRIBE or UNSUBSCRIBE named, which was one
-        // ([MQTT-3.9.3-2], [MQTT-3.11.3-2])
-        (
-            &[0x90, 0x05, 0x00, 0x01, 0x00, 0x01, 0x01],
-            "more than its one filter",
-        ),
-        (
-            &[0xB0, 0x05, 0x00, 0x01, 0x00, 0x00, 0x11],
-            "more than its one filter",
-        ),
         (&[0xD0, 0x01, 0x00], "bytes past"),
     ];
 
@@ -354,7 +377,7 @@ fn refuses_what_is_malformed_and_what_no_client_reads() {
         assert!(why.contains(said), "{bytes:02X?}: {why}");
     }
 
-    let properties: [(&[u8], &str); 7] = [
+    let properties: [(&[u8], &str); 6] = [
         // a Topic Alias, which its CONNECT's Topic Alias Maximum of 0 refuses
         (
             &[0x30, 0x07, 0x00, 0x01, b'x', 0x03, 0x23, 0x00, 0x01],
@@ -382,11 +405,6 @@ fn refuses_what_is_malformed_and_what_no_client_reads() {
             &[
                 0x40, 0x09, 0x00, 0x01, 0x00, 0x05, 0x02, 0x00, 0x00, 0x00, 0x01,
             ],
-            "which its packet does not carry",
-        ),
-        // a Session Expiry Interval on a DISCONNECT, which a broker never sends ([MQTT-3.14.2-2])
-        (
-            &[0xE0, 0x07, 0x00, 0x05, 0x11, 0x00, 0x00, 0x00, 0x00],
             "which its packet does not carry",
         ),
     ];

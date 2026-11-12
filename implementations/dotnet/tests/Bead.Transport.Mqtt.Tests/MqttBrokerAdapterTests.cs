@@ -459,6 +459,27 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Tells_its_link_taken_over_on_a_DISCONNECT_of_0x8E_whatever_else_it_carries_a_Session_Expiry_Interval_among_it_spec_15_21()
+    {
+        await using var adapter = AdapterOf();
+        var (_, downs) = HeardOf(adapter);
+        var link = await LinkUp((adapter, _script));
+
+        // * a DISCONNECT of 0x8E, its Session Expiry Interval of 0 and its Reason String "n", which a
+        // broker never sends together ([MQTT-3.14.2-2]) and which end its link all the same
+        // ([MQTT-3.14.4-2])
+        await link.Write([0xE0, 0x0B, 0x8E, 0x09, 0x11, 0x00, 0x00, 0x00, 0x00, 0x1F, 0x00, 0x01, (byte)'n']);
+        link.End();
+        await Until(() =>
+        {
+            return !downs.IsEmpty;
+        });
+        Assert.Equal([new BrokerDown { IsTakenOver = true }], downs);
+        Assert.False(adapter.IsLinked);
+        Assert.IsType<MqttConnectPacket>(Assert.Single(link.Packets));
+    }
+
+    [Fact]
     public async Task Subscribes_at_QoS_1_No_Local_0_Retain_As_Published_0_and_Retain_Handling_2_a_group_as_its_shared_subscription_held_once_its_SUBACK_grants_QoS_1_and_refused_otherwise_spec_15_27()
     {
         await using var adapter = AdapterOf();
@@ -995,6 +1016,50 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         Assert.Equal([new BrokerDown(), new BrokerDown()], downs);
         Assert.Empty(messages);
         Assert.False(adapter.IsLinked);
+    }
+
+    [Fact]
+    public async Task Loses_its_link_no_DISCONNECT_on_a_packet_its_client_cannot_read_spec_15_29()
+    {
+        await using var adapter = AdapterOf();
+        var (messages, downs) = HeardOf(adapter);
+        // * a PUBLISH to its inbox carrying a property MQTT 5 does not define, 0x7F, and a Remaining
+        // Length still continuing at its fourth byte (MQTT 5.0 §2.2.2.2, §1.5.5)
+        byte[] unreadable = [0x30, 0x0F, 0x00, 0x0A, .. Encoding.UTF8.GetBytes("bead/i/ada"), 0x02, 0x7F, 0x00];
+
+        async Task IsLostIn((ScriptedLink Link, int Count) lost)
+        {
+            await lost.Link.Closed.WaitAsync(Patience, Cancelled);
+            await Until(() =>
+            {
+                return downs.Count >= lost.Count;
+            });
+            Assert.Equal(Enumerable.Repeat(new BrokerDown(), lost.Count), downs);
+            Assert.False(adapter.IsLinked);
+            Assert.IsType<MqttConnectPacket>(Assert.Single(lost.Link.Packets));
+        }
+
+        byte[][] packets = [unreadable, [0x30, 0xFF, 0xFF, 0xFF, 0xFF, 0x01]];
+
+        for (var index = 0; index < packets.Length; index += 1)
+        {
+            var link = await LinkUp((adapter, _script));
+
+            await link.Write(packets[index]);
+            await IsLostIn((link, index + 1));
+        }
+
+        // and beside its CONNACK in one read: its start succeeds, and its link is lost once
+        var starting = adapter.Start();
+        var beside = await _script.Link();
+
+        await beside.Write([0x20, 0x03, 0x00, 0x00, 0x00, .. unreadable]);
+        Assert.Null(await Record.ExceptionAsync(() =>
+        {
+            return starting.WaitAsync(Patience, Cancelled);
+        }));
+        await IsLostIn((beside, 3));
+        Assert.Empty(messages);
     }
 
     [Fact]
@@ -1592,6 +1657,69 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         Assert.Equal([new BrokerDown(), new BrokerDown()], downs);
         await again.Closed.WaitAsync(Patience, Cancelled);
         await adapter.Stop();
+    }
+
+    [Fact]
+    public async Task Retires_its_link_where_a_publication_at_most_once_is_given_up_before_its_packet_is_written_spec_15_28()
+    {
+        await using var adapter = AdapterOf((options) =>
+        {
+            return options with { Delivery = BrokerDelivery.AtMostOnce };
+        });
+        var (_, downs) = HeardOf(adapter);
+        var link = await LinkUp((adapter, _script));
+        var mebibyte = new byte[1_048_576];
+        var held = new List<Task<BrokerPublished>>();
+
+        // * 64 MiB its broker does not read, so that its writer blocks; each asked in a turn of its own
+        link.Pause();
+
+        for (var index = 0; index < 64; index += 1)
+        {
+            held.Add(adapter.Publish(new BrokerPublication { Topic = Inbox, Payload = mebibyte }));
+            await Task.Yield();
+        }
+
+        using var given = new CancellationTokenSource();
+        var givenUp = adapter.Publish(new BrokerPublication { Topic = Inbox, Payload = (byte[])[1], CancellationToken = given.Token });
+
+        await Task.Delay(100, Cancelled);
+        Assert.False(givenUp.IsCompleted, "held behind what is not written");
+        await given.CancelAsync();
+        Assert.IsAssignableFrom<OperationCanceledException>(await FailureOf(() =>
+        {
+            return givenUp;
+        }));
+
+        // * it may go yet, so its link goes
+        await Until(() =>
+        {
+            return !downs.IsEmpty;
+        });
+        Assert.Equal([new BrokerDown()], downs);
+
+        foreach (var publishing in held)
+        {
+            var failure = await Record.ExceptionAsync(() =>
+            {
+                return publishing.WaitAsync(Patience, Cancelled);
+            });
+
+            if (failure is not null)
+            {
+                Assert.Equal("the link of ada was retired: what it was asked was given up once it may have gone", Assert.IsType<IOException>(failure).Message);
+            }
+        }
+
+        // * its network connection closed, no DISCONNECT: what waited never written whole
+        link.Resume();
+        await link.Closed.WaitAsync(Patience, Cancelled);
+        Assert.DoesNotContain(link.Packets, (packet) =>
+        {
+            return packet is MqttDisconnectPacket;
+        });
+        Assert.True(link.PacketsOf<MqttPublishPacket>().Count < 64, "what waited never written whole");
+        Assert.False(adapter.IsLinked);
     }
 
     [Fact]

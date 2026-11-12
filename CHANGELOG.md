@@ -130,17 +130,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   other sides do, where it took it as it was queued: one its broker has not read stays unsettled,
   counted among what waits for its connection, and its Keep Alive counts from the last packet
   written, so a steady flow no broker reads loses its link rather than growing without bound; one
-  given up before it is written resets its link, so that it never goes (spec 15.23, 15.26).
+  given up before it is written resets its link (spec 15.23, 15.26).
 - The Rust side's MQTT 5 adapter lets a subscription go on an UNSUBACK of 0x00 or 0x11 alone, as
   the C# side does, and refuses it on any other code, its filter kept for the stop, where one under
   0x80 let it go (spec 15.27).
 - The Rust and C# MQTT 5 adapters refuse as they are built a URL whose IPv6 address is followed by
   anything but its port, `mqtt://[::1]junk:1884` say, as the TypeScript side does, where they
   dropped what followed and dialled the scheme's port (RFC 3986 §3.2.2).
-- The Rust side's MQTT 5 client reads a SUBACK or an UNSUBACK of more than one Reason Code, or a
-  DISCONNECT that carries a Session Expiry Interval, as what a broker never sends: its connection
-  closed and its link lost, as on any malformed packet, where it read them (spec 15.29,
-  [MQTT-3.9.3-2], [MQTT-3.11.3-2], [MQTT-3.14.2-2]).
+- The Rust side's MQTT 5 client reads a DISCONNECT by its Reason Code whatever else it carries, a
+  Session Expiry Interval its broker never sends among it: a DISCONNECT of 0x8E is its link taken
+  over, its participant fenced, as on the other sides (spec 15.21, [MQTT-3.14.2-2],
+  [MQTT-3.14.4-2], decision 0041).
+- Over MQTT 5, the TypeScript adapter loses its link on a packet MQTT.js's parser refuses once its
+  CONNACK put it up, its network connection closed with no DISCONNECT and its down told once, as
+  the Rust and C# sides do, where its link stayed up and read nothing reliably after it: MQTT.js
+  tells such a refusal as its client's `error` and keeps its stream (spec 15.26, 15.29, decision
+  0041).
+- Over MQTT 5, the C# adapter retires its link on a publication at most once given up once it was
+  asked, as the other sides do, where its call waited until its broker read the packet and was
+  then taken; and the TypeScript adapter says why its retired link fails what it was asked, what
+  it was asked was given up once it may have gone, as the other sides do, where its reason ended
+  at its colon (decision 0041).
 
 ## [0.12.0] - 2026-11-10
 

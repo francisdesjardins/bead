@@ -541,6 +541,25 @@ test.describe('createMqttBrokerAdapter', () => {
     expect(downs).toEqual([{ isTakenOver: true }, { isTakenOver: false }, { isTakenOver: false }]);
   });
 
+  test('tells its link taken over on a DISCONNECT of 0x8E whatever else it carries, a Session Expiry Interval among it (spec 15.21)', async () => {
+    const adapter = adapterOf(script);
+    const { downs } = heardOf(adapter);
+    const link = await linkUp({ adapter, script });
+
+    // * a DISCONNECT of 0x8E, its Session Expiry Interval of 0 and its Reason String "n", which a
+    // broker never sends together ([MQTT-3.14.2-2]) and which end its link all the same
+    // ([MQTT-3.14.4-2])
+    link.write(Uint8Array.of(0xe0, 0x0b, 0x8e, 0x09, 0x11, 0, 0, 0, 0, 0x1f, 0x00, 0x01, 0x6e));
+    link.end();
+    await until(() => {
+      return downs.length > 0;
+    });
+    expect(downs).toEqual([{ isTakenOver: true }]);
+    expect(adapter.isLinked).toBe(false);
+    expect(cmdsOf(link)).toEqual(['connect']);
+    await adapter.stop();
+  });
+
   test('subscribes at QoS 1, No Local 0, Retain As Published 0 and Retain Handling 2, a group as its shared subscription, held once its SUBACK grants QoS 1 and refused otherwise (spec 15.27)', async () => {
     const adapter = adapterOf(script);
     const link = await linkUp({ adapter, script });
@@ -623,8 +642,8 @@ test.describe('createMqttBrokerAdapter', () => {
     await subackOf(link, 1);
     await subscribing;
 
-    // * any other code: MQTT.js's parser hands none but those MQTT 5 names an UNSUBACK by, and
-    // loses its link on any other, 0x01 among them
+    // * each refusal MQTT 5 names an UNSUBACK by: MQTT.js's parser hands no code it does not name,
+    // refusing a packet of any other, 0x01 among them, which loses its link (spec 15.29)
     for (const code of [0x80, 0x83, 0x87, 0x8f, 0x91]) {
       const refused = `0x${code.toString(16).padStart(2, '0').toUpperCase()}`;
 
@@ -1420,6 +1439,53 @@ test.describe('createMqttBrokerAdapter', () => {
     expect(adapter.isLinked).toBe(false);
   });
 
+  test('loses its link, no DISCONNECT, on a packet its client cannot read (spec 15.29)', async () => {
+    const adapter = adapterOf(script);
+    const { downs, messages } = heardOf(adapter);
+    // * a PUBLISH to its inbox carrying a property MQTT 5 does not define, 0x7F, and a Remaining
+    // Length still continuing at its fourth byte (MQTT 5.0 §2.2.2.2, §1.5.5)
+    const unreadable = [0x30, 0x0f, 0x00, 0x0a, ...Buffer.from('bead/i/ada'), 0x02, 0x7f, 0x00];
+    const isLostIn = async (link: IScriptedLink, count: number): Promise<void> => {
+      expect(await closedWithin(link)).toBe(true);
+      await until(() => {
+        return downs.length >= count;
+      });
+      expect(downs).toEqual(
+        Array.from({ length: count }, () => {
+          return { isTakenOver: false };
+        })
+      );
+      expect(adapter.isLinked).toBe(false);
+      expect(cmdsOf(link)).toEqual(['connect']);
+    };
+
+    for (const [index, bytes] of [unreadable, [0x30, 0xff, 0xff, 0xff, 0xff, 0x01]].entries()) {
+      const link = await linkUp({ adapter, script });
+
+      link.write(Uint8Array.from(bytes));
+      await isLostIn(link, index + 1);
+    }
+
+    // ! MQTT.js's parser tells its refusal ahead of the CONNACK before it in one read, which
+    // MQTT.js handles after: its start succeeds, and its link is lost once
+    await withClients(async (clients) => {
+      const starting = failureOf(adapter.start());
+      const link = await script.link();
+      const bytes = [...CONNACK_BYTES, ...unreadable];
+
+      expect(clients[0]).toBeDefined();
+
+      const pushed = oneReadOf(clients[0]!, bytes);
+
+      link.write(Uint8Array.from(bytes));
+      expect(await starting).toBeUndefined();
+      await isLostIn(link, 3);
+      expect(pushed.reads).toBe(1);
+    });
+    expect(messages).toEqual([]);
+    await adapter.stop();
+  });
+
   test('loses its link once on a packet past its Maximum Packet Size beside its CONNACK in one read (spec 15.29)', async () => {
     const adapter = adapterOf(script, { maximumPacketSize: 1_100 });
     const { downs, messages } = heardOf(adapter);
@@ -2024,6 +2090,72 @@ test.describe('createMqttBrokerAdapter', () => {
     });
     expect(downs).toEqual([{ isTakenOver: false }, { isTakenOver: false }]);
     await again.closed;
+    await adapter.stop();
+  });
+
+  test('retires its link where a publication at most once is given up before its packet is written (spec 15.28)', async () => {
+    const adapter = adapterOf(script, { delivery: BROKER_DELIVERIES.AT_MOST_ONCE });
+    const { downs } = heardOf(adapter);
+    const link = await linkUp({ adapter, script });
+    const payload = new Uint8Array(1_048_576);
+    const held: Promise<unknown>[] = [];
+
+    link.pause();
+
+    // * far past what its network connection holds unread, each asked in a turn of its own: MQTT.js
+    // corks its stream for a turn, and Windows takes one write whole whatever its size
+    for (let index = 0; index < 64; index += 1) {
+      held.push(
+        adapter.publish({ payload, topic: INBOX }).then(
+          (published) => {
+            return published;
+          },
+          (error: unknown) => {
+            return String(error);
+          }
+        )
+      );
+      await new Promise<void>((resolve) => {
+        setImmediate(resolve);
+      });
+    }
+
+    const signal = new AbortController();
+    const outcome = { isSettled: false };
+    const givenUp = failureOf(
+      adapter.publish({ payload: Uint8Array.of(1), signal: signal.signal, topic: INBOX })
+    ).finally(() => {
+      outcome.isSettled = true;
+    });
+
+    await sleep(100);
+    expect(outcome.isSettled, 'held behind what is not written').toBe(false);
+    signal.abort();
+    expect(await givenUp).toBeInstanceOf(CancelError);
+
+    // * it may go yet, so its link goes
+    await until(() => {
+      return downs.length > 0;
+    });
+    expect(downs).toEqual([{ isTakenOver: false }]);
+
+    for (const each of await Promise.all(held)) {
+      if (each !== BROKER_PUBLISHED.TAKEN) {
+        expect(each).toContain(
+          'the link of ada was retired: what it was asked was given up once it may have gone'
+        );
+      }
+    }
+
+    // * its network connection closed, no DISCONNECT: what waited never written whole
+    link.resume();
+    expect(await closedWithin(link)).toBe(true);
+    expect(cmdsOf(link)).not.toContain('disconnect');
+    expect(
+      link.packets.filter(({ cmd }) => {
+        return cmd === 'publish';
+      }).length
+    ).toBeLessThan(64);
     await adapter.stop();
   });
 

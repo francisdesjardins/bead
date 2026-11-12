@@ -174,6 +174,9 @@ internal sealed class ScriptedLink
     // the last write, which the next goes after
     private Task _written = Task.CompletedTask;
 
+    // open while it reads, shut while the test holds its reads
+    private TaskCompletionSource _reading = Opened();
+
     internal ScriptedLink(MqttScript script, (Socket Socket, Stream Stream) carried)
     {
         _script = script;
@@ -245,6 +248,30 @@ internal sealed class ScriptedLink
         catch (Exception reason) when (reason is SocketException or ObjectDisposedException)
         {
             // closed already
+        }
+    }
+
+    /// <summary>
+    /// Holds its reads, as a broker that reads nothing does, until <see cref="Resume"/>: what the
+    /// adapter writes meanwhile waits in its buffers, a read under way ending first.
+    /// </summary>
+    public void Pause()
+    {
+        lock (_gate)
+        {
+            if (_reading.Task.IsCompleted)
+            {
+                _reading = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            }
+        }
+    }
+
+    /// <summary>Reads again what <see cref="Pause"/> held.</summary>
+    public void Resume()
+    {
+        lock (_gate)
+        {
+            _reading.TrySetResult();
         }
     }
 
@@ -424,12 +451,31 @@ internal sealed class ScriptedLink
         return new MqttV5PacketDecoder().Decode(new ReceivedMqttPacket(header[0], new ArraySegment<byte>(body), length + remaining));
     }
 
+    // a gate already open
+    private static TaskCompletionSource Opened()
+    {
+        var opened = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        opened.SetResult();
+
+        return opened;
+    }
+
     private async Task<bool> Filled(byte[] buffer)
     {
         var read = 0;
 
         while (read < buffer.Length)
         {
+            Task reading;
+
+            lock (_gate)
+            {
+                reading = _reading.Task;
+            }
+
+            await reading;
+
             var count = await _stream.ReadAsync(buffer.AsMemory(read));
 
             if (count == 0)
