@@ -146,6 +146,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the Rust and C# sides do, where its link stayed up and read nothing reliably after it: MQTT.js
   tells such a refusal as its client's `error` and keeps its stream (spec 15.26, 15.29, decision
   0041).
+- Over MQTT 5, the C# adapter retires its link on a publication at most once given up once it was
+  asked, as the other sides do, where its call waited until its broker read the packet and was
+  then taken (decision 0041).
 
 ## [0.12.0] - 2026-11-10
 

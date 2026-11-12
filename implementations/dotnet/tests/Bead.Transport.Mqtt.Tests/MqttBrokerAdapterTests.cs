@@ -1660,6 +1660,69 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Retires_its_link_where_a_publication_at_most_once_is_given_up_before_its_packet_is_written_spec_15_28()
+    {
+        await using var adapter = AdapterOf((options) =>
+        {
+            return options with { Delivery = BrokerDelivery.AtMostOnce };
+        });
+        var (_, downs) = HeardOf(adapter);
+        var link = await LinkUp((adapter, _script));
+        var mebibyte = new byte[1_048_576];
+        var held = new List<Task<BrokerPublished>>();
+
+        // * 64 MiB its broker does not read, so that its writer blocks; each asked in a turn of its own
+        link.Pause();
+
+        for (var index = 0; index < 64; index += 1)
+        {
+            held.Add(adapter.Publish(new BrokerPublication { Topic = Inbox, Payload = mebibyte }));
+            await Task.Yield();
+        }
+
+        using var given = new CancellationTokenSource();
+        var givenUp = adapter.Publish(new BrokerPublication { Topic = Inbox, Payload = (byte[])[1], CancellationToken = given.Token });
+
+        await Task.Delay(100, Cancelled);
+        Assert.False(givenUp.IsCompleted, "held behind what is not written");
+        await given.CancelAsync();
+        Assert.IsAssignableFrom<OperationCanceledException>(await FailureOf(() =>
+        {
+            return givenUp;
+        }));
+
+        // * it may go yet, so its link goes
+        await Until(() =>
+        {
+            return !downs.IsEmpty;
+        });
+        Assert.Equal([new BrokerDown()], downs);
+
+        foreach (var publishing in held)
+        {
+            var failure = await Record.ExceptionAsync(() =>
+            {
+                return publishing.WaitAsync(Patience, Cancelled);
+            });
+
+            if (failure is not null)
+            {
+                Assert.Equal("the link of ada was retired: what it was asked was given up once it may have gone", Assert.IsType<IOException>(failure).Message);
+            }
+        }
+
+        // * its network connection closed, no DISCONNECT: what waited never written whole
+        link.Resume();
+        await link.Closed.WaitAsync(Patience, Cancelled);
+        Assert.DoesNotContain(link.Packets, (packet) =>
+        {
+            return packet is MqttDisconnectPacket;
+        });
+        Assert.True(link.PacketsOf<MqttPublishPacket>().Count < 64, "what waited never written whole");
+        Assert.False(adapter.IsLinked);
+    }
+
+    [Fact]
     public async Task Fails_its_start_once_its_password_provider_outlives_its_connect_timeout_and_takes_no_late_answer()
     {
         var late = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
