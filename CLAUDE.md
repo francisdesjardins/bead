@@ -164,13 +164,14 @@ titles that hold one write it `’`, and the citation does the same.
 - a module's tests beside it (`src/envelope.rs` → `src/envelope/tests.rs`), the conformance players
   in a crate's `tests/`, the test kit in `bead::testing`, behind the feature `testing`;
 - `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features --locked`,
-  `cargo clippy -p francisdesjardins-bead --lib --locked`, `cargo clippy -p francisdesjardins-bead
-  --lib --features websocket --locked`, `cargo clippy -p francisdesjardins-bead --lib --features
-  http --locked`, `cargo clippy -p francisdesjardins-bead --lib --features mqtt --locked`, `cargo
-  clippy -p francisdesjardins-bead --lib --features testing --locked --target
-  wasm32-unknown-unknown`, `cargo test --workspace --all-features --locked`, `cargo doc --workspace
-  --no-deps --all-features --locked`, `cargo build --workspace --locked` and `cargo deny --locked
-  check` pass, from its folder.
+  `cargo clippy --workspace --all-targets --locked`, `cargo clippy -p francisdesjardins-bead --lib
+  --locked`, `cargo clippy -p francisdesjardins-bead --lib --features websocket --locked`, `cargo
+  clippy -p francisdesjardins-bead --lib --features http --locked`, `cargo clippy -p
+  francisdesjardins-bead --lib --features mqtt --locked`, `cargo clippy -p francisdesjardins-bead
+  --lib --features testing --locked --target wasm32-unknown-unknown`, `cargo test --workspace
+  --all-features --locked`, `cargo doc --workspace --no-deps --all-features --locked`, `cargo build
+  --workspace --locked`, `cargo deny --locked check` and `cargo deny --manifest-path <manifest>
+  --locked check` for `fuzz/` and `tools/protobuf-conformance/` pass, from its folder.
 
 ## The Bead page
 
