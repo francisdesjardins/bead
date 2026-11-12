@@ -1,0 +1,23 @@
+# buf's workspace, for an editor: the .proto files outside a project of their own read Bead's
+# options, protovalidate's and googleapis' from builder/proto, as beadc gives them. Nothing builds
+# from it: beadc passes buf a configuration of its own, and builder/ and examples/hello keep their
+# own workspaces.
+version: v2
+modules:
+  - path: builder/proto
+    lint:
+      use: [STANDARD]
+      # bead/options.proto's package is `bead`, as protobuf's own options name none
+      except: [PACKAGE_VERSION_SUFFIX]
+      # protovalidate's validate.proto is Buf's to lint, googleapis' google/api Google's
+      ignore: [builder/proto/buf/validate/validate.proto, builder/proto/google/api]
+  # the conformance files' messages, each package beside the others in one folder
+  - path: spec
+    lint:
+      use: [MINIMAL]
+      except: [PACKAGE_DIRECTORY_MATCH, PACKAGE_SAME_DIRECTORY, DIRECTORY_SAME_PACKAGE]
+  - path: implementations/typescript/demo/proto
+  - path: implementations/rust/crates/bead-protobuf/proto
+    lint:
+      use: [MINIMAL]
+      except: [PACKAGE_DIRECTORY_MATCH]
