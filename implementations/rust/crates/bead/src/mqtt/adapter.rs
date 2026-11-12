@@ -1896,36 +1896,32 @@ impl State {
                 .reply
                 .send(Err(shared.cancelled("a publication")))
                 .ok();
-            self.given_up(serial);
+            self.given_up((serial, false));
 
             return;
         }
 
         let unwritten = link.unwritten.iter().position(|held| held.key == key);
 
+        // ! its connection reset rather than closed: a close writes what waits first, it among it
         if let Some(publication) = unwritten.and_then(|index| link.unwritten.remove(index)) {
             publication
                 .reply
                 .send(Err(shared.cancelled("a publication")))
                 .ok();
-            self.given_up(serial);
+            self.given_up((serial, true));
         }
     }
 
-    // its link retired once what it was asked was given up once it may have gone
-    fn given_up(&mut self, serial: u64) {
+    // its link retired once what it was asked was given up once it may have gone, its connection
+    // closed once what was written went, or reset where `reset`
+    fn given_up(&mut self, (serial, reset): (u64, bool)) {
         let reason = BrokerError::failed(format!(
             "the link of {} was retired: what it was asked was given up once it may have gone",
             self.shared.id
         ));
 
-        self.retire((
-            serial,
-            End {
-                reason,
-                reset: false,
-            },
-        ));
+        self.retire((serial, End { reason, reset }));
     }
 
     // ── Its subscriptions ────────────────────────────────────────────────────────────────────
@@ -2081,7 +2077,7 @@ impl State {
                 .reply
                 .send(Err(shared.cancelled("a subscription")))
                 .ok();
-            self.given_up(serial);
+            self.given_up((serial, false));
         }
     }
 

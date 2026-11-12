@@ -127,11 +127,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   announces, as the other sides do, where it sent a PINGREQ and lost its link on an unanswered one
   at the unrounded value (spec 15.26).
 - The Rust side's MQTT 5 adapter takes a publication at most once as its PUBLISH is written, as the
-  other sides do, where it took it as it was queued: a broker that reads nothing holds what its
-  connection has not taken within `maximumUnsentBytes`, and its Keep Alive counts from the last
-  packet written, so a steady flow no broker reads loses its link rather than growing without
-  bound; one given up before it is written retires its link, as one of QoS 1 does once sent (spec
-  15.23, 15.26).
+  other sides do, where it took it as it was queued: one its broker has not read stays unsettled,
+  counted among what waits for its connection, and its Keep Alive counts from the last packet
+  written, so a steady flow no broker reads loses its link rather than growing without bound; one
+  given up before it is written resets its link, so that it never goes (spec 15.23, 15.26).
 - The Rust side's MQTT 5 adapter lets a subscription go on an UNSUBACK of 0x00 or 0x11 alone, as
   the C# side does, and refuses it on any other code, its filter kept for the stop, where one under
   0x80 let it go (spec 15.27).

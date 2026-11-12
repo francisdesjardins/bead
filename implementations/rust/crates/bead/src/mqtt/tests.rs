@@ -462,8 +462,8 @@ async fn runs_a_keep_alive_under_a_second_as_its_connect_announces_it_a_whole_se
 
     let adapter = adapter_of(&options);
     let heard = heard_of(&adapter);
-    let link = link_up((&adapter, &script), (&Connack::default(), None)).await;
     let started = Instant::now();
+    let link = link_up((&adapter, &script), (&Connack::default(), None)).await;
 
     assert_eq!(link.connect().keep_alive, 1, "its CONNECT's Keep Alive");
     // * no PINGREQ before the second its CONNECT announced
@@ -1290,7 +1290,7 @@ async fn loses_its_link_where_its_broker_reads_nothing_under_a_steady_flow_at_mo
 
     adapter.start(BrokerStart::default()).await.unwrap();
 
-    let mut publishing = mebibytes_of((&adapter, 16));
+    let mut publishing = mebibytes_of((&adapter, 64));
     let started = Instant::now();
 
     // * a publication each 200 ms, none of which is written: none keeps its link alive
@@ -1333,13 +1333,13 @@ async fn loses_its_link_where_its_broker_reads_nothing_under_a_steady_flow_at_mo
 #[tokio::test]
 async fn retires_its_link_where_a_publication_at_most_once_is_given_up_before_its_packet_is_written()
  {
-    let stalled = Stalled::new().await;
+    let mut stalled = Stalled::new().await;
     let adapter = adapter_of(&stalled.options());
     let heard = heard_of(&adapter);
 
     adapter.start(BrokerStart::default()).await.unwrap();
 
-    let held = mebibytes_of((&adapter, 16));
+    let held = mebibytes_of((&adapter, 64));
     let signal = CancellationToken::new();
     let mut asked = publication(inbox(), &[1]);
 
@@ -1369,8 +1369,17 @@ async fn retires_its_link_where_a_publication_at_most_once_is_given_up_before_it
         }
     }
 
+    // * its connection reset, so that what waited, it among it, never goes
+    stalled.resume();
+    assert!(
+        crate::testing::patience(PATIENCE, stalled.peer)
+            .await
+            .unwrap()
+            .unwrap()
+            < 64 * 1_048_576,
+        "what waited never written"
+    );
     adapter.stop().await;
-    drop(stalled);
 }
 
 // spec 15.28
@@ -3388,6 +3397,7 @@ async fn is_secure_over_mqtts_and_wss_and_over_mqtt_and_ws_to_the_loopback_alone
         (ID, "mqtt://[::1]junk:1884"),
         (ID, "mqtt://[::1]junk"),
         (ID, "ws://[::1]junk/mqtt"),
+        (ID, "mqtt://user@[::1]junk:1884"),
         ("", "mqtt://127.0.0.1"),
     ] {
         assert!(
