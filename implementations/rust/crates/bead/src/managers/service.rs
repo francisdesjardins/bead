@@ -319,12 +319,7 @@ struct Started {
 }
 
 fn wall_of(clock: &SharedClock) -> i64 {
-    clock
-        .wall()
-        .duration_since(std::time::SystemTime::UNIX_EPOCH)
-        .map_or(0, |since| {
-            i64::try_from(since.as_millis()).unwrap_or(i64::MAX)
-        })
+    crate::clock::milliseconds_since_epoch(clock.wall())
 }
 
 // a step of a call, before it is told

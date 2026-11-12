@@ -160,3 +160,45 @@ async fn arms_a_zero_due_and_a_positive_period_and_cancels_them() {
         "cancelled, it fires no more"
     );
 }
+
+// spec 13.10.2 and 13.11: a wall clock's reading in milliseconds rounded down, before the epoch too,
+// as the other sides' Math.floor and ToUnixTimeMilliseconds read it
+#[test]
+fn reads_a_wall_clock_in_milliseconds_rounded_down_before_the_epoch_too() {
+    use core::time::Duration;
+    use std::time::SystemTime;
+
+    use super::{instant_of_milliseconds, milliseconds_since_epoch};
+
+    let epoch = SystemTime::UNIX_EPOCH;
+    let after = |micros: u64| {
+        epoch
+            .checked_add(Duration::from_micros(micros))
+            .expect("after the epoch")
+    };
+    let before = |micros: u64| {
+        epoch
+            .checked_sub(Duration::from_micros(micros))
+            .expect("before the epoch")
+    };
+
+    for (at, milliseconds) in [
+        (after(10_500), 10),
+        (after(10_000), 10),
+        (epoch, 0),
+        (before(500), -1),
+        (before(10_000), -10),
+        (before(10_500), -11),
+        (before(10_000_000), -10_000),
+    ] {
+        assert_eq!(milliseconds_since_epoch(at), milliseconds, "{at:?}");
+    }
+
+    for milliseconds in [-10_001, -11, -1, 0, 1, 10_001] {
+        assert_eq!(
+            milliseconds_since_epoch(instant_of_milliseconds(milliseconds)),
+            milliseconds,
+            "{milliseconds} there and back"
+        );
+    }
+}

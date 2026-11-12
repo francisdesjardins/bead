@@ -522,16 +522,6 @@ pub fn read_jwt(token: &[u8]) -> Option<ReadJwt> {
     Some(ReadJwt { header, claims })
 }
 
-// milliseconds since the epoch of a wall clock's reading
-fn milliseconds_since_epoch(at: SystemTime) -> i64 {
-    match at.duration_since(SystemTime::UNIX_EPOCH) {
-        Ok(since) => i64::try_from(since.as_millis()).unwrap_or(i64::MAX),
-        Err(before) => {
-            i64::try_from(before.duration().as_millis()).map_or(i64::MIN, i64::saturating_neg)
-        }
-    }
-}
-
 /// The verdict on `token`, a `JWT`, verified as section 13.8 states, step by step.
 ///
 /// The first step that fails names the verdict's reason. The wall clock is read once, as its
@@ -595,7 +585,7 @@ pub fn verify_jwt(token: &[u8], against: &JwtAgainst<'_>) -> Result<JwtVerdict, 
     }
 
     // * W read once, as the signature has verified
-    let now = milliseconds_since_epoch((against.now)());
+    let now = crate::clock::milliseconds_since_epoch((against.now)());
 
     Ok(verdict_of(claims, (against.audiences, key, now)))
 }

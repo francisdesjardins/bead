@@ -290,13 +290,6 @@ fn needs(serving: &[JwtKey], (has_kid, kid): (bool, Option<&str>)) -> bool {
     })
 }
 
-fn milliseconds_since_epoch(at: SystemTime) -> i64 {
-    at.duration_since(SystemTime::UNIX_EPOCH)
-        .map_or(0, |since| {
-            i64::try_from(since.as_millis()).unwrap_or(i64::MAX)
-        })
-}
-
 impl CredentialResolver {
     /// The resolver of `credentials`, on `clock` and `runtime`.
     ///
@@ -932,7 +925,7 @@ async fn resolve_elsewhere(
 
     // the wall clock read as the verifier settles: a session whose end it reached does not hold
     if let Some(end) = end
-        && milliseconds_since_epoch(wall_now(inner)) >= end
+        && crate::clock::milliseconds_since_epoch(wall_now(inner)) >= end
     {
         return Ok(Resolved::Refused("end".to_owned()));
     }
