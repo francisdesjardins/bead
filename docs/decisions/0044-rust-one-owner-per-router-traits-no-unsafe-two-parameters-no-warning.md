@@ -389,13 +389,15 @@ its router, which then ends by its dispose. Twins:
 
 **The core spawns through one private module, `platform`, and reads time through its clock alone,
 as clippy's `disallowed-methods` and `disallowed-types` hold it.** `platform::spawn` is the one
-call of tokio's spawn, and `platform::runtime_of` the one reading of the current runtime and of its
-time driver, which every part of the core that takes a runtime calls with its own refusal;
+call of tokio's spawn, `platform::lookup_host` the one of its resolver, which spawns on its
+blocking pool a resolution that runs to its end whatever becomes of the connect that asked, and
+`platform::runtime_of` the one reading of the current runtime and of its time driver, which every
+part of the core that takes a runtime calls with its own refusal;
 `SystemClock`'s body is the one reader of std's `Instant`, of `SystemTime::now()` and of tokio's
 timers. Each of the two funnels sits under one `#[expect]`, and the public surface names tokio's
 `Handle`, the application's runtime being tokio's. The lists refuse every other path in every
 target clippy sees, as CI runs it: tokio's spawns, `try_current` and `current` ("spawn through
-`crate::platform`"); `block_on`, `block_in_place` and `std::thread::sleep` ("a turn awaits
+`crate::platform`"); `tokio::net::lookup_host` ("resolve through `crate::platform`"); `block_on`, `block_in_place` and `std::thread::sleep` ("a turn awaits
 nothing"); tokio's `sleep`, `sleep_until`, `interval`, `interval_at`, `timeout` and `timeout_at`,
 `SystemTime::now`, and the types `std::time::Instant` and `tokio::time::Instant`, so that every
 `elapsed()` is held too ("time through the clock"); `std::thread::spawn` ("no thread of Bead's

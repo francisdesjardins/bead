@@ -190,10 +190,10 @@ at once, each call it waits on failed with that panic for its reason. A server o
 until its stop or its dispose while a connection it serves holds it; idle, its last handle dropped
 lets its port go.
 
-The core spawns and yields through one private module, `platform`, and reads time through its
-clock alone (decision 0011): clippy's `disallowed-methods` and `disallowed-types`, in `clippy.toml`,
-refuse tokio's spawns, its yield and its timers, std's `Instant`, `SystemTime::now` and a thread of
-Bead's own anywhere else. A test takes them from the kit, `bead::testing`'s `spawn`, `yield_now`,
+The core spawns, yields and resolves a name through one private module, `platform`, and reads time
+through its clock alone (decision 0011): clippy's `disallowed-methods` and `disallowed-types`, in
+`clippy.toml`, refuse tokio's spawns, its yield, its resolver and its timers, std's `Instant`,
+`SystemTime::now` and a thread of Bead's own anywhere else. A test takes them from the kit, `bead::testing`'s `spawn`, `yield_now`,
 `rest`, `patience`, `Instant` and `wall_now`; a native target, the benches, the interop or a player
 that measures real time, is exempted once, at its root, with its reason.
 

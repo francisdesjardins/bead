@@ -24,6 +24,7 @@ use tokio::sync::oneshot;
 use crate::clock::{Schedule, SharedClock};
 use crate::errors::{ConnectError, TransportError};
 use crate::judgement::url_host::url_host_of;
+use crate::platform;
 use crate::router::types::BoxFuture;
 
 #[cfg(test)]
@@ -96,8 +97,9 @@ fn interleaved(addresses: &[IpAddr]) -> Vec<IpAddr> {
 
 // the platform's resolver: the name's addresses, in the order it gives them
 async fn resolved(host: String) -> io::Result<Vec<IpAddr>> {
-    Ok(tokio::net::lookup_host((host.as_str(), 0))
+    Ok(platform::lookup_host(&host)
         .await?
+        .into_iter()
         .map(|address| address.ip())
         .collect())
 }
