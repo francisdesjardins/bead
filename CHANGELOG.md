@@ -135,6 +135,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The Rust side's MQTT 5 adapter lets a subscription go on an UNSUBACK of 0x00 or 0x11 alone, as
   the C# side does, and refuses it on any other code, its filter kept for the stop, where one under
   0x80 let it go (spec 15.27).
+- The Rust and C# MQTT 5 adapters refuse as they are built a URL whose IPv6 address is followed by
+  anything but its port, `mqtt://[::1]junk:1884` say, as the TypeScript side does, where they
+  dropped what followed and dialled the scheme's port (RFC 3986 §3.2.2).
 
 ## [0.12.0] - 2026-11-10
 

@@ -3380,10 +3380,14 @@ async fn is_secure_over_mqtts_and_wss_and_over_mqtt_and_ws_to_the_loopback_alone
         "secure"
     );
 
-    // what is none of its four is refused as it is built, and so is an id that is none
+    // what is none of its four is refused as it is built, and so is an IPv6 address followed by
+    // anything but its port (RFC 3986 §3.2.2), and an id that is none
     for (id, url) in [
         (ID, "http://broker.example"),
         (ID, "no url"),
+        (ID, "mqtt://[::1]junk:1884"),
+        (ID, "mqtt://[::1]junk"),
+        (ID, "ws://[::1]junk/mqtt"),
         ("", "mqtt://127.0.0.1"),
     ] {
         assert!(
