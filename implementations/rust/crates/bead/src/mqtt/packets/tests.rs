@@ -154,6 +154,27 @@ fn reads_each_acknowledgement_its_reason_code_left_out_or_given() {
         }),
         "an UNSUBACK of 0x11"
     );
+    // ? a Reason Code past the one filter its SUBSCRIBE or UNSUBSCRIBE named ([MQTT-3.9.3-2],
+    // [MQTT-3.11.3-2]) read as it comes, its adapter reading its first: where is such a count
+    // judged, and how? A row of docs/support.md
+    assert_eq!(
+        packet(&[0x90, 0x05, 0x00, 0x01, 0x00, 0x01, 0x01]),
+        MqttPacket::Suback(MqttAcknowledgement {
+            packet_identifier: 1,
+            reason_codes: vec![1, 1],
+            reason_string: None,
+        }),
+        "a SUBACK of two codes"
+    );
+    assert_eq!(
+        packet(&[0xB0, 0x05, 0x00, 0x02, 0x00, 0x00, 0x11]),
+        MqttPacket::Unsuback(MqttAcknowledgement {
+            packet_identifier: 2,
+            reason_codes: vec![0, 0x11],
+            reason_string: None,
+        }),
+        "an UNSUBACK of two codes"
+    );
     assert_eq!(packet(&[0xD0, 0x00]), MqttPacket::Pingresp, "a PINGRESP");
     assert_eq!(
         packet(&[0xE0, 0x00]),
@@ -328,7 +349,7 @@ fn reads_a_packet_at_its_bound_and_the_next_in_the_same_read_as_they_came() {
 
 #[test]
 fn refuses_what_is_malformed_and_what_no_client_reads() {
-    let cases: [(&[u8], &str); 18] = [
+    let cases: [(&[u8], &str); 16] = [
         (&[0xF0, 0x00], "an AUTH"),
         (&[0x10, 0x00], "a CONNECT"),
         (&[0x82, 0x00], "a SUBSCRIBE"),
@@ -347,16 +368,6 @@ fn refuses_what_is_malformed_and_what_no_client_reads() {
         ),
         (&[0x40, 0x02, 0x00, 0x00], "a Packet Identifier of 0"),
         (&[0x90, 0x03, 0x00, 0x01, 0x00], "no filter"),
-        // * a Reason Code for each filter its SUBSCRIBE or UNSUBSCRIBE named, which was one
-        // ([MQTT-3.9.3-2], [MQTT-3.11.3-2])
-        (
-            &[0x90, 0x05, 0x00, 0x01, 0x00, 0x01, 0x01],
-            "more than its one filter",
-        ),
-        (
-            &[0xB0, 0x05, 0x00, 0x01, 0x00, 0x00, 0x11],
-            "more than its one filter",
-        ),
         (&[0xD0, 0x01, 0x00], "bytes past"),
     ];
 

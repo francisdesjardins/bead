@@ -137,9 +137,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The Rust and C# MQTT 5 adapters refuse as they are built a URL whose IPv6 address is followed by
   anything but its port, `mqtt://[::1]junk:1884` say, as the TypeScript side does, where they
   dropped what followed and dialled the scheme's port (RFC 3986 §3.2.2).
-- The Rust side's MQTT 5 client reads a SUBACK or an UNSUBACK of more than one Reason Code as
-  what a broker never sends: its connection closed and its link lost, as on any malformed packet,
-  where it read them (spec 15.29, [MQTT-3.9.3-2], [MQTT-3.11.3-2]).
 - The Rust side's MQTT 5 client reads a DISCONNECT by its Reason Code whatever else it carries, a
   Session Expiry Interval its broker never sends among it: a DISCONNECT of 0x8E is its link taken
   over, its participant fenced, as on the other sides (spec 15.21, [MQTT-3.14.2-2],

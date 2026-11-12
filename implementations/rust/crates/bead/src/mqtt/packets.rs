@@ -826,9 +826,7 @@ fn puback_of(cursor: &mut Cursor<'_>) -> Result<MqttPacket, MqttRefusal> {
     Ok(MqttPacket::Puback(acknowledgement))
 }
 
-// a SUBACK's or an UNSUBACK's: its identifier, its properties, then a Reason Code per filter, of
-// the one filter each SUBSCRIBE and UNSUBSCRIBE of its client names ([MQTT-3.9.3-2],
-// [MQTT-3.11.3-2])
+// a SUBACK's or an UNSUBACK's: its identifier, its properties, then a Reason Code per filter
 fn acknowledgement_of(cursor: &mut Cursor<'_>) -> Result<MqttAcknowledgement, MqttRefusal> {
     let packet_identifier = identifier_of(cursor)?;
     let reason_string = properties_of(cursor, &ACKNOWLEDGEMENT_PROPERTIES)?.reason_string;
@@ -836,10 +834,6 @@ fn acknowledgement_of(cursor: &mut Cursor<'_>) -> Result<MqttAcknowledgement, Mq
 
     if reason_codes.is_empty() {
         return Err(malformed("an acknowledgement of no filter"));
-    }
-
-    if reason_codes.len() > 1 {
-        return Err(malformed("an acknowledgement of more than its one filter"));
     }
 
     Ok(MqttAcknowledgement {
