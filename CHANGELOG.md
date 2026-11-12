@@ -60,9 +60,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The Rust and C# WebSocket clients fail a 101 that names an extension they never offered, its
   socket dropped, as the TypeScript side's `ws` does, where they opened on it (RFC 6455 §4.1).
 - The Rust side's HTTP server ends an HTTP/2 session that reads no request's head within
-  `headersTimeout`, from its handshake or since its last head while it answers nothing, by GOAWAY
-  within its linger: a peer that sends no preface, only its SETTINGS, or a head never whole, no
-  longer holds its socket without end (spec 15.12).
+  `headersTimeout`, from its handshake or since its last head while it answers nothing, within its
+  linger, by GOAWAY once its preface came: a peer that sends no preface, only its SETTINGS, or a
+  head never whole, no longer holds its socket without end (spec 15.12).
 - The Rust side's WebSocket server judges and adds what waits for a connection's socket at once,
   so senders that cross take no more than `maximumUnsentBytes` between them, and gives it back never
   below none: its gauges no longer read a count wrapped past zero once a connection ended under a
