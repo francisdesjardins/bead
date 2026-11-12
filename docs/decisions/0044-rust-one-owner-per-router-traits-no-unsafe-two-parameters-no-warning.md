@@ -548,7 +548,10 @@ tests, benches and fuzz targets among them, where the C# side's count reads its 
 alone: a crate's tests sit in its `src`. On the surface no item takes or gives one
 ([0047](0047-every-side-shows-one-public-surface.md)), which `bead-house`'s `tuples.rs` holds: two
 things are two parameters, a third essential thing a record of the call, `RouterRequest` or
-`NotifyRequest`, and several values given back a `#[non_exhaustive]` struct.
+`NotifyRequest`, and several values given back a `#[non_exhaustive]` struct. Two kinds of record
+stay exhaustive, so that a literal builds them: the wire's own, an envelope's header and a failure's
+`FailureRecord`, whose fields the spec fixes; and what an application builds to hand in,
+`ProcedureAddress`, `CallAddress`, `CallAsked` and `EnvelopeAsked`.
 
 ### Names, side by side
 
