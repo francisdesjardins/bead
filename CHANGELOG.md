@@ -75,6 +75,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   timeout (RFC 6455 §7.1.1, spec 15.3).
 - A Rust WebSocket or HTTP server dropped idle, without its stop, lets its port go at once, where
   its accepting held it until the next connection came (decision 0049).
+- The Rust side's service layer acts as each call is made, its future only waiting (decision
+  0044): `Notification::register` subscribes, and `NotificationRegistration::unregister` leaves,
+  even when its future is dropped, so an unregistration dropped no longer holds every registration
+  after it waiting for good; `Response::result` and `Response::failure` answer and tell their
+  trace step once the router settled the answer, whether or not anyone waits on them, as the
+  other sides do.
 - A session manager whose clock refuses a timer leaves what it held: a new session is not stored
   and the timers prepared for it are stopped, and a timeout set or reset keeps the stored one and its
   running timer, telling nothing, on the TypeScript and C# sides as on the Rust side (decision
