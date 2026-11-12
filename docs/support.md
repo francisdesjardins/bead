@@ -718,8 +718,11 @@ them, its own: an operation that takes effect as it is made, its future only wai
 `a_call_a_listener_makes_within_a_turn_goes_behind_every_call_made_before_it`, and the
 service layer's registration, unregistration and answer alike,
 `a_registration_whose_future_is_dropped_unpolled_still_subscribes_and_listens` and
-`an_unregistration_whose_future_is_dropped_still_leaves_and_the_next_registration_subscribes_anew`
-in `bead/src/managers/service/tests/notification_unit.rs` and
+`an_unregistration_whose_future_is_dropped_still_leaves_and_the_next_registration_subscribes_anew`,
+and a registration whose handle is dropped, which unregisters nothing and listens on, as a promise
+or a `Task` let go does on the other sides,
+`a_registration_whose_handle_is_dropped_still_listens_and_keeps_its_subscription`, in
+`bead/src/managers/service/tests/notification_unit.rs`, and
 `tells_once_its_router_settled_it_an_answer_nobody_waits_on` in `…/tests/resolver.rs`; a
 router that lives while its transport holds it,
 `keeps_its_connection_when_the_application_drops_its_last_handle`; and a router built outside a

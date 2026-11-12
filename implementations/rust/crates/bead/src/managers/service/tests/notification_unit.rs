@@ -286,6 +286,36 @@ async fn a_registration_whose_future_is_dropped_unpolled_still_subscribes_and_li
     fixture.router.dispose().await;
 }
 
+// ! a registration's handle dropped unregisters nothing: its callback hears on, as a promise or a
+// `Task` let go does on the other sides, until `unregister` or its notification's end
+#[tokio::test]
+async fn a_registration_whose_handle_is_dropped_still_listens_and_keeps_its_subscription() {
+    let fixture = ClientFixture::new();
+    let heard = Heard::default();
+    let notification = notification(&fixture);
+    let registration = subscribed(&fixture, (&notification, callback(&heard, ""))).await;
+
+    drop(registration);
+    fixture.clock.settle().await;
+    deliver(&fixture, (1, "news"));
+    fixture.clock.settle().await;
+
+    assert_eq!(*locked(&heard), ["news"], "its callback listens");
+    assert!(
+        fixture.router.has_notification(&notification.as_like()),
+        "held"
+    );
+    assert!(
+        !fixture
+            .transport
+            .envelopes()
+            .iter()
+            .any(|envelope| matches!(envelope, Envelope::Cancel { .. })),
+        "its subscription kept"
+    );
+    fixture.router.dispose().await;
+}
+
 // decision 0044: the last registration taken away leaves as it is made, its future only waiting,
 // so one dropped, unpolled or once polled, holds back no registration after it
 #[tokio::test]
