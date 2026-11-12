@@ -123,6 +123,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   its DISCONNECT of 0x00, on the C# side once MQTTnet says it connected, so no will goes, and the
   TypeScript adapter no longer counts up a link its stop ended (spec 15.21, 15.26, 15.30, decision
   0041).
+- The Rust side's MQTT 5 adapter runs a `keepAlive` under a second as the whole second its CONNECT
+  announces, as the other sides do, where it sent a PINGREQ and lost its link on an unanswered one
+  at the unrounded value (spec 15.26).
+- The Rust side's MQTT 5 adapter takes a publication at most once as its PUBLISH is written, as the
+  other sides do, where it took it as it was queued: one its broker has not read stays unsettled,
+  counted among what waits for its connection, and its Keep Alive counts from the last packet
+  written, so a steady flow no broker reads loses its link rather than growing without bound; one
+  given up before it is written resets its link, so that it never goes (spec 15.23, 15.26).
+- The Rust side's MQTT 5 adapter lets a subscription go on an UNSUBACK of 0x00 or 0x11 alone, as
+  the C# side does, and refuses it on any other code, its filter kept for the stop, where one under
+  0x80 let it go (spec 15.27).
+- The Rust and C# MQTT 5 adapters refuse as they are built a URL whose IPv6 address is followed by
+  anything but its port, `mqtt://[::1]junk:1884` say, as the TypeScript side does, where they
+  dropped what followed and dialled the scheme's port (RFC 3986 §3.2.2).
+- The Rust side's MQTT 5 client reads a SUBACK or an UNSUBACK of more than one Reason Code, or a
+  DISCONNECT that carries a Session Expiry Interval, as what a broker never sends: its connection
+  closed and its link lost, as on any malformed packet, where it read them (spec 15.29,
+  [MQTT-3.9.3-2], [MQTT-3.11.3-2], [MQTT-3.14.2-2]).
 
 ## [0.12.0] - 2026-11-10
 

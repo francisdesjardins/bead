@@ -93,8 +93,14 @@ pub(crate) fn address_of(url: &str) -> Option<Address> {
 
     let (host, port) = if let Some(bracketed) = authority.strip_prefix('[') {
         let (inner, after) = bracketed.split_once(']')?;
+        // * after an IP literal, its port or the authority's end alone (RFC 3986 §3.2.2, §3.2.3)
+        let port = if after.is_empty() {
+            None
+        } else {
+            Some(after.strip_prefix(':')?)
+        };
 
-        (format!("[{inner}]"), after.strip_prefix(':'))
+        (format!("[{inner}]"), port)
     } else {
         match authority.rsplit_once(':') {
             Some((host, port)) => (host.to_owned(), Some(port)),

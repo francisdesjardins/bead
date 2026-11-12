@@ -515,7 +515,7 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Lets_a_subscription_go_once_its_UNSUBACK_came_naming_the_topic_itself_where_it_held_none_and_refuses_it_on_a_code_of_0x80_or_more_spec_15_27()
+    public async Task Lets_a_subscription_go_once_its_UNSUBACK_came_naming_the_topic_itself_where_it_held_none_and_refuses_it_on_any_other_code_spec_15_27()
     {
         await using var adapter = AdapterOf();
         var link = await LinkUp((adapter, _script));
@@ -536,18 +536,29 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         // * one its broker held none of is let go all the same, 0x11
         Assert.Equal("bead/d/bob", await Answered((["bead", "d", "bob"], MqttUnsubscribeReasonCode.NoSubscriptionExisted)));
         Assert.Equal("bead/d/bob", await Answered((["bead", "d", "bob"], MqttUnsubscribeReasonCode.Success)));
-        Assert.Contains("0x87", (await FailureOf(() =>
-        {
-            return Answered((["bead", "d", "eve"], MqttUnsubscribeReasonCode.NotAuthorized));
-        })).Message, StringComparison.Ordinal);
-        Assert.Contains("0x80", (await FailureOf(() =>
-        {
-            return Answered((["bead", "d", "eve"], MqttUnsubscribeReasonCode.UnspecifiedError));
-        })).Message, StringComparison.Ordinal);
 
-        // its link kept
+        var subscribing = adapter.Subscribe(["bead", "d", "eve"]);
+
+        await SubAckOf((link, 1));
+        await subscribing.WaitAsync(Patience, Cancelled);
+
+        // * any other code, under 0x80 among them, which MQTT 5 names no UNSUBACK by
+        foreach (var code in new[] { 0x01, 0x10, 0x7F, 0x80, 0x87 })
+        {
+            var refused = string.Create(CultureInfo.InvariantCulture, $"0x{code:X2}");
+
+            Assert.Contains(refused, (await FailureOf(() =>
+            {
+                return Answered((["bead", "d", "eve"], (MqttUnsubscribeReasonCode)code));
+            })).Message, StringComparison.Ordinal);
+        }
+
+        // its link kept, and the filter refused its stop's to let go
         Assert.True(adapter.IsLinked);
+        _script.IsHoldingUnsubscribes = false;
         await adapter.Stop();
+        Assert.Equal("bead/d/eve", LetGoOf(link)[^1]);
+        Assert.Equal(8, LetGoOf(link).Count);
     }
 
     [Fact]
@@ -1967,8 +1978,15 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
 
         Assert.Equal([true, true, true, true, true, false, false], uris.Select(IsSecure));
 
-        // what is none of its four is refused as it is built, and so is an id that is none
-        foreach (var refused in new[] { new MqttBrokerAdapterOptions { Id = Id, Uri = new Uri("http://broker.example") }, new MqttBrokerAdapterOptions { Id = "", Uri = new Uri("mqtt://127.0.0.1") } })
+        // what is none of its four is refused as it is built, and so is an IPv6 address followed by
+        // anything but its port (RFC 3986 §3.2.2), and an id that is none
+        string[] refusedUris = ["http://broker.example", "mqtt://[::1]junk:1884", "mqtt://[::1]junk", "ws://[::1]junk/mqtt", "mqtt://user@[::1]junk:1884"];
+        var refusedOptions = refusedUris.Select((uri) =>
+        {
+            return new MqttBrokerAdapterOptions { Id = Id, Uri = new Uri(uri) };
+        }).Append(new MqttBrokerAdapterOptions { Id = "", Uri = new Uri("mqtt://127.0.0.1") });
+
+        foreach (var refused in refusedOptions)
         {
             Assert.Throws<ArgumentException>(() =>
             {

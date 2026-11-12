@@ -8,7 +8,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
+use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use crate::broker::adapter::{
@@ -452,6 +454,43 @@ async fn keeps_a_server_keep_alive_shorter_than_its_own_a_pingreq_once_nothing_w
 
 // spec 15.26
 #[tokio::test]
+async fn runs_a_keep_alive_under_a_second_as_its_connect_announces_it_a_whole_second_rounded_up() {
+    let script = script().await;
+    let mut options = options_of(&script);
+
+    options.keep_alive = Some(Duration::from_millis(200));
+
+    let adapter = adapter_of(&options);
+    let heard = heard_of(&adapter);
+    let started = Instant::now();
+    let link = link_up((&adapter, &script), (&Connack::default(), None)).await;
+
+    assert_eq!(link.connect().keep_alive, 1, "its CONNECT's Keep Alive");
+    // * no PINGREQ before the second its CONNECT announced
+    assert!(
+        link.next(Some(Kind::Pingreq), Duration::from_millis(700))
+            .await
+            .is_err(),
+        "no PINGREQ within 700 ms"
+    );
+    link.next(Some(Kind::Pingreq), Duration::from_secs(2))
+        .await
+        .unwrap();
+    assert!(
+        started.elapsed() >= Duration::from_millis(900),
+        "its PINGREQ once a second went"
+    );
+
+    // * its PINGRESP awaited a whole second too
+    rest(Duration::from_millis(500)).await;
+    assert!(heard.downs().is_empty(), "kept half a second on");
+    link.send(pingresp());
+    assert_eq!(link.of(Kind::Pingreq).len(), 1, "one PINGREQ");
+    adapter.stop().await;
+}
+
+// spec 15.26
+#[tokio::test]
 async fn leaves_a_will_of_its_gone_qos_1_retain_0_and_a_will_delay_interval_of_0_and_stops_with_a_disconnect_of_0x00()
  {
     let script = script().await;
@@ -807,7 +846,7 @@ async fn subscribes_at_qos_1_no_local_0_retain_as_published_0_and_retain_handlin
 
 // spec 15.27
 #[tokio::test]
-async fn lets_a_subscription_go_once_its_unsuback_came_naming_the_topic_itself_where_it_held_none_and_refuses_it_on_a_code_of_0x80_or_more()
+async fn lets_a_subscription_go_once_its_unsuback_came_naming_the_topic_itself_where_it_held_none_and_refuses_it_on_any_other_code()
  {
     let script = script().await;
     let adapter = adapter_of(&options_of(&script));
@@ -833,17 +872,30 @@ async fn lets_a_subscription_go_once_its_unsuback_came_naming_the_topic_itself_w
         vec!["bead/d/bob".to_owned()],
         "0x00"
     );
-    assert!(
-        message_of(&answered(("eve", 0x87)).await.unwrap_err()).contains("0x87"),
-        "0x87"
-    );
-    assert!(
-        message_of(&answered(("eve", 0x80)).await.unwrap_err()).contains("0x80"),
-        "0x80"
-    );
-    // its link kept
+
+    let subscribing =
+        spawn(adapter.subscribe(&topic(&["bead", "d", "eve"]), BrokerSubscription::default()));
+
+    suback_of(&link, 1).await;
+    subscribing.await.unwrap().unwrap();
+
+    // * any other code, under 0x80 among them, which MQTT 5 names no UNSUBACK by
+    for code in [0x01_u8, 0x10, 0x7F, 0x80, 0x87] {
+        let refused = format!("0x{code:02X}");
+
+        assert!(
+            message_of(&answered(("eve", code)).await.unwrap_err()).contains(&refused),
+            "{refused}"
+        );
+    }
+
+    // its link kept, and the filter refused its stop's to let go
     assert!(adapter.is_linked(), "kept");
-    adapter.stop().await;
+    assert_eq!(
+        unsubacked_of(&link, adapter.stop()).await,
+        vec!["bead/d/eve".to_owned()],
+        "its stop lets it go"
+    );
 }
 
 // spec 15.27
@@ -1093,6 +1145,241 @@ async fn publishes_at_qos_1_and_retain_0_a_life_in_whole_seconds_rounded_up_wher
         "QoS 0"
     );
     quick.stop().await;
+}
+
+/// A broker that answers a CONNACK, then reads nothing until it is told to read again, from when
+/// it reads on to its end: its URL, what tells it, and the bytes it read once told.
+struct Stalled {
+    url: String,
+    resume: Option<tokio::sync::oneshot::Sender<()>>,
+    peer: JoinHandle<usize>,
+}
+
+impl Stalled {
+    async fn new() -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("mqtt://{}", listener.local_addr().unwrap());
+        let (resume, resumed) = tokio::sync::oneshot::channel::<()>();
+        let peer = spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buffer = vec![0_u8; 65_536];
+
+            // its CONNECT, one small write
+            assert!(socket.read(&mut buffer).await.unwrap() > 0, "its CONNECT");
+            socket
+                .write_all(&connack(&Connack::default()))
+                .await
+                .unwrap();
+
+            // ! it reads nothing more until told, and drops its socket where it never is
+            if resumed.await.is_err() {
+                return 0;
+            }
+
+            let mut read = 0_usize;
+
+            while let Ok(count) = socket.read(&mut buffer).await
+                && count > 0
+            {
+                read = read.saturating_add(count);
+            }
+
+            read
+        });
+
+        Self {
+            url,
+            resume: Some(resume),
+            peer,
+        }
+    }
+
+    fn options(&self) -> MqttBrokerAdapterOptions {
+        let mut options = MqttBrokerAdapterOptions::new(&self.url, ID);
+
+        options.password = Some(PASSWORD.to_owned());
+        options.delivery = Some(BrokerDelivery::AtMostOnce);
+
+        options
+    }
+
+    fn resume(&mut self) {
+        if let Some(resume) = self.resume.take() {
+            resume.send(()).ok();
+        }
+    }
+}
+
+/// `count` publications at most once of a MiB each to `adapter`'s inbox, each under way.
+fn mebibytes_of(
+    (adapter, count): (&MqttBrokerAdapter, usize),
+) -> Vec<JoinHandle<Result<BrokerPublished, BrokerError>>> {
+    let payload = Bytes::from(vec![0_u8; 1_048_576]);
+
+    (0..count)
+        .map(|_| spawn(adapter.publish(BrokerPublication::new(inbox(), payload.clone()))))
+        .collect()
+}
+
+// spec 15.23, 15.28
+#[tokio::test]
+async fn takes_a_publication_at_most_once_once_its_packet_is_written_holding_it_while_its_broker_reads_nothing()
+ {
+    let mut stalled = Stalled::new().await;
+    let adapter = adapter_of(&stalled.options());
+
+    adapter.start(BrokerStart::default()).await.unwrap();
+
+    // * far past what its socket holds unread
+    let publishing = mebibytes_of((&adapter, 64));
+
+    rest(Duration::from_millis(300)).await;
+
+    let settled = publishing
+        .iter()
+        .filter(|publishing| publishing.is_finished())
+        .count();
+
+    assert!(
+        settled < 64,
+        "{settled} of 64 settled while nothing is read"
+    );
+    assert!(
+        !publishing.last().unwrap().is_finished(),
+        "the last one held"
+    );
+    assert!(adapter.is_linked(), "its link up");
+
+    // * each taken once its broker reads it
+    stalled.resume();
+
+    for publishing in publishing {
+        assert_eq!(
+            crate::testing::patience(PATIENCE, publishing)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap(),
+            BrokerPublished::Taken,
+            "taken once written"
+        );
+    }
+
+    adapter.stop().await;
+    assert!(
+        crate::testing::patience(PATIENCE, stalled.peer)
+            .await
+            .unwrap()
+            .unwrap()
+            >= 64 * 1_048_576,
+        "every one read"
+    );
+}
+
+// spec 15.26, 15.28
+#[tokio::test]
+async fn loses_its_link_where_its_broker_reads_nothing_under_a_steady_flow_at_most_once_its_keep_alive_counted_from_what_was_written()
+ {
+    let stalled = Stalled::new().await;
+    let mut options = stalled.options();
+
+    options.keep_alive = Some(Duration::from_secs(1));
+
+    let adapter = adapter_of(&options);
+    let heard = heard_of(&adapter);
+
+    adapter.start(BrokerStart::default()).await.unwrap();
+
+    let mut publishing = mebibytes_of((&adapter, 64));
+    let started = Instant::now();
+
+    // * a publication each 200 ms, none of which is written: none keeps its link alive
+    while heard.downs().is_empty() && started.elapsed() < PATIENCE {
+        publishing.push(spawn(adapter.publish(publication(inbox(), &[1]))));
+        rest(Duration::from_millis(200)).await;
+    }
+
+    assert_eq!(heard.downs(), vec![down(false)], "its link lost");
+    assert!(
+        started.elapsed() < Duration::from_secs(4),
+        "within two Keep Alives of its last write"
+    );
+
+    let mut failed = 0;
+
+    for publishing in publishing {
+        match crate::testing::patience(PATIENCE, publishing)
+            .await
+            .unwrap()
+            .unwrap()
+        {
+            Ok(published) => assert_eq!(published, BrokerPublished::Taken, "taken"),
+            Err(error) => {
+                assert!(
+                    message_of(&error).contains("no PINGRESP within its Keep Alive"),
+                    "{error}"
+                );
+                failed += 1;
+            }
+        }
+    }
+
+    assert!(failed > 0, "what was not written failed with its link");
+    adapter.stop().await;
+    drop(stalled);
+}
+
+// spec 15.28
+#[tokio::test]
+async fn retires_its_link_where_a_publication_at_most_once_is_given_up_before_its_packet_is_written()
+ {
+    let mut stalled = Stalled::new().await;
+    let adapter = adapter_of(&stalled.options());
+    let heard = heard_of(&adapter);
+
+    adapter.start(BrokerStart::default()).await.unwrap();
+
+    let held = mebibytes_of((&adapter, 64));
+    let signal = CancellationToken::new();
+    let mut asked = publication(inbox(), &[1]);
+
+    asked.signal = Some(signal.clone());
+
+    let given_up = spawn(adapter.publish(asked));
+
+    rest(Duration::from_millis(100)).await;
+    assert!(!given_up.is_finished(), "held behind what is not written");
+    signal.cancel();
+    assert!(
+        message_of(&given_up.await.unwrap().unwrap_err()).contains("was cancelled"),
+        "given up"
+    );
+    // * it may go yet, so its link goes
+    until(|| !heard.downs().is_empty()).await;
+    assert_eq!(heard.downs(), vec![down(false)], "its link retired");
+
+    for publishing in held {
+        let outcome = crate::testing::patience(PATIENCE, publishing)
+            .await
+            .unwrap()
+            .unwrap();
+
+        if let Err(error) = outcome {
+            assert!(message_of(&error).contains("was retired"), "{error}");
+        }
+    }
+
+    // * its connection reset, so that what waited, it among it, never goes
+    stalled.resume();
+    assert!(
+        crate::testing::patience(PATIENCE, stalled.peer)
+            .await
+            .unwrap()
+            .unwrap()
+            < 64 * 1_048_576,
+        "what waited never written"
+    );
+    adapter.stop().await;
 }
 
 // spec 15.28
@@ -3102,10 +3389,15 @@ async fn is_secure_over_mqtts_and_wss_and_over_mqtt_and_ws_to_the_loopback_alone
         "secure"
     );
 
-    // what is none of its four is refused as it is built, and so is an id that is none
+    // what is none of its four is refused as it is built, and so is an IPv6 address followed by
+    // anything but its port (RFC 3986 §3.2.2), and an id that is none
     for (id, url) in [
         (ID, "http://broker.example"),
         (ID, "no url"),
+        (ID, "mqtt://[::1]junk:1884"),
+        (ID, "mqtt://[::1]junk"),
+        (ID, "ws://[::1]junk/mqtt"),
+        (ID, "mqtt://user@[::1]junk:1884"),
         ("", "mqtt://127.0.0.1"),
     ] {
         assert!(

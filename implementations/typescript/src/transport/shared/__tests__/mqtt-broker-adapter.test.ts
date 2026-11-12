@@ -593,7 +593,7 @@ test.describe('createMqttBrokerAdapter', () => {
     expect(await unsubackedOf(link, adapter.stop())).toEqual(['bead/i/ada', 'bead/d/bob']);
   });
 
-  test('lets a subscription go once its UNSUBACK came, naming the topic itself where it held none, and refuses it on a code of 0x80 or more (spec 15.27)', async () => {
+  test('lets a subscription go once its UNSUBACK came, naming the topic itself where it held none, and refuses it on any other code (spec 15.27)', async () => {
     const adapter = adapterOf(script);
     const link = await linkUp({ adapter, script });
     const answered = async (
@@ -617,12 +617,23 @@ test.describe('createMqttBrokerAdapter', () => {
     // * one its broker held none of is let go all the same, 0x11
     expect(await answered(['bead', 'd', 'bob'], 0x11)).toBe('bead/d/bob');
     expect(await answered(['bead', 'd', 'bob'], 0x00)).toBe('bead/d/bob');
-    await expect(answered(['bead', 'd', 'eve'], 0x87)).rejects.toThrow('0x87');
-    await expect(answered(['bead', 'd', 'eve'], 0x80)).rejects.toThrow('0x80');
 
-    // its link kept
+    const subscribing = adapter.subscribe(['bead', 'd', 'eve']);
+
+    await subackOf(link, 1);
+    await subscribing;
+
+    // * any other code: MQTT.js's parser hands none but those MQTT 5 names an UNSUBACK by, and
+    // loses its link on any other, 0x01 among them
+    for (const code of [0x80, 0x83, 0x87, 0x8f, 0x91]) {
+      const refused = `0x${code.toString(16).padStart(2, '0').toUpperCase()}`;
+
+      await expect(answered(['bead', 'd', 'eve'], code), refused).rejects.toThrow(refused);
+    }
+
+    // its link kept, and the filter refused its stop's to let go
     expect(adapter.isLinked).toBe(true);
-    await adapter.stop();
+    expect(await unsubackedOf(link, adapter.stop())).toEqual(['bead/d/eve']);
   });
 
   test('fails an unsubscription whose UNSUBACK has not come within connectTimeout, its link kept and no will gone, then reads the late UNSUBACK (spec 15.27)', async () => {
@@ -2317,10 +2328,15 @@ test.describe('createMqttBrokerAdapter', () => {
         'ws://broker.example/mqtt',
       ].map(secureOf)
     ).toEqual([true, true, true, true, true, false, false]);
-    // what is none of its four is refused as it is built, and so is an id that is none
+    // what is none of its four is refused as it is built, and so is an IPv6 address followed by
+    // anything but its port (RFC 3986 §3.2.2), and an id that is none
     for (const refused of [
       { id: ID, url: 'http://broker.example' },
       { id: ID, url: 'no url' },
+      { id: ID, url: 'mqtt://[::1]junk:1884' },
+      { id: ID, url: 'mqtt://[::1]junk' },
+      { id: ID, url: 'ws://[::1]junk/mqtt' },
+      { id: ID, url: 'mqtt://user@[::1]junk:1884' },
       { id: '', url: 'mqtt://127.0.0.1' },
     ]) {
       expect(() => {

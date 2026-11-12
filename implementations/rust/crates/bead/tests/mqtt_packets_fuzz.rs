@@ -40,7 +40,7 @@ const PACKETS: [&str; 14] = [
     "40 03 00 05 10",
     "40 09 00 05 87 05 1F 00 02 6E 6F",
     "90 04 00 01 00 01",
-    "B0 05 00 02 00 00 11",
+    "B0 04 00 02 00 11",
     "D0 00",
     "E0 00",
     "E0 07 8E 05 1F 00 02 6E 6F",
@@ -173,7 +173,7 @@ fn reads_every_seed_whole() -> Result<(), String> {
     assert_eq!(seeds.len(), PACKETS.len(), "a seed a packet");
     assert_eq!(
         digest_of(seeds),
-        "db5f9db1a9c692c6b1a72b50243647428c3e1593eb55442d2e72536525dbbae9",
+        "5aefa6a26a2fb2c54568282055a1c6fbc81423f0ebf2708bd154a6a265b1246e",
         "the seeds in their order, as tools/fuzz.mjs holds them"
     );
 
