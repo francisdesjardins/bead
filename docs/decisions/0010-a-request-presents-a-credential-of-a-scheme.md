@@ -534,6 +534,16 @@ plays over real sockets, since a rule that a side's own tests alone check is the
 nor its thumbprint (RFC 7638): `spec/check.py` refuses one, over the files git lists, and the demo's
 verifier refuses one ([0006](0006-a-rule-has-its-gate.md)).
 
+**An ES256 key whose `x` and `y` name no point of P-256 is taken as it is given**, on every side,
+since section 13.8's shape of a key names `EC` on `P-256`, its `x` and `y` 32 bytes each, and not
+the point (SEC 1 §3.2.2): each verification under it fails as the side reads the point, Web Crypto's
+import, .NET's `ECDsa` or RustCrypto's `p256`, and its call is answered `PROCEDURE_FAILED` and
+reported (section 9.2), never `SESSION_REQUIRED`, so its requester keeps its credential.
+
+**Ahead, by a decision of its own that meets the Tenth Man**: the point among the shape section
+13.8 holds a key to, so that such a key is refused as it is given, alike on every side and held by
+the conformance files.
+
 ## The Tenth Man
 
 What carries `ELSEWHERE` over a broker met the round of the broker's core, which

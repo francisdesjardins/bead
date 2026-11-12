@@ -269,11 +269,20 @@ bounds how many. A client's own queue toward a server that stops reading is its 
 HTTP/2, a head is HEADERS and CONTINUATION frames, which nghttp2, Kestrel and hyper's `h2` bound
 their own way, and no test holds.
 
-**Ahead, each by a decision of its own that meets the Tenth Man**: a bound on the payload bytes of
-the calls a connection has answered, as HTTP/2's connection window; a raise of
-`maximumAnsweringCalls` for one trusted connection; a requester's queue past it; a budget of what
-waits for every socket together, as `bodyBytesBudget` is for bodies; and 0030's fit of the bound per
-address, an IPv6 client keyed by its prefix and a value fit for a NAT, for both transports at once.
+**A cancel frees its call's place before its resolver ends**, on every side: the call leaves the
+count as its cancel comes (spec 10.2), and its resolver, told by its signal, runs on until it
+settles. The bound counts the calls a peer has a side answer, not the work they started: a peer
+that sends a request and then its cancel, again and again, has as many resolvers run at once as it
+likes, each holding its payload, HTTP/2's Rapid Reset (CVE-2023-44487) at the layer of calls. A
+resolver that heeds its signal ends its work with it.
+
+**Ahead, each by a decision of its own that meets the Tenth Man**: what bounds the resolvers a
+cancel leaves running, as Go's fix of CVE-2023-39325 counts a handler still running against
+`MaxConcurrentStreams`; a bound on the payload bytes of the calls a connection has answered, as
+HTTP/2's connection window; a raise of `maximumAnsweringCalls` for one trusted connection; a
+requester's queue past it; a budget of what waits for every socket together, as `bodyBytesBudget`
+is for bodies; and 0030's fit of the bound per address, an IPv6 client keyed by its prefix and a
+value fit for a NAT, for both transports at once.
 
 **The gate.** `spec/conversations.json`, played by every side: a request past the calls its
 connection has its side answer refused while the others go on, and one taken once a call ends; a

@@ -275,6 +275,84 @@ async fn ends_its_mqtt_websocket_with_a_close_frame_after_its_disconnect_packet(
     );
 }
 
+// * a message is bounded as a packet is, where [MQTT-6.0.0-2] lets a message hold several packets:
+// a row of docs/support.md
+#[tokio::test]
+async fn reads_a_websocket_message_of_two_packets_within_its_packet_bound_and_loses_its_link_on_one_past_it_each_packet_within_it()
+ {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mut options = options_over(&listener);
+
+    options.maximum_packet_size = Some(1_024);
+
+    let adapter = adapter_of(&options);
+    let heard = heard_of(&adapter);
+    let (offered, _offers) = mpsc::unbounded_channel();
+    let (sending, sent) = tokio::sync::oneshot::channel::<()>();
+    let (sending_past, sent_past) = tokio::sync::oneshot::channel::<()>();
+    let two_of = |payload: usize| {
+        let packet = publish(&Publish {
+            topic: "bead/i/ada".to_owned(),
+            payload: vec![0; payload],
+            ..Publish::default()
+        });
+
+        Bytes::from([packet.as_slice(), packet.as_slice()].concat())
+    };
+    let within = two_of(300);
+    let past = two_of(680);
+
+    assert!(within.len() < 1_024, "two packets within its bound");
+    assert!(
+        past.len() > 1_024 + 14 && past.len() / 2 < 1_024,
+        "two packets past it together, each within it"
+    );
+
+    let peer = spawn(async move {
+        let (socket, _) = listener.accept().await.unwrap();
+        let mut peer = tokio_tungstenite::accept_hdr_async(
+            socket,
+            Answered {
+                subprotocol: Some("mqtt"),
+                offered,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(binary_of(&mut peer).await[0], 0x10, "a CONNECT");
+        peer.send(Message::Binary(Bytes::from(connack(&Connack::default()))))
+            .await
+            .unwrap();
+        sent.await.unwrap();
+        peer.send(Message::Binary(within)).await.unwrap();
+        sent_past.await.unwrap();
+        peer.send(Message::Binary(past)).await.unwrap();
+
+        while let Some(Ok(message)) = peer.next().await {
+            assert!(
+                !matches!(message, Message::Binary(_)),
+                "no DISCONNECT on the failed connection"
+            );
+        }
+    });
+
+    adapter.start(BrokerStart::default()).await.unwrap();
+    sending.send(()).unwrap();
+    until(|| heard.messages().len() == 2).await;
+    assert!(heard.downs().is_empty(), "its link kept");
+    sending_past.send(()).unwrap();
+    until(|| !heard.downs().is_empty()).await;
+    assert_eq!(
+        heard.downs(),
+        vec![down(false)],
+        "a message past its bound loses the link once, each of its packets within it"
+    );
+    assert_eq!(heard.messages().len(), 2, "nothing of it handed on");
+    adapter.stop().await;
+    patience(PATIENCE, peer).await.unwrap().unwrap();
+}
+
 #[tokio::test]
 async fn loses_its_link_on_a_websocket_frame_past_its_packet_bound_and_frame_head() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

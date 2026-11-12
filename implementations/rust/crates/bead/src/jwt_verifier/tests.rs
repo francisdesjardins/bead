@@ -406,6 +406,58 @@ fn reads_the_wall_clock_once_the_signature_verifies_so_a_verification_that_waits
     );
 }
 
+// ! a `String` holds no surrogate alone: the claim's value is read as null, which names nothing,
+// where the TypeScript side keeps its string of one unit and the C# side its `JsonElement` (RFC
+// 8259 §8.2), a row of docs/support.md
+#[test]
+fn reads_a_claim_holding_a_surrogate_alone_as_null_and_refuses_at_sub_a_token_whose_sub_holds_one()
+{
+    let (token, keys, audiences, now) = holding();
+    let claims = String::from_utf8(
+        base64url::decode(token.split('.').nth(1).expect("its claims").as_bytes())
+            .expect("base64url"),
+    )
+    .expect("UTF-8");
+    let alone = signed_text(
+        HEADER,
+        &format!(
+            r#"{},"name":"\ud800","kept":"a😀"}}"#,
+            claims.strip_suffix('}').expect("an object's text")
+        ),
+    );
+    let reading = move || now;
+    let against = JwtAgainst {
+        audiences: &audiences,
+        keys: &keys,
+        now: &reading,
+    };
+    let JwtVerdict::Holds { claims: held, .. } =
+        verify_jwt(alone.as_bytes(), &against).expect("judged")
+    else {
+        panic!("{alone} holds");
+    };
+
+    assert_eq!(held.get("name"), Some(&Value::Null), "a surrogate alone");
+    assert_eq!(
+        held.get("kept"),
+        Some(&Value::String("a\u{1F600}".to_owned())),
+        "a pair of surrogates, one character"
+    );
+
+    // its subject a surrogate alone: none named, refused as a token that names no subject is
+    let unnamed = signed_text(
+        HEADER,
+        &claims.replace(r#""sub":"bob""#, r#""sub":"\ud800""#),
+    );
+
+    assert!(claims.contains(r#""sub":"bob""#), "its sub replaced");
+    assert_eq!(
+        verify_jwt(unnamed.as_bytes(), &against).expect("judged"),
+        JwtVerdict::Refused(JwtRefusal::Sub),
+        "refused at sub"
+    );
+}
+
 // SEC 1 §3.2.2: a key of ES256 whose x and y name no point of P-256 is the application's fault,
 // which fails the verification, as the other sides' import of it does; never the token's
 #[test]

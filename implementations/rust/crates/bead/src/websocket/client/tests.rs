@@ -592,6 +592,47 @@ Sec-WebSocket-Extensions: permessage-deflate
     held.stop.cancel();
 }
 
+// ! tungstenite matches `Connection` whole against `Upgrade`, where RFC 6455 §4.1 and RFC 9110 §7.6.1
+// read a list of tokens: a 101 that lists another is refused, as .NET's client and the global
+// WebSocket refuse it and `ws` opens on it, a row of docs/support.md
+#[tokio::test]
+async fn fails_a_101_whose_connection_lists_upgrade_among_other_tokens() {
+    let mut held = holding().await;
+    let client = client();
+    let connecting = client.connect(&to(held.port));
+    let mut socket = held.next().await;
+    let asked = String::from_utf8(head_of(&mut socket).await).unwrap();
+    let key = asked
+        .lines()
+        .find_map(|line| {
+            line.split_once(':')
+                .filter(|(name, _)| name.eq_ignore_ascii_case("sec-websocket-key"))
+                .map(|(_, key)| key.trim().to_owned())
+        })
+        .unwrap();
+    let accept = tungstenite::handshake::derive_accept_key(key.as_bytes());
+
+    socket
+        .write_all(
+            format!(
+                "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: keep-alive, Upgrade\r\nSec-WebSocket-Accept: {accept}\r\n\r\n"
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+
+    let refused = settled(connecting).await;
+
+    assert!(
+        matches!(&refused, Err(TransportError::Connect(error)) if error.to_string().contains("Connection")),
+        "{refused:?}"
+    );
+    assert!(is_state(&client, ReadyState::Closed), "closed");
+    assert!(ends(&mut socket).await, "its socket let go");
+    held.stop.cancel();
+}
+
 #[tokio::test]
 async fn rejects_with_a_connect_error_when_nothing_listens() {
     let client = client();

@@ -996,6 +996,40 @@ public sealed partial class RouterServerTests
         Assert.Empty(Reported());
     }
 
+    // spec 9.2 step 6, SEC 1 §3.2.2: a key of ES256 whose x and y name no point of P-256 fails the
+    // verifier, the application's fault, as its import throws: its call answered PROCEDURE_FAILED and
+    // reported, never SESSION_REQUIRED, which would have its requester withdraw a credential that holds
+    [Fact]
+    public async Task Answers_a_call_under_an_ES256_key_off_its_curve_PROCEDURE_FAILED_and_reports_it_never_SESSION_REQUIRED()
+    {
+        var ones = Base64Url.EncodeToString([.. Enumerable.Repeat((byte)1, 32)]);
+        var part = (object value) =>
+        {
+            return Base64Url.EncodeToString(JsonSerializer.SerializeToUtf8Bytes(value));
+        };
+        var exp = _time.GetUtcNow().ToUnixTimeSeconds() + 3_600;
+        var token = $"{part(new Dictionary<string, string> { ["alg"] = "ES256", ["typ"] = "at+jwt" })}.{part(new Dictionary<string, object> { ["aud"] = Audience, ["exp"] = exp, ["iss"] = Issuer, ["sub"] = "grace" })}.{Base64Url.EncodeToString([.. Enumerable.Repeat((byte)1, 64)])}";
+
+        Start(new RouterServerOptions
+        {
+            Credentials = new Credentials
+            {
+                Audience = Audience,
+                Keys = [new JwtKey { Algorithm = JwtAlgorithm.Es256, Issuer = Issuer, Jwk = JsonSerializer.SerializeToElement(new Dictionary<string, string> { ["crv"] = "P-256", ["kty"] = "EC", ["x"] = ones, ["y"] = ones }) }],
+            },
+        });
+        _transport.Open(First);
+        Services.GetRequestResolver(Echo, new RequestResolverDependencies<string, string> { Serializer = Text })((_, response) =>
+        {
+            return response.Answer("ran");
+        });
+        Deliver(First, Presenting(RequestOf(1), Credential.Jwt(token)));
+        await Settle();
+
+        Assert.Equal(["first failure 1 ProcedureFailed"], SentSince());
+        Assert.Single(Reported());
+    }
+
     [Fact]
     public void Refuses_as_it_is_built_keys_or_a_key_set_without_an_audience_whatever_its_relay_does_and_a_key_set_given_no_issuer()
     {

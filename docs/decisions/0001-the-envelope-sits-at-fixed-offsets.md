@@ -183,6 +183,18 @@ both ends, and what a router receives holds a budget of its own, 256 MiB by defa
 credit grants it: a transfer admitted may still stall should that budget not free. A payload of
 several gigabytes needs a stream, a decision of its own.
 
+**Transfers can share the budget out and none complete**, on every side. A transfer holds its
+opening's bytes and each credit's until it completes or closes, so several, each within the budget
+alone, can hold all of it between them before any completes: each then waits on a credit that only
+another's end would free, a wait in a circle, Coffman's hold and wait. At the defaults, some twenty
+uploads of 16 MiB under way at once can reach it. Each ends `TRANSFER_STALLED` once
+`transferInactivityTimeout` passes, which tells its sender stalled where its receiver held back the
+credit; and a credit the budget grants once it frees sets no transfer's inactivity going again,
+which section 12.8 has each credit that grants do.
+
+**Ahead, by a decision of its own that meets the Tenth Man**: a budget that sees every transfer it
+admits to its end, and a stall that names the side that caused it.
+
 **The why is here, the rule is in [`spec/spec.md`](../../spec/spec.md)**, sections 1 to 10, 12 and
 15, and the bytes are in `spec/vectors.json`, which every implementation reads
 ([0004](0004-one-behaviour-in-every-language.md)).

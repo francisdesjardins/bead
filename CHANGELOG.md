@@ -43,6 +43,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   error, with the refusal, or with the failure its router answered in its place; its duration ends
   with that settling. An answer refused or answered in its place is no longer told twice (debugging
   4.2, decision 0013).
+- The support matrix and decisions 0041 and 0049 correct three statements: the Rust side's HTTP
+  server bounds an HTTP/2 head by its size alone, 16 KiB as h2 counts it, and no count of its
+  fields; the TypeScript side's transport sets no bound on an HTTP/2 session, which its
+  application's `createServer` holds; and the sides part on a Server Keep Alive of 0 or longer than
+  their own, each a row of the matrix's differences.
 
 ### Removed
 
