@@ -30,7 +30,10 @@
     <li><span class="swatch seg-payload"></span>the payload</li>
   </ul>
   <ol class="space">
-    <li>An <a href="#enveloppe">envelope</a> of 8 bytes at fixed offsets, then the payload.</li>
+    <li>
+      An <a href="#enveloppe">envelope</a>: an 8-byte prefix and fields at fixed offsets, then the
+      payload.
+    </li>
     <li>A <a href="#callid">callId</a> pairs each answer with its call, in both directions.</li>
     <li>A <a href="#echecs">failure</a> carries a code whose block says the stage it reached.</li>
     <li>
@@ -39,7 +42,7 @@
     </li>
     <li>
       A <a href="#sessions">credential</a> on each call, which <a href="#relais">relays</a>
-      forward.
+      forward when it is a bearer one.
     </li>
     <li>
       One behaviour in <a href="#implantations">every language</a>, played from the same
@@ -55,7 +58,7 @@
     <li>no required dependency on the TypeScript side</li>
   </ul>
   <p class="space">
-    Each section gives its gist first. The detail is folded under a triangle, and the
+    Each section gives its gist first. The longer details are folded under a triangle, and the
     specification, <a href="{{blob path="spec/spec.md"}}"><code>spec/spec.md</code></a>, keeps the
     whole text: references such as §12 point at its sections.
   </p>
@@ -96,7 +99,7 @@
         <tr>
           <th scope="row">The fields</th>
           <td>One field a byte, or an aligned word</td>
-          <td>Nothing to mask or to shift</td>
+          <td>Each field read whole at its offset; a flag is one bit to test</td>
         </tr>
         <tr>
           <th scope="row">The failure</th>
@@ -110,8 +113,10 @@
         </tr>
         <tr>
           <th scope="row">The header</th>
-          <td>12 bytes for a request, 16 for a chunk or a credit, 8 for the others</td>
-          <td>A size known from the kind and the flags</td>
+          <td>
+            12 bytes for a request, 16 for a chunk or a credit, 8 for the others, before its blocks
+          </td>
+          <td>A size known from the kind, the flags and a credential’s length</td>
         </tr>
       </tbody>
     </table>
@@ -250,16 +255,16 @@
     command.
   </p>
   <p>
-    Each side walks through its 2<sup>31</sup> callIds, skipping those in use or reserved. At
-    10,000 calls a second, a lap takes two and a half days. When every one is taken, the call fails
+    Each side walks through its half of the callIds, about 2<sup>31</sup>, skipping those in use
+    or reserved. At 10,000 calls a second, a lap takes two and a half days. When every one is taken, the call fails
     on the spot with <code>CAPACITY_EXCEEDED</code>.
   </p>
   <p>
     A peer has the other answer 64 calls at once on a connection,
     <code>maximumAnsweringCalls</code>, as HTTP/2 bounds the streams a peer opens. Nothing
     announces this number: both ends set it alike. The requester keeps to it, and the receiver
-    refuses one more request with <code>CAPACITY_EXCEEDED</code> before reading anything of it
-    (§9.2).
+    refuses one more request with <code>CAPACITY_EXCEEDED</code> before reading anything past
+    its prefix (§9.2).
   </p>
   <p>
     An answer goes once, and only while its call is open. One that arrives after a cancel or a
@@ -288,7 +293,8 @@
   <p class="space">
     The protocol’s codes go in blocks of 16, by the stage reached: the envelope, the route, the
     admission, the payload, the procedure. A peer that does not know a code knows its stage at
-    least. Each failure has one of four fates.
+    least. Each failure meets one of four fates. A code marked with two meets one or the other,
+    according to the side that raises it.
   </p>
   <ul class="fates" aria-label="A failure’s fate">
     <li><span class="fate fate-answered">answered</span>sent to the peer, on the request’s callId</li>
@@ -302,8 +308,10 @@
   {{failures}}
   <h3 id="echecs-code">In the code</h3>
   <p>
-    The requester receives a <code>FailureError</code>. <code>isProtocol</code> tests a code of the
-    protocol, <code>isApplication</code> a code of the procedure.
+    On the TypeScript side, the requester receives a <code>FailureError</code>:
+    <code>isProtocol</code> tests a code of the protocol, <code>isApplication</code> a code of the
+    procedure. The C# side’s <code>FailureException</code> and the Rust side’s <code>Failure</code>
+    ask the same.
   </p>
   {{code of="failure"}}
 </section>
@@ -332,8 +340,8 @@
   <p class="gist">
     A request must often hold more than its encoding says: a count of 10 at most, a name of 1 to 63
     characters. Those rules are written in the <code>.proto</code> with protovalidate’s options,
-    the protobuf ecosystem’s standard, and <code>beadc</code> compiles them into native validators
-    in each language.
+    the protobuf ecosystem’s standard, and <code>beadc</code> compiles them into native validators,
+    in TypeScript and in C#; the Rust side’s come with <code>beadc</code>’s Rust target.
   </p>
   {{code of="rules-proto" language="plaintext"}}
   <p class="space">
@@ -362,16 +370,18 @@
   <details class="more">
     <summary>What <code>beadc</code> compiles, and how a pattern is judged</summary>
     <p>
-      <code>beadc</code> compiles <code>required</code> and <code>ignore</code>, a number’s bounds
-      and lists of values, the lengths, pattern, prefix and suffix of a string or of bytes, an
-      enum’s values, a list’s and a map’s rules, and <code>oneof</code>. It refuses any other rule,
+      <code>beadc</code> compiles <code>required</code> and <code>ignore</code>; a constant, on any
+      scalar or an enum; a number’s bounds and a float’s finiteness; a list of values, for a number,
+      a string or an enum; the lengths, prefix, suffix and contents of a string or of bytes, and a
+      string’s pattern; an enum’s defined values; a list’s and a map’s rules; and
+      <code>oneof</code>. It refuses any other rule, CEL and a pattern of bytes among them,
       <code>VALIDATE_RULE_UNSUPPORTED</code>, and ignores none: a rule written and not played would
       let through what a protovalidate server refuses.
     </p>
     <p>
       A pattern follows RE2’s syntax and is judged in linear time, with no backtracking (CWE-1333).
-      <code>beadc</code> builds its automaton ahead, from its own Unicode tables, and each side reads
-      one cell a character. Violations follow an order Bead fixes, field by field. The order, the
+      <code>beadc</code> builds its automaton ahead, from its own Unicode tables, and each validator
+      reads one cell a character. Violations follow an order Bead fixes, field by field. The order, the
       paths and the detail’s format are in §18.
     </p>
   </details>
@@ -415,9 +425,11 @@
   <h3 id="abonnements-rythme">At the client’s pace</h3>
   <p>
     With PACED beside SUBSCRIPTION, the server sends only the notifications the client has
-    granted. The client grants the next one when its callbacks are done with the previous one,
-    promises included. It grants with a CREDIT that carries PACED, an absolute count like RSocket’s
-    <code>REQUEST_N</code>.
+    granted. The client grants as its callbacks finish, promises included: with a window of one, the
+    next notification once they are done with the previous one; with a wider window, as far as that
+    window past what they finished, renewed at its half. It grants with a CREDIT that carries PACED:
+    a count of notifications, as RSocket’s <code>REQUEST_N</code> is, but absolute, as a transfer’s
+    credit is.
   </p>
   <p>
     Past its credit, a notification waits in a queue. The server can give it a key. A notification
@@ -563,8 +575,9 @@
     <p>
       An application can give a key set for some issuers. Bead asks for it when no known key carries
       the token’s <code>kid</code>, at most once a minute per issuer, so that no peer has it queried
-      at will. The keys received hold for ten minutes. At most 64 calls wait on one request, then
-      the next receives <code>CAPACITY_EXCEEDED</code>. Bead fetches nothing by itself: the function
+      at will. The keys received hold for ten minutes. At most 64 calls of one issuer wait for its
+      next ask, then the next call receives <code>CAPACITY_EXCEEDED</code>; a call that waits on an
+      ask under way is never counted. Bead fetches nothing by itself: the function
       that brings the keys belongs to the application (§13.9).
     </p>
   </details>
@@ -588,7 +601,9 @@
   </p>
   <p>
     When a call that presented the default receives <code>SESSION_REQUIRED</code>, the client
-    withdraws that default and tells the application, <code>credentialWithdrawn</code>. Until it
+    withdraws that default and tells the application, <code>credentialWithdrawn</code>. A failure
+    that ends a subscription already answered withdraws nothing, since the credential may still
+    hold. Until it
     gives a new one, each call that would present it fails before it goes. No call thus falls in
     silence into another session. For the same reason, an admission answers
     <code>ACCESS_DENIED</code>, never <code>SESSION_REQUIRED</code>, to a call that presented a
@@ -626,7 +641,7 @@
   <p>
     A transfer is refused before its mass goes by. Its opening passes the route, the credential,
     the admission and the limits before a single byte is granted. A receiver holds four transfers
-    per connection at most, and 256 MiB for all of them together.
+    per connection at most, and 256 MiB for all it receives, on all its connections.
   </p>
   <figure class="figure">
     <figcaption>A transfer, then a refusal at the opening</figcaption>
@@ -659,7 +674,10 @@
   </details>
   <details class="more" id="limites">
     <summary>The limits, and what a transport owes Bead</summary>
-    <p>Nothing announces the limits: both ends of a connection set them alike.</p>
+    <p>
+      Nothing announces the limits: both ends of a connection set them alike, but the last row’s,
+      which each side sets for itself.
+    </p>
     <div class="table-wrap">
       <table>
         <thead>
@@ -678,7 +696,7 @@
           <tr>
             <td><code>chunkBytes</code></td>
             <td class="code-num">1,048,576</td>
-            <td>A chunk, and a whole request</td>
+            <td>A chunk, and a request, whole or a transfer’s opening</td>
           </tr>
           <tr>
             <td><code>windowBytes</code></td>
@@ -699,6 +717,11 @@
             <td><code>maximumTransfers</code></td>
             <td class="code-num">4</td>
             <td>The transfers received at once on a connection</td>
+          </tr>
+          <tr>
+            <td><code>maximumChunkRuns</code></td>
+            <td class="code-num">1,024</td>
+            <td>The runs of bytes apart a transfer holds before it is whole</td>
           </tr>
           <tr>
             <td><code>transferInactivityTimeout</code></td>
@@ -771,7 +794,11 @@
           <td>That result, or that failure counted one relay more</td>
         </tr>
         <tr>
-          <td>An error before its transport has the request</td>
+          <td>A limit of leg B’s, a payload or a capacity, before its transport has the request</td>
+          <td>That refusal, the relay’s own</td>
+        </tr>
+        <tr>
+          <td>Any other error before its transport has the request</td>
           <td><code>DESTINATION_UNREACHABLE</code> (17): nothing was tried</td>
         </tr>
         <tr>
@@ -782,7 +809,8 @@
     </table>
   </div>
   <p class="space">
-    These two codes are an HTTP gateway’s 502 and 504, and what gRPC’s retry rules rest on.
+    These two codes are an HTTP gateway’s 503 and 502, as Bead’s gateway answers them, and what
+    gRPC’s retry rules rest on.
   </p>
   <details class="more">
     <summary>What a relay does not do, and what its requesters share</summary>
@@ -814,9 +842,10 @@
   </p>
   <p>
     WebSocket does all that Bead asks of a transport: it delimits messages, carries both directions
-    and delivers in order. Each end sends a PING every 30 s, and closes a connection left without
-    an answer: a peer gone without a word ends in a close, instead of staying open forever. A
-    message past <code>maximumMessageBytes</code> closes the connection with code 1009 (RFC 6455).
+    and delivers in order. Each end, where its platform lets it, sends a PING every 30 s and closes
+    a connection left without an answer: a peer gone without a word ends in a close, instead of
+    staying open forever. The global <code>WebSocket</code>, a page’s or Node’s, sends none, and the
+    server’s pings stand for it. A message past <code>maximumMessageBytes</code> closes the connection with code 1009 (RFC 6455).
   </p>
   <p>
     A <code>POST</code> with no body connects. The server answers 201 with a 16-byte token in the
@@ -848,7 +877,7 @@
     <code>bead-after</code> field, and the rest comes again.
   </p>
   <p>
-    A listen lost resumes where it was, after 1, 2, 4 s and up to 30, each wait drawn at random. A
+    A listen lost resumes where it was, at once, then after 1, 2, 4 s and up to 30, each wait drawn at random. A
     brief cut costs nothing: the same connection, its session, its subscriptions, and all that
     arrived meanwhile, in order. It is a long poll (RFC 6202): no heartbeat, and nothing an
     intermediary buffers.
@@ -867,8 +896,8 @@
     <p>
       A request’s head must come whole within 30 s, <code>headersTimeout</code>, or the server
       answers 408. A body must come at 240 bytes a second at least, past a grace of 5 s, or it
-      receives 408 <code>too-slow</code>. Each field must be visible ASCII, or the request receives
-      400 before anything else (§15.12).
+      receives 408 <code>too-slow</code>. A field that holds a control character other than a tab,
+      or a byte past ASCII, is refused before anything else, 400 over HTTP/1.1 (§15.12).
     </p>
     <p>
       WebSocket’s handshake is an HTTP request. The WebSocket server judges it by its own
@@ -895,7 +924,7 @@
   </p>
   <p>
     The joined transport, <code>joinTransports</code> on the TypeScript side and
-    <code>JoinedServerTransport</code> on the C# side, gives one router, one admission, one handling
+    <code>JoinedServerTransport</code> on the C# and Rust sides, gives one router, one admission, one handling
     of sessions, and each service offered once, whatever the call’s transport. Each connection
     stays its transport’s. That is how the <a href="#transcodage">HTTP/JSON gateway</a> calls its
     application’s server. Each transport takes the procedures it is given, every one by default: a
@@ -980,7 +1009,7 @@
   <p class="gist">
     Beside the binary wire, a gateway answers a service’s procedures in HTTP and JSON. A page,
     <code>curl</code> or a client generated from an OpenAPI document call them knowing nothing of
-    Bead.
+    Bead. The TypeScript and C# sides each offer one; the Rust side’s is ahead.
   </p>
   <p>
     The gateway is one more client of its application’s server, through the
@@ -1026,8 +1055,8 @@
       <code>update_mask</code> gets one from its body’s keys, as AIP-134 has it.
     </p>
     <p>
-      <code>beadc</code> writes each side’s route table and one OpenAPI 3.1.1 document of the
-      procedures an output’s <code>gateway</code> selects, the whole blueprint by default, the same
+      <code>beadc</code> writes the route table of the TypeScript and C# sides, and one OpenAPI
+      3.1.1 document of the procedures an output’s <code>gateway</code> selects, the whole blueprint by default, the same
       bytes whatever writes it. The gateway serves it at
       <code>/openapi.json</code>, with an <code>etag</code>. A payload’s rules are written there in
       JSON Schema 2020-12’s words. The detail is in the companion’s §3, §4 and §11.
@@ -1038,9 +1067,11 @@
     A <code>proto</code> payload is written in protobuf’s JSON mapping. A <code>json</code> payload
     passes as it is, a <code>text</code> one as <code>text/plain</code>, a <code>raw</code> one as
     <code>application/octet-stream</code>. The reference libraries do not agree on that mapping, so
-    Bead has its own reader and writer in each language. It writes one form: no white space, the
-    members in the order of their field numbers, a map’s entries sorted. In CI, protobuf’s
-    conformance suite, in binary and in JSON, plays that mapping on each side.
+    Bead has its own reader and writer, on the TypeScript and C# sides; the Rust side’s comes with
+    its gateway. It writes one form: no white space, the members in the order of their field
+    numbers, a map’s entries sorted. In CI, protobuf’s conformance suite, in binary and in JSON,
+    plays that mapping on those two sides; the Rust side plays the suite too, its JSON through its
+    protobuf library, Buffa.
   </p>
   <h3 id="transcodage-echecs">A failure, a problem</h3>
   <p>
@@ -1073,13 +1104,15 @@
     <p>
       The gateway judges a request by the HTTP transport’s gates, in the same order, then adds Fetch
       Metadata: a request with no <code>origin</code> from another site is refused 403, but a
-      navigation to the document or to a <code>GET</code> route. A call waits 5 s for its answer by
+      navigation to the document or to the <code>GET</code> of a procedure marked
+      <code>NO_SIDE_EFFECTS</code>. A call waits 5 s for its answer by
       default, then receives 504, and no field of the request changes that timeout. A request
       abandoned closes its connection, and the server cancels its calls.
     </p>
     <p>
       What the wire can do and a gateway does not carry is a row of the support matrix’s “Leveled
-      down”: a command, a connection’s session, a stream’s resumption (the companion’s §10).
+      down”: a connection’s session, a command, a stream’s resumption and its window (the
+      companion’s §2.5, §2.6, §8.3 and §8.8).
     </p>
   </details>
   <h3 id="transcodage-client">The client beadc writes</h3>
@@ -1154,8 +1187,9 @@
     <figcaption>A server’s gates, from the address to the procedure</figcaption>
     {{diagram of="guards"}}
     <p class="note">
-      The first three gates are the HTTP and WebSocket transports’, and their refusals are HTTP
-      statuses. The next ones are the router’s, on any transport, and their refusals are FAILUREs on
+      The first three gates are the HTTP and WebSocket transports’: the address’s refusal is the
+      system’s, with no answer, and those of the hosts and the origins are HTTP statuses. The next
+      ones are the router’s, on any transport, and their refusals are FAILUREs on
       the call’s callId.
     </p>
   </figure>
@@ -1216,8 +1250,8 @@
     </li>
     <li>
       <strong>Rate</strong
-      ><span>Bead bounds what a peer holds of a server, and counts nothing per second. Rate
-        limiting falls to the deployment.</span>
+      ><span>Bead bounds what a peer holds of a server, and holds a slow peer to a minimum pace,
+        but caps no rate. Rate limiting falls to the deployment.</span>
     </li>
     <li>
       <strong>A stolen token</strong
@@ -1287,7 +1321,8 @@
       therefore tells its application each refusal it judges: the status, the reason, the request’s
       authority and origin, the client’s address and port. Never the target, nor a token. Behind a
       proxy, it believes <code>X-Forwarded-For</code> only from the proxies
-      <code>trustedProxies</code> names.
+      <code>trustedProxies</code> names, and from as many others as <code>unnamedProxies</code>
+      counts.
     </p>
     {{code of="refusal"}}
   </details>
@@ -1376,8 +1411,8 @@
     envelope, its header copied without its credential.
   </p>
   <p>
-    With no listener, a call reads no clock and allocates nothing for the trace: one check per call,
-    one per envelope. A listener that throws never changes a call. Its error goes to the
+    With no listener and no registry, a call reads no clock and allocates nothing for debugging:
+    one check per call, one per envelope. A listener that throws never changes a call. Its error goes to the
     <code>error</code> event, and the call keeps the same outcome and the same bytes on the wire.
   </p>
   <p>
@@ -1509,12 +1544,13 @@
     </li>
     <li>
       <strong>A credential scheme to come</strong
-      ><span>4 to 65,535: read whole, then refused <code>CREDENTIAL_UNSUPPORTED</code>.</span>
+      ><span>4 to 65,535: read whole; on a request, refused <code>CREDENTIAL_UNSUPPORTED</code>;
+        on a result or a failure, <code>ENVELOPE_MALFORMED</code>.</span>
     </li>
     <li>
       <strong>The limits</strong
       ><span>Nothing announces them. What exceeds the other’s limit is refused, never
-        truncated.</span>
+        truncated, save a failure’s detail, cut at its bound on a character’s boundary.</span>
     </li>
     <li>
       <strong>Any other bit</strong
@@ -1555,8 +1591,8 @@
             transfers, relays, debugging and metrics
           </td>
           <td>
-            The same, but a payload’s rules: their validators come with <code>beadc</code>’s Rust
-            target
+            The same, but a payload’s rules, whose validators come with <code>beadc</code>’s Rust
+            target, and a service manager over a router of the application’s own
           </td>
         </tr>
         <tr>
@@ -1564,7 +1600,7 @@
           <td>WebSocket, HTTP, Web Worker, in memory, a broker over MQTT 5 or AMQP 1.0, and joined</td>
           <td>WebSocket, HTTP on Kestrel, in memory, a broker over MQTT 5 or AMQP 1.0, and joined</td>
           <td>
-            WebSocket and HTTP on hyper, in memory, a broker over MQTT 5, and joined
+            WebSocket on tungstenite, HTTP on hyper, in memory, a broker over MQTT 5, and joined
           </td>
         </tr>
         <tr>
@@ -1593,8 +1629,9 @@
   <p>
     The sides also measure themselves, on the loopback. TypeScript and C# measure the same layers
     in the same units: the codec, an <code>echo</code> over HTTP and over WebSocket, paced
-    notifications, a 20 MiB transfer. Rust measures its in-memory calls. Each release keeps each
-    side’s report and compares it with the previous one’s.
+    notifications, a 20 MiB transfer. Rust measures its in-memory calls. On each release’s branch,
+    CI measures each side against the last release, both trees in turn on one machine, and compares
+    them: a regression is read and judged, never a gate.
   </p>
   <h3 id="implantations-beadc">Generated from a <code>.proto</code></h3>
   <p>
@@ -1669,20 +1706,22 @@
     is a row of <a href="{{blob path="docs/support.md"}}"><code>docs/support.md</code></a>, with the
     test that shows it.
   </p>
-  <h3 id="methode-horloge">Time passed in, never taken</h3>
+  <h3 id="methode-horloge">Time passed in</h3>
   <p>
-    No side reads the time of its own. The TypeScript side takes a clock, the part of the globals
-    it calls, so a test gives it a clock it advances by hand, and a timeout fires when the test
-    says so; <code>spec/clocks.json</code> holds what every side’s test clock does:
+    A call’s timeout, and the rest of what the specification times, each side takes from a clock it
+    is given; a heartbeat, and what bounds a platform’s own socket, parser, close or connect, run on
+    the real clock. The TypeScript side takes a clock, the part of the globals it calls, so a test
+    gives it a clock it advances by hand, and a timeout fires when the test says so;
+    <code>spec/clocks.json</code> holds what every side’s test clock does:
   </p>
   {{excerpt path="implementations/typescript/src/transport/shared/clock.ts" lines="export interface IClock -> =}"}}
   <p class="space">
     On the Rust side, spawning and time go through one module, <code>crate::platform</code>, and
-    the clock alone. Clippy’s <code>disallowed-methods</code> refuses every other path, so the core
-    also compiles for a browser’s WebAssembly, <code>wasm32-unknown-unknown</code>, which CI
-    checks:
+    the clock alone. Clippy’s <code>disallowed-methods</code> and <code>disallowed-types</code>
+    refuse every other path, so the core also compiles for a browser’s WebAssembly,
+    <code>wasm32-unknown-unknown</code>, which CI checks:
   </p>
-  {{excerpt path="implementations/rust/clippy.toml" language="toml" lines="# The core spawns -> Handle::spawn ;; tokio::task::spawn -> tokio::task::spawn ;; tokio::time::sleep -> tokio::time::sleep ;; SystemTime::now -> SystemTime::now"}}
+  {{excerpt path="implementations/rust/clippy.toml" language="toml" lines="# The core spawns -> disallowed-methods = [ ;; Handle::spawn -> Handle::spawn ;; tokio::task::spawn -> tokio::task::spawn ;; tokio::time::sleep -> tokio::time::sleep ;; SystemTime::now -> SystemTime::now ;; disallowed-types -> =]"}}
   <h3 id="methode-portes">Every rule a gate</h3>
   <p>
     A rule that matters is a CI gate, not a convention: the conformance files regenerated and
@@ -1716,7 +1755,8 @@
   <ul class="rules">
     <li>
       <strong>Rust in full</strong
-      ><span>Its target in <code>beadc</code>, its gateway and its AMQP 1.0 binding.</span>
+      ><span>Its target in <code>beadc</code>, its gateway, its AMQP 1.0 binding, and its service
+        manager over a router of the application’s own.</span>
     </li>
     <li>
       <strong>Rules in CEL</strong
@@ -1753,8 +1793,8 @@
     </li>
     <li>
       <strong>A counted call’s cost</strong
-      ><span>Measured against a call that is not counted, and a guard against a regression of the
-        benches.</span>
+      ><span>Measured against a call that is not counted, on each side, a measure beside those the
+        benches take.</span>
     </li>
     <li>
       <strong>A constrained C side</strong

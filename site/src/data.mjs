@@ -334,7 +334,7 @@ export const STAGES = Object.freeze([
 ]);
 
 // a failure's fate: answered to the peer, reported locally, rejected before it goes, or as the gate
-// lets it
+// lets it; a code may have two
 export const FATES = Object.freeze({
   answered: ['answered', 'répondu'],
   reported: ['reported', 'signalé'],
@@ -366,8 +366,8 @@ export const FAILURES = Object.freeze([
     3,
     'reported',
     [
-      'A kind to come, 0x17 to 0x7F, or a NOTIFICATION a server received.',
-      'Un genre à venir, de 0x17 à 0x7F, ou une NOTIFICATION reçue par un serveur.',
+      'A kind to come, 0x17 to 0x7F; a NOTIFICATION a server received, or a credit of notifications a client received.',
+      'Un genre à venir, de 0x17 à 0x7F ; une NOTIFICATION reçue par un serveur, ou un crédit de notifications reçu par un client.',
     ],
   ],
   [
@@ -391,7 +391,7 @@ export const FAILURES = Object.freeze([
   [
     'DESTINATION_UNREACHABLE',
     17,
-    'answered',
+    ['answered', 'rejected'],
     [
       'The request could not leave for its destination: nothing was tried.',
       'La requête n’a pas pu partir vers sa destination : rien n’a été tenté.',
@@ -439,7 +439,7 @@ export const FAILURES = Object.freeze([
   [
     'SESSION_REQUIRED',
     32,
-    'answered',
+    ['answered', 'rejected'],
     [
       'The credential does not hold, or the procedure wants a session the call lacks; also sent when a session ends.',
       'Le justificatif ne tient pas, ou la procédure veut une session que l’appel n’a pas ; envoyé aussi quand une session finit.',
@@ -457,16 +457,16 @@ export const FAILURES = Object.freeze([
   [
     'PAYLOAD_TOO_LARGE',
     34,
-    'rejected',
+    ['answered', 'rejected'],
     [
-      'The payload is past its procedure’s or its router’s limit, 16 MiB by default.',
-      'La charge dépasse la limite de sa procédure ou du routeur, 16 Mio par défaut.',
+      'The payload, or a transfer’s total, is past its procedure’s or its router’s limit, 16 MiB by default.',
+      'La charge, ou le total d’un transfert, dépasse la limite de sa procédure ou du routeur, 16 Mio par défaut.',
     ],
   ],
   [
     'CAPACITY_EXCEEDED',
     35,
-    'answered',
+    ['answered', 'rejected'],
     [
       'Too many calls at once, no free callId left, or a full queue or budget.',
       'Trop d’appels à la fois, plus aucun callId libre, ou une file ou un budget plein.',
@@ -514,7 +514,7 @@ export const FAILURES = Object.freeze([
   [
     'PAYLOAD_INVALID',
     52,
-    'answered',
+    ['answered', 'rejected'],
     [
       'The payload reads, but breaks a rule of its message.',
       'La charge se lit, mais enfreint une règle de son message.',
