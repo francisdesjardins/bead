@@ -846,7 +846,7 @@ async fn subscribes_at_qos_1_no_local_0_retain_as_published_0_and_retain_handlin
 
 // spec 15.27
 #[tokio::test]
-async fn lets_a_subscription_go_once_its_unsuback_came_naming_the_topic_itself_where_it_held_none_and_refuses_it_on_a_code_of_0x80_or_more()
+async fn lets_a_subscription_go_once_its_unsuback_came_naming_the_topic_itself_where_it_held_none_and_refuses_it_on_any_other_code()
  {
     let script = script().await;
     let adapter = adapter_of(&options_of(&script));
@@ -872,17 +872,30 @@ async fn lets_a_subscription_go_once_its_unsuback_came_naming_the_topic_itself_w
         vec!["bead/d/bob".to_owned()],
         "0x00"
     );
-    assert!(
-        message_of(&answered(("eve", 0x87)).await.unwrap_err()).contains("0x87"),
-        "0x87"
-    );
-    assert!(
-        message_of(&answered(("eve", 0x80)).await.unwrap_err()).contains("0x80"),
-        "0x80"
-    );
-    // its link kept
+
+    let subscribing =
+        spawn(adapter.subscribe(&topic(&["bead", "d", "eve"]), BrokerSubscription::default()));
+
+    suback_of(&link, 1).await;
+    subscribing.await.unwrap().unwrap();
+
+    // * any other code, under 0x80 among them, which MQTT 5 names no UNSUBACK by
+    for code in [0x01_u8, 0x10, 0x7F, 0x80, 0x87] {
+        let refused = format!("0x{code:02X}");
+
+        assert!(
+            message_of(&answered(("eve", code)).await.unwrap_err()).contains(&refused),
+            "{refused}"
+        );
+    }
+
+    // its link kept, and the filter refused its stop's to let go
     assert!(adapter.is_linked(), "kept");
-    adapter.stop().await;
+    assert_eq!(
+        unsubacked_of(&link, adapter.stop()).await,
+        vec!["bead/d/eve".to_owned()],
+        "its stop lets it go"
+    );
 }
 
 // spec 15.27

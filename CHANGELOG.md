@@ -132,6 +132,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   packet written, so a steady flow no broker reads loses its link rather than growing without
   bound; one given up before it is written retires its link, as one of QoS 1 does once sent (spec
   15.23, 15.26).
+- Over MQTT 5, the Rust and TypeScript adapters let a subscription go on an UNSUBACK of 0x00 or
+  0x11 alone, as the C# side does, and refuse it on any other code, its filter kept for the stop,
+  where one under 0x80 let it go (spec 15.27).
 
 ## [0.12.0] - 2026-11-10
 

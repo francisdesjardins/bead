@@ -6,22 +6,22 @@
 //! its TLS client certificate, a Receive Maximum of 65,535, a Topic Alias Maximum of 0, its Maximum
 //! Packet Size and its Keep Alive; its will the participant's GONE, `QoS` 1, RETAIN 0, a Will Delay
 //! Interval of 0. Nothing reconnects, subscribes again or holds a publication while it is down.
-//! Each subscription is of `QoS` 1, No Local 0, Retain As Published 0 and Retain Handling 2, a group's
-//! its shared subscription, held once its SUBACK grants `QoS` 1; one let go once its UNSUBACK came
-//! under 0x80, none within its connect timeout failing it, its link and its filter kept. Each
-//! publication is of `QoS` 1, or 0 at most once, taken once its PUBLISH is written, RETAIN 0, a life
-//! in whole seconds where asked and no other property, counted to its byte and refused past its
-//! CONNACK's Maximum Packet Size, held to its CONNACK's Receive Maximum, later ones waiting in their
-//! order, no other packet delayed for them; its PUBACK of 0x10 says no subscriber, of 0x80 or more
-//! refuses it. Its Keep Alive counts from the last packet written. Each message is handed
-//! on before its PUBACK, which goes once it is settled. A packet past its own Maximum Packet Size,
-//! read at its Remaining Length, closes its network connection, no DISCONNECT, its link lost. A
-//! DISCONNECT of 0x8E tells its link taken over; any other end, lost. Its stop takes no
-//! publication, sends what waits on the quota and awaits each PUBACK, fails what has not gone by
-//! then, sends an UNSUBSCRIBE for each filter its link asked or holds, one filter a packet, all at
-//! once, and awaits their UNSUBACKs, all within one connect timeout of its call, then sends a
-//! DISCONNECT of 0x00 within a connect timeout of its own, so that no will goes. Its leg is secure
-//! under TLS or to the loopback.
+//! Each subscription is of `QoS` 1, No Local 0, Retain As Published 0 and Retain Handling 2, a
+//! group's its shared subscription, held once its SUBACK grants `QoS` 1; one let go once its
+//! UNSUBACK came of 0x00 or 0x11, any other code refusing it and none within its connect timeout
+//! failing it, its link and its filter kept. Each publication is of `QoS` 1, or 0 at most once,
+//! taken once its PUBLISH is written, RETAIN 0, a life in whole seconds where asked and no other
+//! property, counted to its byte and refused past its CONNACK's Maximum Packet Size, held to its
+//! CONNACK's Receive Maximum, later ones waiting in their order, no other packet delayed for them;
+//! its PUBACK of 0x10 says no subscriber, of 0x80 or more refuses it. Its Keep Alive counts from
+//! the last packet written. Each message is handed on before its PUBACK, which goes once it is
+//! settled. A packet past its own Maximum Packet Size, read at its Remaining Length, closes its
+//! network connection, no DISCONNECT, its link lost. A DISCONNECT of 0x8E tells its link taken
+//! over; any other end, lost. Its stop takes no publication, sends what waits on the quota and
+//! awaits each PUBACK, fails what has not gone by then, sends an UNSUBSCRIBE for each filter its
+//! link asked or holds, one filter a packet, all at once, and awaits their UNSUBACKs, all within
+//! one connect timeout of its call, then sends a DISCONNECT of 0x00 within a connect timeout of its
+//! own, so that no will goes. Its leg is secure under TLS or to the loopback.
 //!
 //! Its state is one owner's (decision 0044): each operation posts its job as it is made, and its
 //! future only waits; its network connection's reads and its end come back to that owner as jobs
@@ -90,6 +90,7 @@ const RECEIVE_MAXIMUM: u16 = 65_535;
 const SUCCESS: u8 = 0x00;
 const GRANTED_QOS_1: u8 = 0x01;
 const NO_MATCHING_SUBSCRIBERS: u8 = 0x10;
+const NO_SUBSCRIPTION_EXISTED: u8 = 0x11;
 const REFUSED: u8 = 0x80;
 const SESSION_TAKEN_OVER: u8 = 0x8E;
 const SHARED_SUBSCRIPTIONS_NOT_SUPPORTED: u8 = 0x9E;
@@ -2173,9 +2174,10 @@ impl State {
             timer.cancel();
         }
 
-        // * the UNSUBACK's own code: 0x00, or 0x11 where its broker held none, lets it go
+        // * the UNSUBACK's own code: 0x00, or 0x11 where its broker held none, lets it go, and any
+        // other refuses it, under 0x80 among them (spec 15.27)
         let code = acknowledgement.reason_code();
-        let outcome = if code >= REFUSED {
+        let outcome = if code != SUCCESS && code != NO_SUBSCRIPTION_EXISTED {
             Err(BrokerError::failed(format!(
                 "the broker of {id} refused to let the subscription to {} go: {}",
                 unsubscribing.filter,

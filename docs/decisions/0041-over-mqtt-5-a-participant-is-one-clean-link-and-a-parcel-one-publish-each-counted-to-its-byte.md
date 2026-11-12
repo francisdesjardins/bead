@@ -141,9 +141,9 @@ companion's 13.5 tells a `names` event for each name so let go, before `stopped`
 the one answer: a member's PUBACK of 0x80 or more makes its broker discard a shared message rather
 than hand it to another ([MQTT-4.8.2-6]), and Mosquitto 2.1.2 hands none of a member's
 unacknowledged messages to another even at its end, for a DISCONNECT of 0x00 and a dropped socket
-alike, though §4.8.2 says it SHOULD. A name whose UNSUBACK refuses, 0x80 or more, or has not come
-within `connectTimeout`, is reported and stays held, its adapter's stop letting it go with the
-link's other subscriptions.
+alike, though §4.8.2 says it SHOULD. A name whose UNSUBACK refuses, any code but 0x00 or 0x11, or
+has not come within `connectTimeout`, is reported and stays held, its adapter's stop letting it go
+with the link's other subscriptions.
 
 **A link taken over is fenced** (spec 15.21): a DISCONNECT of 0x8E from its broker is its link
 taken over by another of its id. The adapter tells its `down` so, `isTakenOver` / `IsTakenOver`,
