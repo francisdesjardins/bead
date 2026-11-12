@@ -32,7 +32,7 @@ that hold what of them a test can. The why of each rule is in the decisions:
 - [0048](../docs/decisions/0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md):
   a call its connection's transport does not take, counted under its procedure (7.6, 7.7, 8.3).
 
-**Version: 0.8.0**. Each of its conformance files repeats it as its `debuggingVersion`, and follows
+**Version: 0.9.0**. Each of its conformance files repeats it as its `debuggingVersion`, and follows
 its schema in [`schemas/`](schemas/). It moves by `spec.md`'s rule, under a version of its own
 ([0008](../docs/decisions/0008-three-version-axes-and-names-qualified-by-their-owner.md)): the minor
 when an implementation that conforms to its last version must change to conform to this one, the
