@@ -58,7 +58,8 @@ pub trait Clock: Send + Sync + fmt::Debug {
     /// Its wall clock's reading: what an instant a side reports is.
     fn wall(&self) -> SystemTime;
 
-    /// Arms a timer that calls `callback` as `schedule` says.
+    /// Arms a timer that calls `callback` as `schedule` says, never within this call: Bead arms
+    /// some of its timers under a lock its callbacks take.
     ///
     /// # Errors
     ///

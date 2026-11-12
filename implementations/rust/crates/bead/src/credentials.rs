@@ -66,6 +66,10 @@ impl fmt::Debug for JwtSetKey {
 pub type KeySetAnswer = Result<Vec<JwtSetKey>, Box<dyn Error + Send + Sync>>;
 
 /// A key set's ask: given an issuer it names and a signal its deadline cancels, that issuer's keys.
+///
+/// It is made with no lock of Bead's held, and what it fetches belongs in the future it gives: a
+/// peer's token naming an unknown `kid` has it asked, once a minute an issuer at most, and its
+/// synchronous part, run on the thread that judged that token, blocks that thread while it waits.
 pub type KeySetAsk =
     Arc<dyn Fn(String, CancellationToken) -> BoxFuture<KeySetAnswer> + Send + Sync>;
 
@@ -197,6 +201,16 @@ enum AskOutcome {
 struct KeySetState {
     issuers: BTreeMap<String, IssuerKeys>,
     next_id: u64,
+    // the asks decided under its lock, made once it is let go
+    launches: Vec<Launch>,
+}
+
+// an ask of the key set, decided under the resolver's lock: the ask is the application's, made only
+// once that lock is let go, so that nothing of the application's runs under it
+struct Launch {
+    issuer: String,
+    id: u64,
+    signal: CancellationToken,
 }
 
 struct Inner {
@@ -366,6 +380,7 @@ impl CredentialResolver {
                 state: Mutex::new(KeySetState {
                     issuers,
                     next_id: 1,
+                    launches: Vec::new(),
                 }),
             }),
         })
@@ -563,27 +578,46 @@ fn ask_now(
         return None;
     }
 
-    let weak = Arc::downgrade(inner);
-    let issuer = issuer.to_owned();
-
-    if let Some(ask) = inner.ask.clone() {
-        // ! the key set's ask is the application's: what it panics, as it is asked or as its
-        // answer is awaited, is its throw, failing its ask at once (decision 0044)
-        let asking = caught(("a key set's ask", || ask(issuer.clone(), signal)));
-
-        crate::owner::spawn_counted((&inner.runtime, &inner.clock), async move {
-            let answered: KeySetAnswer = match asking {
-                Ok(asking) => caught_future(("a key set's ask", asking))
-                    .await
-                    .unwrap_or_else(|panicked| Err(Box::new(panicked))),
-                Err(panicked) => Err(Box::new(panicked)),
-            };
-
-            answer(&weak, (&issuer, id, answered));
-        });
-    }
+    state.launches.push(Launch {
+        issuer: issuer.to_owned(),
+        id,
+        signal,
+    });
 
     Some(id)
+}
+
+// lets go of the resolver's lock, then makes the asks decided under it
+fn let_go(inner: &Arc<Inner>, mut state: MutexGuard<'_, KeySetState>) {
+    let launches = core::mem::take(&mut state.launches);
+
+    drop(state);
+
+    for launch in launches {
+        launch_ask(inner, launch);
+    }
+}
+
+// one ask of the key set, made with no lock of the resolver's held
+fn launch_ask(inner: &Arc<Inner>, Launch { issuer, id, signal }: Launch) {
+    let Some(ask) = inner.ask.clone() else {
+        return;
+    };
+    let weak = Arc::downgrade(inner);
+    // ! the key set's ask is the application's: what it panics, as it is asked or as its answer
+    // is awaited, is its throw, failing its ask at once (decision 0044)
+    let asking = caught(("a key set's ask", || ask(issuer.clone(), signal)));
+
+    crate::owner::spawn_counted((&inner.runtime, &inner.clock), async move {
+        let answered: KeySetAnswer = match asking {
+            Ok(asking) => caught_future(("a key set's ask", asking))
+                .await
+                .unwrap_or_else(|panicked| Err(Box::new(panicked))),
+            Err(panicked) => Err(Box::new(panicked)),
+        };
+
+        answer(&weak, (&issuer, id, answered));
+    });
 }
 
 // an ask answered: settled with the answer, unless a deadline that answer reached settled it first
@@ -625,7 +659,7 @@ fn answer(weak: &Weak<Inner>, (issuer, id, answered): (&str, u64, KeySetAnswer))
         settle(&inner, (entry, outcome));
     }
 
-    drop(state);
+    let_go(&inner, state);
 }
 
 // the issuer's deadline, once the reading `now` is at it or past it: an ask unsettled then has
@@ -696,7 +730,7 @@ fn arm(inner: &Arc<Inner>, entry: &mut IssuerKeys) {
                 arm(&inner, entry);
             }
 
-            drop(state);
+            let_go(&inner, state);
         }),
     );
     match timer {
@@ -750,6 +784,44 @@ fn wait_of(
         return Ok(None);
     };
     let mut state = locked(inner);
+    let waited = wait_held(
+        inner,
+        (
+            &mut state,
+            Waiting {
+                header: &header,
+                issuer,
+                judged,
+                signal,
+            },
+        ),
+    );
+
+    let_go(inner, state);
+
+    waited
+}
+
+// a token that may wait on its issuer's keys: its header, its issuer, the keys it was judged
+// against, and its call's signal
+struct Waiting<'token> {
+    header: &'token Map<String, Value>,
+    issuer: String,
+    judged: &'token [JwtKey],
+    signal: &'token CancellationToken,
+}
+
+// the wait of a token, under the resolver's lock
+fn wait_held(
+    inner: &Arc<Inner>,
+    (state, waiting): (&mut KeySetState, Waiting<'_>),
+) -> Result<Option<Wait>, Unresolved> {
+    let Waiting {
+        header,
+        issuer,
+        judged,
+        signal,
+    } = waiting;
 
     if !state.issuers.contains_key(&issuer) {
         return Ok(None);
@@ -760,9 +832,9 @@ fn wait_of(
     }
 
     let now = inner.clock.monotonic();
-    let let_go = reach(inner, (&mut state, &issuer, now));
+    let let_go = reach(inner, (state, &issuer, now));
     let has_kid = header.contains_key("kid");
-    let kid = string_of(&header, "kid").map(str::to_owned);
+    let kid = string_of(header, "kid").map(str::to_owned);
     let id = state.next_id;
 
     state.next_id = state.next_id.saturating_add(1);
@@ -779,8 +851,6 @@ fn wait_of(
             .cloned()
             .collect();
         let (released, receiver) = oneshot::channel();
-
-        drop(state);
 
         if needs(&served, (has_kid, kid.as_deref())) {
             drop(released.send(Ok(())));
@@ -811,10 +881,8 @@ fn wait_of(
         entry.next.push(waiter);
         arm(inner, entry);
     } else {
-        ask_now(inner, (&mut state, &issuer, Some(waiter), now));
+        ask_now(inner, (state, &issuer, Some(waiter), now));
     }
-
-    drop(state);
 
     Ok(Some((issuer, id, receiver)))
 }

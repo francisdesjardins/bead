@@ -88,6 +88,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The Rust side reads a wall clock before 1970 in milliseconds rounded down, as the other sides
   do, where it read 0 or rounded toward 0: an `ELSEWHERE` session's end, a `JWT`'s times, a
   connection's session and a trace's instants judged against that reading (spec 13.10.2, 13.11).
+- The Rust side asks a key set once its credential resolver's lock is let go, as the C# side does:
+  an ask that blocks in its synchronous part no longer stalls every other call's `JWT` on that lock.
 - A session manager whose clock refuses a timer leaves what it held: a new session is not stored
   and the timers prepared for it are stopped, and a timeout set or reset keeps the stored one and its
   running timer, telling nothing, on the TypeScript and C# sides as on the Rust side (decision
