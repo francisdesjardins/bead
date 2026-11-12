@@ -128,24 +128,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   its DISCONNECT of 0x00, on the C# side once MQTTnet says it connected, so no will goes, and the
   TypeScript adapter no longer counts up a link its stop ended (spec 15.21, 15.26, 15.30, decision
   0041).
-- The Rust side's MQTT 5 adapter runs a `keepAlive` under a second as the whole second its CONNECT
-  announces, as the other sides do, where it sent a PINGREQ and lost its link on an unanswered one
-  at the unrounded value (spec 15.26).
-- The Rust side's MQTT 5 adapter takes a publication at most once as its PUBLISH is written, as the
-  other sides do, where it took it as it was queued: one its broker has not read stays unsettled,
-  counted among what waits for its connection, and its Keep Alive counts from the last packet
-  written, so a steady flow no broker reads loses its link rather than growing without bound; one
-  given up before it is written resets its link (spec 15.23, 15.26).
-- The Rust side's MQTT 5 adapter lets a subscription go on an UNSUBACK of 0x00 or 0x11 alone, as
-  the C# side does, and refuses it on any other code, its filter kept for the stop, where one under
-  0x80 let it go (spec 15.27).
-- The Rust and C# MQTT 5 adapters refuse as they are built a URL whose IPv6 address is followed by
-  anything but its port, `mqtt://[::1]junk:1884` say, as the TypeScript side does, where they
-  dropped what followed and dialled the scheme's port (RFC 3986 §3.2.2).
-- The Rust side's MQTT 5 client reads a DISCONNECT by its Reason Code whatever else it carries, a
-  Session Expiry Interval its broker never sends among it: a DISCONNECT of 0x8E is its link taken
-  over, its participant fenced, as on the other sides (spec 15.21, [MQTT-3.14.2-2],
-  [MQTT-3.14.4-2], decision 0041).
+- The C# MQTT 5 adapter refuses as it is built a URL whose IPv6 address is followed by anything but
+  its port, `mqtt://[::1]junk:1884` say, as the other sides do, where it dropped what followed and
+  dialled the scheme's port (RFC 3986 §3.2.2).
 - Over MQTT 5, the TypeScript adapter loses its link on a packet MQTT.js's parser refuses once its
   CONNACK put it up, its network connection closed with no DISCONNECT and its down told once, as
   the Rust and C# sides do, where its link stayed up and read nothing reliably after it: MQTT.js
