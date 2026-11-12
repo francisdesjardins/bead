@@ -459,6 +459,27 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Tells_its_link_taken_over_on_a_DISCONNECT_of_0x8E_whatever_else_it_carries_a_Session_Expiry_Interval_among_it_spec_15_21()
+    {
+        await using var adapter = AdapterOf();
+        var (_, downs) = HeardOf(adapter);
+        var link = await LinkUp((adapter, _script));
+
+        // * a DISCONNECT of 0x8E, its Session Expiry Interval of 0 and its Reason String "n", which a
+        // broker never sends together ([MQTT-3.14.2-2]) and which end its link all the same
+        // ([MQTT-3.14.4-2])
+        await link.Write([0xE0, 0x0B, 0x8E, 0x09, 0x11, 0x00, 0x00, 0x00, 0x00, 0x1F, 0x00, 0x01, (byte)'n']);
+        link.End();
+        await Until(() =>
+        {
+            return !downs.IsEmpty;
+        });
+        Assert.Equal([new BrokerDown { IsTakenOver = true }], downs);
+        Assert.False(adapter.IsLinked);
+        Assert.IsType<MqttConnectPacket>(Assert.Single(link.Packets));
+    }
+
+    [Fact]
     public async Task Subscribes_at_QoS_1_No_Local_0_Retain_As_Published_0_and_Retain_Handling_2_a_group_as_its_shared_subscription_held_once_its_SUBACK_grants_QoS_1_and_refused_otherwise_spec_15_27()
     {
         await using var adapter = AdapterOf();
