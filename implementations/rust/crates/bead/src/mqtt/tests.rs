@@ -17,6 +17,8 @@ use crate::broker::adapter::{
     BrokerAdapter, BrokerCapabilities, BrokerDelivery, BrokerDown, BrokerError, BrokerListener,
     BrokerMessage, BrokerPublication, BrokerPublished, BrokerStart, BrokerSubscription,
 };
+use crate::broker::client::{BrokerTransportClientConnectOptions, BrokerTransportClientOptions};
+use crate::broker::parcel::{Parcel, ParcelRead, kinds, read_parcel, write_parcel};
 use crate::broker::participant::{BrokerParticipant, BrokerParticipantOptions};
 use crate::broker::server::BrokerTransportServerOptions;
 use crate::duration::NEVER;
@@ -25,13 +27,14 @@ use crate::mqtt::packets::{
     LARGEST_PACKET_SIZE, MAXIMUM_PACKET_SIZE, MqttPublishShapeOptions, largest_payload,
 };
 use crate::net::credential::{CredentialProvider, CredentialProviderError};
-use crate::router::types::BoxFuture;
+use crate::router::types::{BoxFuture, RouterError, TransportMessage};
 use crate::testing::mqtt_script::{
     Connack, Kind, MqttScript, MqttScriptOptions, Publish, Scripted, ScriptedLink, connack,
     disconnect, pingresp, puback, publish, suback, unsuback, unsubscribe_bytes,
 };
 use crate::testing::parcels::{self, ParcelFields, ParcelReading};
 use crate::testing::{Instant, rest, spawn, tls};
+use crate::transport::{ClientListener, ReadyState, RouterClientTransport};
 
 mod fixture;
 mod reading;
@@ -1404,6 +1407,265 @@ async fn retires_its_link_where_a_publication_at_most_once_is_given_up_before_it
         "what waited never written"
     );
     adapter.stop().await;
+}
+
+/// A gate on the loopback between an adapter and its script: what the script writes goes through
+/// always, what the adapter writes until the gate is shut, from when nothing of it is read, as a
+/// broker that stops reading, until it opens again.
+struct Gate {
+    url: String,
+    open: tokio::sync::watch::Sender<bool>,
+    piping: JoinHandle<()>,
+}
+
+impl Gate {
+    async fn to(script: &MqttScript) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("mqtt://{}", listener.local_addr().unwrap());
+        let target = script.url().trim_start_matches("mqtt://").to_owned();
+        let (open, mut opened) = tokio::sync::watch::channel(true);
+        let piping = spawn(async move {
+            let (adapter, _) = listener.accept().await.unwrap();
+            let broker = tokio::net::TcpStream::connect(&target).await.unwrap();
+            let (mut from_adapter, mut to_adapter) = adapter.into_split();
+            let (mut from_broker, mut to_broker) = broker.into_split();
+            let answering = spawn(async move {
+                tokio::io::copy(&mut from_broker, &mut to_adapter)
+                    .await
+                    .ok();
+            });
+            let mut buffer = vec![0_u8; 65_536];
+
+            loop {
+                // ! shut, nothing of the adapter's is read: what it writes stays in its socket
+                if opened.wait_for(|is_open| *is_open).await.is_err() {
+                    break;
+                }
+
+                tokio::select! {
+                    biased;
+                    changed = opened.changed() => {
+                        if changed.is_err() {
+                            break;
+                        }
+                    }
+                    read = from_adapter.read(&mut buffer) => {
+                        let Ok(count @ 1..) = read else {
+                            break;
+                        };
+
+                        if to_broker.write_all(&buffer[..count]).await.is_err() {
+                            break;
+                        }
+                    }
+                }
+            }
+
+            to_broker.shutdown().await.ok();
+            answering.await.ok();
+        });
+
+        Self { url, open, piping }
+    }
+
+    fn shut(&self) {
+        self.open.send_replace(false);
+    }
+
+    fn reopen(&self) {
+        self.open.send_replace(true);
+    }
+}
+
+impl Drop for Gate {
+    fn drop(&mut self) {
+        self.piping.abort();
+    }
+}
+
+/// The errors a client tells.
+#[derive(Default)]
+struct ClientErrors(Mutex<Vec<String>>);
+
+impl ClientListener for ClientErrors {
+    fn on_error(&self, error: &RouterError) {
+        self.0.lock().unwrap().push(error.to_string());
+    }
+}
+
+/// A parcel `payload` reads as.
+fn parcel_of(payload: &[u8]) -> Parcel {
+    let ParcelRead::Parcel(parcel) = read_parcel(&Bytes::copy_from_slice(payload)) else {
+        panic!("a parcel that reads");
+    };
+
+    parcel
+}
+
+/// The OPEN `link` reads, `gate` shut behind it, then answered by an ACCEPT of bob's whose bound is
+/// 65,536.
+async fn accepted_behind(gate: &Gate, link: &ScriptedLink) {
+    let open = link.next(Some(Kind::Publish), PATIENCE).await.unwrap();
+    let open = open.publish().unwrap();
+
+    assert_eq!(open.topic, "bead/s/interop", "its OPEN");
+
+    let accept = Parcel {
+        flags: Some(0),
+        opener: parcel_of(&open.payload).opener,
+        acceptor: 0xB0B,
+        sequence: 1,
+        id: Some("bob".to_owned()),
+        incarnation: Some(0xB0B),
+        bound: Some(65_536),
+        ..Parcel::of(kinds::ACCEPT)
+    };
+
+    // * its broker reads nothing more of it from here on
+    gate.shut();
+    link.send(publish(&Publish {
+        topic: "bead/i/ada".to_owned(),
+        identifier: None,
+        retain: false,
+        payload: write_parcel(&accept).unwrap().to_vec(),
+    }));
+}
+
+/// The parcels `link` reads to bob's inbox up to a CLOSE, each SUBSCRIBE and UNSUBSCRIBE meanwhile
+/// granted.
+async fn parcels_to_bob(link: &ScriptedLink) -> Vec<Parcel> {
+    let mut parcels = Vec::new();
+
+    loop {
+        let packet = link.next(None, PATIENCE).await.unwrap();
+
+        if packet.kind() == Kind::Subscribe {
+            link.send(suback(packet.identifier(), 1));
+        } else if packet.kind() == Kind::Unsubscribe {
+            link.send(unsuback(packet.identifier(), 0));
+        } else if let Some(published) = packet.publish() {
+            assert_eq!(published.topic, "bead/i/bob", "to its peer");
+
+            let parcel = parcel_of(&published.payload);
+            let is_close = parcel.kind == kinds::CLOSE;
+
+            parcels.push(parcel);
+
+            if is_close {
+                return parcels;
+            }
+        }
+    }
+}
+
+// spec 15.23
+#[tokio::test]
+async fn holds_what_waits_for_its_broker_to_maximum_unsent_bytes_over_a_link_at_most_once_whose_broker_reads_nothing_and_loses_the_connection_with_a_close_of_4000_past_it()
+ {
+    const BOUND: u64 = 1_048_576;
+    const CAP: u64 = 64 * 1_048_576;
+    const ENVELOPE: usize = 60_000;
+
+    let script = script().await;
+    let gate = Gate::to(&script).await;
+    let mut options = MqttBrokerAdapterOptions::new(&gate.url, ID);
+
+    options.password = Some(PASSWORD.to_owned());
+    options.delivery = Some(BrokerDelivery::AtMostOnce);
+
+    let adapter = Arc::new(adapter_of(&options));
+    let heard = heard_of(&adapter);
+    let participant = BrokerParticipant::new(
+        Arc::<MqttBrokerAdapter>::clone(&adapter),
+        &BrokerParticipantOptions {
+            heartbeat: Some(NEVER),
+            ..BrokerParticipantOptions::default()
+        },
+    )
+    .unwrap();
+    let client = participant
+        .client(&BrokerTransportClientOptions {
+            maximum_unsent_bytes: Some(BOUND),
+        })
+        .unwrap();
+    let errors = Arc::new(ClientErrors::default());
+
+    client.listen(Arc::<ClientErrors>::clone(&errors));
+
+    let connecting = spawn(client.connect(&BrokerTransportClientConnectOptions::new("interop")));
+    let link = script.link(PATIENCE).await.unwrap();
+
+    link.send(connack(&Connack::default()));
+    suback_of(&link, 1).await;
+
+    accepted_behind(&gate, &link).await;
+    connecting.await.unwrap().unwrap();
+
+    // * an envelope a DATA each, each sent in a turn of its own so that its adapter's writer
+    // writes what its socket takes: what is written is taken, what is not waits, counted
+    let envelope = TransportMessage {
+        data: Bytes::from(vec![0_u8; ENVELOPE]),
+        ..TransportMessage::default()
+    };
+    let mut sent = 0_u64;
+    let mut largest = 0_u64;
+
+    while errors.0.lock().unwrap().is_empty()
+        && sent * u64::try_from(ENVELOPE).unwrap() < CAP
+        && client.send(envelope.clone()).is_ok()
+    {
+        sent += 1;
+        rest(Duration::from_millis(1)).await;
+
+        let unsent = participant.gauges().counts["largestUnsentBytes"];
+
+        assert!(unsent <= BOUND, "{unsent} bytes wait, past {BOUND}");
+        largest = largest.max(unsent);
+    }
+
+    until(|| !errors.0.lock().unwrap().is_empty()).await;
+    assert_eq!(
+        *errors.0.lock().unwrap(),
+        [
+            "the connection to bob is closed with 4000: what waits for its broker would pass maximumUnsentBytes, 1048576 bytes"
+        ],
+        "refused past its bound after {sent} envelopes"
+    );
+    assert!(
+        largest + u64::try_from(ENVELOPE).unwrap() > BOUND,
+        "{largest} bytes waited at most"
+    );
+    assert_eq!(
+        client.ready_state(),
+        ReadyState::Closed,
+        "its connection lost"
+    );
+    assert!(adapter.is_linked(), "its link up");
+
+    // * its broker reads again: each DATA that went, in its order, then the CLOSE of 4000 the next
+    gate.reopen();
+
+    let parcels = parcels_to_bob(&link).await;
+    let data: Vec<u64> = parcels
+        .iter()
+        .filter(|parcel| parcel.kind == kinds::DATA)
+        .map(|parcel| parcel.sequence)
+        .collect();
+    let went = u64::try_from(data.len()).unwrap();
+    let close = parcels.last().unwrap();
+
+    assert_eq!(data, (3..went + 3).collect::<Vec<_>>(), "in its order");
+    assert_eq!(
+        (close.kind, close.sequence, close.code),
+        (kinds::CLOSE, went + 3, Some(4_000)),
+        "its CLOSE, the next"
+    );
+    assert!(
+        went < sent,
+        "{went} of {sent} envelopes went, the last lost"
+    );
+    assert_eq!(heard.downs(), Vec::new(), "no down");
+    unsubacked_of(&link, participant.stop()).await;
 }
 
 // spec 15.28

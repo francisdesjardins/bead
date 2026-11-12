@@ -394,6 +394,10 @@ test.describe('the hook, the bridge and the background', () => {
         const words = steps.map((record) => {
           return `${record.direction === 'tx' ? '→' : '←'} ${record.type} ${record.procedureName}`;
         });
+
+        // ! the page shows an outcome at once but writes its logs at its next frame, which may come
+        // a second late: its newest step awaited before either log is read, one frame writing both
+        await expect(page.locator('#calls-log li').first()).toContainText('← request ask');
         const pageSteps = (await page.locator('#calls-log li').allTextContents())
           .reverse()
           .map((line) => {
