@@ -31,7 +31,8 @@ const LONGEST_LENGTH = 4;
  * read, tells `onPastMaximum` its size, and drops every later chunk, so that nothing of it reaches
  * the library, which never awaits the body it announced (spec 15.29). One within it passes
  * untouched, in the chunks it came in. A Remaining Length still continuing at its fourth byte is
- * malformed, and left to the library, which refuses it: nothing more is judged on that stream.
+ * malformed, and left to the library, which refuses it, its link then lost: nothing more is judged
+ * on that stream.
  * It holds no byte, arms no timer and writes nothing; its end, `push(null)`, always passes.
  */
 export const guardPacketSize = (stream: IGuardedStream, options: IPacketGuardOptions): void => {

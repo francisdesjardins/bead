@@ -141,6 +141,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Session Expiry Interval its broker never sends among it: a DISCONNECT of 0x8E is its link taken
   over, its participant fenced, as on the other sides (spec 15.21, [MQTT-3.14.2-2],
   [MQTT-3.14.4-2], decision 0041).
+- Over MQTT 5, the TypeScript adapter loses its link on a packet MQTT.js's parser refuses once its
+  CONNACK put it up, its network connection closed with no DISCONNECT and its down told once, as
+  the Rust and C# sides do, where its link stayed up and read nothing reliably after it: MQTT.js
+  tells such a refusal as its client's `error` and keeps its stream (spec 15.26, 15.29, decision
+  0041).
 
 ## [0.12.0] - 2026-11-10
 
