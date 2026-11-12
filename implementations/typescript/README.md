@@ -1394,14 +1394,23 @@ the `connectTimeout`, or that a stop meets, fails that start whether or not it h
 later answer serving nothing; what it throws fails it, its cause. Its CONNECT says a Receive Maximum
 of 65,535, a Topic Alias Maximum of 0, its `maximumPacketSize`, 16,777,216 bytes by default, and its
 `keepAlive`, 30 s by default; its start waits `connectTimeout`, 30 s by default, for its password,
-where it asks its provider, and a CONNACK of Reason Code 0x00 whose Maximum QoS is not 0. Its will
+where it asks its provider, and a CONNACK of Reason Code 0x00 whose Maximum QoS is not 0. Its link
+is up as MQTT.js reads that CONNACK, before its start settles, whatever comes after it: an end of
+its network connection right behind it is its link lost, its down told once, and a DISCONNECT of
+0x8E its link taken over, its start succeeding all the same. Any other CONNACK fails its start by
+its own code, `CONNACK 0x86, Bad User Name or Password` say, or by its Maximum QoS of 0, and a start
+that fails sends no DISCONNECT (spec 15.26). Its will
 is the participant's GONE, QoS 1, RETAIN 0, a Will Delay Interval of 0; its stop takes no publication,
 sends what waits on its Receive Maximum and awaits each PUBACK, fails what has not gone by then, then
 sends an UNSUBSCRIBE of each filter its link asked or holds, one a packet, and awaits their UNSUBACKs,
 all within `connectTimeout` of its call, then a DISCONNECT of 0x00 within one of its own, so that
 none goes and its broker hands it nothing once it settled; a DISCONNECT of 0x8E from its
 broker is its link taken over. MQTT.js reconnects nothing, subscribes nothing again and holds nothing while down: what is asked of a link
-that is down is refused at once.
+that is down is refused at once. A subscription or a publication its signal gives up once what it
+asked may have gone retires its link, a publication at most once given up before its packet is
+written among them, so that nothing of it enters another link: what else its link was asked fails,
+saying that what it was asked was given up once it may have gone. A publication that waits on its
+broker's Receive Maximum leaves unsent as its signal aborts, its link kept.
 
 A name in a group is the shared subscription `$share/<name>/bead/s/<name>`, every subscription of
 QoS 1, No Local 0, Retain As Published 0 and Retain Handling 2, held once its SUBACK grants QoS 1. A
@@ -1414,7 +1423,10 @@ callback hides it; 0x80 or more refuses it. Each message is handed on inside MQT
 `customHandleAcks`, its PUBACK sent once the core settles it, which it does as it takes it; a packet
 past its own Maximum Packet Size, read at its Remaining Length by a guard of the adapter's own on
 MQTT.js's stream, closes the link, no DISCONNECT (a row of
-[`docs/support.md`](../../docs/support.md)'s "Leveled down"). Its leg is secure under TLS or to the
+[`docs/support.md`](../../docs/support.md)'s "Leveled down"). A packet MQTT.js's parser refuses,
+which MQTT.js tells as its client's `error` and leaves its stream standing, closes the network
+connection alike once its CONNACK put the link up, no DISCONNECT, its link lost and its down told
+once; never once its stop began. Its leg is secure under TLS or to the
 loopback. The deployment's half — its access control by the participant's id, its Client Identifier
 tied to what it authenticated, its queues and its receive maximum — is spec 15.31's.
 

@@ -107,6 +107,10 @@ listener that throws, whose round
 [0023](0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md) keeps.
 Where a listen names its acknowledgement and its wait met it with the listen's fields, whose round
 [0029](0029-a-listen-names-its-cursor-and-its-wait-in-fields-of-its-own.md) keeps.
+An HTTP server or client that refuses limits asking for a transfer, and replaces a chunk and a
+window given (spec 15.11), met it with an answer's step, whose round
+[0013](0013-every-language-debugs-alike-at-no-cost-when-off.md#on-the-answers-step-the-limits-over-http-and-a-closed-connections-budget)
+keeps, On the answer's step, the limits over HTTP and a closed connection's budget.
 What the token is worth in the clear, and when a request's head goes, met it in rounds of their own:
 
 ### On the token in the clear

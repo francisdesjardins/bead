@@ -26,20 +26,20 @@
 
 **What each side does.** The TypeScript side ships each binding as a subpath of its one package,
 `./mqtt-broker-adapter` and `./amqp-broker-adapter`, over MQTT.js 5.16.1 and rhea 3.0.5, optional
-peer dependencies, with Bead's own code beside them where the libraries fall short: `mqtt-packets.ts`
-counts a packet `S = 1 + v(R) + R` (15.30), `mqtt-packet-guard.ts` reads each received packet's
-size at its Remaining Length on MQTT.js's stream (15.29), `amqp-messages.ts` writes the message
-profile (15.35), and `amqp-management.ts` holds RabbitMQ's management pair. Each module exports its
-defaults, `CONNECT_TIMEOUT` among them, and a password provider of type `({ signal }) => string |
-Promise<string>`. The C# side ships a project each, `Bead.Transport.Mqtt` over MQTTnet 5.2.0.1603 and
-`Bead.Transport.Amqp` over AMQPNetLite.Core 2.5.5, each reaching `Bead.Core`'s inside by
-`InternalsVisibleTo`; beside the libraries, `MqttPackets`, `MqttSendQuota`, `AmqpManagement`, and a
-guard on MQTTnet's channel that reads each received packet's size at its Remaining Length and ends
-the link past the Maximum Packet Size; it exports no default as a constant. The Rust side holds the
-adapter's contract, `BrokerAdapter` and `BrokerListener`, at its root, and plays the broker's cases
-over its in-memory broker alone; every feature's item sits at its root (0049), `CredentialProvider`
-already has the shape of both other sides' password providers, and `bead::internal` reaches the
-core's inside for the workspace's own members, outside SemVer.
+peer dependencies, with Bead's own code beside them where the libraries fall short:
+`mqtt-packets.ts` counts a packet `S = 1 + v(R) + R` (15.30), `mqtt-packet-guard.ts` reads each
+received packet's size at its Remaining Length on MQTT.js's stream (15.29), `amqp-messages.ts`
+writes the message profile (15.35), and `amqp-management.ts` holds RabbitMQ's management pair. Each
+module exports its defaults, `CONNECT_TIMEOUT` among them, and a password provider of type `({
+signal }) => string | Promise<string>`. The C# side ships a project each, `Bead.Transport.Mqtt` over
+MQTTnet 5.2.0.1603 and `Bead.Transport.Amqp` over AMQPNetLite.Core 2.5.5, each reaching
+`Bead.Core`'s inside by `InternalsVisibleTo`; beside the libraries, `MqttPackets`, `MqttSendQuota`,
+`AmqpManagement`, and a guard on MQTTnet's channel that reads each received packet's size at its
+Remaining Length and ends the link past the Maximum Packet Size; it exports no default as a
+constant. The Rust side's core holds the adapter's contract, `BrokerAdapter` and `BrokerListener`,
+at its root, and its in-memory broker; every feature's item sits at its root (0049),
+`CredentialProvider` already has the shape of both other sides' password providers, and
+`bead::internal` reaches the core's inside for the workspace's own members, outside SemVer.
 
 **What the probes found**, each on the pinned toolchain, rustc 1.99.1, read on 2026-11-10:
 
@@ -154,37 +154,38 @@ core's inside for the workspace's own members, outside SemVer.
 
 ### Two features of the core, `mqtt` and `amqp`, their items at the root
 
-Each binding is **a feature of the core**, `mqtt` and `amqp`, additive and off by default, as
-`websocket` and `http` are: a transport that ships to applications and needs the core's inside
-(0044, 0049) takes one dependency line and one version, `crate::platform` its one spawn, one table
-of lints, and `internal` kept outside SemVer for the workspace's members alone. Every item of a
-binding is **at the crate's root**, each `pub use` under its feature's `cfg`, its module private;
-a user writes `bead = { package = "francisdesjardins-bead", features = ["mqtt"] }`, then
-`use bead::{MqttBrokerAdapter, MqttBrokerAdapterOptions};`.
+Each binding is **a feature of the core**, `mqtt`, and `amqp` with AMQP 1.0's client, ahead,
+additive and off by default, as `websocket` and `http` are: a transport that ships to applications
+and needs the core's inside (0044, 0049) takes one dependency line and one version,
+`crate::platform` its one spawn, one table of lints, and `internal` kept outside SemVer for the
+workspace's members alone. Every item of a binding is **at the crate's root**, each `pub use` under
+its feature's `cfg`, its module private; a user writes `bead = { package = "francisdesjardins-bead",
+features = ["mqtt"] }`, then `use bead::{MqttBrokerAdapter, MqttBrokerAdapterOptions};`.
 
 **Everything of a binding is under its feature**, its codec among it: a build without it compiles
 nothing of it, and the browser's check, `--features testing --target wasm32-unknown-unknown`, none.
 `bead::internal` re-exports each codec's reader under the same `cfg`, and the fuzz project, outside
-the workspace, turns the features on in its own manifest, which no application's build unifies
-with. The socket layer and `bead::rustls` build under any of `websocket`, `http`, `mqtt` and
-`amqp`; `CredentialProvider` and `CredentialProviderError` move to a module of their own under
-`websocket`, `mqtt` or `amqp`, still at the root by the same names: a broker adapter's password
-provider is that type. `mqtt` builds MQTT 5 over a WebSocket of subprotocol `mqtt` with the
-`websocket` feature's crates; `amqp`, with AMQP 1.0's binding, over TCP and TLS alone. No crate
-joins `Cargo.lock`, and `deny.toml` is unchanged.
+the workspace, turns the features on in its own manifest, which no application's build unifies with.
+The socket layer and `bead::rustls` build under any of `websocket`, `http` and `mqtt`;
+`CredentialProvider` and `CredentialProviderError` sit in a module of their own under `websocket` or
+`mqtt`, still at the root by the same names: a broker adapter's password provider is that type;
+`amqp` joins both. `mqtt` builds MQTT 5 over a WebSocket of subprotocol `mqtt` with the `websocket`
+feature's crates; `amqp`, with AMQP 1.0's binding, over TCP and TLS alone. No crate joins
+`Cargo.lock` with `mqtt`, and `deny.toml` is unchanged.
 
 ### The names and the options
 
 `MqttBrokerAdapter` and `MqttBrokerAdapterOptions`, `AmqpBrokerAdapter` and
 `AmqpBrokerAdapterOptions`, the twins of the other sides' by name; the defaults the TypeScript side
-exports by the same names, `KEEP_ALIVE`, `MAXIMUM_PACKET_SIZE`, `TRANSPORT_MQTT`, `IDLE_TIMEOUT`,
-`LINK_CREDIT`, `MAXIMUM_MESSAGE_SIZE` and `TRANSPORT_AMQP`, each a row of `tools/names.tsv` that
-goes from the TypeScript side's alone to the same on two sides; and the bindings' connect timeouts,
-30 s, `MQTT_CONNECT_TIMEOUT` and `AMQP_CONNECT_TIMEOUT`, each named by its owner, since the root's
-`CONNECT_TIMEOUT` is the transport client's 10 s: a row of the Rust side's own, which names the
-TypeScript module's `CONNECT_TIMEOUT`. `CredentialProvider`'s row names the function's type a
-WebSocket client's connect and a broker adapter's password take, which the other sides write in
-place.
+exports by the same names, `KEEP_ALIVE`, `MAXIMUM_PACKET_SIZE` and `TRANSPORT_MQTT`, each a row of
+`tools/names.tsv` the same on the TypeScript and Rust sides, and `IDLE_TIMEOUT`, `LINK_CREDIT`,
+`MAXIMUM_MESSAGE_SIZE` and `TRANSPORT_AMQP`, rows of the TypeScript side's alone that AMQP 1.0's
+binding brings to the Rust side; and the bindings' connect timeouts, 30 s, `MQTT_CONNECT_TIMEOUT`
+and `AMQP_CONNECT_TIMEOUT`, each named by its owner, since the root's `CONNECT_TIMEOUT` is the
+transport client's 10 s: `MQTT_CONNECT_TIMEOUT` a row of the Rust side's own, which names the
+TypeScript module's `CONNECT_TIMEOUT`, and `AMQP_CONNECT_TIMEOUT` one with its binding.
+`CredentialProvider`'s row names the function's type a WebSocket client's connect and a broker
+adapter's password take, which the other sides write in place.
 
 `MqttBrokerAdapterOptions::new(url, id)` is `#[non_exhaustive]`, not `Copy`, with no `Default`, its
 two required settings its constructor's, every other field a public `Option`: `password`,
@@ -250,17 +251,16 @@ branches carry the rest:
 ### What the Rust side plays
 
 `tests/transports.rs` plays every case over `mqtt` no row excuses it from, through a `CaseBroker`
-trait, the twin of the C# side's `IBrokerCaseBroker`, the in-memory broker its first
-implementation and Mosquitto's the next, `testing::link_relay` cutting a link for `lose`; against
-the broker `BEAD_MQTT_URL` names with the run's password, skipped saying so where none is given,
-failed where `BEAD_MQTT_REQUIRED=1`. `tests/vectors.rs` plays `mqttPublishBounds`, and
-`tests/durations.rs` the places `mqttBrokerAdapter.keepAlive` and
-`mqttBrokerAdapter.connectTimeout`. The adapter's twins of the other sides' tests run against
-`testing::mqtt_script`, a peer that writes what it sends from the test's own bytes, never through
-the client's codec, and against the fixture over TCP and WebSocket. **The interop**:
-`bead-interop-server` serves over MQTT 5, its id `rs-server`, its names `interop-rs` and
-`interop-both`, and its trials, `rs-client`, run against the TypeScript and C# servers; the
-TypeScript and C# interop tests run against it.
+trait, the twin of the C# side's `IBrokerCaseBroker`, the in-memory broker's and Mosquitto's,
+`testing::link_relay` cutting a link for `lose`; against the broker `BEAD_MQTT_URL` names with the
+run's password, skipped saying so where none is given, failed where `BEAD_MQTT_REQUIRED=1`.
+`tests/vectors.rs` plays `mqttPublishBounds`, and `tests/durations.rs` the places
+`mqttBrokerAdapter.keepAlive` and `mqttBrokerAdapter.connectTimeout`. The adapter's twins of the
+other sides' tests run against `testing::mqtt_script`, a peer that writes what it sends from the
+test's own bytes, never through the client's codec, and against the fixture over TCP and WebSocket.
+**The interop**: `bead-interop-server` serves over MQTT 5, its id `rs-server`, its names
+`interop-rs` and `interop-both`, and its trials, `rs-client`, run against the TypeScript and C#
+servers; the TypeScript and C# interop tests run against it.
 
 ### CI
 
@@ -275,7 +275,7 @@ saying so.
 
 ## Consequences
 
-- **A build with `mqtt` or `amqp` needs aws-lc-rs's C compiler**, as one with a socket feature does,
+- **A build with a broker binding needs aws-lc-rs's C compiler**, as one with a socket feature does,
   the fuzz build among them.
 - **The Rust side owns one more reader of a peer's bytes**, MQTT 5's, fuzzed by a target of its own,
   `mqtt-packets`, and by the seeded mutations of `tests/mqtt_packets_fuzz.rs`; neither has a twin,
@@ -307,7 +307,7 @@ stands, AMQP 1.0's client ahead.
 | Objection                                                                                                                                                                                                                                 | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | AMQP 1.0's client weighs two poles, fe2o3-amqp whole or everything by hand, and passes over the split between them: `fe2o3-amqp-types` and `serde_amqp` as the codec, the engine Bead's own, none of the three defects being the codec's. | In part. The option is real and verified: the defects sit in `fe2o3-amqp` (`session/mod.rs:687`, `connection/engine.rs:82`), the codec writes and reads every performative Bead needs, and it is deny-clean with fifteen crates. Against it, as published: `serde_amqp` 0.18.0 panics on a peer's malformed compound in a debug build (`de.rs:961`, `:1070`, `:982`), where the Rust side refuses by a `Result` and never panics; its fix is merged and unreleased; three breaking minors in three months under one maintainer; fifteen crates, proc macros among them. It is one of the three branches of AMQP 1.0's client, which is ahead; the engine is Bead's on every branch, behind a seam, `amqp/codec`, that a library can take without touching it. |
-| The public modules `bead::mqtt` and `bead::amqp` are unforced and break 0049's precedent of every feature's item at the root; the clash is one name; and the reason against a crate misreads `internal`.                                  | Accepted. The items are at the root under their feature's `cfg`; the two connect timeouts are `MQTT_CONNECT_TIMEOUT` and `AMQP_CONNECT_TIMEOUT`, each a row of the Rust side's own naming the TypeScript module's `CONNECT_TIMEOUT`; every other default keeps its name, seven rows of `tools/names.tsv` going from the TypeScript side's alone to the same. On `internal`: a workspace member is not "another crate" in its doc; the reason against a crate is that `internal` is outside SemVer, so a published crate on it pins the core to its exact version, and one dependency line is what a user writes.                                                                                                                                              |
+| The public modules `bead::mqtt` and `bead::amqp` are unforced and break 0049's precedent of every feature's item at the root; the clash is one name; and the reason against a crate misreads `internal`.                                  | Accepted. The items are at the root under their feature's `cfg`; the two connect timeouts are `MQTT_CONNECT_TIMEOUT` and `AMQP_CONNECT_TIMEOUT`, each a row of the Rust side's own naming the TypeScript module's `CONNECT_TIMEOUT`; every other default keeps its name: MQTT 5's three, rows of `tools/names.tsv` the same on the TypeScript and Rust sides, and AMQP 1.0's four, which come to the Rust side with its binding, ahead. On `internal`: a workspace member is not "another crate" in its doc; the reason against a crate is that `internal` is outside SemVer, so a published crate on it pins the core to its exact version, and one dependency line is what a user writes.                                                                   |
 | MQTT 5's client leaves out the two codec-only crates its own probe fetched, `mqtt5-protocol` and `mqttbytes-core-next`.                                                                                                                   | Accepted. The Context names both: `mqtt5-protocol` 0.16.2, 34 releases in eleven months, three in October 2026; `mqttbytes-core-next` 0.34.0, the fork's primitives and its churn; each a reader of a broker's bytes outside the lints Bead's own eleven packets are written under. No client and no codec holds the binding as 0041 has it.                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | The CI gives `mqtt` and `amqp` `needs: rust`, serializing two twenty-minute jobs behind CI's longest, and does not say so.                                                                                                                | Accepted. The broker jobs keep their `needs`; each installs the pinned toolchain and restores the `rust` job's Linux cache read-only, then builds and runs the Rust side over its broker, beside `rust`. 0049's reason for `interop-rust`'s handed binaries, a container with no toolchain and no C compiler, does not reach jobs on the runner's host. A job building once for three consumers is weighed and refused: one more job and an artifact to spare one parallel build.                                                                                                                                                                                                                                                                             |
 | A new row of Differences, "A broker client's reader, fuzzed", is of no kind the table admits and states a gate as a behaviour.                                                                                                            | Accepted. No row. The Consequences, the Rust README and `tools/fuzz.mjs`'s doc name `mqtt-packets` as the Rust side's alone, as `blueprint` is the TypeScript side's, and why it has no twin: the other sides read a broker's bytes through their libraries.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |

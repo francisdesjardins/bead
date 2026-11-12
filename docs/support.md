@@ -89,8 +89,8 @@ Every cell is read from the tests. A cell that names a test file is supported, a
 
 The TypeScript side's unit tests run under Node alone, in one Playwright project and no browser: the Web Worker transport is tested over a `MessageChannel`, and the clients over Node's `WebSocket`, `ws` and `fetch`. One client runs in a browser: the HTTP client, bundled into a page Chromium loads from another origin than the interop service's HTTP server it calls on each side, and into a page whose own server answers its connect with a redirect, by `implementations/typescript/browser/__tests__/cors-page.test.ts` under `playwright.browser.config.ts` (`yarn test:browser`).
 
-Over a broker, every side does the same, the Rust side's core over its in-memory broker among them,
-and what that costs is stated in its records
+Over a broker, every side does the same, the Rust side's core over its in-memory broker and over
+MQTT 5 among them, and what that costs is stated in its records
 ([0038](decisions/0038-over-a-broker-a-connection-is-placed-once-at-its-open-named-by-both-its-ends.md)):
 calls spread across a name's participants by connection, not by call; a participant added takes no
 connection already placed, and one stopped ends every connection of its own; and each participant
@@ -107,7 +107,10 @@ a relay that carries a subscription, which a page across a broker needs
 [0041](decisions/0041-over-mqtt-5-a-participant-is-one-clean-link-and-a-parcel-one-publish-each-counted-to-its-byte.md)
 keeps ahead over MQTT 5: an Authentication Method, MQTT 5's enhanced authentication
 ([§4.12](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html)), and EMQX played beside
-Mosquitto.
+Mosquitto; Mosquitto under TLS played, a client certificate among it, where the row of MQTT 5 over
+TLS above holds "not tested"; and an acknowledgement of a Reason Code its packet's table does not
+name, and a SUBACK or an UNSUBACK whose count of codes is not one, judged alike on every side, the
+two rows of [Differences](#differences) that name them closing with it.
 
 MQTT 5 is a broker's first binding, on every side, the Rust side's a client of its own over its
 core's sockets

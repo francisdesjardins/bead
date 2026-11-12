@@ -309,6 +309,16 @@ again in place (15.33, 15.36), so no requeue reaches a live connection.
 **AMQP 1.0 runs in no page**: no open-source RabbitMQ 4 carries it over a WebSocket, so the adapter
 runs in Node alone and refuses a page, naming why, a row of "Differences".
 
+**AMQP 1.0 over TLS is played, SASL EXTERNAL among it**: the fixture's RabbitMQ listens over TLS
+beside TCP, under a CA and client certificates drawn for the run, each certificate's common name its
+id's user, and each adapter's twin starts participants over `amqps` with SASL EXTERNAL, sends and
+receives a parcel and stops their links: `amqp-broker-adapter.test.ts`'s `starts participants over
+amqps with SASL EXTERNAL, sends and receives a parcel, and stops their links` and
+`AmqpBrokerAdapterTests`'
+`Starts_participants_over_amqps_with_SASL_EXTERNAL_sends_and_receives_a_parcel_and_stops_their_links`,
+which the matrix's row of AMQP 1.0 over TLS cites. MQTT 5 over TLS is
+[0041](0041-over-mqtt-5-a-participant-is-one-clean-link-and-a-parcel-one-publish-each-counted-to-its-byte.md)'s.
+
 **A stop costs a management request**, a round trip within its `connectTimeout`, to delete its
 inbox, which a lost link does not: an inbox its broker reaps after a loss takes parcels until then.
 Its names' DETACHes cost a round trip before its adapter's stop, within one `connectTimeout`, past
@@ -318,11 +328,8 @@ at worst against a broker that answers nothing.
 **Ahead**: a publisher's identity a broker vouches for, standing for an `ELSEWHERE`
 ([0040](0040-a-brokers-adapter-offers-bytes-at-topics-and-bead-keeps-its-own-credit-credential-and-heartbeat.md)),
 by a decision of its own: it is no capability MQTT 5 or core NATS gives; over AMQP 1.0 RabbitMQ
-validates `user-id`, properties' second field, which changes the binding's profile and its count
-and gives the core a use of its own under 15.18 and 15.22, as this record weighs it. The brokers'
-TLS played is ahead too: the fixtures' Mosquitto and RabbitMQ under TLS, a client certificate and
-SASL EXTERNAL among it, where the matrix holds rows "not tested", since each fixture's broker
-listens in clear on the loopback (0041).
+validates `user-id`, properties' second field, which changes the binding's profile and its count and
+gives the core a use of its own under 15.18 and 15.22, as this record weighs it.
 
 **Its gates**: the cases over `amqp` of `spec/transports.json` and its `brokers.amqp`, a
 participant's stop among them, its inbox finding no subscriber once it settled and its name's queue
@@ -330,9 +337,10 @@ holding an OPEN; `amqpMessages` and `amqpPublishBounds`; the places `amqpBrokerA
 and `amqpBrokerAdapter.connectTimeout`; the adapters' twins, against a scripted AMQP 1.0 peer and
 against the fixture, the inbox deleted at a stop among them, an OPEN that comes during a
 participant's stop waiting in its name's queue and answered at its next link, and the management
-helper's; the
-interop over AMQP 1.0 both ways, a name served by two in one group proven by no ACCEPT ever answered
-twice; and the CI job `amqp`, `BEAD_AMQP_REQUIRED=1`.
+helper's; each adapter's twin over TLS against the fixture's TLS listener, participants started over
+`amqps` with SASL EXTERNAL; the interop over AMQP 1.0 both ways, a name served by two in one group
+proven by no ACCEPT ever answered twice; and the CI job `amqp`, `BEAD_AMQP_REQUIRED=1`, TLS and SASL
+EXTERNAL included.
 
 ## The Tenth Man
 

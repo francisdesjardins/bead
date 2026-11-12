@@ -27,12 +27,12 @@
   [0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)'s.
   Its broker bindings, MQTT 5 and AMQP 1.0, features of its core, are
   [0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)'s.
-  Ahead: its AMQP 1.0 binding; its gateway; and beadc's Rust target, with
-  `examples/hello`'s Rust half, the lists of the procedures a server's transports take
+  Ahead: beadc's Rust target, with `examples/hello`'s Rust half, the lists of the procedures a
+  server's transports take
   ([0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md))
   and the validators of a blueprint's rules generated for it, or beadc refusing to generate them
-  ([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)),
-  each stage under a record of its own. The crate's layout and its modules are its README's.
+  ([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md));
+  its gateway; and its AMQP 1.0 binding, each stage under a record of its own. The crate's layout and its modules are its README's.
 
 ## Context
 
@@ -140,13 +140,12 @@ ways with the TypeScript and C# sides, under
 [0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md).
 Its broker bindings, MQTT 5 and AMQP 1.0, features of its core, are
 [0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)'s,
-its MQTT 5 binding a client of its own over its sockets. Ahead, in this order: its AMQP 1.0
-binding; its gateway; and beadc's Rust target, with `examples/hello`'s Rust half, the lists of the
-procedures a server's transports take
+its MQTT 5 binding a client of its own over its sockets. Ahead, in this order: beadc's Rust
+target, with `examples/hello`'s Rust half, the lists of the procedures a server's transports take
 ([0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md))
 and the validators of a blueprint's rules generated for it, or beadc refusing to generate them
-([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)),
-each stage under a record of its own.
+([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md));
+its gateway; and its AMQP 1.0 binding, each stage under a record of its own.
 
 ### The partial side
 
@@ -735,23 +734,28 @@ byte, and **always built**: no Cargo feature leaves debugging out, which would b
 
 CI's `rust` job ([0006](0006-a-rule-has-its-gate.md)), on Linux: `cargo fmt --check`, `cargo clippy
 --workspace --all-targets --all-features --locked` and again on each member's default features, the
-core's lib linted with no feature, with
-`websocket` alone, with `http` alone and with `mqtt` alone (`cargo clippy -p francisdesjardins-bead
---lib --locked`, `--features websocket`, `--features http`, `--features mqtt`), the browser
-target's `cargo clippy -p francisdesjardins-bead --lib --features testing --locked --target
-wasm32-unknown-unknown`, by its features, no socket and no broker binding among them
+core's lib linted with no feature, with `websocket` alone, with `http` alone and with `mqtt` alone
+(`cargo clippy -p francisdesjardins-bead --lib --locked`, `--features websocket`, `--features http`,
+`--features mqtt`), the browser target's `cargo clippy -p francisdesjardins-bead --lib --features
+testing --locked --target wasm32-unknown-unknown`, by its features, no socket and no broker binding
+among them
 ([0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)),
 `cargo doc`, a build on the default features alone, `cargo deny --locked check` and the same on the
-fuzz targets and the conformance player, outside the workspace, the tests under
-coverage held to the floor, and the fuzz targets built on the dated nightly, never run; on Windows,
-`cargo test --workspace --all-features --locked`, as the user's MSVC toolchain builds it. The
-registry and the target are cached by the lock and the toolchain, cargo-deny and cargo-llvm-cov
-installed prebuilt, each checked by its SHA-256, and `ci-ok` needs the job. **Fuzz**: cargo-fuzz on
-the nightly, on Linux or WSL, through `tools/fuzz.mjs`, by hand and ten minutes a target every week
-([0006](0006-a-rule-has-its-gate.md)), its eight targets the twins of the other sides' eight,
+fuzz targets and the conformance player, outside the workspace, the tests under coverage held to the
+floor, and the fuzz targets built on the dated nightly, never run; on Windows, `cargo test
+--workspace --all-features --locked`, as the user's MSVC toolchain builds it. The registry and the
+target are cached by the lock and the toolchain, cargo-deny and cargo-llvm-cov installed prebuilt,
+each checked by its SHA-256, and `ci-ok` needs the job. **Fuzz**: cargo-fuzz on the nightly, on
+Linux or WSL, through `tools/fuzz.mjs`, by hand and ten minutes a target every week
+([0006](0006-a-rule-has-its-gate.md)), its nine targets: eight the twins of the other sides' eight,
 `envelope`, `payload-codecs`, `http-fields`, `debug-filter`, `jwt`, `ws-handshake`, `broker-parcel`
-and `proto-codecs`, each reaching the core through `bead::internal` with no feature; its suite holds
-the envelope readers' and the parcel reader's seeded mutations, the same inputs as the other sides'.
+and `proto-codecs`, each reading what no socket or broker feature holds, through a crate's surface,
+`bead::internal` or a test kit; and `mqtt-packets`, its MQTT 5 client's reader of a broker's
+packets, the Rust side's alone, through `bead::internal` under the feature `mqtt`, which the fuzz
+project's manifest turns on beside `testing`
+([0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)).
+Its suite holds the envelope readers' and the parcel reader's seeded mutations, the same inputs as
+the other sides', and `tests/mqtt_packets_fuzz.rs`'s, the packets a broker sends mutated, its own.
 **Bench**: `bead-bench`, the in-memory bench, each fresh process writing `bead-bench/1`, which
 `tools/bench-release.mjs rust` merges into `bead-bench/2` for `tools/bench-compare.mjs`. The gates
 every side shares hold it too: `tools/check-details.mjs` reads its sources, `tools/check-names.mjs`

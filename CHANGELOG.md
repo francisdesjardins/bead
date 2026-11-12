@@ -36,8 +36,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Over MQTT 5, a start that fails sends no DISCONNECT, on every side: the C# adapter no longer
   sends one of 0x00 on a CONNACK of Maximum QoS 0, which a broker that conforms never gives a
   CONNECT whose will is of QoS 1 ([MQTT-3.2.2-12]). The TypeScript adapter names a CONNACK that
-  refuses by its code, `CONNACK 0x86, Bad User Name or Password`, as the C# and Rust sides do
-  (spec 15.26, decision 0041).
+  refuses by its code and its name, `CONNACK 0x86, Bad User Name or Password`, as the Rust side
+  does; the C# side gives MQTTnet's name, `BadUserNameOrPassword` (spec 15.26, decision 0041).
 - The details gate reads a helper's call by the arguments at the positions that reach its sinks, and
   the whole call where its arguments do not split plainly, so a router's state handed beside a
   reason that stays with the side carries no detail (decision 0006).
@@ -50,6 +50,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   fields; the TypeScript side's transport sets no bound on an HTTP/2 session, which its
   application's `createServer` holds; and the sides part on a Server Keep Alive of 0 or longer than
   their own, each a row of the matrix's differences.
+- The documents are brought to 0.13.0: the records, the READMEs and the support matrix state what
+  holds and where Bead goes, the Rust side's MQTT 5 binding among what holds.
 
 ### Removed
 

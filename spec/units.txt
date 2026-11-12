@@ -3,7 +3,7 @@
 # citation moved; --write-units <unit>… acknowledges the units it names, and no other.
 # The reasons: lead, defines, twins, builder, open and owed, each held as spec/check.py says;
 # a new unit's ? until its author gives it one.
-0 defines 0526047c76f74301cc42fe9dd7e33237f1a71c8e3f2c87709ef9d0ad136329bc
+0 defines e4f75b4457ad66da04c89740f5562ba8acdb1b1f2da06db3967f42d5529f7bf9
 1.0 defines cb34b593ac2026092a4463553390b7c26748df98b21908cb4d3bc115a9673bf0
 1.1 cited 2eed9ca84c13035f2132c2f3584479a75b0f3af5bbd9f413e88211d11b5a16ff
 1.2 cited b975e9dc15551dfbd46cd3ac97cccff53bafdc7e90152f59befaf4c92ba0cd98
