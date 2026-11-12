@@ -346,6 +346,31 @@ public sealed class JwtVerifierTests
         Assert.Equal("reader", verdict.Claims.GetProperty("realm").GetProperty("roles")[0].GetString());
     }
 
+    // RFC 8259 §8.2: a `JsonElement` keeps a surrogate alone as its JSON text wrote it, where the
+    // TypeScript side keeps its string of one unit and the Rust side, whose `String` holds none, reads
+    // null; a row of docs/support.md
+    [Fact]
+    public async Task Keeps_a_claim_holding_a_surrogate_alone_as_its_JsonElement_and_refuses_at_sub_a_token_whose_sub_holds_one()
+    {
+        var vector = Vectors.Of("jwtVerdicts", Holding);
+        var token = vector.GetProperty("token").GetString()!;
+        var claims = Encoding.UTF8.GetString(Base64Url.DecodeFromChars(token.Split('.')[1]));
+        var alone = SignedText(Header, $"{claims[..^1]},\"name\":\"\\ud800\"}}");
+
+        var verdict = await JwtVerifier.VerifyJwt(alone, PropsOf(vector));
+        var name = verdict.Claims.GetProperty("name");
+
+        Assert.True(verdict.Holds, $"the token does not hold: {verdict.Reason}");
+        Assert.Equal((JsonValueKind.String, "\"\\ud800\""), (name.ValueKind, name.GetRawText()));
+
+        // its subject a surrogate alone
+        Assert.Contains("\"sub\":\"bob\"", claims, StringComparison.Ordinal);
+
+        var unnamed = await JwtVerifier.VerifyJwt(SignedText(Header, claims.Replace("\"sub\":\"bob\"", "\"sub\":\"\\ud800\"", StringComparison.Ordinal)), PropsOf(vector));
+
+        Assert.Equal<(bool, JwtRefusal?)>((false, JwtRefusal.Sub), (unnamed.Holds, unnamed.Reason));
+    }
+
     [Fact]
     public async Task Reads_a_token_s_parts_as_section_17_5_bounds_a_payload_no_number_past_the_largest_double_nested_64_deep_at_most()
     {

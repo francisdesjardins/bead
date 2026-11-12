@@ -294,6 +294,33 @@ test.describe('verifyJwt', () => {
     ).toBe(true);
   });
 
+  // RFC 8259 §8.2: a JavaScript string keeps a surrogate alone, where the C# side keeps its
+  // `JsonElement` and the Rust side, whose `String` holds none, reads null; a row of docs/support.md
+  test('keeps a claim holding a surrogate alone as its string of one unit, and refuses at sub a token whose sub holds one', async () => {
+    const { audience, keys, now, token } = HOLDING;
+    const claims = Buffer.from(token.split('.')[1] ?? '', 'base64url').toString();
+    const verdict = await verifyJwt(
+      signedText(HEADER, `${claims.slice(0, -1)},"name":"\\ud800"}`),
+      { audience, keys, now: readingOf(now) }
+    );
+
+    if (!verdict.holds) {
+      throw new Error(`the token does not hold: ${verdict.reason}`);
+    }
+
+    expect(verdict.claims['name']).toBe('\ud800');
+
+    // its subject a surrogate alone
+    expect(claims).toContain('"sub":"bob"');
+
+    const unnamed = await verifyJwt(
+      signedText(HEADER, claims.replace('"sub":"bob"', '"sub":"\\ud800"')),
+      { audience, keys, now: readingOf(now) }
+    );
+
+    expect(unnamed).toEqual({ holds: false, reason: 'sub' });
+  });
+
   for (const [name, { algorithm, jwk }] of Object.entries(UNSHAPED)) {
     test(`throws for a key not shaped for its algorithm, whatever the token: ${name}`, async () => {
       const key = {
