@@ -821,6 +821,42 @@ test.describe('WebSocketTransportServer, on the wire', () => {
     ]);
   });
 
+  // RFC 6455 §8.1 and §7.4.1: `ws` closes a text message that is no UTF-8, and a close whose reason
+  // is no UTF-8, with 1007, where .NET sends 1002 for the reason and tungstenite 1002 for both; a row
+  // of docs/support.md
+  test('closes with 1007 a text message that is no UTF-8 and a close whose reason is no UTF-8', async () => {
+    const codes: (number | undefined)[] = [];
+
+    server.on('error', () => {});
+
+    for (const frame of [
+      maskedFrame(0x1, Uint8Array.of(0xff, 0xfe)),
+      maskedFrame(0x8, Uint8Array.of(0x03, 0xe8, 0xff, 0xfe)),
+    ]) {
+      const closed = nextServerEvent(server, 'close');
+      const connection = nextServerEvent(server, 'connection');
+      const socket = await openTcp(port);
+      const received: Buffer[] = [];
+
+      socket.on('data', (chunk: Buffer) => {
+        received.push(chunk);
+      });
+      socket.write(upgradeRequest());
+      await connection;
+      socket.write(frame);
+      await expect
+        .poll(() => {
+          return closeCodeOf(Buffer.concat(received));
+        })
+        .toBeDefined();
+      codes.push(closeCodeOf(Buffer.concat(received)));
+      socket.destroy();
+      await closed;
+    }
+
+    expect(codes).toEqual([1007, 1007]);
+  });
+
   test('tells a peer that drops without its closing handshake by its unclean close alone, no error', async () => {
     const errors: unknown[][] = [];
     const closes: unknown[][] = [];

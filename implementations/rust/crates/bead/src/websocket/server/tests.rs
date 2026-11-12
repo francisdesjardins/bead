@@ -1529,6 +1529,43 @@ async fn emits_error_with_the_handle_then_that_connection_s_close_on_a_protocol_
     stopped(&server).await;
 }
 
+// ! tungstenite raises one `Error::Utf8` for a text message and for a close's reason that is no
+// UTF-8, so both close with 1002, where RFC 6455 §7.4.1 gives the first 1007: `ws` sends 1007 for
+// both, .NET 1007 for the text and 1002 for the reason, a row of docs/support.md
+#[tokio::test]
+async fn closes_with_1002_a_text_message_that_is_no_utf_8_and_a_close_whose_reason_is_no_utf_8() {
+    let (server, recorder, port) = started(&briefly_closing()).await;
+
+    for (index, frame) in [
+        masked_frame(0x1, (&[0xff, 0xfe], true)),
+        masked_frame(0x8, (&[0x03, 0xe8, 0xff, 0xfe], true)),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let (mut socket, _) = upgraded(port).await;
+
+        socket.write_all(&frame).await.unwrap();
+
+        let mut peer = WebSocketStream::from_raw_socket(socket, Role::Client, None).await;
+
+        assert!(
+            matches!(
+                next_of(&mut peer).await,
+                Some(Ok(Message::Close(Some(CloseFrame {
+                    code: CloseCode::Protocol,
+                    ..
+                }))))
+            ),
+            "1002, case {index}"
+        );
+        recorder.closes(index + 1).await;
+    }
+
+    assert_eq!(recorder.errors(2).await.len(), 2, "each reported");
+    stopped(&server).await;
+}
+
 #[tokio::test]
 async fn tells_a_peer_that_drops_without_its_closing_handshake_by_its_unclean_close_alone_no_error()
 {
