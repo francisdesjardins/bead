@@ -259,6 +259,49 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
       });
 
       if (label === 'ws') {
+        test('fails a 101 that names an extension it never offered', async () => {
+          const http = createNodeServer();
+          const upgraded = Promise.withResolvers<Socket>();
+
+          // oxlint-disable-next-line bead/options-last -- Node's own, an `upgrade` listener's
+          http.on('upgrade', (request, socket) => {
+            const accept = createHash('sha1')
+              .update(
+                `${String(request.headers['sec-websocket-key'])}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`
+              )
+              .digest('base64');
+
+            socket.on('error', () => {});
+            // read on, so its end is heard
+            socket.resume();
+            socket.write(
+              `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\nSec-WebSocket-Extensions: permessage-deflate\r\n\r\n`
+            );
+            upgraded.resolve(socket as Socket);
+          });
+          http.listen(0, host);
+          await once(http, 'listening');
+
+          try {
+            await expect(
+              client.connect({ host, port: (http.address() as AddressInfo).port })
+            ).rejects.toBeInstanceOf(ConnectError);
+            expect(client.isClosed()).toBe(true);
+
+            // its socket let go: Node's server keeps its own half open
+            const socket = await upgraded.promise;
+
+            if (!socket.readableEnded) {
+              await once(socket, 'end');
+            }
+          } finally {
+            (await upgraded.promise).destroy();
+            await new Promise((resolve) => {
+              http.close(resolve);
+            });
+          }
+        });
+
         test('offers no extension in its upgrade, permessage-deflate among them', async () => {
           const offer = Promise.withResolvers<string | string[] | undefined>();
           const refusing = await startServer({
