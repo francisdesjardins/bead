@@ -381,6 +381,36 @@ async fn names_its_host_over_http_2_by_its_authority_a_host_beside_it_ignored_fo
     named.stop().await;
 }
 
+// ! hyper's HTTP/2 takes `max_header_list_size` alone, 16 KiB as RFC 9113 §6.5.2 counts it, 32
+// bytes more a field: the 100 fields HTTP/1.1 is held to bound no HTTP/2 head, a row of
+// docs/support.md
+#[tokio::test]
+async fn takes_over_http_2_a_head_of_300_fields_its_size_its_one_bound() {
+    let started = started_secure(&HttpTransportServerOptions::default()).await;
+    let port = started.port;
+    let own = format!("{HOST}:{port}");
+    let names = (0..300)
+        .map(|number| format!("x-{number}"))
+        .collect::<Vec<_>>();
+    let mut session = TlsWire::open(port).await;
+
+    for count in [101, 300] {
+        let mut fields = vec![
+            (":authority", own.as_str()),
+            ("content-type", BEAD_MEDIA_TYPE),
+        ];
+
+        fields.extend(names.iter().take(count).map(|name| (name.as_str(), "x")));
+        assert_eq!(
+            session.ask(&fields).await,
+            TlsAnswer::of(201, None),
+            "{count} fields"
+        );
+    }
+    assert_eq!(started.recorder.told().connections.len(), 2, "each drawn");
+    started.stop().await;
+}
+
 #[tokio::test]
 async fn resets_over_http_2_the_stream_of_a_request_whose_authority_is_no_host_protocol_error_nothing_written()
  {
