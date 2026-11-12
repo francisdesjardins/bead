@@ -30,9 +30,11 @@
   Ahead: beadc's Rust target, with `examples/hello`'s Rust half, the lists of the procedures a
   server's transports take
   ([0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md))
-  and the validators of a blueprint's rules generated for it, or beadc refusing to generate them
+  and the validators of a blueprint's rules generated for it, their runtime with them
   ([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md));
-  its gateway; and its AMQP 1.0 binding, each stage under a record of its own. The crate's layout and its modules are its README's.
+  its gateway, with the route table and the HTTP client an output with `gateway` writes; and its
+  AMQP 1.0 binding, each stage under a record of its own. The crate's layout and its modules are its
+  README's.
 
 ## Context
 
@@ -122,6 +124,7 @@ counts the receiver.
 | `bead`, `bead-interop`                                    | `bead`: the envelope's codec, the routers, the service layer, its server half and its client half, its managers, sessions, credentials and a `JWT`'s verification, the clock and the durations, the trace, the filter and the registry, the transports' generic part, the in-memory transport, the client and server facades, `bead::json`, and the test kit `bead::testing` behind the feature `testing`; `bead-interop`, the interop service | `spec/vectors.json` but its broker's groups; `spec/conversations.json` through a scripted transport and through the in-memory pair; `spec/clocks.json`; `spec/durations.json` but its transports' places; `spec/identities.json` but the ids no `u16` and no `u32` holds; `spec/codecs.json`'s `raw`, `text` and `json` entries; `spec/debug-filters.json` and `spec/metrics.json` whole; `spec/validations.json`'s details; the spec's and the companion's twins but those of its transports |
 | `bead`                                                    | the broker's core, its participant and the trace of its parcels, its parcel, its sequence, its heartbeat and its transports, the in-memory broker, the joined transport                                                                                                                                                                                                                                                                        | `parcels` and `parcelRefusals`; the cases over the in-memory broker of `spec/transports.json`; the conversations through a broker pair; the broker's places of `spec/durations.json`; spec 15.14's twins                                                                                                                                                                                                                                                                                      |
 | `bead-protobuf`                                           | the `proto` payload's codec, on Buffa 0.9.2: the check of a payload's records, the required walk, the typed codec and the dynamic one                                                                                                                                                                                                                                                                                                          | `spec/codecs.json`'s `proto` entries, the two values a typed message cannot hold through the dynamic message; protobuf's conformance suite through a Rust testee of `tools/protobuf-conformance.mjs`                                                                                                                                                                                                                                                                                          |
+| `bead-protobuf-build`                                     | Bead's setting of Buffa's generator for a build script, `config_of` and `opened_of`: the code of a message as `bead-protobuf`'s codec reads it, from a `FileDescriptorSet`                                                                                                                                                                                                                                                                     | nothing of the files: `bead-protobuf`'s tests' messages are generated through it                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `bead` with `websocket` and `http`, `bead-interop-server` | the WebSocket and HTTP transports, server and client, their facades and their TLS ([0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)); `bead-interop-server`, the interop service's server over both, and the Rust client's trials against each side's                                                                                                                         | the cases over HTTP and over WebSocket of `spec/transports.json`; their places of `spec/durations.json`; spec 15.10's and 15.12's twins; the interop both ways with the TypeScript and C# sides                                                                                                                                                                                                                                                                                               |
 | `bead` with `mqtt` and `amqp`, `bead-interop-server`      | the MQTT 5 adapter and its client, over the core's sockets ([0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)), and the AMQP 1.0 adapter, ahead; `bead-interop-server` over MQTT 5                                                                                                                                                                                       | the cases over MQTT 5 of `spec/transports.json`; `mqttPublishBounds`; the places of `mqttBrokerAdapter`; the twins of 15.25 to 15.31; the interop over MQTT 5 both ways                                                                                                                                                                                                                                                                                                                       |
 
@@ -143,9 +146,15 @@ Its broker bindings, MQTT 5 and AMQP 1.0, features of its core, are
 its MQTT 5 binding a client of its own over its sockets. Ahead, in this order: beadc's Rust
 target, with `examples/hello`'s Rust half, the lists of the procedures a server's transports take
 ([0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md))
-and the validators of a blueprint's rules generated for it, or beadc refusing to generate them
-([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md));
-its gateway; and its AMQP 1.0 binding, each stage under a record of its own.
+and the validators of a blueprint's rules generated for it
+([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)),
+since hello's blueprint requires `validate`: the stage brings the validators' runtime, beside the
+`proto` codec, and the runtime's counter of the contract with generated code, and generates the
+hooks' record (the [support matrix](../support.md)'s row of an option required in some
+instantiations alone); hello's Rust half names no `gateway` until the gateway's stage, which a
+target that writes no route table refuses (`HTTP_UNGENERATED`); its gateway, with the route table
+and the HTTP client an output with `gateway` writes; and its AMQP 1.0 binding, each stage under a
+record of its own.
 
 ### The partial side
 
@@ -168,10 +177,14 @@ a twin.
   Rust's unit of dependency and of `forbid(unsafe_code)`, as an assembly is .NET's. `bead` is
   `Bead.Core`'s twin, `bead-protobuf` `Bead.Protobuf`'s, `bead-interop` the interop service's,
   `bead-interop-server` its server and the Rust client's trials against each side's;
-  `bead-house`, dev only, holds the house's own checks. The crates of the stages ahead are named
-  already, so no rename follows: `bead-transcoding` and `bead-transcoding-http`. A part that needs
-  the core's inside and ships to applications, a transport, comes as a feature of the core
-  ([0047](0047-every-side-shows-one-public-surface.md)): its sockets
+  `bead-protobuf-build`, which mirrors no assembly, is Bead's setting of Buffa's generator for an
+  application's build script, where messages are the stock generators'
+  ([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)),
+  its surface pinned by the house; `bead-house`, dev only, holds the house's own checks. The crates
+  of the stages ahead are named already, so no rename follows: `bead-transcoding` and
+  `bead-transcoding-http`. A part that needs the core's inside and ships to applications, a
+  transport, comes as a feature of the core ([0047](0047-every-side-shows-one-public-surface.md)):
+  its sockets
   ([0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md))
   and its broker bindings
   ([0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)).
@@ -890,7 +903,9 @@ the coverage floor of lines and regions; and CI's `rust` job, on Linux and on Wi
 
 The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)):
 seventeen objections, each checked against its probe before it was answered, fifteen accepted, two
-in part, none refused; the form of a module's documentation was the user's to choose.
+in part, none refused; the form of a module's documentation was the user's to choose. The round on
+a resolver that fails with a failure, which the converse twins found apart, is kept in
+[0004](0004-one-behaviour-in-every-language.md), On the converse twins' six divergences.
 
 | Objection                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

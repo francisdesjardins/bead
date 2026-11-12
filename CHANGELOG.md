@@ -7,6 +7,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- The support matrix and the records correct what they state: the Rust side's HTTP client comes
+  with its gateway, and its beadc target brings the validators' runtime that `examples/hello`'s Rust
+  half needs (decision 0044); four more rows of the matrix's differences name where the sides
+  part in shipped code: an MQTT 5 AUTH no CONNECT asked for, a DISCONNECT from a broker that keeps
+  its connection open, a password beside TLS that trusts an authority with no client certificate,
+  and a resolver, a command or a window of a procedure its service does not hold; and an MQTT 5
+  acknowledgement no request awaits is named in the cells of its two rows (decisions 0018, 0041,
+  0050).
+
 ## [0.13.0] - 2026-11-12
 
 ### Added

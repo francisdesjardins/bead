@@ -506,9 +506,8 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
         var filter = held?.Filter ?? key;
 
-        // ! its request never given up by a token, its link's own but: MQTTnet ends a link on an
-        // UNSUBACK no request awaits, with no DISCONNECT, so its will would go; its wait alone is
-        // bounded, and a late UNSUBACK read
+        // ! its request never given up by a token, its link's own but, so that a late UNSUBACK is
+        // still read; its wait alone is bounded
         var leaving = LeftOf((link, (key, held)), Asked((link, CancellationToken.None), link.Client.UnsubscribeAsync(new MqttClientUnsubscribeOptionsBuilder().WithTopicFilter(filter).Build(), link.Life.Token)));
 
         try

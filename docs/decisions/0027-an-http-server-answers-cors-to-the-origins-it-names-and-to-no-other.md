@@ -203,9 +203,9 @@ write of their own carries none of the path's fields
 **On the TypeScript side, `IHTTPResponseLike` requires `setHeader`**, which `node:http`,
 `node:https` and `node:http2`'s responses have.
 
-**A gateway in front that answers CORS for the Bead path stops, or replaces the fields rather than
+**A proxy in front that answers CORS for the Bead path stops, or replaces the fields rather than
 appends them**, once the server lists the origin: two `Access-Control-Allow-Origin` fail Fetch's
-CORS check. A gateway that appends, nginx's `add_header` among them, breaks every listed page.
+CORS check. A proxy that appends, nginx's `add_header` among them, breaks every listed page.
 
 **A page of the public network needs its user's local network permission besides**, which no server
 answers, asked in a secure context alone; a page of a private address reaches the loopback ungated

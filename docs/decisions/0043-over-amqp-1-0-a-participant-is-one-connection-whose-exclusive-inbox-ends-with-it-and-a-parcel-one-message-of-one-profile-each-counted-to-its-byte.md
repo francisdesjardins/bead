@@ -272,9 +272,9 @@ from every client each half of it. During it, the dead inbox still takes parcels
 "Differences" in [`docs/support.md`](../support.md).
 
 **A connect to a provisioned name with no member waits its time**, its OPEN held in the name's queue
-for its life, where over MQTT 5 0x10 fails it at once; `released` has two causes, an inbox its broker
-ended and a name no deployment provisioned, and never a provisioned name with no member. A row of
-"Differences".
+for its life, where over MQTT 5 at least once 0x10 fails it at once; `released` has two causes, an
+inbox its broker ended and a name no deployment provisioned, and never a provisioned name with no
+member. A row of "Differences".
 
 **A participant serves 60 names under RabbitMQ's default** of 64 sessions a connection, its inbox's,
 the two sending ones and the management's taking four; a deployment that needs more raises

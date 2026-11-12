@@ -264,10 +264,10 @@ transport takes is no access: it grants none, and each procedure keeps its own a
 | `testing`  | the test kit, behind the feature `testing`: the tests' messages, generated from `proto/tests.binpb`; no API                                                                                                     |
 
 A message an application binds to `proto` is generated as `bead-protobuf-build` sets Buffa's
-generator, from the set protoc writes; `ProtoCodec` reads it through its view, which tells a field
-given from one left out, and gives the owned message. An owned message holds a required scalar bare,
-so no typed value leaves one unset; `DynamicCodec`, its value Buffa's `DynamicMessage`, is the form
-that can, and refuses it.
+generator, from a `FileDescriptorSet` its build writes; `ProtoCodec` reads it through its view,
+which tells a field given from one left out, and gives the owned message. An owned message holds a
+required scalar bare, so no typed value leaves one unset; `DynamicCodec`, its value Buffa's
+`DynamicMessage`, is the form that can, and refuses it.
 
 ## Tests
 

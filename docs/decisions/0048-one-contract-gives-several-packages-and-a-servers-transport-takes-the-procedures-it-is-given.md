@@ -141,7 +141,7 @@ outputs:
 - **`client`**, of `procedures`: the client class, its requesters, its notifications and the
   resolvers of the commands it answers, holds what it selects.
 - **`gateway`**, of `procedures` and, on a TypeScript output, `runtime`: the route table, the
-  document and the `<Service>HttpClient` of the `request` and `notifies` procedures it selects,
+  document and the `<Name>HttpClient` of the `request` and `notifies` procedures it selects,
   `gateway: {}` every one, and `runtime` the route table's runtime. An output's `http` and
   `httpRuntime` are refused, naming `gateway: {}` and `gateway.runtime`.
 - An output that names neither `server` nor `client` writes both whole; one that names one writes

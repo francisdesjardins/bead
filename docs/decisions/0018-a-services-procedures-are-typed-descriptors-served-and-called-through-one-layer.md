@@ -587,9 +587,13 @@ public static class PayloadCodecs
 }
 ```
 
-Generated code binds a `proto` payload with `payloadCodecOf` and `PayloadCodecs.Of`, passing its
-stock library's reader and writer with Bead's bound, the payload's records checked before the
-library reads them: what it writes, and what a `proto` payload is, are
+Generated code binds a `proto` payload with the runtime's codec of its schema, `protoCodecOf`,
+`ProtoCodecs.Of` and `ProtoCodec::new`
+([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md),
+[0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)),
+the payload's records checked before its stock library reads them; `payloadCodecOf` and
+`PayloadCodecs.Of` serve a codec an application writes. What it writes, and what a `proto`
+payload is, are
 [0031](0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)'s.
 
 **A rule says who may call a procedure, and a hook is data.**
@@ -995,19 +999,19 @@ empty one. The C# side's `ProceduresWithoutResolver` is a method, as `Gauges` is
 
 What the layer refuses, as it is built or used:
 
-| Mistake                                                                                            | TypeScript                                      | C#                                                                 |
-| -------------------------------------------------------------------------------------------------- | ----------------------------------------------- | ------------------------------------------------------------------ |
-| `on` twice for one procedure, offered or not                                                       | `ProgrammerError`                               | `ArgumentException`, as the router's second resolver               |
-| `on` of a name the service lacks, or of a command on the server side, a request on the client side | compile error; `ProgrammerError` past the types | compile error                                                      |
-| `on` of a command admitted by a hook, on the client side                                           | `ProgrammerError`                               | `ArgumentException`                                                |
-| `offer` twice                                                                                      | `ProgrammerError`                               | `InvalidOperationException`                                        |
-| a command's requester called before `offer`                                                        | `ProgrammerError`                               | `InvalidOperationException`                                        |
-| a hook a procedure names, missing from the options; one the options give that no procedure names   | compile error for a literal; `ProgrammerError`  | compile error for a record; `ArgumentException` past it            |
-| a hook that is no hook                                                                             | `ProgrammerError`                               | `ArgumentException`                                                |
-| a window for a procedure that does not notify                                                      | compile error for a literal; `ProgrammerError`  | compile error for a record; `ArgumentException` past it            |
-| a window that is not a whole number above 0                                                        | `ProgrammerError`, the notification's           | `ArgumentException`, the notification's                            |
-| a second client side over one Bead client, at another window                                       | `ProgrammerError`, item 8's                     | `InvalidOperationException`, item 8's                              |
-| an unlisted failure code answered                                                                  | sent as written; `ProgrammerError` reported     | no counterpart: the failure class holds its procedure's list alone |
+| Mistake                                                                                            | TypeScript                                      | C#                                                                 | Rust                                                 |
+| -------------------------------------------------------------------------------------------------- | ----------------------------------------------- | ------------------------------------------------------------------ | ---------------------------------------------------- |
+| `on` twice for one procedure, offered or not                                                       | `ProgrammerError`                               | `ArgumentException`, as the router's second resolver               | `ProgrammerError`                                    |
+| `on` of a name the service lacks, or of a command on the server side, a request on the client side | compile error; `ProgrammerError` past the types | compile error                                                      | `ProgrammerError`, at run time                       |
+| `on` of a command admitted by a hook, on the client side                                           | `ProgrammerError`                               | `ArgumentException`                                                | `ProgrammerError`                                    |
+| `offer` twice                                                                                      | `ProgrammerError`                               | `InvalidOperationException`                                        | `ProgrammerError`                                    |
+| a command's requester called before `offer`                                                        | `ProgrammerError`                               | `InvalidOperationException`                                        | `ProgrammerError`                                    |
+| a hook a procedure names, missing from the options; one the options give that no procedure names   | compile error for a literal; `ProgrammerError`  | compile error for a record; `ArgumentException` past it            | `ProgrammerError`, as the service is built           |
+| a hook that is no hook                                                                             | `ProgrammerError`                               | `ArgumentException`                                                | compile error                                        |
+| a window for a procedure that does not notify                                                      | compile error for a literal; `ProgrammerError`  | compile error for a record; `ArgumentException` past it            | `ProgrammerError`, at run time                       |
+| a window that is not a whole number above 0                                                        | `ProgrammerError`, the notification's           | `ArgumentException`, the notification's                            | `ProgrammerError` for 0, a `u64` holding no fraction |
+| a second client side over one Bead client, at another window                                       | `ProgrammerError`, item 8's                     | `InvalidOperationException`, item 8's                              | `ProgrammerError`                                    |
+| an unlisted failure code answered                                                                  | sent as written; `ProgrammerError` reported     | no counterpart: the failure class holds its procedure's list alone | sent as written; reported                            |
 
 **A generated class is printed over its side's pick.** beadc writes a service's `<Svc>Procedures`
 whole, every procedure its output's `server`, `client` or `gateway` selects, and prints the server

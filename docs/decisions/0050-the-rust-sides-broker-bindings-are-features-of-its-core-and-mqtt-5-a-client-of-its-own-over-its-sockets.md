@@ -207,12 +207,15 @@ them, the will of GONE at QoS 1, RETAIN 0, Delay 0), PUBLISH (QoS 0 or 1, RETAIN
 Interval alone), PUBACK (0x00), SUBSCRIBE (one filter, QoS 1, No Local 0, Retain As Published 0,
 Retain Handling 2), UNSUBSCRIBE (one filter), PINGREQ and DISCONNECT (0x00); it reads CONNACK,
 PUBLISH, PUBACK, SUBACK, UNSUBACK, PINGRESP and DISCONNECT, each property in any order §2.2.2
-allows, and refuses AUTH. Eleven packets, which `mqtt-packets.ts` and `MqttPackets.cs` count too.
+allows, and refuses AUTH. Eleven packets, which the other sides' libraries write and read;
+`mqtt-packets.ts` and `MqttPackets.cs` count a PUBLISH as `packets.rs` does (15.30).
 
 What it holds by construction: its quota per incarnation, **no other packet delayed for it**
 ([MQTT-3.3.4-8]); each packet counted `S = 1 + v(R) + R` before it goes, refused past its CONNACK's
 bound (15.30); a received packet past its own bound closes its network connection, no DISCONNECT,
-its link lost (15.29), as the row of Leveled down has it; 0x8E a takeover (15.21); one filter per
+its link lost (15.29), as the row of Leveled down has it, and so does one it cannot read, an AUTH
+among them, as on every side but the C# side on an AUTH, the row of Differences `An MQTT 5 AUTH its
+CONNECT never asked for`; 0x8E a takeover (15.21); one filter per
 UNSUBSCRIBE; no request cancelled once its packet may have gone; each WebSocket message one binary
 frame, one packet; every callback gated by its incarnation. **Its connection is one task's**,
 spawned through `crate::platform`, owning the socket, the quota, the filters and the PUBACK
@@ -287,7 +290,9 @@ saying so.
 - **The Rust side keeps to every leveled row the MQTT 5 binding holds**: no DISCONNECT of 0x95, each
   WebSocket message one frame, a Password as text. The first is
   [0041](0041-over-mqtt-5-a-participant-is-one-clean-link-and-a-parcel-one-publish-each-counted-to-its-byte.md)'s,
-  its reason Mosquitto's will handling.
+  its reason Mosquitto's will handling. It parts from the other sides in two rows of Differences,
+  `An MQTT 5 Server Keep Alive of 0, or longer than its own` and `An MQTT 5 WebSocket message of
+  several packets`.
 - **The `mqtt` job builds from the `rust` job's cache**, beside it, not behind it.
 - **Ahead**: AMQP 1.0's binding, `Rust's AMQP 1.0 binding`, its client by one of the three branches
   above, its fuzz target, its cases, its groups `amqpMessages` and `amqpPublishBounds`, its places

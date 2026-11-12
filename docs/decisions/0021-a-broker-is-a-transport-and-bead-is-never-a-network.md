@@ -116,8 +116,8 @@ the transport drops a parcel below the next one awaited, and hands its router ea
 
 **The broker's transport plays the conformance files and the interop**, as HTTP's and the
 WebSocket's do ([0004](0004-one-behaviour-in-every-language.md)): its parcels in `spec/vectors.json`,
-its cases of both roles in `spec/transports.json` over each side's in-memory broker, and the interop
-over MQTT 5 and over AMQP 1.0 against a real broker
+its cases of both roles in `spec/transports.json` over each side's in-memory broker and over each
+binding's real broker, and the interop over each binding a side carries, MQTT 5 and AMQP 1.0
 ([0041](0041-over-mqtt-5-a-participant-is-one-clean-link-and-a-parcel-one-publish-each-counted-to-its-byte.md),
 [0043](0043-over-amqp-1-0-a-participant-is-one-connection-whose-exclusive-inbox-ends-with-it-and-a-parcel-one-message-of-one-profile-each-counted-to-its-byte.md)).
 
