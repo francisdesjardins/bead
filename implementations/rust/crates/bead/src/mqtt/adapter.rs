@@ -287,11 +287,13 @@ impl MqttBrokerAdapter {
     /// a client certificate, a Maximum Packet Size outside 1 to 268,435,460, or a Keep Alive or a
     /// connect timeout spec 1.4 does not hold.
     pub fn new(options: &MqttBrokerAdapterOptions) -> Result<Self, ProgrammerError> {
-        let keep_alive = hold_within(
+        // * in whole seconds rounded up, as its CONNECT announces it and its link runs it (spec
+        // 15.26)
+        let keep_alive = Duration::from_secs(u64::from(seconds_of(hold_within(
             "keepAlive",
             options.keep_alive.unwrap_or(KEEP_ALIVE),
             &HoldWithinOptions::new(LONGEST_KEEP_ALIVE),
-        )?;
+        )?)));
         let connect_timeout = hold_finite(
             "connectTimeout",
             options.connect_timeout.unwrap_or(MQTT_CONNECT_TIMEOUT),

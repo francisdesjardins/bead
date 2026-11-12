@@ -123,6 +123,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   its DISCONNECT of 0x00, on the C# side once MQTTnet says it connected, so no will goes, and the
   TypeScript adapter no longer counts up a link its stop ended (spec 15.21, 15.26, 15.30, decision
   0041).
+- The Rust side's MQTT 5 adapter runs a `keepAlive` under a second as the whole second its CONNECT
+  announces, as the other sides do, where it sent a PINGREQ and lost its link on an unanswered one
+  at the unrounded value (spec 15.26).
 
 ## [0.12.0] - 2026-11-10
 

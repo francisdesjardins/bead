@@ -452,6 +452,43 @@ async fn keeps_a_server_keep_alive_shorter_than_its_own_a_pingreq_once_nothing_w
 
 // spec 15.26
 #[tokio::test]
+async fn runs_a_keep_alive_under_a_second_as_its_connect_announces_it_a_whole_second_rounded_up() {
+    let script = script().await;
+    let mut options = options_of(&script);
+
+    options.keep_alive = Some(Duration::from_millis(200));
+
+    let adapter = adapter_of(&options);
+    let heard = heard_of(&adapter);
+    let link = link_up((&adapter, &script), (&Connack::default(), None)).await;
+    let started = Instant::now();
+
+    assert_eq!(link.connect().keep_alive, 1, "its CONNECT's Keep Alive");
+    // * no PINGREQ before the second its CONNECT announced
+    assert!(
+        link.next(Some(Kind::Pingreq), Duration::from_millis(700))
+            .await
+            .is_err(),
+        "no PINGREQ within 700 ms"
+    );
+    link.next(Some(Kind::Pingreq), Duration::from_secs(2))
+        .await
+        .unwrap();
+    assert!(
+        started.elapsed() >= Duration::from_millis(900),
+        "its PINGREQ once a second went"
+    );
+
+    // * its PINGRESP awaited a whole second too
+    rest(Duration::from_millis(500)).await;
+    assert!(heard.downs().is_empty(), "kept half a second on");
+    link.send(pingresp());
+    assert_eq!(link.of(Kind::Pingreq).len(), 1, "one PINGREQ");
+    adapter.stop().await;
+}
+
+// spec 15.26
+#[tokio::test]
 async fn leaves_a_will_of_its_gone_qos_1_retain_0_and_a_will_delay_interval_of_0_and_stops_with_a_disconnect_of_0x00()
  {
     let script = script().await;
