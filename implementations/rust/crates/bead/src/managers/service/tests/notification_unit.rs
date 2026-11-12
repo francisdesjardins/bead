@@ -1,5 +1,6 @@
 //! A client's notification: one subscription, callback settlements and individual registrations.
 
+use core::time::Duration;
 use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
@@ -254,4 +255,96 @@ async fn the_same_callback_registered_twice_is_heard_twice_and_its_registrations
     assert_eq!(*locked(&heard), ["both", "both", "one"]);
     second.unregister().await.expect("last out");
     fixture.router.dispose().await;
+}
+
+// decision 0044: a registration takes effect as it is made, its future only waiting
+#[tokio::test]
+async fn a_registration_whose_future_is_dropped_unpolled_still_subscribes_and_listens() {
+    let fixture = ClientFixture::new();
+    let heard = Heard::default();
+    let notification = notification(&fixture);
+
+    drop(notification.register(
+        "dropped".to_owned(),
+        callback(&heard, ""),
+        &RegistrationOptions::default(),
+    ));
+    fixture.clock.settle().await;
+
+    assert!(
+        matches!(requests(&fixture).as_slice(), [Envelope::Request { payload, .. }] if payload.as_ref() == b"dropped"),
+        "its subscribing call went: {:?}",
+        requests(&fixture)
+    );
+    assert!(fixture.router.has_notification(&notification.as_like()));
+
+    fixture.transport.deliver(&result(1, b"subscribed"));
+    deliver(&fixture, (1, "news"));
+    fixture.clock.settle().await;
+
+    assert_eq!(*locked(&heard), ["news"], "its callback listens");
+    fixture.router.dispose().await;
+}
+
+// decision 0044: the last registration taken away leaves as it is made, its future only waiting,
+// so one dropped, unpolled or once polled, holds back no registration after it
+#[tokio::test]
+async fn an_unregistration_whose_future_is_dropped_still_leaves_and_the_next_registration_subscribes_anew()
+ {
+    for is_polled in [false, true] {
+        let fixture = ClientFixture::new();
+        let heard = Heard::default();
+        let notification = notification(&fixture);
+        let first = subscribed(&fixture, (&notification, callback(&Heard::default(), ""))).await;
+        let mut leaving = first.unregister();
+
+        if is_polled {
+            pending(&mut leaving).await;
+        }
+
+        drop(leaving);
+        fixture.clock.settle().await;
+
+        assert!(
+            !fixture.router.has_notification(&notification.as_like()),
+            "let go of, polled {is_polled}"
+        );
+        assert!(
+            fixture
+                .transport
+                .envelopes()
+                .iter()
+                .any(|envelope| matches!(envelope, Envelope::Cancel { .. })),
+            "its subscription cancelled, polled {is_polled}"
+        );
+
+        let mut registering = notification.register(
+            "again".to_owned(),
+            callback(&heard, ""),
+            &RegistrationOptions::default(),
+        );
+
+        fixture.clock.settle().await;
+        assert_eq!(
+            requests(&fixture).len(),
+            2,
+            "asked anew, polled {is_polled}"
+        );
+        pending(&mut registering).await;
+
+        let call_id = requests(&fixture).last().expect("a request").call_id();
+
+        fixture.transport.deliver(&result(call_id, b"subscribed"));
+
+        let registration = crate::testing::patience(Duration::from_secs(10), registering)
+            .await
+            .expect("settled in time")
+            .expect("subscribed anew");
+
+        deliver(&fixture, (call_id, "news"));
+        fixture.clock.settle().await;
+        assert_eq!(*locked(&heard), ["news"], "heard, polled {is_polled}");
+        registration.unregister().await.expect("last out");
+        fixture.router.dispose().await;
+    }
 }

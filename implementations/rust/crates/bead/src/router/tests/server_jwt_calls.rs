@@ -1025,3 +1025,83 @@ async fn ends_every_credentials_session_of_an_issuer_by_that_issuer_on_every_con
     served.router.dispose().await;
     assert_eq!(served.clock.dues(), Vec::<core::time::Duration>::new());
 }
+
+// spec 9.2 step 6, SEC 1 §3.2.2: a key of ES256 whose x and y name no point of P-256 fails the
+// verifier, the application's fault, as the other sides' import of it does: its call answered
+// PROCEDURE_FAILED and reported, never SESSION_REQUIRED, which would have its requester withdraw a
+// credential that holds
+#[tokio::test]
+async fn answers_a_call_under_an_es256_key_off_its_curve_procedure_failed_and_reports_it_never_session_required()
+ {
+    let off = json!({
+        "kty": "EC",
+        "crv": "P-256",
+        "x": crate::base64url::encode(&[1_u8; 32]),
+        "y": crate::base64url::encode(&[1_u8; 32]),
+    });
+    let served = Served::new(&RouterServerOptions {
+        credentials: Some(Credentials {
+            audience: Some(AUDIENCE.to_owned()),
+            keys: vec![JwtKey {
+                algorithm: JwtAlgorithm::Es256,
+                issuer: ISSUER.to_owned(),
+                jwk: off.as_object().cloned().expect("a JWK object"),
+            }],
+            ..Credentials::default()
+        }),
+        ..RouterServerOptions::default()
+    });
+
+    served
+        .services
+        .get_request_resolver(
+            &echo(),
+            crate::managers::service::RequestResolverDependencies::new(
+                crate::payloads::RawCodec,
+                crate::payloads::RawCodec,
+            ),
+        )
+        .expect("echo resolved")
+        .on(Arc::new(
+            |request, response: crate::managers::service::Response<crate::payloads::RawCodec>| {
+                response.result(request.payload)
+            },
+        ))
+        .expect("echo registered");
+    served.transport.open(&first(), true);
+
+    let part_of = |value: &Value| crate::base64url::encode(value.to_string().as_bytes());
+    let token = format!(
+        "{}.{}.{}",
+        part_of(&json!({"alg": "ES256", "typ": "at+jwt"})),
+        part_of(
+            &json!({"iss": ISSUER, "aud": AUDIENCE, "sub": "grace", "exp": NOW.saturating_add(3_600)})
+        ),
+        crate::base64url::encode(&[1_u8; 64])
+    );
+
+    served.transport.deliver(
+        &Envelope::Request {
+            header: RequestHeader {
+                credential: Some(Credential::Jwt(Bytes::from(token))),
+                ..request_header_of(1)
+            },
+            payload: Bytes::new(),
+        },
+        &first(),
+    );
+    served.settle().await;
+
+    assert_eq!(
+        served.sent_since(),
+        ["first failure 1 PROCEDURE_FAILED"],
+        "answered PROCEDURE_FAILED, never SESSION_REQUIRED"
+    );
+
+    let reported = served.reported();
+
+    assert!(
+        matches!(reported.as_slice(), [report] if report.contains("point of P-256")),
+        "reported, naming the key's fault: {reported:?}"
+    );
+}

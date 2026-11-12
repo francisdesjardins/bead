@@ -111,8 +111,10 @@ impl Answerer for Recording {
         let delay = locked(&self.delay).clone();
         Box::pin(async move {
             if let Some(reason) = refusal {
+                // ! the clock ticked, never advanced: its router settles an answer in a task the
+                // clock's advance waits on
                 if let Some((clock, delay)) = delay {
-                    clock.advance(delay).await;
+                    clock.tick(delay);
                 }
                 return Err(reason);
             }

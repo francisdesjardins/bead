@@ -402,57 +402,63 @@ async fn tells_with_no_failure_an_answer_that_did_not_go_once_its_call_was_cance
     );
 }
 
-// debugging 4.2: the step of an answer is told by its future, polled to its settling; the other
-// sides' answer runs on unawaited, a row of the support matrix
+// debugging 4.2, decision 0044: the answer goes as it is made, and its step is told once its router
+// settled it, whether or not anyone waits on its future
 #[tokio::test]
-async fn an_answer_whose_future_is_dropped_once_polled_goes_and_tells_no_step() {
-    let fixture = Fixture::new();
-    let heard = fixture.heard();
-    fixture
-        .manager
-        .get_request_resolver(
-            &echo(),
-            RequestResolverDependencies::new(TextCodec, TextCodec),
-        )
-        .expect("defined")
-        .on(Arc::new(|request, response| {
-            Box::pin(async move {
-                let mut answering = response.result(request.payload);
-                // * polled once: its answer handed to its router, which has yet to settle it
-                assert!(
-                    answering
-                        .as_mut()
-                        .poll(&mut Context::from_waker(Waker::noop()))
-                        .is_pending()
-                );
-                drop(answering);
-                Ok(())
-            })
-        }))
-        .expect("registered");
-    fixture.transport.open(&handle_of(1), true);
-    fixture.transport.deliver(
-        &Envelope::Request {
-            header: header(),
-            payload: Bytes::from_static(b"hi"),
-        },
-        &handle_of(1),
-    );
-    fixture.clock.settle().await;
-    let sent = fixture.transport.take();
-    assert!(
-        matches!(sent.as_slice(), [(_, Envelope::Result { header, payload })]
-            if header.call_id == 7 && payload.as_ref() == b"hi"),
-        "its answer went: {sent:?}"
-    );
-    assert_eq!(
-        locked(&heard)
-            .iter()
-            .map(|(error, step)| (step.direction, error.is_some()))
-            .collect::<Vec<_>>(),
-        [(DebugDirection::Rx, false)]
-    );
-    fixture.router.dispose().await;
+async fn tells_once_its_router_settled_it_an_answer_nobody_waits_on() {
+    // its future dropped unpolled, then once polled
+    for is_polled in [false, true] {
+        let fixture = Fixture::new();
+        let heard = fixture.heard();
+        fixture
+            .manager
+            .get_request_resolver(
+                &echo(),
+                RequestResolverDependencies::new(TextCodec, TextCodec),
+            )
+            .expect("defined")
+            .on(Arc::new(move |request, response| {
+                Box::pin(async move {
+                    let mut answering = response.result(request.payload);
+                    if is_polled {
+                        // * polled once: its answer handed to its router, which has yet to settle it
+                        assert!(
+                            answering
+                                .as_mut()
+                                .poll(&mut Context::from_waker(Waker::noop()))
+                                .is_pending()
+                        );
+                    }
+                    drop(answering);
+                    Ok(())
+                })
+            }))
+            .expect("registered");
+        fixture.transport.open(&handle_of(1), true);
+        fixture.transport.deliver(
+            &Envelope::Request {
+                header: header(),
+                payload: Bytes::from_static(b"hi"),
+            },
+            &handle_of(1),
+        );
+        fixture.clock.settle().await;
+        let sent = fixture.transport.take();
+        assert!(
+            matches!(sent.as_slice(), [(_, Envelope::Result { header, payload })]
+                if header.call_id == 7 && payload.as_ref() == b"hi"),
+            "its answer went, polled {is_polled}: {sent:?}"
+        );
+        assert_eq!(
+            locked(&heard)
+                .iter()
+                .map(|(error, step)| (step.direction, error.is_some()))
+                .collect::<Vec<_>>(),
+            [(DebugDirection::Rx, false), (DebugDirection::Tx, false)],
+            "its step told, polled {is_polled}"
+        );
+        fixture.router.dispose().await;
+    }
 }
 
 #[tokio::test]

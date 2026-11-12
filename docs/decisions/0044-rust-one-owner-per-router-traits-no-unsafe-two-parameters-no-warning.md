@@ -298,7 +298,11 @@ traits it derives or implements, its bodies not, pinned to its list in
 the surface grows by a decision ([0047](0047-every-side-shows-one-public-surface.md)); the comment tags
 of `CLAUDE.md` on plain comments alone, none on a doc comment, a doc comment being what rustc's
 tokenizer reads as one (`///`, `//!`, `/** */`, `/*! */`), so `//!` is never taken for the `!` tag;
-and every member's `[lints] workspace = true`, so no crate leaves the policy. **`//!` is kept**,
+and every member's `[lints] workspace = true`, so no crate leaves the policy. The surface names
+crates of their own before 1.0: rustls 0.23's configurations in the socket transports' `tls`
+fields, tokio-util 0.7's `CancellationToken` in every options struct, and Buffa 0.9 in
+`bead-protobuf`'s `ProtoSchema` and `DynamicCodec::new`; a breaking release of one of them, once
+taken, is a breaking release of Bead (C-STABLE). **`//!` is kept**,
 Rust's inner doc comment, the language's and its standard library's form for a module's and a
 crate's documentation: the one exception to the `!` tag, a doc comment, never the tag, though Better
 Comments shows it as one.
@@ -313,6 +317,14 @@ owner and posts its outcome as a job of its own: a turn and its continuations, a
 `when_idle` stand for the scheduler's `Post`, `Run`, `Cover` and `WhenIdle`. The router is re-cut as
 turns and continuations, its turns the other sides', not ported line by line: what `RouterCore.cs`
 does between two awaits is one job.
+
+**Beside the owner, a few states are shared under std's `Mutex`**, each held the length of a copy or
+a write, never across an `await`, which clippy's `await_holding_lock` refuses: a client's
+notifications, the series of what it hears, its session token and its default credential; a
+server's series of what it notifies; each router's resolvers; and a call's handler, its session and
+the failure its router answered in its handler's place. Each serves what is read off the owner
+synchronously, `has_notification`, a request's resolver, a call's `answered`, a gauge, or an
+operation that takes effect as it is made; the rest of a router's state is its owner's alone.
 
 **An operation takes effect when it is made; its future only waits.** Every operation the other
 sides start as it is called — `request`, `notify`, `subscribe`, `command`, `connect`, `close`,
@@ -389,13 +401,15 @@ its router, which then ends by its dispose. Twins:
 
 **The core spawns through one private module, `platform`, and reads time through its clock alone,
 as clippy's `disallowed-methods` and `disallowed-types` hold it.** `platform::spawn` is the one
-call of tokio's spawn, and `platform::runtime_of` the one reading of the current runtime and of its
-time driver, which every part of the core that takes a runtime calls with its own refusal;
+call of tokio's spawn, `platform::lookup_host` the one of its resolver, which spawns on its
+blocking pool a resolution that runs to its end whatever becomes of the connect that asked, and
+`platform::runtime_of` the one reading of the current runtime and of its time driver, which every
+part of the core that takes a runtime calls with its own refusal;
 `SystemClock`'s body is the one reader of std's `Instant`, of `SystemTime::now()` and of tokio's
 timers. Each of the two funnels sits under one `#[expect]`, and the public surface names tokio's
 `Handle`, the application's runtime being tokio's. The lists refuse every other path in every
 target clippy sees, as CI runs it: tokio's spawns, `try_current` and `current` ("spawn through
-`crate::platform`"); `block_on`, `block_in_place` and `std::thread::sleep` ("a turn awaits
+`crate::platform`"); `tokio::net::lookup_host` ("resolve through `crate::platform`"); `block_on`, `block_in_place` and `std::thread::sleep` ("a turn awaits
 nothing"); tokio's `sleep`, `sleep_until`, `interval`, `interval_at`, `timeout` and `timeout_at`,
 `SystemTime::now`, and the types `std::time::Instant` and `tokio::time::Instant`, so that every
 `elapsed()` is held too ("time through the clock"); `std::thread::spawn` ("no thread of Bead's
@@ -534,7 +548,10 @@ tests, benches and fuzz targets among them, where the C# side's count reads its 
 alone: a crate's tests sit in its `src`. On the surface no item takes or gives one
 ([0047](0047-every-side-shows-one-public-surface.md)), which `bead-house`'s `tuples.rs` holds: two
 things are two parameters, a third essential thing a record of the call, `RouterRequest` or
-`NotifyRequest`, and several values given back a `#[non_exhaustive]` struct.
+`NotifyRequest`, and several values given back a `#[non_exhaustive]` struct. Two kinds of record
+stay exhaustive, so that a literal builds them: the wire's own, an envelope's header and a failure's
+`FailureRecord`, whose fields the spec fixes; and what an application builds to hand in,
+`ProcedureAddress`, `CallAddress`, `CallAsked` and `EnvelopeAsked`.
 
 ### Names, side by side
 
@@ -717,13 +734,15 @@ byte, and **always built**: no Cargo feature leaves debugging out, which would b
 ### The CI job, fuzz and bench
 
 CI's `rust` job ([0006](0006-a-rule-has-its-gate.md)), on Linux: `cargo fmt --check`, `cargo clippy
---workspace --all-targets --all-features --locked`, the core's lib linted with no feature, with
+--workspace --all-targets --all-features --locked` and again on each member's default features, the
+core's lib linted with no feature, with
 `websocket` alone, with `http` alone and with `mqtt` alone (`cargo clippy -p francisdesjardins-bead
 --lib --locked`, `--features websocket`, `--features http`, `--features mqtt`), the browser
 target's `cargo clippy -p francisdesjardins-bead --lib --features testing --locked --target
 wasm32-unknown-unknown`, by its features, no socket and no broker binding among them
 ([0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)),
-`cargo doc`, a build on the default features alone, `cargo deny --locked check`, the tests under
+`cargo doc`, a build on the default features alone, `cargo deny --locked check` and the same on the
+fuzz targets and the conformance player, outside the workspace, the tests under
 coverage held to the floor, and the fuzz targets built on the dated nightly, never run; on Windows,
 `cargo test --workspace --all-features --locked`, as the user's MSVC toolchain builds it. The
 registry and the target are cached by the lock and the toolchain, cargo-deny and cargo-llvm-cov

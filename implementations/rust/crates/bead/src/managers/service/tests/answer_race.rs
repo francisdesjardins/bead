@@ -32,7 +32,9 @@ impl Answerer for Racing {
         let replacement = self.replacement.clone();
         Box::pin(async move {
             if let Some(failure) = replacement {
-                clock.advance(Duration::from_millis(5)).await;
+                // ! the clock ticked, never advanced: its router settles an answer in a task the
+                // clock's advance waits on
+                clock.tick(Duration::from_millis(5));
                 *locked(&held) = Some(failure);
             }
             Ok(())

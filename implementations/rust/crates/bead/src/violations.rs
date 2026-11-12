@@ -427,7 +427,7 @@ pub fn words_of(violation: &Violation) -> Option<String> {
 
     for member in members {
         let at = rest.find('%')?;
-        let (before, after) = rest.split_at(at);
+        let (before, after) = rest.split_at_checked(at)?;
         let placeholder = after.get(..2)?;
 
         words.push_str(before);

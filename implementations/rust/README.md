@@ -33,6 +33,7 @@ compiler and their linker; or the GNU host, with a MinGW-w64's `dlltool` on the 
 ```sh
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features --locked
+cargo clippy --workspace --all-targets --locked
 cargo clippy -p francisdesjardins-bead --lib --locked
 cargo clippy -p francisdesjardins-bead --lib --features websocket --locked
 cargo clippy -p francisdesjardins-bead --lib --features http --locked
@@ -42,10 +43,13 @@ cargo test --workspace --all-features --locked
 cargo doc --workspace --no-deps --all-features --locked
 cargo build --workspace --locked
 cargo deny --locked check
+cargo deny --manifest-path fuzz/Cargo.toml --locked check
+cargo deny --manifest-path tools/protobuf-conformance/Cargo.toml --locked check
 ```
 
-The second to the fifth lint the core's library with no feature and with each transport's alone,
-`websocket`, `http` and `mqtt` (decisions 0049, 0050), so that each builds on its own. The sixth
+The second lints each member on its default features. The third to the sixth lint the core's
+library with no feature and with each transport's alone, `websocket`, `http` and `mqtt` (decisions
+0049, 0050), so that each builds on its own. The seventh
 checks the core for the browser's WebAssembly, never runs it, by its features, no socket and no
 broker binding among them:
 what the core links builds there, and `.cargo/config.toml` gives getrandom its `unsupported` backend
@@ -55,7 +59,8 @@ Every warning of rustc, clippy and rustdoc is an error, by `.cargo/config.toml`'
 = "deny"`, as `TreatWarningsAsErrors` is on the C# side; `CARGO_BUILD_WARNINGS=warn` releases one
 run. `cargo build --workspace` builds the core on its default features alone, where what the test kit
 alone reaches is left out. `cargo deny` holds the dependencies to RustSec's advisories, the licences
-`deny.toml` allows, crates.io alone, and one version of each.
+`deny.toml` allows, crates.io alone, and one version of each, in the workspace and in the two
+projects outside it, the fuzz targets and the conformance player.
 
 `bead-protobuf`'s tests read and write messages Buffa generates in its build script from
 `crates/bead-protobuf/proto/tests.binpb`, the set protoc writes of their `.proto` files at
@@ -186,12 +191,14 @@ cancels nothing. A router's transport holds it, so it lives as long as its conne
 handle dropped or not; one that neither its application nor its transport holds ends with its owner,
 but a resolver a service manager registered holds that manager, and so its router, which then ends
 by its dispose. A job that panics past the guards of the sites the spec lets throw ends its router
-at once, each call it waits on failed with that panic for its reason.
+at once, each call it waits on failed with that panic for its reason. A server over a socket serves
+until its stop or its dispose while a connection it serves holds it; idle, its last handle dropped
+lets its port go.
 
-The core spawns and yields through one private module, `platform`, and reads time through its
-clock alone (decision 0011): clippy's `disallowed-methods` and `disallowed-types`, in `clippy.toml`,
-refuse tokio's spawns, its yield and its timers, std's `Instant`, `SystemTime::now` and a thread of
-Bead's own anywhere else. A test takes them from the kit, `bead::testing`'s `spawn`, `yield_now`,
+The core spawns, yields and resolves a name through one private module, `platform`, and reads time
+through its clock alone (decision 0011): clippy's `disallowed-methods` and `disallowed-types`, in
+`clippy.toml`, refuse tokio's spawns, its yield, its resolver and its timers, std's `Instant`,
+`SystemTime::now` and a thread of Bead's own anywhere else. A test takes them from the kit, `bead::testing`'s `spawn`, `yield_now`,
 `rest`, `patience`, `Instant` and `wall_now`; a native target, the benches, the interop or a player
 that measures real time, is exempted once, at its root, with its reason.
 

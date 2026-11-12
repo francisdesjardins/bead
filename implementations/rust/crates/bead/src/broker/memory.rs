@@ -133,7 +133,7 @@ struct BrokerState {
     // by a topic and its group, the member the next message goes to
     turns: HashMap<(String, String), usize>,
     // what befalls the next messages, each with the topic it waits for, or none for any
-    faults: Vec<(Option<String>, MemoryBrokerFault)>,
+    faults: VecDeque<(Option<String>, MemoryBrokerFault)>,
     // by a topic, the message held behind the next one
     held: HashMap<String, Routed>,
 }
@@ -262,7 +262,8 @@ impl BrokerState {
             .faults
             .iter()
             .position(|(asked, _)| asked.as_ref().is_none_or(|asked| *asked == topic))
-            .map(|at| self.faults.remove(at).1);
+            .and_then(|at| self.faults.remove(at))
+            .map(|(_, fault)| fault);
 
         if fault == Some(MemoryBrokerFault::Drop) {
             return true;
@@ -426,7 +427,7 @@ impl MemoryBroker {
             maximum_queued_messages,
             links: Vec::new(),
             turns: HashMap::new(),
-            faults: Vec::new(),
+            faults: VecDeque::new(),
             held: HashMap::new(),
         });
 
@@ -507,7 +508,7 @@ impl MemoryBroker {
         self.inner
             .owner
             .offer(Box::new(move |state: &mut BrokerState| {
-                state.faults.push((topic, fault));
+                state.faults.push_back((topic, fault));
             }));
     }
 }

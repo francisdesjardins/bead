@@ -133,3 +133,47 @@ async fn fails_a_session_whose_end_is_not_a_number_within_2_53_and_one_whose_id_
         consumer.refuses(&format!("pub fn check(mut session: bead::ElsewhereSession) {{ session.end = Some({invalid}); }}"), ("E0308", "mismatched types"));
     }
 }
+
+// spec 13.10.2 and 13.11: an end from −(2⁵³ − 1) holds while the wall clock has not reached it,
+// before the epoch too
+#[tokio::test]
+async fn holds_an_end_before_the_epoch_that_a_wall_clock_before_it_has_not_reached() {
+    use core::time::Duration;
+    use std::time::SystemTime;
+
+    let clock = crate::testing::SteppingClock::new(
+        SystemTime::UNIX_EPOCH
+            .checked_sub(Duration::from_secs(10))
+            .expect("before the epoch"),
+    );
+    let shared: crate::clock::SharedClock = Arc::<crate::testing::SteppingClock>::clone(&clock);
+    let runtime = crate::platform::runtime_of(None, "a test's resolver").expect("a runtime");
+    let resolver = crate::credentials::CredentialResolver::new(
+        &Credentials {
+            verify: Some(Arc::new(|_, _| {
+                Box::pin(async {
+                    Ok(Some(ElsewhereSession {
+                        id: "ada".to_owned(),
+                        data: None,
+                        end: Some(-5_000.0),
+                    }))
+                })
+            })),
+            ..Credentials::default()
+        },
+        (shared, runtime),
+    )
+    .expect("a resolver");
+    let outcome = resolver
+        .resolve((
+            super::elsewhere_of("Interop sub=ada"),
+            CancellationToken::new(),
+        ))
+        .await
+        .expect("the verifier settles");
+
+    assert!(
+        matches!(&outcome, Resolved::Session(session) if session.end == Some(-5_000)),
+        "it holds: {outcome:?}"
+    );
+}

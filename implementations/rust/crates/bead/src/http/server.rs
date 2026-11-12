@@ -53,7 +53,7 @@ use crate::net::bounds::{
     HEADERS_TIMEOUT, MINIMUM_SEND_BYTES_PER_SECOND, SEND_GRACE_PERIOD, SendPace, SendPaceHooks,
     SendPaceOptions, dropped_of, hold_count, late_of,
 };
-use crate::net::listening::{Bound, Listening, accepting, bind};
+use crate::net::listening::{Acceptance, Bound, Listening, accepting, bind, io_error};
 use crate::net::tls::serving_config_of;
 use crate::platform::{self, Handle};
 use crate::router::types::{BoxFuture, ConnectionHandle, Gauges, RouterError, TransportMessage};
@@ -734,18 +734,29 @@ impl ServerInner {
             .map(|listener| {
                 let server = Weak::clone(&self.me);
 
+                let reporting = Weak::clone(&self.me);
+
                 accepting(
                     &self.runtime,
-                    (listener, move |accepted, _serving: &Arc<AtomicBool>| {
-                        let Some(inner) = server.upgrade() else {
-                            return false;
-                        };
-                        let runtime = inner.runtime.clone();
+                    Acceptance {
+                        listener,
+                        take: move |accepted, _serving: &Arc<AtomicBool>| {
+                            let Some(inner) = server.upgrade() else {
+                                return false;
+                            };
+                            let runtime = inner.runtime.clone();
 
-                        drop(platform::spawn(&runtime, inner.serve(accepted)));
+                            drop(platform::spawn(&runtime, inner.serve(accepted)));
 
-                        true
-                    }),
+                            true
+                        },
+                        platform: Arc::clone(&self.platform),
+                        report: Box::new(move |error| {
+                            if let Some(inner) = reporting.upgrade() {
+                                inner.report((&io_error(error), None));
+                            }
+                        }),
+                    },
                 )
             })
             .collect();

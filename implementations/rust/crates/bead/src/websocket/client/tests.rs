@@ -547,6 +547,51 @@ async fn offers_no_extension_in_its_upgrade_permessage_deflate_among_them() {
     client.dispose();
 }
 
+// the twin of `WebSocketTransportClientTests`' own
+#[tokio::test]
+async fn fails_a_101_that_names_an_extension_it_never_offered() {
+    let mut held = holding().await;
+    let client = client();
+    let connecting = client.connect(&to(held.port));
+    let mut socket = held.next().await;
+    let asked = String::from_utf8(head_of(&mut socket).await).unwrap();
+    let key = asked
+        .lines()
+        .find_map(|line| {
+            line.split_once(':')
+                .filter(|(name, _)| name.eq_ignore_ascii_case("sec-websocket-key"))
+                .map(|(_, key)| key.trim().to_owned())
+        })
+        .unwrap();
+    let accept = tungstenite::handshake::derive_accept_key(key.as_bytes());
+
+    socket
+        .write_all(
+            format!(
+                "HTTP/1.1 101 Switching Protocols
+Upgrade: websocket
+Connection: Upgrade
+Sec-WebSocket-Accept: {accept}
+Sec-WebSocket-Extensions: permessage-deflate
+
+"
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+
+    let refused = settled(connecting).await;
+
+    assert!(
+        matches!(&refused, Err(TransportError::Connect(error)) if error.to_string().contains("extension never offered")),
+        "{refused:?}"
+    );
+    assert!(is_state(&client, ReadyState::Closed), "closed");
+    assert!(ends(&mut socket).await, "its socket let go");
+    held.stop.cancel();
+}
+
 #[tokio::test]
 async fn rejects_with_a_connect_error_when_nothing_listens() {
     let client = client();

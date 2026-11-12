@@ -551,7 +551,9 @@ impl Reading {
         while !rest.is_empty() {
             if let Some((length, envelope)) = self.envelope.as_mut() {
                 let taken = length.saturating_sub(envelope.len()).min(rest.len());
-                let (filling, after) = rest.split_at(taken);
+                let Some((filling, after)) = rest.split_at_checked(taken) else {
+                    break;
+                };
 
                 envelope.extend_from_slice(filling);
                 rest = after;
@@ -567,7 +569,9 @@ impl Reading {
             let taken = LENGTH_BYTES
                 .saturating_sub(self.length.len())
                 .min(rest.len());
-            let (filling, after) = rest.split_at(taken);
+            let Some((filling, after)) = rest.split_at_checked(taken) else {
+                break;
+            };
 
             self.length.extend_from_slice(filling);
             rest = after;

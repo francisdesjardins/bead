@@ -633,14 +633,7 @@ fn later_of(first: Option<i64>, second: Option<i64>) -> Option<i64> {
 }
 
 fn wall_milliseconds(state: &ServerState) -> i64 {
-    state
-        .core
-        .clock
-        .wall()
-        .duration_since(std::time::SystemTime::UNIX_EPOCH)
-        .map_or(0, |since| {
-            i64::try_from(since.as_millis()).unwrap_or(i64::MAX)
-        })
+    crate::clock::milliseconds_since_epoch(state.core.clock.wall())
 }
 
 // * the wall clock read again, never counted down: the time left ends the session, or arms the

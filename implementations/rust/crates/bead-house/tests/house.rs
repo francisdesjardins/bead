@@ -8,8 +8,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use bead_house::{
-    Finding, crate_tuples_of, futures_of, members_of, options_of, parameters_of, surface_of,
-    tags_of, tuples_of, wide_tuples_of,
+    Finding, crate_tuples_of, futures_of, members_of, misread_of, options_of, parameters_of,
+    surface_of, tags_of, tuples_of, wide_tuples_of,
 };
 
 // ! the tuples of three elements or more the functions of each member take, by its folder, a member
@@ -338,6 +338,28 @@ fn a_doc_comment_carries_no_tag() {
         "the comment tags refuse:\n{}",
         refused.join("\n")
     );
+}
+
+#[test]
+fn no_source_holds_text_a_misread_of_utf_8_left() {
+    let refused: Vec<String> = sources()
+        .iter()
+        .flat_map(|path| said(path, &misread_of(&read(path).expect("its source read"))))
+        .collect();
+
+    assert!(
+        refused.is_empty(),
+        "UTF-8 misread as Windows-1252:\n{}",
+        refused.join("\n")
+    );
+}
+
+#[test]
+fn refuses_the_lines_a_misread_of_utf_8_as_windows_1252_left() {
+    // * an em dash, U+2014, misread: its bytes E2 80 94 read as `â`, `€` and `”`
+    let source = "//! clean — kept\n//! misread \u{e2}\u{20ac}\u{201d} refused\nfn kept() {}\n";
+
+    assert_eq!(lines_of(&misread_of(source)), [2], "the misread line alone");
 }
 
 #[test]

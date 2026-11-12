@@ -319,12 +319,7 @@ struct Started {
 }
 
 fn wall_of(clock: &SharedClock) -> i64 {
-    clock
-        .wall()
-        .duration_since(std::time::SystemTime::UNIX_EPOCH)
-        .map_or(0, |since| {
-            i64::try_from(since.as_millis()).unwrap_or(i64::MAX)
-        })
+    crate::clock::milliseconds_since_epoch(clock.wall())
 }
 
 // a step of a call, before it is told
@@ -1810,66 +1805,50 @@ where
     ) -> BoxFuture<Result<(), ResolverError>> {
         let shared = Arc::clone(&self.shared);
 
+        if shared.is_answered.load(Ordering::Acquire) {
+            let answered = ResolverError::other(ProgrammerError::new(format!(
+                "{} has answered this request already",
+                shared.procedure.procedure_name
+            )));
+
+            return Box::pin(async move { Err(answered) });
+        }
+
+        let answer = match answer {
+            Ok(answer) => answer,
+            Err(refused) => return Box::pin(async move { Err(refused) }),
+        };
+
+        // ! answered once: of two answers made at once, the second is refused
+        if shared
+            .is_answered
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            let answered = ResolverError::other(ProgrammerError::new(format!(
+                "{} has answered this request already",
+                shared.procedure.procedure_name
+            )));
+
+            return Box::pin(async move { Err(answered) });
+        }
+
+        // * the answer goes as it is made, and its router settles it in a task of its own, which
+        // tells its step: its future only waits, and one dropped answers all the same
+        let responding = shared.answerer.respond(answer);
+        let (reply, outcome) = oneshot::channel();
+        let port = Arc::clone(&shared.manager.port);
+
+        port.cover(Box::pin(async move {
+            drop(reply.send(settled((shared, told), responding).await));
+        }));
+
         Box::pin(async move {
-            if shared.is_answered.load(Ordering::Acquire) {
-                return Err(ResolverError::other(ProgrammerError::new(format!(
-                    "{} has answered this request already",
-                    shared.procedure.procedure_name
-                ))));
-            }
-
-            let answer = answer?;
-
-            shared.is_answered.store(true, Ordering::Release);
-
-            // a request its router answered in its place takes this answer nowhere, and settles
-            let outcome = shared.answerer.respond(answer).await;
-
-            // * its step told once, as its router settled it: with what its router refused it
-            // with, or with the failure its router answered in its place, before or while it went;
-            // a call no longer answered tells no failure (debugging 4.2). A future dropped before
-            // it settled tells none
-            if let Some(step) = shared.step.clone() {
-                let error = match &outcome {
-                    Err(reason) => Some(reason.clone()),
-                    Ok(()) => shared.answerer.answered().await.map(|record| {
-                        CallError::Failure(
-                            Failure::answered(&record, shared.manager.port.side()).about(
-                                &EnvelopeHeader::Failure(FailureHeader {
-                                    call_id: shared.call_id,
-                                    credential: None,
-                                }),
-                            ),
-                        )
-                    }),
-                }
-                .filter(|_| !shared.signal.is_aborted());
-
-                shared.manager.trace(
-                    &shared.procedure,
-                    Step {
-                        direction: DebugDirection::Tx,
-                        error: error.map(|error| -> TracedError { Arc::new(error) }),
-                        is_answered: true,
-                        tx: Some(told),
-                        ..step
-                    },
-                );
-            }
-
-            if let Err(reason) = outcome {
-                // an answer the router could not send is answered as failed; a call no longer
-                // answered takes nothing
-                let failed =
-                    Failure::protocol(ProtocolCode::PROCEDURE_FAILED, shared.manager.port.side())
-                        .record();
-
-                drop(shared.answerer.respond(RouterAnswer::Failure(failed)).await);
-
-                return Err(ResolverError::other(reason));
-            }
-
-            Ok(())
+            outcome.await.unwrap_or_else(|_gone| {
+                Err(ResolverError::other(CallError::Disconnected(
+                    crate::router::core::DISPOSED.to_owned(),
+                )))
+            })
         })
     }
 
@@ -1890,6 +1869,64 @@ where
 
         self.shared.answerer.subscribe()
     }
+}
+
+// an answer its router settles: its step told, and one its router could not send answered as failed
+async fn settled<Res>(
+    (shared, told): (Arc<ResponseShared<Res>>, Traced),
+    responding: BoxFuture<Result<(), CallError>>,
+) -> Result<(), ResolverError>
+where
+    Res: PayloadCodec,
+    Res::Value: Clone + fmt::Debug + Sync,
+{
+    // a request its router answered in its place takes this answer nowhere, and settles
+    let outcome = responding.await;
+
+    // * its step told once, as its router settled it: with what its router refused it
+    // with, or with the failure its router answered in its place, before or while it went;
+    // a call no longer answered tells no failure (debugging 4.2), whether or not its future is
+    // waited on
+    if let Some(step) = shared.step.clone() {
+        let error = match &outcome {
+            Err(reason) => Some(reason.clone()),
+            Ok(()) => shared.answerer.answered().await.map(|record| {
+                CallError::Failure(
+                    Failure::answered(&record, shared.manager.port.side()).about(
+                        &EnvelopeHeader::Failure(FailureHeader {
+                            call_id: shared.call_id,
+                            credential: None,
+                        }),
+                    ),
+                )
+            }),
+        }
+        .filter(|_| !shared.signal.is_aborted());
+
+        shared.manager.trace(
+            &shared.procedure,
+            Step {
+                direction: DebugDirection::Tx,
+                error: error.map(|error| -> TracedError { Arc::new(error) }),
+                is_answered: true,
+                tx: Some(told),
+                ..step
+            },
+        );
+    }
+
+    if let Err(reason) = outcome {
+        // an answer the router could not send is answered as failed; a call no longer
+        // answered takes nothing
+        let failed =
+            Failure::protocol(ProtocolCode::PROCEDURE_FAILED, shared.manager.port.side()).record();
+
+        drop(shared.answerer.respond(RouterAnswer::Failure(failed)).await);
+
+        return Err(ResolverError::other(reason));
+    }
+
+    Ok(())
 }
 
 /// What a resolver's callback is: handed a request and what answers it.

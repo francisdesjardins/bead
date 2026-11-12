@@ -5,6 +5,13 @@
 
 use std::error::Error;
 
+#[cfg_attr(
+    not(feature = "testing"),
+    expect(
+        clippy::unnecessary_wraps,
+        reason = "the feature testing alone generates, and fails as it does"
+    )
+)]
 fn main() -> Result<(), Box<dyn Error>> {
     #[cfg(feature = "testing")]
     bead_protobuf_build::config_of(

@@ -1599,3 +1599,22 @@ async fn listens_on_127_0_0_1_alone_where_the_ipv6_loopback_is_absent_and_report
         );
     }
 }
+
+#[tokio::test]
+async fn lets_its_port_go_once_its_last_handle_is_dropped_idle_without_its_stop() {
+    let started = started(&HttpTransportServerOptions::default()).await;
+    let port = started.port;
+
+    drop(started);
+
+    assert!(
+        crate::testing::patience(PATIENCE, async {
+            while std::net::TcpListener::bind(("127.0.0.1", port)).is_err() {
+                rest(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .is_ok(),
+        "its port let go"
+    );
+}

@@ -629,6 +629,16 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
         return mark is null ? $"{(int)socket.HttpStatusCode}" : $"{(int)socket.HttpStatusCode} {mark}";
     }
 
+    // whether its upgrade's answer carries a Sec-WebSocket-Extensions field
+    private static bool NamesAnExtension(ClientWebSocket socket)
+    {
+        return (socket.HttpResponseHeaders ?? new Dictionary<string, IEnumerable<string>>())
+            .Any((field) =>
+            {
+                return string.Equals(field.Key, "Sec-WebSocket-Extensions", StringComparison.OrdinalIgnoreCase);
+            });
+    }
+
     // a state as a message words it: "open", "closing"…
     private static string NameOf(ReadyState readyState)
     {
@@ -865,6 +875,13 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
                 // (spec 15.6), as the platform's message, "The server returned status code…", never
                 // names the mark
                 throw new WebSocketException(reason.WebSocketErrorCode, $"the server refused the upgrade: {RefusalOf(socket)}", reason);
+            }
+
+            // ! ClientWebSocket opens on a 101 that names an extension it never offered: the client
+            // fails the connection (RFC 6455 §4.1), offering none
+            if (NamesAnExtension(socket))
+            {
+                throw new WebSocketException(WebSocketError.HeaderError, "the server's upgrade names an extension never offered (RFC 6455 §4.1)");
             }
 
             lock (_gate)

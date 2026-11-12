@@ -302,6 +302,9 @@ jobs:
         run: cargo fmt --all -- --check
       - if: matrix.os == 'ubuntu-26.04'
         run: cargo clippy --workspace --all-targets --all-features --locked
+      # each member on its default features too, where what a feature alone builds is left out
+      - if: matrix.os == 'ubuntu-26.04'
+        run: cargo clippy --workspace --all-targets --locked
       # the core's library linted with no feature, then with each socket transport's alone and
       # with its MQTT 5 binding's alone, so that each builds on its own (decisions 0049, 0050)
       - if: matrix.os == 'ubuntu-26.04'
@@ -348,6 +351,12 @@ jobs:
           retention-days: 1
       - if: matrix.os == 'ubuntu-26.04'
         run: cargo deny --locked check
+      # the two projects outside the workspace, held to its deny.toml, which cargo-deny finds above
+      # each: the fuzz targets and the conformance player
+      - if: matrix.os == 'ubuntu-26.04'
+        run: cargo deny --manifest-path fuzz/Cargo.toml --locked check
+      - if: matrix.os == 'ubuntu-26.04'
+        run: cargo deny --manifest-path tools/protobuf-conformance/Cargo.toml --locked check
       # the tests under instrumentation, every test binary's profile merged into one LLVM export,
       # the unit tests, a module's tests.rs and its tests/ folder, and the test kit left out; then
       # what they ran held to the Rust side's floor

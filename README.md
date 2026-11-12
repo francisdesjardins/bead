@@ -319,13 +319,15 @@ Clippy's `pedantic`, `nursery` and `cargo` groups and chosen restriction lints a
 ([0044](docs/decisions/0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)).
 `bead-house`'s tests, among `cargo test`'s, hold what no lint holds: the parameter rule, each
 options struct's shape, each library crate's public items, their members included, to its list
-under `crates/bead-house/surfaces/`, which `BEAD_HOUSE_WRITE=1` writes anew, and no tuple on them.
+under `crates/bead-house/surfaces/`, which `BEAD_HOUSE_WRITE=1` writes anew, no tuple on them, and
+no text a misread of UTF-8 as Windows-1252 left in any source.
 Its [README](implementations/rust/README.md) describes its crates and its modules.
 
 ```sh
 cd implementations/rust
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features --locked
+cargo clippy --workspace --all-targets --locked
 cargo clippy -p francisdesjardins-bead --lib --locked
 cargo clippy -p francisdesjardins-bead --lib --features websocket --locked
 cargo clippy -p francisdesjardins-bead --lib --features http --locked
@@ -334,6 +336,8 @@ cargo test --workspace --all-features --locked
 cargo doc --workspace --no-deps --all-features --locked
 cargo build --workspace --locked
 cargo deny --locked check
+cargo deny --manifest-path fuzz/Cargo.toml --locked check
+cargo deny --manifest-path tools/protobuf-conformance/Cargo.toml --locked check
 ```
 
 The packages are `francisdesjardins-bead*`, their libraries `bead*`, `publish = false`. Bead takes

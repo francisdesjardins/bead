@@ -3577,3 +3577,23 @@ async fn closes_going_away_a_connection_whose_accept_a_stop_crossed() {
         assert_eq!(recorder.count(|told| told.errors.len()), 0);
     }
 }
+
+// whether `port` of the IPv4 loopback comes to be bound again within the patience
+async fn is_let_go(port: u16) -> bool {
+    patience(PATIENCE, async {
+        while std::net::TcpListener::bind(("127.0.0.1", port)).is_err() {
+            rest(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .is_ok()
+}
+
+#[tokio::test]
+async fn lets_its_port_go_once_its_last_handle_is_dropped_idle_without_its_stop() {
+    let (server, _recorder, port) = started(&WebSocketTransportServerOptions::default()).await;
+
+    drop(server);
+
+    assert!(is_let_go(port).await, "its port let go");
+}

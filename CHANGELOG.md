@@ -53,6 +53,50 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The Rust side's WebSocket and HTTP servers pause a second on the platform's clock after an
+  accept that fails of the process' own, short of descriptors say, the first of a run reported,
+  where they accepted again at once and spun a thread; a connection gone before it was taken is
+  accepted past at once (decision 0049).
+- The Rust side's `WebSocketClient::reconnect` and `HttpClient::reconnect` settle in a task of their
+  own, as they are called: a reconnection whose future is dropped no longer leaves a task and its
+  watch on the signal given until the client is disposed (decision 0044).
+- The Rust side's WebSocket server holds what tungstenite keeps unwritten for a connection to its
+  write buffer, the largest message `maximumUnsentBytes` lets go and a control frame: a peer that
+  pings on and reads none of its pongs no longer grows it without bound, and a message that finds
+  it full drops the connection, reported naming the bound (spec 15.12).
+- The Rust and C# WebSocket clients fail a 101 that names an extension they never offered, its
+  socket dropped, as the TypeScript side's `ws` does, where they opened on it (RFC 6455 §4.1).
+- The Rust side's HTTP server ends an HTTP/2 session that reads no request's head within
+  `headersTimeout`, from its handshake or since its last head while it answers nothing, within its
+  linger, by GOAWAY once its preface came: a peer that sends no preface, only its SETTINGS, or a
+  head never whole, no longer holds its socket without end (spec 15.12).
+- The Rust side's WebSocket server judges and adds what waits for a connection's socket at once,
+  so senders that cross take no more than `maximumUnsentBytes` between them, and gives it back never
+  below none: its gauges no longer read a count wrapped past zero once a connection ended under a
+  send (spec 15.12).
+- The Rust side's WebSocket connections report a peer's close of a status no end sends, 1005, 1006
+  or one under 1000 say, as a protocol error, answered 1002, as `ws` and .NET do, where its close
+  was told unclean with no error (RFC 6455 §7.4.1, spec 15.1).
+- A Rust WebSocket connection failed with 1009 or 1002 shuts its write side once its close went, so
+  a peer that answers and waits on the server's end of TCP ends it, where it waited its close
+  timeout (RFC 6455 §7.1.1, spec 15.3).
+- A Rust WebSocket or HTTP server dropped idle, without its stop, lets its port go at once, where
+  its accepting held it until the next connection came (decision 0049).
+- The Rust side's service layer acts as each call is made, its future only waiting (decision
+  0044): `Notification::register` subscribes, and `NotificationRegistration::unregister` leaves,
+  even when its future is dropped, so an unregistration dropped no longer holds every registration
+  after it waiting for good; `Response::result` and `Response::failure` answer and tell their
+  trace step once the router settled the answer, whether or not anyone waits on them, as the
+  other sides do.
+- The Rust side fails a `JWT`'s verification under a key of ES256 whose `x` and `y` name no point
+  of P-256: its call answered `PROCEDURE_FAILED` and reported, as on the other sides, where it was
+  answered `SESSION_REQUIRED` and had its requester withdraw a credential that holds (spec 9.2, SEC
+  1 §3.2.2).
+- The Rust side reads a wall clock before 1970 in milliseconds rounded down, as the other sides
+  do, where it read 0 or rounded toward 0: an `ELSEWHERE` session's end, a `JWT`'s times, a
+  connection's session and a trace's instants judged against that reading (spec 13.10.2, 13.11).
+- The Rust side asks a key set once its credential resolver's lock is let go, as the C# side does:
+  an ask that blocks in its synchronous part no longer stalls every other call's `JWT` on that lock.
 - A session manager whose clock refuses a timer leaves what it held: a new session is not stored
   and the timers prepared for it are stopped, and a timeout set or reset keeps the stored one and its
   running timer, telling nothing, on the TypeScript and C# sides as on the Rust side (decision

@@ -8,7 +8,7 @@ use std::error::Error;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 
 use bytes::Bytes;
-use tokio::sync::Notify;
+use tokio::sync::{Notify, oneshot};
 
 use super::{
     Inner, Maker, RegistrationOptions, Request, RequestDependencies, RouterLike, ServiceManager,
@@ -21,6 +21,7 @@ use crate::failure::Failure;
 use crate::identity::Procedure;
 use crate::payloads::PayloadCodec;
 use crate::router::client::{NotificationLike, UnregisterNotificationOptions};
+use crate::router::core::DISPOSED;
 use crate::router::types::{BoxFuture, RouterError};
 
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -179,7 +180,7 @@ where
     ) -> Result<(), CallError> {
         let liked = self
             .liked()
-            .ok_or_else(|| CallError::Disconnected(crate::router::core::DISPOSED.to_owned()))?;
+            .ok_or_else(|| CallError::Disconnected(DISPOSED.to_owned()))?;
         let registered = async {
             self.router
                 .register_notification(Arc::clone(&liked))
@@ -405,11 +406,13 @@ where
         let Some(own) = locked(&self.own).upgrade() else {
             return Box::pin(async { Ok(()) });
         };
+        let (reply, outcome) = oneshot::channel();
+        let router = Arc::clone(&own.router);
 
-        Box::pin(async move {
+        // * the leave goes as it is made, in a task of its own: its future only waits, and one
+        // dropped leaves no registration after it waiting on a leave that never settles
+        router.cover(Box::pin(async move {
             let left = own.leave().await;
-
-            settling.settle(left.clone());
 
             {
                 let mut state = locked(&own.state);
@@ -423,7 +426,14 @@ where
                 }
             }
 
-            left
+            settling.settle(left.clone());
+            drop(reply.send(left));
+        }));
+
+        Box::pin(async move {
+            outcome
+                .await
+                .unwrap_or_else(|_gone| Err(CallError::Disconnected(DISPOSED.to_owned())))
         })
     }
 }
@@ -518,7 +528,9 @@ where
         options: &RegistrationOptions,
     ) -> BoxFuture<Result<NotificationRegistration, CallError>> {
         let shared = Arc::clone(&self.shared);
-        let (id, own, unregistering) = {
+        let liked = shared.liked();
+        // * decided as it is made: the first registration made is the one whose payload subscribes
+        let (id, own, way) = {
             let mut state = locked(&shared.state);
             let id = state.next;
 
@@ -526,85 +538,147 @@ where
             // listening first, so a notification the registration lets through is not lost
             state.callbacks.push((id, callback));
 
-            (id, state.generation, state.unregistering.clone())
-        };
-        let options = options.clone();
-
-        Box::pin(async move {
-            if let Some(unregistering) = unregistering {
-                drop(unregistering.wait().await);
-            }
-
-            // a registration in flight is waited on even when the router already holds it
-            let registering = {
-                let liked = shared.liked();
-                let mut state = locked(&shared.state);
-                let is_held = liked.is_some_and(|liked| shared.router.has_notification(&liked));
-
-                if state.registering.is_none() && !is_held {
+            // ! a leave under way still has its router hold the notification: what comes after it
+            // subscribes anew once it settled
+            let is_held = state.unregistering.is_none()
+                && liked.is_some_and(|liked| shared.router.has_notification(&liked));
+            let way = match (state.registering.clone(), is_held) {
+                (Some(registering), _) => Way::Joins(registering),
+                (None, true) => Way::Held,
+                (None, false) => {
                     let settling = Arc::new(Settling::default());
-                    let registering = Arc::clone(&shared);
-                    let settled = Arc::clone(&settling);
 
                     state.registering = Some(Arc::clone(&settling));
-                    drop(state);
-                    shared.router.cover(Box::pin(async move {
-                        let registered = registering.register((payload, options)).await;
 
-                        {
-                            let mut state = locked(&registering.state);
-
-                            if state
-                                .registering
-                                .as_ref()
-                                .is_some_and(|held| Arc::ptr_eq(held, &settled))
-                            {
-                                state.registering = None;
-                            }
-                        }
-
-                        settled.settle(registered);
-                    }));
-
-                    Some(settling)
-                } else {
-                    state.registering.clone()
+                    Way::Subscribes {
+                        settling,
+                        after: state.unregistering.clone(),
+                    }
                 }
             };
-            let outcome = match registering {
-                Some(registering) => registering.wait().await,
-                None => Ok(()),
-            };
-            let generation = locked(&shared.state).generation;
-            let outcome = outcome.and_then(|()| {
-                // dropped with its connection meanwhile: nothing is left to listen to
-                if own == generation {
-                    Ok(())
-                } else {
-                    Err(CallError::Disconnected(format!(
-                        "{} was dropped with its connection",
-                        shared.procedure.procedure_name
-                    )))
-                }
-            });
 
-            if let Err(error) = outcome {
-                locked(&shared.state)
-                    .callbacks
-                    .retain(|(held, _)| *held != id);
+            (id, state.generation, way)
+        };
 
-                return Err(error);
-            }
-
+        if matches!(way, Way::Held) {
             let unregistering: Arc<dyn Unregistering> = shared;
 
-            Ok(NotificationRegistration {
-                shared: unregistering,
-                id,
-                own,
-            })
+            return Box::pin(async move {
+                Ok(NotificationRegistration {
+                    shared: unregistering,
+                    id,
+                    own,
+                })
+            });
+        }
+
+        let (reply, outcome) = oneshot::channel();
+        let options = options.clone();
+        let registering = Arc::clone(&shared);
+
+        // * the registration goes as it is made, in a task of its own: its future only waits, and
+        // one dropped subscribes all the same
+        shared.router.cover(Box::pin(async move {
+            let shared = registering;
+            let subscribed = match way {
+                Way::Joins(registering) => registering.wait().await,
+                Way::Held => Ok(()),
+                Way::Subscribes { settling, after } => {
+                    if let Some(unregistering) = after {
+                        drop(unregistering.wait().await);
+                    }
+
+                    let registered = shared.register((payload, options)).await;
+
+                    {
+                        let mut state = locked(&shared.state);
+
+                        if state
+                            .registering
+                            .as_ref()
+                            .is_some_and(|held| Arc::ptr_eq(held, &settling))
+                        {
+                            state.registering = None;
+                        }
+                    }
+
+                    // ! its own outcome told before the registrations that joined it hear theirs
+                    let told = registered.clone();
+                    let outcome = outcome_of(&shared, ((id, own), told));
+
+                    drop(reply.send(outcome));
+                    settling.settle(registered);
+
+                    return;
+                }
+            };
+            let outcome = outcome_of(&shared, ((id, own), subscribed));
+
+            drop(reply.send(outcome));
+        }));
+
+        Box::pin(async move {
+            outcome
+                .await
+                .unwrap_or_else(|_gone| Err(CallError::Disconnected(DISPOSED.to_owned())))
         })
     }
+}
+
+// how a registration is made, decided as it is: it joins the subscription under way, finds it
+// held, or subscribes, once the leave under way settled
+enum Way {
+    Joins(Arc<Settling>),
+    Held,
+    Subscribes {
+        settling: Arc<Settling>,
+        after: Option<Arc<Settling>>,
+    },
+}
+
+// a registration's outcome once its subscription settled: a callback whose subscription failed, or
+// went with its connection meanwhile, listens no more
+fn outcome_of<Req, Res, Not>(
+    shared: &Arc<NotificationShared<Req, Res, Not>>,
+    ((id, own), subscribed): ((u64, u64), Result<(), CallError>),
+) -> Result<NotificationRegistration, CallError>
+where
+    Req: PayloadCodec,
+    Res: PayloadCodec,
+    Not: PayloadCodec,
+    Req::Value: Clone + fmt::Debug + Sync,
+    Res::Value: Clone + fmt::Debug + Sync,
+    Not::Value: Clone + fmt::Debug + Sync,
+{
+    let generation = locked(&shared.state).generation;
+    let outcome = subscribed.and_then(|()| {
+        // dropped with its connection meanwhile: nothing is left to listen to
+        if own == generation {
+            Ok(())
+        } else {
+            Err(CallError::Disconnected(format!(
+                "{} was dropped with its connection",
+                shared.procedure.procedure_name
+            )))
+        }
+    });
+
+    if let Err(error) = outcome {
+        locked(&shared.state)
+            .callbacks
+            .retain(|(held, _)| *held != id);
+
+        return Err(error);
+    }
+
+    let unregistering: Arc<dyn Unregistering> =
+        Arc::<NotificationShared<Req, Res, Not>>::clone(shared);
+
+    Ok(NotificationRegistration {
+        shared: unregistering,
+        id,
+        own,
+    })
 }
 
 /// A notification a manager made, kept for its life: asked for again, the same is given.

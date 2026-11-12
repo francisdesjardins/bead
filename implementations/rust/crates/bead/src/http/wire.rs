@@ -201,6 +201,7 @@ const PIECE_BYTES: usize = 65_536;
 /// The next piece of `bytes`, [`PIECE_BYTES`] at most, none left once the last is taken.
 pub(crate) fn piece_of(bytes: &mut Option<Bytes>) -> Option<Bytes> {
     match bytes {
+        // ! split within what is left, past a piece: Bytes has no checked split
         Some(rest) if rest.len() > PIECE_BYTES => Some(rest.split_to(PIECE_BYTES)),
         _ => bytes.take(),
     }
@@ -603,14 +604,19 @@ fn reset_of(answered: Result<Response<AnswerBody>, Cut>) -> Result<Response<Answ
 
 // a session served by hyper's HTTP/2, its streams spawned through the platform; its server's stop
 // tells it so, GOAWAY, and ends it once what it answers went, or within its linger when it
-// answers nothing
+// answers nothing. A session that reads no request's head within `headers_timeout`, from its
+// handshake or since its last head while it answers nothing, is ended so too: hyper arms no timer
+// of its own over HTTP/2
 async fn serve_http2<S, F>((socket, flow): (S, Arc<Flow>), (options, exchange): (WireOptions, F))
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
     F: Exchange,
 {
     let WireOptions {
-        runtime, platform, ..
+        runtime,
+        platform,
+        headers_timeout,
+        ..
     } = options;
     let serving = Arc::clone(&flow);
     let mut builder = http2::Builder::new(Spawner::on(runtime.clone()));
@@ -632,14 +638,30 @@ where
         }),
     ));
 
-    if unless_cancelled(
-        &flow.stop,
-        poll_fn(|context| connection.as_mut().poll(context)),
-    )
-    .await
-    .is_none()
-        && !flow.abort.is_cancelled()
-    {
+    // * its own end, its server's stop, or a head that did not come within its timeout while it
+    // answered nothing
+    let has_ended = loop {
+        let heads = flow.heads.load(Ordering::SeqCst);
+        let served = unless_cancelled(
+            &flow.stop,
+            within(
+                &platform,
+                (
+                    headers_timeout,
+                    poll_fn(|context| connection.as_mut().poll(context)),
+                ),
+            ),
+        )
+        .await;
+
+        match served {
+            Some(Some(_)) => break true,
+            Some(None) if flow.is_answering() || flow.heads.load(Ordering::SeqCst) != heads => {}
+            None | Some(None) => break false,
+        }
+    };
+
+    if !has_ended && !flow.abort.is_cancelled() {
         // its end once aborted, or past its linger when it answers nothing
         let ended = flow.abort.child_token();
         let lingering = (!flow.is_answering())
