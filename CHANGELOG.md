@@ -81,6 +81,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   after it waiting for good; `Response::result` and `Response::failure` answer and tell their
   trace step once the router settled the answer, whether or not anyone waits on them, as the
   other sides do.
+- The Rust side fails a `JWT`'s verification under a key of ES256 whose `x` and `y` name no point
+  of P-256: its call answered `PROCEDURE_FAILED` and reported, as on the other sides, where it was
+  answered `SESSION_REQUIRED` and had its requester withdraw a credential that holds (spec 9.2, SEC
+  1 §3.2.2).
 - A session manager whose clock refuses a timer leaves what it held: a new session is not stored
   and the timers prepared for it are stopped, and a timeout set or reset keeps the stored one and its
   running timer, telling nothing, on the TypeScript and C# sides as on the Rust side (decision

@@ -112,11 +112,16 @@ const HOLDING: &str = "sub alone, named by sub";
 
 // the verdict vector that holds: its token, its keys, its audiences and its wall clock's reading
 fn holding() -> (String, Vec<JwtKey>, Vec<String>, SystemTime) {
+    verdict_named(HOLDING)
+}
+
+// the verdict vector `name`: its token, its keys, its audiences and its wall clock's reading
+fn verdict_named(name: &str) -> (String, Vec<JwtKey>, Vec<String>, SystemTime) {
     let vectors: Vec<Value> = crate::testing::vectors::of("jwtVerdicts").expect("the vectors");
     let vector = vectors
         .into_iter()
-        .find(|vector| vector.get("name") == Some(&Value::from(HOLDING)))
-        .expect("the vector that holds");
+        .find(|vector| vector.get("name") == Some(&Value::from(name)))
+        .expect("the vector named");
     let text = |name: &str| {
         vector
             .get(name)
@@ -399,4 +404,66 @@ fn reads_the_wall_clock_once_the_signature_verifies_so_a_verification_that_waits
         (JwtVerdict::Refused(JwtRefusal::Signature), 1),
         "refused at signature, no clock read"
     );
+}
+
+// SEC 1 §3.2.2: a key of ES256 whose x and y name no point of P-256 is the application's fault,
+// which fails the verification, as the other sides' import of it does; never the token's
+#[test]
+fn fails_a_verification_under_an_es256_key_whose_point_is_off_its_curve_after_judging_the_signature_s_length()
+ {
+    let (token, keys, audiences, now) = verdict_named("its twin, typed at+jwt");
+    let reading = || now;
+    let [key] = keys.as_slice() else {
+        panic!("one key");
+    };
+    let y = base64url::decode(
+        key.jwk
+            .get("y")
+            .and_then(Value::as_str)
+            .expect("its y")
+            .as_bytes(),
+    )
+    .expect("its y's bytes");
+    let mut flipped = y;
+
+    if let Some(last) = flipped.last_mut() {
+        *last ^= 1;
+    }
+
+    // a bit of y flipped, then y past the field's prime
+    let prime = [
+        0xff_u8, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        0xff, 0xff, 0xff,
+    ];
+
+    for y in [flipped, prime.to_vec()] {
+        let mut off = key.clone();
+
+        off.jwk
+            .insert("y".to_owned(), Value::from(base64url::encode(&y)));
+        assert_jwt_key(&off).expect("shaped for its algorithm");
+
+        let keys = [off];
+        let against = JwtAgainst {
+            audiences: &audiences,
+            keys: &keys,
+            now: &reading,
+        };
+        let failed = verify_jwt(token.as_bytes(), &against).expect_err("the key's fault");
+
+        assert!(
+            failed.to_string().contains("point of P-256"),
+            "named: {failed}"
+        );
+
+        // a signature of another length is refused at signature first, as on the other sides
+        let (signed, _) = token.rsplit_once('.').expect("three parts");
+        let short = format!("{signed}.{}", base64url::encode(&[1_u8; 63]));
+
+        assert_eq!(
+            verify_jwt(short.as_bytes(), &against).expect("judged"),
+            JwtVerdict::Refused(JwtRefusal::Signature)
+        );
+    }
 }
