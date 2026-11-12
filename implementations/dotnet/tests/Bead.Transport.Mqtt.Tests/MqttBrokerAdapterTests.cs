@@ -1019,6 +1019,50 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Loses_its_link_no_DISCONNECT_on_a_packet_its_client_cannot_read_spec_15_29()
+    {
+        await using var adapter = AdapterOf();
+        var (messages, downs) = HeardOf(adapter);
+        // * a PUBLISH to its inbox carrying a property MQTT 5 does not define, 0x7F, and a Remaining
+        // Length still continuing at its fourth byte (MQTT 5.0 §2.2.2.2, §1.5.5)
+        byte[] unreadable = [0x30, 0x0F, 0x00, 0x0A, .. Encoding.UTF8.GetBytes("bead/i/ada"), 0x02, 0x7F, 0x00];
+
+        async Task IsLostIn((ScriptedLink Link, int Count) lost)
+        {
+            await lost.Link.Closed.WaitAsync(Patience, Cancelled);
+            await Until(() =>
+            {
+                return downs.Count >= lost.Count;
+            });
+            Assert.Equal(Enumerable.Repeat(new BrokerDown(), lost.Count), downs);
+            Assert.False(adapter.IsLinked);
+            Assert.IsType<MqttConnectPacket>(Assert.Single(lost.Link.Packets));
+        }
+
+        byte[][] packets = [unreadable, [0x30, 0xFF, 0xFF, 0xFF, 0xFF, 0x01]];
+
+        for (var index = 0; index < packets.Length; index += 1)
+        {
+            var link = await LinkUp((adapter, _script));
+
+            await link.Write(packets[index]);
+            await IsLostIn((link, index + 1));
+        }
+
+        // and beside its CONNACK in one read: its start succeeds, and its link is lost once
+        var starting = adapter.Start();
+        var beside = await _script.Link();
+
+        await beside.Write([0x20, 0x03, 0x00, 0x00, 0x00, .. unreadable]);
+        Assert.Null(await Record.ExceptionAsync(() =>
+        {
+            return starting.WaitAsync(Patience, Cancelled);
+        }));
+        await IsLostIn((beside, 3));
+        Assert.Empty(messages);
+    }
+
+    [Fact]
     public async Task Loses_its_link_once_on_a_packet_past_its_Maximum_Packet_Size_beside_its_CONNACK_in_one_read_spec_15_29()
     {
         await using var adapter = AdapterOf((options) =>
