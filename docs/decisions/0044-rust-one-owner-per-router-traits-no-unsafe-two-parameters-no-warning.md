@@ -298,7 +298,11 @@ traits it derives or implements, its bodies not, pinned to its list in
 the surface grows by a decision ([0047](0047-every-side-shows-one-public-surface.md)); the comment tags
 of `CLAUDE.md` on plain comments alone, none on a doc comment, a doc comment being what rustc's
 tokenizer reads as one (`///`, `//!`, `/** */`, `/*! */`), so `//!` is never taken for the `!` tag;
-and every member's `[lints] workspace = true`, so no crate leaves the policy. **`//!` is kept**,
+and every member's `[lints] workspace = true`, so no crate leaves the policy. The surface names
+crates of their own before 1.0: rustls 0.23's configurations in the socket transports' `tls`
+fields, tokio-util 0.7's `CancellationToken` in every options struct, and Buffa 0.9 in
+`bead-protobuf`'s `ProtoSchema` and `DynamicCodec::new`; a breaking release of one of them, once
+taken, is a breaking release of Bead (C-STABLE). **`//!` is kept**,
 Rust's inner doc comment, the language's and its standard library's form for a module's and a
 crate's documentation: the one exception to the `!` tag, a doc comment, never the tag, though Better
 Comments shows it as one.
@@ -313,6 +317,14 @@ owner and posts its outcome as a job of its own: a turn and its continuations, a
 `when_idle` stand for the scheduler's `Post`, `Run`, `Cover` and `WhenIdle`. The router is re-cut as
 turns and continuations, its turns the other sides', not ported line by line: what `RouterCore.cs`
 does between two awaits is one job.
+
+**Beside the owner, a few states are shared under std's `Mutex`**, each held the length of a copy or
+a write, never across an `await`, which clippy's `await_holding_lock` refuses: a client's
+notifications, the series of what it hears, its session token and its default credential; a
+server's series of what it notifies; each router's resolvers; and a call's handler, its session and
+the failure its router answered in its handler's place. Each serves what is read off the owner
+synchronously, `has_notification`, a request's resolver, a call's `answered`, a gauge, or an
+operation that takes effect as it is made; the rest of a router's state is its owner's alone.
 
 **An operation takes effect when it is made; its future only waits.** Every operation the other
 sides start as it is called — `request`, `notify`, `subscribe`, `command`, `connect`, `close`,
