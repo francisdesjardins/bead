@@ -2336,6 +2336,7 @@ test.describe('createMqttBrokerAdapter', () => {
       { id: ID, url: 'mqtt://[::1]junk:1884' },
       { id: ID, url: 'mqtt://[::1]junk' },
       { id: ID, url: 'ws://[::1]junk/mqtt' },
+      { id: ID, url: 'mqtt://user@[::1]junk:1884' },
       { id: '', url: 'mqtt://127.0.0.1' },
     ]) {
       expect(() => {
