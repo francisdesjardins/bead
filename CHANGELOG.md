@@ -50,6 +50,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   accept that fails of the process' own, short of descriptors say, the first of a run reported,
   where they accepted again at once and spun a thread; a connection gone before it was taken is
   accepted past at once (decision 0049).
+- The Rust side's `WebSocketClient::reconnect` and `HttpClient::reconnect` settle in a task of their
+  own, as they are called: a reconnection whose future is dropped no longer leaves a task and its
+  watch on the signal given until the client is disposed (decision 0044).
 - A session manager whose clock refuses a timer leaves what it held: a new session is not stored
   and the timers prepared for it are stopped, and a timeout set or reset keeps the stored one and its
   running timer, telling nothing, on the TypeScript and C# sides as on the Rust side (decision

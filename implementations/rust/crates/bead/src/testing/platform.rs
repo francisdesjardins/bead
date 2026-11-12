@@ -31,6 +31,15 @@ pub(crate) fn blocking<F: FnOnce() -> R, R>(wait: F) -> R {
     tokio::task::block_in_place(wait)
 }
 
+// How many tasks the current runtime holds alive, as tokio's metrics count them: what a test
+// finds left behind.
+#[cfg(test)]
+pub(crate) fn alive_tasks() -> usize {
+    tokio::runtime::Handle::current()
+        .metrics()
+        .num_alive_tasks()
+}
+
 /// Hands the current task's turn back to its runtime, as `tokio::task::yield_now` does.
 pub async fn yield_now() {
     tokio::task::yield_now().await;

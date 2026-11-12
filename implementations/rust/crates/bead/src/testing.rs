@@ -54,6 +54,8 @@ pub mod vectors;
 pub mod wire;
 
 #[cfg(test)]
+pub(crate) use platform::alive_tasks;
+#[cfg(test)]
 pub(crate) use platform::blocking;
 pub use platform::{Instant, patience, rest, spawn, wall_now, yield_now};
 pub use reading_clock::ReadingClock;
