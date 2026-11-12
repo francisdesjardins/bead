@@ -48,7 +48,7 @@ with the hash of its text. The why of each rule is in the decisions:
 - [0049](../docs/decisions/0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md):
   a request's target, read raw and refused as a page's browser writes it (3.6).
 
-**Version: 0.4.0**. Its conformance file repeats it as its `transcodingVersion`, and follows its
+**Version: 0.4.1**. Its conformance file repeats it as its `transcodingVersion`, and follows its
 schema in [`schemas/`](schemas/). It moves by `spec.md`'s rule, under a version of its own
 ([0008](../docs/decisions/0008-three-version-axes-and-names-qualified-by-their-owner.md)): the minor
 when a gateway that conforms to its last version must change to conform to this one, the patch when

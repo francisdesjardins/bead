@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-12
+
 ### Added
 
 - The Rust side's MQTT 5 binding, the feature `mqtt` of its core, a client of Bead's own over TCP,
@@ -20,6 +22,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The spec moves to 0.14.0 (`spec-v0.14.0`), its companion, `spec/debugging.md`, to 0.9.0
+  (`debugging-v0.9.0`), and the transcoding's companion, `spec/transcoding.md`, to 0.4.1
+  (`transcoding-v0.4.1`).
 - The demo takes francisdesjardins.ca's palette and type, and lays its scenes in one column, Try
   it first, each card's result beside its buttons; the wire, its calls and its envelopes, folds
   into a drawer on a desktop and a sheet on a phone until it is opened.
@@ -34,8 +39,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Over MQTT 5, a start that fails sends no DISCONNECT, on every side: the C# adapter no longer
   sends one of 0x00 on a CONNACK of Maximum QoS 0, which a broker that conforms never gives a
   CONNECT whose will is of QoS 1 ([MQTT-3.2.2-12]). The TypeScript adapter names a CONNACK that
-  refuses by its code, `CONNACK 0x86, Bad User Name or Password`, as the C# and Rust sides do
-  (spec 15.26, decision 0041).
+  refuses by its code and its name, `CONNACK 0x86, Bad User Name or Password`, as the Rust side
+  does; the C# side gives MQTTnet's name, `BadUserNameOrPassword` (spec 15.26, decision 0041).
 - The details gate reads a helper's call by the arguments at the positions that reach its sinks, and
   the whole call where its arguments do not split plainly, so a router's state handed beside a
   reason that stays with the side carries no detail (decision 0006).
@@ -48,6 +53,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   fields; the TypeScript side's transport sets no bound on an HTTP/2 session, which its
   application's `createServer` holds; and the sides part on a Server Keep Alive of 0 or longer than
   their own, each a row of the matrix's differences.
+- The documents are brought to 0.13.0: the records, the READMEs and the support matrix state what
+  holds and where Bead goes, the Rust side's MQTT 5 binding among what holds.
 
 ### Removed
 
@@ -128,24 +135,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   its DISCONNECT of 0x00, on the C# side once MQTTnet says it connected, so no will goes, and the
   TypeScript adapter no longer counts up a link its stop ended (spec 15.21, 15.26, 15.30, decision
   0041).
-- The Rust side's MQTT 5 adapter runs a `keepAlive` under a second as the whole second its CONNECT
-  announces, as the other sides do, where it sent a PINGREQ and lost its link on an unanswered one
-  at the unrounded value (spec 15.26).
-- The Rust side's MQTT 5 adapter takes a publication at most once as its PUBLISH is written, as the
-  other sides do, where it took it as it was queued: one its broker has not read stays unsettled,
-  counted among what waits for its connection, and its Keep Alive counts from the last packet
-  written, so a steady flow no broker reads loses its link rather than growing without bound; one
-  given up before it is written resets its link (spec 15.23, 15.26).
-- The Rust side's MQTT 5 adapter lets a subscription go on an UNSUBACK of 0x00 or 0x11 alone, as
-  the C# side does, and refuses it on any other code, its filter kept for the stop, where one under
-  0x80 let it go (spec 15.27).
-- The Rust and C# MQTT 5 adapters refuse as they are built a URL whose IPv6 address is followed by
-  anything but its port, `mqtt://[::1]junk:1884` say, as the TypeScript side does, where they
-  dropped what followed and dialled the scheme's port (RFC 3986 §3.2.2).
-- The Rust side's MQTT 5 client reads a DISCONNECT by its Reason Code whatever else it carries, a
-  Session Expiry Interval its broker never sends among it: a DISCONNECT of 0x8E is its link taken
-  over, its participant fenced, as on the other sides (spec 15.21, [MQTT-3.14.2-2],
-  [MQTT-3.14.4-2], decision 0041).
+- The C# MQTT 5 adapter refuses as it is built a URL whose IPv6 address is followed by anything but
+  its port, `mqtt://[::1]junk:1884` say, as the other sides do, where it dropped what followed and
+  dialled the scheme's port (RFC 3986 §3.2.2).
 - Over MQTT 5, the TypeScript adapter loses its link on a packet MQTT.js's parser refuses once its
   CONNACK put it up, its network connection closed with no DISCONNECT and its down told once, as
   the Rust and C# sides do, where its link stayed up and read nothing reliably after it: MQTT.js
@@ -2771,7 +2763,8 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
   workflows.
 - The licence, Apache-2.0.
 
-[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.12.0...develop
+[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.13.0...develop
+[0.13.0]: https://github.com/francisdesjardins/bead/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/francisdesjardins/bead/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/francisdesjardins/bead/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/francisdesjardins/bead/compare/v0.9.0...v0.10.0

@@ -553,9 +553,11 @@ The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-th
 twelve rounds, a later one answering an earlier one's answers, the seventh and the eighth also rounds
 of [0020](0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md)'s change; the round on a
 forwarded credential's turn and on a credential that leaves a transfer no room is kept in
-[0001](0001-the-envelope-sits-at-fixed-offsets.md), At the wire's edges, and the round on the
+[0001](0001-the-envelope-sits-at-fixed-offsets.md), At the wire's edges, the round on the
 `ELSEWHERE` its default admission passes in [0004](0004-one-behaviour-in-every-language.md), On the
-text of 0.2.0. The decision's objections, each with the answer that holds:
+text of 0.2.0, and the round on a call that waited for a key set's deadline whose timer its clock
+refused in [0004](0004-one-behaviour-in-every-language.md), On the converse twins' six divergences.
+The decision's objections, each with the answer that holds:
 
 ### The block and the sessions
 

@@ -22,7 +22,7 @@
     "clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8.",
     "Each item of differs names a row of docs/support.md a case crosses, which names the case, and the language it excuses: what that language's platform does otherwise before the transport reads the request. A harness plays every case but those a differs excuses its language from."
   ],
-  "specVersion": "0.13.0",
+  "specVersion": "0.14.0",
   "wallClock": "2026-01-01T00:00:00Z",
   "defaults": {
     "maximumConnections": 10000,

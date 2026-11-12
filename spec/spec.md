@@ -93,12 +93,12 @@ to one meaning of `advance`. The why of each rule is in the decisions:
   a connection's reads paced by what its router has not taken, sections 15.5 to 15.7, 15.12, 15.19
   and 15.23;
 - [0048](../docs/decisions/0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md):
-  the procedures a server's transport takes, sections 9.2, 9.11, 9.12, 15.1 and 15.14.
+  the procedures a server's transport takes, sections 9.2, 9.11, 9.12, 15.1 and 15.14;
 - [0049](../docs/decisions/0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md):
   a request's target, read as a page's browser writes it, and a WebSocket's text message at its
   router, sections 15.2 and 15.12.
 
-**Version: 0.13.0**, of layout `0xA1`, its broker parcels of layout `0xB1`. Each of its
+**Version: 0.14.0**, of layout `0xA1`, its broker parcels of layout `0xB1`. Each of its
 conformance files repeats it as its `specVersion`, and follows its schema in
 [`schemas/`](schemas/). The interop's blueprint,
 [`interop-blueprint.json`](interop-blueprint.json), and what its service does,

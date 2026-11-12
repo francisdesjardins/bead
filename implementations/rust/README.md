@@ -163,8 +163,9 @@ crates/
                                 which beadc's Rust target, ahead, generates; its resolvers and its
                                 credentials
   bead-interop-server/          the interop service's server, bead-interop-server, over WebSocket
-                                and HTTP, which the other sides' clients call; and under tests/,
-                                the Rust client's trials against each side's server
+                                and HTTP, and over MQTT 5 where BEAD_MQTT_URL names a broker,
+                                which the other sides' clients call; and under tests/, the Rust
+                                client's trials against each side's server
   bead-house/                   the side's own checks that no lint holds: the parameter rule, the
                                 options struct's shape, each library crate's public surface
                                 against its list under surfaces/, no tuple on that surface, the
@@ -287,10 +288,24 @@ reach that the API does not offer, the envelope's codec among it, is `bead::inte
 the docs and outside SemVer, as the C# side's members reach theirs by `InternalsVisibleTo`; no
 feature turns it on.
 
+What plays against a real broker of MQTT 5 — the cases over MQTT 5 in `tests/transports.rs`, the
+adapter's twins against the broker in `src/mqtt/tests/fixture.rs`, the interop over MQTT 5 — needs
+one given by `BEAD_MQTT_URL`, and `BEAD_MQTT_WS_URL` for the adapter's link over a WebSocket, each
+link made as the broker's users with the run's password, `BEAD_MQTT_PASSWORD`; it is skipped,
+saying so, where none is, and `BEAD_MQTT_REQUIRED=1` fails it instead. The root's
+[`tools/mqtt-broker.mjs`](../../tools/mqtt-broker.mjs) starts a Mosquitto of the run's own and stops
+it whatever the command's end:
+
+```sh
+node ../../tools/mqtt-broker.mjs run -- cargo test -p francisdesjardins-bead --features testing,mqtt --locked --test transports
+node ../../tools/mqtt-broker.mjs run -- cargo test -p francisdesjardins-bead --features testing,mqtt --locked --lib mqtt::
+```
+
 The interop runs from `crates/bead-interop-server`: its trials, `cargo test -p
 francisdesjardins-bead-interop-server --test interop`, a trial a case, a transport and a server,
 named by the TypeScript side's sentence in snake case, play the Rust client against the TypeScript,
-C# and Rust servers once `BEAD_INTEROP_RUST=1` asks, and are ignored otherwise, saying so; the
+C# and Rust servers, over WebSocket, over HTTP and, where `BEAD_MQTT_URL` names a broker, over
+MQTT 5, once `BEAD_INTEROP_RUST=1` asks, and are ignored otherwise, saying so; the
 other sides' interop tests start the binary `BEAD_INTEROP_RUST_SERVER` names
 ([the root README](../../README.md#interop-both-ways)). `BEAD_HOUSE_WRITE=1 cargo test -p francisdesjardins-bead-house` writes each
 crate's list of its public items anew, its diff the change's to review.

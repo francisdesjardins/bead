@@ -208,10 +208,15 @@ wire's edges met it with sections 7.3, 9.5, 12 and 14.3, a round
 [0010](0010-a-request-presents-a-credential-of-a-scheme.md) points here for; a closing connection's
 teardown met it with sections 9.10 and 12.10, and with debugging 9.7 and an exit of
 `spec/metrics.json`, which [0013](0013-every-language-debugs-alike-at-no-cost-when-off.md) points
-here for; the chunk that makes a payload whole met it with sections 12.6 and 12.7. A failure's detail for an error of the side's own met it in
+here for; the chunk that makes a payload whole met it with sections 12.6 and 12.7. A failure's
+detail for an error of the side's own met it in
 [0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)'s round, on the answer leg A
 cannot carry, which keeps its objections and answers; a transfer's late refusal met it in
-[0004](0004-one-behaviour-in-every-language.md)'s round on the converse twins' divergences. Their
+[0004](0004-one-behaviour-in-every-language.md)'s round on the converse twins' divergences; and a
+closed connection's budget, credited to the transfers it starved on any connection (section 12.10),
+met it with an answer's step, whose round
+[0013](0013-every-language-debugs-alike-at-no-cost-when-off.md#on-the-answers-step-the-limits-over-http-and-a-closed-connections-budget)
+keeps, On the answer's step, the limits over HTTP and a closed connection's budget. Their
 objections, each with the answer that holds:
 
 ### On a transport's order and copies
