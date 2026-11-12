@@ -64,18 +64,12 @@ async fn resets_its_socket_once_its_disconnect_cannot_leave_within_its_connect_t
     let heard = heard_of(&adapter);
 
     adapter.start(BrokerStart::default()).await.unwrap();
-    assert_eq!(
-        adapter
-            .publish(BrokerPublication::new(
-                inbox(),
-                Bytes::from(vec![0; 8_388_608])
-            ))
-            .await
-            .unwrap(),
-        BrokerPublished::Taken,
-        "the QoS 0 publication is handed to its writer"
-    );
 
+    // * handed to its writer as it is made, and taken only once written, which it never is
+    let publishing = spawn(adapter.publish(BrokerPublication::new(
+        inbox(),
+        Bytes::from(vec![0; 8_388_608]),
+    )));
     let stopping = spawn(adapter.stop());
 
     until(|| clock.dues().contains(&timeout)).await;
@@ -89,6 +83,17 @@ async fn resets_its_socket_once_its_disconnect_cannot_leave_within_its_connect_t
         .unwrap()
         .unwrap();
     assert!(!adapter.is_linked(), "its stop settles after the deadline");
+    assert_eq!(
+        message_of(
+            &crate::testing::patience(PATIENCE, publishing)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap_err()
+        ),
+        "the link of ada stopped",
+        "the QoS 0 publication never written fails with its stop"
+    );
     assert!(
         heard.downs().is_empty(),
         "its own stop reports no link loss"
