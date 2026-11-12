@@ -303,7 +303,14 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         // and with `Fields`, each ended by its CRLF, beside its own
         public static async Task Upgrade(TcpClient peer, (byte[] Head, string Fields) answer)
         {
-            var head = answer.Head;
+            await peer.GetStream().WriteAsync(
+                Encoding.ASCII.GetBytes($"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {AcceptOf(answer.Head)}\r\n{answer.Fields}\r\n"),
+                Cancelled);
+        }
+
+        // the Sec-WebSocket-Accept that answers the key the head asked with
+        public static string AcceptOf(byte[] head)
+        {
             var key = Encoding.ASCII.GetString(head)
                 .Split("\r\n")
                 .Single((line) =>
@@ -311,14 +318,11 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
                     return line.StartsWith("Sec-WebSocket-Key:", StringComparison.OrdinalIgnoreCase);
                 })["Sec-WebSocket-Key:".Length..]
                 .Trim();
+
             // the handshake's own hash, which RFC 6455 names: nothing secret rests on it
 #pragma warning disable CA5350
-            var accept = Convert.ToBase64String(SHA1.HashData(Encoding.ASCII.GetBytes($"{key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11")));
+            return Convert.ToBase64String(SHA1.HashData(Encoding.ASCII.GetBytes($"{key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11")));
 #pragma warning restore CA5350
-
-            await peer.GetStream().WriteAsync(
-                Encoding.ASCII.GetBytes($"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\n{answer.Fields}\r\n"),
-                Cancelled);
         }
 
         // answers the handshake the head asked for, and gives the server's end of the socket
@@ -1241,6 +1245,39 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
             });
 
             Assert.Contains("extension never offered", refused.Message, StringComparison.Ordinal);
+            Assert.Equal(ReadyState.Closed, _client.ReadyState);
+
+            // its socket let go: the listener's read meets its end
+            var buffer = new byte[1024];
+            int read;
+
+            do
+            {
+                read = await peer.GetStream().ReadAsync(buffer, Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+            }
+            while (read > 0);
+        }
+    }
+
+    // RFC 6455 §4.1 and RFC 9110 §7.6.1 read `Connection` as a list of tokens, which .NET's client
+    // matches whole against `Upgrade`, as tungstenite does and `ws` does not; a row of docs/support.md
+    [Fact]
+    public async Task Fails_a_101_whose_Connection_lists_upgrade_among_other_tokens()
+    {
+        using var listener = new Listener(IPAddress.Loopback);
+        var connecting = _client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
+        var (peer, head) = await listener.Next();
+
+        using (peer)
+        {
+            await peer.GetStream().WriteAsync(
+                Encoding.ASCII.GetBytes($"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: keep-alive, Upgrade\r\nSec-WebSocket-Accept: {Listener.AcceptOf(head)}\r\n\r\n"),
+                Cancelled);
+
+            await Assert.ThrowsAsync<WebSocketException>(() =>
+            {
+                return connecting.WaitAsync(Patience, Cancelled);
+            });
             Assert.Equal(ReadyState.Closed, _client.ReadyState);
 
             // its socket let go: the listener's read meets its end

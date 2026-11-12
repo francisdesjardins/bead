@@ -301,7 +301,65 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
             });
           }
         });
+      }
 
+      // RFC 6455 §4.1 and RFC 9110 §7.6.1 read `Connection` as a list of tokens: `ws` opens on one
+      // that lists another beside upgrade, where the global WebSocket, .NET's client and tungstenite
+      // refuse it; a row of docs/support.md
+      const answeringUpgrade = async () => {
+        const http = createNodeServer();
+        const upgraded = Promise.withResolvers<Socket>();
+
+        // oxlint-disable-next-line bead/options-last -- Node's own, an `upgrade` listener's
+        http.on('upgrade', (request, socket) => {
+          const accept = createHash('sha1')
+            .update(
+              `${String(request.headers['sec-websocket-key'])}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`
+            )
+            .digest('base64');
+
+          socket.on('error', () => {});
+          socket.resume();
+          socket.write(
+            `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: keep-alive, Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`
+          );
+          upgraded.resolve(socket as Socket);
+        });
+        http.listen(0, host);
+        await once(http, 'listening');
+
+        return {
+          [Symbol.asyncDispose]: async () => {
+            (await upgraded.promise).destroy();
+            await new Promise((resolve) => {
+              http.close(resolve);
+            });
+          },
+          port: (http.address() as AddressInfo).port,
+          upgraded: upgraded.promise,
+        };
+      };
+
+      if (label === 'ws') {
+        test('opens on a 101 whose Connection lists upgrade among other tokens', async () => {
+          await using answering = await answeringUpgrade();
+
+          await client.connect({ host, port: answering.port });
+          expect(client.isOpen()).toBe(true);
+          await client.disconnect({ isQuick: true });
+        });
+      } else {
+        test('fails a 101 whose Connection lists upgrade among other tokens', async () => {
+          await using answering = await answeringUpgrade();
+
+          await expect(client.connect({ host, port: answering.port })).rejects.toBeInstanceOf(
+            ConnectError
+          );
+          expect(client.isClosed()).toBe(true);
+        });
+      }
+
+      if (label === 'ws') {
         test('offers no extension in its upgrade, permessage-deflate among them', async () => {
           const offer = Promise.withResolvers<string | string[] | undefined>();
           const refusing = await startServer({
