@@ -307,3 +307,40 @@ fn holds_a_server_s_write_buffer_to_its_bound_and_leaves_a_client_s_as_tungsteni
         "a client's, as tungstenite has it"
     );
 }
+
+fn shared() -> Shared {
+    Shared {
+        unsent: AtomicU64::new(0),
+        paused: AtomicBool::new(false),
+        is_ended: AtomicBool::new(false),
+        dropped: Mutex::new(None),
+    }
+}
+
+#[test]
+fn holds_what_waits_for_its_socket_to_its_bound_judged_and_added_at_once() {
+    let shared = shared();
+
+    assert!(shared.hold((40, 64)), "held");
+    assert!(!shared.hold((25, 64)), "past its bound: refused");
+    assert_eq!(shared.unsent.load(Ordering::SeqCst), 40, "nothing added");
+    assert!(shared.hold((24, 64)), "to its bound: held");
+    assert!(!shared.hold((u64::MAX, u64::MAX)), "an overflow: refused");
+    assert_eq!(shared.unsent.load(Ordering::SeqCst), 64, "its bound");
+}
+
+#[test]
+fn releases_what_its_end_let_go_of_already_to_none_never_past_it() {
+    let shared = shared();
+
+    assert!(shared.hold((10, 64)), "held");
+    // its end let go of everything, as a send's give-back comes
+    shared.unsent.store(0, Ordering::SeqCst);
+    shared.release(10);
+
+    assert_eq!(
+        shared.unsent.load(Ordering::SeqCst),
+        0,
+        "none, never wrapped"
+    );
+}

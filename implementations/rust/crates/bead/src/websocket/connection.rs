@@ -158,6 +158,27 @@ struct Shared {
     dropped: Mutex<Option<String>>,
 }
 
+impl Shared {
+    // `length` more held for its socket, judged and added at once, so senders that cross take no
+    // more than `maximum` between them; false, nothing held, past it
+    fn hold(&self, (length, maximum): (u64, u64)) -> bool {
+        self.unsent
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |held| {
+                held.checked_add(length).filter(|after| *after <= maximum)
+            })
+            .is_ok()
+    }
+
+    // `length` held no more: never below none, its end having let go of everything
+    fn release(&self, length: u64) {
+        self.unsent
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |held| {
+                Some(held.saturating_sub(length))
+            })
+            .ok();
+    }
+}
+
 /// What the side asks of a connection: each takes effect as it is made, carried out by its task.
 #[derive(Clone)]
 pub(crate) struct Commands {
@@ -189,11 +210,9 @@ impl Commands {
         let length = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
 
         if let Some(pacing) = &self.pacing {
-            let held = self.shared.unsent.load(Ordering::SeqCst);
-
             // * what waits for the socket, held (spec 15.12): an envelope that would take it past
             // its bound drops the connection
-            if held.saturating_add(length) > pacing.maximum_unsent_bytes {
+            if !self.shared.hold((length, pacing.maximum_unsent_bytes)) {
                 self.drop_behind(format!(
                     "what waits for its socket would pass maximumUnsentBytes, {} bytes",
                     pacing.maximum_unsent_bytes
@@ -202,15 +221,13 @@ impl Commands {
                 return;
             }
 
-            self.shared.unsent.fetch_add(length, Ordering::SeqCst);
-
             if let Some(pace) = &self.pace {
                 pace.hand(length);
             }
         }
 
         if self.sender.send(Command::Send(bytes)).is_err() && self.pacing.is_some() {
-            self.shared.unsent.fetch_sub(length, Ordering::SeqCst);
+            self.shared.release(length);
         }
     }
 
@@ -605,12 +622,7 @@ impl<S: Wire> Connection<S> {
     // what the socket took: what waits is less
     fn taken(&self, bytes: u64) {
         if self.pace.is_some() {
-            self.shared
-                .unsent
-                .try_update(Ordering::SeqCst, Ordering::SeqCst, |held| {
-                    Some(held.saturating_sub(bytes))
-                })
-                .ok();
+            self.shared.release(bytes);
         }
     }
 

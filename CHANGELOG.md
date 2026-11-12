@@ -63,6 +63,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `headersTimeout`, from its handshake or since its last head while it answers nothing, by GOAWAY
   within its linger: a peer that sends no preface, only its SETTINGS, or a head never whole, no
   longer holds its socket without end (spec 15.12).
+- The Rust side's WebSocket server judges and adds what waits for a connection's socket at once,
+  so senders that cross take no more than `maximumUnsentBytes` between them, and gives it back never
+  below none: its gauges no longer read a count wrapped past zero once a connection ended under a
+  send (spec 15.12).
 - A session manager whose clock refuses a timer leaves what it held: a new session is not stored
   and the timers prepared for it are stopped, and a timeout set or reset keeps the stored one and its
   running timer, telling nothing, on the TypeScript and C# sides as on the Rust side (decision
