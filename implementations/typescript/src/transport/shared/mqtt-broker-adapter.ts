@@ -425,7 +425,12 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
 
           done();
           reject(error);
-          retire(incarnation, new GenericError(`the link of ${id} was retired: ${error.message}`));
+          retire(
+            incarnation,
+            new GenericError(
+              `the link of ${id} was retired: what it was asked was given up once it may have gone`
+            )
+          );
         }
       };
 

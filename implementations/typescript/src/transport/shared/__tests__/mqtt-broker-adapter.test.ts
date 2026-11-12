@@ -2093,6 +2093,72 @@ test.describe('createMqttBrokerAdapter', () => {
     await adapter.stop();
   });
 
+  test('retires its link where a publication at most once is given up before its packet is written (spec 15.28)', async () => {
+    const adapter = adapterOf(script, { delivery: BROKER_DELIVERIES.AT_MOST_ONCE });
+    const { downs } = heardOf(adapter);
+    const link = await linkUp({ adapter, script });
+    const payload = new Uint8Array(1_048_576);
+    const held: Promise<unknown>[] = [];
+
+    link.pause();
+
+    // * far past what its network connection holds unread, each asked in a turn of its own: MQTT.js
+    // corks its stream for a turn, and Windows takes one write whole whatever its size
+    for (let index = 0; index < 64; index += 1) {
+      held.push(
+        adapter.publish({ payload, topic: INBOX }).then(
+          (published) => {
+            return published;
+          },
+          (error: unknown) => {
+            return String(error);
+          }
+        )
+      );
+      await new Promise<void>((resolve) => {
+        setImmediate(resolve);
+      });
+    }
+
+    const signal = new AbortController();
+    const outcome = { isSettled: false };
+    const givenUp = failureOf(
+      adapter.publish({ payload: Uint8Array.of(1), signal: signal.signal, topic: INBOX })
+    ).finally(() => {
+      outcome.isSettled = true;
+    });
+
+    await sleep(100);
+    expect(outcome.isSettled, 'held behind what is not written').toBe(false);
+    signal.abort();
+    expect(await givenUp).toBeInstanceOf(CancelError);
+
+    // * it may go yet, so its link goes
+    await until(() => {
+      return downs.length > 0;
+    });
+    expect(downs).toEqual([{ isTakenOver: false }]);
+
+    for (const each of await Promise.all(held)) {
+      if (each !== BROKER_PUBLISHED.TAKEN) {
+        expect(each).toContain(
+          'the link of ada was retired: what it was asked was given up once it may have gone'
+        );
+      }
+    }
+
+    // * its network connection closed, no DISCONNECT: what waited never written whole
+    link.resume();
+    expect(await closedWithin(link)).toBe(true);
+    expect(cmdsOf(link)).not.toContain('disconnect');
+    expect(
+      link.packets.filter(({ cmd }) => {
+        return cmd === 'publish';
+      }).length
+    ).toBeLessThan(64);
+    await adapter.stop();
+  });
+
   test('ends its start once stopped in the microtask after its password is answered and asks anew at its next start', async () => {
     let asks = 0;
     const adapter = adapterOf(script, {

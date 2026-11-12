@@ -148,7 +148,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   0041).
 - Over MQTT 5, the C# adapter retires its link on a publication at most once given up once it was
   asked, as the other sides do, where its call waited until its broker read the packet and was
-  then taken (decision 0041).
+  then taken; and the TypeScript adapter says why its retired link fails what it was asked, what
+  it was asked was given up once it may have gone, as the other sides do, where its reason ended
+  at its colon (decision 0041).
 
 ## [0.12.0] - 2026-11-10
 
