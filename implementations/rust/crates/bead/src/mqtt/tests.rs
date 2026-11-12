@@ -2391,6 +2391,56 @@ async fn loses_its_link_once_on_a_packet_past_its_maximum_packet_size_after_its_
     script.dispose();
 }
 
+// spec 15.29
+#[tokio::test]
+async fn loses_its_link_no_disconnect_on_a_packet_its_client_cannot_read() {
+    let script = script().await;
+    let adapter = adapter_of(&options_of(&script));
+    let heard = heard_of(&adapter);
+    // * a PUBLISH to its inbox carrying a property MQTT 5 does not define, 0x7F, and a Remaining
+    // Length still continuing at its fourth byte (MQTT 5.0 §2.2.2.2, §1.5.5)
+    let mut unreadable = vec![0x30, 0x0F, 0x00, 0x0A];
+
+    unreadable.extend_from_slice(b"bead/i/ada");
+    unreadable.extend_from_slice(&[0x02, 0x7F, 0x00]);
+
+    for (index, packet) in [unreadable.clone(), vec![0x30, 0xFF, 0xFF, 0xFF, 0xFF, 0x01]]
+        .into_iter()
+        .enumerate()
+    {
+        let link = link_up((&adapter, &script), (&Connack::default(), None)).await;
+
+        link.send(packet);
+        assert!(link.closed(PATIENCE).await, "its network connection closed");
+        until(|| heard.downs().len() > index).await;
+        assert_eq!(heard.downs(), vec![down(false); index + 1], "lost once");
+        assert!(!adapter.is_linked(), "down");
+        assert_eq!(link.kinds(), vec![Kind::Connect], "no DISCONNECT");
+    }
+
+    // and beside its CONNACK in one read: its start succeeds, and its link is lost once
+    let starting = adapter.start(BrokerStart::default());
+    let link = script.link(PATIENCE).await.unwrap();
+    let mut bytes = connack(&Connack::default());
+
+    bytes.extend_from_slice(&unreadable);
+    link.send(bytes);
+    assert!(link.closed(PATIENCE).await, "its network connection closed");
+    let outcome = crate::testing::patience(PATIENCE, starting).await.unwrap();
+
+    assert!(
+        outcome.is_ok(),
+        "its CONNACK accepts its start: {outcome:?}"
+    );
+    until(|| heard.downs().len() > 2).await;
+    assert_eq!(heard.downs(), vec![down(false); 3], "lost once");
+    assert!(!adapter.is_linked(), "down");
+    assert_eq!(link.kinds(), vec![Kind::Connect], "no DISCONNECT");
+    assert!(heard.messages().is_empty(), "nothing handed on");
+    adapter.stop().await;
+    script.dispose();
+}
+
 // spec 15.26
 #[tokio::test]
 async fn loses_its_link_once_as_its_network_connection_ends_after_its_connack_before_its_caller_resumes()
