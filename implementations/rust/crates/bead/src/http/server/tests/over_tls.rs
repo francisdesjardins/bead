@@ -7,6 +7,10 @@ use std::collections::BTreeMap;
 
 use super::tls_wire::*;
 use super::*;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
+use tokio_rustls::client::TlsStream;
+
 use crate::testing::Instant;
 
 // the options of a server under the fixture's TLS
@@ -798,6 +802,116 @@ async fn serves_http_2_and_http_1_1_on_one_port_a_call_over_each_and_closes_its_
     };
 
     assert!(is_closed, "its session closed");
+}
+
+// HTTP/2's connection preface, and an empty SETTINGS frame (RFC 9113 §3.4, §6.5)
+const PREFACE: &[u8] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
+const SETTINGS: &[u8] = &[0, 0, 0, 0x4, 0, 0, 0, 0, 0];
+
+// whether a socket under TLS ends, its read meeting its end, within the patience
+async fn ends_within_patience(mut stream: TlsStream<TcpStream>) -> bool {
+    let mut read = [0_u8; 4_096];
+
+    patience(PATIENCE, async {
+        loop {
+            match stream.read(&mut read).await {
+                Ok(0) | Err(_) => return,
+                Ok(_) => {}
+            }
+        }
+    })
+    .await
+    .is_ok()
+}
+
+#[tokio::test]
+async fn ends_an_http_2_session_that_reads_no_request_s_head_within_headers_timeout_its_preface_its_settings_or_its_head_never_whole()
+ {
+    let started = started_secure(&HttpTransportServerOptions {
+        headers_timeout: Some(Duration::from_millis(200)),
+        ..HttpTransportServerOptions::default()
+    })
+    .await;
+    let silent = secured(started.port, H2).await;
+    let mut settled = secured(started.port, H2).await;
+    let mut halfway = secured(started.port, H2).await;
+
+    settled.write_all(PREFACE).await.unwrap();
+    settled.write_all(SETTINGS).await.unwrap();
+    halfway.write_all(PREFACE).await.unwrap();
+    halfway.write_all(SETTINGS).await.unwrap();
+    // a HEADERS of stream 1 that ends its stream but not its head, `:method: GET` alone
+    halfway
+        .write_all(&[0, 0, 1, 0x1, 0x1, 0, 0, 0, 1, 0x82])
+        .await
+        .unwrap();
+
+    assert!(ends_within_patience(silent).await, "no preface: ended");
+    assert!(ends_within_patience(settled).await, "no head: ended");
+    assert!(
+        ends_within_patience(halfway).await,
+        "a head never whole: ended"
+    );
+    started.stop().await;
+}
+
+#[tokio::test]
+async fn keeps_an_http_2_session_past_headers_timeout_while_an_answer_is_under_way() {
+    let started = started_secure(&HttpTransportServerOptions {
+        headers_timeout: Some(Duration::from_millis(200)),
+        ..HttpTransportServerOptions::default()
+    })
+    .await;
+    let port = started.port;
+    let stream = secured(port, H2).await;
+    let (session, connection) = h2::client::handshake(stream).await.unwrap();
+    let driven = crate::testing::spawn(async move { connection.await.is_ok() });
+    let (_, fields, _) = exchanged(
+        &session,
+        (
+            request_of(("POST", port), &[("content-type", BEAD_MEDIA_TYPE)]),
+            None,
+        ),
+    )
+    .await;
+    let token = fields[CONNECTION_TOKEN_HEADER].clone();
+    let handle = Arc::clone(&started.server.clients()[0].connection_handle);
+    let (asking, mut sending) = sent(
+        &session,
+        (
+            request_of(
+                ("POST", port),
+                &[
+                    ("content-type", BEAD_MEDIA_TYPE),
+                    (CONNECTION_TOKEN_HEADER, token.as_str()),
+                    ("content-length", "8"),
+                ],
+            ),
+            false,
+        ),
+    )
+    .await;
+
+    sending
+        .send_data(Bytes::from(envelope_of(REQUEST, (1, 0))), true)
+        .unwrap();
+
+    let asked = patience(PATIENCE, asking).await.unwrap().unwrap();
+
+    // * its answer waits past its timeout many times over, and the linger after it
+    rest(Duration::from_millis(3_000)).await;
+    assert!(!driven.is_finished(), "its session kept");
+    started
+        .send(&envelope_of(RESULT, (1, 0)), &handle)
+        .await
+        .unwrap();
+    assert_eq!(
+        body_of(asked.into_body()).await,
+        envelope_of(RESULT, (1, 0)),
+        "its answer"
+    );
+    drop(session);
+    started.stop().await;
 }
 
 #[tokio::test]

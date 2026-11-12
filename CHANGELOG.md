@@ -59,6 +59,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   it full drops the connection, reported naming the bound (spec 15.12).
 - The Rust and C# WebSocket clients fail a 101 that names an extension they never offered, its
   socket dropped, as the TypeScript side's `ws` does, where they opened on it (RFC 6455 §4.1).
+- The Rust side's HTTP server ends an HTTP/2 session that reads no request's head within
+  `headersTimeout`, from its handshake or since its last head while it answers nothing, by GOAWAY
+  within its linger: a peer that sends no preface, only its SETTINGS, or a head never whole, no
+  longer holds its socket without end (spec 15.12).
 - A session manager whose clock refuses a timer leaves what it held: a new session is not stored
   and the timers prepared for it are stopped, and a timeout set or reset keeps the stored one and its
   running timer, telling nothing, on the TypeScript and C# sides as on the Rust side (decision
