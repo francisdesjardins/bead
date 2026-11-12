@@ -151,8 +151,8 @@ and the validators of a blueprint's rules generated for it
 since hello's blueprint requires `validate`: the stage brings the validators' runtime, beside the
 `proto` codec, and the runtime's counter of the contract with generated code, and generates the
 hooks' record (the [support matrix](../support.md)'s row of an option required in some
-instantiations alone); hello's Rust half names no `gateway` until the gateway's stage, which a
-target that writes no route table refuses (`HTTP_UNGENERATED`); its gateway, with the route table
+instantiations alone); hello's Rust half names `gateway` with the gateway's stage, since a
+target that writes no route table refuses it (`HTTP_UNGENERATED`); its gateway, with the route table
 and the HTTP client an output with `gateway` writes; and its AMQP 1.0 binding, each stage under a
 record of its own.
 

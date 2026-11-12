@@ -79,11 +79,10 @@ target in the session its own credential resolves to, which the target verifies
 **A client behind a relay subscribes to nothing**: what it would be notified of stops at the relay,
 and so does a paced subscription ([0002](0002-a-subscription-goes-at-its-clients-pace.md)).
 
-**A relay is played as a conversation across connections**, against each side's own relay, and a
-relay across languages in the interop, one side's relay in front of the other's destination, is
-ahead, in the twin tests' place: until the interop plays one, a relay's two legs' limits and the
-session its requesters share are held by each side's twin tests
-([0004](0004-one-behaviour-in-every-language.md)).
+**A relay is played as a conversation across connections**, against each side's own relay; each
+side's twin tests hold a relay's two legs' limits and the session its requesters share, and a relay
+across languages in the interop, one side's relay in front of the other's destination, is ahead, in
+their place ([0004](0004-one-behaviour-in-every-language.md)).
 
 **The rule is section 14 of [`spec/spec.md`](../../spec/spec.md)**, and `spec/conversations.json`
 plays it against every implementation's relay.
