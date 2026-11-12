@@ -734,13 +734,15 @@ byte, and **always built**: no Cargo feature leaves debugging out, which would b
 ### The CI job, fuzz and bench
 
 CI's `rust` job ([0006](0006-a-rule-has-its-gate.md)), on Linux: `cargo fmt --check`, `cargo clippy
---workspace --all-targets --all-features --locked`, the core's lib linted with no feature, with
+--workspace --all-targets --all-features --locked` and again on each member's default features, the
+core's lib linted with no feature, with
 `websocket` alone, with `http` alone and with `mqtt` alone (`cargo clippy -p francisdesjardins-bead
 --lib --locked`, `--features websocket`, `--features http`, `--features mqtt`), the browser
 target's `cargo clippy -p francisdesjardins-bead --lib --features testing --locked --target
 wasm32-unknown-unknown`, by its features, no socket and no broker binding among them
 ([0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)),
-`cargo doc`, a build on the default features alone, `cargo deny --locked check`, the tests under
+`cargo doc`, a build on the default features alone, `cargo deny --locked check` and the same on the
+fuzz targets and the conformance player, outside the workspace, the tests under
 coverage held to the floor, and the fuzz targets built on the dated nightly, never run; on Windows,
 `cargo test --workspace --all-features --locked`, as the user's MSVC toolchain builds it. The
 registry and the target are cached by the lock and the toolchain, cargo-deny and cargo-llvm-cov
