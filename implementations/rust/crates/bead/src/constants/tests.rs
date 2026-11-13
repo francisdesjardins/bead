@@ -219,7 +219,7 @@ fn is_the_client_for_an_odd_call_id_and_the_server_for_an_even_one() {
 // a u32 holds no negative, no fraction, nothing past 2³² − 1: 0 alone is no call id
 // spec 3.5
 #[test]
-fn is_no_side_for_0_which_is_no_call_id() {
+fn is_no_side_for_what_is_not_a_call_id() {
     assert_eq!(RouterSide::of_call_id(0), None, "no side");
 }
 
