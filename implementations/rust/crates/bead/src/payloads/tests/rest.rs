@@ -237,3 +237,34 @@ fn writes_an_object_of_no_prototype_and_a_member_named_proto_as_a_member() {
         br#"{"__proto__":"x","b":true}"#
     );
 }
+
+#[test]
+fn refuses_what_it_does_not_read_each_in_its_own_words_with_a_syntax_error() {
+    for (bytes, words) in [
+        (Bytes::from_static(b"\"\xff\""), "not UTF-8"),
+        (Bytes::from_static(b"\xef\xbb\xbf1"), "a byte order mark"),
+        (
+            Bytes::from([vec![b'['; 65], vec![b']'; 65]].concat()),
+            "nested past 64",
+        ),
+        (Bytes::from_static(br#"{"a":1,"a":2}"#), "a name twice"),
+        (Bytes::from_static(br#""\ud800""#), "a surrogate alone"),
+        (Bytes::from_static(br#"{"\udc00":1}"#), "a surrogate alone"),
+        (Bytes::from_static(b"1E400"), "a number past a double"),
+    ] {
+        let refusal: crate::payloads::CodecRefusal = JsonCodec.decode(&bytes).expect_err(words);
+        assert_eq!(refusal.to_string(), words);
+    }
+    for text in ["", "[1,]"] {
+        let refusal = JsonCodec
+            .decode(&Bytes::copy_from_slice(text.as_bytes()))
+            .expect_err("not JSON");
+        assert_eq!(refusal.to_string(), "not JSON");
+        assert_eq!(
+            std::error::Error::source(&refusal)
+                .expect("the parser's cause")
+                .downcast_ref::<crate::json::JsonRefusal>(),
+            Some(&crate::json::JsonRefusal::NotJson)
+        );
+    }
+}

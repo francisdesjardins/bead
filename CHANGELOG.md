@@ -64,6 +64,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The Rust side's JSON codec keeps its parser's refusal as the cause of a `not JSON` refusal,
+  alongside its reason, as the TypeScript and C# sides do.
 - Rust's `json` payload codecs normalize `-0` to `0` at every depth on read, including typed
   payloads, as the TypeScript and C# sides do.
 - The C# MQTT adapter names a refusing CONNACK by its code and MQTT 5 name, such as

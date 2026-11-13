@@ -77,19 +77,18 @@ impl Error for CodecRefusal {
     }
 }
 
-// * the refusal's reason is the JSON refusal's, in 17.2's words; what serde said, where it said
-// anything, rides in its cause
+// * the refusal's reason is the JSON refusal's, in 17.2's words; a grammar refusal and what serde
+// said, where it said anything, ride in its cause
 impl From<JsonRefusal> for CodecRefusal {
     fn from(refusal: JsonRefusal) -> Self {
         let reason = refusal.reason();
 
         match refusal {
-            JsonRefusal::NoJsonValue(_) | JsonRefusal::NotItsType(_) => {
+            JsonRefusal::NotJson | JsonRefusal::NoJsonValue(_) | JsonRefusal::NotItsType(_) => {
                 Self::new(reason).caused_by(Arc::new(refusal))
             }
             JsonRefusal::NotUtf8
             | JsonRefusal::ByteOrderMark
-            | JsonRefusal::NotJson
             | JsonRefusal::NameTwice
             | JsonRefusal::SurrogateAlone
             | JsonRefusal::NumberPastADouble
