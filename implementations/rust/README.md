@@ -77,7 +77,7 @@ The coverage, as CI measures it, lines and regions, held to the side's floor in
 [`tools/coverage-floors.json`](../../tools/coverage-floors.json):
 
 ```sh
-cargo llvm-cov --workspace --all-features --locked --json --summary-only --ignore-filename-regex '(/tests\.rs|/tests/.*|/testing\.rs|/testing/.*|/generated/.*|/crates/bead-goldens/.*)$' --output-path coverage/rust.json
+cargo llvm-cov --workspace --all-features --locked --json --summary-only --ignore-filename-regex '([/\\]tests\.rs|[/\\]tests[/\\].*|[/\\]testing\.rs|[/\\]testing[/\\].*|[/\\]generated[/\\].*|[/\\]crates[/\\]bead-goldens[/\\].*)$' --output-path coverage/rust.json
 node ../../tools/coverage-report.mjs coverage/rust.json --under implementations/rust/crates/bead/src --under implementations/rust/crates/bead-protobuf/src --floor rust
 ```
 
