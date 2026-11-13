@@ -19,6 +19,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   acknowledgement no request awaits is named in the cells of its two rows (decisions 0018, 0041,
   0050).
 
+### Fixed
+
+- The C# MQTT adapter names a refusing CONNACK by its code and MQTT 5 name, such as
+  `0x86, Bad User Name or Password`; a code outside the CONNACK table has its value alone.
+
 ## [0.13.0] - 2026-11-12
 
 ### Added
