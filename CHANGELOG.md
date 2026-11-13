@@ -61,6 +61,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   PUBLISH of QoS 0 is taken, once written, and that a subscription or a publication given up once
   its packet may have gone loses its link; `spec/vectors.json` gains `mqttAcknowledgementCodes`.
   Every side's MQTT 5 adapter changes, so the spec's next version is a minor (decision 0041).
+- Spec 15.25: over a WebSocket, an MQTT 5 participant reads each binary message as one stream of
+  packets as its frames come, with no bound on a message of its own, and its upgrade offers no
+  extension; 15.29 judges a packet past its bound as the bytes holding its length come, or once its
+  message is whole on a platform that hands one on only so. A text message closes the link
+  ([MQTT-6.0.0-1]), the TypeScript and C# sides an open row of `docs/support.md`.
 
 ### Fixed
 
