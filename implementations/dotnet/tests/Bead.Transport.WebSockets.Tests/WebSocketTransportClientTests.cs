@@ -3442,4 +3442,45 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         Assert.IsType<WebSocketException>(thrown.InnerException);
         Assert.Equal(ReadyState.Closed, _client.ReadyState);
     }
+
+    [Fact]
+    public async Task Delivers_binary_as_bytes()
+    {
+        var heard = Channel.CreateUnbounded<TransportMessage>();
+        _server.Message += (message, _) =>
+        {
+            heard.Writer.TryWrite(message);
+        };
+        await _client.Connect(Target with { CancellationToken = Cancelled });
+        await _client.Send(new TransportMessage("hello"u8.ToArray(), false)).WaitAsync(Patience, Cancelled);
+
+        var message = await Next(heard);
+
+        Assert.Equal("hello"u8.ToArray(), message.Bytes.ToArray());
+        Assert.False(message.IsText);
+    }
+
+    [Fact]
+    public async Task Rejects_with_a_ready_state_error_before_connecting()
+    {
+        var refused = await Assert.ThrowsAsync<ReadyStateException>(() =>
+        {
+            return _client.CloseConnection();
+        });
+
+        Assert.Equal(ReadyState.Uninitialized, refused.Got);
+    }
+
+    [Fact]
+    public async Task Rejects_with_a_ready_state_error_on_a_closed_connection()
+    {
+        await _client.Connect(Target with { CancellationToken = Cancelled });
+        await _client.CloseConnection().WaitAsync(Patience, Cancelled);
+        var refused = await Assert.ThrowsAsync<ReadyStateException>(() =>
+        {
+            return _client.CloseConnection();
+        });
+
+        Assert.Equal(ReadyState.Closed, refused.Got);
+    }
 }

@@ -3916,4 +3916,30 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         Assert.Equal(505, await StatusOf(Latin1HandshakeOf("GET / HTTP/2.0")));
         Assert.Empty(_server.Clients);
     }
+
+    [Fact]
+    public async Task Dispose_stops_it_closing_with_1001_and_refusing_what_comes_after()
+    {
+        var (client, _) = await Connect();
+
+        using (client)
+        {
+            var closing = AnswerClose(client);
+
+            await _server.DisposeAsync().AsTask().WaitAsync(Patience, Cancelled);
+
+            Assert.Equal(WebSocketCloseStatus.EndpointUnavailable, await closing.WaitAsync(Patience, Cancelled));
+            await Assert.ThrowsAsync<ObjectDisposedException>(() =>
+            {
+                return _server.Start(Loopback with { CancellationToken = Cancelled });
+            });
+            Assert.Equal(ReadyState.Closed, _server.ReadyState);
+        }
+    }
+
+    [Fact]
+    public void Beats_every_HEARTBEAT_when_told_nothing()
+    {
+        Assert.Equal(TimeSpan.FromSeconds(30), new WebSocketTransportServerOptions().Heartbeat);
+    }
 }

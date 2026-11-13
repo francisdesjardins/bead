@@ -381,4 +381,35 @@ public sealed class WebSocketClientTests : IAsyncLifetime
 
         return received;
     }
+
+    [Fact]
+    public async Task Builds_its_router_with_the_limits_given()
+    {
+        await using var client = new WebSocketClient(new WebSocketClientOptions
+        {
+            Limits = new RouterLimits { MaximumPayloadBytes = 8 },
+        });
+        var refused = await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return client.Services.GetRequest(
+                InteropProcedures.Echo.Procedure,
+                new RequestDependencies<string, string> { Serializer = new TextSerializer() })("much too long")()
+                .WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.Equal("a payload is 8 bytes at most, not 13", refused.Detail);
+    }
+
+    private sealed class TextSerializer : IRequestSerializerClient<string, string>
+    {
+        public ReadOnlyMemory<byte> Encode(string request)
+        {
+            return System.Text.Encoding.UTF8.GetBytes(request);
+        }
+
+        public string Decode(ReadOnlyMemory<byte> response)
+        {
+            return System.Text.Encoding.UTF8.GetString(response.Span);
+        }
+    }
 }

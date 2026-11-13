@@ -3680,3 +3680,23 @@ test.describe('WebSocketTransportServer, the head it reads', () => {
     expect(server.clients).toHaveLength(0);
   });
 });
+
+test('dispose stops it closing with 1001 and refusing what comes after', async () => {
+  const server = createWebSocketTransportServer({ WebSocketServer });
+  const { port } = await server.start({ address: host, findOpenPort: true });
+  const socket = new WsClient(`ws://${host}:${String(port)}`);
+
+  try {
+    await once(socket, 'open');
+    const closing = once(socket, 'close');
+
+    await server[Symbol.asyncDispose]();
+
+    expect((await closing)[0]).toBe(1001);
+    await expect(server.start({ address: host, findOpenPort: true })).rejects.toThrow();
+    expect(server.isClosed()).toBe(true);
+  } finally {
+    socket.terminate();
+    await server[Symbol.asyncDispose]();
+  }
+});
