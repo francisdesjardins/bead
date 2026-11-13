@@ -8,11 +8,11 @@ use super::router_core_sessions::handler;
 use super::{Handed, locked};
 use crate::clock::SharedClock;
 use crate::constants::{ProtocolCode, RouterSide};
-use crate::envelope::{Envelope, NotificationHeader, RequestHeader};
+use crate::envelope::{Envelope, NotificationHeader, RequestHeader, ResultHeader};
 use crate::owner::Owner;
 use crate::router::core::{self as router_core, Core, Side};
 use crate::router::types::{
-    ConnectionHandle, RouterError, RouterLimitsOptions, TransportMessage, limits_of,
+    ConnectionHandle, RouterAnswer, RouterError, RouterLimitsOptions, TransportMessage, limits_of,
 };
 use crate::testing::core_port::scripted_header;
 use crate::testing::pair::echo;
@@ -22,6 +22,7 @@ use crate::transport::Sent;
 struct Plain {
     core: Core<Self>,
     reports: Vec<(ConnectionHandle, RouterError)>,
+    sent: Vec<(ConnectionHandle, Envelope)>,
 }
 
 impl Side for Plain {
@@ -35,15 +36,18 @@ impl Side for Plain {
 
     fn transmit(
         &mut self,
-        _message: TransportMessage,
-        _handle: &ConnectionHandle,
+        message: TransportMessage,
+        handle: &ConnectionHandle,
     ) -> Result<Sent, RouterError> {
+        self.sent.push((
+            Arc::clone(handle),
+            scripted::envelope_of(&message.data, self.core.side.peer()),
+        ));
         Ok(Sent::Done)
     }
 }
 
-#[tokio::test]
-async fn keeps_every_default_of_a_port_that_says_nothing_but_its_side_and_how_it_sends() {
+fn plain() -> (Owner<Plain>, Arc<SteppingClock>) {
     let clock = SteppingClock::new(instants::new_year());
     let shared: SharedClock = Arc::<SteppingClock>::clone(&clock);
     let runtime = crate::platform::runtime_of(None, "a plain port's core").expect("a runtime");
@@ -58,7 +62,14 @@ async fn keeps_every_default_of_a_port_that_says_nothing_but_its_side_and_how_it
             ),
         ),
         reports: Vec::new(),
+        sent: Vec::new(),
     });
+    (owner, clock)
+}
+
+#[tokio::test]
+async fn keeps_every_default_of_a_port_that_says_nothing_but_its_side_and_how_it_sends() {
+    let (owner, clock) = plain();
     let handed = Handed::default();
     let resolving = handler((&handed, &Arc::default()));
     owner
@@ -106,4 +117,58 @@ async fn keeps_every_default_of_a_port_that_says_nothing_but_its_side_and_how_it
             "a default port takes no notification: {:?}", state.reports);
         router_core::dispose(state);
     }).await.expect("the default notification policy reports its refusal");
+}
+
+pub(super) async fn assert_sessionless_answer() {
+    let (owner, clock) = plain();
+    let handed = Handed::default();
+    let resolving = handler((&handed, &Arc::default()));
+    owner
+        .run(move |state| {
+            router_core::register_resolver(&state.core.resolvers, (&echo(), resolving, None))
+                .expect("echo registered");
+            router_core::receive(
+                state,
+                (
+                    TransportMessage {
+                        data: scripted::bytes_of(&Envelope::Request {
+                            header: scripted_header(1),
+                            payload: Bytes::new(),
+                        }),
+                        ..TransportMessage::default()
+                    },
+                    &Arc::from("a"),
+                ),
+            );
+        })
+        .await
+        .expect("the request arrives");
+    clock.settle().await;
+    let answerer = Arc::clone(&locked(&handed)[0].answerer);
+    answerer
+        .respond(RouterAnswer::Result(Bytes::new()))
+        .await
+        .expect("the bare port answers");
+    clock.settle().await;
+    owner
+        .run(|state| {
+            assert_eq!(
+                state.sent,
+                [(
+                    Arc::from("a"),
+                    Envelope::Result {
+                        header: ResultHeader {
+                            call_id: 1,
+                            total: None,
+                            credential: None
+                        },
+                        payload: Bytes::new()
+                    }
+                )]
+            );
+            assert!(state.reports.is_empty(), "the port reports no refusal");
+            router_core::dispose(state);
+        })
+        .await
+        .expect("the default session-token provider announces nothing");
 }
