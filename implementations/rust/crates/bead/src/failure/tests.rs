@@ -216,9 +216,29 @@ fn says_a_failure_relayed_has_no_side_it_knows() {
     );
 }
 
-#[test]
-fn is_the_peer_s_of_the_other_side_through_no_relay_when_received() {
-    let error = received((19, FailureScope::Protocol, 0));
+fn peer_failure() {
+    let header = EnvelopeHeader::Failure(FailureHeader {
+        call_id: 3,
+        credential: None,
+    });
+    let error = received((19, FailureScope::Protocol, 0))
+        .of_call(
+            Some(ProcedureAddress {
+                service_id: 2,
+                procedure_id: 1,
+            }),
+            Some(4),
+        )
+        .about(&header);
+    assert_eq!(error.destination_id(), Some(4));
+    assert_eq!(
+        error.procedure(),
+        Some(ProcedureAddress {
+            service_id: 2,
+            procedure_id: 1
+        })
+    );
+    assert_eq!(error.header(), Some(&header));
     assert_eq!(error.origin(), FailureOrigin::Peer);
     assert_eq!(error.side(), Some(RouterSide::Server));
     assert_eq!(error.relays(), 0);
@@ -293,4 +313,49 @@ fn leaves_the_credential_out_and_says_its_scheme_alone_when_there_was_one() {
         );
         assert_eq!(redacted.credential(), Some(&expected));
     }
+}
+
+#[test]
+fn is_the_peer_s_of_the_other_side_through_no_relay_when_received() {
+    peer_failure();
+}
+
+#[test]
+fn is_the_peer_s_of_the_other_side_through_no_relay() {
+    peer_failure();
+}
+
+#[test]
+fn names_no_protocol_code_for_an_application_failure() {
+    let error = received((21, FailureScope::Application, 0))
+        .saying("out of range")
+        .of_call(
+            Some(ProcedureAddress {
+                service_id: 2,
+                procedure_id: 1,
+            }),
+            None,
+        );
+    assert_eq!(
+        error.to_string(),
+        "server application failure 21 (service 2, procedure 1): out of range"
+    );
+    assert_eq!(
+        (error.code().get(), error.origin(), error.scope()),
+        (21, FailureOrigin::Peer, FailureScope::Application)
+    );
+    assert_eq!(error.protocol_code(), None);
+    assert_eq!(
+        Failure::received(
+            &FailureRecord {
+                code: NonZeroU16::new(21).expect("a code"),
+                scope: FailureScope::Application,
+                detail: String::new(),
+                relays: 0,
+            },
+            RouterSide::Server
+        )
+        .to_string(),
+        "client application failure 21"
+    );
 }
