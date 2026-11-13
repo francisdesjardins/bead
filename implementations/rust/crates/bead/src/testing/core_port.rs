@@ -67,6 +67,7 @@ pub(crate) struct State {
     pub(crate) notifications: Vec<(ConnectionHandle, NotificationHeader, Bytes)>,
     pub(crate) cancels: Vec<(u32, ConnectionHandle)>,
     pub(crate) credits: Vec<(ConnectionHandle, CreditHeader)>,
+    pub(crate) answers: Vec<(ConnectionHandle, EnvelopeHeader)>,
     pub(crate) unpaired: Vec<(ConnectionHandle, FailureHeader, FailureRecord)>,
     pub(crate) traces: Vec<(DebugDirection, TracedEnvelope)>,
     pub(crate) activity: Vec<(crate::router::types::RouterActivity, ConnectionHandle)>,
@@ -161,6 +162,10 @@ impl Side for State {
 
     fn on_subscription_credit(&mut self, header: &CreditHeader, handle: &ConnectionHandle) {
         self.credits.push((Arc::clone(handle), header.clone()));
+    }
+
+    fn on_answer_received(&mut self, header: &EnvelopeHeader, handle: &ConnectionHandle) {
+        self.answers.push((Arc::clone(handle), header.clone()));
     }
 
     fn on_unpaired_failure(
@@ -334,6 +339,7 @@ impl Peer {
             notifications: Vec::new(),
             credits: Vec::new(),
             cancels: Vec::new(),
+            answers: Vec::new(),
             unpaired: Vec::new(),
             traces: Vec::new(),
             activity: Vec::new(),

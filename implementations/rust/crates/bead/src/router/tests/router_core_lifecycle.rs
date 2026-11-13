@@ -122,8 +122,7 @@ async fn cancel(peer: &Peer, call_id: u32) {
 }
 
 // spec 9.1, 10.1
-#[tokio::test]
-async fn times_out_and_rejects_never_throwing_what_its_payload_or_the_transport_fails_with() {
+async fn request_failures() {
     let peer = Peer::new(RouterSide::Server, &RouterLimitsOptions::default());
     let mut request = request_of("a");
     request.options.timeout = Duration::from_millis(10);
@@ -170,13 +169,15 @@ async fn times_out_and_rejects_never_throwing_what_its_payload_or_the_transport_
 }
 
 // spec 10.1, 10.4
-#[tokio::test]
-async fn cancels_a_request_that_timed_out_before_its_caller_hears_so_one_made_again_goes_out_behind()
- {
+async fn timeout_cancel_order() {
     for side in [RouterSide::Client, RouterSide::Server] {
         for millis in [20, 1_000] {
             let peer = Peer::new(side, &RouterLimitsOptions::default());
-            let first_id = if side == RouterSide::Client { 1 } else { 2 };
+            let (first_id, next_id) = if side == RouterSide::Client {
+                (1, 3)
+            } else {
+                (2, 4)
+            };
             let ask = || {
                 let mut request = request_of("a");
                 request.options.timeout = Duration::from_millis(millis);
@@ -205,7 +206,7 @@ async fn cancels_a_request_that_timed_out_before_its_caller_hears_so_one_made_ag
                 [
                     (EnvelopeKind::Request, first_id),
                     (EnvelopeKind::Cancel, first_id),
-                    (EnvelopeKind::Request, first_id + 2)
+                    (EnvelopeKind::Request, next_id)
                 ]
             );
             peer.clock.advance(Duration::from_millis(millis)).await;
@@ -228,8 +229,8 @@ async fn cancels_a_request_that_timed_out_before_its_caller_hears_so_one_made_ag
                 [
                     (EnvelopeKind::Request, first_id),
                     (EnvelopeKind::Cancel, first_id),
-                    (EnvelopeKind::Request, first_id + 2),
-                    (EnvelopeKind::Cancel, first_id + 2)
+                    (EnvelopeKind::Request, next_id),
+                    (EnvelopeKind::Cancel, next_id)
                 ]
             );
             quiet(&peer).await;
@@ -238,9 +239,7 @@ async fn cancels_a_request_that_timed_out_before_its_caller_hears_so_one_made_ag
 }
 
 // spec 10.4
-#[tokio::test]
-async fn reserves_a_call_id_as_long_as_its_call_was_given_or_5_s_when_it_was_given_no_time_or_waited_without_end_on_its_clock()
- {
+async fn reservation_delays() {
     let peer = Peer::new(RouterSide::Server, &RouterLimitsOptions::default());
     peer.owner
         .run(|state| {
@@ -270,8 +269,7 @@ async fn reserves_a_call_id_as_long_as_its_call_was_given_or_5_s_when_it_was_giv
 }
 
 // spec 10.4
-#[tokio::test]
-async fn draws_no_call_id_reserved_and_none_at_all_when_every_one_is() {
+async fn reserved_call_ids() {
     for last in [4, 2] {
         let peer = Peer::new(RouterSide::Server, &RouterLimitsOptions::default());
         peer.owner
@@ -314,9 +312,7 @@ async fn draws_no_call_id_reserved_and_none_at_all_when_every_one_is() {
 }
 
 // spec 10.4
-#[tokio::test]
-async fn reserves_by_connection_and_forgets_the_reservations_of_a_connection_or_of_every_one_as_they_go()
- {
+async fn connection_reservations() {
     let peer = Peer::new(RouterSide::Server, &RouterLimitsOptions::default());
     peer.owner
         .run(|state| requester::reserve(state, (&call_of(2, "a"), None)))
@@ -812,8 +808,7 @@ async fn reserves_the_call_id_of_a_result_it_received_in_part_as_long_as_the_pee
 }
 
 // spec 9.1, 11
-#[tokio::test]
-async fn says_whether_its_requests_open_a_subscription_and_whether_it_is_paced() {
+async fn subscription_flags() {
     let peer = Peer::new(RouterSide::Server, &RouterLimitsOptions::default());
     let mut calls = Vec::new();
     for (opens, paced) in [
@@ -1003,4 +998,70 @@ async fn send_no_cancel_for_a_request_the_transport_never_had_though_given_up_at
 async fn sends_no_cancel_for_a_request_the_transport_never_had_though_given_up_at_once_and_reserves_nothing()
  {
     unhanded_requests().await;
+}
+
+#[tokio::test]
+async fn says_whether_its_requests_open_a_subscription_and_whether_it_is_paced() {
+    subscription_flags().await;
+}
+
+#[tokio::test]
+async fn say_whether_they_open_a_subscription_and_whether_it_is_paced() {
+    subscription_flags().await;
+}
+
+#[tokio::test]
+async fn times_out_and_rejects_never_throwing_what_its_payload_or_the_transport_fails_with() {
+    request_failures().await;
+}
+
+#[tokio::test]
+async fn time_out_and_reject_never_throw_what_their_payload_or_the_transport_fails_with() {
+    request_failures().await;
+}
+
+#[tokio::test]
+async fn cancels_a_request_that_timed_out_before_its_caller_hears_so_one_made_again_goes_out_behind()
+ {
+    timeout_cancel_order().await;
+}
+
+#[tokio::test]
+async fn cancel_a_request_that_times_out_before_its_caller_hears_of_it_so_a_call_made_again_goes_out_behind()
+ {
+    timeout_cancel_order().await;
+}
+
+#[tokio::test]
+async fn reserves_a_call_id_as_long_as_its_call_was_given_or_5_s_when_it_was_given_no_time_or_waited_without_end_on_its_clock()
+ {
+    reservation_delays().await;
+}
+
+#[tokio::test]
+async fn reserve_a_call_id_as_long_as_its_call_was_given_or_5s_when_it_was_given_no_time_or_waited_without_end_on_its_clock()
+ {
+    reservation_delays().await;
+}
+
+#[tokio::test]
+async fn draws_no_call_id_reserved_and_none_at_all_when_every_one_is() {
+    reserved_call_ids().await;
+}
+
+#[tokio::test]
+async fn draw_no_call_id_reserved_and_none_at_all_when_every_one_is() {
+    reserved_call_ids().await;
+}
+
+#[tokio::test]
+async fn reserves_by_connection_and_forgets_the_reservations_of_a_connection_or_of_every_one_as_they_go()
+ {
+    connection_reservations().await;
+}
+
+#[tokio::test]
+async fn reserve_by_connection_and_forget_the_reservations_of_a_connection_or_of_every_one_as_they_go()
+ {
+    connection_reservations().await;
 }

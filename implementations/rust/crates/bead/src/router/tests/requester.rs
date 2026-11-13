@@ -174,8 +174,7 @@ async fn sends_its_requests_on_a_call_id_of_its_side_naming_their_procedure_and_
 }
 
 // spec 14.1
-#[tokio::test]
-async fn writes_the_destination_a_request_names_and_none_left_out() {
+async fn destinations() {
     let served = Served::new(&RouterServerOptions::default());
 
     served.transport.open(&first(), true);
@@ -292,4 +291,224 @@ async fn keeps_the_later_end_of_a_call_id_reserved_twice_clearing_the_timer_it_r
         ],
         [false, false]
     );
+}
+
+#[tokio::test]
+async fn writes_the_destination_a_request_names_and_none_left_out() {
+    destinations().await;
+}
+
+#[tokio::test]
+async fn write_the_destination_they_name_and_none_left_out() {
+    destinations().await;
+}
+
+#[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "both side parities with their wire, trace, callback and activity assertions"
+)]
+async fn go_out_on_a_call_id_of_its_side_naming_their_procedure_and_nothing_of_a_session() {
+    use crate::constants::RouterSide;
+    use crate::debug::DebugDirection;
+    use crate::router::types::{RouterActivity, RouterLimitsOptions};
+    use crate::testing::core_port::{Peer, completed, request_of};
+
+    for (side, id, payload, answer) in [
+        (
+            RouterSide::Server,
+            2,
+            Bytes::from_static(&[1, 2, 3]),
+            Bytes::from_static(&[9]),
+        ),
+        (
+            RouterSide::Client,
+            1,
+            Bytes::from_static(&[1]),
+            Bytes::from_static(&[1]),
+        ),
+    ] {
+        let peer = Peer::new(side, &RouterLimitsOptions::default());
+        peer.owner
+            .run(|state| {
+                state.token = Some(Box::new(|_| panic!("a request asks no session")));
+            })
+            .await
+            .expect("the token provider must not run");
+        let told: Told = Arc::default();
+        let telling = Arc::clone(&told);
+        let mut request = request_of("a");
+        request.on_call_id = Some(Box::new(move |call_id| {
+            locked(&telling).push((call_id, 0));
+        }));
+        let before = Arc::clone(&told);
+        peer.owner
+            .run(move |state| {
+                state.on_transmit = Some(Box::new(move |state, _| {
+                    assert_eq!(
+                        *locked(&before),
+                        [(id, 0)],
+                        "the id is told before transmit"
+                    );
+                    assert_eq!(state.sent.len(), 1, "this is its first envelope");
+                }));
+            })
+            .await
+            .expect("the send observes the callback");
+        let asked = peer.request((payload.clone(), request));
+        peer.settle().await;
+        assert_eq!(*locked(&told), [(id, 0)]);
+        assert_eq!(
+            peer.sent().await,
+            [(
+                Arc::from("a"),
+                Envelope::Request {
+                    header: header_of((id, &echo())),
+                    payload,
+                }
+            )]
+        );
+        peer.owner
+            .run(move |state| {
+                assert_eq!(state.traces.len(), 1);
+                let (direction, traced) = &state.traces[0];
+                assert_eq!(*direction, DebugDirection::Tx);
+                assert_eq!(traced.connection_handle.as_ref(), "a");
+                assert_eq!(
+                    traced.header,
+                    crate::envelope::EnvelopeHeader::Request(header_of((id, &echo())))
+                );
+                assert_eq!(traced.credential_scheme, None);
+                assert_eq!(state.activity, [(RouterActivity::Request, Arc::from("a"))]);
+            })
+            .await
+            .expect("the trace and request activity");
+        peer.receive((
+            Envelope::Result {
+                header: crate::envelope::ResultHeader {
+                    call_id: id,
+                    total: None,
+                    credential: None,
+                },
+                payload: answer.clone(),
+            },
+            Arc::from("a"),
+        ));
+        let result = completed(asked).await.expect("the paired result");
+        assert_eq!(result.payload, answer);
+        assert_eq!(
+            result.header,
+            crate::envelope::ResultHeader {
+                call_id: id,
+                total: None,
+                credential: None,
+            }
+        );
+        peer.owner
+            .run(|state| {
+                assert_eq!(
+                    state.activity,
+                    [
+                        (RouterActivity::Request, Arc::from("a")),
+                        (RouterActivity::Response, Arc::from("a")),
+                    ]
+                );
+                assert!(state.reports.is_empty());
+            })
+            .await
+            .expect("one request and response");
+    }
+}
+
+#[tokio::test]
+async fn pair_by_call_id_alone_on_their_own_connection_once() {
+    use crate::constants::{ProtocolCode, RouterSide};
+    use crate::errors::CallError;
+    use crate::router::types::{RouterActivity, RouterError, RouterLimitsOptions};
+    use crate::testing::core_port::{Peer, completed, request_of};
+
+    let peer = Peer::new(RouterSide::Server, &RouterLimitsOptions::default());
+    let mut request = request_of("a");
+    request.options.destination_id = Some(3);
+    let mut asked = peer.request((Bytes::new(), request));
+    peer.receive((result_of(2, None), Arc::from("b")));
+    peer.settle().await;
+    assert!(matches!(
+        asked.try_recv(),
+        Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+    ));
+    peer.receive((
+        Envelope::Result {
+            header: crate::envelope::ResultHeader {
+                call_id: 2,
+                total: None,
+                credential: None,
+            },
+            payload: Bytes::from_static(&[9]),
+        },
+        Arc::from("a"),
+    ));
+    peer.receive((result_of(2, None), Arc::from("a")));
+    let result: Result<_, CallError> = completed(asked).await;
+    assert_eq!(
+        result.expect("only the first matching response").payload,
+        Bytes::from_static(&[9])
+    );
+    peer.owner.run(|state| {
+        assert_eq!(state.reports.len(), 2);
+        for ((handle, error), expected) in state.reports.iter().zip(["b", "a"]) {
+            assert_eq!(handle.as_ref(), expected);
+            assert!(matches!(error, RouterError::Failure(failure) if failure.code() == ProtocolCode::CALL_UNKNOWN.get()));
+        }
+        assert_eq!(state.activity, [
+            (RouterActivity::Request, Arc::from("a")),
+            (RouterActivity::Response, Arc::from("a")),
+        ]);
+        assert_eq!(state.answers.iter().map(|(handle, header)| (handle.as_ref(), header.call_id())).collect::<Vec<_>>(),
+            [("b", 2), ("a", 2), ("a", 2)]);
+    }).await.expect("all responses reach the side before pairing");
+}
+
+#[tokio::test]
+async fn keep_the_later_end_of_a_call_id_reserved_twice_clearing_the_timer_it_replaces() {
+    use crate::constants::RouterSide;
+    use crate::router::requester;
+    use crate::router::types::{CallAddress, RouterLimitsOptions};
+    use crate::testing::core_port::Peer;
+
+    let peer = Peer::new(RouterSide::Server, &RouterLimitsOptions::default());
+    peer.owner
+        .run(|state| {
+            for (call_id, timeout) in [(2, 20), (2, 200), (4, 200), (4, 20)] {
+                requester::reserve(
+                    state,
+                    (
+                        &CallAddress {
+                            call_id,
+                            connection_handle: Arc::from("a"),
+                        },
+                        Some(Duration::from_millis(timeout)),
+                    ),
+                );
+            }
+        })
+        .await
+        .expect("both reservation orders");
+    assert_eq!(peer.armed(), [20, 200, 200].map(Duration::from_millis));
+    assert_eq!(peer.clock.dues(), [Duration::from_millis(200); 2]);
+    for expected in [true, false] {
+        peer.clock.advance(Duration::from_millis(100)).await;
+        peer.owner
+            .run(move |state| {
+                assert_eq!(
+                    [
+                        state.core.pending.is_reserved(2, &Arc::from("a")),
+                        state.core.pending.is_reserved(4, &Arc::from("a"))
+                    ],
+                    [expected; 2]
+                );
+            })
+            .await
+            .expect("the later deadlines alone control both reservations");
+    }
 }
