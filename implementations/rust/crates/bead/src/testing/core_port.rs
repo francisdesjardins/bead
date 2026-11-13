@@ -1,6 +1,7 @@
 //! A core's port, on an owner and a stepping clock: the callbacks a side supplies, its envelopes
 //! and reports, and sends a test settles in any order. Kept inside the crate: the core is private.
 
+use core::sync::atomic::{AtomicUsize, Ordering};
 use core::time::Duration;
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex};
@@ -236,16 +237,19 @@ pub(crate) struct Peer {
     pub(crate) clock: Arc<SteppingClock>,
     pub(crate) owner: Owner<State>,
     armed: Arc<Mutex<Vec<Duration>>>,
+    monotonic_readings: Arc<AtomicUsize>,
 }
 
 #[derive(Debug)]
 struct RecordedClock {
     clock: Arc<SteppingClock>,
     armed: Arc<Mutex<Vec<Duration>>>,
+    monotonic_readings: Arc<AtomicUsize>,
 }
 
 impl Clock for RecordedClock {
     fn monotonic(&self) -> Duration {
+        self.monotonic_readings.fetch_add(1, Ordering::Relaxed);
         self.clock.monotonic()
     }
 
@@ -298,9 +302,11 @@ impl Peer {
         )?;
         let clock = SteppingClock::new(instants::new_year());
         let armed = Arc::default();
+        let monotonic_readings = Arc::default();
         let shared: SharedClock = Arc::new(RecordedClock {
             clock: Arc::clone(&clock),
             armed: Arc::clone(&armed),
+            monotonic_readings: Arc::clone(&monotonic_readings),
         });
         let runtime = crate::platform::runtime_of(None, "a test's core").expect("a runtime");
         let limits = limits_of(&options.limits.clone().unwrap_or_default())?;
@@ -342,11 +348,16 @@ impl Peer {
             clock,
             owner,
             armed,
+            monotonic_readings,
         })
     }
 
     pub(crate) fn armed(&self) -> Vec<Duration> {
         self.armed.lock().expect("timer history").clone()
+    }
+
+    pub(crate) fn monotonic_readings(&self) -> usize {
+        self.monotonic_readings.load(Ordering::Relaxed)
     }
 
     pub(crate) fn send(&self, (envelope, handle): (Envelope, ConnectionHandle)) -> Completion<()> {
