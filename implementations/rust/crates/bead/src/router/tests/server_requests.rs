@@ -130,9 +130,11 @@ async fn a_session_provider_s_error_or_panic_is_reported_and_refuses_only_its_ca
 }
 
 // spec 9.2, 13.1
-#[tokio::test]
-async fn are_each_asked_their_session_of_its_session_of_once_their_call_id_held_before_their_admission_which_reads_it_as_their_callback_does()
- {
+#[expect(
+    clippy::too_many_lines,
+    reason = "the sequential and batched source arrivals each retain their full session, admission, callback and wire orders"
+)]
+async fn server_session_order(sequential: bool) {
     let order = Arc::new(Mutex::new(Vec::new()));
     let resolving = Arc::clone(&order);
     let session = CallSession {
@@ -178,15 +180,17 @@ async fn are_each_asked_their_session_of_its_session_of_once_their_call_id_held_
             response.result("ok".to_owned())
         }))
         .expect("echo registered");
+    let [without, with, rejected] = if sequential { [1, 3, 5] } else { [31, 33, 35] };
+    let other = if sequential {
+        crate::SessionToken::new([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16])
+    } else {
+        crate::SessionToken::new([2; 16])
+    }
+    .expect("another token");
     for (id, credential) in [
-        (31, None),
-        (33, Some(Credential::Opaque(token))),
-        (
-            35,
-            Some(Credential::Opaque(
-                crate::SessionToken::new([2; 16]).expect("another token"),
-            )),
-        ),
+        (without, None),
+        (with, Some(Credential::Opaque(token))),
+        (rejected, Some(Credential::Opaque(other))),
     ] {
         served.transport.deliver(
             &Envelope::Request {
@@ -198,24 +202,40 @@ async fn are_each_asked_their_session_of_its_session_of_once_their_call_id_held_
             },
             &first(),
         );
+        if sequential {
+            served.settle().await;
+        }
     }
     served.settle().await;
     assert_eq!(
         *locked(&order),
-        [
-            SessionStep::Session(first(), 31, false),
-            SessionStep::Admit(31, None),
-            SessionStep::Session(first(), 33, false),
-            SessionStep::Admit(33, Some(Arc::new(session.clone()))),
-            SessionStep::Session(first(), 35, false),
-            SessionStep::Callback(31, None),
-            SessionStep::Callback(33, Some(Arc::new(session))),
-        ]
+        if sequential {
+            vec![
+                SessionStep::Session(first(), 1, false),
+                SessionStep::Admit(1, None),
+                SessionStep::Callback(1, None),
+                SessionStep::Session(first(), 3, false),
+                SessionStep::Admit(3, Some(Arc::new(session.clone()))),
+                SessionStep::Callback(3, Some(Arc::new(session))),
+                SessionStep::Session(first(), 5, false),
+            ]
+        } else {
+            vec![
+                SessionStep::Session(first(), 31, false),
+                SessionStep::Admit(31, None),
+                SessionStep::Session(first(), 33, false),
+                SessionStep::Admit(33, Some(Arc::new(session.clone()))),
+                SessionStep::Session(first(), 35, false),
+                SessionStep::Callback(31, None),
+                SessionStep::Callback(33, Some(Arc::new(session))),
+            ]
+        }
     );
     {
         let steps = locked(&order);
+        let (admit, callback) = if sequential { (4, 5) } else { (3, 6) };
         let (SessionStep::Admit(_, Some(admitted)), SessionStep::Callback(_, Some(received))) =
-            (&steps[3], &steps[6])
+            (&steps[admit], &steps[callback])
         else {
             panic!("the admitted call reaches its callback with its session");
         };
@@ -224,11 +244,19 @@ async fn are_each_asked_their_session_of_its_session_of_once_their_call_id_held_
     }
     assert_eq!(
         served.sent_since(),
-        [
-            "first failure 35 SESSION_REQUIRED",
-            "first result 31 ok",
-            "first result 33 ok",
-        ]
+        if sequential {
+            [
+                "first result 1 ok",
+                "first result 3 ok",
+                "first failure 5 SESSION_REQUIRED",
+            ]
+        } else {
+            [
+                "first failure 35 SESSION_REQUIRED",
+                "first result 31 ok",
+                "first result 33 ok",
+            ]
+        }
     );
     assert_eq!(served.reported(), Vec::<String>::new());
 }
@@ -533,4 +561,16 @@ async fn requests_refuse_a_second_resolver_for_one_procedure() {
     assert!(served.router.register_resolver((&echo(), idle())).is_err());
     assert_eq!(served.transport.take(), Vec::new());
     assert_eq!(served.reported(), Vec::<String>::new());
+}
+
+#[tokio::test]
+async fn are_each_asked_their_session_of_its_session_of_once_their_call_id_held_before_their_admission_which_reads_it_as_their_callback_does()
+ {
+    server_session_order(false).await;
+}
+
+#[tokio::test]
+async fn a_connections_requests_are_each_asked_their_session_of_its_session_of_once_their_call_id_held_before_their_admission_which_reads_it_as_their_callback_does()
+ {
+    server_session_order(true).await;
 }

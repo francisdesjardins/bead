@@ -17,6 +17,44 @@ use crate::testing::pair::echo;
 use crate::{NotificationResolverDependencies, RouterRequest};
 
 #[tokio::test]
+async fn a_debug_listener_that_throws_on_an_envelope_is_reported_with_its_connection_and_the_envelope_and_its_call_go_on_every_listener_told()
+ {
+    let served = Served::new(&RouterServerOptions::default());
+    served.transport.open(&first(), true);
+    served
+        .services
+        .get_request_resolver(
+            &echo(),
+            RequestResolverDependencies::new(TextCodec, TextCodec),
+        )
+        .expect("echo resolved")
+        .on(Arc::new(|request, response: Response<TextCodec>| {
+            response.result(request.payload)
+        }))
+        .expect("echo registered");
+    let told = Arc::new(Mutex::new(Vec::new()));
+    let hearing = Arc::clone(&told);
+    served
+        .router
+        .on_debug(Arc::new(|_, _| panic!("listener bug")));
+    served.router.on_debug(Arc::new(move |direction, _| {
+        locked(&hearing).push(direction);
+    }));
+    served
+        .transport
+        .deliver(&request_of((1, &echo(), "hi")), &first());
+    served.settle().await;
+    assert_eq!(served.sent_since(), ["first result 1 hi"]);
+    assert_eq!(*locked(&told), [DebugDirection::Rx, DebugDirection::Tx]);
+    let reports = locked(&served.reports);
+    assert_eq!(reports.len(), 2);
+    for (reason, handle) in reports.iter() {
+        assert!(reason.to_string().contains("listener bug"));
+        assert_eq!(*handle, Some(first()));
+    }
+}
+
+#[tokio::test]
 async fn dispose_lets_go_of_the_transport_rejects_what_waits_forgets_every_connection_and_sends_nothing_more()
  {
     let served = Served::new(&RouterServerOptions::default());
@@ -121,9 +159,7 @@ async fn dispose_lets_go_of_the_transport_rejects_what_waits_forgets_every_conne
     assert_eq!(served.clock.dues(), Vec::<core::time::Duration>::new());
 }
 
-#[tokio::test]
-async fn tells_debug_each_envelope_with_its_connection_and_a_copy_of_its_header_without_its_token()
-{
+async fn server_trace() {
     let served = Served::new(&RouterServerOptions {
         session_token_of: Some(Arc::new(|_| Ok(Some(token())))),
         ..RouterServerOptions::default()
@@ -197,4 +233,15 @@ async fn tells_debug_each_envelope_with_its_connection_and_a_copy_of_its_header_
     assert!(!format!("{seen:?}").contains(&token().to_string()));
     assert_eq!(served.reported(), Vec::<String>::new());
     served.router.dispose().await;
+}
+
+#[tokio::test]
+async fn tells_debug_each_envelope_with_its_connection_and_a_copy_of_its_header_without_its_token()
+{
+    server_trace().await;
+}
+
+#[tokio::test]
+async fn tells_debug_each_envelope_with_its_connection_and_its_header_without_its_token() {
+    server_trace().await;
 }
