@@ -11,6 +11,7 @@
     />
     <link rel="stylesheet" href="penumbra/tokens.system.css" />
     <link rel="stylesheet" href="penumbra/tokens.skin.base.css" />
+    <link rel="stylesheet" href="penumbra/tokens.system.overrides.css" />
     <style>
       /* the demo's skin over penumbra's two sheets: francisdesjardins.ca's brand, the eleven
          declarations of its tokens.skin.css and the violet neutrals it paints with, and the colours
@@ -478,10 +479,10 @@
       }
 
       /* a wide screen: the scenes take the room francisdesjardins.ca's Bead page gives its code,
-         penumbra's wide width, the intro keeping its measure */
+         the wide width of Bead's overrides of penumbra, the intro keeping its measure */
       @media (min-width: 1136px) {
         .layout {
-          --scenes-max-width: var(--app-content-wide-max-width, 1180px);
+          --scenes-max-width: var(--app-content-wide-max-width);
         }
       }
 
