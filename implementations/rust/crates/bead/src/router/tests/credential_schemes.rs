@@ -11,8 +11,7 @@ fn names_a_scheme_to_come_by_the_word_scheme_and_its_number_in_the_order_of_the_
     assert_eq!(schemes_detail_of(&std::collections::BTreeSet::new()), "");
 }
 
-#[test]
-fn names_the_schemes_a_side_takes_in_the_order_of_their_numbers_a_comma_and_a_space_between() {
+fn scheme_names() {
     for (schemes, expected) in [
         (vec![1], "OPAQUE"),
         (vec![3, 1, 2, 1], "OPAQUE, JWT, ELSEWHERE"),
@@ -20,4 +19,15 @@ fn names_the_schemes_a_side_takes_in_the_order_of_their_numbers_a_comma_and_a_sp
     ] {
         assert_eq!(schemes_detail_of(&schemes.into_iter().collect()), expected);
     }
+}
+
+#[test]
+fn names_the_schemes_a_side_takes_in_the_order_of_their_numbers_a_comma_and_a_space_between() {
+    scheme_names();
+}
+
+#[test]
+fn credential_schemes_detail_of_names_the_schemes_a_side_takes_in_the_order_of_their_numbers_a_comma_and_a_space_between()
+ {
+    scheme_names();
 }
