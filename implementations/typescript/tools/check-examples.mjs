@@ -45,6 +45,19 @@ const GENERATED = join(EXAMPLES_DIR, 'generated');
 const FIX = process.argv.includes('--fix');
 const KEEP = process.argv.includes('--keep');
 
+// ! the generated modules are a run's alone: removed as the process ends, whatever ends it but a
+// kill, so that none is left for the project's oxfmt check, or git, to find
+if (!KEEP) {
+  process.on('exit', () => {
+    rmSync(GENERATED, { recursive: true, force: true });
+  });
+  for (const signal of ['SIGINT', 'SIGTERM']) {
+    process.on(signal, () => {
+      process.exit(130);
+    });
+  }
+}
+
 // ── Collection ───────────────────────────────────────────────────────────────
 
 /** Every `.ts`/`.tsx` under `src/`, tests included — a story's examples are docs too. */
