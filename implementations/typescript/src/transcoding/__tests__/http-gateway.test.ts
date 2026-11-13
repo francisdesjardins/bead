@@ -1,19 +1,24 @@
 import { createHash } from 'node:crypto';
+import { once } from 'node:events';
 import {
   createServer as createNodeServer,
   request as httpRequest,
   type IncomingHttpHeaders,
+  type Server,
 } from 'node:http';
 import {
   connect as connectHTTP2,
   constants as http2Constants,
   createServer as createHTTP2Server,
 } from 'node:http2';
-import { connect, type Socket } from 'node:net';
+import { type AddressInfo, connect, type Socket } from 'node:net';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { create, fromBinary, toBinary } from '@bufbuild/protobuf';
 import { UninterpretedOption_NamePartSchema } from '@bufbuild/protobuf/wkt';
+import cors from '@fastify/cors';
 import { expect, test } from '@playwright/test';
+import express from 'express';
+import Fastify, { type FastifyHttpOptions, type FastifyInstance, type FastifyReply } from 'fastify';
 import { protoCodecOf } from '../../proto/codec';
 import { EnvelopeKind, LIMIT_DEFAULTS, SERVER_FAILURES } from '../../router/shared/constants';
 import { bytesOf, readEnvelope, writeEnvelope } from '../../router/shared/envelope';
@@ -29,7 +34,15 @@ import { HTTP_ROUTES, OPENAPI_DOCUMENT } from './generated/bead_http';
 import { TranscodingProcedures } from './generated/transcoding_bead';
 import { EdgesSchema, TickSchema } from './generated/transcoding_pb';
 import { NeedsSchema } from './generated/transcoding-required_pb';
-import { GOOD_CREDENTIAL, SESSION, startTranscoding } from './transcoding-service';
+import {
+  EXCHANGES,
+  gatewayOptionsOf,
+  GOOD_CREDENTIAL,
+  type Mount,
+  playExchange,
+  SESSION,
+  startTranscoding,
+} from './transcoding-service';
 
 // interfaces
 
@@ -60,10 +73,55 @@ interface IOwnCase {
   words: string;
 }
 
+/** A Fastify a gateway is mounted in: its options, and what is registered ahead of its hook, after. */
+interface IFastifyMount {
+  readonly after?: (app: FastifyInstance) => Promise<void>;
+  /**
+   * Whether Fastify hands back to the gateway what it answers before any hook, as an adapter does:
+   * a path its router cannot decode, by `frameworkErrors`, and what Node's parser refuses, by
+   * `clientErrorHandler`, as Node answers it.
+   */
+  readonly isHandingBack?: boolean;
+  readonly options?: FastifyHttpOptions<Server>;
+  readonly prepare?: (app: FastifyInstance) => Promise<void> | void;
+}
+
 // constants
 
 /** The origin of another site the gateways here name. */
 const ORIGIN = 'https://app.example';
+
+/** What Node writes to a request its parser refuses, where no `clientError` listener answers. */
+const NODE_BAD_REQUEST = 'HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n';
+
+/** The exchanges whose path no route matches, each handed back to the framework the gateway is in. */
+const HANDED_ON: Readonly<Record<string, string>> = Object.freeze(
+  Object.fromEntries(
+    ['a path no route matches, 404', 'a command has no route', 'a dot segment matches nothing'].map(
+      (name) => {
+        return [
+          name,
+          'divergence: a path no route matches is the framework’s, the listener giving it back by its contract, and the framework’s own 404 answers it',
+        ];
+      }
+    )
+  )
+);
+
+/** What Fastify answers in the gateway's place, before any hook of its own. */
+const FASTIFY_OWN: Readonly<Record<string, string>> = Object.freeze({
+  'a variable that does not decode, 400 PAYLOAD_UNDECODABLE, its parameter':
+    'divergence: Fastify’s router answers a path it cannot percent-decode, 400 FST_ERR_BAD_URL in JSON, before any hook',
+  'a body HTTP cannot frame, refused as HTTP refuses it, unmarked, its body empty':
+    'divergence: Fastify’s clientErrorHandler answers what Node’s parser refuses with a body of JSON, where Node writes none',
+  'a target holding an octet other than visible ASCII, or a path whose percent-decoding holds NUL, refused as HTTP refuses it, unmarked, its body empty, before its path is matched; one percent-encoded is taken':
+    'divergence: Fastify’s clientErrorHandler answers what Node’s parser refuses with a body of JSON, where Node writes none',
+});
+
+const FASTIFY_DIVERGENCES: Readonly<Record<string, string>> = Object.freeze({
+  ...HANDED_ON,
+  ...FASTIFY_OWN,
+});
 
 // helpers
 
@@ -261,6 +319,112 @@ const rawAsEdges = (): readonly IHttpRouteInit[] => {
         }
       : init;
   });
+};
+
+/** The port of a server listening on an address of its own. */
+const portOf = (address: AddressInfo | string | null): number => {
+  return typeof address === 'object' && address !== null ? address.port : 0;
+};
+
+/**
+ * Mounts a gateway in Fastify as an application writes it: an `onRequest` hook hands each request
+ * to its listener, and hijacks the reply of each one it answers, so that Fastify writes nothing of
+ * it; any other goes on to Fastify's routes, `GET /health` and `POST /own` among them.
+ */
+const inFastify = (mount: IFastifyMount = {}): Mount => {
+  const { after, isHandingBack = false, options = {}, prepare } = mount;
+
+  return async (gateway) => {
+    const handingBack: FastifyHttpOptions<Server> = {
+      clientErrorHandler: (_error, socket) => {
+        if (socket.writable) {
+          socket.end(NODE_BAD_REQUEST);
+        }
+      },
+      // oxlint-disable-next-line bead/options-last -- Fastify’s own, a `frameworkErrors` handler’s
+      frameworkErrors: (error, request, reply) => {
+        if (gateway.listener(request.raw, reply.raw)) {
+          reply.hijack();
+
+          return;
+        }
+
+        void (reply as FastifyReply).send(error);
+      },
+    };
+    const app = Fastify({ ...options, ...(isHandingBack ? handingBack : {}) });
+
+    await prepare?.(app);
+    // oxlint-disable-next-line bead/options-last -- Fastify’s own, an `onRequest` hook’s
+    app.addHook('onRequest', (request, reply, done) => {
+      if (gateway.listener(request.raw, reply.raw)) {
+        reply.hijack();
+
+        return;
+      }
+
+      done();
+    });
+    await after?.(app);
+    app.get('/health', (_request, reply) => {
+      return reply.send({ status: 'up' });
+    });
+    app.post('/own', (request, reply) => {
+      return reply.send(request.body);
+    });
+    await app.listen({ host: '127.0.0.1', port: 0 });
+
+    return {
+      port: portOf(app.server.address()),
+      [Symbol.asyncDispose]: async () => {
+        await app.close();
+      },
+    };
+  };
+};
+
+/**
+ * Mounts a gateway in Express 5 as an application writes it: a middleware ahead of
+ * `express.json()` hands each request to its listener, and any it answers none of goes on to
+ * Express's routes, `GET /health` and `POST /own` among them; `isJsonFirst`, `express.json()`
+ * ahead of the gateway too.
+ */
+const inExpress = ({ isJsonFirst = false }: { isJsonFirst?: boolean } = {}): Mount => {
+  return async (gateway) => {
+    const app = express();
+
+    if (isJsonFirst) {
+      app.use(express.json());
+    }
+
+    // oxlint-disable-next-line bead/options-last -- Express’s own, a middleware’s
+    app.use((request, response, next) => {
+      if (!gateway.listener(request, response)) {
+        next();
+      }
+    });
+    app.use(express.json());
+    app.get('/health', (_request, response) => {
+      response.json({ status: 'up' });
+    });
+    app.post('/own', (request, response) => {
+      response.json(request.body);
+    });
+
+    const server = app.listen(0, '127.0.0.1');
+
+    await once(server, 'listening');
+
+    return {
+      port: portOf(server.address()),
+      [Symbol.asyncDispose]: async () => {
+        server.closeAllConnections();
+        await new Promise((resolve) => {
+          server.close(resolve);
+        });
+      },
+    };
+  };
 };
 
 // tests
@@ -3442,4 +3606,574 @@ test('writes its comment a heartbeat after its last write, and none while writes
   await clock.tickAsync(1_000);
   expect((await comment).endsWith(':\n\r\n')).toBe(true);
   stream.destroy();
+});
+
+// ── Mounted in a framework ────────────────────────────────────────────────────
+
+// transcoding 2.3: the gateway built with no createServer, mounted in Fastify and in Express 5 as an
+// application writes it, plays the conformance's exchanges; what a framework answers in its place
+// is a divergence, `test.fail` with what it does, and its correction played where one exists.
+
+test.describe('mounted in Fastify', () => {
+  for (const entry of EXCHANGES) {
+    test(`exchanges: ${entry.name}`, async () => {
+      const divergence = FASTIFY_DIVERGENCES[entry.name];
+
+      test.fail(divergence !== undefined, divergence);
+      await using fixture = await startTranscoding({
+        ...gatewayOptionsOf(entry),
+        mount: inFastify(),
+      });
+
+      await playExchange(entry, fixture);
+    });
+  }
+
+  for (const entry of EXCHANGES.filter(({ name }) => {
+    return FASTIFY_OWN[name] !== undefined;
+  })) {
+    test(`exchanges, handed back by frameworkErrors and clientErrorHandler: ${entry.name}`, async () => {
+      await using fixture = await startTranscoding({
+        ...gatewayOptionsOf(entry),
+        mount: inFastify({ isHandingBack: true }),
+      });
+
+      await playExchange(entry, fixture);
+    });
+  }
+
+  test('leaves Fastify each path it serves none of, to its routes and its 404', async () => {
+    await using fixture = await startTranscoding({ mount: inFastify() });
+    const { port } = fixture;
+
+    expect(await send(port, { method: 'GET', path: '/health' })).toMatchObject({
+      body: '{"status":"up"}',
+      status: 200,
+    });
+    expect(await send(port, { method: 'GET', path: '/nope' })).toMatchObject({
+      body: '{"message":"Route GET:/nope not found","error":"Not Found","statusCode":404}',
+      status: 404,
+    });
+    expect(await send(port, { method: 'GET', path: '/v1/books/2' })).toMatchObject({
+      body: '{"name":"2","title":"A tale"}',
+      status: 200,
+    });
+  });
+
+  test('leaves Fastify a path its router cannot decode, and what Node’s parser refuses, each answered in JSON', async () => {
+    await using fixture = await startTranscoding({ mount: inFastify() });
+    const { port } = fixture;
+    const undecodable = await send(port, { method: 'GET', path: '/v1/books/%FF' });
+    const unframed = await exchanged(port, octetsOf(port, { lines: ['GET /v1/books/é HTTP/1.1'] }));
+
+    // ! no hook runs for either: the gateway never sees them
+    expect([undecodable.status, undecodable.headers['bead-refusal'], undecodable.body]).toEqual([
+      400,
+      undefined,
+      `{"error":"Bad Request","code":"FST_ERR_BAD_URL","message":"'/v1/books/%FF' is not a valid url component","statusCode":400}`,
+    ]);
+    expect([unframed.status, unframed.headers['content-type'], unframed.body]).toEqual([
+      400,
+      'application/json',
+      '{"error":"Bad Request","message":"Client Error","statusCode":400}',
+    ]);
+  });
+
+  test('reads the body of each exchange it answers, past bodyLimit, Fastify parsing none', async () => {
+    const parsed: string[] = [];
+    await using fixture = await startTranscoding({
+      mount: inFastify({
+        prepare: (app) => {
+          // oxlint-disable-next-line max-params, bead/options-last -- Fastify’s own, a `preParsing` hook’s
+          app.addHook('preParsing', (request, _reply, payload, done) => {
+            parsed.push(request.url);
+            done(null, payload);
+          });
+        },
+      }),
+    });
+    const { port } = fixture;
+    // * twice Fastify's bodyLimit, 1 MiB by default
+    const bytes = Buffer.alloc(2 * 1_048_576, 'a');
+    const raw = await send(port, {
+      body: bytes,
+      headers: { 'content-type': 'application/octet-stream' },
+      path: '/api/Transcoding/raw',
+    });
+
+    expect([raw.status, raw.body.length]).toEqual([200, bytes.length]);
+    expect(await send(port, { body: '{"a":1}', path: '/own' })).toMatchObject({
+      body: '{"a":1}',
+      status: 200,
+    });
+    expect(parsed).toEqual(['/own']);
+  });
+
+  test('runs onResponse and logs the completion of a reply it hijacks, and none of the hooks that write one', async () => {
+    const seen: string[] = [];
+    const logged: string[] = [];
+    await using fixture = await startTranscoding({
+      mount: inFastify({
+        options: {
+          logger: {
+            level: 'info',
+            stream: {
+              write: (line: string) => {
+                const { msg, req, res } = JSON.parse(line) as {
+                  msg: string;
+                  req?: { url: string };
+                  res?: { statusCode: number };
+                };
+
+                logged.push(
+                  [msg, req?.url, res?.statusCode]
+                    .filter((part) => {
+                      return part !== undefined;
+                    })
+                    .join(' ')
+                );
+              },
+            },
+          },
+        },
+        prepare: (app) => {
+          // oxlint-disable-next-line max-params, bead/options-last -- Fastify’s own, a `preParsing` hook’s
+          app.addHook('preParsing', (request, _reply, payload, done) => {
+            seen.push(`preParsing ${request.url}`);
+            done(null, payload);
+          });
+          // oxlint-disable-next-line bead/options-last -- Fastify’s own, a `preValidation` hook’s
+          app.addHook('preValidation', (request, _reply, done) => {
+            seen.push(`preValidation ${request.url}`);
+            done();
+          });
+          // oxlint-disable-next-line bead/options-last -- Fastify’s own, a `preHandler` hook’s
+          app.addHook('preHandler', (request, _reply, done) => {
+            seen.push(`preHandler ${request.url}`);
+            done();
+          });
+          // oxlint-disable-next-line max-params, bead/options-last -- Fastify’s own, an `onSend` hook’s
+          app.addHook('onSend', (request, _reply, payload, done) => {
+            seen.push(`onSend ${request.url}`);
+            done(null, payload);
+          });
+          // oxlint-disable-next-line bead/options-last -- Fastify’s own, an `onResponse` hook’s
+          app.addHook('onResponse', (request, reply, done) => {
+            seen.push(`onResponse ${request.url} ${String(reply.statusCode)}`);
+            done();
+          });
+        },
+      }),
+    });
+    const { port } = fixture;
+
+    expect((await send(port, { method: 'GET', path: '/v1/books/2' })).status).toBe(200);
+    await until(() => {
+      return seen.length === 1;
+    });
+    expect((await send(port, { method: 'GET', path: '/health' })).status).toBe(200);
+    await until(() => {
+      return seen.length === 6;
+    });
+    expect(seen).toEqual([
+      'onResponse /v1/books/2 200',
+      'preParsing /health',
+      'preValidation /health',
+      'preHandler /health',
+      'onSend /health',
+      'onResponse /health 200',
+    ]);
+    expect(
+      logged.filter((line) => {
+        return !line.startsWith('Server listening');
+      })
+    ).toEqual([
+      'incoming request /v1/books/2',
+      'request completed 200',
+      'incoming request /health',
+      'request completed 200',
+    ]);
+  });
+
+  test('aborted over HTTP/1.1, a hijacked exchange fires the hooks one of Fastify’s own fires: onRequestAbort while its body comes, none once it came, its call cancelled', async () => {
+    const seen: string[] = [];
+    await using fixture = await startTranscoding({
+      mount: inFastify({
+        prepare: (app) => {
+          // oxlint-disable-next-line bead/options-last -- Fastify’s own, an `onResponse` hook’s
+          app.addHook('onResponse', (request, _reply, done) => {
+            seen.push(`onResponse ${request.url}`);
+            done();
+          });
+          app.addHook('onRequestAbort', (request, done) => {
+            seen.push(`onRequestAbort ${request.url}`);
+            done();
+          });
+          app.post('/own/hang', () => {
+            seen.push('own handler');
+
+            return new Promise(() => {});
+          });
+        },
+      }),
+    });
+    const { port } = fixture;
+    const isSeen = (entry: string): (() => boolean) => {
+      return () => {
+        return seen.includes(entry);
+      };
+    };
+    // a body sent whole, on a socket dropped once its handler holds it
+    const dropped = async (path: string, isReached: () => boolean): Promise<void> => {
+      const socket = opened(
+        port,
+        octetsOf(port, {
+          body: '{}',
+          lines: [`POST ${path} HTTP/1.1`, 'content-type: application/json'],
+        })
+      );
+
+      await until(isReached);
+      socket.destroy();
+    };
+
+    await dropped('/api/Transcoding/hang', () => {
+      return fixture.counts.hanging === 1;
+    });
+    await until(() => {
+      return fixture.counts.cancelled === 1;
+    });
+    await dropped('/own/hang', isSeen('own handler'));
+
+    // a body cut short, on a socket dropped before the rest of it came
+    const halfway = async (path: string): Promise<void> => {
+      const socket = opened(
+        port,
+        [
+          `POST ${path} HTTP/1.1`,
+          `host: 127.0.0.1:${String(port)}`,
+          'content-type: application/json',
+          'content-length: 10',
+          '',
+          '{',
+        ].join('\r\n')
+      );
+
+      await sleep(100);
+      socket.destroy();
+      await until(isSeen(`onRequestAbort ${path}`));
+    };
+
+    await halfway('/api/Transcoding/hang');
+    await halfway('/own/hang');
+    // * what else would fire has had its time
+    await sleep(300);
+    expect([seen, fixture.counts.hanging]).toEqual([
+      ['own handler', 'onRequestAbort /api/Transcoding/hang', 'onRequestAbort /own/hang'],
+      1,
+    ]);
+  });
+
+  test('with @fastify/cors registered ahead of its hook, the plugin answers each preflight in its place, and the fields it sets on a hijacked reply are never written', async () => {
+    await using fixture = await startTranscoding({
+      mount: inFastify({
+        prepare: async (app) => {
+          await app.register(cors, { credentials: true, origin: true });
+        },
+      }),
+      origins: [ORIGIN],
+    });
+    const { port } = fixture;
+    const preflight = async (origin: string): Promise<unknown[]> => {
+      const { headers, status } = await send(port, {
+        headers: { 'access-control-request-method': 'PATCH', origin },
+        method: 'OPTIONS',
+        path: '/v1/shelves/1/books/2',
+      });
+
+      return [
+        status,
+        headers['access-control-allow-origin'],
+        headers['access-control-allow-methods'],
+        headers['bead-refusal'],
+      ];
+    };
+
+    // ! the plugin's own methods, PATCH not among them, and an origin the gateway refuses taken
+    expect(await preflight(ORIGIN)).toEqual([204, ORIGIN, 'GET,HEAD,POST', undefined]);
+    expect(await preflight('https://elsewhere.example')).toEqual([
+      204,
+      'https://elsewhere.example',
+      'GET,HEAD,POST',
+      undefined,
+    ]);
+
+    // the gateway's own fields reach the wire, the plugin's never
+    const echoed = await send(port, {
+      body: '{}',
+      headers: { origin: ORIGIN },
+      path: '/api/Transcoding/echo',
+    });
+    const own = await send(port, { headers: { origin: ORIGIN }, method: 'GET', path: '/health' });
+
+    expect([
+      echoed.status,
+      echoed.headers['access-control-allow-origin'],
+      echoed.headers['access-control-allow-credentials'],
+    ]).toEqual([200, ORIGIN, undefined]);
+    expect([own.status, own.headers['access-control-allow-credentials']]).toEqual([200, 'true']);
+  });
+
+  test('with @fastify/cors registered ahead of its hook, answers a preflight to its routes itself', async () => {
+    test.fail(
+      true,
+      'divergence: @fastify/cors answers every preflight in its own onRequest hook, before the gateway’s'
+    );
+    await using fixture = await startTranscoding({
+      mount: inFastify({
+        prepare: async (app) => {
+          await app.register(cors, { origin: true });
+        },
+      }),
+      origins: [ORIGIN],
+    });
+    const { headers, status } = await send(fixture.port, {
+      headers: { 'access-control-request-method': 'PATCH', origin: ORIGIN },
+      method: 'OPTIONS',
+      path: '/v1/shelves/1/books/2',
+    });
+
+    expect([status, headers['access-control-allow-methods']]).toEqual([204, 'GET, HEAD, PATCH']);
+  });
+
+  test('with @fastify/cors registered after its hook, answers a preflight to its routes itself, the plugin those to Fastify’s', async () => {
+    await using fixture = await startTranscoding({
+      mount: inFastify({
+        after: async (app) => {
+          await app.register(cors, { origin: true });
+        },
+      }),
+      origins: [ORIGIN],
+    });
+    const { port } = fixture;
+    const preflight = async (path: string, origin: string): Promise<unknown[]> => {
+      const { headers, status } = await send(port, {
+        headers: { 'access-control-request-method': 'PATCH', origin },
+        method: 'OPTIONS',
+        path,
+      });
+
+      return [status, headers['access-control-allow-methods'], headers['bead-refusal']];
+    };
+
+    expect(await preflight('/v1/shelves/1/books/2', ORIGIN)).toEqual([
+      204,
+      'GET, HEAD, PATCH',
+      undefined,
+    ]);
+    expect(await preflight('/v1/shelves/1/books/2', 'https://elsewhere.example')).toEqual([
+      403,
+      undefined,
+      'origin-refused',
+    ]);
+    expect(await preflight('/health', ORIGIN)).toEqual([204, 'GET,HEAD,POST', undefined]);
+  });
+
+  test('over HTTP/2, h2c, answers its calls, its streams and its cancels, and leaves Fastify the rest', async () => {
+    await using fixture = await startTranscoding({
+      mount: async (gateway) => {
+        const app = Fastify({ http2: true });
+
+        // oxlint-disable-next-line bead/options-last -- Fastify’s own, an `onRequest` hook’s
+        app.addHook('onRequest', (request, reply, done) => {
+          if (gateway.listener(request.raw, reply.raw)) {
+            reply.hijack();
+
+            return;
+          }
+
+          done();
+        });
+        app.get('/health', (_request, reply) => {
+          return reply.send({ status: 'up' });
+        });
+        await app.listen({ host: '127.0.0.1', port: 0 });
+
+        return {
+          port: portOf(app.server.address()),
+          [Symbol.asyncDispose]: async () => {
+            await app.close();
+          },
+        };
+      },
+    });
+    const session = connectHTTP2(`http://127.0.0.1:${String(fixture.port)}`);
+
+    session.on('error', () => {});
+
+    // its status and body, once its stream closed
+    const answerOf = (
+      headers: Record<string, string>,
+      body?: string
+    ): Promise<[number, string]> => {
+      return new Promise((resolve) => {
+        const stream = session.request(headers);
+        const chunks: Buffer[] = [];
+        let status = 0;
+
+        stream.once('response', (response) => {
+          status = response[':status'] ?? 0;
+        });
+        stream.on('data', (chunk: Buffer) => {
+          chunks.push(chunk);
+        });
+        stream.on('error', () => {});
+        stream.once('close', () => {
+          resolve([status, Buffer.concat(chunks).toString('utf8')]);
+        });
+        stream.end(body);
+      });
+    };
+    const json = { 'content-type': 'application/json' };
+
+    try {
+      expect(await answerOf({ ':method': 'GET', ':path': '/v1/books/2' })).toEqual([
+        200,
+        '{"name":"2","title":"A tale"}',
+      ]);
+      expect(
+        await answerOf(
+          { ':method': 'POST', ':path': '/api/Transcoding/echo', ...json },
+          '{"anInt32":7}'
+        )
+      ).toEqual([200, '{"anInt32":7}']);
+      expect(await answerOf({ ':method': 'GET', ':path': '/health' })).toEqual([
+        200,
+        '{"status":"up"}',
+      ]);
+      expect((await answerOf({ ':method': 'GET', ':path': '/nope' }))[0]).toBe(404);
+
+      const [status, events] = await answerOf(
+        {
+          ':method': 'POST',
+          ':path': '/api/Transcoding/ticks',
+          accept: 'text/event-stream',
+          ...json,
+        },
+        '{"from":2}'
+      );
+
+      expect([status, events.startsWith('event: result\nid: 1\ndata: {"ticks":2}\n\n')]).toEqual([
+        200,
+        true,
+      ]);
+      expect(events).toContain('event: failure\n');
+
+      // * a stream reset cancels its call
+      const hanging = session.request({
+        ':method': 'POST',
+        ':path': '/api/Transcoding/hang',
+        ...json,
+      });
+
+      hanging.on('error', () => {});
+      hanging.end('{}');
+      await until(() => {
+        return fixture.counts.hanging === 1;
+      });
+      hanging.close(http2Constants.NGHTTP2_CANCEL);
+      await until(() => {
+        return fixture.counts.cancelled === 1;
+      });
+    } finally {
+      session.close();
+    }
+  });
+});
+
+test.describe('mounted in Express', () => {
+  for (const entry of EXCHANGES) {
+    test(`exchanges: ${entry.name}`, async () => {
+      const divergence = HANDED_ON[entry.name];
+
+      test.fail(divergence !== undefined, divergence);
+      await using fixture = await startTranscoding({
+        ...gatewayOptionsOf(entry),
+        mount: inExpress(),
+      });
+
+      await playExchange(entry, fixture);
+    });
+  }
+
+  test('leaves Express each path it serves none of, to its routes and its 404', async () => {
+    await using fixture = await startTranscoding({ mount: inExpress() });
+    const { port } = fixture;
+    const missing = await send(port, { method: 'GET', path: '/nope' });
+
+    expect(await send(port, { method: 'GET', path: '/health' })).toMatchObject({
+      body: '{"status":"up"}',
+      status: 200,
+    });
+    expect([missing.status, missing.body.includes('Cannot GET /nope')]).toEqual([404, true]);
+    expect(await send(port, { method: 'GET', path: '/v1/books/2' })).toMatchObject({
+      body: '{"name":"2","title":"A tale"}',
+      status: 200,
+    });
+  });
+
+  test('reads the body of each exchange it answers ahead of express.json(), past its limit, which parses the routes of Express', async () => {
+    await using fixture = await startTranscoding({ mount: inExpress() });
+    const { port } = fixture;
+    // * twice express.json()'s limit, 100 kB by default
+    const body = `{"aString":"${'a'.repeat(200_000)}"}`;
+
+    expect(await send(port, { body, path: '/api/Transcoding/echo' })).toMatchObject({
+      body,
+      status: 200,
+    });
+    expect(await send(port, { body: '{"a":1}', path: '/own' })).toMatchObject({
+      body: '{"a":1}',
+      status: 200,
+    });
+  });
+
+  test('behind express.json(), a JSON exchange whose body it took is never answered', async () => {
+    await using fixture = await startTranscoding({
+      bodyGracePeriod: 100,
+      mount: inExpress({ isJsonFirst: true }),
+      timeout: 200,
+    });
+    const { port } = fixture;
+    const taken = opened(
+      port,
+      octetsOf(port, {
+        body: '{"anInt32":7}',
+        lines: ['POST /api/Transcoding/echo HTTP/1.1', 'content-type: application/json'],
+      })
+    );
+    let received = 0;
+
+    taken.on('data', (chunk: Buffer) => {
+      received += chunk.length;
+    });
+
+    // ! its body ended before the gateway read it: no read ends, no timer runs, nothing is answered
+    const raw = await send(port, {
+      body: 'abc',
+      headers: { 'content-type': 'application/octet-stream' },
+      path: '/api/Transcoding/raw',
+    });
+
+    await sleep(1_000);
+    taken.destroy();
+    expect([raw.status, raw.body, received]).toEqual([200, 'abc', 0]);
+  });
+
+  test('carries X-Powered-By into each answer of the gateway', async () => {
+    await using fixture = await startTranscoding({ mount: inExpress() });
+    const { headers, status } = await send(fixture.port, { method: 'GET', path: '/v1/books/2' });
+
+    expect([status, headers['x-powered-by']]).toEqual([200, 'Express']);
+  });
 });
