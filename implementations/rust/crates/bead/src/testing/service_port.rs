@@ -74,6 +74,8 @@ pub(crate) struct Control {
     /// The id each request draws, heard through its `on_call_id`: 7 unless set, none for a router
     /// that draws none.
     pub(crate) call_id: Mutex<Option<u32>>,
+    /// What a request fails with instead of echoing its payload: none unless set.
+    pub(crate) request_error: Mutex<Option<CallError>>,
     /// What a registration waits on once the router holds its notification, as a subscription
     /// would: open unless closed.
     pub(crate) subscribing: Gate,
@@ -120,6 +122,7 @@ impl FakeRouter {
                 clock,
                 control: Control {
                     call_id: Mutex::new(Some(7)),
+                    request_error: Mutex::default(),
                     subscribing: Gate::opened(),
                     subscribe_error: Mutex::default(),
                     unregistering: Gate::opened(),
@@ -239,6 +242,11 @@ impl RouterLike for FakeRouter {
 
         if let Some(refusal) = request.refusal {
             return Ok(Call::refused(refusal));
+        }
+
+        let error = locked(&self.shared.control.request_error).clone();
+        if let Some(error) = error {
+            return Ok(Call::refused(error));
         }
 
         let (answer, answered) = oneshot::channel();

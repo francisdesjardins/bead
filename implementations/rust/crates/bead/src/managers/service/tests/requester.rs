@@ -672,13 +672,17 @@ async fn command_timeout_trace() {
 
 // decision 0047: a command's options are a request's and its own, its connection and its close; the
 // four of a request's are written out on both records, so this build is what holds them equal
-#[test]
-fn a_command_options_carry_every_option_of_a_request() {
+
+fn command_options(opaque: bool) {
     let signal = CancellationToken::new();
     let request = RequestOptions {
         timeout: Some(Duration::from_millis(7)),
         destination_id: Some(4),
-        credential: Some(RequestCredential::Jwt("a.b.c".to_owned())),
+        credential: Some(if opaque {
+            RequestCredential::Opaque
+        } else {
+            RequestCredential::Jwt("a.b.c".to_owned())
+        }),
         signal: Some(signal.clone()),
     };
     // * destructured without `..`: a field a request's options gain and a command's do not fails
@@ -705,10 +709,14 @@ fn a_command_options_carry_every_option_of_a_request() {
         ),
         (handle_of(1), None, Some(Duration::from_millis(7)), Some(4))
     );
-    assert!(matches!(
+    assert_eq!(
         command.credential,
-        Some(RequestCredential::Jwt(token)) if token == "a.b.c"
-    ));
+        Some(if opaque {
+            RequestCredential::Opaque
+        } else {
+            RequestCredential::Jwt("a.b.c".to_owned())
+        })
+    );
     signal.cancel();
     assert!(command.signal.expect("its signal").is_cancelled());
 }
@@ -716,13 +724,13 @@ fn a_command_options_carry_every_option_of_a_request() {
 // spec 16.11: a client's router makes requests and hears notifications, a server's makes commands;
 // the other maker is refused as it is made, by the side before spec 16.10's reasons, and declares
 // nothing
-#[tokio::test]
+
 #[expect(
     clippy::too_many_lines,
     reason = "each maker on each router, by kind, as both other sides tell them"
 )]
-async fn makes_requests_and_notifications_on_a_client_router_alone_and_commands_on_a_server_router_alone()
- {
+// The source fake router counts no metrics; the observer still checks every declaration.
+async fn requester_sides(source_case: bool) {
     use crate::errors::{ProgrammerError, Refusal};
     use crate::identity::IdentityRefusal;
     use crate::metrics::{MetricsRegistry, MetricsRegistryOptions};
@@ -752,10 +760,18 @@ async fn makes_requests_and_notifications_on_a_client_router_alone_and_commands_
     // on a server's router
     let registry = MetricsRegistry::new(&MetricsRegistryOptions::default()).expect("a registry");
     let fixture = Fixture::with(&crate::router::server::RouterServerOptions {
-        metrics_registry: Some(registry.clone()),
+        metrics_registry: (!source_case).then(|| registry.clone()),
         ..crate::router::server::RouterServerOptions::default()
     });
     // * what the registry holds before any maker: a declaration adds its procedure's series
+    let made = Arc::new(Mutex::new(Vec::new()));
+    let making = Arc::clone(&made);
+    fixture
+        .router
+        .observe_requester(crate::testing::scripted::RequesterProbe {
+            declared: Arc::new(move |procedure, _| locked(&making).push(procedure.clone())),
+            called: Arc::new(|_| {}),
+        });
     let declared = registry.exposition().text;
     let request = |procedure: &Procedure| {
         fixture
@@ -808,16 +824,31 @@ async fn makes_requests_and_notifications_on_a_client_router_alone_and_commands_
         Some(Refusal::Identity(IdentityRefusal::OutOfItsRange))
     );
     assert_eq!(registry.exposition().text, declared, "nothing declared");
+    assert!(
+        locked(&made).is_empty(),
+        "no refused maker declares a requester"
+    );
     command(&of_kind(None)).expect("a command, on a server's router");
-    assert_ne!(registry.exposition().text, declared, "the command declared");
+    if !source_case {
+        assert_ne!(registry.exposition().text, declared, "the command declared");
+    }
+    assert_eq!(*locked(&made), [of_kind(None)]);
     fixture.router.dispose().await;
 
     // on a client's router
     let registry = MetricsRegistry::new(&MetricsRegistryOptions::default()).expect("a registry");
     let fixture = ClientFixture::with(&crate::router::client::RouterClientOptions {
-        metrics_registry: Some(registry.clone()),
+        metrics_registry: (!source_case).then(|| registry.clone()),
         ..crate::router::client::RouterClientOptions::default()
     });
+    let made = Arc::new(Mutex::new(Vec::new()));
+    let making = Arc::clone(&made);
+    fixture
+        .router
+        .observe_requester(crate::testing::scripted::RequesterProbe {
+            declared: Arc::new(move |procedure, _| locked(&making).push(procedure.clone())),
+            called: Arc::new(|_| {}),
+        });
     let declared = registry.exposition().text;
     let command = |procedure: &Procedure| {
         fixture
@@ -860,6 +891,10 @@ async fn makes_requests_and_notifications_on_a_client_router_alone_and_commands_
         );
     }
     assert_eq!(registry.exposition().text, declared, "nothing declared");
+    assert!(
+        locked(&made).is_empty(),
+        "no refused maker declares a requester"
+    );
     fixture
         .manager
         .get_request(
@@ -872,14 +907,28 @@ async fn makes_requests_and_notifications_on_a_client_router_alone_and_commands_
         .get_notification(
             &Procedure {
                 procedure_id: 2,
-                procedure_name: "news".to_owned(),
+                procedure_name: if source_case { "echo" } else { "news" }.to_owned(),
                 procedure_kind: Some(ProcedureKind::Notifies),
                 ..echo()
             },
             notifying(),
         )
         .expect("a notification, on a client's router");
-    assert_ne!(registry.exposition().text, declared, "the request declared");
+    if !source_case {
+        assert_ne!(registry.exposition().text, declared, "the request declared");
+    }
+    assert_eq!(
+        *locked(&made),
+        [
+            of_kind(None),
+            Procedure {
+                procedure_id: 2,
+                procedure_name: if source_case { "echo" } else { "news" }.to_owned(),
+                procedure_kind: Some(ProcedureKind::Notifies),
+                ..echo()
+            }
+        ]
+    );
     fixture.router.dispose().await;
 }
 
@@ -1010,4 +1059,26 @@ async fn tells_debug_the_close_on_timeout_that_applies_the_calls_or_else_the_man
 #[tokio::test]
 async fn tells_debug_the_close_on_timeout_that_applies_the_call_or_else_the_manager_one() {
     command_timeout_trace().await;
+}
+
+#[test]
+fn a_command_options_carry_every_option_of_a_request() {
+    command_options(false);
+}
+
+#[test]
+fn a_commands_options_carry_every_option_of_a_requests() {
+    command_options(true);
+}
+
+#[tokio::test]
+async fn makes_requests_and_notifications_on_a_client_router_alone_and_commands_on_a_server_router_alone()
+ {
+    requester_sides(false).await;
+}
+
+#[tokio::test]
+async fn makes_requests_and_notifications_on_a_clients_router_alone_and_commands_on_a_servers_alone_refusing_the_other_as_it_is_made()
+ {
+    requester_sides(true).await;
 }

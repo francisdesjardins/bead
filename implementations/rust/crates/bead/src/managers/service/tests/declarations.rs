@@ -73,13 +73,12 @@ async fn refuses_a_resolver_off_section_16_as_it_is_asked_for_before_its_callbac
 }
 
 // spec 16.10, 16.11; debugging 4.1.2
-#[tokio::test]
+
 #[expect(
     clippy::too_many_lines,
     reason = "each resolver maker on each router, by kind, as both other sides tell them"
 )]
-async fn makes_the_resolvers_of_requests_and_notifications_on_a_server_router_alone_and_of_commands_on_a_client_router_alone()
- {
+async fn resolver_sides() {
     use crate::errors::{ProgrammerError, Refusal};
     use crate::identity::IdentityRefusal;
 
@@ -840,4 +839,16 @@ async fn hands_the_router_a_procedures_payload_limit_with_its_requests_and_its_r
 #[tokio::test]
 async fn hands_the_router_a_procedure_payload_limit_with_its_requests_and_its_resolver() {
     procedure_payload_limit().await;
+}
+
+#[tokio::test]
+async fn makes_the_resolvers_of_requests_and_notifications_on_a_server_router_alone_and_of_commands_on_a_client_router_alone()
+ {
+    resolver_sides().await;
+}
+
+#[tokio::test]
+async fn makes_the_resolvers_of_requests_and_notifications_on_a_servers_router_alone_and_of_commands_on_a_clients_alone_refusing_the_other_as_it_is_made()
+ {
+    resolver_sides().await;
 }
