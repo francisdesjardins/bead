@@ -9,7 +9,8 @@
   `spec/generators/ucd.json`; the interop's `checked`, its conversations and its exit; the
   blueprint's feature `validate`, beadc's rules on payload rules, its pattern compiler and its
   Unicode tables, and `beadc breaking`'s `PROCEDURE_RULES_TIGHTENED`; every runtime's service
-  manager and service layer, and the TypeScript and C# sides' `proto` modules; the differential against protovalidate-es. The
+  manager and service layer, the TypeScript and C# sides' `proto` modules and the Rust side's
+  `bead-protobuf`'s `validate`; the differential against protovalidate-es. The
   descriptor's `validate` and the options of the layer that hands it on are
   [0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)'s;
   the blueprint's form and its features,
@@ -164,9 +165,11 @@ rules of one field that would part on the order as protovalidate-es reads them, 
 `min_len` and `const` beside another enum rule; the verdicts hold the pairs it takes, a pattern
 beside `len`, a prefix beside `len_bytes` and `bytes.len`, `in` beside `not_contains`.
 
-**Rust, and each language after it, generates the same validators from the same blueprint, or beadc
-refuses to generate it.** HTTP/JSON transcoding's OpenAPI document reads the same rules: JSON
-Schema's keywords where they mean the same, a reversed range as `anyOf` its halves, a pattern
+**Every language generates the same validators from the same blueprint, or beadc refuses to
+generate it**: the Rust side's, with their runtime in `bead-protobuf`, read Buffa's messages
+([0051](0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md)), and
+a language after it does the same. HTTP/JSON transcoding's OpenAPI document reads the same rules:
+JSON Schema's keywords where they mean the same, a reversed range as `anyOf` its halves, a pattern
 translated to ECMA-262's dialect where beadc can write one that means RE2's, what no keyword holds
 said in words, and `PAYLOAD_INVALID` in a 422 `application/problem+json` whose `errors` are the
 violations its detail's reader reads (transcoding 7.4, 11.7).
@@ -178,16 +181,14 @@ formats, `bytes.pattern`, `bytes.in`, `any`, `duration`, `timestamp`, `field_mas
 `predefined` rules; and protovalidate's
 Go runner as a gate beside the differential.
 
-**The gate.** `spec/validations.json`, played by the TypeScript and C# sides through the validators
-beadc generates
+**The gate.** `spec/validations.json`, played by every side through the validators beadc generates
 for `spec/validations.proto`: its verdicts, every rule of the first set on both sides of its bound,
 the traps of code points, UTF-8 bytes, a float at its bound, 64-bit integers past 2⁵³, a reversed
 range, NaN, the infinities and `-0.0`, a number its enum does not declare, wrappers, presence and
 each `ignore`, messages held, map keys of every type in their order, a key cut, the orders where
 the readings part, a request of 100,000 breaking items held to its bound and counted exactly, and
 RE2's classes, anchors and folding, a backtracking engine's two worst inputs and a letter of Unicode
-17.0.0; its details, the writer under its bounds and the reader of what a cut leaves, which the Rust side
-plays too, its verdicts ahead with beadc's Rust target. The verdicts'
+17.0.0; its details, the writer under its bounds and the reader of what a cut leaves. The verdicts'
 patterns are judged by RE2 itself, `google-re2`, pinned with its hashes in
 `spec/requirements.txt`, and their Unicode classes by the pinned UCD files. The differential plays
 every verdict, and payloads mutated from them, through each side's validator and protovalidate-es,

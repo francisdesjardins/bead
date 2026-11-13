@@ -201,8 +201,8 @@ and a catalogue are typed by ([0018](0018-a-services-procedures-are-typed-descri
 transports take ([0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md)), and none older: they hold no
 `GENERATED_CODE_SUPPORTS_VERSION_2`, `_3` or `_4` and no `GeneratedCode.SupportsVersion2`,
 `SupportsVersion3` or `SupportsVersion4`, so code that names 2, 3 or 4, an earlier beadc's, fails its
-type-check and its build until it is regenerated. On the Rust side, whose beadc target is ahead,
-an application makes the runtime codec itself.
+type-check and its build until it is regenerated. The Rust runtime holds 7 and 8 alone, since no
+Rust code ever named an older one ([0051](0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md)).
 A runtime keeps a constant while it still serves the code that names it, and one that would run
 version-2 code unchecked no longer serves it as Bead conforms: before 1.0.0, an older constant goes
 once the code that names it no longer conforms through the runtime; from 1.0.0, it stays for the
@@ -285,8 +285,9 @@ codec, the check in front:
   mapping coming with its gateway, ahead; the runner
   closes a text-format suite after it, whose 909 tests a testee skips, since Bead's `proto` carries
   no text form. Each count moves only with the pin, or with a form the testees answer. The Rust
-  side's beadc target is ahead, so for it protoc writes the set of the suite's test messages and
-  `Probe` instead, which its testee's build script hands to Buffa's generator
+  testee takes its messages from its build script, as a Rust output of `messages: external` does
+  ([0051](0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md)): protoc writes the set of the suite's test messages and `Probe`, which it hands to
+  Buffa's generator through `bead_protobuf_build`
   ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)); each
   language after it adds its testee's command.
 - **The testees**, `implementations/typescript/tools/protobuf-conformance/` on the TypeScript side's

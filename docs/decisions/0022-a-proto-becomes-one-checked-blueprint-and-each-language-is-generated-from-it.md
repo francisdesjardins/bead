@@ -6,8 +6,8 @@
   the format of its blueprint, `bead-blueprint/1`, and its schema,
   `spec/schemas/bead-blueprint.schema.json`; the interop's API, `spec/interop-blueprint.json` and its
   schema, and what `spec/interop-service.json` states of the same procedures; the generators that
-  read them and `spec/check.py`; both sides' interop, generated, and the handlers written beside it;
-  `examples/hello`; the CI's `builder` and `examples` jobs. The identity rules a blueprint is held
+  read them and `spec/check.py`; every side's interop, generated, and the handlers written beside
+  it; `examples/hello`; the CI's `builder` and `examples` jobs. The identity rules a blueprint is held
   to are [0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md)'s, and the
   layer the generated code stands on is
   [0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)'s;
@@ -19,7 +19,9 @@
   [0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)'s;
   an output's `server`, `client` and `gateway`, what each selects, its three rules and the
   procedures each transport of its server takes
-  [0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md)'s
+  [0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md)'s;
+  the Rust target's layout, names, messages and gates
+  [0051](0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md)'s
 
 ## Context
 
@@ -229,7 +231,12 @@ with a trailing `Service` taken off; in TypeScript also
 for the service, which C# names `ServiceServerOptions<<Name>Procedures>` and
 `ServiceClientOptions<<Name>Procedures>`; in C# also `<Name>Commands`, `<Name>Notifiers` and
 `<Name>Notifications`, the classes of a server's `Command` and `Notify` and of a client's
-`Notifications`; on the C# side, a procedure that lists failures gives a class of them, nested in
+`Notifications`; in Rust also `<Name>ServerOptions` and `<Name>ClientOptions`, and
+`<Name>Requesters`, `<Name>Commands`, `<Name>Notifiers` and `<Name>Notifications`, the records of
+a client's `request()`, a server's `command()` and `notify()` and a client's `notifications()`,
+its descriptors and its catalogue each made once a process behind `get()`
+([0051](0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md));
+on the C# side, a procedure that lists failures gives a class of them, nested in
 `<Name>Failures` under its rpc's name, and every type that holds a member a procedure or a hook
 names is a sealed class of `init` properties, which synthesizes no member. A procedure's name is its
 rpc's, the first letter lowered (spec 16.4); a failure's is its enum value's, the enum's prefix
@@ -238,7 +245,10 @@ sits in, or a class name a message or a public type of the runtime holds, or a m
 the C# namespace it is written in, in any file of the set that shares the namespace, is refused,
 never escaped (`NAME_TARGET`): the rule runs on the blueprint, and on a `.proto` for the messages
 and enums of each C# namespace, which a blueprint does not hold, over every official target, so one
-blueprint has one verdict whatever targets a project names.
+blueprint has one verdict whatever targets a project names. A rendering that keeps the key is no
+escape: snake case, a raw identifier, or Buffa's `_` where Rust holds no raw one, as the Rust
+target writes a procedure's members (`on_say_hello`, `r#type`, `self_`), the descriptor's
+`procedureName` never moving.
 
 **A target writes data and types; behaviour is the runtime's.** A generated file holds the service's
 descriptors, made by `requestOf` and `commandOf`, `RequestProcedure` and `CommandProcedure`; its
@@ -252,11 +262,11 @@ under `notifications`, at the windows its caller gives, unpaced by default
 ([0002](0002-a-subscription-goes-at-its-clients-pace.md)), and `on` for the commands it answers.
 Each class holds what its output's `server` or `client` selects, and an output that names neither
 writes both whole ([0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md)). A
-file names its runtime's contract, `GENERATED_CODE_SUPPORTS_VERSION_7` or
-`GeneratedCode.SupportsVersion7`, each runtime's counter its own, the file of the procedures a
-server's transports take 8, and a route table 5,
-`./transcoding`'s `GENERATED_CODE_SUPPORTS_VERSION_5` or `GeneratedCode.SupportsVersion5`, each
-runtime carrying its own and 5
+file names its runtime's contract, `GENERATED_CODE_SUPPORTS_VERSION_7`,
+`GeneratedCode.SupportsVersion7` or `bead::GENERATED_CODE_SUPPORTS_VERSION_7`, one number a
+contract, every side's, moved together, the file of the procedures a server's transports take 8,
+and a route table 5, `./transcoding`'s `GENERATED_CODE_SUPPORTS_VERSION_5` or
+`GeneratedCode.SupportsVersion5`
 ([0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)); a
 service's file imports nothing of Bead's but `./service`, and `./proto` where it binds `proto`, a
 route table `./transcoding`, each from a path relative to its output's folder or a package's name;
@@ -266,6 +276,12 @@ codec is `protoCodecOf` of `./proto`, each checking a payload's records before i
 reads them
 ([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md))
 and judging its required fields ([0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)).
+The Rust it writes is each package's typed shells over the layer's `ServiceServer` and
+`ServiceClient`, every item named by its path from its crate's root, `::bead::…` and
+`::bead_protobuf::…`, a `proto` binding's codec `::bead_protobuf::ProtoCodec`, which checks a
+payload's records and judges its required fields alike, under a root of its own beside the messages
+Buffa writes
+([0051](0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md)).
 The TypeScript target runs on `@bufbuild/protoplugin`, in beadc's process, its `target=ts`, its
 header written above protoplugin's imports, never its preamble, its imports printed as symbols. A
 service with no `proto` member is written at the folder's root under its name; one with a `proto`
@@ -274,9 +290,12 @@ descriptor names. The C# target is a printer of its own, in beadc's process, and
 from its descriptor; it writes a service with a `proto` member in its namespace's folder at its
 file's name, beside protoc's file, protoc run with `base_namespace=`, the namespace the set's
 `csharp_namespace` from a `.proto` and the output's `namespace` from a blueprint, and one with none
-at the output's root, under its name, in the output's `namespace`. A deprecation marks what each
-target writes for it, `@deprecated` and `[Obsolete]` with one text and `BEAD0001` in C#; a C# file
-silences its own uses in every file, protoc's `#pragma warning disable`, and a TypeScript file where
+at the output's root, under its name, in the output's `namespace`. The Rust target is a printer of
+its own, in beadc's process, and writes a module a package under its output's `services`, one file
+a package. A deprecation marks what each target writes for it, `@deprecated`, `[Obsolete]` and
+`#[deprecated(note)]` with one text and `BEAD0001` in C#; a C# file silences its own uses in every
+file, protoc's `#pragma warning disable`, a Rust output's `services` its own uses, module-wide, by
+`allow(deprecated)`, and a TypeScript file where
 it marks one or names a deprecated message, protoc-gen-es's `/* eslint-disable */`, which
 protoc-gen-es writes in every file: the TypeScript side's lint holds beadc's output to its rules
 wherever nothing is marked. `generate` refuses two files it would write at one path, over every
@@ -290,16 +309,18 @@ by its first lines in both targets, a `_bead.ts` or a `*Bead.cs` with beadc's he
 with protoc-gen-es's, a `.cs` with protoc's at the path protoc gives its source, and prints each:
 under `clean` the generated files' kinds in an output's folder are beadc's alone, and a project's
 own files stay, where buf's `clean` empties the folder. Messages are the stock generators' —
-protoc-gen-es with `erasable_syntax=true`, run in beadc's process, and protoc's C# generator over
-buf's set — or `external`, a project's own generator writing them. An output with `gateway`, as
-`keepValidateOptions` is an output's, writes its route table and its HTTP client of the procedures
-it selects
+protoc-gen-es with `erasable_syntax=true`, run in beadc's process, protoc's C# generator over
+buf's set, and protoc-gen-buffa, pinned, over the same set, for Rust — or `external`, a project's
+own generator writing them, for Rust through `bead_protobuf_build::config_of`. An output with
+`gateway`, as `keepValidateOptions` is an output's, writes its route table and its HTTP client of
+the procedures it selects
 ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md),
 [0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md)),
 and embeds the OpenAPI document of them byte for byte, in the blueprint's own form, the one
 `beadc.yaml`'s `openapi:` writes of the blueprint where it selects every procedure; any other
 output writes neither and embeds nothing, so no assembly carries a document it never serves, and a
-target that generates no HTTP is refused such an output, `HTTP_UNGENERATED`. An output's `http` and
+target that generates no HTTP is refused such an output, `HTTP_UNGENERATED`, the Rust target until
+its gateway's stage. An output's `http` and
 `httpRuntime` are refused, naming `gateway: {}` and `gateway.runtime` (0048).
 
 **Generated code passes its language's gates but its formatter.** `*_bead.ts` passes oxlint, its
@@ -309,7 +330,11 @@ its file generated in its language's word, `// @generated` in TypeScript, its fi
 `// <auto-generated/>` in C#, its header's last, then `#nullable enable`, which a file so marked
 needs; where Bead's gates judge it, their configuration says so, `[*Bead.cs]`
 `generated_code = false` in the C# side's `.editorconfig`; it writes a doc comment on every public
-member either way.
+member either way. The Rust target's header ends `// @generated by beadc …`; every file of
+`services` and `bead_served` is `include!`d, which rustfmt never follows, and every item of its
+`mod.rs` is `#[rustfmt::skip]`, so an application's `cargo fmt` changes nothing beadc writes; its
+code passes the Rust side's whole lint table, as `bead-goldens` mounts it
+([0051](0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md)).
 
 **`beadc check` refuses by rule name**, at three levels: on a `.proto` input, on any blueprint, a
 hand-written one included, and in each target. A finding prints as
@@ -356,10 +381,9 @@ blueprint to its schema and its form, and the two files to one list, and `--writ
 blueprint out in its form, its arrays sorted, which an author edits as they like; it writes nothing
 when a string holds a surrogate alone, and it never shortens the file it fails to write. The fixture
 `builder/test/fixtures/bead/interop/v1/interop.proto` gives a blueprint whose projection, its `proto`
-members left out, is the spec's byte for byte, which beadc's tests hold. The TypeScript and C#
-sides' interop code is generated from the blueprint, and the Rust side's descriptors are written by
-hand and held to it (`bead-interop/tests/blueprint.rs`) until its target; the handlers and the
-credentials are written.
+members left out, is the spec's byte for byte, which beadc's tests hold. Every side's interop code
+is generated from the blueprint, the root's `beadc.yaml` naming an output a language; the handlers
+and the credentials are written.
 
 **Where each lives.** The builder in `builder/`, with a toolchain of its own
 ([0005](0005-a-toolchain-per-language.md)); `bead/options.proto` in `builder/proto/`; the format's
@@ -378,9 +402,9 @@ shell hands them, one engine call from both; and beadc runs from `builder/` on N
 the repository uses it.
 `beadc init` writes a project's starter: `beadc.yaml` at its root, its `.proto` under `proto/`, a
 package a folder, and each language's generated code under that language's own folder,
-`typescript/gen` and `dotnet/gen`. A generated file resolves what it imports from where it sits, so
-a `package.json` at the project's root or in its language's folder serves it, and the .NET SDK's
-default items compile it from a project in either place. `examples/hello` is that starter, each
+`typescript/gen`, `dotnet/gen` and `rust/src/generated`, since `gen` is reserved in Rust's edition 2024. A generated file resolves what it imports from where it sits, so a `package.json` at the
+project's root or in its language's folder serves it, and the .NET SDK's default items compile it
+from a project in either place. `examples/hello` is that starter, each
 output split by its messages, beadc's or the project's own build's.
 
 **What a peer receives does not change.** No envelope, no code, no conversation: ids travel, names

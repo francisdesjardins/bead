@@ -45,6 +45,8 @@ cargo build --workspace --locked
 cargo deny --locked check
 cargo deny --manifest-path fuzz/Cargo.toml --locked check
 cargo deny --manifest-path tools/protobuf-conformance/Cargo.toml --locked check
+cargo deny --manifest-path tools/protovalidate-differential/Cargo.toml --locked check
+cargo deny --manifest-path ../../examples/hello/rust/Cargo.toml --locked check
 ```
 
 The second lints each member on its default features. The third to the sixth lint the core's
@@ -59,8 +61,10 @@ Every warning of rustc, clippy and rustdoc is an error, by `.cargo/config.toml`'
 = "deny"`, as `TreatWarningsAsErrors` is on the C# side; `CARGO_BUILD_WARNINGS=warn` releases one
 run. `cargo build --workspace` builds the core on its default features alone, where what the test kit
 alone reaches is left out. `cargo deny` holds the dependencies to RustSec's advisories, the licences
-`deny.toml` allows, crates.io alone, and one version of each, in the workspace and in the two
-projects outside it, the fuzz targets and the conformance player.
+`deny.toml` allows, crates.io alone, and one version of each, in the workspace and in the projects
+outside it, each by its own lock: the fuzz targets, the conformance player, the protovalidate
+differential's testee and `examples/hello`'s Rust half, every one from this folder, so that the
+workspace's `deny.toml` is theirs.
 
 `bead-protobuf`'s tests read and write messages Buffa generates in its build script from
 `crates/bead-protobuf/proto/tests.binpb`, the set protoc writes of their `.proto` files at
@@ -73,7 +77,7 @@ The coverage, as CI measures it, lines and regions, held to the side's floor in
 [`tools/coverage-floors.json`](../../tools/coverage-floors.json):
 
 ```sh
-cargo llvm-cov --workspace --all-features --locked --json --summary-only --ignore-filename-regex '(/tests\.rs|/tests/.*|/testing\.rs|/testing/.*)$' --output-path coverage/rust.json
+cargo llvm-cov --workspace --all-features --locked --json --summary-only --ignore-filename-regex '(/tests\.rs|/tests/.*|/testing\.rs|/testing/.*|/generated/.*|/crates/bead-goldens/.*)$' --output-path coverage/rust.json
 node ../../tools/coverage-report.mjs coverage/rust.json --under implementations/rust/crates/bead/src --under implementations/rust/crates/bead-protobuf/src --floor rust
 ```
 
@@ -154,14 +158,18 @@ crates/
                                 kit, and the conformance players under tests/
   bead-protobuf/                the `proto` payload's codec on Buffa 0.9.2: the check of a payload's
                                 records, the required walk, the typed codec over Buffa's generated
-                                code and the dynamic one over its `DynamicMessage`; its tests'
-                                `.proto` files and their set under proto/
+                                code and the dynamic one over its `DynamicMessage`; the validators'
+                                runtime beadc's generated rules judge by; its tests' `.proto` files
+                                and their set under proto/, and beadc's validators of
+                                spec/validations.proto under tests/generated/
   bead-protobuf-build/          Bead's setting of Buffa's generator, for a build script: views,
                                 reflection, and each repeated or map field of a closed enum opened
-  bead-interop/                 the interop service: its descriptors, written by hand from
-                                spec/interop-blueprint.json as beadc writes the other sides',
-                                which beadc's Rust target, ahead, generates; its resolvers and its
-                                credentials
+  bead-interop/                 the interop service: its descriptors and classes, which beadc
+                                generates from spec/interop-blueprint.json into src/generated/; its
+                                resolvers and its credentials
+  bead-goldens/                 beadc's Rust goldens, builder/test/golden/rust, each output mounted
+                                whole under the workspace's lints, and under tests/ the consumer's
+                                refusals and the messages' parity with config_of
   bead-interop-server/          the interop service's server, bead-interop-server, over WebSocket
                                 and HTTP, and over MQTT 5 where BEAD_MQTT_URL names a broker,
                                 which the other sides' clients call; and under tests/, the Rust
@@ -249,8 +257,8 @@ of procedure 0, the only ones a `u16` holds out of range, is refused as the tran
 twice is one (spec 9.12). Its router asks `ServerTransport::names_procedures`, `false` for a
 transport given no list, once as it is built, then `takes_procedure` of each request that names no
 destination, or never; a `JoinedServerTransport` names them when one of its transports does, and
-asks the transport that drew each handle. An application writes the lists by hand, as it writes
-its descriptors; beadc's Rust target, ahead, writes them, as the other sides' targets do. What a
+asks the transport that drew each handle. beadc's Rust target writes the lists in an output's
+`bead_served.rs`, `SERVED_PROCEDURES`, as the other sides' targets do (decision 0051). What a
 transport takes is no access: it grants none, and each procedure keeps its own admission.
 
 `crates/bead-protobuf/src`:
@@ -261,13 +269,15 @@ transport takes is no access: it grants none, and each procedure keeps its own a
 | `required` | the walk of the fields protobuf requires (spec 17.9.7), over a view or a dynamic message, whose presence is the wire's or the application's, and a writer's depth pass (17.9.3), each 100 messages deep at most |
 | `refusal`  | a refusal's reasons in spec 17.2's words, what more the side knows in its cause                                                                                                                                 |
 | `codec`    | `ProtoCodec`, the typed codec of a message Buffa generates, and `DynamicCodec`, by its descriptor alone, each a payload codec of `proto`                                                                        |
+| `validate` | the validators' runtime (spec 18, decision 0051): `validator_of`, the sink a message's generated rules judge into, its rules' sites, a pattern's table and its walk, and the readings spec 18.8 fixes           |
 | `testing`  | the test kit, behind the feature `testing`: the tests' messages, generated from `proto/tests.binpb`; no API                                                                                                     |
 
 A message an application binds to `proto` is generated as `bead-protobuf-build` sets Buffa's
 generator, from a `FileDescriptorSet` its build writes; `ProtoCodec` reads it through its view,
 which tells a field given from one left out, and gives the owned message. An owned message holds a
 required scalar bare, so no typed value leaves one unset; `DynamicCodec`, its value Buffa's
-`DynamicMessage`, is the form that can, and refuses it.
+`DynamicMessage`, is the form that can, and refuses it. `ProtoCodec::new` refuses a message whose
+generator left a repeated or map field of a closed enum closed, which `bead-protobuf-build` opens.
 
 ## Tests
 

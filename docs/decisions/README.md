@@ -48,17 +48,18 @@ transports over WebSocket (RFC 6455) and HTTP/1.1 and HTTP/2 (RFC 9110, 9112, 91
 its core, with the interop both ways with the TypeScript and C# sides
 ([0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md));
 and its MQTT 5 binding, a feature of its core and a client of its own over its sockets, with the
-interop both ways over it ([0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)).
+interop both ways over it ([0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md));
+and beadc's Rust target, each package's typed shells beside the messages Buffa writes, the lists
+of the procedures a server's transports take and the validators of a blueprint's rules, their
+runtime in `bead-protobuf`, with `examples/hello`'s Rust half and the Rust interop's descriptors
+generated
+([0051](0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md)).
 It plays the conformance files it reaches, each part it lacks a row of the support matrix ahead
 ([0004](0004-one-behaviour-in-every-language.md)). Ahead, in this order:
 
-- **beadc's Rust target**, with `examples/hello`'s Rust half, the lists of the procedures a server's
-  transports take
-  ([0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md))
-  and the validators of a blueprint's rules generated for it, their runtime with them
-  ([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md));
-  then the Rust side's gateway, with the HTTP client an output with `gateway` writes; and its
-  AMQP 1.0 binding, its client one of the three branches
+- **the Rust side's gateway**, with the route table, the HTTP client and the document an output
+  with `gateway` writes, and `examples/hello`'s Rust gateway; then its AMQP 1.0 binding, its client
+  one of the three branches
   [0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)
   weighs, each stage under a record of its own
   ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md));

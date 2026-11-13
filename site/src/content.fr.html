@@ -1610,13 +1610,14 @@
   <p class="gist">
     Bead est un protocole : une spécification, des fichiers de conformance que chaque implantation
     joue, et un service d’interop. Le dépôt tient trois implantations. TypeScript et C# sont à
-    parité de comportement. Rust a son cœur, ses transports WebSocket et HTTP et sa liaison
-    MQTT 5, et chaque partie qui lui manque est une ligne de la matrice de support, à venir.
+    parité de comportement. Rust a son cœur, ses transports WebSocket et HTTP, sa liaison MQTT 5
+    et la cible Rust de <code>beadc</code>, et chaque partie qui lui manque est une ligne de la
+    matrice de support, à venir.
   </p>
   {{implementations}}
   <p class="space">
-    Côté Rust, viennent ensuite la cible Rust de <code>beadc</code>, la passerelle et la liaison sur
-    AMQP 1.0, chacune par une décision à elle. Ses transports WebSocket, HTTP et MQTT 5
+    Côté Rust, viennent ensuite la passerelle et la liaison sur AMQP 1.0, chacune par une décision à
+    elle. Ses transports WebSocket, HTTP et MQTT 5
     rencontrent les deux autres côtés dans l’interop, dans les deux sens. Le cœur se compile aussi
     pour <code>wasm32-unknown-unknown</code>.
   </p>

@@ -1564,13 +1564,13 @@
   <p class="gist">
     Bead is a protocol: a specification, conformance files every implementation plays, and an
     interop service. The repository holds three implementations. TypeScript and C# are at
-    behavioural parity. Rust has its core, its WebSocket and HTTP transports and its MQTT 5 binding,
-    and each part it lacks is a row of the support matrix, ahead.
+    behavioural parity. Rust has its core, its WebSocket and HTTP transports, its MQTT 5 binding and
+    <code>beadc</code>’s Rust target, and each part it lacks is a row of the support matrix, ahead.
   </p>
   {{implementations}}
   <p class="space">
-    On the Rust side, next come <code>beadc</code>’s Rust target, the gateway and the binding over
-    AMQP 1.0, each by a decision of its own. Its WebSocket, HTTP and MQTT 5 transports meet the other
+    On the Rust side, next come the gateway and the binding over AMQP 1.0, each by a decision of its
+    own. Its WebSocket, HTTP and MQTT 5 transports meet the other
     two sides in the interop, both ways. The core also compiles for
     <code>wasm32-unknown-unknown</code>.
   </p>
