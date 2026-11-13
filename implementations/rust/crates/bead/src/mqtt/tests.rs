@@ -305,6 +305,62 @@ async fn connects_a_link_that_keeps_no_session_its_id_its_client_identifier_its_
     );
 }
 
+#[tokio::test]
+async fn fails_its_start_on_a_refusing_connack_naming_its_code_and_its_mqtt_5_name() {
+    let script = script().await;
+    let adapter = adapter_of(&options_of(&script));
+    let heard = heard_of(&adapter);
+
+    for (code, name) in [
+        (0x80, Some("Unspecified error")),
+        (0x81, Some("Malformed Packet")),
+        (0x82, Some("Protocol Error")),
+        (0x83, Some("Implementation specific error")),
+        (0x84, Some("Unsupported Protocol Version")),
+        (0x85, Some("Client Identifier not valid")),
+        (0x86, Some("Bad User Name or Password")),
+        (0x87, Some("Not authorized")),
+        (0x88, Some("Server unavailable")),
+        (0x89, Some("Server busy")),
+        (0x8A, Some("Banned")),
+        (0x8C, Some("Bad authentication method")),
+        (0x90, Some("Topic Name invalid")),
+        (0x95, Some("Packet too large")),
+        (0x97, Some("Quota exceeded")),
+        (0x99, Some("Payload format invalid")),
+        (0x9A, Some("Retain not supported")),
+        (0x9B, Some("QoS not supported")),
+        (0x9C, Some("Use another server")),
+        (0x9D, Some("Server moved")),
+        (0x9F, Some("Connection rate exceeded")),
+        (0x01, None),
+    ] {
+        let starting = adapter.start(BrokerStart::default());
+        let link = script.link(PATIENCE).await.unwrap();
+
+        link.send(connack(&Connack {
+            reason_code: code,
+            ..Connack::default()
+        }));
+        let reason = name.map_or_else(
+            || format!("0x{code:02X}"),
+            |name| format!("0x{code:02X}, {name}"),
+        );
+        let failed = starting.await.unwrap_err();
+
+        assert_eq!(
+            message_of(&failed),
+            format!("its broker refused the link of ada: CONNACK {reason}"),
+            "its code and name"
+        );
+        assert!(!adapter.is_linked(), "not linked");
+        assert!(link.closed(PATIENCE).await, "closed");
+        assert_eq!(link.kinds(), vec![Kind::Connect], "no DISCONNECT");
+    }
+
+    assert_eq!(heard.downs(), Vec::new(), "no down");
+}
+
 // spec 15.26
 #[tokio::test]
 async fn fails_its_start_on_a_connack_whose_maximum_qos_is_0_naming_it() {
@@ -340,7 +396,7 @@ async fn fails_its_start_on_a_connack_whose_maximum_qos_is_0_naming_it() {
     let failed = starting.await.unwrap_err();
 
     assert!(
-        message_of(&failed).contains("Bad User Name or Password"),
+        message_of(&failed).contains("CONNACK 0x86, Bad User Name or Password"),
         "{failed}"
     );
 
@@ -2819,7 +2875,7 @@ async fn fails_its_start_on_a_connack_that_refuses_or_says_maximum_qos_0_beside_
                 reason_code: 0x86,
                 ..Connack::default()
             },
-            "0x86",
+            "CONNACK 0x86, Bad User Name or Password",
         ),
         (
             Connack {

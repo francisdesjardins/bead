@@ -319,14 +319,14 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
                 throw new IOException($"the link of {Id} ended before its CONNACK: {reason.Message}", reason);
             }
 
-            // * MQTT 5 names no CONNACK Reason Code between 0x01 and 0x7F: its code alone
+            // * a code outside MQTT 5's CONNACK table has no name: its code alone
             if (connected.ResultCode != MqttClientConnectResultCode.Success)
             {
                 var code = (int)connected.ResultCode;
+                var name = ConnAckNameOf(code);
+                var suffix = name is null ? "" : $", {name}";
 
-                throw new IOException(code >= 0x80
-                    ? string.Create(CultureInfo.InvariantCulture, $"its broker refused the link of {Id}: CONNACK 0x{code:X2}, {connected.ResultCode}")
-                    : string.Create(CultureInfo.InvariantCulture, $"its broker refused the link of {Id}: CONNACK 0x{code:X2}"));
+                throw new IOException(string.Create(CultureInfo.InvariantCulture, $"its broker refused the link of {Id}: CONNACK 0x{code:X2}{suffix}"));
             }
 
             // * subscriptions of QoS 1 and a will of QoS 1: a broker of Maximum QoS 0 carries neither,
@@ -906,6 +906,37 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     }
 
     // the connect's options: one network connection that keeps no session, its id and its means
+    // MQTT 5.0 §3.2.2.2, Table 3-1: a CONNACK's Reason Code names.
+    private static string? ConnAckNameOf(int code)
+    {
+        return code switch
+        {
+            0x00 => "Success",
+            0x80 => "Unspecified error",
+            0x81 => "Malformed Packet",
+            0x82 => "Protocol Error",
+            0x83 => "Implementation specific error",
+            0x84 => "Unsupported Protocol Version",
+            0x85 => "Client Identifier not valid",
+            0x86 => "Bad User Name or Password",
+            0x87 => "Not authorized",
+            0x88 => "Server unavailable",
+            0x89 => "Server busy",
+            0x8A => "Banned",
+            0x8C => "Bad authentication method",
+            0x90 => "Topic Name invalid",
+            0x95 => "Packet too large",
+            0x97 => "Quota exceeded",
+            0x99 => "Payload format invalid",
+            0x9A => "Retain not supported",
+            0x9B => "QoS not supported",
+            0x9C => "Use another server",
+            0x9D => "Server moved",
+            0x9F => "Connection rate exceeded",
+            _ => null,
+        };
+    }
+
     private MqttClientOptions OptionsOf((BrokerPublication? Will, string? Password) connect)
     {
         var (will, password) = connect;
