@@ -155,3 +155,64 @@ fn writes_an_integer_past_2_to_the_53_from_its_digits_as_the_double_nearest_them
         b"9007199254740992"
     );
 }
+
+#[test]
+#[ignore = "divergence: Rust preserves negative zero in decoded JSON; TypeScript and C# return positive zero"]
+fn reads_0_as_0_at_every_depth_and_a_member_named_proto_as_a_member() {
+    let read = JsonCodec
+        .decode(&Bytes::from_static(br#"[-0,{"a":-0}]"#))
+        .expect("zero at both depths");
+    let values = read.as_array().expect("an array");
+    assert_eq!(values.len(), 2);
+    let object = values[1].as_object().expect("its nested object");
+    assert_eq!(object.len(), 1);
+    let bits = [&values[0], &object["a"]].map(|value| value.as_f64().expect("a number").to_bits());
+    assert_eq!(bits, [0_f64.to_bits(), 0_f64.to_bits()]);
+    let read = JsonCodec
+        .decode(&Bytes::from_static(br#"{"__proto__":{"a":1},"b":2}"#))
+        .expect("an ordinary data member");
+    assert!(
+        read.as_object()
+            .expect("an object")
+            .contains_key("__proto__")
+    );
+    assert_eq!(
+        JsonCodec.encode(&read).expect("written").as_ref(),
+        br#"{"__proto__":{"a":1},"b":2}"#
+    );
+}
+
+#[test]
+fn builds_a_payload_whose_name_holds_an_escape_as_json_parse_builds_one_a_member_named_proto_its_own()
+ {
+    let read = JsonCodec
+        .decode(&Bytes::from_static(
+            br#"{"__prot\u006f__":{"a":[1,-0,1E2,"\n",true,null]},"2":false,"1":0}"#,
+        ))
+        .expect("escaped name and values read");
+    let object = read.as_object().expect("an object");
+    assert!(object.contains_key("__proto__"));
+    assert_eq!(
+        object.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["1", "2", "__proto__"]
+    );
+    assert_eq!(
+        JsonCodec.encode(&read).expect("canonical form").as_ref(),
+        br#"{"1":0,"2":false,"__proto__":{"a":[1,0,100,"\n",true,null]}}"#
+    );
+}
+
+#[test]
+fn writes_an_object_of_no_prototype_and_a_member_named_proto_as_a_member() {
+    let value = serde_json::Value::Object(serde_json::Map::from_iter([
+        ("b".to_owned(), serde_json::Value::Bool(true)),
+        ("__proto__".to_owned(), serde_json::Value::from("x")),
+    ]));
+    assert_eq!(
+        JsonCodec
+            .encode(&value)
+            .expect("data members written")
+            .as_ref(),
+        br#"{"__proto__":"x","b":true}"#
+    );
+}
