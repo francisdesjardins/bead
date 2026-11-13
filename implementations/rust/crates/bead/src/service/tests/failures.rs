@@ -118,3 +118,47 @@ fn refuses_a_code_outside_1_to_65535_and_two_names_of_one_code() {
         65_535
     );
 }
+
+#[test]
+fn narrows_to_the_failure_of_its_name_and_leaves_a_failure_error_it_is_not_one() {
+    let nobody = ListedFailure::new("NOBODY_TO_GREET", NonZeroU16::MIN);
+    let loud = ListedFailure::new("TOO_LOUD", NonZeroU16::new(2).expect("a code"));
+    let catalogue = failures_of(7, &[nobody, loud]).expect("the greeter's catalogue");
+    let told = |failure: Failure| {
+        let error = CallError::Failure(failure.clone());
+        if catalogue.is(&error, &nobody) {
+            let named: &Failure = &failure;
+            return format!(
+                "{} of {}, {}",
+                nobody.name(),
+                named.procedure().expect("its service").service_id,
+                named.code()
+            );
+        }
+        if catalogue.is(&error, &loud) {
+            return format!("{}, {}", loud.name(), failure.scope().number());
+        }
+        format!("{}, {}", failure.code(), failure.scope().number())
+    };
+    let received = |code, service_id| {
+        Failure::received(
+            &FailureRecord {
+                code: NonZeroU16::new(code).expect("a nonzero code"),
+                detail: String::new(),
+                scope: FailureScope::Application,
+                relays: 0,
+            },
+            RouterSide::Client,
+        )
+        .of_call(
+            Some(ProcedureAddress {
+                service_id,
+                procedure_id: 1,
+            }),
+            None,
+        )
+    };
+    assert_eq!(told(received(1, 7)), "NOBODY_TO_GREET of 7, 1");
+    assert_eq!(told(received(2, 7)), "TOO_LOUD, 1");
+    assert_eq!(told(received(2, 8)), "2, 1");
+}
