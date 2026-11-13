@@ -16,6 +16,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The demo francisdesjardins.ca serves is at `/bead/playground/`, under Bead's page: the page's
+  links in both languages and the demo's canonical address name it there.
 - The support matrix and the records correct what they state: the Rust side's HTTP client comes
   with its gateway, and its beadc target brings the validators' runtime that `examples/hello`'s Rust
   half needs (decision 0044); six more rows of the matrix's differences name where the sides part
