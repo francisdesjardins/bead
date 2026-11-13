@@ -396,6 +396,17 @@ const carriesContent = (request: IHTTPRequestLike): boolean => {
   );
 };
 
+/**
+ * Whether the server it is mounted on read a request's body before it, wholly or in part (10.1, step
+ * 10): a byte of it read, or its end reached where it carries content; one that ended and carries
+ * none is the empty body, and a request that tells neither, untouched.
+ */
+const isBodyTaken = (request: IHTTPRequestLike): boolean => {
+  return (
+    request.readableDidRead === true || (request.readableEnded === true && carriesContent(request))
+  );
+};
+
 /** Whether an `if-none-match` holds `etag`, weakly compared, or `*`, alone or among others (RFC 9110 §13.1.2). */
 const matchesTag = (request: IHTTPRequestLike, etag: string): boolean => {
   return linesOf(request, 'if-none-match')
@@ -848,6 +859,14 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     const { request } = exchange;
 
     return new Promise((resolve) => {
+      // * a body that came empty and ended before it, whatever read it: its `end` came already
+      if (request.readableEnded === true) {
+        exchange.isBodyRead = true;
+        resolve(new Uint8Array(0));
+
+        return;
+      }
+
       const chunks: Uint8Array[] = [];
       let received = 0;
       let isSettled = false;
@@ -1222,7 +1241,24 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
       return (answer(exchange, { status: 204 }), undefined);
     }
 
-    // 10: its body as it comes
+    // 10: its body as it comes, none of it read before by the server it is mounted on, judged
+    // before its first byte is awaited
+    if (takesBody && isBodyTaken(request)) {
+      // ! a failure of its own: its words reported, never in the problem; over HTTP/1, its
+      // connection closed, since what is left of the body is never read (RFC 9112 §9.3)
+      report(new Error('a body read before the gateway took its request'));
+
+      return (
+        answerProblem(exchange, {
+          problem: {
+            ...problemOfOwn('failed', ''),
+            fields: request.httpVersionMajor === 1 ? { connection: 'close' } : {},
+          },
+        }),
+        undefined
+      );
+    }
+
     const body = takesBody ? await readBody(exchange) : undefined;
 
     if (takesBody && body === undefined) {

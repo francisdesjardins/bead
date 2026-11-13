@@ -333,8 +333,11 @@ Each exchange draws one Bead connection, closed as its response ends. It judges 
 HTTP transport's own gates from one `HttpPolicy`, which `HttpTransportServerOptions.Policy` takes
 too; a member given in the policy and beside it, at its default as at any value, is refused.
 It listens on its own port, or answers in the application's own Kestrel pipeline,
-`endpoints.MapBeadGateway(gateway)`, its fallback endpoint; one origin for `/bead` and `/api/…`
-comes from a proxy in front. It serves the document at `/openapi.json`, byte for byte, with its
+`endpoints.MapBeadGateway(gateway)`, its fallback endpoint; as the fallback it runs after every
+middleware, so one that reads a body there leaves it buffered (`EnableBuffering`), which the gateway
+reads from its start, or runs on the application's own paths alone (`UseWhen`). A body read before
+it otherwise is answered 500 and reported on `Error`, never called with what was left. One origin
+for `/bead` and `/api/…` comes from a proxy in front. It serves the document at `/openapi.json`, byte for byte, with its
 `etag`; Swagger UI is the application's to serve.
 
 Every body the gateway writes meets `MaximumUnsentBytes` and its send pace,

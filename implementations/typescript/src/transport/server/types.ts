@@ -691,6 +691,10 @@ export interface IHTTPRequestLike {
    * `Host` given twice, which `headers` keeps once.
    */
   readonly rawHeaders: readonly string[];
+  /** Whether any of its body was read; Node's has it, and HTTP/2's compatibility one. */
+  readonly readableDidRead?: boolean | undefined;
+  /** Whether its body was read to its end; Node's has it, and HTTP/2's compatibility one. */
+  readonly readableEnded?: boolean | undefined;
   /** Its socket's peer; over HTTP/1, Node's socket, which an answer written early closes in stages. */
   readonly socket: Partial<ILingeringSocketLike> & {
     readonly remoteAddress?: string | undefined;
