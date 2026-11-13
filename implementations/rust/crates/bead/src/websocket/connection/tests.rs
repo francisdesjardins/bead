@@ -235,7 +235,7 @@ async fn settles_a_send_after_its_queue_bound_drops_the_socket_without_aborting_
 }
 
 #[tokio::test]
-async fn settles_a_quiet_close_when_its_peer_never_answers_dropping_it_once_its_close_timeout_passed()
+async fn drops_a_connection_that_never_answers_its_close_once_close_timeout_has_passed_telling_no_error()
  {
     let (connection, commands, _peer) =
         opened(bounds_of(None, Duration::from_millis(1)), 1_024).await;
