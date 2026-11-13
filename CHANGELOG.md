@@ -21,6 +21,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The Rust side's validators' runtime in `bead-protobuf`, and the counter of the contract with
   generated code, `GENERATED_CODE_SUPPORTS_VERSION_7` and `_8`; the Rust side plays
   `spec/validations.json`'s verdicts (decisions 0035, 0051).
+- Guides for teams that adopt Bead outside its repository, in `docs/guides/`: getting started, from
+  an empty folder to a C# server and a TypeScript client in Node and in a page; real-time recipes,
+  a `JWT` and admission hooks, reconnection, Prometheus in .NET and Chrome's DevTools; and how Bead
+  fits together, beside gRPC-Web, Connect and SignalR. The root README links them after its "At a
+  glance".
 
 ### Changed
 

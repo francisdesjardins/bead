@@ -86,6 +86,15 @@ await greeter.notifications.countDown({ from: 3 }, async ({ remaining }) => {
 })();
 ```
 
+## Getting started for teams
+
+**[Getting started](docs/guides/getting-started.md)** builds a service from an empty folder to a
+running C# server and a TypeScript client, in Node and in a page: a request held to its rules, a
+command the server sends mid-call, and a subscription the client paces. Beside it,
+[real-time recipes](docs/guides/cookbook-realtime.md) — a `JWT` and admission hooks, reconnection,
+Prometheus in .NET, Chrome's DevTools — and [how Bead fits together](docs/guides/architecture-overview.md),
+with Bead beside gRPC-Web, Connect and SignalR.
+
 ## Next to the alternatives
 
 gRPC-Web and Connect carry unary calls and server streaming to a browser, neither a client's stream
