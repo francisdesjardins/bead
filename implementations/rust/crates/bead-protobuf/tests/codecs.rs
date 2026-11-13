@@ -600,7 +600,10 @@ fn trials() -> Result<Vec<Trial>, String> {
             continue;
         }
 
-        let name = format!("reads {}", payload.name);
+        let name = format!(
+            "reads_each_payload_then_refuses_it_or_writes_back_its_bytes_handing_on_the_value_of_its_canonical_form: {}",
+            payload.name
+        );
 
         trials.push(Trial::test(name, move || play_payload(&payload)).with_kind("payloads"));
     }
@@ -610,7 +613,10 @@ fn trials() -> Result<Vec<Trial>, String> {
             continue;
         }
 
-        let name = format!("writes {}", entry.name);
+        let name = format!(
+            "writes_each_value_given_in_its_form_to_its_bytes_or_refuses_it: {}",
+            entry.name
+        );
 
         trials.push(Trial::test(name, move || play_value(&entry)).with_kind("values"));
     }

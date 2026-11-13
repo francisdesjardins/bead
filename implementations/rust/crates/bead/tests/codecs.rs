@@ -85,11 +85,45 @@ fn bytes_of(text: &str) -> Result<Bytes, Failed> {
         .ok_or_else(|| format!("{text:?} is no hexadecimal").into())
 }
 
-// a payload read, then written back, through `codec`: what it writes, twice, or its refusal
-fn written_by<C: PayloadCodec>(codec: &C, bytes: &Bytes) -> Result<(Bytes, Bytes), CodecRefusal> {
-    let again = |bytes: &Bytes| codec.decode(bytes).and_then(|value| codec.encode(&value));
+// A reader hands on the canonical value, including a zero's sign at every depth.
+fn same_json(one: &Value, other: &Value) -> bool {
+    match (one, other) {
+        (Value::Number(one), Value::Number(other)) => {
+            one.as_f64().map(f64::to_bits) == other.as_f64().map(f64::to_bits)
+        }
+        (Value::Array(one), Value::Array(other)) => {
+            one.len() == other.len()
+                && one
+                    .iter()
+                    .zip(other)
+                    .all(|(one, other)| same_json(one, other))
+        }
+        (Value::Object(one), Value::Object(other)) => {
+            one.len() == other.len()
+                && one
+                    .iter()
+                    .all(|(name, one)| other.get(name).is_some_and(|other| same_json(one, other)))
+        }
+        _ => one == other,
+    }
+}
 
-    again(bytes).and_then(|written| again(&written).map(|twice| (written, twice)))
+type Same<T> = fn(&T, &T) -> bool;
+
+// A payload read, then written back: both byte sequences and the value the codec hands on.
+fn written_by<C: PayloadCodec>(
+    codec: &C,
+    (bytes, same): (&Bytes, Same<C::Value>),
+) -> Result<(Bytes, Bytes), CodecRefusal> {
+    let value = codec.decode(bytes)?;
+    let written = codec.encode(&value)?;
+    let canonical = codec.decode(&written)?;
+    assert!(
+        same(&value, &canonical),
+        "the decoded value differs from its canonical form"
+    );
+    let twice = codec.encode(&canonical)?;
+    Ok((written, twice))
 }
 
 // a payload read, then written back, through its encoding's codec: what it writes, or its refusal
@@ -98,9 +132,9 @@ fn round_trip(
     bytes: &Bytes,
 ) -> Result<Result<(Bytes, Bytes), CodecRefusal>, Failed> {
     Ok(match encoding {
-        "raw" => written_by(&RawCodec, bytes),
-        "text" => written_by(&TextCodec, bytes),
-        "json" => written_by(&JsonCodec, bytes),
+        "raw" => written_by(&RawCodec, (bytes, PartialEq::eq)),
+        "text" => written_by(&TextCodec, (bytes, PartialEq::eq)),
+        "json" => written_by(&JsonCodec, (bytes, same_json)),
         other => return Err(format!("{other} is no encoding this player plays").into()),
     })
 }
@@ -282,7 +316,10 @@ fn trials() -> Result<Vec<Trial>, String> {
             continue;
         }
 
-        let name = format!("reads {}", payload.name);
+        let name = format!(
+            "reads_each_payload_then_refuses_it_or_writes_back_its_bytes_handing_on_the_value_of_its_canonical_form: {}",
+            payload.name
+        );
 
         trials.push(Trial::test(name, move || play_payload(&payload)).with_kind("payloads"));
     }
@@ -292,7 +329,10 @@ fn trials() -> Result<Vec<Trial>, String> {
             continue;
         }
 
-        let name = format!("writes {}", entry.name);
+        let name = format!(
+            "writes_each_value_given_in_its_form_to_its_bytes_or_refuses_it: {}",
+            entry.name
+        );
 
         trials.push(Trial::test(name, move || play_value(&entry)).with_kind("values"));
     }

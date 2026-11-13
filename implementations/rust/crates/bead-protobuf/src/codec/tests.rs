@@ -1420,3 +1420,47 @@ fn refuses_a_payload_with_a_syntax_error_and_a_value_with_a_type_error_in_the_sa
 fn refuses_a_payload_and_a_value_with_a_format_exception_in_the_same_words() {
     refuses_a_payload_and_a_value_with_a_codec_refusal_in_the_same_words();
 }
+
+#[test]
+fn plays_every_encoding_of_the_file_through_a_codec_of_its_own_and_no_other() {
+    let file: serde_json::Value =
+        bead::testing::files::read_by_bead("codecs.json").expect("the complete codec file");
+    let mut encodings = std::collections::BTreeSet::new();
+    for group in ["payloads", "values"] {
+        let entries = file[group].as_array().expect("a codec vector group");
+        assert!(!entries.is_empty(), "{group} has its entries");
+        encodings.extend(
+            entries
+                .iter()
+                .map(|entry| entry["encoding"].as_str().expect("an encoding")),
+        );
+    }
+    let proto = ProtoCodec::<Probe>::new().expect("the generated Probe codec");
+    let codecs: std::collections::BTreeSet<&str> = [
+        bead::RawCodec.encoding(),
+        bead::TextCodec.encoding(),
+        bead::JsonCodec.encoding(),
+        proto.encoding(),
+    ]
+    .into_iter()
+    .collect();
+    assert_eq!(encodings, codecs);
+    assert_eq!(codecs.len(), 4, "one codec for each encoding");
+}
+
+#[test]
+fn a_proto_map_s_entry_its_key_or_its_value_at_its_default_as_protobuf_es_writes_it() {
+    let codec = ProtoCodec::<Probe>::new().expect("the generated Probe codec");
+    let mut keyed = Probe::default();
+    keyed.children.insert(String::new(), Probe::default());
+    assert_eq!(
+        codec.encode(&keyed).expect("the empty key"),
+        bytes_of("62 04 0A 00 12 00")
+    );
+    let mut valued = Probe::default();
+    valued.tallies.insert("a".to_owned(), 0);
+    assert_eq!(
+        codec.encode(&valued).expect("the zero value"),
+        bytes_of("82 01 05 0A 01 61 10 00")
+    );
+}
