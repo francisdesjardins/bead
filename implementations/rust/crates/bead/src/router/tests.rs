@@ -56,6 +56,7 @@ mod relay_connections;
 mod relay_conversations;
 mod requester;
 mod requester_edges;
+mod requester_metrics;
 mod router_core;
 mod router_core_accounting;
 mod router_core_answered_in_place;

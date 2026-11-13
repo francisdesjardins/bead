@@ -512,3 +512,110 @@ async fn keep_the_later_end_of_a_call_id_reserved_twice_clearing_the_timer_it_re
             .expect("the later deadlines alone control both reservations");
     }
 }
+
+async fn direct_answer(
+    peer: &crate::testing::core_port::Peer,
+    answer: crate::router::core::Answer,
+) {
+    peer.owner
+        .run(move |state| {
+            crate::router::requester::receive_answer(state, (answer, &Arc::from("a"), false));
+        })
+        .await
+        .expect("the requester receives its answer directly");
+}
+
+#[tokio::test]
+async fn sends_a_call_on_a_call_id_of_its_side_settles_it_with_the_answer_paired_to_it_and_hands_its_port_an_answer_no_call_waits_on()
+ {
+    use crate::constants::{ProtocolCode, RouterSide};
+    use crate::envelope::{FailureHeader, ResultHeader};
+    use crate::failure::Failure;
+    use crate::router::core::Answer;
+    use crate::router::requester;
+    use crate::router::types::{CallAddress, RouterError};
+    use crate::testing::core_port::{Peer, completed, request_of};
+
+    let peer = Peer::new(RouterSide::Server, &super::router_core_requester::limits());
+    let called = peer.request((Bytes::from_static(&[1]), request_of("a")));
+    let id = peer
+        .owner
+        .run(|state| {
+            assert_eq!(state.sent.len(), 1);
+            assert_eq!(state.sent[0].0.as_ref(), "a");
+            let Envelope::Request { header, .. } = &state.sent[0].1 else {
+                panic!("a request")
+            };
+            assert_eq!(header.call_id % 2, 0);
+            assert_eq!(state.core.pending.gauges().counts["pendingCalls"], 1);
+            header.call_id
+        })
+        .await
+        .expect("one pending request");
+    let unpaired_id = id.checked_add(2).expect("a second call ID");
+    let unpaired = || {
+        Answer::Failure(
+            FailureHeader {
+                call_id: unpaired_id,
+                credential: None,
+            },
+            Failure::protocol(ProtocolCode::PROCEDURE_FAILED, RouterSide::Server).record(),
+        )
+    };
+    direct_answer(&peer, unpaired()).await;
+    peer.owner
+        .run(move |state| {
+            assert_eq!(state.reports.len(), 1);
+            assert_eq!(state.core.pending.gauges().counts["pendingCalls"], 1);
+            requester::reserve(
+                state,
+                (
+                    &CallAddress {
+                        call_id: unpaired_id,
+                        connection_handle: Arc::from("a"),
+                    },
+                    Some(Duration::from_millis(30)),
+                ),
+            );
+        })
+        .await
+        .expect("the unknown answer leaves the call pending");
+    direct_answer(&peer, unpaired()).await;
+    peer.owner
+        .run(|state| {
+            assert_eq!(state.reports.len(), 1);
+        })
+        .await
+        .expect("the reservation silences its late answer");
+    peer.clock.advance(Duration::from_millis(30)).await;
+    peer.owner
+        .run(move |state| {
+            assert!(!state.core.pending.is_reserved(unpaired_id, &Arc::from("a")));
+        })
+        .await
+        .expect("the reservation expires");
+    let answer = || {
+        Answer::Result(
+            ResultHeader {
+                call_id: id,
+                total: None,
+                credential: None,
+            },
+            Bytes::from_static(&[7]),
+        )
+    };
+    direct_answer(&peer, answer()).await;
+    assert_eq!(
+        completed(called).await.expect("the paired result").payload,
+        Bytes::from_static(&[7])
+    );
+    direct_answer(&peer, answer()).await;
+    peer.owner.run(|state| {
+        assert_eq!(state.reports.len(), 2);
+        for (handle, error) in &state.reports {
+            assert_eq!(handle.as_ref(), "a");
+            assert!(matches!(error, RouterError::Failure(failure) if failure.code() == ProtocolCode::CALL_UNKNOWN.get()));
+        }
+        assert_eq!(state.core.pending.gauges().counts["pendingCalls"], 0);
+    }).await.expect("both protocol failures and no other report");
+}

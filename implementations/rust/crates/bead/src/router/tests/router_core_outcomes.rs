@@ -97,8 +97,7 @@ fn assert_endings(registry: &MetricsRegistry, side: RouterSide) {
 }
 
 // debugging 9.3, 9.6.3, 9.6.4
-#[tokio::test]
-async fn counts_a_call_it_makes_as_its_router_settles_it_timed_to_that_instant() {
+async fn counted_endings() {
     for side in [RouterSide::Server, RouterSide::Client] {
         let peer = Peer::new(side, &RouterLimitsOptions::default());
         let registry =
@@ -120,13 +119,17 @@ async fn counts_a_call_it_makes_as_its_router_settles_it_timed_to_that_instant()
             request.series = Some(series.clone());
             peer.request((Bytes::new(), request))
         };
-        let first = if side == RouterSide::Server { 2 } else { 1 };
+        let (first, next) = if side == RouterSide::Server {
+            (2, 4)
+        } else {
+            (1, 3)
+        };
         let result = ask(NEVER, None);
         let failure = ask(NEVER, None);
         let timed = ask(Duration::from_millis(10), None);
         peer.receive((result_of(first, None), Arc::from("a")));
         peer.receive((
-            failed(first + 2, (9, FailureScope::Application, 0, "")),
+            failed(next, (9, FailureScope::Application, 0, "")),
             Arc::from("a"),
         ));
         peer.clock.advance(Duration::from_millis(10)).await;
@@ -372,4 +375,14 @@ async fn once_disposed_rejects_what_waits_and_sends_nothing_more() {
         assert_eq!(peer.clock.dues(), Vec::<Duration>::new());
         quiet(&peer).await;
     }
+}
+
+#[tokio::test]
+async fn counts_a_call_it_makes_as_its_router_settles_it_timed_to_that_instant() {
+    counted_endings().await;
+}
+
+#[tokio::test]
+async fn count_a_call_it_makes_as_its_router_settles_it_timed_to_that_instant() {
+    counted_endings().await;
 }
