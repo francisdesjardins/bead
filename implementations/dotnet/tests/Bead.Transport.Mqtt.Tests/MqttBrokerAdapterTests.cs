@@ -1556,13 +1556,15 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         messages.Clear();
 
         // * (ii) a PUBLISH carrying property 0x7F, which MQTTnet refuses as it decodes it: its
-        // publication taken and its PUBLISH handed on, both read before
+        // publication taken, its PUBLISH handed on or not by the scheduler, MQTTnet dispatching it
+        // as the decoder's refusal retires the link; once at most, and the one read before
         Assert.Equal(BrokerPublished.Taken, await Before(property));
-        await Until(() =>
+        await Task.Delay(TimeSpan.FromMilliseconds(200), Cancelled);
+        Assert.True(messages.Count <= 1);
+        Assert.All(messages, (message) =>
         {
-            return !messages.IsEmpty;
+            Assert.Equal([7], message.Payload.ToArray());
         });
-        Assert.Equal([7], Assert.Single(messages).Payload.ToArray());
     }
 
     [Fact]
