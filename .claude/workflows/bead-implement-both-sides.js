@@ -12,7 +12,7 @@ export const meta = {
 };
 
 // args: { slug, design, branch, parts?, stages?, first?, together?, repo?, scratch?, venv?, toolchain?,
-//         specEffort?, series?, suites?, notes? }
+//         specEffort?, series?, suites?, notes?, integrationNote? }
 // - repo, scratch, venv, toolchain: the clone, a folder outside it, the Python of `spec/check.py`
 //   and what goes first on PATH, this machine's by default;
 // - design: the path of the settled design, its `design.md`: a part every stage shares under
@@ -36,6 +36,8 @@ export const meta = {
 //   (the user, 2026-10-14: a push of a feature/* branch to save tokens and time), the integration
 //   running the fast gates, every side's build and the tests of what changed;
 // - notes: what the stages need beyond the design, in a few lines.
+// - integrationNote: a word for the integration alone, so that a resumed run replays the stages
+//   and runs the integration again (a stage finished apart from the run, say).
 const required = (name) => {
   if (!args || !args[name]) {
     throw new Error(`args.${name} is required`);
@@ -169,7 +171,12 @@ const integration = await agent(
   `${COMMON}
 # Your task: integrate (effort high)
 Read ${DESIGN} whole, every stage's section; ${RATIONALE}, beside it where the round wrote one, where you need a reason. Check that every side does what the design says, alike, as the conformance files and the twin tests prove, and that the records, the matrix and the CHANGELOG say what landed. Fix what is broken. The stages ran their suites without the interop between the sides: it runs here, once, over the settled tree, both ways, in the suites below. Run every gate with \`${TMP}\`: ${GENERATE}, and check that nothing more moves; \`${VENV} spec/check.py\`; ${FORMAT}; \`node tools/check-links.mjs\`; \`node tools/check-versions.mjs\`; \`node tools/check-names.mjs\`; \`node tools/check-durations.mjs\`; \`node tools/check-details.mjs\`, \`node tools/check-citations.mjs\`, as CI's Commits job runs them; \`node tools/check-examples.mjs\`; \`node --test "tools/__tests__/*.test.mjs"\` when \`tools/\` changed; \`yarn check\`; \`dotnet format Bead.slnx --verify-no-changes\`; from \`implementations/rust\`, CLAUDE.md's Rust gates but \`cargo test\`, which the suites below run; ${SUITE_GATES}; the gates of every stage the design names; the names check over every file \`git status --porcelain\` lists. Then ${args.series ? SERIES : PLAN} Write your report whole to ${reportOf('integrate')}: what you fixed, each gate's result, the test counts and the commits. Return at most ten lines: what you fixed, each gate's verdict, the test counts, the commits, and that path.
-The stages' reports, read first: ${PARTS.map((key) => {
+${
+  args.integrationNote
+    ? `${args.integrationNote}
+`
+    : ''
+}The stages' reports, read first: ${PARTS.map((key) => {
     return reportOf(key);
   }).join(', ')}.`,
   { label: `integrate:${SLUG}`, phase: 'Integrate', effort: 'high' }
