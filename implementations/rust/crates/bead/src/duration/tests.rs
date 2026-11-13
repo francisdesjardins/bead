@@ -158,8 +158,7 @@ fn a_duration_that_is_not_a_number_is_no_duration_on_the_rust_side() {
 }
 
 // Rust's Duration holds no negative value: -1 ms cannot become its never sentinel either.
-#[test]
-fn a_duration_of_1_ms_is_refused_on_the_typescript_side_and_never_on_the_c_side() {
+fn a_duration_of_1_ms_is_refused_on_the_typescript_side_and_never_on_the_c_side_scenario() {
     let file = crate::testing::durations::Durations::read().expect("shared duration inputs");
     assert_eq!(
         file.inputs
@@ -181,8 +180,7 @@ fn a_duration_of_1_ms_is_refused_on_the_typescript_side_and_never_on_the_c_side(
 }
 
 // A Rust tick is a nanosecond, so the same 10 ns fraction stays representable at both boundaries.
-#[test]
-fn a_duration_finer_than_a_tick_is_held_as_written_on_the_typescript_side_and_truncated_to_its_ticks_on_the_c_side()
+fn a_duration_finer_than_a_tick_is_held_as_written_on_the_typescript_side_and_truncated_to_its_ticks_on_the_c_side_scenario()
  {
     let under = Duration::from_nanos(10);
     let past = LONGEST_TIMER.saturating_add(under);
@@ -239,4 +237,165 @@ fn writes_each_refused_value_in_milliseconds_without_losing_its_fraction() {
             )
         );
     }
+}
+
+type HoldDuration = fn(&str, Duration) -> Result<Duration, crate::errors::ProgrammerError>;
+
+fn holds_every_duration_input_by_its_policy() {
+    struct Policy {
+        hold: HoldDuration,
+        place: &'static str,
+        sentence: &'static str,
+    }
+    let file = crate::testing::durations::Durations::read().expect("the source duration inputs");
+    assert_eq!(LONGEST_TIMER, Duration::from_millis(2_147_483_647));
+    assert_eq!(file.inputs.len(), 19);
+    assert_eq!(
+        file.inputs
+            .iter()
+            .filter(|input| input.is_excused)
+            .map(|input| input.name.as_str())
+            .collect::<Vec<_>>(),
+        ["-2 ms", "-1 ms", "NaN", "\"1000\"", "true"]
+    );
+    for policy in [
+        Policy {
+            hold,
+            place: "call.timeout",
+            sentence: "a duration is a duration of whole milliseconds from 1 to 2147483647, or Duration::MAX for never, not ",
+        },
+        Policy {
+            hold: hold_finite,
+            place: "router.transferInactivityTimeout",
+            sentence: "a duration is a duration of whole milliseconds from 1 to 2147483647, not ",
+        },
+        Policy {
+            hold: hold_delay,
+            place: "httpTransportClient.wait",
+            sentence: "a duration is 0 for at once, or a duration of whole milliseconds from 1 to 2147483647, not ",
+        },
+    ] {
+        let place = file
+            .places
+            .iter()
+            .find(|place| place.id == policy.place)
+            .expect("the source policy");
+        assert_eq!(place.outcomes.len(), file.inputs.len());
+        let mut played = 0_usize;
+        for (input, outcome) in file.inputs.iter().zip(&place.outcomes) {
+            assert_eq!(input.name, outcome.input);
+            if input.is_excused {
+                assert_eq!(input.given, None);
+                continue;
+            }
+            assert!(!outcome.is_excused, "{} {}", policy.place, input.name);
+            played = played.saturating_add(1);
+            let held = (policy.hold)("a duration", input.given.expect("a representable duration"));
+            if outcome.outcome == "refused" {
+                let refusal = held.expect_err("the source policy refuses this input");
+                let written = match input.name.as_str() {
+                    "0" => "0 milliseconds",
+                    "0.00001 ms, under a tick" => "0.00001 milliseconds",
+                    "half a millisecond" => "0.5 milliseconds",
+                    "0.00001 ms past the ceiling" => "2147483647.00001 milliseconds",
+                    "0.4 ms past the ceiling" => "2147483647.4 milliseconds",
+                    "half a millisecond past the ceiling" => "2147483647.5 milliseconds",
+                    "never" => "Duration::MAX",
+                    other => panic!("an unlisted refusal input: {other}"),
+                };
+                assert_eq!(refusal.message(), format!("{}{written}", policy.sentence));
+                let Some(crate::errors::Refusal::Duration(reason)) = refusal.reason() else {
+                    panic!("a duration refusal");
+                };
+                assert_eq!(Some(reason.as_str()), outcome.reason.as_deref());
+            } else {
+                let expected = match outcome.outcome.as_str() {
+                    "at once" => Duration::ZERO,
+                    "never" => NEVER,
+                    "held" => outcome.held.expect("the expected held duration"),
+                    other => panic!("an unexpected policy outcome: {other}"),
+                };
+                assert_eq!(
+                    held.expect("the source policy accepts this input"),
+                    expected,
+                    "{} {}",
+                    policy.place,
+                    input.name
+                );
+            }
+        }
+        assert_eq!(played, 14);
+    }
+}
+
+#[test]
+fn rounds_a_half_up_never_to_the_even() {
+    let given = Duration::from_micros(2_500);
+    for held in [
+        hold("a duration", given),
+        hold_finite("a duration", given),
+        hold_delay("a duration", given),
+    ] {
+        assert_eq!(held.expect("a half up"), Duration::from_millis(3));
+    }
+}
+
+fn a_non_number_has_no_duration() {
+    let file = crate::testing::durations::Durations::read().expect("the source inputs");
+    for name in ["NaN", "\"1000\"", "true"] {
+        let input = file
+            .inputs
+            .iter()
+            .find(|input| input.name == name)
+            .expect("the source input");
+        assert!(input.is_excused);
+        assert_eq!(input.given, None);
+    }
+    Duration::try_from_secs_f64(f64::NAN).expect_err("no NaN duration");
+}
+
+#[test]
+fn a_duration_of_1_ms_is_refused_on_the_typescript_side_and_never_on_the_c_side() {
+    a_duration_of_1_ms_is_refused_on_the_typescript_side_and_never_on_the_c_side_scenario();
+}
+
+#[test]
+fn a_duration_of_minus_1_ms_is_refused_on_the_typescript_side_and_never_on_the_csharp_side() {
+    a_duration_of_1_ms_is_refused_on_the_typescript_side_and_never_on_the_c_side_scenario();
+}
+
+#[test]
+fn a_duration_finer_than_a_tick_is_held_as_written_on_the_typescript_side_and_truncated_to_its_ticks_on_the_c_side()
+ {
+    a_duration_finer_than_a_tick_is_held_as_written_on_the_typescript_side_and_truncated_to_its_ticks_on_the_c_side_scenario();
+}
+
+#[test]
+fn a_duration_finer_than_a_tick_is_held_as_written_on_the_typescript_side_and_truncated_to_its_ticks_on_the_csharp_side()
+ {
+    a_duration_finer_than_a_tick_is_held_as_written_on_the_typescript_side_and_truncated_to_its_ticks_on_the_c_side_scenario();
+}
+
+#[test]
+fn holds_a_duration_as_a_whole_number_of_milliseconds_from_1_to_2_31_1_a_fraction_rounded_to_the_nearest_a_half_up_0_at_once_for_a_delay_and_never_where_never_has_a_meaning_refusing_any_other_in_one_message()
+ {
+    holds_every_duration_input_by_its_policy();
+}
+
+#[test]
+fn a_duration_that_is_not_a_number_is_refused_on_the_typescript_side_and_no_time_span_on_the_c_side()
+ {
+    a_non_number_has_no_duration();
+}
+
+#[test]
+fn holds_a_duration_as_a_whole_number_of_milliseconds_from_1_to_2_31_minus_1_a_fraction_rounded_to_the_nearest_a_half_up_0_at_once_for_a_delay_and_never_where_never_has_a_meaning_refusing_any_other_in_one_message()
+ {
+    holds_every_duration_input_by_its_policy();
+}
+
+#[test]
+fn a_duration_that_is_not_a_number_is_refused_on_the_typescript_side_and_no_time_span_on_the_csharp_side()
+ {
+    a_non_number_has_no_duration();
 }
