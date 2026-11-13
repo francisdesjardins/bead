@@ -816,7 +816,7 @@ test('answers 503 DESTINATION_UNREACHABLE when its connection cannot be drawn, r
   expect(reported[0]).toMatch(/, not open$/u);
 });
 
-// transcoding 7.6.27
+// transcoding 7.6.28
 test('answers what no gate foresaw 500, reported, none of its words in the problem', async () => {
   // * a clock that breaks as a body is read, past every gate
   const broken: IClock = {

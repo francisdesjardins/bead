@@ -833,7 +833,7 @@ public sealed class HttpGatewayTests
         }
     }
 
-    // transcoding 7.6.27
+    // transcoding 7.6.28
     [Fact]
     public async Task Answers_what_no_gate_foresaw_500_reported_none_of_its_words_in_the_problem()
     {
