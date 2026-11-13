@@ -424,7 +424,19 @@ public sealed class HttpGateway : IAsyncDisposable
                 return;
             }
 
-            // 10. its body as it comes
+            // 10. its body as it comes, none of it read before by the server it is mounted on,
+            // judged before its first byte is awaited
+            if (IsBodyTaken(context))
+            {
+                // ! a failure of its own: its words reported, never in the problem; over HTTP/1, its
+                // connection closed, since what is left of the body is never read (RFC 9112 §9.3)
+                Report(new InvalidOperationException("a body read before the gateway took its request"));
+                CloseBehind(context);
+                await Answer(context, HttpProblems.Own(OwnFailure.Failed, ""));
+
+                return;
+            }
+
             var (body, refused) = await BodyOf(context);
 
             if (refused is { IsHttp: true } framing)
@@ -710,6 +722,12 @@ public sealed class HttpGateway : IAsyncDisposable
     // rate once its grace passed, on the gateway's clock (spec 15.12); or how it is refused
     private async Task<(byte[]? Body, Refused? End)> BodyOf(HttpContext context)
     {
+        // * a body its server buffered, read from its start
+        if (context.Request.Body.CanSeek)
+        {
+            context.Request.Body.Position = 0;
+        }
+
         var headAt = _clock.GetTimestamp();
         var reader = context.Request.BodyReader;
         var body = new MemoryStream();
@@ -1502,6 +1520,21 @@ public sealed class HttpGateway : IAsyncDisposable
         var values = request.Headers[name];
 
         return values.Count == 0 ? null : values.ToString();
+    }
+
+    // whether the server it is mounted on read a body before it, wholly or in part (transcoding
+    // 10.1, step 10): a seekable one it buffered is read from its start, and one its server tells
+    // begun is taken; a host that tells nothing reads as untouched
+    // ! a stream of a middleware's own in the body's place, not seekable, is taken: its server's
+    // body was read, whatever the stream holds
+    private static bool IsBodyTaken(HttpContext context)
+    {
+        if (context.Request.Body.CanSeek)
+        {
+            return false;
+        }
+
+        return context.Features.Get<IHttpMaxRequestBodySizeFeature>()?.IsReadOnly == true;
     }
 
     private static bool HasBody(HttpRequest request)
