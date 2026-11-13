@@ -31,8 +31,7 @@ async fn serving(maximum: Option<u64>, options: &RouterLimitsOptions) -> (Peer, 
 }
 
 // spec 12.3.2
-#[tokio::test]
-async fn holds_a_procedure_whose_own_limit_is_larger_to_the_routers_both_ways() {
+async fn holds_a_procedure_whose_own_limit_is_larger_to_the_routers_both_ways_scenario() {
     let (peer, handed) = serving(
         Some(1_024),
         &RouterLimitsOptions {
@@ -69,8 +68,7 @@ async fn holds_a_procedure_whose_own_limit_is_larger_to_the_routers_both_ways() 
 }
 
 // spec 12.3.2: u64 represents no negative, fractional or non-finite limit.
-#[tokio::test]
-async fn refuses_a_procedures_limit_that_is_not_a_whole_number_above_0_drawing_nothing_and_takes_its_edge()
+async fn refuses_a_procedures_limit_that_is_not_a_whole_number_above_0_drawing_nothing_and_takes_its_edge_scenario()
  {
     let peer = Peer::new(RouterSide::Server, &RouterLimitsOptions::default());
     let drawn = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -128,12 +126,11 @@ async fn refuses_a_procedures_limit_that_is_not_a_whole_number_above_0_drawing_n
 }
 
 // spec 12.3
-#[tokio::test]
 #[expect(
     clippy::too_many_lines,
     reason = "the shared request and result boundaries also prove the no-transfer refusal and cleanup"
 )]
-async fn sends_a_payload_in_one_envelope_to_its_limit_and_one_byte_more_as_a_transfer_or_not_at_all_where_none_is_sent()
+async fn sends_a_payload_in_one_envelope_to_its_limit_and_one_byte_more_as_a_transfer_or_not_at_all_where_none_is_sent_scenario()
  {
     let (peer, handed) = serving(None, &limits()).await;
     let first = peer.request((Bytes::from(vec![0; 52]), request_of("a")));
@@ -363,4 +360,38 @@ fn opens_every_transfer_with_one_byte_of_its_payload_at_least_and_leaves_one_at_
             assert!(transfers >= 1, "{header:?} at {chunk_bytes} bytes a chunk");
         }
     }
+}
+
+#[tokio::test]
+async fn holds_a_procedure_whose_own_limit_is_larger_to_the_routers_both_ways() {
+    holds_a_procedure_whose_own_limit_is_larger_to_the_routers_both_ways_scenario().await;
+}
+
+#[tokio::test]
+async fn hold_a_procedure_whose_own_limit_is_larger_to_the_router_s_both_ways() {
+    holds_a_procedure_whose_own_limit_is_larger_to_the_routers_both_ways_scenario().await;
+}
+
+#[tokio::test]
+async fn refuses_a_procedures_limit_that_is_not_a_whole_number_above_0_drawing_nothing_and_takes_its_edge()
+ {
+    refuses_a_procedures_limit_that_is_not_a_whole_number_above_0_drawing_nothing_and_takes_its_edge_scenario().await;
+}
+
+#[tokio::test]
+async fn refuse_a_procedure_s_limit_that_is_not_a_whole_number_above_0_drawing_nothing_and_take_its_edge()
+ {
+    refuses_a_procedures_limit_that_is_not_a_whole_number_above_0_drawing_nothing_and_takes_its_edge_scenario().await;
+}
+
+#[tokio::test]
+async fn sends_a_payload_in_one_envelope_to_its_limit_and_one_byte_more_as_a_transfer_or_not_at_all_where_none_is_sent()
+ {
+    sends_a_payload_in_one_envelope_to_its_limit_and_one_byte_more_as_a_transfer_or_not_at_all_where_none_is_sent_scenario().await;
+}
+
+#[tokio::test]
+async fn send_a_payload_in_one_envelope_to_its_limit_and_one_byte_more_as_a_transfer_or_not_at_all_where_none_is_sent()
+ {
+    sends_a_payload_in_one_envelope_to_its_limit_and_one_byte_more_as_a_transfer_or_not_at_all_where_none_is_sent_scenario().await;
 }

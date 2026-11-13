@@ -187,9 +187,8 @@ async fn cancels_a_call_waiting_once_throwing_and_reserving_its_call_id_on_its_c
 }
 
 // spec 12.3.2
-#[tokio::test]
-async fn holds_a_procedure_s_payloads_to_its_own_limit_within_the_router_s_both_ways_once_admitted()
-{
+async fn holds_a_procedure_s_payloads_to_its_own_limit_within_the_router_s_both_ways_once_admitted_scenario()
+ {
     let served = Served::new(&RouterServerOptions::default());
     let small = Procedure {
         maximum_payload_bytes: Some(8),
@@ -317,6 +316,8 @@ async fn holds_a_procedure_s_payloads_to_its_own_limit_within_the_router_s_both_
         .rev()
         .find(|(kind, _, _)| *kind == EnvelopeKind::Request)
         .map_or(0, |(_, call_id, _)| *call_id);
+
+    assert_eq!(call_id, 4, "the refused request drew the first call id");
 
     served.transport.deliver(
         &Envelope::Result {
@@ -930,4 +931,16 @@ async fn detaches_calls_before_settling_an_incoming_resolver_awaiting_an_outgoin
         ],
         "its incoming call counted closed once"
     );
+}
+
+#[tokio::test]
+async fn holds_a_procedure_s_payloads_to_its_own_limit_within_the_router_s_both_ways_once_admitted()
+{
+    holds_a_procedure_s_payloads_to_its_own_limit_within_the_router_s_both_ways_once_admitted_scenario().await;
+}
+
+#[tokio::test]
+async fn hold_a_procedure_s_payloads_to_its_own_limit_within_the_router_s_both_ways_once_admitted()
+{
+    holds_a_procedure_s_payloads_to_its_own_limit_within_the_router_s_both_ways_once_admitted_scenario().await;
 }
