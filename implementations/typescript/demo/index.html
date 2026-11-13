@@ -160,9 +160,12 @@
         flex-wrap: wrap;
         align-items: center;
         gap: var(--app-space-3) var(--app-space-6);
+        /* penumbra's bar height, francisdesjardins.ca's Bead page's alike, its hairline below it;
+           a phone, where it wraps, grows it */
+        min-height: calc(var(--app-topbar-height) - 1px);
         max-width: var(--app-content-max-width);
         margin: 0 auto;
-        padding: var(--app-space-3) max(var(--app-space-4), 3vw);
+        padding: var(--app-space-1) max(var(--app-space-4), 3vw);
       }
 
       .brand {
