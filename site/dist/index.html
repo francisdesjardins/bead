@@ -189,9 +189,7 @@
    styles. */
 
 :root {
-  /* how wide what is read by its lines goes beside a reading column, on a screen with room for it:
-     the page's code and the demo's scenes */
-  --app-content-wide-max-width: 1180px;
+  /* none today: the page and the demo share penumbra's content width as it is */
 }
 
 /* The site's skin, as its home has it, over penumbra's system half and Bead's overrides of it, which
@@ -422,7 +420,11 @@ a:hover {
   align-items: center;
   gap: var(--app-space-3);
   height: var(--app-topbar-height);
-  padding: 0 var(--app-space-4);
+  /* its ends on the frame's edges, the demo's bar's alike */
+  padding-inline: max(
+    var(--frame-gutter),
+    calc((100% - var(--app-content-max-width)) / 2 + var(--frame-gutter))
+  );
   background: var(--app-paper);
   border-bottom: 1px solid var(--app-divider);
 }
@@ -531,13 +533,18 @@ a:hover {
 
 /* ── Layout and contents ──────────────────────────────────────────────────── */
 
+/* the frame the demo shares: penumbra's content width, and the same gutter at its sides */
+:root {
+  --frame-gutter: max(var(--app-space-4), 3vw);
+}
+
 .layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: var(--app-space-10);
-  max-width: 1120px;
+  max-width: var(--app-content-max-width);
   margin-inline: auto;
-  padding: var(--app-space-8) var(--app-space-4) var(--app-space-14);
+  padding: var(--app-space-8) var(--frame-gutter) var(--app-space-14);
 }
 
 main {
@@ -1253,14 +1260,13 @@ pre code {
 
 /* code is read by its lines, not at the prose's measure: on a screen with room beside the column,
    a block of code, or a fold that holds one, widens to the right as far as its longest line asks,
-   to the room the layout leaves there, while its prose keeps the measure; a short block stays as
-   it is. The room: the viewport's right half beside the centred layout (1120px), past its padding,
-   the contents (220px) and their gap, less a margin */
+   to the frame's edge, while its prose keeps the measure; a short block stays as it is. The room:
+   the frame, less its gutters, the contents (220px) and their gap */
 @media (min-width: 1136px) {
   :root {
-    --code-room: min(
-      var(--app-content-wide-max-width),
-      calc(50vw + 560px - var(--app-space-4) - 220px - var(--app-space-12) - var(--app-space-8))
+    --code-room: calc(
+      min(100vw, var(--app-content-max-width)) - 2 * var(--frame-gutter) - 220px -
+        var(--app-space-12)
     );
   }
   main pre.snippet,

@@ -160,7 +160,7 @@
         flex-wrap: wrap;
         align-items: center;
         gap: var(--app-space-3) var(--app-space-6);
-        max-width: 1360px;
+        max-width: var(--app-content-max-width);
         margin: 0 auto;
         padding: var(--app-space-3) max(var(--app-space-4), 3vw);
       }
@@ -461,11 +461,11 @@
         grid-template-columns: minmax(0, 1fr);
         gap: var(--app-space-8);
         align-items: start;
-        max-width: 1360px;
+        /* the frame francisdesjardins.ca's Bead page shares: penumbra's content width, the same
+           gutter at its sides */
+        max-width: var(--app-content-max-width);
         margin: 0 auto;
         padding: var(--app-space-10) max(var(--app-space-4), 3vw) var(--app-space-14);
-        /* how wide the scenes go, which a wide screen widens */
-        --scenes-max-width: 860px;
       }
 
       .scenes {
@@ -473,17 +473,7 @@
         align-content: start;
         gap: var(--app-space-6);
         width: 100%;
-        max-width: var(--scenes-max-width);
         min-width: 0;
-        margin: 0 auto;
-      }
-
-      /* a wide screen: the scenes take the room francisdesjardins.ca's Bead page gives its code,
-         the wide width of Bead's overrides of penumbra, the intro keeping its measure */
-      @media (min-width: 1136px) {
-        .layout {
-          --scenes-max-width: var(--app-content-wide-max-width);
-        }
       }
 
       .intro {
@@ -932,11 +922,6 @@
       }
 
       /* ── the packages: a blueprint cut into beadc.yaml's outputs ─────────── */
-
-      /* the packages beside what they hold: the scenes' column widens for them */
-      .scenes:has(> #packages-scene:not([hidden])) {
-        max-width: 1280px;
-      }
 
       .planner {
         display: grid;

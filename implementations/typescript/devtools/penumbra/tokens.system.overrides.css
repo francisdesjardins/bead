@@ -4,7 +4,5 @@
    styles. */
 
 :root {
-  /* how wide what is read by its lines goes beside a reading column, on a screen with room for it:
-     the page's code and the demo's scenes */
-  --app-content-wide-max-width: 1180px;
+  /* none today: the page and the demo share penumbra's content width as it is */
 }
