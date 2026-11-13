@@ -608,6 +608,16 @@ async fn readings_of(given: Option<&MetricsRegistry>) -> [(usize, usize); 2] {
 #[tokio::test]
 async fn reads_the_monotonic_clock_twice_more_for_a_counted_call_than_for_one_counted_nothing_once_at_each_of_its_gates_and_the_wall_clock_never()
  {
+    call_clock_readings().await;
+}
+
+#[tokio::test]
+async fn read_the_monotonic_clock_twice_more_for_a_counted_call_than_for_one_counted_nothing_once_at_each_of_its_gates_and_the_wall_clock_never()
+ {
+    call_clock_readings().await;
+}
+
+async fn call_clock_readings() {
     let registry = registry();
     let uncounted = readings_of(None).await;
     let counted = readings_of(Some(&registry)).await;

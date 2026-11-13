@@ -248,6 +248,12 @@ async fn close_awaiting((forward, incoming): (bool, u32)) {
     assert_eq!(peer.clock.dues(), Vec::<Duration>::new());
 }
 
+#[tokio::test]
+async fn detach_calls_before_settling_an_incoming_resolver_awaiting_an_outgoing_call_and_count_its_incoming_close_once()
+ {
+    close_awaiting((false, 1)).await;
+}
+
 // debugging 9.7
 #[tokio::test]
 async fn detach_calls_before_settling_an_incoming_resolver_awaiting_an_outgoing_call_given_its_signal_and_fail_that_call_as_closed_never_as_a_cancel()

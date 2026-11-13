@@ -183,6 +183,15 @@ async fn counts_a_call_it_makes_as_its_router_settles_it_timed_to_that_instant()
 // spec 9.0, 12.2
 #[tokio::test]
 async fn tells_the_side_of_each_answer_before_it_goes_out_and_undoes_it_when_it_does_not_go_out() {
+    answer_hooks().await;
+}
+
+#[tokio::test]
+async fn tell_the_side_of_each_answer_before_it_goes_out_and_undo_it_when_it_does_not_go_out() {
+    answer_hooks().await;
+}
+
+async fn answer_hooks() {
     let (peer, handed) = serving(None).await;
     for (call_id, handle) in [(1, "a"), (3, "a"), (5, "b"), (7, "a")] {
         open(&peer, (call_id, handle)).await;
