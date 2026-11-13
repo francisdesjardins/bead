@@ -202,8 +202,8 @@ TRANSCODING = {'transcoding': 'Transcoding'}
 
 # where each implementation's tests are, its language's files, its tests among them, how they name a
 # group of vectors, and how they name a file they read whole: a language that joins adds its row.
-# Rust's tests name each group they read, of vectors.json and of validations.json, since a group of
-# each is ahead for it
+# Rust's tests name each group they read, of vectors.json, since a group of it is ahead for them, and of
+# validations.json, whose details and verdicts two crates play, bead's and bead-protobuf's (0051)
 SIDES = {
     'TypeScript': ('implementations/typescript/src', '.ts', ending('.test.ts'), r'\bVECTORS\.(\w+)',
                    r"'[^']*\b{}\.json'"),
@@ -233,7 +233,6 @@ AHEAD = {
             'groups': ('amqpMessages', 'amqpPublishBounds'),
             'places': ('amqpBrokerAdapter',),
         },
-        "Rust's beadc target": {'groups': ('verdicts',)},
     },
 }
 

@@ -12,3 +12,5 @@ outputs:
   - language: csharp
     out: implementations/dotnet/interop/Bead.Interop/Generated
     namespace: Bead.Interop
+  - language: rust
+    out: implementations/rust/crates/bead-interop/src/generated

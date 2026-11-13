@@ -104,7 +104,10 @@ runtime reader drops such a record before its library reads, which narrows what 
 reads in the library's place, where protobuf keeps it among the unknown fields: a row of "Leveled
 down" ([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md#on-the-corpus-that-writes-every-field-of-probe)).
 A repeated field's items and a map's values keep the number on every side, the Rust side's generator
-opening each such field of a closed enum: a row of "Leveled down".
+opening each such field of a closed enum, and its `ProtoCodec::new` refusing a message whose
+generator left one closed, a `ProgrammerError`
+([0051](0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md)): a
+row of "Leveled down".
 
 **One runtime codec of a schema on each side holds 17.9 once**: `protoCodecOf(schema)` of
 `@francisdesjardins/bead/proto` and `ProtoCodecs.Of<T>()` with `ProtoCodecs.Read(descriptor, bytes)`
@@ -198,7 +201,8 @@ parity. A singular closed enum's undeclared number, written back: dropped on eve
 library reads, where Enum Behavior keeps it, a row of "Leveled down" that lifts when Google.Protobuf
 keeps it among a message's unknown fields and protobuf-es keeps it wherever it reads it. A repeated
 closed enum's item, or a map's value, of an undeclared number: kept on every side, the Rust side's
-generator opening such a field, where Enum Behavior moves it among the unknown fields, a row of
+generator opening such a field and its codec refusing a message whose generator left one closed,
+where Enum Behavior moves it among the unknown fields, a row of
 "Leveled down" that lifts when the TypeScript side can move it to `$unknown`, the C# side can drop
 it in its filter and the Rust side's generator can leave such a field closed, together.
 

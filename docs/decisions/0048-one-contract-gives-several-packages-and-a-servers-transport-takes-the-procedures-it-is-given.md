@@ -24,9 +24,9 @@
   broker's names [0040](0040-a-brokers-adapter-offers-bytes-at-topics-and-bead-keeps-its-own-credit-credential-and-heartbeat.md)'s;
   what a procedure admits, the admission's
   [0010](0010-a-request-presents-a-credential-of-a-scheme.md) and
-  [0034](0034-a-server-tells-each-access-it-refuses-never-the-credential.md). The Rust side's
-  generated addresses are ahead, with the matrix's row `Rust's beadc target`: a Rust application
-  writes its addresses by hand.
+  [0034](0034-a-server-tells-each-access-it-refuses-never-the-credential.md); the Rust side's
+  generated addresses, `bead_served.rs`, beadc's Rust target's
+  [0051](0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md).
 
 ## Context
 
@@ -154,10 +154,12 @@ outputs:
 
 `<Svc>Procedures` holds the union of what the three select, and a service none selects is not
 written. Each class is printed over its own pick of it (0018). Where `server.transports` is given,
-the output writes `bead_served.ts`, `SERVED_PROCEDURES`, and `BeadServed.cs`, `ServedProcedures`,
-one member per key in the order written, the key in Pascal case on the C# side: the lists the
-application hands each transport as its `procedures`. That file alone names the contract 8,
-`GENERATED_CODE_SUPPORTS_VERSION_8` and `GeneratedCode.SupportsVersion8`, so a runtime that lacks
+the output writes `bead_served.ts`, `SERVED_PROCEDURES`, `BeadServed.cs`, `ServedProcedures`, and
+`bead_served.rs`, `SERVED_PROCEDURES`, one member per key in the order written, the key in Pascal
+case on the C# side and in snake case on the Rust side: the lists the application hands each
+transport as its `procedures`. That file alone names the contract 8,
+`GENERATED_CODE_SUPPORTS_VERSION_8`, `GeneratedCode.SupportsVersion8` and
+`bead::GENERATED_CODE_SUPPORTS_VERSION_8`, so a runtime that lacks
 the option fails on the counter, not on a signature or, in TypeScript, not at all.
 
 **Its rules.** As `beadc.yaml` is read, each key of the three a mapping of its own keys, a
@@ -176,12 +178,14 @@ Nothing new goes on the wire.
   (0036), so a server whose two WebSocket listeners take different procedures runs two servers,
   each with its router and its sessions.
 - **A resolver of a procedure the server class does not serve** is a type error on the TypeScript
-  side and an `ArgumentException` as `On` is called on the C# side, the descriptors of one service
+  side, no method on the Rust side (E0599), and an `ArgumentException` as `On` is called on the C#
+  side, the descriptors of one service
   sharing one type tag: a platform row of `docs/support.md`.
 - **The series a procedure takes grow by two**, `failure` under `SERVICE_UNKNOWN` and
   `PROCEDURE_UNKNOWN`: 64 in the server families, 6,400 for 100 procedures (0013).
-- **No Rust target writes the addresses**: a Rust application writes them by hand, and Rust's
-  beadc target is ahead.
+- **The Rust target writes the addresses** as the other two do, `SERVED_PROCEDURES` in
+  `bead_served.rs`, a `const` whose field a key is a list of exhaustive `ProcedureAddress`es,
+  naming 8 ([0051](0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md)).
 - **`http: true` and `httpRuntime` are refused**, naming `gateway: {}` and `gateway.runtime`: a
   break a minor makes while the major is 0
   ([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)), and a `beadc.yaml` that

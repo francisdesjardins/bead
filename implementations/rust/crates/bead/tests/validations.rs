@@ -1,6 +1,6 @@
 //! `spec/validations.json` played against the Rust side's detail's writer and reader: each detail
-//! written of what a validator gave, and each read back (spec 18.6, 18.7). Its verdicts, a
-//! validator beadc generates, are ahead with `Rust's beadc target`.
+//! written of what a validator gave, and each read back (spec 18.6, 18.7). Its verdicts, judged by
+//! the validators beadc generates, `bead-protobuf/tests/validations.rs` plays.
 
 use std::process::ExitCode;
 

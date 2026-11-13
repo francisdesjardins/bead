@@ -430,6 +430,106 @@ describe('the case rules and the renderings', () => {
     );
   });
 
+  test('gives a function that makes a noun as the static class of its nouns and as a Rust type made by its new', () => {
+    const cells = (typescript, csharp, rust) => {
+      return { typescript, csharp, rust };
+    };
+
+    assert.equal(
+      RULES.of(
+        cells(
+          [{ name: 'validatorOf', kind: 'function' }],
+          [{ name: 'Validators.Of', kind: 'function' }],
+          [{ name: 'validator_of', kind: 'function' }]
+        )
+      ),
+      true
+    );
+    assert.equal(
+      RULES.new(
+        cells(
+          [{ name: 'protoCodecOf', kind: 'function' }],
+          [{ name: 'ProtoCodecs.Of', kind: 'function' }],
+          [{ name: 'ProtoCodec', kind: 'record' }]
+        )
+      ),
+      true
+    );
+    assert.equal(
+      RULES.new(
+        cells(
+          [{ name: 'protoCodecOf', kind: 'function' }],
+          [],
+          [{ name: 'ProtoCodec', kind: 'function type' }]
+        )
+      ),
+      false
+    );
+    assert.equal(
+      RULES.new(
+        cells(
+          [{ name: 'protoCodecOf', kind: 'function' }],
+          [{ name: 'ProtoCodecs.Read', kind: 'function' }],
+          []
+        )
+      ),
+      false
+    );
+    assert.equal(
+      RULES.of(
+        cells(
+          [{ name: 'statusOf', kind: 'function' }],
+          [{ name: 'Status.Of', kind: 'function' }],
+          []
+        )
+      ),
+      true
+    );
+    assert.equal(
+      RULES.of(
+        cells([{ name: 'clasOf', kind: 'function' }], [{ name: 'Class.Of', kind: 'function' }], [])
+      ),
+      false
+    );
+  });
+
+  test('gives a verb of a noun as the C# static class of the noun that holds the verb', () => {
+    const cells = (typescript, csharp, rust) => {
+      return { typescript, csharp, rust };
+    };
+
+    assert.equal(
+      RULES.verb(
+        cells(
+          [{ name: 'matchesPattern', kind: 'function' }],
+          [{ name: 'Pattern.Matches', kind: 'function' }],
+          [{ name: 'matches_pattern', kind: 'function' }]
+        )
+      ),
+      true
+    );
+    assert.equal(
+      RULES.verb(
+        cells(
+          [{ name: 'matchesPattern', kind: 'function' }],
+          [{ name: 'Matches.Pattern', kind: 'function' }],
+          []
+        )
+      ),
+      false
+    );
+    assert.equal(
+      RULES.verb(
+        cells(
+          [{ name: 'matchesPattern', kind: 'function' }],
+          [{ name: 'Pattern.Matches', kind: 'constant' }],
+          []
+        )
+      ),
+      false
+    );
+  });
+
   test('renders a set of flags an implementer declares as a TypeScript object of booleans, and no other kind', () => {
     const cells = (typescript, csharp, rust) => {
       return { typescript, csharp, rust };
@@ -601,7 +701,7 @@ describe('problemsOf', () => {
     });
 
     assert.deepEqual(check(rows), [
-      'tools/names.tsv:7: no rendering named "exception": error, like, flags, constant, of, listener, keyword, callable, platform',
+      'tools/names.tsv:7: no rendering named "exception": error, like, flags, constant, of, new, verb, listener, keyword, callable, platform',
       'tools/names.tsv:8: the rendering constant names the records that state it, "rendered: constant (<record>)"',
       'tools/names.tsv:9: the rendering error does not give its names',
     ]);

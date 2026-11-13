@@ -18,6 +18,7 @@ mod duration;
 mod envelope;
 mod errors;
 mod failure;
+mod generated_code;
 #[cfg(feature = "http")]
 mod http;
 mod http_policy;
@@ -106,6 +107,7 @@ pub use errors::{
     ReconnectError, Refusal, ResolverError, TransportError,
 };
 pub use failure::{Failure, FailureOrigin, ProcedureAddress};
+pub use generated_code::{GENERATED_CODE_SUPPORTS_VERSION_7, GENERATED_CODE_SUPPORTS_VERSION_8};
 #[cfg(feature = "http")]
 pub use http::client::{
     HttpTransportClient, HttpTransportClientConnectOptions, HttpTransportClientOptions,

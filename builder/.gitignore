@@ -5,3 +5,5 @@
 .pnp.*
 # protoc, fetched by its pin: `node tools/fetch-protoc.mjs`
 .protoc/
+# protoc-gen-buffa, fetched by its pin: `node tools/fetch-protoc-gen-buffa.mjs`
+.protoc-gen-buffa/

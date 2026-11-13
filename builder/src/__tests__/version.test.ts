@@ -4,16 +4,18 @@ import { expect, test } from '@playwright/test';
 
 import { file, procedure, service } from '../generated/bead/options_pb.ts';
 import { protocPin } from '../protoc.ts';
+import { buffaPin } from '../targets/rust/messages.ts';
 import {
   beadcVersion,
   OPTIONS_NUMBER,
   PROTOBUF_FLOOR,
+  buffaLine,
   protocLine,
   specUrlOf,
   specVersion,
   versionLines,
 } from '../version.ts';
-import { stubProtoc, withProtoc } from './pinned.ts';
+import { stubBuffa, stubProtoc, withBuffa, withProtoc } from './pinned.ts';
 
 const SEMANTIC_VERSION = /^\d+\.\d+\.\d+$/u;
 
@@ -54,6 +56,28 @@ test('names protoc at its pin, one of another version beside the pin, or none', 
       return protocLine();
     })
   ).toBe(`protoc none, pinned ${pinned}`);
+});
+
+test('names protoc-gen-buffa at its pin, one of another version beside the pin, or none', () => {
+  const pinned = buffaPin().version;
+  const folder = test.info().outputPath('stubs');
+
+  expect(pinned).toMatch(SEMANTIC_VERSION);
+  expect(
+    withBuffa(stubBuffa(`${folder}/pinned`, { version: pinned }), () => {
+      return buffaLine();
+    })
+  ).toBe(`protoc-gen-buffa ${pinned}`);
+  expect(
+    withBuffa(stubBuffa(`${folder}/older`, { version: '0.9.1' }), () => {
+      return buffaLine();
+    })
+  ).toBe(`protoc-gen-buffa 0.9.1, pinned ${pinned}`);
+  expect(
+    withBuffa(`${folder}/nowhere/protoc-gen-buffa`, () => {
+      return buffaLine();
+    })
+  ).toBe(`protoc-gen-buffa none, pinned ${pinned}`);
 });
 
 test("the goldens' floor type-check reads @bufbuild/protobuf at PROTOBUF_FLOOR", () => {

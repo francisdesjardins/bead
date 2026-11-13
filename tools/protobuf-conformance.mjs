@@ -18,9 +18,10 @@
 // `protobuf-conformance/.work/<side>/`, under `protobuf_test_messages/` rather than
 // `google/protobuf/`, where beadc writes no message, and the suite's `conformance/conformance.proto`;
 // puts spec/codecs.proto and `protobuf-conformance/service.proto` beside them; runs `beadc generate`
-// there for the side's target, and copies what it writes into the side's testee. The Rust side's
-// beadc target is ahead, so for it protoc writes the set of the suite's protos and Probe instead,
-// which its testee's build script generates its messages from (decision 0044):
+// there for the side's target, and copies what it writes into the side's testee. The Rust testee
+// takes its messages from its build script, as a Rust output of `messages: external` does: protoc
+// writes the set of the suite's protos and Probe instead, which its build script generates its
+// messages from through bead_protobuf_build (decisions 0044, 0051):
 //
 // - TypeScript: `implementations/typescript/tools/protobuf-conformance/`, its `generated/` written
 //   here, type-checked by its own tsconfig.json, its `testee.ts` run by Node on the side's own

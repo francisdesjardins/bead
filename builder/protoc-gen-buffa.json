@@ -1,0 +1,11 @@
+{
+  "version": "0.9.2",
+  "buffa": "=0.9.2",
+  "sha256": {
+    "darwin-aarch64": "654f4a5d58212afbdb3dec7475d99d6bc6cba2c10807c3751652cd3806cf5a5d",
+    "darwin-x86_64": "3d63f43f1a72797e2f5f120d09fe33d7b9e8dff59919b649bfe0dbb5d4a96903",
+    "linux-aarch64": "14f8285cc558f136aaa8a401e802f0e9e7a655e86dbf85ded7841f35fdf62b42",
+    "linux-x86_64": "e8d87b0cc34beb5524835888da694901deeeccaefd834fd5c03300375b629688",
+    "windows-x86_64": "d6346bda11fa0845f46e43935a2c17beb5dcfe56b96db9109a4db88ea0f47814"
+  }
+}

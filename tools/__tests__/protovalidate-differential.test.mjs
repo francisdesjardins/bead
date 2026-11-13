@@ -39,9 +39,10 @@ describe('the pin', () => {
   });
 
   test("each side's testee is under its implementation's tools", () => {
-    assert.deepEqual(Object.keys(SIDES), ['typescript', 'csharp']);
+    assert.deepEqual(Object.keys(SIDES), ['typescript', 'csharp', 'rust']);
     assert.ok(SIDES.typescript.folder.startsWith('implementations/typescript/tools/'));
     assert.ok(SIDES.csharp.folder.startsWith('implementations/dotnet/tools/'));
+    assert.ok(SIDES.rust.folder.startsWith('implementations/rust/tools/'));
   });
 });
 

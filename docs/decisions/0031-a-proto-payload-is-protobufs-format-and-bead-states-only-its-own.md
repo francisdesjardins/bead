@@ -183,11 +183,13 @@ global::Bead.Protobuf.ProtoCodecs.Of<global::Hello.V1.SayHelloRequest>()
 ```
 
 ```rust
-bead_protobuf::ProtoCodec::<SayHelloRequest>::new()
+::bead_protobuf::ProtoCodec::<super::super::super::messages::hello::v1::SayHelloRequest>::new()?
 ```
 
-The Rust line names the message bare: beadc's Rust target, which is ahead, writes no module of it,
-and an application makes the codec itself.
+The Rust line names the message by its path from the services' module to Buffa's `messages`, and
+`new` refuses, as the set of descriptors is made once a process, a message whose generator left a
+repeated closed enum closed
+([0051](0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md)).
 
 What the codec runs, laid out here over lines, its depth pass, its required walk, its check of what
 it wrote and its filter of a closed enum's record aside, which the paragraphs below and

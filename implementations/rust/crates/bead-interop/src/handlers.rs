@@ -1,6 +1,7 @@
 //! The interop service's resolvers, as Bead's Rust side answers them: what a client of any side
 //! calls, and what `spec/conversations.json` plays against. Only the resolvers, the hook and the
-//! rules of `checked` are written here.
+//! rules of `checked` are written here, judged through `bead_protobuf`'s validators' runtime as
+//! beadc's generated rules are.
 
 use core::time::Duration;
 use std::collections::BTreeMap;
@@ -8,12 +9,13 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use bead::internal::{hold_finite, session_key_of};
 use bead::{
-    AdmissionHook, BoxFuture, CallSession, Client, CommandOptions, ConnectionHandle,
-    DestinationOptions, DestinationRegistration, Failure, JsonCodec, Judged, NotifyOptions,
+    AdmissionHook, BoxFuture, CallSession, Client, CommandOptions, ConnectionHandle, Descriptor,
+    DescriptorInit, DestinationOptions, DestinationRegistration, Failure, JsonCodec, NotifyOptions,
     ProgrammerError, ProtocolCode, RelayTarget, RequestProps, RequestResolverDependencies,
-    ResolverCallback, ResolverError, Response, RouterSide, Schedule, Server, ServiceServer,
-    ServiceServerOptions, SessionIdentifier, Validate, ValidateOptions, Violation, ViolationHolder,
+    ResolverCallback, ResolverError, Response, RouterSide, Schedule, Server, ServiceProcedure,
+    ServiceServer, ServiceServerOptions, SessionIdentifier, request_of,
 };
+use bead_protobuf::{RuleValue, ViolationRule, ViolationSink, code_point_length, validator_of};
 use serde_json::{Map, Value, json};
 use tokio::sync::oneshot;
 
@@ -21,16 +23,10 @@ use tokio::sync::oneshot;
 #[path = "handlers/tests.rs"]
 mod tests;
 
-use crate::descriptors::{InteropProcedures, ON_PURPOSE, REGISTERED_ALREADY, interop_procedures};
+use crate::generated::services::{InteropFailures, InteropProcedures};
 
 const QUESTION: &str = "What time is it where you are?";
 const CLOCK_MILLISECONDS: u64 = 10_000;
-
-// the rules of `checked`, as spec/interop-service.json states them: 50 names at most, each of 1 to
-// 3 characters, counted as code points
-const MAXIMUM_NAMES: usize = 50;
-const MINIMUM_CHARACTERS: usize = 1;
-const MAXIMUM_CHARACTERS: usize = 3;
 
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
@@ -38,67 +34,32 @@ fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 
 // ── checked's rules ──────────────────────────────────────────────────────────────────────────
 
-// the judging of one value: each violation held under its bound, the path as steps
-struct Sink {
-    fail_fast: bool,
-    holder: ViolationHolder,
-    path: Vec<(String, Option<usize>)>,
-    violations: Vec<Violation>,
-    more: u64,
-    is_full: bool,
-}
-
-impl Sink {
-    fn path_of(&self) -> Option<String> {
-        (!self.path.is_empty()).then(|| {
-            self.path
-                .iter()
-                .map(|(name, index)| {
-                    index
-                        .as_ref()
-                        .map_or_else(|| name.clone(), |index| format!("{name}[{index}]"))
-                })
-                .collect::<Vec<_>>()
-                .join(".")
-        })
-    }
-
-    // a violation of `rule`, of `value`: whether the judging stops
-    fn add(
-        &mut self,
-        (rule_id, message, bounds): (&str, String, Option<(&str, String)>),
-        value: &Value,
-    ) -> bool {
-        if !self.is_full {
-            let violation = Violation {
-                bounds: bounds.map(|(name, bound)| {
-                    let mut bounds = Map::new();
-
-                    bounds.insert(name.to_owned(), Value::String(bound));
-
-                    bounds
-                }),
-                field_path: self.path_of(),
-                for_key: false,
-                message: Some(message),
-                rule_id: rule_id.to_owned(),
-                value: Some(value.clone()),
-            };
-
-            if self.holder.hold(&violation) {
-                self.violations.push(violation);
-
-                return self.fail_fast;
-            }
-
-            self.is_full = true;
-        }
-
-        self.more = self.more.saturating_add(1);
-
-        self.fail_fast
-    }
-}
+// the rules of `checked`, as spec/interop-service.json states them: 50 names at most, each of 1 to
+// 3 characters, counted as code points, each rule a site as beadc writes one
+const NAMES_REQUIRED: ViolationRule = ViolationRule {
+    rule_id: "required",
+    message: "value is required",
+    bounds: None,
+    for_key: false,
+};
+const NAMES_MAX_ITEMS: ViolationRule = ViolationRule {
+    rule_id: "repeated.max_items",
+    message: "must contain no more than 50 item(s)",
+    bounds: Some(r#"{"max_items":"50"}"#),
+    for_key: false,
+};
+const NAME_MIN_LEN: ViolationRule = ViolationRule {
+    rule_id: "string.min_len",
+    message: "must be at least 1 characters",
+    bounds: Some(r#"{"min_len":"1"}"#),
+    for_key: false,
+};
+const NAME_MAX_LEN: ViolationRule = ViolationRule {
+    rule_id: "string.max_len",
+    message: "must be at most 3 characters",
+    bounds: Some(r#"{"max_len":"3"}"#),
+    for_key: false,
+};
 
 fn names_of(request: &Value) -> Option<Vec<String>> {
     request
@@ -109,84 +70,35 @@ fn names_of(request: &Value) -> Option<Vec<String>> {
         .collect()
 }
 
-/// `checked`'s rules, judged of `request`.
-#[must_use]
-pub fn judge_checked(request: &Value, options: &ValidateOptions) -> Judged {
-    let fail_fast = options.fail_fast.unwrap_or(false);
-    let mut sink = Sink {
-        fail_fast,
-        holder: ViolationHolder::new(options.maximum_bytes.unwrap_or(usize::MAX)),
-        path: Vec::new(),
-        violations: Vec::new(),
-        more: 0,
-        is_full: false,
-    };
-    let stopped = judge_names(request, &mut sink) && fail_fast;
-
-    let mut judged = Judged::default();
-
-    judged.violations = sink.violations;
-    judged.more = sink.more;
-    judged.stopped = stopped;
-    judged
-}
-
-fn judge_names(request: &Value, sink: &mut Sink) -> bool {
-    sink.path.push(("names".to_owned(), None));
+// `checked`'s rules, judged of `request` into `sink` in spec 18.5's order: `true` where the
+// judging stopped
+fn rules_of_checked(request: &Value, sink: &mut dyn ViolationSink) -> bool {
+    sink.enter("names");
 
     let Some(names) = names_of(request) else {
-        return sink.add(("required", "value is required".to_owned(), None), request);
+        return sink.add(&NAMES_REQUIRED, RuleValue::Absent);
     };
-    let all: Value = names.iter().cloned().map(Value::String).collect();
 
-    if names.len() > MAXIMUM_NAMES
-        && sink.add(
-            (
-                "repeated.max_items",
-                format!("must contain no more than {MAXIMUM_NAMES} item(s)"),
-                Some(("max_items", MAXIMUM_NAMES.to_string())),
-            ),
-            &all,
-        )
-    {
+    if names.len() > 50 && sink.add(&NAMES_MAX_ITEMS, RuleValue::Items(&names)) {
         return true;
     }
 
-    sink.path.pop();
+    sink.leave();
 
     for (index, name) in names.iter().enumerate() {
-        let length = name.chars().count();
-        let value = Value::String(name.clone());
+        let length = code_point_length(name);
 
-        sink.path.push(("names".to_owned(), Some(index)));
+        sink.enter_index("names", index);
 
-        if length < MINIMUM_CHARACTERS
-            && sink.add(
-                (
-                    "string.min_len",
-                    format!("must be at least {MINIMUM_CHARACTERS} characters"),
-                    Some(("min_len", MINIMUM_CHARACTERS.to_string())),
-                ),
-                &value,
-            )
-        {
+        if length < 1 && sink.add(&NAME_MIN_LEN, RuleValue::Text(name)) {
             return true;
         }
 
-        if length > MAXIMUM_CHARACTERS
-            && sink.add(
-                (
-                    "string.max_len",
-                    format!("must be at most {MAXIMUM_CHARACTERS} characters"),
-                    Some(("max_len", MAXIMUM_CHARACTERS.to_string())),
-                ),
-                &value,
-            )
-        {
+        if length > 3 && sink.add(&NAME_MAX_LEN, RuleValue::Text(name)) {
             return true;
         }
 
-        sink.path.pop();
+        sink.leave();
     }
 
     false
@@ -358,6 +270,9 @@ fn failed(error: ProgrammerError) -> ResolverError {
     ResolverError::other(error)
 }
 
+/// A procedure of the interop service, every payload JSON.
+pub type InteropDescriptor = Descriptor<JsonCodec, JsonCodec>;
+
 /// The interop service as it is offered: its server, and the descriptors that server holds, the
 /// same ones its handles answer to.
 #[derive(Debug, Clone)]
@@ -365,8 +280,26 @@ fn failed(error: ProgrammerError) -> ResolverError {
 pub struct OfferedInterop {
     /// The service's server.
     pub service: ServiceServer,
-    /// The descriptors it was built of.
-    pub procedures: Arc<InteropProcedures>,
+    /// The descriptors it was built of, beadc's.
+    pub procedures: &'static InteropProcedures,
+    /// `checked`, made again from beadc's with its rules: the blueprint binds json, whose rules
+    /// are a function its side is given (spec 18.1).
+    pub checked: InteropDescriptor,
+}
+
+// * checked, its descriptor made again from the generated one with its rules, as the C# side makes
+// it: the procedure, its admission and its codecs beadc's
+fn checked_of(procedures: &InteropProcedures) -> Result<InteropDescriptor, ProgrammerError> {
+    let generated = &procedures.checked;
+
+    request_of(DescriptorInit {
+        procedure: generated.procedure().clone(),
+        admission: generated.admission(),
+        failures: generated.failures().to_vec(),
+        request: JsonCodec,
+        result: JsonCodec,
+        validate: Some(validator_of(rules_of_checked)),
+    })
 }
 
 /// The interop service, offered on `server`.
@@ -379,10 +312,9 @@ pub struct OfferedInterop {
     reason = "one resolver per procedure, as the service states them"
 )]
 pub fn offer_interop(server: &Server) -> Result<OfferedInterop, ProgrammerError> {
-    // its rules judge every value: none fails to judge
-    let validate: Validate<Value> =
-        Arc::new(|request, options| Ok(judge_checked(request, options)));
-    let procedures = Arc::new(interop_procedures(Some(validate))?);
+    // its rules judge every value, through the validators' runtime generated code judges by
+    let procedures = InteropProcedures::get()?;
+    let checked = checked_of(procedures)?;
     let mut options = ServiceServerOptions::default();
 
     options.admissions = Some(BTreeMap::from([(
@@ -393,7 +325,20 @@ pub fn offer_interop(server: &Server) -> Result<OfferedInterop, ProgrammerError>
         },
     )]));
 
-    let interop = ServiceServer::new(procedures.all(), &options)?;
+    // the generated procedures, checked made again with its rules, so one service server answers
+    // them all, as the other sides' do
+    let all = procedures
+        .all()
+        .into_iter()
+        .map(|procedure| {
+            if procedure.procedure() == checked.procedure() {
+                ServiceProcedure::from(&checked)
+            } else {
+                procedure
+            }
+        })
+        .collect();
+    let interop = ServiceServer::new(all, &options)?;
     let kept = Arc::new(Kept {
         cancellations: Mutex::new(BTreeMap::new()),
         destinations: Mutex::new(Vec::new()),
@@ -401,7 +346,7 @@ pub fn offer_interop(server: &Server) -> Result<OfferedInterop, ProgrammerError>
     });
     let router = server.router().clone();
     let sessions = server.sessions().clone();
-    let procedures_of: &InteropProcedures = &procedures;
+    let procedures_of: &InteropProcedures = procedures;
 
     interop.on(
         &procedures_of.echo,
@@ -411,7 +356,7 @@ pub fn offer_interop(server: &Server) -> Result<OfferedInterop, ProgrammerError>
     interop.on(
         &procedures_of.fail,
         callback_of(|_request, response| {
-            response.failure(&ON_PURPOSE.of("this procedure fails, on purpose"))
+            response.failure(&InteropFailures::ON_PURPOSE.of("this procedure fails, on purpose"))
         }),
     )?;
 
@@ -563,7 +508,9 @@ pub fn offer_interop(server: &Server) -> Result<OfferedInterop, ProgrammerError>
 
                     let outcome = if fail {
                         response
-                            .failure(&ON_PURPOSE.of("this procedure fails, on purpose"))
+                            .failure(
+                                &InteropFailures::ON_PURPOSE.of("this procedure fails, on purpose"),
+                            )
                             .await
                     } else {
                         response.result(Value::Null).await
@@ -787,7 +734,8 @@ pub fn offer_interop(server: &Server) -> Result<OfferedInterop, ProgrammerError>
                     {
                         return response
                             .failure(
-                                &REGISTERED_ALREADY.of("that destination is registered already"),
+                                &InteropFailures::REGISTERED_ALREADY
+                                    .of("that destination is registered already"),
                             )
                             .await;
                     }
@@ -893,7 +841,7 @@ pub fn offer_interop(server: &Server) -> Result<OfferedInterop, ProgrammerError>
 
     // its rules took it before it came: an array of names, each of 1 to 3 characters
     interop.on(
-        &procedures_of.checked,
+        &checked,
         callback_of(|request, response| {
             let count = names_of(&request.payload).map_or(0, |names| names.len());
 
@@ -906,6 +854,7 @@ pub fn offer_interop(server: &Server) -> Result<OfferedInterop, ProgrammerError>
     Ok(OfferedInterop {
         service: interop,
         procedures,
+        checked,
     })
 }
 
@@ -915,7 +864,7 @@ pub fn offer_interop(server: &Server) -> Result<OfferedInterop, ProgrammerError>
 ///
 /// A [`ProgrammerError`] its services refuse the resolver with.
 pub fn offer_interop_client(client: &Client) -> Result<(), ProgrammerError> {
-    let procedures = interop_procedures(None)?;
+    let procedures = InteropProcedures::get()?;
 
     client
         .services()

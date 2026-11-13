@@ -145,13 +145,16 @@ updates:
         update-types: ['version-update:semver-major']
 
   # ── Rust ─────────────────────────────────────────────────────────────────────
-  # The workspace, the fuzz targets and the conformance suite's testee, each a project of its own
-  # with its own lock. The toolchain moves by a commit of its own, never here.
+  # The workspace, the fuzz targets, the conformance suite's testee, the protovalidate
+  # differential's testee and hello's Rust half, each a project of its own with its own lock. The
+  # toolchain moves by a commit of its own, never here.
   - package-ecosystem: cargo
     directories:
       - /implementations/rust
       - /implementations/rust/fuzz
       - /implementations/rust/tools/protobuf-conformance
+      - /implementations/rust/tools/protovalidate-differential
+      - /examples/hello/rust
     schedule:
       interval: weekly
       day: monday

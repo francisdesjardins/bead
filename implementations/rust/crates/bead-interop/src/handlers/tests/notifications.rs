@@ -13,7 +13,7 @@ use bead::{
 use serde_json::{Value, json};
 use tokio::sync::oneshot;
 
-use crate::{InteropProcedures, OfferedInterop, interop_procedures, offer_interop};
+use crate::{InteropProcedures, OfferedInterop, offer_interop};
 
 type News = Notification<JsonCodec, JsonCodec, JsonCodec>;
 
@@ -23,7 +23,7 @@ fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 
 struct Fixture {
     pair: Pair,
-    procedures: InteropProcedures,
+    procedures: &'static InteropProcedures,
     _offered: OfferedInterop,
     sent: Arc<Mutex<Vec<EnvelopeHeader>>>,
 }
@@ -51,7 +51,7 @@ impl Fixture {
             }));
         Self {
             pair,
-            procedures: interop_procedures(None).expect("the descriptors"),
+            procedures: InteropProcedures::get().expect("the descriptors"),
             _offered: offered,
             sent,
         }

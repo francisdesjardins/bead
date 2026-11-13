@@ -17,6 +17,20 @@ pub mod generated {
     include!(concat!(env!("OUT_DIR"), "/_include.rs"));
 }
 
+/// `proto/codec.proto`'s messages as Buffa's generator writes them by default: a repeated or map
+/// field of a closed enum left closed.
+#[expect(
+    clippy::all,
+    clippy::pedantic,
+    clippy::nursery,
+    clippy::restriction,
+    missing_docs,
+    reason = "Buffa's generated code, which Bead's lint table does not hold"
+)]
+pub mod closed {
+    include!(concat!(env!("OUT_DIR"), "/closed/_include.rs"));
+}
+
 pub use generated::bead::codecs::v1 as codecs;
 pub use generated::bead::test;
 pub use generated::bead::transcoding::v1 as transcoding;

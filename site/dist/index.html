@@ -1782,7 +1782,7 @@ greeter.on(<span class="tok-string">'askName'</span>, (_request, response) =&gt;
     A request must often hold more than its encoding says: a count of 10 at most, a name of 1 to 63
     characters. Those rules are written in the <code>.proto</code> with protovalidate’s options,
     the protobuf ecosystem’s standard, and <code>beadc</code> compiles them into native validators,
-    in TypeScript and in C#; the Rust side’s come with <code>beadc</code>’s Rust target.
+    in TypeScript, in C# and in Rust.
   </p>
   <pre class="snippet" tabindex="0"><code class="language-plaintext">import "buf/validate/validate.proto";
 
@@ -3183,13 +3183,13 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
   <p class="gist">
     Bead is a protocol: a specification, conformance files every implementation plays, and an
     interop service. The repository holds three implementations. TypeScript and C# are at
-    behavioural parity. Rust has its core, its WebSocket and HTTP transports and its MQTT 5 binding,
-    and each part it lacks is a row of the support matrix, ahead.
+    behavioural parity. Rust has its core, its WebSocket and HTTP transports, its MQTT 5 binding and
+    <code>beadc</code>’s Rust target, and each part it lacks is a row of the support matrix, ahead.
   </p>
-  <div class="table-wrap"><table class="compare"><thead><tr><th scope="col"><span class="visually-hidden">Part</span></th><th scope="col">TypeScript</th><th scope="col">C#, on .NET 10</th><th scope="col">Rust</th></tr></thead><tbody><tr><th scope="row">The wire</th><td>The envelope, the headers, the failures</td><td>The same, byte for byte</td><td>The same, byte for byte, but AMQP 1.0’s messages, ahead with its binding</td></tr><tr><th scope="row">Above the wire</th><td colspan="2">The routers, the services, sessions and JWTs, a payload’s rules, subscriptions, transfers, relays, debugging and metrics</td><td>The same, but a payload’s rules, whose validators come with <code>beadc</code>’s Rust target, and a service manager over a router of the application’s own</td></tr><tr><th scope="row">The transports</th><td>WebSocket, HTTP, Web Worker, in memory, a broker over MQTT 5 or AMQP 1.0, and joined</td><td>WebSocket, HTTP on Kestrel, in memory, a broker over MQTT 5 or AMQP 1.0, and joined</td><td>WebSocket on tungstenite, HTTP on hyper, in memory, a broker over MQTT 5, and joined</td></tr><tr><th scope="row">The HTTP/JSON gateway</th><td>On <code>node:http</code>, or mounted into a server</td><td>On Kestrel, or mounted by its <code>HttpContext</code></td><td>Ahead</td></tr></tbody></table></div>
+  <div class="table-wrap"><table class="compare"><thead><tr><th scope="col"><span class="visually-hidden">Part</span></th><th scope="col">TypeScript</th><th scope="col">C#, on .NET 10</th><th scope="col">Rust</th></tr></thead><tbody><tr><th scope="row">The wire</th><td>The envelope, the headers, the failures</td><td>The same, byte for byte</td><td>The same, byte for byte, but AMQP 1.0’s messages, ahead with its binding</td></tr><tr><th scope="row">Above the wire</th><td colspan="2">The routers, the services, sessions and JWTs, a payload’s rules, subscriptions, transfers, relays, debugging and metrics</td><td>The same, but a service manager over a router of the application’s own</td></tr><tr><th scope="row">The transports</th><td>WebSocket, HTTP, Web Worker, in memory, a broker over MQTT 5 or AMQP 1.0, and joined</td><td>WebSocket, HTTP on Kestrel, in memory, a broker over MQTT 5 or AMQP 1.0, and joined</td><td>WebSocket on tungstenite, HTTP on hyper, in memory, a broker over MQTT 5, and joined</td></tr><tr><th scope="row">The HTTP/JSON gateway</th><td>On <code>node:http</code>, or mounted into a server</td><td>On Kestrel, or mounted by its <code>HttpContext</code></td><td>Ahead</td></tr></tbody></table></div>
   <p class="space">
-    On the Rust side, next come <code>beadc</code>’s Rust target, the gateway and the binding over
-    AMQP 1.0, each by a decision of its own. Its WebSocket, HTTP and MQTT 5 transports meet the other
+    On the Rust side, next come the gateway and the binding over AMQP 1.0, each by a decision of its
+    own. Its WebSocket, HTTP and MQTT 5 transports meet the other
     two sides in the interop, both ways. The core also compiles for
     <code>wasm32-unknown-unknown</code>.
   </p>
@@ -3217,7 +3217,7 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
     handlers are written, and the client that answers it. <code>beadc breaking</code> compares the
     blueprint with the last release, and says what breaks a peer already deployed or the code
     written against the API. <code>beadc</code> runs in a Docker image, and the example
-    <code>examples/hello</code> plays in CI in both languages, each client against each server.
+    <code>examples/hello</code> plays in CI in all three languages, each client against each server.
     One contract gives several packages, each its own selection of procedures, and each transport
     of a server takes the procedures it is given:
     <a href="/bead/playground/#packages">the demo’s Packages tab</a> cuts a blueprint into them,
@@ -3896,8 +3896,7 @@ greeter.on(<span class="tok-string">'askName'</span>, (_request, response) =&gt;
     Une requête doit souvent tenir plus que son encodage : un compte de 10 au plus, un nom de 1 à
     63 caractères. Ces règles s’écrivent dans le <code>.proto</code> avec les options de
     protovalidate, la norme de l’écosystème protobuf, et <code>beadc</code> les compile en
-    validateurs natifs, en TypeScript et en C# ; ceux du côté Rust viendront avec la cible Rust de
-    <code>beadc</code>.
+    validateurs natifs, en TypeScript, en C# et en Rust.
   </p>
   <pre class="snippet" tabindex="0"><code class="language-plaintext">import "buf/validate/validate.proto";
 
@@ -5341,13 +5340,14 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
   <p class="gist">
     Bead est un protocole : une spécification, des fichiers de conformance que chaque implantation
     joue, et un service d’interop. Le dépôt tient trois implantations. TypeScript et C# sont à
-    parité de comportement. Rust a son cœur, ses transports WebSocket et HTTP et sa liaison
-    MQTT 5, et chaque partie qui lui manque est une ligne de la matrice de support, à venir.
+    parité de comportement. Rust a son cœur, ses transports WebSocket et HTTP, sa liaison MQTT 5
+    et la cible Rust de <code>beadc</code>, et chaque partie qui lui manque est une ligne de la
+    matrice de support, à venir.
   </p>
-  <div class="table-wrap"><table class="compare"><thead><tr><th scope="col"><span class="visually-hidden">Partie</span></th><th scope="col">TypeScript</th><th scope="col">C#, sur .NET 10</th><th scope="col">Rust</th></tr></thead><tbody><tr><th scope="row">Le fil</th><td>L’enveloppe, les en-têtes, les échecs</td><td>Les mêmes, octet pour octet</td><td>Les mêmes, octet pour octet, sauf les messages d’AMQP 1.0, à venir avec sa liaison</td></tr><tr><th scope="row">Au-dessus du fil</th><td colspan="2">Les routeurs, les services, les sessions et les JWT, les règles d’une charge, les abonnements, les transferts, les relais, le débogage et les métriques</td><td>Les mêmes, sauf les règles d’une charge, dont les validateurs viendront avec la cible Rust de <code>beadc</code>, et un gestionnaire de services sur un routeur propre à l’application</td></tr><tr><th scope="row">Les transports</th><td>WebSocket, HTTP, Web Worker, en mémoire, un courtier sur MQTT 5 ou AMQP 1.0, et joints</td><td>WebSocket, HTTP sur Kestrel, en mémoire, un courtier sur MQTT 5 ou AMQP 1.0, et joints</td><td>WebSocket sur tungstenite, HTTP sur hyper, en mémoire, un courtier sur MQTT 5, et joints</td></tr><tr><th scope="row">La passerelle HTTP/JSON</th><td>Sur <code>node:http</code> ou montée dans un serveur</td><td>Sur Kestrel, ou montée par son <code>HttpContext</code></td><td>À venir</td></tr></tbody></table></div>
+  <div class="table-wrap"><table class="compare"><thead><tr><th scope="col"><span class="visually-hidden">Partie</span></th><th scope="col">TypeScript</th><th scope="col">C#, sur .NET 10</th><th scope="col">Rust</th></tr></thead><tbody><tr><th scope="row">Le fil</th><td>L’enveloppe, les en-têtes, les échecs</td><td>Les mêmes, octet pour octet</td><td>Les mêmes, octet pour octet, sauf les messages d’AMQP 1.0, à venir avec sa liaison</td></tr><tr><th scope="row">Au-dessus du fil</th><td colspan="2">Les routeurs, les services, les sessions et les JWT, les règles d’une charge, les abonnements, les transferts, les relais, le débogage et les métriques</td><td>Les mêmes, sauf un gestionnaire de services sur un routeur propre à l’application</td></tr><tr><th scope="row">Les transports</th><td>WebSocket, HTTP, Web Worker, en mémoire, un courtier sur MQTT 5 ou AMQP 1.0, et joints</td><td>WebSocket, HTTP sur Kestrel, en mémoire, un courtier sur MQTT 5 ou AMQP 1.0, et joints</td><td>WebSocket sur tungstenite, HTTP sur hyper, en mémoire, un courtier sur MQTT 5, et joints</td></tr><tr><th scope="row">La passerelle HTTP/JSON</th><td>Sur <code>node:http</code> ou montée dans un serveur</td><td>Sur Kestrel, ou montée par son <code>HttpContext</code></td><td>À venir</td></tr></tbody></table></div>
   <p class="space">
-    Côté Rust, viennent ensuite la cible Rust de <code>beadc</code>, la passerelle et la liaison sur
-    AMQP 1.0, chacune par une décision à elle. Ses transports WebSocket, HTTP et MQTT 5
+    Côté Rust, viennent ensuite la passerelle et la liaison sur AMQP 1.0, chacune par une décision à
+    elle. Ses transports WebSocket, HTTP et MQTT 5
     rencontrent les deux autres côtés dans l’interop, dans les deux sens. Le cœur se compile aussi
     pour <code>wasm32-unknown-unknown</code>.
   </p>
@@ -5377,7 +5377,7 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
     n’écrit que les handlers, et le client qui lui répond. <code>beadc breaking</code> compare le
     blueprint à la dernière version sortie, et dit ce qui casse un pair déjà déployé ou le code
     écrit contre l’API. <code>beadc</code> tourne dans une image Docker, et l’exemple
-    <code>examples/hello</code> se joue dans la CI dans les deux langages, chaque client contre
+    <code>examples/hello</code> se joue dans la CI dans les trois langages, chaque client contre
     chaque serveur. Un contrat donne plusieurs paquets, chacun sa sélection de procédures, et
     chaque transport d’un serveur prend les procédures qu’on lui donne :
     <a href="/bead/playground/#packages">l’onglet Packages de la démo</a> y découpe un blueprint,

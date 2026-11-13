@@ -1,5 +1,5 @@
 //! Bead's interop service on the Rust side: its API `spec/interop-blueprint.json`, its descriptors
-//! written by hand, which beadc's Rust target, ahead, generates, and its behaviour
+//! and its classes, which beadc generates into `generated` (decision 0051), and its behaviour
 //! `spec/interop-service.json`, as Bead's Rust side answers it: what a client of any side calls, and
 //! what `spec/conversations.json` plays against.
 #![expect(
@@ -8,14 +8,16 @@
 )]
 
 mod credentials;
-mod descriptors;
+#[expect(
+    clippy::mod_module_files,
+    reason = "beadc writes its tree's root as mod.rs, Buffa's name for a checked-in tree"
+)]
+pub mod generated;
 mod handlers;
 
 pub use credentials::{INTEROP_SERVICE, interop_credentials_of, interop_verifier_of};
-pub use descriptors::{
-    InteropDescriptor, InteropProcedures, ON_PURPOSE, REGISTERED_ALREADY, SERVICE_ID, SERVICE_NAME,
-    SERVICE_REVISION, interop_failures, interop_procedures,
-};
+pub use generated::services::{InteropFailures, InteropProcedures};
 pub use handlers::{
-    OfferedInterop, identifier_of, issuer_of, judge_checked, offer_interop, offer_interop_client,
+    InteropDescriptor, OfferedInterop, identifier_of, issuer_of, offer_interop,
+    offer_interop_client,
 };

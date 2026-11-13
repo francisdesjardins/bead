@@ -344,8 +344,7 @@
     Une requête doit souvent tenir plus que son encodage : un compte de 10 au plus, un nom de 1 à
     63 caractères. Ces règles s’écrivent dans le <code>.proto</code> avec les options de
     protovalidate, la norme de l’écosystème protobuf, et <code>beadc</code> les compile en
-    validateurs natifs, en TypeScript et en C# ; ceux du côté Rust viendront avec la cible Rust de
-    <code>beadc</code>.
+    validateurs natifs, en TypeScript, en C# et en Rust.
   </p>
   {{code of="rules-proto" language="plaintext"}}
   <p class="space">
@@ -1611,13 +1610,14 @@
   <p class="gist">
     Bead est un protocole : une spécification, des fichiers de conformance que chaque implantation
     joue, et un service d’interop. Le dépôt tient trois implantations. TypeScript et C# sont à
-    parité de comportement. Rust a son cœur, ses transports WebSocket et HTTP et sa liaison
-    MQTT 5, et chaque partie qui lui manque est une ligne de la matrice de support, à venir.
+    parité de comportement. Rust a son cœur, ses transports WebSocket et HTTP, sa liaison MQTT 5
+    et la cible Rust de <code>beadc</code>, et chaque partie qui lui manque est une ligne de la
+    matrice de support, à venir.
   </p>
   {{implementations}}
   <p class="space">
-    Côté Rust, viennent ensuite la cible Rust de <code>beadc</code>, la passerelle et la liaison sur
-    AMQP 1.0, chacune par une décision à elle. Ses transports WebSocket, HTTP et MQTT 5
+    Côté Rust, viennent ensuite la passerelle et la liaison sur AMQP 1.0, chacune par une décision à
+    elle. Ses transports WebSocket, HTTP et MQTT 5
     rencontrent les deux autres côtés dans l’interop, dans les deux sens. Le cœur se compile aussi
     pour <code>wasm32-unknown-unknown</code>.
   </p>
@@ -1647,7 +1647,7 @@
     n’écrit que les handlers, et le client qui lui répond. <code>beadc breaking</code> compare le
     blueprint à la dernière version sortie, et dit ce qui casse un pair déjà déployé ou le code
     écrit contre l’API. <code>beadc</code> tourne dans une image Docker, et l’exemple
-    <code>examples/hello</code> se joue dans la CI dans les deux langages, chaque client contre
+    <code>examples/hello</code> se joue dans la CI dans les trois langages, chaque client contre
     chaque serveur. Un contrat donne plusieurs paquets, chacun sa sélection de procédures, et
     chaque transport d’un serveur prend les procédures qu’on lui donne :
     <a href="/bead/playground/#packages">l’onglet Packages de la démo</a> y découpe un blueprint,

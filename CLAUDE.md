@@ -171,7 +171,8 @@ titles that hold one write it `’`, and the citation does the same.
   --lib --features testing --locked --target wasm32-unknown-unknown`, `cargo test --workspace
   --all-features --locked`, `cargo doc --workspace --no-deps --all-features --locked`, `cargo build
   --workspace --locked`, `cargo deny --locked check` and `cargo deny --manifest-path <manifest>
-  --locked check` for `fuzz/` and `tools/protobuf-conformance/` pass, from its folder.
+  --locked check` for `fuzz/`, `tools/protobuf-conformance/`, `tools/protovalidate-differential/`
+  and `../../examples/hello/rust/` pass, from its folder.
 
 ## The Bead page
 
