@@ -30,24 +30,26 @@ fn call_of(call_id: u32, handle: &str) -> CallAddress {
 }
 
 // spec 10.4
-#[tokio::test]
-async fn send_no_cancel_for_a_request_the_transport_never_had_though_given_up_at_once_and_reserve_nothing()
- {
+async fn unhanded_requests() {
     for side in [RouterSide::Client, RouterSide::Server] {
         let peer = Peer::new(side, &RouterLimitsOptions::default());
-        let first_id = if side == RouterSide::Client { 1 } else { 2 };
+        let first_id = if side == RouterSide::Client { 1_u32 } else { 2 };
+        let expected: Arc<dyn std::error::Error + Send + Sync> =
+            Arc::new(std::io::Error::other("refused"));
+        let error = crate::router::types::RouterError::Other(Arc::clone(&expected));
         peer.owner
-            .run(|state| {
-                state.sending.push_back(Err(error_of("refused")));
+            .run(move |state| {
+                state.sending.push_back(Err(error));
             })
             .await
             .expect("the transport refuses outright");
-        assert_eq!(
-            completed(peer.request((Bytes::new(), request_of("a"))))
-                .await
-                .expect_err("the refusal is heard")
-                .to_string(),
-            "refused"
+        let returned = completed(peer.request((Bytes::new(), request_of("a"))))
+            .await
+            .expect_err("the refusal is heard");
+        assert_eq!(returned.to_string(), "refused");
+        assert!(
+            matches!(returned, CallError::Other(error) if Arc::ptr_eq(&error, &expected)),
+            "the same transport error returns"
         );
 
         // * the port gives the call up in the send's turn, before returning its refusal, as the
@@ -74,7 +76,7 @@ async fn send_no_cancel_for_a_request_the_transport_never_had_though_given_up_at
                 .collect::<Vec<_>>(),
             [
                 (EnvelopeKind::Request, first_id),
-                (EnvelopeKind::Request, first_id + 2)
+                (EnvelopeKind::Request, first_id.saturating_add(2))
             ]
         );
         peer.owner
@@ -88,7 +90,7 @@ async fn send_no_cancel_for_a_request_the_transport_never_had_though_given_up_at
         assert_eq!(peer.clock.dues(), Vec::<Duration>::new());
         quiet(&peer).await;
 
-        for call_id in [first_id, first_id + 2] {
+        for call_id in [first_id, first_id.saturating_add(2)] {
             peer.receive((result_of(call_id, None), Arc::from("a")));
         }
         peer.settle().await;
@@ -989,4 +991,16 @@ async fn hears_its_request_handed_to_the_transport_whole_or_its_transfers_openin
     );
     assert_eq!(peer.sent().await.len(), 5);
     quiet(&peer).await;
+}
+
+#[tokio::test]
+async fn send_no_cancel_for_a_request_the_transport_never_had_though_given_up_at_once_and_reserve_nothing()
+ {
+    unhanded_requests().await;
+}
+
+#[tokio::test]
+async fn sends_no_cancel_for_a_request_the_transport_never_had_though_given_up_at_once_and_reserves_nothing()
+ {
+    unhanded_requests().await;
 }
