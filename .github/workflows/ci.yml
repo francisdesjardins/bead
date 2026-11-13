@@ -371,7 +371,7 @@ jobs:
       - if: matrix.os == 'ubuntu-26.04'
         run: >-
           cargo llvm-cov --workspace --all-features --locked --json --summary-only
-          --ignore-filename-regex '(/tests\.rs|/tests/.*|/testing\.rs|/testing/.*|/generated/.*|/crates/bead-goldens/.*)$'
+          --ignore-filename-regex '([/\\]tests\.rs|[/\\]tests[/\\].*|[/\\]testing\.rs|[/\\]testing[/\\].*|[/\\]generated[/\\].*|[/\\]crates[/\\]bead-goldens[/\\].*)$'
           --output-path coverage/rust.json
       - if: matrix.os == 'ubuntu-26.04'
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
