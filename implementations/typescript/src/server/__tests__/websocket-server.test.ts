@@ -14,6 +14,7 @@ import { EnvelopeKind } from '../../router/shared/constants';
 import { bytesOf } from '../../router/shared/envelope';
 import { createPipedTransports, digestOf, patternOf } from '../../router/shared/__tests__/fixtures';
 import { createRouterClient } from '../../router/client/router-client';
+import { ProgrammerError } from '../../transport/shared/errors';
 import type {
   IAdmissionRequest,
   ICallSession,
@@ -22,7 +23,12 @@ import type {
 } from '../../router/shared/types';
 import { createFakeWebSocketServer } from '../../transport/server/__tests__/fake-websocket-server';
 import type { TransportServerConnectionHandle } from '../../transport/server/types';
-import { allClosed, host, IMPLEMENTATIONS } from '../../transport/shared/__tests__/fixtures';
+import {
+  allClosed,
+  createTestClock,
+  host,
+  IMPLEMENTATIONS,
+} from '../../transport/shared/__tests__/fixtures';
 import {
   CancelError,
   createWebSocketServer,
@@ -87,6 +93,22 @@ const unsubscribe: IProcedure = {
 };
 
 // definition
+
+test('WebSocketServer runs every layer on its transport’s clock and refuses another', async () => {
+  const clock = createTestClock();
+  await using server = createWebSocketServer({ transport: { clock, WebSocketServer } });
+
+  expect(server.router.clock).toBe(clock);
+  expect(server.sessions.clock).toBe(clock);
+  expect(() => {
+    return createWebSocketServer({
+      router: (transport, options) => {
+        return createRouterServer(transport, { ...options, clock: createTestClock() });
+      },
+      transport: { clock, WebSocketServer },
+    });
+  }).toThrow(ProgrammerError);
+});
 
 test('createWebSocketServer builds on a WebSocket transport server, not yet started, with the layers given', async () => {
   const sessions = createSessionManager();
