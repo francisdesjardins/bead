@@ -275,3 +275,79 @@ fn converts_open_numeric_codes_without_losing_unknown_values_and_names_procedure
 fn leave_room_for_a_full_header_between_an_envelope_and_its_payload() {
     holds_by_the_defaults_both_ends_set_alike();
 }
+
+#[test]
+fn names_each_code_exactly_once() {
+    let named = ProtocolCode::named();
+    let expected = [
+        ProtocolCode::ENVELOPE_MALFORMED,
+        ProtocolCode::LAYOUT_UNSUPPORTED,
+        ProtocolCode::KIND_UNSUPPORTED,
+        ProtocolCode::ENVELOPE_TOO_LARGE,
+        ProtocolCode::DESTINATION_UNKNOWN,
+        ProtocolCode::DESTINATION_UNREACHABLE,
+        ProtocolCode::SERVICE_UNKNOWN,
+        ProtocolCode::PROCEDURE_UNKNOWN,
+        ProtocolCode::CALL_UNKNOWN,
+        ProtocolCode::SUBSCRIPTION_UNKNOWN,
+        ProtocolCode::SUBSCRIPTION_UNSUPPORTED,
+        ProtocolCode::SESSION_REQUIRED,
+        ProtocolCode::ACCESS_DENIED,
+        ProtocolCode::PAYLOAD_TOO_LARGE,
+        ProtocolCode::CAPACITY_EXCEEDED,
+        ProtocolCode::CREDENTIAL_UNSUPPORTED,
+        ProtocolCode::CHUNK_INVALID,
+        ProtocolCode::CREDIT_EXCEEDED,
+        ProtocolCode::PAYLOAD_UNDECODABLE,
+        ProtocolCode::TRANSFER_STALLED,
+        ProtocolCode::PAYLOAD_INVALID,
+        ProtocolCode::PROCEDURE_FAILED,
+        ProtocolCode::DESTINATION_LOST,
+    ];
+    assert_eq!(named, expected);
+    assert_eq!(
+        named
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        23
+    );
+    assert_eq!(
+        ProtocolCode::PROCEDURE_UNKNOWN.name(),
+        Some("PROCEDURE_UNKNOWN")
+    );
+    assert_eq!(ProtocolCode::SESSION_REQUIRED.get().get(), 32);
+    assert_eq!(ProtocolCode::ACCESS_DENIED.get().get(), 33);
+    assert_eq!(ProtocolCode::CREDENTIAL_UNSUPPORTED.get().get(), 36);
+}
+
+#[test]
+fn gives_one_frozen_entry_of_its_side_per_key_and_its_side() {
+    // Rust constructs the named failure directly; no table is built by this fixture.
+    let codes = ProtocolCode::named();
+    assert_eq!(codes.len(), 23);
+    for code in codes {
+        let failure = Failure::protocol(code, RouterSide::Client);
+        assert_eq!(failure.code(), code.get());
+        assert_eq!(failure.scope(), super::FailureScope::Protocol);
+        assert_eq!(failure.side(), Some(RouterSide::Client));
+    }
+}
+
+#[test]
+fn makes_two_tables_that_differ_by_side_alone() {
+    for code in ProtocolCode::named() {
+        let client = Failure::protocol(code, RouterSide::Client);
+        let server = Failure::protocol(code, RouterSide::Server);
+        assert_eq!(client.side(), Some(RouterSide::Client));
+        assert_eq!(server.side(), Some(RouterSide::Server));
+        assert_eq!(client.record(), server.record());
+        assert_eq!(client.code(), code.get());
+        assert_eq!(client.scope(), super::FailureScope::Protocol);
+        assert_eq!(client.origin(), server.origin());
+        assert_eq!(client.relays(), server.relays());
+        assert_eq!(client.header(), server.header());
+        assert_eq!(client.procedure(), server.procedure());
+        assert_eq!(client.destination_id(), server.destination_id());
+    }
+}
