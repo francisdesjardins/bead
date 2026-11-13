@@ -1569,8 +1569,12 @@ connection's session ends with its exchange. It judges a request in the order of
 and streams counted apart — from one policy object, `httpPolicyOf`, which
 `createHTTPTransportServer` takes too, so two listeners never keep two lists alike; a member given
 in the policy and beside it is refused. It listens on its own port, or answers as `listener` on a
-server the application builds; one origin for `/bead` and `/api/…` comes from a proxy in front. It
-serves the document at `/openapi.json`, byte for byte, with its `etag`; Swagger UI is the
+server the application builds; mounted, it goes before whatever reads a body there, or that reader
+keeps to the application's own paths: Express's body parsers, for one, go after it, and a framework
+that parses a body before any route's handler, as Fastify does, hands it each request from a hook
+that runs first, Fastify's `onRequest`. A body read before it, wholly or in part, is answered 500
+and reported on `error`, never called with what was left. One origin for `/bead` and `/api/…` comes
+from a proxy in front. It serves the document at `/openapi.json`, byte for byte, with its `etag`; Swagger UI is the
 application's to serve.
 
 The same `bead_http.ts` exports a client of each service, `<Service>HttpClient`, which calls its

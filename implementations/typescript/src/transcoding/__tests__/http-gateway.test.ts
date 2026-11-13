@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import {
   createServer as createNodeServer,
+  type IncomingMessage,
   request as httpRequest,
   type IncomingHttpHeaders,
 } from 'node:http';
@@ -136,10 +137,23 @@ const opened = (port: number, octets: string): Socket => {
   return socket;
 };
 
-/** Writes `octets` on a socket of its own, and reads the response whole, to the socket's close. */
-const exchanged = (port: number, octets: string): Promise<IAnswered> => {
+/**
+ * Writes `octets` on a socket of its own, and reads the response whole, to the socket's close; past
+ * `within` milliseconds, where given, it drops the socket and gives what came, nothing among it.
+ */
+const exchanged = (
+  port: number,
+  octets: string,
+  { within }: { within?: number } = {}
+): Promise<IAnswered> => {
   const socket = opened(port, octets);
   const chunks: Buffer[] = [];
+  const patience =
+    within === undefined
+      ? undefined
+      : setTimeout(() => {
+          socket.destroy();
+        }, within);
 
   socket.on('data', (chunk: Buffer) => {
     chunks.push(chunk);
@@ -147,6 +161,8 @@ const exchanged = (port: number, octets: string): Promise<IAnswered> => {
 
   return new Promise((resolve) => {
     socket.on('close', () => {
+      clearTimeout(patience);
+
       const text = Buffer.concat(chunks).toString('utf8');
       const end = text.indexOf('\r\n\r\n');
       const [statusLine = '', ...fields] = text.slice(0, end).split('\r\n');
@@ -261,6 +277,73 @@ const rawAsEdges = (): readonly IHttpRouteInit[] => {
         }
       : init;
   });
+};
+
+/**
+ * Reads a request's body before the gateway takes it, as the server it is mounted on may, by its
+ * `x-reader`, then hands it on: `end` in its `end`, `later` past it, `peek` behind two bytes read,
+ * `unshift` behind a chunk read and put back; any other, untouched.
+ */
+const readBefore = (request: IncomingMessage, hand: () => void): void => {
+  const reader = request.headers['x-reader'];
+
+  if (reader === 'end' || reader === 'later') {
+    request.resume();
+    request.on('end', () => {
+      if (reader === 'end') {
+        hand();
+      } else {
+        setTimeout(hand, 20);
+      }
+    });
+
+    return;
+  }
+
+  if (reader === 'peek' || reader === 'unshift') {
+    request.once('readable', () => {
+      const chunk: unknown = reader === 'peek' ? request.read(2) : request.read();
+
+      if (reader === 'unshift' && chunk instanceof Buffer) {
+        request.unshift(chunk);
+      }
+      hand();
+    });
+
+    return;
+  }
+
+  hand();
+};
+
+/** A gateway mounted on a server of Node's that reads each request's body first, by `readBefore`. */
+const mountedBehindReader = (): ReturnType<typeof startTranscoding> => {
+  return startTranscoding({
+    bodyGracePeriod: 100,
+    createServer: (listener) => {
+      return createNodeServer((request, response) => {
+        readBefore(request, () => {
+          listener(request, response);
+        });
+      });
+    },
+    maximumExchangesPerAddress: 1,
+  });
+};
+
+/** A request to echo's route, its framing's fields and its body as they go, by `x-reader`. */
+const echoOctets = (
+  port: number,
+  { body, fields }: { body: string; fields: readonly string[] }
+): string => {
+  return [
+    'POST /api/Transcoding/echo HTTP/1.1',
+    `host: 127.0.0.1:${String(port)}`,
+    'content-type: application/json',
+    ...fields,
+    '',
+    body,
+  ].join('\r\n');
 };
 
 // tests
@@ -814,6 +897,113 @@ test('answers 503 DESTINATION_UNREACHABLE when its connection cannot be drawn, r
   });
   expect(reported).toHaveLength(1);
   expect(reported[0]).toMatch(/, not open$/u);
+});
+
+// transcoding 7.6.27
+test('refuses 500 a body read before it by the server it is mounted on, reported, its call never made', async () => {
+  await using fixture = await mountedBehindReader();
+  const reported = reportedBy(fixture.gateway);
+  const words = 'a body read before the gateway took its request';
+  const parted: string[] = [];
+  let calls = 0;
+
+  fixture.memory.on('connection', () => {
+    calls += 1;
+  });
+
+  for (const reader of ['end', 'later', 'peek', 'unshift']) {
+    for (const [framing, fields, body] of [
+      ['JSON, content-length', ['content-length: 13'], '{"anInt32":1}'],
+      ['JSON, chunked', ['transfer-encoding: chunked'], 'd\r\n{"anInt32":1}\r\n0\r\n\r\n'],
+      ['chunked, empty', ['transfer-encoding: chunked'], '0\r\n\r\n'],
+    ] as const) {
+      // * a peek or a chunk put back of an empty body got nothing, which Node shows as untouched
+      if (framing === 'chunked, empty' && (reader === 'peek' || reader === 'unshift')) {
+        continue;
+      }
+
+      const cell = `${reader}, ${framing}`;
+      const before = { calls, reported: reported.length };
+      const answered = await exchanged(
+        fixture.port,
+        echoOctets(fixture.port, { body, fields: [...fields, `x-reader: ${reader}`] }),
+        { within: 1_000 }
+      );
+      const made = calls - before.calls;
+      const told = reported.slice(before.reported);
+      // * its place released: the address's one call answers
+      const next = await send(fixture.port, { body: '{}', path: '/api/Transcoding/echo' });
+
+      parted.push(
+        ...[
+          answered.status === 500 ? '' : `status ${String(answered.status)}`,
+          answered.headers['bead-refusal'] === undefined
+            ? ''
+            : `bead-refusal ${String(answered.headers['bead-refusal'])}`,
+          answered.body === '{"status":500,"title":"Internal Server Error","type":"about:blank"}'
+            ? ''
+            : `body ${answered.body}`,
+          answered.headers.connection === 'close'
+            ? ''
+            : `connection ${String(answered.headers.connection)}`,
+          JSON.stringify(told) === JSON.stringify([words])
+            ? ''
+            : `reported ${JSON.stringify(told)}`,
+          made === 0 ? '' : `${String(made)} call(s)`,
+          next.status === 200 ? '' : `next ${String(next.status)}`,
+        ]
+          .filter((part) => {
+            return part !== '';
+          })
+          .map((part) => {
+            return `${cell}: ${part}`;
+          })
+      );
+    }
+  }
+
+  expect(parted).toEqual([]);
+});
+
+// transcoding 10.1.10
+test('reads a body that came empty as empty, whatever read it before', async () => {
+  await using fixture = await mountedBehindReader();
+  const reported = reportedBy(fixture.gateway);
+  const parted: string[] = [];
+
+  for (const [framing, fields, body, readers] of [
+    ['content-length: 0', ['content-length: 0'], '', ['end', 'later', 'peek', 'unshift']],
+    ['chunked, empty', ['transfer-encoding: chunked'], '0\r\n\r\n', ['peek', 'unshift']],
+  ] as const) {
+    const untouched = await exchanged(
+      fixture.port,
+      echoOctets(fixture.port, { body, fields: [...fields, 'connection: close'] })
+    );
+
+    expect(untouched).toMatchObject({
+      headers: { 'content-type': 'application/problem+json' },
+      status: 400,
+    });
+
+    for (const reader of readers) {
+      const answered = await exchanged(
+        fixture.port,
+        echoOctets(fixture.port, {
+          body,
+          fields: [...fields, 'connection: close', `x-reader: ${reader}`],
+        }),
+        { within: 1_000 }
+      );
+      const seen = [answered.status, answered.headers['bead-refusal'], answered.body];
+
+      if (JSON.stringify(seen) !== JSON.stringify([untouched.status, undefined, untouched.body])) {
+        parted.push(`${reader}, ${framing}: ${JSON.stringify(seen)}`);
+      }
+    }
+  }
+
+  expect(parted).toEqual([]);
+  expect(reported).toEqual([]);
 });
 
 // transcoding 7.6.28
