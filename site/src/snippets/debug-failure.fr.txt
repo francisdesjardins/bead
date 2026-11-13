@@ -1,4 +1,4 @@
-// echo('fail') : le serveur répond l'échec 21 de la procédure
+// echo('') : le serveur répond l'échec 21 de la procédure
 FailureError {
   code: 21,
   detail: 'nothing to echo',
@@ -8,6 +8,7 @@ FailureError {
   relays: 0,
   scope: 1, // APPLICATION
   side: 'server',
+  …
 }, {
   direction: 'rx',
   duration: 1,
@@ -15,7 +16,7 @@ FailureError {
   procedureName: 'echo',
   rx: { code: 21, detail: 'nothing to echo', scope: 1 },
   startedAt: 1790700108978,
-  tx: 'fail',
+  tx: '',
   type: 'request',
   …
 }

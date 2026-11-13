@@ -9,7 +9,7 @@ try {
   } else if (reason instanceof FailureError && reason.isProtocol(ProtocolCode.SESSION_REQUIRED)) {
     // le code 32 du protocole : ouvrir une session, ou renouveler son justificatif, puis rappeler
   } else if (reason instanceof FailureError && reason.isProtocol(ProtocolCode.PAYLOAD_INVALID)) {
-    // le code 52 : chaque violation nomme son champ et sa règle, more compte celles laissées
+    // le code 52 : chaque violation nomme son champ et sa règle, more compte celles laissées de côté
     const { more, violations } = violationsOf(reason);
   }
 }

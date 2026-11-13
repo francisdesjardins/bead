@@ -187,8 +187,13 @@ const stageOf = (code, language) => {
   );
 };
 
-const fateOf = (fate, language) => {
-  return `<span class="fate fate-${fate}">${escape(pick(FATES[fate], language))}</span>`;
+const fateOf = (fates, language) => {
+  return [fates]
+    .flat()
+    .map((fate) => {
+      return `<span class="fate fate-${fate}">${escape(pick(FATES[fate], language))}</span>`;
+    })
+    .join(' ');
 };
 
 const failuresOf = (language) => {
@@ -464,7 +469,7 @@ const STRINGS = Object.freeze({
   en: {
     title: 'Bead: a binary protocol for calls between a client and a server',
     description:
-      'Bead is a binary wire protocol for calls between a client and a server, both ways: a written specification, conformance files every implementation plays, TypeScript and C# at behavioural parity, and a Rust core.',
+      'Bead is a binary wire protocol for calls between a client and a server, both ways: a written specification, conformance files every implementation plays, TypeScript and C# at behavioural parity, and a Rust side with its core, its WebSocket and HTTP transports and its MQTT 5 binding.',
     skip: 'Skip to the content',
     contents: 'Contents',
     menu: 'Open the contents',
@@ -479,7 +484,7 @@ const STRINGS = Object.freeze({
   fr: {
     title: 'Bead : un protocole binaire pour les appels entre un client et un serveur',
     description:
-      'Bead est un protocole binaire pour les appels entre un client et un serveur, dans les deux sens : une spécification écrite, des fichiers de conformance que chaque implantation joue, TypeScript et C# à parité de comportement, et un cœur en Rust.',
+      'Bead est un protocole binaire pour les appels entre un client et un serveur, dans les deux sens : une spécification écrite, des fichiers de conformance que chaque implantation joue, TypeScript et C# à parité de comportement, et un côté Rust avec son cœur, ses transports WebSocket et HTTP et sa liaison MQTT 5.',
     skip: 'Aller au contenu',
     contents: 'Sommaire',
     menu: 'Ouvrir le sommaire',
