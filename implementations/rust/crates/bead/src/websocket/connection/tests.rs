@@ -388,6 +388,46 @@ async fn fails_a_peer_s_close_of_a_status_no_end_sends_as_a_protocol_error_answe
 }
 
 #[tokio::test]
+async fn fails_a_text_message_or_a_close_s_reason_that_is_no_utf_8_answered_1007() {
+    for (index, frame) in [
+        masked_frame(0x1, (&[0xff, 0xfe], true)),
+        masked_frame(0x8, (&[0x03, 0xe8, 0xff, 0xfe], true)),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let (connection, _commands, mut peer) = opened(bounds_of(None, NEVER), 1_024).await;
+        let delivered = Delivered::default();
+
+        peer.write_all(&frame).await.unwrap();
+
+        let running = spawn(connection.run(hooks_of(&delivered)));
+        // the peer reads its 1007, then ends
+        let mut close = [0_u8; 4];
+
+        patience(PATIENCE, peer.read_exact(&mut close))
+            .await
+            .unwrap()
+            .unwrap();
+        drop(peer);
+
+        let ended = patience(PATIENCE, running).await.unwrap().unwrap();
+
+        assert_eq!(close, [0x88, 0x02, 0x03, 0xef], "case {index}: 1007");
+        assert!(
+            matches!(ended.failure, Some(Failed::InvalidPayload(_))),
+            "case {index}: no UTF-8, {:?}",
+            ended.failure
+        );
+        assert!(ended.is_ended_here, "case {index}: failed here");
+        assert!(
+            delivered.lock().unwrap().is_empty(),
+            "case {index}: nothing delivered"
+        );
+    }
+}
+
+#[tokio::test]
 async fn shuts_its_write_side_once_its_failing_close_went_so_a_peer_that_answers_and_waits_ends_it()
 {
     let (connection, _commands, mut peer) = opened(bounds_of(None, NEVER), 1_024).await;

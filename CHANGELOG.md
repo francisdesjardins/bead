@@ -97,6 +97,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The TypeScript side's MQTT 5 link over a WebSocket in Node bounds a message by 100 MiB, or by its
   `maximumPacketSize` where larger, so no packet within its bound is refused, and offers no
   permessage-deflate (spec 15.25).
+- The Rust side's WebSocket, server and client, fails a text message that is no UTF-8 with 1007,
+  as spec 15.3 says and the other sides do, where it sent 1002; a close whose reason is no UTF-8
+  alike, since tungstenite raises one error for both.
 
 ## [0.13.0] - 2026-11-12
 

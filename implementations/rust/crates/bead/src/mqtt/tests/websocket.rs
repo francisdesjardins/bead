@@ -505,6 +505,47 @@ async fn loses_its_link_once_its_mqtt_websocket_peer_closes_or_ends_without_a_cl
     }
 }
 
+// * a close whose reason is no UTF-8 ends the link as any close does, its reason never read, answered
+// with a close of no body (RFC 6455 §5.5.1): `ws` sends 1007 for it, .NET 1002, a row of
+// docs/support.md
+#[tokio::test]
+async fn answers_its_broker_s_close_whose_reason_is_no_utf_8_with_a_close_of_no_body_its_link_lost()
+{
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let adapter = adapter_of(&options_over(&listener));
+    let heard = heard_of(&adapter);
+    let (offered, _offers) = mpsc::unbounded_channel();
+    let (ending, ended) = tokio::sync::oneshot::channel::<()>();
+    let peer = spawn(async move {
+        let mut peer = accepted(&listener, offered).await;
+
+        assert_eq!(binary_of(&mut peer).await[0], 0x10, "a CONNECT");
+        peer.send(Message::Binary(Bytes::from(connack(&Connack::default()))))
+            .await
+            .unwrap();
+        ended.await.unwrap();
+        // a close of 1000 whose reason is no UTF-8, written raw, as a server sends one
+        peer.get_mut()
+            .write_all(&[0x88, 0x04, 0x03, 0xE8, 0xFF, 0xFE])
+            .await
+            .unwrap();
+
+        assert!(
+            matches!(peer.next().await, Some(Ok(Message::Close(None)))),
+            "answered with a close of no body"
+        );
+    });
+
+    adapter.start(BrokerStart::default()).await.unwrap();
+    assert!(adapter.is_linked(), "linked before its broker closes");
+    ending.send(()).unwrap();
+    until(|| !heard.downs().is_empty()).await;
+    assert_eq!(heard.downs(), vec![down(false)], "lost once");
+    assert!(!adapter.is_linked(), "its close ends its link");
+    adapter.stop().await;
+    patience(PATIENCE, peer).await.unwrap().unwrap();
+}
+
 #[tokio::test]
 async fn ends_its_mqtt_websocket_with_a_close_frame_after_its_disconnect_packet() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

@@ -3143,6 +3143,54 @@ async fn tells_a_protocol_error_on_its_connection_once_then_its_unclean_close() 
     assert!(is_state(&client, ReadyState::Closed), "closed");
 }
 
+// spec 15.3: tungstenite raises one `Error::Utf8` for a text message and for a close's reason that
+// is no UTF-8, which this side fails with 1007; .NET sends 1002 for the reason, a row of
+// docs/support.md
+#[tokio::test]
+async fn closes_with_1007_a_text_message_from_its_server_that_is_no_utf_8_and_with_1007_a_close_whose_reason_is_no_utf_8()
+ {
+    let mut server = raw().await;
+
+    for (index, frame) in [
+        frame_of(0x1, &[0xff, 0xfe]),
+        frame_of(0x8, &[0x03, 0xe8, 0xff, 0xfe]),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let client = client();
+        let recorder = recorded(&client);
+
+        settled(client.connect(&to(server.port))).await.unwrap();
+
+        let mut socket = server.next().await;
+
+        socket.write_all(&frame).await.unwrap();
+
+        // it ends its socket once the client's close came
+        assert_eq!(
+            close_code_from(&mut socket).await,
+            Some(1007),
+            "case {index}: 1007"
+        );
+        socket.shutdown().await.unwrap();
+        closes_within(&recorder, 1).await;
+
+        let told = told_of(&recorder);
+
+        assert_eq!(told.len(), 2, "case {index}: {told:?}");
+        assert!(
+            told[0].starts_with("error: the connection is closed with 1007"),
+            "case {index}: {told:?}"
+        );
+        assert_eq!(told[1], "close: false false", "case {index}: unclean");
+        assert!(
+            is_state(&client, ReadyState::Closed),
+            "case {index}: closed"
+        );
+    }
+}
+
 // spec 15.1
 #[tokio::test]
 async fn fails_with_1009_a_message_past_its_bound_telling_one_error_that_names_maximum_message_bytes_then_an_unclean_close_even_when_its_server_answers_its_close()
