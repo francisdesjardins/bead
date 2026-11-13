@@ -218,6 +218,7 @@ table.
 | [0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)                 | A `.proto` becomes one checked blueprint, and each language's server and client are generated from it alone             | accepted |
 | [0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)   | A procedure is also an HTTP route, which a gateway answers as one more client of its server, one connection an exchange | accepted |
 | [0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md) | One contract gives several packages, and a server's transport takes the procedures it is given                          | accepted |
+| [0051](0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md)                | beadc writes Rust each package's typed shells beside the messages Buffa writes                                          | accepted |
 
 ### Transports and relays
 
@@ -292,7 +293,7 @@ table.
 
 ## Writing one
 
-The next decision is 0051. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
+The next decision is 0052. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
 the decision, not its subject. The title may grow with the record; the file's name stays, unless it
 would mislead.
 
