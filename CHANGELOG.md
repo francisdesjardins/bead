@@ -79,6 +79,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   size, a packet past its Maximum Packet Size is judged at its Remaining Length, and nothing is
   reserved at a frame's head; a ping is answered with its pong and a close with a close (spec
   15.25, 15.29; decision 0050).
+- Spec 15.3: a text message that is no UTF-8 fails its WebSocket with 1007 (RFC 6455 §8.1, §7.4.1),
+  and never reaches its router; a page's `WebSocket` fails it as its browser does.
+  `spec/transports.json` plays it over a WebSocket, every side; the spec's next version is a minor.
 
 ### Fixed
 
