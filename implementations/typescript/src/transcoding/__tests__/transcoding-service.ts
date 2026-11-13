@@ -1,8 +1,8 @@
 // ── Transcoding service ───────────────────────────────────────────────────────
 
 // The `Transcoding` service of `spec/transcoding.proto`, served as `spec/transcoding.json`'s
-// `service` states each procedure, on a server whose in-memory transport is joined, behind a
-// gateway on its own listener or mounted on an application's.
+// `service` states each procedure, on a server whose in-memory transport is joined, and a gateway of
+// its route table in front of it: what the conformance's exchanges and the gateway's tests call.
 
 // dependencies
 
@@ -18,23 +18,6 @@ import { TranscodingFailures, TranscodingServer } from './generated/transcoding_
 
 // interfaces
 
-/** An application's server a gateway built with no `createServer` is mounted on, listening. */
-export interface IMounted extends AsyncDisposable {
-  /** Its port, on 127.0.0.1. */
-  readonly port: number;
-}
-
-/** Mounts a gateway built with no `createServer` on an application's server, and starts it. */
-export type Mount = (gateway: IHTTPGateway) => Promise<IMounted>;
-
-/** A gateway's options but its transport, and the application's server that mounts it, if one does. */
-export interface ITranscodingOptions
-  extends
-    Omit<IHTTPGatewayOptions, 'routes' | 'transport'>,
-    Partial<Pick<IHTTPGatewayOptions, 'routes'>> {
-  readonly mount?: Mount | undefined;
-}
-
 /** A gateway in front of a server of the service, and the counts its exchanges wait on. */
 export interface ITranscodingFixture extends AsyncDisposable {
   /**
@@ -45,7 +28,7 @@ export interface ITranscodingFixture extends AsyncDisposable {
   readonly gateway: IHTTPGateway;
   /** The in-memory transport its gateway's connections cross. */
   readonly memory: ReturnType<typeof createMemoryTransportServer>;
-  /** The port of the gateway's own listener, or of the server it is mounted on, on 127.0.0.1. */
+  /** The gateway's own listener's port, on 127.0.0.1. */
   readonly port: number;
   /** The detail of each command of `ask` that failed, in their order. */
   readonly refused: string[];
@@ -68,13 +51,12 @@ const CANCELS_PATIENCE = 1_000;
 /**
  * A server of the `Transcoding` service, its in-memory transport joined, and a gateway of its route
  * table listening on 127.0.0.1 in front of it, of `options` beside the transport, the document, the
- * problem types and the table beadc wrote, unless `options` gives one; where `options` mounts it,
- * built with no `createServer`, listening on the server it is mounted on.
+ * problem types and the table beadc wrote, unless `options` gives one.
  */
 export const startTranscoding = async (
-  options: ITranscodingOptions = {}
+  options: Omit<IHTTPGatewayOptions, 'routes' | 'transport'> &
+    Partial<Pick<IHTTPGatewayOptions, 'routes'>> = {}
 ): Promise<ITranscodingFixture> => {
-  const { mount, ...given } = options;
   const memory = createMemoryTransportServer();
   const server = createServer(
     { transport: joinTransports([memory]) },
@@ -221,21 +203,16 @@ export const startTranscoding = async (
   await memory.start();
 
   const gateway = createHTTPGateway({
-    ...(mount === undefined
-      ? {
-          createServer: (listener) => {
-            return createNodeServer(listener);
-          },
-        }
-      : {}),
+    createServer: (listener) => {
+      return createNodeServer(listener);
+    },
     document: OPENAPI_DOCUMENT,
     problemTypes: HTTP_PROBLEM_TYPES,
     routes: HTTP_ROUTES,
-    ...given,
+    ...options,
     transport: memory,
   });
-  const mounted = mount === undefined ? undefined : await mount(gateway);
-  const { port } = mounted ?? (await gateway.start({ address: '127.0.0.1' }));
+  const { port } = await gateway.start({ address: '127.0.0.1' });
 
   return {
     counts,
@@ -249,7 +226,6 @@ export const startTranscoding = async (
     },
     [Symbol.asyncDispose]: async () => {
       await gateway.stop();
-      await mounted?.[Symbol.asyncDispose]();
       await server[Symbol.asyncDispose]();
     },
   };
