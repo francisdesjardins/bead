@@ -158,8 +158,7 @@ async fn gives_limits_a_router_holds_together_and_refuses_a_transfer_asked_for()
 // a u64 holds no negative: a count of transfers or of a detail's bytes below 0, refused by the
 // other sides by its words, is refused here by its type
 // spec 12.2
-#[test]
-fn refuses_limits_that_do_not_hold_together_each_by_its_own_rule() {
+fn refuses_limits_that_do_not_hold_together_each_by_its_own_rule_scenario() {
     for (limits, words) in [
         (
             RouterLimitsOptions {
@@ -353,4 +352,14 @@ fn takes_no_transfer_and_sizes_the_chunk_and_the_window_on_the_envelope_the_rest
         }),
         "the rest as given"
     );
+}
+
+#[test]
+fn refuses_limits_that_do_not_hold_together_each_by_its_own_rule() {
+    refuses_limits_that_do_not_hold_together_each_by_its_own_rule_scenario();
+}
+
+#[test]
+fn refuse_limits_that_do_not_hold_together_each_rule_by_its_own_failure() {
+    refuses_limits_that_do_not_hold_together_each_by_its_own_rule_scenario();
 }
