@@ -131,6 +131,7 @@ export const mountSignUp = (client: IClient, { reasonOf }: ISignUpOptions): void
   const form = elementOf('sign-up') as HTMLFormElement;
   const validates = elementOf('sign-up-validates') as HTMLInputElement;
   const failFast = elementOf('sign-up-fail-fast') as HTMLInputElement;
+  const shortDetail = elementOf('sign-up-short-detail') as HTMLInputElement;
   // * an alert holding a list, so the list keeps its semantics
   const unbound = elementOf('sign-up-unbound');
   const unboundList = elementOf('sign-up-unbound-list');
@@ -151,6 +152,21 @@ export const mountSignUp = (client: IClient, { reasonOf }: ISignUpOptions): void
   const sent = new SignUpClient(client);
   const judged = new SignUpClient(client, { validates: true });
   const firstJudged = new SignUpClient(client, { failFast: true, validates: true });
+
+  // * the detail's bound is the client's, built as the page loads (page.ts reads `?detail=short`):
+  // the box says which the page runs under, and a change reloads it under the other, on this tab
+  const url = new URL(location.href);
+  shortDetail.checked = url.searchParams.get('detail') === 'short';
+  shortDetail.addEventListener('change', () => {
+    if (shortDetail.checked) {
+      url.searchParams.set('detail', 'short');
+    } else {
+      url.searchParams.delete('detail');
+    }
+
+    url.hash = 'rules';
+    location.assign(url);
+  });
 
   // a field as it was before any refusal: described by its hint alone
   const clearField = ({ hint, input, messages }: IField): void => {

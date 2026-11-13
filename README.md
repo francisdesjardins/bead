@@ -582,9 +582,9 @@ branches or regions run, then the lines no report ran; with `--floor`, it fails 
 floor, when it measured nothing, or on a measure the floor names and no report measured, and with
 `--summary`, it writes the report into the run's summary. A floor sits half a point under what was measured, and
 rises with `--raise`, never down but by a decision
-([0006](docs/decisions/0006-a-rule-has-its-gate.md)). Each run keeps its reports 14 days, among its
-artifacts: `coverage-typescript`, c8's HTML to browse and its lcov, `coverage-csharp`, the
-cobertura files, and `coverage-rust`, the LLVM export. Locally, the same commands as CI's:
+([0006](docs/decisions/0006-a-rule-has-its-gate.md)). A run that fails keeps its reports 14 days,
+among its artifacts: `coverage-typescript`, c8's HTML to browse and its lcov, `coverage-csharp`,
+the cobertura files, and `coverage-rust`, the LLVM export; a green run's figures are its summary's. Locally, the same commands as CI's:
 
 ```sh
 cd implementations/typescript
