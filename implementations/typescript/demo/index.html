@@ -1885,12 +1885,19 @@
                 <input id="sign-up-fail-fast" type="checkbox" disabled />
                 Stop at the first violation
               </label>
-              <p class="note">
-                A list longer than its detail holds ends <code>and N more</code>: validate before
-                sending under <a href="?detail=short#rules">a 256-byte detail</a> to see it (<a
-                  href="?#rules"
-                  >the default one</a
-                >).
+              <label class="check">
+                <input
+                  id="sign-up-short-detail"
+                  type="checkbox"
+                  aria-describedby="sign-up-short-detail-note"
+                />
+                A detail of 256 bytes
+              </label>
+              <p id="sign-up-short-detail-note" class="note">
+                The client's refusal holds its violations in a detail of 1,024 bytes, or 256 with
+                this checked: a list longer than it holds ends <code>and N more</code>. Validate
+                before sending, then break several fields, to see it. The page reloads with its
+                client so bounded.
               </p>
               <div class="buttons">
                 <button type="submit">Sign up</button>
