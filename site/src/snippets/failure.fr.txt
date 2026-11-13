@@ -4,12 +4,16 @@ import { violationsOf } from '@francisdesjardins/bead/service';
 try {
   await echo('')();
 } catch (reason) {
-  if (reason instanceof FailureError && reason.isApplication(21)) {
+  const failure = reason instanceof FailureError ? reason : undefined;
+
+  if (failure?.isApplication(21)) {
     // le code 21 de la procédure elle-même : elle refuse un texte vide
-  } else if (reason instanceof FailureError && reason.isProtocol(ProtocolCode.SESSION_REQUIRED)) {
-    // le code 32 du protocole : ouvrir une session, ou renouveler son justificatif, puis rappeler
-  } else if (reason instanceof FailureError && reason.isProtocol(ProtocolCode.PAYLOAD_INVALID)) {
-    // le code 52 : chaque violation nomme son champ et sa règle, more compte celles laissées de côté
-    const { more, violations } = violationsOf(reason);
+  } else if (failure?.isProtocol(ProtocolCode.SESSION_REQUIRED)) {
+    // le code 32 du protocole : ouvrir une session, ou renouveler son justificatif,
+    // puis rappeler
+  } else if (failure?.isProtocol(ProtocolCode.PAYLOAD_INVALID)) {
+    // le code 52 : chaque violation nomme son champ et sa règle,
+    // more compte celles laissées de côté
+    const { more, violations } = violationsOf(failure);
   }
 }

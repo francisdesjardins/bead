@@ -85,7 +85,117 @@
 })();
     </script>
     <style>
-/* The site's tokens, as its home has them, and the page's own on top: the code, the byte roles and
+/* Copied unchanged from penumbra at a618d89: change it there, then copy it again. */
+
+/**
+ * Penumbra — the system half of the design system.
+ *
+ * Scale, rhythm, motion and stacking. **No colour and no typeface live here**, which is the whole
+ * point: consumers import this file unchanged and write their own skin beside it. Anything that
+ * would need changing here belongs in that skin. If a `#hex` or a font name appears below, the
+ * split has failed and the file has stopped being portable — `yarn check` refuses it.
+ *
+ * A component asks for a step, never a pixel count. An off-scale literal must carry a comment
+ * saying why it is off-scale — a measured geometry, a UA constant.
+ */
+
+:root {
+  /* ── Space — the 4px grid ────────────────────────────────────────────────────────── */
+  --app-space-1: 4px;
+  --app-space-2: 8px;
+  --app-space-3: 12px;
+  --app-space-4: 16px;
+  --app-space-5: 20px;
+  --app-space-6: 24px;
+  --app-space-8: 32px;
+  --app-space-10: 40px;
+  --app-space-12: 48px;
+  --app-space-14: 56px;
+
+  /* ── Type ramp ───────────────────────────────────────────────────────────────────────
+     A ~1.22 ratio off a 15px body: 11 · 13 · 15 · 18 · 22 · 28 · 36 · 46. Body is `-md`, and it
+     is 15px on purpose — larger than the 14px a component library spends its interface on,
+     smaller than a marketing 16px. This is a documentation app; 15 is the reading size. */
+  --app-text-xs: 0.6875rem;
+  --app-text-sm: 0.8125rem;
+  --app-text-md: 0.9375rem;
+  --app-text-base: 1.125rem;
+  --app-text-lg: 1.375rem;
+  --app-text-xl: 1.75rem;
+  --app-text-2xl: 2.25rem;
+  --app-text-3xl: 2.875rem;
+
+  /* Line heights are tokens too, so a new surface stops inventing a decimal. */
+  --app-lh-tight: 1.15;
+  --app-lh-snug: 1.35;
+  --app-lh-body: 1.6;
+  --app-lh-relaxed: 1.7;
+
+  /* Tracking. Display sizes tighten; the mono eyebrow is the one thing that opens up. */
+  --app-tracking-tight: -0.022em;
+  --app-tracking-snug: -0.01em;
+  --app-tracking-label: 0.14em;
+
+  /* ── Radii ───────────────────────────────────────────────────────────────────────── */
+  --app-radius-sm: 3px;
+  --app-radius: 6px;
+  --app-radius-md: 8px;
+  --app-radius-lg: 12px;
+  --app-radius-xl: 16px;
+  --app-radius-pill: 999px;
+
+  /* ── Motion ──────────────────────────────────────────────────────────────────────────
+     The default curve front-loads the movement and settles hard, rather than easing
+     symmetrically in and out. Per element the difference is small; across a page it is what
+     stops the app feeling like it was assembled from a component library. */
+  --app-quick: 110ms;
+  --app-duration: 200ms;
+  --app-slow: 340ms;
+  --app-ease: cubic-bezier(0.2, 0, 0, 1);
+  --app-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --app-ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+
+  /* ── Layout ──────────────────────────────────────────────────────────────────────────
+     Breakpoints cannot be custom properties (media queries resolve before the cascade), so the
+     two the app uses stay a convention: 600px (sm) and 900px (md), stated here and nowhere
+     re-invented. */
+  --app-topbar-height: 56px;
+  --app-sidebar-width: 248px;
+  --app-content-max-width: 1400px;
+  --app-measure: 68ch;
+  --app-icon-sm: 20px;
+
+  /* ── Stacking ────────────────────────────────────────────────────────────────────────
+     Small numbers, deliberately. The dialog manager assigns 1300+ and a dialog `<dialog>` paints
+     in the top layer where no `z-index` reaches it at all, so the shell only ever has to order
+     itself against itself. */
+  /* The mascot sits below the backdrop, not beside the sidebar. It is fixed, clickable and drifts
+     across the viewport, so a tie with the drawer is not decided by the scale at all — it is
+     decided by document order, and the shells render the mascot last. What that costs is the tap:
+     the drawer's backdrop is `pointer-events: auto` so a tap outside closes it, and a mascot above
+     the backdrop eats that tap while the drawer stays open. Under it, the same tap closes the
+     drawer and the open drawer dims the mascot along with the page. */
+  --app-z-mascot: 10;
+  --app-z-backdrop: 20;
+  --app-z-sidebar: 30;
+  --app-z-topbar: 40;
+
+  --app-scrollbar-width: 10px;
+}
+
+/* Bead's own tokens beside penumbra's system half, which stays as penumbra writes it: what Bead adds
+   to its scale or declares anyway, a deliberate act penumbra's README asks to read as one. The demo
+   links it under the two sheets, and francisdesjardins.ca's Bead page inlines it ahead of its own
+   styles. */
+
+:root {
+  /* how wide what is read by its lines goes beside a reading column, on a screen with room for it:
+     the page's code and the demo's scenes */
+  --app-content-wide-max-width: 1180px;
+}
+
+/* The site's skin, as its home has it, over penumbra's system half and Bead's overrides of it, which
+   the build puts ahead of this sheet; and the page's own tokens on top: the code, the byte roles and
    the diagrams', each of the site's. The light scheme is the root's; the dark one answers to
    `data-color-scheme`, or to the system where no script set it. */
 
@@ -142,39 +252,6 @@
   --app-info-wash: rgb(3 105 161 / 0.1);
   --app-warn: #92400e;
   --app-warn-wash: rgb(146 64 14 / 0.1);
-
-  --app-space-1: 4px;
-  --app-space-2: 8px;
-  --app-space-3: 12px;
-  --app-space-4: 16px;
-  --app-space-5: 20px;
-  --app-space-6: 24px;
-  --app-space-8: 32px;
-  --app-space-10: 40px;
-  --app-space-12: 48px;
-  --app-space-14: 56px;
-  --app-text-xs: 0.6875rem;
-  --app-text-sm: 0.8125rem;
-  --app-text-md: 0.9375rem;
-  --app-text-base: 1.125rem;
-  --app-text-lg: 1.375rem;
-  --app-text-xl: 1.75rem;
-  --app-text-2xl: 2.25rem;
-  --app-text-3xl: 2.875rem;
-  --app-lh-tight: 1.15;
-  --app-lh-snug: 1.35;
-  --app-lh-body: 1.6;
-  --app-tracking-tight: -0.022em;
-  --app-tracking-label: 0.14em;
-  --app-radius-sm: 3px;
-  --app-radius: 6px;
-  --app-radius-md: 8px;
-  --app-radius-lg: 12px;
-  --app-radius-pill: 999px;
-  --app-quick: 110ms;
-  --app-ease: cubic-bezier(0.2, 0, 0, 1);
-  --app-topbar-height: 56px;
-  --app-measure: 68ch;
 
   /* the page's own, each of the site's */
   --focus: var(--app-accent);
@@ -1068,7 +1145,6 @@ th[scope='row'] {
 /* ── Folded detail ────────────────────────────────────────────────────────── */
 
 details.more {
-  max-width: var(--app-measure);
   margin-top: var(--app-space-4);
   border: 1px solid var(--app-divider);
   border-radius: var(--app-radius-md);
@@ -1173,6 +1249,30 @@ pre code {
   margin-top: var(--app-space-2);
   font-size: var(--app-text-sm);
   overflow-wrap: anywhere;
+}
+
+/* code is read by its lines, not at the prose's measure: on a screen with room beside the column,
+   a block of code, or a fold that holds one, widens to the right as far as its longest line asks,
+   to the room the layout leaves there, while its prose keeps the measure; a short block stays as
+   it is. The room: the viewport's right half beside the centred layout (1120px), past its padding,
+   the contents (220px) and their gap, less a margin */
+@media (min-width: 1136px) {
+  :root {
+    --code-room: min(
+      var(--app-content-wide-max-width),
+      calc(50vw + 560px - var(--app-space-4) - 220px - var(--app-space-12) - var(--app-space-8))
+    );
+  }
+  main pre.snippet,
+  main details.more,
+  main .excerpt {
+    width: max-content;
+    min-width: 100%;
+    max-width: var(--code-room);
+  }
+  details.more pre.snippet {
+    max-width: 100%;
+  }
 }
 
 .files {
@@ -1436,7 +1536,9 @@ footer {
 hello.on(<span class="tok-string">'sayHello'</span>, <span class="tok-keyword">async</span> ({ connectionHandle, payload }, response) =&gt; {
   <span class="tok-keyword">const</span> name =
     payload.name === <span class="tok-string">''</span>
-      ? (<span class="tok-keyword">await</span> hello.command.askName({ question: <span class="tok-string">'What is your name?'</span> })({ connectionHandle })).name
+      ? (
+          <span class="tok-keyword">await</span> hello.command.askName({ question: <span class="tok-string">'What is your name?'</span> })({ connectionHandle })
+        ).name
       : payload.name;
 
   <span class="tok-keyword">return</span> response({ greeting: <span class="tok-string">`Hello, ${name}!`</span> });
@@ -1636,13 +1738,15 @@ greeter.on(<span class="tok-string">'askName'</span>, (_request, response) =&gt;
 <span class="tok-keyword">try</span> {
   <span class="tok-keyword">await</span> echo(<span class="tok-string">''</span>)();
 } <span class="tok-keyword">catch</span> (reason) {
-  <span class="tok-keyword">if</span> (reason <span class="tok-keyword">instanceof</span> FailureError &amp;&amp; reason.isApplication(<span class="tok-number">21</span>)) {
+  <span class="tok-keyword">const</span> failure = reason <span class="tok-keyword">instanceof</span> FailureError ? reason : <span class="tok-keyword">undefined</span>;
+
+  <span class="tok-keyword">if</span> (failure?.isApplication(<span class="tok-number">21</span>)) {
     <span class="tok-comment">// the procedure's own code 21: it refuses an empty text</span>
-  } <span class="tok-keyword">else</span> <span class="tok-keyword">if</span> (reason <span class="tok-keyword">instanceof</span> FailureError &amp;&amp; reason.isProtocol(ProtocolCode.SESSION_REQUIRED)) {
+  } <span class="tok-keyword">else</span> <span class="tok-keyword">if</span> (failure?.isProtocol(ProtocolCode.SESSION_REQUIRED)) {
     <span class="tok-comment">// the protocol's code 32: open a session, or renew its credential, then call again</span>
-  } <span class="tok-keyword">else</span> <span class="tok-keyword">if</span> (reason <span class="tok-keyword">instanceof</span> FailureError &amp;&amp; reason.isProtocol(ProtocolCode.PAYLOAD_INVALID)) {
+  } <span class="tok-keyword">else</span> <span class="tok-keyword">if</span> (failure?.isProtocol(ProtocolCode.PAYLOAD_INVALID)) {
     <span class="tok-comment">// code 52: each violation names its field and its rule, more counts those left out</span>
-    <span class="tok-keyword">const</span> { more, violations } = violationsOf(reason);
+    <span class="tok-keyword">const</span> { more, violations } = violationsOf(failure);
   }
 }</code></pre>
 </section>
@@ -2721,8 +2825,12 @@ data: {"code":2,"scope":"application","status":400,"title":"COUNTED","type":"htt
       counts.
     </p>
     <pre class="snippet" tabindex="0"><code class="language-typescript">transport.on(<span class="tok-string">'refusal'</span>, ({ address, authority, origin, port, reason, status }) =&gt; {
-  <span class="tok-comment">// 403 host-refused: authority "rebind.example:8080", origin "http://rebind.example:8080", from 127.0.0.1:53114</span>
-  console.warn(<span class="tok-string">`refused ${status} ${reason}: authority ${JSON.stringify(authority)}, origin ${JSON.stringify(origin)}, from ${address}:${port}`</span>);
+  <span class="tok-comment">// 403 host-refused: authority "rebind.example:8080", origin "http://rebind.example:8080",</span>
+  <span class="tok-comment">// from 127.0.0.1:53114</span>
+  console.warn(
+    <span class="tok-string">`refused ${status} ${reason}: authority ${JSON.stringify(authority)}, `</span> +
+      <span class="tok-string">`origin ${JSON.stringify(origin)}, from ${address}:${port}`</span>
+  );
 });</code></pre>
   </details>
   <details class="more" id="securite-acces">
@@ -2734,10 +2842,17 @@ data: {"code":2,"scope":"application","status":400,"title":"COUNTED","type":"htt
       failure without its secrets. A JWT refused for <code>exp</code> or <code>kid</code> thus tells
       the operator whether a clock drifted or a key rotated (§13.12).
     </p>
-    <pre class="snippet" tabindex="0"><code class="language-typescript">server.router.on(<span class="tok-string">'accessRefused'</span>, ({ address, code, credentialScheme, port, procedureId, reason, serviceId, stage }) =&gt; {
-  <span class="tok-comment">// credential 32 exp: an expired JWT, scheme 2, service 1, procedure 4, from 203.0.113.7:53114</span>
-  console.warn(<span class="tok-string">`refused ${stage} ${code} ${reason ?? ''}: scheme ${credentialScheme}, ${serviceId}/${procedureId}, from ${address}:${port}`</span>);
-});</code></pre>
+    <pre class="snippet" tabindex="0"><code class="language-typescript">server.router.on(
+  <span class="tok-string">'accessRefused'</span>,
+  ({ address, code, credentialScheme, port, procedureId, reason, serviceId, stage }) =&gt; {
+    <span class="tok-comment">// credential 32 exp: an expired JWT, scheme 2, service 1, procedure 4,</span>
+    <span class="tok-comment">// from 203.0.113.7:53114</span>
+    console.warn(
+      <span class="tok-string">`refused ${stage} ${code} ${reason ?? ''}: scheme ${credentialScheme}, `</span> +
+        <span class="tok-string">`${serviceId}/${procedureId}, from ${address}:${port}`</span>
+    );
+  }
+);</code></pre>
   </details>
   <details class="more" id="securite-bornes">
     <summary>What a peer holds of a server</summary>
@@ -3531,7 +3646,9 @@ disallowed-types = [
 hello.on(<span class="tok-string">'sayHello'</span>, <span class="tok-keyword">async</span> ({ connectionHandle, payload }, response) =&gt; {
   <span class="tok-keyword">const</span> name =
     payload.name === <span class="tok-string">''</span>
-      ? (<span class="tok-keyword">await</span> hello.command.askName({ question: <span class="tok-string">'What is your name?'</span> })({ connectionHandle })).name
+      ? (
+          <span class="tok-keyword">await</span> hello.command.askName({ question: <span class="tok-string">'What is your name?'</span> })({ connectionHandle })
+        ).name
       : payload.name;
 
   <span class="tok-keyword">return</span> response({ greeting: <span class="tok-string">`Hello, ${name}!`</span> });
@@ -3733,13 +3850,17 @@ greeter.on(<span class="tok-string">'askName'</span>, (_request, response) =&gt;
 <span class="tok-keyword">try</span> {
   <span class="tok-keyword">await</span> echo(<span class="tok-string">''</span>)();
 } <span class="tok-keyword">catch</span> (reason) {
-  <span class="tok-keyword">if</span> (reason <span class="tok-keyword">instanceof</span> FailureError &amp;&amp; reason.isApplication(<span class="tok-number">21</span>)) {
+  <span class="tok-keyword">const</span> failure = reason <span class="tok-keyword">instanceof</span> FailureError ? reason : <span class="tok-keyword">undefined</span>;
+
+  <span class="tok-keyword">if</span> (failure?.isApplication(<span class="tok-number">21</span>)) {
     <span class="tok-comment">// le code 21 de la procédure elle-même : elle refuse un texte vide</span>
-  } <span class="tok-keyword">else</span> <span class="tok-keyword">if</span> (reason <span class="tok-keyword">instanceof</span> FailureError &amp;&amp; reason.isProtocol(ProtocolCode.SESSION_REQUIRED)) {
-    <span class="tok-comment">// le code 32 du protocole : ouvrir une session, ou renouveler son justificatif, puis rappeler</span>
-  } <span class="tok-keyword">else</span> <span class="tok-keyword">if</span> (reason <span class="tok-keyword">instanceof</span> FailureError &amp;&amp; reason.isProtocol(ProtocolCode.PAYLOAD_INVALID)) {
-    <span class="tok-comment">// le code 52 : chaque violation nomme son champ et sa règle, more compte celles laissées de côté</span>
-    <span class="tok-keyword">const</span> { more, violations } = violationsOf(reason);
+  } <span class="tok-keyword">else</span> <span class="tok-keyword">if</span> (failure?.isProtocol(ProtocolCode.SESSION_REQUIRED)) {
+    <span class="tok-comment">// le code 32 du protocole : ouvrir une session, ou renouveler son justificatif,</span>
+    <span class="tok-comment">// puis rappeler</span>
+  } <span class="tok-keyword">else</span> <span class="tok-keyword">if</span> (failure?.isProtocol(ProtocolCode.PAYLOAD_INVALID)) {
+    <span class="tok-comment">// le code 52 : chaque violation nomme son champ et sa règle,</span>
+    <span class="tok-comment">// more compte celles laissées de côté</span>
+    <span class="tok-keyword">const</span> { more, violations } = violationsOf(failure);
   }
 }</code></pre>
 </section>
@@ -4854,8 +4975,12 @@ data: {"code":2,"scope":"application","status":400,"title":"COUNTED","type":"htt
       <code>unnamedProxies</code>.
     </p>
     <pre class="snippet" tabindex="0"><code class="language-typescript">transport.on(<span class="tok-string">'refusal'</span>, ({ address, authority, origin, port, reason, status }) =&gt; {
-  <span class="tok-comment">// 403 host-refused : autorité "rebind.example:8080", origine "http://rebind.example:8080", de 127.0.0.1:53114</span>
-  console.warn(<span class="tok-string">`refusé ${status} ${reason} : autorité ${JSON.stringify(authority)}, origine ${JSON.stringify(origin)}, de ${address}:${port}`</span>);
+  <span class="tok-comment">// 403 host-refused : autorité "rebind.example:8080", origine "http://rebind.example:8080",</span>
+  <span class="tok-comment">// de 127.0.0.1:53114</span>
+  console.warn(
+    <span class="tok-string">`refusé ${status} ${reason} : autorité ${JSON.stringify(authority)}, `</span> +
+      <span class="tok-string">`origine ${JSON.stringify(origin)}, de ${address}:${port}`</span>
+  );
 });</code></pre>
   </details>
   <details class="more" id="securite-acces">
@@ -4868,10 +4993,17 @@ data: {"code":2,"scope":"application","status":400,"title":"COUNTED","type":"htt
       <code>kid</code> dit ainsi à l’exploitant si une horloge a dérivé ou si une clé a tourné
       (§13.12).
     </p>
-    <pre class="snippet" tabindex="0"><code class="language-typescript">server.router.on(<span class="tok-string">'accessRefused'</span>, ({ address, code, credentialScheme, port, procedureId, reason, serviceId, stage }) =&gt; {
-  <span class="tok-comment">// credential 32 exp : un JWT expiré, schéma 2, service 1, procédure 4, de 203.0.113.7:53114</span>
-  console.warn(<span class="tok-string">`refusé ${stage} ${code} ${reason ?? ''} : schéma ${credentialScheme}, ${serviceId}/${procedureId}, de ${address}:${port}`</span>);
-});</code></pre>
+    <pre class="snippet" tabindex="0"><code class="language-typescript">server.router.on(
+  <span class="tok-string">'accessRefused'</span>,
+  ({ address, code, credentialScheme, port, procedureId, reason, serviceId, stage }) =&gt; {
+    <span class="tok-comment">// credential 32 exp : un JWT expiré, schéma 2, service 1, procédure 4,</span>
+    <span class="tok-comment">// de 203.0.113.7:53114</span>
+    console.warn(
+      <span class="tok-string">`refusé ${stage} ${code} ${reason ?? ''} : schéma ${credentialScheme}, `</span> +
+        <span class="tok-string">`${serviceId}/${procedureId}, de ${address}:${port}`</span>
+    );
+  }
+);</code></pre>
   </details>
   <details class="more" id="securite-bornes">
     <summary>Ce qu’un pair tient d’un serveur</summary>

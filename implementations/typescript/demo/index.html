@@ -11,6 +11,7 @@
     />
     <link rel="stylesheet" href="penumbra/tokens.system.css" />
     <link rel="stylesheet" href="penumbra/tokens.skin.base.css" />
+    <link rel="stylesheet" href="penumbra/tokens.system.overrides.css" />
     <style>
       /* the demo's skin over penumbra's two sheets: francisdesjardins.ca's brand, the eleven
          declarations of its tokens.skin.css and the violet neutrals it paints with, and the colours
@@ -463,6 +464,8 @@
         max-width: 1360px;
         margin: 0 auto;
         padding: var(--app-space-10) max(var(--app-space-4), 3vw) var(--app-space-14);
+        /* how wide the scenes go, which a wide screen widens */
+        --scenes-max-width: 860px;
       }
 
       .scenes {
@@ -470,9 +473,17 @@
         align-content: start;
         gap: var(--app-space-6);
         width: 100%;
-        max-width: 860px;
+        max-width: var(--scenes-max-width);
         min-width: 0;
         margin: 0 auto;
+      }
+
+      /* a wide screen: the scenes take the room francisdesjardins.ca's Bead page gives its code,
+         the wide width of Bead's overrides of penumbra, the intro keeping its measure */
+      @media (min-width: 1136px) {
+        .layout {
+          --scenes-max-width: var(--app-content-wide-max-width);
+        }
       }
 
       .intro {
@@ -505,19 +516,19 @@
         display: none;
       }
 
-      /* the scenes' tabs, on one line: past a phone's width, they scroll within it */
+      /* the scenes' tabs, on one line: past a phone's width, they scroll within it, sideways
+         alone; the hairline is drawn inside the list, where the selected tab's bar covers it, so
+         that no tab reaches past the list and asks a scroll of its own */
       .scene-tabs {
         display: flex;
         gap: var(--app-space-1);
-        overflow-x: auto;
-        border-bottom: 1px solid var(--app-divider);
+        overflow: auto hidden;
+        box-shadow: inset 0 -1px 0 var(--app-divider);
         scrollbar-width: thin;
       }
 
       .scene-tabs [role='tab'] {
         flex: none;
-        /* the selected tab's bar lies on the list's hairline */
-        margin-bottom: -1px;
         padding: 0 var(--app-space-3);
         border: 0;
         border-bottom: 2px solid transparent;

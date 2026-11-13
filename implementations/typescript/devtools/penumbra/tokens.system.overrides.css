@@ -1,0 +1,10 @@
+/* Bead's own tokens beside penumbra's system half, which stays as penumbra writes it: what Bead adds
+   to its scale or declares anyway, a deliberate act penumbra's README asks to read as one. The demo
+   links it under the two sheets, and francisdesjardins.ca's Bead page inlines it ahead of its own
+   styles. */
+
+:root {
+  /* how wide what is read by its lines goes beside a reading column, on a screen with room for it:
+     the page's code and the demo's scenes */
+  --app-content-wide-max-width: 1180px;
+}

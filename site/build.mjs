@@ -40,6 +40,11 @@ import {
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '..');
 const SRC = join(HERE, 'src');
+// penumbra's system half, Bead's copy of it, and Bead's overrides of it, which the demo links too:
+// the page's styles come on top of both
+const PENUMBRA = join(ROOT, 'implementations', 'typescript', 'devtools', 'penumbra');
+const SYSTEM = join(PENUMBRA, 'tokens.system.css');
+const OVERRIDES = join(PENUMBRA, 'tokens.system.overrides.css');
 const DIAGRAMS = join(HERE, 'diagrams');
 export const OUT = join(HERE, 'dist', 'index.html');
 
@@ -794,7 +799,13 @@ export const build = () => {
   );
   const page = shell
     .replace('{{style}}', () => {
-      return read(join(SRC, 'styles.css')).trim();
+      // * penumbra's system half and Bead's overrides of it, as the demo has them, then the page's
+      // styles over them
+      return [SYSTEM, OVERRIDES, join(SRC, 'styles.css')]
+        .map((path) => {
+          return read(path).trim();
+        })
+        .join('\n\n');
     })
     .replace('{{head-script}}', () => {
       return read(join(SRC, 'head.js')).trim();

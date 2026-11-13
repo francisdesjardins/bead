@@ -1,4 +1,5 @@
-/* The site's tokens, as its home has them, and the page's own on top: the code, the byte roles and
+/* The site's skin, as its home has it, over penumbra's system half and Bead's overrides of it, which
+   the build puts ahead of this sheet; and the page's own tokens on top: the code, the byte roles and
    the diagrams', each of the site's. The light scheme is the root's; the dark one answers to
    `data-color-scheme`, or to the system where no script set it. */
 
@@ -55,39 +56,6 @@
   --app-info-wash: rgb(3 105 161 / 0.1);
   --app-warn: #92400e;
   --app-warn-wash: rgb(146 64 14 / 0.1);
-
-  --app-space-1: 4px;
-  --app-space-2: 8px;
-  --app-space-3: 12px;
-  --app-space-4: 16px;
-  --app-space-5: 20px;
-  --app-space-6: 24px;
-  --app-space-8: 32px;
-  --app-space-10: 40px;
-  --app-space-12: 48px;
-  --app-space-14: 56px;
-  --app-text-xs: 0.6875rem;
-  --app-text-sm: 0.8125rem;
-  --app-text-md: 0.9375rem;
-  --app-text-base: 1.125rem;
-  --app-text-lg: 1.375rem;
-  --app-text-xl: 1.75rem;
-  --app-text-2xl: 2.25rem;
-  --app-text-3xl: 2.875rem;
-  --app-lh-tight: 1.15;
-  --app-lh-snug: 1.35;
-  --app-lh-body: 1.6;
-  --app-tracking-tight: -0.022em;
-  --app-tracking-label: 0.14em;
-  --app-radius-sm: 3px;
-  --app-radius: 6px;
-  --app-radius-md: 8px;
-  --app-radius-lg: 12px;
-  --app-radius-pill: 999px;
-  --app-quick: 110ms;
-  --app-ease: cubic-bezier(0.2, 0, 0, 1);
-  --app-topbar-height: 56px;
-  --app-measure: 68ch;
 
   /* the page's own, each of the site's */
   --focus: var(--app-accent);
@@ -981,7 +949,6 @@ th[scope='row'] {
 /* ── Folded detail ────────────────────────────────────────────────────────── */
 
 details.more {
-  max-width: var(--app-measure);
   margin-top: var(--app-space-4);
   border: 1px solid var(--app-divider);
   border-radius: var(--app-radius-md);
@@ -1086,6 +1053,30 @@ pre code {
   margin-top: var(--app-space-2);
   font-size: var(--app-text-sm);
   overflow-wrap: anywhere;
+}
+
+/* code is read by its lines, not at the prose's measure: on a screen with room beside the column,
+   a block of code, or a fold that holds one, widens to the right as far as its longest line asks,
+   to the room the layout leaves there, while its prose keeps the measure; a short block stays as
+   it is. The room: the viewport's right half beside the centred layout (1120px), past its padding,
+   the contents (220px) and their gap, less a margin */
+@media (min-width: 1136px) {
+  :root {
+    --code-room: min(
+      var(--app-content-wide-max-width),
+      calc(50vw + 560px - var(--app-space-4) - 220px - var(--app-space-12) - var(--app-space-8))
+    );
+  }
+  main pre.snippet,
+  main details.more,
+  main .excerpt {
+    width: max-content;
+    min-width: 100%;
+    max-width: var(--code-room);
+  }
+  details.more pre.snippet {
+    max-width: 100%;
+  }
 }
 
 .files {
