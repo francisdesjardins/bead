@@ -4,6 +4,7 @@
 
 use bytes::Bytes;
 
+use super::super::adapter::count_of;
 use super::{
     Connect, LARGEST_PACKET_SIZE, MqttAcknowledgement, MqttConnack, MqttDisconnect, MqttPacket,
     MqttPublish, MqttPublishShapeOptions, MqttReading, MqttRefusal, Will, group_filter_of,
@@ -108,6 +109,10 @@ fn reads_a_publish_of_qos_0_and_1_its_life_and_its_retain() {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "each acknowledgement read in its every shape, as the other sides read it"
+)]
 fn reads_each_acknowledgement_its_reason_code_left_out_or_given() {
     assert_eq!(
         packet(&[0x40, 0x02, 0x00, 0x05]),
@@ -154,9 +159,41 @@ fn reads_each_acknowledgement_its_reason_code_left_out_or_given() {
         }),
         "an UNSUBACK of 0x11"
     );
-    // ? a Reason Code past the one filter its SUBSCRIBE or UNSUBSCRIBE named ([MQTT-3.9.3-2],
-    // [MQTT-3.11.3-2]) read as it comes, its adapter reading its first: where is such a count
-    // judged, and how? A row of docs/support.md
+
+    // * a code of 0x80 or more its table does not name read all the same, a refusal its adapter
+    // tells by its code: 0x95, which Mosquitto 2.1.2 sends past its `message_size_limit`
+    for (bytes, read) in [
+        (
+            [0x40, 0x03, 0x00, 0x05, 0x95].as_slice(),
+            MqttPacket::Puback(MqttAcknowledgement {
+                packet_identifier: 5,
+                reason_codes: vec![0x95],
+                reason_string: None,
+            }),
+        ),
+        (
+            [0x90, 0x04, 0x00, 0x01, 0x00, 0x95].as_slice(),
+            MqttPacket::Suback(MqttAcknowledgement {
+                packet_identifier: 1,
+                reason_codes: vec![0x95],
+                reason_string: None,
+            }),
+        ),
+        (
+            [0xB0, 0x04, 0x00, 0x02, 0x00, 0x95].as_slice(),
+            MqttPacket::Unsuback(MqttAcknowledgement {
+                packet_identifier: 2,
+                reason_codes: vec![0x95],
+                reason_string: None,
+            }),
+        ),
+    ] {
+        assert_eq!(packet(bytes), read, "{bytes:02X?}");
+    }
+
+    // * a Reason Code past the one filter its SUBSCRIBE or UNSUBSCRIBE named read as it comes, each
+    // judged by its table: its adapter judges their count, its link lost on any but one
+    // ([MQTT-3.8.4-6], [MQTT-3.11.3-2]; spec 15.29)
     assert_eq!(
         packet(&[0x90, 0x05, 0x00, 0x01, 0x00, 0x01, 0x01]),
         MqttPacket::Suback(MqttAcknowledgement {
@@ -347,9 +384,123 @@ fn reads_a_packet_at_its_bound_and_the_next_in_the_same_read_as_they_came() {
     );
 }
 
+// the twin of the TypeScript guard's sentence of the same words: its reader refuses a code under
+// 0x80 its table does not name, and its adapter a count other than one, `count_of`; each after
+// what came before it in that read, which is read whole
+#[test]
+fn trips_on_an_acknowledgement_of_a_code_under_0x80_its_table_does_not_name_or_of_a_count_of_codes_other_than_one_handing_on_what_came_before_it()
+ {
+    let unnamed = "a Reason Code its table does not name";
+    // * what its reader refuses, in its words where its table's check finds it first
+    let refused: [(&[u8], Option<String>); 10] = [
+        (
+            &[0x40, 0x03, 0x00, 0x01, 0x01],
+            Some(format!("a PUBACK of 0x01, {unnamed}")),
+        ),
+        // its reserved flags set: refused for them, ahead of its code
+        (&[0x42, 0x03, 0x00, 0x01, 0x01], None),
+        (
+            &[0x90, 0x04, 0x00, 0x01, 0x00, 0x03],
+            Some(format!("a SUBACK of 0x03, {unnamed}")),
+        ),
+        // a property MQTT 5 does not define: refused for it, ahead of its code
+        (&[0x90, 0x06, 0x00, 0x01, 0x02, 0x7F, 0x00, 0x03], None),
+        (
+            &[0xB0, 0x04, 0x00, 0x01, 0x00, 0x01],
+            Some(format!("an UNSUBACK of 0x01, {unnamed}")),
+        ),
+        // ! of no code, in its reader's own words
+        (&[0x90, 0x03, 0x00, 0x01, 0x00], None),
+        (&[0xB0, 0x03, 0x00, 0x01, 0x00], None),
+        // ! no Property Length at all, and one still continuing at its body's last byte
+        (&[0xB0, 0x02, 0x00, 0x01], None),
+        (&[0x90, 0x03, 0x00, 0x01, 0x80], None),
+        (&[0xB0, 0x03, 0x00, 0x01, 0x80], None),
+    ];
+    // * what its reader reads, of a count other than one, which its adapter refuses
+    let counted: [(&[u8], &str); 3] = [
+        (
+            &[0x90, 0x05, 0x00, 0x01, 0x00, 0x01, 0x01],
+            "a SUBACK of 2 Reason Codes for one filter",
+        ),
+        (
+            &[0x90, 0x05, 0x00, 0x01, 0x00, 0x01, 0x87],
+            "a SUBACK of 2 Reason Codes for one filter",
+        ),
+        (
+            &[0xB0, 0x05, 0x00, 0x01, 0x00, 0x00, 0x11],
+            "an UNSUBACK of 2 Reason Codes for one filter",
+        ),
+    ];
+
+    for (bytes, said) in refused {
+        // behind a PINGRESP in one read: the PINGRESP read whole, then the packet refused
+        let mut read_whole = vec![0xD0, 0x00];
+
+        read_whole.extend_from_slice(bytes);
+        read_whole.extend_from_slice(&[0x30, 0x00]);
+        assert_eq!(
+            read(&read_whole),
+            Ok(MqttReading::Packet {
+                packet: MqttPacket::Pingresp,
+                length: 2,
+            }),
+            "{bytes:02X?}: the PINGRESP before it"
+        );
+
+        let why = refusal(&read_whole[2..]);
+
+        if let Some(said) = said {
+            assert_eq!(why, said, "{bytes:02X?}");
+        }
+
+        // a byte a read: nothing of it read, each first bytes awaited or, its flags, refused
+        for end in 1..bytes.len() {
+            assert!(
+                !matches!(read(&bytes[..end]), Ok(MqttReading::Packet { .. })),
+                "{bytes:02X?}: its first {end}"
+            );
+        }
+    }
+
+    for (bytes, said) in counted {
+        assert_eq!(
+            count_of(&packet(bytes)).as_deref(),
+            Some(said),
+            "{bytes:02X?}"
+        );
+    }
+
+    // and nothing its table names, of one code, trips it: a PUBACK of none, one of 0x95, a SUBACK
+    // of 0x01
+    for bytes in [
+        &[0x40, 0x02, 0x00, 0x01][..],
+        &[0x40, 0x03, 0x00, 0x01, 0x95],
+        &[0x90, 0x04, 0x00, 0x01, 0x00, 0x01],
+    ] {
+        assert_eq!(count_of(&packet(bytes)), None, "{bytes:02X?}");
+    }
+}
+
+// the twin of the TypeScript guard's sentence of the same words: what the other sides' guards
+// leave to their library, its reader, this side's library, refuses for its Property Length
+#[test]
+fn leaves_to_the_library_an_acknowledgement_whose_property_length_it_cannot_follow_judging_nothing_more()
+ {
+    // a Property Length past its body, and one still continuing at its fourth byte
+    for bytes in [
+        &[0x90, 0x03, 0x00, 0x01, 0x05][..],
+        &[0x90, 0x07, 0x00, 0x01, 0x80, 0x80, 0x80, 0x80, 0x01],
+    ] {
+        let why = refusal(bytes);
+
+        assert!(!why.contains("Reason Code"), "{bytes:02X?}: {why}");
+    }
+}
+
 #[test]
 fn refuses_what_is_malformed_and_what_no_client_reads() {
-    let cases: [(&[u8], &str); 16] = [
+    let cases: [(&[u8], &str); 19] = [
         (&[0xF0, 0x00], "an AUTH"),
         (&[0x10, 0x00], "a CONNECT"),
         (&[0x82, 0x00], "a SUBSCRIBE"),
@@ -369,6 +520,11 @@ fn refuses_what_is_malformed_and_what_no_client_reads() {
         (&[0x40, 0x02, 0x00, 0x00], "a Packet Identifier of 0"),
         (&[0x90, 0x03, 0x00, 0x01, 0x00], "no filter"),
         (&[0xD0, 0x01, 0x00], "bytes past"),
+        // a Reason Code under 0x80 its packet's table does not name, a Protocol Error
+        // ([MQTT-3.4.2-1], [MQTT-3.9.3-2], [MQTT-3.11.3-2]; spec 15.29)
+        (&[0x40, 0x03, 0x00, 0x01, 0x01], "a PUBACK of 0x01"),
+        (&[0x90, 0x04, 0x00, 0x01, 0x00, 0x03], "a SUBACK of 0x03"),
+        (&[0xB0, 0x04, 0x00, 0x02, 0x00, 0x01], "an UNSUBACK of 0x01"),
     ];
 
     for (bytes, said) in cases {

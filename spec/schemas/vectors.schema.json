@@ -19,6 +19,7 @@
     "parcels",
     "parcelRefusals",
     "mqttPublishBounds",
+    "mqttAcknowledgementCodes",
     "amqpMessages",
     "amqpPublishBounds"
   ],
@@ -361,6 +362,32 @@
             "description": "The bytes of the PUBLISH that payload makes, or null where none fits.",
             "type": ["integer", "null"],
             "minimum": 1
+          }
+        }
+      }
+    },
+    "mqttAcknowledgementCodes": {
+      "description": "The Reason Codes each MQTT 5 acknowledgement's table names, against which a side judges every code from 0x00 to 0xFF: named, read as its table says; 0x80 or more and not named, a refusal of its request; under 0x80 and not named, a packet its client cannot read (sections 15.27 to 15.29).",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "clauses", "packet", "type", "named"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "$ref": "common.schema.json#/$defs/name" },
+          "clauses": { "$ref": "common.schema.json#/$defs/clauses" },
+          "packet": { "enum": ["PUBACK", "SUBACK", "UNSUBACK"] },
+          "type": {
+            "description": "Its fixed header's packet type: PUBACK 4, SUBACK 9, UNSUBACK 11.",
+            "enum": [4, 9, 11]
+          },
+          "named": {
+            "description": "The Reason Codes its packet's table names, ascending.",
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "type": "integer", "minimum": 0, "maximum": 255 }
           }
         }
       }

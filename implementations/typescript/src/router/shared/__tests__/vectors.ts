@@ -142,6 +142,15 @@ export interface IAmqpPublishBoundVector {
   name: string;
 }
 
+/** The Reason Codes an MQTT 5 acknowledgement's table names, ascending (spec 15.27 to 15.29). */
+export interface IMqttAcknowledgementCodesVector {
+  clauses: string[];
+  name: string;
+  named: number[];
+  packet: 'PUBACK' | 'SUBACK' | 'UNSUBACK';
+  type: 4 | 9 | 11;
+}
+
 export interface IMqttPublishBoundVector {
   clauses: string[];
   expiry: boolean;
@@ -175,6 +184,7 @@ export interface IVectors {
   headerRefusals: IRefusalVector[];
   headers: (INamed & { header: EnvelopeHeader })[];
   jwtVerdicts: IJwtVerdictVector[];
+  mqttAcknowledgementCodes: IMqttAcknowledgementCodesVector[];
   mqttPublishBounds: IMqttPublishBoundVector[];
   parcelRefusals: IParcelRefusalVector[];
   parcels: IParcelVector[];

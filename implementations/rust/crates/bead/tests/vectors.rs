@@ -5,10 +5,10 @@ use std::collections::BTreeMap;
 use std::process::ExitCode;
 
 use bead::internal::{
-    LARGEST_PACKET_SIZE, LARGEST_REMAINING_LENGTH, MAXIMUM_DETAIL_BYTES, MqttPublish,
-    MqttPublishShapeOptions, ReadEnvelopeOptions, ReadHeader, header_bytes_of, largest_payload,
-    publish_bytes, read_envelope, read_failure, read_header, read_prefix, verify_jwt,
-    write_envelope, write_header, write_publish,
+    LARGEST_PACKET_SIZE, LARGEST_REMAINING_LENGTH, MAXIMUM_DETAIL_BYTES, MqttPacket, MqttPublish,
+    MqttPublishShapeOptions, MqttReading, ReadEnvelopeOptions, ReadHeader, header_bytes_of,
+    largest_payload, publish_bytes, read_envelope, read_failure, read_header, read_packet,
+    read_prefix, verify_jwt, write_envelope, write_header, write_publish,
 };
 use bead::json::JsonRefusal;
 use bead::testing::instants;
@@ -863,6 +863,89 @@ fn mqtt_publish_bounds() -> Result<Vec<Trial>, String> {
     .with_kind("mqttPublishBounds")])
 }
 
+/// A row of `mqttAcknowledgementCodes`: a packet, its type, and the Reason Codes its table names.
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MqttAcknowledgementCodes {
+    name: String,
+    #[serde(rename = "clauses")]
+    _clauses: Vec<String>,
+    packet: String,
+    #[serde(rename = "type")]
+    kind: u8,
+    named: Vec<u8>,
+}
+
+// a packet of its row's type answering identifier 1 with `code`: a PUBACK's code after its
+// identifier, a SUBACK's and an UNSUBACK's after its properties' length
+fn acknowledgement_bytes(kind: u8, code: u8) -> Vec<u8> {
+    let first = kind.checked_shl(4).unwrap_or_default();
+
+    if kind == 4 {
+        vec![first, 0x03, 0x00, 0x01, code]
+    } else {
+        vec![first, 0x04, 0x00, 0x01, 0x00, code]
+    }
+}
+
+// spec 15.27, 15.28, 15.29: every code of each row read by its packet's table, named, a refusal of
+// 0x80 or more, or under 0x80 a packet its client cannot read
+fn mqtt_acknowledgement_codes() -> Result<Vec<Trial>, String> {
+    let entries: Vec<MqttAcknowledgementCodes> = vectors::of("mqttAcknowledgementCodes")?;
+
+    Ok(vec![
+        Trial::test("plays_mqtt_acknowledgement_codes", move || {
+            hold(entries.len() == 3, || format!("{} rows", entries.len()))?;
+
+            for vector in &entries {
+                let name = &vector.name;
+
+                for code in 0..=u8::MAX {
+                    let bytes = acknowledgement_bytes(vector.kind, code);
+                    let is_named = vector.named.contains(&code);
+
+                    match read_packet(&bytes, LARGEST_PACKET_SIZE) {
+                        Ok(MqttReading::Packet { packet, .. }) => {
+                            let ((4, MqttPacket::Puback(read))
+                            | (9, MqttPacket::Suback(read))
+                            | (11, MqttPacket::Unsuback(read))) = (vector.kind, &packet)
+                            else {
+                                return Err(format!(
+                                    "{name}: 0x{code:02X} read as {packet:?}, no {}",
+                                    vector.packet
+                                )
+                                .into());
+                            };
+
+                            // * named, or a refusal its adapter tells by a code of 0x80 or more
+                            hold(is_named || code >= 0x80, || {
+                                format!("{name}: 0x{code:02X}, unreadable, read")
+                            })?;
+                            hold(read.reason_code() == code, || {
+                                format!("{name}: 0x{code:02X} read as {:?}", read.reason_codes)
+                            })?;
+                        }
+                        Ok(MqttReading::Partial) => {
+                            return Err(format!("{name}: 0x{code:02X} wants more bytes").into());
+                        }
+                        Err(refusal) => {
+                            hold(!is_named && code < 0x80, || {
+                                format!("{name}: 0x{code:02X} refused: {refusal}")
+                            })?;
+                            hold(refusal.to_string().contains(&vector.packet), || {
+                                format!("{name}: 0x{code:02X} refused as {refusal}")
+                            })?;
+                        }
+                    }
+                }
+            }
+
+            Ok(())
+        })
+        .with_kind("mqttAcknowledgementCodes"),
+    ])
+}
+
 fn main() -> ExitCode {
     let arguments = Arguments::from_args();
     let mut trials = Vec::new();
@@ -878,6 +961,7 @@ fn main() -> ExitCode {
         credential_refusals(),
         parcels(),
         mqtt_publish_bounds(),
+        mqtt_acknowledgement_codes(),
     ] {
         match group {
             Ok(group) => trials.extend(group),

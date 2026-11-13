@@ -7,7 +7,10 @@
 //! CONNACK, PUBLISH, PUBACK, SUBACK, UNSUBACK, PINGRESP and DISCONNECT, each property in any order
 //! §2.2.2 allows, and refuses AUTH, which no CONNECT of Bead's asks for, and every packet a broker
 //! never sends a client. Its reader parses a peer's bytes by checked operations alone, refusing
-//! what is malformed or past its bound, and never panics.
+//! what is malformed or past its bound, and never panics. It judges a PUBACK's, a SUBACK's and an
+//! UNSUBACK's Reason Codes by their packet's table, which `mqttAcknowledgementCodes` holds every
+//! side to with no broker (spec 15.27 to 15.29): one under 0x80 its table does not name refused as
+//! a Protocol Error, one of 0x80 or more read, a refusal whether or not its table names it.
 
 use bytes::Bytes;
 
@@ -109,6 +112,17 @@ const DISCONNECT_PROPERTIES: [u8; 4] = [
     SERVER_REFERENCE,
 ];
 
+/// PUBACK's Reason Codes, its table's (MQTT 5.0 §3.4.2.1).
+pub(crate) const PUBACK_CODES: [u8; 9] = [0x00, 0x10, 0x80, 0x83, 0x87, 0x90, 0x91, 0x97, 0x99];
+
+/// SUBACK's Reason Codes, its table's (MQTT 5.0 §3.9.3, Table 3-8).
+pub(crate) const SUBACK_CODES: [u8; 12] = [
+    0x00, 0x01, 0x02, 0x80, 0x83, 0x87, 0x8F, 0x91, 0x97, 0x9E, 0xA1, 0xA2,
+];
+
+/// UNSUBACK's Reason Codes, its table's (MQTT 5.0 §3.11.3, Table 3-9).
+pub(crate) const UNSUBACK_CODES: [u8; 7] = [0x00, 0x11, 0x80, 0x83, 0x87, 0x8F, 0x91];
+
 // a subscription's options: QoS 1, No Local 0, Retain As Published 0, Retain Handling 2 (MQTT 5.0
 // §3.8.3.1; spec 15.27)
 const SUBSCRIPTION_OPTIONS: u8 = 0b0010_0001;
@@ -153,6 +167,46 @@ fn malformed<S: Into<String>>(why: S) -> MqttRefusal {
 
 fn short() -> MqttRefusal {
     malformed("it ends before what it holds")
+}
+
+/// What an acknowledgement's Reason Code says against its packet's table, the three verdicts of
+/// `mqttAcknowledgementCodes` (spec 15.27 to 15.29; MQTT 5.0 §2.4, §4.13).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CodeVerdict {
+    /// One its table names: its table's meaning.
+    Named,
+    /// One of 0x80 or more its table does not name: a refusal all the same (MQTT 5.0 §2.4,
+    /// §4.13.2).
+    Refusal,
+    /// One under 0x80 its table does not name: a Protocol Error, a packet no client reads
+    /// ([MQTT-3.4.2-1], [MQTT-3.9.3-2], [MQTT-3.11.3-2]).
+    Unreadable,
+}
+
+/// `code` judged against `table`, its packet's.
+pub(crate) fn verdict_of((table, code): (&[u8], u8)) -> CodeVerdict {
+    if table.contains(&code) {
+        CodeVerdict::Named
+    } else if code >= 0x80 {
+        CodeVerdict::Refusal
+    } else {
+        CodeVerdict::Unreadable
+    }
+}
+
+// ! judged once the rest of its packet is read: a packet its client cannot read for another
+// reason, its flags, a property or its length, is that, whatever its code (spec 15.29)
+fn judged((name, table): (&str, &[u8]), codes: &[u8]) -> Result<(), MqttRefusal> {
+    let unreadable = codes
+        .iter()
+        .find(|code| verdict_of((table, **code)) == CodeVerdict::Unreadable);
+
+    unreadable.map_or(Ok(()), |code| {
+        Err(malformed(format!(
+            "{name} of {}, a Reason Code its table does not name",
+            code_of(*code)
+        )))
+    })
 }
 
 /// A CONNACK (MQTT 5.0 §3.2): its link's outcome and what its broker bounds it by.
@@ -822,12 +876,17 @@ fn puback_of(cursor: &mut Cursor<'_>) -> Result<MqttPacket, MqttRefusal> {
     }
 
     ended(cursor)?;
+    judged(("a PUBACK", &PUBACK_CODES), &acknowledgement.reason_codes)?;
 
     Ok(MqttPacket::Puback(acknowledgement))
 }
 
-// a SUBACK's or an UNSUBACK's: its identifier, its properties, then a Reason Code per filter
-fn acknowledgement_of(cursor: &mut Cursor<'_>) -> Result<MqttAcknowledgement, MqttRefusal> {
+// a SUBACK's or an UNSUBACK's: its identifier, its properties, then a Reason Code per filter, each
+// judged by its packet's table; their count is its adapter's to judge, one per filter it asked
+fn acknowledgement_of(
+    cursor: &mut Cursor<'_>,
+    packet: (&str, &[u8]),
+) -> Result<MqttAcknowledgement, MqttRefusal> {
     let packet_identifier = identifier_of(cursor)?;
     let reason_string = properties_of(cursor, &ACKNOWLEDGEMENT_PROPERTIES)?.reason_string;
     let reason_codes = cursor.rest().to_vec();
@@ -835,6 +894,8 @@ fn acknowledgement_of(cursor: &mut Cursor<'_>) -> Result<MqttAcknowledgement, Mq
     if reason_codes.is_empty() {
         return Err(malformed("an acknowledgement of no filter"));
     }
+
+    judged(packet, &reason_codes)?;
 
     Ok(MqttAcknowledgement {
         packet_identifier,
@@ -937,8 +998,14 @@ pub fn read_packet(bytes: &[u8], maximum_packet_size: u32) -> Result<MqttReading
         CONNACK => connack_of(&mut cursor)?,
         PUBLISH => publish_of(flags, &mut cursor)?,
         PUBACK => puback_of(&mut cursor)?,
-        SUBACK => MqttPacket::Suback(acknowledgement_of(&mut cursor)?),
-        UNSUBACK => MqttPacket::Unsuback(acknowledgement_of(&mut cursor)?),
+        SUBACK => MqttPacket::Suback(acknowledgement_of(
+            &mut cursor,
+            ("a SUBACK", &SUBACK_CODES),
+        )?),
+        UNSUBACK => MqttPacket::Unsuback(acknowledgement_of(
+            &mut cursor,
+            ("an UNSUBACK", &UNSUBACK_CODES),
+        )?),
         PINGRESP => {
             ended(&cursor)?;
 

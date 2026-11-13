@@ -2159,7 +2159,7 @@ type is `BROKER`, and it never leaves the process, so it is secure.
 
 ### MQTT 5
 
-_Vectors: `mqttPublishBounds`._
+_Vectors: `mqttPublishBounds`, `mqttAcknowledgementCodes`._
 
 15.25. A broker of MQTT 5.0
 ([OASIS MQTT 5.0](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html)) carries a
@@ -2193,40 +2193,49 @@ Maximum QoS is not 0, as that CONNACK is read, its packets judged in the order t
 any other Reason Code, or of a Maximum QoS of 0, fails its start whatever comes after it, as does
 no CONNACK within `connectTimeout` of its start, and a start that fails sends no DISCONNECT. Once
 up, a link that ends other than by its stop is lost, its down told once, before or after its start
-settles, and its start succeeds all the same; its stop ends it as it ends any link up. Its
-password is one its adapter is given, or one a provider it is given answers, asked anew at each
-link's start before its network connection opens, under that start's signal and its stop, and
-within the same `connectTimeout`: an ask that outlives it, or that a stop meets, fails that start
-whether or not its provider hears its signal, a later answer serving nothing, and its provider's
-signal is aborted once that start ends, linked or not. A password is UTF-8 text, never empty and
-holding no NUL ([`docs/support.md`](../docs/support.md), "Leveled down"): its adapter is refused as
-it is built given one that is not, a password and a provider both, or either beside a TLS client
-certificate, and its start fails on a provider's answer that is not. It sends a packet within each
-Keep Alive in force, the Server Keep Alive its CONNACK names where it names one. A
-participant's stop takes no new publication; once what it was handed has gone, each PUBACK come, it
-sends an UNSUBSCRIBE for each filter its link asked or holds, its inbox, its names and its peers'
-departures, one whose SUBSCRIBE went with no SUBACK yet among them, all at once, and awaits their
-UNSUBACKs together, what it was handed and those UNSUBACKs within one `connectTimeout` of its call.
-It then ends its link with a DISCONNECT of Reason Code 0x00, within a `connectTimeout` of its own,
-so that no will goes, an UNSUBACK that refuses, or none within that time, ending it all the same.
-The stop of a link that is down sends nothing. A DISCONNECT its broker sends of Reason Code 0x8E
-is its link taken over (section 15.21); any other end of its network connection is its link lost.
-Nothing of a link reaches another: no library reconnects it, subscribes again for it, holds what it
-publishes while it is down, or keeps its aliases, and what is asked of a link that is down is
-refused at once.
+settles, and its start succeeds all the same; its stop ends it as it ends any link up. A
+subscription or a publication its application gives up once its packet may have gone and before its
+outcome came, a SUBSCRIBE or a PUBLISH of QoS 1 sent, or a PUBLISH of QoS 0 not yet written
+(section 15.28), loses its link, no DISCONNECT, since what was asked may take effect yet, and what
+else that link awaits fails with it; a publication given up while it waits on the Receive Maximum
+leaves unsent, its link kept. Its password is one its adapter is given, or one a provider it is
+given answers, asked anew at each link's start before its network connection opens, under that
+start's signal and its stop, and within the same `connectTimeout`: an ask that outlives it, or that
+a stop meets, fails that start whether or not its provider hears its signal, a later answer serving
+nothing, and its provider's signal is aborted once that start ends, linked or not. A password is
+UTF-8 text, never empty and holding no NUL ([`docs/support.md`](../docs/support.md), "Leveled
+down"): its adapter is refused as it is built given one that is not, a password and a provider both,
+or either beside a TLS client certificate, and its start fails on a provider's answer that is not.
+It sends a packet within each Keep Alive in force, the Server Keep Alive its CONNACK names where it
+names one. A participant's stop takes no new publication; once what it was handed has gone, each
+PUBACK come, it sends an UNSUBSCRIBE for each filter its link asked or holds, its inbox, its names
+and its peers' departures, one whose SUBSCRIBE went with no SUBACK yet among them, all at once, and
+awaits their UNSUBACKs together, what it was handed and those UNSUBACKs within one `connectTimeout`
+of its call. It then ends its link with a DISCONNECT of Reason Code 0x00, within a `connectTimeout`
+of its own, so that no will goes, an UNSUBACK that refuses, or none within that time, ending it all
+the same. The stop of a link that is down sends nothing. A DISCONNECT its broker sends of Reason
+Code 0x8E is its link taken over (section 15.21); any other end of its network connection is its
+link lost. Nothing of a link reaches another: no library reconnects it, subscribes again for it,
+holds what it publishes while it is down, or keeps its aliases, and what is asked of a link that is
+down is refused at once.
 
 15.27. A participant subscribes each topic in a SUBSCRIBE of its own, at QoS 1, No Local 0, Retain
 As Published 0 and Retain Handling 2, with no Subscription Identifier. A subscription is held once
-its SUBACK grants QoS 1, and refused on any other code, QoS 0 granted among them. A SUBACK says a
-subscription is installed, never that its subscriber may read what it matches: its broker's access
-control decides what it delivers (section 15.31). An UNSUBSCRIBE names one filter, the one its
-SUBSCRIBE named, whether or not its SUBACK came: its broker, reading a link's packets in their
-order, removes it all the same
+its SUBACK's Reason Code is 0x01, Granted QoS 1; it is refused on 0x00 or 0x02, Granted QoS 0 or 2,
+its filter kept for its stop, and on any code of 0x80 or more, whether or not SUBACK's table names
+it
+([MQTT 5.0 §2.4, §3.9.3, §4.13.2](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html)).
+A SUBACK says a subscription is installed, never that its subscriber may read what it matches: its
+broker's access control decides what it delivers (section 15.31). An UNSUBSCRIBE names one filter,
+the one its SUBSCRIBE named, whether or not its SUBACK came: its broker, reading a link's packets in
+their order, removes it all the same
 ([MQTT 5.0 §3.10.4](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html)). A
 subscription is let go once its UNSUBACK came with a Reason Code of 0x00 or 0x11, No subscription
-existed, and refused on any other; one whose UNSUBACK has not come within `connectTimeout` of its
-UNSUBSCRIBE fails, its link kept so that no will goes, and its filter kept for its stop (section
-15.26).
+existed, and refused on any code of 0x80 or more
+([MQTT 5.0 §3.11.3](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html)); one whose
+UNSUBACK has not come within `connectTimeout` of its UNSUBSCRIBE fails, its link kept so that no will
+goes, and its filter kept for its stop (section 15.26). Any other SUBACK or UNSUBACK is section
+15.29's.
 
 15.28. A participant publishes each parcel in a PUBLISH of QoS 1 where its adapter delivers at least
 once, of QoS 0 where at most once, never of QoS 2; of RETAIN 0; with no Topic Alias, Response Topic,
@@ -2236,20 +2245,34 @@ life sections 15.18 and 15.22 give each, in whole seconds rounded up, 1 at least
 its CONNACK's Receive Maximum, 65,535 where it names none, of its PUBLISH packets of QoS 1
 unacknowledged, later ones waiting in their order, and delays no other packet for them
 ([MQTT 5.0 §4.9](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html)). A PUBLISH of
-QoS 1 is taken once its PUBACK came with a Reason Code under 0x80 but 0x10; 0x10, No matching
-subscribers, says no subscriber takes it; 0x80 or more refuses it. A publication whose packet,
-counted as section 15.30 counts it, would pass its CONNACK's Maximum Packet Size is refused as it is
-asked, and never sent.
+QoS 1 is taken once its PUBACK came with a Reason Code of 0x00, or with none; 0x10, No matching
+subscribers, says no subscriber takes it; any code of 0x80 or more refuses it, whether or not
+PUBACK's table names it
+([MQTT 5.0 §2.4, §3.4.2.1, §4.13.2](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html));
+any other PUBACK is section 15.29's. A PUBLISH of QoS 0 is taken once it is written to its network
+connection, whatever its broker then reads of it. A publication whose packet, counted as section
+15.30 counts it, would pass its CONNACK's Maximum Packet Size is refused as it is asked, and never
+sent.
 
 15.29. A participant acknowledges a PUBLISH of QoS 1 with a PUBACK of Reason Code 0x00 once its core
 took its parcel (section 15.19), never with one of 0x80 or more. It drops in silence, and
 acknowledges, a PUBLISH whose RETAIN is 1. A packet past its own Maximum Packet Size, counted from
 its fixed header's Remaining Length as section 15.30 counts one, is a Protocol Error
-([MQTT 5.0 §3.1.2.11.4, §4.13.1](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html)):
-as it reads that length, before the packet's body comes, it closes its network connection,
-reading nothing more of it, its link lost where it was up, or its start failed where no CONNACK had
-put it up (section 15.26). It sends no DISCONNECT before it closes
-([`docs/support.md`](../docs/support.md), "Leveled down"), and its broker publishes its will.
+([MQTT 5.0 §3.1.2.11.4, §4.13.1](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html));
+so is a PUBACK, a SUBACK or an UNSUBACK of a Reason Code under 0x80 that its packet's table does not
+name, the tables `mqttAcknowledgementCodes` holds ([MQTT-3.4.2-1], [MQTT-3.9.3-2], [MQTT-3.11.3-2]),
+and a SUBACK or an UNSUBACK whose count of Reason Codes is not one, its SUBSCRIBE's or its
+UNSUBSCRIBE's one filter ([MQTT-3.8.4-6], [MQTT-3.11.3-2]), whether or not a request of its link
+awaits it; any other packet its client cannot read is a Malformed Packet or a Protocol Error that
+client finds
+([MQTT 5.0 §4.13.1](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html)).
+On each it closes its network connection, reading nothing more of it, one past its bound as it reads
+that length, before the packet's body comes: its link lost where it was up, its participant's stop
+letting its names go among it (section 15.21), what that link awaits failed with it, the
+acknowledged request among it, never refused nor taken; its start failed where no CONNACK had put it
+up (section 15.26); its stop ended where it stopped, no down told. It sends no DISCONNECT before it
+closes, at its stop no more than at any other time ([`docs/support.md`](../docs/support.md),
+"Leveled down"), and its broker publishes its will.
 
 15.30. A PUBLISH of N bytes of payload to a topic of T bytes in UTF-8 counts S = 1 + v(R) + R bytes,
 where R = 2 + T + Q + v(P) + P + N, Q is 2 at QoS 1 and 0 at QoS 0, P is 5 with a Message Expiry

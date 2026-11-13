@@ -128,12 +128,41 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
     // the bytes a packet takes, as MQTTnet's encoder writes MQTT 5
     private static int BytesOf(MqttPacket packet)
     {
-        return new MqttV5PacketEncoder(new MqttBufferWriter(4_096, 65_536)).Encode(packet).Join().Count;
+        return EncodedOf(packet).Length;
+    }
+
+    // a packet's bytes, as MQTTnet's encoder writes MQTT 5, for a write that carries others beside it
+    private static byte[] EncodedOf(MqttPacket packet)
+    {
+        return new MqttV5PacketEncoder(new MqttBufferWriter(4_096, 65_536)).Encode(packet).Join().ToArray();
+    }
+
+    // its stop, called under the context given, which its continuations then go by
+    private static Task StopUnder((MqttBrokerAdapter Adapter, SynchronizationContext? Context) stopped)
+    {
+        var previous = SynchronizationContext.Current;
+
+        SynchronizationContext.SetSynchronizationContext(stopped.Context);
+
+        try
+        {
+            return stopped.Adapter.Stop();
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previous);
+        }
     }
 
     private static Task PubAckOf((ScriptedLink Link, ushort PacketIdentifier, int Code) answer)
     {
         return answer.Link.Send(new MqttPubAckPacket { PacketIdentifier = answer.PacketIdentifier, ReasonCode = (MqttPubAckReasonCode)answer.Code });
+    }
+
+    // a Packet Identifier's two bytes, as a packet written by hand carries it
+    private static byte[] IdentifierOf(ushort packetIdentifier)
+    {
+        return [(byte)(packetIdentifier >> 8), (byte)packetIdentifier];
     }
 
     // a PUBLISH a broker forwards, of QoS 1 unless told
@@ -564,7 +593,7 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Subscribes_at_QoS_1_No_Local_0_Retain_As_Published_0_and_Retain_Handling_2_a_group_as_its_shared_subscription_held_once_its_SUBACK_grants_QoS_1_and_refused_otherwise_spec_15_27()
+    public async Task Subscribes_at_QoS_1_No_Local_0_Retain_As_Published_0_and_Retain_Handling_2_a_group_as_its_shared_subscription_held_once_its_SUBACK_grants_QoS_1_refused_on_QoS_0_or_2_granted_its_filter_kept_and_on_0x80_or_more_spec_15_27()
     {
         await using var adapter = AdapterOf();
         var link = await LinkUp((adapter, _script));
@@ -596,31 +625,30 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         await leaving.WaitAsync(Patience, Cancelled);
         _script.IsHoldingUnsubscribes = false;
 
-        // QoS 0 granted is refused, as a failure is
-        var downgraded = adapter.Subscribe(["bead", "d", "bob"]);
-
-        await SubAckOf((link, 0));
-        Assert.Contains("0x00", (await FailureOf(() =>
+        // * QoS 0 or 2 granted is refused, its filter kept, as one its broker holds; any code of
+        // 0x80 or more refused, its filter forgotten, 0x95 among them, which SUBACK's table does
+        // not name
+        foreach (var (peer, code) in new[] { ("bob", 0x00), ("cyd", 0x02), ("eve", 0x87), ("fay", 0x95) })
         {
-            return downgraded;
-        })).Message, StringComparison.Ordinal);
+            var refused = adapter.Subscribe(["bead", "d", peer]);
 
-        var failed = adapter.Subscribe(["bead", "d", "eve"]);
+            await SubAckOf((link, code));
+            Assert.Contains(string.Create(CultureInfo.InvariantCulture, $"SUBACK 0x{code:X2}"), (await FailureOf(() =>
+            {
+                return refused;
+            })).Message, StringComparison.Ordinal);
+        }
 
-        await SubAckOf((link, 0x87));
-        Assert.Contains("0x87", (await FailureOf(() =>
-        {
-            return failed;
-        })).Message, StringComparison.Ordinal);
+        Assert.True(adapter.IsLinked);
         await adapter.Stop();
 
-        // * its stop lets go of what its broker holds, QoS 0 granted among it, and of nothing
-        // refused or let go before it
-        Assert.Equal(["bead/d/bob", "bead/i/ada"], LetGoOf(link).Skip(1).Order(StringComparer.Ordinal));
+        // * its stop lets go of what its broker holds, QoS 0 and 2 granted among it, and of nothing
+        // refused of 0x80 or more or let go before it
+        Assert.Equal(["bead/d/bob", "bead/d/cyd", "bead/i/ada"], LetGoOf(link).Skip(1).Order(StringComparer.Ordinal));
     }
 
     [Fact]
-    public async Task Lets_a_subscription_go_once_its_UNSUBACK_came_naming_the_topic_itself_where_it_held_none_and_refuses_it_on_any_other_code_spec_15_27()
+    public async Task Lets_a_subscription_go_once_its_UNSUBACK_came_naming_the_topic_itself_where_it_held_none_and_refuses_it_on_a_code_of_0x80_or_more_spec_15_27()
     {
         await using var adapter = AdapterOf();
         var link = await LinkUp((adapter, _script));
@@ -647,10 +675,11 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         await SubAckOf((link, 1));
         await subscribing.WaitAsync(Patience, Cancelled);
 
-        // * any other code, under 0x80 among them, which MQTT 5 names no UNSUBACK by
-        foreach (var code in new[] { 0x01, 0x10, 0x7F, 0x80, 0x87 })
+        // * a code of 0x80 or more, 0x95 among them, which UNSUBACK's table does not name; one under
+        // 0x80 it does not name loses the link (spec 15.29)
+        foreach (var code in new[] { 0x80, 0x83, 0x87, 0x8F, 0x91, 0x95 })
         {
-            var refused = string.Create(CultureInfo.InvariantCulture, $"0x{code:X2}");
+            var refused = string.Create(CultureInfo.InvariantCulture, $"UNSUBACK 0x{code:X2}");
 
             Assert.Contains(refused, (await FailureOf(() =>
             {
@@ -663,7 +692,7 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         _script.IsHoldingUnsubscribes = false;
         await adapter.Stop();
         Assert.Equal("bead/d/eve", LetGoOf(link)[^1]);
-        Assert.Equal(8, LetGoOf(link).Count);
+        Assert.Equal(9, LetGoOf(link).Count);
     }
 
     [Fact]
@@ -848,31 +877,45 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Reads_a_PUBACK_of_0x10_as_no_subscriber_under_0x80_as_taken_and_0x80_or_more_as_refused_spec_15_28()
+    public async Task Reads_a_PUBACK_of_0x00_or_of_none_as_taken_0x10_as_no_subscriber_and_0x80_or_more_as_refused_spec_15_28()
     {
         await using var adapter = AdapterOf();
+        var (_, downs) = HeardOf(adapter);
         var link = await LinkUp((adapter, _script));
 
-        async Task<BrokerPublished> Answered(int reasonCode)
+        // its PUBACK of the code given, or of none, its Remaining Length 2, where none is given
+        async Task<BrokerPublished> Answered(int? reasonCode)
         {
             var publishing = adapter.Publish(new BrokerPublication { Topic = Name, Payload = (byte[])[1] });
             var publish = await link.Next<MqttPublishPacket>();
 
-            await PubAckOf((link, publish.PacketIdentifier, reasonCode));
+            if (reasonCode is { } code)
+            {
+                await PubAckOf((link, publish.PacketIdentifier, code));
+            }
+            else
+            {
+                await link.Write([0x40, 0x02, .. IdentifierOf(publish.PacketIdentifier)]);
+            }
 
             return await publishing.WaitAsync(Patience, Cancelled);
         }
 
-        Assert.Equal(BrokerPublished.NoSubscriber, await Answered(0x10));
+        Assert.Equal(BrokerPublished.Taken, await Answered(null));
         Assert.Equal(BrokerPublished.Taken, await Answered(0x00));
-        Assert.Contains("0x87", (await FailureOf(() =>
+        Assert.Equal(BrokerPublished.NoSubscriber, await Answered(0x10));
+
+        // * every code of 0x80 or more its table names, and 0x95, which it does not
+        foreach (var code in new[] { 0x80, 0x83, 0x87, 0x90, 0x91, 0x97, 0x99, 0x95 })
         {
-            return Answered(0x87);
-        })).Message, StringComparison.Ordinal);
-        Assert.Contains("0x80", (await FailureOf(() =>
-        {
-            return Answered(0x80);
-        })).Message, StringComparison.Ordinal);
+            Assert.Contains(string.Create(CultureInfo.InvariantCulture, $"PUBACK 0x{code:X2}"), (await FailureOf(() =>
+            {
+                return Answered(code);
+            })).Message, StringComparison.Ordinal);
+        }
+
+        Assert.True(adapter.IsLinked);
+        Assert.Empty(downs);
         Assert.Equal(BrokerCapabilities.NoSubscriber, adapter.Capabilities & BrokerCapabilities.NoSubscriber);
         await adapter.Stop();
     }
@@ -1144,6 +1187,382 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         }));
         await IsLostIn((beside, 3));
         Assert.Empty(messages);
+    }
+
+    [Fact]
+    public async Task Loses_its_link_no_DISCONNECT_on_an_acknowledgement_of_a_Reason_Code_under_0x80_its_table_does_not_name_or_of_a_count_of_codes_other_than_one_awaited_or_not_its_start_failed_before_its_CONNACK_spec_15_26_15_27_15_28_15_29()
+    {
+        await using var adapter = AdapterOf();
+        var (messages, downs) = HeardOf(adapter);
+
+        // * a PUBLISH to its inbox behind each, in the same write, never handed on
+        var behind = EncodedOf(PublishOf(("bead/i/ada", [7], 9)));
+
+        _script.IsHoldingUnsubscribes = true;
+
+        // its link lost, told once, no DISCONNECT, what it was asked failed with that loss
+        async Task IsLostOn((string Packet, Func<Task>? Ask) call, Func<ScriptedLink, Task<byte[]>> answer)
+        {
+            var link = await LinkUp((adapter, _script));
+            var told = downs.Count;
+            var asked = call.Ask?.Invoke();
+
+            await link.Write([.. await answer(link), .. behind]);
+            await link.Closed.WaitAsync(Patience, Cancelled);
+            await Until(() =>
+            {
+                return downs.Count > told;
+            });
+
+            if (asked is not null)
+            {
+                var failure = Assert.IsType<IOException>(await FailureOf(() =>
+                {
+                    return asked;
+                }));
+
+                // * never refused nor taken: its link's loss, naming what its broker sent
+                Assert.StartsWith($"the link of ada went down: its broker sent {call.Packet} ", failure.Message, StringComparison.Ordinal);
+            }
+
+            Assert.Equal(Enumerable.Repeat(new BrokerDown(), told + 1), downs);
+            Assert.False(adapter.IsLinked);
+            Assert.DoesNotContain(link.Packets, (packet) =>
+            {
+                return packet is MqttDisconnectPacket;
+            });
+            Assert.Empty(messages);
+        }
+
+        // an answer to the next packet of a kind the link reads, by its identifier
+        Func<ScriptedLink, Task<byte[]>> To<T>(Func<byte[], byte[]> answer)
+            where T : MqttPacket
+        {
+            return async (link) =>
+            {
+                var packet = await link.Next<T>();
+                var identifier = packet switch
+                {
+                    MqttSubscribePacket subscribe => subscribe.PacketIdentifier,
+                    MqttUnsubscribePacket unsubscribe => unsubscribe.PacketIdentifier,
+                    MqttPublishPacket publish => publish.PacketIdentifier,
+                    _ => throw new InvalidOperationException("a packet of no identifier"),
+                };
+
+                return answer(IdentifierOf(identifier));
+            };
+        }
+
+        Task Subscribing()
+        {
+            return adapter.Subscribe(["bead", "d", "bob"]);
+        }
+
+        Task Unsubscribing()
+        {
+            return adapter.Unsubscribe(["bead", "d", "bob"]);
+        }
+
+        Task Publishing()
+        {
+            return adapter.Publish(new BrokerPublication { Topic = Name, Payload = (byte[])[1] });
+        }
+
+        // * awaited, up: a code under 0x80 its table does not name, or a count other than one
+        await IsLostOn(("an UNSUBACK", Unsubscribing), To<MqttUnsubscribePacket>((id) =>
+        {
+            return [0xB0, 0x04, .. id, 0x00, 0x01];
+        }));
+        await IsLostOn(("a SUBACK", Subscribing), To<MqttSubscribePacket>((id) =>
+        {
+            return [0x90, 0x04, .. id, 0x00, 0x03];
+        }));
+        await IsLostOn(("a PUBACK", Publishing), To<MqttPublishPacket>((id) =>
+        {
+            return [0x40, 0x03, .. id, 0x01];
+        }));
+        await IsLostOn(("a SUBACK", Subscribing), To<MqttSubscribePacket>((id) =>
+        {
+            return [0x90, 0x05, .. id, 0x00, 0x01, 0x01];
+        }));
+        await IsLostOn(("a SUBACK", Subscribing), To<MqttSubscribePacket>((id) =>
+        {
+            return [0x90, 0x05, .. id, 0x00, 0x01, 0x87];
+        }));
+        await IsLostOn(("an UNSUBACK", Unsubscribing), To<MqttUnsubscribePacket>((id) =>
+        {
+            return [0xB0, 0x05, .. id, 0x00, 0x00, 0x11];
+        }));
+        await IsLostOn(("a SUBACK", Subscribing), To<MqttSubscribePacket>((id) =>
+        {
+            return [0x90, 0x03, .. id, 0x00];
+        }));
+        await IsLostOn(("an UNSUBACK", Unsubscribing), To<MqttUnsubscribePacket>((id) =>
+        {
+            return [0xB0, 0x03, .. id, 0x00];
+        }));
+
+        // * a packet both wrong, of 0x03 and of a property MQTT 5 does not define, 0x7F: lost all the
+        // same, whichever check found it
+        await IsLostOn(("a SUBACK", Subscribing), To<MqttSubscribePacket>((id) =>
+        {
+            return [0x90, 0x06, .. id, 0x02, 0x7F, 0x00, 0x03];
+        }));
+
+        // * a PUBACK of 0x01 whose reserved flags are set, which MQTTnet reads: judged by its code
+        await IsLostOn(("a PUBACK", Publishing), To<MqttPublishPacket>((id) =>
+        {
+            return [0x42, 0x03, .. id, 0x01];
+        }));
+
+        // * no request awaiting it, an identifier its link never used
+        foreach (byte[] unawaited in new byte[][] { [0xB0, 0x04, 0x77, 0x77, 0x00, 0x01], [0x40, 0x03, 0x77, 0x77, 0x01], [0x90, 0x05, 0x77, 0x77, 0x00, 0x01, 0x01], [0xB0, 0x03, 0x77, 0x77, 0x00] })
+        {
+            await IsLostOn(("", null), (_) =>
+            {
+                return Task.FromResult(unawaited);
+            });
+        }
+
+        // * before its CONNACK, an UNSUBACK of 0x01, then the CONNACK in the same write: its start
+        // fails, no down
+        var told = downs.Count;
+        var starting = adapter.Start();
+        var early = await _script.Link();
+
+        await early.Write([0xB0, 0x04, 0x00, 0x01, 0x00, 0x01, 0x20, 0x03, 0x00, 0x00, 0x00]);
+        Assert.StartsWith("the link of ada went down: its broker sent an UNSUBACK ", Assert.IsType<IOException>(await FailureOf(() =>
+        {
+            return starting;
+        })).Message, StringComparison.Ordinal);
+        await early.Closed.WaitAsync(Patience, Cancelled);
+        Assert.IsType<MqttConnectPacket>(Assert.Single(early.Packets));
+        await Task.Delay(50, Cancelled);
+        Assert.Equal(told, downs.Count);
+        Assert.False(adapter.IsLinked);
+    }
+
+    [Fact]
+    public async Task Ends_its_stop_at_once_no_DISCONNECT_and_no_down_on_a_packet_its_client_cannot_read_an_acknowledgement_under_0x80_its_table_does_not_name_or_of_a_count_other_than_one_among_it_spec_15_26_15_29()
+    {
+        var bound = TimeSpan.FromSeconds(5);
+        byte[] unreadable = [0x30, 0x0F, 0x00, 0x0A, .. Encoding.UTF8.GetBytes("bead/i/ada"), 0x02, 0x7F, 0x00];
+
+        _script.IsHoldingUnsubscribes = true;
+
+        // an adapter up, of connectTimeout 5 s, its link's downs heard, holding a subscription to
+        // each topic given
+        async Task<(MqttBrokerAdapter Adapter, ScriptedLink Link, ConcurrentQueue<BrokerDown> Downs)> Up(string[][] topics)
+        {
+            var adapter = AdapterOf((options) =>
+            {
+                return options with { ConnectTimeout = bound };
+            });
+            var (_, downs) = HeardOf(adapter);
+            var link = await LinkUp((adapter, _script));
+
+            foreach (var topic in topics)
+            {
+                var subscribing = adapter.Subscribe(topic);
+
+                await SubAckOf((link, 1));
+                await subscribing.WaitAsync(Patience, Cancelled);
+            }
+
+            return (adapter, link, downs);
+        }
+
+        // * once its broker wrote what its client cannot read, its stop settles within half its
+        // connectTimeout, no DISCONNECT sent and no down told
+        async Task IsEndedBy((MqttBrokerAdapter Adapter, ScriptedLink Link, ConcurrentQueue<BrokerDown> Downs) up, (Task Stopping, byte[] Written) stop)
+        {
+            var watch = Stopwatch.StartNew();
+
+            await up.Link.Write(stop.Written);
+            await stop.Stopping.WaitAsync(Patience, Cancelled);
+            Assert.True(watch.Elapsed < bound / 2, $"its stop settled {watch.Elapsed.TotalMilliseconds} ms after it");
+            await up.Link.Closed.WaitAsync(Patience, Cancelled);
+            Assert.DoesNotContain(up.Link.Packets, (packet) =>
+            {
+                return packet is MqttDisconnectPacket;
+            });
+            Assert.Empty(up.Downs);
+            Assert.False(up.Adapter.IsLinked);
+            await up.Adapter.DisposeAsync();
+        }
+
+        // * in its let-go, a PUBLISH carrying property 0x7F
+        var publishing = await Up([Inbox]);
+        var stopping = publishing.Adapter.Stop();
+
+        await publishing.Link.Next<MqttUnsubscribePacket>();
+        await IsEndedBy(publishing, (stopping, unreadable));
+
+        // * in its let-go, an UNSUBACK of 0x01 while another's is withheld, under no context and under
+        // one that posts its continuations
+        foreach (var context in new SynchronizationContext?[] { null, new PostedContinuation() })
+        {
+            var two = await Up([Inbox, ["bead", "d", "bob"]]);
+            var letting = StopUnder((two.Adapter, context));
+            var first = await two.Link.Next<MqttUnsubscribePacket>();
+
+            await two.Link.Next<MqttUnsubscribePacket>();
+            await IsEndedBy(two, (letting, [0xB0, 0x04, .. IdentifierOf(first.PacketIdentifier), 0x00, 0x01]));
+        }
+
+        // * in its let-go, an UNSUBACK of no code
+        var none = await Up([Inbox]);
+        var leaving = none.Adapter.Stop();
+        var unsubscribe = await none.Link.Next<MqttUnsubscribePacket>();
+
+        await IsEndedBy(none, (leaving, [0xB0, 0x03, .. IdentifierOf(unsubscribe.PacketIdentifier), 0x00]));
+
+        // * in its drain, a PUBACK of 0x01 to its publication, which fails with its link's loss,
+        // never taken, under no context and under one that posts
+        foreach (var context in new SynchronizationContext?[] { null, new PostedContinuation() })
+        {
+            var draining = await Up([]);
+            var published = draining.Adapter.Publish(new BrokerPublication { Topic = Name, Payload = (byte[])[1] });
+            var publish = await draining.Link.Next<MqttPublishPacket>();
+            var drained = StopUnder((draining.Adapter, context));
+
+            await Task.Delay(50, Cancelled);
+            Assert.False(drained.IsCompleted);
+            await IsEndedBy(draining, (drained, [0x40, 0x03, .. IdentifierOf(publish.PacketIdentifier), 0x01]));
+            Assert.StartsWith("the link of ada went down: its broker sent a PUBACK ", Assert.IsType<IOException>(await FailureOf(() =>
+            {
+                return published;
+            })).Message, StringComparison.Ordinal);
+        }
+
+        // * a SUBACK of 0x01 0x01 to a SUBSCRIBE under way at its stop
+        var asking = await Up([]);
+        var subscribing = asking.Adapter.Subscribe(Inbox);
+        var subscribe = await asking.Link.Next<MqttSubscribePacket>();
+        var ending = asking.Adapter.Stop();
+
+        await asking.Link.Next<MqttUnsubscribePacket>();
+        await IsEndedBy(asking, (ending, [0x90, 0x05, .. IdentifierOf(subscribe.PacketIdentifier), 0x00, 0x01, 0x01]));
+        Assert.StartsWith("the link of ada went down: its broker sent a SUBACK ", Assert.IsType<IOException>(await FailureOf(() =>
+        {
+            return subscribing;
+        })).Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Reads_an_acknowledgement_of_0x80_or_more_its_table_does_not_name_as_a_refusal_awaited_or_not_naming_its_code_its_link_kept_spec_15_27_15_28()
+    {
+        await using var adapter = AdapterOf();
+        var (messages, downs) = HeardOf(adapter);
+        var link = await LinkUp((adapter, _script));
+
+        // * a PUBACK of 0x95, as Mosquitto 2.1.2 sends it past its message_size_limit: refused,
+        // naming it, then the next publication taken
+        var refused = adapter.Publish(new BrokerPublication { Topic = Name, Payload = (byte[])[1] });
+        var publish = await link.Next<MqttPublishPacket>();
+
+        await link.Write([0x40, 0x03, .. IdentifierOf(publish.PacketIdentifier), 0x95]);
+        Assert.Contains("PUBACK 0x95", (await FailureOf(() =>
+        {
+            return refused;
+        })).Message, StringComparison.Ordinal);
+
+        var taken = adapter.Publish(new BrokerPublication { Topic = Name, Payload = (byte[])[2] });
+
+        await PubAckOf((link, (await link.Next<MqttPublishPacket>()).PacketIdentifier, 0));
+        Assert.Equal(BrokerPublished.Taken, await taken.WaitAsync(Patience, Cancelled));
+
+        // * a SUBACK of 0x95: refused, naming it, its filter forgotten, its broker installing none
+        var subscribing = adapter.Subscribe(["bead", "d", "bob"]);
+
+        await SubAckOf((link, 0x95));
+        Assert.Contains("SUBACK 0x95", (await FailureOf(() =>
+        {
+            return subscribing;
+        })).Message, StringComparison.Ordinal);
+
+        // * an UNSUBACK of 0x95: refused, naming it, its filter kept for its stop
+        var held = adapter.Subscribe(Inbox);
+
+        await SubAckOf((link, 1));
+        await held.WaitAsync(Patience, Cancelled);
+        _script.IsHoldingUnsubscribes = true;
+
+        var leaving = adapter.Unsubscribe(Inbox);
+        var unsubscribe = await link.Next<MqttUnsubscribePacket>();
+
+        await link.Write([0xB0, 0x04, .. IdentifierOf(unsubscribe.PacketIdentifier), 0x00, 0x95]);
+        Assert.Contains("UNSUBACK 0x95", (await FailureOf(() =>
+        {
+            return leaving;
+        })).Message, StringComparison.Ordinal);
+
+        // * an UNSUBACK of 0xFF no request awaits: ignored, the next publication taken behind it
+        var after = adapter.Publish(new BrokerPublication { Topic = Name, Payload = (byte[])[3] });
+
+        await link.Write([0xB0, 0x04, 0x77, 0x77, 0x00, 0xFF]);
+        await PubAckOf((link, (await link.Next<MqttPublishPacket>()).PacketIdentifier, 0));
+        Assert.Equal(BrokerPublished.Taken, await after.WaitAsync(Patience, Cancelled));
+
+        Assert.Empty(downs);
+        Assert.Empty(messages);
+        Assert.True(adapter.IsLinked);
+        Assert.DoesNotContain(link.Packets, (packet) =>
+        {
+            return packet is MqttDisconnectPacket;
+        });
+
+        // its stop lets go of the filter its UNSUBACK refused, and of none its SUBACK refused
+        _script.IsHoldingUnsubscribes = false;
+        await adapter.Stop().WaitAsync(Patience, Cancelled);
+        Assert.Equal(["bead/i/ada", "bead/i/ada"], LetGoOf(link));
+    }
+
+    // ! the tests of docs/support.md's row "What an MQTT 5 link lost on a packet its client cannot
+    // read hands on of what came before it in one read": each asserts what held 40 runs of 40, a
+    // PUBLISH before an UNSUBACK no request awaits handed on or not by the scheduler
+    [Fact]
+    public async Task Hands_on_what_came_before_a_packet_its_client_cannot_read_in_one_read_as_far_as_its_side_does_spec_15_29()
+    {
+        await using var adapter = AdapterOf();
+        var (messages, downs) = HeardOf(adapter);
+        var inbox = EncodedOf(PublishOf(("bead/i/ada", [7], 9)));
+        byte[] property = [0x30, 0x0F, 0x00, 0x0A, .. Encoding.UTF8.GetBytes("bead/i/ada"), 0x02, 0x7F, 0x00];
+
+        // in one write, a PUBACK of 0x00 to its publication and a PUBLISH to its inbox, then what it
+        // cannot read: what its publication gave
+        async Task<BrokerPublished> Before(byte[] unreadable)
+        {
+            var link = await LinkUp((adapter, _script));
+            var told = downs.Count;
+            var publishing = adapter.Publish(new BrokerPublication { Topic = Name, Payload = (byte[])[1] });
+            var publish = await link.Next<MqttPublishPacket>();
+
+            await link.Write([0x40, 0x03, .. IdentifierOf(publish.PacketIdentifier), 0x00, .. inbox, .. unreadable]);
+            await link.Closed.WaitAsync(Patience, Cancelled);
+            await Until(() =>
+            {
+                return downs.Count > told;
+            });
+            Assert.Equal(told + 1, downs.Count);
+            Assert.False(adapter.IsLinked);
+
+            return await publishing.WaitAsync(Patience, Cancelled);
+        }
+
+        // * (i) an UNSUBACK of 0x01 no request awaits, judged at its inspector: its publication
+        // taken, its PUBLISH handed on or not by the scheduler
+        Assert.Equal(BrokerPublished.Taken, await Before([0xB0, 0x04, 0x77, 0x77, 0x00, 0x01]));
+        messages.Clear();
+
+        // * (ii) a PUBLISH carrying property 0x7F, which MQTTnet refuses as it decodes it: its
+        // publication taken and its PUBLISH handed on, both read before
+        Assert.Equal(BrokerPublished.Taken, await Before(property));
+        await Until(() =>
+        {
+            return !messages.IsEmpty;
+        });
+        Assert.Equal([7], Assert.Single(messages).Payload.ToArray());
     }
 
     [Fact]
@@ -1443,6 +1862,21 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         Assert.IsType<MqttConnectPacket>(Assert.Single(link.Packets));
     }
 
+    // * a caller's context that posts each continuation, as a UI thread's or a test runner's does,
+    // none run inside the call that completed its task: the stop's awaits resume on the pool, after
+    // MQTTnet's receive loop went on
+    private sealed class PostedContinuation : SynchronizationContext
+    {
+        public override void Post(SendOrPostCallback callback, object? state)
+        {
+            ThreadPool.QueueUserWorkItem((_) =>
+            {
+                SetSynchronizationContext(this);
+                callback(state);
+            });
+        }
+    }
+
     private sealed class HeldContinuation : SynchronizationContext
     {
         public TaskCompletionSource<Action> Posted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -1620,7 +2054,7 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Gives_up_a_start_a_subscription_or_a_publication_its_signal_aborts_a_publication_that_waits_on_its_quota_leaving_it_unsent_and_retires_its_link_where_what_it_asked_may_have_gone()
+    public async Task Gives_up_a_start_a_subscription_or_a_publication_its_signal_aborts_a_publication_that_waits_on_its_quota_leaving_it_unsent_and_retires_its_link_where_what_it_asked_may_have_gone_spec_15_26()
     {
         await using var adapter = AdapterOf();
         var (_, downs) = HeardOf(adapter);
@@ -1744,7 +2178,7 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Retires_its_link_where_a_publication_at_most_once_is_given_up_before_its_packet_is_written_spec_15_28()
+    public async Task Retires_its_link_where_a_publication_at_most_once_is_given_up_before_its_packet_is_written_spec_15_26_15_28()
     {
         await using var adapter = AdapterOf((options) =>
         {

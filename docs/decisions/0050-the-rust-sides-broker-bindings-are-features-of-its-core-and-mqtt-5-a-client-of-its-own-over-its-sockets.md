@@ -207,8 +207,10 @@ them, the will of GONE at QoS 1, RETAIN 0, Delay 0), PUBLISH (QoS 0 or 1, RETAIN
 Interval alone), PUBACK (0x00), SUBSCRIBE (one filter, QoS 1, No Local 0, Retain As Published 0,
 Retain Handling 2), UNSUBSCRIBE (one filter), PINGREQ and DISCONNECT (0x00); it reads CONNACK,
 PUBLISH, PUBACK, SUBACK, UNSUBACK, PINGRESP and DISCONNECT, each property in any order §2.2.2
-allows, and refuses AUTH. Eleven packets, which the other sides' libraries write and read;
-`mqtt-packets.ts` and `MqttPackets.cs` count a PUBLISH as `packets.rs` does (15.30).
+allows, and refuses AUTH; it refuses a PUBACK, a SUBACK or an UNSUBACK of a Reason Code under 0x80
+its table does not name as it reads it, and its adapter a SUBACK or an UNSUBACK of more than one
+code, before it looks for what awaits it (15.29). Eleven packets, which the other sides' libraries
+write and read; `mqtt-packets.ts` and `MqttPackets.cs` count a PUBLISH as `packets.rs` does (15.30).
 
 What it holds by construction: its quota per incarnation, **no other packet delayed for it**
 ([MQTT-3.3.4-8]); each packet counted `S = 1 + v(R) + R` before it goes, refused past its CONNACK's
@@ -257,13 +259,14 @@ branches carry the rest:
 trait, the twin of the C# side's `IBrokerCaseBroker`, the in-memory broker's and Mosquitto's,
 `testing::link_relay` cutting a link for `lose`; against the broker `BEAD_MQTT_URL` names with the
 run's password, skipped saying so where none is given, failed where `BEAD_MQTT_REQUIRED=1`.
-`tests/vectors.rs` plays `mqttPublishBounds`, and `tests/durations.rs` the places
-`mqttBrokerAdapter.keepAlive` and `mqttBrokerAdapter.connectTimeout`. The adapter's twins of the
-other sides' tests run against `testing::mqtt_script`, a peer that writes what it sends from the
-test's own bytes, never through the client's codec, and against the fixture over TCP and WebSocket.
-**The interop**: `bead-interop-server` serves over MQTT 5, its id `rs-server`, its names
-`interop-rs` and `interop-both`, and its trials, `rs-client`, run against the TypeScript and C#
-servers; the TypeScript and C# interop tests run against it.
+`tests/vectors.rs` plays `mqttPublishBounds` and `mqttAcknowledgementCodes`, and
+`tests/durations.rs` the places `mqttBrokerAdapter.keepAlive` and
+`mqttBrokerAdapter.connectTimeout`. The adapter's twins of the other sides' tests run against
+`testing::mqtt_script`, a peer that writes what it sends from the test's own bytes, never through
+the client's codec, and against the fixture over TCP and WebSocket. **The interop**:
+`bead-interop-server` serves over MQTT 5, its id `rs-server`, its names `interop-rs` and
+`interop-both`, and its trials, `rs-client`, run against the TypeScript and C# servers; the
+TypeScript and C# interop tests run against it.
 
 ### CI
 
@@ -287,8 +290,9 @@ saying so.
 - **CI lints the core's library five ways**: with no feature, with `websocket`, `http` or `mqtt`
   alone, and with all.
 - **Three serve `interop-both`**, the TypeScript, C# and Rust servers.
-- **The Rust side keeps to every leveled row the MQTT 5 binding holds**: no DISCONNECT of 0x95, each
-  WebSocket message one frame, a Password as text. The first is
+- **The Rust side keeps to every leveled row the MQTT 5 binding holds**: no DISCONNECT of 0x95, 0x81
+  or 0x82, and none at its stop after a packet it cannot read, each WebSocket message one frame, a
+  Password as text. The first is
   [0041](0041-over-mqtt-5-a-participant-is-one-clean-link-and-a-parcel-one-publish-each-counted-to-its-byte.md)'s,
   its reason Mosquitto's will handling. It parts from the other sides in two rows of Differences,
   `An MQTT 5 Server Keep Alive of 0, or longer than its own` and `An MQTT 5 WebSocket message of
@@ -298,9 +302,9 @@ saying so.
   above, its fuzz target, its cases, its groups `amqpMessages` and `amqpPublishBounds`, its places
   and its interop.
 
-**Its gates**: the cases over `mqtt` of `spec/transports.json`, the group `mqttPublishBounds`, the
-two places of `mqttBrokerAdapter`, the adapter's twins, the interop over MQTT 5 both ways, the `mqtt`
-job running the Rust side, and the fuzz target `mqtt-packets`.
+**Its gates**: the cases over `mqtt` of `spec/transports.json`, the groups `mqttPublishBounds` and
+`mqttAcknowledgementCodes`, the two places of `mqttBrokerAdapter`, the adapter's twins, the interop
+over MQTT 5 both ways, the `mqtt` job running the Rust side, and the fuzz target `mqtt-packets`.
 
 ## The Tenth Man
 

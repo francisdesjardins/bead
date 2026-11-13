@@ -48,6 +48,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   it is mounted on: 500, a failure of its own reported on its `error`, its call never made (7.5,
   7.6, 10.1). Every gateway makes the change, so the companion's next version is a minor
   (decision 0037).
+- Over MQTT 5, every side judges each PUBACK, SUBACK and UNSUBACK alike, whether or not a request
+  awaits it. A Reason Code of 0x80 or more refuses its request, its link kept, whether or not its
+  packet's table names it, as MQTT 5 gives every such code (§2.4, §4.13.2): a PUBACK of 0x95, which
+  Mosquitto 2.1.2 sends past its `message_size_limit`, refuses that publication on the TypeScript
+  side too, which lost its link on it. A Reason Code under 0x80 its table does not name, or a SUBACK
+  or an UNSUBACK whose count of codes is not one, is a packet the client cannot read: the link
+  closes, no DISCONNECT, in every phase, where the C# and Rust sides refused it, or took such a
+  PUBACK, and kept the link, and the TypeScript side let a subscription go on an UNSUBACK of no
+  code. A packet the client cannot read ends the adapter's stop with no DISCONNECT on every side,
+  where the TypeScript side read on to its DISCONNECT. Spec 15.26 to 15.29 say so, with when a
+  PUBLISH of QoS 0 is taken, once written, and that a subscription or a publication given up once
+  its packet may have gone loses its link; `spec/vectors.json` gains `mqttAcknowledgementCodes`.
+  Every side's MQTT 5 adapter changes, so the spec's next version is a minor (decision 0041).
 
 ### Fixed
 
