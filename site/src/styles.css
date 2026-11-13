@@ -1095,7 +1095,7 @@ pre code {
 @media (min-width: 1136px) {
   :root {
     --code-room: min(
-      1180px,
+      var(--app-content-wide-max-width, 1180px),
       calc(50vw + 560px - var(--app-space-4) - 220px - var(--app-space-12) - var(--app-space-8))
     );
   }

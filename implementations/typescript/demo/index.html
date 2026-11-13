@@ -463,6 +463,8 @@
         max-width: 1360px;
         margin: 0 auto;
         padding: var(--app-space-10) max(var(--app-space-4), 3vw) var(--app-space-14);
+        /* how wide the scenes go, which a wide screen widens */
+        --scenes-max-width: 860px;
       }
 
       .scenes {
@@ -470,16 +472,16 @@
         align-content: start;
         gap: var(--app-space-6);
         width: 100%;
-        max-width: 860px;
+        max-width: var(--scenes-max-width);
         min-width: 0;
         margin: 0 auto;
       }
 
-      /* a wide screen: the scenes take the room the page's code takes beside its column, as
-         francisdesjardins.ca's Bead page does, the intro keeping its measure */
+      /* a wide screen: the scenes take the room francisdesjardins.ca's Bead page gives its code,
+         penumbra's wide width, the intro keeping its measure */
       @media (min-width: 1136px) {
-        .scenes {
-          max-width: 1180px;
+        .layout {
+          --scenes-max-width: var(--app-content-wide-max-width, 1180px);
         }
       }
 
