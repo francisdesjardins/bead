@@ -268,3 +268,121 @@ fn refuses_what_it_does_not_read_each_in_its_own_words_with_a_syntax_error() {
         );
     }
 }
+
+#[test]
+fn hands_on_the_document_it_read_when_canonical_and_the_canonical_form_s_otherwise() {
+    for (text, canonical) in [
+        (r#"{"a":1,"b":[-1.5,"x"]}"#, r#"{"a":1,"b":[-1.5,"x"]}"#),
+        ("1.0", "1"),
+        ("-0", "0"),
+        (r#"[-0,{"a":-0}]"#, r#"[0,{"a":0}]"#),
+        ("12345678901234567890", "12345678901234567000"),
+    ] {
+        let read = JsonCodec
+            .decode(&Bytes::copy_from_slice(text.as_bytes()))
+            .expect("a JSON value");
+        assert_eq!(
+            JsonCodec.encode(&read).expect("canonical bytes").as_ref(),
+            canonical.as_bytes()
+        );
+    }
+    assert_eq!(
+        JsonOf::<i32>::new()
+            .decode(&Bytes::from_static(b"1.0"))
+            .expect("an integer"),
+        1
+    );
+    builds_a_payload_whose_name_holds_an_escape_as_json_parse_builds_one_a_member_named_proto_its_own();
+}
+
+#[test]
+fn refuses_a_json_value_that_does_not_write_and_a_text_either_way_in_its_own_words() {
+    let mut deep = serde_json::Value::Array(Vec::new());
+    for _ in 1..65 {
+        deep = serde_json::Value::Array(vec![deep]);
+    }
+    assert_eq!(
+        JsonCodec
+            .encode(&deep)
+            .expect_err("65 nested arrays")
+            .reason(),
+        "nested past 64"
+    );
+    assert_eq!(
+        TextCodec
+            .decode(&Bytes::from_static(&[0xc3]))
+            .expect_err("truncated UTF-8")
+            .reason(),
+        "not UTF-8"
+    );
+}
+
+#[test]
+fn refuses_a_number_past_the_largest_double_that_an_element_parsed_leniently_holds_as_it_is_written()
+ {
+    // A Value holds no non-finite number; the typed writer can receive all three.
+    for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert_eq!(
+            JsonOf::<f64>::new()
+                .encode(&value)
+                .expect_err("a non-finite number")
+                .reason(),
+            "not a finite number"
+        );
+    }
+    assert_eq!(
+        JsonCodec
+            .decode(&Bytes::from_static(b"[1E400]"))
+            .expect_err("no lenient Value input")
+            .reason(),
+        "a number past a double"
+    );
+}
+
+#[test]
+fn writes_a_string_as_written_when_it_holds_no_escape_and_is_utf_8_and_from_its_characters_otherwise()
+ {
+    for (text, expected) in [
+        ("\"é<\u{7f}\"", "\"é<\u{7f}\""),
+        (r#""\u0041\u003e""#, "\"A>\""),
+    ] {
+        let read = JsonCodec
+            .decode(&Bytes::copy_from_slice(text.as_bytes()))
+            .expect("a string");
+        assert_eq!(
+            JsonCodec.encode(&read).expect("written").as_ref(),
+            expected.as_bytes()
+        );
+    }
+    assert_eq!(
+        JsonCodec
+            .decode(&Bytes::from_static(b"\"\xff\""))
+            .expect_err("no invalid UTF-8 Value input")
+            .reason(),
+        "not UTF-8"
+    );
+}
+
+#[test]
+fn is_given_by_json_serializer_no_nan_and_no_infinity_and_a_surrogate_alone_as_u_fffd_before_it_writes()
+ {
+    for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert_eq!(
+            JsonOf::<f64>::new()
+                .encode(&value)
+                .expect_err("a non-finite number")
+                .reason(),
+            "not a finite number"
+        );
+    }
+    let repaired = "a\u{fffd}b".to_owned();
+    assert_eq!(
+        JsonOf::<String>::new()
+            .encode(&repaired)
+            .expect("a replacement character")
+            .as_ref(),
+        "\"a\u{fffd}b\"".as_bytes()
+    );
+    String::from_utf16(&[0x61, 0xd800, 0x62]).expect_err("a surrogate alone is no Rust String");
+    assert_eq!(String::from_utf16_lossy(&[0x61, 0xd800, 0x62]), repaired);
+}
