@@ -19,7 +19,7 @@ async fn pair() -> Pair {
 async fn answers_slow_once_its_servers_clock_passed_its_wait_never_before() {
     let pair = pair().await;
     let _interop = bead_interop::offer_interop(&pair.server).expect("the interop offered");
-    let procedures = bead_interop::interop_procedures(None).expect("the interop descriptors");
+    let procedures = bead_interop::InteropProcedures::get().expect("the interop descriptors");
     let request = pair
         .client
         .services()

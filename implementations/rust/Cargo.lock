@@ -598,6 +598,7 @@ name = "francisdesjardins-bead-interop"
 version = "0.13.0"
 dependencies = [
  "francisdesjardins-bead",
+ "francisdesjardins-bead-protobuf",
  "serde_json",
  "tokio",
 ]

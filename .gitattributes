@@ -30,3 +30,4 @@
 # What beadc writes for a Rust output, held by `generate --check`: shown as generated, its diff
 # folded.
 /examples/hello/rust/src/generated/** linguist-generated
+/implementations/rust/crates/bead-interop/src/generated/** linguist-generated

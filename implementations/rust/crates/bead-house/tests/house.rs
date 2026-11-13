@@ -19,7 +19,7 @@ const WIDE_TUPLES: [(&str, usize); 4] = [
     ("benches", 2),
     ("crates/bead", 75),
     ("crates/bead-house", 2),
-    ("crates/bead-interop", 3),
+    ("crates/bead-interop", 1),
 ];
 
 #[test]
