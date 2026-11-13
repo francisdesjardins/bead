@@ -16,9 +16,7 @@ use crate::router::server::RouterServerOptions;
 use crate::testing::pair::echo;
 use crate::testing::scripted::Sending;
 
-#[tokio::test]
-async fn requests_answered_after_their_connection_closed_send_nothing_so_the_handle_is_told_its_session_anew()
- {
+async fn late_connection_answer(open_first: bool) {
     let served = Served::new(&RouterServerOptions {
         session_token_of: Some(Arc::new(|_| Ok(Some(token())))),
         ..RouterServerOptions::default()
@@ -42,7 +40,9 @@ async fn requests_answered_after_their_connection_closed_send_nothing_so_the_han
             })
         }))
         .expect("echo registered");
-    served.transport.open(&first(), true);
+    if open_first {
+        served.transport.open(&first(), true);
+    }
     served
         .transport
         .deliver(&request_of((1, &echo(), "late")), &first());
@@ -144,4 +144,16 @@ async fn what_an_answer_subscribed_goes_with_it_when_it_is_a_failure_or_does_not
     served.settle().await;
     assert_eq!(subscriptions(&served).await, Vec::<u32>::new());
     assert_eq!(served.reported(), ["gone second", "gone second"]);
+}
+
+#[tokio::test]
+async fn requests_answered_after_their_connection_closed_send_nothing_so_the_handle_is_told_its_session_anew()
+ {
+    late_connection_answer(true).await;
+}
+
+#[tokio::test]
+async fn answered_after_their_connection_closed_send_nothing_so_the_handle_is_told_its_session_anew()
+ {
+    late_connection_answer(false).await;
 }

@@ -381,9 +381,7 @@ async fn are_asked_their_admission_once_on_their_header_before_their_payload_is_
 }
 
 // spec 9.2, 13.5
-#[tokio::test]
-async fn requests_refused_their_admission_never_reach_a_callback_which_would_subscribe_a_plain_request()
- {
+async fn admission_refusals() {
     let served = Served::new(&RouterServerOptions::default());
     let reached = Arc::new(Mutex::new(Vec::new()));
     let reaching = Arc::clone(&reached);
@@ -425,9 +423,7 @@ async fn requests_refused_their_admission_never_reach_a_callback_which_would_sub
 }
 
 // spec 9.2
-#[tokio::test]
-async fn requests_are_refused_when_nobody_answers_them_or_they_name_a_destination_this_router_relays_nothing()
- {
+async fn routing_refusals() {
     let served = Served::new(&RouterServerOptions::default());
     let other = crate::identity::Procedure {
         procedure_id: 9,
@@ -481,8 +477,7 @@ async fn requests_are_refused_when_nobody_answers_them_or_they_name_a_destinatio
 }
 
 // spec 9.2
-#[tokio::test]
-async fn requests_are_the_only_envelopes_answered_any_other_is_reported() {
+async fn unanswered_envelopes() {
     let served = Served::new(&RouterServerOptions::default());
     served.transport.deliver(
         &Envelope::Notification {
@@ -512,9 +507,7 @@ async fn requests_are_the_only_envelopes_answered_any_other_is_reported() {
 }
 
 // spec 9.2, 11.2
-#[tokio::test]
-async fn requests_of_the_servers_own_parity_or_on_a_subscriptions_call_id_are_reported_on_their_connection_and_taken_on_another()
- {
+async fn incoming_call_parity() {
     let served = Served::new(&RouterServerOptions::default());
     served.transport.open(&first(), true);
     served.transport.open(&second(), true);
@@ -551,8 +544,7 @@ async fn requests_of_the_servers_own_parity_or_on_a_subscriptions_call_id_are_re
         .expect("a call id belongs to its connection");
 }
 
-#[tokio::test]
-async fn requests_refuse_a_second_resolver_for_one_procedure() {
+async fn duplicate_resolver() {
     let served = Served::new(&RouterServerOptions::default());
     served
         .router
@@ -561,6 +553,7 @@ async fn requests_refuse_a_second_resolver_for_one_procedure() {
     assert!(served.router.register_resolver((&echo(), idle())).is_err());
     assert_eq!(served.transport.take(), Vec::new());
     assert_eq!(served.reported(), Vec::<String>::new());
+    served.router.dispose().await;
 }
 
 #[tokio::test]
@@ -573,4 +566,59 @@ async fn are_each_asked_their_session_of_its_session_of_once_their_call_id_held_
 async fn a_connections_requests_are_each_asked_their_session_of_its_session_of_once_their_call_id_held_before_their_admission_which_reads_it_as_their_callback_does()
  {
     server_session_order(true).await;
+}
+
+#[tokio::test]
+async fn requests_refused_their_admission_never_reach_a_callback_which_would_subscribe_a_plain_request()
+ {
+    admission_refusals().await;
+}
+
+#[tokio::test]
+async fn refused_their_admission_never_reach_a_callback_which_would_subscribe_a_plain_request() {
+    admission_refusals().await;
+}
+
+#[tokio::test]
+async fn requests_are_refused_when_nobody_answers_them_or_they_name_a_destination_this_router_relays_nothing()
+ {
+    routing_refusals().await;
+}
+
+#[tokio::test]
+async fn are_refused_when_nobody_answers_them_or_they_name_a_destination_this_router_relays_nothing()
+ {
+    routing_refusals().await;
+}
+
+#[tokio::test]
+async fn requests_are_the_only_envelopes_answered_any_other_is_reported() {
+    unanswered_envelopes().await;
+}
+
+#[tokio::test]
+async fn are_the_only_envelopes_answered_any_other_is_reported() {
+    unanswered_envelopes().await;
+}
+
+#[tokio::test]
+async fn requests_of_the_servers_own_parity_or_on_a_subscriptions_call_id_are_reported_on_their_connection_and_taken_on_another()
+ {
+    incoming_call_parity().await;
+}
+
+#[tokio::test]
+async fn of_the_servers_own_parity_or_on_a_subscriptions_call_id_are_reported_on_their_connection_and_taken_on_another()
+ {
+    incoming_call_parity().await;
+}
+
+#[tokio::test]
+async fn requests_refuse_a_second_resolver_for_one_procedure() {
+    duplicate_resolver().await;
+}
+
+#[tokio::test]
+async fn refuse_a_second_resolver_for_one_procedure() {
+    duplicate_resolver().await;
 }
