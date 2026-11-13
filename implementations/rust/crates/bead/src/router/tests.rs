@@ -70,6 +70,7 @@ mod router_core_lifecycle;
 mod router_core_outcomes;
 mod router_core_peer_calls;
 mod router_core_placement;
+mod router_core_port_defaults;
 mod router_core_procedures_taken;
 mod router_core_requester;
 mod router_core_rest;

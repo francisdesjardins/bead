@@ -21,13 +21,11 @@ fn resolved(session: Option<crate::router::types::CallSession>) -> Resolution {
 }
 
 // spec 13.1
-#[tokio::test]
 #[expect(
     clippy::too_many_lines,
     reason = "the shared bare and fallback-session scenarios include each refused and admitted request"
 )]
-async fn a_credential_that_does_not_resolve_is_refused_session_required_whatever_its_procedure_requires_never_admitted_an_elsewhere_as_one_that_came_without_none_resolving_to_none_runs_in_none()
- {
+async fn unresolved_credentials() {
     let (first, handed, admitted) = serving(Some(Box::new(|_, _| resolved(None)))).await;
     let (bare, bare_handed, bare_admitted) = serving(None).await;
     first
@@ -312,4 +310,16 @@ async fn answers_an_admissions_session_required_to_a_request_that_presented_a_cr
             quiet(&peer).await;
         }
     }
+}
+
+#[tokio::test]
+async fn a_credential_that_does_not_resolve_is_refused_session_required_whatever_its_procedure_requires_never_admitted_an_elsewhere_as_one_that_came_without_none_resolving_to_none_runs_in_none()
+ {
+    unresolved_credentials().await;
+}
+
+#[tokio::test]
+async fn that_does_not_resolve_is_refused_session_required_whatever_its_procedure_requires_never_admitted_an_elsewhere_as_one_that_came_without_none_resolving_to_none_runs_in_none()
+ {
+    unresolved_credentials().await;
 }
