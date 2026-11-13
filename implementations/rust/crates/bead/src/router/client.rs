@@ -1157,6 +1157,10 @@ impl RouterClient {
         reason = "a call held to its credential, its subscription and its refusals, as the other sides hold it"
     )]
     pub fn request(&self, payload: Bytes, request: RouterRequest) -> Result<Call, ProgrammerError> {
+        #[cfg(test)]
+        if let Some(probe) = self.requester_probe() {
+            (probe.called)(&request);
+        }
         let shared = &self.shared;
         let RouterRequest {
             procedure,

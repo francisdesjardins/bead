@@ -190,9 +190,7 @@ async fn declares_its_requester_to_its_router_as_it_is_made_and_hands_each_of_it
     fixture.router.dispose().await;
 }
 
-#[tokio::test]
-async fn one_unanswered_in_time_closes_its_connection_as_the_call_or_else_the_manager_says_nothing_else_does()
- {
+async fn command_timeout_policy() {
     use crate::constants::{ProtocolCode, RouterSide};
     use crate::envelope::FailureHeader;
     use crate::errors::CallError;
@@ -279,7 +277,10 @@ async fn one_unanswered_in_time_closes_its_connection_as_the_call_or_else_the_ma
             _ => panic!("a test ending"),
         }
         assert_eq!(
-            locked(&closed).len() - before,
+            locked(&closed)
+                .len()
+                .checked_sub(before)
+                .expect("close counts never drop"),
             usize::from(closes),
             "{ending}, default {default}, own {own:?}"
         );
@@ -444,8 +445,7 @@ async fn sends_the_encoded_payload_with_the_resolved_options_and_decodes_the_ans
     fixture.router.dispose().await;
 }
 
-#[tokio::test]
-async fn takes_the_managers_defaults_where_the_call_says_nothing_and_its_signal_as_given() {
+async fn manager_request_defaults() {
     let fixture = ClientFixture::new();
     let manager = ServiceManager::new(
         ServiceRouter::Client(fixture.router.clone()),
@@ -585,9 +585,7 @@ async fn a_deprecated_procedure_raises_deprecated_at_each_call_and_only_a_deprec
     fixture.router.dispose().await;
 }
 
-#[tokio::test]
-async fn get_command_asks_one_connection_as_a_servers_request_does_and_tells_debug_it_is_a_command()
-{
+async fn command_request_trace() {
     let fixture = Fixture::new();
     let heard = fixture.heard();
     fixture.transport.open(&handle_of(1), true);
@@ -624,8 +622,7 @@ async fn get_command_asks_one_connection_as_a_servers_request_does_and_tells_deb
     fixture.router.dispose().await;
 }
 
-#[tokio::test]
-async fn tells_debug_the_close_on_timeout_that_applies_the_calls_or_else_the_managers() {
+async fn command_timeout_trace() {
     let fixture = Fixture::new();
     fixture.transport.open(&handle_of(1), true);
     let manager = ServiceManager::new(
@@ -969,4 +966,48 @@ fn a_command_names_the_connection_it_goes_to_as_the_types_require() {
         "pub fn check() -> bead::CommandOptions { bead::CommandOptions::new() }",
         ("E0061", "takes 1 argument"),
     );
+}
+
+#[tokio::test]
+async fn takes_the_managers_defaults_where_the_call_says_nothing_and_its_signal_as_given() {
+    manager_request_defaults().await;
+}
+
+#[tokio::test]
+async fn takes_the_manager_defaults_where_the_call_says_nothing_and_its_token_as_given() {
+    manager_request_defaults().await;
+}
+
+#[tokio::test]
+async fn one_unanswered_in_time_closes_its_connection_as_the_call_or_else_the_manager_says_nothing_else_does()
+ {
+    command_timeout_policy().await;
+}
+
+#[tokio::test]
+async fn a_command_unanswered_in_time_closes_its_connection_as_the_call_or_else_the_manager_says_nothing_else_does()
+ {
+    command_timeout_policy().await;
+}
+
+#[tokio::test]
+async fn get_command_asks_one_connection_as_a_servers_request_does_and_tells_debug_it_is_a_command()
+{
+    command_request_trace().await;
+}
+
+#[tokio::test]
+async fn get_command_asks_one_connection_as_a_server_request_does_and_tells_debug_it_is_a_command()
+{
+    command_request_trace().await;
+}
+
+#[tokio::test]
+async fn tells_debug_the_close_on_timeout_that_applies_the_calls_or_else_the_managers() {
+    command_timeout_trace().await;
+}
+
+#[tokio::test]
+async fn tells_debug_the_close_on_timeout_that_applies_the_call_or_else_the_manager_one() {
+    command_timeout_trace().await;
 }

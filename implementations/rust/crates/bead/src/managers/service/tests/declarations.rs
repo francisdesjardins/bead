@@ -366,8 +366,7 @@ async fn refuses_a_procedure_off_section_16_before_its_own_reason_a_notification
     fixture.router.dispose().await;
 }
 
-#[tokio::test]
-async fn a_trigger_the_router_never_registered_is_a_programmer_error() {
+async fn stray_trigger() {
     let fixture = ClientFixture::new();
     let notification = fixture
         .manager
@@ -577,9 +576,8 @@ async fn hands_before_request_the_connection_the_header_and_the_calls_session_al
     );
 }
 
-#[tokio::test]
-async fn hands_the_router_a_procedures_payload_limit_with_its_requests_and_its_resolver_and_nothing_else_it_carries()
- {
+async fn procedure_payload_limit() {
+    client_procedure_payload_limit().await;
     let fixture = Fixture::new();
     let limited = crate::identity::Procedure {
         maximum_payload_bytes: Some(64),
@@ -661,6 +659,70 @@ async fn hands_the_router_a_procedures_payload_limit_with_its_requests_and_its_r
         "pub fn check(mut procedure: bead::Procedure) { procedure.extra = \"kept here\"; }",
         ("E0609", "no field"),
     );
+}
+
+async fn client_procedure_payload_limit() {
+    let fixture = ClientFixture::new();
+    let limited = crate::identity::Procedure {
+        maximum_payload_bytes: Some(64),
+        procedure_kind: None,
+        ..echo()
+    };
+    let called = Arc::new(Mutex::new(Vec::new()));
+    let calling = Arc::clone(&called);
+    fixture
+        .router
+        .observe_requester(crate::testing::scripted::RequesterProbe {
+            declared: Arc::new(|_, _| {}),
+            called: Arc::new(move |request| {
+                locked(&calling).push(request.procedure.clone());
+            }),
+        });
+    fixture
+        .manager
+        .get_command_resolver(
+            &limited,
+            RequestResolverDependencies::new(TextCodec, TextCodec),
+        )
+        .expect("the client command defined")
+        .on(Arc::new(|_, _| Box::pin(async { Ok(()) })))
+        .expect("the command resolver registered");
+    fixture
+        .router
+        .owner()
+        .run(|state| {
+            let resolvers = locked(&state.core().resolvers);
+            assert_eq!(resolvers.len(), 1);
+            assert_eq!(
+                resolvers
+                    .get(&(2, 1))
+                    .expect("the command resolver")
+                    .handler
+                    .maximum_payload_bytes,
+                Some(64)
+            );
+        })
+        .await
+        .expect("the client's resolver limit");
+    let request = fixture
+        .manager
+        .get_request(&limited, RequestDependencies::new(TextCodec, TextCodec))
+        .expect("the client request declared");
+    let waiting = request
+        .call("hi".to_owned(), &crate::RequestOptions::default())
+        .expect("the request made");
+    fixture.clock.settle().await;
+    assert_eq!(*locked(&called), [limited]);
+    fixture.transport.deliver(&Envelope::Result {
+        header: ResultHeader {
+            call_id: 1,
+            total: None,
+            credential: None,
+        },
+        payload: Bytes::from_static(b"hi"),
+    });
+    assert_eq!(waiting.await.expect("the request answers"), "hi");
+    fixture.router.dispose().await;
 }
 
 // spec 16.11
@@ -757,4 +819,25 @@ async fn types_a_client_s_services_and_a_server_s_by_their_side_each_without_the
         server.off(listener);
     }
     assert!(!client.is_debugging() && !server.is_debugging());
+}
+
+#[tokio::test]
+async fn a_trigger_the_router_never_registered_is_a_programmer_error() {
+    stray_trigger().await;
+}
+
+#[tokio::test]
+async fn a_trigger_the_router_never_registered_is_an_invalid_operation() {
+    stray_trigger().await;
+}
+
+#[tokio::test]
+async fn hands_the_router_a_procedures_payload_limit_with_its_requests_and_its_resolver_and_nothing_else_it_carries()
+ {
+    procedure_payload_limit().await;
+}
+
+#[tokio::test]
+async fn hands_the_router_a_procedure_payload_limit_with_its_requests_and_its_resolver() {
+    procedure_payload_limit().await;
 }

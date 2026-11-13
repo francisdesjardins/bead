@@ -145,8 +145,7 @@ fn asking(manager: &ServiceManager) -> crate::managers::service::Request<JsonCod
 }
 
 // debugging 3.1, 3.4
-#[tokio::test]
-async fn is_on_only_while_someone_listens() {
+async fn manager_debug_listeners() {
     let pair = pair().await;
     let manager = &pair.client.services().manager;
 
@@ -1201,4 +1200,14 @@ fn refuses_a_filter_given_whole_in_the_grammar_s_names_as_it_is_made() {
             .starts_with("a debug filter takes a kind among request, result, failure"),
         "a kind no grammar names"
     );
+}
+
+#[tokio::test]
+async fn is_on_only_while_someone_listens() {
+    manager_debug_listeners().await;
+}
+
+#[tokio::test]
+async fn is_debugging_only_while_someone_listens() {
+    manager_debug_listeners().await;
 }

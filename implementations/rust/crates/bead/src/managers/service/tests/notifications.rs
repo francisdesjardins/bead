@@ -539,9 +539,7 @@ async fn the_same_procedure_gives_the_same_notification_so_every_callback_is_hea
     two.unregister().await.expect("last out");
 }
 
-#[tokio::test]
-async fn the_same_procedure_under_another_kind_name_revision_deprecation_or_limit_is_a_programmer_error()
- {
+async fn conflicting_notification() {
     let fixture = ClientFixture::new();
     let held = notification(&fixture);
     for asked in [
@@ -620,6 +618,7 @@ async fn the_same_procedure_under_another_kind_name_revision_deprecation_or_limi
         &held.as_like(),
         &notification(&fixture).as_like()
     ));
+    fixture.router.dispose().await;
 }
 
 #[tokio::test]
@@ -712,4 +711,16 @@ async fn makes_a_notification_with_the_window_its_dependencies_give_paced_by_it(
     let registration = subscribed(&fixture, (&notification, callback(&Heard::default(), ""))).await;
     assert!(matches!(&requests(&fixture)[0], Envelope::Request { header, .. } if header.paced));
     registration.unregister().await.expect("unregistered");
+}
+
+#[tokio::test]
+async fn the_same_procedure_under_another_kind_name_revision_deprecation_or_limit_is_a_programmer_error()
+ {
+    conflicting_notification().await;
+}
+
+#[tokio::test]
+async fn the_same_procedure_under_another_kind_name_revision_deprecation_or_limit_is_an_invalid_operation()
+ {
+    conflicting_notification().await;
 }

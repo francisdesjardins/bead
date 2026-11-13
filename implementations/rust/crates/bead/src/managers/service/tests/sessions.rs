@@ -71,8 +71,7 @@ async fn a_routers_own_handle_type_reaches_the_callback_for_the_session_manager_
     fixture.router.dispose().await;
 }
 
-#[tokio::test]
-async fn reads_the_calls_session_its_router_resolved_and_so_does_the_callback_whoever_asks_it() {
+async fn admission_session_identity() {
     let fixture = Fixture::new();
     let ada = Arc::new(CallSession {
         data: Some(json!("ada")),
@@ -220,4 +219,15 @@ async fn permissive_sessions(fixture: &Fixture, (ada, bob): (Arc<CallSession>, A
         locked(&received)[2].as_ref().expect("bob received"),
         &bob,
     ));
+}
+
+#[tokio::test]
+async fn reads_the_calls_session_its_router_resolved_and_so_does_the_callback_whoever_asks_it() {
+    admission_session_identity().await;
+}
+
+#[tokio::test]
+async fn admission_reads_the_calls_session_its_router_resolved_and_so_does_the_callback_whoever_asks_it()
+ {
+    admission_session_identity().await;
 }

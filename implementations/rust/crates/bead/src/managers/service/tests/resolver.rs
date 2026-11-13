@@ -178,8 +178,7 @@ async fn hands_the_callback_the_signal_of_its_call_which_its_cancel_aborts() {
     );
 }
 
-#[tokio::test]
-async fn an_answer_with_a_failure_of_the_procedures_own_sends_it_as_the_applications() {
+async fn application_failure_answer() {
     let fixture = Fixture::new();
     let recording = Arc::new(Recording::default());
     let failure = application(7, "why");
@@ -626,4 +625,14 @@ async fn an_answer_that_cannot_go_out_leaves_the_request_to_be_answered_as_faile
             failed(ProtocolCode::PROCEDURE_FAILED)
         ]
     );
+}
+
+#[tokio::test]
+async fn an_answer_with_a_failure_of_the_procedures_own_sends_it_as_the_applications() {
+    application_failure_answer().await;
+}
+
+#[tokio::test]
+async fn an_answer_with_a_failure_of_the_procedure_own_sends_it_as_the_application_one() {
+    application_failure_answer().await;
 }
