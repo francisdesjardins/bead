@@ -20,17 +20,16 @@ use crate::router::types::{CallSession, RouterError};
 use crate::testing::pair::echo;
 use crate::testing::scripted::handle_of;
 
-#[tokio::test]
-async fn refuses_a_resolver_off_section_16_as_it_is_asked_for_before_its_callback_is_given() {
+async fn resolver_identity_refusals(procedure: &crate::identity::Procedure) {
     let fixture = Fixture::new();
     let client = ClientFixture::new();
     let named = crate::identity::Procedure {
         procedure_name: "Echo".to_owned(),
-        ..echo()
+        ..procedure.clone()
     };
     let ranged = crate::identity::Procedure {
         service_revision: 0,
-        ..echo()
+        ..procedure.clone()
     };
     let request = fixture
         .manager
@@ -70,6 +69,24 @@ async fn refuses_a_resolver_off_section_16_as_it_is_asked_for_before_its_callbac
     fixture.router.dispose().await;
     assert_eq!(client.transport.envelopes(), []);
     client.router.dispose().await;
+}
+#[tokio::test]
+async fn refuses_a_resolver_off_section_16_as_it_is_asked_for_before_its_callback_is_given() {
+    resolver_identity_refusals(&echo()).await;
+}
+
+#[tokio::test]
+async fn a_manager_refuses_a_resolver_off_section_16_as_it_is_asked_for_before_its_callback_is_given()
+ {
+    resolver_identity_refusals(&crate::identity::Procedure {
+        service_id: 1,
+        procedure_id: 1,
+        service_revision: 1,
+        procedure_name: "echo".to_owned(),
+        procedure_kind: None,
+        ..echo()
+    })
+    .await;
 }
 
 // spec 16.10, 16.11; debugging 4.1.2
@@ -315,28 +332,26 @@ async fn resolver_sides() {
     server.router.dispose().await;
 }
 
-#[tokio::test]
-async fn refuses_a_procedure_off_section_16_before_its_own_reason_a_notifications_asked_for_otherwise()
- {
+async fn notification_identity_before_cache(procedure: &crate::identity::Procedure) {
     let fixture = ClientFixture::new();
     let dependencies =
         || NotificationDependencies::new(RequestDependencies::new(TextCodec, TextCodec), TextCodec);
     let notification = fixture
         .manager
-        .get_notification(&echo(), dependencies())
+        .get_notification(procedure, dependencies())
         .expect("the notification is known");
     for (procedure, reason) in [
         (
             crate::identity::Procedure {
                 procedure_name: "Echo".to_owned(),
-                ..echo()
+                ..procedure.clone()
             },
             " is off its form: ",
         ),
         (
             crate::identity::Procedure {
                 service_revision: 0,
-                ..echo()
+                ..procedure.clone()
             },
             " is out of its range: ",
         ),
@@ -349,12 +364,12 @@ async fn refuses_a_procedure_off_section_16_before_its_own_reason_a_notification
     }
     let same = fixture
         .manager
-        .get_notification(&echo(), dependencies())
+        .get_notification(procedure, dependencies())
         .expect("the valid notification remains known");
     assert!(Arc::ptr_eq(&notification.as_like(), &same.as_like()));
     let renamed = crate::identity::Procedure {
         procedure_name: "other".to_owned(),
-        ..echo()
+        ..procedure.clone()
     };
     let error = fixture
         .manager
@@ -363,6 +378,25 @@ async fn refuses_a_procedure_off_section_16_before_its_own_reason_a_notification
     assert!(error.to_string().contains("already a notification"));
     assert_eq!(fixture.transport.envelopes(), []);
     fixture.router.dispose().await;
+}
+#[tokio::test]
+async fn refuses_a_procedure_off_section_16_before_its_own_reason_a_notifications_asked_for_otherwise()
+ {
+    notification_identity_before_cache(&echo()).await;
+}
+
+#[tokio::test]
+async fn a_manager_refuses_a_procedure_off_section_16_before_its_own_reason_a_notification_s_asked_for_otherwise()
+ {
+    notification_identity_before_cache(&crate::identity::Procedure {
+        service_id: 1,
+        procedure_id: 1,
+        service_revision: 1,
+        procedure_name: "echo".to_owned(),
+        procedure_kind: None,
+        ..echo()
+    })
+    .await;
 }
 
 async fn stray_trigger() {
