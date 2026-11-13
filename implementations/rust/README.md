@@ -91,8 +91,8 @@ features are additive:
 - `http`: the HTTP transport, server and client (RFC 9110, 9112), on hyper, HTTP/2 beside HTTP/1.1
   under TLS on the server (RFC 9113); `HttpServer` and `HttpClient` over them;
 - `mqtt`: MQTT 5 over a broker (decision 0041), a client of Bead's own over TCP, TLS or a WebSocket
-  of subprotocol `mqtt`; `MqttBrokerAdapter` over it, and its defaults, `MQTT_CONNECT_TIMEOUT`
-  among them;
+  of subprotocol `mqtt`, its upgrade and its frames its own; `MqttBrokerAdapter` over it, and its
+  defaults, `MQTT_CONNECT_TIMEOUT` among them;
 - `testing`: the test kit, `bead::testing`, which the tests alone turn on: no API.
 
 Each of `websocket`, `http` and `mqtt` brings TLS on rustls over aws-lc-rs, a client verifying by
@@ -323,16 +323,18 @@ crate's list of its public items anew, its diff the change's to review.
 ## Fuzzing and the bench
 
 `node ../../tools/fuzz.mjs build rust`, then `run rust
-envelope|payload-codecs|http-fields|debug-filter|jwt|ws-handshake|broker-parcel|proto-codecs|mqtt-packets`,
-fuzzes the side's nine targets with cargo-fuzz on the nightly the tool pins by its date, on Linux or
-WSL: the eight every side shares, and `mqtt-packets`, its MQTT 5 client's reader of a broker's
-packets, the Rust side's alone, since the other sides read a broker's bytes through MQTT.js and
-MQTTnet. [`fuzz.yml`](../../.github/workflows/fuzz.yml) runs the nine every week, each ten minutes,
-its corpus kept between runs ([the root README](../../README.md#fuzzing)).
+envelope|payload-codecs|http-fields|debug-filter|jwt|ws-handshake|broker-parcel|proto-codecs|mqtt-packets|mqtt-websocket-frames`,
+fuzzes the side's ten targets with cargo-fuzz on the nightly the tool pins by its date, on Linux or
+WSL: the eight every side shares, `mqtt-packets`, its MQTT 5 client's reader of a broker's packets,
+and `mqtt-websocket-frames`, its reader of an MQTT 5 WebSocket's frames, the Rust side's alone, since
+the other sides read a broker's bytes through MQTT.js and MQTTnet.
+[`fuzz.yml`](../../.github/workflows/fuzz.yml) runs the ten every week, each ten minutes, its corpus
+kept between runs ([the root README](../../README.md#fuzzing)).
 `crates/bead/tests/envelope_fuzz.rs` and `broker_parcel_fuzz.rs` feed the envelope readers and the
 parcel's seeded mutations of `spec/vectors.json` in the suite, from `bead::testing::mutations`, the
 generator every side shares; `mqtt_packets_fuzz.rs` feeds the MQTT 5 packets' reader seeded
-mutations of its own packets. `node ../../tools/bench-release.mjs rust` runs bead-bench in fresh
+mutations of its own packets, and `mqtt_websocket_frames_fuzz.rs` the WebSocket's frame reader
+seeded mutations of its own frames. `node ../../tools/bench-release.mjs rust` runs bead-bench in fresh
 processes, from its release build: the envelope's codec, a request written and read back, calls on
 one in-memory connection kept, and exchanges, each a client and its connection drawn, called once
 and closed; [`bench.yml`](../../.github/workflows/bench.yml) compares it with the last release's on

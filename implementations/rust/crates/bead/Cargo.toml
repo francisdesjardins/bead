@@ -164,5 +164,11 @@ name = "broker_parcel_fuzz"
 name = "mqtt_packets_fuzz"
 required-features = ["mqtt"]
 
+# seeded mutations of the frames a server sends over an MQTT 5 WebSocket, fed to the MQTT 5 client's
+# frame reader
+[[test]]
+name = "mqtt_websocket_frames_fuzz"
+required-features = ["mqtt"]
+
 [lints]
 workspace = true

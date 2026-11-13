@@ -21,6 +21,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The Rust side's validators' runtime in `bead-protobuf`, and the counter of the contract with
   generated code, `GENERATED_CODE_SUPPORTS_VERSION_7` and `_8`; the Rust side plays
   `spec/validations.json`'s verdicts (decisions 0035, 0051).
+- The fuzz target `mqtt-websocket-frames` and its seeded mutations, over the Rust side's reader of
+  an MQTT 5 WebSocket's frames (decision 0050).
 
 ### Changed
 
@@ -66,6 +68,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   extension; 15.29 judges a packet past its bound as the bytes holding its length come, or once its
   message is whole on a platform that hands one on only so. A text message closes the link
   ([MQTT-6.0.0-1]), the TypeScript and C# sides an open row of `docs/support.md`.
+- The Rust side's MQTT 5 link reads its WebSocket's frames itself: its upgrade judged as RFC 6455
+  §4.1 has a client judge one, `Connection` read as a list of tokens, each binary frame's payload
+  handed to its packet reader as it comes, so a message of several packets is read whatever its
+  size, a packet past its Maximum Packet Size is judged at its Remaining Length, and nothing is
+  reserved at a frame's head; a ping is answered with its pong and a close with a close (spec
+  15.25, 15.29; decision 0050).
 
 ### Fixed
 
