@@ -51,8 +51,7 @@ pub(super) fn failures(scripted: &Scripted) -> Vec<(u32, u16, String)> {
         .collect()
 }
 
-#[tokio::test]
-async fn cancelled_by_the_server_abort_their_resolvers_signal_and_are_answered_by_nothing() {
+async fn cancelled_command() {
     let scripted = Scripted::new();
     let cancelled = Arc::new(Mutex::new(Vec::new()));
     let hearing = Arc::clone(&cancelled);
@@ -79,7 +78,10 @@ async fn cancelled_by_the_server_abort_their_resolvers_signal_and_are_answered_b
             })),
         ))
         .expect("registered");
-    command(&scripted, request_header_of(30));
+    scripted.transport.deliver(&Envelope::Request {
+        header: request_header_of(30),
+        payload: Bytes::from_static(&[3]),
+    });
     scripted.transport.deliver(&cancel_of(30));
     scripted.settle().await;
     assert_eq!(*locked(&cancelled), [30]);
@@ -125,9 +127,7 @@ async fn answers_capacity_exceeded_a_command_past_the_calls_its_server_has_it_an
     assert_eq!(scripted.codes(), Vec::<String>::new());
 }
 
-#[tokio::test]
-async fn for_a_service_a_procedure_or_a_destination_it_does_not_know_are_refused_with_the_clients_failures()
- {
+async fn unknown_command_routes() {
     let scripted = Scripted::new();
     command(&scripted, request_header_of(2));
     scripted.settle().await;
@@ -287,4 +287,27 @@ async fn fails_a_command_to_a_connection_not_open() {
     ));
     pair.client.dispose().await;
     pair.server.dispose().await.expect("disposed");
+}
+
+#[tokio::test]
+async fn cancelled_by_the_server_abort_their_resolvers_signal_and_are_answered_by_nothing() {
+    cancelled_command().await;
+}
+
+#[tokio::test]
+async fn the_servers_requests_cancelled_by_the_server_abort_their_resolvers_signal_and_are_answered_by_nothing()
+ {
+    cancelled_command().await;
+}
+
+#[tokio::test]
+async fn for_a_service_a_procedure_or_a_destination_it_does_not_know_are_refused_with_the_clients_failures()
+ {
+    unknown_command_routes().await;
+}
+
+#[tokio::test]
+async fn the_servers_requests_for_a_service_a_procedure_or_a_destination_it_does_not_know_are_refused_with_the_clients_failures()
+ {
+    unknown_command_routes().await;
 }

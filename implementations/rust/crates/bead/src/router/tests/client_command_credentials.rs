@@ -71,9 +71,7 @@ fn elsewhere(scripted: &Scripted, (call_id, carried): (u32, Option<&str>)) {
     });
 }
 
-#[tokio::test]
-async fn resolve_their_credential_as_a_server_does_none_and_the_session_it_learned_run_in_it_another_token_is_refused_session_required_a_jwt_credential_unsupported()
- {
+async fn command_credentials() {
     let scripted = Scripted::new();
     let sessions = Arc::new(Mutex::new(Vec::new()));
     scripted
@@ -230,4 +228,16 @@ async fn answers_a_command_that_presented_a_credential_whose_admission_refuses_s
     );
     assert_eq!(scripted.transport.sent().len(), 2);
     assert_eq!(scripted.codes(), Vec::<String>::new());
+}
+
+#[tokio::test]
+async fn resolve_their_credential_as_a_server_does_none_and_the_session_it_learned_run_in_it_another_token_is_refused_session_required_a_jwt_credential_unsupported()
+ {
+    command_credentials().await;
+}
+
+#[tokio::test]
+async fn the_servers_requests_resolve_their_credential_as_a_server_does_none_and_the_session_it_learned_run_in_it_another_token_is_refused_session_required_a_jwt_credential_unsupported()
+ {
+    command_credentials().await;
 }

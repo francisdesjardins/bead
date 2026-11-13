@@ -209,9 +209,7 @@ async fn rejects_with_the_failure_the_server_answers_as_the_servers() {
     );
 }
 
-#[tokio::test]
-async fn times_out_and_cancels_its_call_a_result_too_late_says_nothing_while_its_call_id_is_reserved()
- {
+async fn reserved_timeout() {
     let scripted = Scripted::new();
     let timeout = Duration::from_millis(10);
     let asking = scripted
@@ -276,9 +274,7 @@ async fn learns_the_session_from_a_results_opening_before_the_rest_of_its_transf
     assert_eq!(scripted.codes(), Vec::<String>::new());
 }
 
-#[tokio::test]
-async fn writes_the_destination_a_request_names_refuses_a_destination_of_0_and_writes_none_left_undefined()
- {
+async fn request_destinations() {
     let scripted = Scripted::new();
     let mut calls = Vec::new();
     for destination in [Some(7), None] {
@@ -433,9 +429,7 @@ async fn refuses_a_payload_that_would_go_as_a_transfer_where_it_sends_none_befor
     assert_eq!(scripted.transport.sent().len(), 0);
 }
 
-#[tokio::test]
-async fn requests_are_held_to_the_limits_the_router_is_built_with_which_must_hold_together_and_show_them()
- {
+async fn request_limits() {
     let scripted = Scripted::with(&RouterClientOptions {
         limits: Some(RouterLimitsOptions {
             maximum_payload_bytes: Some(8),
@@ -499,4 +493,39 @@ async fn requests_are_held_to_the_limits_the_router_is_built_with_which_must_hol
     )
     .expect_err("limits that do not hold together");
     assert_eq!(scripted.transport.listener_count(), listeners);
+}
+
+#[tokio::test]
+async fn requests_are_held_to_the_limits_the_router_is_built_with_which_must_hold_together_and_show_them()
+ {
+    request_limits().await;
+}
+
+#[tokio::test]
+async fn are_held_to_the_limits_the_router_is_built_with_which_must_hold_together_and_show_them() {
+    request_limits().await;
+}
+
+#[tokio::test]
+async fn times_out_and_cancels_its_call_a_result_too_late_says_nothing_while_its_call_id_is_reserved()
+ {
+    reserved_timeout().await;
+}
+
+#[tokio::test]
+async fn times_out_and_cancels_its_call_and_a_result_too_late_says_nothing_while_its_call_id_is_reserved()
+ {
+    reserved_timeout().await;
+}
+
+#[tokio::test]
+async fn writes_the_destination_a_request_names_refuses_a_destination_of_0_and_writes_none_left_undefined()
+ {
+    request_destinations().await;
+}
+
+#[tokio::test]
+async fn writes_the_destination_a_request_names_refuses_a_destination_of_0_and_writes_none_left_null()
+ {
+    request_destinations().await;
 }
