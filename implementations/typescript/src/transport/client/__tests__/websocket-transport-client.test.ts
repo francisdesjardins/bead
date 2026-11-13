@@ -3353,3 +3353,51 @@ test.describe('WebSocketTransportClient, paused by its router', () => {
     }
   });
 });
+
+test('delivers binary as bytes', async () => {
+  const server = await startServer();
+  await using client = createWebSocketTransportClient({ WebSocket: IMPLEMENTATIONS[1][1] });
+
+  try {
+    const connected = nextConnection(server);
+    await client.connect({ host, port: portOf(server) });
+    const { socket } = await connected;
+    const heard = once(socket, 'message');
+
+    await client.send({ data: new TextEncoder().encode('hello') });
+
+    const [data, isBinary] = (await heard) as [Buffer, boolean];
+    expect([Array.from(data), isBinary]).toEqual([[104, 101, 108, 108, 111], true]);
+  } finally {
+    await client.disconnect({ isQuick: true });
+    await stopServer(server);
+    await allClosed();
+  }
+});
+
+test('rejects with a ready state error before connecting', async () => {
+  await using client = createWebSocketTransportClient();
+
+  await expect(client.disconnect()).rejects.toMatchObject({
+    got: ReadyState.UNINITIALIZED,
+    name: 'ReadyStateError',
+  });
+});
+
+test('rejects with a ready state error on a closed connection', async () => {
+  const server = await startServer();
+  await using client = createWebSocketTransportClient({ WebSocket: IMPLEMENTATIONS[1][1] });
+
+  try {
+    await client.connect({ host, port: portOf(server) });
+    await client.disconnect();
+
+    await expect(client.disconnect()).rejects.toMatchObject({
+      got: ReadyState.CLOSED,
+      name: 'ReadyStateError',
+    });
+  } finally {
+    await stopServer(server);
+    await allClosed();
+  }
+});
