@@ -581,7 +581,7 @@ fn assert_counted_procedure_failed(counted: &[String]) {
 // debugging 9.4.14, spec 9.0, 17.2: the twin of "counts a request whose codec throws other than
 // its refusal as failure PROCEDURE_FAILED", a codec's panic its throw
 #[tokio::test]
-async fn counts_a_request_whose_codec_panics_as_it_reads_as_failure_procedure_failed() {
+async fn counts_a_request_whose_codec_throws_other_than_its_refusal_as_failure_procedure_failed() {
     let (sent, reported, counted) =
         counted_through(RequestResolverDependencies::new(Unreadable, TextCodec)).await;
 
