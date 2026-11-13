@@ -593,29 +593,41 @@ fn halves_an_odd_window_exactly_64_bytes_short_of_half_of_129_and_65_not() {
     assert_eq!(incoming.credit_to_grant(65), Some(66));
 }
 
+fn carries_100_kib_through_envelopes_of_1024_bytes_and_a_window_of_8_kib_a_few_credits_apart_scenario()
+ {
+    for available in [9_007_199_254_740_991, u64::MAX] {
+        let whole = pattern_of(102_400);
+        let mut outgoing = OutgoingTransfer::new(whole.clone(), (1_004, 1_008));
+        let mut incoming = incoming(&outgoing.opening(), (102_400, 1_008, 8_192));
+        let (mut credits, mut chunks) = (0_u32, 0_u32);
+        loop {
+            if let Some(granted) = incoming.credit_to_grant(available) {
+                credits = credits.saturating_add(1);
+                outgoing.grant(granted);
+            }
+            let Some(chunk) = outgoing.next_chunk() else {
+                break;
+            };
+            chunks = chunks.saturating_add(1);
+            assert!(chunk.bytes.len().saturating_add(16) <= 1_024);
+            incoming
+                .place(&chunk.bytes, (chunk.is_last, chunk.offset))
+                .expect("placed");
+        }
+        assert!(incoming.is_whole());
+        assert_eq!(incoming.contiguous(), 102_400);
+        assert_eq!(incoming.payload(), whole);
+        assert_eq!((chunks, credits), (101, 20));
+        assert_eq!(outgoing.next_chunk(), None);
+    }
+}
+
 #[test]
 fn carries_100_kib_through_envelopes_of_1024_bytes_and_a_window_of_8_kib_a_few_credits_apart() {
-    let whole = pattern_of(102_400);
-    let mut outgoing = OutgoingTransfer::new(whole.clone(), (1_004, 1_008));
-    let mut incoming = incoming(&outgoing.opening(), (102_400, 1_008, 8_192));
-    let (mut credits, mut chunks) = (0_u32, 0_u32);
-    loop {
-        if let Some(granted) = incoming.credit_to_grant(u64::MAX) {
-            credits = credits.saturating_add(1);
-            outgoing.grant(granted);
-        }
-        let Some(chunk) = outgoing.next_chunk() else {
-            break;
-        };
-        chunks = chunks.saturating_add(1);
-        assert!(chunk.bytes.len().saturating_add(16) <= 1_024);
-        incoming
-            .place(&chunk.bytes, (chunk.is_last, chunk.offset))
-            .expect("placed");
-    }
-    assert!(incoming.is_whole());
-    assert_eq!(incoming.contiguous(), 102_400);
-    assert_eq!(incoming.payload(), whole);
-    assert_eq!((chunks, credits), (101, 20));
-    assert_eq!(outgoing.next_chunk(), None);
+    carries_100_kib_through_envelopes_of_1024_bytes_and_a_window_of_8_kib_a_few_credits_apart_scenario();
+}
+
+#[test]
+fn carries_100_kib_through_envelopes_of_1_024_bytes_and_a_window_of_8_kib_a_few_credits_apart() {
+    carries_100_kib_through_envelopes_of_1024_bytes_and_a_window_of_8_kib_a_few_credits_apart_scenario();
 }
