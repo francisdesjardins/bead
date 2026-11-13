@@ -42,6 +42,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - The C# MQTT adapter names a refusing CONNACK by its code and MQTT 5 name, such as
   `0x86, Bad User Name or Password`; a code outside the CONNACK table has its value alone.
+- A gateway mounted behind what reads a request's body, a framework's body parser or a
+  middleware, answers 500 and reports it, never calling with what was left: the TypeScript side
+  answered nothing, or 408 `too-slow`, and the C# side called with the bytes left or answered 400.
+  The C# side reads a body its server buffered from its start, and the TypeScript side reads at
+  once a body that came empty and ended before it (decision 0037).
 
 ## [0.13.0] - 2026-11-12
 
