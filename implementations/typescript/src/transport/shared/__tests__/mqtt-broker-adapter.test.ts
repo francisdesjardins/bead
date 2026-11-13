@@ -13,7 +13,7 @@ import { MqttClient } from 'mqtt';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
 import { generate, type IPublishPacket, type ISubscribePacket, type Packet } from 'mqtt-packet';
-import { WebSocketServer as WsServer } from 'ws';
+import { type WebSocket as WsSocket, WebSocketServer as WsServer } from 'ws';
 import { ParcelKind, readParcel, writeParcel } from '../broker-parcel';
 import { createBrokerParticipant } from '../broker-participant';
 import { BROKER_DELIVERIES, BROKER_PUBLISHED } from '../constants';
@@ -217,6 +217,43 @@ const withClients = async (run: (clients: MqttClient[]) => Promise<void>): Promi
   } finally {
     hooked.mock.restore();
   }
+};
+
+/**
+ * A broker over a WebSocket of subprotocol mqtt, which answers each CONNECT by `answer`, a binary
+ * CONNACK of 0x00 unless told; its server, its URL, and its close.
+ */
+const wsBrokerOf = async (answer?: (socket: WsSocket) => void) => {
+  const broker = new WsServer({
+    handleProtocols: () => {
+      return 'mqtt';
+    },
+    host: '127.0.0.1',
+    port: 0,
+  });
+
+  await once(broker, 'listening');
+  broker.on('connection', (socket) => {
+    socket.once('message', () => {
+      if (answer === undefined) {
+        socket.send(Uint8Array.from(CONNACK_BYTES));
+      } else {
+        answer(socket);
+      }
+    });
+  });
+
+  return {
+    [Symbol.asyncDispose]: () => {
+      return new Promise<void>((resolve) => {
+        broker.close(() => {
+          resolve();
+        });
+      });
+    },
+    broker,
+    url: `ws://127.0.0.1:${String((broker.address() as AddressInfo).port)}/mqtt`,
+  };
 };
 
 /**
@@ -3112,20 +3149,10 @@ test.describe('createMqttBrokerAdapter, against a broker over MQTT 5', () => {
     expect(outcomes.length, 'each connect made').toBeGreaterThan(20);
   });
 
-  // [MQTT-6.0.0-2] lets a WebSocket message hold several packets: MQTT.js reads its WebSocket as a
-  // stream of packets, each held to its Maximum Packet Size alone, where the Rust side bounds a
-  // message as a packet; a row of docs/support.md
+  // [MQTT-6.0.0-2] lets a WebSocket message hold several packets: each held to its Maximum Packet
+  // Size alone, on every side
   test('reads a WebSocket message of two packets past its Maximum Packet Size together, each within it', async () => {
-    const broker = new WsServer({
-      handleProtocols: () => {
-        return 'mqtt';
-      },
-      host: '127.0.0.1',
-      port: 0,
-    });
-
-    await once(broker, 'listening');
-
+    await using broker = await wsBrokerOf();
     const publish = generate(
       {
         cmd: 'publish',
@@ -3141,7 +3168,7 @@ test.describe('createMqttBrokerAdapter, against a broker over MQTT 5', () => {
       id: ID,
       maximumPacketSize: 1_024,
       password: PASSWORD,
-      url: `ws://127.0.0.1:${String((broker.address() as AddressInfo).port)}/mqtt`,
+      url: broker.url,
     });
     const heard = heardOf(adapter);
 
@@ -3152,16 +3179,11 @@ test.describe('createMqttBrokerAdapter, against a broker over MQTT 5', () => {
       publish.length < 1_024 && publish.length * 2 > 1_024 + 14,
       `${String(publish.length)} bytes a packet`
     ).toBe(true);
-    // its CONNECT, then its CONNACK; then one message of two PUBLISHes of 700 bytes or so each
-    broker.on('connection', (socket) => {
-      socket.once('message', () => {
-        socket.send(Uint8Array.from(CONNACK_BYTES));
-      });
-    });
 
     try {
       await adapter.start();
-      [...broker.clients][0]?.send(Buffer.concat([publish, publish]));
+      // * one message of two PUBLISHes of 700 bytes or so each
+      [...broker.broker.clients][0]?.send(Buffer.concat([publish, publish]));
       await until(() => {
         return heard.messages.length === 2;
       });
@@ -3169,9 +3191,151 @@ test.describe('createMqttBrokerAdapter, against a broker over MQTT 5', () => {
       expect(adapter.isLinked).toBe(true);
     } finally {
       await adapter.stop();
-      await new Promise((resolve) => {
-        broker.close(resolve);
+    }
+  });
+
+  test('reads a packet across two WebSocket messages whole (spec 15.25)', async () => {
+    // * its CONNACK in two binary messages, split after its fixed header
+    await using broker = await wsBrokerOf((socket) => {
+      socket.send(Uint8Array.from(CONNACK_BYTES.slice(0, 2)));
+      socket.send(Uint8Array.from(CONNACK_BYTES.slice(2)));
+    });
+    const adapter = createMqttBrokerAdapter({ id: ID, password: PASSWORD, url: broker.url });
+    const { downs } = heardOf(adapter);
+
+    try {
+      await adapter.start();
+      expect([adapter.isLinked, downs]).toEqual([true, []]);
+    } finally {
+      await adapter.stop();
+    }
+  });
+
+  test('offers no extension in its WebSocket’s upgrade to its broker, permessage-deflate among them', async () => {
+    await using broker = await wsBrokerOf();
+    const offered: unknown[] = [];
+    const adapter = createMqttBrokerAdapter({ id: ID, password: PASSWORD, url: broker.url });
+
+    broker.broker.on('connection', (_socket, request) => {
+      offered.push(request.headers['sec-websocket-extensions']);
+    });
+
+    try {
+      await adapter.start();
+      expect(offered).toEqual([undefined]);
+      expect(adapter.isLinked).toBe(true);
+    } finally {
+      await adapter.stop();
+    }
+  });
+
+  // ! `ws` hands a message on once its last fragment came: its packet is judged at its Remaining
+  // Length only then, where the C# and Rust sides judge it as its first fragment comes; a row of
+  // docs/support.md
+  test('loses its link on a WebSocket message holding a packet past its Maximum Packet Size once its last fragment came', async () => {
+    await using broker = await wsBrokerOf();
+    const adapter = createMqttBrokerAdapter({
+      id: ID,
+      maximumPacketSize: 1_024,
+      password: PASSWORD,
+      url: broker.url,
+    });
+    const { downs, messages } = heardOf(adapter);
+    // * a PUBLISH of 2,003 bytes, its fixed header announcing a Remaining Length of 2,000
+    const publish = generate(
+      {
+        cmd: 'publish',
+        dup: false,
+        payload: Buffer.alloc(1_987),
+        qos: 0,
+        retain: false,
+        topic: `bead/i/${ID}`,
+      },
+      { protocolVersion: 5 }
+    );
+
+    expect([publish.length, [...publish.subarray(0, 3)]]).toEqual([2_003, [0x30, 0xd0, 0x0f]]);
+
+    try {
+      await adapter.start();
+
+      const socket = [...broker.broker.clients][0];
+      const read: Buffer[] = [];
+
+      expect(socket).toBeDefined();
+      socket!.on('message', (data: Buffer) => {
+        read.push(data);
       });
+
+      const closed = once(socket!, 'close');
+
+      // its fixed header and its topic's first bytes, then the rest, one message of two fragments
+      socket!.send(publish.subarray(0, 8), { binary: true, fin: false });
+      await sleep(100);
+      expect([downs, adapter.isLinked], 'its first fragment held').toEqual([[], true]);
+      socket!.send(publish.subarray(8), { binary: true, fin: true });
+      await until(() => {
+        return downs.length > 0;
+      });
+      expect(downs).toEqual([{ isTakenOver: false }]);
+      await closed;
+      expect(
+        read.filter((data) => {
+          return data[0] === 0xe0;
+        }),
+        'no DISCONNECT'
+      ).toEqual([]);
+      expect(messages).toEqual([]);
+      expect(adapter.isLinked).toBe(false);
+    } finally {
+      await adapter.stop();
+    }
+  });
+
+  test('gives its WebSocket in Node a message bound of 100 MiB, or of its Maximum Packet Size where larger', async () => {
+    await using broker = await wsBrokerOf();
+
+    await withClients(async (clients) => {
+      for (const maximumPacketSize of [1_024, LARGEST_PACKET_SIZE]) {
+        const adapter = createMqttBrokerAdapter({
+          id: ID,
+          maximumPacketSize,
+          password: PASSWORD,
+          url: broker.url,
+        });
+
+        try {
+          await adapter.start();
+        } finally {
+          await adapter.stop();
+        }
+      }
+
+      // * `ws`'s own bound, 100 MiB, as its options reach MQTT.js, then the largest packet's
+      expect(
+        clients.map(({ options }) => {
+          return options.wsOptions;
+        })
+      ).toEqual([
+        { maxPayload: 104_857_600, perMessageDeflate: false },
+        { maxPayload: 268_435_460, perMessageDeflate: false },
+      ]);
+      expect(LARGEST_PACKET_SIZE).toBe(268_435_460);
+    });
+  });
+
+  // [MQTT-6.0.0-1] closes the link on a text message: MQTT.js reads its bytes, a row of docs/support.md
+  test('reads a CONNACK sent as a text WebSocket message, its link up', async () => {
+    await using broker = await wsBrokerOf((socket) => {
+      socket.send(Buffer.from(CONNACK_BYTES), { binary: false });
+    });
+    const adapter = createMqttBrokerAdapter({ id: ID, password: PASSWORD, url: broker.url });
+
+    try {
+      await adapter.start();
+      expect(adapter.isLinked).toBe(true);
+    } finally {
+      await adapter.stop();
     }
   });
 

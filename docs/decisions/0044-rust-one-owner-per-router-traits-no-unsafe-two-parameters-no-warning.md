@@ -772,15 +772,17 @@ floor, and the fuzz targets built on the dated nightly, never run; on Windows, `
 target are cached by the lock and the toolchain, cargo-deny and cargo-llvm-cov installed prebuilt,
 each checked by its SHA-256, and `ci-ok` needs the job. **Fuzz**: cargo-fuzz on the nightly, on
 Linux or WSL, through `tools/fuzz.mjs`, by hand and ten minutes a target every week
-([0006](0006-a-rule-has-its-gate.md)), its nine targets: eight the twins of the other sides' eight,
+([0006](0006-a-rule-has-its-gate.md)), its ten targets: eight the twins of the other sides' eight,
 `envelope`, `payload-codecs`, `http-fields`, `debug-filter`, `jwt`, `ws-handshake`, `broker-parcel`
 and `proto-codecs`, each reading what no socket or broker feature holds, through a crate's surface,
 `bead::internal` or a test kit; and `mqtt-packets`, its MQTT 5 client's reader of a broker's
-packets, the Rust side's alone, through `bead::internal` under the feature `mqtt`, which the fuzz
+packets, and `mqtt-websocket-frames`, its MQTT 5 client's reader of a WebSocket's frames, the Rust
+side's alone, through `bead::internal` under the feature `mqtt`, which the fuzz
 project's manifest turns on beside `testing`
 ([0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)).
 Its suite holds the envelope readers' and the parcel reader's seeded mutations, the same inputs as
-the other sides', and `tests/mqtt_packets_fuzz.rs`'s, the packets a broker sends mutated, its own.
+the other sides', and `tests/mqtt_packets_fuzz.rs`'s and `tests/mqtt_websocket_frames_fuzz.rs`'s,
+the packets and the frames a broker sends mutated, its own.
 **Bench**: `bead-bench`, the in-memory bench, each fresh process writing `bead-bench/1`, which
 `tools/bench-release.mjs rust` merges into `bead-bench/2` for `tools/bench-compare.mjs`. The gates
 every side shares hold it too: `tools/check-details.mjs` reads its sources, `tools/check-names.mjs`

@@ -830,9 +830,10 @@ same parcel and the same bytes; `proto-codecs`, the `proto` codecs over `spec/co
 wrap what reads, which its writer then refuses as nested past 100 or writes so that its reader takes
 it back. The Rust side fuzzes all eight, over its core's judgement and codecs, with cargo-fuzz on
 the nightly `tools/fuzz.mjs` pins by its date, on Linux or WSL, from `implementations/rust/fuzz/`,
-and one of its own, `mqtt-packets`, its MQTT 5 client's reader of a broker's packets, which the
-other sides leave to MQTT.js and MQTTnet, so it has no twin. The TypeScript side fuzzes one of its
-own, `blueprint`,
+and two of its own, `mqtt-packets`, its MQTT 5 client's reader of a broker's packets, and
+`mqtt-websocket-frames`, its MQTT 5 client's reader of a WebSocket's frames, which the other sides
+leave to MQTT.js and MQTTnet and to their WebSocket clients, so neither has a twin. The TypeScript
+side fuzzes one of its own, `blueprint`,
 beadc's blueprint reader, its JSON, its schema and its rules, and its form written back and read
 again; beadc has no C# side, so it has no twin. A target lets its parser's documented refusal pass;
 any other exception or a panic, an input past 1 s, or memory past its bound, 256 MiB of its own on

@@ -249,6 +249,8 @@ pub mod internal {
         MqttDisconnect, MqttPacket, MqttPublish, MqttPublishShapeOptions, MqttReading, MqttRefusal,
         largest_payload, publish_bytes, read_packet, width_of, write_publish,
     };
+    #[cfg(feature = "mqtt")]
+    pub use crate::mqtt::websocket::{MqttFrameEvent, MqttFrameReader, MqttFrameRefusal};
     pub use crate::router::types::{limits_of, session_key_of, whole_envelope_limits_of};
 }
 

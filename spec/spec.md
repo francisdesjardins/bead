@@ -2169,6 +2169,14 @@ participant's link over TCP, over TLS, or over a WebSocket whose subprotocol is 
 carries one. Over a WebSocket, a participant sends each message to its broker as one binary frame,
 never fragmented ([RFC 6455 §5.4](https://www.rfc-editor.org/rfc/rfc6455#section-5.4)), whatever
 packets it holds ([MQTT 5.0 §6](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html)).
+It reads the bytes of each binary message its broker sends, in their order, as one stream of
+packets as its frames come, a packet across messages or across a message's fragments read whole
+and several in one frame each read, each held to its own Maximum Packet Size alone (section
+15.29), with no bound on a message of its own; a message of any other type closes its network
+connection ([MQTT-6.0.0-1], [MQTT-6.0.0-2]). Its upgrade offers no extension. A platform that
+hands a message on only once it is whole bounds it
+([RFC 6455 §10.4](https://www.rfc-editor.org/rfc/rfc6455#section-10.4);
+[`docs/support.md`](../docs/support.md), "Differences").
 A parcel is the payload of one PUBLISH, and a topic its tokens joined by `/`: an inbox
 `<root>/i/<id>`, a server's name `<root>/s/<name>`, a departure `<root>/d/<id>`. A name served in a
 group is subscribed as the shared subscription `$share/<name>/<root>/s/<name>`, its share name the
@@ -2267,7 +2275,8 @@ awaits it; any other packet its client cannot read is a Malformed Packet or a Pr
 client finds
 ([MQTT 5.0 §4.13.1](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html)).
 On each it closes its network connection, reading nothing more of it, one past its bound as it reads
-that length, before the packet's body comes: its link lost where it was up, its participant's stop
+that length, over a WebSocket as the bytes that hold it come, or once its message is whole on a
+platform that hands one on only so (section 15.25), before the packet's body comes: its link lost where it was up, its participant's stop
 letting its names go among it (section 15.21), what that link awaits failed with it, the
 acknowledged request among it, never refused nor taken; its start failed where no CONNACK had put it
 up (section 15.26); its stop ended where it stopped, no down told. It sends no DISCONNECT before it

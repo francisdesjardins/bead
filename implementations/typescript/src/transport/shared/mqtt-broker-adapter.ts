@@ -164,6 +164,10 @@ const RECEIVE_MAXIMUM = 65_535;
 // the longest life a Message Expiry Interval holds, a Four Byte Integer of seconds
 const LONGEST_LIFE_SECONDS = 4_294_967_295;
 
+// `ws`'s own `maxPayload`, 100 MiB: what a message read whole holds at most, unless a packet within
+// its Maximum Packet Size is larger (RFC 6455 §10.4)
+const WS_MESSAGE_BYTES = 104_857_600;
+
 const REASON = Object.freeze({
   NO_MATCHING_SUBSCRIBERS: 0x10,
   NO_SUBSCRIPTION_EXISTED: 0x11,
@@ -205,6 +209,15 @@ const isNode = (): boolean => {
     typeof (globalThis as { process?: { versions?: { node?: unknown } } }).process?.versions
       ?.node === 'string'
   );
+};
+
+// ! a new object for each link, never frozen, which MQTT.js writes a `wss` link's TLS options into:
+// what `ws` takes in Node, a message bound no packet within its Maximum Packet Size passes and no
+// permessage-deflate offered (spec 15.25)
+const mqttWebSocketOptions = (
+  maximumPacketSize: number
+): NonNullable<IClientOptions['wsOptions']> => {
+  return { maxPayload: Math.max(WS_MESSAGE_BYTES, maximumPacketSize), perMessageDeflate: false };
 };
 
 // a Reason Code as a refusal names it
@@ -756,9 +769,10 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
       clientId: id,
       connectTimeout: Math.max(1, Math.ceil(left)),
       // ! in a page alone, each message one frame (spec 15.25): in Node, `ws` fragments none, and
-      // its stream sends with a callback, which the sliced send would drop
+      // its stream sends with a callback, which the sliced send would drop; there `ws` reassembles a
+      // message whole, bounded by its Maximum Packet Size at least, no permessage-deflate offered
       ...(isNode()
-        ? {}
+        ? { wsOptions: mqttWebSocketOptions(maximumPacketSize) }
         : {
             createWebsocket: (webSocketUrl: string, protocols: string[]) => {
               return withSlicedSends(new WebSocket(webSocketUrl, protocols));

@@ -1,26 +1,26 @@
 //! An MQTT 5 link's network connection (spec 15.25): its broker's URL read — `mqtt`, `mqtts`, `ws`
 //! or `wss` — its socket dialled over the core's socket layer, its addresses raced, under TLS where
 //! it is secured, and a WebSocket of subprotocol `mqtt` over it where the URL says so; then its two
-//! halves, one a task reads, one a task writes, and what resets it at once.
+//! halves, one a task reads, one a task writes, and what resets it at once. Over a WebSocket, each
+//! half reads or writes its frames itself, over its socket's own halves.
 
 use core::time::Duration;
 use std::io;
 use std::sync::Arc;
 
+use bytes::buf::BufMut;
 use bytes::{Bytes, BytesMut};
-use futures_util::stream::{SplitSink, SplitStream};
 use rustls::ClientConfig;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf};
-use tokio_tungstenite::WebSocketStream;
-use tungstenite::Message;
 
 use crate::judgement::security::is_secure;
+use crate::mqtt::websocket::{MqttFrameEvent, MqttFrameReader, binary_of, close_of, pong_of};
 use crate::net::dial::{ClientSocket, dial};
 use crate::net::racing::{RacingOptions, host_of};
 use crate::net::tls::{http1_config_of, platform_client_config};
 
-// what a read takes from its socket at most at once
-const READ_BYTES: usize = 65_536;
+/// What a read takes from its socket at most at once.
+pub(crate) const READ_BYTES: usize = 65_536;
 
 /// A broker's scheme (spec 15.25): MQTT over TCP, or under TLS, or over a WebSocket, or a secure one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,8 +42,8 @@ impl Scheme {
         matches!(self, Self::Ws | Self::Wss)
     }
 
-    // the port its URL names when it names none: IANA's for MQTT, RFC 6455's for a WebSocket
-    const fn port(self) -> u16 {
+    /// The port its URL names when it names none: IANA's for MQTT, RFC 6455's for a WebSocket.
+    pub(crate) const fn port(self) -> u16 {
         match self {
             Self::Mqtt => 1_883,
             Self::Mqtts => 8_883,
@@ -133,13 +133,31 @@ pub(crate) fn address_of(url: &str) -> Option<Address> {
 /// What a link's network connection is read by.
 pub(crate) enum Reader {
     Stream(ReadHalf<ClientSocket>),
-    WebSocket(SplitStream<WebSocketStream<ClientSocket>>),
+    /// Over a WebSocket: its socket's read half, its frame reader, and the bytes read and not yet
+    /// taken by it.
+    WebSocket {
+        half: ReadHalf<ClientSocket>,
+        frames: MqttFrameReader,
+        buffer: BytesMut,
+    },
 }
 
-/// What a link's network connection is written by.
+/// What a link's network connection is written by: over a WebSocket, its socket's write half, each
+/// frame written whole.
 pub(crate) enum Writer {
     Stream(WriteHalf<ClientSocket>),
-    WebSocket(SplitSink<WebSocketStream<ClientSocket>, Message>),
+    WebSocket(WriteHalf<ClientSocket>),
+}
+
+/// What came on a link's network connection.
+#[derive(Debug)]
+pub(crate) enum Incoming {
+    /// Bytes of its packets, in their order: over a WebSocket, a binary message's, as they came.
+    Bytes(Bytes),
+    /// Over a WebSocket, a ping, its payload.
+    Ping(Bytes),
+    /// Over a WebSocket, its close.
+    Close,
 }
 
 /// A link's network connection, open: its halves, and what resets it at once.
@@ -151,16 +169,45 @@ pub(crate) struct Opened {
 }
 
 impl Reader {
-    /// The next bytes its broker sent; none once its connection ended cleanly.
-    pub(crate) async fn next(&mut self) -> io::Result<Option<Bytes>> {
+    /// What came next; none once its connection ended. A frame its WebSocket refuses fails it.
+    pub(crate) async fn next(&mut self) -> io::Result<Option<Incoming>> {
         match self {
             Self::Stream(reader) => {
                 let mut buffer = BytesMut::with_capacity(READ_BYTES);
                 let read = reader.read_buf(&mut buffer).await?;
 
-                Ok((read > 0).then(|| buffer.freeze()))
+                Ok((read > 0).then(|| Incoming::Bytes(buffer.freeze())))
             }
-            Self::WebSocket(reader) => crate::mqtt::websocket::next(reader).await,
+            Self::WebSocket {
+                half,
+                frames,
+                buffer,
+            } => loop {
+                // * what is held read first: the bytes behind its 101, and a read's next frames
+                match frames.read(buffer) {
+                    Ok(Some(MqttFrameEvent::Bytes(bytes))) => {
+                        return Ok(Some(Incoming::Bytes(bytes)));
+                    }
+                    Ok(Some(MqttFrameEvent::Ping(payload))) => {
+                        return Ok(Some(Incoming::Ping(payload)));
+                    }
+                    Ok(Some(MqttFrameEvent::Close)) => return Ok(Some(Incoming::Close)),
+                    Ok(Some(MqttFrameEvent::Pong)) => {}
+                    Ok(None) => {
+                        buffer.reserve(READ_BYTES);
+
+                        if half.read_buf(&mut buffer.limit(READ_BYTES)).await? == 0 {
+                            return Ok(None);
+                        }
+                    }
+                    Err(refusal) => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            refusal.to_string(),
+                        ));
+                    }
+                }
+            },
         }
     }
 }
@@ -168,23 +215,41 @@ impl Reader {
 impl Writer {
     /// Writes one packet: over a WebSocket, one binary message, one frame (spec 15.25).
     pub(crate) async fn send(&mut self, packet: Vec<u8>) -> io::Result<()> {
+        let (writer, written) = match self {
+            Self::Stream(writer) => (writer, packet),
+            Self::WebSocket(writer) => (writer, binary_of(packet)?),
+        };
+
+        writer.write_all(&written).await?;
+        writer.flush().await
+    }
+
+    /// Answers a ping with its pong of `payload`, over a WebSocket; nothing over a stream.
+    pub(crate) async fn pong(&mut self, payload: Bytes) -> io::Result<()> {
         match self {
-            Self::Stream(writer) => {
-                writer.write_all(&packet).await?;
+            Self::Stream(_) => Ok(()),
+            Self::WebSocket(writer) => {
+                writer.write_all(&pong_of(payload)?).await?;
                 writer.flush().await
             }
-            Self::WebSocket(writer) => crate::mqtt::websocket::send(writer, packet).await,
         }
     }
 
-    /// Ends its side of the connection once what was written went: over a WebSocket, its close.
+    /// Ends its side of the connection once what was written went: over a WebSocket, its close of
+    /// no body first (RFC 6455 §5.5.1).
     pub(crate) async fn close(&mut self) {
-        match self {
-            Self::Stream(writer) => {
-                writer.shutdown().await.ok();
+        let writer = match self {
+            Self::Stream(writer) => writer,
+            Self::WebSocket(writer) => {
+                if let Ok(close) = close_of() {
+                    writer.write_all(&close).await.ok();
+                }
+
+                writer
             }
-            Self::WebSocket(writer) => crate::mqtt::websocket::close(writer).await,
-        }
+        };
+
+        writer.shutdown().await.ok();
     }
 }
 
@@ -206,11 +271,10 @@ fn resetter_of(socket: &ClientSocket) -> Option<socket2::Socket> {
     socket2::SockRef::from(tcp).try_clone().ok()
 }
 
-/// How a link's network connection is opened: its race, its TLS and the largest message it reads.
+/// How a link's network connection is opened: its race and its TLS.
 pub(crate) struct OpenOptions<'options> {
     pub(crate) racing: &'options RacingOptions,
     pub(crate) tls: Option<&'options Arc<ClientConfig>>,
-    pub(crate) maximum_packet_size: u32,
 }
 
 /// A link's network connection to `address`, open: over TCP, under TLS for `mqtts` and `wss`, and a
@@ -236,11 +300,15 @@ pub(crate) async fn open(address: &Address, options: &OpenOptions<'_>) -> io::Re
     let resetter = resetter_of(&socket);
 
     if address.scheme.is_websocket() {
-        let (writer, reader) =
-            crate::mqtt::websocket::open((address, socket), options.maximum_packet_size).await?;
+        let (socket, buffer) = crate::mqtt::websocket::open((address, socket)).await?;
+        let (half, writer) = tokio::io::split(socket);
 
         return Ok(Opened {
-            reader: Reader::WebSocket(reader),
+            reader: Reader::WebSocket {
+                half,
+                frames: MqttFrameReader::new(),
+                buffer,
+            },
             writer: Writer::WebSocket(writer),
             resetter,
         });

@@ -103,12 +103,13 @@ jobs:
 
   # ── Rust ─────────────────────────────────────────────────────────────────────
   # The Rust side's targets under cargo-fuzz, on the nightly its sanitizer needs, the one
-  # tools/fuzz.mjs pins by its date and CI's fuzz build takes: every twin, and `mqtt-packets`, its
-  # MQTT 5 client's reader of a broker's packets, its alone.
+  # tools/fuzz.mjs pins by its date and CI's fuzz build takes: every twin, and `mqtt-packets` and
+  # `mqtt-websocket-frames`, its MQTT 5 client's readers of a broker's packets and of a WebSocket's
+  # frames, its alone. Ten targets of ten minutes each, so the other sides' bound.
   rust:
     name: Fuzz (rust)
     runs-on: ubuntu-26.04
-    timeout-minutes: 120
+    timeout-minutes: 150
     env:
       CARGO_TERM_COLOR: always
     steps:
