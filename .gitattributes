@@ -23,3 +23,6 @@
 *.exe binary
 *.pdb binary
 *.snk binary
+
+# A descriptor set, protobuf's own binary, as a test or a golden of beadc holds one.
+*.binpb binary

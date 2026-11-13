@@ -753,13 +753,10 @@ export const PARTS = Object.freeze([
       },
       {
         sides: ['Rust'],
-        ahead: [
-          "Rust's beadc target",
-          "Rust's service manager over a router of the application's own",
-        ],
+        ahead: ["Rust's service manager over a router of the application's own"],
         says: [
-          'The same, but a payload’s rules, whose validators come with <code>beadc</code>’s Rust target, and a service manager over a router of the application’s own',
-          'Les mêmes, sauf les règles d’une charge, dont les validateurs viendront avec la cible Rust de <code>beadc</code>, et un gestionnaire de services sur un routeur propre à l’application',
+          'The same, but a service manager over a router of the application’s own',
+          'Les mêmes, sauf un gestionnaire de services sur un routeur propre à l’application',
         ],
       },
     ],

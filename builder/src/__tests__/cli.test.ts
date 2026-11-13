@@ -75,7 +75,7 @@ test('node runs src/cli.ts version as written, as a child process', () => {
   expect(run.stderr).toBe('');
   expect(run.status).toBe(0);
   expect(run.stdout).toMatch(
-    /^beadc \d+\.\d+\.\d+\nbuf 1\.75\.0\nprotobuf-es \d+\.\d+\.\d+\nprotoplugin \d+\.\d+\.\d+\nprotoc-gen-es \d+\.\d+\.\d+\nprotoc (?:\d+\.\d+|(?:none|\d+\.\d+), pinned \d+\.\d+)\nformat bead-blueprint\/1\nspec \d+\.\d+\.\d+\noptions 58500\n$/u
+    /^beadc \d+\.\d+\.\d+\nbuf 1\.75\.0\nprotobuf-es \d+\.\d+\.\d+\nprotoplugin \d+\.\d+\.\d+\nprotoc-gen-es \d+\.\d+\.\d+\nprotoc (?:\d+\.\d+|(?:none|\d+\.\d+), pinned \d+\.\d+)\nprotoc-gen-buffa (?:\d+\.\d+\.\d+|(?:none|\d+\.\d+\.\d+), pinned \d+\.\d+\.\d+)\nformat bead-blueprint\/1\nspec \d+\.\d+\.\d+\noptions 58500\n$/u
   );
 });
 
@@ -136,7 +136,7 @@ test('the usage names every command, init and wrapper among them', () => {
   ${command} `);
   }
 
-  expect(run.stderr).toContain('--language typescript|csharp');
+  expect(run.stderr).toContain('--language typescript|csharp|rust');
 });
 
 test('a call beadc cannot take exits 2', () => {

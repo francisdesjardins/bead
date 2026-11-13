@@ -11,6 +11,7 @@
 //   node tools/protovalidate-differential.mjs oracle        protovalidate-es over the verdicts alone
 //   node tools/protovalidate-differential.mjs typescript    the corpus through the TypeScript side's
 //   node tools/protovalidate-differential.mjs csharp        the corpus through the C# side's
+//   node tools/protovalidate-differential.mjs rust          the corpus through the Rust side's
 //
 // The violations are compared as protovalidate's own conformance compares them, sorted by `ruleId`
 // then by path, and a path by its elements, protovalidate's `FieldPath` from `violationsToProto`,
@@ -27,7 +28,10 @@
 // - TypeScript: `implementations/typescript/tools/protovalidate-differential/`, its `generated/`
 //   written here, its `testee.ts` run by Node on the side's own install;
 // - C#: `implementations/dotnet/tools/Bead.ProtovalidateDifferential/`, its `Generated/` written
-//   here, built in Release and run by `dotnet`.
+//   here, built in Release and run by `dotnet`;
+// - Rust: `implementations/rust/tools/protovalidate-differential/`, its `src/generated/` written
+//   here, its messages through protoc-gen-buffa at its pin, built in release by Cargo on the
+//   toolchain the side pins, by its own lock, and run.
 //
 // A testee reads a case a line on its standard input, `{"message":"<full name>","payload":"<base64>"}`,
 // reads the payload as its message's codec reads it, judges it by the procedure that binds it,
@@ -37,7 +41,9 @@
 // library does not read is never sent.
 //
 // From the repository's root, once builder/ and the side are installed; protoc is `BEADC_PROTOC`, or
-// the one builder/tools/fetch-protoc.mjs fetches. Exit 1 on a parting, with its case.
+// the one builder/tools/fetch-protoc.mjs fetches, and protoc-gen-buffa, for the Rust side,
+// `BEADC_PROTOC_GEN_BUFFA`, or the one builder/tools/fetch-protoc-gen-buffa.mjs fetches. Exit 1 on
+// a parting, with its case.
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -54,6 +60,7 @@ const ORACLE = join(HERE, '.oracle');
 const WORK = join(HERE, '.work');
 const BEADC = join(ROOT, 'builder', 'src', 'cli.ts');
 const FETCH_PROTOC = join(ROOT, 'builder', 'tools', 'fetch-protoc.mjs');
+const FETCH_PROTOC_GEN_BUFFA = join(ROOT, 'builder', 'tools', 'fetch-protoc-gen-buffa.mjs');
 const VALIDATIONS = join(ROOT, 'spec', 'validations.json');
 const VALIDATIONS_PROTO = join(ROOT, 'spec', 'validations.proto');
 
@@ -70,6 +77,11 @@ export const SIDES = Object.freeze({
     language: 'csharp',
     folder: 'implementations/dotnet/tools/Bead.ProtovalidateDifferential',
     generated: 'Generated',
+  }),
+  rust: Object.freeze({
+    language: 'rust',
+    folder: 'implementations/rust/tools/protovalidate-differential',
+    generated: 'src/generated',
   }),
 });
 
@@ -530,7 +542,7 @@ const generate = (side) => {
             `    runtime: ${side.runtime}`,
             `    protoRuntime: ${side.protoRuntime}`,
           ]
-        : ['  - language: csharp', '    out: generated']),
+        : [`  - language: ${side.language}`, '    out: generated']),
       '',
     ].join('\n')
   );
@@ -541,6 +553,16 @@ const generate = (side) => {
       BEADC_PROTOC:
         process.env.BEADC_PROTOC ??
         execFileSync(process.execPath, [FETCH_PROTOC], { encoding: 'utf8' }).trim(),
+      // the Rust side's messages are Buffa's, through its plugin at its pin
+      ...(side.language === 'rust'
+        ? {
+            BEADC_PROTOC_GEN_BUFFA:
+              process.env.BEADC_PROTOC_GEN_BUFFA ??
+              execFileSync(process.execPath, [FETCH_PROTOC_GEN_BUFFA], {
+                encoding: 'utf8',
+              }).trim(),
+          }
+        : {}),
     },
   });
   rmSync(out, { force: true, recursive: true });
@@ -554,6 +576,24 @@ const testeeOf = (side) => {
   if (side.language === 'typescript') {
     return (input) => {
       return spawnSync(process.execPath, ['testee.ts'], {
+        cwd: folder,
+        input,
+        encoding: 'utf8',
+        maxBuffer: 1024 * 1024 * 1024,
+      });
+    };
+  }
+
+  if (side.language === 'rust') {
+    // ! its own target folder, whatever CARGO_TARGET_DIR says, so the binary is where it is run from;
+    // --locked, as a release moves the side's crates in its lock beside the workspace's
+    const target = join(folder, 'target');
+    const testee = join(target, 'release', process.platform === 'win32' ? 'testee.exe' : 'testee');
+
+    run('cargo', ['build', '--release', '--locked', '--target-dir', target], { cwd: folder });
+
+    return (input) => {
+      return spawnSync(testee, [], {
         cwd: folder,
         input,
         encoding: 'utf8',
@@ -613,7 +653,7 @@ const main = async () => {
         });
       }
     }
-  } else if (mode === 'typescript' || mode === 'csharp') {
+  } else if (Object.hasOwn(SIDES, mode)) {
     const side = SIDES[mode];
 
     generate(side);
@@ -673,7 +713,9 @@ const main = async () => {
       `protovalidate-differential: ${String(cases.length)} cases through the ${mode} side, ${String(refused)} its library does not read`
     );
   } else {
-    throw new Error('usage: node tools/protovalidate-differential.mjs oracle|typescript|csharp');
+    throw new Error(
+      'usage: node tools/protovalidate-differential.mjs oracle|typescript|csharp|rust'
+    );
   }
 
   for (const parting of partings.slice(0, 20)) {

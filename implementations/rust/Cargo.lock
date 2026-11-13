@@ -573,6 +573,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "francisdesjardins-bead-goldens"
+version = "0.13.0"
+dependencies = [
+ "buffa",
+ "buffa-descriptor",
+ "buffa-types",
+ "francisdesjardins-bead",
+ "francisdesjardins-bead-protobuf",
+ "francisdesjardins-bead-protobuf-build",
+ "serde_json",
+]
+
+[[package]]
 name = "francisdesjardins-bead-house"
 version = "0.13.0"
 dependencies = [

@@ -13,7 +13,9 @@
 // outside the expression given, the image's `org.opencontainers.image.licenses`, or one it holds
 // no text for, fails the build: the label and the files cannot part (OCI Image Format's
 // annotations; SPDX's license expressions; Apache-2.0 4(a) and BSD-3-Clause's second clause, a
-// redistribution in binary form carrying the licence's text).
+// redistribution in binary form carrying the licence's text). protoc-gen-buffa's release ships none
+// beside its binary either, so Buffa's, the Apache License 2.0's text with its notice, goes to
+// `protoc-gen-buffa/LICENSE`.
 //
 // Usage, from builder/:
 //   node tools/licenses.mjs /opt/bead/licenses "Apache-2.0 AND BSD-3-Clause AND ISC AND MIT"
@@ -32,6 +34,9 @@ const PROTOBUF = join(BUILDER, 'licenses', 'protobuf.txt');
 const PROTOVALIDATE = join(BUILDER, 'licenses', 'protovalidate.txt');
 // googleapis', the Apache License 2.0's text, for the google/api files beadc vendors (0037)
 const GOOGLEAPIS = join(BUILDER, 'licenses', 'googleapis.txt');
+// Buffa's, the Apache License 2.0's text with its notice, for the protoc-gen-buffa the image holds
+// (0051)
+const BUFFA = join(BUILDER, 'licenses', 'buffa.txt');
 
 // a package's licence files, as npm counts them, and its notices, typescript's third parties' among
 // them, in any case
@@ -126,6 +131,8 @@ function main() {
   copyFileSync(PROTOVALIDATE, join(out, 'protovalidate', 'LICENSE'));
   mkdirSync(join(out, 'googleapis'), { recursive: true });
   copyFileSync(GOOGLEAPIS, join(out, 'googleapis', 'LICENSE'));
+  mkdirSync(join(out, 'protoc-gen-buffa'), { recursive: true });
+  copyFileSync(BUFFA, join(out, 'protoc-gen-buffa', 'LICENSE'));
   copyFileSync(APACHE, join(out, 'LICENSE'));
 
   console.log(

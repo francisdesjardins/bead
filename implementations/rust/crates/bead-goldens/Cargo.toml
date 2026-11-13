@@ -1,0 +1,47 @@
+[package]
+name = "francisdesjardins-bead-goldens"
+description = "beadc's Rust goldens, builder/test/golden/rust, compiled as an application mounts them: each output whole, under the workspace's lints, against bead, bead-protobuf and Buffa's crates; the twin of the C# side's Bead.Goldens."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish = false
+
+# every test target is named below
+autotests = false
+
+[lib]
+name = "bead_goldens"
+
+[dependencies]
+bead = { workspace = true }
+bead-protobuf = { workspace = true }
+buffa = { workspace = true }
+buffa-descriptor = { workspace = true }
+buffa-types = { workspace = true }
+
+[build-dependencies]
+bead-protobuf-build = { workspace = true }
+buffa-descriptor = { workspace = true }
+
+[dev-dependencies]
+bead = { workspace = true, features = ["testing"] }
+bead-protobuf-build = { workspace = true }
+buffa-descriptor = { workspace = true }
+serde_json = { workspace = true }
+
+# a consumer of the goldens, compiled against the libraries this crate builds with: what the
+# compiler refuses of it, and what it reports
+[[test]]
+name = "consumer"
+
+# the goldens' messages against Buffa's generator, set as bead_protobuf_build sets it
+[[test]]
+name = "parity"
+
+[lints]
+workspace = true

@@ -14,7 +14,7 @@
 //   node src/cli.ts generate [--check]
 //   node src/cli.ts breaking [<root or blueprint>] --against <folder, - or blueprint>
 //     [--category WIRE|API]
-//   node src/cli.ts init <name> [--language typescript|csharp]...
+//   node src/cli.ts init <name> [--language typescript|csharp|rust]...
 //   node src/cli.ts wrapper beadc.sh|beadc.ps1
 //   node src/cli.ts version
 
@@ -96,7 +96,7 @@ const USAGE = [
   '       --descriptor-set-out <file> (blueprint, from a .proto),',
   '       --category WIRE|API (breaking, API by default), --except <RULE>@<subject> or',
   '       buf:<RULE>@<path> (breaking, any finding: a subject as its line prints it)',
-  '       --language typescript|csharp (init, repeated; both when none is named)',
+  '       --language typescript|csharp|rust (init, repeated; each when none is named)',
 ].join('\n');
 
 // what GitHub titles a difference under each --check

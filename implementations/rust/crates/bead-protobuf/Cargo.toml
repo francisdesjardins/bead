@@ -50,5 +50,11 @@ harness = false
 [[test]]
 name = "service"
 
+# spec/validations.json's verdicts, a trial each, named by the verdict's own name, judged by the
+# validators beadc generates for spec/validations.proto into tests/generated
+[[test]]
+name = "validations"
+harness = false
+
 [lints]
 workspace = true

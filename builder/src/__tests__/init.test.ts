@@ -107,8 +107,19 @@ test("lays each language's generated code under its own folder", () => {
       '    importExtension: ts',
       '  - language: csharp',
       '    out: dotnet/gen',
+      '  - language: rust',
+      '    out: rust/src/generated',
       '',
     ].join('\n')
+  );
+
+  // the Rust output alone, a module of its crate's src/, since edition 2024 reserves gen
+  const rust = folderOf('rust');
+
+  initProject('hello', { folder: rust, version, languages: ['rust'] });
+
+  expect(readFileSync(join(rust, 'beadc.yaml'), 'utf8')).toContain(
+    'outputs:\n  - language: rust\n    out: rust/src/generated\n'
   );
 
   // the C# output alone: its folder, and its git line after the blueprint's
@@ -199,6 +210,7 @@ test('appends its .gitattributes and .gitignore lines once', () => {
       'gen/** text eol=lf linguist-generated=true',
       'typescript/gen/** text eol=lf linguist-generated=true',
       'dotnet/gen/** text eol=lf linguist-generated=true',
+      'rust/src/generated/** text eol=lf linguist-generated=true',
       '',
     ].join('\n')
   );
@@ -226,7 +238,7 @@ test("refuses a name that is no proto package's part, in buf's lower snake case,
     ['init', 'hello__world'],
     ['init', 'hello_'],
     ['init', '_hello'],
-    ['init', 'hello', '--language', 'rust'],
+    ['init', 'hello', '--language', 'go'],
     ['check', '--language', 'typescript'],
   ]) {
     const run = beadc(args, folder);

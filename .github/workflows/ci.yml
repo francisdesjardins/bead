@@ -353,19 +353,23 @@ jobs:
           retention-days: 1
       - if: matrix.os == 'ubuntu-26.04'
         run: cargo deny --locked check
-      # the two projects outside the workspace, held to its deny.toml, which cargo-deny finds above
-      # each: the fuzz targets and the conformance player
+      # the projects outside the workspace, each by its own lock, held to the workspace's deny.toml,
+      # cargo-deny's default, the one in the folder it runs from: the fuzz targets, the conformance
+      # player and the protovalidate differential's testee
       - if: matrix.os == 'ubuntu-26.04'
         run: cargo deny --manifest-path fuzz/Cargo.toml --locked check
       - if: matrix.os == 'ubuntu-26.04'
         run: cargo deny --manifest-path tools/protobuf-conformance/Cargo.toml --locked check
+      - if: matrix.os == 'ubuntu-26.04'
+        run: cargo deny --manifest-path tools/protovalidate-differential/Cargo.toml --locked check
       # the tests under instrumentation, every test binary's profile merged into one LLVM export,
-      # the unit tests, a module's tests.rs and its tests/ folder, and the test kit left out; then
+      # the unit tests, a module's tests.rs and its tests/ folder, the test kit, the code beadc
+      # writes, under a generated/ folder, and the goldens' crate that compiles it left out; then
       # what they ran held to the Rust side's floor
       - if: matrix.os == 'ubuntu-26.04'
         run: >-
           cargo llvm-cov --workspace --all-features --locked --json --summary-only
-          --ignore-filename-regex '(/tests\.rs|/tests/.*|/testing\.rs|/testing/.*)$'
+          --ignore-filename-regex '(/tests\.rs|/tests/.*|/testing\.rs|/testing/.*|/generated/.*|/crates/bead-goldens/.*)$'
           --output-path coverage/rust.json
       - if: matrix.os == 'ubuntu-26.04'
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -653,14 +657,16 @@ jobs:
   # environment, then once more from `builder/`, where each wrapper runs the image it built, over
   # the repository's projects and `examples/hello`; and the wrappers' lint, each linter at its pin.
   #
-  # `BEADC_PROTOC_REQUIRED=1` turns a test that would skip without protoc into one that fails: here a
-  # skip could only be a fetch gone wrong.
+  # `BEADC_PROTOC_REQUIRED=1` turns a test that would skip without protoc into one that fails, and
+  # `BEADC_PROTOC_GEN_BUFFA_REQUIRED=1` one that would skip without protoc-gen-buffa: here a skip
+  # could only be a fetch gone wrong.
   builder:
     name: Builder (${{ matrix.os }}, Node ${{ matrix.node }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     env:
       BEADC_PROTOC_REQUIRED: 1
+      BEADC_PROTOC_GEN_BUFFA_REQUIRED: 1
       # a wrapper's test that would skip without bash, pwsh 7.6 or, on Windows, the right to make a
       # symbolic link fails: every runner has them
       BEADC_WRAPPERS_REQUIRED: 1
@@ -714,6 +720,16 @@ jobs:
         run: |
           protoc="$(node tools/fetch-protoc.mjs)"
           echo "BEADC_PROTOC=$protoc" >> "$GITHUB_ENV"
+      # protoc-gen-buffa's binary, by the pin it was checked against: the Rust target's messages,
+      # its goldens' and every Rust output's that generates them
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: builder/.protoc-gen-buffa
+          key: protoc-gen-buffa-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('builder/protoc-gen-buffa.json') }}
+      - name: protoc-gen-buffa, by its pin's sha256
+        run: |
+          plugin="$(node tools/fetch-protoc-gen-buffa.mjs)"
+          echo "BEADC_PROTOC_GEN_BUFFA=$plugin" >> "$GITHUB_ENV"
       - if: runner.os == 'Linux'
         run: $YARN check
       # the image's test stage first, then the image, which reuses every stage but the last; the
@@ -958,7 +974,8 @@ jobs:
   # byte of them is read; the violations compared as protovalidate's own conformance compares them,
   # sorted by rule id then path, a path by its elements, every word and forKey equal. The oracle over
   # the verdicts alone first, then each side's testee. A job of its own, beside the protobuf
-  # conformance: it needs both runtimes, beadc and protoc, which no other job has together.
+  # conformance: it needs every side's runtime, beadc, protoc and protoc-gen-buffa, which no other
+  # job has together.
   protovalidate-differential:
     name: protovalidate differential
     runs-on: ubuntu-26.04
@@ -1012,6 +1029,30 @@ jobs:
       - name: The C# testee's format
         working-directory: implementations/dotnet/tools/Bead.ProtovalidateDifferential
         run: dotnet format Bead.ProtovalidateDifferential.csproj --verify-no-changes --exclude Generated
+      # 1.99.1, as implementations/rust/rust-toolchain.toml names it
+      - run: rustup toolchain install
+        working-directory: implementations/rust
+      # the registry and the Rust testee's build, by its own lock and the toolchain
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            implementations/rust/tools/protovalidate-differential/target
+          key: protovalidate-differential-rust-${{ hashFiles('implementations/rust/tools/protovalidate-differential/Cargo.lock', 'implementations/rust/rust-toolchain.toml') }}
+          restore-keys: protovalidate-differential-rust-
+      # assigned first: a failed fetch fails the step
+      - name: protoc-gen-buffa, by its pin's sha256
+        working-directory: builder
+        run: |
+          plugin="$(node tools/fetch-protoc-gen-buffa.mjs)"
+          echo "BEADC_PROTOC_GEN_BUFFA=$plugin" >> "$GITHUB_ENV"
+      - name: The corpus through the Rust side's validators
+        run: node tools/protovalidate-differential.mjs rust
+      # the Rust testee lies outside the side's workspace, so its format is held here, the code
+      # generated into it at run time aside: include!d and rustfmt::skip, rustfmt reads none of it
+      - name: The Rust testee's format
+        working-directory: implementations/rust/tools/protovalidate-differential
+        run: cargo fmt --check
 
   # ── Commits ──────────────────────────────────────────────────────────────────
   # Every commit subject the push or the pull request brings is a Conventional Commit; merges are
