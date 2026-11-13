@@ -2704,6 +2704,76 @@ test.describe('WebSocketTransportClient, what its error tells', () => {
     expect(client.isClosed()).toBe(true);
   });
 
+  // RFC 6455 §8.1 and §7.4.1, spec 15.3: in Node, `ws` and the global WebSocket alike close both
+  // with 1007, .NET the reason with 1002; a page's as its browser does; rows of docs/support.md
+  test('closes with 1007 a text message from its server that is no UTF-8, and with 1007 a close whose reason is no UTF-8', async () => {
+    await using raw = await startRaw();
+    const heard: Record<string, unknown[]> = {};
+
+    for (const [label, Tracked] of [
+      ['the global WebSocket', TrackedGlobal],
+      ['ws', TrackedWs],
+    ] as const) {
+      const told: unknown[][] = [];
+      const sent: (number | undefined)[] = [];
+
+      for (const frame of [
+        frameOf(0x1, Uint8Array.of(0xff, 0xfe)),
+        frameOf(0x8, Uint8Array.of(0x03, 0xe8, 0xff, 0xfe)),
+      ]) {
+        const client = createWebSocketTransportClient({ WebSocket: Tracked });
+        const upgraded = raw.next();
+
+        client.on('error', (error) => {
+          told.push(['error', (error as Error & { code?: string }).code]);
+        });
+        client.on('close', (wasClean, wasQuick) => {
+          told.push(['close', wasClean, wasQuick]);
+        });
+        await client.connect({ host, port: raw.port });
+
+        const socket = await upgraded;
+        const closed = nextEvent(client, 'close');
+
+        // it ends its socket once the client's close came, answering none
+        socket.on('data', (chunk: Buffer) => {
+          const code = closeCodeOfMasked(chunk);
+
+          if (code !== undefined) {
+            sent.push(code);
+            socket.end();
+          }
+        });
+        socket.write(frame);
+        await closed;
+
+        expect(client.isClosed()).toBe(true);
+      }
+
+      heard[label] = [told, sent];
+    }
+
+    // * one error then the close over `ws`, its close alone over the global WebSocket (spec 15.1)
+    expect(heard).toEqual({
+      'the global WebSocket': [
+        [
+          ['close', false, false],
+          ['close', false, false],
+        ],
+        [1007, 1007],
+      ],
+      ws: [
+        [
+          ['error', 'WS_ERR_INVALID_UTF8'],
+          ['close', false, false],
+          ['error', 'WS_ERR_INVALID_UTF8'],
+          ['close', false, false],
+        ],
+        [1007, 1007],
+      ],
+    });
+  });
+
   test('fails with 1009 a message past its bound, telling one error that names maximumMessageBytes, then an unclean close, even when its server answers its close', async () => {
     await using raw = await startRaw();
     const client = createWebSocketTransportClient({ maxPayload: 1_024, WebSocket: TrackedWs });
