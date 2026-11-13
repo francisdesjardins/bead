@@ -981,7 +981,6 @@ th[scope='row'] {
 /* ── Folded detail ────────────────────────────────────────────────────────── */
 
 details.more {
-  max-width: var(--app-measure);
   margin-top: var(--app-space-4);
   border: 1px solid var(--app-divider);
   border-radius: var(--app-radius-md);
@@ -1086,6 +1085,30 @@ pre code {
   margin-top: var(--app-space-2);
   font-size: var(--app-text-sm);
   overflow-wrap: anywhere;
+}
+
+/* code is read by its lines, not at the prose's measure: on a screen with room beside the column,
+   a block of code, or a fold that holds one, widens to the right as far as its longest line asks,
+   to the room the layout leaves there, while its prose keeps the measure; a short block stays as
+   it is. The room: the viewport's right half beside the centred layout (1120px), past its padding,
+   the contents (220px) and their gap, less a margin */
+@media (min-width: 1136px) {
+  :root {
+    --code-room: min(
+      1180px,
+      calc(50vw + 560px - var(--app-space-4) - 220px - var(--app-space-12) - var(--app-space-8))
+    );
+  }
+  main pre.snippet,
+  main details.more,
+  main .excerpt {
+    width: max-content;
+    min-width: 100%;
+    max-width: var(--code-room);
+  }
+  details.more pre.snippet {
+    max-width: 100%;
+  }
 }
 
 .files {
