@@ -771,8 +771,7 @@ async fn lets_a_resolver_that_fails_after_it_answered_take_nothing_from_the_call
 }
 
 // spec 9.0
-#[tokio::test]
-async fn free_the_call_of_an_answer_that_could_not_go_out_so_its_call_id_opens_again() {
+async fn failed_answer_call_id() {
     for message in [
         "the transport is closing",
         "the transport refused the result",
@@ -821,8 +820,7 @@ async fn free_the_call_of_an_answer_that_could_not_go_out_so_its_call_id_opens_a
 }
 
 // spec 9.0, 12.2
-#[tokio::test]
-async fn keep_a_call_open_when_its_answer_cannot_go_out_so_a_fallback_answers_it() {
+async fn fallback_answer() {
     let (served, handed) = held();
 
     served
@@ -890,4 +888,24 @@ async fn keep_a_call_open_when_its_answer_cannot_go_out_so_a_fallback_answers_it
         ],
         "the fallback answers each call"
     );
+}
+
+#[tokio::test]
+async fn keep_a_call_open_when_its_answer_cannot_go_out_so_a_fallback_answers_it() {
+    fallback_answer().await;
+}
+
+#[tokio::test]
+async fn keeps_a_call_open_when_its_answer_cannot_go_out_so_a_fallback_answers_it() {
+    fallback_answer().await;
+}
+
+#[tokio::test]
+async fn free_the_call_of_an_answer_that_could_not_go_out_so_its_call_id_opens_again() {
+    failed_answer_call_id().await;
+}
+
+#[tokio::test]
+async fn frees_the_call_of_an_answer_that_could_not_go_out_so_its_call_id_opens_again() {
+    failed_answer_call_id().await;
 }
