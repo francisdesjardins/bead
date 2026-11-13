@@ -79,6 +79,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   size, a packet past its Maximum Packet Size is judged at its Remaining Length, and nothing is
   reserved at a frame's head; a ping is answered with its pong and a close with a close (spec
   15.25, 15.29; decision 0050).
+- Spec 15.3: a text message that is no UTF-8 fails its WebSocket with 1007 (RFC 6455 §8.1, §7.4.1),
+  and never reaches its router; a page's `WebSocket` fails it as its browser does.
+  `spec/transports.json` plays it over a WebSocket, every side; the spec's next version is a minor.
 
 ### Fixed
 
@@ -94,6 +97,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The TypeScript side's MQTT 5 link over a WebSocket in Node bounds a message by 100 MiB, or by its
   `maximumPacketSize` where larger, so no packet within its bound is refused, and offers no
   permessage-deflate (spec 15.25).
+- The Rust side's WebSocket, server and client, fails a text message that is no UTF-8 with 1007,
+  as spec 15.3 says and the other sides do, where it sent 1002; a close whose reason is no UTF-8
+  alike, since tungstenite raises one error for both.
 
 ## [0.13.0] - 2026-11-12
 

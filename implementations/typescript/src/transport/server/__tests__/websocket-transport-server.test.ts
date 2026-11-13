@@ -91,15 +91,36 @@ const textFrame = (text: string) => {
   return Buffer.concat([Buffer.from([0x81, 0x80 | payload.length]), mask, masked]);
 };
 
-// a frame of `opcode` a client sends, masked as every client's is (RFC 6455 §5.2, §5.3), its
-// payload under 126 bytes
-const maskedFrame = (opcode: number, payload: Uint8Array) => {
+// a frame of its own first byte, FIN and opcode, a client sends, masked as every client's is
+// (RFC 6455 §5.2, §5.3), its payload under 126 bytes
+const maskedFrameOf = (head: number, payload: Uint8Array) => {
   const mask = randomBytes(4);
   const masked = payload.map((byte, index) => {
     return byte ^ (mask[index % 4] ?? 0);
   });
 
-  return Buffer.concat([Buffer.from([0x80 | opcode, 0x80 | payload.length]), mask, masked]);
+  return Buffer.concat([Buffer.from([head, 0x80 | payload.length]), mask, masked]);
+};
+
+// a frame of `opcode` a client sends, whole, its FIN set
+const maskedFrame = (opcode: number, payload: Uint8Array) => {
+  return maskedFrameOf(0x80 | opcode, payload);
+};
+
+// the frames a server sent after its 101, unmasked, as a server's are: each its first byte, then
+// its payload, each under 126 bytes
+const framesOf = (received: Buffer): [number, number[]][] => {
+  const frames: [number, number[]][] = [];
+  let rest = received.subarray(received.indexOf('\r\n\r\n') + 4);
+
+  while (rest.length >= 2 && rest.length >= 2 + ((rest[1] ?? 0) & 0x7f)) {
+    const length = (rest[1] ?? 0) & 0x7f;
+
+    frames.push([rest[0] ?? 0, [...rest.subarray(2, 2 + length)]]);
+    rest = rest.subarray(2 + length);
+  }
+
+  return frames;
 };
 
 // the code of the close a server sent right after its 101, once it came: its frame unmasked, as a
@@ -821,18 +842,15 @@ test.describe('WebSocketTransportServer, on the wire', () => {
     ]);
   });
 
-  // RFC 6455 §8.1 and §7.4.1: `ws` closes a text message that is no UTF-8, and a close whose reason
-  // is no UTF-8, with 1007, where .NET sends 1002 for the reason and tungstenite 1002 for both; a row
-  // of docs/support.md
-  test('closes with 1007 a text message that is no UTF-8 and a close whose reason is no UTF-8', async () => {
+  // RFC 6455 §8.1: `ws` judges a text message whole, failing one in fragments that is no UTF-8 with
+  // 1007 at its last fragment, .NET and tungstenite at the first that breaks it; a close's reason,
+  // 1007 here and on the Rust side, 1002 on .NET's; rows of docs/support.md
+  test('closes with 1007 a text message in fragments that is no UTF-8 once its last fragment came, and with 1007 a close whose reason is no UTF-8', async () => {
     const codes: (number | undefined)[] = [];
 
     server.on('error', () => {});
 
-    for (const frame of [
-      maskedFrame(0x1, Uint8Array.of(0xff, 0xfe)),
-      maskedFrame(0x8, Uint8Array.of(0x03, 0xe8, 0xff, 0xfe)),
-    ]) {
+    const open = async () => {
       const closed = nextServerEvent(server, 'close');
       const connection = nextServerEvent(server, 'connection');
       const socket = await openTcp(port);
@@ -843,16 +861,60 @@ test.describe('WebSocketTransportServer, on the wire', () => {
       });
       socket.write(upgradeRequest());
       await connection;
-      socket.write(frame);
-      await expect
-        .poll(() => {
-          return closeCodeOf(Buffer.concat(received));
-        })
-        .toBeDefined();
-      codes.push(closeCodeOf(Buffer.concat(received)));
-      socket.destroy();
-      await closed;
-    }
+
+      return {
+        closed,
+        // the frames it sent so far
+        sent: () => {
+          return framesOf(Buffer.concat(received));
+        },
+        socket,
+      };
+    };
+    const closeCodeAmong = (frames: [number, number[]][]): number | undefined => {
+      const [, payload] =
+        frames.find(([head]) => {
+          return head === 0x88;
+        }) ?? [];
+
+      return payload && payload.length >= 2
+        ? ((payload[0] ?? 0) << 8) | (payload[1] ?? 0)
+        : undefined;
+    };
+
+    // its first fragment, `FF` without FIN, then a ping, answered with a pong and no close
+    const fragmented = await open();
+
+    fragmented.socket.write(maskedFrameOf(0x01, Uint8Array.of(0xff)));
+    fragmented.socket.write(maskedFrameOf(0x89, new Uint8Array(0)));
+    await expect
+      .poll(() => {
+        return fragmented.sent();
+      })
+      .toEqual([[0x8a, []]]);
+
+    // its last fragment, `FE` with FIN, the message whole: failed
+    fragmented.socket.write(maskedFrameOf(0x80, Uint8Array.of(0xfe)));
+    await expect
+      .poll(() => {
+        return closeCodeAmong(fragmented.sent());
+      })
+      .toBeDefined();
+    codes.push(closeCodeAmong(fragmented.sent()));
+    fragmented.socket.destroy();
+    await fragmented.closed;
+
+    const closing = await open();
+
+    closing.socket.write(maskedFrame(0x8, Uint8Array.of(0x03, 0xe8, 0xff, 0xfe)));
+    await expect
+      .poll(() => {
+        return closeCodeAmong(closing.sent());
+      })
+      .toBeDefined();
+    codes.push(closeCodeAmong(closing.sent()));
+    closing.socket.destroy();
+    await closing.closed;
 
     expect(codes).toEqual([1007, 1007]);
   });

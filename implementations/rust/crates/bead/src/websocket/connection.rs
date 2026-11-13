@@ -57,6 +57,7 @@ const PROTOCOL_ERROR: u16 = 1002;
 
 // the reason tungstenite gives the 1002 it reads a peer's close of a status no end sends as
 const REWRITTEN: &str = "Protocol violation";
+const INVALID_PAYLOAD: u16 = 1007;
 const TOO_BIG: u16 = 1009;
 
 // what a failed connection reads at once of its socket, and drops
@@ -122,8 +123,8 @@ pub(crate) struct Ended {
     /// Whether this side ended it of its own: dropped behind a bound, failed, or dropped past its
     /// close timeout. Its close is unclean, whatever the peer answered.
     pub(crate) is_ended_here: bool,
-    /// What failed it: a message past its bound, a protocol error, why it was dropped behind a
-    /// bound; none when it ended as a connection does.
+    /// What failed it: a message past its bound, one that is no UTF-8, a protocol error, why it
+    /// was dropped behind a bound; none when it ended as a connection does.
     pub(crate) failure: Option<Failed>,
 }
 
@@ -141,6 +142,9 @@ pub(crate) enum Failed {
     TooBig(u64),
     /// Its peer broke the protocol, which it was failed with 1002 for, in tungstenite's words.
     Protocol(String),
+    /// A text message, or a close's reason, that is no UTF-8, which it was failed with 1007 for,
+    /// in tungstenite's words (spec 15.3).
+    InvalidPayload(String),
     /// Dropped behind a bound of its pace, and why, naming the bound and its value.
     Dropped(String),
 }
@@ -738,6 +742,11 @@ impl<S: Wire> Connection<S> {
                 CapacityError::MessageTooLong { .. } | CapacityError::TooManyHeaders,
             ))) => {
                 self.fail((TOO_BIG, Failed::TooBig(self.bounds.maximum_message_bytes)));
+            }
+            // ! tungstenite raises one `Error::Utf8` for a text message and for a close's reason that
+            // is no UTF-8, its close never answered, so both fail with 1007 (RFC 6455 §8.1, §7.4.1)
+            Some(Err(error @ WsError::Utf8(_))) => {
+                self.fail((INVALID_PAYLOAD, Failed::InvalidPayload(error.to_string())));
             }
             Some(Err(error)) => self.fail((PROTOCOL_ERROR, Failed::Protocol(error.to_string()))),
         }

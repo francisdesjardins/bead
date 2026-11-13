@@ -415,6 +415,22 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         }
     }
 
+    // the status of the close the server sends, the first frame it sends
+    private static async Task<int> FirstCloseCodeOf(NetworkStream stream)
+    {
+        var head = new byte[2];
+
+        await stream.ReadExactlyAsync(head, Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+
+        Assert.Equal(0x88, head[0]);
+
+        var payload = new byte[head[1] & 0x7F];
+
+        await stream.ReadExactlyAsync(payload, Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+
+        return (payload[0] << 8) | payload[1];
+    }
+
     // a masked client frame of the first byte and the payload given, its payload under 126 bytes
     private static byte[] FrameOf((byte First, byte[] Payload) given)
     {
@@ -2786,23 +2802,30 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         }
     }
 
-    // RFC 6455 §8.1 and §7.4.1: .NET closes a text message that is no UTF-8 with 1007, and a close
-    // whose reason is no UTF-8 with 1002, where `ws` sends 1007 for both and tungstenite 1002 for
-    // both; a row of docs/support.md
+    // RFC 6455 §8.1: .NET fails a text message that is no UTF-8 with 1007 at the first fragment that
+    // breaks it, where `ws` waits for its last, and a close whose reason is no UTF-8 with 1002, where
+    // `ws` and the Rust side send 1007; rows of docs/support.md
     [Fact]
-    public async Task Closes_with_1007_a_text_message_that_is_no_UTF_8_and_with_1002_a_close_whose_reason_is_no_UTF_8()
+    public async Task Closes_with_1007_a_text_message_in_fragments_that_is_no_UTF_8_at_the_first_fragment_that_breaks_it_and_with_1002_a_close_whose_reason_is_no_UTF_8()
     {
         var codes = new List<int>();
 
-        foreach (var frame in new[] { FrameOf((0x81, [0xFF, 0xFE])), FrameOf((0x88, [0x03, 0xE8, 0xFF, 0xFE])) })
+        // a text message's first fragment, no FIN, then a ping, which no pong answers before the close
+        var sent = new[]
+        {
+            FrameOf((0x01, [0xFF])).Concat(FrameOf((0x89, []))).ToArray(),
+            FrameOf((0x88, [0x03, 0xE8, 0xFF, 0xFE])),
+        };
+
+        foreach (var frames in sent)
         {
             using var tcp = await OpenTcp();
             var stream = tcp.GetStream();
 
             await stream.WriteAsync(HandshakeOf("GET / HTTP/1.1", $"Host: 127.0.0.1:{_port}"), Cancelled);
             await ReadHead(stream);
-            await stream.WriteAsync(frame, Cancelled);
-            codes.Add(await CloseCodeOf(stream));
+            await stream.WriteAsync(frames, Cancelled);
+            codes.Add(await FirstCloseCodeOf(stream));
         }
 
         Assert.Equal([1007, 1002], codes);
