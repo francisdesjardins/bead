@@ -1,5 +1,7 @@
 // a call's listener: (error, info), for the request echo('hi') that succeeds
 null, {
+  callId: 3,
+  connectionHandle: 'server',
   direction: 'rx',
   duration: 1,
   options: { timeout: 2000 },

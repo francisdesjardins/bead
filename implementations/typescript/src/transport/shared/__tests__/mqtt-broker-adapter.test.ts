@@ -351,6 +351,52 @@ test.describe('createMqttBrokerAdapter', () => {
     }).toThrow('a TLS client certificate is carried over mqtts or wss');
   });
 
+  test('fails its start on a refusing CONNACK, naming its code and its MQTT 5 name', async () => {
+    const adapter = adapterOf(script);
+    const { downs } = heardOf(adapter);
+
+    for (const [code, name] of [
+      [0x80, 'Unspecified error'],
+      [0x81, 'Malformed Packet'],
+      [0x82, 'Protocol Error'],
+      [0x83, 'Implementation specific error'],
+      [0x84, 'Unsupported Protocol Version'],
+      [0x85, 'Client Identifier not valid'],
+      [0x86, 'Bad User Name or Password'],
+      [0x87, 'Not authorized'],
+      [0x88, 'Server unavailable'],
+      [0x89, 'Server busy'],
+      [0x8a, 'Banned'],
+      [0x8c, 'Bad authentication method'],
+      [0x90, 'Topic Name invalid'],
+      [0x95, 'Packet too large'],
+      [0x97, 'Quota exceeded'],
+      [0x99, 'Payload format invalid'],
+      [0x9a, 'Retain not supported'],
+      [0x9b, 'QoS not supported'],
+      [0x9c, 'Use another server'],
+      [0x9d, 'Server moved'],
+      [0x9f, 'Connection rate exceeded'],
+      [0x01, undefined],
+    ] as const) {
+      const starting = adapter.start();
+      const link = await script.link();
+
+      link.send({ cmd: 'connack', reasonCode: code, sessionPresent: false });
+
+      const reason = `0x${code.toString(16).toUpperCase().padStart(2, '0')}${name === undefined ? '' : `, ${name}`}`;
+
+      await expect(starting).rejects.toMatchObject({
+        message: `its broker refused the link of ada: CONNACK ${reason}`,
+      });
+      expect(adapter.isLinked).toBe(false);
+      expect(await closedWithin(link)).toBe(true);
+      expect(cmdsOf(link)).toEqual(['connect']);
+    }
+
+    expect(downs).toEqual([]);
+  });
+
   test('fails its start on a CONNACK whose Maximum QoS is 0, naming it (spec 15.26)', async () => {
     const adapter = adapterOf(script);
     const { downs } = heardOf(adapter);
@@ -375,7 +421,7 @@ test.describe('createMqttBrokerAdapter', () => {
     const refused = await script.link();
 
     refused.send({ cmd: 'connack', reasonCode: 0x86, sessionPresent: false });
-    await expect(starting).rejects.toThrow('Bad User Name or Password');
+    await expect(starting).rejects.toThrow('CONNACK 0x86, Bad User Name or Password');
 
     // and so does no CONNACK within connectTimeout
     const waiting = adapterOf(script, { connectTimeout: 200 });
@@ -1700,7 +1746,7 @@ test.describe('createMqttBrokerAdapter', () => {
 
   test('fails its start on a CONNACK that refuses or says Maximum QoS 0 beside a packet past its Maximum Packet Size in one read, naming the CONNACK (spec 15.26, 15.29)', async () => {
     const answers = [
-      { connack: [0x20, 0x03, 0x00, 0x86, 0x00], named: 'CONNACK 0x86' },
+      { connack: [0x20, 0x03, 0x00, 0x86, 0x00], named: 'CONNACK 0x86, Bad User Name or Password' },
       { connack: [0x20, 0x03, 0x00, 0x01, 0x00], named: 'CONNACK 0x01' },
       // * its properties a Maximum QoS (0x24) of 0
       { connack: [0x20, 0x05, 0x00, 0x00, 0x02, 0x24, 0x00], named: 'Maximum QoS 0' },

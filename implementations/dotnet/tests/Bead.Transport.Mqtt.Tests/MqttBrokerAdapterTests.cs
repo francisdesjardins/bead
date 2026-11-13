@@ -241,6 +241,64 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         }).Message, StringComparison.Ordinal);
     }
 
+
+    [Fact]
+    public async Task Fails_its_start_on_a_refusing_CONNACK_naming_its_code_and_its_MQTT_5_name()
+    {
+        await using var adapter = AdapterOf();
+        var (_, downs) = HeardOf(adapter);
+
+        foreach (var (code, name) in new (byte, string?)[]
+        {
+            (0x80, "Unspecified error"),
+            (0x81, "Malformed Packet"),
+            (0x82, "Protocol Error"),
+            (0x83, "Implementation specific error"),
+            (0x84, "Unsupported Protocol Version"),
+            (0x85, "Client Identifier not valid"),
+            (0x86, "Bad User Name or Password"),
+            (0x87, "Not authorized"),
+            (0x88, "Server unavailable"),
+            (0x89, "Server busy"),
+            (0x8A, "Banned"),
+            (0x8C, "Bad authentication method"),
+            (0x90, "Topic Name invalid"),
+            (0x95, "Packet too large"),
+            (0x97, "Quota exceeded"),
+            (0x99, "Payload format invalid"),
+            (0x9A, "Retain not supported"),
+            (0x9B, "QoS not supported"),
+            (0x9C, "Use another server"),
+            (0x9D, "Server moved"),
+            (0x9F, "Connection rate exceeded"),
+            (0x01, null),
+        })
+        {
+            var starting = adapter.Start();
+            var link = await _script.Link();
+
+            await link.Send(new MqttConnAckPacket
+            {
+                ReasonCode = (MqttConnectReasonCode)code,
+                MaximumQoS = MqttQualityOfServiceLevel.ExactlyOnce,
+                RetainAvailable = true,
+                SharedSubscriptionAvailable = true,
+            });
+            var reason = string.Create(CultureInfo.InvariantCulture, $"0x{code:X2}") + (name is null ? "" : $", {name}");
+            var refused = Assert.IsType<IOException>(await FailureOf(() =>
+            {
+                return starting;
+            }));
+
+            Assert.Equal($"its broker refused the link of ada: CONNACK {reason}", refused.Message);
+            Assert.False(adapter.IsLinked);
+            await link.Closed.WaitAsync(Patience, Cancelled);
+            Assert.IsType<MqttConnectPacket>(Assert.Single(link.Packets));
+        }
+
+        Assert.Empty(downs);
+    }
+
     [Fact]
     public async Task Fails_its_start_on_a_CONNACK_whose_Maximum_QoS_is_0_naming_it_spec_15_26()
     {
@@ -269,7 +327,7 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         var refused = await _script.Link();
 
         await refused.Send(new MqttConnAckPacket { ReasonCode = MqttConnectReasonCode.BadUserNameOrPassword, MaximumQoS = MqttQualityOfServiceLevel.ExactlyOnce, RetainAvailable = true, SharedSubscriptionAvailable = true });
-        Assert.Contains("0x86", (await FailureOf(() =>
+        Assert.Contains("CONNACK 0x86, Bad User Name or Password", (await FailureOf(() =>
         {
             return starting;
         })).Message, StringComparison.Ordinal);
@@ -1227,7 +1285,7 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         // * one broker write each: a CONNACK, then a header alone past 1,100 bytes
         (byte[] ConnAck, string Named)[] refusals =
         [
-            ([0x20, 0x03, 0, 0x86, 0], "0x86"),
+            ([0x20, 0x03, 0, 0x86, 0], "CONNACK 0x86, Bad User Name or Password"),
             ([0x20, 0x03, 0, 0x01, 0], "0x01"),
             ([0x20, 0x05, 0, 0, 0x02, 0x24, 0], "Maximum QoS 0"),
         ];
@@ -2029,7 +2087,7 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         var refused = await _script.Link();
 
         await refused.Send(new MqttConnAckPacket { ReasonCode = MqttConnectReasonCode.BadUserNameOrPassword, MaximumQoS = MqttQualityOfServiceLevel.ExactlyOnce, RetainAvailable = true, SharedSubscriptionAvailable = true });
-        Assert.Contains("0x86", (await FailureOf(() =>
+        Assert.Contains("CONNACK 0x86, Bad User Name or Password", (await FailureOf(() =>
         {
             return refusing;
         })).Message, StringComparison.Ordinal);

@@ -1052,6 +1052,11 @@ jobs:
           node tools/check-commits.mjs "$@"
       - name: Check the links
         run: node tools/check-links.mjs
+      # Every test docs/support.md cites, by its file, its class or method, its function or its
+      # title, wherever it stands, is one a side's tests declare, an entry a harness names at run
+      # time, a case's label or a row, or a literal the tool lists with its reason (decision 0006).
+      - name: Check the cited tests
+        run: node tools/check-citations.mjs
       - name: Check the details
         run: node tools/check-details.mjs
       # The page francisdesjardins.ca serves at /bead/ is what its build writes from site/, byte for

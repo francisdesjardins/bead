@@ -4,11 +4,17 @@
 // content is `src/content.<language>.html`, its placeholders filled from the repository: the
 // versions and the conformance files' counts, the byte examples and tables of `src/data.mjs`, the
 // snippets of `src/snippets/`, excerpts of the sources, and each diagram's SVG, which must be its
-// source's render. Node alone, nothing installed, and the same bytes on every machine.
+// source's render. The table of the three implementations is drawn from `src/data.mjs` and held to
+// `docs/support.md`: each row of its Features and Transports in one part of the table or in
+// OFF_THE_PAGE, and each cell's declaration, the stages it says are ahead, the union of what its
+// rows' cells say for its sides by the token `ahead: <stage>`, a row of the differences of kind
+// open. Node alone, nothing installed, and the same bytes on every machine.
 //
 //   node build.mjs   writes dist/index.html
 //
-// Exit 1 on a placeholder it cannot fill or a diagram whose SVG is not its source's.
+// Exit 1 on a placeholder it cannot fill, a diagram whose SVG is not its source's, or a table the
+// matrix does not hold: a row in no list or in two, a title the matrix lacks, "ahead" in a cell's
+// own words or naming no open difference, or a cell that says otherwise than its rows.
 
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
@@ -21,6 +27,10 @@ import {
   FAILURE_HEADINGS,
   FATES,
   HEADER,
+  OFF_THE_PAGE,
+  PARTS,
+  PART_HEADING,
+  SIDES,
   STAGES,
   STATUSES,
   STATUS_HEADINGS,
@@ -187,8 +197,13 @@ const stageOf = (code, language) => {
   );
 };
 
-const fateOf = (fate, language) => {
-  return `<span class="fate fate-${fate}">${escape(pick(FATES[fate], language))}</span>`;
+const fateOf = (fates, language) => {
+  return [fates]
+    .flat()
+    .map((fate) => {
+      return `<span class="fate fate-${fate}">${escape(pick(FATES[fate], language))}</span>`;
+    })
+    .join(' ');
 };
 
 const failuresOf = (language) => {
@@ -220,6 +235,241 @@ const wireOf = (language) => {
     return `<li><a href="${BLOB}${path}"><code>${escape(name)}</code></a><span class="file-label">${escape(pick(label, language))}</span></li>`;
   }).join('');
   return `<ul class="files">${items}</ul>`;
+};
+
+// ── The three implementations, held to the support matrix ─────────────────────
+
+const MATRIX = 'docs/support.md';
+
+// a part ahead, in a side's cell of the matrix: `ahead: <stage>`, the stage the title of a row of
+// its differences, of kind open
+const TOKEN = /ahead: `([^`]+)`/gu;
+
+// the cells of a row of a Markdown table, a pipe inside a code span none of their bounds
+const cellsOf = (line) => {
+  const cells = [];
+  let cell = '';
+  let coded = false;
+  for (const character of line.trim().slice(1)) {
+    if (character === '`') {
+      coded = !coded;
+    }
+    if (character === '|' && !coded) {
+      cells.push(cell.trim());
+      cell = '';
+    } else {
+      cell += character;
+    }
+  }
+  return cells;
+};
+
+// the table under a heading of the matrix: its header's cells, and each row's
+const tableOf = (lines, heading) => {
+  const at = lines.indexOf(heading);
+  if (at === -1) {
+    throw new Error(`build: ${MATRIX} has no ${heading}`);
+  }
+  let first = at + 1;
+  while (first < lines.length && !lines[first].startsWith('|')) {
+    first += 1;
+  }
+  let end = first;
+  while (end < lines.length && lines[end].startsWith('|')) {
+    end += 1;
+  }
+  const [header, , ...rows] = lines.slice(first, end).map(cellsOf);
+  return { header, rows };
+};
+
+// what a side's cell says is ahead: the stages its tokens name, whether it is nothing but them, and
+// whether it says "ahead" in its own words, outside a token and a code span
+const aheadIn = (cell) => {
+  const stages = [...cell.matchAll(TOKEN)].map(([, stage]) => {
+    return stage;
+  });
+  const rest = cell.replace(TOKEN, '');
+  return {
+    stages,
+    whole: stages.length > 0 && rest.replace(/[\s,;]/gu, '') === '',
+    bare: /\bahead\b/iu.test(rest.replace(/`[^`]*`/gu, '')),
+  };
+};
+
+// each row of the matrix's Features and Transports, by its title, with what each side has ahead in
+// it: the stages its cells name, and whether every cell of the side is ahead whole; a side's cells
+// are the columns its name heads, `Rust` or `Rust client` and `Rust server`
+const matrixOf = (refusals) => {
+  const lines = read(join(ROOT, MATRIX)).split('\n');
+  const differences = tableOf(lines, '## Differences');
+  const kind = differences.header.indexOf('Kind');
+  const open = new Set(
+    differences.rows
+      .filter((cells) => {
+        return cells[kind] === 'open';
+      })
+      .map(([title]) => {
+        return title;
+      })
+  );
+  const rows = new Map();
+  for (const heading of ['## Features', '## Transports']) {
+    const { header, rows: cellsOfRows } = tableOf(lines, heading);
+    for (const cells of cellsOfRows) {
+      const [title] = cells;
+      if (rows.has(title)) {
+        refusals.push(`${MATRIX} holds two rows “${title}”`);
+      }
+      const sides = {};
+      for (const [side] of SIDES) {
+        const states = header
+          .map((name, index) => {
+            return name === side || name.startsWith(`${side} `)
+              ? aheadIn(cells[index] ?? '')
+              : null;
+          })
+          .filter((state) => {
+            return state !== null;
+          });
+        if (states.length === 0) {
+          throw new Error(`build: ${MATRIX}'s ${heading} has no column for ${side}`);
+        }
+        for (const state of states) {
+          if (state.bare) {
+            refusals.push(
+              `${MATRIX}, “${title}”, ${side}: says ahead in its own words; write ahead: \`<stage>\`, the title of a row of its differences, of kind open`
+            );
+          }
+          for (const stage of state.stages) {
+            if (!open.has(stage)) {
+              refusals.push(
+                `${MATRIX}, “${title}”, ${side}: ahead: \`${stage}\` names no row of its differences of kind open`
+              );
+            }
+          }
+        }
+        sides[side] = {
+          stages: new Set(
+            states.flatMap((state) => {
+              return state.stages;
+            })
+          ),
+          whole: states.every((state) => {
+            return state.whole;
+          }),
+        };
+      }
+      rows.set(title, sides);
+    }
+  }
+  return rows;
+};
+
+const stateText = (stages, whole) => {
+  if (stages.size === 0) {
+    return 'none ahead';
+  }
+  return `${[...stages].sort().join(', ')} ahead, ${whole ? 'whole' : 'in part'}`;
+};
+
+// ! the table holds the matrix: every row of Features and Transports in exactly one list, a part's
+// or OFF_THE_PAGE, and each cell's declaration what its part's rows say for its sides
+const tableRefusals = () => {
+  const refusals = [];
+  const rows = matrixOf(refusals);
+  const listed = new Map();
+  const lists = [
+    ...PARTS.map((part) => {
+      return [`the part “${part.name[0]}”`, part.rows];
+    }),
+    ['OFF_THE_PAGE', OFF_THE_PAGE],
+  ];
+  for (const [list, titles] of lists) {
+    for (const title of titles) {
+      if (!rows.has(title)) {
+        refusals.push(`${list} names “${title}”, which ${MATRIX} has no row of`);
+      } else if (listed.has(title)) {
+        refusals.push(`“${title}” is in ${listed.get(title)} and in ${list}`);
+      } else {
+        listed.set(title, list);
+      }
+    }
+  }
+  for (const title of rows.keys()) {
+    if (!listed.has(title)) {
+      refusals.push(
+        `${MATRIX}'s row “${title}” is in no list of src/data.mjs: a part's rows, or OFF_THE_PAGE`
+      );
+    }
+  }
+  const sides = SIDES.map(([side]) => {
+    return side;
+  });
+  for (const part of PARTS) {
+    const covered = part.cells.flatMap((cell) => {
+      return cell.sides;
+    });
+    if (covered.join() !== sides.join()) {
+      refusals.push(
+        `the part “${part.name[0]}” has cells for ${covered.join(', ')}, not ${sides.join(', ')}`
+      );
+      continue;
+    }
+    const held = part.rows
+      .filter((title) => {
+        return rows.has(title);
+      })
+      .map((title) => {
+        return rows.get(title);
+      });
+    for (const cell of part.cells) {
+      for (const side of cell.sides) {
+        const stages = new Set(
+          held.flatMap((row) => {
+            return [...row[side].stages];
+          })
+        );
+        const whole =
+          held.length > 0 &&
+          held.every((row) => {
+            return row[side].whole;
+          });
+        const said = new Set(cell.ahead);
+        const saidWhole = cell.whole === true;
+        const same =
+          stages.size === said.size &&
+          [...stages].every((stage) => {
+            return said.has(stage);
+          }) &&
+          whole === saidWhole;
+        if (!same) {
+          refusals.push(
+            `the part “${part.name[0]}”, ${side}: the matrix says ${stateText(stages, whole)}; the page says ${stateText(said, saidWhole)}`
+          );
+        }
+      }
+    }
+  }
+  return refusals;
+};
+
+const implementationsOf = (language) => {
+  const head = [
+    `<th scope="col"><span class="visually-hidden">${escape(pick(PART_HEADING, language))}</span></th>`,
+    ...SIDES.map(([, label]) => {
+      return `<th scope="col">${escape(pick(label, language))}</th>`;
+    }),
+  ].join('');
+  const body = PARTS.map((part) => {
+    const cells = part.cells
+      .map((cell) => {
+        const span = cell.sides.length > 1 ? ` colspan="${cell.sides.length}"` : '';
+        return `<td${span}>${pick(cell.says, language)}</td>`;
+      })
+      .join('');
+    return `<tr><th scope="row">${escape(pick(part.name, language))}</th>${cells}</tr>`;
+  }).join('');
+  return `<div class="table-wrap"><table class="compare"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
 };
 
 // ── Code ──────────────────────────────────────────────────────────────────────
@@ -416,6 +666,8 @@ const fill = (template, language, known) => {
         return statusesOf(language);
       case 'wire':
         return wireOf(language);
+      case 'implementations':
+        return implementationsOf(language);
       case 'diagram':
         return diagramOf(attributes.of, language);
       case 'code':
@@ -464,7 +716,7 @@ const STRINGS = Object.freeze({
   en: {
     title: 'Bead: a binary protocol for calls between a client and a server',
     description:
-      'Bead is a binary wire protocol for calls between a client and a server, both ways: a written specification, conformance files every implementation plays, TypeScript and C# at behavioural parity, and a Rust core.',
+      'Bead is a binary wire protocol for calls between a client and a server, both ways: a written specification, conformance files every implementation plays, TypeScript and C# at behavioural parity, and a Rust side with its core, its WebSocket and HTTP transports and its MQTT 5 binding.',
     skip: 'Skip to the content',
     contents: 'Contents',
     menu: 'Open the contents',
@@ -479,7 +731,7 @@ const STRINGS = Object.freeze({
   fr: {
     title: 'Bead : un protocole binaire pour les appels entre un client et un serveur',
     description:
-      'Bead est un protocole binaire pour les appels entre un client et un serveur, dans les deux sens : une spécification écrite, des fichiers de conformance que chaque implantation joue, TypeScript et C# à parité de comportement, et un cœur en Rust.',
+      'Bead est un protocole binaire pour les appels entre un client et un serveur, dans les deux sens : une spécification écrite, des fichiers de conformance que chaque implantation joue, TypeScript et C# à parité de comportement, et un côté Rust avec son cœur, ses transports WebSocket et HTTP et sa liaison MQTT 5.',
     skip: 'Aller au contenu',
     contents: 'Sommaire',
     menu: 'Ouvrir le sommaire',
@@ -496,7 +748,12 @@ const STRINGS = Object.freeze({
 const pageOf = (language, known) => {
   const strings = STRINGS[language];
   const other = language === 'en' ? 'fr' : 'en';
-  const filled = fill(read(join(SRC, `content.${language}.html`)), language, known);
+  const template = read(join(SRC, `content.${language}.html`));
+  // ! the table of the three implementations is drawn from data alone, where the build holds it
+  if (template.split('{{implementations}}').length !== 2) {
+    throw new Error(`build: content.${language}.html holds {{implementations}} other than once`);
+  }
+  const filled = fill(template, language, known);
   const { items, content } = contentsOf(language === 'fr' ? typeset(filled) : filled);
   const chrome = read(join(SRC, 'chrome.html'))
     .replaceAll('{{lang}}', language)
@@ -510,6 +767,16 @@ const pageOf = (language, known) => {
 };
 
 export const build = () => {
+  const refusals = tableRefusals();
+  if (refusals.length > 0) {
+    throw new Error(
+      refusals
+        .map((refusal) => {
+          return `build: ${refusal}`;
+        })
+        .join('\n')
+    );
+  }
   const known = facts();
   const heads = Object.fromEntries(
     LANGUAGES.map((language) => {
