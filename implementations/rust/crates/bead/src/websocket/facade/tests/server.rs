@@ -404,7 +404,8 @@ async fn assert_takes(bytes: usize, options: &WebSocketServerOptions) {
 
 // the TypeScript side takes a factory for each layer; this side builds its own
 #[tokio::test]
-async fn builds_on_a_websocket_transport_server_not_yet_started_with_the_layers_given() {
+async fn websocket_server_builds_on_a_websocket_transport_server_not_yet_started_with_its_layers_and_the_limits_given()
+ {
     let server = server_with(&ServerOptions {
         limits: Some(RouterLimitsOptions {
             maximum_payload_bytes: Some(8),
@@ -435,7 +436,7 @@ async fn builds_on_a_websocket_transport_server_not_yet_started_with_the_layers_
 
 // the C# side's own: no layer is given a clock of its own but its transport's
 #[tokio::test]
-async fn runs_every_layer_on_its_transport_s_clock_and_refuses_another() {
+async fn websocket_server_runs_every_layer_on_its_transport_s_clock_and_refuses_another() {
     let clock: SharedClock = SteppingClock::new(crate::testing::instants::new_year());
     let server = WebSocketServer::new(&WebSocketServerOptions {
         transport: Some(WebSocketTransportServerOptions {
@@ -499,7 +500,7 @@ async fn takes_a_message_of_an_envelope_at_most_more_when_the_transport_says_so_
 }
 
 #[tokio::test]
-async fn builds_its_router_with_the_pacing_its_options_give() {
+async fn websocket_server_builds_its_router_with_the_pacing_its_options_give() {
     let server = server_with(&ServerOptions {
         pacing: Some(PacingLimitsOptions {
             maximum_queued_notification_bytes: Some(2_048),
@@ -522,7 +523,8 @@ async fn builds_its_router_with_the_pacing_its_options_give() {
 }
 
 #[tokio::test]
-async fn closes_with_1009_a_connection_that_sends_more_than_maximum_message_bytes() {
+async fn websocket_server_closes_with_1009_a_connection_that_sends_more_than_maximum_message_bytes()
+{
     let server = WebSocketServer::new(&options_of(
         Some(256),
         &RouterLimitsOptions {
@@ -544,7 +546,7 @@ async fn closes_with_1009_a_connection_that_sends_more_than_maximum_message_byte
 }
 
 #[tokio::test]
-async fn closes_a_client_that_lets_a_command_go_unanswered_when_told_to() {
+async fn websocket_server_closes_a_client_that_lets_a_command_go_unanswered_when_told_to() {
     let ends = Ends {
         server: server_with(&ServerOptions {
             close_on_command_timeout: Some(true),
