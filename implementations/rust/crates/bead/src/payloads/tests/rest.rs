@@ -157,7 +157,6 @@ fn writes_an_integer_past_2_to_the_53_from_its_digits_as_the_double_nearest_them
 }
 
 #[test]
-#[ignore = "divergence: Rust preserves negative zero in decoded JSON; TypeScript and C# return positive zero"]
 fn reads_0_as_0_at_every_depth_and_a_member_named_proto_as_a_member() {
     let read = JsonCodec
         .decode(&Bytes::from_static(br#"[-0,{"a":-0}]"#))
@@ -179,6 +178,28 @@ fn reads_0_as_0_at_every_depth_and_a_member_named_proto_as_a_member() {
     assert_eq!(
         JsonCodec.encode(&read).expect("written").as_ref(),
         br#"{"__proto__":{"a":1},"b":2}"#
+    );
+}
+
+#[test]
+fn normalizes_negative_zero_before_a_json_payload_is_given_to_its_type() {
+    for text in [b"-0".as_slice(), b"-0.0", b"-0e0"] {
+        let bytes = Bytes::copy_from_slice(text);
+        let decoded = JsonOf::<f64>::new().decode(&bytes).expect("a typed double");
+        assert_eq!(decoded.to_bits(), 0_f64.to_bits());
+        assert_eq!(
+            JsonOf::<i64>::new()
+                .decode(&bytes)
+                .expect("a typed integer"),
+            0
+        );
+    }
+    let decoded = JsonOf::<Vec<f64>>::new()
+        .decode(&Bytes::from_static(b"[-0,-0.0,-0e0]"))
+        .expect("a typed array");
+    assert_eq!(
+        decoded.into_iter().map(f64::to_bits).collect::<Vec<_>>(),
+        [0, 0, 0]
     );
 }
 

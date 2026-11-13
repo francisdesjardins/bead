@@ -64,6 +64,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Rust's `json` payload codecs normalize `-0` to `0` at every depth on read, including typed
+  payloads, as the TypeScript and C# sides do.
 - The C# MQTT adapter names a refusing CONNACK by its code and MQTT 5 name, such as
   `0x86, Bad User Name or Password`; a code outside the CONNACK table has its value alone.
 - A gateway mounted behind what reads a request's body, a framework's body parser or a
