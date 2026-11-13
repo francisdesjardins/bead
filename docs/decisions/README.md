@@ -127,11 +127,7 @@ that meets the Tenth Man:
   [0041](0041-over-mqtt-5-a-participant-is-one-clean-link-and-a-parcel-one-publish-each-counted-to-its-byte.md)
   keeps ahead over MQTT 5: an Authentication Method, MQTT 5's enhanced authentication (§4.12), and
   EMQX played beside Mosquitto; **Mosquitto under TLS played**, a client certificate among it, where
-  the matrix holds its row of MQTT 5 over TLS "not tested"; and an acknowledgement of a Reason Code
-  its packet's table does not name, and a SUBACK or an UNSUBACK whose count of codes is not one,
-  judged alike on every side, with 15.28's sentences on when a publication at most once is taken and
-  on one given up once its packet may have gone, and 15.29's on a packet its client cannot read, by
-  a round of its own, the two rows of Differences that name them closing with it;
+  the matrix holds its row of MQTT 5 over TLS "not tested";
 - what [0033](0033-a-side-bounds-what-a-peer-holds-of-it.md) keeps ahead of the bounds a side
   keeps against a peer that holds it: what bounds the resolvers a cancel leaves running, as Go's fix
   of CVE-2023-39325 counts a handler still running against `MaxConcurrentStreams`; a bound on the

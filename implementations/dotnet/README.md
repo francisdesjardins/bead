@@ -220,16 +220,20 @@ link's start, by a TLS client certificate (`Tls`), or with neither by its User N
 subscription of QoS 1 and Retain Handling 2 for each topic, a name in a group as its shared
 subscription `$share/<name>/<root>/s/<name>`; each publication of QoS 1, or of QoS 0 where its
 `Delivery` is `AtMostOnce`, counted to its byte by `MqttPackets` before it goes, one of QoS 1 held
-to its CONNACK's Receive Maximum, PUBACK 0x10 read as no subscriber; each message handed on before
-its PUBACK, which goes once the core settled it; a will of the participant's GONE; at a stop, once
-what it was handed went, an UNSUBSCRIBE of each filter it asked or holds, one a packet, their
-UNSUBACKs awaited within its `ConnectTimeout`, then a DISCONNECT of 0x00 within one of its own, one
-of 0x8E read as the link taken over. A guard of its own on MQTTnet's channel, `MqttPacketGuard`,
-reads each packet it receives at its Remaining Length: one past its own `MaximumPacketSize` closes
-the network connection before its body comes, no DISCONNECT (spec 15.29, a row of
-[`docs/support.md`](../../docs/support.md)'s "Leveled down"), its link lost where it was up and its
-start failed where no CONNACK put it up. MQTTnet's automation is off: no reconnection, resubscription, offline queue
-or alias, each incarnation a client of its own. Its handles' type is `MQTT`.
+to its CONNACK's Receive Maximum, PUBACK 0x10 read as no subscriber; each acknowledgement read at
+MQTTnet's packet inspector before it decodes it, a code of 0x80 or more refusing its request
+whether or not its table names it, and a code under 0x80 its table does not name, or a count other
+than one, closing the link, no DISCONNECT, in every phase (spec 15.27 to 15.29); each message
+handed on before its PUBACK, which goes once the core settled it; a will of the participant's
+GONE; at a stop, once what it was handed went, an UNSUBSCRIBE of each filter it asked or holds,
+one a packet, their UNSUBACKs awaited within its `ConnectTimeout`, then a DISCONNECT of 0x00
+within one of its own, one of 0x8E read as the link taken over. A guard of its own on MQTTnet's
+channel, `MqttPacketGuard`, reads each packet it receives at its Remaining Length: one past its own
+`MaximumPacketSize` closes the network connection before its body comes, no DISCONNECT (spec 15.29,
+a row of [`docs/support.md`](../../docs/support.md)'s "Leveled down"), its link lost where it was
+up and its start failed where no CONNACK put it up. MQTTnet's automation is off: no reconnection,
+resubscription, offline queue or alias, each incarnation a client of its own. Its handles' type is
+`MQTT`.
 
 ```csharp
 await using var participant = new BrokerParticipant(new MqttBrokerAdapter(new MqttBrokerAdapterOptions
@@ -258,7 +262,9 @@ Its link is up as a CONNACK of 0x00 whose Maximum QoS is not 0 is read: a loss r
 told once as its `Down`, a DISCONNECT of 0x8E as its link taken over, and its start succeeds all
 the same. A CONNACK of any other code fails its start, an `IOException` naming it, `CONNACK 0x86`
 say, as does one of Maximum QoS 0, and a start that fails sends no DISCONNECT; a stop once MQTTnet
-says it connected sends its DISCONNECT of 0x00, though its start has not settled (spec 15.26). A
+says it connected sends its DISCONNECT of 0x00, though its start has not settled (spec 15.26), and
+none once a packet its client cannot read ended its link, which ends that stop at once, no down
+told (spec 15.29). A
 subscription or a publication its token gives up once what it asked may have gone, at either QoS,
 a publication at most once given up before its packet is written among them, retires its link, so
 that nothing of it enters another: what else its link was asked fails with an `IOException` saying

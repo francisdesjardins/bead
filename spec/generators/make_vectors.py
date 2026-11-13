@@ -994,6 +994,27 @@ mqtt_publish_bounds.append(('no payload fits: ' + publish_bound(SERVER_INBOX, 24
 assert mqtt_publish_bounds[-1][6] is None and publish_bytes(len(SERVER_INBOX), 0, qos=1, expiry=True) == 25
 
 
+# ── An MQTT 5 acknowledgement's Reason Codes (sections 15.27 to 15.29) ──────────────────────────
+
+# each acknowledgement a participant reads, by its fixed header's packet type, and the Reason Codes its
+# table names (MQTT 5.0 §3.4.2.1, §3.9.3 and §3.11.3): a code it names is read as named, one of 0x80 or
+# more it does not name refuses its request all the same (§2.4, §4.13.2), and one under 0x80 it does
+# not name is a Protocol Error, a packet its client cannot read ([MQTT-3.4.2-1], [MQTT-3.9.3-2],
+# [MQTT-3.11.3-2])
+mqtt_acknowledgement_codes = [
+    ("a PUBACK's Reason Codes, its table's", ['15.28', '15.29'], 'PUBACK', 4,
+     [0x00, 0x10, 0x80, 0x83, 0x87, 0x90, 0x91, 0x97, 0x99]),
+    ("a SUBACK's Reason Codes, its table's", ['15.27', '15.29'], 'SUBACK', 9,
+     [0x00, 0x01, 0x02, 0x80, 0x83, 0x87, 0x8F, 0x91, 0x97, 0x9E, 0xA1, 0xA2]),
+    ("an UNSUBACK's Reason Codes, its table's", ['15.27', '15.29'], 'UNSUBACK', 11,
+     [0x00, 0x11, 0x80, 0x83, 0x87, 0x8F, 0x91]),
+]
+# ! every table names its every refusal from 0x80, and 0x95 none: Mosquitto 2.1.2's PUBACK past its
+# message_size_limit is a refusal no table names
+assert all(0x80 in named and 0x95 not in named and named == sorted(set(named))
+           for _, _, _, _, named in mqtt_acknowledgement_codes)
+
+
 # ── An AMQP 1.0 message's bytes (sections 15.35 and 15.37) ──────────────────────────────────────
 
 # the addresses a parcel is written to: the inbox of a peer, a name a server's participants serve in
@@ -1094,6 +1115,7 @@ document = {
         "written false marks a parcel a reader reads and no writer writes, which a side reads alone: an advisory kind, read to its prefix — layout, kind, halves and sequence — whatever its flags, its kept byte and its body, to be taken in its order and skipped; an OPEN of a layout to come, read to its prefix and its id, which its acceptor refuses 426; a REFUSE of a layout to come, read whole, which every layout keeps; and an OPEN whose id is no token or whose receive bound is under 1,024, which its acceptor refuses 400 (section 15.18).",
         "A parcel refusal is what a side makes of a message that does not read as a parcel: no-parcel, under 28 bytes or of a first byte outside 0xB1 to 0xBF, which it drops in silence and reports; or does-not-read, a parcel of layout 0xB1 that does not read, which closes its connection with 1002, reported.",
         "An MQTT 5 publish bound is section 15.30's count with no broker: a PUBLISH to topic, its UTF-8 bytes, at qos, 1 or 0, with a Message Expiry Interval where expiry is true; largestPayload, the largest payload whose packet is within maximumPacketSize and whose Remaining Length is at most 268,435,455, null where an empty one does not fit; and packetBytes, that packet's every byte, null alike.",
+        "An MQTT 5 acknowledgement's codes are a PUBACK's, a SUBACK's or an UNSUBACK's, by packet and by type, its fixed header's packet type, 4, 9 or 11, and named, the Reason Codes its table names (sections 15.27 to 15.29): a side plays every code from 0x00 to 0xFF of each, read as its table names it where named holds it, a refusal of its request where it is 0x80 or more, and otherwise a packet its client cannot read.",
         "An AMQP 1.0 message is section 15.35's profile: a message to the address to, its UTF-8 bytes, of payloadLength bytes each payloadByte, with a header whose ttl is ttl, in milliseconds, where ttl is given, and none where it is not; bytes is the whole message, which a side's writer writes to its every byte.",
         "An AMQP 1.0 publish bound is section 15.37's count with no broker: a message to address, its UTF-8 bytes, a life counted whatever the message; largestPayload, the largest payload whose message is within maximumMessageSize, at most 4,294,967,295, null where an empty one does not fit; and messageBytes, that message's every byte, null alike.",
     ],
@@ -1125,6 +1147,8 @@ document = {
     'mqttPublishBounds': [{'name': name, 'clauses': clauses, 'topic': topic, 'maximumPacketSize': maximum, 'qos': qos,
                            'expiry': expiry, 'largestPayload': largest, 'packetBytes': packet}
                           for name, clauses, topic, maximum, qos, expiry, largest, packet in mqtt_publish_bounds],
+    'mqttAcknowledgementCodes': [{'name': name, 'clauses': clauses, 'packet': packet, 'type': kind, 'named': named}
+                                 for name, clauses, packet, kind, named in mqtt_acknowledgement_codes],
     'amqpMessages': [entry(name=name, clauses=clauses, to=to, payloadLength=payload, payloadByte=PAYLOAD_BYTE, ttl=ttl,
                            bytes=data)
                      for name, clauses, to, payload, ttl, data in amqp_message_vectors],
