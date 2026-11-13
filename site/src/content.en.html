@@ -1567,51 +1567,7 @@
     behavioural parity. Rust has its core, its WebSocket and HTTP transports and its MQTT 5 binding,
     and each part it lacks is a row of the support matrix, ahead.
   </p>
-  <div class="table-wrap">
-    <table class="compare">
-      <thead>
-        <tr>
-          <th scope="col"><span class="visually-hidden">Part</span></th>
-          <th scope="col">TypeScript</th>
-          <th scope="col">C#, on .NET 10</th>
-          <th scope="col">Rust</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <th scope="row">The wire</th>
-          <td>The envelope, the headers, the failures</td>
-          <td>The same, byte for byte</td>
-          <td>The same, byte for byte</td>
-        </tr>
-        <tr>
-          <th scope="row">Above the wire</th>
-          <td colspan="2">
-            The routers, the services, sessions and JWTs, a payload’s rules, subscriptions,
-            transfers, relays, debugging and metrics
-          </td>
-          <td>
-            The same, but a payload’s rules, whose validators come with <code>beadc</code>’s Rust
-            target, and a service manager over a router of the application’s own
-          </td>
-        </tr>
-        <tr>
-          <th scope="row">The transports</th>
-          <td>WebSocket, HTTP, Web Worker, in memory, a broker over MQTT 5 or AMQP 1.0, and joined</td>
-          <td>WebSocket, HTTP on Kestrel, in memory, a broker over MQTT 5 or AMQP 1.0, and joined</td>
-          <td>
-            WebSocket on tungstenite, HTTP on hyper, in memory, a broker over MQTT 5, and joined
-          </td>
-        </tr>
-        <tr>
-          <th scope="row">The HTTP/JSON gateway</th>
-          <td>On <code>node:http</code>, or mounted into a server</td>
-          <td>On Kestrel, or mounted by its <code>HttpContext</code></td>
-          <td>Ahead</td>
-        </tr>
-      </tbody>
-    </table>
-  </div>
+  {{implementations}}
   <p class="space">
     On the Rust side, next come <code>beadc</code>’s Rust target, the gateway and the binding over
     AMQP 1.0, each by a decision of its own. Its WebSocket, HTTP and MQTT 5 transports meet the other

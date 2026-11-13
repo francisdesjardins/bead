@@ -18,6 +18,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   resolver, a command or a window of a procedure its service does not hold; and an MQTT 5
   acknowledgement no request awaits is named in the cells of its two rows (decisions 0018, 0041,
   0050).
+- The page's table of the three implementations is drawn from data and held to the support matrix
+  by its build: each row of the matrix's Features and Transports in one part of the table or listed
+  as off the page, a part ahead said in a side's cell by the token `` ahead: `<stage>` ``, an open
+  row of the differences, and each cell of the table what its rows say; its Rust cell for the wire
+  names AMQP 1.0's messages, ahead with that binding, and the matrix's service layer names the Rust
+  side's service manager over a router of the application's own ahead.
 
 ## [0.13.0] - 2026-11-12
 
