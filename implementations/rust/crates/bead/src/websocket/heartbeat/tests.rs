@@ -110,3 +110,19 @@ fn arms_nothing_for_never_and_a_stop_clears_the_timer() {
 fn arms_nothing_for_infinity_and_a_stop_clears_the_timer() {
     arms_nothing_for_never_and_a_stop_clears_the_timer_scenario();
 }
+
+#[test]
+fn takes_a_number_of_milliseconds_a_timer_holds_rounded_to_the_nearest_whole_one_or_infinity_for_none_and_refuses_infinity_which_the_durations_file_holds_no_input_of()
+ {
+    for (given, held) in [
+        (Duration::from_millis(1), Duration::from_millis(1)),
+        (Duration::from_micros(1_500), Duration::from_millis(2)),
+        (Duration::from_secs(30), Duration::from_secs(30)),
+        (crate::LONGEST_TIMER, crate::LONGEST_TIMER),
+        (NEVER, NEVER),
+    ] {
+        assert_eq!(hold_heartbeat(given).expect("a source heartbeat"), held);
+    }
+    assert_eq!(crate::HEARTBEAT, Duration::from_secs(30));
+    Duration::try_from_secs_f64(f64::NEG_INFINITY).expect_err("no negative infinity duration");
+}
