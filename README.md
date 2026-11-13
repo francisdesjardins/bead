@@ -427,6 +427,13 @@ node render.mjs --chromium <chrome> --fonts <folder of geist.woff2, geist-mono.w
 `render.mjs` renders the diagrams whose SVG is stale, `--all` every one, and fails on a colour left
 that is no token. CI's `commits` job runs `check.mjs`.
 
+The table of the three implementations is drawn from `src/data.mjs` and held to the support matrix:
+each part lists the rows of `docs/support.md`'s Features and Transports it stands for, the rest
+listed as not on the page, and each cell declares the stages it says are ahead. A side's cell of the
+matrix says a part ahead by the token `` ahead: `<stage>` ``, the title of a row of its differences
+of kind open; the build fails on a row in no list or in two, on "ahead" said in a cell's own words,
+and on a cell of the page that says otherwise than its rows.
+
 ## Interop, both ways
 
 Each side starts the others' interop servers and calls them with its own client, over WebSocket,
