@@ -144,8 +144,11 @@ test.describe('mountSignUp', () => {
   test('counts the violations its short detail leaves out when the client judges the sign-up', async ({
     page,
   }) => {
-    await page.getByRole('link', { name: 'a 256-byte detail' }).click();
+    // * the box reloads the page under the short detail, and says so once it has
+    await page.getByLabel('A detail of 256 bytes').check();
+    await expect(page).toHaveURL(/[?&]detail=short#rules$/u);
     await expect(page.locator('#connection')).toHaveAttribute('data-state', 'open');
+    await expect(page.getByLabel('A detail of 256 bytes')).toBeChecked();
     await page.getByLabel('Validate before sending').check();
     await page.getByRole('button', { name: 'Break several fields' }).click();
     await page.getByRole('button', { name: 'Sign up' }).click();
@@ -173,8 +176,10 @@ test.describe('mountSignUp', () => {
     await expect(page.locator('#sign-up-unbound')).toBeHidden();
 
     // * the default detail holds all five, through the same form and judging
-    await page.getByRole('link', { name: 'the default one' }).click();
+    await page.getByLabel('A detail of 256 bytes').uncheck();
+    await expect(page).not.toHaveURL(/detail=short/u);
     await expect(page.locator('#connection')).toHaveAttribute('data-state', 'open');
+    await expect(page.getByLabel('A detail of 256 bytes')).not.toBeChecked();
     await page.getByLabel('Validate before sending').check();
     await page.getByRole('button', { name: 'Break several fields' }).click();
     await page.getByRole('button', { name: 'Sign up' }).click();
