@@ -1369,3 +1369,54 @@ fn refuses_a_message_whose_generator_left_a_repeated_closed_enum_closed() {
         "a cycle that reaches no such field"
     );
 }
+
+#[test]
+fn refuses_a_value_10000_deep_before_its_library_writes_any_of_it() {
+    #[expect(
+        clippy::mem_forget,
+        reason = "the source values are 10,000 messages deep; dropping them recurses as deep"
+    )]
+    fn run() {
+        let probe = wrapped(Probe::default(), (10_000, child_of));
+        let cycle = wrapped(
+            Loop::default(),
+            (5_000, |inner| Loop {
+                back: MessageField::some(Back {
+                    r#loop: MessageField::some(inner),
+                    ..Back::default()
+                }),
+                ..Loop::default()
+            }),
+        );
+        let alone = wrapped(
+            Alone::default(),
+            (10_000, |inner| Alone {
+                alone: MessageField::some(inner),
+                ..Alone::default()
+            }),
+        );
+        assert!(ProtoSchema::of::<Loop>().root().reaches);
+        assert_refused((&probe, None), "a message");
+        assert_refused((&cycle, None), "a message that reaches a required field");
+        assert_refused((&alone, None), "a message that reaches no required field");
+        core::mem::forget(probe);
+        core::mem::forget(cycle);
+        core::mem::forget(alone);
+    }
+    std::thread::Builder::new()
+        .stack_size(1 << 20)
+        .spawn(run)
+        .expect("a thread of 1 MiB")
+        .join()
+        .expect("the writer refuses before a recursive walk or write");
+}
+
+#[test]
+fn refuses_a_payload_with_a_syntax_error_and_a_value_with_a_type_error_in_the_same_words() {
+    refuses_a_payload_and_a_value_with_a_codec_refusal_in_the_same_words();
+}
+
+#[test]
+fn refuses_a_payload_and_a_value_with_a_format_exception_in_the_same_words() {
+    refuses_a_payload_and_a_value_with_a_codec_refusal_in_the_same_words();
+}
