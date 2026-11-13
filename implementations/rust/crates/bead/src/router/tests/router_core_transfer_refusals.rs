@@ -47,8 +47,11 @@ pub(super) async fn reports(peer: &Peer) -> Vec<(String, ProtocolCode)> {
         .expect("the reports read")
 }
 
-#[tokio::test]
-async fn refuse_an_opening_before_any_credit_goes_each_by_its_own_failure_and_keep_nothing_of_it() {
+#[expect(
+    clippy::too_many_lines,
+    reason = "the six opening refusals each check exact traffic, failure detail, late chunk report and absence of dispatch"
+)]
+async fn refused_openings() {
     for (index, total, length, code, detail) in [
         (
             0,
@@ -151,12 +154,11 @@ async fn refuse_an_opening_before_any_credit_goes_each_by_its_own_failure_and_ke
     }
 }
 
-#[tokio::test]
 #[expect(
     clippy::disallowed_methods,
     reason = "the test slices its own fixed payload at offsets within its length"
 )]
-async fn find_a_transfer_that_a_chunk_comes_for_at_once_as_its_first_credit_goes_out() {
+async fn returned_first_chunk() {
     for dotnet in [false, true] {
         let (peer, handed) = serving(false, &limits()).await;
         peer.owner
@@ -164,27 +166,29 @@ async fn find_a_transfer_that_a_chunk_comes_for_at_once_as_its_first_credit_goes
                 state.on_transmit = Some(Box::new(move |state, envelope| {
                     if let Envelope::Credit { header } = envelope {
                         let offset = if header.call_id == 1 { 40 } else { 32 };
-                        receive(
-                            state,
+                        let chunk = chunk(
+                            header.call_id,
                             (
-                                chunk(
-                                    header.call_id,
-                                    (
-                                        offset,
-                                        pattern((80, dotnet))
-                                            .slice(usize::try_from(offset).expect("an offset")..),
-                                        80,
-                                    ),
-                                ),
-                                "a",
-                                None,
+                                offset,
+                                pattern((80, dotnet))
+                                    .slice(usize::try_from(offset).expect("an offset")..),
+                                80,
                             ),
                         );
+                        if dotnet {
+                            state
+                                .core
+                                .owner
+                                .post(Box::new(move |state| receive(state, (chunk, "a", None))))
+                                .expect("the first credit's chunk queued");
+                        } else {
+                            receive(state, (chunk, "a", None));
+                        }
                     }
                 }));
             })
             .await
-            .expect("the port answers each first credit within its send");
+            .expect("the port answers each first credit inline or queued");
         let asking = peer.request((Bytes::new(), request_of("a")));
         peer.receive((
             opening(1, (pattern((80, dotnet)).slice(..40), 80)),
@@ -213,7 +217,6 @@ async fn find_a_transfer_that_a_chunk_comes_for_at_once_as_its_first_credit_goes
     }
 }
 
-#[tokio::test]
 #[expect(
     clippy::too_many_lines,
     reason = "the twin keeps the broken, abandoned and reused call in one scenario"
@@ -222,8 +225,7 @@ async fn find_a_transfer_that_a_chunk_comes_for_at_once_as_its_first_credit_goes
     clippy::disallowed_methods,
     reason = "the test slices its own fixed payload at offsets within its length"
 )]
-async fn end_a_requests_transfer_with_the_failure_a_chunk_breaks_and_drop_what_its_credit_let_come_after()
- {
+async fn broken_receiving_chunks() {
     for (dotnet, end) in [(false, 120), (true, 128)] {
         let (peer, handed) = serving(false, &limits()).await;
         peer.owner
@@ -331,4 +333,37 @@ async fn end_a_requests_transfer_with_the_failure_a_chunk_breaks_and_drop_what_i
             [(1, None)]
         );
     }
+}
+
+#[tokio::test]
+async fn refuse_an_opening_before_any_credit_goes_each_by_its_own_failure_and_keep_nothing_of_it() {
+    refused_openings().await;
+}
+
+#[tokio::test]
+async fn refuses_an_opening_before_any_credit_goes_each_by_its_own_failure_and_keeps_nothing_of_it()
+{
+    refused_openings().await;
+}
+
+#[tokio::test]
+async fn find_a_transfer_that_a_chunk_comes_for_at_once_as_its_first_credit_goes_out() {
+    returned_first_chunk().await;
+}
+
+#[tokio::test]
+async fn finds_a_transfer_that_a_chunk_comes_for_at_once_as_its_first_credit_goes_out() {
+    returned_first_chunk().await;
+}
+
+#[tokio::test]
+async fn end_a_requests_transfer_with_the_failure_a_chunk_breaks_and_drop_what_its_credit_let_come_after()
+ {
+    broken_receiving_chunks().await;
+}
+
+#[tokio::test]
+async fn ends_a_requests_transfer_with_the_failure_a_chunk_breaks_and_drops_what_its_credit_let_come_after()
+ {
+    broken_receiving_chunks().await;
 }

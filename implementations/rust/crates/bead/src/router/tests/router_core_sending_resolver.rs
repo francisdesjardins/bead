@@ -18,13 +18,11 @@ use std::sync::{Arc, Mutex};
 
 type Answers = Arc<Mutex<Vec<BoxFuture<Result<(), CallError>>>>>;
 
-#[tokio::test]
 #[expect(
     clippy::disallowed_methods,
     reason = "the test slices its own fixed payload at offsets within its length"
 )]
-async fn keep_a_result_going_that_its_resolver_failed_behind_a_second_answer_going_nowhere_until_the_peer_cancels_it()
- {
+async fn failed_resolver_transfer() {
     for dotnet in [false, true] {
         let peer = Peer::new(RouterSide::Server, &limits());
         let answers = Answers::default();
@@ -93,4 +91,16 @@ async fn keep_a_result_going_that_its_resolver_failed_behind_a_second_answer_goi
             .await
             .expect("the resolver failure reported once");
     }
+}
+
+#[tokio::test]
+async fn keep_a_result_going_that_its_resolver_failed_behind_a_second_answer_going_nowhere_until_the_peer_cancels_it()
+ {
+    failed_resolver_transfer().await;
+}
+
+#[tokio::test]
+async fn keeps_a_result_going_that_its_resolver_failed_behind_a_second_answer_going_nowhere_until_the_peer_cancels_it()
+ {
+    failed_resolver_transfer().await;
 }

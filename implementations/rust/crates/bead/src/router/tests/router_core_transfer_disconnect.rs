@@ -90,13 +90,11 @@ async fn end_the_transfers_it_sends_on_a_connection_that_goes_and_on_a_router_di
     }
 }
 
-#[tokio::test]
 #[expect(
     clippy::disallowed_methods,
     reason = "the test slices its own fixed payload at offsets within its length"
 )]
-async fn end_the_transfers_of_a_connection_that_goes_before_their_budget_grants_any_credit_and_send_nothing_once_disposed()
- {
+async fn disconnected_transfers() {
     let (peer, handed) = serving(false, &narrow()).await;
     peer.owner
         .run(|state| {
@@ -175,4 +173,16 @@ async fn end_the_transfers_of_a_connection_that_goes_before_their_budget_grants_
         [("a".to_owned(), Outgoing::Credit(1, 172))]
     );
     assert!(locked(&handed).is_empty());
+}
+
+#[tokio::test]
+async fn end_the_transfers_of_a_connection_that_goes_before_their_budget_grants_any_credit_and_send_nothing_once_disposed()
+ {
+    disconnected_transfers().await;
+}
+
+#[tokio::test]
+async fn ends_the_transfers_of_a_connection_that_goes_before_their_budget_grants_any_credit_and_sends_nothing_once_disposed()
+ {
+    disconnected_transfers().await;
 }
