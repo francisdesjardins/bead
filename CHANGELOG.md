@@ -7,6 +7,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `tools/check-citations.mjs`, in CI's Commits job: every test the support matrix cites, by its
+  file, its class, its method, its function or its title, wherever it stands, is one a side's tests
+  declare, an entry a harness names at run time, a case's label or a row of the matrix (decision
+  0006).
+
 ### Changed
 
 - The support matrix and the records correct what they state: the Rust side's HTTP client comes
@@ -18,6 +25,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   resolver, a command or a window of a procedure its service does not hold; and an MQTT 5
   acknowledgement no request awaits is named in the cells of its two rows (decisions 0018, 0041,
   0050).
+- The page's table of the three implementations is drawn from data and held to the support matrix
+  by its build: each row of the matrix's Features and Transports in one part of the table or listed
+  as off the page, a part ahead said in a side's cell by the token `` ahead: `<stage>` ``, an open
+  row of the differences, and each cell of the table what its rows say; its Rust cell for the wire
+  names AMQP 1.0's messages, ahead with that binding, and the matrix's service layer names the Rust
+  side's service manager over a router of the application's own ahead.
+- The support matrix names each test it cites as its side declares it: a title cut where its test
+  goes on, a renamed Rust function and a C# method's last word among them.
 
 ### Fixed
 

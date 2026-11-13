@@ -1614,52 +1614,7 @@
     parité de comportement. Rust a son cœur, ses transports WebSocket et HTTP et sa liaison
     MQTT 5, et chaque partie qui lui manque est une ligne de la matrice de support, à venir.
   </p>
-  <div class="table-wrap">
-    <table class="compare">
-      <thead>
-        <tr>
-          <th scope="col"><span class="visually-hidden">Partie</span></th>
-          <th scope="col">TypeScript</th>
-          <th scope="col">C#, sur .NET 10</th>
-          <th scope="col">Rust</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <th scope="row">Le fil</th>
-          <td>L’enveloppe, les en-têtes, les échecs</td>
-          <td>Les mêmes, octet pour octet</td>
-          <td>Les mêmes, octet pour octet</td>
-        </tr>
-        <tr>
-          <th scope="row">Au-dessus du fil</th>
-          <td colspan="2">
-            Les routeurs, les services, les sessions et les JWT, les règles d’une charge, les
-            abonnements, les transferts, les relais, le débogage et les métriques
-          </td>
-          <td>
-            Les mêmes, sauf les règles d’une charge, dont les validateurs viendront avec la cible
-            Rust de <code>beadc</code>, et un gestionnaire de services sur un routeur propre à
-            l’application
-          </td>
-        </tr>
-        <tr>
-          <th scope="row">Les transports</th>
-          <td>WebSocket, HTTP, Web Worker, en mémoire, un courtier sur MQTT 5 ou AMQP 1.0, et joints</td>
-          <td>WebSocket, HTTP sur Kestrel, en mémoire, un courtier sur MQTT 5 ou AMQP 1.0, et joints</td>
-          <td>
-            WebSocket sur tungstenite, HTTP sur hyper, en mémoire, un courtier sur MQTT 5, et joints
-          </td>
-        </tr>
-        <tr>
-          <th scope="row">La passerelle HTTP/JSON</th>
-          <td>Sur <code>node:http</code> ou montée dans un serveur</td>
-          <td>Sur Kestrel, ou montée par son <code>HttpContext</code></td>
-          <td>À venir</td>
-        </tr>
-      </tbody>
-    </table>
-  </div>
+  {{implementations}}
   <p class="space">
     Côté Rust, viennent ensuite la cible Rust de <code>beadc</code>, la passerelle et la liaison sur
     AMQP 1.0, chacune par une décision à elle. Ses transports WebSocket, HTTP et MQTT 5
