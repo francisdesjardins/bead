@@ -27,9 +27,9 @@ the requester's call id: a result as it came, a failure of the target's one rela
 **What the relay raises itself says how far the request went**, as every code does:
 `DESTINATION_UNREACHABLE` (17) while the relay's transport was never handed the request, or refused
 it, so nothing was tried, and `DESTINATION_LOST` (65) once that transport had it and the target was
-lost, the procedure run or not: HTTP's gateway 502 against its 504, and what gRPC's retry rules turn
-on. Those failures name no address behind the relay: why leg B failed is reported where the relay
-runs.
+lost, the procedure run or not: a gateway's 503 against its 502 (`spec/transcoding.md`'s table),
+and what gRPC's retry rules turn on. Those failures name no address behind the relay: why leg B
+failed is reported where the relay runs.
 
 **An answer leg A cannot carry is the relay's own `PROCEDURE_FAILED`, with no detail**, whatever
 refused it: the relay terminates leg A, so a result past leg A's limit is a result its side cannot
