@@ -115,6 +115,41 @@ fn holding() -> (String, Vec<JwtKey>, Vec<String>, SystemTime) {
     verdict_named(HOLDING)
 }
 
+#[test]
+#[ignore = "divergence: Rust truncates a fractional millisecond wall reading; TypeScript refuses it"]
+fn throws_for_a_reading_that_is_not_a_whole_number_of_milliseconds() {
+    let (token, keys, audiences, now) = holding();
+    let whole = || now;
+    assert!(matches!(
+        verify_jwt(
+            token.as_bytes(),
+            &JwtAgainst {
+                audiences: &audiences,
+                keys: &keys,
+                now: &whole,
+            }
+        )
+        .expect("the whole-millisecond fixture verifies"),
+        JwtVerdict::Holds { .. }
+    ));
+    let fractional = || {
+        now.checked_add(core::time::Duration::from_micros(500))
+            .expect("half a millisecond after the fixture's reading")
+    };
+    let outcome = verify_jwt(
+        token.as_bytes(),
+        &JwtAgainst {
+            audiences: &audiences,
+            keys: &keys,
+            now: &fractional,
+        },
+    );
+    assert!(
+        outcome.is_err(),
+        "a fractional millisecond reading must be refused as a programmer error: {outcome:?}"
+    );
+}
+
 // the verdict vector `name`: its token, its keys, its audiences and its wall clock's reading
 fn verdict_named(name: &str) -> (String, Vec<JwtKey>, Vec<String>, SystemTime) {
     let vectors: Vec<Value> = crate::testing::vectors::of("jwtVerdicts").expect("the vectors");
