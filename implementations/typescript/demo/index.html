@@ -475,6 +475,14 @@
         margin: 0 auto;
       }
 
+      /* a wide screen: the scenes take the room the page's code takes beside its column, as
+         francisdesjardins.ca's Bead page does, the intro keeping its measure */
+      @media (min-width: 1136px) {
+        .scenes {
+          max-width: 1180px;
+        }
+      }
+
       .intro {
         display: grid;
         gap: var(--app-space-3);
@@ -505,19 +513,19 @@
         display: none;
       }
 
-      /* the scenes' tabs, on one line: past a phone's width, they scroll within it */
+      /* the scenes' tabs, on one line: past a phone's width, they scroll within it, sideways
+         alone; the hairline is drawn inside the list, where the selected tab's bar covers it, so
+         that no tab reaches past the list and asks a scroll of its own */
       .scene-tabs {
         display: flex;
         gap: var(--app-space-1);
-        overflow-x: auto;
-        border-bottom: 1px solid var(--app-divider);
+        overflow: auto hidden;
+        box-shadow: inset 0 -1px 0 var(--app-divider);
         scrollbar-width: thin;
       }
 
       .scene-tabs [role='tab'] {
         flex: none;
-        /* the selected tab's bar lies on the list's hairline */
-        margin-bottom: -1px;
         padding: 0 var(--app-space-3);
         border: 0;
         border-bottom: 2px solid transparent;
