@@ -270,3 +270,8 @@ fn converts_open_numeric_codes_without_losing_unknown_values_and_names_procedure
         );
     }
 }
+
+#[test]
+fn leave_room_for_a_full_header_between_an_envelope_and_its_payload() {
+    holds_by_the_defaults_both_ends_set_alike();
+}
