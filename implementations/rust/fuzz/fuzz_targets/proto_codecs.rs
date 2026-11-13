@@ -23,7 +23,7 @@ use libfuzzer_sys::fuzz_target;
 const START: u8 = 0x23;
 const END: u8 = 0x24;
 
-static TYPED: LazyLock<ProtoCodec<Probe>> = LazyLock::new(ProtoCodec::new);
+static TYPED: LazyLock<ProtoCodec<Probe>> = LazyLock::new(|| ProtoCodec::new().expect("Probe opens its closed enums"));
 
 static DYNAMIC: LazyLock<DynamicCodec> = LazyLock::new(|| {
     let schema = TYPED.schema();

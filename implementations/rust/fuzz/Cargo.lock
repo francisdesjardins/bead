@@ -465,6 +465,7 @@ dependencies = [
  "bytes",
  "francisdesjardins-bead",
  "francisdesjardins-bead-protobuf-build",
+ "serde_json",
 ]
 
 [[package]]

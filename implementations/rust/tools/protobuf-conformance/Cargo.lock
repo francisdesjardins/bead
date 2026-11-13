@@ -341,6 +341,7 @@ dependencies = [
  "buffa-descriptor",
  "bytes",
  "francisdesjardins-bead",
+ "serde_json",
 ]
 
 [[package]]

@@ -13,9 +13,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   file, its class, its method, its function or its title, wherever it stands, is one a side's tests
   declare, an entry a harness names at run time, a case's label or a row of the matrix (decision
   0006).
+- The Rust side's validators' runtime in `bead-protobuf`, and the counter of the contract with
+  generated code, `GENERATED_CODE_SUPPORTS_VERSION_7` and `_8` (decision 0051).
 
 ### Changed
 
+- **Breaking:** `bead_protobuf::ProtoCodec::new` returns a `Result`, refusing a message whose
+  repeated or map field of a closed enum its generator left closed; `bead-protobuf` requires
+  Buffa's crates exactly (decision 0051).
 - The support matrix and the records correct what they state: the Rust side's HTTP client comes
   with its gateway, and its beadc target brings the validators' runtime that `examples/hello`'s Rust
   half needs (decision 0044); six more rows of the matrix's differences name where the sides part
@@ -49,7 +54,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   once a body that came empty and ended before it (decision 0037). A reader that read the body
   and put it back is refused alike, where the gateway answered before: a stream's `unshift` on the
   TypeScript side, a middleware's examining read on the C# side; mount the gateway before it.
-
 ## [0.13.0] - 2026-11-12
 
 ### Added

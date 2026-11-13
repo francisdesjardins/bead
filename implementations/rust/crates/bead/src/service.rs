@@ -321,6 +321,13 @@ impl<Req: PayloadCodec, Res: PayloadCodec> Descriptor<Req, Res> {
     pub fn validates(&self) -> bool {
         self.init.validate.is_some()
     }
+
+    /// The rules its request is judged by, where it has some: what a player of the verdicts and
+    /// the differential's testee judge a request by, as the C# side's `Bindings.Validate`.
+    #[must_use]
+    pub fn validate(&self) -> Option<&Validate<Req::Value>> {
+        self.init.validate.as_ref()
+    }
 }
 
 impl<Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec> NotifyingDescriptor<Req, Res, Not> {

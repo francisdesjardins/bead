@@ -1,6 +1,6 @@
 [package]
 name = "francisdesjardins-bead-protobuf"
-description = "Bead's proto payload codec on the Rust side, over Buffa: a payload's records checked against its message, its depth bound, the walk of its required fields, a typed codec over generated code and a dynamic one by descriptor."
+description = "Bead's proto payload codec on the Rust side, over Buffa: a payload's records checked against its message, its depth bound, the walk of its required fields, a typed codec over generated code and a dynamic one by descriptor, and the validators' runtime generated rules judge by."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -28,6 +28,8 @@ bytes = { workspace = true }
 buffa = { workspace = true }
 buffa-descriptor = { workspace = true }
 buffa-types = { workspace = true, optional = true }
+# a violation's bounds and its value, the core's JSON
+serde_json = { workspace = true }
 
 [build-dependencies]
 bead-protobuf-build = { workspace = true, optional = true }
@@ -39,7 +41,6 @@ bead = { workspace = true, features = ["testing"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 libtest-mimic = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true }
 
 # spec/codecs.json's proto entries, a trial each, named by the entry's own name
 [[test]]
