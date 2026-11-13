@@ -52,7 +52,7 @@ async fn answers_by_itself_a_call_a_router_hands_it_unasked_as_a_resolver_does()
 }
 
 #[test]
-fn draws_a_destination_again_when_0_or_in_use() {
+fn are_drawn_again_when_all_zero_or_in_use_so_are_destinations_when_0_or_in_use() {
     let fills = Arc::new(crate::testing::scripted::DestinationFills::new(
         vec![[0, 0, 0, 0], [0, 0, 0, 5], [0, 0, 1, 7]],
         [0, 0, 0, 9],

@@ -322,8 +322,7 @@ fn refuses_a_maximum_answering_calls_that_is_not_a_whole_number_above_0() {
 
 // spec 15.1
 #[test]
-fn whole_envelope_limits_take_no_transfer_and_size_the_chunk_and_the_window_on_the_envelope_the_rest_as_given()
- {
+fn takes_no_transfer_and_sizes_the_chunk_and_the_window_on_the_envelope_the_rest_as_given() {
     assert_eq!(
         whole_envelope_limits_of(&RouterLimitsOptions::default()).ok(),
         Some(RouterLimitsOptions {

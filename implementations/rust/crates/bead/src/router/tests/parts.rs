@@ -171,7 +171,7 @@ fn refuses_a_last_call_id_of_zero_or_its_peer_s_parity_before_a_router_starts() 
 
 // spec 9.1
 #[test]
-fn walks_its_range_by_two_then_from_its_first_again() {
+fn walks_its_range_by_its_step_then_from_its_first_again() {
     let mut calls = PendingCalls::bounded(RouterSide::Client, 7).expect("a bound of its side");
     let a = handle("a");
     let drawn: Vec<Option<u32>> = (0..5).map(|_| calls.draw((&a, free))).collect();
