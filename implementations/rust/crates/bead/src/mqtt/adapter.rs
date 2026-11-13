@@ -56,7 +56,7 @@ use crate::clock::{Schedule, SharedClock, SystemClock, Timer};
 use crate::duration::{HoldWithinOptions, hold_finite, hold_within};
 use crate::errors::ProgrammerError;
 use crate::mqtt::link::{
-    Address, OpenOptions, Opened, Reader, Writer, address_of, open, ready_reset,
+    Address, Incoming, OpenOptions, Opened, Reader, Writer, address_of, open, ready_reset,
 };
 use crate::mqtt::packets::{
     Connect, LARGEST_PACKET_SIZE, MAXIMUM_PACKET_SIZE, MqttAcknowledgement, MqttConnack,
@@ -581,6 +581,9 @@ enum Outgoing {
         packet: Vec<u8>,
         publication: Option<u64>,
     },
+    // over a WebSocket, the pong of a ping's payload, which dates no Keep Alive: MQTT 5.0
+    // §3.1.2.10 counts Control Packets
+    Pong(Bytes),
     // its side ended once what was written went, then told
     Close,
 }
@@ -615,9 +618,23 @@ async fn reading(mut reader: Reader, tasked: Tasked) {
     loop {
         match unless_ended(reader.next(), &ended).await {
             None => return,
-            Some(Ok(Some(bytes))) => owner.offer(Box::new(move |state: &mut State| {
-                state.read((serial, bytes));
-            })),
+            Some(Ok(Some(Incoming::Bytes(bytes)))) => {
+                owner.offer(Box::new(move |state: &mut State| {
+                    state.read((serial, bytes));
+                }));
+            }
+            Some(Ok(Some(Incoming::Ping(payload)))) => {
+                owner.offer(Box::new(move |state: &mut State| {
+                    state.pinged((serial, payload));
+                }));
+            }
+            Some(Ok(Some(Incoming::Close))) => {
+                owner.offer(Box::new(move |state: &mut State| {
+                    state.closed_by_its_broker(serial);
+                }));
+
+                return;
+            }
             Some(Ok(None)) => {
                 owner.offer(Box::new(move |state: &mut State| {
                     state.lost((serial, "its broker ended its network connection".to_owned()));
@@ -666,6 +683,19 @@ async fn writing(
                 Some(Ok(())) => owner.offer(Box::new(move |state: &mut State| {
                     state.written((serial, publication));
                 })),
+                Some(Err(error)) => {
+                    let reason = error.to_string();
+
+                    owner.offer(Box::new(move |state: &mut State| {
+                        state.lost((serial, reason));
+                    }));
+
+                    return;
+                }
+            },
+            Outgoing::Pong(payload) => match unless_ended(writer.pong(payload), &aborted).await {
+                None => return,
+                Some(Ok(())) => {}
                 Some(Err(error)) => {
                     let reason = error.to_string();
 
@@ -1046,7 +1076,6 @@ async fn linking((shared, owner): (Arc<Shared>, WeakOwner<State>), linking: Link
         let options = OpenOptions {
             racing: &shared.racing,
             tls: shared.tls.as_ref(),
-            maximum_packet_size: shared.maximum_packet_size,
         };
         let opened = raced(
             open(&shared.address, &options),
@@ -2499,18 +2528,45 @@ impl State {
         ));
     }
 
-    // * its link lost: once, as its network connection ends; a stop's end once its DISCONNECT went
-    fn lost(&mut self, (serial, why): (u64, String)) {
+    // over a WebSocket, a ping answered with its pong
+    fn pinged(&mut self, (serial, payload): (u64, Bytes)) {
+        if let Some(link) = self.link_of(serial) {
+            link.outgoing.send(Outgoing::Pong(payload)).ok();
+        }
+    }
+
+    // * over a WebSocket, its broker's close: its link lost as `lost` words it, its down told once,
+    // and its close answered with its own once what was written went (RFC 6455 §5.5.1)
+    fn closed_by_its_broker(&mut self, serial: u64) {
+        let reason = self.lost_for("its broker closed its WebSocket");
+
+        self.retire((
+            serial,
+            End {
+                reason,
+                reset: false,
+            },
+        ));
+    }
+
+    // what a link lost for `why` fails what it awaits with
+    fn lost_for(&self, why: &str) -> BrokerError {
         let id = &self.shared.id;
         let is_connecting = self
             .link
             .as_ref()
             .is_some_and(|link| matches!(link.phase, Phase::Connecting { .. }));
-        let reason = BrokerError::failed(if is_connecting {
+
+        BrokerError::failed(if is_connecting {
             format!("the link of {id} ended before its CONNACK: {why}")
         } else {
             format!("the link of {id} went down: {why}")
-        });
+        })
+    }
+
+    // * its link lost: once, as its network connection ends; a stop's end once its DISCONNECT went
+    fn lost(&mut self, (serial, why): (u64, String)) {
+        let reason = self.lost_for(&why);
         // * its broker closing once it read its DISCONNECT is a clean end
         let is_disconnecting = self.link_of(serial).is_some_and(|link| {
             matches!(

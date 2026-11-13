@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Coverage-guided fuzzing of Bead's own parsers, on every side, by hand and every week, never as a
 // pull request's gate (decision 0006). Eight targets, the same on each side and named alike, one
-// of beadc's and one of the Rust side's own, each fed raw bytes:
+// of beadc's and two of the Rust side's own, each fed raw bytes:
 //
 // - `envelope`: the envelope reader, its header then its body, and a failure's record;
 // - `payload-codecs`: the `json` and `text` codecs' readers, and the writers behind them;
@@ -21,7 +21,10 @@
 //   JSON, its schema and its rules, and its form written back;
 // - `mqtt-packets`, the Rust side's alone: its MQTT 5 client's reader of a broker's packets, which
 //   the other sides leave to MQTT.js and MQTTnet, spec 15.29, a PUBLISH it reads written again in
-//   the bytes spec 15.30 counts (decision 0050).
+//   the bytes spec 15.30 counts (decision 0050);
+// - `mqtt-websocket-frames`, the Rust side's alone: its MQTT 5 client's reader of a WebSocket's
+//   frames, which the other sides leave to their WebSocket clients, spec 15.25, the same events
+//   whether its bytes come whole or cut, nothing held past a frame's head (decision 0050).
 //
 // A target lets the refusal its parser is designed to give pass; anything else it throws, an input
 // past a second, or memory past 256 MiB of its own is a finding, which the fuzzer keeps.
@@ -37,10 +40,10 @@
 //   runtime does: what a run keeps past it fails as a finding, never as a slow climb to the limit.
 // - Rust: cargo-fuzz's libFuzzer, over `implementations/rust/fuzz/`, a project outside the side's
 //   workspace, on the nightly its `-Z sanitizer` needs, pinned by its date as CI's fuzz build is,
-//   on Linux or WSL, every twin, over its core's judgement and codecs, and `mqtt-packets`, over
-//   its MQTT 5 client's reader (decisions 0044, 0049, 0050). Its runs read the folder's
-//   `.cargo/config.toml`, and set `CARGO_BUILD_WARNINGS=warn`: a newer compiler's warnings are no
-//   gate of the pinned one's.
+//   on Linux or WSL, every twin, over its core's judgement and codecs, and `mqtt-packets` and
+//   `mqtt-websocket-frames`, over its MQTT 5 client's readers (decisions 0044, 0049, 0050). Its
+//   runs read the folder's `.cargo/config.toml`, and set `CARGO_BUILD_WARNINGS=warn`: a newer
+//   compiler's warnings are no gate of the pinned one's.
 // - C#: libFuzzer as libfuzzer-dotnet builds it for Windows, over
 //   `implementations/dotnet/tools/Bead.Fuzz/`, which it runs as its child, once SharpFuzz has
 //   instrumented Bead.Core, Bead.Transport.WebSockets, Bead.Protobuf and Google.Protobuf in a copy
@@ -96,12 +99,12 @@ export const TWINS = Object.freeze([
 
 /**
  * Each side's targets, by their names: the twins, on the TypeScript side beadc's `blueprint` beside
- * them, on the Rust side its MQTT 5 client's `mqtt-packets`.
+ * them, on the Rust side its MQTT 5 client's `mqtt-packets` and `mqtt-websocket-frames`.
  */
 export const TARGETS = Object.freeze({
   typescript: Object.freeze([...TWINS, 'blueprint']),
   csharp: TWINS,
-  rust: Object.freeze([...TWINS, 'mqtt-packets']),
+  rust: Object.freeze([...TWINS, 'mqtt-packets', 'mqtt-websocket-frames']),
 });
 
 /** Every side's targets, each once, in the order the sides list them. */
@@ -350,6 +353,17 @@ const MQTT_PACKETS = Object.freeze([
   'E0 07 8E 05 1F 00 02 6E 6F',
 ]);
 
+// the frames a server sends a client of MQTT 5 over a WebSocket, as the Rust side's frame mutation
+// test, `tests/mqtt_websocket_frames_fuzz.rs`, seeds from them: a binary frame whole, its CONNACK;
+// one fragmented with a ping between; a pong; a close; a head of a 64-bit length
+const MQTT_WEBSOCKET_FRAMES = Object.freeze([
+  '82 05 20 03 00 00 00',
+  '02 02 20 03 89 04 62 65 61 74 80 03 00 00 00',
+  '8A 00',
+  '88 02 03 E8',
+  '82 7F 00 00 00 00 00 01 00 00 30 00',
+]);
+
 // what the `proto-codecs` target reads before its payload: the path, the count and the number of
 // unknown groups, each 0, so the payload is read as it is and written as it was read
 const PLAIN = Buffer.of(0, 0, 0);
@@ -377,7 +391,8 @@ const entryBytesOf = (entry, key) => {
  * `vectors.json`, read and refused, no byte at all among them, the seeds of every side's parcel
  * mutation tests; the `proto` payloads of `codecs.json` and the bytes its `proto` values are
  * written as, each after three zero bytes, the plain path; `blueprints`, the repository's
- * blueprints as bytes; and the packets a broker sends, the Rust side's packet mutation seeds.
+ * blueprints as bytes; the packets a broker sends, the Rust side's packet mutation seeds; and the
+ * frames a server sends, the Rust side's frame mutation seeds.
  */
 export const seedsOf = (files) => {
   const { blueprints, codecs, conversations, debugFilters, transports, vectors } = files;
@@ -431,6 +446,9 @@ export const seedsOf = (files) => {
     blueprint: blueprints,
     'mqtt-packets': MQTT_PACKETS.map((packet) => {
       return hexBytesOf(packet);
+    }),
+    'mqtt-websocket-frames': MQTT_WEBSOCKET_FRAMES.map((frame) => {
+      return hexBytesOf(frame);
     }),
   };
 };

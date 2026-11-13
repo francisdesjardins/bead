@@ -26,6 +26,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   a `JWT` and admission hooks, reconnection, Prometheus in .NET and Chrome's DevTools; and how Bead
   fits together, beside gRPC-Web, Connect and SignalR. The root README links them after its "At a
   glance".
+- The fuzz target `mqtt-websocket-frames` and its seeded mutations, over the Rust side's reader of
+  an MQTT 5 WebSocket's frames (decision 0050).
 
 ### Changed
 
@@ -66,6 +68,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   PUBLISH of QoS 0 is taken, once written, and that a subscription or a publication given up once
   its packet may have gone loses its link; `spec/vectors.json` gains `mqttAcknowledgementCodes`.
   Every side's MQTT 5 adapter changes, so the spec's next version is a minor (decision 0041).
+- Spec 15.25: over a WebSocket, an MQTT 5 participant reads each binary message as one stream of
+  packets as its frames come, with no bound on a message of its own, and its upgrade offers no
+  extension; 15.29 judges a packet past its bound as the bytes holding its length come, or once its
+  message is whole on a platform that hands one on only so. A text message closes the link
+  ([MQTT-6.0.0-1]), the TypeScript and C# sides an open row of `docs/support.md`.
+- The Rust side's MQTT 5 link reads its WebSocket's frames itself: its upgrade judged as RFC 6455
+  §4.1 has a client judge one, `Connection` read as a list of tokens, each binary frame's payload
+  handed to its packet reader as it comes, so a message of several packets is read whatever its
+  size, a packet past its Maximum Packet Size is judged at its Remaining Length, and nothing is
+  reserved at a frame's head; a ping is answered with its pong and a close with a close (spec
+  15.25, 15.29; decision 0050).
 
 ### Fixed
 
@@ -78,6 +91,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   once a body that came empty and ended before it (decision 0037). A reader that read the body
   and put it back is refused alike, where the gateway answered before: a stream's `unshift` on the
   TypeScript side, a middleware's examining read on the C# side; mount the gateway before it.
+- The TypeScript side's MQTT 5 link over a WebSocket in Node bounds a message by 100 MiB, or by its
+  `maximumPacketSize` where larger, so no packet within its bound is refused, and offers no
+  permessage-deflate (spec 15.25).
 
 ## [0.13.0] - 2026-11-12
 

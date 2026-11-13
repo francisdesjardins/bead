@@ -89,9 +89,14 @@ describe('the targets', () => {
     assert.deepEqual(TARGETS.typescript, [...TWINS, 'blueprint']);
   });
 
-  test('knows the Rust side’s targets, every twin and its MQTT 5 client’s packet reader', () => {
-    assert.deepEqual(TARGETS.rust, [...TWINS, 'mqtt-packets']);
-    assert.deepEqual(EVERY_TARGET, [...TWINS, 'blueprint', 'mqtt-packets']);
+  test('knows the Rust side’s targets, every twin and its MQTT 5 client’s packet and frame readers', () => {
+    assert.deepEqual(TARGETS.rust, [...TWINS, 'mqtt-packets', 'mqtt-websocket-frames']);
+    assert.deepEqual(EVERY_TARGET, [
+      ...TWINS,
+      'blueprint',
+      'mqtt-packets',
+      'mqtt-websocket-frames',
+    ]);
     assert.match(SIDES.rust, /implementations[\\/]rust[\\/]fuzz$/u);
     assert.deepEqual(argumentsOf(['run', 'rust', 'jwt']), {
       command: 'run',
@@ -104,6 +109,9 @@ describe('the targets', () => {
     assert.equal(argumentsOf(['run', 'typescript', 'mqtt-packets']), undefined);
     assert.equal(argumentsOf(['run', 'csharp', 'mqtt-packets']), undefined);
     assert.equal(folderOf('rust', 'mqtt-packets'), SIDES.rust);
+    assert.equal(argumentsOf(['run', 'typescript', 'mqtt-websocket-frames']), undefined);
+    assert.equal(argumentsOf(['run', 'csharp', 'mqtt-websocket-frames']), undefined);
+    assert.equal(folderOf('rust', 'mqtt-websocket-frames'), SIDES.rust);
   });
 
   test("keep each in its side's folder, and the blueprint's beside beadc", () => {
@@ -286,6 +294,20 @@ describe('the seeds', () => {
     }
   });
 
+  test("seed the frame target with the Rust side's frame mutation seeds, each unmasked, in their order and digest", () => {
+    // * the 5 frames of the Rust side's tests/mqtt_websocket_frames_fuzz.rs, a server's to a client
+    assert.equal(SEEDS['mqtt-websocket-frames'].length, 5);
+    assert.equal(
+      digestOf(inSeedOrder(SEEDS['mqtt-websocket-frames'])),
+      'ce9d8aa9e4f964ff50a345e9445a83b1609d25150cf0ae337bdcbe52ed63a2ab'
+    );
+
+    // each a server's: no mask bit on its first head (RFC 6455 §5.1)
+    for (const seed of SEEDS['mqtt-websocket-frames']) {
+      assert.equal(seed[1] & 0x80, 0, seed.toString('hex'));
+    }
+  });
+
   test("seed the envelope target with every side's envelope mutation seeds, in their order and digest", () => {
     const vectors = hexUnder(specOf('vectors.json'), ['bytes', 'record']);
 
@@ -371,6 +393,7 @@ describe('the command line', () => {
       ['rust', 'broker-parcel'],
       ['rust', 'proto-codecs'],
       ['rust', 'mqtt-packets'],
+      ['rust', 'mqtt-websocket-frames'],
     ]) {
       assert.deepEqual(argumentsOf(['run', side, target]), {
         command: 'run',

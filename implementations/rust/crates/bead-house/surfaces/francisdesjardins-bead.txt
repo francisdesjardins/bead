@@ -1884,6 +1884,29 @@ crate::mqtt::packets
   fn largest_payload(topic: &str, maximum: u64, options: &MqttPublishShapeOptions) -> Option<u64> #[cfg(feature = "mqtt")]
   fn read_packet(bytes: &[u8], maximum_packet_size: u32) -> Result<MqttReading, MqttRefusal> #[cfg(feature = "mqtt")]
   fn write_publish(publish: &MqttPublish) -> Result<Vec<u8>, MqttRefusal> #[cfg(feature = "mqtt")]
+crate::mqtt::websocket
+  enum MqttFrameEvent #[cfg(feature = "mqtt")]
+    Bytes(Bytes) #[cfg(feature = "mqtt")]
+    Ping(Bytes) #[cfg(feature = "mqtt")]
+    Pong #[cfg(feature = "mqtt")]
+    Close #[cfg(feature = "mqtt")]
+    derives Clone, Debug, Eq, PartialEq #[cfg(feature = "mqtt")]
+  enum MqttFrameRefusal #[cfg(feature = "mqtt")]
+    Masked #[cfg(feature = "mqtt")]
+    ReservedBits #[cfg(feature = "mqtt")]
+    ReservedOpcode(u8) #[cfg(feature = "mqtt")]
+    LengthPastItsBound #[cfg(feature = "mqtt")]
+    FragmentedControl #[cfg(feature = "mqtt")]
+    LongControl #[cfg(feature = "mqtt")]
+    ContinuationOutsideAMessage #[cfg(feature = "mqtt")]
+    DataInsideAMessage #[cfg(feature = "mqtt")]
+    Text #[cfg(feature = "mqtt")]
+    implements Display, Error
+    derives Clone, Copy, Debug, Eq, PartialEq #[cfg(feature = "mqtt")]
+  struct MqttFrameReader #[cfg(feature = "mqtt")]
+    fn new() -> Self
+    fn read(&mut self, bytes: &mut BytesMut) -> Result<Option<MqttFrameEvent>, MqttFrameRefusal>
+    derives Debug, Default #[cfg(feature = "mqtt")]
 crate::net::bounds
   const MINIMUM_SEND_BYTES_PER_SECOND: u64 #[cfg(any(feature = "websocket", feature = "http", feature = "mqtt"))] #[cfg(any(feature = "websocket", feature = "http"))]
   const SEND_GRACE_PERIOD: Duration #[cfg(any(feature = "websocket", feature = "http", feature = "mqtt"))] #[cfg(any(feature = "websocket", feature = "http"))]
@@ -2692,6 +2715,9 @@ crate::internal
   use crate::mqtt::packets::read_packet #[cfg(feature = "mqtt")]
   use crate::mqtt::packets::width_of #[cfg(feature = "mqtt")]
   use crate::mqtt::packets::write_publish #[cfg(feature = "mqtt")]
+  use crate::mqtt::websocket::MqttFrameEvent #[cfg(feature = "mqtt")]
+  use crate::mqtt::websocket::MqttFrameReader #[cfg(feature = "mqtt")]
+  use crate::mqtt::websocket::MqttFrameRefusal #[cfg(feature = "mqtt")]
   use crate::router::types::limits_of
   use crate::router::types::session_key_of
   use crate::router::types::whole_envelope_limits_of
