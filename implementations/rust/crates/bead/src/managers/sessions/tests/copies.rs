@@ -141,3 +141,28 @@ fn update_data_stores_a_copy_and_emits_data_changed_with_the_new_and_old_values(
         }]
     );
 }
+
+#[test]
+fn update_data_emits_nothing_for_similar_data() {
+    let mut sessions = SessionManager::new();
+    sessions.get_or_else_set(FIRST);
+    sessions.taken();
+    let first = sessions
+        .manager
+        .update_data((&handle(FIRST), Some(data("guest"))), &mut sessions.told)
+        .expect("the first data");
+    let second = sessions
+        .manager
+        .update_data((&handle(FIRST), Some(data("guest"))), &mut sessions.told)
+        .expect("similar data");
+
+    assert_eq!(first, second);
+    assert_eq!(
+        sessions.taken(),
+        [SessionEvent::DataChanged {
+            session: first,
+            new_value: Some(data("guest")),
+            old_value: None,
+        }]
+    );
+}
