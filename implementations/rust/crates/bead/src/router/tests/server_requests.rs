@@ -311,6 +311,49 @@ async fn requests_are_asked_their_admission_once_on_their_header_before_their_pa
 
 // spec 9.2, 13.5
 #[tokio::test]
+async fn are_asked_their_admission_once_on_their_header_before_their_payload_is_read() {
+    let served = Served::new(&RouterServerOptions::default());
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let asking = Arc::clone(&asked);
+    let decoded = Arc::default();
+    let mut dependencies =
+        RequestResolverDependencies::new(NonEmptyText(Arc::clone(&decoded)), TextCodec);
+    dependencies.before_request = Some(BeforeRequest::new(
+        move |request| {
+            locked(&asking).push(request.header.call_id);
+            request.header.call_id == 31
+        },
+        None,
+    ));
+    served
+        .services
+        .get_request_resolver(&echo(), dependencies)
+        .expect("echo resolved")
+        .on(Arc::new(|request, response: Response<TextCodec>| {
+            response.result(format!("{}!", request.payload))
+        }))
+        .expect("echo registered");
+
+    // * both arrivals share a turn: the refused payload is unreadable, its refusal immediate
+    served
+        .transport
+        .deliver(&request_of((31, &echo(), "hi")), &first());
+    served
+        .transport
+        .deliver(&request_of((33, &echo(), "")), &first());
+    served.settle().await;
+
+    assert_eq!(*locked(&asked), [31, 33]);
+    assert_eq!(*locked(&decoded), [Bytes::from_static(b"hi")]);
+    assert_eq!(
+        served.sent_since(),
+        ["first failure 33 ACCESS_DENIED", "first result 31 hi!"]
+    );
+    assert_eq!(served.reported(), Vec::<String>::new());
+}
+
+// spec 9.2, 13.5
+#[tokio::test]
 async fn requests_refused_their_admission_never_reach_a_callback_which_would_subscribe_a_plain_request()
  {
     let served = Served::new(&RouterServerOptions::default());
