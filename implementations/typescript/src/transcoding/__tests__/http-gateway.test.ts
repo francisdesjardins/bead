@@ -11,13 +11,14 @@ import {
   constants as http2Constants,
   createServer as createHTTP2Server,
 } from 'node:http2';
+import { createRequire } from 'node:module';
 import { type AddressInfo, connect, type Socket } from 'node:net';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { create, fromBinary, toBinary } from '@bufbuild/protobuf';
 import { UninterpretedOption_NamePartSchema } from '@bufbuild/protobuf/wkt';
 import cors from '@fastify/cors';
 import { expect, test } from '@playwright/test';
-import express from 'express';
+import type expressModule from 'express';
 import Fastify, { type FastifyHttpOptions, type FastifyInstance, type FastifyReply } from 'fastify';
 import { protoCodecOf } from '../../proto/codec';
 import { EnvelopeKind, LIMIT_DEFAULTS, SERVER_FAILURES } from '../../router/shared/constants';
@@ -34,15 +35,8 @@ import { HTTP_ROUTES, OPENAPI_DOCUMENT } from './generated/bead_http';
 import { TranscodingProcedures } from './generated/transcoding_bead';
 import { EdgesSchema, TickSchema } from './generated/transcoding_pb';
 import { NeedsSchema } from './generated/transcoding-required_pb';
-import {
-  EXCHANGES,
-  gatewayOptionsOf,
-  GOOD_CREDENTIAL,
-  type Mount,
-  playExchange,
-  SESSION,
-  startTranscoding,
-} from './transcoding-service';
+import { EXCHANGES, gatewayOptionsOf, playExchange } from './transcoding-exchanges';
+import { GOOD_CREDENTIAL, type Mount, SESSION, startTranscoding } from './transcoding-service';
 
 // interfaces
 
@@ -87,6 +81,11 @@ interface IFastifyMount {
 }
 
 // constants
+
+// ! Express by `require`, never by `import`: on Node 24.9, the floor, an ES module's import of it
+// fails under Playwright's loader hooks ("module is not linked"), where `get-intrinsic` requires
+// `async-function`, whose `module-sync` export is an ES module
+const express = createRequire(import.meta.url)('express') as typeof expressModule;
 
 /** The origin of another site the gateways here name. */
 const ORIGIN = 'https://app.example';
@@ -370,7 +369,10 @@ const inFastify = (mount: IFastifyMount = {}): Mount => {
       return reply.send({ status: 'up' });
     });
     app.post('/own', (request, reply) => {
-      return reply.send(request.body);
+      const { a } = request.body as { a?: unknown };
+
+      // * an object of what Fastify's JSON parser read, never the body as it came
+      return reply.send({ a: typeof a === 'number' ? a : null });
     });
     await app.listen({ host: '127.0.0.1', port: 0 });
 

@@ -42,8 +42,8 @@ import {
   type IPeer,
   playExchange,
   readOn,
-  startTranscoding,
-} from './transcoding-service';
+} from './transcoding-exchanges';
+import { startTranscoding } from './transcoding-service';
 
 // interfaces
 
