@@ -9,6 +9,8 @@ use crate::constants::ProcedureKind;
 use crate::errors::Refusal;
 use crate::testing::pair::echo;
 
+mod vectors;
+
 // A Rust slice holds addresses alone: null and an object in place of a list are no inputs.
 #[test]
 fn refuses_an_address_out_of_its_range_naming_the_transport_and_the_address_and_a_list_that_is_no_array()
