@@ -350,9 +350,7 @@ fn kept_envelopes(source: DebugFilterSource) -> Vec<(u8, DebugDirection)> {
         .collect()
 }
 
-#[test]
-fn an_envelope_listener_keeps_a_direction_and_the_kinds_named_and_every_envelope_without_a_filter()
-{
+fn envelope_selections() {
     assert_eq!(kept_envelopes(spec("")).len(), 4);
     assert_eq!(
         kept_envelopes(spec("d(rx)")),
@@ -381,18 +379,14 @@ fn an_envelope_listener_keeps_a_direction_and_the_kinds_named_and_every_envelope
     );
 }
 
-#[test]
-fn an_envelope_listener_serves_the_same_spec_as_the_calls_the_names_and_the_types_of_calls_are_not_asked()
- {
+fn call_and_envelope_spec() {
     let spec_value = "d(rx), t(r), e(failure), getStatus";
     assert_eq!(heard(spec(spec_value)), ["getStatus rx request"]);
     assert_eq!(kept_envelopes(spec(spec_value)), [(18, DebugDirection::Rx)]);
     assert_eq!(kept_envelopes(spec("-*, t(c)")).len(), 4);
 }
 
-#[test]
-fn an_envelope_listener_refuses_a_first_filter_that_does_not_hold_and_keeps_the_last_that_held_after()
- {
+fn last_envelope_filter() {
     FilterKeeper::new(spec("e(nothing)")).expect_err("invalid first filter");
     crate::testing::surface::Consumer::new().refuses(
         "pub fn check(f: &mut bead::DebugFilter) { f.kinds = vec![0x99]; }",
@@ -443,4 +437,54 @@ fn two_filters_of_the_same_lists_are_equal_whatever_lists_hold_them() {
             ..DebugFilter::default()
         }
     );
+}
+
+#[test]
+fn an_envelope_listener_keeps_a_direction_and_the_kinds_named_and_every_envelope_without_a_filter()
+{
+    envelope_selections();
+}
+
+#[test]
+fn keeps_a_direction_and_the_kinds_named_and_every_envelope_without_a_filter() {
+    envelope_selections();
+}
+
+#[test]
+fn an_envelope_listener_serves_the_same_spec_as_the_calls_the_names_and_the_types_of_calls_are_not_asked()
+ {
+    call_and_envelope_spec();
+}
+
+#[test]
+fn serves_the_same_spec_as_the_calls_the_names_and_the_types_of_calls_are_not_asked() {
+    call_and_envelope_spec();
+}
+
+#[test]
+fn an_envelope_listener_refuses_a_first_filter_that_does_not_hold_and_keeps_the_last_that_held_after()
+ {
+    last_envelope_filter();
+}
+
+#[test]
+fn refuses_a_first_filter_that_does_not_hold_and_keeps_the_last_that_held_after() {
+    last_envelope_filter();
+}
+
+#[test]
+fn names_a_kind_as_its_constant_does_however_it_is_written() {
+    assert_eq!(
+        parse_debug_filter("e(request|FAILURE), E(cancel)")
+            .expect("case-independent kind names")
+            .kinds,
+        [
+            EnvelopeKind::Request,
+            EnvelopeKind::Failure,
+            EnvelopeKind::Cancel
+        ]
+    );
+    for spec in ["e(r)", "e(chunks)", "e(constructor)", "e()"] {
+        parse_debug_filter(spec).expect_err("a full envelope kind name is required");
+    }
 }
