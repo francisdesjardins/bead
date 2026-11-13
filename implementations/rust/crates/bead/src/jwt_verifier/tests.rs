@@ -554,3 +554,116 @@ fn fails_a_verification_under_an_es256_key_whose_point_is_off_its_curve_after_ju
         );
     }
 }
+
+// The claims outlive both the signed text and the caller's JSON tree.
+fn whole_claims() {
+    let (original, keys, audiences, now) = holding();
+    let mut expected = read_jwt(original.as_bytes())
+        .expect("the source token")
+        .claims;
+    expected.insert("realm".to_owned(), json!({"roles": ["reader"]}));
+    let signed = signed_text(HEADER, &Value::Object(expected.clone()).to_string());
+    let verdict = verify_jwt(
+        signed.as_bytes(),
+        &JwtAgainst {
+            audiences: &audiences,
+            keys: &keys,
+            now: &|| now,
+        },
+    )
+    .expect("verified");
+    drop(signed);
+    drop(original);
+    let JwtVerdict::Holds {
+        claims, identifier, ..
+    } = &verdict
+    else {
+        panic!("the token does not hold: {verdict:?}");
+    };
+    assert_eq!(claims, &expected);
+    assert_eq!(claims["realm"]["roles"][0], "reader");
+    assert!(matches!(identifier, super::JwtSessionIdentifier::Sub { sub, .. } if sub == "bob"));
+    expected.insert("realm".to_owned(), json!({"roles": ["writer"]}));
+    assert_eq!(claims["realm"]["roles"][0], "reader");
+}
+
+#[test]
+fn gives_the_claims_set_of_a_token_that_holds_whole_past_its_document() {
+    whole_claims();
+}
+
+#[test]
+fn gives_the_claims_set_of_a_token_that_holds_whole_frozen_to_its_depth() {
+    whole_claims();
+    let consumer = crate::testing::surface::Consumer::new();
+    consumer.refuses(
+        "pub fn check(v: &bead::JwtVerdict) { if let bead::JwtVerdict::Holds { claims, .. } = v { claims.get_mut(\"realm\"); } }",
+        ("E0596", "cannot borrow"),
+    );
+    consumer.refuses(
+        "pub fn check(v: &bead::JwtSessionIdentifier) { if let bead::JwtSessionIdentifier::Sub { sub, .. } = v { sub.clear(); } }",
+        ("E0596", "cannot borrow"),
+    );
+}
+
+fn all_verdicts() {
+    let vectors: Vec<Value> = crate::testing::vectors::of("jwtVerdicts").expect("the vectors");
+    assert!(!vectors.is_empty(), "the JWT vector group has its entries");
+    for vector in vectors {
+        let name = vector["name"].as_str().expect("a name");
+        let (token, keys, audiences, now) = verdict_named(name);
+        let bytes = crate::testing::vectors::latin1_bytes_of(&token).expect("wire bytes");
+        let verdict = verify_jwt(
+            &bytes,
+            &JwtAgainst {
+                audiences: &audiences,
+                keys: &keys,
+                now: &|| now,
+            },
+        )
+        .expect("judged");
+        let got = match verdict {
+            JwtVerdict::Refused(reason) => json!({"holds": false, "reason": reason.as_str()}),
+            JwtVerdict::Holds {
+                claims,
+                end,
+                identifier,
+            } => {
+                let identifier = match identifier {
+                    super::JwtSessionIdentifier::Sid { issuer, sid } => {
+                        json!({"issuer": issuer, "sid": sid})
+                    }
+                    super::JwtSessionIdentifier::Sub { issuer, sub } => {
+                        json!({"issuer": issuer, "sub": sub})
+                    }
+                };
+                json!({"holds": true, "claims": claims, "end": end, "identifier": identifier})
+            }
+        };
+        // A claims tree already at its depth bound is canonicalized below no verdict wrapper.
+        let canonical = |value: &Value| -> std::collections::BTreeMap<String, Vec<u8>> {
+            value
+                .as_object()
+                .expect("a verdict object")
+                .iter()
+                .map(|(key, value)| {
+                    (
+                        key.clone(),
+                        crate::json::write(value).expect("canonical member"),
+                    )
+                })
+                .collect()
+        };
+        assert_eq!(canonical(&got), canonical(&vector["verdict"]), "{name}");
+    }
+}
+
+#[test]
+fn gives_each_jwt_its_verdict_name() {
+    all_verdicts();
+}
+
+#[test]
+fn gives_each_jwt_its_verdict() {
+    all_verdicts();
+}
