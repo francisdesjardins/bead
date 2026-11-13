@@ -2198,7 +2198,7 @@ async fn rejects_a_connect_while_a_disconnect_is_pending() {
 // ── Its send ─────────────────────────────────────────────────────────────────────────────────
 
 #[tokio::test]
-async fn delivers_a_uint8_array() {
+async fn delivers_binary_as_bytes() {
     let server = hearing(None).await;
     let client = client();
 

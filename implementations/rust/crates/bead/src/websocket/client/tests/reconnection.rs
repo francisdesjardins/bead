@@ -4,7 +4,7 @@ use super::*;
 use crate::TransportClientReconnectDelay;
 
 #[tokio::test]
-async fn throws_a_reconnectexception_carrying_the_last_failure_ending_closed() {
+async fn throws_a_reconnect_exception_carrying_the_last_failure_ending_closed() {
     const NOT_IMPLEMENTED: &str =
         "HTTP/1.1 501 Not Implemented\r\ncontent-length: 0\r\nconnection: close\r\n\r\n";
     let server = hearing(Some(NOT_IMPLEMENTED)).await;
@@ -259,7 +259,7 @@ async fn passes_on_what_its_tap_throws_ending_closed_with_no_attempt_after_it_an
 }
 
 #[tokio::test]
-async fn throws_an_invalidoperationexception_ending_closed_when_its_delay_throws() {
+async fn throws_an_invalid_operation_exception_ending_closed_when_its_delay_throws() {
     let server = hearing(Some(BAD_GATEWAY)).await;
     let client = client();
 
@@ -283,7 +283,7 @@ async fn throws_an_invalidoperationexception_ending_closed_when_its_delay_throws
 }
 
 #[tokio::test]
-async fn throws_an_operationcanceledexception_without_waiting_out_its_delay_when_cancelled_mid_wait()
+async fn throws_an_operation_canceled_exception_without_waiting_out_its_delay_when_cancelled_mid_wait()
  {
     let server = hearing(Some(BAD_GATEWAY)).await;
     let clock = stepping();
