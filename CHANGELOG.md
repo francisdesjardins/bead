@@ -33,11 +33,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   side's service manager over a router of the application's own ahead.
 - The support matrix names each test it cites as its side declares it: a title cut where its test
   goes on, a renamed Rust function and a C# method's last word among them.
+- `spec/transcoding.md` refuses a body read before the gateway took its request, by the server
+  it is mounted on: 500, a failure of its own reported on its `error`, its call never made (7.5,
+  7.6, 10.1). Every gateway makes the change, so the companion's next version is a minor
+  (decision 0037).
 
 ### Fixed
 
 - The C# MQTT adapter names a refusing CONNACK by its code and MQTT 5 name, such as
   `0x86, Bad User Name or Password`; a code outside the CONNACK table has its value alone.
+- A gateway mounted behind what reads a request's body, a framework's body parser or a
+  middleware, answers 500 and reports it, never calling with what was left: the TypeScript side
+  answered nothing, or 408 `too-slow`, and the C# side called with the bytes left or answered 400.
+  The C# side reads a body its server buffered from its start, and the TypeScript side reads at
+  once a body that came empty and ended before it (decision 0037).
 
 ## [0.13.0] - 2026-11-12
 

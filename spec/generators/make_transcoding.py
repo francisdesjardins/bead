@@ -2318,7 +2318,7 @@ ROWS = [
 # the rows past the protocol's codes: a code no name names, an application failure, then the gateway's own
 UNNAMED_ROW, APPLICATION_ROW = len(ROWS) + 1, len(ROWS) + 2
 OWN_ROWS = {'timeout': (len(ROWS) + 3, 504), 'closed': (len(ROWS) + 4, 502), 'unwritable': (len(ROWS) + 5, 500),
-            'jwt': (len(ROWS) + 6, 431), 'scheme': (len(ROWS) + 7, 401), 'failed': (len(ROWS) + 8, 500)}
+            'jwt': (len(ROWS) + 6, 431), 'scheme': (len(ROWS) + 7, 401), 'failed': (len(ROWS) + 9, 500)}
 
 
 def row_of(code, arose, encoding):

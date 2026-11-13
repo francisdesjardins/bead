@@ -3448,6 +3448,8 @@ src/transport/server/types.ts IHTTPRequestLike
     readonly complete?: boolean | undefined
     readonly method?: string | undefined
     readonly rawHeaders: readonly string[]
+    readonly readableDidRead?: boolean | undefined
+    readonly readableEnded?: boolean | undefined
     readonly socket: Partial<ILingeringSocketLike> & {readonly remoteAddress?: string | undefined; readonly remotePort?: number | undefined}
     readonly url?: string | undefined
     destroy(): unknown

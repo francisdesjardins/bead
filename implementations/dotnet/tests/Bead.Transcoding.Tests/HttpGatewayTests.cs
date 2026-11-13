@@ -835,6 +835,172 @@ public sealed class HttpGatewayTests
 
     // transcoding 7.6.27
     [Fact]
+    public async Task Refuses_500_a_body_read_before_it_by_the_server_it_is_mounted_on_reported_its_call_never_made()
+    {
+        await using var service = await TranscodingService.Start();
+        await using var gateway = new HttpGateway(Exchanges.OptionsOf(service.Memory, null) with
+        {
+            BodyGracePeriod = TimeSpan.FromMilliseconds(100),
+            MaximumExchangesPerAddress = 1,
+        });
+        var told = new List<string>();
+        var parted = new List<string>();
+        var calls = 0;
+
+        gateway.Error += (reason) =>
+        {
+            lock (told)
+            {
+                told.Add($"{reason.GetType().Name}: {reason.Message}");
+            }
+        };
+        service.Memory.Connection += (_) => { Interlocked.Increment(ref calls); };
+
+        var (application, port) = await MountedBehindReader(gateway);
+
+        try
+        {
+            using var client = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{port}") };
+
+            foreach (var reader in new[] { "taken", "peek", "completed", "examine" })
+            {
+                foreach (var (framing, fields, body) in new[]
+                {
+                    ("JSON, content-length", new[] { "content-length: 13" }, "{\"anInt32\":1}"),
+                    ("JSON, chunked", ["transfer-encoding: chunked"], "d\r\n{\"anInt32\":1}\r\n0\r\n\r\n"),
+                    ("chunked, empty", ["transfer-encoding: chunked"], "0\r\n\r\n"),
+                })
+                {
+                    var cell = $"{reader}, {framing}";
+                    var before = (Calls: Volatile.Read(ref calls), Told: told.Count);
+                    var answered = await Exchanged(port, EchoOctetsOf(port, ([.. fields, $"x-reader: {reader}"], body)));
+                    var made = Volatile.Read(ref calls) - before.Calls;
+                    List<string> reported;
+
+                    lock (told)
+                    {
+                        reported = told[before.Told..];
+                    }
+
+                    // * its place released: the address's one call answers
+                    using var next = await client.SendAsync(Json("/api/Transcoding/echo", "{}"), Cancelled);
+
+                    parted.AddRange(new[]
+                    {
+                        answered.Status == 500 ? "" : $"status {answered.Status}",
+                        answered.Fields.GetValueOrDefault("bead-refusal") is { } reason ? $"bead-refusal {reason}" : "",
+                        answered.Body == "{\"status\":500,\"title\":\"Internal Server Error\",\"type\":\"about:blank\"}" ? "" : $"body {answered.Body}",
+                        answered.Fields.GetValueOrDefault("connection") == "close" ? "" : $"connection {answered.Fields.GetValueOrDefault("connection")}",
+                        reported is ["InvalidOperationException: a body read before the gateway took its request"] ? "" : $"reported [{string.Join(", ", reported)}]",
+                        made == 0 ? "" : $"{made} call(s)",
+                        next.StatusCode == HttpStatusCode.OK ? "" : $"next {(int)next.StatusCode}",
+                    }.Where((part) =>
+                    {
+                        return part.Length > 0;
+                    }).Select((part) =>
+                    {
+                        return $"{cell}: {part}";
+                    }));
+                }
+            }
+
+            Assert.Empty(parted);
+        }
+        finally
+        {
+            await application.StopAsync(Cancelled);
+            await application.DisposeAsync();
+        }
+    }
+
+    // transcoding 10.1.10
+    [Fact]
+    public async Task Reads_a_body_that_came_empty_as_empty_whatever_read_it_before()
+    {
+        await using var service = await TranscodingService.Start();
+        await using var gateway = new HttpGateway(Exchanges.OptionsOf(service.Memory, null) with
+        {
+            BodyGracePeriod = TimeSpan.FromMilliseconds(100),
+            MaximumExchangesPerAddress = 1,
+        });
+        var reported = ReportedBy(gateway);
+        var parted = new List<string>();
+        var (application, port) = await MountedBehindReader(gateway);
+
+        try
+        {
+            string[] fields = ["content-length: 0", "connection: close"];
+            var untouched = await Exchanged(port, EchoOctetsOf(port, (fields, "")));
+
+            Assert.Equal((400, "application/problem+json"), (untouched.Status, untouched.Fields.GetValueOrDefault("content-type")));
+
+            foreach (var reader in new[] { "taken", "peek", "examine" })
+            {
+                var answered = await Exchanged(port, EchoOctetsOf(port, ([.. fields, $"x-reader: {reader}"], "")));
+                var seen = (answered.Status, Reason: answered.Fields.GetValueOrDefault("bead-refusal"), answered.Body);
+
+                if (seen != (untouched.Status, null, untouched.Body))
+                {
+                    parted.Add($"{reader}, content-length: 0: {seen}");
+                }
+            }
+
+            Assert.Empty(parted);
+            Assert.Empty(reported);
+        }
+        finally
+        {
+            await application.StopAsync(Cancelled);
+            await application.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Reads_from_its_start_a_body_the_server_it_is_mounted_on_buffered()
+    {
+        await using var service = await TranscodingService.Start();
+        await using var gateway = new HttpGateway(Exchanges.OptionsOf(service.Memory, null));
+        var reported = ReportedBy(gateway);
+        var parted = new List<string>();
+        var calls = 0;
+
+        service.Memory.Connection += (_) => { Interlocked.Increment(ref calls); };
+
+        var (application, port) = await MountedBehindReader(gateway);
+
+        try
+        {
+            foreach (var reader in new[] { "buffered", "buffered-partial", "buffered-pipe", "replaced" })
+            {
+                foreach (var (framing, fields, body) in new[]
+                {
+                    ("content-length", new[] { "content-length: 13" }, "{\"anInt32\":1}"),
+                    ("chunked", ["transfer-encoding: chunked"], "d\r\n{\"anInt32\":1}\r\n0\r\n\r\n"),
+                })
+                {
+                    var before = Volatile.Read(ref calls);
+                    var answered = await Exchanged(port, EchoOctetsOf(port, ([.. fields, "connection: close", $"x-reader: {reader}"], body)));
+                    var made = Volatile.Read(ref calls) - before;
+
+                    if ((answered.Status, answered.Body, made) != (200, "{\"anInt32\":1}", 1))
+                    {
+                        parted.Add($"{reader}, {framing}: {answered.Status} {answered.Body}, {made} call(s)");
+                    }
+                }
+            }
+
+            Assert.Empty(parted);
+            Assert.Empty(reported);
+        }
+        finally
+        {
+            await application.StopAsync(Cancelled);
+            await application.DisposeAsync();
+        }
+    }
+
+    // transcoding 7.6.28
+    [Fact]
     public async Task Answers_what_no_gate_foresaw_500_reported_none_of_its_words_in_the_problem()
     {
         // * a clock that breaks as a body is read, past every gate
@@ -3214,6 +3380,129 @@ public sealed class HttpGatewayTests
         }
 
         return (int.Parse(head[0].Split(' ')[1], CultureInfo.InvariantCulture), fields, text[(end + 4)..]);
+    }
+
+    // a gateway mapped as the fallback of an application of Kestrel's, behind a middleware that
+    // reads each request's body first, by its x-reader, as the server it is mounted on may; and
+    // the port it listens on
+    private static async Task<(WebApplication Application, int Port)> MountedBehindReader(HttpGateway gateway)
+    {
+        var builder = WebApplication.CreateSlimBuilder();
+
+        builder.Logging.ClearProviders();
+        builder.WebHost.UseKestrel((kestrel) =>
+        {
+            kestrel.Listen(IPAddress.Loopback, 0);
+        });
+
+        var application = builder.Build();
+
+        application.Use(ReadBefore);
+        application.MapBeadGateway(gateway);
+        await application.StartAsync(Cancelled);
+
+        return (application, new Uri(application.Urls.First()).Port);
+    }
+
+    // a request's body read before the gateway takes it, by its x-reader: taken whole, two bytes
+    // peeked, its reader completed, its first read examined and left, or buffered and read whole,
+    // in part or through its reader, or copied into a stream of the middleware's own; any other,
+    // untouched
+    private static async Task ReadBefore(HttpContext context, RequestDelegate next)
+    {
+        var request = context.Request;
+        var aborted = context.RequestAborted;
+
+        switch (request.Headers["x-reader"].ToString())
+        {
+            case "taken":
+                {
+                    await request.Body.CopyToAsync(Stream.Null, aborted);
+
+                    break;
+                }
+            case "peek":
+                {
+                    _ = await request.Body.ReadAsync(new byte[2], aborted);
+
+                    break;
+                }
+            case "completed":
+                {
+                    await Drained(request);
+                    await request.BodyReader.CompleteAsync();
+
+                    break;
+                }
+            case "examine":
+                {
+                    var read = await request.BodyReader.ReadAsync(aborted);
+
+                    request.BodyReader.AdvanceTo(read.Buffer.Start, read.Buffer.End);
+
+                    break;
+                }
+            case "buffered":
+                {
+                    request.EnableBuffering();
+                    await request.Body.CopyToAsync(Stream.Null, aborted);
+
+                    break;
+                }
+            case "buffered-partial":
+                {
+                    request.EnableBuffering();
+                    _ = await request.Body.ReadAsync(new byte[2], aborted);
+
+                    break;
+                }
+            case "buffered-pipe":
+                {
+                    request.EnableBuffering();
+                    await Drained(request);
+
+                    break;
+                }
+            case "replaced":
+                {
+                    var copy = new MemoryStream();
+
+                    await request.Body.CopyToAsync(copy, aborted);
+                    request.Body = copy;
+
+                    break;
+                }
+            default:
+                {
+                    break;
+                }
+        }
+
+        await next(context);
+    }
+
+    // a request's body read through its reader to its end, its reader left open
+    private static async Task Drained(HttpRequest request)
+    {
+        while (true)
+        {
+            var read = await request.BodyReader.ReadAsync(request.HttpContext.RequestAborted);
+
+            request.BodyReader.AdvanceTo(read.Buffer.End);
+
+            if (read.IsCompleted)
+            {
+                return;
+            }
+        }
+    }
+
+    // a request to echo's route, its fields and its body as they go
+    private static byte[] EchoOctetsOf(int port, (string[] Fields, string Body) request)
+    {
+        string[] lines = ["POST /api/Transcoding/echo HTTP/1.1", $"host: 127.0.0.1:{port}", "content-type: application/json", .. request.Fields, "", request.Body];
+
+        return Encoding.UTF8.GetBytes(string.Join("\r\n", lines));
     }
 
     // what a case's response parts from it: its status, its mark, and its problem's words exactly
