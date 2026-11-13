@@ -355,13 +355,15 @@ jobs:
         run: cargo deny --locked check
       # the projects outside the workspace, each by its own lock, held to the workspace's deny.toml,
       # cargo-deny's default, the one in the folder it runs from: the fuzz targets, the conformance
-      # player and the protovalidate differential's testee
+      # player, the protovalidate differential's testee and hello's Rust half
       - if: matrix.os == 'ubuntu-26.04'
         run: cargo deny --manifest-path fuzz/Cargo.toml --locked check
       - if: matrix.os == 'ubuntu-26.04'
         run: cargo deny --manifest-path tools/protobuf-conformance/Cargo.toml --locked check
       - if: matrix.os == 'ubuntu-26.04'
         run: cargo deny --manifest-path tools/protovalidate-differential/Cargo.toml --locked check
+      - if: matrix.os == 'ubuntu-26.04'
+        run: cargo deny --manifest-path ../../examples/hello/rust/Cargo.toml --locked check
       # the tests under instrumentation, every test binary's profile merged into one LLVM export,
       # the unit tests, a module's tests.rs and its tests/ folder, the test kit, the code beadc
       # writes, under a generated/ folder, and the goldens' crate that compiles it left out; then
@@ -802,14 +804,16 @@ jobs:
 
   # ── Examples ─────────────────────────────────────────────────────────────────
   # Each project of examples/, written as a consumer writes one, its runtimes from their source: a
-  # Yarn portal and a ProjectReference. First what the examples copy or take from beadc, held to
-  # their source; then examples/hello: beadc on Node from builder/ holds its generated files and
-  # writes the copy of Bead's options its external builds read; buf's lint and layout over its
-  # .proto; each half's gates and both its builds; then each client against each server, both
-  # modes of each half, sixteen pairs, each server's gateway asked after its client, every one
+  # Yarn portal, a ProjectReference and a Cargo path. First what the examples copy or take from
+  # beadc, held to their source; then examples/hello: beadc on Node from builder/ holds its
+  # generated files and writes the copy of Bead's options its external builds read; buf's lint and
+  # layout over its .proto; each half's gates and both its builds; then each client against each
+  # server, both modes of each half, each server's gateway asked after its client, every one
   # writing transcript.txt, every server ending clean.
-  # On the current line and on the floor the TypeScript half's engines.node declares. The wrappers
-  # run over it on the builder job's image legs, where the image is.
+  # On the current line and on the floor the TypeScript half's engines.node declares. The Rust half
+  # on the current line's leg alone, on the toolchain its rust-toolchain.toml pins, the Rust side's,
+  # its two binaries over one target folder: its pairs played there, Node's floor no part of it.
+  # The wrappers run over it on the builder job's image legs, where the image is.
   examples:
     name: Examples (Node ${{ matrix.node }})
     runs-on: ubuntu-26.04
@@ -818,6 +822,9 @@ jobs:
       fail-fast: false
       matrix:
         node: ['26', '24.9']
+        include:
+          - node: '26'
+            rust: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -853,6 +860,12 @@ jobs:
         run: |
           protoc="$(node tools/fetch-protoc.mjs)"
           echo "BEADC_PROTOC=$protoc" >> "$GITHUB_ENV"
+      # the Rust half's messages, beadc's through Buffa's plugin, held on every leg
+      - name: protoc-gen-buffa, by its pin's sha256
+        working-directory: builder
+        run: |
+          plugin="$(node tools/fetch-protoc-gen-buffa.mjs)"
+          echo "BEADC_PROTOC_GEN_BUFFA=$plugin" >> "$GITHUB_ENV"
       - name: What each example copies, or takes from beadc's wrapper and init
         run: node tools/check-examples.mjs
       # held first, then written: generate writes the same files again, and the copy of Bead's
@@ -880,8 +893,40 @@ jobs:
         working-directory: examples/hello/dotnet
         env:
           CI: true
+      # 1.99.1, as examples/hello/rust/rust-toolchain.toml names it, the Rust side's pin
+      - if: matrix.rust
+        run: rustup toolchain install
+        working-directory: examples/hello/rust
+      # the registry and the Rust half's build, by its own lock and its toolchain
+      - if: matrix.rust
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            examples/hello/rust/target
+          key: examples-rust-${{ hashFiles('examples/hello/rust/Cargo.lock', 'examples/hello/rust/rust-toolchain.toml', 'implementations/rust/Cargo.lock') }}
+          restore-keys: examples-rust-
+      - if: matrix.rust
+        run: cargo fmt --check
+        working-directory: examples/hello/rust
+      # the feature external's build script builds its set with the TypeScript half's buf, the one
+      # the lint above ran
+      - if: matrix.rust
+        run: cargo clippy --all-targets --locked && cargo clippy --all-targets --features external --locked
+        working-directory: examples/hello/rust
+        env:
+          BUF: ${{ github.workspace }}/examples/hello/typescript/node_modules/.bin/buf
+      # both binaries over one target folder: hello, then hello-external with the feature external
+      - if: matrix.rust
+        run: cargo build --locked && cargo build --features external --locked
+        working-directory: examples/hello/rust
+        env:
+          BUF: ${{ github.workspace }}/examples/hello/typescript/node_modules/.bin/buf
       - name: Each client against each server
         run: node examples/hello/pairs.mjs
+        env:
+          # the Rust half's pairs where it is built; any other word leaves them out
+          HELLO_RUST: ${{ matrix.rust && 'built' || 'absent' }}
 
   # ── Protobuf conformance ─────────────────────────────────────────────────────
   # Protobuf's conformance suite through each side's generated `proto` codec, the check of a

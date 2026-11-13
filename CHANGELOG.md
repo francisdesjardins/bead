@@ -16,7 +16,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - beadc's Rust target: each package's service descriptors, catalogue, typed server and client,
   hooks, windows and options, its requests' validators, and the procedures each transport of its
   server takes, beside the messages Buffa writes, through the pinned `protoc-gen-buffa` or an
-  application's build through `bead_protobuf_build` (decision 0051).
+  application's build through `bead_protobuf_build`; `examples/hello`'s Rust half (decision 0051).
 - The Rust side's validators' runtime in `bead-protobuf`, and the counter of the contract with
   generated code, `GENERATED_CODE_SUPPORTS_VERSION_7` and `_8`; the Rust side plays
   `spec/validations.json`'s verdicts (decisions 0035, 0051).

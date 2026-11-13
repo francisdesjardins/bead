@@ -1,0 +1,6 @@
+# The Rust half's toolchain, the Rust side's pin, implementations/rust/rust-toolchain.toml's channel:
+# moved with it, in the same commit
+[toolchain]
+channel = "1.99.1"
+profile = "minimal"
+components = ["clippy", "rustfmt"]

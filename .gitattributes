@@ -26,3 +26,7 @@
 
 # A descriptor set, protobuf's own binary, as a test or a golden of beadc holds one.
 *.binpb binary
+
+# What beadc writes for a Rust output, held by `generate --check`: shown as generated, its diff
+# folded.
+/examples/hello/rust/src/generated/** linguist-generated
