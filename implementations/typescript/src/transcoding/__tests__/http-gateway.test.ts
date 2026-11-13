@@ -3795,7 +3795,7 @@ test.describe('mounted in Fastify', () => {
     ]);
   });
 
-  test('aborted over HTTP/1.1, a hijacked exchange cancels its call, and fires neither onResponse nor onRequestAbort, as one of Fastify’s own', async () => {
+  test('aborted over HTTP/1.1, a hijacked exchange fires the hooks one of Fastify’s own fires: onRequestAbort while its body comes, none once it came, its call cancelled', async () => {
     const seen: string[] = [];
     await using fixture = await startTranscoding({
       mount: inFastify({
@@ -3810,41 +3810,68 @@ test.describe('mounted in Fastify', () => {
             done();
           });
           app.post('/own/hang', () => {
+            seen.push('own handler');
+
             return new Promise(() => {});
           });
         },
       }),
     });
     const { port } = fixture;
-    const hanging = opened(
-      port,
-      octetsOf(port, {
-        body: '{}',
-        lines: ['POST /api/Transcoding/hang HTTP/1.1', 'content-type: application/json'],
-      })
-    );
+    const isSeen = (entry: string): (() => boolean) => {
+      return () => {
+        return seen.includes(entry);
+      };
+    };
+    // a body sent whole, on a socket dropped once its handler holds it
+    const dropped = async (path: string, isReached: () => boolean): Promise<void> => {
+      const socket = opened(
+        port,
+        octetsOf(port, {
+          body: '{}',
+          lines: [`POST ${path} HTTP/1.1`, 'content-type: application/json'],
+        })
+      );
 
-    await until(() => {
+      await until(isReached);
+      socket.destroy();
+    };
+
+    await dropped('/api/Transcoding/hang', () => {
       return fixture.counts.hanging === 1;
     });
-    hanging.destroy();
     await until(() => {
       return fixture.counts.cancelled === 1;
     });
+    await dropped('/own/hang', isSeen('own handler'));
 
-    const own = opened(
-      port,
-      octetsOf(port, {
-        body: '{}',
-        lines: ['POST /own/hang HTTP/1.1', 'content-type: application/json'],
-      })
-    );
+    // a body cut short, on a socket dropped before the rest of it came
+    const halfway = async (path: string): Promise<void> => {
+      const socket = opened(
+        port,
+        [
+          `POST ${path} HTTP/1.1`,
+          `host: 127.0.0.1:${String(port)}`,
+          'content-type: application/json',
+          'content-length: 10',
+          '',
+          '{',
+        ].join('\r\n')
+      );
 
-    await sleep(100);
-    own.destroy();
-    // * what would fire has had its time
+      await sleep(100);
+      socket.destroy();
+      await until(isSeen(`onRequestAbort ${path}`));
+    };
+
+    await halfway('/api/Transcoding/hang');
+    await halfway('/own/hang');
+    // * what else would fire has had its time
     await sleep(300);
-    expect(seen).toEqual([]);
+    expect([seen, fixture.counts.hanging]).toEqual([
+      ['own handler', 'onRequestAbort /api/Transcoding/hang', 'onRequestAbort /own/hang'],
+      1,
+    ]);
   });
 
   test('with @fastify/cors registered ahead of its hook, the plugin answers each preflight in its place, and the fields it sets on a hijacked reply are never written', async () => {
