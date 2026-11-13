@@ -284,3 +284,37 @@ fn tell_error_tells_error_to_each_listener_within_a_guard_dropping_what_one_thro
     );
     drop(told);
 }
+
+#[test]
+#[expect(
+    clippy::as_conversions,
+    reason = "the source twin checks the six fieldless enum discriminants against WebSocket numbering"
+)]
+fn keeps_the_websocket_numbering_for_connecting_to_closed() {
+    assert_eq!(
+        [
+            ReadyState::Connecting,
+            ReadyState::Open,
+            ReadyState::Closing,
+            ReadyState::Closed,
+            ReadyState::Uninitialized,
+            ReadyState::Reconnecting,
+        ]
+        .map(|state| state as u8),
+        [0, 1, 2, 3, 4, 5]
+    );
+}
+
+#[test]
+fn ready_state_names_reverses_it() {
+    for (state, name) in [
+        (ReadyState::Connecting, "CONNECTING"),
+        (ReadyState::Open, "OPEN"),
+        (ReadyState::Closing, "CLOSING"),
+        (ReadyState::Closed, "CLOSED"),
+        (ReadyState::Uninitialized, "UNINITIALIZED"),
+        (ReadyState::Reconnecting, "RECONNECTING"),
+    ] {
+        assert_eq!(state.name(), name);
+    }
+}
