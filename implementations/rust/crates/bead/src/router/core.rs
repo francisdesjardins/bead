@@ -2236,6 +2236,10 @@ fn resolve_session<S: Side>(
     }
 }
 
+#[cfg(test)]
+#[path = "tests/credential_schemes.rs"]
+mod credential_schemes_tests;
+
 // the schemes the side takes, OPAQUE always, and the detail that names them
 fn schemes_detail_of(schemes: &BTreeSet<u16>) -> String {
     schemes

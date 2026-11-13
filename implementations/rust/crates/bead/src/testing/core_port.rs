@@ -39,6 +39,7 @@ pub(crate) type TokenHook =
 pub(crate) type SessionHook = Box<dyn FnMut(&SessionRequest, &Signal) -> Resolution + Send>;
 pub(crate) type ReadHook = Box<dyn FnOnce(&Bytes) -> Result<Option<Envelope>, Failure> + Send>;
 pub(crate) type TraceHook = Box<dyn FnMut(DebugDirection, &TracedEnvelope) + Send>;
+pub(crate) type DestinationHook = Box<dyn FnMut(u32) -> Option<Arc<Handler>> + Send>;
 
 #[expect(
     clippy::struct_excessive_bools,
@@ -55,6 +56,7 @@ pub(crate) struct State {
     pub(crate) on_trace: Option<TraceHook>,
     pub(crate) schemes: Vec<CredentialScheme>,
     pub(crate) destination: Option<Arc<Handler>>,
+    pub(crate) destination_of: Option<DestinationHook>,
     pub(crate) held: Vec<u32>,
     pub(crate) sent: Vec<(ConnectionHandle, Envelope)>,
     pub(crate) reports: Vec<(ConnectionHandle, RouterError)>,
@@ -111,8 +113,11 @@ impl Side for State {
         )
     }
 
-    fn handler_of_destination(&mut self, _destination_id: u32) -> Option<Arc<Handler>> {
-        self.destination.clone()
+    fn handler_of_destination(&mut self, destination_id: u32) -> Option<Arc<Handler>> {
+        self.destination_of.as_mut().map_or_else(
+            || self.destination.clone(),
+            |handler| handler(destination_id),
+        )
     }
 
     fn is_call_id_in_use(&self, call_id: u32, _handle: &ConnectionHandle) -> bool {
@@ -313,6 +318,7 @@ impl Peer {
             on_trace: None,
             schemes: Vec::new(),
             destination: None,
+            destination_of: None,
             held: Vec::new(),
             sent: Vec::new(),
             reports: Vec::new(),

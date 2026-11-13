@@ -62,6 +62,7 @@ mod router_core_answered_in_place;
 mod router_core_answering;
 mod router_core_credentials;
 mod router_core_crossing;
+mod router_core_destinations;
 mod router_core_hooks;
 mod router_core_incoming;
 mod router_core_lifecycle;
