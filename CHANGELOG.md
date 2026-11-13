@@ -78,6 +78,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   once a body that came empty and ended before it (decision 0037). A reader that read the body
   and put it back is refused alike, where the gateway answered before: a stream's `unshift` on the
   TypeScript side, a middleware's examining read on the C# side; mount the gateway before it.
+- The TypeScript side's MQTT 5 link over a WebSocket in Node bounds a message by 100 MiB, or by its
+  `maximumPacketSize` where larger, so no packet within its bound is refused, and offers no
+  permessage-deflate (spec 15.25).
 
 ## [0.13.0] - 2026-11-12
 
