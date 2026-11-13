@@ -15,6 +15,7 @@
     "written false marks a parcel a reader reads and no writer writes, which a side reads alone: an advisory kind, read to its prefix — layout, kind, halves and sequence — whatever its flags, its kept byte and its body, to be taken in its order and skipped; an OPEN of a layout to come, read to its prefix and its id, which its acceptor refuses 426; a REFUSE of a layout to come, read whole, which every layout keeps; and an OPEN whose id is no token or whose receive bound is under 1,024, which its acceptor refuses 400 (section 15.18).",
     "A parcel refusal is what a side makes of a message that does not read as a parcel: no-parcel, under 28 bytes or of a first byte outside 0xB1 to 0xBF, which it drops in silence and reports; or does-not-read, a parcel of layout 0xB1 that does not read, which closes its connection with 1002, reported.",
     "An MQTT 5 publish bound is section 15.30's count with no broker: a PUBLISH to topic, its UTF-8 bytes, at qos, 1 or 0, with a Message Expiry Interval where expiry is true; largestPayload, the largest payload whose packet is within maximumPacketSize and whose Remaining Length is at most 268,435,455, null where an empty one does not fit; and packetBytes, that packet's every byte, null alike.",
+    "An MQTT 5 acknowledgement's codes are a PUBACK's, a SUBACK's or an UNSUBACK's, by packet and by type, its fixed header's packet type, 4, 9 or 11, and named, the Reason Codes its table names (sections 15.27 to 15.29): a side plays every code from 0x00 to 0xFF of each, read as its table names it where named holds it, a refusal of its request where it is 0x80 or more, and otherwise a packet its client cannot read.",
     "An AMQP 1.0 message is section 15.35's profile: a message to the address to, its UTF-8 bytes, of payloadLength bytes each payloadByte, with a header whose ttl is ttl, in milliseconds, where ttl is given, and none where it is not; bytes is the whole message, which a side's writer writes to its every byte.",
     "An AMQP 1.0 publish bound is section 15.37's count with no broker: a message to address, its UTF-8 bytes, a life counted whatever the message; largestPayload, the largest payload whose message is within maximumMessageSize, at most 4,294,967,295, null where an empty one does not fit; and messageBytes, that message's every byte, null alike."
   ],
@@ -6059,6 +6060,69 @@
       "expiry": true,
       "largestPayload": null,
       "packetBytes": null
+    }
+  ],
+  "mqttAcknowledgementCodes": [
+    {
+      "name": "a PUBACK's Reason Codes, its table's",
+      "clauses": [
+        "15.28",
+        "15.29"
+      ],
+      "packet": "PUBACK",
+      "type": 4,
+      "named": [
+        0,
+        16,
+        128,
+        131,
+        135,
+        144,
+        145,
+        151,
+        153
+      ]
+    },
+    {
+      "name": "a SUBACK's Reason Codes, its table's",
+      "clauses": [
+        "15.27",
+        "15.29"
+      ],
+      "packet": "SUBACK",
+      "type": 9,
+      "named": [
+        0,
+        1,
+        2,
+        128,
+        131,
+        135,
+        143,
+        145,
+        151,
+        158,
+        161,
+        162
+      ]
+    },
+    {
+      "name": "an UNSUBACK's Reason Codes, its table's",
+      "clauses": [
+        "15.27",
+        "15.29"
+      ],
+      "packet": "UNSUBACK",
+      "type": 11,
+      "named": [
+        0,
+        17,
+        128,
+        131,
+        135,
+        143,
+        145
+      ]
     }
   ],
   "amqpMessages": [

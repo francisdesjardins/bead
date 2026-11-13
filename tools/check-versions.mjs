@@ -9,7 +9,8 @@
 //
 // On every ref: the TypeScript package's `version`, the builder's where the tree has one, the C#
 // side's `<Version>` and every project range of its lock files and of an example's, and the Rust
-// workspace's `[workspace.package] version` and its lock's members where the tree has them agree; each
+// workspace's `[workspace.package] version` and its lock's members where the tree has them agree; an
+// example's Rust toolchain is the channel the Rust side's `rust-toolchain.toml` pins; each
 // conformance file repeats its document's version; and each `## [x.y.z]` section of the CHANGELOG
 // is the one its `vx.y.z` shipped. On a release branch, a pull request into main and main,
 // besides: the product and each document whose files changed move one step past their last
@@ -144,6 +145,10 @@ export const BUILDER = 'builder/package.json';
 // members, the packages of no source, stand at it (decisions 0008 and 0044)
 export const CARGO = 'implementations/rust/Cargo.toml';
 export const CARGO_LOCK = 'implementations/rust/Cargo.lock';
+// the toolchain the Rust side pins, and an example's Rust half's, which takes the same channel, so
+// that the example builds on the compiler the side's lints were reviewed under (decision 0044)
+export const RUST_TOOLCHAIN = 'implementations/rust/rust-toolchain.toml';
+export const TOOLCHAINS = /^examples\/[^/]+\/rust\/rust-toolchain\.toml$/;
 export const CHANGELOG = 'CHANGELOG.md';
 
 // the C# lock files that take the side's projects: every packages.lock.json git lists under
@@ -248,6 +253,12 @@ export const cargoVersionOf = (text) => {
   return table === null ? null : (/^version[ \t]*=[ \t]*"([^"]*)"/m.exec(table[1])?.[1] ?? null);
 };
 
+// the channel of a rust-toolchain.toml's `[toolchain]`, as TOML writes a basic string, or null
+export const channelOf = (text) => {
+  const table = /^\[toolchain\][ \t]*$([\s\S]*?)(?=^\[|(?![\s\S]))/m.exec(text ?? '');
+  return table === null ? null : (/^channel[ \t]*=[ \t]*"([^"]*)"/m.exec(table[1])?.[1] ?? null);
+};
+
 // the members of a Cargo lock: each `[[package]]` of no `source`, a path's, by its name and version
 export const cargoMembersOf = (text) => {
   return (text ?? '')
@@ -277,11 +288,16 @@ export const readVersions = (read, paths) => {
     cargo: cargoVersionOf(read(CARGO)),
     cargoMembers: cargoMembersOf(read(CARGO_LOCK)),
     hasCargoLock: read(CARGO_LOCK) !== null,
+    channel: channelOf(read(RUST_TOOLCHAIN)),
+    toolchains: {},
     locks: {},
     documents: {},
   };
   for (const path of paths.filter((path) => LOCKS.test(path))) {
     versions.locks[path] = projectRangesOf(read(path));
+  }
+  for (const path of paths.filter((path) => TOOLCHAINS.test(path))) {
+    versions.toolchains[path] = channelOf(read(path));
   }
   for (const document of DOCUMENTS) {
     const text = read(document.path);
@@ -419,6 +435,14 @@ const judgeAxes = (versions) => {
     if (version !== versions.cargo) {
       problems.push(
         `${CARGO_LOCK}: ${name} at ${version}, where ${CARGO} states ${versions.cargo}`
+      );
+    }
+  }
+  // an example's Rust half moves with the side's pin, in the same commit
+  for (const [path, channel] of Object.entries(versions.toolchains ?? {})) {
+    if (channel !== versions.channel) {
+      problems.push(
+        `${path}: channel ${channel}, where ${RUST_TOOLCHAIN} pins ${versions.channel}`
       );
     }
   }
@@ -719,7 +743,8 @@ const treeOf = (root, commit) => {
       return (
         path.startsWith('spec/') ||
         LOCKS.test(path) ||
-        [PACKAGE, BUILDER, PROPS, CARGO, CARGO_LOCK, CHANGELOG].includes(path)
+        TOOLCHAINS.test(path) ||
+        [PACKAGE, BUILDER, PROPS, CARGO, CARGO_LOCK, RUST_TOOLCHAIN, CHANGELOG].includes(path)
       );
     })
   );

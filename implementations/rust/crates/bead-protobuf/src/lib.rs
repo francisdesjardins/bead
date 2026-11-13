@@ -34,10 +34,16 @@ mod codec;
 mod records;
 mod refusal;
 mod required;
+mod validate;
 
 pub use codec::{DynamicCodec, ENCODING, ProtoCodec};
 pub use records::{ProtoSchema, check_records};
 pub use required::check_required;
+pub use validate::{
+    MapEntry, MapKey, MessageRules, PatternTable, RuleItems, RuleValue, ViolationRule,
+    ViolationSink, bytes_contain, bytes_end_with, bytes_equal, bytes_start_with, code_point_length,
+    entries_by_key, is_unique, judge_rules, matches_pattern, utf8_length, validator_of,
+};
 
 #[cfg(feature = "testing")]
 #[doc(hidden)]

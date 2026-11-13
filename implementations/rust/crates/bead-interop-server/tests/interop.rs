@@ -52,9 +52,7 @@ use bead::{
     RouterSide, Sent, SharedClock, TransportMessage, WebSocketClient, WebSocketClientOptions,
     WebSocketTransportClientConnectOptions,
 };
-use bead_interop::{
-    INTEROP_SERVICE, InteropDescriptor, InteropProcedures, interop_procedures, offer_interop_client,
-};
+use bead_interop::{INTEROP_SERVICE, InteropDescriptor, InteropProcedures, offer_interop_client};
 use bytes::Bytes;
 use hmac::{Hmac, KeyInit, Mac};
 use libtest_mimic::{Arguments, Failed, Trial};
@@ -846,7 +844,7 @@ struct Case {
     over: Over,
     ports: Ports,
     connected: Connected,
-    procedures: InteropProcedures,
+    procedures: &'static InteropProcedures,
 }
 
 impl Case {
@@ -2030,7 +2028,7 @@ impl Played {
                 over: self.over,
                 ports,
                 connected,
-                procedures: interop_procedures(None).map_err(|error| error.to_string())?,
+                procedures: InteropProcedures::get().map_err(|error| error.to_string())?,
             };
             let outcome = self.which.play(&mut case).await;
 

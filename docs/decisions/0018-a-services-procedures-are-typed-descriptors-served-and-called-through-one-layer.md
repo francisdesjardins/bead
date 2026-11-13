@@ -426,8 +426,9 @@ _Conformance:_ none. _Matrix:_ none; `Connect` outside `IClient` is a type's sha
   protocol buffer files to ensure compatibility with the gRPC version used. The latest support
   package version is 9. Older versions are kept for compatibility" (pkg.go.dev,
   `google.golang.org/grpc`). `GENERATED_CODE_SUPPORTS_VERSION_7` on the TypeScript side, and
-  `GeneratedCode.SupportsVersion7` on the C# side, with no underscore, so CA1707 stands, each
-  runtime's counter its own, as gRPC-Go's is its package's; 2 since the
+  `GeneratedCode.SupportsVersion7` on the C# side, with no underscore, so CA1707 stands, and
+  `bead::GENERATED_CODE_SUPPORTS_VERSION_7` on the Rust side: one number a contract, every side's,
+  moved together, each number given its meaning on every side; 2 since the
   layer's options are typed by the service, which generated code names, 3 since it calls the
   check of a `proto` payload's records
   ([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)),
@@ -983,7 +984,8 @@ public interface IServiceResponse<TResult, TFailure> where TFailure : IApplicati
 C# computes no type from another's members. A service's hooks and windows are records that its
 generated code, or its author, writes, one for every service, which the layer reads through an
 interface tied to the service's tag. A hook left out does not compile on the TypeScript and C#
-sides, and the Rust side's `ServiceServer::new` refuses it, a `ProgrammerError`. A service written
+sides, nor through the Rust side's generated `<Name>Admissions`, every hook a required field, and
+past it the Rust side's `ServiceServer::new` refuses it, a `ProgrammerError`. A service written
 without beadc writes its records as the tests' `GreeterAdmissions` does. Each record implements its
 interface's `ToDictionary()` explicitly, a conversion named as .NET's Framework Design Guidelines
 name one, so a hook named `toDictionary` still builds beside it; the layer calls it once, as it is
@@ -999,29 +1001,31 @@ empty one. The C# side's `ProceduresWithoutResolver` is a method, as `Gauges` is
 
 What the layer refuses, as it is built or used:
 
-| Mistake                                                                                            | TypeScript                                      | C#                                                                 | Rust                                                 |
-| -------------------------------------------------------------------------------------------------- | ----------------------------------------------- | ------------------------------------------------------------------ | ---------------------------------------------------- |
-| `on` twice for one procedure, offered or not                                                       | `ProgrammerError`                               | `ArgumentException`, as the router's second resolver               | `ProgrammerError`                                    |
-| `on` of a name the service lacks, or of a command on the server side, a request on the client side | compile error; `ProgrammerError` past the types | compile error                                                      | `ProgrammerError`, at run time                       |
-| `on` of a command admitted by a hook, on the client side                                           | `ProgrammerError`                               | `ArgumentException`                                                | `ProgrammerError`                                    |
-| `offer` twice                                                                                      | `ProgrammerError`                               | `InvalidOperationException`                                        | `ProgrammerError`                                    |
-| a command's requester called before `offer`                                                        | `ProgrammerError`                               | `InvalidOperationException`                                        | `ProgrammerError`                                    |
-| a hook a procedure names, missing from the options; one the options give that no procedure names   | compile error for a literal; `ProgrammerError`  | compile error for a record; `ArgumentException` past it            | `ProgrammerError`, as the service is built           |
-| a hook that is no hook                                                                             | `ProgrammerError`                               | `ArgumentException`                                                | compile error                                        |
-| a window for a procedure that does not notify                                                      | compile error for a literal; `ProgrammerError`  | compile error for a record; `ArgumentException` past it            | `ProgrammerError`, at run time                       |
-| a window that is not a whole number above 0                                                        | `ProgrammerError`, the notification's           | `ArgumentException`, the notification's                            | `ProgrammerError` for 0, a `u64` holding no fraction |
-| a second client side over one Bead client, at another window                                       | `ProgrammerError`, item 8's                     | `InvalidOperationException`, item 8's                              | `ProgrammerError`                                    |
-| an unlisted failure code answered                                                                  | sent as written; `ProgrammerError` reported     | no counterpart: the failure class holds its procedure's list alone | sent as written; reported                            |
+| Mistake                                                                                            | TypeScript                                      | C#                                                                 | Rust                                                                                          |
+| -------------------------------------------------------------------------------------------------- | ----------------------------------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
+| `on` twice for one procedure, offered or not                                                       | `ProgrammerError`                               | `ArgumentException`, as the router's second resolver               | `ProgrammerError`                                                                             |
+| `on` of a name the service lacks, or of a command on the server side, a request on the client side | compile error; `ProgrammerError` past the types | compile error                                                      | compile error through the generated classes; `ProgrammerError` past them                      |
+| `on` of a command admitted by a hook, on the client side                                           | `ProgrammerError`                               | `ArgumentException`                                                | `ProgrammerError`                                                                             |
+| `offer` twice                                                                                      | `ProgrammerError`                               | `InvalidOperationException`                                        | `ProgrammerError`                                                                             |
+| a command's requester called before `offer`                                                        | `ProgrammerError`                               | `InvalidOperationException`                                        | `ProgrammerError`                                                                             |
+| a hook a procedure names, missing from the options; one the options give that no procedure names   | compile error for a literal; `ProgrammerError`  | compile error for a record; `ArgumentException` past it            | compile error for the generated options; `ProgrammerError` past them, as the service is built |
+| a hook that is no hook                                                                             | `ProgrammerError`                               | `ArgumentException`                                                | compile error                                                                                 |
+| a window for a procedure that does not notify                                                      | compile error for a literal; `ProgrammerError`  | compile error for a record; `ArgumentException` past it            | compile error for the generated windows; `ProgrammerError` past them                          |
+| a window that is not a whole number above 0                                                        | `ProgrammerError`, the notification's           | `ArgumentException`, the notification's                            | `ProgrammerError` for 0, a `u64` holding no fraction                                          |
+| a second client side over one Bead client, at another window                                       | `ProgrammerError`, item 8's                     | `InvalidOperationException`, item 8's                              | `ProgrammerError`                                                                             |
+| an unlisted failure code answered                                                                  | sent as written; `ProgrammerError` reported     | no counterpart: the failure class holds its procedure's list alone | sent as written; reported                                                                     |
 
 **A generated class is printed over its side's pick.** beadc writes a service's `<Svc>Procedures`
 whole, every procedure its output's `server`, `client` or `gateway` selects, and prints the server
 class and its types over those its `server` selects, the client class and its types over those its
 `client` selects, each pick a list the layer takes as it takes the whole
 ([0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md)): an unexported frozen
-object on the TypeScript side, the internal lists `Served` and `Called` beside `All` on the C# side.
+object on the TypeScript side, the internal lists `Served` and `Called` beside `All` on the C# side,
+an `on_<procedure>` for each procedure it serves on the Rust side
+([0051](0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md)).
 A resolver of a procedure its server class does not serve is a type error on the TypeScript side,
-and an `ArgumentException` as `On` is called on the C# side, where the descriptors of one service
-share one type tag: a platform row of `docs/support.md`.
+no method on the Rust side (E0599), and an `ArgumentException` as `On` is called on the C# side,
+where the descriptors of one service share one type tag: a platform row of `docs/support.md`.
 
 **A call bound to its payload is a bound call, and it carries the guard.** The runtime's procedure
 takes its payload and gives a function of the call's options; that function is named, on the
@@ -1321,11 +1325,16 @@ a route table, `bead_http.ts`, imports `./transcoding`
 ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)).
 
 **Generated code names the contract it needs.** `GENERATED_CODE_SUPPORTS_VERSION_7` in `./service`,
-`true`; `GeneratedCode.SupportsVersion7`, a `const bool` on a static class in `Bead.Core`, each
-runtime's counter its own, as gRPC-Go's is its package's; and, for a route table,
-`GENERATED_CODE_SUPPORTS_VERSION_5` in `./transcoding` (`src/transcoding/routes.ts`) and
-`GeneratedCode.SupportsVersion5` beside it. A generated file names the highest it needs,
-`void GENERATED_CODE_SUPPORTS_VERSION_7;`, and in C# a private constant of its runtime's. The
+`true`; `GeneratedCode.SupportsVersion7`, a `const bool` on a static class in `Bead.Core`;
+`bead::GENERATED_CODE_SUPPORTS_VERSION_7`, a `bool` constant `true` in the Rust core, which answers
+for `bead-protobuf`'s calls too
+([0051](0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md)):
+one number a contract, every side's, moved together, as gRPC-Go's is its package's; and, for a
+route table, `GENERATED_CODE_SUPPORTS_VERSION_5` in `./transcoding` (`src/transcoding/routes.ts`)
+and `GeneratedCode.SupportsVersion5` beside it. A generated file names the highest it needs,
+`void GENERATED_CODE_SUPPORTS_VERSION_7;`, in C# a private constant of its runtime's, and in Rust
+`const _: bool = ::bead::GENERATED_CODE_SUPPORTS_VERSION_7;`, which fails with E0425 where the
+runtime lacks it. The
 counter moves only when generated code needs something the runtime did not have: 2 for the layer's
 options typed by the service, `IServiceClientOptions` and the client side's Bead client apart on the
 TypeScript side, `IServiceAdmissions<TService>`, `IServiceWindows<TService>`,
@@ -1355,9 +1364,11 @@ holds no notifier, and on the TypeScript side one that makes no catalogue, while
 at its type, `BoundCall` against `BoundCommand`, a `Func` against `Notifier<TNotification>`, an
 object against two parameters; and none older: code that names 4 judges no required
 field, code that names 3 judges no request by its rules, and code that names 2 reads a `proto`
-payload unchecked, none of which conforms through any runtime. A file of a later beadc, built
-against a runtime that lacks its constant, fails on the counter (TS2724, CS0117), not on a
-signature.
+payload unchecked, none of which conforms through any runtime. The Rust runtime holds 7 and 8
+alone, since no Rust code names an older one: a package's file of services names 7 and
+`bead_served.rs` 8, as on the other sides, and its route table's 5 comes with its gateway. A file
+of a later beadc, built against a runtime that lacks its constant, fails on the counter (TS2724,
+CS0117, E0425), not on a signature.
 
 **Where it lives.** The TypeScript side: `src/service/` — `service.ts` the entry,
 `service-server.ts`, `service-client.ts`, `descriptors.ts`, `failures.ts`, `generated-code.ts`, a
@@ -1374,7 +1385,8 @@ test file each in `src/service/__tests__/`; the codecs stay in `router/shared/pa
 `ProcedureKind` in `RouterTypes.cs`, `Subscriber` and `NotifyRequest` beside `NotifyOptions`, the
 kind's check in `Identity.cs`, run by the core and each router. The Rust side: the two newtypes in
 `managers/service.rs`. beadc gives a service named `ServiceManager` these Rust names; they join
-`RUNTIME_TYPES` with beadc's Rust target.
+nothing, since Rust's generated classes name every runtime type by its path, `::bead::…`
+([0051](0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md)).
 
 **The rule has its gate** ([0006](0006-a-rule-has-its-gate.md)): `spec/identities.json`'s group of
 procedure kinds, played the six ways on every side; the test of `service-manager.test.ts` that holds

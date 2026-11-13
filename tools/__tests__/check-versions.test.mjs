@@ -13,6 +13,7 @@ import {
   MODES,
   PACKAGE,
   PROPS,
+  RUST_TOOLCHAIN,
   checkVersions,
   documentOf,
   judge,
@@ -377,6 +378,24 @@ describe('every ref: each version agrees with itself, and a released section sta
       problems().join('\n'),
       /Cargo\.toml: \[workspace\.package\] version 0\.2\.0, where/
     );
+  });
+
+  test('holds an example’s Rust toolchain to the channel the Rust side pins', () => {
+    const { write, problems } = repository(released());
+    const toolchain = (channel) => {
+      return `[toolchain]
+channel = "${channel}"
+profile = "minimal"
+components = ["clippy", "rustfmt"]
+`;
+    };
+    const example = 'examples/hello/rust/rust-toolchain.toml';
+    write({ [RUST_TOOLCHAIN]: toolchain('1.99.1'), [example]: toolchain('1.99.1') });
+    assert.deepEqual(problems(), []);
+    write({ [example]: toolchain('1.98.0') });
+    assert.deepEqual(problems(), [
+      'examples/hello/rust/rust-toolchain.toml: channel 1.98.0, where implementations/rust/rust-toolchain.toml pins 1.99.1',
+    ]);
   });
 
   test('the props apart from the package fail', () => {

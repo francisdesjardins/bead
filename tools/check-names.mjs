@@ -559,6 +559,16 @@ const heldKeysOf = (name, kind) => {
   return member === undefined ? [] : [keyOf(`${holder}${member}`, kind), keyOf(member, kind)];
 };
 
+// a C# `Nouns.Of`'s key, `nounof`, its holder the plural of the noun it makes, as `Validators.Of`
+// makes a validator; none for another name
+const ofKeysOf = (name) => {
+  const [holder, member] = name.split('.');
+
+  return member === 'Of' && /[^s]s$/.test(holder)
+    ? [keyOf(`${holder.slice(0, -1)}Of`, 'function')]
+    : [];
+};
+
 // a key's stem, `suffix` dropped from its end, or none where it does not end so
 const stemOf = (key, ...suffixes) => {
   const suffix = suffixes.find((one) => {
@@ -672,15 +682,47 @@ export const RULES = Object.freeze({
       return side === 'csharp' ? heldKeysOf(name, kind) : [keyOf(name, kind)];
     });
   },
-  // a function `nounOf` is C#'s `Noun.Of`, or `NounOf` on a static class that holds several, and
-  // Rust's `noun_of` (0007, 0044)
+  // a function `nounOf` is C#'s `Noun.Of`, or `Nouns.Of` on the static class of its nouns, or
+  // `NounOf` on a static class that holds several, and Rust's `noun_of` (0007, 0044)
   of: (cells) => {
     return agree(cells, (side, { name, kind }) => {
       if (kind !== 'function') {
         return [];
       }
 
-      return side === 'csharp' ? heldKeysOf(name, kind) : [keyOf(name, kind)];
+      return side === 'csharp'
+        ? [...heldKeysOf(name, kind), ...ofKeysOf(name)]
+        : [keyOf(name, kind)];
+    });
+  },
+  // a function `nounOf` that makes a `Noun`, C#'s `Nouns.Of`, is Rust's type `Noun` itself, its
+  // `new` the function, as Rust's API guidelines make a value (C-CTOR) (0007, 0044)
+  new: (cells) => {
+    return agree(cells, (side, { name, kind }) => {
+      if (side === 'rust') {
+        return kind === 'record' ? [`${keyOf(name, kind)}of`] : [];
+      }
+      if (kind !== 'function') {
+        return [];
+      }
+
+      return side === 'csharp' ? ofKeysOf(name) : [keyOf(name, kind)];
+    });
+  },
+  // a function `verbNoun` is C#'s `Noun.Verb`, the noun the static class that holds the verb, and
+  // Rust's `verb_noun` (0007, 0044)
+  verb: (cells) => {
+    return agree(cells, (side, { name, kind }) => {
+      if (kind !== 'function') {
+        return [];
+      }
+      if (side === 'csharp') {
+        const [holder, member] = name.split('.');
+
+        return member === undefined ? [] : [keyOf(`${member}${holder}`, kind)];
+      }
+
+      return [keyOf(name, kind)];
     });
   },
   // an event the others emit is a Rust `…Listener` or `on_…` (0044)
@@ -721,7 +763,7 @@ export const RULES = Object.freeze({
 });
 
 // the renderings that hold each side's kind themselves, past the kind table
-const KINDED_BY_RULE = new Set(['flags', 'callable', 'platform']);
+const KINDED_BY_RULE = new Set(['flags', 'callable', 'new', 'platform']);
 
 // ── The rows ───────────────────────────────────────────────────────────────────
 
@@ -880,8 +922,8 @@ const classProblemsOf = (row) => {
         return [`the rendering ${written.reason} does not give its names`];
       }
 
-      // ! a platform's own type is held by its record alone, its kind with it; a set of flags and a
-      // callable, by their rule, which reads each side's kind itself
+      // ! a platform's own type is held by its record alone, its kind with it; a set of flags, a
+      // callable and a type made by its `new`, by their rule, which reads each side's kind itself
       return renders || KINDED_BY_RULE.has(written.reason) ? [] : [unkinded(row)];
     }
     case 'own': {

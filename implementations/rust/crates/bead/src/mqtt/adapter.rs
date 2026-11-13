@@ -7,16 +7,22 @@
 //! Packet Size and its Keep Alive; its will the participant's GONE, `QoS` 1, RETAIN 0, a Will Delay
 //! Interval of 0. Nothing reconnects, subscribes again or holds a publication while it is down.
 //! Each subscription is of `QoS` 1, No Local 0, Retain As Published 0 and Retain Handling 2, a
-//! group's its shared subscription, held once its SUBACK grants `QoS` 1; one let go once its
-//! UNSUBACK came of 0x00 or 0x11, any other code refusing it and none within its connect timeout
-//! failing it, its link and its filter kept. Each publication is of `QoS` 1, or 0 at most once,
+//! group's its shared subscription, held once its SUBACK grants `QoS` 1, refused on `QoS` 0 or 2
+//! granted, its filter kept, and on 0x80 or more; one let go once its UNSUBACK came of 0x00 or
+//! 0x11, a code of 0x80 or more refusing it and none within its connect timeout failing it, its
+//! link and its filter kept. Each publication is of `QoS` 1, or 0 at most once,
 //! taken once its PUBLISH is written, RETAIN 0, a life in whole seconds where asked and no other
 //! property, counted to its byte and refused past its CONNACK's Maximum Packet Size, held to its
 //! CONNACK's Receive Maximum, later ones waiting in their order, no other packet delayed for them;
-//! its PUBACK of 0x10 says no subscriber, of 0x80 or more refuses it. Its Keep Alive counts from
+//! its PUBACK of 0x00, or of none, takes it, of 0x10 says no subscriber, of 0x80 or more refuses
+//! it. A PUBACK's, a SUBACK's or an UNSUBACK's code of 0x80 or more refuses its request whether or
+//! not its packet's table names it; one under 0x80 its table does not name, or a SUBACK or an
+//! UNSUBACK whose count of codes is not one, is a packet its client cannot read, awaited or not, in
+//! every phase (spec 15.29). Its Keep Alive counts from
 //! the last packet written. Each message is handed on before its PUBACK, which goes once it is
-//! settled. A packet past its own Maximum Packet Size, read at its Remaining Length, closes its
-//! network connection, no DISCONNECT, its link lost. A DISCONNECT of 0x8E tells its link taken
+//! settled. A packet past its own Maximum Packet Size, read at its Remaining Length, or one its
+//! client cannot read, closes its network connection, no DISCONNECT, its link lost, its start
+//! failed before its CONNACK, its stop ended where it stopped, no down told, its will going. A DISCONNECT of 0x8E tells its link taken
 //! over; any other end, lost. Its stop takes no publication, sends what waits on the quota and
 //! awaits each PUBACK, fails what has not gone by then, sends an UNSUBSCRIBE for each filter its
 //! link asked or holds, one filter a packet, all at once, and awaits their UNSUBACKs, all within
@@ -251,6 +257,26 @@ fn seconds_of(life: Duration) -> u32 {
 // what a Reason Code is called, after its value: `0x86, Bad User Name or Password`
 fn reason_of(code: u8) -> String {
     format!("{}, {}", code_of(code), reason_name_of(code))
+}
+
+// a SUBACK or an UNSUBACK of a count of Reason Codes other than one, as its loss names it: `a
+// SUBACK of 2 Reason Codes for one filter`; none for any other packet
+pub(super) fn count_of(packet: &MqttPacket) -> Option<String> {
+    let (name, acknowledgement) = match packet {
+        MqttPacket::Suback(acknowledgement) => ("a SUBACK", acknowledgement),
+        MqttPacket::Unsuback(acknowledgement) => ("an UNSUBACK", acknowledgement),
+        MqttPacket::Connack(_)
+        | MqttPacket::Publish(_)
+        | MqttPacket::Puback(_)
+        | MqttPacket::Pingresp
+        | MqttPacket::Disconnect(_) => return None,
+    };
+
+    match acknowledgement.reason_codes.len() {
+        1 => None,
+        0 => Some(format!("{name} of no Reason Code")),
+        count => Some(format!("{name} of {count} Reason Codes for one filter")),
+    }
 }
 
 // ── The adapter ──────────────────────────────────────────────────────────────────────────────
@@ -1505,28 +1531,41 @@ impl State {
                         link.buffer.clear();
                     }
 
+                    // ! one Reason Code per filter its SUBSCRIBE or UNSUBSCRIBE named, which was
+                    // one: any other count is a packet its client cannot read, judged before
+                    // anything looks for what awaits it ([MQTT-3.8.4-6], [MQTT-3.11.3-2])
+                    if let Some(count) = count_of(&packet) {
+                        self.unreadable((serial, count));
+
+                        return;
+                    }
+
                     self.on_packet((serial, packet));
                 }
-                // ! past its own bound, or malformed: its network connection closed, no
-                // DISCONNECT, its link lost (spec 15.29)
                 Err(refusal) => {
-                    let reason = BrokerError::failed(format!(
-                        "the link of {} went down: its broker sent {refusal}",
-                        self.shared.id
-                    ));
-
-                    self.retire((
-                        serial,
-                        End {
-                            reason,
-                            reset: true,
-                        },
-                    ));
+                    self.unreadable((serial, refusal.to_string()));
 
                     return;
                 }
             }
         }
+    }
+
+    // ! past its own bound, or a packet its client cannot read: its network connection closed, no
+    // DISCONNECT, in every phase, its link lost, its start failed or its stop ended (spec 15.29)
+    fn unreadable(&mut self, (serial, what): (u64, String)) {
+        let reason = BrokerError::failed(format!(
+            "the link of {} went down: its broker sent {what}",
+            self.shared.id
+        ));
+
+        self.retire((
+            serial,
+            End {
+                reason,
+                reset: true,
+            },
+        ));
     }
 
     fn on_packet(&mut self, (serial, packet): (u64, MqttPacket)) {
@@ -1843,6 +1882,8 @@ impl State {
         let Some(publication) = link.in_flight.remove(&acknowledgement.packet_identifier) else {
             return;
         };
+        // * 0x00, or none, takes it, 0x10 says no subscriber, and 0x80 or more, its table's or not,
+        // refuses it; its reader refused any other (spec 15.28)
         let code = acknowledgement.reason_code();
         let outcome = if code >= REFUSED {
             Err(BrokerError::failed(format!(
@@ -2039,8 +2080,8 @@ impl State {
             return;
         }
 
-        // ! kept where its broker may hold it, QoS 0 granted among it, which its stop lets go; a
-        // code of 0x80 or more installed nothing
+        // ! kept where its broker may hold it, QoS 0 or 2 granted, which its stop lets go; a code of
+        // 0x80 or more, its table's or not, installed nothing (spec 15.27)
         if code >= REFUSED {
             link.forget((&subscribing.key, subscribing.record));
         }
@@ -2176,8 +2217,8 @@ impl State {
             timer.cancel();
         }
 
-        // * the UNSUBACK's own code: 0x00, or 0x11 where its broker held none, lets it go, and any
-        // other refuses it, under 0x80 among them (spec 15.27)
+        // * the UNSUBACK's own code: 0x00, or 0x11 where its broker held none, lets it go, and one
+        // of 0x80 or more, its table's or not, refuses it; its reader refused any other (spec 15.27)
         let code = acknowledgement.reason_code();
         let outcome = if code != SUCCESS && code != NO_SUBSCRIPTION_EXISTED {
             Err(BrokerError::failed(format!(

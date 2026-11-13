@@ -11,12 +11,14 @@
 
 use core::fmt;
 use core::marker::PhantomData;
+use std::collections::HashSet;
 use std::sync::Arc;
 
-use bead::{CodecRefusal, PayloadCodec};
+use bead::{CodecRefusal, PayloadCodec, ProgrammerError};
+use buffa::editions::EnumType;
 use buffa::{DecodeError, DecodeOptions, EncodeError, HasMessageView, MessageView};
 use buffa_descriptor::reflect::{DynamicMessage, ReflectMessage};
-use buffa_descriptor::{DescriptorPool, MessageIndex};
+use buffa_descriptor::{DescriptorPool, FieldKind, MessageIndex, SingularKind};
 use bytes::Bytes;
 
 use crate::records::{DEPTH, ProtoSchema, check_records, filtered};
@@ -58,6 +60,54 @@ fn read_back(bytes: Vec<u8>, schema: &ProtoSchema) -> Result<Bytes, CodecRefusal
     Ok(Bytes::from(bytes))
 }
 
+// * the first repeated or map field of a closed enum its generator left closed, among `message`'s
+// fields and those of every message they reach, cycles among them: Buffa sets such an item or value
+// of a number its enum does not declare among the unknown fields, where every side keeps it as the
+// item or the value it is, so a generator set otherwise than `bead_protobuf_build` sets it is
+// refused before anything is read (decision 0051)
+fn left_closed(pool: &DescriptorPool, message: MessageIndex) -> Option<String> {
+    let mut seen = HashSet::from([message]);
+    let mut waiting = vec![message];
+
+    while let Some(index) = waiting.pop() {
+        let descriptor = pool.message(index);
+
+        for field in descriptor.fields() {
+            let (holds_enum, reached) = match field.kind() {
+                FieldKind::List(SingularKind::Enum(_))
+                | FieldKind::Map {
+                    value: SingularKind::Enum(_),
+                    ..
+                } => (true, None),
+                FieldKind::Singular(SingularKind::Message(reached))
+                | FieldKind::List(SingularKind::Message(reached))
+                | FieldKind::Map {
+                    value: SingularKind::Message(reached),
+                    ..
+                } => (false, Some(reached)),
+                FieldKind::Singular(SingularKind::Scalar(_) | SingularKind::Enum(_))
+                | FieldKind::List(SingularKind::Scalar(_))
+                | FieldKind::Map {
+                    value: SingularKind::Scalar(_),
+                    ..
+                } => (false, None),
+            };
+
+            if holds_enum && field.enum_type() == Some(EnumType::Closed) {
+                return Some(format!("{}.{}", descriptor.full_name(), field.name()));
+            }
+
+            if let Some(reached) = reached
+                && seen.insert(reached)
+            {
+                waiting.push(reached);
+            }
+        }
+    }
+
+    None
+}
+
 // ── Typed ─────────────────────────────────────────────────────────────────────
 
 /// The codec of `M`, a message Buffa generated as `bead_protobuf_build` sets its generator.
@@ -70,6 +120,10 @@ fn read_back(bytes: Vec<u8>, schema: &ProtoSchema) -> Result<Bytes, CodecRefusal
 /// does not declare: the type makes the fault impossible rather than hiding it. A required message
 /// it holds as a field set or not, which the walk refuses unset before anything is written.
 /// [`DynamicCodec`] writes the forms `M` cannot hold.
+///
+/// `M` is generated as `bead_protobuf_build` sets Buffa's generator, every repeated or map field
+/// of a closed enum opened: a message whose generator left one closed, or which reaches one that
+/// did, has no codec.
 pub struct ProtoCodec<M> {
     schema: ProtoSchema,
     of: PhantomData<fn() -> M>,
@@ -77,18 +131,25 @@ pub struct ProtoCodec<M> {
 
 impl<M: ReflectMessage + Default> ProtoCodec<M> {
     /// The codec of `M`, by the pool its code embeds.
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            schema: ProtoSchema::of::<M>(),
-            of: PhantomData,
-        }
-    }
-}
+    ///
+    /// # Errors
+    ///
+    /// A [`ProgrammerError`] where `M`, or a message its fields reach, holds a repeated or map
+    /// field of a closed enum its generator left closed.
+    pub fn new() -> Result<Self, ProgrammerError> {
+        let schema = ProtoSchema::of::<M>();
 
-impl<M: ReflectMessage + Default> Default for ProtoCodec<M> {
-    fn default() -> Self {
-        Self::new()
+        if let Some(field) = left_closed(schema.pool(), schema.message()) {
+            return Err(ProgrammerError::new(format!(
+                "{field} holds a closed enum its generator left closed: generate {} as bead_protobuf_build sets Buffa's generator, which opens it",
+                schema.root().full_name
+            )));
+        }
+
+        Ok(Self {
+            schema,
+            of: PhantomData,
+        })
     }
 }
 

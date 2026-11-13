@@ -3,7 +3,9 @@
 // The tests' protoc: the one beadc finds, `BEADC_PROTOC` or the path's, at its pin's version. A test
 // that runs it skips, with its reason, where there is none; with `BEADC_PROTOC_REQUIRED=1`, as CI's
 // `builder` job sets it, it runs anyway and fails, since a skip there could only be a path gone
-// wrong, as `BEAD_INTEROP_REQUIRED=1` holds the interop.
+// wrong, as `BEAD_INTEROP_REQUIRED=1` holds the interop. protoc-gen-buffa, which writes a Rust
+// output's messages, the same way: `BEADC_PROTOC_GEN_BUFFA`, the path's, or a test's skip, and
+// `BEADC_PROTOC_GEN_BUFFA_REQUIRED=1` where it must run.
 
 // dependencies
 
@@ -13,6 +15,7 @@ import { join } from 'node:path';
 import { test } from '@playwright/test';
 
 import { findProtoc, protocPin } from '../protoc.ts';
+import { buffaPin, findBuffa } from '../targets/rust/messages.ts';
 
 // definition
 
@@ -84,4 +87,54 @@ export const withProtoc = <T>(path: string, run: () => T): T => {
       process.env['BEADC_PROTOC'] = before;
     }
   }
+};
+
+/**
+ * A stand-in for protoc-gen-buffa in `folder`, a script, `protoc-gen-buffa.cmd` on Windows, which
+ * answers `--version` with `protoc-gen-buffa <version>`; gives its path.
+ */
+export const stubBuffa = (folder: string, options: { readonly version: string }): string => {
+  const stub = join(
+    folder,
+    process.platform === 'win32' ? 'protoc-gen-buffa.cmd' : 'protoc-gen-buffa'
+  );
+
+  mkdirSync(folder, { recursive: true });
+
+  if (process.platform === 'win32') {
+    writeFileSync(stub, ['@echo off', `echo protoc-gen-buffa ${options.version}`, ''].join('\r\n'));
+  } else {
+    writeFileSync(stub, ['#!/bin/sh', `echo "protoc-gen-buffa ${options.version}"`, ''].join('\n'));
+    chmodSync(stub, 0o755);
+  }
+
+  return stub;
+};
+
+/** Runs `run` with `BEADC_PROTOC_GEN_BUFFA` naming `path`, then puts it back as it was. */
+export const withBuffa = <T>(path: string, run: () => T): T => {
+  const before = process.env['BEADC_PROTOC_GEN_BUFFA'];
+
+  process.env['BEADC_PROTOC_GEN_BUFFA'] = path;
+
+  try {
+    return run();
+  } finally {
+    if (before === undefined) {
+      delete process.env['BEADC_PROTOC_GEN_BUFFA'];
+    } else {
+      process.env['BEADC_PROTOC_GEN_BUFFA'] = before;
+    }
+  }
+};
+
+/**
+ * Whether beadc finds protoc-gen-buffa at its pin's version, or one is required: with
+ * `BEADC_PROTOC_GEN_BUFFA_REQUIRED=1`, as beadc's image's tests set it, a test runs anyway and fails.
+ */
+export const hasPinnedBuffa = (): boolean => {
+  return (
+    findBuffa()?.version === buffaPin().version ||
+    process.env['BEADC_PROTOC_GEN_BUFFA_REQUIRED'] === '1'
+  );
 };

@@ -2,7 +2,7 @@
 
 // `beadc.yaml`, at a project's root: its `version`, its `source` — `.proto` roots, or a blueprint —
 // where `beadc blueprint` writes, the `outputs` `beadc generate` writes, a language and a folder
-// each, TypeScript or C#, and whether `generate` takes out what it no longer writes, `clean`, buf's
+// each, TypeScript, C# or Rust, and whether `generate` takes out what it no longer writes, `clean`, buf's
 // opt-in, off unless set; its HTTP prefix, the OpenAPI document `generate` writes (decision 0037),
 // and each output's `server`, `client` and `gateway`, each its own selection of procedures, and the
 // procedures each transport of its server takes (decision 0048). Every path stays under the folder
@@ -30,6 +30,7 @@ import {
 } from './model/selection.ts';
 import { NAMESPACE } from './targets/csharp/options.ts';
 import { Messages } from './targets/messages.ts';
+import { toSnakeCase } from './targets/rust/names.ts';
 import {
   DEFAULT_HTTP_RUNTIME,
   DEFAULT_PROTO_RUNTIME,
@@ -108,8 +109,29 @@ export interface IOpenApiConfig {
   readonly problemTypes?: string;
 }
 
+/**
+ * A Rust output: its folder and its messages (decision 0051); no runtime, namespace nor folder of
+ * messages to name, its code naming every runtime item from its crate's root and its messages
+ * under its own `messages` root.
+ */
+export interface IRustOutput {
+  readonly language: 'rust';
+  readonly out: string;
+  readonly messages: Messages;
+  /** As a TypeScript output's: protovalidate's options kept in the messages it generates. */
+  readonly keepValidateOptions?: boolean;
+  /** As a TypeScript output's: `google.api.http` kept in the messages it generates. */
+  readonly keepHttpOptions?: boolean;
+  /** As a TypeScript output's: its server, and each transport of it. */
+  readonly server?: IServerSide;
+  /** As a TypeScript output's: its client. */
+  readonly client?: ISide;
+  /** Read so that `generate` refuses it, HTTP_UNGENERATED: the Rust target writes no route table. */
+  readonly gateway?: ISide;
+}
+
 /** An output `beadc generate` writes. */
-export type Output = ITypeScriptOutput | ICSharpOutput;
+export type Output = ITypeScriptOutput | ICSharpOutput | IRustOutput;
 
 /** What an earlier release's `beadc.yaml` gives `beadc breaking`: its source, and its blueprint. */
 export interface IAgainstConfig {
@@ -173,6 +195,16 @@ const CSHARP_KEYS = new Set([
   'language',
   'out',
   'namespace',
+  'messages',
+  'keepValidateOptions',
+  'keepHttpOptions',
+  'server',
+  'client',
+  'gateway',
+]);
+const RUST_KEYS = new Set([
+  'language',
+  'out',
   'messages',
   'keepValidateOptions',
   'keepHttpOptions',
@@ -622,6 +654,49 @@ export const parseConfig = (
       ...(sides.gateway === undefined ? {} : { gateway: sides.gateway }),
     };
   };
+  // a Rust output, its keys read or refused: two transports' keys that render as one field refused
+  const rustOutputOf = (given: Record<string, unknown>, key: string): IRustOutput => {
+    const messages = given['messages'] ?? Messages.GENERATE;
+    const sides = sidesOf(given, key);
+
+    for (const name of Object.keys(given)) {
+      if (!RUST_KEYS.has(name)) {
+        refuse(`${key}.${name}, a key beadc does not read`);
+      }
+    }
+
+    if (!messagesOf().includes(messages)) {
+      refuse(`${key}.messages is generate or external`);
+    }
+
+    // ! a key is not folded (spec 16.6 folds names alone), and snake case lowers an acronym into
+    // one word: getHTTP and getHttp are one field of SERVED_PROCEDURES
+    const fields = new Map<string, string>();
+
+    for (const transport of sides.server?.transports ?? []) {
+      const field = toSnakeCase(transport.key);
+      const other = fields.get(field);
+
+      if (other !== undefined) {
+        refuse(
+          `${key}.server.transports: ${other} and ${transport.key} are one field of SERVED_PROCEDURES in Rust, ${field}: rename one of them`
+        );
+      }
+
+      fields.set(field, transport.key);
+    }
+
+    return {
+      language: 'rust',
+      out: resolved(given['out'], `${key}.out`),
+      messages: messages as Messages,
+      ...keepsOf(given, { key, messages }),
+      ...keepHttpOf(given, { key, messages }),
+      ...(sides.server === undefined ? {} : { server: sides.server }),
+      ...(sides.client === undefined ? {} : { client: sides.client }),
+      ...(sides.gateway === undefined ? {} : { gateway: sides.gateway }),
+    };
+  };
   // each output, its keys read or refused, its folders under this one
   const outputOf = (given: unknown, at: number): Output => {
     const key = `outputs[${String(at)}]`;
@@ -634,8 +709,12 @@ export const parseConfig = (
       return csharpOutputOf(given, key);
     }
 
+    if (given['language'] === 'rust') {
+      return rustOutputOf(given, key);
+    }
+
     if (given['language'] !== 'typescript') {
-      return refuse(`${key}.language: typescript or csharp, the targets of this beadc`);
+      return refuse(`${key}.language: typescript, csharp or rust, the targets of this beadc`);
     }
 
     const sides = sidesOf(given, key);

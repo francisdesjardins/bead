@@ -111,6 +111,8 @@ crate
   use failure::Failure
   use failure::FailureOrigin
   use failure::ProcedureAddress
+  use generated_code::GENERATED_CODE_SUPPORTS_VERSION_7
+  use generated_code::GENERATED_CODE_SUPPORTS_VERSION_8
   use http::client::HttpTransportClient #[cfg(feature = "http")]
   use http::client::HttpTransportClientConnectOptions #[cfg(feature = "http")]
   use http::client::HttpTransportClientOptions #[cfg(feature = "http")]
@@ -1053,6 +1055,9 @@ crate::failure
     fn record(&self) -> FailureRecord
     implements Display, Error
     derives Clone, Debug
+crate::generated_code
+  const GENERATED_CODE_SUPPORTS_VERSION_7: bool
+  const GENERATED_CODE_SUPPORTS_VERSION_8: bool
 crate::http::client
   struct HttpTransportClientOptions #[non_exhaustive] #[cfg(feature = "http")]
     pub clock: Option<SharedClock> #[cfg(feature = "http")]
@@ -2356,6 +2361,7 @@ crate::service
     fn request(&self) -> &Req
     fn result(&self) -> &Res
     fn validates(&self) -> bool
+    fn validate(&self) -> Option<&Validate<Req::Value>>
     implements Clone, Debug
   struct NotifyingDescriptor<Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec>
     const fn descriptor(&self) -> &Descriptor<Req, Res>

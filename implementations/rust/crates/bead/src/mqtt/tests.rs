@@ -925,7 +925,7 @@ async fn tells_its_link_taken_over_on_a_disconnect_of_0x8e_whatever_else_it_carr
 
 // spec 15.27
 #[tokio::test]
-async fn subscribes_at_qos_1_no_local_0_retain_as_published_0_and_retain_handling_2_a_group_as_its_shared_subscription_held_once_its_suback_grants_qos_1_and_refused_otherwise()
+async fn subscribes_at_qos_1_no_local_0_retain_as_published_0_and_retain_handling_2_a_group_as_its_shared_subscription_held_once_its_suback_grants_qos_1_refused_on_qos_0_or_2_granted_its_filter_kept_and_on_0x80_or_more()
  {
     let script = script().await;
     let adapter = adapter_of(&options_of(&script));
@@ -968,35 +968,41 @@ async fn subscribes_at_qos_1_no_local_0_retain_as_published_0_and_retain_handlin
     link.send(unsuback(unsubscribe.identifier(), 0));
     leaving.await.unwrap().unwrap();
 
-    // QoS 0 granted is refused, as a failure is
-    let downgraded =
-        spawn(adapter.subscribe(&topic(&["bead", "d", "bob"]), BrokerSubscription::default()));
+    // QoS 0 or 2 granted is refused, its filter kept, and 0x80 or more, 0x95 among it, which its
+    // table does not name
+    for (peer, code) in [
+        ("bob", 0x00_u8),
+        ("dan", 0x02),
+        ("eve", 0x87),
+        ("fay", 0x95),
+    ] {
+        let refused = format!("0x{code:02X}");
+        let subscribing =
+            spawn(adapter.subscribe(&topic(&["bead", "d", peer]), BrokerSubscription::default()));
 
-    suback_of(&link, 0).await;
-    assert!(
-        message_of(&downgraded.await.unwrap().unwrap_err()).contains("0x00"),
-        "QoS 0 refused"
-    );
+        suback_of(&link, code).await;
+        assert!(
+            message_of(&subscribing.await.unwrap().unwrap_err()).contains(&refused),
+            "{refused} refused"
+        );
+    }
 
-    let failed =
-        spawn(adapter.subscribe(&topic(&["bead", "d", "eve"]), BrokerSubscription::default()));
-
-    suback_of(&link, 0x87).await;
-    assert!(
-        message_of(&failed.await.unwrap().unwrap_err()).contains("0x87"),
-        "0x87 refused"
-    );
-    // * its stop lets go of what its broker holds, QoS 0 granted among it, and of nothing refused
+    // * its stop lets go of what its broker holds, QoS 0 or 2 granted among it, and of nothing
+    // refused by 0x80 or more
     assert_eq!(
         unsubacked_of(&link, adapter.stop()).await,
-        vec!["bead/i/ada".to_owned(), "bead/d/bob".to_owned()],
+        vec![
+            "bead/i/ada".to_owned(),
+            "bead/d/bob".to_owned(),
+            "bead/d/dan".to_owned()
+        ],
         "let go"
     );
 }
 
 // spec 15.27
 #[tokio::test]
-async fn lets_a_subscription_go_once_its_unsuback_came_naming_the_topic_itself_where_it_held_none_and_refuses_it_on_any_other_code()
+async fn lets_a_subscription_go_once_its_unsuback_came_naming_the_topic_itself_where_it_held_none_and_refuses_it_on_a_code_of_0x80_or_more()
  {
     let script = script().await;
     let adapter = adapter_of(&options_of(&script));
@@ -1029,8 +1035,9 @@ async fn lets_a_subscription_go_once_its_unsuback_came_naming_the_topic_itself_w
     suback_of(&link, 1).await;
     subscribing.await.unwrap().unwrap();
 
-    // * any other code, under 0x80 among them, which MQTT 5 names no UNSUBACK by
-    for code in [0x01_u8, 0x10, 0x7F, 0x80, 0x87] {
+    // * a code of 0x80 or more, its table's or not, 0x95 among it: one under 0x80 its table does
+    // not name loses its link (spec 15.29)
+    for code in [0x80_u8, 0x83, 0x87, 0x8F, 0x91, 0x95] {
         let refused = format!("0x{code:02X}");
 
         assert!(
@@ -1479,7 +1486,7 @@ async fn loses_its_link_where_its_broker_reads_nothing_under_a_steady_flow_at_mo
     drop(stalled);
 }
 
-// spec 15.28
+// spec 15.26, 15.28
 #[tokio::test]
 async fn retires_its_link_where_a_publication_at_most_once_is_given_up_before_its_packet_is_written()
  {
@@ -2322,37 +2329,54 @@ async fn sends_no_unsubscribe_at_its_stop_ahead_of_a_publication_that_waits_on_i
 
 // spec 15.28
 #[tokio::test]
-async fn reads_a_puback_of_0x10_as_no_subscriber_under_0x80_as_taken_and_0x80_or_more_as_refused() {
+async fn reads_a_puback_of_0x00_or_of_none_as_taken_0x10_as_no_subscriber_and_0x80_or_more_as_refused()
+ {
     let script = script().await;
     let adapter = adapter_of(&options_of(&script));
+    let heard = heard_of(&adapter);
     let link = link_up((&adapter, &script), (&Connack::default(), None)).await;
-    let answered = async |code: u8| -> Result<BrokerPublished, BrokerError> {
+    // its PUBACK of a code, or of none, its Remaining Length 2
+    let answered = async |code: Option<u8>| -> Result<BrokerPublished, BrokerError> {
         let publishing = spawn(adapter.publish(publication(name(), &[1])));
         let sent = link.next(Some(Kind::Publish), PATIENCE).await.unwrap();
+        let [high, low] = sent.identifier().to_be_bytes();
 
-        link.send(puback(sent.identifier(), code));
+        link.send(code.map_or_else(
+            || vec![0x40, 0x02, high, low],
+            |code| puback(sent.identifier(), code),
+        ));
 
         publishing.await.unwrap()
     };
 
     assert_eq!(
-        answered(0x10).await.unwrap(),
-        BrokerPublished::NoSubscriber,
-        "0x10"
+        answered(None).await.unwrap(),
+        BrokerPublished::Taken,
+        "none"
     );
     assert_eq!(
-        answered(0x00).await.unwrap(),
+        answered(Some(0x00)).await.unwrap(),
         BrokerPublished::Taken,
         "0x00"
     );
-    assert!(
-        message_of(&answered(0x87).await.unwrap_err()).contains("0x87"),
-        "0x87"
+    assert_eq!(
+        answered(Some(0x10)).await.unwrap(),
+        BrokerPublished::NoSubscriber,
+        "0x10"
     );
-    assert!(
-        message_of(&answered(0x80).await.unwrap_err()).contains("0x80"),
-        "0x80"
-    );
+
+    // * each of 0x80 or more its table names, and 0x95, which it does not
+    for code in [0x80_u8, 0x83, 0x87, 0x90, 0x91, 0x97, 0x99, 0x95] {
+        let refused = format!("0x{code:02X}");
+
+        assert!(
+            message_of(&answered(Some(code)).await.unwrap_err()).contains(&refused),
+            "{refused}"
+        );
+    }
+
+    assert!(adapter.is_linked(), "its link kept");
+    assert_eq!(heard.downs(), Vec::new(), "no down");
     assert!(
         adapter
             .capabilities()
@@ -2360,6 +2384,75 @@ async fn reads_a_puback_of_0x10_as_no_subscriber_under_0x80_as_taken_and_0x80_or
         "it offers no subscriber"
     );
     adapter.stop().await;
+}
+
+// spec 15.27, 15.28
+#[tokio::test]
+async fn reads_an_acknowledgement_of_0x80_or_more_its_table_does_not_name_as_a_refusal_awaited_or_not_naming_its_code_its_link_kept()
+ {
+    let script = script().await;
+    let adapter = adapter_of(&options_of(&script));
+    let heard = heard_of(&adapter);
+    let link = link_up((&adapter, &script), (&Connack::default(), None)).await;
+
+    // * a PUBACK of 0x95 as Mosquitto 2.1.2 sends it past its `message_size_limit`
+    let publishing = spawn(adapter.publish(publication(name(), &[1])));
+    let sent = link.next(Some(Kind::Publish), PATIENCE).await.unwrap();
+
+    link.send(puback_bytes(0x40, (sent.identifier(), 0x95)));
+    assert!(
+        message_of(&publishing.await.unwrap().unwrap_err()).contains("0x95"),
+        "a PUBACK of 0x95 refused"
+    );
+
+    let next = spawn(adapter.publish(publication(name(), &[2])));
+    let sent = link.next(Some(Kind::Publish), PATIENCE).await.unwrap();
+
+    link.send(puback(sent.identifier(), 0));
+    assert_eq!(
+        next.await.unwrap().unwrap(),
+        BrokerPublished::Taken,
+        "the next taken"
+    );
+
+    // a SUBACK of 0x95: refused, its filter forgotten, since 0x80 or more installs none
+    let refused =
+        spawn(adapter.subscribe(&topic(&["bead", "d", "eve"]), BrokerSubscription::default()));
+
+    suback_of(&link, 0x95).await;
+    assert!(
+        message_of(&refused.await.unwrap().unwrap_err()).contains("0x95"),
+        "a SUBACK of 0x95 refused"
+    );
+
+    // an UNSUBACK of 0x95: refused, its filter kept for its stop
+    let subscribing =
+        spawn(adapter.subscribe(&topic(&["bead", "d", "bob"]), BrokerSubscription::default()));
+
+    suback_of(&link, 1).await;
+    subscribing.await.unwrap().unwrap();
+
+    let leaving = spawn(adapter.unsubscribe(&topic(&["bead", "d", "bob"])));
+    let unsubscribe = link.next(Some(Kind::Unsubscribe), PATIENCE).await.unwrap();
+
+    link.send(unsuback(unsubscribe.identifier(), 0x95));
+    assert!(
+        message_of(&leaving.await.unwrap().unwrap_err()).contains("0x95"),
+        "an UNSUBACK of 0x95 refused"
+    );
+
+    // * an UNSUBACK of 0xFF no request awaits, ignored
+    link.send(unsuback(0x7777, 0xFF));
+    rest(Duration::from_millis(50)).await;
+    assert!(adapter.is_linked() && !link.is_closed(), "its link kept");
+    assert_eq!(heard.downs(), Vec::new(), "no down");
+    assert!(!link.kinds().contains(&Kind::Disconnect), "no DISCONNECT");
+    assert_eq!(
+        unsubacked_of(&link, adapter.stop()).await,
+        vec!["bead/d/bob".to_owned()],
+        "its stop lets go of the filter its UNSUBACK refused, and of none its SUBACK refused"
+    );
+    script.dispose();
 }
 
 // spec 15.28
@@ -2784,10 +2877,7 @@ async fn loses_its_link_no_disconnect_on_a_packet_its_client_cannot_read() {
     let heard = heard_of(&adapter);
     // * a PUBLISH to its inbox carrying a property MQTT 5 does not define, 0x7F, and a Remaining
     // Length still continuing at its fourth byte (MQTT 5.0 §2.2.2.2, §1.5.5)
-    let mut unreadable = vec![0x30, 0x0F, 0x00, 0x0A];
-
-    unreadable.extend_from_slice(b"bead/i/ada");
-    unreadable.extend_from_slice(&[0x02, 0x7F, 0x00]);
+    let unreadable = unreadable_publish();
 
     for (index, packet) in [unreadable.clone(), vec![0x30, 0xFF, 0xFF, 0xFF, 0xFF, 0x01]]
         .into_iter()
@@ -2822,6 +2912,453 @@ async fn loses_its_link_no_disconnect_on_a_packet_its_client_cannot_read() {
     assert!(!adapter.is_linked(), "down");
     assert_eq!(link.kinds(), vec![Kind::Connect], "no DISCONNECT");
     assert!(heard.messages().is_empty(), "nothing handed on");
+    adapter.stop().await;
+    script.dispose();
+}
+
+/// What a case asks before its broker's answer comes: a subscription, a letting go, a publication,
+/// or nothing, its answer then to an identifier its link never used.
+#[derive(Clone, Copy, Debug)]
+enum Asked {
+    Subscription,
+    Unsubscription,
+    Publication,
+    Nothing,
+}
+
+/// A SUBACK's or an UNSUBACK's bytes, `first` its type and flags, to `identifier`: no property,
+/// then `codes`, whatever their count.
+fn acknowledgement_bytes(first: u8, (identifier, codes): (u16, &[u8])) -> Vec<u8> {
+    let mut bytes = vec![first, u8::try_from(codes.len()).unwrap().saturating_add(3)];
+
+    bytes.extend_from_slice(&identifier.to_be_bytes());
+    bytes.push(0);
+    bytes.extend_from_slice(codes);
+
+    bytes
+}
+
+/// A PUBACK's bytes, `first` its type and flags, to `identifier`: its code and no properties'
+/// length, as Mosquitto writes one.
+fn puback_bytes(first: u8, (identifier, code): (u16, u8)) -> Vec<u8> {
+    let [high, low] = identifier.to_be_bytes();
+
+    vec![first, 0x03, high, low, code]
+}
+
+/// A PUBLISH to its inbox carrying a property MQTT 5 does not define, 0x7F (MQTT 5.0 §2.2.2.2).
+fn unreadable_publish() -> Vec<u8> {
+    let mut unreadable = vec![0x30, 0x0F, 0x00, 0x0A];
+
+    unreadable.extend_from_slice(b"bead/i/ada");
+    unreadable.extend_from_slice(&[0x02, 0x7F, 0x00]);
+
+    unreadable
+}
+
+/// A PUBLISH of `QoS` 0 to its inbox, of one byte.
+fn inbox_publish(payload: u8) -> Vec<u8> {
+    publish(&Publish {
+        topic: "bead/i/ada".to_owned(),
+        payload: vec![payload],
+        ..Publish::default()
+    })
+}
+
+/// `asked` asked of `adapter` and its packet read off `link`: its outcome as it comes, and the
+/// identifier an answer names, one its link never used where nothing was asked.
+async fn asked_of(
+    (adapter, link): (&MqttBrokerAdapter, &ScriptedLink),
+    asked: Asked,
+) -> (Option<JoinHandle<Result<String, BrokerError>>>, u16) {
+    let peer = topic(&["bead", "d", "bob"]);
+    let (asking, kind) = match asked {
+        Asked::Subscription => {
+            let subscribing = adapter.subscribe(&peer, BrokerSubscription::default());
+
+            (
+                spawn(async move { subscribing.await.map(|()| "held".to_owned()) }),
+                Kind::Subscribe,
+            )
+        }
+        Asked::Unsubscription => {
+            let leaving = adapter.unsubscribe(&peer);
+
+            (
+                spawn(async move { leaving.await.map(|()| "let go".to_owned()) }),
+                Kind::Unsubscribe,
+            )
+        }
+        Asked::Publication => {
+            let publishing = adapter.publish(publication(name(), &[1]));
+
+            (
+                spawn(async move { publishing.await.map(|published| format!("{published:?}")) }),
+                Kind::Publish,
+            )
+        }
+        Asked::Nothing => return (None, 0x7777),
+    };
+    let packet = link.next(Some(kind), PATIENCE).await.unwrap();
+
+    (Some(asking), packet.identifier())
+}
+
+const LOST: &str = "the link of ada went down: its broker sent";
+
+// spec 15.26, 15.27, 15.28, 15.29
+#[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "each case of the sentence played on a link of its own, as the other sides play it"
+)]
+async fn loses_its_link_no_disconnect_on_an_acknowledgement_of_a_reason_code_under_0x80_its_table_does_not_name_or_of_a_count_of_codes_other_than_one_awaited_or_not_its_start_failed_before_its_connack()
+ {
+    type Answer = fn(u16) -> Vec<u8>;
+
+    let script = script().await;
+    let adapter = adapter_of(&options_of(&script));
+    let heard = heard_of(&adapter);
+    // * what it is, what was asked, its broker's answer, and the packet its loss names, none where
+    // a check of its client's other than its table's finds it first (spec 15.29)
+    let cases: [(&str, Asked, Answer, Option<&str>); 14] = [
+        (
+            "an UNSUBACK of 0x01",
+            Asked::Unsubscription,
+            |identifier| unsuback(identifier, 0x01),
+            Some("an UNSUBACK of 0x01"),
+        ),
+        (
+            "a SUBACK of 0x03",
+            Asked::Subscription,
+            |identifier| suback(identifier, 0x03),
+            Some("a SUBACK of 0x03"),
+        ),
+        (
+            "a PUBACK of 0x01",
+            Asked::Publication,
+            |identifier| puback_bytes(0x40, (identifier, 0x01)),
+            Some("a PUBACK of 0x01"),
+        ),
+        (
+            "a SUBACK of 0x01 0x01",
+            Asked::Subscription,
+            |identifier| acknowledgement_bytes(0x90, (identifier, &[0x01, 0x01])),
+            Some("a SUBACK of 2 Reason Codes"),
+        ),
+        (
+            "a SUBACK of 0x01 0x87",
+            Asked::Subscription,
+            |identifier| acknowledgement_bytes(0x90, (identifier, &[0x01, 0x87])),
+            Some("a SUBACK of 2 Reason Codes"),
+        ),
+        (
+            "an UNSUBACK of 0x00 0x11",
+            Asked::Unsubscription,
+            |identifier| acknowledgement_bytes(0xB0, (identifier, &[0x00, 0x11])),
+            Some("an UNSUBACK of 2 Reason Codes"),
+        ),
+        (
+            "a SUBACK of no code",
+            Asked::Subscription,
+            |identifier| acknowledgement_bytes(0x90, (identifier, &[])),
+            None,
+        ),
+        (
+            "an UNSUBACK of no code",
+            Asked::Unsubscription,
+            |identifier| acknowledgement_bytes(0xB0, (identifier, &[])),
+            None,
+        ),
+        (
+            "a SUBACK of 0x03 carrying property 0x7F",
+            Asked::Subscription,
+            |identifier| {
+                let [high, low] = identifier.to_be_bytes();
+
+                vec![0x90, 0x06, high, low, 0x02, 0x7F, 0x00, 0x03]
+            },
+            None,
+        ),
+        // ! its reserved flags set: MQTTnet reads such flags (docs/support.md, "An MQTT 5 PUBLISH
+        // whose QoS bits are both 1, and a PUBACK whose reserved flags are set"), its code judged
+        // all the same, so that it is lost on every side
+        (
+            "a PUBACK of 0x01 whose reserved flags are set",
+            Asked::Publication,
+            |identifier| puback_bytes(0x42, (identifier, 0x01)),
+            None,
+        ),
+        // no request awaiting it
+        (
+            "an UNSUBACK of 0x01 no request awaits",
+            Asked::Nothing,
+            |identifier| unsuback(identifier, 0x01),
+            Some("an UNSUBACK of 0x01"),
+        ),
+        (
+            "a PUBACK of 0x01 no request awaits",
+            Asked::Nothing,
+            |identifier| puback_bytes(0x40, (identifier, 0x01)),
+            Some("a PUBACK of 0x01"),
+        ),
+        (
+            "a SUBACK of 0x01 0x01 no request awaits",
+            Asked::Nothing,
+            |identifier| acknowledgement_bytes(0x90, (identifier, &[0x01, 0x01])),
+            Some("a SUBACK of 2 Reason Codes"),
+        ),
+        (
+            "an UNSUBACK of no code no request awaits",
+            Asked::Nothing,
+            |identifier| acknowledgement_bytes(0xB0, (identifier, &[])),
+            None,
+        ),
+    ];
+
+    for (index, (said, asked, answer, named)) in cases.into_iter().enumerate() {
+        let link = link_up((&adapter, &script), (&Connack::default(), None)).await;
+        let (asking, identifier) = asked_of((&adapter, &link), asked).await;
+        let mut bytes = answer(identifier);
+
+        // * a PUBLISH to its inbox behind it, in the same write
+        bytes.extend(inbox_publish(9));
+        link.send(bytes);
+        assert!(
+            link.closed(PATIENCE).await,
+            "{said}: its network connection closed"
+        );
+
+        if let Some(asking) = asking {
+            let outcome = crate::testing::patience(PATIENCE, asking)
+                .await
+                .unwrap()
+                .unwrap();
+            let lost = message_of(&outcome.expect_err("never held, let go nor taken"));
+
+            assert!(lost.contains(LOST), "{said}: failed with its loss: {lost}");
+            assert!(
+                named.is_none_or(|named| lost.contains(named)),
+                "{said}: its loss names it: {lost}"
+            );
+            assert!(!lost.contains("refused"), "{said}: never refused: {lost}");
+        }
+
+        until(|| heard.downs().len() > index).await;
+        assert_eq!(
+            heard.downs(),
+            vec![down(false); index + 1],
+            "{said}: lost once"
+        );
+        assert!(!adapter.is_linked(), "{said}: down");
+        assert!(
+            !link.kinds().contains(&Kind::Disconnect),
+            "{said}: no DISCONNECT"
+        );
+    }
+
+    // * before its CONNACK, in the same write: its start failed, no down
+    let starting = adapter.start(BrokerStart::default());
+    let link = script.link(PATIENCE).await.unwrap();
+    let mut bytes = unsuback(0x7777, 0x01);
+
+    bytes.extend(connack(&Connack::default()));
+    link.send(bytes);
+    assert!(link.closed(PATIENCE).await, "its network connection closed");
+
+    let failed = crate::testing::patience(PATIENCE, starting)
+        .await
+        .unwrap()
+        .unwrap_err();
+
+    assert!(
+        message_of(&failed).contains("an UNSUBACK of 0x01"),
+        "its start failed: {failed}"
+    );
+    rest(Duration::from_millis(50)).await;
+    assert_eq!(heard.downs().len(), cases.len(), "no down");
+    assert!(!adapter.is_linked(), "down");
+    assert_eq!(link.kinds(), vec![Kind::Connect], "no DISCONNECT");
+    assert!(heard.messages().is_empty(), "nothing behind it handed on");
+    adapter.stop().await;
+    script.dispose();
+}
+
+/// Where a stop meets a packet its client cannot read: in its let-go or its drain, or with a
+/// SUBSCRIBE under way.
+#[derive(Clone, Copy, Debug)]
+enum AtStop {
+    LettingGoPublish,
+    LettingGoUnsuback,
+    LettingGoNoCode,
+    DrainingPuback,
+    SubscribingSuback,
+}
+
+// spec 15.26, 15.29
+#[tokio::test]
+async fn ends_its_stop_at_once_no_disconnect_and_no_down_on_a_packet_its_client_cannot_read_an_acknowledgement_under_0x80_its_table_does_not_name_or_of_a_count_other_than_one_among_it()
+ {
+    let script = script().await;
+    let mut options = options_of(&script);
+
+    options.connect_timeout = Some(Duration::from_secs(5));
+
+    let adapter = adapter_of(&options);
+    let heard = heard_of(&adapter);
+
+    for case in [
+        AtStop::LettingGoPublish,
+        AtStop::LettingGoUnsuback,
+        AtStop::LettingGoNoCode,
+        AtStop::DrainingPuback,
+        AtStop::SubscribingSuback,
+    ] {
+        let link = link_up((&adapter, &script), (&Connack::default(), None)).await;
+        let is_letting_go = matches!(
+            case,
+            AtStop::LettingGoPublish | AtStop::LettingGoUnsuback | AtStop::LettingGoNoCode
+        );
+
+        if is_letting_go {
+            for peer in ["bob", "eve"] {
+                let subscribing = spawn(
+                    adapter.subscribe(&topic(&["bead", "d", peer]), BrokerSubscription::default()),
+                );
+
+                suback_of(&link, 1).await;
+                subscribing.await.unwrap().unwrap();
+            }
+        }
+
+        let publishing = matches!(case, AtStop::DrainingPuback)
+            .then(|| spawn(adapter.publish(publication(name(), &[1]))));
+        let subscribing = matches!(case, AtStop::SubscribingSuback).then(|| {
+            spawn(adapter.subscribe(&topic(&["bead", "d", "bob"]), BrokerSubscription::default()))
+        });
+        let identifier = match case {
+            AtStop::DrainingPuback => link
+                .next(Some(Kind::Publish), PATIENCE)
+                .await
+                .unwrap()
+                .identifier(),
+            AtStop::SubscribingSuback => link
+                .next(Some(Kind::Subscribe), PATIENCE)
+                .await
+                .unwrap()
+                .identifier(),
+            AtStop::LettingGoPublish | AtStop::LettingGoUnsuback | AtStop::LettingGoNoCode => 0,
+        };
+        let started = Instant::now();
+        let stopping = spawn(adapter.stop());
+        let unsubscribe = if is_letting_go {
+            let first = link.next(Some(Kind::Unsubscribe), PATIENCE).await.unwrap();
+
+            // * the other's UNSUBACK withheld
+            link.next(Some(Kind::Unsubscribe), PATIENCE).await.unwrap();
+
+            first.identifier()
+        } else {
+            0
+        };
+        let unreadable = match case {
+            AtStop::LettingGoPublish => unreadable_publish(),
+            AtStop::LettingGoUnsuback => unsuback(unsubscribe, 0x01),
+            AtStop::LettingGoNoCode => acknowledgement_bytes(0xB0, (unsubscribe, &[])),
+            AtStop::DrainingPuback => puback_bytes(0x40, (identifier, 0x01)),
+            AtStop::SubscribingSuback => acknowledgement_bytes(0x90, (identifier, &[0x01, 0x01])),
+        };
+
+        link.send(unreadable);
+        crate::testing::patience(PATIENCE, stopping)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let waited = started.elapsed();
+
+        assert!(
+            waited < Duration::from_millis(2_500),
+            "{case:?}: settled at once, within half its connect timeout: {waited:?}"
+        );
+        assert!(
+            link.closed(PATIENCE).await,
+            "{case:?}: its network connection closed"
+        );
+        assert!(
+            !link.kinds().contains(&Kind::Disconnect),
+            "{case:?}: no DISCONNECT"
+        );
+
+        if let Some(publishing) = publishing {
+            let lost = message_of(&publishing.await.unwrap().unwrap_err());
+
+            assert!(
+                lost.contains(LOST) && lost.contains("a PUBACK of 0x01"),
+                "{case:?}: its publication failed with its loss, never taken: {lost}"
+            );
+        }
+
+        if let Some(subscribing) = subscribing {
+            subscribing.await.unwrap().unwrap_err();
+        }
+
+        assert!(!adapter.is_linked(), "{case:?}: down");
+    }
+
+    rest(Duration::from_millis(50)).await;
+    assert_eq!(heard.downs(), Vec::new(), "no down");
+    script.dispose();
+}
+
+// spec 15.29
+#[tokio::test]
+async fn hands_on_what_came_before_a_packet_its_client_cannot_read_in_one_read_as_far_as_its_side_does()
+ {
+    let script = script().await;
+    let adapter = adapter_of(&options_of(&script));
+    let heard = heard_of(&adapter);
+    // (i) an UNSUBACK of 0x01 no request awaits, its table's judge; (ii) a PUBLISH carrying property
+    // 0x7F, its reader's own refusal
+    let unreadables = [unsuback(0x7777, 0x01), unreadable_publish()];
+
+    for (index, unreadable) in unreadables.into_iter().enumerate() {
+        let link = link_up((&adapter, &script), (&Connack::default(), None)).await;
+        let publishing = spawn(adapter.publish(publication(name(), &[1])));
+        let sent = link.next(Some(Kind::Publish), PATIENCE).await.unwrap();
+        let mut bytes = puback(sent.identifier(), 0);
+        let payload = u8::try_from(index).unwrap();
+
+        bytes.extend(inbox_publish(payload));
+        bytes.extend(unreadable);
+        link.send(bytes);
+        assert!(link.closed(PATIENCE).await, "its network connection closed");
+        // ! docs/support.md, "What an MQTT 5 link lost on a packet its client cannot read hands on
+        // of what came before it in one read": each packet before it handed on in its order, then
+        // its link lost, 40 runs of 40
+        assert_eq!(
+            publishing.await.unwrap().unwrap(),
+            BrokerPublished::Taken,
+            "{index}: its PUBACK before it taken"
+        );
+        until(|| heard.downs().len() > index).await;
+        assert_eq!(
+            heard.downs(),
+            vec![down(false); index + 1],
+            "{index}: lost once"
+        );
+        assert_eq!(
+            heard
+                .messages()
+                .iter()
+                .map(|message| message.payload().to_vec())
+                .collect::<Vec<_>>(),
+            (0..=payload).map(|each| vec![each]).collect::<Vec<_>>(),
+            "{index}: its PUBLISH before it handed on"
+        );
+        assert!(!link.kinds().contains(&Kind::Disconnect), "no DISCONNECT");
+    }
+
     adapter.stop().await;
     script.dispose();
 }
@@ -3287,6 +3824,7 @@ fn cancelled() -> CancellationToken {
     signal
 }
 
+// spec 15.26
 #[tokio::test]
 #[expect(
     clippy::too_many_lines,

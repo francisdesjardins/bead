@@ -11,6 +11,7 @@
 **/test-results
 **/TestResults
 builder/.protoc
+builder/.protoc-gen-buffa
 builder/.yarn/*
 !builder/.yarn/releases
 # what tools/fuzz.mjs at the root writes beside the blueprint's fuzz target, by hand

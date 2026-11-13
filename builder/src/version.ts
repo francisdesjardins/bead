@@ -1,9 +1,9 @@
 // ── Version ───────────────────────────────────────────────────────────────────
 
 // What beadc is and what it writes for: its own version, the product's, from its package; its
-// tools', each from its own package, and protoc's, the one it finds against its pin; the blueprint's
-// format; the spec's version, read from spec/spec.md in place, which a blueprint it writes repeats;
-// and the number Bead's options take.
+// tools', each from its own package, and protoc's and protoc-gen-buffa's, each the one it finds
+// against its pin; the blueprint's format; the spec's version, read from spec/spec.md in place,
+// which a blueprint it writes repeats; and the number Bead's options take.
 
 // dependencies
 
@@ -12,6 +12,7 @@ import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 
 import { findProtoc, protocPin } from './protoc.ts';
+import { buffaPin, findBuffa } from './targets/rust/messages.ts';
 
 // constants
 
@@ -121,8 +122,25 @@ export const protocLine = (): string => {
 };
 
 /**
- * What `beadc version` prints, a line each: beadc's, its tools', protoc's, the format, the spec's, the
- * options'.
+ * The line `beadc version` names protoc-gen-buffa on: its version, or another's and the pin's, or
+ * none's.
+ */
+export const buffaLine = (): string => {
+  const pinned = buffaPin().version;
+  const found = findBuffa();
+
+  if (found === undefined) {
+    return `protoc-gen-buffa none, pinned ${pinned}`;
+  }
+
+  return found.version === pinned
+    ? `protoc-gen-buffa ${pinned}`
+    : `protoc-gen-buffa ${found.version}, pinned ${pinned}`;
+};
+
+/**
+ * What `beadc version` prints, a line each: beadc's, its tools', protoc's, protoc-gen-buffa's, the
+ * format, the spec's, the options'.
  */
 export const versionLines = (): readonly string[] => {
   return [
@@ -132,6 +150,7 @@ export const versionLines = (): readonly string[] => {
     `protoplugin ${packageVersionOf('@bufbuild/protoplugin')}`,
     `protoc-gen-es ${protocGenEsVersion()}`,
     protocLine(),
+    buffaLine(),
     `format ${FORMAT}`,
     `spec ${specVersion()}`,
     `options ${String(OPTIONS_NUMBER)}`,

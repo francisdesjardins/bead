@@ -1,0 +1,31 @@
+# The Rust side's testee of the protovalidate differential (decisions 0035 and 0051), outside the
+# side's workspace, as the C# side's lies outside Bead.slnx: `node tools/protovalidate-differential.mjs
+# rust`, from the repository's root, writes the code beadc generates for spec/validations.proto into
+# src/generated/, its messages through protoc-gen-buffa at its pin, then builds this and runs it.
+# Each case is read by the codec of the procedure that binds its message, then judged by its
+# generated validator.
+[package]
+name = "francisdesjardins-bead-protovalidate-differential"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "testee"
+path = "src/main.rs"
+test = false
+doc = false
+bench = false
+
+[dependencies]
+bead = { package = "francisdesjardins-bead", path = "../../crates/bead" }
+bead-protobuf = { package = "francisdesjardins-bead-protobuf", path = "../../crates/bead-protobuf" }
+# Buffa's crates as the side requires them, exactly: the generated messages name them
+buffa = { version = "=0.9.2", default-features = false, features = ["std"] }
+buffa-descriptor = { version = "=0.9.2", default-features = false, features = ["std", "reflect"] }
+buffa-types = { version = "=0.9.2", default-features = false, features = ["std", "reflect"] }
+bytes = { version = "1.12.1", default-features = false, features = ["std"] }
+serde_json = { version = "1.0.154", default-features = false, features = ["std"] }

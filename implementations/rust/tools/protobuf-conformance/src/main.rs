@@ -12,7 +12,7 @@ use std::io::{self, Read, Write};
 use std::process::ExitCode;
 use std::sync::{Arc, LazyLock};
 
-use bead::PayloadCodec;
+use bead::{PayloadCodec, ProgrammerError};
 use bead_protobuf::{ProtoCodec, ProtoSchema};
 use buffa::{EnumValue, Message};
 use buffa_descriptor::reflect::{DynamicMessage, ReflectMessage};
@@ -67,33 +67,38 @@ where
 }
 
 // each message the suite sends, by its full name, and its codec
-static CODECS: LazyLock<Vec<(&str, Box<dyn Codec>)>> = LazyLock::new(|| {
-    vec![
+type Codecs = Vec<(&'static str, Box<dyn Codec>)>;
+
+// the codecs, or the refusal of one, which fails every test
+static CODECS: LazyLock<Result<Codecs, ProgrammerError>> = LazyLock::new(|| {
+    let codecs: Codecs = vec![
         (
             "protobuf_test_messages.proto3.TestAllTypesProto3",
-            Box::new(ProtoCodec::<proto3::TestAllTypesProto3>::new()),
+            Box::new(ProtoCodec::<proto3::TestAllTypesProto3>::new()?),
         ),
         (
             "protobuf_test_messages.proto2.TestAllTypesProto2",
-            Box::new(ProtoCodec::<proto2::TestAllTypesProto2>::new()),
+            Box::new(ProtoCodec::<proto2::TestAllTypesProto2>::new()?),
         ),
         (
             "protobuf_test_messages.editions.TestAllTypesEdition2023",
-            Box::new(ProtoCodec::<editions::TestAllTypesEdition2023>::new()),
+            Box::new(ProtoCodec::<editions::TestAllTypesEdition2023>::new()?),
         ),
         (
             "protobuf_test_messages.editions.proto2.TestAllTypesProto2",
-            Box::new(ProtoCodec::<editions::proto2::TestAllTypesProto2>::new()),
+            Box::new(ProtoCodec::<editions::proto2::TestAllTypesProto2>::new()?),
         ),
         (
             "protobuf_test_messages.editions.proto3.TestAllTypesProto3",
-            Box::new(ProtoCodec::<editions::proto3::TestAllTypesProto3>::new()),
+            Box::new(ProtoCodec::<editions::proto3::TestAllTypesProto3>::new()?),
         ),
         (
             "bead.codecs.v1.Probe",
-            Box::new(ProtoCodec::<generated::bead::codecs::v1::Probe>::new()),
+            Box::new(ProtoCodec::<generated::bead::codecs::v1::Probe>::new()?),
         ),
-    ]
+    ];
+
+    Ok(codecs)
 });
 
 fn answer(request: &ConformanceRequest) -> Answer {
@@ -134,8 +139,13 @@ fn answer(request: &ConformanceRequest) -> Answer {
         );
     }
 
+    let codecs = match CODECS.as_ref() {
+        Ok(codecs) => codecs,
+        Err(refusal) => return Answer::RuntimeError(refusal.to_string()),
+    };
+
     // ! a message gone fails its tests, rather than skipping them
-    let Some((_, codec)) = CODECS
+    let Some((_, codec)) = codecs
         .iter()
         .find(|(name, _)| *name == request.message_type)
     else {

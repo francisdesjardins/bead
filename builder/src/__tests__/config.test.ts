@@ -167,7 +167,7 @@ test("reads an output's keys and refuses another, a C# output's namespace for a 
       '  - language: csharp\n    out: gen\n    namespace: Acme\n    messages: none\n',
       /generate or external/u,
     ],
-    ['  - language: go\n    out: gen\n', /outputs\[0\]\.language: typescript or csharp/u],
+    ['  - language: go\n    out: gen\n', /outputs\[0\]\.language: typescript, csharp or rust/u],
     [
       '  - language: typescript\n    out: gen\n    namespace: X\n',
       /outputs\[0\]\.namespace, a key/u,

@@ -1541,6 +1541,7 @@ test("each wrapper runs generate --check over the repository's beadc.yaml and ex
     'spec/interop-blueprint.json',
     'implementations/typescript/interop/generated',
     'implementations/dotnet/interop/Bead.Interop/Generated',
+    'implementations/rust/crates/bead-interop/src/generated',
   ]) {
     cpSync(join(REPOSITORY, path), join(copy, path), { recursive: true });
   }

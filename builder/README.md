@@ -30,24 +30,25 @@ Yarn release vendored:
 ```sh
 yarn install --immutable
 export BEADC_PROTOC="$(node tools/fetch-protoc.mjs)"   # protoc, by its pin
+export BEADC_PROTOC_GEN_BUFFA="$(node tools/fetch-protoc-gen-buffa.mjs)"   # protoc-gen-buffa, by its pin
 yarn check        # types, the goldens' types, lint, format, buf's lint and format, the options' generated code, what reads beadc.yaml kept pure
 yarn test         # beadc's tests, the targets' goldens among them
 node src/cli.ts check ../spec/interop-blueprint.json
 node src/cli.ts blueprint --check ../spec/interop-blueprint.json
 ```
 
-| Script               | What it runs                                                                                                                                                                                                                                                                                        |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `yarn type-check`    | TypeScript 7 over `src/` and the fuzz target, `tools/fuzz/blueprint.ts`, under the TypeScript side's strictness and Node's module system, `nodenext`; then over the target's goldens, as a consumer compiles them, against `@bufbuild/protobuf`'s pin and its floor                                 |
-| `yarn lint`          | oxlint, type-aware, the TypeScript side's lint surface by reference                                                                                                                                                                                                                                 |
-| `yarn format:check`  | oxfmt, the TypeScript side's options, copied                                                                                                                                                                                                                                                        |
-| `yarn buf:lint`      | `buf lint` over [`buf.yaml`](buf.yaml)'s modules: `proto/`, `test/fixtures/` and `test/messages/`                                                                                                                                                                                                   |
-| `yarn buf:format`    | `buf format --diff --exit-code` over the same                                                                                                                                                                                                                                                       |
-| `yarn options:check` | `src/generated/bead/options_pb.ts` and `src/generated/buf/validate/validate_pb.ts`, the code the front end reads Bead's options and protovalidate's through, written again apart and compared; `yarn options:generate` writes them in place                                                         |
-| `yarn pure:check`    | `src/config.ts` and `src/model/selection.ts`, which a page takes to build a `beadc.yaml`, their imports walked: none reaches the platform, `node:` or a package but `yaml`                                                                                                                          |
-| `yarn unicode:check` | `src/patterns/unicode.ts`, beadc's Unicode tables, written again from the UCD files `../spec/generators/ucd.json` pins, each held to its sha256, and compared; `yarn unicode:generate` writes it in place                                                                                           |
-| `yarn test`          | Playwright's runner, no browser: one test file a module, in `__tests__/` beside it; `BEADC_WRITE_GOLDEN=1 yarn test` writes the targets' goldens again; a test that runs protoc skips, with its reason, where none of the pin's version is found, and fails instead under `BEADC_PROTOC_REQUIRED=1` |
-| `yarn test:coverage` | the same under c8                                                                                                                                                                                                                                                                                   |
+| Script               | What it runs                                                                                                                                                                                                                                                                                                                                                   |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `yarn type-check`    | TypeScript 7 over `src/` and the fuzz target, `tools/fuzz/blueprint.ts`, under the TypeScript side's strictness and Node's module system, `nodenext`; then over the target's goldens, as a consumer compiles them, against `@bufbuild/protobuf`'s pin and its floor                                                                                            |
+| `yarn lint`          | oxlint, type-aware, the TypeScript side's lint surface by reference                                                                                                                                                                                                                                                                                            |
+| `yarn format:check`  | oxfmt, the TypeScript side's options, copied                                                                                                                                                                                                                                                                                                                   |
+| `yarn buf:lint`      | `buf lint` over [`buf.yaml`](buf.yaml)'s modules: `proto/`, `test/fixtures/` and `test/messages/`                                                                                                                                                                                                                                                              |
+| `yarn buf:format`    | `buf format --diff --exit-code` over the same                                                                                                                                                                                                                                                                                                                  |
+| `yarn options:check` | `src/generated/bead/options_pb.ts` and `src/generated/buf/validate/validate_pb.ts`, the code the front end reads Bead's options and protovalidate's through, written again apart and compared; `yarn options:generate` writes them in place                                                                                                                    |
+| `yarn pure:check`    | `src/config.ts` and `src/model/selection.ts`, which a page takes to build a `beadc.yaml`, their imports walked: none reaches the platform, `node:` or a package but `yaml`                                                                                                                                                                                     |
+| `yarn unicode:check` | `src/patterns/unicode.ts`, beadc's Unicode tables, written again from the UCD files `../spec/generators/ucd.json` pins, each held to its sha256, and compared; `yarn unicode:generate` writes it in place                                                                                                                                                      |
+| `yarn test`          | Playwright's runner, no browser: one test file a module, in `__tests__/` beside it; `BEADC_WRITE_GOLDEN=1 yarn test` writes the targets' goldens again; a test that runs protoc or protoc-gen-buffa skips, with its reason, where none of the pin's version is found, and fails instead under `BEADC_PROTOC_REQUIRED=1` or `BEADC_PROTOC_GEN_BUFFA_REQUIRED=1` |
+| `yarn test:coverage` | the same under c8                                                                                                                                                                                                                                                                                                                                              |
 
 **The pins are the TypeScript side's.** `@bufbuild/buf`, `@bufbuild/protobuf`,
 `@bufbuild/protoc-gen-es`, TypeScript, oxlint, oxlint-tsgolint, oxfmt, Playwright, c8 and
@@ -77,7 +78,9 @@ generates messages, and refuses one of another version, which writes other code.
 [`tools/fetch-protoc.mjs`](tools/fetch-protoc.mjs) downloads this platform's archive from
 protobuf's release, checks its sha256 before it reads it, extracts it into `.protoc/<version>/`,
 which git ignores, and prints the executable's path. An upgrade moves `protoc.json` whole, its
-version, its floor and its sums, and writes the C# goldens again.
+version, its floor and its sums, and writes the C# goldens again. **protoc-gen-buffa is pinned
+the same way**, by [`protoc-gen-buffa.json`](protoc-gen-buffa.json), for a Rust output's messages
+([The Rust target](#the-rust-target)).
 
 ## The commands
 
@@ -122,7 +125,7 @@ source:
   proto: [proto] # its .proto roots; or `blueprint: <file>`, a blueprint
 blueprint: gen/bead.blueprint.json # where `beadc blueprint` and `beadc generate` write
 outputs:
-  - language: typescript # or csharp
+  - language: typescript # or csharp, or rust
     out: gen/ts # the output's folder
     importExtension: ts # what a relative import ends with: none, js or ts (the default)
     runtime: '@francisdesjardins/bead/service' # the default; or a path relative to out, no extension
@@ -146,6 +149,9 @@ outputs:
     messages: generate # the default, protoc's; or external, a project's own build's
     # client: { procedures: { include: [Greeter/sayHello] } } # its client class alone
     # gateway: {} # its route table, BeadHttp.cs, the OpenAPI document and the HTTP client
+  - language: rust
+    out: rust/src/generated # a module of its crate: mod generated;
+    messages: generate # the default, protoc-gen-buffa's; or external, its build script's, config_of
 clean: true # generate takes out what it no longer writes; off unless set, as buf's
 # http:
 #   prefix: /api # the default routes' prefix, the default
@@ -236,13 +242,13 @@ registered.
 
 **`clean`** is buf.gen.yaml's opt-in: protoc never removes a file, and buf removes one only under
 `clean: true`. Off, the default, `generate` takes out nothing; a `_bead.ts`, a `bead_http.ts`, a
-`bead_served.ts` or a `.cs` under beadc's own header that it no longer writes, which nothing but
+`bead_served.ts`, a `.cs` or a `.rs` under beadc's own header that it no longer writes, which nothing but
 beadc writes, it names and leaves, and `--check` fails on it, so a service a source dropped never
 ships in silence. On, `generate` takes out of each output's folder a file of a kind it writes that
-this run does not, in both targets by its first lines: a `_bead.ts`, a `bead_http.ts`, a
-`bead_served.ts` or a `.cs` under beadc's header;
-where messages are generated, a `_pb.ts` under protoc-gen-es's, or a `.cs` under protoc's at the
-path protoc gives its source; and prints each. Where buf's `clean` empties the folder, beadc takes
+this run does not, in every target by its first lines: a `_bead.ts`, a `bead_http.ts`, a
+`bead_served.ts`, a `.cs` or a `.rs` under beadc's header; where messages are generated, a `_pb.ts`
+under protoc-gen-es's, a `.cs` under protoc's at the path protoc gives its source, or a `.rs` under
+Buffa's in a Rust output's `messages/`; and prints each. Where buf's `clean` empties the folder, beadc takes
 out only by kind and header, since an output's folder may hold a project's own files: under
 `clean`, the generated files' kinds in an output's folder are beadc's alone, so a protoc-gen-es file
 another run left there is taken out and printed, while a `legacy_bead.ts` a person wrote, a
@@ -704,6 +710,114 @@ is compiled with them by Roslyn in
 [`Bead.Goldens.Tests`](../implementations/dotnet/tests/Bead.Goldens.Tests/Bead.Goldens.Tests.csproj),
 every warning a warning: each use is `BEAD0001`'s with its text, and none of the goldens' own is
 reported, protobuf's `CS0612` and `CS0618` none either.
+
+## The Rust target
+
+`beadc generate` writes a Rust output as one module tree under three roots of beadc's own
+([decision 0051](../docs/decisions/0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md)),
+which the output's `mod.rs` mounts and an application mounts in turn, `mod generated;` (or
+`pub mod`); `beadc init --language rust` names `rust/src/generated`, since edition 2024 reserves
+`gen` (RFC 3513):
+
+- **`messages`**, Buffa's tree as Buffa writes it, never declared again by beadc: under
+  `messages: generate`, the default, `messages/mod.rs` and the files `protoc-gen-buffa` writes;
+  under `messages: external`, the include file the application's build script writes into
+  `OUT_DIR`, `_include.rs`, by
+  `bead_protobuf_build::config_of(set, files)?.include_file("_include.rs").compile()`. One
+  `#[allow]` of beadc's sits on it: Buffa's code answers to Buffa's lints, not its application's.
+- **`services`**, a module a package, each segment named as Buffa names a package's
+  (`services::hello::v1`), its file `services/<package>.rs`, Buffa's name for a package's file,
+  holding every service of every `.proto` file of that package in the blueprint's order; a service
+  with no `proto` member, or of the unnamed package, in `services` itself, from
+  `services/__buffa.rs`.
+- **`bead_served`**, where an output's `server` names its `transports`: `SERVED_PROCEDURES`, a
+  constant of a `#[non_exhaustive]` struct whose field each key is, in snake case, in the order
+  `beadc.yaml` writes them, each a `&'static [ProcedureAddress]` a transport's option `procedures`
+  takes as `SERVED_PROCEDURES.web_socket.to_vec()`, and the contract with the runtime that option
+  needs, `GENERATED_CODE_SUPPORTS_VERSION_8`.
+
+Every file of `services` and `bead_served` is `include!`d, which rustfmt never follows, and every
+item of `mod.rs` is `#[rustfmt::skip]`, so an application's `cargo fmt` changes nothing beadc
+writes. Every runtime item is named from its crate's root, `::bead::…`, `::bead_protobuf::…`,
+`::std::…`, `::core::…`, and a message by its path from the service's module to `messages`
+(`super::super::super::messages::hello::v1::SayHelloRequest`, a nested one through Buffa's
+module, a well-known type through `::buffa_types`), so no item of a module takes a runtime item's
+place and generated code names no `serde_json`. A package's file holds, for each of its services:
+
+- **`<Name>Procedures`**, a `#[non_exhaustive]` struct of public descriptor fields,
+  `::bead::Descriptor` or `::bead::NotifyingDescriptor`, made once a process behind a `LazyLock`,
+  since the service layer matches a descriptor by its identity: `<Name>Procedures::get()`, and
+  `all()`, every one in their ids' order. A `proto` binding's codec is
+  `::bead_protobuf::ProtoCodec`, which refuses a message whose generator left a repeated closed
+  enum closed;
+- **`<Name>Failures`**, a unit struct of an associated `ListedFailure` constant a failure,
+  `<Name>Failures::NAMELESS`, its `catalogue()`, made once a process, and `is(&error, &failure)`;
+- **`<Name>Admissions`**, a struct of public `AdmissionHook` fields, every hook required;
+  **`<Name>ServerOptions`**, `new(admissions)` where a procedure names a hook, `Default` where none
+  does; **`<Name>Windows`**, an `Option<u64>` a procedure that notifies; **`<Name>ClientOptions`**,
+  `Default`; and the records of its handles, **`<Name>Requesters`**, **`<Name>Commands`**,
+  **`<Name>Notifiers`** and **`<Name>Notifications`**, each `#[non_exhaustive]`, a public field a
+  procedure;
+- **`<Name>Server`**: `new(&options)`, `on_<procedure>(resolver)` for each request and procedure
+  that notifies it serves, generic over the resolver and its future, an `async fn` given by its
+  name, `command()`, `notify()`, `offer(&server)` and `procedures_without_resolver()`; a command,
+  another service's procedure, or one it does not serve has no method;
+- **`<Name>Client`**: `new(&client, &options)`, `request()`, `notifications()`, and
+  `on_<command>(resolver)` for each command it answers;
+
+then each request's rules, `rules_of_<message>`, `bead_protobuf`'s `MessageRules`, which judges each
+rule in spec 18.5's order into the runtime's `ViolationSink`, each field's and each of the
+message's own rules a function of its own that it calls in turn, each rule's site a constant
+`ViolationRule`, each pattern's table a constant `PatternTable`, a descriptor's `validate` its
+`validator_of`; and, once, the contract with the runtime, `GENERATED_CODE_SUPPORTS_VERSION_7`. A
+name is Buffa's snake case, an acronym one word (`getHTTPStatus2`, `on_get_http_status2`), a keyword
+a raw identifier, `r#type`, or with Buffa's `_` where Rust holds no raw one, `self_`: the key, the
+descriptor's `procedureName`, never moves. The target refuses, for its output, two transports' keys
+that render as one field (`getHTTP`, `getHttp`), and a package whose module is a type its parent
+package's service gives beside it.
+
+**A description** is beadc's one-line summary, then an HTML block, one `<p>` a paragraph, its text
+escaped as HTML's and each character rustc refuses in a comment, a lone CR and the bidirectional
+controls, as its numeric reference (CommonMark 0.31.2, §4.6). **A deprecation** is
+`#[deprecated(note = "<its text>")]`, the blueprint's message or `No replacement is named.`, on each
+item the file writes for it: a procedure's descriptor field, its `on_<procedure>`, its fields of the
+records of handles and of `<Name>Windows`; a failure's constant; a service's every type. The
+services' module allows `deprecated` for the file's own uses, as C#'s `#pragma` does, while a
+consumer's are reported at its own site; it allows `dead_code`, since an application uses the items
+of its own side alone, `unreachable_pub`, since it mounts the tree privately or publicly as it will,
+`clippy::struct_field_names`, since a record's fields are its procedures' names, and
+`clippy::type_complexity`, since a descriptor's type names each of its codecs by its whole path; `bead_served`
+allows `dead_code` and `unreachable_pub` alike, and `messages` rustc's `unnameable_types` and
+`unreachable_pub` beside Buffa's own lints. Buffa 0.9.2 marks nothing protobuf deprecates.
+
+**Its messages.** Under `messages: generate`, beadc runs **`protoc-gen-buffa` 0.9.2**, pinned by
+[`protoc-gen-buffa.json`](protoc-gen-buffa.json) as protoc is: its version, the Buffa its code
+requires, `=0.9.2`, which a test holds to the Rust workspace's requirement, and each release
+binary's sha256. beadc runs the plugin `BEADC_PROTOC_GEN_BUFFA` names, or `protoc-gen-buffa` on the
+path, only where a Rust output generates messages, and refuses one of another version;
+[`tools/fetch-protoc-gen-buffa.mjs`](tools/fetch-protoc-gen-buffa.mjs) downloads this platform's
+binary from Buffa's release into `.protoc-gen-buffa/<version>/`, which git ignores, checks its
+sha256 before it runs it, and prints its path. beadc hands it a `CodeGeneratorRequest` itself, no
+protoc run: the set it hands protoc for the C# target, protovalidate's options and
+`google.api.http` taken out unless the output keeps them, pruned to the files the messages import,
+each file's bytes kept; the files that declare a bound message and the files they import,
+Google's well-known types and beadc's own files apart; and `config_of`'s settings, `views=true`,
+`reflect_mode=vtable`, `unknown_fields=true`, `allow_message_set=true` and an `open_enums_in` each
+repeated or map field of a closed enum. The plugin writes no module root, so beadc writes
+`messages/mod.rs`, as `buffa-build` writes its include file. An application's build script through
+`config_of` over the same set writes the same files.
+
+**Its goldens**, under [`test/golden/rust/`](test/golden/rust/), each a whole output: the comments
+fixture's (`comments/`); the subsets' blueprint's, split (`subsets/`); the interop's, its procedure
+that notifies, its command and a failure deprecated (`deprecations/`), and its procedures, a hook
+and transports named by Rust's keywords and an acronym (`keywords/`); the messages fixture's
+`messages.proto`, its messages Buffa's through the plugin (`messages/`); and its `rules.proto`, its
+messages its application's build's (`validations/`). Beside each golden of a `.proto` fixture,
+`messages.binpb` is the set it was written from, the one handed to the plugin, or, for the external
+one, buf's as it is, which the Rust side's `bead-goldens` hands `config_of`. A test writes them again
+and compares them byte for byte, the plugin's files where the pinned plugin runs, as protoc's are;
+`crates/bead-goldens` compiles each whole, as an application mounts it, under the workspace's
+lint table.
 
 ## The rules
 

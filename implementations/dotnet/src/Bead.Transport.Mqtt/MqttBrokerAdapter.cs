@@ -19,10 +19,12 @@ namespace Bead.Transport.Mqtt;
 /// read as no subscriber; each message handed on before its PUBACK, which goes once its participant
 /// settled it; a will of its GONE; at a stop, an UNSUBSCRIBE of each filter it asked or holds, then
 /// a DISCONNECT of 0x00, and one of 0x8E read as its link taken over. A packet past its own Maximum
-/// Packet Size, read at its Remaining Length, closes its network connection, no DISCONNECT, its link
-/// lost. MQTTnet's automation is off: no reconnection, resubscription, offline queue or alias; each
-/// incarnation is a client of its own, every late callback of a former one doing nothing. The
-/// TypeScript side's adapter over MQTT.js does the same.
+/// Packet Size, read at its Remaining Length, or a PUBACK, a SUBACK or an UNSUBACK of a Reason Code
+/// under 0x80 its table does not name or of a count of codes other than one, read at MQTTnet's
+/// packet inspector before it decodes it, closes its network connection, no DISCONNECT, its link
+/// lost, at its stop as at any other time. MQTTnet's automation is off: no reconnection,
+/// resubscription, offline queue or alias; each incarnation is a client of its own, every late
+/// callback of a former one doing nothing. The TypeScript side's adapter over MQTT.js does the same.
 /// </summary>
 public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 {
@@ -304,10 +306,11 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             {
                 connected = await client.ConnectAsync(OptionsOf((start?.Will, password)), linked.Token);
             }
-            // * a packet past its own Maximum Packet Size, its CONNACK's among them, read before it
-            catch (Exception) when (link.PastMaximum is not null)
+            // * a packet its client cannot read, read before its CONNACK or as it: past its own Maximum
+            // Packet Size, its CONNACK among them, or an acknowledgement its table does not name
+            catch (Exception) when (link.Unreadable is not null)
             {
-                throw link.PastMaximum;
+                throw link.Unreadable;
             }
             // * the timeout's, whatever its cancel ended after it: MQTTnet tells the link down as it gives up
             catch (Exception reason) when (timeout.IsCancellationRequested && !token.IsCancellationRequested)
@@ -387,11 +390,13 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     /// <summary>
     /// Holds a subscription to <paramref name="topic"/> of QoS 1, No Local 0, Retain As Published 0
     /// and Retain Handling 2, a group's as its shared subscription; settles once its SUBACK granted
-    /// QoS 1, and fails on any other code, QoS 0 among them (spec 15.27). Its filter is its link's
-    /// as its SUBSCRIBE goes, so that its stop lets it go whether or not its SUBACK came, until a
-    /// SUBACK of 0x80 or more says its broker installed none; one whose SUBACK comes as its link
-    /// stops fails with its stop. A group its broker offers none of is refused, naming why; a link
-    /// down, an <see cref="InvalidOperationException"/>.
+    /// QoS 1, and fails on QoS 0 or 2 granted and on a code of 0x80 or more, whether or not SUBACK's
+    /// table names it (spec 15.27); a SUBACK of a code under 0x80 its table does not name, or of a
+    /// count of codes other than one, loses its link, which it fails with (spec 15.29). Its filter
+    /// is its link's as its SUBSCRIBE goes, so that its stop lets it go whether or not its SUBACK
+    /// came, until a SUBACK of 0x80 or more says its broker installed none; one whose SUBACK comes as
+    /// its link stops fails with its stop. A group its broker offers none of is refused, naming why;
+    /// a link down, an <see cref="InvalidOperationException"/>.
     /// </summary>
     public async Task Subscribe(IReadOnlyList<string> topic, BrokerSubscription? subscription = null)
     {
@@ -486,8 +491,10 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     /// Lets the subscription to <paramref name="topic"/> go, by the filter its SUBSCRIBE named, or
     /// the topic itself where it held none, its UNSUBSCRIBE sent as it is called; settles once its
     /// UNSUBACK came of 0x00, or 0x11 where its broker held none, each PUBLISH its broker sent of it
-    /// before then read first, its connection carrying both in order ([MQTT-3.10.4-3]); fails on
-    /// 0x80 or more, an <see cref="IOException"/> naming it, and with none within
+    /// before then read first, its connection carrying both in order ([MQTT-3.10.4-3]); fails on a
+    /// code of 0x80 or more, whether or not UNSUBACK's table names it, an <see cref="IOException"/>
+    /// naming it, with its link's loss on one under 0x80 it does not name or of a count of codes
+    /// other than one (spec 15.29), and with none within
     /// <see cref="MqttBrokerAdapterOptions.ConnectTimeout"/> of its call, a
     /// <see cref="TimeoutException"/> naming it, its link kept so that no will goes (spec 15.27).
     /// Its filter stays its link's until such an UNSUBACK came, a late one among them, so that a
@@ -551,13 +558,14 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     /// <summary>
     /// Publishes a parcel in one PUBLISH (spec 15.28): of QoS 1 at least once, held to its CONNACK's
     /// Receive Maximum, later ones waiting in their order, <see cref="BrokerPublished.Taken"/> once
-    /// its PUBACK came under 0x80 but 0x10, <see cref="BrokerPublished.NoSubscriber"/> on 0x10, an
-    /// <see cref="IOException"/> on 0x80 or more; of QoS 0 at most once, taken as it goes; RETAIN 0,
-    /// its life in whole seconds rounded up where one is asked, no other property. One whose packet
-    /// would pass its CONNACK's Maximum Packet Size is an <see cref="ArgumentException"/>, nothing
-    /// sent; a link down, an <see cref="InvalidOperationException"/>. Given up while it waits for the
-    /// quota, it leaves unsent, its link kept; given up once it may have gone, at either QoS, its link
-    /// is retired.
+    /// its PUBACK came of 0x00 or of none, <see cref="BrokerPublished.NoSubscriber"/> on 0x10, an
+    /// <see cref="IOException"/> naming it on a code of 0x80 or more, whether or not PUBACK's table
+    /// names it, and its link's loss on one under 0x80 it does not name (spec 15.29); of QoS 0 at
+    /// most once, taken as it goes; RETAIN 0, its life in whole seconds rounded up where one is
+    /// asked, no other property. One whose packet would pass its CONNACK's Maximum Packet Size is an
+    /// <see cref="ArgumentException"/>, nothing sent; a link down, an
+    /// <see cref="InvalidOperationException"/>. Given up while it waits for the quota, it leaves
+    /// unsent, its link kept; given up once it may have gone, at either QoS, its link is retired.
     /// </summary>
     public async Task<BrokerPublished> Publish(BrokerPublication publication)
     {
@@ -665,14 +673,17 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     /// filter its link asked or holds, one filter each, all at once, their UNSUBACKs of 0x00 or
     /// 0x11 awaited together; what it was handed and those UNSUBACKs within one
     /// <see cref="MqttBrokerAdapterOptions.ConnectTimeout"/> of its call, what has not gone by then
-    /// failed; its DISCONNECT within a bound of its own, an UNSUBACK that refuses, or none by then,
-    /// ending it all the same. It settles once its broker let go of each subscription of its link,
-    /// as its unsubscription lets one go, so that its broker hands it nothing more. Nothing where
-    /// it has none, and nothing sent where its link is down; a later start a new link.
+    /// failed; its DISCONNECT within a bound of its own, an UNSUBACK of a code of 0x80 or more that
+    /// refuses, or none by then, ending it all the same. A packet its client cannot read ends it at
+    /// once, no DISCONNECT, no down told, its broker publishing its will, and what it awaited fails
+    /// with that loss (spec 15.29). It settles once its broker let go of each subscription of its
+    /// link, as its unsubscription lets one go, so that its broker hands it nothing more. Nothing
+    /// where it has none, and nothing sent where its link is down; a later start a new link.
     /// </summary>
     public async Task Stop()
     {
         Link? link;
+        var life = CancellationToken.None;
         var stopped = new InvalidOperationException($"the link of {Id} stopped");
 
         lock (_gate)
@@ -684,6 +695,9 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
                 // ! named before its DISCONNECT goes, which fails what it awaits before its end
                 link.IsStopping = true;
                 link.Ended = stopped;
+
+                // ! read under its gate while it has not ended: its end disposes its source
+                life = link.Life.Token;
             }
         }
 
@@ -694,8 +708,10 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
         try
         {
-            // * one connectTimeout from its call: what it was handed, then its broker's let-go
-            using var letting = new CancellationTokenSource(_options.ConnectTimeout, TimeProvider.System);
+            // * one connectTimeout from its call: what it was handed, then its broker's let-go; and
+            // its link's end, a packet its client cannot read among it, ending both waits at once
+            using var bounded = new CancellationTokenSource(_options.ConnectTimeout, TimeProvider.System);
+            using var letting = CancellationTokenSource.CreateLinkedTokenSource(bounded.Token, life);
 
             // * what it was handed goes first, no new publication taken meanwhile: its quota drained,
             // each PUBACK come
@@ -708,7 +724,7 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             // peer reading no subscriber before its 1001; one filter each, since one packet of
             // every filter may pass its broker's Maximum Packet Size, a Protocol Error that
             // publishes its will
-            if (link.IsUp && link.Client.IsConnected)
+            if (link.IsUp && link.Client.IsConnected && !IsEnded(link))
             {
                 List<string> filters;
 
@@ -732,8 +748,10 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
             // ! a bound of its own: a drain that spent its time leaves its DISCONNECT one, or the
             // broker would read no DISCONNECT and publish its will; sent once MQTTnet says it
-            // connected, its CONNACK read, even before its start's continuation counted it up
-            if (link.Client.IsConnected)
+            // connected, its CONNACK read, even before its start's continuation counted it up, and
+            // never once its link ended, a packet its client cannot read ending it, which MQTTnet
+            // may say connected a moment more
+            if (link.Client.IsConnected && !IsEnded(link))
             {
                 using var timeout = new CancellationTokenSource(_options.ConnectTimeout, TimeProvider.System);
 
@@ -1034,29 +1052,52 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             {
                 Interlocked.Exchange(ref link.LastSent, TimeProvider.System.GetTimestamp());
             }
+            // ! judged whole, before MQTTnet decodes it: its end cancels what awaits it before
+            // MQTTnet hands that a code, whatever context its caller resumes on
+            else if (MqttPackets.UnreadableOf(inspected.Buffer) is { } words)
+            {
+                Lost((link, new IOException($"the link of {Id} went down: its broker sent {words}")));
+            }
 
             return Task.CompletedTask;
         };
     }
 
     // a packet past its own Maximum Packet Size, a Protocol Error (MQTT 5.0 §3.1.2.11.4, §4.13.1),
-    // judged at its Remaining Length by its channel's guard, on MQTTnet's receive loop: its link
-    // lost, or its start failed where its CONNACK had not come
+    // judged at its Remaining Length by its channel's guard, on MQTTnet's receive loop
     private void PastMaximum((Link Link, long Size) past)
     {
         var (link, size) = past;
-        var reason = new IOException(string.Create(CultureInfo.InvariantCulture, $"the link of {Id} went down: its broker sent a packet of {size} bytes, past its Maximum Packet Size, {_options.MaximumPacketSize} bytes"));
+
+        Lost((link, new IOException(string.Create(CultureInfo.InvariantCulture, $"the link of {Id} went down: its broker sent a packet of {size} bytes, past its Maximum Packet Size, {_options.MaximumPacketSize} bytes"))));
+    }
+
+    // a packet its client cannot read (spec 15.29), on MQTTnet's receive loop, in every phase: its
+    // link lost where it was up, its start failed where its CONNACK had not come, its stop ended
+    // where it stopped, no down told; never a DISCONNECT
+    private void Lost((Link Link, IOException Reason) lost)
+    {
+        var (link, reason) = lost;
 
         lock (_gate)
         {
             // ! a link ended already keeps the reason it ended for
             if (!link.IsEnded)
             {
-                link.PastMaximum = reason;
+                link.Unreadable = reason;
             }
         }
 
         End((link, new BrokerDown()), reason);
+    }
+
+    // whether its link ended, read under its gate
+    private bool IsEnded(Link link)
+    {
+        lock (_gate)
+        {
+            return link.IsEnded;
+        }
     }
 
     // a message received, handed on before its PUBACK, which its participant's settle sends, once,
@@ -1283,8 +1324,9 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
         public Exception? Ended { get; set; }
 
-        // set by its guard before it ends it, so that its start fails with it, never as a stop's end
-        public IOException? PastMaximum { get; set; }
+        // a packet its client cannot read, set before it ends it, so that its start fails with it,
+        // never as a stop's end
+        public IOException? Unreadable { get; set; }
 
         public ITimer? Pinger { get; set; }
     }

@@ -32,7 +32,7 @@ use bead::{
     RequestDependencies, RequestHeader, RequestOptions, RouterSide, Server, ServerOptions,
     ServerTransport,
 };
-use bead_interop::{interop_procedures, offer_interop};
+use bead_interop::{InteropProcedures, offer_interop};
 use serde_json::{Value, json};
 
 mod scale;
@@ -224,7 +224,7 @@ async fn stand() -> Result<Stand, String> {
     memory.start().await.map_err(|error| error.to_string())?;
 
     let (client, _) = connected(&memory).await?;
-    let echo = interop_procedures(None)
+    let echo = InteropProcedures::get()
         .map_err(|error| error.to_string())?
         .echo
         .procedure()

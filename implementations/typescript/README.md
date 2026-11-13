@@ -1423,10 +1423,14 @@ callback hides it; 0x80 or more refuses it. Each message is handed on inside MQT
 `customHandleAcks`, its PUBACK sent once the core settles it, which it does as it takes it; a packet
 past its own Maximum Packet Size, read at its Remaining Length by a guard of the adapter's own on
 MQTT.js's stream, closes the link, no DISCONNECT (a row of
-[`docs/support.md`](../../docs/support.md)'s "Leveled down"). A packet MQTT.js's parser refuses,
-which MQTT.js tells as its client's `error` and leaves its stream standing, closes the network
+[`docs/support.md`](../../docs/support.md)'s "Leveled down"). A PUBACK, a SUBACK or an UNSUBACK
+of a Reason Code under 0x80 its table does not name, or a SUBACK or an UNSUBACK of a count of codes
+other than one, awaited or not, is a packet its client cannot read, judged by that guard ahead of
+MQTT.js's parser; one of 0x80 or more its table does not name, 0x95 say, the guard hands MQTT.js
+as 0x80, and its refusal names the broker's own code. A packet MQTT.js's parser refuses, which
+MQTT.js tells as its client's `error` and leaves its stream standing, closes the network
 connection alike once its CONNACK put the link up, no DISCONNECT, its link lost and its down told
-once; never once its stop began. Its leg is secure under TLS or to the
+once; and at its stop alike, its stop ended, no DISCONNECT, no down told. Its leg is secure under TLS or to the
 loopback. The deployment's half — its access control by the participant's id, its Client Identifier
 tied to what it authenticated, its queues and its receive maximum — is spec 15.31's.
 
@@ -2060,7 +2064,7 @@ server and the identity provider run in a Web Worker of the page — `demo/worke
 `dist/worker.js` beside `dist/page.js` — and no backend answers anything but the files: that pair is
 what a playground takes. `yarn playground:build:file` builds it, with the page, into
 `demo/dist/playground/`, every path relative and nothing started — the site publishes it at
-`/playground/bead/`, where the page, served as files alone, is its worker's and hides what needs a
+`/bead/playground/`, where the page, served as files alone, is its worker's and hides what needs a
 server. In the console, `localStorage.setItem('bead:debug', 'd(rx), read')` sends the calls that filter
 keeps to the console — and the envelopes, when it asks for them by `e(…)` — with no reload, and
 `removeItem` stops it (`demo/debug.ts`). A listener only queues: the console is written when the

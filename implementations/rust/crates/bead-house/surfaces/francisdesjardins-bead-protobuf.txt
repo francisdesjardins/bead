@@ -5,12 +5,31 @@ crate
   use records::ProtoSchema
   use records::check_records
   use required::check_required
+  use validate::MapEntry
+  use validate::MapKey
+  use validate::MessageRules
+  use validate::PatternTable
+  use validate::RuleItems
+  use validate::RuleValue
+  use validate::ViolationRule
+  use validate::ViolationSink
+  use validate::bytes_contain
+  use validate::bytes_end_with
+  use validate::bytes_equal
+  use validate::bytes_start_with
+  use validate::code_point_length
+  use validate::entries_by_key
+  use validate::is_unique
+  use validate::judge_rules
+  use validate::matches_pattern
+  use validate::utf8_length
+  use validate::validator_of
 crate::codec
   const ENCODING: &str
   struct ProtoCodec<M>
-    fn new() -> Self
+    fn new() -> Result<Self, ProgrammerError>
     fn schema(&self) -> &ProtoSchema
-    implements Clone, Debug, Default, PayloadCodec
+    implements Clone, Debug, PayloadCodec
   struct DynamicCodec
     fn new(pool: Arc<DescriptorPool>, message: MessageIndex) -> Self
     fn schema(&self) -> &ProtoSchema
@@ -27,3 +46,64 @@ crate::records
   fn check_records(bytes: &[u8], schema: &ProtoSchema) -> Result<(), CodecRefusal>
 crate::required
   fn check_required(message: &dyn ReflectMessage, schema: &ProtoSchema) -> Result<(), CodecRefusal>
+crate::validate
+  use pattern::PatternTable
+  use pattern::matches_pattern
+  struct ViolationRule
+    pub rule_id: &'static str
+    pub message: &'static str
+    pub bounds: Option<&'static str>
+    pub for_key: bool
+    derives Clone, Copy, Debug, Eq, PartialEq
+  enum RuleValue<'a> #[non_exhaustive]
+    Absent
+    Bool(bool)
+    Signed(i64)
+    Unsigned(u64)
+    Float(f64)
+    Text(&'a str)
+    Bytes(&'a [u8])
+    Items(&'a dyn RuleItems)
+    implements Debug
+    derives Clone, Copy
+  enum MapKey<'a>
+    Signed(i64)
+    Unsigned(u64)
+    Bool(bool)
+    Text(&'a str)
+    derives Clone, Copy, Debug, Eq, PartialEq
+  trait RuleItems
+    fn each<'a>(&'a self, visit: &mut dyn FnMut(Option<MapKey<'a>>, RuleValue<'a>))
+  trait ViolationSink
+    fn add(&mut self, rule: &ViolationRule, value: RuleValue<'_>) -> bool
+    fn enter(&mut self, name: &'static str)
+    fn enter_index(&mut self, name: &'static str, index: usize)
+    fn enter_key(&mut self, name: &'static str, key: MapKey<'_>)
+    fn leave(&mut self)
+  type MessageRules<M> = fn(&M, &mut dyn ViolationSink) -> bool
+  fn judge_rules<F>(rules: F, options: &ValidateOptions) -> Result<Judged, ProgrammerError> where F: FnOnce(&mut dyn ViolationSink) -> bool,
+  fn validator_of<M: 'static>(rules: MessageRules<M>) -> Validate<M>
+  fn code_point_length(text: &str) -> u64
+  fn utf8_length(text: &str) -> u64
+  fn bytes_equal(bytes: &[u8], other: &[u8]) -> bool
+  fn bytes_start_with(bytes: &[u8], prefix: &[u8]) -> bool
+  fn bytes_end_with(bytes: &[u8], suffix: &[u8]) -> bool
+  fn bytes_contain(bytes: &[u8], part: &[u8]) -> bool
+  fn is_unique(items: &dyn RuleItems) -> bool
+  struct MapEntry<'a, K, V>
+    pub key: &'a K
+    pub value: &'a V
+    derives Debug
+  fn entries_by_key<K: Ord, V, S>(map: &HashMap<K, V, S>) -> Vec<MapEntry<'_, K, V>>
+crate::validate::pattern
+  struct PatternTable
+    pub accepting: &'static [u16]
+    pub bounds: &'static [u32]
+    pub class_count: u16
+    pub classes: &'static [u16]
+    pub dead: Option<u16>
+    pub matched: Option<u16>
+    pub state_count: u16
+    pub transitions: &'static [u16]
+    derives Clone, Copy, Debug, Eq, PartialEq
+  fn matches_pattern(table: &PatternTable, text: &str) -> bool

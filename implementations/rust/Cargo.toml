@@ -74,11 +74,13 @@ libtest-mimic = { version = "0.8.2" }
 syn = { version = "3.0.9", default-features = false, features = ["full", "parsing", "visit"] }
 proc-macro2 = { version = "1.0.107", default-features = false, features = ["span-locations"] }
 # the proto payload's codec: Buffa's runtime, its descriptors and dynamic message, its well-known
-# types, and its generator, fed the set protoc writes at builder/protoc.json's pin
-buffa = { version = "0.9.2", default-features = false, features = ["std"] }
-buffa-descriptor = { version = "0.9.2", default-features = false, features = ["std", "reflect"] }
-buffa-types = { version = "0.9.2", default-features = false, features = ["std", "reflect"] }
-buffa-build = { version = "0.9.2" }
+# types, and its generator, fed the set protoc writes at builder/protoc.json's pin; each required
+# exactly, the version builder/protoc-gen-buffa.json pins, so an application's lock never moves
+# Buffa apart from the code beadc writes (decision 0051)
+buffa = { version = "=0.9.2", default-features = false, features = ["std"] }
+buffa-descriptor = { version = "=0.9.2", default-features = false, features = ["std", "reflect"] }
+buffa-types = { version = "=0.9.2", default-features = false, features = ["std", "reflect"] }
+buffa-build = { version = "=0.9.2" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

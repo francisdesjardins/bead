@@ -1,6 +1,6 @@
 [package]
 name = "francisdesjardins-bead-interop"
-description = "Bead's interop service on the Rust side: its descriptors, its resolvers and its credentials, which the conformance players and the interop serve."
+description = "Bead's interop service on the Rust side: its descriptors, which beadc generates, its resolvers and its credentials, which the conformance players and the interop serve."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -16,6 +16,8 @@ name = "bead_interop"
 
 [dependencies]
 bead = { workspace = true }
+# the validators' runtime `checked`'s rules judge through
+bead-protobuf = { workspace = true }
 tokio = { workspace = true, features = ["rt", "sync", "time"] }
 serde_json = { workspace = true }
 

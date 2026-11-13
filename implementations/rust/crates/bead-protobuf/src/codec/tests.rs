@@ -323,8 +323,18 @@ fn opens_an_edition_enum_when_no_message_or_file_sets_its_type() {
 #[test]
 fn refuses_a_message_that_leaves_a_required_field_unset_at_every_depth_a_proto3_root_s_message_an_item_a_map_s_value_a_group_and_a_delimited_field()
  {
-    let requiring = |bytes: &Bytes| ProtoCodec::<Requiring>::new().decode(bytes).map(|_| ());
-    let probe = |bytes: &Bytes| ProtoCodec::<Probe>::new().decode(bytes).map(|_| ());
+    let requiring = |bytes: &Bytes| {
+        ProtoCodec::<Requiring>::new()
+            .expect("its codec")
+            .decode(bytes)
+            .map(|_| ())
+    };
+    let probe = |bytes: &Bytes| {
+        ProtoCodec::<Probe>::new()
+            .expect("its codec")
+            .decode(bytes)
+            .map(|_| ())
+    };
 
     for (hex, name, by_requiring) in [
         // its needs, {count: 1}
@@ -377,6 +387,7 @@ fn refuses_a_message_that_leaves_a_required_field_unset_at_every_depth_a_proto3_
 #[test]
 fn refuses_a_payload_and_a_value_with_a_codec_refusal_in_the_same_words() {
     let read = ProtoCodec::<Needs>::new()
+        .expect("its codec")
         .decode(&bytes_of("10 01"))
         .expect_err("a payload that leaves name unset");
     let needs = dynamic_of("bead.transcoding.v1.Needs");
@@ -417,7 +428,7 @@ fn refuses_a_payload_and_a_value_with_a_codec_refusal_in_the_same_words() {
 fn refuses_bytes_its_library_cannot_read_as_every_reader_refuses_the_library_s_error_as_its_cause()
 {
     // a text of one byte that is not UTF-8, which Buffa reads, past the records' check
-    let probe = ProtoCodec::<Probe>::new();
+    let probe = ProtoCodec::<Probe>::new().expect("its codec");
     let bytes = bytes_of("0A 01 FF");
 
     check_records(&bytes, probe.schema()).expect("past the records' check");
@@ -437,8 +448,8 @@ fn refuses_bytes_its_library_cannot_read_as_every_reader_refuses_the_library_s_e
 
 #[test]
 fn takes_a_required_field_set_at_its_default_and_one_a_message_given_twice_sets_in_either_record() {
-    let needs = ProtoCodec::<Needs>::new();
-    let requiring = ProtoCodec::<Requiring>::new();
+    let needs = ProtoCodec::<Needs>::new().expect("its codec");
+    let requiring = ProtoCodec::<Requiring>::new().expect("its codec");
     let read = needs.decode(&bytes_of("0A 00 10 00")).expect("read");
 
     assert_eq!(
@@ -467,10 +478,11 @@ fn takes_a_required_field_set_at_its_default_and_one_a_message_given_twice_sets_
 #[test]
 fn reads_a_closed_enum_s_undeclared_number_as_setting_nothing_its_last_declared_number_kept_a_oneof_s_other_member_too()
  {
-    let probe = ProtoCodec::<Probe>::new();
+    let probe = ProtoCodec::<Probe>::new().expect("its codec");
     let nothing = probe.decode(&bytes_of("70 05")).expect("read");
     let kept = probe.decode(&bytes_of("70 01 70 05")).expect("read");
     let toned = ProtoCodec::<Toned>::new()
+        .expect("its codec")
         .decode(&bytes_of("12 01 61 08 05"))
         .expect("read");
 
@@ -492,7 +504,7 @@ fn reads_a_closed_enum_s_undeclared_number_as_setting_nothing_its_last_declared_
 
     // * the leveled row: a repeated field's item and a map's value of 5 kept as the item and the
     // value they are, since the generator opens such a field; a singular one dropped
-    let leveled = ProtoCodec::<Leveled>::new();
+    let leveled = ProtoCodec::<Leveled>::new().expect("its codec");
 
     for (hex, expected, written) in [
         ("08 05", "tones [Unknown(5)]", "08 05"),
@@ -541,7 +553,7 @@ fn reads_a_closed_enum_s_undeclared_number_as_setting_nothing_its_last_declared_
 #[test]
 fn drops_a_closed_enum_s_undeclared_number_before_its_library_reads_beside_another_unknown_field_wide_or_overlong()
  {
-    let probe = ProtoCodec::<Probe>::new();
+    let probe = ProtoCodec::<Probe>::new().expect("its codec");
     let dynamic = dynamic_codec_of::<Probe>();
     // a text of 128 bytes, so its child's length takes two
     let text = ["61"; 128].join(" ");
@@ -598,8 +610,8 @@ fn drops_a_closed_enum_s_undeclared_number_before_its_library_reads_beside_anoth
 
 #[test]
 fn looks_into_no_extension_and_no_any_s_message() {
-    let requiring = ProtoCodec::<Requiring>::new();
-    let holder = ProtoCodec::<Holder>::new();
+    let requiring = ProtoCodec::<Requiring>::new().expect("its codec");
+    let holder = ProtoCodec::<Holder>::new().expect("its codec");
     let partial = Requiring {
         any: MessageField::some(buffa_types::Any {
             type_url: "type.googleapis.com/bead.transcoding.v1.Needs".to_owned(),
@@ -796,7 +808,7 @@ where
     M: buffa::HasMessageView + ReflectMessage + Default + 'static,
     for<'a> M::View<'a>: ReflectMessage,
 {
-    let typed = ProtoCodec::<M>::new();
+    let typed = ProtoCodec::<M>::new().expect("its codec");
     let by_descriptor = dynamic_codec_of::<M>();
     let mut written = vec![(
         "typed",
@@ -967,6 +979,7 @@ fn refuses_a_value_10_000_deep_before_its_library_writes_any_of_it() {
 
         assert_eq!(
             ProtoCodec::<Probe>::new()
+                .expect("its codec")
                 .encode(&typed)
                 .map_err(|refusal| refusal.to_string()),
             Err("nested past 100".to_owned()),
@@ -997,6 +1010,7 @@ fn refuses_a_value_10_000_deep_before_its_library_writes_any_of_it() {
 
         assert_eq!(
             ProtoCodec::<Alone>::new()
+                .expect("its codec")
                 .encode(&alone)
                 .map_err(|refusal| refusal.to_string()),
             Err("nested past 100".to_owned()),
@@ -1013,7 +1027,7 @@ fn refuses_a_value_10_000_deep_before_its_library_writes_any_of_it() {
 
 #[test]
 fn refuses_to_write_41_messages_above_60_unknown_groups_a_reading_kept() {
-    let typed = ProtoCodec::<Probe>::new();
+    let typed = ProtoCodec::<Probe>::new().expect("its codec");
     let dynamic = dynamic_codec_of::<Probe>();
     let read = typed.decode(&bytes_of(GROUPS)).expect("60 groups read");
     let held = dynamic
@@ -1074,7 +1088,7 @@ fn reads_a_map_s_entry_100_deep_that_holds_no_value_and_refuses_to_write_the_val
     let deepest = (0..99).fold(vec![0x62, 0x00], |inner, _| child_bytes(&inner));
     let deeper = Bytes::from(child_bytes(&deepest));
     let deepest = Bytes::from(deepest);
-    let typed = ProtoCodec::<Probe>::new();
+    let typed = ProtoCodec::<Probe>::new().expect("its codec");
     let dynamic = dynamic_codec_of::<Probe>();
     let read = typed.decode(&deepest).expect("an entry 100 deep read");
     let held = dynamic
@@ -1170,7 +1184,12 @@ fn a_proto_string_holding_a_surrogate_alone_is_no_string_on_the_rust_side() {
     };
 
     assert_eq!(
-        hex_of(&ProtoCodec::<Probe>::new().encode(&probe).expect("written")),
+        hex_of(
+            &ProtoCodec::<Probe>::new()
+                .expect("its codec")
+                .encode(&probe)
+                .expect("written")
+        ),
         "0A 05 61 EF BF BD 62",
         "the repaired string, as the other sides write it"
     );
@@ -1181,7 +1200,7 @@ fn a_proto_string_holding_a_surrogate_alone_is_no_string_on_the_rust_side() {
 // is given both, and refuses each
 #[test]
 fn a_typed_value_leaves_no_required_field_unset_and_holds_no_undeclared_number_on_the_rust_side() {
-    let probe = ProtoCodec::<Probe>::new();
+    let probe = ProtoCodec::<Probe>::new().expect("its codec");
     let needs_left = Probe {
         needs: MessageField::some(codecs::Needs::default()),
         ..Probe::default()
@@ -1223,7 +1242,7 @@ fn a_typed_value_leaves_no_required_field_unset_and_holds_no_undeclared_number_o
 // refused reading and writing, a typed value's among them, which holds a message set or not
 #[test]
 fn refuses_a_message_that_leaves_an_edition_s_required_message_field_unset_reading_and_writing() {
-    let typed = ProtoCodec::<NeedsUpdate>::new();
+    let typed = ProtoCodec::<NeedsUpdate>::new().expect("its codec");
     let words = Err(words_of("bead.transcoding.v1.NeedsUpdate.update_mask"));
 
     assert_eq!(
@@ -1277,7 +1296,7 @@ fn writes_a_dynamic_message_of_its_own_message_alone() {
     );
     assert_eq!(probe.encoding(), "proto", "its encoding");
     assert_eq!(
-        ProtoCodec::<Probe>::new().encoding(),
+        ProtoCodec::<Probe>::new().expect("its codec").encoding(),
         "proto",
         "the typed codec's"
     );
@@ -1285,7 +1304,7 @@ fn writes_a_dynamic_message_of_its_own_message_alone() {
 
 #[test]
 fn shares_its_schema_with_its_clones_and_shows_its_message_by_name() {
-    let codec = ProtoCodec::<Probe>::default();
+    let codec = ProtoCodec::<Probe>::new().expect("its codec");
 
     assert!(
         ptr::eq(codec.schema().root(), codec.clone().schema().root()),
@@ -1300,5 +1319,53 @@ fn shares_its_schema_with_its_clones_and_shows_its_message_by_name() {
         format!("{:?}", dynamic_of("bead.codecs.v1.Probe")),
         "DynamicCodec { schema: ProtoSchema { message: \"bead.codecs.v1.Probe\", .. } }",
         "the dynamic codec"
+    );
+}
+
+#[test]
+fn refuses_a_message_whose_generator_left_a_repeated_closed_enum_closed() {
+    use crate::testing::closed::bead::test as closed;
+
+    // * the same file, generated twice: as bead_protobuf_build sets Buffa's generator, every
+    // repeated or map field of a closed enum opened; and as Buffa's generator is by default
+    let opened = ProtoSchema::of::<Leveled>();
+    let left = ProtoSchema::of::<closed::Leveled>();
+    let field = |schema: &ProtoSchema, name: &str| {
+        schema
+            .pool()
+            .message(schema.message())
+            .fields()
+            .iter()
+            .find(|field| field.name() == name)
+            .and_then(buffa_descriptor::FieldDescriptor::enum_type)
+    };
+
+    assert_eq!(
+        field(&opened, "tones"),
+        Some(buffa::editions::EnumType::Open),
+        "opened by its generator"
+    );
+    assert_eq!(
+        field(&left, "tones"),
+        Some(buffa::editions::EnumType::Closed),
+        "left closed"
+    );
+    assert!(ProtoCodec::<Leveled>::new().is_ok(), "an opened one read");
+    assert_eq!(
+        ProtoCodec::<closed::Leveled>::new()
+            .map(|_| ())
+            .map_err(|error| error.message().to_owned()),
+        Err("bead.test.Leveled.tones holds a closed enum its generator left closed: generate bead.test.Leveled as bead_protobuf_build sets Buffa's generator, which opens it".to_owned()),
+        "its first such field named"
+    );
+    // a message that holds none, of the same generation, is read; one that reaches none, through
+    // a cycle, too
+    assert!(
+        ProtoCodec::<closed::Toned>::new().is_ok(),
+        "a singular closed enum, dropped as 17.9.8 says"
+    );
+    assert!(
+        ProtoCodec::<closed::Loop>::new().is_ok(),
+        "a cycle that reaches no such field"
     );
 }

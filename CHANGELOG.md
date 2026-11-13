@@ -13,17 +13,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   file, its class, its method, its function or its title, wherever it stands, is one a side's tests
   declare, an entry a harness names at run time, a case's label or a row of the matrix (decision
   0006).
+- beadc's Rust target: each package's service descriptors, catalogue, typed server and client,
+  hooks, windows and options, its requests' validators, and the procedures each transport of its
+  server takes, beside the messages Buffa writes, through the pinned `protoc-gen-buffa` or an
+  application's build through `bead_protobuf_build`; `examples/hello`'s Rust half; the Rust
+  interop's descriptors generated (decision 0051).
+- The Rust side's validators' runtime in `bead-protobuf`, and the counter of the contract with
+  generated code, `GENERATED_CODE_SUPPORTS_VERSION_7` and `_8`; the Rust side plays
+  `spec/validations.json`'s verdicts (decisions 0035, 0051).
 
 ### Changed
 
+- The demo francisdesjardins.ca serves is at `/bead/playground/`, under Bead's page: the page's
+  links in both languages and the demo's canonical address name it there.
+- **Breaking:** `bead_protobuf::ProtoCodec::new` returns a `Result`, refusing a message whose
+  repeated or map field of a closed enum its generator left closed; `bead-protobuf` requires
+  Buffa's crates exactly (decision 0051).
 - The support matrix and the records correct what they state: the Rust side's HTTP client comes
-  with its gateway, and its beadc target brings the validators' runtime that `examples/hello`'s Rust
-  half needs (decision 0044); six more rows of the matrix's differences name where the sides part
-  in shipped code: an MQTT 5 AUTH no CONNECT asked for, a DISCONNECT from a broker that keeps its
-  connection open, a password beside TLS that trusts an authority with no client certificate, a
-  gateway's `HEAD` that asks a stream, a gateway's `HEAD` navigation from another site, and a
-  resolver, a command or a window of a procedure its service does not hold; and an MQTT 5
-  acknowledgement no request awaits is named in the cells of its two rows (decisions 0018, 0041,
+  with its gateway (decision 0044); five more rows of the matrix's differences name where the sides
+  part in shipped code: an MQTT 5 AUTH no CONNECT asked for, a DISCONNECT from a broker that keeps
+  its connection open, a password beside TLS that trusts an authority with no client certificate, a
+  gateway's `HEAD` that asks a stream, and a gateway's `HEAD` navigation from another site; and an
+  MQTT 5 acknowledgement no request awaits is named in the cells of its two rows (decisions 0041,
   0050).
 - The page's table of the three implementations is drawn from data and held to the support matrix
   by its build: each row of the matrix's Features and Transports in one part of the table or listed
@@ -37,6 +48,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   it is mounted on: 500, a failure of its own reported on its `error`, its call never made (7.5,
   7.6, 10.1). Every gateway makes the change, so the companion's next version is a minor
   (decision 0037).
+- Over MQTT 5, every side judges each PUBACK, SUBACK and UNSUBACK alike, whether or not a request
+  awaits it. A Reason Code of 0x80 or more refuses its request, its link kept, whether or not its
+  packet's table names it, as MQTT 5 gives every such code (§2.4, §4.13.2): a PUBACK of 0x95, which
+  Mosquitto 2.1.2 sends past its `message_size_limit`, refuses that publication on the TypeScript
+  side too, which lost its link on it. A Reason Code under 0x80 its table does not name, or a SUBACK
+  or an UNSUBACK whose count of codes is not one, is a packet the client cannot read: the link
+  closes, no DISCONNECT, in every phase, where the C# and Rust sides refused it, or took such a
+  PUBACK, and kept the link, and the TypeScript side let a subscription go on an UNSUBACK of no
+  code. A packet the client cannot read ends the adapter's stop with no DISCONNECT on every side,
+  where the TypeScript side read on to its DISCONNECT. Spec 15.26 to 15.29 say so, with when a
+  PUBLISH of QoS 0 is taken, once written, and that a subscription or a publication given up once
+  its packet may have gone loses its link; `spec/vectors.json` gains `mqttAcknowledgementCodes`.
+  Every side's MQTT 5 adapter changes, so the spec's next version is a minor (decision 0041).
 
 ### Fixed
 

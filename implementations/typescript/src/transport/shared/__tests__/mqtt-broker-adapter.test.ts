@@ -270,6 +270,49 @@ const publishOf = (
   };
 };
 
+/** A PUBACK to `identifier`, of `code`, its fixed header's flags `flags` where told: what no encoder writes. */
+const pubackBytes = (
+  identifier: number,
+  code: number,
+  options?: { flags?: number | undefined }
+): number[] => {
+  return [0x40 | (options?.flags ?? 0), 0x03, identifier >> 8, identifier & 0xff, code];
+};
+
+/** A SUBACK (9) or an UNSUBACK (11) to `identifier`, of `codes`, after `properties`. */
+const ackBytes = (
+  type: 9 | 11,
+  {
+    codes,
+    identifier,
+    properties = [],
+  }: { codes: number[]; identifier: number; properties?: number[] }
+): number[] => {
+  return [
+    type << 4,
+    3 + properties.length + codes.length,
+    identifier >> 8,
+    identifier & 0xff,
+    properties.length,
+    ...properties,
+    ...codes,
+  ];
+};
+
+// a PUBLISH of QoS 0 to its inbox, written behind a packet a case plays
+const INBOX_PUBLISH = Object.freeze([
+  0x30,
+  0x0e,
+  0x00,
+  0x0a,
+  ...Buffer.from('bead/i/ada'),
+  0x00,
+  0x78,
+]);
+
+// an identifier no request of a link uses
+const UNUSED = 0x7777;
+
 // definition
 
 test.describe('createMqttBrokerAdapter', () => {
@@ -635,7 +678,7 @@ test.describe('createMqttBrokerAdapter', () => {
     await adapter.stop();
   });
 
-  test('subscribes at QoS 1, No Local 0, Retain As Published 0 and Retain Handling 2, a group as its shared subscription, held once its SUBACK grants QoS 1 and refused otherwise (spec 15.27)', async () => {
+  test('subscribes at QoS 1, No Local 0, Retain As Published 0 and Retain Handling 2, a group as its shared subscription, held once its SUBACK grants QoS 1, refused on QoS 0 or 2 granted, its filter kept, and on 0x80 or more (spec 15.27)', async () => {
     const adapter = adapterOf(script);
     const link = await linkUp({ adapter, script });
     let isHeld = false;
@@ -673,21 +716,39 @@ test.describe('createMqttBrokerAdapter', () => {
     });
     await leaving;
 
-    // QoS 0 granted is refused, as a failure is
-    const downgraded = adapter.subscribe(['bead', 'd', 'bob']);
+    // QoS 0 or 2 granted is refused, its filter kept, since its broker holds it
+    for (const [code, name] of [
+      [0x00, 'bob'],
+      [0x02, 'carol'],
+    ] as const) {
+      const downgraded = adapter.subscribe(['bead', 'd', name]);
 
-    await subackOf(link, 0);
-    await expect(downgraded).rejects.toThrow('0x00');
+      await subackOf(link, code);
+      await expect(downgraded).rejects.toThrow(code === 0 ? '0x00' : '0x02');
+    }
 
-    const failed = adapter.subscribe(['bead', 'd', 'eve']);
+    // * 0x80 or more is refused, its filter forgotten, its table naming the code or not
+    for (const [code, name] of [
+      [0x87, 'eve'],
+      [0x95, 'mallory'],
+    ] as const) {
+      const failed = adapter.subscribe(['bead', 'd', name]);
 
-    await subackOf(link, 0x87);
-    await expect(failed).rejects.toThrow('0x87');
-    // * its stop lets go of what its broker holds, QoS 0 granted among it, and of nothing refused
-    expect(await unsubackedOf(link, adapter.stop())).toEqual(['bead/i/ada', 'bead/d/bob']);
+      await subackOf(link, code);
+      await expect(failed).rejects.toThrow(code === 0x87 ? '0x87' : '0x95');
+    }
+
+    expect(adapter.isLinked).toBe(true);
+    // * its stop lets go of what its broker holds, QoS 0 or 2 granted among it, and of nothing
+    // refused at 0x80 or more
+    expect(await unsubackedOf(link, adapter.stop())).toEqual([
+      'bead/i/ada',
+      'bead/d/bob',
+      'bead/d/carol',
+    ]);
   });
 
-  test('lets a subscription go once its UNSUBACK came, naming the topic itself where it held none, and refuses it on any other code (spec 15.27)', async () => {
+  test('lets a subscription go once its UNSUBACK came, naming the topic itself where it held none, and refuses it on a code of 0x80 or more (spec 15.27)', async () => {
     const adapter = adapterOf(script);
     const link = await linkUp({ adapter, script });
     const answered = async (
@@ -717,9 +778,9 @@ test.describe('createMqttBrokerAdapter', () => {
     await subackOf(link, 1);
     await subscribing;
 
-    // * each refusal MQTT 5 names an UNSUBACK by: MQTT.js's parser hands no code it does not name,
-    // refusing a packet of any other, 0x01 among them, which loses its link (spec 15.29)
-    for (const code of [0x80, 0x83, 0x87, 0x8f, 0x91]) {
+    // * each refusal MQTT 5 names an UNSUBACK by, and 0x95, which its table does not: a code under
+    // 0x80 it does not name loses its link instead (spec 15.29)
+    for (const code of [0x80, 0x83, 0x87, 0x8f, 0x91, 0x95]) {
       const refused = `0x${code.toString(16).padStart(2, '0').toUpperCase()}`;
 
       await expect(answered(['bead', 'd', 'eve'], code), refused).rejects.toThrow(refused);
@@ -1290,22 +1351,39 @@ test.describe('createMqttBrokerAdapter', () => {
     ]);
   });
 
-  test('reads a PUBACK of 0x10 as no subscriber, under 0x80 as taken, and 0x80 or more as refused (spec 15.28)', async () => {
+  test('reads a PUBACK of 0x00, or of none, as taken, 0x10 as no subscriber, and 0x80 or more as refused (spec 15.28)', async () => {
     const adapter = adapterOf(script);
+    const { downs } = heardOf(adapter);
     const link = await linkUp({ adapter, script });
-    const answered = async (reasonCode: number) => {
+    // * each PUBACK as its bytes, its Remaining Length 2 where it carries no code
+    const answered = async (code: number | undefined) => {
       const publishing = adapter.publish({ payload: Uint8Array.of(1), topic: NAME });
-      const publish = await link.next('publish');
+      const identifier = (await link.next('publish')).messageId ?? 0;
 
-      link.send({ cmd: 'puback', messageId: publish.messageId ?? 0, reasonCode });
+      link.write(
+        Uint8Array.from(
+          code === undefined
+            ? [0x40, 0x02, identifier >> 8, identifier & 0xff]
+            : pubackBytes(identifier, code)
+        )
+      );
 
       return publishing;
     };
 
-    expect(await answered(0x10)).toBe(BROKER_PUBLISHED.NO_SUBSCRIBER);
+    expect(await answered(undefined)).toBe(BROKER_PUBLISHED.TAKEN);
     expect(await answered(0x00)).toBe(BROKER_PUBLISHED.TAKEN);
-    await expect(answered(0x87)).rejects.toThrow('0x87');
-    await expect(answered(0x80)).rejects.toThrow('0x80');
+    expect(await answered(0x10)).toBe(BROKER_PUBLISHED.NO_SUBSCRIBER);
+
+    // * each refusal its table names, and 0x95, which it does not
+    for (const code of [0x80, 0x83, 0x87, 0x90, 0x91, 0x97, 0x99, 0x95]) {
+      const refused = `0x${code.toString(16).padStart(2, '0').toUpperCase()}`;
+
+      await expect(answered(code), refused).rejects.toThrow(refused);
+    }
+
+    expect(adapter.isLinked).toBe(true);
+    expect(downs).toEqual([]);
     expect(adapter.capabilities.noSubscriber).toBe(true);
     await adapter.stop();
   });
@@ -1559,6 +1637,339 @@ test.describe('createMqttBrokerAdapter', () => {
     });
     expect(messages).toEqual([]);
     await adapter.stop();
+  });
+
+  test('loses its link, no DISCONNECT, on an acknowledgement of a Reason Code under 0x80 its table does not name or of a count of codes other than one, awaited or not, its start failed before its CONNACK (spec 15.26, 15.27, 15.28, 15.29)', async () => {
+    test.setTimeout(60_000);
+
+    const adapter = adapterOf(script);
+    const { downs, messages } = heardOf(adapter);
+    const lost = `the link of ${ID} went down: its broker sent`;
+    // * its request asked, then the acknowledgement `bytesOf` writes for its identifier, the PUBLISH
+    // to its inbox behind it in one write
+    const awaitedCases: {
+      ask: () => Promise<unknown>;
+      bytesOf: (identifier: number) => number[];
+      cmd: Packet['cmd'];
+      packet: string;
+    }[] = [
+      {
+        ask: () => {
+          return adapter.unsubscribe(['bead', 'd', 'bob']);
+        },
+        bytesOf: (identifier) => {
+          return ackBytes(11, { codes: [0x01], identifier });
+        },
+        cmd: 'unsubscribe',
+        packet: 'UNSUBACK',
+      },
+      {
+        ask: () => {
+          return adapter.subscribe(['bead', 'd', 'bob']);
+        },
+        bytesOf: (identifier) => {
+          return ackBytes(9, { codes: [0x03], identifier });
+        },
+        cmd: 'subscribe',
+        packet: 'SUBACK',
+      },
+      {
+        ask: () => {
+          return adapter.publish({ payload: Uint8Array.of(1), topic: NAME });
+        },
+        bytesOf: (identifier) => {
+          return pubackBytes(identifier, 0x01);
+        },
+        cmd: 'publish',
+        packet: 'PUBACK',
+      },
+      ...[[0x01, 0x01], [0x01, 0x87], []].map((codes) => {
+        return {
+          ask: () => {
+            return adapter.subscribe(['bead', 'd', 'bob']);
+          },
+          bytesOf: (identifier: number) => {
+            return ackBytes(9, { codes, identifier });
+          },
+          cmd: 'subscribe' as const,
+          packet: 'SUBACK',
+        };
+      }),
+      ...[[0x00, 0x11], []].map((codes) => {
+        return {
+          ask: () => {
+            return adapter.unsubscribe(['bead', 'd', 'bob']);
+          },
+          bytesOf: (identifier: number) => {
+            return ackBytes(11, { codes, identifier });
+          },
+          cmd: 'unsubscribe' as const,
+          packet: 'UNSUBACK',
+        };
+      }),
+      // * both wrong, a property MQTT 5 does not define and a code its table does not name: lost
+      // all the same, whichever check finds it
+      {
+        ask: () => {
+          return adapter.subscribe(['bead', 'd', 'bob']);
+        },
+        bytesOf: (identifier) => {
+          return ackBytes(9, { codes: [0x03], identifier, properties: [0x7f, 0x00] });
+        },
+        cmd: 'subscribe',
+        packet: 'SUBACK',
+      },
+      // its reserved flags set, which MQTTnet reads, its code judged on every side
+      {
+        ask: () => {
+          return adapter.publish({ payload: Uint8Array.of(1), topic: NAME });
+        },
+        bytesOf: (identifier) => {
+          return pubackBytes(identifier, 0x01, { flags: 0x02 });
+        },
+        cmd: 'publish',
+        packet: 'PUBACK',
+      },
+    ];
+    const isLostIn = async (link: IScriptedLink, count: number): Promise<void> => {
+      expect(await closedWithin(link)).toBe(true);
+      await until(() => {
+        return downs.length >= count;
+      });
+      expect(downs).toHaveLength(count);
+      expect(downs.at(-1)).toEqual({ isTakenOver: false });
+      expect(adapter.isLinked).toBe(false);
+      expect(cmdsOf(link)).not.toContain('disconnect');
+    };
+
+    for (const [index, { ask, bytesOf, cmd, packet }] of awaitedCases.entries()) {
+      const link = await linkUp({ adapter, script });
+      const failing = failureOf(ask());
+      const request = await link.next(cmd);
+
+      link.write(Uint8Array.from([...bytesOf(request.messageId ?? 0), ...INBOX_PUBLISH]));
+      // * failed with the loss, never refused nor taken
+      expect(await failing, `${String(index)}: ${packet}`).toMatchObject({
+        message: expect.stringMatching(new RegExp(`^${lost} an? ${packet} of `, 'u')),
+      });
+      await isLostIn(link, index + 1);
+    }
+
+    // * no request awaiting it
+    const unawaited = [
+      ackBytes(11, { codes: [0x01], identifier: UNUSED }),
+      pubackBytes(UNUSED, 0x01),
+      ackBytes(9, { codes: [0x01, 0x01], identifier: UNUSED }),
+      ackBytes(11, { codes: [], identifier: UNUSED }),
+    ];
+
+    for (const [index, bytes] of unawaited.entries()) {
+      const link = await linkUp({ adapter, script });
+
+      link.write(Uint8Array.from([...bytes, ...INBOX_PUBLISH]));
+      await isLostIn(link, awaitedCases.length + index + 1);
+    }
+
+    // * before its CONNACK, in the same write: its start failed, no down
+    const starting = failureOf(adapter.start());
+    const early = await script.link();
+
+    early.write(
+      Uint8Array.from([...ackBytes(11, { codes: [0x01], identifier: UNUSED }), ...CONNACK_BYTES])
+    );
+    expect(await starting).toMatchObject({
+      message: expect.stringContaining(`${lost} an UNSUBACK of 0x01`),
+    });
+    expect(await closedWithin(early)).toBe(true);
+    await sleep(50);
+    expect(downs).toHaveLength(awaitedCases.length + unawaited.length);
+    expect(cmdsOf(early)).toEqual(['connect']);
+    expect(adapter.isLinked).toBe(false);
+    expect(messages).toEqual([]);
+  });
+
+  test('ends its stop at once, no DISCONNECT and no down, on a packet its client cannot read, an acknowledgement under 0x80 its table does not name or of a count other than one among it (spec 15.26, 15.29)', async () => {
+    test.setTimeout(60_000);
+
+    const adapter = adapterOf(script, { connectTimeout: 5_000 });
+    const { downs } = heardOf(adapter);
+    const lost = `the link of ${ID} went down: its broker sent`;
+    // a PUBLISH to its inbox carrying a property MQTT 5 does not define, 0x7F
+    const unreadable = [0x30, 0x0f, 0x00, 0x0a, ...Buffer.from('bead/i/ada'), 0x02, 0x7f, 0x00];
+    const subscribed = async (link: IScriptedLink, topics: readonly (readonly string[])[]) => {
+      for (const topic of topics) {
+        const subscribing = adapter.subscribe(topic);
+
+        await subackOf(link, 1);
+        await subscribing;
+      }
+    };
+    // * `bytes` written once its stop is under way, then its stop settled within half its
+    // connectTimeout, its link closed with no DISCONNECT and no down told
+    const endsAtOnce = async (
+      link: IScriptedLink,
+      { bytes, stopping }: { bytes: number[]; stopping: Promise<void> }
+    ): Promise<void> => {
+      const writtenAt = Date.now();
+
+      link.write(Uint8Array.from(bytes));
+      await stopping;
+      expect(Date.now() - writtenAt, 'its stop settled at once').toBeLessThan(2_500);
+      expect(await closedWithin(link)).toBe(true);
+      expect(cmdsOf(link)).not.toContain('disconnect');
+      expect(downs).toEqual([]);
+      expect(adapter.isLinked).toBe(false);
+    };
+
+    // (a) in its let-go, a PUBLISH it cannot read
+    {
+      const link = await linkUp({ adapter, script });
+
+      await subscribed(link, [INBOX]);
+
+      const stopping = adapter.stop();
+
+      await link.next('unsubscribe');
+      await endsAtOnce(link, { bytes: unreadable, stopping });
+    }
+
+    // (b) in its let-go, an UNSUBACK of 0x01 while another's is withheld, and (c) one of no code
+    for (const codes of [[0x01], []]) {
+      const link = await linkUp({ adapter, script });
+
+      await subscribed(link, [INBOX, ['bead', 'd', 'bob']]);
+
+      const stopping = adapter.stop();
+      const first = await link.next('unsubscribe');
+
+      await link.next('unsubscribe');
+      await endsAtOnce(link, {
+        bytes: ackBytes(11, { codes, identifier: first.messageId ?? 0 }),
+        stopping,
+      });
+    }
+
+    // (d) in its drain, a PUBACK of 0x01 to its publication, which fails with the loss
+    {
+      const link = await linkUp({ adapter, script });
+      const publishing = failureOf(adapter.publish({ payload: Uint8Array.of(1), topic: NAME }));
+      const publish = await link.next('publish');
+      const stopping = adapter.stop();
+
+      await sleep(50);
+      await endsAtOnce(link, { bytes: pubackBytes(publish.messageId ?? 0, 0x01), stopping });
+      expect(await publishing).toMatchObject({
+        message: expect.stringContaining(`${lost} a PUBACK of 0x01`),
+      });
+    }
+
+    // (e) a SUBACK of two codes to a SUBSCRIBE under way at its stop
+    {
+      const link = await linkUp({ adapter, script });
+      const subscribing = failureOf(adapter.subscribe(INBOX));
+      const subscribe = await link.next('subscribe');
+      const stopping = adapter.stop();
+
+      await link.next('unsubscribe');
+      await endsAtOnce(link, {
+        bytes: ackBytes(9, { codes: [0x01, 0x01], identifier: subscribe.messageId ?? 0 }),
+        stopping,
+      });
+      expect(await subscribing).toBeInstanceOf(Error);
+    }
+  });
+
+  test('reads an acknowledgement of 0x80 or more its table does not name as a refusal, awaited or not, naming its code, its link kept (spec 15.27, 15.28)', async () => {
+    const adapter = adapterOf(script);
+    const { downs } = heardOf(adapter);
+    const link = await linkUp({ adapter, script });
+
+    // * a PUBACK of 0x95, as Mosquitto 2.1.2 sends one past its message_size_limit: refused, the
+    // next publication taken
+    const refused = adapter.publish({ payload: Uint8Array.of(1), topic: NAME });
+    const publish = await link.next('publish');
+
+    link.write(Uint8Array.from(pubackBytes(publish.messageId ?? 0, 0x95)));
+    await expect(refused).rejects.toThrow('0x95');
+
+    const taken = adapter.publish({ payload: Uint8Array.of(2), topic: NAME });
+    const next = await link.next('publish');
+
+    link.send({ cmd: 'puback', messageId: next.messageId ?? 0, reasonCode: 0 });
+    expect(await taken).toBe(BROKER_PUBLISHED.TAKEN);
+
+    // a SUBACK of 0x95: refused, its filter forgotten, since 0x80 or more installs none
+    const subscribing = adapter.subscribe(['bead', 'd', 'bob']);
+    const subscribe = await link.next('subscribe');
+
+    link.write(
+      Uint8Array.from(ackBytes(9, { codes: [0x95], identifier: subscribe.messageId ?? 0 }))
+    );
+    await expect(subscribing).rejects.toThrow('0x95');
+
+    // an UNSUBACK of 0x95: refused, its filter kept for its stop
+    const held = adapter.subscribe(['bead', 'd', 'eve']);
+
+    await subackOf(link, 1);
+    await held;
+
+    const leaving = adapter.unsubscribe(['bead', 'd', 'eve']);
+    const unsubscribe = await link.next('unsubscribe');
+
+    link.write(
+      Uint8Array.from(ackBytes(11, { codes: [0x95], identifier: unsubscribe.messageId ?? 0 }))
+    );
+    await expect(leaving).rejects.toThrow('0x95');
+
+    // * an UNSUBACK of 0xFF no request awaits: ignored
+    link.write(Uint8Array.from(ackBytes(11, { codes: [0xff], identifier: UNUSED })));
+    await sleep(100);
+    expect(downs).toEqual([]);
+    expect(adapter.isLinked).toBe(true);
+    expect(cmdsOf(link)).not.toContain('disconnect');
+    expect(await unsubackedOf(link, adapter.stop())).toEqual(['bead/d/eve']);
+  });
+
+  test('hands on what came before a packet its client cannot read in one read as far as its side does (spec 15.29)', async () => {
+    // ! docs/support.md's row "What an MQTT 5 link lost on a packet its client cannot read hands on
+    // of what came before it in one read": what held 40 runs of 40 on this side, each case one write
+    const adapter = adapterOf(script);
+    const { downs, messages } = heardOf(adapter);
+    const unreadable = [0x30, 0x0f, 0x00, 0x0a, ...Buffer.from('bead/i/ada'), 0x02, 0x7f, 0x00];
+    const cases = [
+      // (i) its guard's trip: the PUBACK before it handled at once, the PUBLISH a tick later
+      {
+        outcome: BROKER_PUBLISHED.TAKEN,
+        tail: ackBytes(11, { codes: [0x01], identifier: UNUSED }),
+      },
+      // (ii) its parser's refusal, told ahead of every packet it parsed in that read
+      { outcome: undefined, tail: unreadable },
+    ];
+
+    for (const [index, { outcome, tail }] of cases.entries()) {
+      const link = await linkUp({ adapter, script });
+      const publishing = adapter.publish({ payload: Uint8Array.of(1), topic: NAME });
+      const identifier = (await link.next('publish')).messageId ?? 0;
+
+      link.write(Uint8Array.from([...pubackBytes(identifier, 0x00), ...INBOX_PUBLISH, ...tail]));
+
+      if (outcome === undefined) {
+        expect(await failureOf(publishing)).toMatchObject({
+          message: expect.stringContaining(`the link of ${ID} went down: its broker sent`),
+        });
+      } else {
+        expect(await publishing).toBe(outcome);
+      }
+
+      expect(await closedWithin(link)).toBe(true);
+      await until(() => {
+        return downs.length > index;
+      });
+      await sleep(30);
+      expect(messages, 'the PUBLISH before it not handed on').toEqual([]);
+      expect(downs).toHaveLength(index + 1);
+      expect(cmdsOf(link)).not.toContain('disconnect');
+    }
   });
 
   test('loses its link once on a packet past its Maximum Packet Size beside its CONNACK in one read (spec 15.29)', async () => {
@@ -2025,7 +2436,7 @@ test.describe('createMqttBrokerAdapter', () => {
     await adapter.stop();
   });
 
-  test('gives up a start, a subscription or a publication its signal aborts, a publication that waits on its quota leaving it unsent, and retires its link where what it asked may have gone', async () => {
+  test('gives up a start, a subscription or a publication its signal aborts, a publication that waits on its quota leaving it unsent, and retires its link where what it asked may have gone (spec 15.26)', async () => {
     const adapter = adapterOf(script);
     const { downs } = heardOf(adapter);
     const given = new AbortController();
@@ -2168,7 +2579,7 @@ test.describe('createMqttBrokerAdapter', () => {
     await adapter.stop();
   });
 
-  test('retires its link where a publication at most once is given up before its packet is written (spec 15.28)', async () => {
+  test('retires its link where a publication at most once is given up before its packet is written (spec 15.26, 15.28)', async () => {
     const adapter = adapterOf(script, { delivery: BROKER_DELIVERIES.AT_MOST_ONCE });
     const { downs } = heardOf(adapter);
     const link = await linkUp({ adapter, script });
