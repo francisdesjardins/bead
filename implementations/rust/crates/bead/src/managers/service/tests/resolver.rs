@@ -47,8 +47,7 @@ fn application(code: u16, detail: &str) -> Failure {
     )
 }
 
-#[tokio::test]
-async fn makes_a_resolver_named_after_its_procedure_that_answers_its_callbacks_response_through_its_router_and_leaves_its_registration_to_its_manager()
+async fn makes_a_resolver_named_after_its_procedure_that_answers_its_callbacks_response_through_its_router_and_leaves_its_registration_to_its_manager_scenario()
  {
     let fixture = Fixture::new();
     let recording = Arc::new(Recording::default());
@@ -635,4 +634,15 @@ async fn an_answer_with_a_failure_of_the_procedures_own_sends_it_as_the_applicat
 #[tokio::test]
 async fn an_answer_with_a_failure_of_the_procedure_own_sends_it_as_the_application_one() {
     application_failure_answer().await;
+}
+
+#[tokio::test]
+async fn makes_a_resolver_named_after_its_procedure_that_answers_its_callbacks_response_through_its_router_and_leaves_its_registration_to_its_manager()
+ {
+    makes_a_resolver_named_after_its_procedure_that_answers_its_callbacks_response_through_its_router_and_leaves_its_registration_to_its_manager_scenario().await;
+}
+
+#[tokio::test]
+async fn hands_the_callback_a_frozen_decoded_request_and_sends_its_answer_back() {
+    makes_a_resolver_named_after_its_procedure_that_answers_its_callbacks_response_through_its_router_and_leaves_its_registration_to_its_manager_scenario().await;
 }
