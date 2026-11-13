@@ -397,7 +397,7 @@ async fn starts_uninitialized_and_is_open_once_listening_on_a_port_the_system_pi
 }
 
 #[tokio::test]
-async fn fails_on_a_port_taken_ending_closed_and_starts_again_on_a_free_one_and_after_a_stop() {
+async fn throws_on_a_port_taken_ending_closed_and_starts_again_on_a_free_one_and_after_a_stop() {
     let (server, _, port) = started(&briefly_closing()).await;
     let other = WebSocketTransportServer::new(&briefly_closing()).unwrap();
     let taken = TransportServerStartOptions {
@@ -503,8 +503,7 @@ async fn refuses_a_start_once_disposed_its_state_kept_and_disposes_once_stopping
 }
 
 #[tokio::test]
-async fn stops_at_once_when_never_started_stops_twice_then_starts_again_on_a_new_port_and_accepts()
-{
+async fn stops_at_once_when_never_started_stops_twice_then_starts_again_and_accepts() {
     let server = WebSocketTransportServer::new(&briefly_closing()).unwrap();
     let recorder = recorded(&server);
 
@@ -595,7 +594,7 @@ async fn a_stop_reentered_from_a_close_listener_shares_the_stop_in_progress() {
 }
 
 #[tokio::test]
-async fn an_abort_before_listening_rejects_the_start_closes_what_was_opened_and_can_start_again() {
+async fn a_cancelled_start_throws_disposes_what_it_built_and_can_start_again() {
     let server = WebSocketTransportServer::new(&briefly_closing()).unwrap();
     let signal = CancellationToken::new();
 
@@ -1180,7 +1179,7 @@ async fn resolves_false_closing_a_handle_nobody_holds() {
 }
 
 #[tokio::test]
-async fn counts_the_connections_it_holds_and_gives_their_handles() {
+async fn counts_the_connections_it_holds_and_gives_their_handles_for_no_one_outside_the_process() {
     let (server, recorder, port) = started(&briefly_closing()).await;
     let _first = client(port).await;
     let _second = client(port).await;
@@ -1478,7 +1477,8 @@ async fn answers_a_close_at_once_and_says_it_was_clean() {
 }
 
 #[tokio::test]
-async fn tells_a_close_from_its_peer_with_no_status_code_unclean_as_it_reads_1005() {
+async fn tells_a_close_from_its_peer_with_no_status_code_as_its_platform_reads_it_clean_on_net_which_reads_it_as_1000_unclean_on_ws_which_reads_1005()
+ {
     let (server, recorder, port) = started(&briefly_closing()).await;
     let mut client = client(port).await;
     let handle = recorder.connections(1).await.remove(0);
@@ -1714,7 +1714,7 @@ async fn drops_a_connection_that_never_answers_its_close_once_the_timeout_passed
 }
 
 #[tokio::test]
-async fn waits_on_its_peer_without_end_for_a_close_timeout_of_never_arming_no_timer() {
+async fn waits_on_its_peer_without_end_for_a_close_timeout_of_infinity_arming_no_timer() {
     let (server, recorder, port) = started(&WebSocketTransportServerOptions {
         close_timeout: Some(NEVER),
         ..WebSocketTransportServerOptions::default()
@@ -1812,7 +1812,7 @@ async fn stamps_the_activity_on_its_clock_and_bounds_a_close_on_the_real_one_whi
 }
 
 #[tokio::test]
-async fn stop_closes_every_connection_with_1001_each_telling_its_close_before_it_resolves_and_stops_listening()
+async fn stop_closes_every_connection_each_raising_its_close_before_it_resolves_and_stops_listening()
  {
     let (server, recorder, port) = started(&briefly_closing()).await;
     let mut first = client(port).await;
@@ -2770,7 +2770,8 @@ async fn a_websocket_server_transport_takes_the_procedures_it_is_given() {
 }
 
 #[tokio::test]
-async fn pings_each_connection_every_heartbeat_and_drops_one_that_left_a_ping_unanswered() {
+async fn pings_each_connection_every_heartbeat_and_drops_one_that_left_a_ping_unanswered_or_could_not_be_sent_one()
+ {
     let stepping = SteppingClock::new(SystemTime::UNIX_EPOCH);
     let (server, recorder, port) = started_on(
         Arc::<SteppingClock>::clone(&stepping),
@@ -2812,7 +2813,7 @@ async fn pings_each_connection_every_heartbeat_and_drops_one_that_left_a_ping_un
 }
 
 #[tokio::test]
-async fn keeps_the_clients_that_answer_its_pings_and_drops_one_that_does_not_on_the_wire() {
+async fn drops_a_peer_that_never_answers_its_pings_and_keeps_one_that_does() {
     // beats wide enough that a pong never misses one on a loaded machine
     let (server, recorder, port) = started(&WebSocketTransportServerOptions {
         heartbeat: Some(Duration::from_millis(200)),
@@ -2845,7 +2846,7 @@ async fn keeps_the_clients_that_answer_its_pings_and_drops_one_that_does_not_on_
 }
 
 #[tokio::test]
-async fn beats_every_30_seconds_when_told_nothing() {
+async fn beats_every_heartbeat_when_told_nothing() {
     let stepping = SteppingClock::new(SystemTime::UNIX_EPOCH);
     let (server, recorder, port) =
         started_on(Arc::<SteppingClock>::clone(&stepping), &briefly_closing()).await;
@@ -2860,7 +2861,7 @@ async fn beats_every_30_seconds_when_told_nothing() {
 }
 
 #[tokio::test]
-async fn beats_nothing_with_a_heartbeat_of_never() {
+async fn pings_nothing_with_a_heartbeat_of_infinity() {
     for (heartbeat, dues) in [
         (Duration::from_millis(200), vec![Duration::from_millis(200)]),
         (NEVER, vec![]),
