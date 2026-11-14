@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using MQTTnet;
 
 namespace Bead.Transport.Mqtt;
 
@@ -70,6 +71,9 @@ public sealed record MqttBrokerAdapterOptions
 
     /// <summary>False where its broker is known to offer no shared subscription (spec 15.25): true unless told, MQTT 5's default.</summary>
     public bool Groups { get; init; } = true;
+
+    // a test's: the client it links through, around MQTTnet's own
+    internal Func<IMqttClient, IMqttClient>? ClientOf { get; init; }
 
     // every member as the compiler writes it, but its password and its provider, of which whether one is set
     private bool PrintMembers(StringBuilder builder)

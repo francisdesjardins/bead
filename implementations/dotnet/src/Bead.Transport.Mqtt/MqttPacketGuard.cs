@@ -8,6 +8,7 @@ using MQTTnet.Channel;
 using MQTTnet.Diagnostics.Logger;
 using MQTTnet.Formatter;
 using MQTTnet.Implementations;
+using MQTTnet.Packets;
 
 namespace Bead.Transport.Mqtt;
 
@@ -19,6 +20,12 @@ internal sealed record MqttPacketGuardOptions
 
     /// <summary>Told once, with the packet's size, as the first packet past it is judged.</summary>
     public required Action<long> PastMaximum { get; init; }
+
+    /// <summary>
+    /// Told as its reads end, before MQTTnet hears it: a packet it could not decode, its network
+    /// connection's end or its failure; none tells nothing.
+    /// </summary>
+    public Action? ReadsEnded { get; init; }
 }
 
 /// <summary>
@@ -41,11 +48,139 @@ internal sealed class GuardedAdapterFactory(MqttPacketGuardOptions guarded) : IM
         };
         var formatter = new MqttPacketFormatterAdapter(options.ProtocolVersion, new MqttBufferWriter(options.WriterBufferSize, options.WriterBufferSizeMax));
 
-        return new MqttChannelAdapter(new MqttPacketGuard(channel, guarded), formatter, logger)
+        var adapter = new MqttChannelAdapter(new MqttPacketGuard(channel, guarded), formatter, logger)
         {
             AllowPacketFragmentation = options.AllowPacketFragmentation,
             PacketInspector = packetInspector,
         };
+
+        return guarded.ReadsEnded is { } ended ? new ReadEndingAdapter(adapter, ended) : adapter;
+    }
+}
+
+/// <summary>
+/// MQTTnet's adapter of a channel, which tells its reads' end before MQTTnet hears it: MQTTnet fails
+/// what awaits its link on that end, and says that link disconnected only after (spec 15.29), so
+/// what reads its end then knows its link lost, its client still saying it connected.
+/// </summary>
+internal sealed class ReadEndingAdapter(IMqttChannelAdapter inner, Action ended) : IMqttChannelAdapter
+{
+    /// <inheritdoc/>
+    public long BytesReceived
+    {
+        get
+        {
+            return inner.BytesReceived;
+        }
+    }
+
+    /// <inheritdoc/>
+    public long BytesSent
+    {
+        get
+        {
+            return inner.BytesSent;
+        }
+    }
+
+    /// <inheritdoc/>
+    public X509Certificate2 ClientCertificate
+    {
+        get
+        {
+            return inner.ClientCertificate;
+        }
+    }
+
+    /// <inheritdoc/>
+    public EndPoint RemoteEndPoint
+    {
+        get
+        {
+            return inner.RemoteEndPoint;
+        }
+    }
+
+    /// <inheritdoc/>
+    public EndPoint LocalEndPoint
+    {
+        get
+        {
+            return inner.LocalEndPoint;
+        }
+    }
+
+    /// <inheritdoc/>
+    public bool IsSecureConnection
+    {
+        get
+        {
+            return inner.IsSecureConnection;
+        }
+    }
+
+    /// <inheritdoc/>
+    public MqttPacketFormatterAdapter PacketFormatterAdapter
+    {
+        get
+        {
+            return inner.PacketFormatterAdapter;
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task ConnectAsync(CancellationToken cancellationToken)
+    {
+        return inner.ConnectAsync(cancellationToken);
+    }
+
+    /// <inheritdoc/>
+    public Task DisconnectAsync(CancellationToken cancellationToken)
+    {
+        return inner.DisconnectAsync(cancellationToken);
+    }
+
+    /// <summary>The next packet, or none at its connection's end, its end told first.</summary>
+    public async Task<MqttPacket> ReceivePacketAsync(CancellationToken cancellationToken)
+    {
+        MqttPacket? packet;
+
+        try
+        {
+            packet = await inner.ReceivePacketAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            ended();
+
+            throw;
+        }
+
+        if (packet is null)
+        {
+            ended();
+        }
+
+        // ! MQTTnet's own none at its connection's end, which its interface does not say
+        return packet!;
+    }
+
+    /// <inheritdoc/>
+    public void ResetStatistics()
+    {
+        inner.ResetStatistics();
+    }
+
+    /// <inheritdoc/>
+    public Task SendPacketAsync(MqttPacket packet, CancellationToken cancellationToken)
+    {
+        return inner.SendPacketAsync(packet, cancellationToken);
+    }
+
+    /// <inheritdoc/>
+    public void Dispose()
+    {
+        inner.Dispose();
     }
 }
 

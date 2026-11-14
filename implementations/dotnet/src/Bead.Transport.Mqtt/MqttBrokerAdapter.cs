@@ -240,7 +240,7 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     public async Task Start(BrokerStart? start = null)
     {
         Link? guarded = null;
-        var client = new MqttClientFactory().CreateMqttClient(new GuardedAdapterFactory(new MqttPacketGuardOptions
+        var made = new MqttClientFactory().CreateMqttClient(new GuardedAdapterFactory(new MqttPacketGuardOptions
         {
             MaximumPacketSize = _options.MaximumPacketSize,
             PastMaximum = (size) =>
@@ -251,7 +251,15 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
                     PastMaximum((guarded, size));
                 }
             },
+            ReadsEnded = () =>
+            {
+                if (guarded is not null)
+                {
+                    ReadsEnded(guarded);
+                }
+            },
         }));
+        var client = _options.ClientOf?.Invoke(made) ?? made;
         var link = guarded = new Link(client);
 
         lock (_gate)
@@ -735,7 +743,7 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             // peer reading no subscriber before its 1001; one filter each, since one packet of
             // every filter may pass its broker's Maximum Packet Size, a Protocol Error that
             // publishes its will
-            if (link.IsUp && link.Client.IsConnected && !IsEnded(link))
+            if (link.IsUp && IsReading(link))
             {
                 List<string> filters;
 
@@ -773,7 +781,7 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             // connected, its CONNACK read, even before its start's continuation counted it up, and
             // never once its link ended or was lost, a packet its client cannot read ending it,
             // which MQTTnet may say connected a moment more
-            if (!isLost && link.Client.IsConnected && !IsEnded(link))
+            if (!isLost && IsReading(link))
             {
                 using var timeout = new CancellationTokenSource(_options.ConnectTimeout, TimeProvider.System);
 
@@ -1129,6 +1137,26 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         }
     }
 
+    // its client's reads ended, told before MQTTnet fails what awaits on that end: a stop then sends
+    // no DISCONNECT, MQTTnet saying it connected a moment more
+    private void ReadsEnded(Link link)
+    {
+        lock (_gate)
+        {
+            link.IsReadEnded = true;
+        }
+    }
+
+    // whether its link still reads: MQTTnet says it connected, its reads did not end, and it did not
+    // end
+    private bool IsReading(Link link)
+    {
+        lock (_gate)
+        {
+            return link.Client.IsConnected && !link.IsReadEnded && !link.IsEnded;
+        }
+    }
+
     // a message received, handed on before its PUBACK, which its participant's settle sends, once,
     // on the link it came by alone; one MQTTnet dispatches once its link ended is dropped
     private void Take((Link Link, MqttApplicationMessageReceivedEventArgs Received) taken)
@@ -1375,6 +1403,9 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
         // what a message's hand-on holds, its end awaiting it
         public Lock Handing { get; } = new();
+
+        // whether its client's reads ended, which MQTTnet tells after it failed what awaits on it
+        public bool IsReadEnded { get; set; }
 
         public CancellationTokenSource Life { get; } = new();
 

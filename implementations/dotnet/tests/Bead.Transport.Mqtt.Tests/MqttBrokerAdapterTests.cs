@@ -1619,6 +1619,77 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Sends_no_DISCONNECT_at_its_stop_once_its_reads_ended_on_a_packet_its_client_cannot_decode_its_client_saying_it_connected_a_moment_more_spec_15_26_15_29()
+    {
+        byte[] unreadable = [0x30, 0x0F, 0x00, 0x0A, .. Encoding.UTF8.GetBytes("bead/i/ada"), 0x02, 0x7F, 0x00];
+
+        _script.IsHoldingUnsubscribes = true;
+
+        // an adapter up over a client held saying it connected once told, holding a subscription
+        // to each topic given
+        async Task<(MqttBrokerAdapter Adapter, ScriptedLink Link, HeldConnectedClient Client)> Up(string[][] topics)
+        {
+            HeldConnectedClient? held = null;
+            var adapter = AdapterOf((options) =>
+            {
+                return options with
+                {
+                    ClientOf = (client) =>
+                    {
+                        return held = new HeldConnectedClient(client);
+                    },
+                };
+            });
+            var link = await LinkUp((adapter, _script));
+
+            foreach (var topic in topics)
+            {
+                var subscribing = adapter.Subscribe(topic);
+
+                await SubAckOf((link, 1));
+                await subscribing.WaitAsync(Patience, Cancelled);
+            }
+
+            return (adapter, link, held!);
+        }
+
+        // * MQTTnet's moment held: what its stop awaited failed with its link, its client saying it
+        // connected all the same; its stop settles, no DISCONNECT asked
+        async Task IsEndedBy((MqttBrokerAdapter Adapter, ScriptedLink Link, HeldConnectedClient Client) up, Task stopping)
+        {
+            up.Client.IsHeld = true;
+            await up.Link.Write(unreadable);
+            await stopping.WaitAsync(Patience, Cancelled);
+            await up.Link.Closed.WaitAsync(Patience, Cancelled);
+            Assert.Equal(0, up.Client.Disconnects);
+            Assert.DoesNotContain(up.Link.Packets, (packet) =>
+            {
+                return packet is MqttDisconnectPacket;
+            });
+            up.Client.IsHeld = false;
+            await up.Adapter.DisposeAsync();
+        }
+
+        // * in its drain, no filter held: its publication's PUBACK awaited
+        var draining = await Up([]);
+        var published = draining.Adapter.Publish(new BrokerPublication { Topic = Name, Payload = (byte[])[1] });
+
+        await draining.Link.Next<MqttPublishPacket>();
+        await IsEndedBy(draining, draining.Adapter.Stop());
+        await Record.ExceptionAsync(() =>
+        {
+            return published;
+        });
+
+        // * in its let-go: its UNSUBACK withheld
+        var letting = await Up([Inbox]);
+        var stopping = letting.Adapter.Stop();
+
+        await letting.Link.Next<MqttUnsubscribePacket>();
+        await IsEndedBy(letting, stopping);
+    }
+
+    [Fact]
     public async Task Reads_an_acknowledgement_of_0x80_or_more_its_table_does_not_name_as_a_refusal_awaited_or_not_naming_its_code_its_link_kept_spec_15_27_15_28()
     {
         await using var adapter = AdapterOf();

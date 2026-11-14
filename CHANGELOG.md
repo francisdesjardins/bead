@@ -175,6 +175,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The C# MQTT adapter hands nothing on of a link once its down was told: a PUBLISH MQTTnet
   dispatched as the link ended could reach the participant after its down, which the TypeScript
   and Rust sides never hand on; it is dropped, as theirs is.
+- The C# MQTT adapter's stop sends no DISCONNECT once its client's reads ended, a packet MQTTnet
+  cannot decode among them, in its drain as in its let-go (spec 15.29): MQTTnet says its link
+  connected a moment past that end, and a stop that held no filter read it so and sent one.
 
 ### Security
 
