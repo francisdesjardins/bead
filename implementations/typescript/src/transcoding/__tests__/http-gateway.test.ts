@@ -1155,6 +1155,34 @@ test('answers what no gate foresaw 500, reported, none of its words in the probl
   expect(reported).toEqual(['the clock broke']);
 });
 
+test('answers a route’s variable that names no field 500, reported, none of its words in the problem', async () => {
+  // * getBook's route told its path is /v1/{nope}, which no field of its request names: a
+  // programmer's error its binding meets, past every gate, before any connection is drawn
+  await using fixture = await startTranscoding({
+    routes: HTTP_ROUTES.map((init) => {
+      return init.procedure === TranscodingProcedures.getBook
+        ? { ...init, routes: [{ method: 'GET', template: '/v1/{nope}' }] }
+        : init;
+    }),
+  });
+  const reported = reportedBy(fixture.gateway);
+  let connections = 0;
+
+  fixture.server.transport.on('connection', () => {
+    connections += 1;
+  });
+
+  const answered = await send(fixture.port, { method: 'GET', path: '/v1/x' });
+
+  expect(answered).toMatchObject({
+    body: '{"status":500,"title":"Internal Server Error","type":"about:blank"}',
+    status: 500,
+  });
+  expect(connections).toBe(0);
+  expect(reported).toHaveLength(1);
+  expect(reported[0]).toContain('nope');
+});
+
 test('answers 500 a connection its server failed to draw but by refusing it, reported, with no detail', async () => {
   // * a transport whose accept throws what no refusal of a connect is; C#'s, a concrete class,
   // takes no stand-in, and refuses an exchange's port past 65535, which no socket of Node's shows
