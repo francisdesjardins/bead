@@ -1984,6 +1984,66 @@ public sealed partial class RouterClientTests
         Assert.Empty(scripted.Errors);
     }
 
+    // debugging 4.4; spec 9.0
+    [Fact]
+    public async Task A_request_made_inside_a_notification_callback_names_its_call_id_on_its_tx_step()
+    {
+        using var scripted = new ScriptedRouter();
+        var (router, transport) = (scripted.Router, scripted.Transport);
+        var services = new ServiceManager(router);
+        var notification = services.GetNotification(Service, new NotificationDependencies<string, string, string> { Serializer = Text });
+        var asking = services.GetRequest(Service, new RequestDependencies<string, string> { Serializer = Text });
+        var steps = new List<(DebugDirection Direction, uint? CallId)>();
+        var requests = new List<uint>();
+        var subscribed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var requested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var reading = new TaskCompletionSource<Task<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        services.Debug += (_, step) =>
+        {
+            if (step.Type == DebugType.Request && (Equals(step.Tx, "read") || Equals(step.Rx, "counter at 1")))
+            {
+                lock (steps)
+                {
+                    steps.Add((step.Direction, step.CallId));
+                }
+            }
+        };
+        router.Debug += (direction, envelope) =>
+        {
+            if (direction == DebugDirection.Tx && envelope.Header is RequestHeader { CallId: var callId })
+            {
+                lock (requests)
+                {
+                    requests.Add(callId);
+                }
+
+                (callId == 1 ? subscribed : requested).TrySetResult();
+            }
+        };
+
+        var registering = notification.Register("subscribe", (_) =>
+        {
+            // * made from within the notification's callback
+            reading.TrySetResult(asking("read")());
+
+            return Task.CompletedTask;
+        })();
+
+        await subscribed.Task.WaitAsync(Patience, Cancelled);
+        transport.Deliver(ResultOf(1));
+        await using var registration = await registering.WaitAsync(Patience, Cancelled);
+        transport.Deliver(new Envelope { Header = new NotificationHeader { CallId = 1 }, Payload = Text.Encode("changed") });
+        await requested.Task.WaitAsync(Patience, Cancelled);
+        transport.Deliver(new Envelope { Header = new ResultHeader { CallId = 3 }, Payload = Text.Encode("counter at 1") });
+
+        Assert.Equal("counter at 1", await (await reading.Task.WaitAsync(Patience, Cancelled)).WaitAsync(Patience, Cancelled));
+        await scripted.Settle();
+        Assert.Equal([1u, 3u], requests);
+        Assert.Equal<(DebugDirection, uint?)>([(DebugDirection.Tx, 3), (DebugDirection.Rx, 3)], steps);
+        Assert.Empty(scripted.Errors);
+    }
+
     // the C# side's alone: one thread runs the TypeScript side, which has no scheduler to stay off
     [Fact]
     public async Task Tells_a_call_s_tx_step_off_its_router_s_scheduler()
