@@ -82,6 +82,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Spec 15.3: a text message that is no UTF-8 fails its WebSocket with 1007 (RFC 6455 §8.1, §7.4.1),
   and never reaches its router; a page's `WebSocket` fails it as its browser does.
   `spec/transports.json` plays it over a WebSocket, every side; the spec's next version is a minor.
+- `spec/transcoding.json`'s exchange of a `#` is two, the `#` and `%23` apart, and an exchange
+  names the rows that excuse a side from it, as a case of `spec/transports.json` does; every player
+  skips the one that excuses its own (decision 0052).
 
 ### Fixed
 

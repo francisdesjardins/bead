@@ -610,6 +610,11 @@ for whole in ('codecs', 'identities'):
             check_crossing(f'{whole}: {group}, {entry["name"]!r},', entry.get('differs', []), f'spec/{whole}.json',
                            entry['name'])
 
+# the transcoding's exchanges name their file beside themselves, as the codecs' entries do
+for entry in named['transcoding/exchanges']:
+    check_crossing(f'transcoding: exchanges, {entry["name"]!r},', entry.get('differs', []), 'spec/transcoding.json',
+                   entry['name'])
+
 # ── The durations ───────────────────────────────────────────────────────────────────────────────
 
 durations = documents['durations']

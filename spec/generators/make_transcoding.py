@@ -3707,8 +3707,9 @@ def call_failed(given, *, on='a', procedure=None, rule=None):
                                                     'bead-refusal': None, **fields}, 'body': text}, 'on': on}
 
 
-def exchange(name, clauses, steps, *, options=None, real_time=False):
-    """An exchange, which cites the row of 7.7's table of each refusal it meets."""
+def exchange(name, clauses, steps, *, options=None, real_time=False, differs=None):
+    """An exchange, which cites the row of 7.7's table of each refusal it meets, and names the rows of
+    docs/support.md that excuse a side from it, as a case of spec/transports.json does."""
     refusals = [REFUSAL_ROWS[step['expect']['fields']['bead-refusal']] for step in steps
                 if step.get('expect', {}).get('fields', {}).get('bead-refusal')]
     entry = {'name': name, 'clauses': [*clauses, *(['7.7'] if refusals else []), *refusals]}
@@ -3718,6 +3719,9 @@ def exchange(name, clauses, steps, *, options=None, real_time=False):
 
     if real_time:
         entry['realTime'] = True
+
+    if differs:
+        entry['differs'] = differs
 
     return {**entry, 'steps': steps}
 
@@ -4007,18 +4011,21 @@ EXCHANGES = [
               send('GET', '/v1/books/a"b', on='j'),
               {'expect': {'status': 400, 'fields': {'bead-refusal': None, 'content-type': None}, 'body': ''},
                'on': 'j'}]),
-    # ! an exchange of its own, so that a side that cannot see a # (hyper's Uri cuts a target there) is
-    # excused from this alone: no form of a request-target carries a fragment (spec 15.12, RFC 9112
-    # §3.2), so a # anywhere in a target makes its request-line invalid, judged before the path is
-    # matched; %23 is an octet the target encodes, decoded into its variable as any other
+    # ! two exchanges, the # apart from its %23, so that a side that cannot see a # (hyper's Uri cuts a
+    # target there, the row A # in a target) is excused by its differs from the first alone and plays the
+    # second: no form of a request-target carries a fragment (spec 15.12, RFC 9112 §3.2), so a # anywhere
+    # in a target makes its request-line invalid, judged before the path is matched; %23 is an octet the
+    # target encodes, decoded into its variable as any other
     exchange("a target holding a # is refused as HTTP refuses it, unmarked, its body empty, before its path is "
-             "matched; %23 is a path's",
+             "matched",
              ['3.6', '10.1', '10.1.1', 'spec:15.12'],
-             [send('GET', '/v1/books/a#b', on='a'),
+             [send('GET', '/v1/books/a#b'),
               {'expect': {'status': 400, 'fields': {'bead-refusal': None, 'content-type': None}, 'body': ''},
-               'on': 'a'},
-              send('GET', '/v1/books/a%23b', on='b'),
-              answered(result('Book', {'name': 'a#b', 'title': 'A tale'}), on='b')]),
+               'on': 'a'}],
+             differs=[{'row': 'A # in a target', 'language': 'Rust'}]),
+    exchange("%23 in a target is a path's, decoded into its variable as any other octet it encodes",
+             ['3.6', 'spec:15.12'],
+             [send('GET', '/v1/books/a%23b'), answered(result('Book', {'name': 'a#b', 'title': 'A tale'}))]),
     exchange("a body past maximumBodyBytes as it comes, 413", ['9.3', '10.1', '10.1.10'],
              [{'send': {'head': 'POST /api/Transcoding/echo HTTP/1.1' + chr(13) + chr(10) + 'host: {host}' + chr(13) + chr(10)
                         + 'content-type: application/json' + chr(13) + chr(10) + 'transfer-encoding: chunked'
@@ -4145,7 +4152,7 @@ DOCUMENT_JSON = {
         "bindings are requests bound by section 4: procedure, its procedure; route, its method, its template and its body as its rule gives them; target, the request's target, raw; body, its body's text where it has one; then payload, the request's message as its binary payload, compared as a reading's is, or refused, the reason, which a gateway answers 400 PAYLOAD_UNDECODABLE, and pointer or parameter, where the request carried it, as 7.4 places it, none for its text or its query whole.",
         "failures are a call's failure as a gateway answers it (section 7). failure is its code; its scope, protocol where none is given; its detail as the gateway's client read it; where it arose, arose: server, its server answered it of the request; client, its client raised it before the call went; answer, its client raised it of a result or a notification; gateway, the gateway's own reading of the request; encoding, of a request its server could not read, proto where none is given; credential, true where its call presented one; challenge, where the gateway is given one, Bearer otherwise; pointer or parameter, where the gateway's reading met what it refuses. Or own, a failure of the gateway's own — timeout, closed, unwritable, jwt, scheme or failed — with its detail, its words, empty for none. procedure and route, for PAYLOAD_INVALID, its procedure and the route its request came by; problemTypes, the problem types its definitions give, https://example.com/problems/ where none is given, null for none. status, fields beside it, and problem, the body's text, byte for byte.",
         "events are a stream's call as a gateway writes it (section 8): steps, what its call gives, in their order — result and notification, each its data: a JSON text, a text, as text, or bytes in hexadecimal, as raw, which 8.4 writes as JSON strings; heartbeat, its heartbeat's timer firing; failure, a problem's status and its text — then status, contentType and body, the response's, byte for byte.",
-        "exchanges are HTTP exchanges with a gateway of the Transcoding service, in process, its server joined, over a real socket, each step as spec/transports.json plays one. send writes a request on a socket of its own, opened for the exchange it names with on: head, its octets as text, each character one octet, as ISO-8859-1 writes it, in which {host} is the gateway's host and port, an IP literal, and {etag}, or any other name a field captured, the value captured under it; body, its octets in hexadecimal. expect reads the response on that exchange: its status; its fields, by name in any case, each its value, null for one absent, {\"shape\": \"etag\"} for a strong entity tag of 64 lower-case hexadecimal digits, the sha256 of the document, {\"capture\"} keeping it under that name; its body, its text exactly, or bodyBytes, in hexadecimal, read by its content-length or de-chunked to its end; or stream, the octets a body that does not end begins with. In a body, {document} stands for the document beadc wrote of spec/transcoding.proto, byte for byte; a refusal's words are the companion's (7.7), each in its body as it is. close drops a socket; until waits, on the real clock and within a patience, for a count the service keeps to reach its value.",
+        "exchanges are HTTP exchanges with a gateway of the Transcoding service, in process, its server joined, over a real socket, each step as spec/transports.json plays one. send writes a request on a socket of its own, opened for the exchange it names with on: head, its octets as text, each character one octet, as ISO-8859-1 writes it, in which {host} is the gateway's host and port, an IP literal, and {etag}, or any other name a field captured, the value captured under it; body, its octets in hexadecimal. expect reads the response on that exchange: its status; its fields, by name in any case, each its value, null for one absent, {\"shape\": \"etag\"} for a strong entity tag of 64 lower-case hexadecimal digits, the sha256 of the document, {\"capture\"} keeping it under that name; its body, its text exactly, or bodyBytes, in hexadecimal, read by its content-length or de-chunked to its end; or stream, the octets a body that does not end begins with. In a body, {document} stands for the document beadc wrote of spec/transcoding.proto, byte for byte; a refusal's words are the companion's (7.7), each in its body as it is. close drops a socket; until waits, on the real clock and within a patience, for a count the service keeps to reach its value. Each item of differs names a row of docs/support.md an exchange crosses, which names this file and the exchange, and the language it excuses: what that language's platform does otherwise before its gateway reads the request. A harness plays every exchange but those a differs excuses its language from.",
         "defaults are the gateway's options where a case gives none, by the names of transcoding 2.4, 7.6, 8.7, 8.8, 9.2, 10.3 and 11.1, and of spec 15.12, in milliseconds for a time; options, where given, are a case's beside them. service is what each procedure's resolver does, by its name, what its server verifies, and the counts an exchange waits on. A case marked realTime plays on the real clock.",
         "clauses are the units of transcoding.md an entry checks: a clause, 5.2; an item of its numbered list, 5.2.1; a row of its table, counted from 1, 7.6.8; and a unit of spec.md behind spec:, spec:9.2.5, after them.",
     ],

@@ -126,6 +126,7 @@ interface IEventsEntry extends IEntry {
 type ExpectedField = string | null | { capture?: string; shape: 'etag' };
 
 interface IExchangeEntry extends IEntry {
+  differs?: { language: string; row: string }[];
   options?: Record<string, unknown>;
   realTime?: true;
   steps: {
@@ -528,6 +529,15 @@ const gatewayOptionsOf = (entry: IExchangeEntry): Record<string, unknown> => {
   };
 };
 
+// an exchange a row of the support matrix excuses this side from, which it does not play
+const isExcused = ({ differs }: IExchangeEntry): boolean => {
+  return (
+    differs?.some(({ language }) => {
+      return language === 'TypeScript';
+    }) === true
+  );
+};
+
 // tests
 
 test('compares payload signed zeros, NaNs and unknown fields', () => {
@@ -797,6 +807,10 @@ test.describe('plays transcoding.json', () => {
   }
 
   for (const entry of FILE.exchanges) {
+    if (isExcused(entry)) {
+      continue;
+    }
+
     test(`exchanges: ${entry.name}`, async () => {
       await using fixture = await startTranscoding(gatewayOptionsOf(entry));
       const peers = new Map<string, IPeer>();
