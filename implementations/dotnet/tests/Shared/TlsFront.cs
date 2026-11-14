@@ -11,29 +11,102 @@ namespace Bead.Tests;
 
 /// <summary>
 /// The user's CA store of Windows, into which the platform writes the intermediates a client
-/// presents by a context: its PKI's intermediate let go of before the first test of an assembly and
-/// after its last, by thumbprint, so that no run judges a chain by what another left. Nothing on any
-/// other platform, whose store the platform leaves alone.
+/// presents by a context: its PKI's intermediate let go of by thumbprint, before the first test of
+/// the first assembly in and after the last test of the last assembly out, so that no run judges a
+/// chain by what another left. Nothing on any other platform, whose store the platform leaves alone.
 /// </summary>
 internal sealed class TlsStore : IDisposable
 {
+    // ! the store is the user's, and `dotnet test --solution` runs the WebSocket and HTTP assemblies
+    // at once: a clean by one while the other's client is between its context and its handshake
+    // leaves that client presenting its leaf alone, which its server refuses. So each assembly counts
+    // itself in a semaphore of the user's session, and only an assembly that finds no other in it
+    // cleans, under a mutex of the same session
+    private const string Name = @"Local\Bead.Tests.TlsStore";
+
+    private readonly Mutex? _turn;
+    private readonly Semaphore? _assemblies;
+
     public TlsStore()
-    {
-        Clean();
-    }
-
-    public void Dispose()
-    {
-        Clean();
-    }
-
-    private static void Clean()
     {
         if (!OperatingSystem.IsWindows())
         {
             return;
         }
 
+        _turn = new Mutex(false, $"{Name}.Turn");
+        _assemblies = new Semaphore(0, int.MaxValue, $"{Name}.Assemblies");
+        Take(_turn);
+
+        try
+        {
+            if (!IsAnyIn(_assemblies))
+            {
+                Clean();
+            }
+
+            _assemblies.Release();
+        }
+        finally
+        {
+            _turn.ReleaseMutex();
+        }
+    }
+
+    public void Dispose()
+    {
+        if (_turn is null || _assemblies is null)
+        {
+            return;
+        }
+
+        Take(_turn);
+
+        try
+        {
+            _assemblies.WaitOne(0);
+
+            if (!IsAnyIn(_assemblies))
+            {
+                Clean();
+            }
+        }
+        finally
+        {
+            _turn.ReleaseMutex();
+            _turn.Dispose();
+            _assemblies.Dispose();
+        }
+    }
+
+    // the mutex taken, from a process that ended holding it too
+    private static void Take(Mutex turn)
+    {
+        try
+        {
+            turn.WaitOne();
+        }
+        catch (AbandonedMutexException)
+        {
+            // taken all the same
+        }
+    }
+
+    // whether another assembly counts itself in, its count left as it was
+    private static bool IsAnyIn(Semaphore assemblies)
+    {
+        if (!assemblies.WaitOne(0))
+        {
+            return false;
+        }
+
+        assemblies.Release();
+
+        return true;
+    }
+
+    private static void Clean()
+    {
         using var intermediate = X509Certificate2.CreateFromPem(Pki.Read("intermediate.pem"));
         using var store = new X509Store(StoreName.CertificateAuthority, StoreLocation.CurrentUser);
 
