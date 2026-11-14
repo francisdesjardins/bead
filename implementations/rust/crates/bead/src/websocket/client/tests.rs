@@ -633,8 +633,7 @@ async fn fails_a_101_whose_connection_lists_upgrade_among_other_tokens() {
     held.stop.cancel();
 }
 
-#[tokio::test]
-async fn rejects_with_a_connect_error_when_nothing_listens() {
+async fn compares_a_refused_connect_and_its_retry() {
     let client = client();
     let refused = settled(client.connect(&to(closed_port().await))).await;
 
@@ -643,6 +642,14 @@ async fn rejects_with_a_connect_error_when_nothing_listens() {
         "{refused:?}"
     );
     assert!(is_state(&client, ReadyState::Closed), "closed");
+    let server = hearing(None).await;
+    settled(client.connect(&to(server.port))).await.unwrap();
+    assert_eq!(
+        client.ready_state(),
+        ReadyState::Open,
+        "the same client opens again"
+    );
+    client.dispose();
 }
 
 #[tokio::test]
@@ -700,8 +707,7 @@ async fn rejects_a_second_connect_while_the_first_is_connecting_opening_one_sock
 }
 
 // spec 15.15
-#[tokio::test]
-async fn rejects_with_a_timeout_error_then_drops_a_socket_that_never_finished_its_handshake() {
+async fn compares_a_timed_out_handshake() {
     let mut held = holding().await;
     // its timeout on the test clock, which alone moves it
     let clock = stepping();
@@ -712,6 +718,11 @@ async fn rejects_with_a_timeout_error_then_drops_a_socket_that_never_finished_it
     });
     // its handshake held at the server
     let mut socket = held.next().await;
+    let request_head = patience(PATIENCE, head_of(&mut socket)).await.unwrap();
+    assert!(
+        request_head.ends_with(b"\r\n\r\n"),
+        "the whole upgrade request"
+    );
 
     clock.advance(Duration::from_millis(100)).await;
 
@@ -720,6 +731,10 @@ async fn rejects_with_a_timeout_error_then_drops_a_socket_that_never_finished_it
     assert!(
         is_timed_out(&refused, Duration::from_millis(100)),
         "{refused:?}"
+    );
+    assert_eq!(
+        refused.expect_err("timed out").to_string(),
+        "timed out after 100ms"
     );
     assert!(is_state(&client, ReadyState::Closed), "closed");
     // the socket closes on its own, with the server still holding its handshake
@@ -804,21 +819,27 @@ async fn rejects_with_a_cancel_error_closed_when_its_signal_aborts_during_the_ha
 }
 
 // spec 15.15
-#[tokio::test]
-async fn dispose_while_connecting_rejects_the_connect_with_a_connect_error() {
-    let mut held = holding().await;
-    let client = client();
-    let connecting = client.connect(&WebSocketTransportClientConnectOptions {
-        timeout: Some(NEVER),
-        ..to(held.port)
-    });
-    let mut socket = held.next().await;
+async fn compares_disposal_during_a_handshake() {
+    for timeout in [None, Some(NEVER)] {
+        let mut held = holding().await;
+        let client = client();
+        let connecting = client.connect(&WebSocketTransportClientConnectOptions {
+            timeout,
+            ..to(held.port)
+        });
+        let mut socket = held.next().await;
+        let request_head = patience(PATIENCE, head_of(&mut socket)).await.unwrap();
+        assert!(
+            request_head.ends_with(b"\r\n\r\n"),
+            "the whole unanswered upgrade"
+        );
 
-    client.dispose();
+        client.dispose();
 
-    assert!(is_disposed(&settled(connecting).await), "disposed");
-    assert!(is_state(&client, ReadyState::Closed), "closed");
-    assert!(ends(&mut socket).await, "its socket dropped");
+        assert!(is_disposed(&settled(connecting).await), "disposed");
+        assert!(is_state(&client, ReadyState::Closed), "closed");
+        assert!(ends(&mut socket).await, "its socket dropped");
+    }
 }
 
 #[tokio::test]
@@ -2822,25 +2843,43 @@ async fn rejects_with_a_reconnect_error_caused_by_a_connect_error_when_the_serve
 
 // ── Its ready state ──────────────────────────────────────────────────────────────────────────
 
-#[tokio::test]
-async fn only_one_ready_state_is_true_at_a_time() {
-    let server = hearing(None).await;
+async fn compares_each_held_ready_state() {
+    let mut held = holding().await;
     let client = client();
-
     assert_eq!(client.ready_state(), ReadyState::Uninitialized, "first");
-
-    let connecting = client.connect(&to(server.port));
-
-    assert_eq!(client.ready_state(), ReadyState::Connecting, "connecting");
+    let connecting = client.connect(&to(held.port));
+    let socket = held.next().await;
+    assert_eq!(
+        client.ready_state(),
+        ReadyState::Connecting,
+        "the peer has not answered"
+    );
+    let mut peer = patience(PATIENCE, tokio_tungstenite::accept_async(socket))
+        .await
+        .unwrap()
+        .unwrap();
     settled(connecting).await.unwrap();
     assert_eq!(client.ready_state(), ReadyState::Open, "open");
-
-    let disconnecting = client
+    let closing = client
         .disconnect(&TransportClientDisconnectOptions::default())
         .unwrap();
-
-    assert_eq!(client.ready_state(), ReadyState::Closing, "closing");
-    patience(PATIENCE, disconnecting).await.unwrap();
+    assert_eq!(
+        client.ready_state(),
+        ReadyState::Closing,
+        "the peer has not read its close"
+    );
+    let received = patience(PATIENCE, peer.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(received, Message::Close(_)),
+        "the actual close frame"
+    );
+    // Tungstenite queues the received close's answer; only this flush lets it go.
+    peer.flush().await.unwrap();
+    patience(PATIENCE, closing).await.unwrap();
     assert_eq!(client.ready_state(), ReadyState::Closed, "closed");
 }
 
@@ -3960,4 +3999,186 @@ async fn offers_its_protocols_in_the_handshake() {
         "cancelled while unanswered"
     );
     assert_eq!(client.ready_state(), ReadyState::Closed);
+}
+
+#[tokio::test]
+async fn rejects_with_a_connect_error_when_nothing_listens() {
+    compares_a_refused_connect_and_its_retry().await;
+}
+
+#[tokio::test]
+async fn throws_what_its_socket_threw_when_nothing_listens_ending_closed_and_can_connect_again() {
+    compares_a_refused_connect_and_its_retry().await;
+}
+
+#[tokio::test]
+async fn rejects_with_a_timeout_error_then_drops_a_socket_that_never_finished_its_handshake() {
+    compares_a_timed_out_handshake().await;
+}
+
+#[tokio::test]
+async fn throws_a_timeout_exception_past_its_timeout_ending_closed_and_drops_the_socket_that_never_finished_its_handshake()
+ {
+    compares_a_timed_out_handshake().await;
+}
+
+#[tokio::test]
+async fn dispose_while_connecting_rejects_the_connect_with_a_connect_error() {
+    compares_disposal_during_a_handshake().await;
+}
+
+#[tokio::test]
+async fn dispose_async_while_connecting_fails_the_connect_ending_closed_and_closes_its_socket() {
+    compares_disposal_during_a_handshake().await;
+}
+
+#[tokio::test]
+async fn only_one_ready_state_is_true_at_a_time() {
+    compares_each_held_ready_state().await;
+}
+
+#[tokio::test]
+async fn holds_one_ready_state_at_a_time_from_uninitialized_to_closed() {
+    compares_each_held_ready_state().await;
+}
+
+#[tokio::test]
+async fn a_connect_cancelled_before_its_handshake_changes_nothing_and_one_cancelled_during_it_ends_closed()
+ {
+    let server = hearing(None).await;
+    let client = client();
+    let before = CancellationToken::new();
+    before.cancel();
+    let refused = settled(client.connect(&WebSocketTransportClientConnectOptions {
+        signal: Some(before),
+        ..to(server.port)
+    }))
+    .await;
+    assert!(is_cancelled(&refused), "the pre-cancelled connect");
+    assert_eq!(
+        client.ready_state(),
+        ReadyState::Uninitialized,
+        "nothing changes"
+    );
+    assert_eq!(
+        server.accepted.load(Ordering::SeqCst),
+        0,
+        "no socket reaches the server"
+    );
+    let mut held = holding().await;
+    let during = CancellationToken::new();
+    let connecting = client.connect(&WebSocketTransportClientConnectOptions {
+        signal: Some(during.clone()),
+        ..to(held.port)
+    });
+    let mut socket = held.next().await;
+    let request_head = patience(PATIENCE, head_of(&mut socket)).await.unwrap();
+    assert!(
+        request_head.ends_with(b"\r\n\r\n"),
+        "its whole upgrade is unanswered"
+    );
+    during.cancel();
+    assert!(
+        is_cancelled(&settled(connecting).await),
+        "cancelled during the handshake"
+    );
+    assert_eq!(client.ready_state(), ReadyState::Closed, "closed");
+    assert!(ends(&mut socket).await, "its socket closes");
+    settled(client.connect(&to(server.port))).await.unwrap();
+    assert_eq!(
+        client.ready_state(),
+        ReadyState::Open,
+        "the same client connects again"
+    );
+    client.dispose();
+}
+
+#[tokio::test]
+async fn beats_every_30_seconds_waits_30_seconds_and_asks_for_the_root_over_ws_when_told_nothing() {
+    let options = WebSocketTransportClientOptions::default();
+    assert!(options.clock.is_none(), "no supplied clock");
+    assert!(
+        options.maximum_message_bytes.is_none(),
+        "no supplied message bound"
+    );
+    let defaults = client_of(&options);
+    assert_eq!(defaults.inner.settings.heartbeat, Duration::from_secs(30));
+    assert_eq!(
+        defaults.inner.settings.close_timeout,
+        Duration::from_secs(5)
+    );
+    assert_eq!(defaults.inner.settings.maximum_message_bytes, 16_778_240);
+    let target = to(80);
+    assert_eq!((target.host.as_str(), target.port), (LOOPBACK, 80));
+    assert!(
+        target.pathname.is_none() && target.secured.is_none() && target.timeout.is_none(),
+        "the path, scheme and timeout are not supplied"
+    );
+    assert!(target.protocols.is_none(), "no supplied protocols");
+    let reconnect = TransportClientReconnectOptions::default();
+    assert!(
+        reconnect.maximum_attempts.is_none() && reconnect.signal.is_none(),
+        "no supplied attempt bound or cancellation"
+    );
+    assert!(
+        reconnect.delay.is_none() && reconnect.tap.is_none(),
+        "no delay or tap supplied"
+    );
+    defaults.dispose();
+
+    // The real default disconnect renders is_clean=true and is_quick=false.
+    let server = hearing(None).await;
+    let client = client();
+    let recorder = recorded(&client);
+    settled(client.connect(&to(server.port))).await.unwrap();
+    let request = server.heard.lock().unwrap()[0].clone();
+    assert_eq!(request.uri().path(), "/", "the default pathname");
+    assert!(
+        request.headers().get(SEC_WEBSOCKET_PROTOCOL).is_none(),
+        "no offered protocol"
+    );
+    patience(
+        PATIENCE,
+        client
+            .disconnect(&TransportClientDisconnectOptions::default())
+            .unwrap(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        recorder.closes(),
+        [(true, false)],
+        "the default close arguments"
+    );
+
+    // Its actual connect's default timeout is armed at 30 seconds, over clear TCP.
+    let mut held = holding().await;
+    let clock = stepping();
+    let transport = stepping_client(&clock);
+    let connecting = transport.connect(&to(held.port));
+    let mut socket = held.next().await;
+    let request_head = patience(PATIENCE, head_of(&mut socket)).await.unwrap();
+    assert!(
+        request_head.starts_with(b"GET / HTTP/1.1\r\n"),
+        "the root over ws, with no TLS"
+    );
+    assert_eq!(
+        clock.dues(),
+        [Duration::from_secs(30)],
+        "the real default timeout"
+    );
+    clock.advance(Duration::from_secs(29)).await;
+    assert_eq!(
+        transport.ready_state(),
+        ReadyState::Connecting,
+        "not timed out at 29 seconds"
+    );
+    clock.advance(Duration::from_secs(1)).await;
+    let refused = settled(connecting).await;
+    assert!(
+        is_timed_out(&refused, Duration::from_secs(30)),
+        "timed out at exactly 30 seconds"
+    );
+    assert_eq!(transport.ready_state(), ReadyState::Closed);
+    assert!(ends(&mut socket).await, "the unanswered socket closes");
 }
