@@ -118,6 +118,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The DevTools panel's Timeline is drawn at its view's own width, a unit a pixel, and redrawn as
+  the panel is resized, where a drawing 1,000 wide stretched to the view zoomed its text and rows.
 - The C# MQTT adapter names a refusing CONNACK by its code and MQTT 5 name, such as
   `0x86, Bad User Name or Password`; a code outside the CONNACK table has its value alone.
 - A gateway mounted behind what reads a request's body, a framework's body parser or a

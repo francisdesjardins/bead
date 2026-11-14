@@ -28,11 +28,15 @@ export interface ITimelineView {
   /** The span the Calls list is bounded to, if any. */
   range: ISpan | undefined;
   span: ISpan | undefined;
+  /** The width it is drawn at, in CSS pixels: the view's own, so a pixel of the drawing is one of the page. */
+  width?: number;
 }
 
 // constants
 
+/** The width drawn at where none is given, and the least any is drawn at: past it, the view scrolls. */
 const WIDTH = 1_000;
+const LEAST_WIDTH = 560;
 const LEFT = 170;
 const RIGHT = 16;
 const ROW = 20;
@@ -62,6 +66,9 @@ const FILLS = Object.freeze({
 /** The Timeline, its legend and its brush. */
 export const timelineViewOf = (view: ITimelineView): Node[] => {
   const { calls, nameOf, span } = view;
+  // ! drawn at the view's own width, one unit a CSS pixel: a fixed width stretched to the view
+  // scaled its text and its rows with it, zoomed on a wide panel
+  const width = Math.max(Math.round(view.width ?? WIDTH), LEAST_WIDTH);
 
   if (span === undefined) {
     return [make('p', { className: 'note', text: 'No call yet.' })];
@@ -69,7 +76,7 @@ export const timelineViewOf = (view: ITimelineView): Node[] => {
 
   const shown = calls.slice(-TIMELINE_ROWS);
   const height = TOP + shown.length * ROW + 8;
-  const scale = scaleOf(span, { left: LEFT, right: WIDTH - RIGHT });
+  const scale = scaleOf(span, { left: LEFT, right: width - RIGHT });
   const parts: SVGElement[] = ticksOf(span).flatMap((tick) => {
     const x = scale.xOf(span.from + tick);
 
@@ -162,7 +169,7 @@ export const timelineViewOf = (view: ITimelineView): Node[] => {
           class: 'hit',
           'data-key': String(call.key),
           height: ROW,
-          width: WIDTH,
+          width,
           x: 0,
           y,
         },
@@ -178,7 +185,7 @@ export const timelineViewOf = (view: ITimelineView): Node[] => {
     attributes: {
       'aria-label': 'Every call shown, on the time axis',
       role: 'img',
-      viewBox: `0 0 ${String(WIDTH)} ${String(height)}`,
+      viewBox: `0 0 ${String(width)} ${String(height)}`,
     },
     children: [...parts, brush],
   });
@@ -187,7 +194,7 @@ export const timelineViewOf = (view: ITimelineView): Node[] => {
   const xOfEvent = (event: PointerEvent): number => {
     const box = currentOf(svg).getBoundingClientRect();
 
-    return ((event.clientX - box.left) / Math.max(box.width, 1)) * WIDTH;
+    return ((event.clientX - box.left) / Math.max(box.width, 1)) * width;
   };
 
   listen(svg, {
