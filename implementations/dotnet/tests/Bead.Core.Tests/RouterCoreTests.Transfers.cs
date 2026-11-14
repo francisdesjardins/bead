@@ -1505,15 +1505,21 @@ public sealed partial class RouterCoreTests
     private sealed class Peer : IRouterCorePort
     {
         public Peer(RouterSide side, RouterLimits? limits = null, uint? lastCallId = null)
+            : this(side, new PeerOptions { Limits = limits, LastCallId = lastCallId })
+        {
+        }
+
+        // as the test says, its resolvers on a scheduler of the test's when it gives one
+        public Peer(RouterSide side, PeerOptions options)
         {
             Side = side;
             Core = new RouterCore(
                 this,
                 new RouterCoreOptions
                 {
-                    LastCallId = lastCallId,
-                    Limits = limits ?? Chunked,
-                    ResolverScheduler = Loop,
+                    LastCallId = options.LastCallId,
+                    Limits = options.Limits ?? Chunked,
+                    ResolverScheduler = options.Resolvers ?? Loop,
                     Scheduler = Loop,
                     Clock = Clock,
                 });
@@ -1578,6 +1584,12 @@ public sealed partial class RouterCoreTests
         public List<(CreditHeader Header, string ConnectionHandle)> SubscriptionCredits { get; } = [];
 
         public List<(uint CallId, string ConnectionHandle)> Cancels { get; } = [];
+
+        // the connections the side was asked to close, each with how many envelopes it had sent then
+        public List<(string ConnectionHandle, int Sent)> Closed { get; } = [];
+
+        // what its transport does as it is asked to close a connection, when the test says it otherwise
+        public Func<string, Task>? OnClose { get; set; }
 
         // whether its transport carries a credential beside an envelope, and is secure: in process
         public bool IsCarrying { get; set; } = true;
@@ -1662,6 +1674,13 @@ public sealed partial class RouterCoreTests
         public void OnCancel(uint callId, string connectionHandle)
         {
             Cancels.Add((callId, connectionHandle));
+        }
+
+        public Task Close(string connectionHandle)
+        {
+            Closed.Add((connectionHandle, Sent.Count));
+
+            return OnClose?.Invoke(connectionHandle) ?? Task.CompletedTask;
         }
 
         public bool OnUnpairedFailure(Envelope envelope, string connectionHandle)
@@ -1816,6 +1835,47 @@ public sealed partial class RouterCoreTests
             {
                 await Loop.WhenIdle();
             }
+        }
+    }
+
+    // how a peer is built: its limits, its last call id, and the scheduler its resolvers run on, its
+    // loop when none
+    private sealed record PeerOptions
+    {
+        public RouterLimits? Limits { get; init; }
+
+        public uint? LastCallId { get; init; }
+
+        public TaskScheduler? Resolvers { get; init; }
+    }
+
+    // a scheduler the test drives: what is queued on it runs only as the test runs it, never inline
+    private sealed class DrivenScheduler : TaskScheduler
+    {
+        private readonly System.Collections.Concurrent.ConcurrentQueue<Task> _queued = new();
+
+        // runs what was queued, and what that queued behind it
+        public void RunAll()
+        {
+            while (_queued.TryDequeue(out var task))
+            {
+                _ = TryExecuteTask(task);
+            }
+        }
+
+        protected override void QueueTask(Task task)
+        {
+            _queued.Enqueue(task);
+        }
+
+        protected override bool TryExecuteTaskInline(Task task, bool taskWasPreviouslyQueued)
+        {
+            return false;
+        }
+
+        protected override IEnumerable<Task> GetScheduledTasks()
+        {
+            return [.. _queued];
         }
     }
 

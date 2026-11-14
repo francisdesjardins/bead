@@ -1909,7 +1909,9 @@ public sealed partial class RouterServerTests : IDisposable
         sending.SetException(new IOException("gone"));
         await Settle();
 
-        Assert.Equal(["gone first"], Reported());
+        // * its resolver, which outlived its call, was told as its connection closed (spec 9.10):
+        // what it fails with after is its connection's, reported by none
+        Assert.Empty(Reported());
         Assert.Empty(await SubscribedTo(News));
     }
 

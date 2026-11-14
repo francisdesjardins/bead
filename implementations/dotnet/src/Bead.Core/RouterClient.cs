@@ -93,6 +93,17 @@ public interface IRouterClientTransport
             return false;
         }
     }
+
+    /// <summary>
+    /// Closes its connection — its server has the router refuse its commands past the calls it
+    /// answers and those its resolvers outlive (spec 9.2, step 3) — as
+    /// <see cref="TransportClientDisconnectOptions"/> say. One that closes none stays connected, as
+    /// this default.
+    /// </summary>
+    Task CloseConnection(TransportClientDisconnectOptions? options = null)
+    {
+        return Task.CompletedTask;
+    }
 }
 
 /// <summary>How a client's router is built.</summary>
@@ -1132,6 +1143,13 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
         public Task Send(TransportMessage message, string connectionHandle)
         {
             return client.Transport.Send(message);
+        }
+
+        // a server that has its client refuse its commands past what their resolvers outlive is
+        // left: the client closes its own connection (spec 9.2, step 3)
+        public Task Close(string connectionHandle)
+        {
+            return client.Transport.CloseConnection();
         }
 
         public bool IsTracing

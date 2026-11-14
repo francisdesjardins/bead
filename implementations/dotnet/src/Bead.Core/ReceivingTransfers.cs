@@ -33,7 +33,9 @@ internal sealed record ReceivingTransfersOptions
 /// The transfers a router receives, on every connection. Their bytes share one budget, reserved as
 /// each credit grants them — the opening's first — so an opening holds only what its peer sends, and
 /// a transfer the budget cannot credit waits until another gives some back. Each connection receives
-/// <see cref="RouterLimits.MaximumTransfers"/> at once. Touched on its router's scheduler alone.
+/// <see cref="RouterLimits.MaximumTransfers"/> at once, and twice as many with those whose call's
+/// resolver outlives the call, each counted from its call's end until that resolver settles (spec
+/// 12.3). Touched on its router's scheduler alone.
 /// </summary>
 internal sealed class ReceivingTransfers(ReceivingTransfersOptions options)
 {
@@ -43,6 +45,10 @@ internal sealed class ReceivingTransfers(ReceivingTransfersOptions options)
     // the transfers each connection receives at once
     private readonly Dictionary<string, Counted> _connections = [];
     private readonly RouterLimits _limits = options.Limits;
+
+    // by connection, the transfers whose call's resolver outlives the call, until it settles or its
+    // connection closes
+    private readonly Dictionary<string, HashSet<Receiving>> _outliving = [];
     private long _buffered;
 
     /// <summary>The bytes of the budget no transfer holds.</summary>
@@ -84,6 +90,16 @@ internal sealed class ReceivingTransfers(ReceivingTransfersOptions options)
             }
         }
 
+        // * the places its resolvers outlive end with its connection
+        if (connectionHandle is null)
+        {
+            _outliving.Clear();
+        }
+        else
+        {
+            _outliving.Remove(connectionHandle);
+        }
+
         GrantStarved();
     }
 
@@ -106,12 +122,23 @@ internal sealed class ReceivingTransfers(ReceivingTransfersOptions options)
         return payload;
     }
 
-    /// <summary>What it holds: the transfers received, the bytes of the budget they hold under its ceiling, and their connections.</summary>
+    /// <summary>
+    /// What it holds: the transfers received, the bytes of the budget they hold under its ceiling,
+    /// those whose call's resolver outlives the call, with no ceiling, and their connections.
+    /// </summary>
     public Gauges Gauges()
     {
         return Bead.Gauges.Of(
-            new Dictionary<string, long> { ["bufferedBytes"] = _buffered, ["receivingTransfers"] = _held.Count },
-            _connections.Keys) with
+            new Dictionary<string, long>
+            {
+                ["bufferedBytes"] = _buffered,
+                ["outlivingTransfers"] = _outliving.Values.Sum((outliving) =>
+                {
+                    return (long)outliving.Count;
+                }),
+                ["receivingTransfers"] = _held.Count,
+            },
+            _connections.Keys.Concat(_outliving.Keys)) with
         {
             Ceilings = new Dictionary<string, long> { ["bufferedBytes"] = _limits.BufferedBytesBudget },
         };
@@ -140,8 +167,8 @@ internal sealed class ReceivingTransfers(ReceivingTransfersOptions options)
     /// <summary>
     /// Opens a transfer on its call from its opening, or gives the failure that refuses it:
     /// <c>PAYLOAD_TOO_LARGE</c> when this side takes no transfer, for a total of 0 or past the
-    /// payload's limit; <c>CAPACITY_EXCEEDED</c> when the connection holds its transfers already, or
-    /// the budget cannot hold the opening; <c>CHUNK_INVALID</c> for an opening that carries no byte
+    /// payload's limit; <c>CAPACITY_EXCEEDED</c> when the connection holds twice its transfers with
+    /// those its resolvers outlive, or its transfers already, or the budget cannot hold the opening; <c>CHUNK_INVALID</c> for an opening that carries no byte
     /// of its payload, or holds its whole total. Given <c>OnStall</c>, a timer hears the transfer
     /// stall when nothing comes for the inactivity allowed.
     /// </summary>
@@ -165,6 +192,15 @@ internal sealed class ReceivingTransfers(ReceivingTransfersOptions options)
         if (opened.Total > _limits.MaximumPayloadBytes)
         {
             return Refused(ProtocolCode.PayloadTooLarge, $"a payload is {_limits.MaximumPayloadBytes} bytes at most, not {opened.Total}");
+        }
+
+        // * the second ceiling first: the transfers received and those whose call's resolver outlives
+        // the call (spec 12.3)
+        if (connection.Transfers + OutlivingOn(connectionHandle) >= 2L * _limits.MaximumTransfers)
+        {
+            return Refused(
+                ProtocolCode.CapacityExceeded,
+                $"the transfers a connection receives and those its resolvers outlive are {2L * _limits.MaximumTransfers} at most");
         }
 
         if (connection.Transfers >= _limits.MaximumTransfers)
@@ -224,9 +260,59 @@ internal sealed class ReceivingTransfers(ReceivingTransfersOptions options)
         return placed;
     }
 
+    /// <summary>
+    /// A transfer whose call ended while its resolver runs outlives the call: it keeps its place on
+    /// its connection until <see cref="Settle"/>, or until that connection closes. Told before the
+    /// transfer is closed; one no longer held, gone with its connection, keeps none.
+    /// </summary>
+    public void Outlive(Receiving receiving)
+    {
+        ArgumentNullException.ThrowIfNull(receiving);
+
+        if (!_held.ContainsKey(receiving))
+        {
+            return;
+        }
+
+        var connectionHandle = receiving.Call.ConnectionHandle;
+
+        if (!_outliving.TryGetValue(connectionHandle, out var outliving))
+        {
+            outliving = [];
+            _outliving[connectionHandle] = outliving;
+        }
+
+        outliving.Add(receiving);
+    }
+
+    /// <summary>
+    /// The resolver a transfer outlived its call with settled: it gives its place back. Settling one
+    /// that outlives nothing, or whose connection closed, does nothing.
+    /// </summary>
+    public void Settle(Receiving receiving)
+    {
+        ArgumentNullException.ThrowIfNull(receiving);
+
+        var connectionHandle = receiving.Call.ConnectionHandle;
+
+        if (_outliving.TryGetValue(connectionHandle, out var outliving) && outliving.Remove(receiving))
+        {
+            if (outliving.Count == 0)
+            {
+                _outliving.Remove(connectionHandle);
+            }
+        }
+    }
+
     private static (Receiving? Receiving, Failure? Refusal) Refused(ProtocolCode code, string detail)
     {
         return (null, Failure.OfProtocol(code, detail));
+    }
+
+    // the transfers a connection's resolvers outlive their call with
+    private int OutlivingOn(string connectionHandle)
+    {
+        return _outliving.TryGetValue(connectionHandle, out var outliving) ? outliving.Count : 0;
     }
 
     // stops a transfer's timer: one that fired already, on its way to the scheduler, hears nothing

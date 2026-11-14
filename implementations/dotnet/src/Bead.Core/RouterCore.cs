@@ -142,6 +142,17 @@ internal sealed partial class RouterCore : IDisposable
             {
                 _receivings.Close(receiving.Transfer);
             },
+
+            // a transfer whose call's resolver outlives the call keeps a place until that resolver
+            // settles (spec 12.3)
+            OnOutlive = (transfer) =>
+            {
+                _receivings.Outlive(transfer);
+            },
+            OnSettle = (transfer) =>
+            {
+                _receivings.Settle(transfer);
+            },
             Post = Post,
             Clock = _clock,
         });
@@ -570,10 +581,11 @@ internal sealed partial class RouterCore : IDisposable
         Loop.Cover(answering.Source.CancelAsync());
     }
 
-    // hands a request to its resolver, where resolvers run: one that throws before it returns fails
-    // as one whose task faults; one that fails before it answers is reported and answered
-    // PROCEDURE_FAILED, its call id free once that answer goes; a call cancelled, or gone with its
-    // connection, is not reported, and answered nothing
+    // hands a request to its resolver, where resolvers run, none if its call ended before that turn
+    // came: one that throws before it returns fails as one whose task faults; one that fails before
+    // it answers is reported and answered PROCEDURE_FAILED, its call id free once that answer goes; a
+    // call cancelled, or gone with its connection, is not reported, and answered nothing. One that
+    // runs on past its call's end outlives it until it settles (spec 9.2, steps 3 and 9)
     private void Dispatch(IRequestHandler resolver, (AnswerTarget Target, AnsweringCall Answering, ReadOnlyMemory<byte> Payload) dispatched)
     {
         var (target, answering, payload) = dispatched;
@@ -592,6 +604,14 @@ internal sealed partial class RouterCore : IDisposable
             .StartNew(
                 () =>
                 {
+                    // ! the turn that starts it races its call's end, off the core's scheduler: the
+                    // call's own swap decides, as Go's HTTP/2 server starts no handler for a stream
+                    // reset before its turn
+                    if (!AnsweringCalls.Run(answering))
+                    {
+                        return Task.CompletedTask;
+                    }
+
                     return resolver.Handle(props);
                 },
                 CancellationToken.None,
@@ -601,6 +621,9 @@ internal sealed partial class RouterCore : IDisposable
             .ContinueWith(
                 (handled) =>
                 {
+                    // * settled, it gives back the place it kept while it outlived its call
+                    _answeringCalls.Settle(answering);
+
                     if (handled.IsCompletedSuccessfully)
                     {
                         return;
@@ -849,9 +872,21 @@ internal sealed partial class RouterCore : IDisposable
             answering.Counted = StartedOf(registered?.Series?.Calls ?? metrics.Answered, _clock);
         }
 
-        // * step 3 of section 9.2: past the calls its peer has it answer on the connection, refused
-        // before anything else of it is read — its route, its credential, its transfer — as an HTTP/2
-        // endpoint refuses a stream past those it lets its peer open (RFC 9113 §5.1.2, §8.7)
+        // * step 3 of section 9.2: past the calls its peer has it answer on the connection, or past
+        // twice as many with those whose resolvers outlive them, refused before anything else of it
+        // is read — its route, its credential, its transfer — as an HTTP/2 endpoint refuses a stream
+        // past those it lets its peer open (RFC 9113 §5.1.2, §8.7); counted after its own call
+        // opened, the second ceiling first
+        if (_answeringCalls.TrackedOn(connectionHandle) > 2 * Limits.MaximumAnsweringCalls)
+        {
+            RefusePastTracked(dispatched);
+
+            return;
+        }
+
+        // any other request that reaches this step ends the run of refusals past the second count
+        _answeringCalls.Admitted(connectionHandle);
+
         if (_answeringCalls.CountOn(connectionHandle) > Limits.MaximumAnsweringCalls)
         {
             Refuse(
@@ -894,6 +929,62 @@ internal sealed partial class RouterCore : IDisposable
 
         _handlers.AddOrUpdate(header, resolver);
         Resolve(resolver, new Arrival(target, answering, payload) { Arrived = arrived, TransportCredential = carried, From = (message.Address, message.Port) });
+    }
+
+    // a request past the calls its connection answers and those its resolvers outlive is refused;
+    // the refusal that makes twice maximumAnsweringCalls of them in a row, nothing admitted between,
+    // reports it, and its connection is closed in a later turn, once that refusal is handed to its
+    // transport, as an HTTP/2 endpoint may treat a flood of resets as ENHANCE_YOUR_CALM (RFC 9113
+    // §10.5; spec 9.2, step 3)
+    private void RefusePastTracked((AnswerTarget Target, AnsweringCall Answering) dispatched)
+    {
+        var (connectionHandle, header) = dispatched.Target;
+        var tracked = 2 * Limits.MaximumAnsweringCalls;
+
+        var refused = Refusing(
+            ProtocolFailureOf(
+                ProtocolCode.CapacityExceeded,
+                string.Create(CultureInfo.InvariantCulture, $"the calls a connection answers and those its resolvers outlive are {tracked} at most")),
+            dispatched);
+
+        // ! once, as the run reaches it: a refusal after it, before the close lands, closes nothing more
+        if (_answeringCalls.RefusedPast(connectionHandle) != tracked)
+        {
+            return;
+        }
+
+        Report(
+            ProtocolFailureOf(
+                ProtocolCode.CapacityExceeded,
+                string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"the calls a connection answers and those its resolvers outlive stayed at {tracked} for {tracked} requests: the connection is closed")),
+            (connectionHandle, header));
+        _ = Closing((refused, connectionHandle));
+    }
+
+    // closes a connection through its side in a later turn, once its transport settled the last
+    // refusal, whether it went out or not; none once its router was disposed. What the close throws
+    // or faults with is reported
+    private async Task Closing((Task Refused, string ConnectionHandle) closing)
+    {
+        var (refused, connectionHandle) = closing;
+
+        // ! a refusal that did not go out was reported as it failed: it never throws here
+        await refused;
+
+        try
+        {
+            // * behind what came before it, never at once, though its refusal settled in its turn
+            await Loop.RunBehind(() =>
+            {
+                return _isStateDisposed ? Task.CompletedTask : _port.Close(connectionHandle);
+            });
+        }
+        catch (Exception reason)
+        {
+            _port.Report(reason, connectionHandle);
+        }
     }
 
     // whether a service is known on a connection (spec 9.11): a resolver of it registered whose
@@ -1013,6 +1104,13 @@ internal sealed partial class RouterCore : IDisposable
             return;
         }
 
+        // * a verifier that resolves later runs as a resolver does, in its call's place until it
+        // settles; in the turn its request came, its call is open
+        if (waits)
+        {
+            _ = AnsweringCalls.Run(answering);
+        }
+
         ValueTask<CredentialResolution> resolving;
 
         try
@@ -1029,10 +1127,12 @@ internal sealed partial class RouterCore : IDisposable
 
         if (waits)
         {
-            // * a later turn, even for a resolution that settled at once
+            // * a later turn, even for a resolution that settled at once; one its call ended before
+            // outlived it until now (spec 9.2, step 3)
             resolving.AsTask().ContinueWith(
                 (resolved) =>
                 {
+                    _answeringCalls.Settle(answering);
                     Settle(resolver, (arrival, resolved));
                 },
                 CancellationToken.None,

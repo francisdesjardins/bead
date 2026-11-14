@@ -1588,6 +1588,9 @@ public sealed partial class RouterClientTests
             return stopped.Task;
         }));
         transport.Deliver(new Envelope { Header = RequestHeaderOf(30), Payload = new byte[] { 3 } });
+
+        // its resolver handed it in a later turn, before its cancel comes
+        await scripted.Settle();
         transport.Deliver(new Envelope { Header = new CancelHeader { CallId = 30 } });
         await scripted.Settle();
         Assert.Equal([30u], cancelled);
@@ -1625,6 +1628,53 @@ public sealed partial class RouterClientTests
         await scripted.Settle();
         Assert.Equal(3, held.Count);
         Assert.Empty(scripted.Errors);
+    }
+
+    [Fact]
+    public async Task Closes_a_connection_that_it_refused_twice_maximumAnsweringCalls_requests_in_a_row_past_the_resolvers_that_outlive_its_calls_nothing_settling_between_and_reports_it()
+    {
+        using var scripted = new ScriptedRouter(RouterLimits.Default with { MaximumAnsweringCalls = 1 });
+        var (router, transport) = (scripted.Router, scripted.Transport);
+
+        // what its disconnect throws is reported
+        transport.DisconnectFailure = new IOException("the transport would not disconnect");
+        router.RegisterResolver(new ScriptedResolver(Service, (_) =>
+        {
+            // deaf to its signal, it never settles
+            return new TaskCompletionSource().Task;
+        }));
+
+        // one whose resolver outlives its cancel, one open beside it: twice the bound
+        transport.Deliver(new Envelope { Header = RequestHeaderOf(30) });
+        await scripted.Settle();
+        transport.Deliver(new Envelope { Header = new CancelHeader { CallId = 30 } });
+        transport.Deliver(new Envelope { Header = RequestHeaderOf(32) });
+        await scripted.Settle();
+        transport.Deliver(new Envelope { Header = RequestHeaderOf(34) });
+        await scripted.Settle();
+        Assert.Equal(0, transport.Disconnects);
+        Assert.Empty(scripted.Errors);
+
+        // * the second refusal in a row: reported, then its transport disconnected in a later turn
+        transport.Deliver(new Envelope { Header = RequestHeaderOf(36) });
+        await scripted.Settle();
+        Assert.Equal(
+            [
+                (34u, (ushort)ProtocolCode.CapacityExceeded, "the calls a connection answers and those its resolvers outlive are 2 at most"),
+                (36u, (ushort)ProtocolCode.CapacityExceeded, "the calls a connection answers and those its resolvers outlive are 2 at most"),
+            ],
+            transport.Envelopes.Select((envelope) =>
+            {
+                return (envelope.Header.CallId, envelope.Failure!.Code, envelope.Failure.Detail);
+            }));
+        Assert.Equal(2, scripted.Errors.Count);
+        var closing = Assert.IsType<FailureException>(scripted.Errors[0]);
+
+        Assert.Equal(
+            ((ushort)ProtocolCode.CapacityExceeded, "the calls a connection answers and those its resolvers outlive stayed at 2 for 2 requests: the connection is closed"),
+            (closing.Code, closing.Detail));
+        Assert.Equal("the transport would not disconnect", Assert.IsType<IOException>(scripted.Errors[1]).Message);
+        Assert.Equal(1, transport.Disconnects);
     }
 
     [Fact]
@@ -2262,6 +2312,12 @@ public sealed partial class RouterClientTests
         // what a send fails with, once set: what it was given is recorded all the same
         public Exception? Refusal { get; set; }
 
+        // how many times its router closed its connection
+        public int Disconnects { get; private set; }
+
+        // what its close throws with, once set
+        public Exception? DisconnectFailure { get; set; }
+
         // its state: a send in any but Open refused before it is recorded, by the refusal every
         // client transport gives (debugging 9.7)
         public ReadyState ReadyState { get; set; } = ReadyState.Open;
@@ -2402,6 +2458,18 @@ public sealed partial class RouterClientTests
                     }
                 });
             }
+        }
+
+        public Task CloseConnection(TransportClientDisconnectOptions? options = null)
+        {
+            Disconnects += 1;
+
+            if (DisconnectFailure is not null)
+            {
+                throw DisconnectFailure;
+            }
+
+            return Task.CompletedTask;
         }
 
         public void Deliver(byte[] bytes)

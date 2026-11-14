@@ -239,10 +239,28 @@ public sealed class AnsweringCallsTests
         calls.Attach(call, ReceivingOf(answering, (1, "a", 4)));
         calls.Close(call, answering);
         Assert.Equal(["a", "b"], calls.Gauges().ConnectionHandles.Order());
-        Assert.Equal(new Dictionary<string, long> { ["abandonedCalls"] = 1, ["answeringCalls"] = 1, ["largestAnsweringCalls"] = 1 }, calls.Gauges().Counts);
+        Assert.Equal(
+            new Dictionary<string, long>
+            {
+                ["abandonedCalls"] = 1,
+                ["answeringCalls"] = 1,
+                ["largestAnsweringCalls"] = 1,
+                ["largestTrackedCalls"] = 1,
+                ["outlivingResolvers"] = 0,
+            },
+            calls.Gauges().Counts);
         calls.TakeAll(null);
         Assert.Empty(calls.Gauges().ConnectionHandles);
-        Assert.Equal(new Dictionary<string, long> { ["abandonedCalls"] = 0, ["answeringCalls"] = 0, ["largestAnsweringCalls"] = 0 }, calls.Gauges().Counts);
+        Assert.Equal(
+            new Dictionary<string, long>
+            {
+                ["abandonedCalls"] = 0,
+                ["answeringCalls"] = 0,
+                ["largestAnsweringCalls"] = 0,
+                ["largestTrackedCalls"] = 0,
+                ["outlivingResolvers"] = 0,
+            },
+            calls.Gauges().Counts);
     }
 
     [Fact]
@@ -266,7 +284,7 @@ public sealed class AnsweringCallsTests
         calls.Open(new AnswerTarget("b", HeaderOf(1)));
 
         // the busiest connection's, never the sum of them, under the bound of one connection
-        Assert.Equal(5, calls.Gauges().Ceilings["largestAnsweringCalls"]);
+        Assert.Equal((5L, 10L), (calls.Gauges().Ceilings["largestAnsweringCalls"], calls.Gauges().Ceilings["largestTrackedCalls"]));
         Assert.Equal((4L, 3L), (calls.Gauges().Counts["answeringCalls"], calls.Gauges().Counts["largestAnsweringCalls"]));
         Assert.Equal(3, calls.CountOn("a"));
         Assert.Equal(new HealthCheck { ObservedValue = 3, Status = HealthStatus.Pass, Output = "3 of 5" }, CheckOf());
@@ -274,6 +292,70 @@ public sealed class AnsweringCallsTests
         Assert.Equal(new HealthCheck { ObservedValue = 4, Status = HealthStatus.Warn, Output = "4 of 5" }, CheckOf());
         calls.TakeAll("a");
         Assert.Equal(1, calls.Gauges().Counts["largestAnsweringCalls"]);
+    }
+
+    [Fact]
+    public void Gauges_largestTrackedCalls_under_its_ceiling_twice_maximumAnsweringCalls_which_health_warns_at_and_outlivingResolvers()
+    {
+        var calls = CallsOf(OptionsOf(new FakeTimeProvider()) with { Limits = RouterLimits.Default with { MaximumAnsweringCalls = 5 } });
+        var none = new LayerGauges { Anomalies = [], Ceilings = new Dictionary<string, long>(), Counts = new Dictionary<string, long>(), Orphans = 0 };
+
+        HealthCheck CheckOf()
+        {
+            var router = LayerGauges.Of(calls.Gauges(), new HashSet<string> { "a", "b" });
+
+            return Assert.Single(Health.Of(new ServerGauges { Router = router, Server = none, Sessions = none, Transport = none }).Checks["router:largestTrackedCalls"]);
+        }
+
+        (long AnsweringCalls, long LargestTrackedCalls, long OutlivingResolvers) TrackedOf()
+        {
+            var counts = calls.Gauges().Counts;
+
+            return (counts["answeringCalls"], counts["largestTrackedCalls"], counts["outlivingResolvers"]);
+        }
+
+        // five calls on a, each resolver running, three of them cancelled: those resolvers outlive
+        // their call
+        var running = new uint[] { 1, 3, 5, 7, 9 }.Select((callId) =>
+        {
+            var call = calls.Open(new AnswerTarget("a", HeaderOf(callId)));
+
+            Assert.True(AnsweringCalls.Run(call));
+
+            return call;
+        }).ToList();
+
+        foreach (var callId in new uint[] { 1, 3, 5 })
+        {
+            calls.Take(new CallAddress(callId, "a"));
+        }
+
+        calls.Open(new AnswerTarget("b", HeaderOf(1)));
+
+        // the busiest connection's two counts together, never the sum of the connections', under
+        // twice the bound of one connection; the resolvers that outlive their call, over the side
+        Assert.Equal(10, calls.Gauges().Ceilings["largestTrackedCalls"]);
+        Assert.Equal((3L, 5L, 3L), TrackedOf());
+        Assert.Equal(5, calls.TrackedOn("a"));
+        Assert.Equal(new HealthCheck { ObservedValue = 5, Status = HealthStatus.Pass, Output = "5 of 10" }, CheckOf());
+
+        foreach (var callId in new uint[] { 11, 13, 15 })
+        {
+            calls.Open(new AnswerTarget("a", HeaderOf(callId)));
+        }
+
+        Assert.Equal(new HealthCheck { ObservedValue = 8, Status = HealthStatus.Warn, Output = "8 of 10" }, CheckOf());
+
+        // its connection gone, what still runs counts side-wide alone; what was never handed, none
+        calls.TakeAll("a");
+        Assert.Equal((1L, 1L, 5L), TrackedOf());
+
+        foreach (var call in running)
+        {
+            calls.Settle(call);
+        }
+
+        Assert.Equal((1L, 1L, 0L), TrackedOf());
     }
 
     [Fact]
