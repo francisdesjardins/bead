@@ -4593,11 +4593,14 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
 
         await using var webSocket = new WebSockets.WebSocketTransportServer(new WebSockets.WebSocketTransportServerOptions { HeadersTimeout = timeout });
         var webSocketPort = (await webSocket.Start(new TransportServerStartOptions { Address = Host, FindOpenPort = true, CancellationToken = Cancelled })).Port;
+        var wirePorts = new List<int>();
 
         foreach (var (port, start) in new[] { (_port, "POST /bead HTTP/1.1"), (webSocketPort, "GET / HTTP/1.1") })
         {
             using var wire = await Wire.Open(port);
             var watch = Stopwatch.StartNew();
+
+            wirePorts.Add(wire.Port);
 
             // a head that never ends
             await wire.Write($"{start}\r\nHost: {Host}\r\n");
@@ -4614,7 +4617,12 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
             Assert.True(await wire.IsClosed());
         }
 
-        Assert.Empty(_refusals);
+        // ! none of its own wires' heads was refused: its port is any test's to dial, of another
+        // process's even, once the port that test meant was freed and given to it
+        Assert.DoesNotContain(_refusals, (refusal) =>
+        {
+            return wirePorts.Contains(refusal.Port);
+        });
     }
 
     [Fact]
