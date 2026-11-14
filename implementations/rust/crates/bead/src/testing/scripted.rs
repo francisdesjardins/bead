@@ -253,6 +253,7 @@ pub struct ScriptedClient {
     ready: Mutex<ReadyState>,
     paced: Mutex<Paced>,
     pauses: Mutex<Vec<bool>>,
+    disconnects: AtomicUsize,
 }
 
 impl core::fmt::Debug for ScriptedClient {
@@ -279,6 +280,7 @@ impl ScriptedClient {
             ready: Mutex::new(ReadyState::Open),
             paced: Mutex::default(),
             pauses: Mutex::default(),
+            disconnects: AtomicUsize::new(0),
         })
     }
 
@@ -366,6 +368,12 @@ impl ScriptedClient {
     #[must_use]
     pub fn pauses(&self) -> Vec<bool> {
         locked(&self.pauses).clone()
+    }
+
+    /// How many times its router disconnected it of its own accord.
+    #[must_use]
+    pub fn disconnects(&self) -> usize {
+        self.disconnects.load(Ordering::SeqCst)
     }
 
     // in a task of its own: what it holds handed on, in order, until its router pauses it again
@@ -457,6 +465,12 @@ impl RouterClientTransport for ScriptedClient {
     fn pause(&self) {
         locked(&self.pauses).push(true);
         locked(&self.paced).is_paused = true;
+    }
+
+    // counted, its close told as its connection closing tells it
+    fn disconnect(&self) {
+        self.disconnects.fetch_add(1, Ordering::SeqCst);
+        self.close_connection();
     }
 
     // ! as `pause`: what it holds handed on by a task of its own, never within this call

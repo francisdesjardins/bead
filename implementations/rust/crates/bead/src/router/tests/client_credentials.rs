@@ -48,6 +48,10 @@ impl RouterClientTransport for Upgraded {
         self.transport.pause();
     }
 
+    fn disconnect(&self) {
+        RouterClientTransport::disconnect(&*self.transport);
+    }
+
     fn resume(&self) {
         self.transport.resume();
     }

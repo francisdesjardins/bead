@@ -259,6 +259,7 @@ fn counts_the_transfers_received_and_the_bytes_of_the_budget_they_hold_under_its
                 "bufferedBytes",
                 64_u64.saturating_sub(receiving.available())
             ),
+            ("outlivingTransfers", 0),
             ("receivingTransfers", 1)
         ])
     );
@@ -272,8 +273,121 @@ fn counts_the_transfers_received_and_the_bytes_of_the_budget_they_hold_under_its
     assert!(gauges.connection_handles.is_empty());
     assert_eq!(
         gauges.counts,
-        std::collections::BTreeMap::from([("bufferedBytes", 0), ("receivingTransfers", 0)])
+        std::collections::BTreeMap::from([
+            ("bufferedBytes", 0),
+            ("outlivingTransfers", 0),
+            ("receivingTransfers", 0)
+        ])
     );
+}
+
+// spec 12.3
+#[test]
+fn holds_a_received_transfer_s_place_while_its_call_s_resolver_outlives_the_call_among_twice_maximum_transfers_and_gives_it_back_as_that_resolver_settles()
+ {
+    let mut receiving = receiving(RouterLimits {
+        buffered_bytes_budget: 64,
+        maximum_transfers: 1,
+        ..LIMIT_DEFAULTS
+    });
+    let a: crate::router::types::ConnectionHandle = Arc::from("a");
+    let open = |receiving: &mut ReceivingTransfers, (call_id, handle): (u32, &str)| {
+        receiving.open(&Bytes::from_static(&[0]), (&call((call_id, handle)), 2))
+    };
+    let refusal_of = |opened: Result<u64, crate::failure::Failure>| {
+        let refused = opened.expect_err("refused");
+
+        (refused.code(), refused.detail().to_owned())
+    };
+    let past_both = (
+        ProtocolCode::CAPACITY_EXCEEDED.get(),
+        "the transfers a connection receives and those its resolvers outlive are 2 at most"
+            .to_owned(),
+    );
+    // its call ends while the resolver of its dispatch runs on, as the core ends it
+    let outlive = |receiving: &mut ReceivingTransfers, (transfer, dispatched): (u64, u64)| {
+        receiving.outlive((&a, dispatched));
+        receiving.close(transfer);
+    };
+    let first = open(&mut receiving, (1, "a")).expect("an opening");
+
+    // its call ends while its resolver runs on: its bytes go back, its place among the transfers
+    // the connection receives too, but not among those and the ones its resolvers outlive
+    outlive(&mut receiving, (first, 11));
+
+    let gauges = receiving.gauges();
+
+    assert_eq!(
+        gauges.connection_handles,
+        std::collections::BTreeSet::from([Arc::clone(&a)])
+    );
+    assert_eq!(
+        [
+            gauges.counts.get("bufferedBytes").copied(),
+            gauges.counts.get("outlivingTransfers").copied(),
+            gauges.counts.get("receivingTransfers").copied()
+        ],
+        [Some(0), Some(1), Some(0)]
+    );
+
+    let second = open(&mut receiving, (3, "a")).expect("an opening");
+
+    // * past maximumTransfers first, then past twice as many with those its resolvers outlive,
+    // checked first, its detail its own; another connection's are its own
+    assert_eq!(refusal_of(open(&mut receiving, (5, "a"))), past_both);
+
+    outlive(&mut receiving, (second, 13));
+
+    assert_eq!(refusal_of(open(&mut receiving, (5, "a"))), past_both);
+    assert_eq!(
+        receiving.gauges().counts.get("outlivingTransfers"),
+        Some(&2)
+    );
+    open(&mut receiving, (1, "b")).expect("another connection's");
+
+    // the resolver settles: its place goes back, once, and the next opening is taken
+    receiving.settle((&a, 11));
+    receiving.settle((&a, 11));
+
+    assert_eq!(
+        receiving.gauges().counts.get("outlivingTransfers"),
+        Some(&1)
+    );
+
+    let third = open(&mut receiving, (5, "a")).expect("an opening");
+
+    assert_eq!(refusal_of(open(&mut receiving, (7, "a"))), past_both);
+
+    receiving.settle((&a, 13));
+
+    assert_eq!(
+        refusal_of(open(&mut receiving, (7, "a"))),
+        (
+            ProtocolCode::CAPACITY_EXCEEDED.get(),
+            "the transfers a connection receives at once are 1 at most".to_owned()
+        )
+    );
+
+    // its connection closes: the places its resolvers outlive end with it, and settle to nothing
+    outlive(&mut receiving, (third, 15));
+    receiving.close_all(Some(&a));
+
+    let gauges = receiving.gauges();
+
+    assert_eq!(
+        gauges.connection_handles,
+        std::collections::BTreeSet::from([Arc::from("b")])
+    );
+    assert_eq!(
+        [
+            gauges.counts.get("outlivingTransfers").copied(),
+            gauges.counts.get("receivingTransfers").copied()
+        ],
+        [Some(0), Some(1)]
+    );
+
+    receiving.settle((&a, 15));
+    open(&mut receiving, (9, "a")).expect("an opening");
 }
 
 async fn timed_peer() -> crate::testing::core_port::Peer {

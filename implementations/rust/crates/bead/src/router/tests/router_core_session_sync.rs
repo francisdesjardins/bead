@@ -90,11 +90,8 @@ async fn a_credential_of_none_or_opaque_resolves_in_the_turn_it_came_the_calls_s
                         None,
                     ),
                 );
-                assert_eq!(
-                    locked(&dispatched).len(),
-                    2,
-                    "both dispatched before a checkpoint"
-                );
+                // then handed to its resolver in a later turn (spec 9.2, step 9)
+                assert_eq!(locked(&dispatched).len(), 0, "none handed within this turn");
                 assert_eq!(
                     locked(&checking).len(),
                     4,
@@ -125,6 +122,7 @@ async fn a_credential_of_none_or_opaque_resolves_in_the_turn_it_came_the_calls_s
             let resolved = locked(&resolutions);
             let dispatched = locked(&handed);
             let admitted = locked(&admitted);
+            assert_eq!(dispatched.len(), 2, "both handed in a later turn");
             assert_eq!(
                 resolved.len(),
                 2,

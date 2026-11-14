@@ -687,6 +687,10 @@ impl BrokerTransportClient {
     /// # Errors
     ///
     /// A [`TransportError`] when it is not open.
+    #[expect(
+        clippy::same_name_method,
+        reason = "the router's disconnect, of its own accord, is this one with its default options, named as on the other sides"
+    )]
     pub fn disconnect(
         &self,
         options: &TransportClientDisconnectOptions,
@@ -991,6 +995,14 @@ impl RouterClientTransport for BrokerTransportClient {
 
     fn unlisten(&self, listener: &Arc<dyn ClientListener>) {
         self.inner.listeners.remove(listener);
+    }
+
+    // not open, nothing
+    fn disconnect(&self) {
+        drop(Self::disconnect(
+            self,
+            &TransportClientDisconnectOptions::default(),
+        ));
     }
 
     // ! no lock: the flag its participant reads as each envelope of its connection comes whole,

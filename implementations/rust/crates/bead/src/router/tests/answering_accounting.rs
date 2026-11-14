@@ -52,6 +52,7 @@ fn dispatch((call_id, name): (u32, &str), id: u64) -> Dispatch {
         session: Mutex::new(None),
         answered: Mutex::new(None),
         origin: (None, None),
+        run: crate::router::parts::ResolverRun::default(),
     }
 }
 

@@ -2,8 +2,9 @@
 //! the call ids it reserved, the calls it answers and those abandoned, the transfers it sends and
 //! receives, and what its answers announced.
 
+use core::sync::atomic::{AtomicU8, Ordering};
 use core::time::Duration;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -355,7 +356,8 @@ pub(crate) struct Receiving {
 }
 
 /// The transfers a router receives, on every connection: the bytes they hold of its budget, the
-/// places they take on their connection, the credit they grant.
+/// places they take on their connection, the credit they grant; and, by connection, those whose
+/// call ended while its resolver outlives it, by the dispatch of that call.
 #[derive(Debug)]
 pub(crate) struct ReceivingTransfers {
     limits: RouterLimits,
@@ -363,6 +365,7 @@ pub(crate) struct ReceivingTransfers {
     // the transfers open, by their id, in the order they opened
     held: BTreeMap<u64, Receiving>,
     connections: HashMap<ConnectionHandle, u64>,
+    outliving: HashMap<ConnectionHandle, BTreeSet<u64>>,
     buffered: u64,
     next: u64,
 }
@@ -382,8 +385,36 @@ impl ReceivingTransfers {
             },
             held: BTreeMap::new(),
             connections: HashMap::new(),
+            outliving: HashMap::new(),
             buffered: 0,
             next: 0,
+        }
+    }
+
+    fn outliving_on(&self, handle: &ConnectionHandle) -> u64 {
+        self.outliving
+            .get(handle)
+            .map_or(0, |dispatches| count_of(dispatches.len()))
+    }
+
+    /// Keeps the place of the transfer a call received, its call ended while the resolver of the
+    /// dispatch `dispatched` outlives it, until that resolver settles (spec 12.3).
+    pub(crate) fn outlive(&mut self, (handle, dispatched): (&ConnectionHandle, u64)) {
+        self.outliving
+            .entry(Arc::clone(handle))
+            .or_default()
+            .insert(dispatched);
+    }
+
+    /// Gives back the place the resolver of the dispatch `dispatched` kept, as it settles: nothing
+    /// for one that kept none, or whose connection closed since.
+    pub(crate) fn settle(&mut self, (handle, dispatched): (&ConnectionHandle, u64)) {
+        if let Some(dispatches) = self.outliving.get_mut(handle) {
+            dispatches.remove(&dispatched);
+
+            if dispatches.is_empty() {
+                self.outliving.remove(handle);
+            }
         }
     }
 
@@ -426,6 +457,16 @@ impl ReceivingTransfers {
             return Err(too_large(format!(
                 "a payload is {} bytes at most, not {total}",
                 self.limits.maximum_payload_bytes
+            )));
+        }
+
+        // * the transfers whose resolvers outlive their calls keep a place too, within twice the
+        // bound, checked first (spec 12.3, item 3)
+        let tracked_most = self.limits.maximum_transfers.saturating_mul(2);
+
+        if transfers.saturating_add(self.outliving_on(&call.connection_handle)) >= tracked_most {
+            return Err(exceeded(format!(
+                "the transfers a connection receives and those its resolvers outlive are {tracked_most} at most"
             )));
         }
 
@@ -551,6 +592,14 @@ impl ReceivingTransfers {
             self.end(id);
         }
 
+        // the places its resolvers kept end with their connection
+        match connection_handle {
+            Some(handle) => {
+                self.outliving.remove(handle);
+            }
+            None => self.outliving.clear(),
+        }
+
         self.grant_starved()
     }
 
@@ -582,8 +631,8 @@ impl ReceivingTransfers {
             .place(&chunk.bytes, (chunk.is_last, chunk.offset))
     }
 
-    /// The transfers received and the bytes of the budget they hold, counted, and their
-    /// connections.
+    /// The transfers received, the bytes of the budget they hold and those whose resolvers outlive
+    /// their calls, counted, and their connections.
     pub(crate) fn gauges(&self) -> Gauges {
         let mut gauges = Gauges::default();
 
@@ -591,12 +640,22 @@ impl ReceivingTransfers {
             .ceilings
             .insert("bufferedBytes", self.limits.buffered_bytes_budget);
         gauges.counts.insert("bufferedBytes", self.buffered);
+        gauges.counts.insert(
+            "outlivingTransfers",
+            self.outliving
+                .values()
+                .map(|dispatches| count_of(dispatches.len()))
+                .sum(),
+        );
         gauges
             .counts
             .insert("receivingTransfers", count_of(self.held.len()));
         gauges
             .connection_handles
             .extend(self.connections.keys().cloned());
+        gauges
+            .connection_handles
+            .extend(self.outliving.keys().cloned());
 
         gauges
     }
@@ -862,12 +921,70 @@ pub(crate) struct RequestReceiving {
     pub(crate) transfer: u64,
 }
 
-/// A call to answer: the request that opened it, its signal, whether its answer is going out,
-/// what it receives of its payload; and, counted, its series and when it started.
+// where a resolver stands: its turn to come, running, its call ended before its turn, outliving its
+// call, settled
+const QUEUED: u8 = 0;
+const RUNNING: u8 = 1;
+const ENDED: u8 = 2;
+const OUTLIVING: u8 = 3;
+const SETTLED: u8 = 4;
+
+/// Where a request's resolver stands, or its credential's verifier while it resolves, which its
+/// dispatch, its call and the task that runs it share: its turn to come, running, its call ended
+/// before its turn, outliving its call, or settled. The task that runs it and the owner both move
+/// it, so each move is a compare-and-swap (spec 9.2, steps 3 and 9).
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ResolverRun(Arc<AtomicU8>);
+
+impl ResolverRun {
+    fn swap(&self, (from, to): (u8, u8)) -> Result<u8, u8> {
+        self.0
+            .compare_exchange(from, to, Ordering::AcqRel, Ordering::Acquire)
+    }
+
+    /// Marks it running as its turn comes: `false`, and it is handed nothing, once its call ended
+    /// before its turn came.
+    pub(crate) fn start(&self) -> bool {
+        self.swap((QUEUED, RUNNING)).is_ok()
+    }
+
+    /// Marks its credential's verifier running.
+    pub(crate) fn verify(&self) {
+        self.0.store(RUNNING, Ordering::Release);
+    }
+
+    /// Its verifier settled with its call open: its resolver's turn to come. `true` when its call
+    /// ended meanwhile, the verifier outliving it, so the place it kept is given back.
+    pub(crate) fn verified(&self) -> bool {
+        match self.swap((RUNNING, QUEUED)) {
+            Ok(_) => false,
+            Err(_) => self.settle(),
+        }
+    }
+
+    /// Its call ends: a resolver whose turn has not come never runs; `true` when one runs on,
+    /// outliving its call.
+    pub(crate) fn end(&self) -> bool {
+        match self.swap((QUEUED, ENDED)) {
+            Ok(_) => false,
+            Err(_) => self.swap((RUNNING, OUTLIVING)).is_ok(),
+        }
+    }
+
+    /// It settles: `true` when it outlived its call, so the place it kept is given back.
+    pub(crate) fn settle(&self) -> bool {
+        self.0.swap(SETTLED, Ordering::AcqRel) == OUTLIVING
+    }
+}
+
+/// A call to answer: the request that opened it, its signal, where its resolver stands, whether its
+/// answer is going out, what it receives of its payload; and, counted, its series and when it
+/// started.
 #[derive(Debug)]
 pub(crate) struct Answering {
     pub(crate) dispatched: u64,
     pub(crate) signal: Signal,
+    pub(crate) run: ResolverRun,
     pub(crate) is_answered: bool,
     pub(crate) is_ended: bool,
     pub(crate) receiving: Option<RequestReceiving>,
@@ -900,15 +1017,104 @@ pub(crate) struct Abandoned {
 }
 
 /// The calls the peer opened that this side has not answered yet, by connection, and those
-/// abandoned once their transfer ended.
+/// abandoned once their transfer ended; the resolvers that outlive their call, by connection and
+/// by their dispatch, each with its call's signal, and those of connections closed since; and, by
+/// connection, the requests in a row refused past the calls answered and those outlived together.
 #[derive(Debug, Default)]
 pub(crate) struct AnsweringCalls {
     pub(crate) answering: BTreeMap<ConnectionHandle, BTreeMap<u32, Answering>>,
     pub(crate) abandoned: BTreeMap<ConnectionHandle, BTreeMap<u32, Abandoned>>,
+    pub(crate) outliving: BTreeMap<ConnectionHandle, BTreeMap<u64, Signal>>,
+    // ! keyed by dispatch alone: a connection the transport no longer holds leaves no orphan, and a
+    // name a transport gives again finds none of its own
+    pub(crate) closed: BTreeSet<u64>,
+    pub(crate) refused: BTreeMap<ConnectionHandle, u64>,
     pub(crate) most: u64,
 }
 
 impl AnsweringCalls {
+    /// Keeps a place for the resolver of the call `answering` on `handle`, which outlives that
+    /// call, until it settles: by its dispatch, with its call's signal, aborted should its
+    /// connection close first (spec 9.10).
+    pub(crate) fn outlive(&mut self, (handle, answering): (&ConnectionHandle, &Answering)) {
+        self.outliving
+            .entry(Arc::clone(handle))
+            .or_default()
+            .insert(answering.dispatched, answering.signal.clone());
+    }
+
+    /// Gives back the place of the resolver of the dispatch `dispatched` as it settles, on its
+    /// connection or among those of connections closed since.
+    pub(crate) fn settle(&mut self, (handle, dispatched): (&ConnectionHandle, u64)) {
+        if let Some(dispatches) = self.outliving.get_mut(handle)
+            && dispatches.remove(&dispatched).is_some()
+        {
+            if dispatches.is_empty() {
+                self.outliving.remove(handle);
+            }
+
+            return;
+        }
+
+        self.closed.remove(&dispatched);
+    }
+
+    /// Counts, among those of connections closed, a resolver its connection's close found running.
+    pub(crate) fn outlive_closed(&mut self, dispatched: u64) {
+        self.closed.insert(dispatched);
+    }
+
+    /// The calls `handle` has this side answer and those whose resolvers outlive them, together.
+    pub(crate) fn tracked_on(&self, handle: &ConnectionHandle) -> u64 {
+        let outliving = self
+            .outliving
+            .get(handle)
+            .map_or(0, |dispatches| count_of(dispatches.len()));
+
+        self.count_on(handle).saturating_add(outliving)
+    }
+
+    /// Counts a request refused past the calls answered and those outlived together, and gives the
+    /// requests in a row so refused on `handle`.
+    pub(crate) fn refused_past(&mut self, handle: &ConnectionHandle) -> u64 {
+        let run = self.refused.entry(Arc::clone(handle)).or_insert(0);
+
+        *run = run.saturating_add(1);
+
+        *run
+    }
+
+    /// Sets the run of refusals on `handle` back, as a request reaches step 3 and is not refused
+    /// past the calls answered and those outlived together: admitted, or refused at the first
+    /// ceiling.
+    pub(crate) fn admitted(&mut self, handle: &ConnectionHandle) {
+        self.refused.remove(handle);
+    }
+
+    /// The signals of the resolvers that outlive their call on `handle`, or on every connection
+    /// when none, which now count among those of connections closed.
+    pub(crate) fn close_outliving(&mut self, handle: Option<&ConnectionHandle>) -> Vec<Signal> {
+        let taken: Vec<BTreeMap<u64, Signal>> = match handle {
+            Some(handle) => self.outliving.remove(handle).into_iter().collect(),
+            None => core::mem::take(&mut self.outliving).into_values().collect(),
+        };
+        let mut signals = Vec::new();
+
+        for (dispatched, signal) in taken.into_iter().flatten() {
+            self.closed.insert(dispatched);
+            signals.push(signal);
+        }
+
+        match handle {
+            Some(handle) => {
+                self.refused.remove(handle);
+            }
+            None => self.refused.clear(),
+        }
+
+        signals
+    }
+
     pub(crate) fn get(&self, call: &CallAddress) -> Option<&Answering> {
         self.answering
             .get(&call.connection_handle)
@@ -1055,7 +1261,7 @@ impl AnsweringCalls {
     ) -> Vec<(CallAddress, Answering)> {
         let handles: Vec<ConnectionHandle> = handle.map_or_else(
             || {
-                let mut handles: std::collections::BTreeSet<ConnectionHandle> =
+                let mut handles: BTreeSet<ConnectionHandle> =
                     self.answering.keys().cloned().collect();
                 handles.extend(self.abandoned.keys().cloned());
                 handles.into_iter().collect()
@@ -1109,12 +1315,37 @@ impl AnsweringCalls {
                 .sum(),
         );
         gauges.counts.insert("largestAnsweringCalls", largest);
+
+        // * the busiest connection's calls answered and those outlived together, within twice the
+        // bound; and every resolver that outlives its call, those of connections closed among them
+        let tracked = self
+            .answering
+            .keys()
+            .chain(self.outliving.keys())
+            .map(|handle| self.tracked_on(handle))
+            .max()
+            .unwrap_or(0);
+        let outliving = self
+            .outliving
+            .values()
+            .map(|dispatches| count_of(dispatches.len()))
+            .sum::<u64>()
+            .saturating_add(count_of(self.closed.len()));
+
+        gauges
+            .ceilings
+            .insert("largestTrackedCalls", self.most.saturating_mul(2));
+        gauges.counts.insert("largestTrackedCalls", tracked);
+        gauges.counts.insert("outlivingResolvers", outliving);
         gauges
             .connection_handles
             .extend(self.answering.keys().cloned());
         gauges
             .connection_handles
             .extend(self.abandoned.keys().cloned());
+        gauges
+            .connection_handles
+            .extend(self.outliving.keys().cloned());
 
         gauges
     }

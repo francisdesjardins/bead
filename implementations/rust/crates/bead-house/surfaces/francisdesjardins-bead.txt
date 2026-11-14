@@ -2860,6 +2860,7 @@ crate::transport
     fn listen(&self, listener: Arc<dyn ClientListener>)
     fn unlisten(&self, listener: &Arc<dyn ClientListener>)
     fn pause(&self)
+    fn disconnect(&self)
     fn resume(&self)
     fn clock(&self) -> Option<SharedClock>
     fn is_secure(&self) -> bool
