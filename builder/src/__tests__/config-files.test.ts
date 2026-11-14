@@ -83,3 +83,53 @@ test('bounds temporary folder creation when concurrent cleanups keep removing it
 test('passes a temporary folder creation error other than ENOENT straight to its caller', () => {
   workspaceRace(test.info().outputPath('project'), { removals: 0, code: 'EACCES' });
 });
+
+test('creates a temporary folder after its parent’s creation meets a concurrent cleanup', () => {
+  const folder = test.info().outputPath('project');
+
+  execFileSync(
+    process.execPath,
+    [
+      '--input-type=module',
+      '-e',
+      `
+        import assert from 'node:assert/strict';
+        import fs from 'node:fs';
+        import { syncBuiltinESMExports } from 'node:module';
+        import path from 'node:path';
+
+        const [module, folder] = process.argv.slice(1);
+        const { temporaryFolderOf } = await import(module);
+        const { BEADC_FOLDER } = await import(new URL('./config.ts', module).href);
+        const own = path.join(folder, BEADC_FOLDER);
+        const make = fs.mkdirSync;
+        let attempts = 0;
+
+        fs.mkdirSync = (target, options) => {
+          if (path.resolve(target) === own) {
+            attempts += 1;
+            if (attempts === 1) {
+              // Windows' recursive mkdir, as another invocation's cleanup removes the parent
+              throw Object.assign(new Error('no such file or directory'), { code: 'ENOENT' });
+            }
+          }
+          return make(target, options);
+        };
+        syncBuiltinESMExports();
+
+        try {
+          const made = temporaryFolderOf('buf-', { folder });
+          assert.equal(attempts, 2);
+          assert.equal(path.dirname(made), own);
+          fs.rmdirSync(made);
+        } finally {
+          fs.mkdirSync = make;
+          syncBuiltinESMExports();
+        }
+      `,
+      new URL('../config-files.ts', import.meta.url).href,
+      folder,
+    ],
+    { stdio: 'pipe' }
+  );
+});

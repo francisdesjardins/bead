@@ -154,6 +154,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- beadc retries its work area's `.beadc` parent's creation too when another run removes it as
+  it is made, which Windows answers with ENOENT, where it failed the run.
 - beadc's check that an earlier's root holds a `.proto` leaves `.beadc` work areas out, where it
   counted another run's copy of its options, and failed on a file that run removed as it read.
 - beadc leaves its work area's empty `.beadc` parent in place when Windows refuses its removal

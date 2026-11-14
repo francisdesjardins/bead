@@ -31,11 +31,12 @@ export const temporaryFolderOf = (
 
   const own = nodePath.join(options.folder, BEADC_FOLDER);
 
-  // * an empty-parent cleanup can land between mkdir and mkdtemp; retry just that race.
+  // * an empty-parent cleanup can land between mkdir and mkdtemp, or within mkdir, which on Windows
+  // answers ENOENT to a parent another run removes as it looks; retry just that race.
   for (let attempt = 1; ; attempt += 1) {
-    mkdirSync(own, { recursive: true });
-
     try {
+      mkdirSync(own, { recursive: true });
+
       return mkdtempSync(nodePath.join(own, prefix));
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || attempt === WORKSPACE_ATTEMPTS) {
