@@ -47,7 +47,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `/playground/`, each old path under francisdesjardins.ca/bead/ sent there by a 301; `site/deploy.mjs`
   ships both to a Cloudflare Worker that serves files alone, under a Content-Security-Policy, and
   Bead's mark, Baily's beads at the Moon's edge, is the page's and the demo's icon and the mark
-  beside the name in their top bars, and the DevTools extension's, its panel's tab `⦿ Bead`; the
+  beside the name in their top bars, and the DevTools extension's, its panel's tab `Bead ⦿`; the
   page's footer names its author.
 - **Breaking:** `bead_protobuf::ProtoCodec::new` returns a `Result`, refusing a message whose
   repeated or map field of a closed enum its generator left closed; `bead-protobuf` requires
