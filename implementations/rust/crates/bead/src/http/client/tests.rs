@@ -24,6 +24,7 @@ mod definition;
 mod guards;
 mod listening;
 mod redirects;
+mod tls;
 
 /// The token the server of the tests' own draws.
 const TOKEN: &str = "TTTTTTTTTTTTTTTTTTTTTT";

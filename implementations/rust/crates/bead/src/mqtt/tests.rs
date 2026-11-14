@@ -13,6 +13,7 @@ use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
+use crate::TlsOptions;
 use crate::broker::adapter::{
     BrokerAdapter, BrokerCapabilities, BrokerDelivery, BrokerDown, BrokerError, BrokerListener,
     BrokerMessage, BrokerPublication, BrokerPublished, BrokerStart, BrokerSubscription,
@@ -270,16 +271,16 @@ async fn connects_a_link_that_keeps_no_session_its_id_its_client_identifier_its_
     );
     adapter.stop().await;
 
-    // under a client certificate its broker ties to its id, over TLS: neither User Name nor
-    // Password
+    // under a client certificate its broker ties to its id, which its broker requires, over TLS:
+    // neither User Name nor Password
     let secured_options = MqttScriptOptions {
-        tls: Some(tls::server_config().unwrap()),
+        tls: Some(tls::pki_server_config(&tls::PkiServerOptions::default()).unwrap()),
     };
 
     let secured = MqttScript::new(&secured_options).await.unwrap();
     let mut certified = MqttBrokerAdapterOptions::new(secured.url(), ID);
 
-    certified.tls = Some(tls::certified_client_config().unwrap());
+    certified.tls = Some(tls::pki_client().unwrap());
 
     let certified = adapter_of(&certified);
     let bare = link_up((&certified, &secured), (&Connack::default(), None)).await;
@@ -290,10 +291,45 @@ async fn connects_a_link_that_keeps_no_session_its_id_its_client_identifier_its_
     assert!(certified.is_secure(), "secure");
     certified.stop().await;
 
+    // * under the authorities alone, its broker judged by them: its User Name and its Password
+    let trusting_options = MqttScriptOptions {
+        tls: Some(
+            tls::pki_server_config(&tls::PkiServerOptions {
+                requires_certificate: Some(false),
+                ..tls::PkiServerOptions::default()
+            })
+            .unwrap(),
+        ),
+    };
+    let trusting_script = MqttScript::new(&trusting_options).await.unwrap();
+    let mut trusting = MqttBrokerAdapterOptions::new(trusting_script.url(), ID);
+
+    trusting.password = Some(PASSWORD.to_owned());
+    trusting.tls = Some(TlsOptions {
+        authorities: Some(tls::pki("root.pem").unwrap()),
+        ..TlsOptions::default()
+    });
+
+    let trusting = adapter_of(&trusting);
+    let named = link_up((&trusting, &trusting_script), (&Connack::default(), None)).await;
+
+    assert_eq!(
+        named.connect().user_name.as_deref(),
+        Some(ID),
+        "its User Name"
+    );
+    assert_eq!(
+        named.connect().password.as_deref(),
+        Some(PASSWORD.as_bytes()),
+        "its Password"
+    );
+    assert!(trusting.is_secure(), "secure");
+    trusting.stop().await;
+
     // a certificate in the clear is refused as it is built
     let mut clear = MqttBrokerAdapterOptions::new(script.url(), ID);
 
-    clear.tls = Some(tls::certified_client_config().unwrap());
+    clear.tls = Some(tls::pki_client().unwrap());
 
     let refused = MqttBrokerAdapter::new(&clear).unwrap_err();
 
@@ -455,13 +491,22 @@ async fn fails_its_start_where_its_broker_cannot_be_reached_over_tcp_tls_or_a_we
 #[tokio::test]
 async fn fails_its_start_over_tls_where_its_brokers_certificate_chains_to_no_authority_it_trusts() {
     let secured_options = MqttScriptOptions {
-        tls: Some(tls::server_config().unwrap()),
+        tls: Some(
+            tls::pki_server_config(&tls::PkiServerOptions {
+                requires_certificate: Some(false),
+                ..tls::PkiServerOptions::default()
+            })
+            .unwrap(),
+        ),
     };
 
     let secured = MqttScript::new(&secured_options).await.unwrap();
     let mut options = MqttBrokerAdapterOptions::new(secured.url(), ID);
-
-    options.tls = Some(tls::untrusting_client_config().unwrap());
+    // * the stranger root alone, in place of the platform's: the broker's chains to the root
+    options.tls = Some(TlsOptions {
+        authorities: Some(tls::pki("stranger-root.pem").unwrap()),
+        ..TlsOptions::default()
+    });
 
     let untrusting = adapter_of(&options);
     let failed = untrusting.start(BrokerStart::default()).await.unwrap_err();
@@ -4294,7 +4339,7 @@ async fn refuses_a_password_beside_a_client_certificate_and_both_a_password_and_
     let script = script().await;
     let secured = "mqtts://127.0.0.1:8883";
     let provider = provider_of(|_signal| Box::pin(async { Ok(PASSWORD.to_owned()) }));
-    let certificate = tls::certified_client_config().unwrap();
+    let certificate = tls::pki_client().unwrap();
     let refusals: Vec<String> = [
         (true, false, true),
         (false, true, true),
@@ -4308,7 +4353,7 @@ async fn refuses_a_password_beside_a_client_certificate_and_both_a_password_and_
 
         options.password = password.then(|| PASSWORD.to_owned());
         options.password_provider = provided.then(|| Arc::clone(&provider));
-        options.tls = certified.then(|| Arc::clone(&certificate));
+        options.tls = certified.then(|| certificate.clone());
 
         MqttBrokerAdapter::new(&options)
             .unwrap_err()
@@ -4339,6 +4384,35 @@ async fn refuses_a_password_beside_a_client_certificate_and_both_a_password_and_
     );
     assert_eq!(link.connect().password, None, "no Password");
     bare.stop().await;
+}
+
+// spec 15.39
+#[tokio::test]
+async fn takes_a_password_beside_tls_that_names_authorities_alone() {
+    let provider = provider_of(|_signal| Box::pin(async { Ok(PASSWORD.to_owned()) }));
+    let authorities = TlsOptions {
+        authorities: Some(tls::pki("root.pem").unwrap()),
+        ..TlsOptions::default()
+    };
+
+    // built over mqtts and wss, never started: no broker is needed
+    for url in ["mqtts://127.0.0.1:8883", "wss://127.0.0.1:8884/mqtt"] {
+        for provided in [false, true] {
+            let mut options = MqttBrokerAdapterOptions::new(url, ID);
+
+            options.tls = Some(authorities.clone());
+
+            if provided {
+                options.password_provider = Some(Arc::clone(&provider));
+            } else {
+                options.password = Some(PASSWORD.to_owned());
+            }
+
+            let refused = MqttBrokerAdapter::new(&options).err();
+
+            assert!(refused.is_none(), "{url}, provided {provided}: {refused:?}");
+        }
+    }
 }
 
 #[tokio::test]

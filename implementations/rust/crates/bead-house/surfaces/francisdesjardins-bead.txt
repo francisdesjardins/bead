@@ -1,5 +1,6 @@
 crate
   mod json
+  use net::tls::TlsOptions #[cfg(any(feature = "websocket", feature = "http", feature = "mqtt"))]
   use rustls #[cfg(any(feature = "websocket", feature = "http", feature = "mqtt"))]
   use tokio::runtime::Handle
   use tokio_util::sync::CancellationToken
@@ -1196,7 +1197,8 @@ crate::http::client
     pub maximum_body_bytes: Option<u64> #[cfg(feature = "http")]
     pub pause: Option<Duration> #[cfg(feature = "http")]
     pub wait: Option<Duration> #[cfg(feature = "http")]
-    pub tls: Option<Arc<ClientConfig>> #[cfg(feature = "http")]
+    pub client_config: Option<Arc<ClientConfig>> #[cfg(feature = "http")]
+    pub tls: Option<TlsOptions> #[cfg(feature = "http")]
     derives Clone, Debug, Default #[cfg(feature = "http")]
   struct HttpTransportClientConnectOptions #[non_exhaustive] #[cfg(feature = "http")]
     pub host: String #[cfg(feature = "http")]
@@ -1936,7 +1938,7 @@ crate::mqtt::adapter
     pub id: String #[cfg(feature = "mqtt")]
     pub password: Option<String> #[cfg(feature = "mqtt")]
     pub password_provider: Option<CredentialProvider> #[cfg(feature = "mqtt")]
-    pub tls: Option<Arc<ClientConfig>> #[cfg(feature = "mqtt")]
+    pub tls: Option<TlsOptions> #[cfg(feature = "mqtt")]
     pub maximum_packet_size: Option<u32> #[cfg(feature = "mqtt")]
     pub keep_alive: Option<Duration> #[cfg(feature = "mqtt")]
     pub connect_timeout: Option<Duration> #[cfg(feature = "mqtt")]
@@ -2042,6 +2044,13 @@ crate::net::bounds
 crate::net::credential
   type CredentialProviderError = Box<dyn Error + Send + Sync> #[cfg(any(feature = "websocket", feature = "http", feature = "mqtt"))] #[cfg(any(feature = "websocket", feature = "mqtt"))]
   type CredentialProvider = Arc<dyn Fn(CancellationToken) -> BoxFuture<Result<String, CredentialProviderError>> + Send + Sync,> #[cfg(any(feature = "websocket", feature = "http", feature = "mqtt"))] #[cfg(any(feature = "websocket", feature = "mqtt"))]
+crate::net::tls
+  struct TlsOptions #[non_exhaustive] #[cfg(any(feature = "websocket", feature = "http", feature = "mqtt"))]
+    pub authorities: Option<String> #[cfg(any(feature = "websocket", feature = "http", feature = "mqtt"))]
+    pub certificate: Option<String> #[cfg(any(feature = "websocket", feature = "http", feature = "mqtt"))]
+    pub key: Option<String> #[cfg(any(feature = "websocket", feature = "http", feature = "mqtt"))]
+    implements Debug
+    derives Clone, Default #[cfg(any(feature = "websocket", feature = "http", feature = "mqtt"))]
 crate::payloads
   struct CodecRefusal
     fn new<R: Into<String>>(reason: R) -> Self
@@ -2928,7 +2937,8 @@ crate::websocket::client
     pub close_timeout: Option<Duration> #[cfg(feature = "websocket")]
     pub heartbeat: Option<Duration> #[cfg(feature = "websocket")]
     pub maximum_message_bytes: Option<u64> #[cfg(feature = "websocket")]
-    pub tls: Option<Arc<ClientConfig>> #[cfg(feature = "websocket")]
+    pub client_config: Option<Arc<ClientConfig>> #[cfg(feature = "websocket")]
+    pub tls: Option<TlsOptions> #[cfg(feature = "websocket")]
     derives Clone, Debug, Default #[cfg(feature = "websocket")]
   struct WebSocketTransportClientConnectOptions #[non_exhaustive] #[cfg(feature = "websocket")]
     pub host: String #[cfg(feature = "websocket")]

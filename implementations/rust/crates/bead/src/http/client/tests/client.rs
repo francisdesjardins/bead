@@ -1080,7 +1080,7 @@ async fn refuses_to_connect_where_no_connection_is_drawn_and_lets_go_of_one_draw
     })
     .await;
     let client = client_of(&HttpTransportClientOptions {
-        tls: Some(crate::testing::tls::client_config().unwrap()),
+        client_config: Some(crate::testing::tls::client_config().unwrap()),
         ..not_listening()
     });
     let connecting = client.connect(&HttpTransportClientConnectOptions {

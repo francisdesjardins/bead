@@ -6,18 +6,16 @@
 
 use core::time::Duration;
 use std::io;
-use std::sync::Arc;
 
 use bytes::buf::BufMut;
 use bytes::{Bytes, BytesMut};
-use rustls::ClientConfig;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf};
 
 use crate::judgement::security::is_secure;
 use crate::mqtt::websocket::{MqttFrameEvent, MqttFrameReader, binary_of, close_of, pong_of};
 use crate::net::dial::{ClientSocket, dial};
 use crate::net::racing::{RacingOptions, host_of};
-use crate::net::tls::{http1_config_of, platform_client_config};
+use crate::net::tls::{ClientTls, config_of, http1_config_of};
 
 /// What a read takes from its socket at most at once.
 pub(crate) const READ_BYTES: usize = 65_536;
@@ -274,19 +272,19 @@ fn resetter_of(socket: &ClientSocket) -> Option<socket2::Socket> {
 /// How a link's network connection is opened: its race and its TLS.
 pub(crate) struct OpenOptions<'options> {
     pub(crate) racing: &'options RacingOptions,
-    pub(crate) tls: Option<&'options Arc<ClientConfig>>,
+    pub(crate) tls: &'options ClientTls,
 }
 
 /// A link's network connection to `address`, open: over TCP, under TLS for `mqtts` and `wss`, and a
 /// WebSocket of subprotocol `mqtt` for `ws` and `wss`.
 pub(crate) async fn open(address: &Address, options: &OpenOptions<'_>) -> io::Result<Opened> {
     let tls = if address.scheme.is_tls() {
-        let config = match (address.scheme, options.tls) {
+        let config = match address.scheme {
             // * a WebSocket's upgrade speaks HTTP/1.1, which its ALPN offers alone
-            (Scheme::Wss, given) => http1_config_of(given).map_err(io::Error::other)?,
-            (_, Some(given)) => Arc::clone(given),
-            (_, None) => Arc::new(platform_client_config().map_err(io::Error::other)?),
-        };
+            Scheme::Wss => http1_config_of(options.tls),
+            Scheme::Mqtt | Scheme::Mqtts | Scheme::Ws => config_of(options.tls),
+        }
+        .map_err(io::Error::other)?;
 
         Some(config)
     } else {

@@ -19,6 +19,7 @@ use crate::websocket::server::{WebSocketTransportServer, WebSocketTransportServe
 use crate::{ServerTransport, TransportServerAddress};
 
 mod reconnection;
+mod tls;
 
 const PATIENCE: Duration = Duration::from_secs(10);
 
@@ -926,7 +927,7 @@ async fn asks_for_wss_when_secured() {
     });
 
     let secured = client_of(&WebSocketTransportClientOptions {
-        tls: Some(crate::testing::tls::client_config().unwrap()),
+        client_config: Some(crate::testing::tls::client_config().unwrap()),
         ..WebSocketTransportClientOptions::default()
     });
     let recorder = recorded(&secured);

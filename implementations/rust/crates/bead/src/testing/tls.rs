@@ -1,17 +1,28 @@
-//! The TypeScript side's `TLS_FIXTURE`, for the tests of a transport over TLS alone.
+//! TLS for the tests of a transport over TLS: the TypeScript side's fixture, and Bead's test PKI.
 //!
-//! A key and the certificate it signed itself, for `localhost` and 127.0.0.1, good until 2126. It
-//! guards nothing — anyone may read it here.
+//! `TLS_FIXTURE` is a key and the certificate it signed itself, for `localhost` and 127.0.0.1, good
+//! until 2126. The PKI, `spec/pki/`, is read at run time, with the TLS front a test puts before a
+//! server in the clear. They guard nothing — anyone may read them here.
 
-use std::sync::Arc;
+use core::net::Ipv4Addr;
+use std::io;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::crypto::{WebPkiSupportedAlgorithms, verify_tls12_signature, verify_tls13_signature};
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
+use rustls::server::WebPkiClientVerifier;
 use rustls::{
-    CertificateError, ClientConfig, DigitallySignedStruct, ServerConfig, SignatureScheme,
+    CertificateError, ClientConfig, DigitallySignedStruct, ProtocolVersion, RootCertStore,
+    ServerConfig, SignatureScheme,
 };
+use tokio::net::{TcpListener, TcpStream};
+use tokio::task::JoinHandle;
+use tokio_rustls::TlsAcceptor;
+
+use crate::TlsOptions;
+use crate::testing::{files, spawn};
 
 /// The certificate, in PEM: P-256, for `localhost` and 127.0.0.1.
 pub const CERTIFICATE: &str = "-----BEGIN CERTIFICATE-----
@@ -138,48 +149,208 @@ pub fn client_config() -> Result<Arc<ClientConfig>, rustls::Error> {
     ))
 }
 
-/// A client's config that trusts the certificate alone and presents it as its own.
+// ── Bead's test PKI ──────────────────────────────────────────────────────────────────────────
+
+/// The file `name` of `spec/pki/`, Bead's test PKI, its text whole.
 ///
-/// It trusts as [`client_config`] does, and its certificate is a client's its broker ties to its
-/// id, as the TypeScript side's broker tests give `TLS_FIXTURE`'s `cert` and `key`.
+/// The PKI holds a root, an intermediate under it, a client under the intermediate and a server
+/// under the root, then a stranger root with a client and a server of its own. Its keys guard
+/// nothing.
 ///
 /// # Errors
 ///
-/// What rustls refuses it for.
-pub fn certified_client_config() -> Result<Arc<ClientConfig>, rustls::Error> {
-    let certificate = CertificateDer::from_pem_slice(CERTIFICATE.as_bytes())
-        .map_err(|_unread| refused("certificate"))?;
-    let key = PrivateKeyDer::from_pem_slice(KEY.as_bytes()).map_err(|_unread| refused("key"))?;
+/// What reading it refuses, saying which file.
+pub fn pki(name: &str) -> Result<String, String> {
+    files::text_of(&format!("pki/{name}"))
+}
+
+/// The `tls` of the PKI's client: `root.pem` its authorities, `client-chain.pem` its certificate,
+/// the intermediate after it, and `client.key` its key.
+///
+/// # Errors
+///
+/// What reading a file of the PKI refuses.
+pub fn pki_client() -> Result<TlsOptions, String> {
+    Ok(TlsOptions {
+        authorities: Some(pki("root.pem")?),
+        certificate: Some(pki("client-chain.pem")?),
+        key: Some(pki("client.key")?),
+    })
+}
+
+// the PKI's file `name`, read as certificates
+fn pki_certificates(name: &str) -> Result<Vec<CertificateDer<'static>>, String> {
+    CertificateDer::pem_slice_iter(pki(name)?.as_bytes())
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|unread| format!("{name}: {unread}"))
+}
+
+/// How a server of the PKI serves: under which certificate, asking what of its client, up to which
+/// TLS version.
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
+pub struct PkiServerOptions {
+    /// Whether it serves under `stranger-server.pem`, which chains to the stranger root, rather
+    /// than `server.pem`, under the root: `false` when none.
+    pub is_stranger: Option<bool>,
+    /// Whether its handshake requires a client certificate under `root.pem`, or asks for none:
+    /// `true` when none.
+    pub requires_certificate: Option<bool>,
+    /// The highest TLS version it speaks, 1.2 or 1.3: TLS 1.3 when none.
+    pub highest: Option<ProtocolVersion>,
+}
+
+/// A server's config of the PKI, as `options` say.
+///
+/// # Errors
+///
+/// What reading the PKI or rustls refuses it for.
+pub fn pki_server_config(options: &PkiServerOptions) -> Result<Arc<ServerConfig>, String> {
+    let name = if options.is_stranger.unwrap_or(false) {
+        "stranger-server"
+    } else {
+        "server"
+    };
+    let chain = pki_certificates(&format!("{name}.pem"))?;
+    let key = PrivateKeyDer::from_pem_slice(pki(&format!("{name}.key"))?.as_bytes())
+        .map_err(|unread| format!("{name}.key: {unread}"))?;
+    let versions: &[&'static rustls::SupportedProtocolVersion] =
+        if options.highest == Some(ProtocolVersion::TLSv1_2) {
+            &[&rustls::version::TLS12]
+        } else {
+            &[&rustls::version::TLS13, &rustls::version::TLS12]
+        };
     let provider = provider();
-    let pinned = Pinned {
-        certificate: certificate.clone(),
-        algorithms: provider.signature_verification_algorithms,
+    let versioned = ServerConfig::builder_with_provider(Arc::clone(&provider))
+        .with_protocol_versions(versions)
+        .map_err(|refused| refused.to_string())?;
+    let verified = if options.requires_certificate.unwrap_or(true) {
+        let mut roots = RootCertStore::empty();
+
+        for root in pki_certificates("root.pem")? {
+            roots.add(root).map_err(|refused| refused.to_string())?;
+        }
+
+        let verifier = WebPkiClientVerifier::builder_with_provider(Arc::new(roots), provider)
+            .build()
+            .map_err(|refused| refused.to_string())?;
+
+        versioned.with_client_cert_verifier(verifier)
+    } else {
+        versioned.with_no_client_auth()
     };
 
     Ok(Arc::new(
-        ClientConfig::builder_with_provider(provider)
-            .with_safe_default_protocol_versions()?
-            .dangerous()
-            .with_custom_certificate_verifier(Arc::new(pinned))
-            .with_client_auth_cert(vec![certificate], key)?,
+        verified
+            .with_single_cert(chain, key)
+            .map_err(|refused| refused.to_string())?,
     ))
 }
 
-/// A client's config that presents the certificate as its own and trusts no authority at all:
-/// every server's certificate, the fixture's among them, chains to none it trusts.
-///
-/// # Errors
-///
-/// What rustls refuses it for.
-pub fn untrusting_client_config() -> Result<Arc<ClientConfig>, rustls::Error> {
-    let certificate = CertificateDer::from_pem_slice(CERTIFICATE.as_bytes())
-        .map_err(|_unread| refused("certificate"))?;
-    let key = PrivateKeyDer::from_pem_slice(KEY.as_bytes()).map_err(|_unread| refused("key"))?;
+// ── Its TLS front ────────────────────────────────────────────────────────────────────────────
 
-    Ok(Arc::new(
-        ClientConfig::builder_with_provider(provider())
-            .with_safe_default_protocol_versions()?
-            .with_root_certificates(rustls::RootCertStore::empty())
-            .with_client_auth_cert(vec![certificate], key)?,
-    ))
+fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// A front of TLS before a server in the clear, the test kit's twins' peer.
+///
+/// As the TypeScript side's over `node:tls` and the C# side's over `SslStream` are, it listens on
+/// 127.0.0.1, takes TLS as a [`pki_server_config`] of its options, and pipes each connection whose
+/// handshake it took to that server's port, both ways; a handshake it refused, it drops.
+pub struct TlsFront {
+    port: u16,
+    versions: Arc<Mutex<Vec<ProtocolVersion>>>,
+    tasks: Arc<Mutex<Vec<JoinHandle<()>>>>,
+    accepting: JoinHandle<()>,
+}
+
+impl core::fmt::Debug for TlsFront {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("TlsFront")
+            .field("port", &self.port)
+            .finish_non_exhaustive()
+    }
+}
+
+// one connection it took: its handshake, then its bytes piped to `port`, both ways
+async fn piped(
+    (acceptor, near): (TlsAcceptor, TcpStream),
+    (port, versions): (u16, Arc<Mutex<Vec<ProtocolVersion>>>),
+) {
+    // * a handshake it refused is dropped, its client told by its alert
+    let Ok(mut secured) = acceptor.accept(near).await else {
+        return;
+    };
+
+    if let Some(version) = secured.get_ref().1.protocol_version() {
+        locked(&versions).push(version);
+    }
+
+    let Ok(mut far) = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).await else {
+        return;
+    };
+
+    tokio::io::copy_bidirectional(&mut secured, &mut far)
+        .await
+        .ok();
+}
+
+impl TlsFront {
+    /// A front before the server in the clear on 127.0.0.1's `port`, serving as `options` say.
+    ///
+    /// # Errors
+    ///
+    /// Where its config does not build, or where it cannot listen.
+    pub async fn to(port: u16, options: &PkiServerOptions) -> io::Result<Self> {
+        let acceptor = TlsAcceptor::from(pki_server_config(options).map_err(io::Error::other)?);
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await?;
+        let local = listener.local_addr()?.port();
+        let versions: Arc<Mutex<Vec<ProtocolVersion>>> = Arc::default();
+        let tasks: Arc<Mutex<Vec<JoinHandle<()>>>> = Arc::default();
+        let taken = Arc::clone(&versions);
+        let held = Arc::clone(&tasks);
+        let accepting = spawn(async move {
+            while let Ok((near, _)) = listener.accept().await {
+                let piping = spawn(piped((acceptor.clone(), near), (port, Arc::clone(&taken))));
+
+                locked(&held).push(piping);
+            }
+        });
+
+        Ok(Self {
+            port: local,
+            versions,
+            tasks,
+            accepting,
+        })
+    }
+
+    /// The port a client connects to it by, on 127.0.0.1.
+    #[must_use]
+    pub const fn port(&self) -> u16 {
+        self.port
+    }
+
+    /// The TLS version of each handshake it took, in their order.
+    #[must_use]
+    pub fn versions(&self) -> Vec<ProtocolVersion> {
+        locked(&self.versions).clone()
+    }
+
+    /// Stops listening, and drops each connection it pipes.
+    pub fn dispose(&self) {
+        self.accepting.abort();
+
+        for task in locked(&self.tasks).drain(..) {
+            task.abort();
+        }
+    }
+}
+
+impl Drop for TlsFront {
+    fn drop(&mut self) {
+        self.dispose();
+    }
 }

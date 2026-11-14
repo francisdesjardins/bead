@@ -38,6 +38,7 @@ use crate::judgement::security::is_secure;
 use crate::net::bounds::hold_count;
 use crate::net::listening::unless_cancelled;
 use crate::net::racing::RacingOptions;
+use crate::net::tls::ClientTls;
 use crate::payloads::{PayloadCodec, decoded, encoded, refusal_saying};
 use crate::platform::{self, Handle};
 use crate::router::types::BoxFuture;
@@ -294,7 +295,13 @@ impl HttpCaller {
         )?;
         let runtime = platform::socket_runtime_of(options.runtime.as_ref(), "an HTTP caller")?;
         let clock: SharedClock = Arc::new(SystemClock::on(runtime.clone()));
-        let connector = Connector::new(options.tls.clone(), &RacingOptions::on(clock));
+        let given = options
+            .tls
+            .as_ref()
+            .map_or_else(ClientTls::default, |config| {
+                ClientTls::Given(Arc::clone(config))
+            });
+        let connector = Connector::new(given, &RacingOptions::on(clock));
         // * HTTP/1.1, a pooled connection let go once idle on Bead's timer, its executor Bead's;
         // hyper follows no redirect and keeps no cookie
         let client = Client::builder(Spawner::on(runtime.clone()))
