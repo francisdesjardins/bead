@@ -1538,41 +1538,43 @@ async fn tells_a_close_from_its_peer_with_no_status_code_as_its_platform_reads_i
     stopped(&server).await;
 }
 
-#[tokio::test]
-async fn emits_error_with_the_handle_then_that_connection_s_close_on_a_protocol_error() {
-    let (server, recorder, port) = started(&briefly_closing()).await;
-    let (mut socket, _) = upgraded(port).await;
-    let handle = recorder.connections(1).await.remove(0);
+async fn compares_protocol_error_events() {
+    for (opcode, payload, code) in [(0x3, &[1][..], 1002), (0x1, &[0xff, 0xfe][..], 1007)] {
+        let (server, recorder, port) = started(&briefly_closing()).await;
+        let (mut socket, _) = upgraded(port).await;
+        let handle = recorder.connections(1).await.remove(0);
 
-    // a frame of an opcode RFC 6455 reserves
-    socket
-        .write_all(&masked_frame(0x3, (&[1], true)))
-        .await
-        .unwrap();
+        // a frame RFC 6455 refuses: a reserved opcode or text that is no UTF-8
+        socket
+            .write_all(&masked_frame(opcode, (payload, true)))
+            .await
+            .unwrap();
 
-    let closes = recorder.closes(1).await;
-    let errors = recorder.errors(1).await;
-    let order = recorder.order();
+        let closes = recorder.closes(1).await;
+        let errors = recorder.errors(1).await;
+        let order = recorder.order();
+        assert_eq!(errors.len(), 1, "exactly one error");
 
-    assert_eq!(
-        order[order.len() - 2..],
-        ["error", "close"],
-        "its error, then its close"
-    );
-    assert_eq!(
-        errors[0].1.as_ref(),
-        Some(&handle),
-        "its error's connection"
-    );
-    assert!(
-        errors[0]
-            .0
-            .starts_with(&format!("{handle} is closed with 1002: ")),
-        "its error: {}",
-        errors[0].0
-    );
-    assert_eq!(closes, vec![(false, handle)], "unclean");
-    stopped(&server).await;
+        assert_eq!(
+            order,
+            ["connection", "error", "close"],
+            "its error, then its close"
+        );
+        assert_eq!(
+            errors[0].1.as_ref(),
+            Some(&handle),
+            "its error's connection"
+        );
+        assert!(
+            errors[0]
+                .0
+                .starts_with(&format!("{handle} is closed with {code}: ")),
+            "its error: {}",
+            errors[0].0
+        );
+        assert_eq!(closes, vec![(false, handle)], "unclean");
+        stopped(&server).await;
+    }
 }
 
 // ! tungstenite raises one `Error::Utf8` for a text message and for a close's reason that is no
@@ -3902,4 +3904,14 @@ async fn raises_connection_before_a_frame_that_arrived_with_the_upgrade_request(
 #[tokio::test]
 async fn emits_connection_before_a_frame_that_arrived_with_the_upgrade_request() {
     compares_upgrade_carried_frames().await;
+}
+
+#[tokio::test]
+async fn emits_error_with_the_handle_then_that_connection_s_close_on_a_protocol_error() {
+    compares_protocol_error_events().await;
+}
+
+#[tokio::test]
+async fn raises_an_error_with_the_handle_then_that_connection_s_close_on_a_protocol_error() {
+    compares_protocol_error_events().await;
 }
