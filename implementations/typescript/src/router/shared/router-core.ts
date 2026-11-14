@@ -1103,9 +1103,12 @@ export const createRouterCore = <Handle extends string>(
     }
 
     // a transfer's opening is not its payload: refused once routed, before any credit goes;
-    // opened, its call waits on the rest, which one silent too long ends
+    // opened, its call waits on the budget, then on the rest, which one silent too long ends
     const transfer = receivings.open(payload, {
       call: { callId, connectionHandle },
+      onRefused: (failure) => {
+        refuse(failure, dispatched);
+      },
       onStall: () => {
         const detail = `nothing came for ${String(limits.transferInactivityTimeout)} milliseconds`;
 
@@ -1732,7 +1735,7 @@ export const createRouterCore = <Handle extends string>(
 
     // what the connection receives and sends, what it opened, its call ids reserved and what it was
     // told of its session go with it, before anything hears of it; its transfers first, so the
-    // budget the received give back grants no credit to one about to go
+    // budget the received give back admits no opening about to go
     receivings.closeAll(connectionHandle);
     sendings.closeAll(connectionHandle);
 

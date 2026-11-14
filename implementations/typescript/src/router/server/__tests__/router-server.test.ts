@@ -4933,7 +4933,14 @@ test.describe('createRouterServer, relaying', () => {
       },
       { limits: { maximumPayloadBytes: 2 * past }, relay: admitting }
     );
-    const opening = requestOf(1, { destinationId: 9, payload: new Uint8Array(16) });
+    const { header } = requestOf(1, { destinationId: 9 });
+    const openingHeader = { ...header, total: past };
+    // full, as its sender places it: a chunk's envelope less its header
+    const opening = {
+      header: openingHeader,
+      kind: EnvelopeKind.REQUEST,
+      payload: new Uint8Array(LIMIT_DEFAULTS.chunkBytes - headerBytesOf(openingHeader)),
+    } as OutgoingEnvelope;
 
     for (const connectionHandle of [first, second, third]) {
       open(connectionHandle);
@@ -4943,7 +4950,7 @@ test.describe('createRouterServer, relaying', () => {
     router.registerDestination({ connectionHandle: third }, { destinationId: 11 });
 
     // a transfer's opening past the default, credited; nothing goes on before it is whole
-    deliver(first, { ...opening, header: { ...opening.header, total: past } } as OutgoingEnvelope);
+    deliver(first, opening);
     deliver(first, requestOf(3, { destinationId: 11 }));
     await sleep(0);
 

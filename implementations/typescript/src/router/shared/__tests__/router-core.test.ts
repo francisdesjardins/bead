@@ -66,6 +66,7 @@ import {
   lineOf,
   narrow,
   openerOn,
+  openingBytesOf,
   options,
   payloadOf,
   piecesOf,
@@ -417,10 +418,10 @@ test.describe('createRouterCore', () => {
       // whole, then as a transfer: admitted, then refused
       core.receive(requestOf(1), 'a');
       core.receive(requestOf(3), 'a');
-      core.receive(requestOf(5, { payload: payload.subarray(0, 40), total: 100 }), 'a');
-      core.receive(chunkOf(5, { offset: 40, payload: payload.subarray(40, 88), total: 100 }), 'a');
-      core.receive(chunkOf(5, { offset: 88, payload: payload.subarray(88), total: 100 }), 'a');
-      core.receive(requestOf(7, { payload: payload.subarray(0, 40), total: 100 }), 'a');
+      core.receive(requestOf(5, { payload: payload.subarray(0, 44), total: 100 }), 'a');
+      core.receive(chunkOf(5, { offset: 44, payload: payload.subarray(44, 92), total: 100 }), 'a');
+      core.receive(chunkOf(5, { offset: 92, payload: payload.subarray(92), total: 100 }), 'a');
+      core.receive(requestOf(7, { payload: payload.subarray(0, 44), total: 100 }), 'a');
       // no route: never asked
       core.receive(requestOf(9, { procedure: { ...echo, serviceId: 8 } }), 'a');
       await sleep(0);
@@ -2530,10 +2531,15 @@ test.describe('createRouterCore', () => {
     });
 
     test('resolving, a transfer’s opening gets no credit until its resolution and its admission settle', async () => {
-      for (const [total, opening] of [
-        [100, 8],
-        [300, 20],
-      ] as const) {
+      for (const total of [100, 300]) {
+        const opening = openingBytesOf({
+          callId: 1,
+          credential: JWT,
+          kind: EnvelopeKind.REQUEST,
+          procedureId: echo.procedureId,
+          serviceId: echo.serviceId,
+          total,
+        });
         const resolution = Promise.withResolvers<ICallSession | undefined>();
         const clock = createTestClock();
         let admitted = 0;
@@ -2713,9 +2719,9 @@ test.describe('createRouterCore', () => {
       expect({ anomalies, ceilings, connectionHandles, counts }).toEqual({
         anomalies: [],
         ceilings: {
-          bufferedBytes: LIMIT_DEFAULTS.bufferedBytesBudget,
           largestAnsweringCalls: 64,
           largestTrackedCalls: 128,
+          reservedBytes: LIMIT_DEFAULTS.bufferedBytesBudget,
         },
         connectionHandles: new Set(['a', 'b']),
         counts: {
@@ -2729,8 +2735,10 @@ test.describe('createRouterCore', () => {
           outlivingTransfers: 0,
           pendingCalls: 1,
           receivingTransfers: 0,
+          reservedBytes: 0,
           reservedCallIds: 0,
           sendingTransfers: 0,
+          waitingTransfers: 0,
         },
       });
 
@@ -4035,7 +4043,7 @@ test.describe('createRouterCore', () => {
 
   test.describe('the transfers it receives', () => {
     test('refuse an opening before any credit goes, each by its own failure, and keep nothing of it', async () => {
-      const opening = requestOf(1, { payload: new Uint8Array(40), total: 128 });
+      const opening = requestOf(1, { payload: new Uint8Array(44), total: 128 });
 
       for (const [given, openings, answers] of [
         [
@@ -4071,21 +4079,26 @@ test.describe('createRouterCore', () => {
           ],
         ],
         [
-          { bufferedBytesBudget: 128, maximumPayloadBytes: 128 },
-          [opening, requestOf(3, { payload: Uint8Array.of(1), total: 8 })],
+          // a wait of 0 for the budget refuses at once an opening the budget left cannot hold
+          { bufferedBytesBudget: 128, maximumPayloadBytes: 128, transferInactivityTimeout: 1 },
+          [opening, requestOf(3, { payload: new Uint8Array(44), total: 100 })],
           [
             [1, EnvelopeKind.CREDIT],
             [
               3,
               ProtocolCode.CAPACITY_EXCEEDED,
-              'the transfers received hold the budget but 0 bytes',
+              'a total of 100 bytes waited 0 milliseconds for the budget',
             ],
           ],
         ],
       ] as const) {
         const { port, reported, sent } = createPort();
-        // envelopes as large as by default, for a refusal's detail to go whole
-        using core = createRouterCore(port, { limits: { maximumPayloadBytes: 1_024, ...given } });
+        // chunks of 64 bytes, in envelopes as large as by default, for a refusal's detail to go
+        // whole
+        using core = createRouterCore(port, {
+          clock: createTestClock(),
+          limits: { chunkBytes: 64, maximumPayloadBytes: 1_024, windowBytes: 128, ...given },
+        });
         const seen: IRequestResolverProps<Handle>[] = [];
 
         core.registerResolver(resolverOf(echo, seen));
@@ -4114,11 +4127,11 @@ test.describe('createRouterCore', () => {
     test('find a transfer that a chunk comes for at once, as its first credit goes out', async () => {
       const { port, reported, sent } = createPort();
       const seen: IRequestResolverProps<Handle>[] = [];
-      const payload = patternOf(80);
+      const payload = patternOf(76);
       // the chunk each call's first credit brings
       const chunks = new Map([
-        [1, chunkOf(1, { offset: 40, payload: payload.subarray(40), total: 80 })],
-        [2, chunkOf(2, { offset: 32, payload: payload.subarray(32), total: 80 })],
+        [1, chunkOf(1, { offset: 44, payload: payload.subarray(44), total: 76 })],
+        [2, chunkOf(2, { offset: 28, payload: payload.subarray(28), total: 76 })],
       ]);
       using core = createRouterCore(
         {
@@ -4148,9 +4161,9 @@ test.describe('createRouterCore', () => {
       });
 
       core.registerResolver(resolverOf(echo, seen));
-      core.receive(requestOf(1, { payload: payload.subarray(0, 40), total: 80 }), 'a');
+      core.receive(requestOf(1, { payload: payload.subarray(0, 44), total: 76 }), 'a');
       await sleep(0);
-      core.receive(resultOpeningOf(2, { payload: payload.subarray(0, 32), total: 80 }), 'a');
+      core.receive(resultOpeningOf(2, { payload: payload.subarray(0, 28), total: 76 }), 'a');
 
       await expect(answering).resolves.toMatchObject({ payload });
       expect(
@@ -4171,23 +4184,23 @@ test.describe('createRouterCore', () => {
       };
 
       core.registerResolver(resolverOf(echo, seen));
-      core.receive(requestOf(1, { payload: payload.subarray(0, 40), total: 300 }), 'a');
+      core.receive(requestOf(1, { payload: payload.subarray(0, 44), total: 300 }), 'a');
 
       // out of order, and again: each byte placed once; the last may come before the chunk ahead
       for (const [start, end] of [
-        [88, 136],
-        [40, 88],
-        [184, 232],
-        [136, 184],
-        [40, 88],
-        [280, 300],
+        [92, 140],
+        [44, 92],
+        [188, 236],
+        [140, 188],
+        [44, 92],
+        [284, 300],
       ] as const) {
         core.receive(chunk(start, end), 'a');
       }
 
       expect(seen).toEqual([]);
 
-      core.receive(chunk(232, 280), 'a');
+      core.receive(chunk(236, 284), 'a');
       await sleep(0);
 
       expect(
@@ -4201,14 +4214,14 @@ test.describe('createRouterCore', () => {
         { connectionHandle: 'a', header: seen[0]?.header ?? headerOf(1) }
       );
       // once answered, a chunk under the credit granted is late, and one past it never granted
-      core.receive(chunk(232, 280), 'a');
+      core.receive(chunk(236, 284), 'a');
       core.receive(chunkOf(1, { offset: 290, payload: new Uint8Array(48), total: 1_024 }), 'a');
       await sleep(0);
 
-      // the window past the opening; 96 more once 136 came, half a window at least; then the rest
+      // the window past the opening; 96 more once 140 came, half a window at least; then the rest
       expect(answersOf(sent)).toEqual([
-        ['a', 'credit', 1, 168],
-        ['a', 'credit', 1, 264],
+        ['a', 'credit', 1, 172],
+        ['a', 'credit', 1, 268],
         ['a', 'credit', 1, 300],
         ['a', 'result', 1, [9]],
       ]);
@@ -4222,24 +4235,25 @@ test.describe('createRouterCore', () => {
       const payload = patternOf(100);
 
       core.registerResolver(resolverOf(echo, seen));
-      core.receive(requestOf(1, { payload: payload.subarray(0, 40), total: 100 }), 'a');
-      core.receive(chunkOf(1, { offset: 40, payload: payload.subarray(40, 88), total: 100 }), 'a');
-      core.receive(chunkOf(1, { offset: 88, payload: payload.subarray(88), total: 100 }), 'a');
-      // whole and dispatched, its call not answered yet
+      core.receive(requestOf(1, { payload: payload.subarray(0, 44), total: 100 }), 'a');
+      core.receive(chunkOf(1, { offset: 44, payload: payload.subarray(44, 92), total: 100 }), 'a');
+      core.receive(chunkOf(1, { offset: 92, payload: payload.subarray(92), total: 100 }), 'a');
+      // whole and dispatched, its call not answered yet; its place refused before its opening is
+      // read
       core.receive(requestOf(3, { payload: Uint8Array.of(1), total: 8 }), 'a');
       await sleep(0);
       await core.respond(
         { payload: Uint8Array.of(9) },
         { connectionHandle: 'a', header: seen[0]?.header ?? headerOf(1) }
       );
-      core.receive(requestOf(5, { payload: Uint8Array.of(1), total: 8 }), 'a');
+      core.receive(requestOf(5, { payload: payload.subarray(0, 44), total: 60 }), 'a');
       await sleep(0);
 
       expect(answersOf(sent)).toEqual([
         ['a', 'credit', 1, 100],
         ['a', 'failure', 3, ProtocolCode.CAPACITY_EXCEEDED],
         ['a', 'result', 1, [9]],
-        ['a', 'credit', 5, 8],
+        ['a', 'credit', 5, 60],
       ]);
 
       const same = createPort();
@@ -4264,35 +4278,57 @@ test.describe('createRouterCore', () => {
       ]);
     });
 
-    test('give the budget back once a payload is whole, and grant the transfer it starved', async () => {
+    test('give the budget back once a payload is whole, and admit the opening that waits for it, its credit setting its inactivity going', async () => {
       const { port, sent } = createPort();
-      using core = createRouterCore(port, { limits: narrow });
+      const clock = createTestClock();
+      using core = createRouterCore(port, { clock, limits: narrow });
       const seen: IRequestResolverProps<Handle>[] = [];
-      const payload = patternOf(168);
+      const payload = patternOf(150);
 
       core.registerResolver(resolverOf(echo, seen));
-      core.receive(requestOf(1, { payload: payload.subarray(0, 40), total: 168 }), 'a');
-      // the budget holds its opening, and grants it nothing
-      core.receive(requestOf(3, { payload: new Uint8Array(32), total: 100 }), 'b');
-      // the budget holds no more
-      core.receive(requestOf(5, { payload: Uint8Array.of(1), total: 8 }), 'a');
+      core.receive(requestOf(1, { payload: payload.subarray(0, 44), total: 100 }), 'a');
+      // past the 100 bytes left: it waits, granted nothing
+      core.receive(requestOf(3, { payload: payload.subarray(0, 44), total: 150 }), 'b');
+      // within the 100 bytes left, it waits behind it all the same
+      core.receive(requestOf(5, { payload: payload.subarray(0, 44), total: 60 }), 'a');
+      clock.tick(10_000);
 
-      for (const offset of [40, 88, 136]) {
+      for (const offset of [44, 92]) {
         core.receive(
-          chunkOf(1, { offset, payload: payload.subarray(offset, offset + 48), total: 168 }),
+          chunkOf(1, {
+            offset,
+            payload: payload.subarray(offset, Math.min(offset + 48, 100)),
+            total: 100,
+          }),
           'a'
         );
       }
 
       await sleep(0);
 
-      // whole, its call not answered yet
+      // whole, its call not answered yet: its budget admits the first that waits, and the 50 bytes
+      // left not the second, refused once its wait passed half the inactivity allowed
       expect(seen).toHaveLength(1);
       expect(answersOf(sent)).toEqual([
-        ['a', 'credit', 1, 168],
-        ['a', 'failure', 5, ProtocolCode.CAPACITY_EXCEEDED],
-        ['b', 'credit', 3, 100],
+        ['a', 'credit', 1, 100],
+        ['b', 'credit', 3, 150],
       ]);
+
+      clock.tick(5_000);
+      await sleep(0);
+
+      expect(answersOf(sent).at(-1)).toEqual(['a', 'failure', 5, ProtocolCode.CAPACITY_EXCEEDED]);
+
+      // its inactivity counted from the credit that admitted it, not from its opening
+      clock.tick(24_999);
+      await sleep(0);
+
+      expect(answersOf(sent)).toHaveLength(3);
+
+      clock.tick(1);
+      await sleep(0);
+
+      expect(answersOf(sent).at(-1)).toEqual(['b', 'failure', 3, ProtocolCode.TRANSFER_STALLED]);
 
       const same = createPort();
       using sameCore = createRouterCore(same.port, {
@@ -4333,30 +4369,30 @@ test.describe('createRouterCore', () => {
       const payload = patternOf(200);
 
       core.registerResolver(resolverOf(echo, seen));
-      core.receive(requestOf(1, { payload: payload.subarray(0, 40), total: 200 }), 'a');
+      core.receive(requestOf(1, { payload: payload.subarray(0, 44), total: 200 }), 'a');
       // the last, it says, yet it ends before the total
       core.receive(
         envelopeOf({
-          header: { callId: 1, isLast: true, kind: EnvelopeKind.CHUNK, offset: 40 },
+          header: { callId: 1, isLast: true, kind: EnvelopeKind.CHUNK, offset: 44 },
           kind: EnvelopeKind.CHUNK,
-          payload: payload.subarray(40, 80),
+          payload: payload.subarray(44, 84),
         }),
         'a'
       );
       // under the credit granted, then past it
-      core.receive(chunkOf(1, { offset: 80, payload: payload.subarray(80, 120), total: 200 }), 'a');
+      core.receive(chunkOf(1, { offset: 84, payload: payload.subarray(84, 124), total: 200 }), 'a');
       core.receive(chunkOf(1, { offset: 160, payload: payload.subarray(160), total: 200 }), 'a');
-      core.receive(requestOf(3, { payload: payload.subarray(0, 40), total: 200 }), 'a');
+      core.receive(requestOf(3, { payload: payload.subarray(0, 44), total: 200 }), 'a');
       core.receive(chunkOf(3, { offset: 168, payload: payload.subarray(168), total: 200 }), 'a');
       // a request opens the call id abandoned again, without a transfer
       core.receive(requestOf(1), 'a');
-      core.receive(chunkOf(1, { offset: 80, payload: payload.subarray(80, 120), total: 200 }), 'a');
+      core.receive(chunkOf(1, { offset: 84, payload: payload.subarray(84, 124), total: 200 }), 'a');
       await sleep(0);
 
       expect(answersOf(sent)).toEqual([
-        ['a', 'credit', 1, 168],
+        ['a', 'credit', 1, 172],
         ['a', 'failure', 1, ProtocolCode.CHUNK_INVALID],
-        ['a', 'credit', 3, 168],
+        ['a', 'credit', 3, 172],
         ['a', 'failure', 3, ProtocolCode.CREDIT_EXCEEDED],
       ]);
       expect(codesOf(reported)).toEqual([
@@ -4376,16 +4412,17 @@ test.describe('createRouterCore', () => {
       using core = createRouterCore(port, { limits: narrow });
 
       core.registerResolver(resolverOf(echo));
-      core.receive(requestOf(1, { payload: new Uint8Array(40), total: 200 }), 'a');
+      core.receive(requestOf(1, { payload: new Uint8Array(44), total: 200 }), 'a');
       core.receive(cancelOf(1), 'a');
       // under the credit granted: late
-      core.receive(chunkOf(1, { offset: 40, payload: new Uint8Array(48), total: 200 }), 'a');
-      core.receive(requestOf(3, { payload: new Uint8Array(40), total: 200 }), 'a');
+      core.receive(chunkOf(1, { offset: 44, payload: new Uint8Array(48), total: 200 }), 'a');
+      // the whole budget its total reserved came back: admitted at once
+      core.receive(requestOf(3, { payload: new Uint8Array(44), total: 200 }), 'a');
       await sleep(0);
 
       expect(answersOf(sent)).toEqual([
-        ['a', 'credit', 1, 168],
-        ['a', 'credit', 3, 168],
+        ['a', 'credit', 1, 172],
+        ['a', 'credit', 3, 172],
       ]);
       expect(reported).toEqual([]);
     });
@@ -4445,11 +4482,11 @@ test.describe('createRouterCore', () => {
 
       core.registerResolver(resolverOf(echo, seen));
       await sleep(0);
-      core.receive(requestOf(1, { payload: payload.subarray(0, 40), total: 200 }), 'a');
-      core.receive(resultOpeningOf(2, { payload: payload.subarray(0, 32), total: 200 }), 'a');
+      core.receive(requestOf(1, { payload: payload.subarray(0, 44), total: 200 }), 'a');
+      core.receive(resultOpeningOf(2, { payload: payload.subarray(0, 28), total: 200 }), 'a');
       // a request's payload whole: its call is its resolver's
-      core.receive(requestOf(3, { payload: payload.subarray(0, 40), total: 60 }), 'a');
-      core.receive(chunkOf(3, { offset: 40, payload: payload.subarray(40, 60), total: 60 }), 'a');
+      core.receive(requestOf(3, { payload: payload.subarray(0, 44), total: 60 }), 'a');
+      core.receive(chunkOf(3, { offset: 44, payload: payload.subarray(44, 60), total: 60 }), 'a');
 
       for (const callId of [1, 1, 2, 2, 3, 5]) {
         core.receive(emptyChunkOf(callId), 'a');
@@ -4474,8 +4511,8 @@ test.describe('createRouterCore', () => {
       });
       expect(answersOf(sent)).toEqual([
         ['a', EnvelopeKind.REQUEST, 2],
-        ['a', 'credit', 1, 168],
-        ['a', 'credit', 2, 160],
+        ['a', 'credit', 1, 172],
+        ['a', 'credit', 2, 156],
         ['a', 'credit', 3, 60],
         ['a', 'failure', 1, ProtocolCode.CHUNK_INVALID],
         ['a', EnvelopeKind.CANCEL, 2],
@@ -4508,7 +4545,7 @@ test.describe('createRouterCore', () => {
       });
 
       await sleep(0);
-      clientCore.receive(resultOpeningOf(1, { payload: patternOf(32), total: 300 }), 'a');
+      clientCore.receive(resultOpeningOf(1, { payload: patternOf(28), total: 300 }), 'a');
       clientCore.receive(unreadableOf(1), 'a');
       await expect(asked).rejects.toMatchObject({
         code: ProtocolCode.CHUNK_INVALID,
@@ -4517,7 +4554,7 @@ test.describe('createRouterCore', () => {
       });
       expect(answersOf(client.sent)).toEqual([
         ['a', EnvelopeKind.REQUEST, 1],
-        ['a', 'credit', 1, 160],
+        ['a', 'credit', 1, 156],
         ['a', EnvelopeKind.CANCEL, 1],
       ]);
 
@@ -4578,13 +4615,13 @@ test.describe('createRouterCore', () => {
       core.registerResolver(resolverOf(echo));
 
       const { armed } = timersBy(clock, () => {
-        core.receive(requestOf(1, { payload: new Uint8Array(40), total: 200 }), 'a');
+        core.receive(requestOf(1, { payload: new Uint8Array(44), total: 200 }), 'a');
         asking = core.request(new Uint8Array(0), {
           connectionHandle: 'a',
           options,
           procedure: echo,
         });
-        core.receive(resultOpeningOf(2, { payload: new Uint8Array(32), total: 200 }), 'a');
+        core.receive(resultOpeningOf(2, { payload: new Uint8Array(28), total: 200 }), 'a');
       });
       const stalls = armed.filter(({ delay }) => {
         return delay === 250;
@@ -4606,14 +4643,14 @@ test.describe('createRouterCore', () => {
         timeout: 250,
       });
       // late, and dropped in silence
-      core.receive(chunkOf(1, { offset: 40, payload: new Uint8Array(48), total: 200 }), 'a');
-      core.receive(chunkOf(2, { offset: 32, payload: new Uint8Array(48), total: 200 }), 'a');
+      core.receive(chunkOf(1, { offset: 44, payload: new Uint8Array(48), total: 200 }), 'a');
+      core.receive(chunkOf(2, { offset: 28, payload: new Uint8Array(48), total: 200 }), 'a');
       await sleep(0);
 
       expect(answersOf(sent)).toEqual([
-        ['a', 'credit', 1, 168],
+        ['a', 'credit', 1, 172],
         ['a', EnvelopeKind.REQUEST, 2],
-        ['a', 'credit', 2, 160],
+        ['a', 'credit', 2, 156],
         ['a', 'failure', 1, ProtocolCode.TRANSFER_STALLED],
         ['a', EnvelopeKind.CANCEL, 2],
       ]);
@@ -4659,7 +4696,7 @@ test.describe('createRouterCore', () => {
         options: { timeout: Infinity },
         procedure: echo,
       });
-      requesting.receive(resultOpeningOf(1, { payload: payload.subarray(0, 32), total: 300 }), 'a');
+      requesting.receive(resultOpeningOf(1, { payload: payload.subarray(0, 28), total: 300 }), 'a');
       clientClock.tick(2_000);
       await expect(requested).rejects.toMatchObject({
         message: 'no answer came in 2000 milliseconds',
@@ -4669,22 +4706,23 @@ test.describe('createRouterCore', () => {
       await sleep(0);
       expect(answersOf(client.sent)).toEqual([
         ['a', EnvelopeKind.REQUEST, 1],
-        ['a', 'credit', 1, 160],
+        ['a', 'credit', 1, 156],
         ['a', EnvelopeKind.CANCEL, 1],
       ]);
       expect(client.reported).toEqual([]);
     });
 
     // spec 12.10
-    test('end the transfers of a connection that goes before their budget grants any credit, and send nothing once disposed', async () => {
+    test('end the transfers of a connection that goes, waiting or admitted, before their budget admits any opening, and send nothing once disposed', async () => {
       const { port, reported, sent } = createPort();
       const core = createRouterCore(port, { limits: narrow });
 
       core.registerResolver(resolverOf(echo));
-      core.receive(requestOf(1, { payload: new Uint8Array(40), total: 168 }), 'a');
-      // starved, each: nothing is left of the budget
-      core.receive(requestOf(3, { payload: new Uint8Array(16), total: 100 }), 'a');
-      core.receive(requestOf(1, { payload: new Uint8Array(16), total: 100 }), 'b');
+      core.receive(requestOf(1, { payload: new Uint8Array(44), total: 168 }), 'a');
+      // waiting, each: the 32 bytes left hold neither; 'a' 3 ends with its connection before 'b' 1
+      // is admitted
+      core.receive(requestOf(3, { payload: new Uint8Array(44), total: 100 }), 'a');
+      core.receive(requestOf(1, { payload: new Uint8Array(44), total: 100 }), 'b');
       core.rejectPending('gone', 'a');
       core.receive(requestOf(3, { payload: new Uint8Array(44), total: 200 }), 'b');
       core[Symbol.dispose]();
@@ -4728,8 +4766,8 @@ test.describe('createRouterCore', () => {
         }, echo)
       );
 
-      core.receive(requestOf(1, { payload: patternOf(40), total: 60 }), 'a');
-      core.receive(chunkOf(1, { offset: 40, payload: patternOf(20), total: 60 }), 'a');
+      core.receive(requestOf(1, { payload: patternOf(44), total: 60 }), 'a');
+      core.receive(chunkOf(1, { offset: 44, payload: patternOf(16), total: 60 }), 'a');
       // every timer still armed fires
       clock.runAll();
 

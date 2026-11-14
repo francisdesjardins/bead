@@ -123,6 +123,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (spec 8.2, 12.2, 12.3, 12.4, 12.8, 12.10; decision 0001).
 - A transfer's opening carries exactly the bytes its sender places in it, `chunkBytes` less its
   header, or is answered `CHUNK_INVALID` (spec 12.3; decision 0001).
+- The receiving transfers' gauges: `reservedBytes` holds what `bufferedBytes` held, under the
+  budget's ceiling; `bufferedBytes` counts the bytes received and held; `waitingTransfers` is new.
 
 ### Fixed
 

@@ -62,6 +62,11 @@ import {
   settledOf,
 } from './router-core-fixtures';
 
+// constants
+
+// a budget of 256 bytes: a request's transfer of 200 leaves a result's of 100 waiting
+const budgeted = { ...limits, bufferedBytesBudget: 256, maximumPayloadBytes: 256 };
+
 // definition
 
 test.describe('createRouterCore', () => {
@@ -557,6 +562,7 @@ test.describe('createRouterCore', () => {
       await expect(answering).rejects.toMatchObject({
         code: ProtocolCode.PAYLOAD_TOO_LARGE,
         detail: 'a payload is 16777216 bytes at most, not 16777217',
+        header: { callId: 2, kind: EnvelopeKind.RESULT },
         origin: 'local',
         side: 'server',
       });
@@ -572,7 +578,7 @@ test.describe('createRouterCore', () => {
         options: { timeout: 5_000 },
         procedure: { ...echo, maximumPayloadBytes: 100 },
       });
-      clientCore.receive(resultOpeningOf(1, { payload: patternOf(32), total: 300 }), 'a');
+      clientCore.receive(resultOpeningOf(1, { payload: patternOf(28), total: 300 }), 'a');
       await expect(asked).rejects.toMatchObject({
         code: ProtocolCode.PAYLOAD_TOO_LARGE,
         detail: 'a payload is 100 bytes at most, not 300',
@@ -583,6 +589,105 @@ test.describe('createRouterCore', () => {
         ['a', EnvelopeKind.REQUEST, 1],
         ['a', EnvelopeKind.CANCEL, 1],
       ]);
+    });
+
+    test('end a call whose result’s transfer waits for the budget past half its inactivity, CAPACITY_EXCEEDED, and cancel it', async () => {
+      const { port, sent } = createPort();
+      const clock = createTestClock();
+      using core = createRouterCore(port, {
+        clock,
+        limits: { ...budgeted, transferInactivityTimeout: 20_000 },
+      });
+
+      core.registerResolver(resolverOf(echo));
+      // the peer's request holds 200 bytes of the budget's 256
+      core.receive(requestOf(1, { payload: patternOf(44), total: 200 }), 'a');
+
+      const answering = core.request(new Uint8Array(0), {
+        connectionHandle: 'a',
+        options,
+        procedure: echo,
+      });
+
+      await sleep(0);
+      // past the 56 bytes left: it waits, granted nothing
+      core.receive(resultOpeningOf(2, { payload: patternOf(28), total: 100 }), 'a');
+      clock.tick(9_999);
+      await sleep(0);
+
+      expect(answersOf(sent)).toEqual([
+        ['a', 'credit', 1, 172],
+        ['a', EnvelopeKind.REQUEST, 2],
+      ]);
+
+      clock.tick(1);
+
+      await expect(answering).rejects.toMatchObject({
+        code: ProtocolCode.CAPACITY_EXCEEDED,
+        detail: 'a total of 100 bytes waited 10000 milliseconds for the budget',
+        header: { callId: 2, kind: EnvelopeKind.RESULT },
+        origin: 'local',
+        side: 'server',
+      });
+      expect(answersOf(sent)).toEqual([
+        ['a', 'credit', 1, 172],
+        ['a', EnvelopeKind.REQUEST, 2],
+        ['a', EnvelopeKind.CANCEL, 2],
+      ]);
+      expect(core.isReserved(2, 'a')).toBe(true);
+      expect(core.gauges().counts).toMatchObject({ receivingTransfers: 1, waitingTransfers: 0 });
+    });
+
+    test('credit a result’s transfer once the budget admits it, setting its call’s inactivity going again', async () => {
+      const { port, sent } = createPort();
+      const clock = createTestClock();
+      using core = createRouterCore(port, {
+        clock,
+        limits: { ...budgeted, transferInactivityTimeout: 20_000 },
+      });
+      const payload = patternOf(100);
+      let isEnded = false;
+
+      core.registerResolver(resolverOf(echo));
+      core.receive(requestOf(1, { payload: patternOf(44), total: 200 }), 'a');
+
+      const answering = core.request(new Uint8Array(0), {
+        connectionHandle: 'a',
+        options,
+        procedure: echo,
+      });
+
+      void settledOf(answering).then(() => {
+        isEnded = true;
+      });
+      await sleep(0);
+      core.receive(resultOpeningOf(2, { payload: payload.subarray(0, 28), total: 100 }), 'a');
+      clock.tick(5_000);
+      // the peer cancels its request: the budget it reserved admits the result's transfer
+      core.receive(cancelOf(1), 'a');
+
+      expect(answersOf(sent)).toEqual([
+        ['a', 'credit', 1, 172],
+        ['a', EnvelopeKind.REQUEST, 2],
+        ['a', 'credit', 2, 100],
+      ]);
+
+      // past its inactivity from its opening, short of it from the credit that admitted it
+      clock.tick(19_999);
+      core.receive(chunkOf(2, { offset: 28, payload: payload.subarray(28, 76), total: 100 }), 'a');
+      await sleep(0);
+
+      expect(isEnded).toBe(false);
+
+      // the chunk placed set it going again, and nothing comes for as long
+      clock.tick(20_000);
+
+      await expect(answering).rejects.toMatchObject({
+        message: 'no answer came in 20000 milliseconds',
+        name: 'TimeoutError',
+        timeout: 20_000,
+      });
+      expect(answersOf(sent).at(-1)).toEqual(['a', EnvelopeKind.CANCEL, 2]);
     });
 
     test('time out, and reject — never throw — what their payload or the transport fails with', async () => {
@@ -1251,34 +1356,34 @@ test.describe('createRouterCore', () => {
 
         await sleep(0);
         core.receive(
-          resultOpeningOf(callId, { payload: payload.subarray(0, 32), total: 300 }),
+          resultOpeningOf(callId, { payload: payload.subarray(0, 28), total: 300 }),
           'a'
         );
-        core.receive(chunk(80, 128), 'a');
+        core.receive(chunk(76, 124), 'a');
         // again: nothing new, dropped in silence
-        core.receive(chunk(80, 128), 'a');
-        core.receive(chunk(32, 80), 'a');
-        core.receive(chunk(128, 176), 'a');
-        core.receive(chunk(176, 224), 'a');
-        core.receive(chunk(224, 272), 'a');
+        core.receive(chunk(76, 124), 'a');
+        core.receive(chunk(28, 76), 'a');
+        core.receive(chunk(124, 172), 'a');
+        core.receive(chunk(172, 220), 'a');
+        core.receive(chunk(220, 268), 'a');
 
         expect(activities).toEqual(['request a']);
 
-        core.receive(chunk(272), 'a');
+        core.receive(chunk(268), 'a');
         // late, its call id reserved
-        core.receive(chunk(272), 'a');
+        core.receive(chunk(268), 'a');
 
-        core.receive(chunk(224, 272), 'a');
+        core.receive(chunk(220, 268), 'a');
         await expect(answering).resolves.toEqual({
           header: { callId, kind: EnvelopeKind.RESULT, total: 300 },
           payload,
         });
         expect(activities).toEqual(['request a', 'response a']);
-        // a window past the opening, then more as the chunks come: 128 received, then 176
+        // a window past the opening, then more as the chunks come: 124 received, then 172
         expect(answersOf(sent)).toEqual([
           ['a', EnvelopeKind.REQUEST, callId],
-          ['a', 'credit', callId, 160],
-          ['a', 'credit', callId, 256],
+          ['a', 'credit', callId, 156],
+          ['a', 'credit', callId, 252],
           ['a', 'credit', callId, 300],
         ]);
         expect(reported).toEqual([]);
@@ -1301,7 +1406,7 @@ test.describe('createRouterCore', () => {
         await sleep(0);
         core.receive(
           resultOpeningOf(callId, {
-            payload: total === 150 ? new Uint8Array(32) : patternOf(32),
+            payload: total === 150 ? new Uint8Array(28) : patternOf(28),
             total,
           }),
           'a'
@@ -1309,16 +1414,16 @@ test.describe('createRouterCore', () => {
         // the last, it says, yet it ends before the total
         core.receive(
           envelopeOf({
-            header: { callId, isLast: total === 150, kind: EnvelopeKind.CHUNK, offset: 32 },
+            header: { callId, isLast: total === 150, kind: EnvelopeKind.CHUNK, offset: 28 },
             kind: EnvelopeKind.CHUNK,
-            payload: total === 150 ? new Uint8Array(48) : patternOf(300).subarray(32, 52),
+            payload: total === 150 ? new Uint8Array(48) : patternOf(300).subarray(28, 48),
           }),
           'a'
         );
         core.receive(
           chunkOf(callId, {
-            offset: total === 150 ? 80 : 32,
-            payload: total === 150 ? new Uint8Array(48) : patternOf(300).subarray(32, 80),
+            offset: total === 150 ? 76 : 28,
+            payload: total === 150 ? new Uint8Array(48) : patternOf(300).subarray(28, 76),
             total,
           }),
           'a'
@@ -1332,7 +1437,7 @@ test.describe('createRouterCore', () => {
         });
         expect(answersOf(sent)).toEqual([
           ['a', EnvelopeKind.REQUEST, callId],
-          ['a', 'credit', callId, total === 150 ? 150 : 160],
+          ['a', 'credit', callId, total === 150 ? 150 : 156],
           ['a', EnvelopeKind.CANCEL, callId],
         ]);
         expect(reported).toEqual([]);
@@ -1348,7 +1453,7 @@ test.describe('createRouterCore', () => {
       const first = ask();
 
       await sleep(0);
-      core.receive(resultOpeningOf(2, { payload: new Uint8Array(32), total: 200 }), 'a');
+      core.receive(resultOpeningOf(2, { payload: new Uint8Array(28), total: 200 }), 'a');
       core.receive(
         envelopeOf({
           failure: { code: ProtocolCode.TRANSFER_STALLED, scope: FailureScope.PROTOCOL },
@@ -1357,27 +1462,27 @@ test.describe('createRouterCore', () => {
         }),
         'a'
       );
-      core.receive(chunkOf(2, { offset: 32, payload: new Uint8Array(48), total: 200 }), 'a');
+      core.receive(chunkOf(2, { offset: 28, payload: new Uint8Array(48), total: 200 }), 'a');
 
       await expect(first).rejects.toMatchObject({
         code: ProtocolCode.TRANSFER_STALLED,
         origin: 'peer',
       });
 
-      // what the first held of the budget, the second is granted
+      // what the first reserved of the budget, the second is admitted to
       const second = ask().catch((reason: unknown) => {
         return reason;
       });
 
       await sleep(0);
-      core.receive(resultOpeningOf(4, { payload: new Uint8Array(32), total: 200 }), 'a');
+      core.receive(resultOpeningOf(4, { payload: new Uint8Array(28), total: 200 }), 'a');
       await sleep(0);
 
       expect(answersOf(sent)).toEqual([
         ['a', EnvelopeKind.REQUEST, 2],
-        ['a', 'credit', 2, 160],
+        ['a', 'credit', 2, 156],
         ['a', EnvelopeKind.REQUEST, 4],
-        ['a', 'credit', 4, 160],
+        ['a', 'credit', 4, 156],
       ]);
       expect(reported).toEqual([]);
       core.cancel({ callId: 4, connectionHandle: 'a' });
@@ -1400,9 +1505,9 @@ test.describe('createRouterCore', () => {
           });
 
           await sleep(0);
-          core.receive(resultOpeningOf(callId, { payload: payload.subarray(0, 32), total }), 'a');
+          core.receive(resultOpeningOf(callId, { payload: payload.subarray(0, 28), total }), 'a');
           core.receive(resultOf(callId, Uint8Array.of(9)), 'a');
-          for (let offset = 32; offset < total; offset += 48) {
+          for (let offset = 28; offset < total; offset += 48) {
             core.receive(
               chunkOf(callId, { offset, payload: payload.subarray(offset, offset + 48), total }),
               'a'
@@ -1452,15 +1557,15 @@ test.describe('createRouterCore', () => {
             return reason;
           });
 
-        core.receive(resultOpeningOf(2, { payload: patternOf(32), total: 40 }), 'a');
+        core.receive(resultOpeningOf(2, { payload: patternOf(28), total: 40 }), 'a');
 
         const { armed } = await timersUntil(clock, () => {
           if (ending === 'whole') {
-            core.receive(chunkOf(2, { offset: 32, payload: patternOf(8), total: 40 }), 'a');
+            core.receive(chunkOf(2, { offset: 28, payload: patternOf(12), total: 40 }), 'a');
           } else if (ending === 'failure') {
             core.receive(failed, 'a');
           } else if (ending === 'invalid') {
-            core.receive(chunkOf(2, { offset: 32, payload: patternOf(9), total: 41 }), 'a');
+            core.receive(chunkOf(2, { offset: 28, payload: patternOf(13), total: 41 }), 'a');
           } else if (ending === 'cancel') {
             core.cancel({ callId: 2, connectionHandle: 'a' });
           } else if (ending === 'cancel given time') {
@@ -1483,7 +1588,7 @@ test.describe('createRouterCore', () => {
 
         if (ending === 'whole') {
           expect(settled).toMatchObject({
-            payload: Uint8Array.from([...patternOf(32), ...patternOf(8)]),
+            payload: Uint8Array.from([...patternOf(28), ...patternOf(12)]),
           });
         } else if (ending === 'failure' || ending === 'invalid') {
           expect(settled).toMatchObject(
@@ -1511,12 +1616,12 @@ test.describe('createRouterCore', () => {
         procedure: echo,
       });
 
-      core.receive(resultOpeningOf(1, { payload: patternOf(32), total: 300 }), 'a');
+      core.receive(resultOpeningOf(1, { payload: patternOf(28), total: 300 }), 'a');
       controller.abort();
       await expect(asking).rejects.toBeInstanceOf(CancelError);
       clock.tick(1_500);
       core.receive(
-        chunkOf(1, { offset: 32, payload: patternOf(300).subarray(32, 80), total: 300 }),
+        chunkOf(1, { offset: 28, payload: patternOf(300).subarray(28, 76), total: 300 }),
         'a'
       );
       expect(reported).toEqual([]);
@@ -1530,7 +1635,7 @@ test.describe('createRouterCore', () => {
       expect(sent.at(-1)?.envelope?.header.callId).toBe(3);
       clock.tick(500);
       core.receive(
-        chunkOf(1, { offset: 32, payload: patternOf(300).subarray(32, 80), total: 300 }),
+        chunkOf(1, { offset: 28, payload: patternOf(300).subarray(28, 76), total: 300 }),
         'a'
       );
       expect(codesOf(reported)).toEqual([[ProtocolCode.CALL_UNKNOWN, 'a']]);
@@ -1798,7 +1903,7 @@ test.describe('createRouterCore', () => {
         clock,
         limits: { ...limits, transferInactivityTimeout: 250 },
       });
-      const chunk = chunkOf(2, { offset: 32, payload: new Uint8Array(48), total: 150 });
+      const chunk = chunkOf(2, { offset: 28, payload: new Uint8Array(48), total: 150 });
       let waiting: Promise<unknown> = Promise.resolve();
       const { armed } = timersBy(clock, () => {
         waiting = core.request(new Uint8Array(0), {
@@ -1806,7 +1911,7 @@ test.describe('createRouterCore', () => {
           options,
           procedure: echo,
         });
-        core.receive(resultOpeningOf(2, { payload: new Uint8Array(32), total: 150 }), 'a');
+        core.receive(resultOpeningOf(2, { payload: new Uint8Array(28), total: 150 }), 'a');
         core.receive(chunk, 'a');
         // again: nothing new
         core.receive(chunk, 'a');
@@ -1850,15 +1955,15 @@ test.describe('createRouterCore', () => {
       void settledOf(asked).then(() => {
         isSettled = true;
       });
-      peer.receive(resultOpeningOf(1, { payload: patternOf(32), total: 300 }), 'a');
+      peer.receive(resultOpeningOf(1, { payload: patternOf(28), total: 300 }), 'a');
       advanced.tick(1_500);
       peer.receive(
-        chunkOf(1, { offset: 32, payload: patternOf(300).subarray(32, 80), total: 300 }),
+        chunkOf(1, { offset: 28, payload: patternOf(300).subarray(28, 76), total: 300 }),
         'a'
       );
       advanced.tick(1_500);
       peer.receive(
-        chunkOf(1, { offset: 32, payload: patternOf(300).subarray(32, 80), total: 300 }),
+        chunkOf(1, { offset: 28, payload: patternOf(300).subarray(28, 76), total: 300 }),
         'a'
       );
       await sleep(0);
@@ -1950,7 +2055,7 @@ test.describe('createRouterCore', () => {
 
               if (envelope?.kind === EnvelopeKind.CHUNK && envelope.header.isLast) {
                 opened += 1;
-                core.receive(resultOpeningOf(2, { payload: patternOf(32), total: 100 }), 'a');
+                core.receive(resultOpeningOf(2, { payload: patternOf(28), total: 100 }), 'a');
                 return holdLastSend ? handed.promise : sending;
               }
 
@@ -2013,7 +2118,7 @@ test.describe('createRouterCore', () => {
         isEnded = true;
       });
       core.receive(creditOf(1, 172), 'a');
-      core.receive(resultOpeningOf(1, { payload: patternOf(32), total: 300 }), 'a');
+      core.receive(resultOpeningOf(1, { payload: patternOf(28), total: 300 }), 'a');
       core.receive(creditOf(1, 300), 'a');
       expect(sent.at(-1)?.envelope).toMatchObject({
         header: { isLast: true },
@@ -2073,7 +2178,7 @@ test.describe('createRouterCore', () => {
               procedure: echo,
             })
           );
-          core.receive(resultOpeningOf(2, { payload: new Uint8Array(32), total: 200 }), 'a');
+          core.receive(resultOpeningOf(2, { payload: new Uint8Array(28), total: 200 }), 'a');
         });
 
         if (ending === 'cancel') {
@@ -2096,16 +2201,16 @@ test.describe('createRouterCore', () => {
           core.request(new Uint8Array(0), { connectionHandle: 'a', options, procedure: echo })
         );
 
-        core.receive(resultOpeningOf(4, { payload: new Uint8Array(32), total: 200 }), 'a');
+        core.receive(resultOpeningOf(4, { payload: new Uint8Array(28), total: 200 }), 'a');
         core.cancel({ callId: 4, connectionHandle: 'a' });
         await next;
 
         expect(answersOf(sent), ending).toEqual([
           ['a', EnvelopeKind.REQUEST, 2],
-          ['a', 'credit', 2, 160],
+          ['a', 'credit', 2, 156],
           ['a', EnvelopeKind.CANCEL, 2],
           ['a', EnvelopeKind.REQUEST, 4],
-          ['a', 'credit', 4, 160],
+          ['a', 'credit', 4, 156],
           ['a', EnvelopeKind.CANCEL, 4],
         ]);
       }

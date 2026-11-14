@@ -157,7 +157,7 @@ test.describe('createOutgoingTransfer', () => {
       'A1 10 04 05 00 00 00 07 00 02 00 05 00 00 00 00 01 40 00 00'
     );
 
-    const creditEnd = incoming.creditToGrant(Number.MAX_SAFE_INTEGER) ?? 0;
+    const creditEnd = incoming.creditToGrant() ?? 0;
 
     expect(creditEnd).toBe(5_242_860);
     expect(
@@ -342,7 +342,7 @@ test.describe('createIncomingTransfer', () => {
       windowBytes: 60,
     });
 
-    incoming.creditToGrant(Number.MAX_SAFE_INTEGER);
+    incoming.creditToGrant();
 
     expect(
       [19, 9, 24, 4, 14].map((offset) => {
@@ -382,7 +382,7 @@ test.describe('createIncomingTransfer', () => {
       );
     };
 
-    incoming.creditToGrant(Number.MAX_SAFE_INTEGER);
+    incoming.creditToGrant();
 
     expect([
       // 3 bytes, though more follow
@@ -426,7 +426,7 @@ test.describe('createIncomingTransfer', () => {
       });
     };
 
-    expect(incoming.creditToGrant(Number.MAX_SAFE_INTEGER)).toBe(16);
+    expect(incoming.creditToGrant()).toBe(16);
     // a byte past full, before the last and as the last, though it reaches the total
     expect(place(4, 5)).toMatchObject({
       code: ProtocolCode.CHUNK_INVALID,
@@ -448,7 +448,7 @@ test.describe('createIncomingTransfer', () => {
   test('refuses more runs of bytes apart than its bound, one byte at a time', () => {
     const incoming = incomingOf(patternOf(1), { maximumChunkRuns: 3, total: 20, windowBytes: 40 });
 
-    incoming.creditToGrant(Number.MAX_SAFE_INTEGER);
+    incoming.creditToGrant();
 
     expect(
       [2, 4].map((offset) => {
@@ -472,18 +472,18 @@ test.describe('createIncomingTransfer', () => {
       });
     };
 
-    expect(incoming.creditToGrant(Number.MAX_SAFE_INTEGER)).toBe(12);
+    expect(incoming.creditToGrant()).toBe(12);
     // nothing received since: nothing more to grant
-    expect(incoming.creditToGrant(Number.MAX_SAFE_INTEGER)).toBeUndefined();
+    expect(incoming.creditToGrant()).toBeUndefined();
     expect(placeAll([4])).toEqual([ChunkOutcome.PLACED]);
     // 6 received: 14 would grant 2 more, less than half a window
-    expect(incoming.creditToGrant(Number.MAX_SAFE_INTEGER)).toBeUndefined();
+    expect(incoming.creditToGrant()).toBeUndefined();
     expect(placeAll([6, 8, 10])).toEqual([
       ChunkOutcome.PLACED,
       ChunkOutcome.PLACED,
       ChunkOutcome.PLACED,
     ]);
-    expect(incoming.creditToGrant(Number.MAX_SAFE_INTEGER)).toBe(20);
+    expect(incoming.creditToGrant()).toBe(20);
     expect(placeAll([12, 14, 16, 18])).toEqual([
       ChunkOutcome.PLACED,
       ChunkOutcome.PLACED,
@@ -491,25 +491,30 @@ test.describe('createIncomingTransfer', () => {
       ChunkOutcome.PLACED,
     ]);
     // 2 bytes are left, less than half a window: granted all the same
-    expect(incoming.creditToGrant(Number.MAX_SAFE_INTEGER)).toBe(22);
-    expect(incoming.creditToGrant(Number.MAX_SAFE_INTEGER)).toBeUndefined();
+    expect(incoming.creditToGrant()).toBe(22);
+    expect(incoming.creditToGrant()).toBeUndefined();
     expect(incoming.place(patternOf(2), { isLast: true, offset: 20 })).toBe(ChunkOutcome.COMPLETE);
   });
 
-  test('grants no more than the bytes it is told are available', () => {
-    const incoming = incomingOf(patternOf(4), { total: 30, windowBytes: 8 });
-
-    // 2 bytes available: less than half a window, so nothing
-    expect(incoming.creditToGrant(2)).toBeUndefined();
-    expect(incoming.creditToGrant(5)).toBe(9);
-    expect(incoming.creditEnd).toBe(9);
-  });
-
   test('halves an odd window exactly, 64 bytes short of half of 129 and 65 not', () => {
-    const incoming = incomingOf(patternOf(1), { total: 1_000, windowBytes: 129 });
+    const payload = patternOf(1_000);
+    const incoming = incomingOf(payload.subarray(0, 1), { total: 1_000, windowBytes: 129 });
+    const placeTo = (end: number): void => {
+      for (let offset = incoming.contiguous; offset < end; offset += 1) {
+        incoming.place(payload.subarray(offset, offset + 1), { isLast: false, offset });
+      }
+    };
 
-    expect(incoming.creditToGrant(64)).toBeUndefined();
-    expect(incoming.creditToGrant(65)).toBe(66);
+    expect(incoming.creditToGrant()).toBe(130);
+
+    // 64 bytes received past the last credit's base: its end moves 64 bytes, short of half
+    placeTo(65);
+
+    expect(incoming.creditToGrant()).toBeUndefined();
+
+    placeTo(66);
+
+    expect(incoming.creditToGrant()).toBe(195);
   });
 
   test('carries 100 KiB through envelopes of 1,024 bytes and a window of 8 KiB, a few credits apart', () => {
@@ -529,7 +534,7 @@ test.describe('createIncomingTransfer', () => {
     let chunks = 0;
 
     for (;;) {
-      const granted = incoming.creditToGrant(Number.MAX_SAFE_INTEGER);
+      const granted = incoming.creditToGrant();
 
       if (granted !== undefined) {
         credits += 1;
