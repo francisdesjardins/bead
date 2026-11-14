@@ -468,6 +468,35 @@ test('draws one Bead connection per exchange, and closes it as its response ends
   expect(opened.length).toBe(2);
 });
 
+test('gives each exchange’s client the router limits it is given', async () => {
+  await using limited = await startTranscoding({ limits: { maximumPayloadBytes: 16 } });
+  await using unlimited = await startTranscoding();
+  const past = `{"aString":"${'a'.repeat(40)}"}`;
+
+  // a request within its client's bound goes
+  expect(
+    await send(limited.port, { body: '{"aString":"a"}', path: '/api/Transcoding/echo' })
+  ).toMatchObject({ body: '{"aString":"a"}', status: 200 });
+
+  // * one past it refused by its exchange's own client before it goes, each exchange alike
+  for (let count = 1; count <= 2; count += 1) {
+    const refused = await send(limited.port, { body: past, path: '/api/Transcoding/echo' });
+
+    expect(refused.status).toBe(413);
+    expect(JSON.parse(refused.body)).toMatchObject({
+      code: 34,
+      detail: 'a payload is 16 bytes at most, not 42',
+      title: 'PAYLOAD_TOO_LARGE',
+    });
+  }
+
+  // a gateway given none holds by the defaults
+  expect(await send(unlimited.port, { body: past, path: '/api/Transcoding/echo' })).toMatchObject({
+    body: past,
+    status: 200,
+  });
+});
+
 test('presents the Authorization field ELSEWHERE, or as a JWT under bearer-jwt', async () => {
   await using elsewhere = await startTranscoding();
   const whoAmI = { body: '{}', path: '/api/Transcoding/whoAmI' };

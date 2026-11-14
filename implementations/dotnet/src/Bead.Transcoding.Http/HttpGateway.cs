@@ -922,10 +922,10 @@ public sealed class HttpGateway : IAsyncDisposable
         }
 
         // its client declares no resolver: a command its server sends is answered SERVICE_UNKNOWN
-        // (transcoding 2.6). Its notifications' callbacks run on a scheduler of the exchange's own,
-        // which a stream's end follows
+        // (transcoding 2.6), and holds by the router limits the gateway is given. Its notifications'
+        // callbacks run on a scheduler of the exchange's own, which a stream's end follows
         var callbacks = new SerialScheduler();
-        using var router = new RouterClient(transport, new RouterClientOptions { Clock = _clock, ResolverScheduler = callbacks });
+        using var router = new RouterClient(transport, new RouterClientOptions { Clock = _clock, Limits = _options.Limits, ResolverScheduler = callbacks });
 
         using var aborted = context.RequestAborted.Register(() =>
         {

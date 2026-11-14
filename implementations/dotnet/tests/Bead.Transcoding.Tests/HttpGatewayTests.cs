@@ -326,6 +326,47 @@ public sealed class HttpGatewayTests
     }
 
     [Fact]
+    public async Task Gives_each_exchange_s_client_the_router_limits_it_is_given()
+    {
+        var limited = await Started((options) =>
+        {
+            return options with { Limits = new RouterLimits { MaximumPayloadBytes = 16 } };
+        });
+        var unlimited = await Started();
+        var past = $"{{\"aString\":\"{new string('a', 40)}\"}}";
+
+        try
+        {
+            // a request within its client's bound goes
+            using var within = await limited.Client.SendAsync(Json("/api/Transcoding/echo", "{\"aString\":\"a\"}"), Cancelled);
+
+            Assert.Equal((HttpStatusCode.OK, "{\"aString\":\"a\"}"), (within.StatusCode, await within.Content.ReadAsStringAsync(Cancelled)));
+
+            // * one past it refused by its exchange's own client before it goes, each exchange alike
+            for (var count = 1; count <= 2; count += 1)
+            {
+                using var refused = await limited.Client.SendAsync(Json("/api/Transcoding/echo", past), Cancelled);
+                using var problem = JsonDocument.Parse(await refused.Content.ReadAsStringAsync(Cancelled));
+
+                Assert.Equal(HttpStatusCode.RequestEntityTooLarge, refused.StatusCode);
+                Assert.Equal(
+                    (34, "PAYLOAD_TOO_LARGE", "a payload is 16 bytes at most, not 42"),
+                    (problem.RootElement.GetProperty("code").GetInt32(), problem.RootElement.GetProperty("title").GetString(), problem.RootElement.GetProperty("detail").GetString()));
+            }
+
+            // a gateway given none holds by the defaults
+            using var echoed = await unlimited.Client.SendAsync(Json("/api/Transcoding/echo", past), Cancelled);
+
+            Assert.Equal((HttpStatusCode.OK, past), (echoed.StatusCode, await echoed.Content.ReadAsStringAsync(Cancelled)));
+        }
+        finally
+        {
+            await Stopped(limited);
+            await Stopped(unlimited);
+        }
+    }
+
+    [Fact]
     public async Task Presents_the_Authorization_field_ELSEWHERE_or_as_a_JWT_under_bearer_jwt()
     {
         var elsewhere = await Started();
