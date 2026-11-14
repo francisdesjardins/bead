@@ -430,39 +430,43 @@ a:hover {
   border-bottom: 1px solid var(--app-divider);
 }
 
-.back {
-  flex: none;
-  color: var(--app-text-secondary);
-  font-size: var(--app-text-sm);
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-.back:hover {
-  color: var(--app-text);
-}
-
 .brand {
   display: inline-flex;
   align-items: center;
   gap: var(--app-space-2);
-  margin-inline: auto;
+  margin-inline: 0 auto;
+  color: var(--app-text);
   font-family: var(--app-font-mono);
   font-weight: 500;
   font-size: var(--app-text-md);
   letter-spacing: 0.01em;
+  text-decoration: none;
+  white-space: nowrap;
 }
 
-/* the disc's edge, and three beads of light breaking through just inside it, as the home draws them */
+/* Bead's mark, the favicon's own drawing: the Moon's disc, and the Sun's light breaking through its
+   edge in beads; the disc dark in either theme, its edge a hairline, the light the page's accent */
 .mark {
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background:
-    radial-gradient(circle at 83% 53%, var(--app-primary) 0 1.8px, transparent 2.3px),
-    radial-gradient(circle at 74% 74%, var(--app-primary) 0 1.8px, transparent 2.3px),
-    radial-gradient(circle at 53% 83%, var(--app-primary) 0 1.8px, transparent 2.3px);
-  box-shadow: inset 0 0 0 1.5px var(--app-primary);
+  flex: none;
+  width: 22px;
+  height: 22px;
+}
+
+.mark .moon {
+  fill: var(--app-body);
+  stroke: var(--app-text-tertiary);
+  stroke-width: 1;
+}
+
+.mark .rim {
+  fill: none;
+  stroke: var(--app-primary);
+  stroke-width: 0.9;
+  stroke-opacity: 0.6;
+}
+
+.mark .bead {
+  fill: var(--app-primary);
 }
 
 .tools {
@@ -515,9 +519,6 @@ a:hover {
   }
   .language .short {
     display: inline;
-  }
-  .brand {
-    margin-inline: auto 0;
   }
 }
 
@@ -1381,10 +1382,10 @@ footer {
     <div id="page" data-lang="en">
 <a class="skip" href="#main">Skip to the content</a>
 <header class="topbar">
-  <a class="back" href="https://francisdesjardins.ca/?lng=en" title="Back to francisdesjardins.ca"><span aria-hidden="true">◂</span> francisdesjardins.ca</a>
-  <span class="brand"><span class="mark" aria-hidden="true"></span>Bead</span>
+  <a class="brand" href="#top" title="Bead, to the top of the page"><svg class="mark" viewBox="2.6 4.7 25 25" aria-hidden="true"><circle class="moon" cx="14" cy="18" r="10.5" /><path class="rim" d="M 15.82 7.66 A 10.5 10.5 0 0 1 24.19 15.46" /><circle class="bead" cx="15.94" cy="6.97" r="1.8" /><circle class="bead" cx="21.64" cy="9.81" r="2.5" /><circle class="bead" cx="24.87" cy="15.29" r="1.5" /></svg>Bead</a>
   <span class="tools">
     <button type="button" class="tool menu" data-action="menu" aria-expanded="false" aria-controls="toc" aria-label="Open the contents" data-open="Open the contents" data-close="Close the contents">≡</button>
+    <a class="tool demo" href="/playground/">Demo</a>
     <a class="tool language" href="?lng=fr" hreflang="fr" lang="fr" data-action="language" title="Lire cette page en français"><span class="long">Français</span><span class="short" aria-hidden="true">FR</span></a>
     <button type="button" class="tool" data-action="theme" aria-label="Switch to dark mode" data-to-dark="Switch to dark mode" data-to-light="Switch to light mode">◐</button>
   </span>
@@ -3480,7 +3481,9 @@ disallowed-types = [
   <p>
     The name comes from Baily’s beads, the points of light that break through at the Moon’s edge
     during an eclipse. It reads another way too: each envelope a bead, strung on its connection, in
-    order, at the pace of the one who receives. Bead is released under the Apache-2.0 licence.
+    order, at the pace of the one who receives. Bead is made by
+    <a href="https://francisdesjardins.ca/?lng=en">Francis Desjardins</a> and released under the
+    Apache-2.0 licence.
   </p>
 </footer>
 
@@ -3490,10 +3493,10 @@ disallowed-types = [
     <template id="page-other" data-lang="fr">
 <a class="skip" href="#main">Aller au contenu</a>
 <header class="topbar">
-  <a class="back" href="https://francisdesjardins.ca/?lng=fr" title="Retour à francisdesjardins.ca"><span aria-hidden="true">◂</span> francisdesjardins.ca</a>
-  <span class="brand"><span class="mark" aria-hidden="true"></span>Bead</span>
+  <a class="brand" href="#top" title="Bead, en haut de la page"><svg class="mark" viewBox="2.6 4.7 25 25" aria-hidden="true"><circle class="moon" cx="14" cy="18" r="10.5" /><path class="rim" d="M 15.82 7.66 A 10.5 10.5 0 0 1 24.19 15.46" /><circle class="bead" cx="15.94" cy="6.97" r="1.8" /><circle class="bead" cx="21.64" cy="9.81" r="2.5" /><circle class="bead" cx="24.87" cy="15.29" r="1.5" /></svg>Bead</a>
   <span class="tools">
     <button type="button" class="tool menu" data-action="menu" aria-expanded="false" aria-controls="toc" aria-label="Ouvrir le sommaire" data-open="Ouvrir le sommaire" data-close="Fermer le sommaire">≡</button>
+    <a class="tool demo" href="/playground/">Démo</a>
     <a class="tool language" href="?lng=en" hreflang="en" lang="en" data-action="language" title="Read this page in English"><span class="long">English</span><span class="short" aria-hidden="true">EN</span></a>
     <button type="button" class="tool" data-action="theme" aria-label="Passer au thème sombre" data-to-dark="Passer au thème sombre" data-to-light="Passer au thème clair">◐</button>
   </span>
@@ -5647,7 +5650,9 @@ disallowed-types = [
   <p>
     Le nom vient des grains de Baily, ces points de lumière qui percent au bord de la Lune pendant
     une éclipse. Il se lit aussi autrement : chaque enveloppe est un grain, enfilé sur sa connexion,
-    dans l’ordre, au rythme de celui qui reçoit. Bead est publié sous la licence Apache-2.0.
+    dans l’ordre, au rythme de celui qui reçoit. Bead est conçu par
+    <a href="https://francisdesjardins.ca/?lng=fr">Francis Desjardins</a> et publié sous la licence
+    Apache-2.0.
   </p>
 </footer>
 

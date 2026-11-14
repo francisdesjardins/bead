@@ -235,39 +235,43 @@ a:hover {
   border-bottom: 1px solid var(--app-divider);
 }
 
-.back {
-  flex: none;
-  color: var(--app-text-secondary);
-  font-size: var(--app-text-sm);
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-.back:hover {
-  color: var(--app-text);
-}
-
 .brand {
   display: inline-flex;
   align-items: center;
   gap: var(--app-space-2);
-  margin-inline: auto;
+  margin-inline: 0 auto;
+  color: var(--app-text);
   font-family: var(--app-font-mono);
   font-weight: 500;
   font-size: var(--app-text-md);
   letter-spacing: 0.01em;
+  text-decoration: none;
+  white-space: nowrap;
 }
 
-/* the disc's edge, and three beads of light breaking through just inside it, as the home draws them */
+/* Bead's mark, the favicon's own drawing: the Moon's disc, and the Sun's light breaking through its
+   edge in beads; the disc dark in either theme, its edge a hairline, the light the page's accent */
 .mark {
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background:
-    radial-gradient(circle at 83% 53%, var(--app-primary) 0 1.8px, transparent 2.3px),
-    radial-gradient(circle at 74% 74%, var(--app-primary) 0 1.8px, transparent 2.3px),
-    radial-gradient(circle at 53% 83%, var(--app-primary) 0 1.8px, transparent 2.3px);
-  box-shadow: inset 0 0 0 1.5px var(--app-primary);
+  flex: none;
+  width: 22px;
+  height: 22px;
+}
+
+.mark .moon {
+  fill: var(--app-body);
+  stroke: var(--app-text-tertiary);
+  stroke-width: 1;
+}
+
+.mark .rim {
+  fill: none;
+  stroke: var(--app-primary);
+  stroke-width: 0.9;
+  stroke-opacity: 0.6;
+}
+
+.mark .bead {
+  fill: var(--app-primary);
 }
 
 .tools {
@@ -320,9 +324,6 @@ a:hover {
   }
   .language .short {
     display: inline;
-  }
-  .brand {
-    margin-inline: auto 0;
   }
 }
 
