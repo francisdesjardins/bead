@@ -3753,7 +3753,7 @@
     },
     {
       "id": "mqttBrokerAdapter.keepAlive",
-      "name": "an MQTT 5 adapter's Keep Alive, which its broker counts its link lost by",
+      "name": "an MQTT 5 adapter's Keep Alive, its CONNECT's, which its broker counts its link lost by where its CONNACK names no Server Keep Alive",
       "clauses": [
         "1.4",
         "15.30"

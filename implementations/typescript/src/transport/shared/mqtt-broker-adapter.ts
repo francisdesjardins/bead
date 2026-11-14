@@ -7,6 +7,7 @@ import mqtt, {
   type IClientOptions,
   type IDisconnectPacket,
   type IPublishPacket,
+  type KeepaliveManager,
   type MqttClient,
   type Packet,
 } from 'mqtt';
@@ -60,7 +61,9 @@ export interface IMqttBrokerAdapterOptions {
   id: string;
   /**
    * Its CONNECT's Keep Alive, in milliseconds, sent in whole seconds rounded up: from 1 to 65,535
-   * seconds (spec 15.30). Defaults to {@link KEEP_ALIVE}.
+   * seconds (spec 15.30). Defaults to {@link KEEP_ALIVE}. The Keep Alive its link runs unless its
+   * CONNACK names a shorter Server Keep Alive; a PINGREQ unanswered for half of it loses its link
+   * (spec 15.26).
    */
   keepAlive?: number | undefined;
   /**
@@ -152,7 +155,7 @@ interface IIncarnation {
 /** How long a start waits for its password, where it asks its provider, and its CONNACK, and a stop for what it was handed and its UNSUBACKs, then for its DISCONNECT, by default: 30 seconds (spec 15.30). */
 export const CONNECT_TIMEOUT = 30_000;
 
-/** Its Keep Alive, by default: 30 seconds, its will inside two heartbeats (spec 15.30). */
+/** Its Keep Alive, by default: 30 seconds, its will inside two heartbeats where its CONNACK names no Server Keep Alive (spec 15.26, 15.30). */
 export const KEEP_ALIVE = 30_000;
 
 // the longest Keep Alive a CONNECT carries, a Two Byte Integer of seconds (MQTT 5.0 §3.1.2.10)
@@ -1018,6 +1021,20 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
           lastMaximumPacketSize = held.maximumPacketSize;
           // * up as its CONNACK is read, whatever comes after it (spec 15.26)
           held.isLinked = true;
+
+          // ! MQTT.js takes any Server Keep Alive above 0 (its client's keepalive getter) and arms
+          // its manager in _onConnect, after this event, before it emits connect: its own, the
+          // shorter, set back once connect comes (spec 15.26); a bump re-reads _onConnect and
+          // KeepaliveManager, and a longer one's test pins it
+          const ownKeepAlive = Math.ceil(keepAlive / 1_000);
+
+          if ((properties.serverKeepAlive ?? 0) > ownKeepAlive) {
+            client.once('connect', () => {
+              if (!held.isRetired) {
+                (client.keepaliveManager as KeepaliveManager | null)?.setKeepalive(ownKeepAlive);
+              }
+            });
+          }
           // * its link lost: once, as its network connection ends, unless it was stopped
           client.on('close', () => {
             retire(held, new GenericError(`the link of ${id} went down`));

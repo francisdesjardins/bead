@@ -511,71 +511,41 @@ async fn keeps_a_server_keep_alive_shorter_than_its_own_a_pingreq_once_nothing_w
     adapter.stop().await;
 }
 
-// spec 15.26, where the sides part: the TypeScript side keeps its own under 0, the C# side its own
-// under 0 and under a longer one
+// spec 15.26
 #[tokio::test]
-async fn sends_no_pingreq_under_a_server_keep_alive_of_0_and_takes_one_longer_than_its_own() {
-    let zero = script().await;
-    let mut options = options_of(&zero);
+async fn keeps_its_own_keep_alive_under_a_server_keep_alive_of_0_or_longer_than_its_own() {
+    for server_keep_alive in [0, 3] {
+        let script = script().await;
+        let mut options = options_of(&script);
 
-    options.keep_alive = Some(Duration::from_secs(1));
+        options.keep_alive = Some(Duration::from_secs(1));
 
-    let adapter = adapter_of(&options);
-    let link = link_up(
-        (&adapter, &zero),
-        (
-            &Connack {
-                server_keep_alive: Some(0),
-                ..Connack::default()
-            },
-            None,
-        ),
-    )
-    .await;
+        let adapter = adapter_of(&options);
+        let link = link_up(
+            (&adapter, &script),
+            (
+                &Connack {
+                    server_keep_alive: Some(server_keep_alive),
+                    ..Connack::default()
+                },
+                None,
+            ),
+        )
+        .await;
+        let started = Instant::now();
 
-    assert_eq!(link.connect().keep_alive, 1, "its CONNECT's Keep Alive");
-    assert!(
-        link.next(Some(Kind::Pingreq), Duration::from_millis(2_500))
+        assert_eq!(link.connect().keep_alive, 1, "its CONNECT's Keep Alive");
+        // * its own second, neither none under 0 nor the 3 seconds its broker allows
+        link.next(Some(Kind::Pingreq), Duration::from_secs(3))
             .await
-            .is_err(),
-        "no PINGREQ under a Server Keep Alive of 0"
-    );
-    adapter.stop().await;
-
-    let longer = script().await;
-    let mut options = options_of(&longer);
-
-    options.keep_alive = Some(Duration::from_secs(1));
-
-    let adapter = adapter_of(&options);
-    let link = link_up(
-        (&adapter, &longer),
-        (
-            &Connack {
-                server_keep_alive: Some(2),
-                ..Connack::default()
-            },
-            None,
-        ),
-    )
-    .await;
-    let started = Instant::now();
-
-    assert!(
-        link.next(Some(Kind::Pingreq), Duration::from_millis(1_500))
-            .await
-            .is_err(),
-        "no PINGREQ within its own Keep Alive"
-    );
-    link.next(Some(Kind::Pingreq), Duration::from_secs(2))
-        .await
-        .unwrap();
-    assert!(
-        started.elapsed() >= Duration::from_millis(1_900),
-        "its PINGREQ once its Server Keep Alive went"
-    );
-    link.send(pingresp());
-    adapter.stop().await;
+            .unwrap();
+        assert!(
+            started.elapsed() < Duration::from_millis(2_500),
+            "its PINGREQ within its own Keep Alive under a Server Keep Alive of {server_keep_alive}"
+        );
+        link.send(pingresp());
+        adapter.stop().await;
+    }
 }
 
 // spec 15.26
@@ -606,10 +576,14 @@ async fn runs_a_keep_alive_under_a_second_as_its_connect_announces_it_a_whole_se
         started.elapsed() >= Duration::from_millis(900),
         "its PINGREQ once a second went"
     );
+    assert!(
+        started.elapsed() < Duration::from_millis(2_000),
+        "its PINGREQ by 2,000 ms"
+    );
 
-    // * its PINGRESP awaited a whole second too
-    rest(Duration::from_millis(500)).await;
-    assert!(heard.downs().is_empty(), "kept half a second on");
+    // * its PINGRESP awaited half of that second
+    rest(Duration::from_millis(300)).await;
+    assert!(heard.downs().is_empty(), "kept 300 ms on");
     link.send(pingresp());
     assert_eq!(link.of(Kind::Pingreq).len(), 1, "one PINGREQ");
     adapter.stop().await;
@@ -1458,8 +1432,8 @@ async fn loses_its_link_where_its_broker_reads_nothing_under_a_steady_flow_at_mo
 
     assert_eq!(heard.downs(), vec![down(false)], "its link lost");
     assert!(
-        started.elapsed() < Duration::from_secs(4),
-        "within two Keep Alives of its last write"
+        started.elapsed() < Duration::from_secs(3),
+        "within a Keep Alive and a half of its last write"
     );
 
     let mut failed = 0;
@@ -1473,7 +1447,7 @@ async fn loses_its_link_where_its_broker_reads_nothing_under_a_steady_flow_at_mo
             Ok(published) => assert_eq!(published, BrokerPublished::Taken, "taken"),
             Err(error) => {
                 assert!(
-                    message_of(&error).contains("no PINGRESP within its Keep Alive"),
+                    message_of(&error).contains("no PINGRESP within half its Keep Alive"),
                     "{error}"
                 );
                 failed += 1;
