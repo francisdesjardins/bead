@@ -348,6 +348,9 @@ export const createRouterCore = <Handle extends string>(
   // the failure the router answered each request dispatched with in its resolver's place, by the
   // very header dispatched, which its resolver's answer tells once settled (debugging 4.2)
   const failuresAnswered = new WeakMap<IHandedRequestHeader, IFailure>();
+  // the calls this side answered PROCEDURE_FAILED, its own failure, by the very header dispatched:
+  // what their resolver fails with is reported, whatever tells it after (spec 9.0)
+  const failedAnswered = new WeakSet<IHandedRequestHeader>();
   // the address and port each request came from, as its transport handed them, by the very header
   // dispatched, which a refusal told names (spec 13.12, 15.1)
   const origins = new WeakMap<
@@ -716,6 +719,16 @@ export const createRouterCore = <Handle extends string>(
       failuresAnswered.set(header, response.failure);
     }
 
+    // ! marked in the turn it goes, before its transport has it: a close its answer brings about
+    // tells its resolver, which still owes the report of its failure (spec 9.0, 9.10)
+    if (
+      !isDisposed &&
+      response.failure?.code === failures.procedureFailed.code &&
+      response.failure.scope === failures.procedureFailed.scope
+    ) {
+      failedAnswered.add(header);
+    }
+
     // a whole answer ends its call as its transport has it
     const ending =
       metrics === undefined || response.failure === undefined
@@ -834,15 +847,15 @@ export const createRouterCore = <Handle extends string>(
   };
 
   // hands a request to its resolver in a later turn, none if its call ended meanwhile: one that
-  // throws before it returns fails as one that rejects, reported unless its call was cancelled or
-  // went with its connection
+  // throws before it returns fails as one that rejects, reported unless its signal was aborted first
+  // and this side did not answer its call PROCEDURE_FAILED
   const dispatch = (
     resolver: IRequestHandler<Handle>,
     dispatched: IDispatched<Handle> & { payload: Uint8Array }
   ): void => {
     const { connectionHandle, controller, header, payload, session } = dispatched;
     const fail = (reason: unknown): void => {
-      if (!controller.signal.aborted) {
+      if (!controller.signal.aborted || failedAnswered.has(header)) {
         heard(() => {
           port.report(toError(reason), connectionHandle);
         });

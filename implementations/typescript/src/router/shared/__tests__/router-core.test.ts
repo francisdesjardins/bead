@@ -3473,6 +3473,9 @@ test.describe('createRouterCore', () => {
     const JWT = Object.freeze({ scheme: CredentialScheme.JWT, token: 'a.b.c' });
     const SESSION: ICallSession = Object.freeze({ data: 'ada' });
     const ANSWER = new TextEncoder().encode('answer');
+    // the payload of a request whose resolver is answered PROCEDURE_FAILED first, as a service's
+    // callback that fails is, then runs on
+    const FAILED = new TextEncoder().encode('failed');
 
     /** What sent says of each failure: its call id, its code and its detail. */
     const failuresOf = (sent: { envelope: Envelope | undefined }[]) => {
@@ -3492,7 +3495,8 @@ test.describe('createRouterCore', () => {
 
     /**
      * A core whose resolver of echo holds each call it is handed until the test settles it, deaf to
-     * its signal; one whose payload says `answer` answers first.
+     * its signal; one whose payload says `answer` answers first, one whose payload says `failed` is
+     * answered PROCEDURE_FAILED first.
      */
     const createHolding = (
       maximumAnsweringCalls: number,
@@ -3512,8 +3516,12 @@ test.describe('createRouterCore', () => {
           handed.push(props);
           held.push(holding);
 
-          if (new TextDecoder().decode(props.payload) === 'answer') {
+          const said = new TextDecoder().decode(props.payload);
+
+          if (said === 'answer') {
             await core.respond({ payload: new Uint8Array(0) }, props);
+          } else if (said === 'failed') {
+            await core.respond({ failure: recorded.port.failures.procedureFailed }, props);
           }
 
           await holding.promise;
@@ -3988,6 +3996,39 @@ test.describe('createRouterCore', () => {
       });
       expect(answersOf(sent)).toEqual([['a', 'result', 1, []]]);
       expect(reported).toEqual([]);
+      core[Symbol.dispose]();
+    });
+
+    test('reports the failure of a resolver its side answered PROCEDURE_FAILED once its connection closed, and none of one answered otherwise or cancelled', async () => {
+      const { core, held, reported, sent } = createHolding(4);
+      const rejected = new Error('rejected');
+
+      core.receive(requestOf(1, { payload: FAILED }), 'a');
+      core.receive(requestOf(3, { payload: ANSWER }), 'a');
+      core.receive(requestOf(5), 'a');
+      await sleep(0);
+      core.receive(cancelOf(5), 'a');
+
+      expect(answersOf(sent)).toEqual([
+        ['a', 'failure', 1, ProtocolCode.PROCEDURE_FAILED],
+        ['a', 'result', 3, []],
+      ]);
+
+      // * the close its answers bring about tells each before its failure comes
+      core.rejectPending('a closed', 'a');
+
+      for (const holding of held.slice(0, 3)) {
+        holding.reject(rejected);
+      }
+
+      await sleep(0);
+
+      expect(reported).toEqual([[rejected, 'a']]);
+      expect(trackedOf(core)).toEqual({
+        answeringCalls: 0,
+        largestTrackedCalls: 0,
+        outlivingResolvers: 0,
+      });
       core[Symbol.dispose]();
     });
   });
