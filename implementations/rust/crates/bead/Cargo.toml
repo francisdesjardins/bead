@@ -51,6 +51,9 @@ http = [
   "dep:rustls-platform-verifier",
   "dep:httpdate",
 ]
+# HTTP/JSON transcoding's parts that hold no socket: http.proto's templates, a route table, a
+# gateway's problems and events, and the seam a message's JSON form fills (decision 0052)
+transcoding = []
 # the MQTT 5 binding, a broker adapter of Bead's own over tokio's sockets, its TCP, its TLS and its
 # WebSocket of subprotocol mqtt (decision 0050)
 mqtt = [

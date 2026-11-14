@@ -1,4 +1,4 @@
-# alone: typescript 283, csharp 58, rust 77
+# alone: typescript 280, csharp 57, rust 77
 # concept	typescript	csharp	rust	class
 ACCEPT_TIMEOUT	ACCEPT_TIMEOUT [constant]	-	ACCEPT_TIMEOUT [constant]	same
 AccessRefusal	IAccessRefusal [record]	AccessRefusal [record]	AccessRefusal [record]	same
@@ -12,7 +12,7 @@ AmqpBrokerAdapter	IAmqpBrokerAdapter [record], createAmqpBrokerAdapter [function
 AmqpBrokerAdapterOptions	IAmqpBrokerAdapterOptions [record]	AmqpBrokerAdapterOptions [record]	-	same
 ApplicationFailure	IApplicationFailure [record]	IApplicationFailure [record]	-	same
 BeforeRequest	IBeforeRequest [record]	BeforeRequest [record]	BeforeRequest [record]	same
-BindingOptions	IBindingOptions [record]	BindingOptions [record]	-	same
+BindingOptions	IBindingOptions [record]	BindingOptions [record]	BindingOptions [record]	same
 BODY_GRACE_PERIOD	BODY_GRACE_PERIOD [constant]	-	BODY_GRACE_PERIOD [constant]	same
 BoundCall	IBoundCall [function type]	BoundCall [function type]	-	same
 BoundCommand	IBoundCommand [function type]	BoundCommand [function type]	-	same
@@ -124,11 +124,11 @@ HTTPEvent	HTTPEvent [choice]	HttpEvent [record]	-	same
 HTTPGateway	IHTTPGateway [record], createHTTPGateway [function]	HttpGateway [record]	-	same
 HTTPGatewayOptions	IHTTPGatewayOptions [record]	HttpGatewayOptions [record]	-	same
 HTTPGatewayStartOptions	IHTTPGatewayStartOptions [record]	HttpGatewayStartOptions [record]	-	same
-HttpPayload	HttpPayload [choice]	HttpPayload [record]	-	same
+HttpPayload	HttpPayload [choice]	HttpPayload [record]	HttpPayload [choice]	same
 HTTPPolicy	IHTTPPolicy [record]	HttpPolicy [record]	HttpPolicy [record]	same
 HTTPPolicyOptions	IHTTPPolicyOptions [record]	HttpPolicyOptions [record]	HttpPolicyOptions [record]	same
 HttpRefusals	-	-	HttpRefusals [record]	own: the type of the Rust side's constant of refusals, where the other sides hold a frozen object and a static class of constants (0044)
-HttpRouteTemplate	IHttpRouteTemplate [record]	HttpRouteTemplate [record]	-	same
+HttpRouteTemplate	IHttpRouteTemplate [record]	HttpRouteTemplate [record]	HttpRouteTemplate [record]	same
 HTTPServer	HTTPServer [record], createHTTPServer [function]	HttpServer [record]	HttpServer [record]	same
 HTTPServerOptions	IHTTPServerOptions [record]	HttpServerOptions [record]	HttpServerOptions [record]	same
 HTTPTransportClient	HTTPTransportClient [record], createHTTPTransportClient [function]	HttpTransportClient [record]	HttpTransportClient [record]	same
@@ -144,7 +144,7 @@ isFieldValue	isFieldValue [function]	-	is_field_value [function]	same
 isUnique	isUnique [function]	Validators.IsUnique [function]	is_unique [function]	rendered: of (0007, 0044)
 JoinedServerTransport	-	JoinedServerTransport [record]	JoinedServerTransport [record]	same
 JsonForm	IJsonForm [record], createJsonForm [function]	JsonForm [record]	-	same
-JsonFormError	JsonFormError [record]	JsonFormException [record]	-	rendered: error (0007, 0044)
+JsonFormError	JsonFormError [record]	JsonFormException [record]	JsonFormError [record]	rendered: error (0007, 0044)
 JsonToken	IJsonToken [record]	JsonToken [record]	-	same
 Judged	IJudged [record]	Judged [record]	Judged [record]	same
 JwtAlgorithm	JwtAlgorithm [choice]	JwtAlgorithm [choice]	JwtAlgorithm [choice]	same
@@ -202,8 +202,8 @@ NotificationSerializerServer	INotificationSerializerServer [record]	INotificatio
 Notifier	INotifier [function type]	Notifier [function type]	Notifier [record]	rendered: callable (0044)
 NotifyOptions	INotifyOptions [record]	NotifyOptions [record]	NotifyOptions [record]	same
 NotifyRequest	INotifyRequest [record]	NotifyRequest [record]	NotifyRequest [record]	same
-OwnFailure	OwnFailure [choice]	OwnFailure [choice]	-	same
-OwnProblemOptions	IOwnProblemOptions [record]	OwnProblemOptions [record]	-	same
+OwnFailure	OwnFailure [choice]	OwnFailure [choice]	OwnFailure [choice]	same
+OwnProblemOptions	IOwnProblemOptions [record]	OwnProblemOptions [record]	OwnProblemOptions [record]	same
 PACING_DEFAULTS	PACING_DEFAULTS [constant]	-	PACING_DEFAULTS [constant]	same
 PacingLimits	IPacingLimits [record]	PacingLimits [record]	PacingLimits [record]	same
 PacingLimitsOptions	PacingLimitsOptions [record]	-	PacingLimitsOptions [record]	same
@@ -238,7 +238,7 @@ RequestDependencies	IRequestDependencies [record]	RequestDependencies [record]	R
 RequestHeader	IRequestHeader [record]	RequestHeader [record]	RequestHeader [record]	same
 requestOf	requestOf [function]	-	request_of [function]	same
 RequestOptions	IRequestOptions [record]	RequestOptions [record]	RequestOptions [record]	same
-RequestPlace	RequestPlace [choice]	RequestPlace [record]	-	same
+RequestPlace	RequestPlace [choice]	RequestPlace [record]	RequestPlace [choice]	same
 RequestProps	IRequestProps [record]	RequestProps [record]	RequestProps [record]	same
 RequestResolver	IRequestResolver [record]	IRequestResolver [record]	-	same
 RequestResolverCallback	RequestResolverCallback [function type]	RequestResolverCallback [function type]	-	same
@@ -278,7 +278,7 @@ ServerGauges	ServerGauges [record]	ServerGauges [record]	ServerGauges [record]	s
 ServerLayers	IServerLayers [record]	-	-	differs: A facade's layers built by the application
 ServerListener	-	-	ServerListener [record]	own: a listener the Rust side registers for an event the other sides emit (0044)
 ServerOptions	IServerOptions [record]	ServerOptions [record]	ServerOptions [record]	same
-ServerSentEvent	IServerSentEvent [record]	ServerSentEvent [record]	-	same
+ServerSentEvent	IServerSentEvent [record]	ServerSentEvent [record]	ServerSentEvent [record]	same
 ServerTransportLike	IServerTransportLike [record]	IServerTransport [record]	ServerTransport [record]	rendered: like (0007)
 ServiceClient	IServiceClient [record], createServiceClient [function]	ServiceClient [record]	ServiceClient [record]	same
 ServiceClientOptions	IServiceClientOptions [record]	ServiceClientOptions [record]	ServiceClientOptions [record]	same
@@ -475,7 +475,7 @@ HttpEncoding	-	HttpEncoding [choice]	-	alone
 HttpEvents	-	HttpEvents [record]	-	alone
 HttpGatewayEndpoints.MapBeadGateway	-	HttpGatewayEndpoints.MapBeadGateway [function]	-	alone
 HTTPGatewayEventMap	HTTPGatewayEventMap [record]	-	-	alone
-HttpMethod	HttpMethod [choice]	-	-	alone
+HttpMethod	HttpMethod [choice]	-	HttpMethod [choice]	same
 HttpPath	-	HttpPath [record]	-	alone
 httpPolicyOf	httpPolicyOf [function]	-	-	alone
 HTTPPolicyOption	IHTTPPolicyOption [record]	-	-	alone
@@ -492,8 +492,8 @@ httpRequesterOf	httpRequesterOf [function]	-	-	alone
 HTTPRequestLike	IHTTPRequestLike [record]	-	-	alone
 HTTPRequestListener	HTTPRequestListener [function type]	-	-	alone
 HTTPResponseLike	IHTTPResponseLike [record]	-	-	alone
-HttpRoute	-	HttpRoute [record]	-	alone
-HttpRouteInit	IHttpRouteInit [record]	-	-	alone
+HttpRoute	-	HttpRoute [record]	HttpRoute [record]	same
+HttpRouteInit	IHttpRouteInit [record]	-	HttpRouteInit [record]	same
 HttpSegment	-	HttpSegment [record]	-	alone
 HttpSegmentKind	-	HttpSegmentKind [choice]	-	alone
 HTTPServerLike	IHTTPServerLike [record]	-	-	alone
@@ -565,6 +565,8 @@ MemoryPeerLike	IMemoryPeerLike [record]	-	-	alone
 MemoryTransportServerLike	IMemoryTransportServerLike [record]	-	-	alone
 MESSAGE_EVENT	MESSAGE_EVENT [constant]	-	-	alone
 MessageEventLike	IMessageEventLike [record]	-	-	alone
+MessageForm	-	-	MessageForm [record]	own: the seam where the core meets bead-protobuf's JSON form, as PayloadCodec joins them, where the other sides hold the form in one package (0052)
+MessageFormError	-	-	MessageFormError [choice]	own: a Result's error, where the other sides throw (0044)
 MessageRules	MessageRules [function type]	-	MessageRules [function type]	same
 MqttBrokerTlsOptions	-	MqttBrokerTlsOptions [record]	-	alone
 NoFailure	-	NoFailure [record]	-	alone
@@ -638,7 +640,7 @@ ResolverSeries	-	-	ResolverSeries [record]	alone
 RETRY_DELAYS	RETRY_DELAYS [constant]	-	-	alone
 retryAfterOf	retryAfterOf [function]	-	-	alone
 routeIndexOf	routeIndexOf [function]	-	-	alone
-routeOf	routeOf [function]	-	-	alone
+routeOf	routeOf [function]	-	route_of [function]	same
 ROUTER_CLIENT_EVENTS	ROUTER_CLIENT_EVENTS [choice]	-	-	alone
 ROUTER_SERVER_EVENTS	ROUTER_SERVER_EVENTS [choice]	-	-	alone
 RouterClientActivity	RouterClientActivity [record]	-	-	alone
