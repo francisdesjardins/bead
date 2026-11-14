@@ -32,8 +32,9 @@ use crate::failure::{Failure, ProcedureAddress};
 use crate::metrics::{CallEnding, ProcedureSeries, ResolverSeries, RouterMetrics};
 use crate::owner::{Deferral, Job, Owned, WeakOwner};
 use crate::router::parts::{
-    Announcements, Answering, AnsweringCalls, PendingCalls, Placed, Placement, ReceivingTransfers,
-    RequestReceiving, ResolverRun, SendingFor, SendingTransfers, cancel_timer,
+    Admitted, Announcements, Answering, AnsweringCalls, OpeningOf, PendingCalls, Placed, Placement,
+    ReceivingTransfers, RequestReceiving, ResolverRun, SendingFor, SendingTransfers,
+    budget_wait_of, cancel_timer,
 };
 use crate::router::transfer::{Chunk, ChunkOutcome};
 use crate::router::types::{
@@ -1460,12 +1461,56 @@ fn forget_answering<S: Side>(
 
         core.receiving_requests.remove(&receiving.transfer);
 
-        let credits = core.receivings.close(receiving.transfer);
+        let admitted = core.receivings.close(receiving.transfer);
 
-        send_credits(state, credits);
+        admit(state, admitted);
     }
 
     Some(answering)
+}
+
+/// Sets each transfer the budget admitted going, then sends its first credit: a request's, its
+/// transfer's inactivity; a result's, its call's, set going again (spec 12.4, 12.8). One ended as
+/// another was set going is skipped, and a disposed router sends nothing.
+pub(crate) fn admit<S: Side>(state: &mut S, admitted: Vec<Admitted>) {
+    for Admitted {
+        id,
+        call,
+        credit_end,
+    } in admitted
+    {
+        let core = state.core();
+        let timeout = core.limits.transfer_inactivity_timeout;
+
+        if core.is_disposed() || core.receivings.get(id).is_none() {
+            continue;
+        }
+
+        if core.receiving_requests.contains_key(&id) {
+            touch_request_transfer(state, (id, timeout));
+        } else if let Some(request) = core.pending.get(&call).filter(|request| {
+            request
+                .receiving
+                .as_ref()
+                .is_some_and(|receiving| receiving.transfer == id)
+        }) {
+            let request = request.id;
+
+            crate::router::requester::request_progress(state, (&call, request));
+        }
+
+        let core = state.core();
+
+        // ! setting its timer going may have ended it, or disposed the router: its credit goes
+        // only while it is held
+        if core.is_disposed() || core.receivings.get(id).is_none() {
+            continue;
+        }
+
+        if let Some(credit_end) = credit_end {
+            send_credits(state, vec![(call, credit_end)]);
+        }
+    }
 }
 
 /// Sends each credit the budget let a transfer grant.
@@ -2123,8 +2168,11 @@ fn admit_routed<S: Side>(
         connection_handle: Arc::clone(&handle),
         call_id: header.call_id,
     };
-    let transfer = match core.receivings.open(&payload, (&call, total)) {
-        Ok(transfer) => transfer,
+    let opened = core
+        .receivings
+        .open(&payload, OpeningOf { call: &call, total });
+    let (transfer, admitted) = match opened {
+        Ok(opened) => (opened.id, opened.admitted),
         Err(failure) => return refuse(state, (failure, &dispatch)),
     };
     let timeout = core.limits.transfer_inactivity_timeout;
@@ -2132,8 +2180,13 @@ fn admit_routed<S: Side>(
     core.receiving_requests
         .insert(transfer, (Arc::clone(&dispatch), Arc::clone(&handler)));
 
-    // kept before its first credit goes, so a chunk that credit brings at once finds it
+    // kept before its first credit goes, so a chunk that credit brings at once finds it; kept as
+    // well while it waits, so a cancel or a close ends it as it ends one admitted
     core.answering.attach(&call, RequestReceiving { transfer });
+
+    if !admitted {
+        return wait_for_budget(state, (transfer, total));
+    }
 
     touch_request_transfer(state, (transfer, timeout));
 
@@ -2145,6 +2198,63 @@ fn admit_routed<S: Side>(
         .collect();
 
     send_credits(state, credits);
+}
+
+// arms the wait of a request's opening the budget does not admit yet, in its transfer's timer:
+// still waiting once it passes, it is refused, and the budget walks the openings behind it
+fn wait_for_budget<S: Side>(state: &mut S, (transfer, total): (u64, u64)) {
+    let core = state.core();
+    let wait = budget_wait_of(&core.limits);
+    let timer = core.after(wait, move |state: &mut S| {
+        let core = state.core();
+        let Some((dispatch, _)) = core.receiving_requests.get(&transfer).cloned() else {
+            return;
+        };
+
+        if !core.receivings.is_waiting(transfer) {
+            return;
+        }
+
+        let failure = core
+            .failure(ProtocolCode::CAPACITY_EXCEEDED)
+            .saying(format!(
+                "a total of {total} bytes waited {} milliseconds for the budget",
+                wait.as_millis()
+            ));
+
+        refuse(state, (failure, &dispatch));
+
+        // * its end walks the openings that wait in this turn, whatever its refusal did with it:
+        // one its transport refused closes its call only in a later turn
+        let admitted = state.core().receivings.refuse_waiting(transfer);
+
+        admit(state, admitted);
+    });
+
+    hold_request_timer(state, (transfer, timer));
+}
+
+// keeps the timer armed for a request's transfer in its slot, in place of the one before; none
+// for a transfer ended meanwhile
+fn hold_request_timer<S: Side>(
+    state: &mut S,
+    (transfer, timer): (u64, Result<Arc<dyn Timer>, ProgrammerError>),
+) {
+    let Some((dispatch, _)) = state.core().receiving_requests.get(&transfer).cloned() else {
+        if let Ok(timer) = timer {
+            timer.cancel();
+        }
+        return;
+    };
+    let Some(timer) = timer_of(state, (timer, &dispatch.connection_handle)) else {
+        return;
+    };
+    if let Some(receiving) = state.core().receivings.get_mut(transfer) {
+        cancel_timer(&mut receiving.timer);
+        receiving.timer = Some(timer);
+    } else {
+        timer.cancel();
+    }
 }
 
 // sets a request's transfer's timer going again: silent too long, it is refused
@@ -2163,21 +2273,7 @@ fn touch_request_transfer<S: Side>(state: &mut S, (transfer, timeout): (u64, Dur
         refuse(state, (failure, &dispatch));
     });
 
-    let Some((dispatch, _)) = state.core().receiving_requests.get(&transfer).cloned() else {
-        if let Ok(timer) = timer {
-            timer.cancel();
-        }
-        return;
-    };
-    let Some(timer) = timer_of(state, (timer, &dispatch.connection_handle)) else {
-        return;
-    };
-    if let Some(receiving) = state.core().receivings.get_mut(transfer) {
-        cancel_timer(&mut receiving.timer);
-        receiving.timer = Some(timer);
-    } else {
-        timer.cancel();
-    }
+    hold_request_timer(state, (transfer, timer));
 }
 
 // the call's session, from what its request came with, then its admission on it; while it
@@ -2775,9 +2871,9 @@ fn receive_request_chunk<S: Side>(
             send_credits(state, credits);
         }
         Ok(ChunkOutcome::Complete) => {
-            let (payload, credits) = state.core().receivings.complete(transfer);
+            let (payload, admitted) = state.core().receivings.complete(transfer);
 
-            send_credits(state, credits);
+            admit(state, admitted);
             dispatch_to(state, (handler, dispatch, payload));
         }
         // a chunk that brings nothing new is dropped in silence
@@ -2842,11 +2938,11 @@ pub(crate) fn reject_pending<S: Side>(
     state: &mut S,
     (reason, handle): (&str, Option<&ConnectionHandle>),
 ) {
-    // its transfers first, so the budget they give back grants no credit to one about to go; the
-    // credits it grants the transfers of other connections go out (spec 12.10)
-    let credits = state.core().receivings.close_all(handle);
+    // its transfers first, waiting or admitted, so the budget they give back admits no opening
+    // about to go; the openings of other connections it admits are credited (spec 12.10)
+    let admitted = state.core().receivings.close_all(handle);
 
-    send_credits(state, credits);
+    admit(state, admitted);
 
     let core = state.core();
 

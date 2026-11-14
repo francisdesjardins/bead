@@ -48,6 +48,10 @@ pub(super) async fn reports(peer: &Peer) -> Vec<(String, ProtocolCode)> {
 }
 
 #[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "the twin plays each refusal of spec 12.3's order, and the wait of 0, in one table"
+)]
 async fn refuse_an_opening_before_any_credit_goes_each_by_its_own_failure_and_keep_nothing_of_it() {
     for (index, total, length, code, detail) in [
         (
@@ -85,31 +89,39 @@ async fn refuse_an_opening_before_any_credit_goes_each_by_its_own_failure_and_ke
             ProtocolCode::CAPACITY_EXCEEDED,
             "the transfers a connection receives at once are 1 at most",
         ),
+        // a wait of 0 for the budget refuses at once an opening the budget left cannot hold
         (
-            5,
-            8,
-            1,
+            6,
+            100,
+            44,
             ProtocolCode::CAPACITY_EXCEEDED,
-            "the transfers received hold the budget but 0 bytes",
+            "a total of 100 bytes waited 0 milliseconds for the budget",
         ),
     ] {
+        let follows_one = matches!(index, 4 | 6);
+        // chunks of 64 bytes, in envelopes as large as by default, for a refusal's detail to go
+        // whole
         let options = RouterLimitsOptions {
-            maximum_payload_bytes: Some(if index == 5 { 128 } else { 1_024 }),
+            chunk_bytes: Some(64),
+            window_bytes: Some(128),
+            maximum_payload_bytes: Some(if index == 6 { 128 } else { 1_024 }),
             maximum_transfers: match index {
                 2 => Some(0),
                 4 => Some(1),
                 _ => None,
             },
-            buffered_bytes_budget: (index == 5).then_some(128),
+            buffered_bytes_budget: (index == 6).then_some(128),
+            transfer_inactivity_timeout: (index == 6)
+                .then_some(core::time::Duration::from_millis(1)),
             ..RouterLimitsOptions::default()
         };
         let (peer, handed) = serving(false, &options).await;
         peer.owner
             .run(move |state| {
-                if index >= 4 {
+                if follows_one {
                     receive(
                         state,
-                        (opening(1, (Bytes::from(vec![0; 40]), 128)), "a", None),
+                        (opening(1, (Bytes::from(vec![0; 44]), 128)), "a", None),
                     );
                 }
                 receive(
@@ -125,8 +137,8 @@ async fn refuse_an_opening_before_any_credit_goes_each_by_its_own_failure_and_ke
             .expect("the opening and its uncredited chunk received");
         peer.settle().await;
         let sent = peer.sent().await;
-        assert_eq!(sent.len(), if index >= 4 { 2 } else { 1 });
-        if index >= 4 {
+        assert_eq!(sent.len(), if follows_one { 2 } else { 1 });
+        if follows_one {
             let (handle, Envelope::Credit { header }) = &sent[0] else {
                 panic!("the admitted transfer credited");
             };
@@ -163,7 +175,7 @@ async fn find_a_transfer_that_a_chunk_comes_for_at_once_as_its_first_credit_goes
             .run(move |state| {
                 state.on_transmit = Some(Box::new(move |state, envelope| {
                     if let Envelope::Credit { header } = envelope {
-                        let offset = if header.call_id == 1 { 40 } else { 32 };
+                        let offset = if header.call_id == 1 { 44 } else { 28 };
                         receive(
                             state,
                             (
@@ -171,9 +183,9 @@ async fn find_a_transfer_that_a_chunk_comes_for_at_once_as_its_first_credit_goes
                                     header.call_id,
                                     (
                                         offset,
-                                        pattern((80, dotnet))
+                                        pattern((76, dotnet))
                                             .slice(usize::try_from(offset).expect("an offset")..),
-                                        80,
+                                        76,
                                     ),
                                 ),
                                 "a",
@@ -187,12 +199,12 @@ async fn find_a_transfer_that_a_chunk_comes_for_at_once_as_its_first_credit_goes
             .expect("the port answers each first credit within its send");
         let asking = peer.request((Bytes::new(), request_of("a")));
         peer.receive((
-            opening(1, (pattern((80, dotnet)).slice(..40), 80)),
+            opening(1, (pattern((76, dotnet)).slice(..44), 76)),
             Arc::from("a"),
         ));
         peer.settle().await;
         peer.receive((
-            result_opening(2, (pattern((80, dotnet)).slice(..32), 80)),
+            result_opening(2, (pattern((76, dotnet)).slice(..28), 76)),
             Arc::from("a"),
         ));
         assert_eq!(
@@ -200,14 +212,14 @@ async fn find_a_transfer_that_a_chunk_comes_for_at_once_as_its_first_credit_goes
                 .await
                 .expect("the result assembled")
                 .payload,
-            pattern((80, dotnet))
+            pattern((76, dotnet))
         );
         assert_eq!(
             locked(&handed)
                 .iter()
                 .map(|props| props.payload.clone())
                 .collect::<Vec<_>>(),
-            [pattern((80, dotnet))]
+            [pattern((76, dotnet))]
         );
         assert_eq!(reports(&peer).await, []);
     }
@@ -224,12 +236,12 @@ async fn find_a_transfer_that_a_chunk_comes_for_at_once_as_its_first_credit_goes
 )]
 async fn end_a_requests_transfer_with_the_failure_a_chunk_breaks_and_drop_what_its_credit_let_come_after()
  {
-    for (dotnet, end) in [(false, 120), (true, 128)] {
+    for (dotnet, end) in [(false, 124), (true, 132)] {
         let (peer, handed) = serving(false, &limits()).await;
         peer.owner
             .run(move |state| {
                 let payload = pattern((200, dotnet));
-                receive(state, (opening(1, (payload.slice(..40), 200)), "a", None));
+                receive(state, (opening(1, (payload.slice(..44), 200)), "a", None));
                 receive(
                     state,
                     (
@@ -237,15 +249,15 @@ async fn end_a_requests_transfer_with_the_failure_a_chunk_breaks_and_drop_what_i
                             header: ChunkHeader {
                                 call_id: 1,
                                 is_last: true,
-                                offset: 40,
+                                offset: 44,
                             },
-                            payload: payload.slice(40..80),
+                            payload: payload.slice(44..84),
                         },
                         "a",
                         None,
                     ),
                 );
-                for (offset, end) in [(80, end), (160, 200)] {
+                for (offset, end) in [(84, end), (160, 200)] {
                     receive(
                         state,
                         (
@@ -262,7 +274,7 @@ async fn end_a_requests_transfer_with_the_failure_a_chunk_breaks_and_drop_what_i
                         ),
                     );
                 }
-                receive(state, (opening(3, (payload.slice(..40), 200)), "a", None));
+                receive(state, (opening(3, (payload.slice(..44), 200)), "a", None));
                 receive(
                     state,
                     (chunk(3, (168, payload.slice(168..), 200)), "a", None),
@@ -272,7 +284,7 @@ async fn end_a_requests_transfer_with_the_failure_a_chunk_breaks_and_drop_what_i
                     (
                         Envelope::Request {
                             header: crate::testing::core_port::scripted_header(1),
-                            payload: if end == 120 {
+                            payload: if end == 124 {
                                 Bytes::new()
                             } else {
                                 Bytes::from_static(&[1])
@@ -284,7 +296,7 @@ async fn end_a_requests_transfer_with_the_failure_a_chunk_breaks_and_drop_what_i
                 );
                 receive(
                     state,
-                    (chunk(1, (80, payload.slice(80..end), 200)), "a", None),
+                    (chunk(1, (84, payload.slice(84..end), 200)), "a", None),
                 );
             })
             .await
@@ -293,12 +305,12 @@ async fn end_a_requests_transfer_with_the_failure_a_chunk_breaks_and_drop_what_i
         assert_eq!(
             outgoing(&peer).await,
             [
-                ("a".to_owned(), Outgoing::Credit(1, 168)),
+                ("a".to_owned(), Outgoing::Credit(1, 172)),
                 (
                     "a".to_owned(),
                     Outgoing::Failure(1, ProtocolCode::CHUNK_INVALID.get().get())
                 ),
-                ("a".to_owned(), Outgoing::Credit(3, 168)),
+                ("a".to_owned(), Outgoing::Credit(3, 172)),
                 (
                     "a".to_owned(),
                     Outgoing::Failure(3, ProtocolCode::CREDIT_EXCEEDED.get().get())

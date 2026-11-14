@@ -14,13 +14,15 @@ use std::sync::Arc;
     clippy::disallowed_methods,
     reason = "the test slices its own fixed payload at offsets within its length"
 )]
-async fn end_the_transfers_of_a_connection_that_goes_before_their_budget_grants_any_credit_and_send_nothing_once_disposed()
+async fn end_the_transfers_of_a_connection_that_goes_waiting_or_admitted_before_their_budget_admits_any_opening_and_send_nothing_once_disposed()
  {
     let (peer, handed) = serving(false, &narrow()).await;
     peer.owner
         .run(|state| {
+            // waiting, after the first: the 32 bytes left hold neither; "a" 3 ends with its
+            // connection before "b" 1 is admitted
             for (id, handle, length, total) in
-                [(1, "a", 40, 168), (3, "a", 16, 100), (1, "b", 16, 100)]
+                [(1, "a", 44, 168), (3, "a", 44, 100), (1, "b", 44, 100)]
             {
                 receive(
                     state,
@@ -39,7 +41,7 @@ async fn end_the_transfers_of_a_connection_that_goes_before_their_budget_grants_
             router_core::dispose(state);
         })
         .await
-        .expect("the starved transfers released");
+        .expect("the waiting transfers released");
     peer.settle().await;
     assert_eq!(
         outgoing(&peer).await,

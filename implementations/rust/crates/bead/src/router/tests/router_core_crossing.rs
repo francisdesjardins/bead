@@ -152,7 +152,7 @@ async fn keeps_the_inactivity_of_a_result_that_opens_as_the_last_chunk_of_its_re
                 ]);
                 state.on_transmit = Some(Box::new(|state, envelope| {
                     if matches!(envelope, Envelope::Chunk { header, .. } if header.is_last) {
-                        receive(state, &opening(2, (pattern(32), 100)));
+                        receive(state, &opening(2, (pattern(28), 100)));
                     }
                 }));
             })
@@ -191,7 +191,7 @@ async fn keeps_the_inactivity_of_a_result_that_opens_as_the_last_chunk_of_its_re
     );
     let mut asked = peer.request((pattern(300), request_of("a")));
     peer.receive((credit(1, 172), Arc::from("a")));
-    peer.receive((opening(1, (pattern(32), 300)), Arc::from("a")));
+    peer.receive((opening(1, (pattern(28), 300)), Arc::from("a")));
     peer.receive((credit(1, 300), Arc::from("a")));
     peer.settle().await;
     assert!(

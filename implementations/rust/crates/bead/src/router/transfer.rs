@@ -212,12 +212,11 @@ impl IncomingTransfer {
     }
 
     /// The end of a credit to grant now, and granted: a window past the bytes received, once half
-    /// of the last was used, within `available` bytes past the last end granted.
-    pub(crate) fn credit_to_grant(&mut self, available: u64) -> Option<u64> {
+    /// of the last was used, the budget holding its total already (spec 12.4).
+    pub(crate) fn credit_to_grant(&mut self) -> Option<u64> {
         let next = self
             .total
-            .min(self.contiguous().saturating_add(self.bounds.window_bytes))
-            .min(self.credit_end.saturating_add(available));
+            .min(self.contiguous().saturating_add(self.bounds.window_bytes));
         let granted = next.saturating_sub(self.credit_end);
         let rest = self.total.saturating_sub(self.credit_end);
 

@@ -93,7 +93,7 @@ fn lays_the_spec_s_20_mib_out_byte_by_byte_its_opening_a_credit_a_chunk_with_mor
         ),
     )
     .expect("its opening placed");
-    let credit_end = incoming.credit_to_grant(u64::MAX).unwrap_or(0);
+    let credit_end = incoming.credit_to_grant().unwrap_or(0);
 
     assert_eq!(credit_end, 5_242_860, "a window past its opening");
     assert_eq!(
@@ -191,7 +191,7 @@ fn refuses_more_runs_of_bytes_apart_than_its_bound_one_byte_at_a_time() {
     .expect("its opening placed");
     let one = Bytes::from_static(&[1]);
 
-    incoming.credit_to_grant(u64::MAX);
+    incoming.credit_to_grant();
 
     assert_eq!(
         incoming
@@ -425,7 +425,7 @@ fn checks_a_chunk_in_order_its_bounds_its_bytes_its_last_then_its_credit_then_wh
 fn joins_the_whole_out_of_order_once_and_gives_the_same_whole_when_asked_again() {
     let whole = pattern_of(28);
     let mut incoming = incoming(&whole.slice(..4), (28, 5, 60));
-    assert_eq!(incoming.credit_to_grant(u64::MAX), Some(28));
+    assert_eq!(incoming.credit_to_grant(), Some(28));
     let outcomes: Vec<ChunkOutcome> = [19_usize, 9, 24, 4, 14]
         .into_iter()
         .map(|offset| {
@@ -465,7 +465,7 @@ fn joins_the_whole_out_of_order_once_and_gives_the_same_whole_when_asked_again()
 fn refuses_a_chunk_before_the_last_that_is_not_full_and_one_over_bytes_received_in_part() {
     let whole = pattern_of(19);
     let mut incoming = incoming(&whole.slice(..4), (19, 4, 40));
-    incoming.credit_to_grant(u64::MAX);
+    incoming.credit_to_grant();
     let outcomes: Vec<Result<ChunkOutcome, Option<ProtocolCode>>> = [
         (4_usize, 3_usize),
         (8, 4),
@@ -514,7 +514,7 @@ fn refuses_a_chunk_past_full_before_the_last_or_the_last_chunk_invalid_and_place
  {
     let whole = pattern_of(16);
     let mut incoming = incoming(&whole.slice(..4), (16, 4, 40));
-    assert_eq!(incoming.credit_to_grant(u64::MAX), Some(16));
+    assert_eq!(incoming.credit_to_grant(), Some(16));
     for (offset, last, detail) in [
         (4, false, "a chunk before the last carries 4 bytes, not 5"),
         (11, true, "a last chunk carries 4 bytes at most, not 5"),
@@ -546,13 +546,13 @@ fn refuses_a_chunk_past_full_before_the_last_or_the_last_chunk_invalid_and_place
 #[test]
 fn grants_a_window_past_the_bytes_received_once_half_of_it_can_go_the_rest_at_the_end() {
     let mut incoming = incoming(&pattern_of(4), (22, 2, 8));
-    assert_eq!(incoming.credit_to_grant(u64::MAX), Some(12));
-    assert_eq!(incoming.credit_to_grant(u64::MAX), None);
+    assert_eq!(incoming.credit_to_grant(), Some(12));
+    assert_eq!(incoming.credit_to_grant(), None);
     assert_eq!(
         incoming.place(&pattern_of(2), (false, 4)).expect("placed"),
         ChunkOutcome::Placed
     );
-    assert_eq!(incoming.credit_to_grant(u64::MAX), None);
+    assert_eq!(incoming.credit_to_grant(), None);
     for offset in [6, 8, 10] {
         assert_eq!(
             incoming
@@ -561,7 +561,7 @@ fn grants_a_window_past_the_bytes_received_once_half_of_it_can_go_the_rest_at_th
             ChunkOutcome::Placed
         );
     }
-    assert_eq!(incoming.credit_to_grant(u64::MAX), Some(20));
+    assert_eq!(incoming.credit_to_grant(), Some(20));
     for offset in [12, 14, 16, 18] {
         assert_eq!(
             incoming
@@ -570,8 +570,8 @@ fn grants_a_window_past_the_bytes_received_once_half_of_it_can_go_the_rest_at_th
             ChunkOutcome::Placed
         );
     }
-    assert_eq!(incoming.credit_to_grant(u64::MAX), Some(22));
-    assert_eq!(incoming.credit_to_grant(u64::MAX), None);
+    assert_eq!(incoming.credit_to_grant(), Some(22));
+    assert_eq!(incoming.credit_to_grant(), None);
     assert_eq!(
         incoming.place(&pattern_of(2), (true, 20)).expect("whole"),
         ChunkOutcome::Complete
@@ -579,18 +579,28 @@ fn grants_a_window_past_the_bytes_received_once_half_of_it_can_go_the_rest_at_th
 }
 
 #[test]
-fn grants_no_more_than_the_bytes_it_is_told_are_available() {
-    let mut incoming = incoming(&pattern_of(4), (30, 1, 8));
-    assert_eq!(incoming.credit_to_grant(2), None);
-    assert_eq!(incoming.credit_to_grant(5), Some(9));
-    assert_eq!(incoming.credit_end(), 9);
-}
-
-#[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test slices its own fixed payload at offsets within its length"
+)]
 fn halves_an_odd_window_exactly_64_bytes_short_of_half_of_129_and_65_not() {
-    let mut incoming = incoming(&pattern_of(1), (1_000, 1, 129));
-    assert_eq!(incoming.credit_to_grant(64), None);
-    assert_eq!(incoming.credit_to_grant(65), Some(66));
+    let payload = pattern_of(1_000);
+    let mut incoming = incoming(&payload.slice(..1), (1_000, 1, 129));
+    let place_to = |incoming: &mut IncomingTransfer, end: u64| {
+        for offset in incoming.contiguous()..end {
+            let start = usize::try_from(offset).expect("an offset");
+
+            incoming
+                .place(&payload.slice(start..=start), (false, offset))
+                .expect("placed");
+        }
+    };
+    assert_eq!(incoming.credit_to_grant(), Some(130));
+    // 64 bytes received past the last credit's base: its end moves 64 bytes, short of half
+    place_to(&mut incoming, 65);
+    assert_eq!(incoming.credit_to_grant(), None);
+    place_to(&mut incoming, 66);
+    assert_eq!(incoming.credit_to_grant(), Some(195));
 }
 
 #[test]
@@ -600,7 +610,7 @@ fn carries_100_kib_through_envelopes_of_1024_bytes_and_a_window_of_8_kib_a_few_c
     let mut incoming = incoming(&outgoing.opening(), (102_400, 1_008, 8_192));
     let (mut credits, mut chunks) = (0_u32, 0_u32);
     loop {
-        if let Some(granted) = incoming.credit_to_grant(u64::MAX) {
+        if let Some(granted) = incoming.credit_to_grant() {
             credits = credits.saturating_add(1);
             outgoing.grant(granted);
         }

@@ -353,11 +353,11 @@ async fn asks_a_request_s_admission_on_its_header_once_past_its_route_and_before
             total: Some(100),
             ..header_of((call_id, &echo()))
         },
-        payload: payload.slice(..40),
+        payload: payload.slice(..44),
     };
 
     served.transport.deliver(&opening(5), &first());
-    for (offset, end) in [(40, 88), (88, 100)] {
+    for (offset, end) in [(44, 92), (92, 100)] {
         served.transport.deliver(
             &Envelope::Chunk {
                 header: ChunkHeader {
