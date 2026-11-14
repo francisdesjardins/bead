@@ -1698,7 +1698,7 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         byte[] property = [0x30, 0x0F, 0x00, 0x0A, .. Encoding.UTF8.GetBytes("bead/i/ada"), 0x02, 0x7F, 0x00];
 
         // in one write, a PUBACK of 0x00 to its publication and a PUBLISH to its inbox of the payload
-        // given, then what it cannot read: what its publication gave
+        // given, then what it cannot read: what its publication gave, nothing handed on after its down
         async Task<BrokerPublished> Before((byte[] Unreadable, byte Payload) read)
         {
             var link = await LinkUp((adapter, _script));
@@ -1713,10 +1713,18 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
             {
                 return downs.Count > told;
             });
+            var handed = messages.Count;
+
             Assert.Equal(told + 1, downs.Count);
             Assert.False(adapter.IsLinked);
 
-            return await publishing.WaitAsync(Patience, Cancelled);
+            var published = await publishing.WaitAsync(Patience, Cancelled);
+
+            // ! nothing of its link handed on once its down was told
+            await Task.Delay(TimeSpan.FromMilliseconds(200), Cancelled);
+            Assert.Equal(handed, messages.Count);
+
+            return published;
         }
 
         // the messages of the payload given handed on so far
@@ -1729,16 +1737,13 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         }
 
         // * (i) an UNSUBACK of 0x01 no request awaits, judged at its inspector: its publication
-        // taken, its PUBLISH handed on or not by the scheduler, and when it is, as late as once its
-        // down was told
-        // ? a message handed on once its link's down was told, which the other sides never hand on
+        // taken, its PUBLISH handed on or not by the scheduler
         Assert.Equal(BrokerPublished.Taken, await Before(([0xB0, 0x04, 0x77, 0x77, 0x00, 0x01], 7)));
 
         // * (ii) a PUBLISH carrying property 0x7F, which MQTTnet refuses as it decodes it: its
         // publication taken, its PUBLISH handed on or not by the scheduler, MQTTnet dispatching it
         // as the decoder's refusal retires the link; once at most, and the one read before
         Assert.Equal(BrokerPublished.Taken, await Before((property, 8)));
-        await Task.Delay(TimeSpan.FromMilliseconds(200), Cancelled);
         Assert.True(HandedOn(7) <= 1);
         Assert.True(HandedOn(8) <= 1);
         Assert.Equal(messages.Count, HandedOn(7) + HandedOn(8));

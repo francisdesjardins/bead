@@ -1130,23 +1130,38 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     }
 
     // a message received, handed on before its PUBACK, which its participant's settle sends, once,
-    // on the link it came by alone
+    // on the link it came by alone; one MQTTnet dispatches once its link ended is dropped
     private void Take((Link Link, MqttApplicationMessageReceivedEventArgs Received) taken)
     {
         var (link, received) = taken;
-
-        if (link.IsEnded)
-        {
-            return;
-        }
-
         var message = received.ApplicationMessage;
         var isAcknowledged = message.QualityOfServiceLevel != MqttQualityOfServiceLevel.AtMostOnce;
 
-        if (isAcknowledged)
+        // ! handed on under its link's hand-on, which its end awaits before it tells its down
+        lock (link.Handing)
         {
-            Interlocked.Increment(ref _unsettled);
+            lock (_gate)
+            {
+                if (link.IsEnded)
+                {
+                    return;
+                }
+
+                if (isAcknowledged)
+                {
+                    Interlocked.Increment(ref _unsettled);
+                }
+            }
+
+            HandOn((link, received), isAcknowledged);
         }
+    }
+
+    // a message taken, to its participant
+    private void HandOn((Link Link, MqttApplicationMessageReceivedEventArgs Received) taken, bool isAcknowledged)
+    {
+        var (link, received) = taken;
+        var message = received.ApplicationMessage;
 
         Message?.Invoke(new BrokerMessage(
             new BrokerPublication { Topic = message.Topic.Split('/'), Payload = message.Payload.ToArray() },
@@ -1309,6 +1324,12 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             Interlocked.Exchange(ref _unsettled, 0);
         }
 
+        // ! a hand-on under way finishes first, and none starts after: nothing of its link reaches
+        // its participant once it heard it down, as on the other sides
+        lock (link.Handing)
+        {
+        }
+
         // * told first, so that its participant hears its link down before what failed of it
         if (wasUp && down is not null && !link.IsStopping)
         {
@@ -1351,6 +1372,9 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         public int IsPinging;
 
         public IMqttClient Client { get; } = client;
+
+        // what a message's hand-on holds, its end awaiting it
+        public Lock Handing { get; } = new();
 
         public CancellationTokenSource Life { get; } = new();
 

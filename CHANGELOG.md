@@ -172,6 +172,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   with its link, a packet it cannot decode among what came, as spec 15.29 states and the other
   sides do: MQTTnet fails what awaits before it says the link disconnected, and in that moment the
   stop read it connected and sent one.
+- The C# MQTT adapter hands nothing on of a link once its down was told: a PUBLISH MQTTnet
+  dispatched as the link ended could reach the participant after its down, which the TypeScript
+  and Rust sides never hand on; it is dropped, as theirs is.
 
 ### Security
 
