@@ -53,6 +53,7 @@ fn dispatch((call_id, name): (u32, &str), id: u64) -> Dispatch {
         answered: Mutex::new(None),
         origin: (None, None),
         run: crate::router::parts::ResolverRun::default(),
+        is_failed_answered: std::sync::atomic::AtomicBool::new(false),
     }
 }
 

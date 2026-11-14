@@ -12,6 +12,7 @@ use super::{Handed, cancel_of, locked};
 use crate::constants::{CredentialScheme, ProtocolCode, RouterSide};
 use crate::envelope::{Credential, Envelope, RequestHeader};
 use crate::errors::ResolverError;
+use crate::failure::Failure;
 use crate::router::core::{self as router_core, Handler, Resolution, ResolveFn, Resolved};
 use crate::router::types::{RouterAnswer, RouterError, RouterLimitsOptions, SignalReason};
 use crate::testing::core_port::{Peer, State, scripted_header};
@@ -20,6 +21,10 @@ use crate::transport::Sent;
 
 // the payload of a request whose resolver answers first, then runs on
 const ANSWER: &[u8] = b"answer";
+
+// the payload of a request whose resolver is answered PROCEDURE_FAILED first, as a service's
+// callback that fails is, then runs on
+const FAILED: &[u8] = b"failed";
 
 // the detail of a refusal past the calls answered and those outlived, twice `most`
 fn past_both(most: u64) -> String {
@@ -62,7 +67,8 @@ fn limits_of(maximum_answering_calls: u64) -> RouterLimitsOptions {
 }
 
 /// A core whose resolver of echo holds each call it is handed until the test settles it, deaf to
-/// its signal; one whose payload says `answer` answers first.
+/// its signal; one whose payload says `answer` answers first, one whose payload says `failed` is
+/// answered `PROCEDURE_FAILED` first.
 struct Holding {
     peer: Peer,
     handed: Handed,
@@ -78,14 +84,20 @@ impl Holding {
         let resolve: ResolveFn = Arc::new(move |props| {
             let (settles, settled) = oneshot::channel();
             let answerer = Arc::clone(&props.answerer);
-            let is_answering = props.payload.as_ref() == ANSWER;
+            let answer = match props.payload.as_ref() {
+                ANSWER => Some(RouterAnswer::Result(Bytes::new())),
+                FAILED => Some(RouterAnswer::Failure(
+                    Failure::protocol(ProtocolCode::PROCEDURE_FAILED, RouterSide::Server).record(),
+                )),
+                _ => None,
+            };
 
             locked(&holding).push(Some(settles));
             locked(&handing).push(props);
 
             Box::pin(async move {
-                if is_answering {
-                    drop(answerer.respond(RouterAnswer::Result(Bytes::new())).await);
+                if let Some(answer) = answer {
+                    drop(answerer.respond(answer).await);
                 }
 
                 match settled.await {
@@ -743,4 +755,45 @@ async fn tells_every_resolver_still_running_on_a_connection_as_it_closes_its_cal
     assert_eq!(tracked_of(peer).await, [2, 2, 0]);
     assert_eq!(answers_of(peer).await, ["a Result 1"]);
     assert_eq!(reports_of(peer).await, []);
+}
+
+// spec 9.0, 9.10
+#[tokio::test]
+async fn reports_the_failure_of_a_resolver_its_side_answered_procedure_failed_once_its_connection_closed_and_none_of_one_answered_otherwise_or_cancelled()
+ {
+    let holding = Holding::new(4).await;
+    let peer = &holding.peer;
+
+    receive_all(
+        peer,
+        (
+            vec![request_with(1, FAILED), request_with(3, ANSWER), request(5)],
+            "a",
+        ),
+    )
+    .await;
+    peer.settle().await;
+    receive_all(peer, (vec![cancel_of(5)], "a")).await;
+
+    assert_eq!(answers_of(peer).await, ["a Failure 1", "a Result 3"]);
+
+    // * the close its answers bring about tells each before its failure comes
+    peer.owner
+        .run(|state| {
+            router_core::reject_pending(state, ("a closed", Some(&Arc::from("a"))));
+        })
+        .await
+        .expect("closed");
+
+    for index in 0..3 {
+        holding.settle((index, Settling::Rejects)).await;
+    }
+
+    let reported = reports_of(peer).await;
+
+    assert!(
+        matches!(reported.as_slice(), [(handle, said)] if handle == "a" && said.contains("rejected")),
+        "the failure answered PROCEDURE_FAILED reported alone: {reported:?}"
+    );
+    assert_eq!(tracked_of(peer).await, [0, 0, 0]);
 }

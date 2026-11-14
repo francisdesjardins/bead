@@ -378,6 +378,7 @@ impl Peer {
                 answered: Mutex::new(None),
                 origin: (None, None),
                 run: crate::router::parts::ResolverRun::default(),
+                is_failed_answered: std::sync::atomic::AtomicBool::new(false),
             });
             // * opened as a request dispatched opens it: a call abandoned on its call id forgotten
             state.core.answering.open(

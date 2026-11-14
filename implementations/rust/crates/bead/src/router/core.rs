@@ -206,6 +206,9 @@ pub(crate) struct Dispatch {
     pub(crate) origin: (Option<String>, Option<u16>),
     /// Where its resolver stands, which its call shares.
     pub(crate) run: ResolverRun,
+    /// Whether this side answered its call `PROCEDURE_FAILED`, its own failure: what its resolver
+    /// fails with is then reported, whatever tells it after (spec 9.0).
+    pub(crate) is_failed_answered: AtomicBool,
 }
 
 fn locked<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -1655,6 +1658,17 @@ fn answer_call<S: Side>(state: &mut S, (made, is_in_place): (CallAnswer<S>, bool
     // its answer going out: a second goes nowhere, and this one closes the call once done
     let is_its = state.core().answering.answer((&call, dispatch.id));
 
+    // ! marked in the turn it goes, before its transport has it: a close its answer brings about
+    // tells its resolver, which still owes the report of its failure (spec 9.0, 9.10)
+    if let RouterAnswer::Failure(failure) = &answer
+        && is_its
+        && !state.core().is_disposed()
+        && failure.scope == FailureScope::Protocol
+        && failure.code == ProtocolCode::PROCEDURE_FAILED.get()
+    {
+        dispatch.is_failed_answered.store(true, Ordering::Release);
+    }
+
     // ! held only for the router's own answer in its resolver's place, which its manager tells as
     // that resolver's answer settles: a failure the resolver answered is never held
     if let RouterAnswer::Failure(failure) = &answer
@@ -1976,8 +1990,10 @@ fn settle_resolver<S: Side>(state: &mut S, dispatch: &Dispatch) {
     core.receivings.settle((handle, dispatch.id));
 }
 
-// a resolver that failed: reported unless its call was cancelled or went with its connection, then
-// answered PROCEDURE_FAILED while it still answers, as the other sides' order has it
+// a resolver that failed: reported unless its call was cancelled or went with its connection, or
+// it was told by its signal before its failure came, one whose call this side answered
+// PROCEDURE_FAILED reported all the same; then answered PROCEDURE_FAILED while it still answers, as
+// the other sides' order has it
 fn resolver_failed<S: Side>(
     state: &mut S,
     (dispatch, signal, error): (&Arc<Dispatch>, &Signal, ResolverError),
@@ -1986,7 +2002,7 @@ fn resolver_failed<S: Side>(
     let ResolverError::Other(error) = error;
     let error = reported_error_of(error);
 
-    if !signal.is_aborted() {
+    if !signal.is_aborted() || dispatch.is_failed_answered.load(Ordering::Acquire) {
         state.report(error, &handle);
     }
 
@@ -2468,6 +2484,7 @@ fn receive_request<S: Side>(
         answered: Mutex::new(None),
         origin,
         run: ResolverRun::default(),
+        is_failed_answered: AtomicBool::new(false),
     });
 
     // * its call starts as its request opens it, timed from its arrival

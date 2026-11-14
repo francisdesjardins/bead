@@ -248,6 +248,7 @@ fn dispatch_of((connection_handle, header): (ConnectionHandle, RequestHeader)) -
         answered: Mutex::new(None),
         origin: (None, None),
         run: crate::router::parts::ResolverRun::default(),
+        is_failed_answered: std::sync::atomic::AtomicBool::new(false),
     }
 }
 
