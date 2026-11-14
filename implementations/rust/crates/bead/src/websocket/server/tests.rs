@@ -17,6 +17,7 @@ use super::*;
 use crate::NEVER;
 use crate::platform::JoinHandle;
 use crate::testing::{Instant, SteppingClock, patience, rest};
+use crate::transport::RouterClientTransport;
 
 const PATIENCE: Duration = Duration::from_secs(10);
 
@@ -146,6 +147,36 @@ impl ServerListener for Recorder {
             told.errors
                 .push((error.to_string(), connection_handle.cloned()));
         }));
+    }
+}
+
+#[derive(Default)]
+struct ClientCloses {
+    heard: Mutex<Vec<(bool, bool)>>,
+    changed: Notify,
+}
+
+impl crate::transport::ClientListener for ClientCloses {
+    fn on_close(&self, was_clean: bool, is_quick: bool) {
+        self.heard.lock().unwrap().push((was_clean, is_quick));
+        self.changed.notify_waiters();
+    }
+}
+
+impl ClientCloses {
+    async fn wait(&self) -> Vec<(bool, bool)> {
+        patience(PATIENCE, async {
+            loop {
+                let changed = self.changed.notified();
+                let heard = self.heard.lock().unwrap().clone();
+                if !heard.is_empty() {
+                    return heard;
+                }
+                changed.await;
+            }
+        })
+        .await
+        .unwrap()
     }
 }
 
@@ -377,8 +408,7 @@ fn binary(bytes: &[u8]) -> Message {
 
 // ── Its life ───────────────────────────────────────────────────────────────────────────────────
 
-#[tokio::test]
-async fn starts_uninitialized_and_is_open_once_listening_on_a_port_the_system_picked() {
+async fn compares_a_system_picked_port() {
     let server = WebSocketTransportServer::new(&briefly_closing()).unwrap();
 
     assert_eq!(server.ready_state(), ReadyState::Uninitialized, "before");
@@ -396,8 +426,7 @@ async fn starts_uninitialized_and_is_open_once_listening_on_a_port_the_system_pi
     stopped(&server).await;
 }
 
-#[tokio::test]
-async fn throws_on_a_port_taken_ending_closed_and_starts_again_on_a_free_one_and_after_a_stop() {
+async fn compares_a_taken_port() {
     let (server, _, port) = started(&briefly_closing()).await;
     let other = WebSocketTransportServer::new(&briefly_closing()).unwrap();
     let taken = TransportServerStartOptions {
@@ -866,8 +895,12 @@ async fn meets_a_connection_already_registered_and_can_send_to_it() {
         Some(true),
         "registered"
     );
-    assert!(
-        handle.starts_with("type=WS;ip=127.0.0.1;port=") && handle.contains(";ordinal="),
+    assert_eq!(
+        handle.as_ref(),
+        format!(
+            "type=WS;ip=127.0.0.1;port={};ordinal=1",
+            client.get_ref().local_addr().unwrap().port()
+        ),
         "its handle: {handle}"
     );
     stopped(&server).await;
@@ -927,63 +960,68 @@ async fn keeps_a_connection_whose_connection_listener_throws_its_messages_heard_
 }
 
 // spec 15.2
-#[tokio::test]
-async fn delivers_text_as_text_and_binary_as_bytes_stamping_the_activity() {
-    let stepping = SteppingClock::new(dated_at());
-    let (server, recorder, port) = started(&WebSocketTransportServerOptions {
-        clock: Some(Arc::<SteppingClock>::clone(&stepping)),
-        ..briefly_closing()
-    })
-    .await;
-    let mut client = client(port).await;
-    let handle = recorder.connections(1).await.remove(0);
-    let second = Duration::from_secs(1);
+async fn compares_message_activity() {
+    for (text_value, binary_value) in [
+        ("hi", &[1, 2][..]),
+        ("hi", &b"bytes"[..]),
+        ("hello", &b"bytes"[..]),
+    ] {
+        let stepping = SteppingClock::new(dated_at());
+        let (server, recorder, port) = started(&WebSocketTransportServerOptions {
+            clock: Some(Arc::<SteppingClock>::clone(&stepping)),
+            ..briefly_closing()
+        })
+        .await;
+        let mut client = client(port).await;
+        let handle = recorder.connections(1).await.remove(0);
+        let second = Duration::from_secs(1);
 
-    assert_eq!(server.clients()[0].last_activity, None, "none before");
+        assert_eq!(server.clients()[0].last_activity, None, "none before");
 
-    stepping.advance(second).await;
-    client.send(Message::text("hi")).await.unwrap();
+        stepping.advance(second).await;
+        client.send(Message::text(text_value)).await.unwrap();
 
-    // * a text message is handed on as it came, marked so, for its router to judge: its transport
-    // reports nothing of it
-    let (text, on) = recorder.messages(1).await.remove(0);
+        // * a text message is handed on as it came, marked so, for its router to judge: its transport
+        // reports nothing of it
+        let (text, on) = recorder.messages(1).await.remove(0);
 
-    assert_eq!(&*text.data, b"hi", "the text, as its bytes");
-    assert!(text.is_text, "marked text");
-    assert_eq!(on, handle, "its connection");
-    assert_eq!(text.address.as_deref(), Some("127.0.0.1"), "its address");
-    assert_eq!(
-        text.port,
-        Some(server.clients()[0].port.unwrap()),
-        "its port"
-    );
-    assert_eq!(text.credential, None, "no credential");
-    assert_eq!(
-        server.clients()[0].last_activity,
-        dated_at().checked_add(second),
-        "stamped by the text, on its clock"
-    );
+        assert_eq!(&*text.data, text_value.as_bytes(), "the text, as its bytes");
+        assert!(text.is_text, "marked text");
+        assert_eq!(on, handle, "its connection");
+        assert_eq!(text.address.as_deref(), Some("127.0.0.1"), "its address");
+        assert_eq!(
+            text.port,
+            Some(server.clients()[0].port.unwrap()),
+            "its port"
+        );
+        assert_eq!(text.credential, None, "no credential");
+        assert_eq!(
+            server.clients()[0].last_activity,
+            dated_at().checked_add(second),
+            "stamped by the text, on its clock"
+        );
 
-    // each message stamps it again
-    stepping.advance(second).await;
-    client.send(binary(&[1, 2])).await.unwrap();
+        // each message stamps it again
+        stepping.advance(second).await;
+        client.send(binary(binary_value)).await.unwrap();
 
-    let (bytes, on) = recorder.messages(2).await.remove(1);
+        let (bytes, on) = recorder.messages(2).await.remove(1);
 
-    assert_eq!(&*bytes.data, &[1, 2], "the binary one");
-    assert!(!bytes.is_text, "not marked text");
-    assert_eq!(on, handle, "its connection");
-    assert_eq!(
-        server.clients()[0].last_activity,
-        dated_at().checked_add(second * 2),
-        "stamped by the binary"
-    );
-    assert_eq!(
-        recorder.count(|told| told.errors.len()),
-        0,
-        "nothing reported"
-    );
-    stopped(&server).await;
+        assert_eq!(&*bytes.data, binary_value, "the binary one");
+        assert!(!bytes.is_text, "not marked text");
+        assert_eq!(on, handle, "its connection");
+        assert_eq!(
+            server.clients()[0].last_activity,
+            dated_at().checked_add(second.checked_mul(2).unwrap()),
+            "stamped by the binary"
+        );
+        assert_eq!(
+            recorder.count(|told| told.errors.len()),
+            0,
+            "nothing reported"
+        );
+        stopped(&server).await;
+    }
 }
 
 #[tokio::test]
@@ -1057,8 +1095,7 @@ async fn delivers_a_message_sent_in_frames_as_one_and_names_its_connection() {
     stopped(&server).await;
 }
 
-#[tokio::test]
-async fn raises_connection_before_a_frame_that_arrived_with_the_upgrade_request() {
+async fn compares_upgrade_carried_frames() {
     for (opcode, bytes) in [(0x2, &[7][..]), (0x1, &b"early"[..])] {
         let (server, recorder, port) = started(&briefly_closing()).await;
         let mut socket = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
@@ -1114,18 +1151,24 @@ async fn sends_to_a_connection_in_order_one_message_at_a_time() {
     stopped(&server).await;
 }
 
-#[tokio::test]
-async fn resolves_a_send_for_a_handle_nobody_holds() {
-    let (server, _, _) = started(&briefly_closing()).await;
-    let sent = server.send(
-        TransportMessage {
-            data: Bytes::from_static(&[1]),
-            ..TransportMessage::default()
-        },
-        &Arc::from("type=WS;ip=127.0.0.1;port=1;ordinal=99"),
-    );
-
-    assert!(matches!(sent, Ok(Sent::Done)), "done");
+async fn compares_an_unknown_send() {
+    let (server, recorder, port) = started(&briefly_closing()).await;
+    let _client = client(port).await;
+    recorder.connections(1).await;
+    for (is_text, bytes, handle) in [
+        (false, &[1][..], "type=WS;ip=127.0.0.1;port=1;ordinal=1"),
+        (true, &b"hello"[..], "type=WS;ip=0.0.0.0;port=1;ordinal=1"),
+    ] {
+        let sent = server.send(
+            TransportMessage {
+                data: Bytes::copy_from_slice(bytes),
+                is_text,
+                ..TransportMessage::default()
+            },
+            &Arc::from(handle),
+        );
+        assert!(matches!(sent, Ok(Sent::Done)), "done");
+    }
     stopped(&server).await;
 }
 
@@ -1168,16 +1211,16 @@ async fn closes_one_connection_which_is_gone_once_it_resolves() {
     stopped(&server).await;
 }
 
-#[tokio::test]
-async fn resolves_false_closing_a_handle_nobody_holds() {
-    let (server, _, _) = started(&briefly_closing()).await;
+async fn compares_an_unknown_close() {
+    let (server, recorder, _) = started(&briefly_closing()).await;
 
     assert!(
         !server
-            .close(&Arc::from("type=WS;ip=127.0.0.1;port=1;ordinal=99"))
+            .close(&Arc::from("type=WS;ip=0.0.0.0;port=1;ordinal=1"))
             .await,
         "nobody holds it"
     );
+    assert_eq!(recorder.count(|told| told.closes.len()), 0, "no close told");
     stopped(&server).await;
 }
 
@@ -1657,9 +1700,10 @@ async fn checks_the_default_envelope_limit() {
     let (server, recorder, port) = started(&briefly_closing()).await;
     let mut client = client(port).await;
     let handle = recorder.connections(1).await.remove(0);
-    let past = usize::try_from(MAXIMUM_MESSAGE_BYTES).unwrap() + 1;
+    let limit = usize::try_from(MAXIMUM_MESSAGE_BYTES).unwrap();
+    let past = limit.checked_add(1).unwrap();
 
-    client.send(binary(&vec![0; past - 1])).await.unwrap();
+    client.send(binary(&vec![0; limit])).await.unwrap();
 
     let messages = recorder.messages(1).await;
 
@@ -1874,14 +1918,12 @@ async fn stamps_the_activity_on_its_clock_and_bounds_a_close_on_the_real_one_whi
     stopped(&server).await;
 }
 
-#[tokio::test]
-async fn stop_closes_every_connection_each_raising_its_close_before_it_resolves_and_stops_listening()
- {
+async fn compares_stopping_connections() {
     let (server, recorder, port) = started(&briefly_closing()).await;
     let mut first = client(port).await;
     let mut second = client(port).await;
 
-    recorder.connections(2).await;
+    let handles = recorder.connections(2).await;
 
     let stopping = server.stop();
 
@@ -1902,7 +1944,18 @@ async fn stop_closes_every_connection_each_raising_its_close_before_it_resolves_
 
     patience(PATIENCE, stopping).await.unwrap().unwrap();
 
-    let closes = recorder.closes(2).await;
+    let mut closes = recorder.told.lock().unwrap().closes.clone();
+    let mut expected = handles
+        .into_iter()
+        .map(|handle| (false, handle))
+        .collect::<Vec<_>>();
+    closes.sort();
+    expected.sort();
+    assert_eq!(
+        closes, expected,
+        "both exact handles told before the stop resolves"
+    );
+    assert_eq!(server.ready_state(), ReadyState::Closed, "closed");
 
     assert!(
         closes.iter().all(|(is_clean, _)| !is_clean),
@@ -1912,6 +1965,64 @@ async fn stop_closes_every_connection_each_raising_its_close_before_it_resolves_
     assert!(
         TcpStream::connect(("127.0.0.1", port)).await.is_err(),
         "it listens no more"
+    );
+
+    // The transport clients' two close arguments, as well as the close frames above.
+    let (server, recorder, port) = started(&briefly_closing()).await;
+    let mut clients = Vec::new();
+    for _ in 0..2 {
+        let client = crate::WebSocketTransportClient::new(
+            &crate::WebSocketTransportClientOptions::default(),
+        )
+        .unwrap();
+        let closes = Arc::new(ClientCloses::default());
+        client.listen(Arc::<ClientCloses>::clone(&closes));
+        patience(
+            PATIENCE,
+            client.connect(&crate::WebSocketTransportClientConnectOptions::new(
+                "127.0.0.1",
+                port,
+            )),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        clients.push((client, closes));
+    }
+    let handles = recorder.connections(2).await;
+    stopped(&server).await;
+    let mut notifications = recorder.told.lock().unwrap().closes.clone();
+    let mut expected = handles
+        .into_iter()
+        .map(|handle| (false, handle))
+        .collect::<Vec<_>>();
+    notifications.sort();
+    expected.sort();
+    assert_eq!(
+        notifications, expected,
+        "both server closes before stop resolves"
+    );
+    for (client, closes) in clients {
+        assert_eq!(
+            closes.wait().await,
+            [(false, false)],
+            "neither clean nor quick"
+        );
+        assert_eq!(client.ready_state(), ReadyState::Closed, "closed");
+    }
+    assert!(server.clients().is_empty(), "no client held");
+    assert!(
+        server.gauges().unwrap().connection_handles.is_empty(),
+        "no handle held"
+    );
+    assert_eq!(
+        server.ready_state(),
+        ReadyState::Closed,
+        "the server closed"
+    );
+    assert!(
+        TcpStream::connect(("127.0.0.1", port)).await.is_err(),
+        "no late connection"
     );
 }
 
@@ -2416,21 +2527,32 @@ async fn reads_the_host_of_an_upgrade_as_it_came_an_idn_page_s_own_in_punycode_a
     );
 }
 
-#[tokio::test]
-async fn refuses_as_it_is_built_a_hosts_entry_with_a_port_and_an_origins_entry_that_is_a_star_or_null()
- {
-    for (options, refusal) in [
-        (judging(&["bead.test:8080"], &[]), "a hosts entry"),
-        (judging(&[], &["*"]), "an origins entry"),
-        (judging(&[], &["null"]), "an origins entry"),
+fn compares_host_configuration() {
+    for (hosts, origins, words) in [
+        (vec!["bead.test:8080"], vec![], "bead.test:8080"),
+        (
+            vec!["bead.test", "bead.test:8080"],
+            vec![],
+            "bead.test:8080",
+        ),
+        (vec!["bead.test", "*"], vec![], "hosts takes * alone"),
+        (vec![], vec!["*"], "no wildcard"),
+        (vec![], vec!["null"], "a sandboxed frame of any site"),
+        (vec![], vec!["https://bead.test/"], "an origins entry"),
+        (
+            vec!["*"],
+            vec!["https://bead.test", "null"],
+            "a sandboxed frame of any site",
+        ),
     ] {
-        let refused = WebSocketTransportServer::new(&options).unwrap_err();
-
+        let refused = WebSocketTransportServer::new(&judging(&hosts, &origins)).unwrap_err();
         assert!(
-            refused.to_string().contains(refusal) || refused.to_string().contains("origin"),
-            "refused: {refused}"
+            refused.to_string().contains(words),
+            "{hosts:?}, {origins:?}: {refused}"
         );
     }
+    WebSocketTransportServer::new(&judging(&["*"], &["https://bead.test"]))
+        .expect("the valid lists");
 }
 
 #[tokio::test]
@@ -3697,4 +3819,87 @@ async fn lets_its_port_go_once_its_last_handle_is_dropped_idle_without_its_stop(
     drop(server);
 
     assert!(is_let_go(port).await, "its port let go");
+}
+
+#[tokio::test]
+async fn listens_on_a_port_the_system_picked() {
+    compares_a_system_picked_port().await;
+}
+
+#[tokio::test]
+async fn starts_uninitialized_and_is_open_once_listening_on_a_port_the_system_picked() {
+    compares_a_system_picked_port().await;
+}
+
+#[tokio::test]
+async fn rejects_with_eaddrinuse_on_a_port_taken_ending_closed_and_starts_again_on_a_free_one_and_after_a_stop()
+ {
+    compares_a_taken_port().await;
+}
+
+#[tokio::test]
+async fn throws_on_a_port_taken_ending_closed_and_starts_again_on_a_free_one_and_after_a_stop() {
+    compares_a_taken_port().await;
+}
+
+#[tokio::test]
+async fn delivers_text_as_a_string_and_binary_as_an_array_buffer_stamping_the_activity() {
+    compares_message_activity().await;
+}
+
+#[tokio::test]
+async fn delivers_text_as_text_and_binary_as_bytes_stamping_the_activity() {
+    compares_message_activity().await;
+}
+
+#[tokio::test]
+async fn resolves_for_a_handle_nobody_holds() {
+    compares_an_unknown_send().await;
+}
+
+#[tokio::test]
+async fn resolves_a_send_for_a_handle_nobody_holds() {
+    compares_an_unknown_send().await;
+}
+
+#[tokio::test]
+async fn resolves_false_for_a_handle_nobody_holds() {
+    compares_an_unknown_close().await;
+}
+
+#[tokio::test]
+async fn resolves_false_closing_a_handle_nobody_holds() {
+    compares_an_unknown_close().await;
+}
+
+#[tokio::test]
+async fn closes_every_connection_each_emitting_its_close_before_it_resolves_and_stops_listening() {
+    compares_stopping_connections().await;
+}
+
+#[tokio::test]
+async fn stop_closes_every_connection_each_raising_its_close_before_it_resolves_and_stops_listening()
+ {
+    compares_stopping_connections().await;
+}
+
+#[tokio::test]
+async fn refuses_as_it_is_built_a_hosts_entry_with_a_port_and_an_origins_entry_that_is_or_null() {
+    compares_host_configuration();
+}
+
+#[tokio::test]
+async fn refuses_as_it_is_built_a_hosts_entry_with_a_port_and_an_origins_entry_that_is_a_star_or_null()
+ {
+    compares_host_configuration();
+}
+
+#[tokio::test]
+async fn raises_connection_before_a_frame_that_arrived_with_the_upgrade_request() {
+    compares_upgrade_carried_frames().await;
+}
+
+#[tokio::test]
+async fn emits_connection_before_a_frame_that_arrived_with_the_upgrade_request() {
+    compares_upgrade_carried_frames().await;
 }
