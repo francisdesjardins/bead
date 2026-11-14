@@ -8437,6 +8437,49 @@
       ]
     },
     {
+      "name": "a text message that is not UTF-8 fails its connection with 1007",
+      "clauses": [
+        "15.3"
+      ],
+      "transport": "websocket",
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "socket"
+        },
+        {
+          "send": {
+            "frames": [
+              {
+                "opcode": 1,
+                "fin": true,
+                "payload": "FF FE"
+              }
+            ]
+          },
+          "on": "socket"
+        },
+        {
+          "expect": {
+            "close": 1007
+          },
+          "on": "socket"
+        }
+      ]
+    },
+    {
       "name": "a WebSocket upgrade that carries no Origin carries its Authorization beside every envelope of its connection, as it came, its auth-scheme included and its surrounding whitespace removed: a request presenting ELSEWHERE hands it to the verifier, whoami answering the sub it names, and one presenting none is refused SESSION_REQUIRED, the upgrade's credential standing for nothing but ELSEWHERE",
       "clauses": [
         "15.1",

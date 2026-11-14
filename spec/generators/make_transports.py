@@ -973,8 +973,8 @@ cases += relayed_over_http()
 # RFC 6455 §1.3's own key, and the accept it gives
 KEY, ACCEPT = 'dGhlIHNhbXBsZSBub25jZQ==', 's3pPLMBiTxaQ9kYGzzhZRbK+xOo='
 SMALL = {'maximumEnvelopeBytes': 64, 'chunkBytes': 64, 'windowBytes': 128}
-CONTINUATION, BINARY = 0x0, 0x2
-NORMAL, GOING_AWAY, TOO_BIG = 1000, 1001, 1009
+CONTINUATION, TEXT, BINARY = 0x0, 0x1, 0x2
+NORMAL, GOING_AWAY, INVALID_PAYLOAD, TOO_BIG = 1000, 1001, 1007, 1009
 
 
 def asked(on='socket', fields=None, *, method='GET', target='/', http='HTTP/1.1', host='{host}',
@@ -1042,6 +1042,11 @@ websocket = [
         message('socket', binary=request(3, 'echo', '"y"')), heard('socket', envelope=result(3, '"y"'))]),
     ('a message past the side\'s own limit fails its connection with 1009', ['15.3', '12.2.1'], {'limits': SMALL}, [
         *upgrade(), message('socket', binary=request(1, 'echo', '"' + 'x' * 51 + '"')), heard('socket', close=TOO_BIG)]),
+    # 15.3: FF and FE are never UTF-8 (RFC 3629 §1), written as a frame since a text is a JSON string,
+    # which holds no octet past UTF-8
+    ('a text message that is not UTF-8 fails its connection with 1007', ['15.3'], {}, [
+        *upgrade(), message('socket', frames=[{'opcode': TEXT, 'fin': True, 'payload': 'FF FE'}]),
+        heard('socket', close=INVALID_PAYLOAD)]),
     # 15.1 and 15.2: the Authorization of an upgrade from no page, carried beside every envelope of its
     # connection; the verifier holds a value of its grammar alone, so whoami answers only if its
     # auth-scheme came with it and the spaces and tabs around it went

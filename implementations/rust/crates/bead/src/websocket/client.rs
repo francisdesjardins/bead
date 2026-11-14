@@ -277,7 +277,8 @@ struct Opened {
 /// Once open, each message is handed on `on_message`, a text one marked `is_text`, for its router
 /// to report as no envelope (spec 15.2). A message past
 /// `maximum_message_bytes` fails its connection with 1009, reported on `on_error` naming
-/// `maximumMessageBytes`, then its unclean close; a protocol error is reported alike, failed with
+/// `maximumMessageBytes`, then its unclean close; a text message, or a close's reason, that is no
+/// UTF-8 is reported alike, failed with 1007 (spec 15.3), and any other protocol error, failed with
 /// 1002. A server gone without its closing handshake tells its unclean close alone.
 ///
 /// Its connection is pinged every `heartbeat` on the platform's clock, and dropped, its close
@@ -368,6 +369,7 @@ fn failure_of(failed: &Failed) -> RouterError {
             "the connection is closed with 1009: a message past its maximumMessageBytes, {maximum} bytes"
         ),
         Failed::Protocol(why) => format!("the connection is closed with 1002: {why}"),
+        Failed::InvalidPayload(why) => format!("the connection is closed with 1007: {why}"),
         Failed::Dropped(why) => format!("the connection is dropped: {why}"),
     };
 

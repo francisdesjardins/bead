@@ -211,6 +211,24 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         }
     }
 
+    // the status of the close a client sends, the first frame it sends, masked as a client's are
+    private static async Task<int> CloseCodeOf(NetworkStream stream)
+    {
+        var head = new byte[2];
+
+        await stream.ReadExactlyAsync(head, Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+
+        Assert.Equal((0x88, 0x80), ((int)head[0], head[1] & 0x80));
+
+        var mask = new byte[4];
+        var payload = new byte[head[1] & 0x7F];
+
+        await stream.ReadExactlyAsync(mask, Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+        await stream.ReadExactlyAsync(payload, Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+
+        return ((payload[0] ^ mask[0]) << 8) | (payload[1] ^ mask[1]);
+    }
+
     // a client's 1009, as its Error tells it
     private static string TooBig(int maximumMessageBytes)
     {
@@ -2108,6 +2126,47 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
                 });
             Assert.Equal(ReadyState.Closed, _client.ReadyState);
         }
+    }
+
+    // RFC 6455 §8.1: .NET fails a text message that is no UTF-8 with 1007, and a close whose reason
+    // is no UTF-8 with 1002, where `ws` and the Rust side send 1007; rows of docs/support.md
+    [Fact]
+    public async Task Closes_with_1007_a_text_message_from_its_server_that_is_no_UTF_8_and_with_1002_a_close_whose_reason_is_no_UTF_8()
+    {
+        var codes = new List<int>();
+
+        // unmasked, as a server sends them
+        foreach (var frame in new byte[][] { [0x81, 0x02, 0xFF, 0xFE], [0x88, 0x04, 0x03, 0xE8, 0xFF, 0xFE] })
+        {
+            using var listener = new Listener(IPAddress.Loopback);
+            await using var client = new WebSocketTransportClient();
+            var (told, closed) = EndOf(client);
+            var connecting = client.Connect(new WebSocketTransportClientConnectOptions { Host = Host, Port = listener.Port, CancellationToken = Cancelled });
+            var (peer, head) = await listener.Next();
+
+            using (peer)
+            {
+                await Listener.Upgrade(peer, head);
+                await connecting.WaitAsync(Patience, Cancelled);
+                await peer.GetStream().WriteAsync(frame, Cancelled);
+                codes.Add(await CloseCodeOf(peer.GetStream()));
+                await closed.WaitAsync(Patience, Cancelled);
+
+                Assert.Collection(
+                    Described(told, false),
+                    (error) =>
+                    {
+                        Assert.Equal(WebSocketError.Faulted, Assert.IsType<WebSocketException>(error).WebSocketErrorCode);
+                    },
+                    (close) =>
+                    {
+                        Assert.Equal((false, false), close);
+                    });
+                Assert.Equal(ReadyState.Closed, client.ReadyState);
+            }
+        }
+
+        Assert.Equal([1007, 1002], codes);
     }
 
     [Fact]

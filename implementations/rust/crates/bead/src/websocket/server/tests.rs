@@ -1530,14 +1530,21 @@ async fn emits_error_with_the_handle_then_that_connection_s_close_on_a_protocol_
 }
 
 // ! tungstenite raises one `Error::Utf8` for a text message and for a close's reason that is no
-// UTF-8, so both close with 1002, where RFC 6455 §7.4.1 gives the first 1007: `ws` sends 1007 for
-// both, .NET 1007 for the text and 1002 for the reason, a row of docs/support.md
+// UTF-8, which this side fails with 1007, a text message at the first fragment that breaks it:
+// `ws` waits for its last fragment, .NET sends 1002 for the reason, rows of docs/support.md
 #[tokio::test]
-async fn closes_with_1002_a_text_message_that_is_no_utf_8_and_a_close_whose_reason_is_no_utf_8() {
+async fn closes_with_1007_a_text_message_in_fragments_that_is_no_utf_8_at_the_first_fragment_that_breaks_it_and_with_1007_a_close_whose_reason_is_no_utf_8()
+ {
     let (server, recorder, port) = started(&briefly_closing()).await;
+    let mut handles = Vec::new();
 
-    for (index, frame) in [
-        masked_frame(0x1, (&[0xff, 0xfe], true)),
+    for (index, frames) in [
+        // a text message's first fragment, then a ping its failure leaves unanswered
+        [
+            masked_frame(0x1, (&[0xff], false)),
+            masked_frame(0x9, (&[], true)),
+        ]
+        .concat(),
         masked_frame(0x8, (&[0x03, 0xe8, 0xff, 0xfe], true)),
     ]
     .into_iter()
@@ -1545,7 +1552,8 @@ async fn closes_with_1002_a_text_message_that_is_no_utf_8_and_a_close_whose_reas
     {
         let (mut socket, _) = upgraded(port).await;
 
-        socket.write_all(&frame).await.unwrap();
+        handles.push(recorder.connections(index + 1).await.remove(index));
+        socket.write_all(&frames).await.unwrap();
 
         let mut peer = WebSocketStream::from_raw_socket(socket, Role::Client, None).await;
 
@@ -1553,16 +1561,28 @@ async fn closes_with_1002_a_text_message_that_is_no_utf_8_and_a_close_whose_reas
             matches!(
                 next_of(&mut peer).await,
                 Some(Ok(Message::Close(Some(CloseFrame {
-                    code: CloseCode::Protocol,
+                    code: CloseCode::Invalid,
                     ..
                 }))))
             ),
-            "1002, case {index}"
+            "1007 first, no pong before it, case {index}"
         );
         recorder.closes(index + 1).await;
     }
 
-    assert_eq!(recorder.errors(2).await.len(), 2, "each reported");
+    let errors = recorder.errors(2).await;
+
+    for (index, handle) in handles.iter().enumerate() {
+        assert_eq!(errors[index].1.as_ref(), Some(handle), "case {index}'s");
+        assert!(
+            errors[index]
+                .0
+                .starts_with(&format!("{handle} is closed with 1007: ")),
+            "case {index}, reported: {}",
+            errors[index].0
+        );
+    }
+
     stopped(&server).await;
 }
 

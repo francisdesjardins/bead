@@ -1380,8 +1380,12 @@ connection; a 426 names `upgrade` in its `Connection`.
 [§10.4](https://www.rfc-editor.org/rfc/rfc6455#section-10.4)): it sends its close, drains what
 still comes until the peer's close or its close timeout, then ends the connection, its close
 unclean whatever code the peer answers with; a side reports it, naming the bound and its value
-(section 15.1). A side's close timeout, 5 seconds by default, bounds each closing handshake it
-begins, its 1009 among them: a peer that has not answered by then is dropped, and a server tells its
+(section 15.1). A text message that is not UTF-8 fails the connection with 1007
+([RFC 6455 §8.1](https://www.rfc-editor.org/rfc/rfc6455#section-8.1),
+[§7.4.1](https://www.rfc-editor.org/rfc/rfc6455#section-7.4.1)), and never reaches its router
+(section 15.2); a page's `WebSocket` fails it as its browser does. A side's close timeout,
+5 seconds by default, bounds each closing handshake it begins, its 1009 among them: a peer that
+has not answered by then is dropped, and a server tells its
 close unclean. A client SHOULD hold one where its platform lets it: a page's `WebSocket` bounds its
 close as its platform does. A side SHOULD ping its peer every `heartbeat` — 30 seconds by default,
 or never — and close a connection that left a ping unanswered, so a peer gone without a word ends
