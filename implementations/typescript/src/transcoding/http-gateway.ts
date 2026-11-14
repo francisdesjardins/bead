@@ -1395,11 +1395,17 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
 
     if (isStream) {
       const write = writerOf(response);
+      // * a HEAD is answered as its GET begins, and ends at its head, its subscription with it (8.1)
+      const isHead = request.method === 'HEAD';
       // the stream's end follows its last queued event
       let written = Promise.resolve(false);
       const opened = createEventStream(
         {
           answer: (problem) => {
+            if (isHead) {
+              release();
+            }
+
             answerProblem(exchange, { problem });
             close();
           },
@@ -1415,6 +1421,16 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
               ...RESPONSE_HEADERS,
               'content-type': EVENT_STREAM_MEDIA_TYPE,
             });
+
+            if (isHead) {
+              // ! its place freed before its socket takes its head, where its caller may ask again,
+              // never left to its response's `close`
+              isGone = true;
+              release();
+              opened.close();
+              close();
+              response.end();
+            }
           },
           write: async (text) => {
             if (isGone) {

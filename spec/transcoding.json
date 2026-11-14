@@ -6472,6 +6472,62 @@
       ]
     },
     {
+      "name": "a HEAD that asks a stream is answered as its GET begins, and frees its place as it ends at its head",
+      "clauses": [
+        "3.4",
+        "8.1",
+        "8.6",
+        "10.3"
+      ],
+      "options": {
+        "maximumConnectionsPerAddress": 1
+      },
+      "realTime": true,
+      "steps": [
+        {
+          "send": {
+            "head": "HEAD /v1/watch HTTP/1.1\r\nhost: {host}\r\naccept: text/event-stream\r\nconnection: close\r\n\r\n"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "text/event-stream",
+              "content-length": null,
+              "bead-refusal": null
+            },
+            "body": ""
+          },
+          "on": "a"
+        },
+        {
+          "send": {
+            "head": "GET /v1/watch HTTP/1.1\r\nhost: {host}\r\naccept: text/event-stream\r\nconnection: close\r\n\r\n"
+          },
+          "on": "b"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "text/event-stream",
+              "bead-refusal": null
+            },
+            "stream": "event: result\nid: 1\ndata: {}\n\n"
+          },
+          "on": "b"
+        }
+      ]
+    },
+    {
       "name": "a procedure marked NO_SIDE_EFFECTS answers GET at its default route",
       "clauses": [
         "3.2"

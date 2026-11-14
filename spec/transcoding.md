@@ -590,9 +590,14 @@ Notifications go as Server-Sent Events,
 least the weight it gives `application/json`
 ([RFC 9110 §12.5.1](https://www.rfc-editor.org/rfc/rfc9110#section-12.5.1)), each by the first range
 that names it most specifically, a weight off RFC 9110's `qvalue` grammar (§12.4.2) as none
-given, 1: never through `*/*` or `text/*`, which a `fetch` sends by default. Any other request to it
-is a call as any other, which subscribes nothing (section 11.2), its result 200 and of section 5's
-form.
+given, 1: never through `*/*` or `text/*`, which a `fetch` sends by default. A `HEAD` that would open
+a stream is answered as its `GET` begins: its call made as that `GET`'s, then that `GET`'s head — 200
+`text/event-stream` and section 6.2's fields, or its failure's problem (section 8.2) — with no content
+([RFC 9110 §9.3.2](https://www.rfc-editor.org/rfc/rfc9110#section-9.3.2)); its response ends at its
+head ([RFC 9112 §6.3](https://www.rfc-editor.org/rfc/rfc9112#section-6.3)), which closes its
+exchange's connection and so ends its subscription (section 8.6). It is counted as its `GET`'s stream
+(section 10.3), and frees that place as it ends its response. Any other request to it is a call as
+any other, which subscribes nothing (section 11.2), its result 200 and of section 5's form.
 
 8.2. A gateway MUST write nothing of a stream before its call is answered: a failure is a problem
 of its status, as any call's (section 7); a result opens the stream, 200 `text/event-stream`, and

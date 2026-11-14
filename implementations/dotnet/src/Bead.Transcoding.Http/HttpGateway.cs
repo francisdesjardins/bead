@@ -1247,6 +1247,21 @@ public sealed class HttpGateway : IAsyncDisposable
             return;
         }
 
+        // * a HEAD that asks a stream: its GET's head, with no content, and its response ends there
+        // (8.1). Nothing written yet: its exchange's connection closes and its place is freed as this
+        // returns, before its server writes that head, so its next request finds both gone
+        if (IsMethod(context.Request, "HEAD"))
+        {
+            // ! ended before its result, so the notifications it held and any that come write nothing
+            events.Failure(ReadOnlyMemory<byte>.Empty, out _);
+            settled.TrySetResult();
+            context.Response.StatusCode = StatusCodes.Status200OK;
+            Stamp(context.Response);
+            context.Response.ContentType = EventStreamType;
+
+            return;
+        }
+
         // * the result and the notifications held enqueued at once, the failure that ends them after
         var written = events.Result(data);
 
@@ -1759,7 +1774,8 @@ public sealed class HttpGateway : IAsyncDisposable
 
         public async Task<IReadOnlyList<Exception>> Trigger(ReadOnlyMemory<byte> payload)
         {
-            if (_isEnding)
+            // its own end begun, or its stream's ended without it, as a HEAD's ends at its head
+            if (_isEnding || stream.Events.IsEnded)
             {
                 return [];
             }

@@ -682,6 +682,63 @@ test('answers a stream’s request that carries Last-Event-ID with 204 and no ca
   ).toMatchObject({ body: '{"ticks":2}', status: 200 });
 });
 
+test('answers a HEAD that asks a stream as its GET begins, and ends at its head, its subscription with it', async () => {
+  await using fixture = await startTranscoding({ maximumConnectionsPerAddress: 1 });
+  const drawn: string[] = [];
+  const closed: string[] = [];
+
+  fixture.memory.on('connection', (...[, handle]) => {
+    drawn.push(handle);
+  });
+  fixture.memory.on('close', (_wasClean, handle) => {
+    closed.push(handle);
+  });
+
+  const host = `host: 127.0.0.1:${String(fixture.port)}`;
+  const asked = (method: string): string => {
+    return [`${method} /v1/watch HTTP/1.1`, host, 'accept: text/event-stream', '', ''].join('\r\n');
+  };
+  // * one socket, kept alive: every byte it takes, in order
+  const socket = opened(fixture.port, asked('HEAD'));
+  const chunks: Buffer[] = [];
+  const received = (): string => {
+    return Buffer.concat(chunks).toString('latin1');
+  };
+
+  socket.on('data', (chunk: Buffer) => {
+    chunks.push(chunk);
+  });
+  await until(() => {
+    return received().includes('\r\n\r\n');
+  });
+
+  const head = received().slice(0, received().indexOf('\r\n\r\n')).toLowerCase();
+
+  expect(head).toMatch(/^http\/1\.1 200 /u);
+  expect(head).toContain('content-type: text/event-stream');
+  expect(head).toContain('cache-control: no-store');
+  expect(head).not.toContain('content-length');
+
+  // its call made on a connection of its own, closed as its response ended: its subscription with it
+  await until(() => {
+    return closed.length === 1;
+  });
+  expect(closed).toEqual(drawn);
+
+  // its place freed: the same socket's next request, the GET of its stream, opens it, nothing between
+  socket.write(asked('GET'));
+  await until(() => {
+    return received().includes('data: {}\n\n');
+  });
+  socket.destroy();
+
+  const next = received().slice(received().indexOf('\r\n\r\n') + 4);
+
+  expect(next).toMatch(/^HTTP\/1\.1 200 /u);
+  expect(next).toContain('event: result\nid: 1\ndata: {}\n\n');
+  expect(drawn).toHaveLength(2);
+});
+
 test('answers a preflight with the methods its URL’s routes take', async () => {
   await using fixture = await startTranscoding({ origins: [ORIGIN] });
   const preflight = (path: string): Promise<IAnswered> => {

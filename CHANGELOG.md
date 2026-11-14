@@ -37,10 +37,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   repeated or map field of a closed enum its generator left closed; `bead-protobuf` requires
   Buffa's crates exactly (decision 0051).
 - The support matrix and the records correct what they state: the Rust side's HTTP client comes
-  with its gateway (decision 0044); five more rows of the matrix's differences name where the sides
+  with its gateway (decision 0044); four more rows of the matrix's differences name where the sides
   part in shipped code: an MQTT 5 AUTH no CONNECT asked for, a DISCONNECT from a broker that keeps
-  its connection open, a password beside TLS that trusts an authority with no client certificate, a
-  gateway's `HEAD` that asks a stream, and a gateway's `HEAD` navigation from another site; and an
+  its connection open, a password beside TLS that trusts an authority with no client certificate, and a
+  gateway's `HEAD` navigation from another site; and an
   MQTT 5 acknowledgement no request awaits is named in the cells of its two rows (decisions 0041,
   0050).
 - The page's table of the three implementations is drawn from data and held to the support matrix
@@ -85,6 +85,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `spec/transcoding.json`'s exchange of a `#` is two, the `#` and `%23` apart, and an exchange
   names the rows that excuse a side from it, as a case of `spec/transports.json` does; every player
   skips the one that excuses its own (decision 0052).
+- `spec/transcoding.md` has a `HEAD` that would open a stream answered as its `GET` begins, then
+  ended at its head, its subscription with it, where both gateways held it while it lasted (8.1),
+  the fixture's `watch` gaining a `get` rule, `/v1/watch`, to pin it (decision 0052).
 
 ### Fixed
 

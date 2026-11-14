@@ -534,6 +534,75 @@ public sealed class HttpGatewayTests
     }
 
     [Fact]
+    public async Task Answers_a_HEAD_that_asks_a_stream_as_its_GET_begins_and_ends_at_its_head_its_subscription_with_it()
+    {
+        // * on its own listener, and mounted on an application's server: each holds one stream an address
+        static HttpGatewayOptions OneStream(HttpGatewayOptions options)
+        {
+            return options with { MaximumConnectionsPerAddress = 1 };
+        }
+
+        var started = await Started(OneStream);
+        await using var service = await TranscodingService.Start();
+        await using var gateway = new HttpGateway(OneStream(Exchanges.OptionsOf(service.Memory, null)));
+        var (application, port) = await MountedBehindReader(gateway);
+
+        try
+        {
+            foreach (var (where, at, memory) in new[] { ("its own listener", started.Port, started.Service.Memory), ("mounted", port, service.Memory) })
+            {
+                var drawn = 0;
+                var closed = 0;
+
+                memory.Connection += (_) => { Interlocked.Increment(ref drawn); };
+                memory.Close += (_, _) => { Interlocked.Increment(ref closed); };
+
+                using var socket = await Opened(at, Encoding.ASCII.GetBytes($"HEAD /v1/watch HTTP/1.1\r\nhost: 127.0.0.1:{at}\r\naccept: text/event-stream\r\n\r\n"));
+                var head = await ReadUntil(socket, "\r\n\r\n");
+                var lines = head[..head.IndexOf("\r\n\r\n", StringComparison.Ordinal)].Split("\r\n");
+                var fields = lines.Skip(1).ToDictionary(
+                    (field) =>
+                    {
+                        return field[..field.IndexOf(':', StringComparison.Ordinal)].Trim();
+                    },
+                    (field) =>
+                    {
+                        return field[(field.IndexOf(':', StringComparison.Ordinal) + 1)..].Trim();
+                    },
+                    StringComparer.OrdinalIgnoreCase);
+
+                // its GET's head, its call made: 200 text/event-stream and 6.2's fields, with no content
+                Assert.Equal((where, "HTTP/1.1 200 OK"), (where, lines[0]));
+                Assert.Equal(
+                    (where, "text/event-stream", "no-store", "nosniff", "Origin"),
+                    (where, fields.GetValueOrDefault("content-type"), fields.GetValueOrDefault("cache-control"), fields.GetValueOrDefault("x-content-type-options"), fields.GetValueOrDefault("vary")));
+                Assert.False(fields.ContainsKey("content-length"), where);
+                Assert.False(fields.ContainsKey("transfer-encoding"), where);
+                Assert.EndsWith("\r\n\r\n", head, StringComparison.Ordinal);
+                Assert.Equal(1, Volatile.Read(ref drawn));
+
+                // * its exchange's connection closed with its response, and its subscription with it
+                await Until(() => { return Volatile.Read(ref closed) == 1; });
+
+                // its response ended at its head, and its place freed: the next request on its socket, a
+                // GET that opens the same stream, answered
+                await socket.SendAsync(Encoding.ASCII.GetBytes($"GET /v1/watch HTTP/1.1\r\nhost: 127.0.0.1:{at}\r\naccept: text/event-stream\r\nconnection: close\r\n\r\n"), Cancelled);
+
+                var stream = await ReadUntil(socket, "event: result\nid: 1\ndata: {}\n\n");
+
+                Assert.StartsWith("HTTP/1.1 200 OK\r\n", stream, StringComparison.Ordinal);
+                Assert.Contains("text/event-stream", stream, StringComparison.OrdinalIgnoreCase);
+            }
+        }
+        finally
+        {
+            await application.StopAsync(Cancelled);
+            await application.DisposeAsync();
+            await Stopped(started);
+        }
+    }
+
+    [Fact]
     public async Task Answers_a_preflight_with_the_methods_its_URL_s_routes_take()
     {
         var started = await Started();

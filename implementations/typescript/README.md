@@ -1557,7 +1557,9 @@ violation's `pointer` or `parameter`, `SESSION_REQUIRED` 401 with `www-authentic
 answer the gateway could not take 502. A request whose `accept` names `text/event-stream` to a
 procedure that notifies is a stream of Server-Sent Events: its result, each notification a
 `message`, the failure that ends it, each an `id`, paced by what its response takes, 16 at once; one
-that carries `Last-Event-ID` is answered 204, so an `EventSource` stops rather than calls again.
+that carries `Last-Event-ID` is answered 204, so an `EventSource` stops rather than calls again. A
+`HEAD` that asks a stream is answered as its `GET` begins, its head alone, and ends there, its
+subscription and its place with it.
 
 Every body the gateway writes meets `maximumUnsentBytes` and its send pace,
 `minimumSendBytesPerSecond` after `sendGracePeriod`: whole answers, problems, the document and
