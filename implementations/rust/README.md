@@ -38,7 +38,10 @@ cargo clippy -p francisdesjardins-bead --lib --locked
 cargo clippy -p francisdesjardins-bead --lib --features websocket --locked
 cargo clippy -p francisdesjardins-bead --lib --features http --locked
 cargo clippy -p francisdesjardins-bead --lib --features mqtt --locked
-cargo clippy -p francisdesjardins-bead --lib --features testing --locked --target wasm32-unknown-unknown
+cargo clippy -p francisdesjardins-bead --lib --features transcoding --locked
+cargo clippy -p francisdesjardins-bead --lib --features gateway --locked
+cargo clippy -p francisdesjardins-bead-protobuf --lib --features transcoding --locked
+cargo clippy -p francisdesjardins-bead --lib --features testing,transcoding --locked --target wasm32-unknown-unknown
 cargo test --workspace --all-features --locked
 cargo doc --workspace --no-deps --all-features --locked
 cargo build --workspace --locked
@@ -49,11 +52,11 @@ cargo deny --manifest-path tools/protovalidate-differential/Cargo.toml --locked 
 cargo deny --manifest-path ../../examples/hello/rust/Cargo.toml --locked check
 ```
 
-The second lints each member on its default features. The third to the sixth lint the core's
-library with no feature and with each transport's alone, `websocket`, `http` and `mqtt` (decisions
-0049, 0050), so that each builds on its own. The seventh
-checks the core for the browser's WebAssembly, never runs it, by its features, no socket and no
-broker binding among them:
+The second lints each member on its default features. The third to the eighth lint the core's
+library with no feature and with each of its features alone, `websocket`, `http`, `mqtt`,
+`transcoding` and `gateway` (decisions 0049, 0050, 0052), so that each builds on its own; the ninth
+lints `bead-protobuf`'s with `transcoding`. The tenth checks the core for the browser's WebAssembly,
+never runs it, by its features, `transcoding` among them and no socket and no broker binding:
 what the core links builds there, and `.cargo/config.toml` gives getrandom its `unsupported` backend
 on that target alone, so that no dependency is added for it.
 

@@ -759,11 +759,12 @@ byte, and **always built**: no Cargo feature leaves debugging out, which would b
 
 CI's `rust` job ([0006](0006-a-rule-has-its-gate.md)), on Linux: `cargo fmt --check`, `cargo clippy
 --workspace --all-targets --all-features --locked` and again on each member's default features, the
-core's lib linted with no feature, with `websocket` alone, with `http` alone and with `mqtt` alone
-(`cargo clippy -p francisdesjardins-bead --lib --locked`, `--features websocket`, `--features http`,
-`--features mqtt`), the browser target's `cargo clippy -p francisdesjardins-bead --lib --features
-testing --locked --target wasm32-unknown-unknown`, by its features, no socket and no broker binding
-among them
+core's lib linted with no feature, with `websocket` alone, with `http` alone, with `mqtt` alone,
+with `transcoding` alone and with `gateway` alone (`cargo clippy -p francisdesjardins-bead --lib
+--locked`, `--features websocket`, `--features http`, `--features mqtt`, `--features transcoding`,
+`--features gateway`), `bead-protobuf`'s with `transcoding`, the browser target's `cargo clippy -p
+francisdesjardins-bead --lib --features testing,transcoding --locked --target
+wasm32-unknown-unknown`, by its features, no socket and no broker binding among them
 ([0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)),
 `cargo doc`, a build on the default features alone, `cargo deny --locked check` and the same on the
 fuzz targets and the conformance player, outside the workspace, the tests under coverage held to the

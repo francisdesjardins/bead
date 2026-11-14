@@ -321,8 +321,8 @@ nothing it generates is committed.
 
 In `implementations/rust`. Rust 1.99.1 and edition 2024, as `rust-toolchain.toml` pins them, which
 rustup installs with clippy, rustfmt, llvm-tools and the browser's target, `wasm32-unknown-unknown`;
-on Windows, the MSVC build tools: the core pure Rust, its socket transports' and its MQTT 5
-binding's TLS, aws-lc-rs, built by the platform's C compiler
+on Windows, the MSVC build tools: the core pure Rust, its socket transports', its MQTT 5
+binding's and its gateway's TLS, aws-lc-rs, built by the platform's C compiler
 ([0049](docs/decisions/0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)).
 Clippy's `pedantic`, `nursery` and `cargo` groups and chosen restriction lints are denied,
 `unsafe_code` forbidden, and every warning of rustc, clippy and rustdoc an error by its
@@ -343,7 +343,10 @@ cargo clippy -p francisdesjardins-bead --lib --locked
 cargo clippy -p francisdesjardins-bead --lib --features websocket --locked
 cargo clippy -p francisdesjardins-bead --lib --features http --locked
 cargo clippy -p francisdesjardins-bead --lib --features mqtt --locked
-cargo clippy -p francisdesjardins-bead --lib --features testing --locked --target wasm32-unknown-unknown
+cargo clippy -p francisdesjardins-bead --lib --features transcoding --locked
+cargo clippy -p francisdesjardins-bead --lib --features gateway --locked
+cargo clippy -p francisdesjardins-bead-protobuf --lib --features transcoding --locked
+cargo clippy -p francisdesjardins-bead --lib --features testing,transcoding --locked --target wasm32-unknown-unknown
 cargo test --workspace --all-features --locked
 cargo doc --workspace --no-deps --all-features --locked
 cargo build --workspace --locked
@@ -1098,8 +1101,9 @@ its digest, its heartbeat lowered, and a password and TLS certificates drawn for
 `BEAD_AMQP_REQUIRED=1` and `BEAD_INTEROP_REQUIRED=1`: the cases over AMQP 1.0 on the TypeScript and
 C# sides, each adapter against it over TCP and over TLS with SASL EXTERNAL, and the interop over
 AMQP 1.0 both ways, with no page leg, since no page reaches an AMQP 1.0 broker); `rust` on Linux and Windows (on Linux, the toolchain its file pins, format, clippy, the
-core's library linted with no feature and with `websocket`, `http` and `mqtt` each alone, the
-core's clippy for the browser's target, the documentation, a build on the default features alone,
+core's library linted with no feature and with `websocket`, `http`, `mqtt`, `transcoding` and
+`gateway` each alone, `bead-protobuf`'s with `transcoding`, the core's clippy for the browser's
+target with `transcoding`, the documentation, a build on the default features alone,
 the interop's server and its trials' test binary built and handed on, cargo-deny, the tests'
 descriptor set held to what protoc writes at its pin, the tests under coverage, `bead-house`'s
 holding each library crate's public surface to its list among them, lines and regions held to the
@@ -1111,8 +1115,8 @@ of another origin in Chromium against every HTTP server, the Rust one among them
 `BEADC_WRAPPERS_REQUIRED=1`, the wrappers held to one contract against a stand-in engine, then beadc
 over the interop's blueprint, its rules and its form, `beadc generate --check` over the root's
 `beadc.yaml`, each side's interop, and over the demo's, and `tools/check-validations.mjs` and
-`tools/check-transcoding.mjs`, every side's validators of `spec/validations.proto` and the
-TypeScript and C# sides' route tables and documents of `spec/transcoding.proto` held to what beadc
+`tools/check-transcoding.mjs`, every side's validators of `spec/validations.proto` and every
+side's route table and document of `spec/transcoding.proto` held to what beadc
 writes, on Node 26 on Linux and Windows and on 24.9 on Linux; then `beadc breaking` over the interop's blueprint and
 `examples/hello`, against the last release, which carries both, on Linux; its types, the goldens'
 among them, lint and format, buf's among them, on Linux; and on the image's legs, Linux on Node 26,

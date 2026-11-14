@@ -252,16 +252,17 @@ jobs:
   # ── Rust ─────────────────────────────────────────────────────────────────────
   # The Rust side's own gate (decision 0044): its toolchain from its rust-toolchain.toml, a warning
   # an error by its .cargo/config.toml, `[build] warnings = "deny"`; its format, its lints, the
-  # core's library linted with no feature, with each socket transport's alone and with its MQTT 5
-  # binding's alone, the core's lints on the browser's WebAssembly target, its documentation, a
-  # build on the default features alone, where what the test kit alone reaches is left out, its
-  # dependencies' advisories, licences, bans and sources, then its tests, bead-house's holding each
-  # library crate's public surface to its list, and its conformance players under coverage, lines
-  # and regions on the pinned stable, held to the side's floor in tools/coverage-floors.json; and
-  # its fuzz targets built on the nightly pinned by its date, never run. On Linux too, the interop's
-  # server and its trials' test binary, built once and handed to the interop-rust job. On Windows,
-  # its tests alone, as the user's MSVC toolchain builds them. The registry and the target are
-  # cached by the lock and the toolchain; every build is `--locked`.
+  # core's library linted with no feature, with each socket transport's alone, with its MQTT 5
+  # binding's alone and with its gateway's two, and bead-protobuf's with its JSON mapping's alone,
+  # the core's lints on the browser's WebAssembly target, its transcoding among them, its
+  # documentation, a build on the default features alone, where what the test kit alone reaches is
+  # left out, its dependencies' advisories, licences, bans and sources, then its tests, bead-house's
+  # holding each library crate's public surface to its list, and its conformance players under
+  # coverage, lines and regions on the pinned stable, held to the side's floor in
+  # tools/coverage-floors.json; and its fuzz targets built on the nightly pinned by its date, never
+  # run. On Linux too, the interop's server and its trials' test binary, built once and handed to
+  # the interop-rust job. On Windows, its tests alone, as the user's MSVC toolchain builds them. The
+  # registry and the target are cached by the lock and the toolchain; every build is `--locked`.
   rust:
     name: Rust (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -307,8 +308,10 @@ jobs:
       # each member on its default features too, where what a feature alone builds is left out
       - if: matrix.os == 'ubuntu-26.04'
         run: cargo clippy --workspace --all-targets --locked
-      # the core's library linted with no feature, then with each socket transport's alone and
-      # with its MQTT 5 binding's alone, so that each builds on its own (decisions 0049, 0050)
+      # the core's library linted with no feature, then with each socket transport's alone, with
+      # its MQTT 5 binding's alone, and with its gateway's routes alone, then its gateway whole, and
+      # bead-protobuf's with its JSON mapping alone, so that each builds on its own (decisions 0049,
+      # 0050, 0052)
       - if: matrix.os == 'ubuntu-26.04'
         run: cargo clippy -p francisdesjardins-bead --lib --locked
       - if: matrix.os == 'ubuntu-26.04'
@@ -317,12 +320,19 @@ jobs:
         run: cargo clippy -p francisdesjardins-bead --lib --features http --locked
       - if: matrix.os == 'ubuntu-26.04'
         run: cargo clippy -p francisdesjardins-bead --lib --features mqtt --locked
-      # the core checked for the browser's WebAssembly, never run, the target rust-toolchain.toml's,
-      # by its features, no socket among them, which mio refuses there: what it links builds there,
-      # its spawning and its time through crate::platform and the clock alone; getrandom's backend
-      # for the target is .cargo/config.toml's
       - if: matrix.os == 'ubuntu-26.04'
-        run: cargo clippy -p francisdesjardins-bead --lib --features testing --locked --target wasm32-unknown-unknown
+        run: cargo clippy -p francisdesjardins-bead --lib --features transcoding --locked
+      - if: matrix.os == 'ubuntu-26.04'
+        run: cargo clippy -p francisdesjardins-bead --lib --features gateway --locked
+      - if: matrix.os == 'ubuntu-26.04'
+        run: cargo clippy -p francisdesjardins-bead-protobuf --lib --features transcoding --locked
+      # the core checked for the browser's WebAssembly, never run, the target rust-toolchain.toml's,
+      # by its features, its transcoding among them, no socket, which mio refuses there, nor its
+      # gateway, which listens on one: what it links builds there, its spawning and its time through
+      # crate::platform and the clock alone; getrandom's backend for the target is
+      # .cargo/config.toml's
+      - if: matrix.os == 'ubuntu-26.04'
+        run: cargo clippy -p francisdesjardins-bead --lib --features testing,transcoding --locked --target wasm32-unknown-unknown
       - if: matrix.os == 'ubuntu-26.04'
         run: cargo doc --workspace --no-deps --all-features --locked
       # the default features alone: what the test kit alone reaches is cfg'd out, or a warning
@@ -415,15 +425,16 @@ jobs:
           CARGO_BUILD_WARNINGS: warn
 
   # ── Interop with the Rust side ───────────────────────────────────────────────
-  # The interop with the Rust side, both ways, over WebSocket and over HTTP (decision 0049): the
-  # Rust client's trials against each side's server, the TypeScript client and the C# one against
-  # the Rust server, then a page of another origin in Chromium against its HTTP server, what proves
-  # a browser reads its CORS answer. The Rust server and the trials' test binary are the Rust job's,
-  # built once on its Linux leg, so no Rust toolchain and no C compiler here; it needs both of that
-  # job's legs, the Windows one's tests among them. In the Playwright image the .NET job runs, Ubuntu
-  # 26.04 as the Rust job's runner, so the binaries find the glibc they were linked against; .NET and
-  # the TypeScript side installed as the .NET job has them, for the servers the trials start and for
-  # the clients against the Rust one, the C# server built first so that no trial waits on its build.
+  # The interop with the Rust side, both ways, over WebSocket, over HTTP and through each side's
+  # gateway (decisions 0049, 0052): the Rust client's trials against each side's server and its
+  # gateway, the TypeScript client and the C# one against the Rust server and its gateway, then a
+  # page of another origin in Chromium against its HTTP server, what proves a browser reads its CORS
+  # answer. The Rust server and the trials' test binary are the Rust job's, built once on its Linux
+  # leg, so no Rust toolchain and no C compiler here; it needs both of that job's legs, the Windows
+  # one's tests among them. In the Playwright image the .NET job runs, Ubuntu 26.04 as the Rust
+  # job's runner, so the binaries find the glibc they were linked against; .NET and the TypeScript
+  # side installed as the .NET job has them, for the servers the trials start and for the clients
+  # against the Rust one, the C# server built first so that no trial waits on its build.
   #
   # `BEAD_INTEROP_REQUIRED=1` turns an interop that would skip into one that fails, and
   # `BEAD_INTEROP_RUST=1` asks for the Rust trials, which are ignored otherwise.
@@ -937,8 +948,8 @@ jobs:
   # and its failure list, which the runner holds both ways, then the floor of tests run; then one
   # corpus of Probe through every side's testee, read alike, compared two by two, after the suite
   # step that built the Rust testee. A job of its own: it needs every side's runtime, beadc and
-  # protoc, which no other job has together; the Rust testee's JSON goes through Buffa's dynamic
-  # message until Rust's gateway brings Bead's mapping (decision 0044).
+  # protoc, which no other job has together; the Rust testee's JSON goes through Bead's own mapping,
+  # bead-protobuf's `JsonForm`, as the gateway reads and writes it (decision 0052).
   # The C# testee lies outside Bead.slnx, so its format is held here, by name, the code generated
   # into it at run time aside; `CI=true`, the runner's own, restores it locked.
   protobuf-conformance:
