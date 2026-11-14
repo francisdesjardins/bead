@@ -92,6 +92,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `spec/transcoding.md` takes a navigation from another site only as a `GET` that no `object` or
   `embed` makes, web.dev's resource isolation policy whole, where the TypeScript side refused a
   `HEAD` one but to the document and the C# side took it (10.1) (decision 0052).
+- Decision 0044 no longer names crates for the Rust side's gateway: it is a feature of the core,
+  its JSON mapping a feature of `bead-protobuf` (decision 0052).
 
 ### Fixed
 

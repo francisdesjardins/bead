@@ -174,6 +174,11 @@ that meets the Tenth Man:
   transfer as it comes; OpenAPI 3.2.0, whose `itemSchema` describes a stream's events; and
   `google.api.field_behavior` read into `readOnly`, `writeOnly` and `required`;
 - what
+  [0052](0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md)
+  keeps ahead of a gateway: mounting Bead and its gateway in a host, a framework among them, a round
+  of its own; a `Service` that reads its caller's address from an extension of Bead's, beside the
+  Rust side's `answer`; and the Rust caller's typed write in place;
+- what
   [0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)
   keeps ahead of a gateway's problems, each a round of its own: a report's context, the exchange and
   the route it came of; an event for each refusal of the gateway's own; and an occurrence's id in a
@@ -208,14 +213,15 @@ table.
 
 ### Services and their names
 
-| #                                                                                                            | Decision                                                                                                                | Status   |
-| ------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- | -------- |
-| [0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md)                                  | Ids are for life, a procedure's name takes one ASCII form, and every side refuses a declaration off them as it is made  | accepted |
-| [0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)              | A service's procedures are typed descriptors, served and called through one layer in each runtime                       | accepted |
-| [0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)                 | A `.proto` becomes one checked blueprint, and each language's server and client are generated from it alone             | accepted |
-| [0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)   | A procedure is also an HTTP route, which a gateway answers as one more client of its server, one connection an exchange | accepted |
-| [0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md) | One contract gives several packages, and a server's transport takes the procedures it is given                          | accepted |
-| [0051](0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md)                | beadc writes Rust each package's typed shells beside the messages Buffa writes                                          | accepted |
+| #                                                                                                                                             | Decision                                                                                                                                                | Status   |
+| --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| [0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md)                                                                   | Ids are for life, a procedure's name takes one ASCII form, and every side refuses a declaration off them as it is made                                  | accepted |
+| [0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)                                               | A service's procedures are typed descriptors, served and called through one layer in each runtime                                                       | accepted |
+| [0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)                                                  | A `.proto` becomes one checked blueprint, and each language's server and client are generated from it alone                                             | accepted |
+| [0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)                                    | A procedure is also an HTTP route, which a gateway answers as one more client of its server, one connection an exchange                                 | accepted |
+| [0048](0048-one-contract-gives-several-packages-and-a-servers-transport-takes-the-procedures-it-is-given.md)                                  | One contract gives several packages, and a server's transport takes the procedures it is given                                                          | accepted |
+| [0051](0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md)                                                 | beadc writes Rust each package's typed shells beside the messages Buffa writes                                                                          | accepted |
+| [0052](0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md) | The Rust side's gateway is a feature of its core and its JSON mapping a feature of its proto codec, met by one trait, and a `HEAD` never holds a stream | accepted |
 
 ### Transports and relays
 
@@ -290,7 +296,7 @@ table.
 
 ## Writing one
 
-The next decision is 0052. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
+The next decision is 0053. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
 the decision, not its subject. The title may grow with the record; the file's name stays, unless it
 would mislead.
 

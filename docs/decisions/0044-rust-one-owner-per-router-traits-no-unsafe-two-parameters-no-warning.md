@@ -184,14 +184,14 @@ a twin.
   application's build script, where messages are the stock generators'
   ([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)),
   its surface pinned by the house; `bead-house`, dev only, holds the house's own checks;
-  `bead-goldens`, dev only, `Bead.Goldens`' twin, compiles beadc's Rust goldens. The crates
-  of the stages ahead are named already, so no rename follows: `bead-transcoding` and
-  `bead-transcoding-http`. A part that needs the core's inside and ships to applications, a
-  transport, comes as a feature of the core ([0047](0047-every-side-shows-one-public-surface.md)):
-  its sockets
-  ([0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md))
-  and its broker bindings
-  ([0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)).
+  `bead-goldens`, dev only, `Bead.Goldens`' twin, compiles beadc's Rust goldens. A part that
+  needs the core's inside and ships to applications comes as a feature of that crate
+  ([0047](0047-every-side-shows-one-public-surface.md)): the core's sockets
+  ([0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)),
+  its broker bindings
+  ([0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)),
+  its transcoding and its gateway, and `bead-protobuf`'s JSON mapping
+  ([0052](0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md)).
 - **Packages qualified by their owner, libraries short**, as NuGet's `FrancisDesjardins.Bead.*`
   over the assemblies `Bead.*`
   ([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)): the package
