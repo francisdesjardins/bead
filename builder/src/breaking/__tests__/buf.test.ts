@@ -29,7 +29,9 @@ const PAIR = fileURLToPath(new URL('../../../test/breaking/buf/', import.meta.ur
 const EARLIER = join(PAIR, 'earlier');
 const CURRENT = join(PAIR, 'current');
 
-// ! a fixture's .proto alone: a case comparing against the fixture in place holds its work area there
+// ! each case compiles its own copy of the fixture: a compile against a folder holds its work area
+// in it, which buf, compiling the same folder for another case, trips on; a copy takes the
+// fixture's .proto alone
 const copyFixture = (from: string, to: string): void => {
   cpSync(from, to, {
     recursive: true,
@@ -37,6 +39,15 @@ const copyFixture = (from: string, to: string): void => {
       return basename(source) !== BEADC_FOLDER;
     },
   });
+};
+
+// the earlier, copied into the running case's own folder
+const earlierOfCase = (): string => {
+  const earlier = test.info().outputPath('earlier');
+
+  copyFixture(EARLIER, earlier);
+
+  return earlier;
 };
 
 // buf's breaking rules at its pin, as `buf config ls-breaking-rules` lists them
@@ -72,9 +83,10 @@ test("buf's rules run once over the pair that breaks a field, by category, at th
     Category,
     unknown[]
   >;
+  const earlier = earlierOfCase();
 
   for (const category of Object.values(Category)) {
-    const run = breaking({ proto: [CURRENT] }, { against: EARLIER, category });
+    const run = breaking({ proto: [CURRENT] }, { against: earlier, category });
 
     expect(
       run.diagnostics.map((diagnostic) => {
@@ -199,10 +211,11 @@ test("BUF_RULES_RUN is what each category's use runs, at buf's pin, WIRE_JSON's 
 test("a buf: waiver waives under its file or its folder, as buf's ignore_only matches one, and names a rule its category runs", () => {
   test.setTimeout(60_000);
 
+  const earlier = earlierOfCase();
   const rulesOf = (except: readonly string[]): string[] => {
     return breaking(
       { proto: [CURRENT] },
-      { against: EARLIER, category: Category.API, except }
+      { against: earlier, category: Category.API, except }
     ).diagnostics.map((diagnostic) => {
       return diagnostic.rule;
     });
@@ -234,10 +247,9 @@ test("a buf: waiver waives under its file or its folder, as buf's ignore_only ma
 test("a file the current lost is placed at the earlier's path, which a buf: scope names", () => {
   test.setTimeout(60_000);
 
-  const earlier = test.info().outputPath('earlier');
+  const earlier = earlierOfCase();
   const lost = join(earlier, 'parcel', 'v1', 'lost.proto');
 
-  copyFixture(EARLIER, earlier);
   writeFileSync(
     lost,
     'syntax = "proto3";\n\npackage parcel.v1;\n\nmessage Lost {\n  string name = 1;\n}\n'
