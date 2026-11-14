@@ -35,16 +35,18 @@ This repository holds the protocol and its implementations, side by side:
   duration held as spec 1.4 holds it; the trace, the filter and the registry, and a participant's
   trace of its parcels; the WebSocket, HTTP and in-memory transports; the broker's core over an
   in-memory broker, MQTT 5 over a broker, and the joined transport; the `proto` payload's codec on
-  Buffa and the validators' runtime; and what beadc writes for it, each package's typed server and
-  client beside the messages Buffa writes — playing every conformance file it reaches, each part it
-  lacks a row of the support matrix ahead
+  Buffa and the validators' runtime; the same gateway, on its own listener or mounted on hyper, with
+  protobuf's JSON by Bead's mapping; and what beadc writes for it, each package's typed server and
+  client beside the messages Buffa writes, and an output's route table, document and HTTP client —
+  playing every conformance file it reaches, each part it lacks a row of the support matrix ahead
   ([0044](docs/decisions/0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md),
   [0049](docs/decisions/0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md),
   [0050](docs/decisions/0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md),
-  [0051](docs/decisions/0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md));
+  [0051](docs/decisions/0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md),
+  [0052](docs/decisions/0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md));
 - **an interop service** every side offers, which each other side's client calls over WebSocket,
   HTTP and MQTT 5, and the TypeScript and C# sides' over AMQP 1.0 too, beside a gateway whose routes
-  the other side's generated HTTP client calls.
+  each other side's generated HTTP client calls.
 
 **Nothing is published.** No package goes to npm, NuGet or crates.io, and no image to a registry:
 build on a commit, pinned. Publication is ahead.
@@ -146,9 +148,9 @@ envelopes.
 
 ## Where Bead goes
 
-- **Next**: the Rust side's gateway, then its AMQP 1.0 binding, each a record of its own
+- **Next**: the Rust side's AMQP 1.0 binding, a record of its own
   ([0044](docs/decisions/0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)),
-  each a row of the [support matrix](docs/support.md#differences) ahead.
+  a row of the [support matrix](docs/support.md#differences) ahead.
 - **Then**: a payload's rules written in CEL, a total subset beadc compiles into each side beside
   the rules it compiles already
   ([0035](docs/decisions/0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md));

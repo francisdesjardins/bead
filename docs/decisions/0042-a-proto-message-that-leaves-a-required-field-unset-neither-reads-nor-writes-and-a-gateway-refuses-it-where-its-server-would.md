@@ -163,7 +163,7 @@ unset does not read at the gateway, 502 (7.5.2), and an `Any`'s message is writt
 the field left out, as C++ and Go write one.
 
 **A PATCH's derived mask is set on the message**, by proto names, after steps 1 to 3 and before step
-4, on the TypeScript and C# sides, never read back through 5.4's form, so a required `update_mask`
+4, on every side, never read back through 5.4's form, so a required `update_mask`
 binds and a body naming `line_1` binds. A required field of the body's message is always among the
 derived paths, so a caller keeps one unchanged only by an `update_mask` of its own, as
 [AIP-203](https://google.aip.dev/203) has a required field marked by `field_behavior` and not by

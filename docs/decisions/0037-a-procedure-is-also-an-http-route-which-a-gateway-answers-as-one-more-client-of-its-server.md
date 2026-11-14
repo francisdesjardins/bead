@@ -109,7 +109,8 @@ when an event wrote an `id`, stop on any other status, 204 named for that, and d
 with no name as `message`; it writes no header of its page's. The Fetch Standard shows a page's
 `Origin` on every request but a `GET` or a `HEAD` that is no CORS request, and web.dev's
 [Fetch Metadata resource isolation policy](https://web.dev/articles/fetch-metadata) refuses a
-request from another site but a navigation, which OWASP's CSRF
+request from another site but a `GET` navigation that no `object` or `embed` makes, which OWASP's
+CSRF
 cheat sheet names as defense in depth. OpenAPI 3.1.1's base dialect only annotates `format` and
 `contentEncoding`: probed with the builder's ajv, a schema of `Everything` takes `{"at":"nope"}`, a
 tenth fraction digit, year 0000 and a 20-digit `int64`, each of which both libraries refuse.
@@ -154,11 +155,19 @@ service offered once
 It answers on a listener of its own or as a handler an application mounts, never on the HTTP
 transport's, and both take one policy object of hosts, origins, proxies and bounds, so two lists
 are never kept alike in silence; one origin for `/bead` and `/api/…` comes from a proxy in front.
+Mounted, a gateway keeps every gate of 10.1 from its step 2, its problems, its pace and its bounds;
+its host owns what HTTP refuses of its own (step 1), its head's bounds and timeouts, its socket's
+write deadline, a path its own router answers first, and whatever reads the body before it
+(7.6.27).
 
 **A body read before it, a gateway refuses** (transcoding 7.6, 10.1). One that the server it
 is mounted on read, wholly or in part, is answered 500 as step 10 begins. It is a failure of
 its own, reported on its `error`, with no detail and never a call. The C# side reads a body
-its server buffered from its start, a difference of the platforms. A chunked body that came
+its server buffered from its start, and the Rust side one put back whole with its length, a
+difference of the platforms; the Rust side judges a body by hyper's hints before its first byte
+and by its count at its end, still before any binding, and what hyper's request cannot show is
+two rows of the platform
+([0052](0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md)). A chunked body that came
 empty and was read to its end is refused on every side, a leveling; one only peeked the
 TypeScript side reads as empty, since Node shows nothing of the peek, another difference of
 the platforms. A reader that put back what it read is refused alike, since neither platform
@@ -185,7 +194,7 @@ tells it from one that kept it.
   `PATCH`'s absent `update_mask` filled from the keys its body holds, as grpc-gateway's
   `allow_patch_feature` fills one, so a caller clears a field by sending it.
 - **The JSON form is Bead's own mapping** (5), one reader and one writer a runtime, one object made
-  over the messages an `Any` may name, `JsonForm` on the TypeScript and C# sides, the Rust side's coming with its gateway, ahead: it reads a body by its message's
+  over the messages an `Any` may name, `JsonForm` on every side: it reads a body by its message's
   descriptor and writes a message, a field of one or an event's data, each call of two parameters
   at most, the schema a parameter where a message carries none. It reads and writes over its
   descriptors and its library's reflection, the binary payload still its stock library's alone, as
@@ -215,11 +224,12 @@ tells it from one that kept it.
   in `errors`, each pointing at its field by JSON names.
 - **Notifications as Server-Sent Events** (8), chosen by `accept: text/event-stream` alone: the
   result, then each notification as a plain `message` event, then the failure that ends them, each
-  event an `id`; a request carrying `Last-Event-ID` answered 204 and no call, so an `EventSource`
-  stops and its page is told rather than called again behind the gap; paced by the response's drain,
-  a subscription `PACED` within a window of 16, so a reader that falls behind holds its server's
-  queue, where [0002](0002-a-subscription-goes-at-its-clients-pace.md)'s keys and bound tell it,
-  never the gateway's memory.
+  event an `id`; a `HEAD` that asks one answered as its `GET` begins, then ended at its head, its
+  subscription with it (8.1); a request carrying `Last-Event-ID` answered 204 and no call, so an
+  `EventSource` stops and its page is told rather than called again behind the gap; paced by the
+  response's drain, a subscription `PACED` within a window of 16, so a reader that falls behind
+  holds its server's queue, where [0002](0002-a-subscription-goes-at-its-clients-pace.md)'s keys and
+  bound tell it, never the gateway's memory.
 - **Every body a gateway writes is paced** (10.2): a whole answer, a problem, the document and each
   event, by 15.12's `minimumSendBytesPerSecond` after `sendGracePeriod` and by `maximumUnsentBytes`,
   what its platform holds unwritten above its socket, as it shows it, and the write that would add
@@ -228,10 +238,11 @@ tells it from one that kept it.
   drop is reported, naming its bound, as 15.12 has a server report each; it frees its exchange's
   place and its socket, and cancels a stream's call.
 - **The gates** (10) are the HTTP transport's, in 15.6's order, with Fetch Metadata's step: a
-  request with no `origin` from another site refused but a navigation to `/openapi.json`, a default
-  route's `GET`, or a `get` rule on a marked method. Calls and streams are bounded apart, calls by
-  `maximumExchanges` and `maximumExchangesPerAddress`, 10,000 and 256, since one lives a request,
-  streams by 15.12's connections' bounds, 64 an address, since one lives as long as its reader.
+  request with no `origin` from another site refused but a `GET` navigation that no `object` or
+  `embed` makes, to `/openapi.json`, a default route's `GET`, or a `get` rule on a marked method.
+  Calls and streams are bounded apart, calls by `maximumExchanges` and `maximumExchangesPerAddress`,
+  10,000 and 256, since one lives a request, streams by 15.12's connections' bounds, 64 an address,
+  since one lives as long as its reader.
 - **The document** (11): OpenAPI 3.1.1, one a blueprint, or one of the procedures an output's
   `gateway` selects, written once by the builder in the blueprint's own form and embedded byte for
   byte in an output with `gateway`, served at
@@ -244,7 +255,8 @@ tells it from one that kept it.
   table, of the procedures it selects, under the route table's contract 5, which stays beside a service file's 7, since a route
   table calls no codec ([0042](0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)),
   ([0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)),
-  `<Service>HttpClient` over `fetch` or `HttpClient`, its surface name for name on both sides. It
+  `<Service>HttpClient` over `fetch`, `HttpClient` or the Rust side's hyper client, its surface name
+  for name on every side. It
   reads every answer its gateway gives as a Bead failure: a problem of a code and a scope as that
   failure, the gateway's own `about:blank` by its `bead-refusal` then its status, a status with no
   problem by section 9's line between a call never tried, `DESTINATION_UNREACHABLE`, and one that
@@ -276,26 +288,26 @@ alike. A page of another origin preflights each route's URL once per `max-age`, 
 preflight cache by URL, where `POST /bead` has one URL
 ([0027](0027-an-http-server-answers-cors-to-the-origins-it-names-and-to-no-other.md)).
 
-**The mapping is Bead's to keep**: its third implementation is the generator's, and protobuf's
+**The mapping is Bead's to keep**: its fourth implementation is the generator's, and protobuf's
 conformance suite's JSON tests then hold the code that answers, each side's `failing.txt` naming,
-with its reason, what Bead's rules part from it on, the same lines on both sides. Its cost against
+with its reason, what Bead's rules part from it on, the same lines on every side. Its cost against
 each stock library's JSON is a benchmark of each side, so a regression shows.
 
 **Ahead, each a round of its own**: a report's context, the exchange and the route it came of; an
 event for each refusal of the gateway's own; and an occurrence's id in a problem, RFC 9457 §3.1.5's
-`instance`. Each adds surface on both sides, and none is needed for a problem to say what failed and
+`instance`. Each adds surface on every side, and none is needed for a problem to say what failed and
 where.
 
-**Its gates** ([0006](0006-a-rule-has-its-gate.md)): `spec/transcoding.json`, which both sides play
-whole — its templates and bindings through their routes, its readings and writings through their
-mapping, its failures through their problems, its events through their streams, and its exchanges
-through their gateway over a real socket; protobuf's conformance suite's JSON tests through each
-side's mapping; `tools/check-transcoding.mjs`, which holds each side's generated route table and
-embedded document to what beadc writes; beadc's tests, which hold every document to OpenAPI 3.1's
-schema and every body Bead writes to the document; and the generator itself, which runs protobuf's
-Python library beside its own reading and writing and fails on any parting its entries do not name.
-`spec/check.py` holds the companion's units as it holds the spec's, its ledger
-`spec/transcoding-units.txt`.
+**Its gates** ([0006](0006-a-rule-has-its-gate.md)): `spec/transcoding.json`, which every side plays
+whole but an exchange its `differs` excuses it from — its templates and bindings through their
+routes, its readings and writings through their mapping, its failures through their problems, its
+events through their streams, and its exchanges through their gateway over a real socket; protobuf's
+conformance suite's JSON tests through each side's mapping; `tools/check-transcoding.mjs`, which
+holds each side's generated route table and embedded document to what beadc writes; beadc's tests,
+which hold every document to OpenAPI 3.1's schema and every body Bead writes to the document; and
+the generator itself, which runs protobuf's Python library beside its own reading and writing and
+fails on any parting its entries do not name. `spec/check.py` holds the companion's units as it
+holds the spec's, its ledger `spec/transcoding-units.txt`.
 
 ## The Tenth Man
 
@@ -311,8 +323,11 @@ rule, one held ahead; the coverage work on both sides found eleven more, each se
 on what the twin tests and `transcoding.json` pin met eleven more: ten accepted, one refused. A
 round on the generated client and a gateway's pace met seventeen more, two of them blocking:
 fifteen accepted, one decided by 15.12's words, one refused. A round on a body read before a
-mounted gateway met ten more: eight accepted, two in part. Each other objection, with the answer
-that holds:
+mounted gateway met ten more: eight accepted, two in part. The round on the Rust side's gateway
+brought two units to every side, a `HEAD` that asks a stream ended at its head (8.1) and a
+navigation from another site taken only as a `GET` that no `object` or `embed` makes (10.1.5), its
+nine objections in
+[0052](0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md)'s table. Each other objection, with the answer that holds:
 
 ### On routes
 

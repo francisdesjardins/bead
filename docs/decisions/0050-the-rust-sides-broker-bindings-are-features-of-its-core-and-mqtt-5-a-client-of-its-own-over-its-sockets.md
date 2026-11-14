@@ -99,9 +99,9 @@ at its root, and its in-memory broker; every feature's item sits at its root (00
   and **[RFC 8305](https://www.rfc-editor.org/rfc/rfc8305)**: the core's TLS, its verifier and its
   Happy Eyeballs, as 0049 has them.
 - **[Cargo's features](https://doc.rust-lang.org/cargo/reference/features.html)**: additive, an
-  optional dependency behind a feature, the twin of npm's optional peer; the
-  **[Rust API Guidelines](https://rust-lang.github.io/api-guidelines/)**' C-FEATURE, a feature named
-  for what it brings, and C-REEXPORT, an item where its user looks for it.
+  optional dependency behind a feature, the twin of npm's optional peer; the **[Rust API
+  Guidelines](https://rust-lang.github.io/api-guidelines/)**' C-FEATURE, a feature's name free of
+  placeholder words, `use-` or `with-`, and C-REEXPORT, an item where its user looks for it.
 
 **The options not taken**, each with its reason:
 

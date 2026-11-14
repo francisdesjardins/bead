@@ -281,8 +281,8 @@ codec, the check in front:
   **Its floor**: a side's successes and its expected failures are 5,601, and its skips 48, its JSON
   tests answered through Bead's mapping of protobuf's JSON
   ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md))
-  on the TypeScript and C# sides, and on the Rust side through Buffa's `DynamicMessage`, Bead's
-  mapping coming with its gateway, ahead; the runner
+  on every side, the Rust side's by `JsonForm`
+  ([0052](0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md)); the runner
   closes a text-format suite after it, whose 909 tests a testee skips, since Bead's `proto` carries
   no text form. Each count moves only with the pin, or with a form the testees answer. The Rust
   testee takes its messages from its build script, as a Rust output of `messages: external` does
@@ -315,8 +315,8 @@ codec, the check in front:
   message's unknown fields back by number and wire type, a platform row; and each names besides the
   two JSON tests of an extension's JSON name, which Bead's mapping reads as no field of its message
   ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)).
-  The Rust side's names the extension's test alone, its JSON read by Buffa's `DynamicMessage`, Bead's
-  mapping coming with its gateway, ahead.
+  The Rust side's names the TypeScript side's three, its JSON read by Bead's mapping, `JsonForm`
+  ([0052](0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md)).
 
 **How the pin moves.** One runner serves every side's library. The tool fails when `runner.json`'s
 `upstreamVersion` and Google.Protobuf's pin name different protobuf releases, `v36` and `3.36`

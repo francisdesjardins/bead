@@ -53,15 +53,17 @@ and beadc's Rust target, each package's typed shells beside the messages Buffa w
 of the procedures a server's transports take and the validators of a blueprint's rules, their
 runtime in `bead-protobuf`, with `examples/hello`'s Rust half and the Rust interop's descriptors
 generated
-([0051](0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md)).
+([0051](0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md));
+and its HTTP/JSON gateway, features of its core, its JSON mapping a feature of `bead-protobuf`, met
+by one trait, with the route table, the HTTP client and the document an output with `gateway`
+writes, `examples/hello`'s Rust gateway and the interop both ways over it
+([0052](0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md)).
 It plays the conformance files it reaches, each part it lacks a row of the support matrix ahead
 ([0004](0004-one-behaviour-in-every-language.md)). Ahead, in this order:
 
-- **the Rust side's gateway**, with the route table, the HTTP client and the document an output
-  with `gateway` writes, and `examples/hello`'s Rust gateway; then its AMQP 1.0 binding, its client
-  one of the three branches
+- **the Rust side's AMQP 1.0 binding**, its client one of the three branches
   [0050](0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)
-  weighs, each stage under a record of its own
+  weighs, under a record of its own
   ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md));
 - **a payload's rules written in CEL**, a total subset beadc compiles into each side beside the rules
   it compiles already, and then the rules

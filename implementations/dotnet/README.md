@@ -329,22 +329,29 @@ await gateway.Start(new HttpGatewayStartOptions { Port = 8080 });
 ```
 
 It routes, binds, reads and writes as the TypeScript side's gateway does, one form of every body on
-the TypeScript and C# sides, and its README says it whole: every procedure a client calls at
-`POST /api/<Service>/<procedure>`, one marked `NO_SIDE_EFFECTS` at `GET` and `HEAD` there too where
-the query carries its request, each `google.api.http` rule as written; Bead's own mapping of
-protobuf's JSON, never `JsonParser` or `JsonFormatter`; failures as `application/problem+json`;
-notifications as Server-Sent Events, paced by what the response takes. **The route is no guard**: a
-procedure answers its default route whatever rules map it, and what guards it is its admission.
-Each exchange draws one Bead connection, closed as its response ends. It judges a request by the
-HTTP transport's own gates from one `HttpPolicy`, which `HttpTransportServerOptions.Policy` takes
-too; a member given in the policy and beside it, at its default as at any value, is refused.
-It listens on its own port, or answers in the application's own Kestrel pipeline,
-`endpoints.MapBeadGateway(gateway)`, its fallback endpoint; as the fallback it runs after every
-middleware, so one that reads a body there leaves it buffered (`EnableBuffering`), which the gateway
-reads from its start, or runs on the application's own paths alone (`UseWhen`). A body read before
-it otherwise is answered 500 and reported on `Error`, never called with what was left. One origin
-for `/bead` and `/api/…` comes from a proxy in front. It serves the document at `/openapi.json`, byte for byte, with its
-`etag`; Swagger UI is the application's to serve.
+every side, and its README says it whole: every procedure a client calls at `POST
+/api/<Service>/<procedure>`, one marked `NO_SIDE_EFFECTS` at `GET` and `HEAD` there too where the
+query carries its request, each `google.api.http` rule as written; Bead's own mapping of protobuf's
+JSON, never `JsonParser` or `JsonFormatter`; failures as `application/problem+json`; notifications
+as Server-Sent Events, paced by what the response takes, a `HEAD` that asks one answered as its
+`GET` begins and ended at its head, its subscription with it. **The route is no guard**: a procedure
+answers its default route whatever rules map it, and what guards it is its admission. Each exchange
+draws one Bead connection, closed as its response ends, its client given the router limits
+`HttpGatewayOptions.Limits` gives. It judges a request by the HTTP transport's own gates, a
+navigation from another site taken only as a `GET` that no `object` or `embed` makes, from one
+`HttpPolicy`, which `HttpTransportServerOptions.Policy` takes too; a member given in the policy and
+beside it, at its default as at any value, is refused. It listens on its own port, or answers in the
+application's own Kestrel pipeline, `endpoints.MapBeadGateway(gateway)`, its fallback endpoint; as
+the fallback it runs after every middleware, so one that reads a body there leaves it buffered
+(`EnableBuffering`), which the gateway reads from its start, or runs on the application's own paths
+alone (`UseWhen`). A body read before it otherwise is answered 500 and reported on `Error`, never
+called with what was left. Mounted, it keeps every gate of `transcoding.md` 10.1 from its step 2,
+its problems, its pace and its bounds; its host owns what HTTP refuses of its own, its head's bounds
+and timeouts, its socket's write deadline, a path its own router answers first, and whatever reads
+the body before it. Mounting it in a host's framework, its lines held by tests, is a round of its
+own, ahead (decision 0052). One origin for `/bead` and `/api/…` comes from a proxy in front. It
+serves the document at `/openapi.json`, byte for byte, with its `etag`; Swagger UI is the
+application's to serve.
 
 Every body the gateway writes meets `MaximumUnsentBytes` and its send pace,
 `MinimumSendBytesPerSecond` after `SendGracePeriod`: whole answers, problems, the document and

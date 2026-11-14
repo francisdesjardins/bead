@@ -11,7 +11,9 @@ every duration held as spec 1.4 holds it; the trace, the filter and the registry
 participant's trace of its parcels; the WebSocket and HTTP transports, server and client, features
 of the core over tokio's sockets, and the in-memory transport; the broker's core over an in-memory
 broker, its MQTT 5 binding, a feature of the core and a client of its own, and the joined transport;
-and the `proto` payload's codec on Buffa — playing every conformance file it reaches, each part it
+the `proto` payload's codec on Buffa; and its HTTP/JSON gateway and its caller, features of the core
+on hyper, protobuf's JSON read and written by Bead's own mapping, a feature of `bead-protobuf` —
+playing every conformance file it reaches, each part it
 lacks a row of [`docs/support.md`](../../docs/support.md)'s differences, ahead with the stage that
 brings it. The rules its code keeps — one owner per router, traits and composition, no unsafe code,
 two parameters then an options struct, every warning an error — are
@@ -19,14 +21,16 @@ two parameters then an options struct, every warning an error — are
 its sockets are
 [decision 0049](../../docs/decisions/0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)'s,
 its broker bindings
-[decision 0050](../../docs/decisions/0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)'s.
+[decision 0050](../../docs/decisions/0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md)'s,
+its gateway [decision 0052](../../docs/decisions/0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md)'s.
 
 ## Build and test
 
 Rust 1.99.1 and edition 2024, as `rust-toolchain.toml` pins them, which rustup installs with clippy,
 rustfmt and llvm-tools, and the target `wasm32-unknown-unknown`. The core is pure Rust; its socket
 transports' TLS, aws-lc-rs, is built by the platform's C compiler, so a build with `websocket`,
-`http` or `mqtt`, the workspace's among them, needs one: on Windows, the MSVC build tools, their C
+`http`, `mqtt` or `gateway`, the workspace's among them, needs one, and one with `transcoding`
+alone does not: on Windows, the MSVC build tools, their C
 compiler and their linker; or the GNU host, with a MinGW-w64's `dlltool` on the `PATH`, which
 `windows-sys` asks of it. From this folder:
 
@@ -96,13 +100,71 @@ features are additive:
 - `mqtt`: MQTT 5 over a broker (decision 0041), a client of Bead's own over TCP, TLS or a WebSocket
   of subprotocol `mqtt`, its upgrade and its frames its own; `MqttBrokerAdapter` over it, and its
   defaults, `MQTT_CONNECT_TIMEOUT` among them;
+- `transcoding`: what a gateway reads and writes, with no socket and no dependency of its own: a
+  route's templates and its table, `HttpMethod`, `HttpRouteInit` and `route_of`, its problems and
+  its events, and the trait `MessageForm` a message's JSON form fills;
+- `gateway`: `transcoding` with `http`: `HttpGateway`, on its own listener or mounted by `answer`,
+  and `HttpCaller`, which beadc's `<Service>HttpClient` calls through;
 - `testing`: the test kit, `bead::testing`, which the tests alone turn on: no API.
 
-Each of `websocket`, `http` and `mqtt` brings TLS on rustls over aws-lc-rs, a client verifying by
-the platform's own verifier, and `bead::rustls`, the rustls it builds, for an application's
-`ServerConfig` or `ClientConfig`. What judges a request, a head, a target, a host, an origin and a
-WebSocket's handshake, is always built, as is the HTTP policy, so the fuzz targets reach it with no
-feature.
+`francisdesjardins-bead-protobuf`'s feature `transcoding` brings protobuf's JSON mapping,
+`JsonForm`, and a request's binding from its route, `HttpBinding`; an output with a `gateway` takes
+it beside the core's `gateway`.
+
+Each of `websocket`, `http`, `mqtt` and `gateway` brings TLS on rustls over aws-lc-rs, a client
+verifying by the platform's own verifier, and `bead::rustls`, the rustls it builds, for an
+application's `ServerConfig` or `ClientConfig`. What judges a request, a head, a target, a host, an
+origin and a WebSocket's handshake, is always built, as is the HTTP policy, so the fuzz targets
+reach it with no feature.
+
+## The gateway
+
+`gateway` answers a service's procedures as HTTP routes
+([`spec/transcoding.md`](../../spec/transcoding.md), decision 0037) beside the wire, never in its
+place: each exchange draws one client of the application's own server, across an in-memory
+transport that server joined beside its others, so it meets the same router, admission, sessions
+and services. It reads everything from what beadc writes in an output with a `gateway`,
+`bead_http.rs`: `HttpRoutes::get()?.all`, `OPENAPI_DOCUMENT` and `HTTP_PROBLEM_TYPES`. A message's
+JSON is `bead-protobuf`'s `JsonForm`, Bead's own mapping of protobuf's JSON over Buffa's
+descriptors, which the gateway reaches through the core's trait `MessageForm`; the binary payload
+stays its stock library's ([decision 0052](../../docs/decisions/0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md)).
+
+`HttpGateway::start` listens on its own port, over the HTTP transport's wire: HTTP/1.1, and HTTP/2
+under TLS by ALPN. Mounted, `answer(request, peer)` answers a request its application routed to it,
+`peer` the caller's address and port, none read as local; `answer`'s `http::Request`,
+`http::Response` and `http_body::Body` are the application's own `http` 1.x and `http-body` 1.x,
+which hyper gives it, and the core re-exports neither. Under hyper's `serve_connection`, one
+`service_fn` an accepted socket:
+
+```rust
+let gateway = gateway.clone();
+let service = hyper::service::service_fn(move |request| {
+    let answer = gateway.answer(request, Some(peer));
+    async move { Ok::<_, std::convert::Infallible>(answer.await) }
+});
+```
+
+A path no route matches is answered 404 `path-unknown`, as the endpoint the C# side maps answers
+it. Mounted, the gateway keeps every gate of 10.1 from its step 2, its problems, its pace and its
+bounds; its host owns what HTTP refuses of its own, its head's bounds and timeouts, its socket's
+write deadline, which hyper does not arm, a path its own router answers first, and whatever reads
+the body before it. A body read before it is judged by hyper's hints before its first byte and by
+its count at its end, before any binding: one ended, or short of its `content-length`, is refused
+500 and reported, its call never made, as is a chunked body that gave no byte over HTTP/1.1, since
+nothing tells one read whole before it from one that came empty; a body put back whole with its
+length is read from its start. What hyper's request cannot show, a chunked body read in part and
+handed on, read as what is left, and an HTTP/2 body read whole and replaced by an ended empty one,
+read as empty, is a row of [`docs/support.md`](../../docs/support.md)'s differences. hyper cuts a
+target at its `#` before the gateway reads it, so `GET /v1/books/a#b` answers the route of
+`/v1/books/a`: what stands in front of a Rust gateway refuses a `#`, as Envoy's
+`http_reject_path_with_fragment` does by default. Mounting it in a framework, axum among them, is a
+round of its own, ahead.
+
+`HttpCaller` calls a gateway over the HTTP transport client's own connector, and beadc's
+`<Service>HttpClient` over it: `say_hello(&request, &options)` on a procedure's default route, and
+`subscribe_count_down(&request, &options)`, a `Stream` of its result, then each notification, then
+the failure that ends it, never reconnecting. It follows no redirect and keeps no cookie, and sends
+no credential in the clear.
 
 ## Listening and proxies
 
@@ -164,19 +226,24 @@ crates/
                                 code and the dynamic one over its `DynamicMessage`; the validators'
                                 runtime beadc's generated rules judge by; its tests' `.proto` files
                                 and their set under proto/, and beadc's validators of
-                                spec/validations.proto under tests/generated/
+                                spec/validations.proto under tests/generated/; under
+                                `transcoding`, protobuf's JSON by Bead's mapping and a request's
+                                binding
   bead-protobuf-build/          Bead's setting of Buffa's generator, for a build script: views,
                                 reflection, and each repeated or map field of a closed enum opened
   bead-interop/                 the interop service: its descriptors and classes, which beadc
                                 generates from spec/interop-blueprint.json into src/generated/; its
-                                resolvers and its credentials
+                                resolvers and its credentials; under `transcoding`, the
+                                `Transcoding` service of spec/transcoding.proto, beadc's output of
+                                it with its gateway, and its resolvers
   bead-goldens/                 beadc's Rust goldens, builder/test/golden/rust, each output mounted
                                 whole under the workspace's lints, and under tests/ the consumer's
                                 refusals and the messages' parity with config_of
   bead-interop-server/          the interop service's server, bead-interop-server, over WebSocket
                                 and HTTP, and over MQTT 5 where BEAD_MQTT_URL names a broker,
-                                which the other sides' clients call; and under tests/, the Rust
-                                client's trials against each side's server
+                                beside the gateway of the `Transcoding` service, which the other
+                                sides' clients call; and under tests/, the Rust client's trials
+                                against each side's server and gateway
   bead-house/                   the side's own checks that no lint holds: the parameter rule, the
                                 options struct's shape, each library crate's public surface
                                 against its list under surfaces/, no tuple on that surface, the
@@ -236,6 +303,8 @@ that measures real time, is exempted once, at its root, with its reason.
 | `websocket`                                                    | the WebSocket transport (spec 15.2, 15.3), behind `websocket`: its server, its client, the connection either end runs, its heartbeat, its facades  |
 | `http`                                                         | the HTTP transport (spec 15.4 to 15.11), behind `http`: its server, on hyper, its client, its exchanges and fields, its facades                    |
 | `mqtt`                                                         | MQTT 5 over a broker, behind `mqtt`: its packets, written and read, its link, its quota, its adapter, over TCP, TLS or a WebSocket                 |
+| `transcoding`                                                  | what a gateway reads and writes, behind `transcoding`: a route's templates, the route table, its problems, its events, and the trait `MessageForm` |
+| `gateway`                                                      | the HTTP/JSON gateway, behind `gateway`: its host, on its own listener or mounted, its two paces, its body, and the caller                         |
 | `net`                                                          | what a transport over a socket does alike: `localhost` bound, a socket's bounds, a close in stages, a name's addresses raced, TLS                  |
 | `judgement`, `http_policy`                                     | what a server judges of a request, pure and always built: a head, a target, a host, an origin, proxies, a handshake; and the HTTP policy           |
 | `broker`                                                       | the broker's core: its participant, its parcel, its sequence, its heartbeat, its transports and the in-memory broker                               |
@@ -266,14 +335,16 @@ transport takes is no access: it grants none, and each procedure keeps its own a
 
 `crates/bead-protobuf/src`:
 
-| Module     | What it holds                                                                                                                                                                                                   |
-| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `records`  | a message's schema, read once from its descriptors, and the check of a payload's records against it (spec 17.9.1 to 17.9.6)                                                                                     |
-| `required` | the walk of the fields protobuf requires (spec 17.9.7), over a view or a dynamic message, whose presence is the wire's or the application's, and a writer's depth pass (17.9.3), each 100 messages deep at most |
-| `refusal`  | a refusal's reasons in spec 17.2's words, what more the side knows in its cause                                                                                                                                 |
-| `codec`    | `ProtoCodec`, the typed codec of a message Buffa generates, and `DynamicCodec`, by its descriptor alone, each a payload codec of `proto`                                                                        |
-| `validate` | the validators' runtime (spec 18, decision 0051): `validator_of`, the sink a message's generated rules judge into, its rules' sites, a pattern's table and its walk, and the readings spec 18.8 fixes           |
-| `testing`  | the test kit, behind the feature `testing`: the tests' messages, generated from `proto/tests.binpb`; no API                                                                                                     |
+| Module      | What it holds                                                                                                                                                                                                   |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `records`   | a message's schema, read once from its descriptors, and the check of a payload's records against it (spec 17.9.1 to 17.9.6)                                                                                     |
+| `required`  | the walk of the fields protobuf requires (spec 17.9.7), over a view or a dynamic message, whose presence is the wire's or the application's, and a writer's depth pass (17.9.3), each 100 messages deep at most |
+| `refusal`   | a refusal's reasons in spec 17.2's words, what more the side knows in its cause                                                                                                                                 |
+| `codec`     | `ProtoCodec`, the typed codec of a message Buffa generates, and `DynamicCodec`, by its descriptor alone, each a payload codec of `proto`                                                                        |
+| `validate`  | the validators' runtime (spec 18, decision 0051): `validator_of`, the sink a message's generated rules judge into, its rules' sites, a pattern's table and its walk, and the readings spec 18.8 fixes           |
+| `json_form` | protobuf's JSON read and written by Bead's own mapping, behind `transcoding` (transcoding 5, decision 0052): `JsonForm`, one an output over the pool its messages embed, its strict reader and its writer       |
+| `binding`   | a request bound from its route's variables, its query and its body (transcoding 4), behind `transcoding`: `HttpBinding`                                                                                         |
+| `testing`   | the test kit, behind the feature `testing`: the tests' messages, generated from `proto/tests.binpb`; no API                                                                                                     |
 
 A message an application binds to `proto` is generated as `bead-protobuf-build` sets Buffa's
 generator, from a `FileDescriptorSet` its build writes; `ProtoCodec` reads it through its view,
