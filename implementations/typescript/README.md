@@ -252,7 +252,8 @@ what it adds, and the failures it raises: each router carries its own table, `CL
 ### The Bead envelope
 
 The router's protocol is called Bead, after Baily's beads — the points of light that break through
-along the edge of the Moon at an eclipse. Its unit is the envelope: a fixed 8-byte prefix, in network
+along the edge of the Moon at an eclipse. It reads another way too: each envelope a bead, strung on
+its connection, in order, at the pace of the one who receives. Its unit is the envelope: a fixed 8-byte prefix, in network
 byte order, then a part of the kind's own, then optional blocks, then the payload. There is no
 length field: each transport delimits the envelope, as WebSocket does with its messages.
 
