@@ -2010,14 +2010,19 @@ async fn stamps_the_activity_on_its_clock_and_bounds_a_close_on_the_real_one_whi
     stopped(&server).await;
 }
 
-async fn compares_stopping_connections() {
+async fn compares_stopping_raw_connections(disposing: bool) {
     let (server, recorder, port) = started(&briefly_closing()).await;
+    assert_eq!(server.ready_state(), ReadyState::Open);
     let mut first = client(port).await;
     let mut second = client(port).await;
 
     let handles = recorder.connections(2).await;
 
-    let stopping = server.stop();
+    let stopping = if disposing {
+        server.dispose()
+    } else {
+        server.stop()
+    };
 
     for client in [&mut first, &mut second] {
         assert!(
@@ -2058,9 +2063,11 @@ async fn compares_stopping_connections() {
         TcpStream::connect(("127.0.0.1", port)).await.is_err(),
         "it listens no more"
     );
+}
 
-    // The transport clients' two close arguments, as well as the close frames above.
+async fn compares_stopping_transport_clients(disposing: bool) {
     let (server, recorder, port) = started(&briefly_closing()).await;
+    assert_eq!(server.ready_state(), ReadyState::Open);
     let mut clients = Vec::new();
     for _ in 0..2 {
         let client = crate::WebSocketTransportClient::new(
@@ -2082,7 +2089,17 @@ async fn compares_stopping_connections() {
         clients.push((client, closes));
     }
     let handles = recorder.connections(2).await;
-    stopped(&server).await;
+    patience(
+        PATIENCE,
+        if disposing {
+            server.dispose()
+        } else {
+            server.stop()
+        },
+    )
+    .await
+    .unwrap()
+    .unwrap();
     let mut notifications = recorder.told.lock().unwrap().closes.clone();
     let mut expected = handles
         .into_iter()
@@ -2116,6 +2133,11 @@ async fn compares_stopping_connections() {
         TcpStream::connect(("127.0.0.1", port)).await.is_err(),
         "no late connection"
     );
+}
+
+async fn compares_stopping_connections(disposing: bool) {
+    compares_stopping_raw_connections(disposing).await;
+    compares_stopping_transport_clients(disposing).await;
 }
 
 #[tokio::test]
@@ -3089,8 +3111,7 @@ async fn pings_each_connection_every_heartbeat_and_drops_one_that_left_a_ping_un
     answering.await.unwrap();
 }
 
-#[tokio::test]
-async fn drops_a_peer_that_never_answers_its_pings_and_keeps_one_that_does() {
+async fn compares_answered_and_unanswered_pings() {
     // beats wide enough that a pong never misses one on a loaded machine
     let (server, recorder, port) = started(&WebSocketTransportServerOptions {
         heartbeat: Some(Duration::from_millis(200)),
@@ -3098,12 +3119,25 @@ async fn drops_a_peer_that_never_answers_its_pings_and_keeps_one_that_does() {
     })
     .await;
     let answering = reading(client(port).await);
+    let transport =
+        crate::WebSocketTransportClient::new(&crate::WebSocketTransportClientOptions::default())
+            .unwrap();
+    patience(
+        PATIENCE,
+        transport.connect(&crate::WebSocketTransportClientConnectOptions::new(
+            "127.0.0.1",
+            port,
+        )),
+    )
+    .await
+    .unwrap()
+    .unwrap();
     let (_silent, _) = upgraded(port).await;
-    let handles = recorder.connections(2).await;
+    let handles = recorder.connections(3).await;
 
     assert_eq!(
         recorder.closes(1).await,
-        vec![(false, Arc::clone(&handles[1]))],
+        vec![(false, Arc::clone(&handles[2]))],
         "the silent one dropped"
     );
 
@@ -3115,9 +3149,16 @@ async fn drops_a_peer_that_never_answers_its_pings_and_keeps_one_that_does() {
             .iter()
             .map(|client| Arc::clone(&client.connection_handle))
             .collect::<Vec<_>>(),
-        vec![Arc::clone(&handles[0])],
-        "the answering one kept"
+        vec![Arc::clone(&handles[0]), Arc::clone(&handles[1])],
+        "both answering clients kept"
     );
+    assert_eq!(transport.ready_state(), ReadyState::Open);
+    assert_eq!(
+        recorder.told.lock().unwrap().closes,
+        [(false, Arc::clone(&handles[2]))],
+        "no later close after three more beats"
+    );
+    assert_eq!(recorder.count(|told| told.errors.len()), 0, "no error");
     stopped(&server).await;
     answering.await.unwrap();
 }
@@ -3991,13 +4032,13 @@ async fn resolves_false_closing_a_handle_nobody_holds() {
 
 #[tokio::test]
 async fn closes_every_connection_each_emitting_its_close_before_it_resolves_and_stops_listening() {
-    compares_stopping_connections().await;
+    compares_stopping_connections(false).await;
 }
 
 #[tokio::test]
 async fn stop_closes_every_connection_each_raising_its_close_before_it_resolves_and_stops_listening()
  {
-    compares_stopping_connections().await;
+    compares_stopping_connections(false).await;
 }
 
 #[tokio::test]
@@ -4061,4 +4102,25 @@ async fn pings_nothing_with_a_heartbeat_of_infinity() {
 #[tokio::test]
 async fn beats_nothing_with_a_heartbeat_of_infinity() {
     compares_infinite_and_finite_heartbeats().await;
+}
+
+#[tokio::test]
+async fn drops_a_peer_that_never_answers_its_pings_and_keeps_one_that_does() {
+    compares_answered_and_unanswered_pings().await;
+}
+
+#[tokio::test]
+async fn keeps_the_clients_that_answer_its_pings_a_browser_s_as_ws_s_and_drops_one_that_does_not_on_the_wire()
+ {
+    compares_answered_and_unanswered_pings().await;
+}
+
+#[tokio::test]
+async fn await_using_stops_it_closing_with_1001_and_refusing_what_comes_after() {
+    compares_stopping_connections(true).await;
+}
+
+#[tokio::test]
+async fn closes_each_connection_with_1001_as_it_stops() {
+    compares_stopping_connections(false).await;
 }
