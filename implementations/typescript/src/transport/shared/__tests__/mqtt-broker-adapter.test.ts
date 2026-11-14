@@ -573,31 +573,91 @@ test.describe('createMqttBrokerAdapter', () => {
     await adapter.stop();
   });
 
-  // spec 15.26, where the sides part: MQTT.js keeps its own under 0 and takes a longer one, where the
-  // Rust side sends no PINGREQ under 0 and the C# side keeps its own under both; a row of
-  // docs/support.md
-  test('keeps its own Keep Alive under a Server Keep Alive of 0, and takes one longer than its own (spec 15.26)', async () => {
-    const zero = adapterOf(script, { keepAlive: 1_000 });
-    const unbounded = await linkUp(
-      { adapter: zero, script },
-      { properties: { serverKeepAlive: 0 } }
-    );
-    let startedAt = Date.now();
+  test('keeps its own Keep Alive under a Server Keep Alive of 0 or longer than its own (spec 15.26)', async () => {
+    // * a longer one of 3, not 2, so that a side that took it, its PINGREQ at 3,000 ms, fails
+    for (const serverKeepAlive of [0, 3]) {
+      const adapter = adapterOf(script, { keepAlive: 1_000 });
+      const link = await linkUp({ adapter, script }, { properties: { serverKeepAlive } });
+      const startedAt = Date.now();
 
-    await unbounded.next('pingreq', { within: 3_000 });
-    expect(Date.now() - startedAt).toBeLessThan(2_500);
-    unbounded.send({ cmd: 'pingresp' });
-    await zero.stop();
+      await link.next('pingreq', { within: 3_000 });
+      expect(Date.now() - startedAt).toBeLessThan(2_500);
+      link.send({ cmd: 'pingresp' });
+      await adapter.stop();
+    }
+  });
 
-    const longer = adapterOf(script, { keepAlive: 1_000 });
-    const link = await linkUp({ adapter: longer, script }, { properties: { serverKeepAlive: 2 } });
+  test('loses its link once its PINGREQ has no PINGRESP within half its Keep Alive in force (spec 15.26)', async () => {
+    // * a broker that answers nothing after its CONNACK, each case an adapter and a scripted link of
+    // its own, at once
+    const isLostUnder = async ({
+      keepAlive,
+      properties,
+    }: {
+      keepAlive: number;
+      properties: Record<string, unknown>;
+    }): Promise<void> => {
+      const silent = await createMqttScript();
 
-    startedAt = Date.now();
-    await expect(link.next('pingreq', { within: 1_500 })).rejects.toThrow();
-    await link.next('pingreq', { within: 2_000 });
-    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(1_900);
+      try {
+        const adapter = adapterOf(silent, { keepAlive });
+        const { downs } = heardOf(adapter);
+        const link = await linkUp({ adapter, script: silent }, { properties });
+        const upAt = Date.now();
+
+        await link.next('pingreq', { within: 3_000 });
+
+        const pingedAt = Date.now();
+
+        expect(pingedAt - upAt).toBeLessThan(2_600);
+        await sleep(700);
+        expect(downs).toEqual([]);
+        await until(() => {
+          return downs.length > 0;
+        });
+        expect(Date.now() - pingedAt).toBeLessThan(1_700);
+        expect(await closedWithin(link)).toBe(true);
+        // * told once, its link lost, not taken over, and no DISCONNECT sent
+        await sleep(50);
+        expect(downs).toEqual([{ isTakenOver: false }]);
+        expect(adapter.isLinked).toBe(false);
+        expect(cmdsOf(link)).toEqual(['connect', 'pingreq']);
+      } finally {
+        await silent[Symbol.asyncDispose]();
+      }
+    };
+
+    await Promise.all([
+      // (a) no Server Keep Alive
+      isLostUnder({ keepAlive: 2_000, properties: {} }),
+      // (b) a Server Keep Alive shorter than its own
+      isLostUnder({ keepAlive: 30_000, properties: { serverKeepAlive: 2 } }),
+      // (c) a Server Keep Alive of 0
+      isLostUnder({ keepAlive: 2_000, properties: { serverKeepAlive: 0 } }),
+    ]);
+  });
+
+  test('runs a Keep Alive under a second as its CONNECT announces it, a whole second rounded up (spec 15.26)', async () => {
+    const adapter = adapterOf(script, { keepAlive: 200 });
+    const { downs } = heardOf(adapter);
+    const link = await linkUp({ adapter, script });
+    const upAt = Date.now();
+
+    expect(link.connect).toMatchObject({ keepalive: 1 });
+    await expect(link.next('pingreq', { within: 700 })).rejects.toThrow('no pingreq came');
+    await link.next('pingreq', { within: 2_000 - (Date.now() - upAt) });
+    expect(Date.now() - upAt).toBeGreaterThanOrEqual(900);
+
+    // * its PINGRESP awaited half of the second it runs, not half of 200 ms
+    await sleep(300);
+    expect([adapter.isLinked, downs]).toEqual([true, []]);
     link.send({ cmd: 'pingresp' });
-    await longer.stop();
+    await adapter.stop();
+    expect(
+      cmdsOf(link).filter((cmd) => {
+        return cmd === 'pingreq';
+      })
+    ).toHaveLength(1);
   });
 
   test('leaves a will of its GONE, QoS 1, RETAIN 0 and a Will Delay Interval of 0, and stops with a DISCONNECT of 0x00 (spec 15.26)', async () => {

@@ -190,6 +190,39 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         return (messages, downs);
     }
 
+    // a link up on a script of its own under the Keep Alive and the CONNACK given, which its broker
+    // answers nothing after: its PINGREQ, then its link lost at half its Keep Alive in force, no
+    // DISCONNECT sent (spec 15.26)
+    private static async Task LostUnanswered((string Case, TimeSpan KeepAlive, byte[] ConnAck) silent)
+    {
+        await using var script = MqttScript.Start();
+        await using var adapter = new MqttBrokerAdapter(new MqttBrokerAdapterOptions { Id = Id, Password = Password, Uri = script.Uri, KeepAlive = silent.KeepAlive });
+        var (_, downs) = HeardOf(adapter);
+        var starting = adapter.Start();
+        var link = await script.Link();
+
+        await link.Write(silent.ConnAck);
+        await starting.WaitAsync(Patience, Cancelled);
+
+        var watch = Stopwatch.StartNew();
+
+        await link.Next<MqttPingReqPacket>(TimeSpan.FromSeconds(4));
+        Assert.True(watch.Elapsed < TimeSpan.FromMilliseconds(2_600), $"{silent.Case}: its PINGREQ went after {watch.ElapsedMilliseconds} ms");
+
+        var pinged = Stopwatch.StartNew();
+
+        await Task.Delay(TimeSpan.FromMilliseconds(700), Cancelled);
+        Assert.True(downs.IsEmpty, $"{silent.Case}: its down was told within 700 ms of its PINGREQ");
+        await Until(() =>
+        {
+            return !downs.IsEmpty;
+        });
+        Assert.True(pinged.Elapsed < TimeSpan.FromMilliseconds(1_700), $"{silent.Case}: its down was told {pinged.ElapsedMilliseconds} ms after its PINGREQ");
+        await link.Closed.WaitAsync(Patience, Cancelled);
+        Assert.Equal([new BrokerDown()], downs);
+        Assert.Empty(link.PacketsOf<MqttDisconnectPacket>());
+    }
+
     // polls on the real clock until it holds, within five seconds
     private static async Task Until(Func<bool> isDone)
     {
@@ -503,23 +536,24 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         await adapter.Stop();
     }
 
-    // spec 15.26, where the sides part: MQTTnet keeps its own period whatever the CONNACK names, where
-    // the Rust side sends no PINGREQ under 0 and takes a longer one, and the TypeScript side takes a
-    // longer one; a row of docs/support.md
+    // spec 15.26: MQTTnet's loop on its own period keeps it; a bump that applies the Server Keep Alive fails here
     [Fact]
     public async Task Keeps_its_own_Keep_Alive_under_a_Server_Keep_Alive_of_0_or_longer_than_its_own_spec_15_26()
     {
-        foreach (var server in new ushort[] { 0, 3 })
+        foreach (var server in new byte[] { 0, 3 })
         {
             await using var adapter = AdapterOf((options) =>
             {
                 return options with { KeepAlive = TimeSpan.FromSeconds(1) };
             });
-            var answer = ScriptedLink.ConnAck();
+            var starting = adapter.Start();
+            var link = await _script.Link();
 
-            answer.ServerKeepAlive = server;
+            // * a CONNACK written by hand, its Server Keep Alive (0x13) on the wire: MQTTnet's encoder
+            // writes none of 0
+            await link.Write([0x20, 0x06, 0, 0, 0x03, 0x13, 0, server]);
+            await starting.WaitAsync(Patience, Cancelled);
 
-            var link = await LinkUp((adapter, _script), (answer, null));
             var watch = Stopwatch.StartNew();
 
             await link.Next<MqttPingReqPacket>(TimeSpan.FromSeconds(3));
@@ -527,6 +561,45 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
             await link.Send(MqttPingRespPacket.Instance);
             await adapter.Stop();
         }
+    }
+
+    [Fact]
+    public async Task Loses_its_link_once_its_PINGREQ_has_no_PINGRESP_within_half_its_Keep_Alive_in_force_spec_15_26()
+    {
+        // * a CONNACK of 0x00 that names no Server Keep Alive, one of 2 under a Keep Alive of 30,
+        // and one of 0 (0x13), each on a script of its own
+        await Task.WhenAll(
+            LostUnanswered(("none", TimeSpan.FromSeconds(2), [0x20, 0x03, 0, 0, 0])),
+            LostUnanswered(("2 of 30", TimeSpan.FromSeconds(30), [0x20, 0x06, 0, 0, 0x03, 0x13, 0, 2])),
+            LostUnanswered(("0", TimeSpan.FromSeconds(2), [0x20, 0x06, 0, 0, 0x03, 0x13, 0, 0])));
+    }
+
+    [Fact]
+    public async Task Runs_a_Keep_Alive_under_a_second_as_its_CONNECT_announces_it_a_whole_second_rounded_up_spec_15_26()
+    {
+        await using var adapter = AdapterOf((options) =>
+        {
+            return options with { KeepAlive = TimeSpan.FromMilliseconds(200) };
+        });
+        var (_, downs) = HeardOf(adapter);
+        var link = await LinkUp((adapter, _script));
+        var watch = Stopwatch.StartNew();
+
+        Assert.Equal(1, link.Connect.KeepAlivePeriod);
+        await Assert.ThrowsAsync<TimeoutException>(() =>
+        {
+            return link.Next<MqttPingReqPacket>(TimeSpan.FromMilliseconds(700) - watch.Elapsed);
+        });
+        await link.Next<MqttPingReqPacket>(TimeSpan.FromMilliseconds(2_000) - watch.Elapsed);
+        Assert.True(watch.Elapsed >= TimeSpan.FromMilliseconds(900), $"its PINGREQ went after {watch.ElapsedMilliseconds} ms");
+
+        // * half of the second it runs, not of 200 ms
+        await Task.Delay(TimeSpan.FromMilliseconds(300), Cancelled);
+        Assert.Empty(downs);
+        await link.Send(MqttPingRespPacket.Instance);
+        Assert.Single(link.PacketsOf<MqttPingReqPacket>());
+        await adapter.Stop();
+        Assert.Empty(downs);
     }
 
     [Fact]

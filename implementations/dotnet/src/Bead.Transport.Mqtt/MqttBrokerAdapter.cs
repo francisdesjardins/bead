@@ -1147,9 +1147,13 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             }));
     }
 
-    // a Server Keep Alive shorter than its own, which MQTTnet reads and pings past all the same: a
-    // PINGREQ once nothing went for that long, on the system's clock, as the library's own timer
-    // runs ([MQTT-3.2.2-21])
+    // a Server Keep Alive shorter than its own, its Keep Alive in force: a PINGREQ once nothing went
+    // for that long, on the system's clock, as the library's own timer runs ([MQTT-3.2.2-21]), and
+    // its link lost, no DISCONNECT, once that PINGREQ has had no PINGRESP for half of it (spec 15.26)
+    // ! MQTTnet works out the Server Keep Alive and pings on its own period all the same
+    // (MqttClient.cs 146-155, 1032): its own Keep Alive under 0 and under a longer one is MQTTnet's
+    // loop, which waits half its period for a PINGRESP; a bump re-reads it, and the twin of a Server
+    // Keep Alive of 0 or longer pins it
     private void KeepServerKeepAlive((Link Link, ushort Seconds) kept)
     {
         var (link, seconds) = kept;
@@ -1179,7 +1183,23 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
                 {
                     try
                     {
-                        await Quietly(link.Client.PingAsync(link.Life.Token));
+                        using var deadline = new CancellationTokenSource(serverKeepAlive / 2, TimeProvider.System);
+                        using var waiting = CancellationTokenSource.CreateLinkedTokenSource(link.Life.Token, deadline.Token);
+
+                        try
+                        {
+                            await link.Client.PingAsync(waiting.Token);
+                        }
+                        // ! judged by its tokens, not by what it throws: MQTTnet's wait may end in
+                        // its own time-out as in a cancellation
+                        catch (Exception) when (deadline.IsCancellationRequested && !link.Life.IsCancellationRequested)
+                        {
+                            End((link, new BrokerDown()), new IOException($"the link of {Id} had no PINGRESP within half its Keep Alive"));
+                        }
+                    }
+                    catch (Exception reason) when (reason is not OutOfMemoryException)
+                    {
+                        // its link's end tells what failed
                     }
                     finally
                     {

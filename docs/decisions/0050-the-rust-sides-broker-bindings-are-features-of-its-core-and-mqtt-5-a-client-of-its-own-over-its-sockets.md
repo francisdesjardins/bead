@@ -302,7 +302,7 @@ twins and the cases skip there, saying so.
   Password as text. The first is
   [0041](0041-over-mqtt-5-a-participant-is-one-clean-link-and-a-parcel-one-publish-each-counted-to-its-byte.md)'s,
   its reason Mosquitto's will handling. It parts from the other sides in the rows of Differences
-  `An MQTT 5 Server Keep Alive of 0, or longer than its own`,
+  `What dates an MQTT 5 link's Keep Alive, and what answers its PINGREQ`,
   `An MQTT 5 WebSocket message, read as its frames come or once whole` and
   `An MQTT 5 WebSocket message of text`.
 - **The `mqtt` job builds from the `rust` job's cache**, beside it, not behind it.

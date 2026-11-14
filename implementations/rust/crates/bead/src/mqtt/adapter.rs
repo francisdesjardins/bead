@@ -18,8 +18,9 @@
 //! it. A PUBACK's, a SUBACK's or an UNSUBACK's code of 0x80 or more refuses its request whether or
 //! not its packet's table names it; one under 0x80 its table does not name, or a SUBACK or an
 //! UNSUBACK whose count of codes is not one, is a packet its client cannot read, awaited or not, in
-//! every phase (spec 15.29). Its Keep Alive counts from
-//! the last packet written. Each message is handed on before its PUBACK, which goes once it is
+//! every phase (spec 15.29). Its Keep Alive, the shorter of its own and its CONNACK's Server Keep
+//! Alive, a PINGREQ unanswered for half of it losing its link, counts from the last packet written.
+//! Each message is handed on before its PUBACK, which goes once it is
 //! settled. A packet past its own Maximum Packet Size, read at its Remaining Length, or one its
 //! client cannot read, closes its network connection, no DISCONNECT, its link lost, its start
 //! failed before its CONNACK, its stop ended where it stopped, no down told, its will going. A DISCONNECT of 0x8E tells its link taken
@@ -80,7 +81,8 @@ use crate::transport::{Listeners, caught, caught_future};
 /// [`crate::CONNECT_TIMEOUT`] is the transport client's.
 pub const MQTT_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Its Keep Alive, by default: 30 seconds, its will inside two heartbeats (spec 15.30).
+/// Its Keep Alive, by default: 30 seconds, its will inside two heartbeats where its CONNACK names no
+/// Server Keep Alive (spec 15.26, 15.30).
 pub const KEEP_ALIVE: Duration = Duration::from_secs(30);
 
 /// The type an MQTT 5 adapter's handles begin with.
@@ -132,7 +134,8 @@ pub struct MqttBrokerAdapterOptions {
     /// 268,435,460 (spec 15.30): [`MAXIMUM_PACKET_SIZE`] when none.
     pub maximum_packet_size: Option<u32>,
     /// Its CONNECT's Keep Alive, sent in whole seconds rounded up, from 1 to 65,535 seconds (spec
-    /// 15.30): [`KEEP_ALIVE`] when none.
+    /// 15.30): [`KEEP_ALIVE`] when none. It is the Keep Alive its link runs unless its CONNACK names
+    /// a shorter Server Keep Alive; a PINGREQ unanswered for half of it loses its link (spec 15.26).
     pub keep_alive: Option<Duration>,
     /// How long it waits: its start, for its password and its CONNACK; a subscription let go, for
     /// its UNSUBACK; its stop, for what it was handed and its UNSUBACKs, then for its DISCONNECT
@@ -1439,8 +1442,10 @@ impl State {
         link.quota = SendQuota::new(connack.receive_maximum.unwrap_or(RECEIVE_MAXIMUM));
         link.is_shared_refused = connack.shared_subscription_available == Some(false);
 
-        if let Some(seconds) = connack.server_keep_alive {
-            link.keep_alive = Duration::from_secs(u64::from(seconds));
+        // * the shorter of its own and its Server Keep Alive, its own under 0 ([MQTT-3.2.2-21],
+        // MQTT 5.0 §3.1.2.10)
+        if let Some(seconds) = connack.server_keep_alive.filter(|&seconds| seconds > 0) {
+            link.keep_alive = link.keep_alive.min(Duration::from_secs(u64::from(seconds)));
         }
 
         shared
@@ -1464,9 +1469,7 @@ impl State {
             reply.settle(Ok(()));
         }
 
-        if !keep_alive.is_zero() {
-            self.arm_keep_alive((serial, keep_alive));
-        }
+        self.arm_keep_alive((serial, keep_alive));
     }
 
     // ── Its keep alive ───────────────────────────────────────────────────────────────────────
@@ -1479,8 +1482,8 @@ impl State {
         }
     }
 
-    // * a PINGREQ once nothing went for its Keep Alive; a PINGREQ left unanswered by the next one,
-    // its link lost (MQTT 5.0 §3.1.2.10)
+    // * a PINGREQ once nothing went for its Keep Alive in force; one whose PINGRESP has not come
+    // within half of it, its link lost (MQTT 5.0 §3.1.2.10)
     fn keep_alive(&mut self, serial: u64) {
         let now = self.now();
         let Some(link) = self.link_of(serial) else {
@@ -1489,7 +1492,7 @@ impl State {
 
         if link.is_pinged {
             let reason = BrokerError::failed(format!(
-                "the link of {} had no PINGRESP within its Keep Alive",
+                "the link of {} had no PINGRESP within half its Keep Alive",
                 self.shared.id
             ));
 
@@ -1509,7 +1512,7 @@ impl State {
             link.is_pinged = true;
             link.send(write_pingreq());
 
-            link.keep_alive
+            link.keep_alive.checked_div(2).unwrap_or(link.keep_alive)
         } else {
             link.keep_alive.saturating_sub(since)
         };

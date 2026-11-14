@@ -2218,8 +2218,18 @@ nothing, and its provider's signal is aborted once that start ends, linked or no
 UTF-8 text, never empty and holding no NUL ([`docs/support.md`](../docs/support.md), "Leveled
 down"): its adapter is refused as it is built given one that is not, a password and a provider both,
 or either beside a TLS client certificate, and its start fails on a provider's answer that is not.
-It sends a packet within each Keep Alive in force, the Server Keep Alive its CONNACK names where it
-names one. A participant's stop takes no new publication; once what it was handed has gone, each
+Its Keep Alive in force is the shorter of its CONNECT's Keep Alive and its CONNACK's Server Keep
+Alive, its CONNECT's where its CONNACK names none or 0: a client may send a PINGREQ at any time, and
+one that sends within the shorter never passes the Server Keep Alive it uses ([MQTT-3.1.2-21],
+[MQTT-3.2.2-21],
+[MQTT 5.0 §3.1.2.10](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html)). It sends a
+packet within each Keep Alive in force, a PINGREQ once nothing else went for that long, and a
+PINGREQ whose PINGRESP has not come within half the Keep Alive in force loses its link, no
+DISCONNECT, its will going. Its broker counts its link lost silent for half again as long as the
+Server Keep Alive its CONNACK names, or as its CONNECT's Keep Alive where it names none, and counts
+nothing under a Server Keep Alive of 0 ([MQTT-3.1.2-22], [MQTT-3.2.2-22]): its will then goes on no
+silence, and its peers find it gone by their heartbeat (section 15.21). A participant's stop takes
+no new publication; once what it was handed has gone, each
 PUBACK come, it sends an UNSUBSCRIBE for each filter its link asked or holds, its inbox, its names
 and its peers' departures, one whose SUBSCRIBE went with no SUBACK yet among them, all at once, and
 awaits their UNSUBACKs together, what it was handed and those UNSUBACKs within one `connectTimeout`
@@ -2300,11 +2310,11 @@ CONNACK's, or within 268,435,460 bytes where its CONNACK names none. Under its d
 `maximumPacketSize`, an inbox `bead/i/server` takes a payload of 16,777,188 bytes; under a Maximum
 Packet Size of 4,096, a message to `bead/i/peer` carries 4,072.
 
-| Bound               | By default | Bounds                                                                                                                                                                                                           |
-| ------------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `maximumPacketSize` | 16,777,216 | its CONNECT's Maximum Packet Size, the largest packet its broker sends it                                                                                                                                        |
-| `keepAlive`         | 30 s       | its CONNECT's Keep Alive, 1 to 65,535 seconds: its broker counts its link lost silent for half again as long                                                                                                     |
-| `connectTimeout`    | 30 s       | how long its start waits for its password, where it asks its provider, and its CONNACK; a subscription let go, for its UNSUBACK; and its stop, for what it was handed and its UNSUBACKs, then for its DISCONNECT |
+| Bound               | By default | Bounds                                                                                                                                                                                                                |
+| ------------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `maximumPacketSize` | 16,777,216 | its CONNECT's Maximum Packet Size, the largest packet its broker sends it                                                                                                                                             |
+| `keepAlive`         | 30 s       | its CONNECT's Keep Alive, 1 to 65,535 seconds, which a shorter Server Keep Alive replaces (section 15.26): its broker counts its link lost silent for half again as long where its CONNACK names no Server Keep Alive |
+| `connectTimeout`    | 30 s       | how long its start waits for its password, where it asks its provider, and its CONNACK; a subscription let go, for its UNSUBACK; and its stop, for what it was handed and its UNSUBACKs, then for its DISCONNECT      |
 
 Neither `keepAlive` nor `connectTimeout` is ever without end or 0, and a `keepAlive` past 65,535
 seconds is refused.
