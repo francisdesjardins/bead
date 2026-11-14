@@ -21,10 +21,19 @@ export interface IReceiving<Handle extends string> {
   readonly incoming: IIncomingTransfer;
 }
 
+/**
+ * What a connection holds of the transfers it receives: those it receives at once, and those whose
+ * call's resolver outlives the call.
+ */
+interface IConnectionTransfers {
+  outliving: number;
+  transfers: number;
+}
+
 /** What a receiving transfer holds, besides its bytes. */
 interface IHeld {
   /** The transfers its connection receives at once, itself among them. */
-  connection: { transfers: number };
+  connection: IConnectionTransfers;
   /** Whether its payload went on, whole: it holds no byte of the budget any more. */
   isComplete: boolean;
   /** What hears that it stalled; none, for a transfer no timer governs. */
@@ -48,7 +57,8 @@ export interface IReceivingTransfers<Handle extends string> {
   close(receiving: IReceiving<Handle>): void;
   /**
    * Ends every transfer — `connectionHandle`'s alone, when given — before the transfers the budget
-   * starved are granted theirs, so no credit goes to a transfer about to end with them.
+   * starved are granted theirs, so no credit goes to a transfer about to end with them; those whose
+   * call's resolver outlives the call there go with them, and settle to nothing.
    */
   closeAll(connectionHandle?: Handle): void;
   /**
@@ -56,26 +66,41 @@ export interface IReceivingTransfers<Handle extends string> {
    * and its timer stops. Its place on its connection stays until it is closed.
    */
   complete(receiving: IReceiving<Handle>): Uint8Array;
-  /** The transfers received and the bytes of the budget they hold, counted, and their connections. */
+  /**
+   * The transfers received, those whose call's resolver outlives the call, and the bytes of the
+   * budget they hold, counted, and their connections.
+   */
   gauges(): IGauges<Handle>;
   /** Grants the credit a transfer may, within the budget left, and sends it. */
   grant(receiving: IReceiving<Handle>): void;
   /**
    * Opens a transfer on `call` from its opening, or gives the failure that refuses it:
    * `payloadTooLarge` when this side takes no transfer, for a total of 0 or past the payload's
-   * limit; `capacityExceeded` when the connection holds its transfers already, or the budget cannot
-   * hold the opening; `chunkInvalid` for an opening that holds its whole total. Given `onStall`, a
-   * timer hears the transfer stall when nothing comes for the inactivity allowed.
+   * limit; `capacityExceeded` when the connection holds its transfers already, or twice as many
+   * with those whose call's resolver outlives the call, or the budget cannot hold the opening;
+   * `chunkInvalid` for an opening that holds its whole total. Given `onStall`, a timer hears the
+   * transfer stall when nothing comes for the inactivity allowed.
    */
   open(
     opening: Uint8Array,
     options: { call: ICallAddress<Handle>; onStall?: (() => void) | undefined; total: number }
   ): IReceiving<Handle> | IProtocolFailure;
   /**
+   * Ends a transfer whose call ended while its resolver runs on: as `close` does, but its place
+   * among the transfers its connection holds with those its resolvers outlive stays until `settle`
+   * (spec 12.3). Ending one that ended already does nothing.
+   */
+  outlive(receiving: IReceiving<Handle>): void;
+  /**
    * Places a chunk; what places bytes is progress, and sets the timer going again, unless it makes
    * the payload whole, which stops it.
    */
   place(receiving: IReceiving<Handle>, chunk: IChunk): ChunkOutcome | IProtocolFailure;
+  /**
+   * The resolver a transfer outlived its call with settled: its place goes back. Settling one that
+   * outlives nothing, or whose connection closed, does nothing.
+   */
+  settle(receiving: IReceiving<Handle>): void;
 }
 
 // definition
@@ -114,8 +139,10 @@ export const createReceivingTransfers = <Handle extends string>({
 }): IReceivingTransfers<Handle> => {
   // the transfers open, and what each holds
   const held = new Map<IReceiving<Handle>, IHeld>();
-  // the transfers each connection receives at once
-  const connections = new Map<Handle, { transfers: number }>();
+  // the transfers each connection receives at once, and those whose resolvers outlive their call
+  const connections = new Map<Handle, IConnectionTransfers>();
+  // the transfers whose call's resolver outlives the call, and their connection's
+  const outlived = new Map<IReceiving<Handle>, IConnectionTransfers>();
   let buffered = 0;
 
   // stops a transfer's timer
@@ -167,16 +194,20 @@ export const createReceivingTransfers = <Handle extends string>({
     }
   };
 
+  // forgets a connection that holds no transfer, nor one its resolvers outlive
+  const release = (connectionHandle: Handle, connection: IConnectionTransfers): void => {
+    if (connection.transfers === 0 && connection.outliving === 0) {
+      connections.delete(connectionHandle);
+    }
+  };
+
   // ends a transfer, and gives back what it holds: its bytes, its place, its timer
   const end = (receiving: IReceiving<Handle>, state: IHeld): void => {
     held.delete(receiving);
     clock.clearTimeout(state.timer);
     drain(state);
     state.connection.transfers -= 1;
-
-    if (state.connection.transfers === 0) {
-      connections.delete(receiving.call.connectionHandle);
-    }
+    release(receiving.call.connectionHandle, state.connection);
   };
 
   return {
@@ -205,6 +236,18 @@ export const createReceivingTransfers = <Handle extends string>({
         }
       }
 
+      // * the places its resolvers outlive end with its connection
+      for (const [receiving, connection] of outlived) {
+        if (
+          connectionHandle === undefined ||
+          receiving.call.connectionHandle === connectionHandle
+        ) {
+          outlived.delete(receiving);
+          connection.outliving -= 1;
+          release(receiving.call.connectionHandle, connection);
+        }
+      }
+
       grantStarved();
     },
     complete: (receiving) => {
@@ -225,12 +268,16 @@ export const createReceivingTransfers = <Handle extends string>({
       return gaugesOf({
         ceilings: { bufferedBytes: limits.bufferedBytesBudget },
         connectionHandles: connections.keys(),
-        counts: { bufferedBytes: buffered, receivingTransfers: held.size },
+        counts: {
+          bufferedBytes: buffered,
+          outlivingTransfers: outlived.size,
+          receivingTransfers: held.size,
+        },
       });
     },
     open: (opening, { call, onStall, total }) => {
       const { connectionHandle } = call;
-      const connection = connections.get(connectionHandle) ?? { transfers: 0 };
+      const connection = connections.get(connectionHandle) ?? { outliving: 0, transfers: 0 };
       const available = limits.bufferedBytesBudget - buffered;
 
       if (limits.maximumTransfers === 0) {
@@ -245,6 +292,15 @@ export const createReceivingTransfers = <Handle extends string>({
         return {
           ...failures.payloadTooLarge,
           detail: `a payload is ${String(limits.maximumPayloadBytes)} bytes at most, not ${String(total)}`,
+        };
+      }
+
+      // * checked first: the places its resolvers outlive bound a peer that cancels each transfer it
+      // sends (spec 12.3)
+      if (connection.transfers + connection.outliving >= 2 * limits.maximumTransfers) {
+        return {
+          ...failures.capacityExceeded,
+          detail: `the transfers a connection receives and those its resolvers outlive are ${String(2 * limits.maximumTransfers)} at most`,
         };
       }
 
@@ -290,6 +346,19 @@ export const createReceivingTransfers = <Handle extends string>({
 
       return receiving;
     },
+    outlive: (receiving) => {
+      const state = held.get(receiving);
+
+      if (state === undefined) {
+        return;
+      }
+
+      // counted among those its resolvers outlive before it leaves, so its connection stays
+      state.connection.outliving += 1;
+      outlived.set(receiving, state.connection);
+      end(receiving, state);
+      grantStarved();
+    },
     place: (receiving, { bytes, isLast, offset }) => {
       const outcome = receiving.incoming.place(bytes, { isLast, offset });
       const state = held.get(receiving);
@@ -306,6 +375,17 @@ export const createReceivingTransfers = <Handle extends string>({
       }
 
       return outcome;
+    },
+    settle: (receiving) => {
+      const connection = outlived.get(receiving);
+
+      if (connection === undefined) {
+        return;
+      }
+
+      outlived.delete(receiving);
+      connection.outliving -= 1;
+      release(receiving.call.connectionHandle, connection);
     },
   };
 };

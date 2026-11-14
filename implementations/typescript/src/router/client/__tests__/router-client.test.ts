@@ -2517,6 +2517,78 @@ test.describe('createRouterClient', () => {
       expect(errors).toEqual([]);
     });
 
+    test('closes a connection that it refused twice maximumAnsweringCalls requests in a row past the resolvers that outlive its calls, nothing settling between, and reports it', async () => {
+      const scripted = createScriptedTransport();
+      const { deliver, sent } = scripted;
+      let disconnects = 0;
+      const transport: IRouterClientTransportLike = {
+        ...scripted.transport,
+        // what its disconnect throws is reported
+        disconnect: () => {
+          disconnects += 1;
+
+          throw new Error('the transport would not disconnect');
+        },
+      };
+      using router = createRouterClient(transport, { limits: { maximumAnsweringCalls: 1 } });
+      const errors = recordErrors(router);
+      const commandOn = (callId: number) => {
+        deliver({
+          header: requestHeaderOf(callId),
+          kind: EnvelopeKind.REQUEST,
+          payload: new Uint8Array(0),
+        });
+      };
+
+      router.registerResolver(
+        Object.assign(() => {
+          // deaf to its signal, it never settles
+          return new Promise<void>(() => {
+            return undefined;
+          });
+        }, service)
+      );
+
+      // one whose resolver outlives its cancel, one open beside it: twice the bound
+      commandOn(30);
+      await sleep(0);
+      deliver({ header: { callId: 30, kind: EnvelopeKind.CANCEL }, kind: EnvelopeKind.CANCEL });
+      commandOn(32);
+      await sleep(0);
+      commandOn(34);
+      await sleep(0);
+
+      expect(disconnects).toBe(0);
+      expect(errors).toEqual([]);
+
+      // * the second refusal in a row: reported, then its transport disconnected in a later turn
+      commandOn(36);
+
+      expect(disconnects).toBe(0);
+
+      await sleep(0);
+
+      expect(sent).toMatchObject([
+        { failure: { code: ProtocolCode.CAPACITY_EXCEEDED }, header: { callId: 34 } },
+        {
+          failure: {
+            code: ProtocolCode.CAPACITY_EXCEEDED,
+            detail: 'the calls a connection answers and those its resolvers outlive are 2 at most',
+          },
+          header: { callId: 36 },
+        },
+      ]);
+      expect(codesOf(errors)).toEqual([
+        ProtocolCode.CAPACITY_EXCEEDED,
+        'the transport would not disconnect',
+      ]);
+      expect(errors[0]).toMatchObject({
+        detail:
+          'the calls a connection answers and those its resolvers outlive stayed at 2 for 2 requests: the connection is closed',
+      });
+      expect(disconnects).toBe(1);
+    });
+
     test('of the client’s own parity are reported, and never answered', async () => {
       const { deliver, sent, transport } = createScriptedTransport();
       using router = createRouterClient(transport);

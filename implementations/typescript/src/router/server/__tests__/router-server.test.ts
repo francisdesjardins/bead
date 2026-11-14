@@ -1543,6 +1543,8 @@ test.describe('createRouterServer', () => {
       );
 
       deliver(first, subscribingOf(1));
+      // its resolver handed it in a later turn, before its connection closes
+      await sleep(0);
       close(first);
       onClosed();
       await answered;
@@ -1723,6 +1725,8 @@ test.describe('createRouterServer', () => {
       );
 
       deliver(first, subscribingOf(1));
+      // its resolver handed it in a later turn, before its connection closes
+      await sleep(0);
       close(first);
       onClosed();
       await sleep(0);
@@ -1835,6 +1839,8 @@ test.describe('createRouterServer', () => {
       });
 
       deliver(first, subscribingOf(1));
+      // its resolver handed it in a later turn, before its cancel comes
+      await sleep(0);
       deliver(first, cancelOf(1));
       onCancelled();
       await sleep(0);
@@ -2096,7 +2102,9 @@ test.describe('createRouterServer', () => {
         sending.reject(new Error('gone'));
         await sleep(0);
 
-        expect(reportedOf(errors)).toEqual([['gone', first]]);
+        // * its resolver, which outlived its call, was told as its connection closed (spec 9.10):
+        // what it fails with after is its connection's, reported by none
+        expect(reportedOf(errors)).toEqual([]);
         expect(router.notifications.subscriptions()).toEqual([]);
         router[Symbol.dispose]();
       });
@@ -4990,7 +4998,10 @@ test.describe('createRouterServer, its gauges', () => {
         closedDestinations: 1,
         connections: 1,
         destinations: 1,
+        largestTrackedCalls: 1,
         notifiedSubscriptions: 0,
+        outlivingResolvers: 0,
+        outlivingTransfers: 0,
         pendingCalls: 0,
         subscriptionsInFlight: 0,
         subscriptionsWaiting: 0,
@@ -5002,7 +5013,14 @@ test.describe('createRouterServer, its gauges', () => {
     // the destination stays, on purpose, for no connection
     expect(router.gauges()).toMatchObject({
       connectionHandles: new Set(),
-      counts: { answeringCalls: 0, closedDestinations: 1, connections: 0, destinations: 1 },
+      counts: {
+        answeringCalls: 0,
+        closedDestinations: 1,
+        connections: 0,
+        destinations: 1,
+        largestTrackedCalls: 0,
+        outlivingResolvers: 0,
+      },
     });
   });
 });
@@ -6584,6 +6602,8 @@ test.describe('createRouterServer, within a telling', () => {
     );
     open(first);
     deliver(first, requestOf(5));
+    // its resolver handed it in a later turn, before its cancel comes
+    await sleep(0);
     deliver(first, cancelOf(5));
     await sleep(0);
     sent.length = 0;

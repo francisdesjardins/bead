@@ -40,6 +40,8 @@ import type {
   IRequestHeader,
   IRequestResolver,
   IRequestResolverProps,
+  IRouterCore,
+  IRouterCorePort,
   ISessionRequest,
   ITransportCarried,
   OutgoingEnvelope,
@@ -1255,6 +1257,8 @@ test.describe('createRouterCore', () => {
         }, echo)
       );
       core.receive(requestOf(5), 'a');
+      // its resolver handed it in a later turn, before its connection goes
+      await sleep(0);
       // the connection is replaced, and the peer opens call 5 again before the first one answers
       core.rejectPending('a replaced', 'a');
       core.receive(requestOf(5), 'a');
@@ -2708,7 +2712,11 @@ test.describe('createRouterCore', () => {
 
       expect({ anomalies, ceilings, connectionHandles, counts }).toEqual({
         anomalies: [],
-        ceilings: { bufferedBytes: LIMIT_DEFAULTS.bufferedBytesBudget, largestAnsweringCalls: 64 },
+        ceilings: {
+          bufferedBytes: LIMIT_DEFAULTS.bufferedBytesBudget,
+          largestAnsweringCalls: 64,
+          largestTrackedCalls: 128,
+        },
         connectionHandles: new Set(['a', 'b']),
         counts: {
           abandonedCalls: 0,
@@ -2716,6 +2724,9 @@ test.describe('createRouterCore', () => {
           answeringCalls: 1,
           bufferedBytes: 0,
           largestAnsweringCalls: 1,
+          largestTrackedCalls: 1,
+          outlivingResolvers: 0,
+          outlivingTransfers: 0,
           pendingCalls: 1,
           receivingTransfers: 0,
           reservedCallIds: 0,
@@ -3456,6 +3467,529 @@ test.describe('createRouterCore', () => {
     expect(answersOf(client.sent)).toEqual([['a', EnvelopeKind.REQUEST, 1]]);
     expect(client.reported).toEqual([]);
     expect(clientCore.gauges().counts['reservedCallIds']).toBe(0);
+  });
+
+  test.describe('the resolvers that outlive their call', () => {
+    const JWT = Object.freeze({ scheme: CredentialScheme.JWT, token: 'a.b.c' });
+    const SESSION: ICallSession = Object.freeze({ data: 'ada' });
+    const ANSWER = new TextEncoder().encode('answer');
+
+    /** What sent says of each failure: its call id, its code and its detail. */
+    const failuresOf = (sent: { envelope: Envelope | undefined }[]) => {
+      return sent.flatMap(({ envelope }) => {
+        return envelope?.kind === EnvelopeKind.FAILURE
+          ? [[envelope.header.callId, envelope.failure.code, envelope.failure.detail]]
+          : [];
+      });
+    };
+
+    /** The counts of the calls a connection has it answer and of the resolvers that outlive them. */
+    const trackedOf = (core: IRouterCore<Handle>) => {
+      const { answeringCalls, largestTrackedCalls, outlivingResolvers } = core.gauges().counts;
+
+      return { answeringCalls, largestTrackedCalls, outlivingResolvers };
+    };
+
+    /**
+     * A core whose resolver of echo holds each call it is handed until the test settles it, deaf to
+     * its signal; one whose payload says `answer` answers first.
+     */
+    const createHolding = (
+      maximumAnsweringCalls: number,
+      hooks: Partial<IRouterCorePort<Handle>> = {}
+    ) => {
+      const recorded = createPort(hooks);
+      const core = createRouterCore(recorded.port, {
+        limits: { ...limits, maximumAnsweringCalls, maximumEnvelopeBytes: 1_024 },
+      });
+      const handed: IRequestResolverProps<Handle>[] = [];
+      const held: PromiseWithResolvers<void>[] = [];
+
+      core.registerResolver(
+        Object.assign(async (props: IRequestResolverProps<Handle>) => {
+          const holding = Promise.withResolvers<void>();
+
+          handed.push(props);
+          held.push(holding);
+
+          if (new TextDecoder().decode(props.payload) === 'answer') {
+            await core.respond({ payload: new Uint8Array(0) }, props);
+          }
+
+          await holding.promise;
+        }, echo)
+      );
+
+      return { ...recorded, core, handed, held };
+    };
+
+    const callIdsOfHanded = (handed: IRequestResolverProps<Handle>[]) => {
+      return handed.map(({ header }) => {
+        return header.callId;
+      });
+    };
+
+    test('holds a call whose resolver outlives its cancel among the calls it counts until that resolver settles, and answers CAPACITY_EXCEEDED a request that comes while they and the calls it answers number twice maximumAnsweringCalls', async () => {
+      const { core, handed, held, reported, sent } = createHolding(2);
+
+      core.receive(requestOf(1), 'a');
+      core.receive(requestOf(3), 'a');
+      await sleep(0);
+      // * both resolvers run on past their cancel: the calls leave, their places stay
+      core.receive(cancelOf(1), 'a');
+      core.receive(cancelOf(3), 'a');
+
+      expect(trackedOf(core)).toEqual({
+        answeringCalls: 0,
+        largestTrackedCalls: 2,
+        outlivingResolvers: 2,
+      });
+
+      core.receive(requestOf(5), 'a');
+      core.receive(requestOf(7), 'a');
+      core.receive(requestOf(9), 'a');
+      await sleep(0);
+
+      expect(callIdsOfHanded(handed)).toEqual([1, 3, 5, 7]);
+      expect(failuresOf(sent)).toEqual([
+        [
+          9,
+          ProtocolCode.CAPACITY_EXCEEDED,
+          'the calls a connection answers and those its resolvers outlive are 4 at most',
+        ],
+      ]);
+
+      // one settles: its place goes back among both counts, while the calls answered stay at
+      // their own bound
+      held[0]?.resolve();
+      await sleep(0);
+      core.receive(requestOf(11), 'a');
+      await sleep(0);
+
+      expect(failuresOf(sent).at(-1)).toEqual([
+        11,
+        ProtocolCode.CAPACITY_EXCEEDED,
+        'the calls a connection has answered at once are 2 at most',
+      ]);
+
+      // a call cancelled leaves room among the calls answered, and the next is taken
+      core.receive(cancelOf(5), 'a');
+      core.receive(requestOf(13), 'a');
+      // another connection's counts are its own
+      core.receive(requestOf(1), 'b');
+      await sleep(0);
+
+      expect(callIdsOfHanded(handed)).toEqual([1, 3, 5, 7, 13, 1]);
+      expect(trackedOf(core)).toEqual({
+        answeringCalls: 3,
+        largestTrackedCalls: 4,
+        outlivingResolvers: 2,
+      });
+      expect(reported).toEqual([]);
+      core[Symbol.dispose]();
+    });
+
+    test('holds a call whose resolver outlives its answer among the calls it counts until that resolver settles', async () => {
+      const { core, handed, held, reported, sent } = createHolding(1);
+
+      core.receive(requestOf(1, { payload: ANSWER }), 'a');
+      await sleep(0);
+
+      // answered, its resolver runs on: the call left, its place stays
+      expect(answersOf(sent)).toEqual([['a', 'result', 1, []]]);
+      expect(trackedOf(core)).toEqual({
+        answeringCalls: 0,
+        largestTrackedCalls: 1,
+        outlivingResolvers: 1,
+      });
+
+      core.receive(requestOf(3), 'a');
+      core.receive(requestOf(5), 'a');
+      await sleep(0);
+
+      expect(callIdsOfHanded(handed)).toEqual([1, 3]);
+      expect(failuresOf(sent)).toEqual([
+        [
+          5,
+          ProtocolCode.CAPACITY_EXCEEDED,
+          'the calls a connection answers and those its resolvers outlive are 2 at most',
+        ],
+      ]);
+
+      held[0]?.resolve();
+      await sleep(0);
+
+      expect(trackedOf(core)).toEqual({
+        answeringCalls: 1,
+        largestTrackedCalls: 1,
+        outlivingResolvers: 0,
+      });
+
+      // the calls answered at their own bound still refuse the next, by their own detail
+      core.receive(requestOf(7), 'a');
+      await sleep(0);
+
+      expect(failuresOf(sent).at(-1)).toEqual([
+        7,
+        ProtocolCode.CAPACITY_EXCEEDED,
+        'the calls a connection has answered at once are 1 at most',
+      ]);
+      expect(reported).toEqual([]);
+      core[Symbol.dispose]();
+    });
+
+    test('gives a place back as the resolver that outlives its call settles, whether it resolves, rejects or throws', async () => {
+      const { port, reported, sent } = createPort();
+      using core = createRouterCore(port, {
+        limits: { ...limits, maximumAnsweringCalls: 1, maximumEnvelopeBytes: 1_024 },
+      });
+      const settling = new Map<number, PromiseWithResolvers<void>>();
+
+      core.registerResolver(
+        Object.assign((props: IRequestResolverProps<Handle>) => {
+          // its answer gone, it throws before it returns
+          if (new TextDecoder().decode(props.payload) === 'throws') {
+            void core.respond({ payload: new Uint8Array(0) }, props);
+
+            throw new Error('thrown');
+          }
+
+          const holding = Promise.withResolvers<void>();
+
+          settling.set(props.header.callId, holding);
+
+          return holding.promise;
+        }, echo)
+      );
+
+      const outliving = () => {
+        return core.gauges().counts['outlivingResolvers'];
+      };
+
+      // it resolves, past its cancel
+      core.receive(requestOf(1), 'a');
+      await sleep(0);
+      core.receive(cancelOf(1), 'a');
+
+      expect(outliving()).toBe(1);
+
+      settling.get(1)?.resolve();
+      await sleep(0);
+
+      expect(outliving()).toBe(0);
+
+      // it rejects, past its cancel: reported by none, its call no one's to hear of
+      core.receive(requestOf(3), 'a');
+      await sleep(0);
+      core.receive(cancelOf(3), 'a');
+
+      expect(outliving()).toBe(1);
+
+      settling.get(3)?.reject(new Error('rejected'));
+      await sleep(0);
+
+      expect(outliving()).toBe(0);
+
+      // it throws past its answer, in the turn it was handed: reported, its place back in that turn
+      core.receive(requestOf(5, { payload: new TextEncoder().encode('throws') }), 'a');
+      await sleep(0);
+
+      expect(outliving()).toBe(0);
+
+      // no place held: the next is taken, and the one after refused at the calls answered alone
+      core.receive(requestOf(7), 'a');
+      core.receive(requestOf(9), 'a');
+      await sleep(0);
+
+      expect([...settling.keys()]).toEqual([1, 3, 7]);
+      expect(answersOf(sent)).toEqual([
+        ['a', 'result', 5, []],
+        ['a', 'failure', 9, ProtocolCode.CAPACITY_EXCEEDED],
+      ]);
+      expect(sent.at(-1)?.envelope).toMatchObject({
+        failure: { detail: 'the calls a connection has answered at once are 1 at most' },
+      });
+      expect(codesOf(reported)).toEqual([['thrown', 'a']]);
+    });
+
+    test('holds a peer that cancels each request it sends to twice maximumAnsweringCalls resolvers at once, however many it sends', async () => {
+      const { port, sent } = createPort();
+      using core = createRouterCore(port, { limits: { ...limits, maximumAnsweringCalls: 2 } });
+      let live = 0;
+      let largest = 0;
+
+      core.registerResolver(
+        Object.assign(() => {
+          live += 1;
+          largest = Math.max(largest, live);
+
+          // deaf to its signal, it never settles
+          return new Promise<void>(noop);
+        }, echo)
+      );
+
+      // * the review's probe: a request, its resolver handed it, then its cancel, 200 times
+      for (let round = 0; round < 200; round += 1) {
+        const callId = 2 * round + 1;
+
+        core.receive(requestOf(callId), 'a');
+        await sleep(0);
+        core.receive(cancelOf(callId), 'a');
+      }
+
+      await sleep(0);
+
+      expect([live, largest]).toEqual([4, 4]);
+      expect(
+        answersOf(sent).filter(([, kind, , code]) => {
+          return kind === 'failure' && code === ProtocolCode.CAPACITY_EXCEEDED;
+        })
+      ).toHaveLength(196);
+      expect(sent).toHaveLength(196);
+      expect(trackedOf(core)).toEqual({
+        answeringCalls: 0,
+        largestTrackedCalls: 4,
+        outlivingResolvers: 4,
+      });
+    });
+
+    test('holds a call cancelled while its credential resolves among the calls it counts until its verifier settles', async () => {
+      const verifying: PromiseWithResolvers<ICallSession | undefined>[] = [];
+      const signals: AbortSignal[] = [];
+      const { port, reported, sent } = createPort({
+        credentialSchemes: [CredentialScheme.JWT],
+        sessionOf: ({ header }, signal) => {
+          if (header.credential === undefined) {
+            return undefined;
+          }
+
+          const resolution = Promise.withResolvers<ICallSession | undefined>();
+
+          verifying.push(resolution);
+          signals.push(signal);
+
+          return resolution.promise;
+        },
+      });
+      const seen: IRequestResolverProps<Handle>[] = [];
+      using core = createRouterCore(port, {
+        limits: { ...limits, maximumAnsweringCalls: 1, maximumEnvelopeBytes: 1_024 },
+      });
+
+      core.registerResolver(resolverOf(echo, seen));
+      core.receive(requestOf(1, { credential: JWT }), 'a');
+      core.receive(cancelOf(1), 'a');
+
+      // * its verifier told, it runs on: the call left, its place stays
+      expect(signals[0]?.aborted).toBe(true);
+      expect(trackedOf(core)).toEqual({
+        answeringCalls: 0,
+        largestTrackedCalls: 1,
+        outlivingResolvers: 1,
+      });
+
+      // a call beside it, which its resolver leaves open, then one past both refused
+      core.receive(requestOf(3), 'a');
+      await sleep(0);
+      core.receive(requestOf(5), 'a');
+      await sleep(0);
+
+      expect(failuresOf(sent)).toEqual([
+        [
+          5,
+          ProtocolCode.CAPACITY_EXCEEDED,
+          'the calls a connection answers and those its resolvers outlive are 2 at most',
+        ],
+      ]);
+
+      // its verifier settles, to a session dropped in silence: its place goes back
+      verifying[0]?.resolve(SESSION);
+      await sleep(0);
+
+      expect(trackedOf(core)).toEqual({
+        answeringCalls: 1,
+        largestTrackedCalls: 1,
+        outlivingResolvers: 0,
+      });
+
+      core.receive(requestOf(7), 'a');
+      await sleep(0);
+
+      expect(failuresOf(sent).at(-1)).toEqual([
+        7,
+        ProtocolCode.CAPACITY_EXCEEDED,
+        'the calls a connection has answered at once are 1 at most',
+      ]);
+      expect(callIdsOfHanded(seen)).toEqual([3]);
+      expect(reported).toEqual([]);
+    });
+
+    test('hands nothing to the resolver of a request whose cancel came in the same read', async () => {
+      const { port, reported, sent } = createPort();
+      const seen: IRequestResolverProps<Handle>[] = [];
+      using core = createRouterCore(port);
+
+      core.registerResolver(resolverOf(echo, seen));
+
+      // ! each request and its cancel received in one turn of the router, before its resolver's
+      // own: its call ended before that turn came
+      for (let callId = 1; callId < 200; callId += 2) {
+        core.receive(requestOf(callId), 'a');
+        core.receive(cancelOf(callId), 'a');
+      }
+
+      await sleep(0);
+
+      expect(seen).toEqual([]);
+      expect(sent).toEqual([]);
+      expect(reported).toEqual([]);
+      expect(trackedOf(core)).toEqual({
+        answeringCalls: 0,
+        largestTrackedCalls: 0,
+        outlivingResolvers: 0,
+      });
+    });
+
+    test('closes a connection that it refused twice maximumAnsweringCalls requests in a row past the resolvers that outlive its calls, nothing settling between, and reports it', async () => {
+      const closed: Handle[] = [];
+      const { control, core, held, reported, sent } = createHolding(1, {
+        // what its close rejects with is reported
+        close: (connectionHandle) => {
+          closed.push(connectionHandle);
+
+          return Promise.reject(new Error('the transport would not close'));
+        },
+      });
+      const closeDetail =
+        'the calls a connection answers and those its resolvers outlive stayed at 2 for 2 requests: the connection is closed';
+
+      core.receive(requestOf(1), 'a');
+      await sleep(0);
+      core.receive(cancelOf(1), 'a');
+      core.receive(requestOf(3), 'a');
+      await sleep(0);
+      // the first of a run past both counts
+      core.receive(requestOf(5), 'a');
+      await sleep(0);
+      // a settle, then a request refused at the calls answered alone: the run starts over
+      held[0]?.resolve();
+      await sleep(0);
+      core.receive(requestOf(7), 'a');
+      core.receive(cancelOf(3), 'a');
+      core.receive(requestOf(9), 'a');
+      await sleep(0);
+      // past both again: once
+      core.receive(requestOf(11), 'a');
+      await sleep(0);
+
+      expect(
+        failuresOf(sent).map(([callId]) => {
+          return callId;
+        })
+      ).toEqual([5, 7, 11]);
+      expect(closed).toEqual([]);
+      expect(reported).toEqual([]);
+
+      // twice, in a row: reported at once, and closed once its transport settled that refusal
+      control.held = [];
+      core.receive(requestOf(13), 'a');
+
+      expect(codesOf(reported)).toEqual([[ProtocolCode.CAPACITY_EXCEEDED, 'a']]);
+      expect(reported[0]?.[0]).toMatchObject({ detail: closeDetail });
+
+      // one more refused before the close lands closes nothing more
+      core.receive(requestOf(15), 'a');
+      await sleep(0);
+
+      expect(closed).toEqual([]);
+
+      for (const { resolve } of control.held) {
+        resolve();
+      }
+
+      await sleep(0);
+
+      expect(
+        failuresOf(sent).map(([callId]) => {
+          return callId;
+        })
+      ).toEqual([5, 7, 11, 13, 15]);
+      expect(failuresOf(sent).at(-2)).toEqual([
+        13,
+        ProtocolCode.CAPACITY_EXCEEDED,
+        'the calls a connection answers and those its resolvers outlive are 2 at most',
+      ]);
+      expect(closed).toEqual(['a']);
+      expect(codesOf(reported)).toEqual([
+        [ProtocolCode.CAPACITY_EXCEEDED, 'a'],
+        ['the transport would not close', 'a'],
+      ]);
+      core[Symbol.dispose]();
+    });
+
+    test('tells every resolver still running on a connection as it closes, its call answered or not, and counts those that outlive it side-wide until they settle', async () => {
+      const { core, handed, held, reported, sent } = createHolding(2);
+
+      core.receive(requestOf(1, { payload: ANSWER }), 'a');
+      await sleep(0);
+      core.receive(requestOf(3), 'a');
+      core.receive(requestOf(5), 'a');
+      await sleep(0);
+      core.receive(cancelOf(5), 'a');
+
+      expect(
+        handed.map(({ signal }) => {
+          return signal.aborted;
+        })
+      ).toEqual([false, false, true]);
+
+      core.rejectPending('a closed', 'a');
+
+      // * each told: one answered and one open by the close, one cancelled by its cancel already
+      expect(
+        handed.map(({ signal }): unknown => {
+          return signal.reason;
+        })
+      ).toEqual([
+        expect.any(DisconnectError),
+        expect.any(DisconnectError),
+        expect.any(CancelError),
+      ]);
+      expect(core.gauges().connectionHandles).toEqual(new Set());
+      expect(trackedOf(core)).toEqual({
+        answeringCalls: 0,
+        largestTrackedCalls: 0,
+        outlivingResolvers: 3,
+      });
+
+      // a connection opened again under its handle starts from none of them
+      core.receive(requestOf(1), 'a');
+      core.receive(requestOf(3), 'a');
+      await sleep(0);
+
+      expect(callIdsOfHanded(handed)).toEqual([1, 3, 5, 1, 3]);
+      expect(trackedOf(core)).toEqual({
+        answeringCalls: 2,
+        largestTrackedCalls: 2,
+        outlivingResolvers: 3,
+      });
+
+      // each settles, and its place goes back side-wide alone
+      for (const holding of held.slice(0, 3)) {
+        holding.resolve();
+      }
+
+      await sleep(0);
+
+      expect(trackedOf(core)).toEqual({
+        answeringCalls: 2,
+        largestTrackedCalls: 2,
+        outlivingResolvers: 0,
+      });
+      expect(answersOf(sent)).toEqual([['a', 'result', 1, []]]);
+      expect(reported).toEqual([]);
+      core[Symbol.dispose]();
+    });
   });
 
   test.describe('the transfers it receives', () => {

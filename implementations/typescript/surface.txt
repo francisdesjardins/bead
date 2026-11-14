@@ -1555,6 +1555,7 @@ src/router/client/types.ts IRouterClientTransportLike
   interface IRouterClientTransportLike
     carries?(credential: string): boolean
     readonly clock?: IClock | undefined
+    disconnect?(): Promise<unknown>
     readonly isSecure?: boolean | undefined
     off(event: 'close', listener: (wasClean: boolean, wasQuick: boolean) => void): unknown
     off(event: 'message', listener: (message: ITransportMessage) => void): unknown
@@ -1725,6 +1726,7 @@ src/router/server/types.ts IRouterServerTransportLike
     on(event: 'connection', listener: EmitterListener<[connection: ITransportServerConnection, connectionHandle: TransportServerConnectionHandle]>): unknown
     on(event: 'message', listener: EmitterListener<[message: ITransportMessage, connectionHandle: TransportServerConnectionHandle]>): unknown
     carriesCredential?(connectionHandle: TransportServerConnectionHandle): boolean
+    close?(connectionHandle: TransportServerConnectionHandle): Promise<unknown>
     isSecure?(connectionHandle: TransportServerConnectionHandle): boolean
     isTwoWay?(connectionHandle: TransportServerConnectionHandle): boolean
     takesProcedure?(connectionHandle: TransportServerConnectionHandle, address: IProcedureAddress): boolean
