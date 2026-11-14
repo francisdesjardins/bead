@@ -634,7 +634,7 @@ the listens, the outboxes and the server's life, under one lock on the C# side.
   declare among them ([decision
   0028](../../docs/decisions/0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md));
   a singular closed enum's record of a number its enum does not declare is dropped before the
-  library reads (17.9.8). `ProtoRequired.Check` then refuses a message that leaves a field of
+  library reads (17.9.8). The required walk then refuses a message that leaves a field of
   `LEGACY_REQUIRED` presence unset, at any depth but inside an extension or an `Any`, reading and
   writing, with a `FormatException` of the same reason (17.9.7, [decision
   0042](../../docs/decisions/0042-a-proto-message-that-leaves-a-required-field-unset-neither-reads-nor-writes-and-a-gateway-refuses-it-where-its-server-would.md)),

@@ -285,15 +285,16 @@ A value nested past the bound in its known fields that also leaves a required fi
 refused for its depth, as the pass runs first. One residual is the application's: unknown fields it
 builds by hand (Buffa's `UnknownFields` is public) deeper than its stack recurse in the library
 before the check, as the drop of a deep owned message is the application's own recursion. The
-public walks are bounded alike: the C# side's `ProtoRequired.Check` refuses past the bound with the
-same `FormatException`, its `UnsetOf` internal; the Rust side's `check_required` with the same
+required walk is internal on every side, as the TypeScript side's is, and bounded where it would
+recurse. The C# side's `ProtoRequired.Check` refuses past the bound with the same
+`FormatException`, its `UnsetOf` beside it. The Rust side's `checked` refuses with the same
 `CodecRefusal`, its `unset_of`, `Unset`, `UnsetStep` and `Place` the crate's own, which only its
-tests call; the TypeScript side exports no required walk. Every path that writes a `proto` value
-an application gives goes through the codec's write: the typed and dynamic codecs and the generated
-bindings. The HTTP gateway writes the request its JSON reader built, which that reader refuses past
-the bound, counting as the wire nests, and which holds no unknown field, so its library writes it
-directly. On the Rust side the pass rides in the required walk, which carries the depth, and guards
-the walk itself; Buffa's own writer needs no guard.
+tests call. Every path that writes a `proto` value an application gives goes through the codec's
+write: the typed and dynamic codecs and the generated bindings. The HTTP gateway writes the
+request its JSON reader built, which that reader refuses past the bound, counting as the wire
+nests, and which holds no unknown field, so its library writes it directly. On the Rust side the
+pass rides in the required walk, which carries the depth, and guards the walk itself; Buffa's own
+writer needs no guard.
 
 A reading's required walk judges no depth: the records check held the wire to the bound before the
 library read it. Each library gives a map's entry that held no value its value's default, a message

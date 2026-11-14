@@ -148,8 +148,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - **Breaking:** C#'s `MqttBrokerTlsOptions` and `AmqpBrokerTlsOptions`, whose adapters take
   `TlsOptions` (decision 0053).
-- **Breaking:** the public required walk, Rust's `check_required`. The walk is internal, as the
-  TypeScript side's is, and the codec still runs it on a read and a write (decision 0047).
+- **Breaking:** the public required walk, C#'s `ProtoRequired.Check` and Rust's `check_required`.
+  The walk is internal on every side, as the TypeScript side's is, and each codec still runs it on a
+  read and a write (decision 0047).
 
 ### Fixed
 

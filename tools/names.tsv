@@ -1,4 +1,4 @@
-# alone: typescript 271, csharp 50, rust 75
+# alone: typescript 271, csharp 49, rust 75
 # concept	typescript	csharp	rust	class
 ACCEPT_TIMEOUT	ACCEPT_TIMEOUT [constant]	-	ACCEPT_TIMEOUT [constant]	same
 AccessRefusal	IAccessRefusal [record]	AccessRefusal [record]	AccessRefusal [record]	same
@@ -609,7 +609,6 @@ protoCodecOf	protoCodecOf [function]	ProtoCodecs.Of [function]	ProtoCodec [recor
 ProtoCodecs.Read	-	ProtoCodecs.Read [function]	-	alone
 PROTOCOL_TYPES	PROTOCOL_TYPES [constant]	-	-	alone
 ProtocolFailure	IProtocolFailure [record]	-	-	alone
-ProtoRequired.Check	-	ProtoRequired.Check [function]	-	alone
 ProtoSchema	-	-	ProtoSchema [record]	alone
 RawCodec	-	-	RawCodec [record]	alone
 RawPath	IRawPath [record]	-	-	alone
