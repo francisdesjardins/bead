@@ -1,12 +1,15 @@
-//! A server's requests: its transport, admissions before decoding, routing refusals, and the
-//! connection and parity of each incoming call.
+//! A server's requests: its transport, admissions before decoding, routing refusals, the
+//! connection and parity of each incoming call, and the close of a connection refused past the
+//! resolvers that outlive its calls, its transport's close panicking.
 
 use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
+use tokio::sync::oneshot;
+use tokio_util::sync::CancellationToken;
 
 use super::server::{Served, first, news, request_of, second, subscribing_of};
-use super::{locked, result_of};
+use super::{cancel_of, locked, result_of};
 use crate::NotificationResolverDependencies;
 use crate::constants::{ProtocolCode, RouterSide};
 use crate::envelope::{Credential, Envelope, NotificationHeader, RequestHeader};
@@ -15,8 +18,11 @@ use crate::payloads::{CodecRefusal, PayloadCodec, TextCodec};
 use crate::router::admissions::BeforeRequest;
 use crate::router::core::Handler;
 use crate::router::server::RouterServerOptions;
-use crate::router::types::{CallSession, ConnectionHandle, TransportMessage};
+use crate::router::types::{
+    CallSession, ConnectionHandle, RouterError, RouterLimitsOptions, TransportMessage,
+};
 use crate::testing::pair::echo;
+use crate::testing::scripted::{ClosingOptions, Sending};
 
 // A refused request is deliberately unreadable: the decode history proves its admission comes
 // first, rather than merely obtaining the same refusal from another stage.
@@ -490,4 +496,179 @@ async fn requests_refuse_a_second_resolver_for_one_procedure() {
     assert!(served.router.register_resolver((&echo(), idle())).is_err());
     assert_eq!(served.transport.take(), Vec::new());
     assert_eq!(served.reported(), Vec::<String>::new());
+}
+
+// each failure sent on the first connection: its call id, its code and its detail
+fn refusals_of(served: &Served) -> Vec<(u32, u16, String)> {
+    served
+        .transport
+        .envelopes(&first())
+        .iter()
+        .filter_map(|envelope| match envelope {
+            Envelope::Failure { failure, .. } => Some((
+                envelope.call_id(),
+                failure.code.get(),
+                failure.detail.clone(),
+            )),
+            Envelope::Request { .. }
+            | Envelope::Result { .. }
+            | Envelope::Notification { .. }
+            | Envelope::Chunk { .. }
+            | Envelope::Credit { .. }
+            | Envelope::Cancel { .. } => None,
+        })
+        .collect()
+}
+
+// spec 9.2; RFC 9113 §10.5
+#[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "a twin plays its sentence whole, as the other sides' twins do"
+)]
+async fn closes_a_connection_that_it_refused_twice_maximum_answering_calls_requests_in_a_row_past_the_resolvers_that_outlive_its_calls_nothing_settling_between_and_reports_it()
+ {
+    let close_detail = "the calls a connection answers and those its resolvers outlive stayed at 2 for 2 requests: the connection is closed";
+
+    // its transport's close panics as it is called, or as it settles
+    for at_call in [false, true] {
+        let served = Served::new(&RouterServerOptions {
+            limits: Some(RouterLimitsOptions {
+                maximum_answering_calls: Some(1),
+                ..RouterLimitsOptions::default()
+            }),
+            ..RouterServerOptions::default()
+        });
+        let held: Arc<Mutex<Vec<Option<oneshot::Sender<()>>>>> = Arc::default();
+        let holding = Arc::clone(&held);
+        let deliver = |call_ids: &[(u32, bool)]| {
+            for &(call_id, is_cancel) in call_ids {
+                let envelope = if is_cancel {
+                    cancel_of(call_id)
+                } else {
+                    request_of((call_id, &echo(), ""))
+                };
+
+                served.transport.deliver(&envelope, &first());
+            }
+        };
+        let call_ids = || {
+            refusals_of(&served)
+                .into_iter()
+                .map(|(call_id, _, _)| call_id)
+                .collect::<Vec<_>>()
+        };
+
+        // what its close panics with is reported
+        served.transport.close_as(&ClosingOptions {
+            panicked: Some("the transport would not close".to_owned()),
+            at_call: Some(at_call),
+            ..ClosingOptions::default()
+        });
+        served.transport.open(&first(), true);
+        // deaf to its signal, each resolver settles when the test says
+        served
+            .router
+            .register_resolver((
+                &echo(),
+                Handler {
+                    resolve: Arc::new(move |_props| {
+                        let (settles, settled) = oneshot::channel::<()>();
+
+                        locked(&holding).push(Some(settles));
+
+                        Box::pin(async move {
+                            settled.await.ok();
+
+                            Ok(())
+                        })
+                    }),
+                    ..idle()
+                },
+            ))
+            .expect("echo registered");
+
+        deliver(&[(1, false)]);
+        served.settle().await;
+        deliver(&[(1, true), (3, false)]);
+        served.settle().await;
+        // the first of a run past both counts
+        deliver(&[(5, false)]);
+        served.settle().await;
+        // a settle, then a request refused at the calls answered alone: the run starts over
+        locked(&held)
+            .first_mut()
+            .and_then(Option::take)
+            .expect("the first resolver held")
+            .send(())
+            .ok();
+        served.settle().await;
+        deliver(&[(7, false), (3, true), (9, false)]);
+        served.settle().await;
+        // past both again: once
+        deliver(&[(11, false)]);
+        served.settle().await;
+
+        assert_eq!(call_ids(), [5, 7, 11]);
+        assert_eq!(served.transport.closed(), Vec::<ConnectionHandle>::new());
+        assert_eq!(served.reported(), Vec::<String>::new());
+
+        // twice, in a row: reported at once, and closed once its transport settled that refusal
+        let released = CancellationToken::new();
+
+        served.transport.send_as((
+            &first(),
+            Sending::Waiting {
+                released: released.clone(),
+                outcome: Ok(()),
+            },
+        ));
+        deliver(&[(13, false)]);
+        served.settle().await;
+
+        assert_eq!(served.reported(), ["CAPACITY_EXCEEDED first"]);
+
+        let detail = locked(&served.reports)
+            .first()
+            .and_then(|(error, _)| match error {
+                RouterError::Failure(failure) => Some(failure.detail().to_owned()),
+                RouterError::ReadyState(_)
+                | RouterError::Disconnected(_)
+                | RouterError::Other(_) => None,
+            });
+
+        assert_eq!(detail.as_deref(), Some(close_detail));
+
+        // one more refused before the close lands closes nothing more
+        deliver(&[(15, false)]);
+        served.settle().await;
+
+        assert_eq!(served.transport.closed(), Vec::<ConnectionHandle>::new());
+
+        released.cancel();
+        served.settle().await;
+
+        assert_eq!(call_ids(), [5, 7, 11, 13, 15]);
+
+        let refusals = refusals_of(&served);
+
+        assert_eq!(
+            refusals.get(refusals.len().saturating_sub(2)),
+            Some(&(
+                13,
+                ProtocolCode::CAPACITY_EXCEEDED.get().get(),
+                "the calls a connection answers and those its resolvers outlive are 2 at most"
+                    .to_owned()
+            ))
+        );
+        assert_eq!(served.transport.closed(), [first()]);
+        assert_eq!(
+            served.reported(),
+            [
+                "CAPACITY_EXCEEDED first",
+                "a transport panicked: the transport would not close first"
+            ],
+            "its close panicking as it is called: {at_call}"
+        );
+    }
 }
