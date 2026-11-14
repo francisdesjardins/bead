@@ -1058,28 +1058,31 @@ async fn delivers_a_message_sent_in_frames_as_one_and_names_its_connection() {
 }
 
 #[tokio::test]
-async fn emits_connection_before_a_frame_that_arrived_with_the_upgrade_request() {
-    let (server, recorder, port) = started(&briefly_closing()).await;
-    let mut socket = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
-    let mut request = request_of("GET / HTTP/1.1", &["Host: 127.0.0.1"]).into_bytes();
+async fn raises_connection_before_a_frame_that_arrived_with_the_upgrade_request() {
+    for (opcode, bytes) in [(0x2, &[7][..]), (0x1, &b"early"[..])] {
+        let (server, recorder, port) = started(&briefly_closing()).await;
+        let mut socket = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        let mut request = request_of("GET / HTTP/1.1", &["Host: 127.0.0.1"]).into_bytes();
 
-    request.extend(masked_frame(0x2, (&[7], true)));
-    socket.write_all(&request).await.unwrap();
+        request.extend(masked_frame(opcode, (bytes, true)));
+        socket.write_all(&request).await.unwrap();
 
-    let messages = recorder.messages(1).await;
+        let messages = recorder.messages(1).await;
 
-    assert_eq!(
-        recorder.order()[..2],
-        ["connection", "message"],
-        "its connection told first"
-    );
-    assert_eq!(
-        messages[0].1,
-        recorder.connections(1).await[0],
-        "on that connection"
-    );
-    assert_eq!(&*messages[0].0.data, &[7], "the frame read with the head");
-    stopped(&server).await;
+        assert_eq!(
+            recorder.order(),
+            ["connection", "message"],
+            "its connection told first, with no extra event"
+        );
+        assert_eq!(
+            messages[0].1,
+            recorder.connections(1).await[0],
+            "on that connection"
+        );
+        assert_eq!(&*messages[0].0.data, bytes, "the frame read with the head");
+        assert_eq!(messages[0].0.is_text, opcode == 0x1, "its frame kind");
+        stopped(&server).await;
+    }
 }
 
 #[tokio::test]
@@ -1650,15 +1653,35 @@ async fn fails_with_1009_a_message_past_its_bound_telling_one_error_that_names_m
     stopped(&server).await;
 }
 
-#[tokio::test]
-async fn closes_with_1009_a_message_past_an_envelope_s_limit_16_778_240_bytes_when_told_no_bound() {
+async fn checks_the_default_envelope_limit() {
     let (server, recorder, port) = started(&briefly_closing()).await;
     let mut client = client(port).await;
     let handle = recorder.connections(1).await.remove(0);
     let past = usize::try_from(MAXIMUM_MESSAGE_BYTES).unwrap() + 1;
 
+    client.send(binary(&vec![0; past - 1])).await.unwrap();
+
+    let messages = recorder.messages(1).await;
+
+    assert_eq!(
+        messages[0].0.data.len(),
+        16_778_240,
+        "the exact limit taken"
+    );
+    assert_eq!(messages[0].1, handle, "its connection");
+    assert!(!messages[0].0.is_text, "binary");
     client.send(binary(&vec![0; past])).await.unwrap();
 
+    assert!(
+        matches!(
+            next_of(&mut client).await,
+            Some(Ok(Message::Close(Some(CloseFrame {
+                code: CloseCode::Size,
+                ..
+            }))))
+        ),
+        "one byte past the limit closes with 1009"
+    );
     while let Some(Ok(_)) = next_of(&mut client).await {}
 
     assert_eq!(
@@ -1673,7 +1696,27 @@ async fn closes_with_1009_a_message_past_an_envelope_s_limit_16_778_240_bytes_wh
         ),
         "an envelope's limit"
     );
+    assert!(server.clients().is_empty(), "none held");
+    assert!(
+        server.gauges().unwrap().connection_handles.is_empty(),
+        "no handle held"
+    );
+    assert_eq!(
+        recorder.count(|told| told.messages.len()),
+        1,
+        "nothing past the bound heard"
+    );
     stopped(&server).await;
+}
+
+#[tokio::test]
+async fn closes_with_1009_a_message_past_an_envelope_s_limit_16_778_240_bytes_when_told_no_bound() {
+    checks_the_default_envelope_limit().await;
+}
+
+#[tokio::test]
+async fn closes_with_1009_a_message_past_an_envelope_s_limit_16778240_bytes_when_told_no_bound() {
+    checks_the_default_envelope_limit().await;
 }
 
 #[tokio::test]
