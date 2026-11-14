@@ -227,7 +227,9 @@ decision of its own.
   `authorities` are given and on webpki over them where they are, the certificate by
   `with_client_auth_cert`, so a certificate with the platform's roots works; an application's own
   `ClientConfig` is a client's `client_config`. The MQTT 5 adapter takes `tls: Option<TlsOptions>`
-  alone.
+  alone. The gateway's caller, `HttpCaller`, takes `tls` and `client_config` as the clients do,
+  refused together. The TypeScript and C# callers take their `fetch` and their `Handler` alone,
+  and a row of the matrix holds that difference.
 
 ### The test PKI and the TLS front
 

@@ -1008,3 +1008,142 @@ fn frames_events_across_chunks_by_any_line_end_and_refuses_a_line_of_no_utf_8() 
         "an end with no failure"
     );
 }
+
+// ── Its TLS ──────────────────────────────────────────────────────────────────────────────────
+
+// the service's gateway on its own listener, in the clear, and the port it listens on
+async fn gateway_in_the_clear(service: &Service) -> (Server, ServiceServer, HttpGateway, u16) {
+    let memory = MemoryTransportServer::new(&MemoryTransportServerOptions::default())
+        .expect("the in-memory transport");
+    let server =
+        Server::new(Arc::new(memory.clone()), &ServerOptions::default()).expect("the server");
+    let offered = offered_on(service, &server);
+
+    memory.start().await.expect("started");
+
+    let gateway =
+        HttpGateway::new(&HttpGatewayOptions::new(memory, service.routes())).expect("the gateway");
+    let start = HttpGatewayStartOptions {
+        address: Some(HOST.to_owned()),
+        port: Some(0),
+        find_open_port: Some(true),
+        ..HttpGatewayStartOptions::default()
+    };
+    let port = gateway.start(&start).await.expect("listening").port;
+
+    (server, offered, gateway, port)
+}
+
+// spec 15.39
+#[tokio::test]
+async fn calls_its_gateway_presenting_a_client_certificate_under_an_intermediate_to_a_server_that_requires_one_trusting_it_by_the_authorities_it_is_given()
+ {
+    use crate::testing::tls::{PkiServerOptions, TlsFront, pki, pki_client};
+
+    let service = Service::new();
+    let (server, _offered, gateway, port) = gateway_in_the_clear(&service).await;
+    let front = TlsFront::to(port, &PkiServerOptions::default())
+        .await
+        .expect("the front");
+    let url = format!("https://127.0.0.1:{}", front.port());
+    let routes = service.routes();
+    let options = HttpCallOptions::default();
+    // * root.pem its authorities, client-chain.pem its certificate and its intermediate
+    let caller = caller_of(
+        &url,
+        &HttpCallerOptions {
+            tls: Some(pki_client().expect("the PKI's client")),
+            ..HttpCallerOptions::default()
+        },
+    );
+    let echo = caller
+        .requester_of(&routes[0], &service.echo)
+        .expect("echo's requester");
+
+    assert_eq!(
+        settled(echo.call(&"hi".to_owned(), &options))
+            .await
+            .expect("echo's result"),
+        "hi!",
+        "called over TLS, its certificate presented"
+    );
+
+    // * the root alone, no certificate presented: its server refuses the handshake
+    let untrusted = caller_of(
+        &url,
+        &HttpCallerOptions {
+            tls: Some(TlsOptions {
+                authorities: Some(pki("root.pem").expect("the root")),
+                ..TlsOptions::default()
+            }),
+            ..HttpCallerOptions::default()
+        },
+    )
+    .requester_of(&routes[0], &service.echo)
+    .expect("echo's requester");
+
+    assert!(
+        settled(untrusted.call(&"hi".to_owned(), &options))
+            .await
+            .is_err(),
+        "no certificate presented, no call"
+    );
+    front.dispose();
+    gateway.dispose().await.expect("the gateway disposed");
+    server.dispose().await.expect("the server disposed");
+}
+
+// spec 15.39
+#[tokio::test]
+async fn refuses_tls_beside_a_client_config_which_keeps_a_tls_of_its_own_and_one_that_does_not_read()
+ {
+    use crate::testing::tls::{client_config, pki, pki_client};
+
+    let refused = HttpCaller::new(
+        "https://localhost",
+        &HttpCallerOptions {
+            client_config: Some(client_config().expect("a config")),
+            tls: Some(pki_client().expect("the PKI's client")),
+            ..HttpCallerOptions::default()
+        },
+    )
+    .expect_err("tls beside a client_config");
+
+    assert_eq!(
+        refused.message(),
+        "tls is refused beside a client_config, which keeps a TLS of its own",
+        "refused"
+    );
+
+    // * a tls of no member is none, taken beside it
+    assert!(
+        HttpCaller::new(
+            "https://localhost",
+            &HttpCallerOptions {
+                client_config: Some(client_config().expect("a config")),
+                tls: Some(TlsOptions::default()),
+                ..HttpCallerOptions::default()
+            },
+        )
+        .is_ok(),
+        "an empty tls taken"
+    );
+
+    let refused = HttpCaller::new(
+        "https://localhost",
+        &HttpCallerOptions {
+            tls: Some(TlsOptions {
+                certificate: Some(pki("client-chain.pem").expect("the chain")),
+                ..TlsOptions::default()
+            }),
+            ..HttpCallerOptions::default()
+        },
+    )
+    .expect_err("a certificate without its key");
+
+    assert_eq!(
+        refused.message(),
+        "a TLS client certificate is given with its key, and a key with its certificate",
+        "unpaired"
+    );
+}
