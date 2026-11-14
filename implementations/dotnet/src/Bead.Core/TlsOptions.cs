@@ -259,6 +259,12 @@ internal sealed class TlsCredentials : IDisposable
         if (_context is not null)
         {
             options.ClientCertificateContext = _context;
+
+            // ! on Windows a handshake that presents a certificate starts anonymous, and .NET caches
+            // that anonymous credential, which Schannel then ties to the certificate, under the key a
+            // client given none reads: that client would present this certificate. Resumption off
+            // keeps it under another key
+            options.AllowTlsResume = !OperatingSystem.IsWindows();
         }
 
         if (Authorities is not null)

@@ -557,7 +557,10 @@ the listens, the outboxes and the server's life, under one lock on the C# side.
   beside authorities alone. Its leaf is imported again from PKCS #12, since Schannel refuses an
   ephemeral key, and on Windows the platform writes the intermediates into the user's CA store,
   from which Schannel sends them. The brokers' libraries take a collection, presented as the leaf
-  alone, or nothing on Windows, where no store holds its intermediates (`docs/support.md`).
+  alone, or nothing on Windows, where no store holds its intermediates (`docs/support.md`). On
+  Windows a client that presents a certificate resumes no TLS session. .NET caches the anonymous
+  credential its handshake starts with, and Schannel ties it to the certificate: a client given
+  none would read it and present that certificate.
 - **The credential a transport carries** beside an envelope, which a call presenting `ELSEWHERE`
   stands for: over HTTP, each `POST`'s `Authorization`; over a WebSocket, its upgrade's, for every
   envelope of the connection, toward its server alone (spec 15.2, [decision
