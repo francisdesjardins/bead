@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { cpSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { fromBinary, toBinary } from '@bufbuild/protobuf';
@@ -9,6 +9,7 @@ import { FileDescriptorSetSchema } from '@bufbuild/protobuf/wkt';
 import { expect, test } from '@playwright/test';
 
 import { compile } from '../../compile.ts';
+import { BEADC_FOLDER } from '../../config.ts';
 import { type IDiagnostic, InputError } from '../../diagnostics.ts';
 import { BEADC_FILES, displayOf, OPTIONS_FILE } from '../../roots.ts';
 import { Category } from '../../rules.ts';
@@ -27,6 +28,16 @@ import {
 const PAIR = fileURLToPath(new URL('../../../test/breaking/buf/', import.meta.url));
 const EARLIER = join(PAIR, 'earlier');
 const CURRENT = join(PAIR, 'current');
+
+// ! a fixture's .proto alone: a case comparing against the fixture in place holds its work area there
+const copyFixture = (from: string, to: string): void => {
+  cpSync(from, to, {
+    recursive: true,
+    filter: (source) => {
+      return basename(source) !== BEADC_FOLDER;
+    },
+  });
+};
 
 // buf's breaking rules at its pin, as `buf config ls-breaking-rules` lists them
 const bufRules = (): { id: string; deprecated: boolean; categories: string[] }[] => {
@@ -113,8 +124,8 @@ test('bead/options.proto and an import dropped are never compared', () => {
   const earlierRoot = join(pair, 'earlier');
   const currentRoot = join(pair, 'current');
 
-  cpSync(EARLIER, earlierRoot, { recursive: true });
-  cpSync(CURRENT, currentRoot, { recursive: true });
+  copyFixture(EARLIER, earlierRoot);
+  copyFixture(CURRENT, currentRoot);
 
   const earlier = compile([earlierRoot], { image: true });
   const current = fromBinary(FileDescriptorSetSchema, compile([currentRoot], { image: true }));
@@ -226,7 +237,7 @@ test("a file the current lost is placed at the earlier's path, which a buf: scop
   const earlier = test.info().outputPath('earlier');
   const lost = join(earlier, 'parcel', 'v1', 'lost.proto');
 
-  cpSync(EARLIER, earlier, { recursive: true });
+  copyFixture(EARLIER, earlier);
   writeFileSync(
     lost,
     'syntax = "proto3";\n\npackage parcel.v1;\n\nmessage Lost {\n  string name = 1;\n}\n'
