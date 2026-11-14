@@ -48,7 +48,9 @@ impl HttpBinding {
     ///
     /// [`MessageFormError::Form`] for what the binding or the mapping refuses, at its place in the
     /// request, which a gateway answers 400 `PAYLOAD_UNDECODABLE`; [`MessageFormError::Programmer`]
-    /// for a variable that names no field.
+    /// for a variable that names no field, and [`MessageFormError::Undecodable`] for a message its
+    /// stock library does not encode, past its bound, which a gateway answers 500 `failed`,
+    /// reported.
     pub fn bind(
         &self,
         schema: &ProtoSchema,

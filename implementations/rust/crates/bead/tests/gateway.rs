@@ -2618,6 +2618,56 @@ async fn answers_what_no_gate_foresaw_500_reported_none_of_its_words_in_the_prob
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn answers_a_route_s_variable_that_names_no_field_500_reported_none_of_its_words_in_the_problem()
+ {
+    // * getBook's route told its path is /v1/{nope}, which no field of its request names: a
+    // programmer's error its binding meets, past every gate, before any connection is drawn
+    let fixture = started_with((
+        |options: &mut HttpGatewayOptions| {
+            options.routes = changed_routes(
+                &options.routes,
+                ("getBook", &|route| {
+                    bead::route_of(bead::HttpRouteInit {
+                        procedure: route.procedure().clone(),
+                        request: route.request().clone(),
+                        result: route.result().clone(),
+                        notification: route.notification().cloned(),
+                        failures: route.failures().to_vec(),
+                        no_side_effects: route.no_side_effects(),
+                        routes: vec![bead::HttpRouteTemplate {
+                            method: bead::HttpMethod::Get,
+                            template: "/v1/{nope}".to_owned(),
+                            body: None,
+                            response_body: None,
+                        }],
+                    })
+                    .expect("a route")
+                }),
+            );
+        },
+        true,
+    ))
+    .await;
+    let reported = reported_by(&fixture);
+    let drawn = drawn_by(&fixture);
+    let answered = asked(fixture.port, (&["GET /v1/x HTTP/1.1"], "")).await;
+
+    assert_eq!(answered.head.status, 500);
+    assert_eq!(
+        text_of(&answered),
+        "{\"status\":500,\"title\":\"Internal Server Error\",\"type\":\"about:blank\"}"
+    );
+    assert_eq!(drawn.count.load(Ordering::SeqCst), 0);
+
+    let reported = locked(&reported).clone();
+
+    assert_eq!(reported.len(), 1, "{reported:?}");
+    assert!(reported[0].contains("nope"), "{reported:?}");
+
+    fixture.dispose().await.expect("disposed");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn answers_500_a_connection_its_server_failed_to_draw_but_by_refusing_it_reported_with_no_detail()
  {
     // * the Rust form: its in-memory connect refused as it is made, its timer one its clock will

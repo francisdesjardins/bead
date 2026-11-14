@@ -1804,7 +1804,7 @@ impl Inner {
         // 11: its binding and its reading
         let payload = match bound_of(served, (&path, (query.as_deref(), read.as_ref()))) {
             Ok(payload) => payload,
-            Err(refused) => {
+            Err(MessageFormError::Form(refused)) => {
                 // * the mapping's own words of the client's own request, and where the request
                 // carried what it refuses, cut, never in its words (7.4)
                 let problem = problem_of_failure(
@@ -1824,6 +1824,16 @@ impl Inner {
                         ..ProblemOptions::default()
                     },
                 );
+
+                return self.answer_problem((&exchange, problem), None);
+            }
+            Err(other) => {
+                // ! what no gate foresaw, a variable that names no field of its message or a
+                // message its stock library does not encode: its words are reported, never the
+                // gateway's
+                self.report(&RouterError::Other(Arc::new(other)));
+
+                let problem = self.own_problem(OwnFailure::Failed, "");
 
                 return self.answer_problem((&exchange, problem), None);
             }
@@ -2330,9 +2340,11 @@ type ChosenRoute = (usize, RawPath, Option<String>);
 fn bound_of(
     served: &Served,
     (path, (query, body)): (&RawPath, (Option<&str>, Option<&Bytes>)),
-) -> Result<Bytes, JsonFormError> {
+) -> Result<Bytes, MessageFormError> {
     let variables = variables_of(&served.template, path).map_err(|refusal| {
-        JsonFormError::new(refusal.reason).at(RequestPlace::Parameter(refusal.field_path))
+        MessageFormError::Form(
+            JsonFormError::new(refusal.reason).at(RequestPlace::Parameter(refusal.field_path)),
+        )
     })?;
     let template = served.template();
 
@@ -2344,18 +2356,14 @@ fn bound_of(
         options.query = query;
         options.route_body = template.body.as_deref();
 
-        return form.bind(&options).map_err(|error| match error {
-            MessageFormError::Form(error) => error,
-            MessageFormError::Undecodable(refusal) => JsonFormError::new(refusal.to_string()),
-            MessageFormError::Programmer(error) => JsonFormError::new(error.to_string()),
-        });
+        return form.bind(&options);
     }
 
     // * a query of empty sequences alone, `?&`, carries no parameter, as a message's binds none
     if query.is_some_and(|query| query.split('&').any(|sequence| !sequence.is_empty())) {
-        return Err(JsonFormError::new(
+        return Err(MessageFormError::Form(JsonFormError::new(
             "a query beside a body of the whole request",
-        ));
+        )));
     }
 
     Ok(body.cloned().unwrap_or_default())

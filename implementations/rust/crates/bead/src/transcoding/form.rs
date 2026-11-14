@@ -112,9 +112,12 @@ impl<'a> BindingOptions<'a> {
 pub enum MessageFormError {
     /// What the mapping refuses, its words and its place.
     Form(JsonFormError),
-    /// A payload its stock library does not read: 502, code 50, reported, never in a problem.
+    /// A payload its stock library does not read or write: a result's, which a gateway answers 502,
+    /// code 50, or a request's it binds but cannot encode, past the library's bound, which it answers
+    /// 500 `failed`; reported, never in a problem.
     Undecodable(CodecRefusal),
-    /// A route its message does not hold: a programmer's error.
+    /// A route its message does not hold, a programmer's error: a gateway answers 500 `failed`,
+    /// reported, never in a problem.
     Programmer(ProgrammerError),
 }
 
@@ -153,8 +156,10 @@ pub trait MessageForm: fmt::Debug + Send + Sync + 'static {
     ///
     /// # Errors
     ///
-    /// What the mapping refuses, at its place; a programmer's error for a variable that names no
-    /// field.
+    /// [`MessageFormError::Form`] for what the mapping refuses, at its place, which a gateway
+    /// answers 400 `PAYLOAD_UNDECODABLE` in the mapping's words; [`MessageFormError::Programmer`]
+    /// for a variable that names no field, and [`MessageFormError::Undecodable`] for a message its
+    /// stock library does not encode, which it answers 500 `failed`, reported.
     fn bind(&self, options: &BindingOptions<'_>) -> Result<Bytes, MessageFormError>;
 
     /// A JSON text read as a message of it (5.2), encoded: a caller's result, an event's data.
