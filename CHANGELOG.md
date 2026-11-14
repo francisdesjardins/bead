@@ -137,11 +137,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   TLS is refused in the same words, authorities alone among it; the Rust side's `ClientConfig` is a
   client's `client_config`, the gateway caller's among them, and its MQTT 5 adapter takes none
   (decision 0053).
+- `tools/check-names.mjs` holds a rendering to the records its rule names, each of which writes the
+  rule's tag. It reads a C# static class of constants as one name and as its members, placed by one
+  or the other. It keys a Rust module's item with its module, and a C# static member's bare member
+  only where it has two words or more (decision 0047).
+- **Breaking:** the Rust side's `check_records` is `check_proto_records`, the other sides'
+  `checkProtoRecords` and `ProtoRecords.Check` (decisions 0044, 0047).
 
 ### Removed
 
 - **Breaking:** C#'s `MqttBrokerTlsOptions` and `AmqpBrokerTlsOptions`, whose adapters take
   `TlsOptions` (decision 0053).
+- **Breaking:** the public required walk, C#'s `ProtoRequired.Check` and Rust's `check_required`.
+  The walk is internal on every side, as the TypeScript side's is, and each codec still runs it on a
+  read and a write (decision 0047).
 
 ### Fixed
 

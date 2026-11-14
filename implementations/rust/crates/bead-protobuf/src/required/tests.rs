@@ -16,7 +16,7 @@ use buffa_descriptor::reflect::{
 
 use buffa::MessageField;
 
-use super::{Place, bounded, check_required, unset_of};
+use super::{Place, Presence, bounded, checked, unset_of};
 use crate::records::ProtoSchema;
 use crate::testing::codecs::{self, Probe};
 use crate::testing::test::{
@@ -337,14 +337,14 @@ fn check_stops_at_the_bound_and_refuses() {
         let schema = ProtoSchema::of::<Loop>();
 
         assert_eq!(
-            check_required(&looped(100), &schema),
+            checked(&looped(100), (&schema, Presence::Given)),
             Ok(()),
             "100 below the top"
         );
 
         for levels in [101, 10_000] {
             let deep = looped(levels);
-            let refusal = check_required(&deep, &schema).expect_err("past the bound");
+            let refusal = checked(&deep, (&schema, Presence::Given)).expect_err("past the bound");
 
             assert_eq!(
                 refusal.reason(),

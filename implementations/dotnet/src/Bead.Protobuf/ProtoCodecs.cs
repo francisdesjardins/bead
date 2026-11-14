@@ -8,7 +8,7 @@ namespace Bead.Protobuf;
 /// its records checked against its descriptor before Google.Protobuf reads them
 /// (<see cref="ProtoRecords"/>, decision 0028), a singular closed enum's record of a number its enum
 /// declares no value of dropped first (17.9.8), the bound of 17.9.3 set in the call, then the
-/// message refused where it leaves a required field unset (<see cref="ProtoRequired"/>, 17.9.7). A
+/// message refused where it leaves a required field unset (its required walk, 17.9.7). A
 /// value is written as its reader would read it (17.2, decision 0031): refused before
 /// Google.Protobuf writes any of it where its known fields nest past the bound
 /// (<see cref="ProtoDepth"/>) or the same walk finds a required field unset; then its bytes checked

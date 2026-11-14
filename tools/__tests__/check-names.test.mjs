@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 import {
+  citationProblemsOf,
   cSharpNamesOf,
   differencesOf,
   keyOf,
@@ -9,6 +10,7 @@ import {
   problemsOf,
   publicLinesOf,
   rowsOf,
+  RULE_RECORDS,
   RULES,
   rustNamesOf,
   seedOf,
@@ -76,6 +78,7 @@ const CSHARP_SHIPPED = [
   'Bead.HttpEvent<TResult, TNotification>.IsResult.get -> bool',
   'Bead.LimitDefaults',
   'const Bead.LimitDefaults.ChunkBytes = 1048576 -> int',
+  'const Bead.LimitDefaults.FrameBytes = 16384 -> int',
   'Bead.MemoryTransportClient',
   'Bead.MemoryTransportClient.Pause() -> void',
   'Bead.TransportReconnectDelay',
@@ -274,6 +277,8 @@ describe('the lists', () => {
       'HttpEvent<,>': 'record',
       HttpEvent: 'record',
       LimitDefaults: 'constant',
+      'LimitDefaults.ChunkBytes': 'constant',
+      'LimitDefaults.FrameBytes': 'constant',
       MemoryTransportClient: 'record',
       'Violations.ClosingBytes': 'constant',
       'Violations.Of': 'function',
@@ -282,6 +287,37 @@ describe('the lists', () => {
       TransportClientReconnectDelay: 'record',
       TransportClientReconnectDelayResolver: 'function type',
     });
+  });
+
+  test('reads a C# static class of constants alone as one name and as each of its members', () => {
+    const names = cSharpNamesOf(
+      publicLinesOf(
+        [
+          '#nullable enable',
+          'Bead.Clocks',
+          'static readonly Bead.Clocks.LongestTimer -> System.TimeSpan',
+          'Bead.GeneratedCode',
+          'const Bead.GeneratedCode.SupportsVersion7 = true -> bool',
+          'const Bead.GeneratedCode.SupportsVersion8 = true -> bool',
+          'Bead.Violations',
+          'const Bead.Violations.ClosingBytes = 26 -> int',
+          'static Bead.Violations.Of(Bead.Judged! judged) -> string!',
+          '',
+        ].join('\n')
+      )
+    );
+
+    assert.deepEqual(names.get('GeneratedCode'), {
+      kinds: ['constant'],
+      members: ['GeneratedCode.SupportsVersion7', 'GeneratedCode.SupportsVersion8'],
+    });
+    assert.deepEqual(names.get('GeneratedCode.SupportsVersion8'), {
+      kinds: ['constant'],
+      table: 'GeneratedCode',
+    });
+    assert.deepEqual(names.get('Clocks.LongestTimer'), { kinds: ['constant'], table: 'Clocks' });
+    assert.deepEqual(names.get('Violations.ClosingBytes'), { kinds: ['constant'] });
+    assert.equal(names.has('Violations'), false);
   });
 
   test('reads each Rust name a root exports where it is defined, and a public module’s items', () => {
@@ -351,6 +387,28 @@ describe('the case rules and the renderings', () => {
     assert.equal(keyOf('violations_of', 'function'), keyOf('violationsOf', 'function'));
     assert.equal(keyOf('HttpEvent<,>', 'record'), 'httpevent');
     assert.notEqual(keyOf('IDLE_TIMEOUT', 'constant'), keyOf('DLE_TIMEOUT', 'constant'));
+  });
+
+  test('keys a Rust module’s item with its module, and a variant by its own name', () => {
+    assert.equal(keyOf('json::read', 'function'), 'jsonread');
+    assert.equal(keyOf('json::JsonRefusal', 'choice'), 'jsonjsonrefusal');
+    assert.equal(keyOf('CallError::Failure', 'variant'), 'failure');
+    assert.notEqual(keyOf('json::read', 'function'), keyOf('read', 'function'));
+  });
+
+  test('keeps a C# static member’s own key only where it has two words or more', () => {
+    const cells = (csharp, rust) => {
+      return {
+        typescript: [],
+        csharp: [{ name: csharp, kind: 'function' }],
+        rust: [{ name: rust, kind: 'function' }],
+      };
+    };
+
+    assert.equal(RULES.of(cells('ProtoCodecs.Read', 'json::read')), false);
+    assert.equal(RULES.of(cells('ProtoCodecs.Read', 'read')), false);
+    assert.equal(RULES.of(cells('Violations.WordsOf', 'words_of')), true);
+    assert.equal(RULES.of(cells('Violations.Of', 'violations_of')), true);
   });
 
   test('give an error, an interface met by its shape, a flags enum, a held constant and a function', () => {
@@ -475,6 +533,27 @@ describe('the case rules and the renderings', () => {
       ),
       false
     );
+    // never without a Rust cell, where it is `of`
+    assert.equal(
+      RULES.new(
+        cells(
+          [{ name: 'payloadCodecOf', kind: 'function' }],
+          [{ name: 'PayloadCodecs.Of', kind: 'function' }],
+          []
+        )
+      ),
+      false
+    );
+    assert.equal(
+      RULES.of(
+        cells(
+          [{ name: 'payloadCodecOf', kind: 'function' }],
+          [{ name: 'PayloadCodecs.Of', kind: 'function' }],
+          []
+        )
+      ),
+      true
+    );
     assert.equal(
       RULES.of(
         cells(
@@ -525,6 +604,79 @@ describe('the case rules and the renderings', () => {
           [{ name: 'Pattern.Matches', kind: 'constant' }],
           []
         )
+      ),
+      false
+    );
+    assert.equal(
+      RULES.verb(
+        cells(
+          [{ name: 'checkProtoRecords', kind: 'function' }],
+          [{ name: 'ProtoRecords.Check', kind: 'function' }],
+          [{ name: 'check_proto_records', kind: 'function' }]
+        )
+      ),
+      true
+    );
+    assert.equal(
+      RULES.verb(
+        cells(
+          [{ name: 'checkProtoRecords', kind: 'function' }],
+          [{ name: 'ProtoRecords.Check', kind: 'function' }],
+          [{ name: 'check_records', kind: 'function' }]
+        )
+      ),
+      false
+    );
+  });
+
+  test('renders a platform’s own type only as a C# Bead name of a .NET type the tool lists', () => {
+    const cells = (typescript, csharp, rust) => {
+      return { typescript, csharp, rust };
+    };
+
+    assert.equal(
+      RULES.platform(
+        cells(
+          [{ name: 'HTTPClient', kind: 'record' }],
+          [{ name: 'BeadHttpClient', kind: 'record' }],
+          [{ name: 'HttpClient', kind: 'record' }]
+        )
+      ),
+      true
+    );
+    assert.equal(
+      RULES.platform(
+        cells(
+          [{ name: 'IHTTPClientOptions', kind: 'record' }],
+          [{ name: 'BeadHttpClientOptions', kind: 'record' }],
+          [{ name: 'HttpClientOptions', kind: 'record' }]
+        )
+      ),
+      true
+    );
+    assert.equal(
+      RULES.platform(
+        cells(
+          [{ name: 'checkProtoRecords', kind: 'function' }],
+          [{ name: 'ProtoRecords.Check', kind: 'function' }],
+          [{ name: 'check_proto_records', kind: 'function' }]
+        )
+      ),
+      false
+    );
+    assert.equal(
+      RULES.platform(
+        cells(
+          [{ name: 'Validator', kind: 'function type' }],
+          [{ name: 'Clocks', kind: 'constant' }],
+          [{ name: 'json::DEPTH', kind: 'constant' }]
+        )
+      ),
+      false
+    );
+    assert.equal(
+      RULES.platform(
+        cells([{ name: 'Server', kind: 'record' }], [{ name: 'BeadServer', kind: 'record' }], [])
       ),
       false
     );
@@ -705,6 +857,54 @@ describe('problemsOf', () => {
       'tools/names.tsv:8: the rendering constant names the records that state it, "rendered: constant (<record>)"',
       'tools/names.tsv:9: the rendering error does not give its names',
     ]);
+    // the records come before the sides: a rendering of one side that cites another rule's
+    assert.deepEqual(
+      check(
+        [...HELD, ...LEFT].map((row) => {
+          return row.startsWith('BoundCall\t') ? row.replace('alone', 'rendered: of (0049)') : row;
+        })
+      ),
+      ["tools/names.tsv:10: the rendering of cites its rule's records, (0007, 0044)"]
+    );
+  });
+
+  test('fails a rendering that cites other records than its rule’s', () => {
+    const rows = [...HELD, ...LEFT].map((row) => {
+      return row.startsWith('violationsOf\t')
+        ? row.replace('rendered: of (0007, 0044)', 'rendered: of (0049)')
+        : row;
+    });
+
+    assert.deepEqual(check(rows), [
+      "tools/names.tsv:9: the rendering of cites its rule's records, (0007, 0044)",
+    ]);
+  });
+
+  test('holds a C# table placed by its own row, or by a row for each of its members', () => {
+    const members = [
+      'LimitDefaults.ChunkBytes\t-\tLimitDefaults.ChunkBytes [constant]\t-\talone',
+      'LimitDefaults.FrameBytes\t-\tLimitDefaults.FrameBytes [constant]\t-\talone',
+    ];
+
+    assert.deepEqual(check([...HELD, ...LEFT]), []);
+    assert.deepEqual(
+      check([...HELD, ...LEFT.filter((row) => !row.startsWith('LimitDefaults\t')), ...members]),
+      []
+    );
+  });
+
+  test('fails a C# table placed by its row and by its members’ rows, or by some members alone', () => {
+    const chunk = 'LimitDefaults.ChunkBytes\t-\tLimitDefaults.ChunkBytes [constant]\t-\talone';
+
+    assert.deepEqual(check([...HELD, ...LEFT, chunk]), [
+      "tools/names.tsv: csharp's LimitDefaults is placed by its row and by its members' rows; one or the other",
+    ]);
+    assert.deepEqual(
+      check([...HELD, ...LEFT.filter((row) => !row.startsWith('LimitDefaults\t')), chunk]),
+      [
+        "tools/names.tsv: csharp's LimitDefaults is placed by its members: LimitDefaults.FrameBytes is in no row",
+      ]
+    );
   });
 
   test('fails an own row without its reason or its record, and one of two sides', () => {
@@ -777,6 +977,60 @@ describe('problemsOf', () => {
   });
 });
 
+describe('citationProblemsOf', () => {
+  // a record of `number` that writes each tag of `rules`, `wrapped` broken across two lines, and
+  // `late` after its Tenth Man alone
+  const recordOf = (rules, { wrapped = [], late = [] } = {}) => {
+    const tag = (rule) => {
+      return wrapped.includes(rule) ? `\`rendered:\n  ${rule}\`` : `\`rendered: ${rule}\``;
+    };
+    const stated = rules.filter((rule) => !late.includes(rule)).map(tag);
+
+    return [
+      '# A record',
+      '',
+      `It states ${stated.join(', ')}.`,
+      '',
+      '## The Tenth Man',
+      '',
+      `It answers ${late.map(tag).join(', ')}.`,
+      '',
+    ].join('\n');
+  };
+  const rulesOf = (number) => {
+    return Object.keys(RULE_RECORDS).filter((rule) => RULE_RECORDS[rule].includes(number));
+  };
+
+  test('holds a rule whose every record writes its tag, wrapped or not, before its Tenth Man', () => {
+    const records = {
+      '0007': recordOf(rulesOf('0007')),
+      '0044': recordOf(rulesOf('0044'), { wrapped: ['callable'] }),
+      '0049': recordOf(rulesOf('0049')),
+    };
+
+    assert.deepEqual(
+      citationProblemsOf((number) => records[number] ?? null),
+      []
+    );
+  });
+
+  test('fails a rule whose record writes its tag only in its Tenth Man, or not at all, or is missing', () => {
+    const records = {
+      '0007': recordOf(rulesOf('0007'), { late: ['like'] }),
+      '0044': recordOf(rulesOf('0044').filter((rule) => rule !== 'keyword')),
+    };
+
+    assert.deepEqual(
+      citationProblemsOf((number) => records[number] ?? null),
+      [
+        'docs/decisions/0007: the rendering like cites this record, which does not write "rendered: like"',
+        'docs/decisions/0044: the rendering keyword cites this record, which does not write "rendered: keyword"',
+        'docs/decisions/0049: the rendering platform cites a record no file holds',
+      ]
+    );
+  });
+});
+
 describe('seedOf', () => {
   test('writes the shared keys, the renderings and every other name alone, its pins counted', () => {
     const seed = seedOf(surfaces());
@@ -790,9 +1044,11 @@ describe('seedOf', () => {
       'violations_of\t-\tViolations.Of [function]\tviolations_of [function]\trendered: of (0007, 0044)',
       'HttpEvent\t-\tHttpEvent [record]\t-\talone',
       'HttpEvent<,>\t-\tHttpEvent<,> [record]\t-\talone',
+      'LimitDefaults\t-\tLimitDefaults [constant]\t-\talone',
     ]) {
       assert.ok(lines.includes(row), row);
     }
+    assert.equal(seed.includes('LimitDefaults.'), false);
     assert.deepEqual(problemsOf(seed, surfaces(), differencesOf(SUPPORT)), []);
   });
 

@@ -976,9 +976,11 @@ against each server.
   applied, the Rust side's `surfaces/` — are one on every side, or a row of `tools/names.tsv` says
   how one renders, why it is one side's own, or which row of the support matrix's Differences holds
   it; a row gives each name its kind, and a row whose kinds do not render each other fails, as one
-  word for a number, a delegate and an enum would. The names no reading has
-  placed, `alone`, are counted against the pin on the file's first line, which only falls.
-  `--seed` writes the file anew from the lists.
+  word for a number, a delegate and an enum would; a rendering names one of the tool's rules and
+  cites the records that rule names, each writing its tag, `rendered: <rule>`; a C# static class
+  of constants is placed by its row or by its members'. The names no reading has placed, `alone`,
+  are counted against the pin on the file's first line, which only falls. `--seed` writes the file
+  anew from the lists.
 - `node tools/check-durations.mjs`: every member of each side's surface list that takes a duration
   an application gives is a place and a way of `spec/durations.json` in `tools/durations.tsv`, or a
   row says why none; `--seed` starts the table.

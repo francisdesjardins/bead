@@ -17,7 +17,7 @@ use buffa_descriptor::generated::descriptor::{
 };
 use buffa_descriptor::{DescriptorPool, ScalarType, SingularKind};
 
-use super::{Holds, ProtoSchema, check_records};
+use super::{Holds, ProtoSchema, check_proto_records};
 use crate::testing::codecs::Probe;
 
 // bytes as the conformance files write them, in hexadecimal, a space between two
@@ -31,14 +31,14 @@ fn probe() -> ProtoSchema {
 
 fn takes(schema: &ProtoSchema, hex: &str) {
     assert!(
-        check_records(&bytes_of(hex), schema).is_ok(),
+        check_proto_records(&bytes_of(hex), schema).is_ok(),
         "the check takes {hex}"
     );
 }
 
 fn refuses(schema: &ProtoSchema, hex: &str) {
     assert!(
-        check_records(&bytes_of(hex), schema).is_err(),
+        check_proto_records(&bytes_of(hex), schema).is_err(),
         "the check refuses {hex}"
     );
 }
@@ -296,7 +296,7 @@ fn refuses_a_varint_of_10_bytes_past_64_bits_known_unknown_or_packed() {
         "1A 0B 20 80 80 80 80 80 80 80 80 80 7F",
     ] {
         // * Bead's refusal, before Buffa's
-        let refusal = check_records(&bytes_of(hex), &schema).expect_err(hex);
+        let refusal = check_proto_records(&bytes_of(hex), &schema).expect_err(hex);
 
         assert_eq!(
             (refusal.reason(), refusal.source().map(ToString::to_string)),
@@ -352,7 +352,7 @@ fn refuses_a_length_past_the_bytes_that_follow_it_a_varint_past_32_bits_among_th
 #[test]
 fn refuses_a_message_nested_more_than_100_deep_below_the_top_one_groups_and_map_entries_counted() {
     let schema = probe();
-    let checks = |bytes: &[u8]| check_records(bytes, &schema).is_ok();
+    let checks = |bytes: &[u8]| check_proto_records(bytes, &schema).is_ok();
 
     // * by child, by group, by map's entry, which holds its value one deeper, and by unknown group
     assert!(checks(&nested(100, child)), "100 children deep");
