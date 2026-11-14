@@ -1,8 +1,9 @@
 // ── Interop ───────────────────────────────────────────────────────────────────
 
-// Bead's TypeScript client against the C# server of the interop service, over WebSocket, HTTP,
-// MQTT 5 and AMQP 1.0, and the Rust one, over WebSocket, HTTP and MQTT 5: the same procedures,
-// failures and cancel; skipped, saying so, without .NET, a broker or `BEAD_INTEROP_RUST_SERVER`.
+// Bead's TypeScript client against the C# and Rust servers of the interop service, over WebSocket,
+// HTTP and MQTT 5, AMQP 1.0 the C# one's alone, and its HTTP caller against their gateways: the
+// same procedures, failures and cancel; skipped, saying so, without .NET, a broker or
+// `BEAD_INTEROP_RUST_SERVER`.
 
 // dependencies
 
@@ -47,7 +48,7 @@ import {
 
 // interfaces
 
-/** Where an interop server listens: over WebSocket, HTTP and, the C# one, the HTTP/JSON gateway. */
+/** Where an interop server listens: over WebSocket, HTTP and its HTTP/JSON gateway. */
 interface IPorts {
   gatewayPort?: number;
   httpPort: number;
@@ -292,6 +293,15 @@ const portsOfLine = (line: string): IPorts | undefined => {
   } catch {
     return undefined;
   }
+};
+
+/** The HTTP/JSON gateway of the `side` server, at the port its line said. */
+const gatewayOf = (side: string, { gatewayPort }: IPorts): string => {
+  if (gatewayPort === undefined) {
+    throw new Error(`the ${side} interop server said no gatewayPort`);
+  }
+
+  return `http://${HOST}:${String(gatewayPort)}`;
 };
 
 /**
@@ -920,58 +930,8 @@ const describeOver = (
   });
 };
 
-// ! one worker plays the file in order: each server's describe over MQTT 5 links the broker's
-// `ts-client` and `ts-server`, which a second link of the same id at once takes over (MQTT 5.0
-// §3.1.4, 0x8E)
-test.describe.configure({ mode: 'default' });
-
-test.describe('the C# server of the interop service', () => {
-  test.skip(
-    !HAS_DOTNET && !REQUIRED,
-    'it builds and starts a .NET program, and .NET is not installed'
-  );
-  test.describe.configure({ mode: 'serial' });
-
-  let ports: IPorts;
-  let server: ChildProcessWithoutNullStreams | undefined;
-
-  test.beforeAll(async () => {
-    // the first run builds the server
-    test.setTimeout(180_000);
-
-    if (!HAS_DOTNET) {
-      throw new Error('BEAD_INTEROP_REQUIRED=1 asks for the interop, and .NET is not installed');
-    }
-
-    ({ ports, server } = await startServer(
-      spawn('dotnet', ['run', '--project', 'interop/Bead.Interop.Server'], {
-        cwd: DOTNET,
-        stdio: ['pipe', 'pipe', 'pipe'],
-      })
-    ));
-  });
-
-  /** The C# server's HTTP/JSON gateway, at the port its line said. */
-  const gateway = (): string => {
-    if (ports.gatewayPort === undefined) {
-      throw new Error('the C# interop server said no gatewayPort');
-    }
-
-    return `http://${HOST}:${String(ports.gatewayPort)}`;
-  };
-
-  test.afterAll(async () => {
-    // a server that never started has nothing to stop
-    if (server === undefined) {
-      return;
-    }
-
-    const exited = once(server, 'exit');
-
-    server.stdin.end();
-    await exited;
-  });
-
+/** The trials of the other server's HTTP/JSON gateway, at the URL `gateway` gives, in its describe. */
+const gatewayTrials = (gateway: () => string): void => {
   test('calls the other gateway with protobuf JSON and every native encoding', async () => {
     const client = new TranscodingHttpClient(gateway());
 
@@ -1069,6 +1029,54 @@ test.describe('the C# server of the interop service', () => {
     expect(own.status).toBe(200);
     expect(Buffer.from(await remote.arrayBuffer())).toEqual(Buffer.from(await own.arrayBuffer()));
   });
+};
+
+// ! one worker plays the file in order: each server's describe over MQTT 5 links the broker's
+// `ts-client` and `ts-server`, which a second link of the same id at once takes over (MQTT 5.0
+// §3.1.4, 0x8E)
+test.describe.configure({ mode: 'default' });
+
+test.describe('the C# server of the interop service', () => {
+  test.skip(
+    !HAS_DOTNET && !REQUIRED,
+    'it builds and starts a .NET program, and .NET is not installed'
+  );
+  test.describe.configure({ mode: 'serial' });
+
+  let ports: IPorts;
+  let server: ChildProcessWithoutNullStreams | undefined;
+
+  test.beforeAll(async () => {
+    // the first run builds the server
+    test.setTimeout(180_000);
+
+    if (!HAS_DOTNET) {
+      throw new Error('BEAD_INTEROP_REQUIRED=1 asks for the interop, and .NET is not installed');
+    }
+
+    ({ ports, server } = await startServer(
+      spawn('dotnet', ['run', '--project', 'interop/Bead.Interop.Server'], {
+        cwd: DOTNET,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      })
+    ));
+  });
+
+  test.afterAll(async () => {
+    // a server that never started has nothing to stop
+    if (server === undefined) {
+      return;
+    }
+
+    const exited = once(server, 'exit');
+
+    server.stdin.end();
+    await exited;
+  });
+
+  gatewayTrials(() => {
+    return gatewayOf('C#', ports);
+  });
 
   for (const transport of TRANSPORTS) {
     describeOver(transport, {
@@ -1104,7 +1112,11 @@ test.describe('the Rust server of the interop service', () => {
     await exited;
   });
 
-  // * no AMQP 1.0 nor gateway: those it serves beside are ahead on the Rust side
+  gatewayTrials(() => {
+    return gatewayOf('Rust', ports);
+  });
+
+  // * no AMQP 1.0: what it serves beside is ahead on the Rust side
   for (const transport of TRANSPORTS) {
     if (transport.label !== 'AMQP 1.0') {
       describeOver(transport, {

@@ -111,6 +111,25 @@ crate
   use failure::Failure
   use failure::FailureOrigin
   use failure::ProcedureAddress
+  use gateway::body::HttpGatewayBody #[cfg(feature = "gateway")]
+  use gateway::caller::HttpCallOptions #[cfg(feature = "gateway")]
+  use gateway::caller::HttpCaller #[cfg(feature = "gateway")]
+  use gateway::caller::HttpCallerOptions #[cfg(feature = "gateway")]
+  use gateway::caller::HttpEvent #[cfg(feature = "gateway")]
+  use gateway::caller::HttpRequester #[cfg(feature = "gateway")]
+  use gateway::caller::HttpSubscriber #[cfg(feature = "gateway")]
+  use gateway::caller::HttpSubscription #[cfg(feature = "gateway")]
+  use gateway::host::DOCUMENT_PATH #[cfg(feature = "gateway")]
+  use gateway::host::GATEWAY_TIMEOUT #[cfg(feature = "gateway")]
+  use gateway::host::GATEWAY_WINDOW #[cfg(feature = "gateway")]
+  use gateway::host::GatewayAuthorization #[cfg(feature = "gateway")]
+  use gateway::host::GatewayErrorListener #[cfg(feature = "gateway")]
+  use gateway::host::HttpGateway #[cfg(feature = "gateway")]
+  use gateway::host::HttpGatewayOptions #[cfg(feature = "gateway")]
+  use gateway::host::HttpGatewayStartOptions #[cfg(feature = "gateway")]
+  use gateway::host::MAXIMUM_EXCHANGES #[cfg(feature = "gateway")]
+  use gateway::host::MAXIMUM_EXCHANGES_PER_ADDRESS #[cfg(feature = "gateway")]
+  use generated_code::GENERATED_CODE_SUPPORTS_VERSION_5 #[cfg(feature = "gateway")]
   use generated_code::GENERATED_CODE_SUPPORTS_VERSION_7
   use generated_code::GENERATED_CODE_SUPPORTS_VERSION_8
   use http::client::HttpTransportClient #[cfg(feature = "http")]
@@ -319,6 +338,20 @@ crate
   use service::request_of
   use session_token::SessionToken
   use session_token::SessionTokenDrawError
+  use transcoding::events::ServerSentEvent #[cfg(feature = "transcoding")]
+  use transcoding::form::BindingOptions #[cfg(feature = "transcoding")]
+  use transcoding::form::JsonFormError #[cfg(feature = "transcoding")]
+  use transcoding::form::MessageForm #[cfg(feature = "transcoding")]
+  use transcoding::form::MessageFormError #[cfg(feature = "transcoding")]
+  use transcoding::form::RequestPlace #[cfg(feature = "transcoding")]
+  use transcoding::problems::OwnFailure #[cfg(feature = "transcoding")]
+  use transcoding::problems::OwnProblemOptions #[cfg(feature = "transcoding")]
+  use transcoding::routes::HttpMethod #[cfg(feature = "transcoding")]
+  use transcoding::routes::HttpPayload #[cfg(feature = "transcoding")]
+  use transcoding::routes::HttpRoute #[cfg(feature = "transcoding")]
+  use transcoding::routes::HttpRouteInit #[cfg(feature = "transcoding")]
+  use transcoding::routes::HttpRouteTemplate #[cfg(feature = "transcoding")]
+  use transcoding::routes::route_of #[cfg(feature = "transcoding")]
   use transport::CONNECT_TIMEOUT
   use transport::ClientListener
   use transport::Connect
@@ -1055,7 +1088,102 @@ crate::failure
     fn record(&self) -> FailureRecord
     implements Display, Error
     derives Clone, Debug
+crate::gateway::body
+  struct HttpGatewayBody #[cfg(feature = "gateway")]
+    implements Body, Debug, Drop
+crate::gateway::caller
+  struct HttpCallerOptions #[non_exhaustive] #[cfg(feature = "gateway")]
+    pub authorization: Option<String> #[cfg(feature = "gateway")]
+    pub maximum_body_bytes: Option<u64> #[cfg(feature = "gateway")]
+    pub tls: Option<Arc<ClientConfig>> #[cfg(feature = "gateway")]
+    pub runtime: Option<Handle> #[cfg(feature = "gateway")]
+    derives Clone, Debug, Default #[cfg(feature = "gateway")]
+  struct HttpCallOptions #[non_exhaustive] #[cfg(feature = "gateway")]
+    pub authorization: Option<String> #[cfg(feature = "gateway")]
+    pub without_authorization: Option<bool> #[cfg(feature = "gateway")]
+    pub signal: Option<CancellationToken> #[cfg(feature = "gateway")]
+    derives Clone, Debug, Default #[cfg(feature = "gateway")]
+  enum HttpEvent<R, N> #[cfg(feature = "gateway")]
+    Result(R) #[cfg(feature = "gateway")]
+    Notification(N) #[cfg(feature = "gateway")]
+    derives Clone, Debug, Eq, PartialEq #[cfg(feature = "gateway")]
+  struct HttpCaller #[cfg(feature = "gateway")]
+    fn new(url: &str, options: &HttpCallerOptions) -> Result<Self, ProgrammerError>
+    fn requester_of<Req: PayloadCodec, Res: PayloadCodec>(&self, route: &HttpRoute, descriptor: &Descriptor<Req, Res>) -> Result<HttpRequester<Req, Res>, ProgrammerError>
+    fn subscriber_of<Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec>(&self, route: &HttpRoute, descriptor: &NotifyingDescriptor<Req, Res, Not>) -> Result<HttpSubscriber<Req, Res, Not>, ProgrammerError>
+    implements Debug
+    derives Clone #[cfg(feature = "gateway")]
+  struct HttpRequester<Req: PayloadCodec, Res: PayloadCodec> #[cfg(feature = "gateway")]
+    fn call(&self, request: &Req::Value, options: &HttpCallOptions) -> BoxFuture<Result<Res::Value, CallError>>
+    implements Clone, Debug
+  struct HttpSubscriber<Req: PayloadCodec, Res: PayloadCodec, Not: PayloadCodec> #[cfg(feature = "gateway")]
+    fn call(&self, request: &Req::Value, options: &HttpCallOptions) -> HttpSubscription<Res::Value, Not::Value>
+    implements Clone, Debug
+  struct HttpSubscription<R, N> #[cfg(feature = "gateway")]
+    implements Debug, Drop, Stream
+crate::gateway::host
+  const DOCUMENT_PATH: &str #[cfg(feature = "gateway")]
+  const GATEWAY_TIMEOUT: Duration #[cfg(feature = "gateway")]
+  const GATEWAY_WINDOW: u64 #[cfg(feature = "gateway")]
+  const MAXIMUM_EXCHANGES: u64 #[cfg(feature = "gateway")]
+  const MAXIMUM_EXCHANGES_PER_ADDRESS: u64 #[cfg(feature = "gateway")]
+  enum GatewayAuthorization #[non_exhaustive] #[cfg(feature = "gateway")]
+    Elsewhere #[cfg(feature = "gateway")]
+    BearerJwt #[cfg(feature = "gateway")]
+    derives Clone, Copy, Debug, Default, Eq, PartialEq #[cfg(feature = "gateway")]
+  type GatewayErrorListener = Arc<dyn Fn(&RouterError) + Send + Sync> #[cfg(feature = "gateway")]
+  struct HttpGatewayOptions #[non_exhaustive] #[cfg(feature = "gateway")]
+    pub transport: MemoryTransportServer #[cfg(feature = "gateway")]
+    pub routes: Vec<HttpRoute> #[cfg(feature = "gateway")]
+    pub authorization: Option<GatewayAuthorization> #[cfg(feature = "gateway")]
+    pub challenge: Option<String> #[cfg(feature = "gateway")]
+    pub clock: Option<SharedClock> #[cfg(feature = "gateway")]
+    pub runtime: Option<Handle> #[cfg(feature = "gateway")]
+    pub document: Option<Bytes> #[cfg(feature = "gateway")]
+    pub heartbeat: Option<Duration> #[cfg(feature = "gateway")]
+    pub limits: Option<RouterLimitsOptions> #[cfg(feature = "gateway")]
+    pub maximum_exchanges: Option<u64> #[cfg(feature = "gateway")]
+    pub maximum_exchanges_per_address: Option<u64> #[cfg(feature = "gateway")]
+    pub maximum_unsent_bytes: Option<u64> #[cfg(feature = "gateway")]
+    pub problem_types: Option<String> #[cfg(feature = "gateway")]
+    pub timeout: Option<Duration> #[cfg(feature = "gateway")]
+    pub window: Option<u64> #[cfg(feature = "gateway")]
+    pub policy: Option<HttpPolicy> #[cfg(feature = "gateway")]
+    pub body_bytes_budget: Option<u64> #[cfg(feature = "gateway")]
+    pub body_grace_period: Option<Duration> #[cfg(feature = "gateway")]
+    pub headers_timeout: Option<Duration> #[cfg(feature = "gateway")]
+    pub hosts: Option<Vec<String>> #[cfg(feature = "gateway")]
+    pub maximum_body_bytes: Option<u64> #[cfg(feature = "gateway")]
+    pub maximum_connections: Option<u64> #[cfg(feature = "gateway")]
+    pub maximum_connections_per_address: Option<u64> #[cfg(feature = "gateway")]
+    pub minimum_body_bytes_per_second: Option<u64> #[cfg(feature = "gateway")]
+    pub minimum_send_bytes_per_second: Option<u64> #[cfg(feature = "gateway")]
+    pub origins: Option<Vec<String>> #[cfg(feature = "gateway")]
+    pub send_grace_period: Option<Duration> #[cfg(feature = "gateway")]
+    pub trusted_proxies: Option<Vec<String>> #[cfg(feature = "gateway")]
+    pub unnamed_proxies: Option<u64> #[cfg(feature = "gateway")]
+    pub tls: Option<Arc<rustls::ServerConfig>> #[cfg(feature = "gateway")]
+    const fn new(transport: MemoryTransportServer, routes: Vec<HttpRoute>) -> Self
+    implements Debug
+    derives Clone #[cfg(feature = "gateway")]
+  struct HttpGatewayStartOptions #[non_exhaustive] #[cfg(feature = "gateway")]
+    pub address: Option<String> #[cfg(feature = "gateway")]
+    pub port: Option<u16> #[cfg(feature = "gateway")]
+    pub find_open_port: Option<bool> #[cfg(feature = "gateway")]
+    pub signal: Option<CancellationToken> #[cfg(feature = "gateway")]
+    derives Clone, Debug, Default #[cfg(feature = "gateway")]
+  struct HttpGateway #[cfg(feature = "gateway")]
+    fn new(options: &HttpGatewayOptions) -> Result<Self, ProgrammerError>
+    fn start(&self, options: &HttpGatewayStartOptions) -> BoxFuture<Result<TransportServerAddress, RouterError>>
+    fn stop(&self) -> BoxFuture<Result<(), RouterError>>
+    fn dispose(&self) -> BoxFuture<Result<(), RouterError>>
+    fn answer<B>(&self, request: ::http::Request<B>, peer: Option<SocketAddr>) -> BoxFuture<::http::Response<HttpGatewayBody>> where B: Body<Data = Bytes> + Send + 'static, B::Error: Into<Box<dyn Error + Send + Sync>>,
+    fn on_error(&self, listener: GatewayErrorListener) -> ListenerId
+    fn off(&self, id: ListenerId)
+    implements Debug
+    derives Clone #[cfg(feature = "gateway")]
 crate::generated_code
+  const GENERATED_CODE_SUPPORTS_VERSION_5: bool
   const GENERATED_CODE_SUPPORTS_VERSION_7: bool
   const GENERATED_CODE_SUPPORTS_VERSION_8: bool
 crate::http::client
@@ -2441,6 +2569,222 @@ crate::session_token
     fn is(&self, presented: &Self) -> bool
     implements Debug, Display, FromStr
     derives Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd
+crate::transcoding::events
+  const EVENT_STREAM_MEDIA_TYPE: &str #[cfg(feature = "transcoding")]
+  const HEARTBEAT_COMMENT: &str #[cfg(feature = "transcoding")]
+  struct ServerSentEvent #[non_exhaustive] #[cfg(feature = "transcoding")]
+    pub name: Option<&'static str> #[cfg(feature = "transcoding")]
+    pub id: u64 #[cfg(feature = "transcoding")]
+    pub data: String #[cfg(feature = "transcoding")]
+    const fn new(id: u64, data: String) -> Self
+    fn text(&self) -> String
+    derives Clone, Debug, Eq, PartialEq #[cfg(feature = "transcoding")]
+  type Taken = BoxFuture<bool> #[cfg(feature = "transcoding")]
+  trait EventSink: Send + 'static #[cfg(feature = "transcoding")]
+    fn answer(&mut self, problem: Problem) #[cfg(feature = "transcoding")]
+    fn end(&mut self) #[cfg(feature = "transcoding")]
+    fn open(&mut self) #[cfg(feature = "transcoding")]
+    fn write(&mut self, text: String) -> Taken #[cfg(feature = "transcoding")]
+  struct EventStream #[cfg(feature = "transcoding")]
+    fn new(sink: Box<dyn EventSink>, heartbeat: EventHeartbeat) -> Self
+    fn is_ended(&self) -> bool
+    fn close(&self)
+    fn failure(&self, problem: Problem)
+    fn notification(&self, data: String) -> Result<BoxFuture<()>, ProgrammerError>
+    fn result(&self, data: String) -> Result<(), ProgrammerError>
+    implements Debug
+    derives Clone #[cfg(feature = "transcoding")]
+  struct EventHeartbeat #[cfg(feature = "transcoding")]
+    pub clock: SharedClock #[cfg(feature = "transcoding")]
+    pub every: Duration #[cfg(feature = "transcoding")]
+    derives Clone, Debug #[cfg(feature = "transcoding")]
+  fn base64_of(bytes: &[u8]) -> String #[cfg(feature = "transcoding")]
+  fn bytes_of_base64(text: &str) -> Option<Vec<u8>> #[cfg(feature = "transcoding")]
+  fn text_data_of(payload: &[u8]) -> Option<String> #[cfg(feature = "transcoding")]
+  fn raw_data_of(payload: &[u8]) -> String #[cfg(feature = "transcoding")]
+crate::transcoding::form
+  enum RequestPlace #[cfg(feature = "transcoding")]
+    Pointer(String) #[cfg(feature = "transcoding")]
+    Parameter(String) #[cfg(feature = "transcoding")]
+    derives Clone, Debug, Eq, PartialEq #[cfg(feature = "transcoding")]
+  struct JsonFormError #[non_exhaustive] #[cfg(feature = "transcoding")]
+    fn new<R: Into<String>>(reason: R) -> Self
+    fn at(mut self, place: RequestPlace) -> Self
+    fn reason(&self) -> &str
+    const fn place(&self) -> Option<&RequestPlace>
+    implements Display, Error
+    derives Clone, Debug, Eq, PartialEq #[cfg(feature = "transcoding")]
+  struct BindingOptions<'a> #[non_exhaustive] #[cfg(feature = "transcoding")]
+    pub body: Option<&'a [u8]> #[cfg(feature = "transcoding")]
+    pub is_patch: Option<bool> #[cfg(feature = "transcoding")]
+    pub query: Option<&'a str> #[cfg(feature = "transcoding")]
+    pub route_body: Option<&'a str> #[cfg(feature = "transcoding")]
+    pub variables: &'a [VariableValue] #[cfg(feature = "transcoding")]
+    const fn new(variables: &'a [VariableValue]) -> Self
+    derives Clone, Debug #[cfg(feature = "transcoding")]
+  enum MessageFormError #[non_exhaustive] #[cfg(feature = "transcoding")]
+    Form(JsonFormError) #[cfg(feature = "transcoding")]
+    Undecodable(CodecRefusal) #[cfg(feature = "transcoding")]
+    Programmer(ProgrammerError) #[cfg(feature = "transcoding")]
+    implements Display, Error
+    derives Clone, Debug #[cfg(feature = "transcoding")]
+  trait MessageForm: fmt::Debug + Send + Sync + 'static #[cfg(feature = "transcoding")]
+    fn full_name(&self) -> &str #[cfg(feature = "transcoding")]
+    fn bind(&self, options: &BindingOptions<'_>) -> Result<Bytes, MessageFormError> #[cfg(feature = "transcoding")]
+    fn read(&self, body: &[u8]) -> Result<Bytes, MessageFormError> #[cfg(feature = "transcoding")]
+    fn write(&self, payload: &[u8], field: Option<&str>) -> Result<String, MessageFormError> #[cfg(feature = "transcoding")]
+    fn place_of(&self, field_path: &str, route: &HttpRouteTemplate) -> Option<RequestPlace> #[cfg(feature = "transcoding")]
+crate::transcoding::problems
+  const PROBLEM_MEDIA_TYPE: &str #[cfg(feature = "transcoding")]
+  const PROTOCOL_TYPES: &str #[cfg(feature = "transcoding")]
+  const DEFAULT_CHALLENGE: &str #[cfg(feature = "transcoding")]
+  enum Arose #[cfg(feature = "transcoding")]
+    Answer #[cfg(feature = "transcoding")]
+    Client #[cfg(feature = "transcoding")]
+    Gateway #[cfg(feature = "transcoding")]
+    Server #[cfg(feature = "transcoding")]
+    derives Clone, Copy, Debug, Eq, PartialEq #[cfg(feature = "transcoding")]
+  enum Encoding #[cfg(feature = "transcoding")]
+    Json #[cfg(feature = "transcoding")]
+    Proto #[cfg(feature = "transcoding")]
+    Raw #[cfg(feature = "transcoding")]
+    Text #[cfg(feature = "transcoding")]
+    derives Clone, Copy, Debug, Eq, PartialEq #[cfg(feature = "transcoding")]
+  enum OwnFailure #[non_exhaustive] #[cfg(feature = "transcoding")]
+    Closed #[cfg(feature = "transcoding")]
+    Failed #[cfg(feature = "transcoding")]
+    Jwt #[cfg(feature = "transcoding")]
+    Scheme #[cfg(feature = "transcoding")]
+    Timeout #[cfg(feature = "transcoding")]
+    Unwritable #[cfg(feature = "transcoding")]
+    derives Clone, Copy, Debug, Eq, PartialEq #[cfg(feature = "transcoding")]
+  struct OwnProblemOptions #[non_exhaustive] #[cfg(feature = "transcoding")]
+    pub challenge: Option<String> #[cfg(feature = "transcoding")]
+    derives Clone, Debug, Default #[cfg(feature = "transcoding")]
+  struct CallFailure #[cfg(feature = "transcoding")]
+    pub arose: Arose #[cfg(feature = "transcoding")]
+    pub code: NonZeroU16 #[cfg(feature = "transcoding")]
+    pub scope: FailureScope #[cfg(feature = "transcoding")]
+    pub detail: String #[cfg(feature = "transcoding")]
+    pub credential: bool #[cfg(feature = "transcoding")]
+    pub encoding: Encoding #[cfg(feature = "transcoding")]
+    pub place: Option<RequestPlace> #[cfg(feature = "transcoding")]
+    derives Clone, Debug, Eq, PartialEq #[cfg(feature = "transcoding")]
+  struct ProblemRoute<'a> #[cfg(feature = "transcoding")]
+    pub form: &'a dyn MessageForm #[cfg(feature = "transcoding")]
+    pub route: &'a HttpRouteTemplate #[cfg(feature = "transcoding")]
+    derives Clone, Copy, Debug #[cfg(feature = "transcoding")]
+  struct ProblemOptions<'a> #[non_exhaustive] #[cfg(feature = "transcoding")]
+    pub catalogue: Option<&'a [ListedFailure]> #[cfg(feature = "transcoding")]
+    pub challenge: Option<&'a str> #[cfg(feature = "transcoding")]
+    pub problem_types: Option<&'a str> #[cfg(feature = "transcoding")]
+    pub route: Option<ProblemRoute<'a>> #[cfg(feature = "transcoding")]
+    derives Clone, Debug, Default #[cfg(feature = "transcoding")]
+  struct ProblemField #[cfg(feature = "transcoding")]
+    pub name: &'static str #[cfg(feature = "transcoding")]
+    pub value: String #[cfg(feature = "transcoding")]
+    derives Clone, Debug, Eq, PartialEq #[cfg(feature = "transcoding")]
+  struct Problem #[cfg(feature = "transcoding")]
+    pub status: u16 #[cfg(feature = "transcoding")]
+    pub fields: Vec<ProblemField> #[cfg(feature = "transcoding")]
+    pub body: String #[cfg(feature = "transcoding")]
+    derives Clone, Debug, Eq, PartialEq #[cfg(feature = "transcoding")]
+  const fn phrase_of(status: u16) -> Option<&'static str> #[cfg(feature = "transcoding")]
+  fn place_into(members: &mut Map<String, Value>, place: &RequestPlace) #[cfg(feature = "transcoding")]
+  fn pointer_token_of(text: &str) -> String #[cfg(feature = "transcoding")]
+  fn fragment_of(text: &str) -> String #[cfg(feature = "transcoding")]
+  struct RoutedFieldPath<'a> #[cfg(feature = "transcoding")]
+    pub field_path: &'a str #[cfg(feature = "transcoding")]
+    pub route: &'a HttpRouteTemplate #[cfg(feature = "transcoding")]
+    derives Clone, Copy, Debug #[cfg(feature = "transcoding")]
+  fn place_by(path: &RoutedFieldPath<'_>, field: &mut dyn FnMut(&str) -> Option<String>) -> Option<RequestPlace> #[cfg(feature = "transcoding")]
+  fn text_of(members: Map<String, Value>) -> String #[cfg(feature = "transcoding")]
+  fn problem_of_failure(failure: &CallFailure, options: &ProblemOptions<'_>) -> Problem #[cfg(feature = "transcoding")]
+  const fn own_status_of(own: OwnFailure) -> u16 #[cfg(feature = "transcoding")]
+  fn problem_of_own(own: OwnFailure, detail: &str, options: &OwnProblemOptions) -> Problem #[cfg(feature = "transcoding")]
+  fn problem_of_refusal(status: u16, detail: &str) -> Problem #[cfg(feature = "transcoding")]
+crate::transcoding::routes
+  enum HttpMethod #[non_exhaustive] #[cfg(feature = "transcoding")]
+    Delete #[cfg(feature = "transcoding")]
+    Get #[cfg(feature = "transcoding")]
+    Patch #[cfg(feature = "transcoding")]
+    Post #[cfg(feature = "transcoding")]
+    Put #[cfg(feature = "transcoding")]
+    const fn as_str(self) -> &'static str
+    implements Display
+    derives Clone, Copy, Debug, Eq, Hash, PartialEq #[cfg(feature = "transcoding")]
+  enum HttpPayload #[non_exhaustive] #[cfg(feature = "transcoding")]
+    Message(Arc<dyn MessageForm>) #[cfg(feature = "transcoding")]
+    Json #[cfg(feature = "transcoding")]
+    Text #[cfg(feature = "transcoding")]
+    Raw #[cfg(feature = "transcoding")]
+    fn form(&self) -> Option<&Arc<dyn MessageForm>>
+    derives Clone, Debug #[cfg(feature = "transcoding")]
+  struct HttpRouteTemplate #[cfg(feature = "transcoding")]
+    pub method: HttpMethod #[cfg(feature = "transcoding")]
+    pub template: String #[cfg(feature = "transcoding")]
+    pub body: Option<String> #[cfg(feature = "transcoding")]
+    pub response_body: Option<String> #[cfg(feature = "transcoding")]
+    derives Clone, Debug, Eq, PartialEq #[cfg(feature = "transcoding")]
+  struct HttpRouteInit #[cfg(feature = "transcoding")]
+    pub procedure: ServiceProcedure #[cfg(feature = "transcoding")]
+    pub request: HttpPayload #[cfg(feature = "transcoding")]
+    pub result: HttpPayload #[cfg(feature = "transcoding")]
+    pub notification: Option<HttpPayload> #[cfg(feature = "transcoding")]
+    pub failures: Vec<ListedFailure> #[cfg(feature = "transcoding")]
+    pub no_side_effects: bool #[cfg(feature = "transcoding")]
+    pub routes: Vec<HttpRouteTemplate> #[cfg(feature = "transcoding")]
+    derives Clone, Debug #[cfg(feature = "transcoding")]
+  struct HttpRoute #[cfg(feature = "transcoding")]
+    fn procedure(&self) -> &ServiceProcedure
+    fn request(&self) -> &HttpPayload
+    fn result(&self) -> &HttpPayload
+    fn notification(&self) -> Option<&HttpPayload>
+    fn failures(&self) -> &[ListedFailure]
+    fn no_side_effects(&self) -> bool
+    fn routes(&self) -> &[HttpRouteTemplate]
+    derives Clone, Debug #[cfg(feature = "transcoding")]
+  fn route_of(init: HttpRouteInit) -> Result<HttpRoute, ProgrammerError> #[cfg(feature = "transcoding")]
+crate::transcoding::templates
+  enum Segment #[cfg(feature = "transcoding")]
+    Literal(String) #[cfg(feature = "transcoding")]
+    Star #[cfg(feature = "transcoding")]
+    Stars #[cfg(feature = "transcoding")]
+    derives Clone, Debug, Eq, PartialEq #[cfg(feature = "transcoding")]
+  struct Variable #[cfg(feature = "transcoding")]
+    pub field_path: String #[cfg(feature = "transcoding")]
+    pub start: usize #[cfg(feature = "transcoding")]
+    pub end: usize #[cfg(feature = "transcoding")]
+    pub is_multi_segment: bool #[cfg(feature = "transcoding")]
+    derives Clone, Debug, Eq, PartialEq #[cfg(feature = "transcoding")]
+  struct Template #[cfg(feature = "transcoding")]
+    pub text: String #[cfg(feature = "transcoding")]
+    pub segments: Vec<Segment> #[cfg(feature = "transcoding")]
+    pub variables: Vec<Variable> #[cfg(feature = "transcoding")]
+    pub verb: Option<String> #[cfg(feature = "transcoding")]
+    fn compare_precedence(&self, other: &Self, path: &RawPath) -> Ordering
+    derives Clone, Debug, Eq, PartialEq #[cfg(feature = "transcoding")]
+  struct RawPath #[cfg(feature = "transcoding")]
+    pub segments: Vec<String> #[cfg(feature = "transcoding")]
+    pub verb: Option<String> #[cfg(feature = "transcoding")]
+    derives Clone, Debug, Eq, PartialEq #[cfg(feature = "transcoding")]
+  struct VariableValue #[cfg(feature = "transcoding")]
+    pub field_path: String #[cfg(feature = "transcoding")]
+    pub value: String #[cfg(feature = "transcoding")]
+    derives Clone, Debug, Eq, PartialEq #[cfg(feature = "transcoding")]
+  struct VariableRefusal #[cfg(feature = "transcoding")]
+    pub field_path: String #[cfg(feature = "transcoding")]
+    pub reason: &'static str #[cfg(feature = "transcoding")]
+    derives Clone, Debug, Eq, PartialEq #[cfg(feature = "transcoding")]
+  fn parse_template(text: &str) -> Result<Template, &'static str> #[cfg(feature = "transcoding")]
+  fn template_of(text: &str) -> Result<Template, ProgrammerError> #[cfg(feature = "transcoding")]
+  fn is_tie(one: &Template, other: &Template) -> bool #[cfg(feature = "transcoding")]
+  fn raw_path_of(path: &str) -> Option<RawPath> #[cfg(feature = "transcoding")]
+  fn matches_template(template: &Template, path: &RawPath) -> bool #[cfg(feature = "transcoding")]
+  fn route_index_of<'a, I>(templates: I, path: &RawPath) -> Option<usize> where I: IntoIterator<Item = &'a Template>, #[cfg(feature = "transcoding")]
+  fn decode_of(text: &str) -> Result<String, &'static str> #[cfg(feature = "transcoding")]
+  fn query_decode_of(text: &str) -> Option<String> #[cfg(feature = "transcoding")]
+  fn variables_of(template: &Template, path: &RawPath) -> Result<Vec<VariableValue>, VariableRefusal> #[cfg(feature = "transcoding")]
 crate::transport
   enum Sent #[non_exhaustive]
     Done
@@ -2721,3 +3065,49 @@ crate::internal
   use crate::router::types::limits_of
   use crate::router::types::session_key_of
   use crate::router::types::whole_envelope_limits_of
+  use crate::transcoding::events::EVENT_STREAM_MEDIA_TYPE #[cfg(feature = "transcoding")]
+  use crate::transcoding::events::EventHeartbeat #[cfg(feature = "transcoding")]
+  use crate::transcoding::events::EventSink #[cfg(feature = "transcoding")]
+  use crate::transcoding::events::EventStream #[cfg(feature = "transcoding")]
+  use crate::transcoding::events::HEARTBEAT_COMMENT #[cfg(feature = "transcoding")]
+  use crate::transcoding::events::Taken #[cfg(feature = "transcoding")]
+  use crate::transcoding::events::base64_of #[cfg(feature = "transcoding")]
+  use crate::transcoding::events::bytes_of_base64 #[cfg(feature = "transcoding")]
+  use crate::transcoding::events::raw_data_of #[cfg(feature = "transcoding")]
+  use crate::transcoding::events::text_data_of #[cfg(feature = "transcoding")]
+  use crate::transcoding::problems::Arose #[cfg(feature = "transcoding")]
+  use crate::transcoding::problems::CallFailure #[cfg(feature = "transcoding")]
+  use crate::transcoding::problems::DEFAULT_CHALLENGE #[cfg(feature = "transcoding")]
+  use crate::transcoding::problems::Encoding #[cfg(feature = "transcoding")]
+  use crate::transcoding::problems::PROBLEM_MEDIA_TYPE #[cfg(feature = "transcoding")]
+  use crate::transcoding::problems::PROTOCOL_TYPES #[cfg(feature = "transcoding")]
+  use crate::transcoding::problems::Problem #[cfg(feature = "transcoding")]
+  use crate::transcoding::problems::ProblemField #[cfg(feature = "transcoding")]
+  use crate::transcoding::problems::ProblemOptions #[cfg(feature = "transcoding")]
+  use crate::transcoding::problems::ProblemRoute #[cfg(feature = "transcoding")]
+  use crate::transcoding::problems::RoutedFieldPath #[cfg(feature = "transcoding")]
+  use crate::transcoding::problems::fragment_of #[cfg(feature = "transcoding")]
+  use crate::transcoding::problems::own_status_of #[cfg(feature = "transcoding")]
+  use crate::transcoding::problems::phrase_of #[cfg(feature = "transcoding")]
+  use crate::transcoding::problems::place_by #[cfg(feature = "transcoding")]
+  use crate::transcoding::problems::place_into #[cfg(feature = "transcoding")]
+  use crate::transcoding::problems::pointer_token_of #[cfg(feature = "transcoding")]
+  use crate::transcoding::problems::problem_of_failure #[cfg(feature = "transcoding")]
+  use crate::transcoding::problems::problem_of_own #[cfg(feature = "transcoding")]
+  use crate::transcoding::problems::problem_of_refusal #[cfg(feature = "transcoding")]
+  use crate::transcoding::problems::text_of #[cfg(feature = "transcoding")]
+  use crate::transcoding::templates::RawPath #[cfg(feature = "transcoding")]
+  use crate::transcoding::templates::Segment #[cfg(feature = "transcoding")]
+  use crate::transcoding::templates::Template #[cfg(feature = "transcoding")]
+  use crate::transcoding::templates::Variable #[cfg(feature = "transcoding")]
+  use crate::transcoding::templates::VariableRefusal #[cfg(feature = "transcoding")]
+  use crate::transcoding::templates::VariableValue #[cfg(feature = "transcoding")]
+  use crate::transcoding::templates::decode_of #[cfg(feature = "transcoding")]
+  use crate::transcoding::templates::is_tie #[cfg(feature = "transcoding")]
+  use crate::transcoding::templates::matches_template #[cfg(feature = "transcoding")]
+  use crate::transcoding::templates::parse_template #[cfg(feature = "transcoding")]
+  use crate::transcoding::templates::query_decode_of #[cfg(feature = "transcoding")]
+  use crate::transcoding::templates::raw_path_of #[cfg(feature = "transcoding")]
+  use crate::transcoding::templates::route_index_of #[cfg(feature = "transcoding")]
+  use crate::transcoding::templates::template_of #[cfg(feature = "transcoding")]
+  use crate::transcoding::templates::variables_of #[cfg(feature = "transcoding")]

@@ -10,7 +10,7 @@
     "bindings are requests bound by section 4: procedure, its procedure; route, its method, its template and its body as its rule gives them; target, the request's target, raw; body, its body's text where it has one; then payload, the request's message as its binary payload, compared as a reading's is, or refused, the reason, which a gateway answers 400 PAYLOAD_UNDECODABLE, and pointer or parameter, where the request carried it, as 7.4 places it, none for its text or its query whole.",
     "failures are a call's failure as a gateway answers it (section 7). failure is its code; its scope, protocol where none is given; its detail as the gateway's client read it; where it arose, arose: server, its server answered it of the request; client, its client raised it before the call went; answer, its client raised it of a result or a notification; gateway, the gateway's own reading of the request; encoding, of a request its server could not read, proto where none is given; credential, true where its call presented one; challenge, where the gateway is given one, Bearer otherwise; pointer or parameter, where the gateway's reading met what it refuses. Or own, a failure of the gateway's own — timeout, closed, unwritable, jwt, scheme or failed — with its detail, its words, empty for none. procedure and route, for PAYLOAD_INVALID, its procedure and the route its request came by; problemTypes, the problem types its definitions give, https://example.com/problems/ where none is given, null for none. status, fields beside it, and problem, the body's text, byte for byte.",
     "events are a stream's call as a gateway writes it (section 8): steps, what its call gives, in their order — result and notification, each its data: a JSON text, a text, as text, or bytes in hexadecimal, as raw, which 8.4 writes as JSON strings; heartbeat, its heartbeat's timer firing; failure, a problem's status and its text — then status, contentType and body, the response's, byte for byte.",
-    "exchanges are HTTP exchanges with a gateway of the Transcoding service, in process, its server joined, over a real socket, each step as spec/transports.json plays one. send writes a request on a socket of its own, opened for the exchange it names with on: head, its octets as text, each character one octet, as ISO-8859-1 writes it, in which {host} is the gateway's host and port, an IP literal, and {etag}, or any other name a field captured, the value captured under it; body, its octets in hexadecimal. expect reads the response on that exchange: its status; its fields, by name in any case, each its value, null for one absent, {\"shape\": \"etag\"} for a strong entity tag of 64 lower-case hexadecimal digits, the sha256 of the document, {\"capture\"} keeping it under that name; its body, its text exactly, or bodyBytes, in hexadecimal, read by its content-length or de-chunked to its end; or stream, the octets a body that does not end begins with. In a body, {document} stands for the document beadc wrote of spec/transcoding.proto, byte for byte; a refusal's words are the companion's (7.7), each in its body as it is. close drops a socket; until waits, on the real clock and within a patience, for a count the service keeps to reach its value.",
+    "exchanges are HTTP exchanges with a gateway of the Transcoding service, in process, its server joined, over a real socket, each step as spec/transports.json plays one. send writes a request on a socket of its own, opened for the exchange it names with on: head, its octets as text, each character one octet, as ISO-8859-1 writes it, in which {host} is the gateway's host and port, an IP literal, and {etag}, or any other name a field captured, the value captured under it; body, its octets in hexadecimal. expect reads the response on that exchange: its status; its fields, by name in any case, each its value, null for one absent, {\"shape\": \"etag\"} for a strong entity tag of 64 lower-case hexadecimal digits, the sha256 of the document, {\"capture\"} keeping it under that name; its body, its text exactly, or bodyBytes, in hexadecimal, read by its content-length or de-chunked to its end; or stream, the octets a body that does not end begins with. In a body, {document} stands for the document beadc wrote of spec/transcoding.proto, byte for byte; a refusal's words are the companion's (7.7), each in its body as it is. close drops a socket; until waits, on the real clock and within a patience, for a count the service keeps to reach its value. Each item of differs names a row of docs/support.md an exchange crosses, which names this file and the exchange, and the language it excuses: what that language's platform does otherwise before its gateway reads the request. A harness plays every exchange but those a differs excuses its language from.",
     "defaults are the gateway's options where a case gives none, by the names of transcoding 2.4, 7.6, 8.7, 8.8, 9.2, 10.3 and 11.1, and of spec 15.12, in milliseconds for a time; options, where given, are a case's beside them. service is what each procedure's resolver does, by its name, what its server verifies, and the counts an exchange waits on. A case marked realTime plays on the real clock.",
     "clauses are the units of transcoding.md an entry checks: a clause, 5.2; an item of its numbered list, 5.2.1; a row of its table, counted from 1, 7.6.8; and a unit of spec.md behind spec:, spec:9.2.5, after them."
   ],
@@ -6472,6 +6472,62 @@
       ]
     },
     {
+      "name": "a HEAD that asks a stream is answered as its GET begins, and frees its place as it ends at its head",
+      "clauses": [
+        "3.4",
+        "8.1",
+        "8.6",
+        "10.3"
+      ],
+      "options": {
+        "maximumConnectionsPerAddress": 1
+      },
+      "realTime": true,
+      "steps": [
+        {
+          "send": {
+            "head": "HEAD /v1/watch HTTP/1.1\r\nhost: {host}\r\naccept: text/event-stream\r\nconnection: close\r\n\r\n"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "text/event-stream",
+              "content-length": null,
+              "bead-refusal": null
+            },
+            "body": ""
+          },
+          "on": "a"
+        },
+        {
+          "send": {
+            "head": "GET /v1/watch HTTP/1.1\r\nhost: {host}\r\naccept: text/event-stream\r\nconnection: close\r\n\r\n"
+          },
+          "on": "b"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "text/event-stream",
+              "bead-refusal": null
+            },
+            "stream": "event: result\nid: 1\ndata: {}\n\n"
+          },
+          "on": "b"
+        }
+      ]
+    },
+    {
       "name": "a procedure marked NO_SIDE_EFFECTS answers GET at its default route",
       "clauses": [
         "3.2"
@@ -8209,6 +8265,108 @@
       ]
     },
     {
+      "name": "a HEAD navigation from another site is refused, to a marked read and to the document",
+      "clauses": [
+        "7.7",
+        "7.7.3",
+        "10.1.5"
+      ],
+      "steps": [
+        {
+          "send": {
+            "head": "HEAD /api/Transcoding/getOperation?name=operations/a HTTP/1.1\r\nhost: {host}\r\nsec-fetch-site: cross-site\r\nsec-fetch-mode: navigate\r\nconnection: close\r\n\r\n"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/problem+json",
+              "bead-refusal": "origin-refused",
+              "content-length": "125"
+            },
+            "body": ""
+          },
+          "on": "a"
+        },
+        {
+          "send": {
+            "head": "HEAD /openapi.json HTTP/1.1\r\nhost: {host}\r\nsec-fetch-site: cross-site\r\nsec-fetch-mode: navigate\r\nconnection: close\r\n\r\n"
+          },
+          "on": "b"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/problem+json",
+              "bead-refusal": "origin-refused",
+              "content-length": "125"
+            },
+            "body": ""
+          },
+          "on": "b"
+        }
+      ]
+    },
+    {
+      "name": "a navigation from another site that an object or an embed makes is refused",
+      "clauses": [
+        "7.7",
+        "7.7.3",
+        "10.1.5"
+      ],
+      "steps": [
+        {
+          "send": {
+            "head": "GET /api/Transcoding/getOperation?name=operations/a HTTP/1.1\r\nhost: {host}\r\nsec-fetch-site: cross-site\r\nsec-fetch-mode: navigate\r\nsec-fetch-dest: object\r\nconnection: close\r\n\r\n"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/problem+json",
+              "bead-refusal": "origin-refused"
+            },
+            "body": "{\"detail\":\"a request from a page of another site that shows no origin\",\"status\":403,\"title\":\"Forbidden\",\"type\":\"about:blank\"}"
+          },
+          "on": "a"
+        },
+        {
+          "send": {
+            "head": "GET /openapi.json HTTP/1.1\r\nhost: {host}\r\nsec-fetch-site: cross-site\r\nsec-fetch-mode: navigate\r\nsec-fetch-dest: embed\r\nconnection: close\r\n\r\n"
+          },
+          "on": "b"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/problem+json",
+              "bead-refusal": "origin-refused"
+            },
+            "body": "{\"detail\":\"a request from a page of another site that shows no origin\",\"status\":403,\"title\":\"Forbidden\",\"type\":\"about:blank\"}"
+          },
+          "on": "b"
+        }
+      ]
+    },
+    {
       "name": "a request of no sec-fetch-site is taken",
       "clauses": [
         "10.1.5"
@@ -8569,12 +8727,18 @@
       ]
     },
     {
-      "name": "a target holding a # is refused as HTTP refuses it, unmarked, its body empty, before its path is matched; %23 is a path's",
+      "name": "a target holding a # is refused as HTTP refuses it, unmarked, its body empty, before its path is matched",
       "clauses": [
         "3.6",
         "10.1",
         "10.1.1",
         "spec:15.12"
+      ],
+      "differs": [
+        {
+          "row": "A # in a target",
+          "language": "Rust"
+        }
       ],
       "steps": [
         {
@@ -8593,12 +8757,21 @@
             "body": ""
           },
           "on": "a"
-        },
+        }
+      ]
+    },
+    {
+      "name": "%23 in a target is a path's, decoded into its variable as any other octet it encodes",
+      "clauses": [
+        "3.6",
+        "spec:15.12"
+      ],
+      "steps": [
         {
           "send": {
             "head": "GET /v1/books/a%23b HTTP/1.1\r\nhost: {host}\r\nconnection: close\r\n\r\n"
           },
-          "on": "b"
+          "on": "a"
         },
         {
           "expect": {
@@ -8613,7 +8786,7 @@
             },
             "body": "{\"name\":\"a#b\",\"title\":\"A tale\"}"
           },
-          "on": "b"
+          "on": "a"
         }
       ]
     },

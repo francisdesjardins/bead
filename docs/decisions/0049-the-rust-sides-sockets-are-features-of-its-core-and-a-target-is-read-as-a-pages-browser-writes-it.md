@@ -156,18 +156,21 @@ by its standard:
   resource. `%23` is an octet the target encodes, a character of its path or its query. Each side
   judges the `#` itself, never by its platform's patch level: Kestrel refuses it first since 10.0.15,
   and the C# side's judgement of `RawTarget` refuses it alike on an earlier runtime. The Rust side's
-  HTTP address cannot: hyper's `Uri` has cut the `#` before Bead reads the target, over HTTP/1.1 and
-  in HTTP/2's `:path` alike, so it serves the target cut, a row of Differences, `A # in a target`,
-  lifted when `http`'s `PathAndQuery::from_shared` refuses a fragment as its `from_static` does.
+  HTTP address and its gateway cannot: hyper's `Uri` has cut the `#` before Bead reads the target,
+  over HTTP/1.1 and in HTTP/2's `:path` alike, so each serves the target cut, a row of Differences,
+  `A # in a target`, lifted when hyper's HTTP/1.1 server refuses a request-target that holds a `#`
+  before it builds its `Uri` and h2's server treats a `:path` that holds one as malformed, the two
+  changes asked of them
+  ([0052](0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md)).
 - **A scheme is read in any case** (RFC 3986 §3.1), as hyper reads it and Node hands it on. Kestrel
   answers any other than lower case 400 before the application runs: a row of Differences,
   `A target in absolute-form, its scheme's case`.
 
 `spec/transports.json` holds seven cases of these, four over HTTP and three at a WebSocket's
 address, beside those of a control character; `spec/transcoding.json` refuses `/v1/books/a"b` in the
-exchange that reads a target, and `/v1/books/a#b` in one of its own, which reads `/v1/books/a%23b`
-as `a#b`. A side plays them all but those a `differs` excuses it from: the C# side the two of a
-scheme's case, and the Rust side's HTTP address the one of a `#`.
+exchange that reads a target, and `/v1/books/a#b` in one of its own, beside the one that reads
+`/v1/books/a%23b` as `a#b`. A side plays them all but those a `differs` excuses it from: the C# side
+the two of a scheme's case, and the Rust side's HTTP address and its gateway the ones of a `#`.
 
 ### The WebSocket server reads its own head
 
@@ -316,10 +319,11 @@ side's `fetchInOrder` and the C# side's `InOrder` keep theirs; the transport ord
   sends `<`, `{` or `#` raw in a path, or `"` in a query, is answered 400; nothing a browser writes
   is.
 - **No application sees a `#` in a target**: every side refuses it, but the Rust side's HTTP
-  address, which serves the target cut at it, its application never seeing what followed.
+  address and its gateway, which serve the target cut at it, its application never seeing what
+  followed.
 - **The C# side keeps one row of Differences**, Kestrel's refusal of an upper-case scheme, and the
-  Rust side one, its HTTP address serving a target cut at its `#`; a case's `differs` excuses its
-  player from each.
+  Rust side one, its HTTP address and its gateway serving a target cut at its `#`; a case's or an
+  exchange's `differs` excuses its player from each.
 - **A build with a socket feature needs a C compiler**, aws-lc-rs's; the core with no feature does
   not.
 - **CI lints the core's library four ways**, with no feature, with `websocket` alone, with `http`

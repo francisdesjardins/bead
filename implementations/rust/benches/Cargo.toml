@@ -1,6 +1,6 @@
 [package]
 name = "francisdesjardins-bead-bench"
-description = "The Rust side's in-memory bench: the envelope's codec, calls on one in-memory connection kept, and exchanges, each a client and its connection drawn, called once and closed, written as bead-bench/1."
+description = "The Rust side's in-memory bench: the envelope's codec, protobuf's JSON read and written by Bead's mapping beside Buffa's own, calls on one in-memory connection kept, and exchanges, each a client and its connection drawn, called once and closed, written as bead-bench/1."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -17,7 +17,11 @@ path = "src/main.rs"
 
 [dependencies]
 bead = { workspace = true }
-bead-interop = { workspace = true }
+# the Transcoding service's messages, beadc's, and Bead's mapping of protobuf's JSON over them,
+# measured beside Buffa's own (decision 0052)
+bead-interop = { workspace = true, features = ["transcoding"] }
+bead-protobuf = { workspace = true, features = ["transcoding"] }
+buffa-descriptor = { workspace = true, features = ["json"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "sync"] }
 serde_json = { workspace = true }
 

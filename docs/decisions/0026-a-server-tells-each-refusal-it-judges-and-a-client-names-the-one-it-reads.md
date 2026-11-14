@@ -168,8 +168,10 @@ percent-encodes where it stands, `"`, `<` and `>` in a path or a query, and `^`,
 `}` in a path, is answered 400 unmarked, and a target that holds a `#` anywhere is answered alike;
 `\`, `|`, and `^`, `` ` ``, `{` and `}` in a query are taken as they came, as a page sends them
 ([0049](0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)).
-The Rust side's HTTP address alone serves a target that holds a `#` cut at it, hyper's `http::Uri`
-cutting it before the transport reads it: a platform row of `docs/support.md`, `A # in a target`.
+The Rust side's HTTP address and its gateway serve a target that holds a `#` cut at it, hyper's
+`http::Uri` cutting it before the transport or the gateway reads it: a platform row of
+`docs/support.md`, `A # in a target`
+([0052](0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md)).
 
 **A request's method is compared as it came** (spec 15.6, and 15.2's step 3): a case-sensitive
 token ([RFC 9110 §9.1](https://www.rfc-editor.org/rfc/rfc9110#section-9.1)), so `get` is no `GET`.

@@ -139,6 +139,9 @@ service TranscodingService {
       id: 11
       notifies: {message: "bead.transcoding.v1.Tick"}
     };
+    option (google.api.http) = {
+      get: "/v1/watch"
+    };
   }
 
   // Answers its request.

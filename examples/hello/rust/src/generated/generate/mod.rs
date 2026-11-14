@@ -2,7 +2,7 @@
 // Do not edit: regenerate with beadc.
 // Messages: protoc-gen-buffa 0.9.2, for buffa =0.9.2.
 
-//! The code beadc writes for this output: Buffa's messages under `messages`, and each package's services under `services`.
+//! The code beadc writes for this output: Buffa's messages under `messages`, each package's services under `services`, and its gateway's routes, the document it serves at `/openapi.json` and each service's HTTP client.
 
 #[rustfmt::skip]
 #[allow(
@@ -40,4 +40,20 @@ pub mod services {
             include!("services/hello.v1.rs");
         }
     }
+}
+
+#[rustfmt::skip]
+#[allow(
+    dead_code,
+    deprecated,
+    unreachable_pub,
+    clippy::allow_attributes,
+    clippy::struct_field_names,
+    clippy::type_complexity,
+    reason = "an application serves its routes or calls them, and mounts the tree where it will, beadc's code names what it marks deprecated, a client's fields are its procedures' names, and a requester's type names each of its codecs by its whole path"
+)]
+pub mod bead_http {
+    //! Its gateway's routes, the document it serves at `/openapi.json` and each service's HTTP client.
+
+    include!("bead_http.rs");
 }

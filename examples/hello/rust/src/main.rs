@@ -9,7 +9,7 @@
 use std::process::ExitCode;
 
 // what beadc wrote for this output: the messages under `messages`, the service under `services`,
-// and the procedures each transport of its server takes
+// the procedures each transport of its server takes, and its routes under `bead_http`
 #[path = "generated/generate/mod.rs"]
 pub mod generated;
 

@@ -21,6 +21,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The Rust side's validators' runtime in `bead-protobuf`, and the counter of the contract with
   generated code, `GENERATED_CODE_SUPPORTS_VERSION_7` and `_8`; the Rust side plays
   `spec/validations.json`'s verdicts (decisions 0035, 0051).
+- The Rust side's HTTP/JSON gateway, the features `transcoding` and `gateway` of its core, and
+  protobuf's JSON mapping, the feature `transcoding` of `bead-protobuf`: `HttpGateway` on its own
+  listener or mounted by `answer`, `HttpCaller`, `JsonForm` and `HttpBinding`; beadc's Rust target
+  writes an output's `bead_http.rs`, its routes, its document and each service's HTTP client, and
+  `examples/hello`'s Rust half serves a gateway; it plays `spec/transcoding.json` but the exchange
+  of a `#`, its places of `spec/durations.json`, protobuf's conformance suite's JSON through Bead's
+  mapping, and the interop runs both ways over its gateway (decision 0052).
+- A gateway's `limits`, its exchanges' clients' router limits, on the C# side as on the TypeScript
+  side (decision 0052).
+- A ninth fuzz twin on every side, `json-form`: protobuf's JSON read by Bead's mapping over the
+  `Transcoding` service's messages; what reads is written, what was written reads, and it writes
+  again to the same text, byte for byte (decision 0052).
 - Guides for teams that adopt Bead outside its repository, in `docs/guides/`: getting started, from
   an empty folder to a C# server and a TypeScript client in Node and in a page; real-time recipes,
   a `JWT` and admission hooks, reconnection, Prometheus in .NET and Chrome's DevTools; and how Bead
@@ -37,12 +49,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   repeated or map field of a closed enum its generator left closed; `bead-protobuf` requires
   Buffa's crates exactly (decision 0051).
 - The support matrix and the records correct what they state: the Rust side's HTTP client comes
-  with its gateway (decision 0044); five more rows of the matrix's differences name where the sides
+  with its gateway (decision 0044); three more rows of the matrix's differences name where the sides
   part in shipped code: an MQTT 5 AUTH no CONNECT asked for, a DISCONNECT from a broker that keeps
-  its connection open, a password beside TLS that trusts an authority with no client certificate, a
-  gateway's `HEAD` that asks a stream, and a gateway's `HEAD` navigation from another site; and an
-  MQTT 5 acknowledgement no request awaits is named in the cells of its two rows (decisions 0041,
-  0050).
+  its connection open, and a password beside TLS that trusts an authority with no client
+  certificate; and an MQTT 5 acknowledgement no request awaits is named in the cells of its two
+  rows (decisions 0041, 0050).
 - The page's table of the three implementations is drawn from data and held to the support matrix
   by its build: each row of the matrix's Features and Transports in one part of the table or listed
   as off the page, a part ahead said in a side's cell by the token `` ahead: `<stage>` ``, an open
@@ -82,6 +93,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Spec 15.3: a text message that is no UTF-8 fails its WebSocket with 1007 (RFC 6455 §8.1, §7.4.1),
   and never reaches its router; a page's `WebSocket` fails it as its browser does.
   `spec/transports.json` plays it over a WebSocket, every side; the spec's next version is a minor.
+- `spec/transcoding.json`'s exchange of a `#` is two, the `#` and `%23` apart, and an exchange
+  names the rows that excuse a side from it, as a case of `spec/transports.json` does; every player
+  skips the one that excuses its own (decision 0052).
+- `spec/transcoding.md` has a `HEAD` that would open a stream answered as its `GET` begins, then
+  ended at its head, its subscription with it, where both gateways held it while it lasted (8.1),
+  the fixture's `watch` gaining a `get` rule, `/v1/watch`, to pin it (decision 0052).
+- `spec/transcoding.md` takes a navigation from another site only as a `GET` that no `object` or
+  `embed` makes, web.dev's resource isolation policy whole, where the TypeScript side refused a
+  `HEAD` one but to the document and the C# side took it (10.1) (decision 0052).
+- Decision 0044 no longer names crates for the Rust side's gateway: it is a feature of the core,
+  its JSON mapping a feature of `bead-protobuf` (decision 0052).
 - Spec 15.26: an MQTT 5 link's Keep Alive in force is the shorter of its CONNECT's and its
   CONNACK's Server Keep Alive, its CONNECT's under 0, and a PINGREQ whose PINGRESP has not come
   within half of it loses its link, on every side. The Rust side keeps its own under a Server Keep
@@ -107,6 +129,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The Rust side's WebSocket, server and client, fails a text message that is no UTF-8 with 1007,
   as spec 15.3 says and the other sides do, where it sent 1002; a close whose reason is no UTF-8
   alike, since tungstenite raises one error for both.
+- The Rust side's router ends a call whose timer its clock cannot arm before its request goes with
+  nothing sent, no cancel and no call id reserved, as the TypeScript and C# sides end it, where it
+  cancelled a request its peer never saw.
 
 ## [0.13.0] - 2026-11-12
 

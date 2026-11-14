@@ -136,6 +136,9 @@ public sealed record HttpGatewayOptions
     /// <summary>How often a quiet stream writes a comment, 30 s by default (transcoding 8.7); infinite writes none.</summary>
     public TimeSpan Heartbeat { get; init; } = TimeSpan.FromSeconds(30);
 
+    /// <summary>The router limits of each exchange's client; <see cref="RouterLimits.Default"/> when none.</summary>
+    public RouterLimits? Limits { get; init; }
+
     /// <summary>The calls it holds at once, of every caller (transcoding 10.3).</summary>
     public int MaximumExchanges { get; init; } = 10_000;
 

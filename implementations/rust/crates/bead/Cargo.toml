@@ -51,6 +51,12 @@ http = [
   "dep:rustls-platform-verifier",
   "dep:httpdate",
 ]
+# HTTP/JSON transcoding's parts that hold no socket: http.proto's templates, a route table, a
+# gateway's problems and events, and the seam a message's JSON form fills (decision 0052)
+transcoding = []
+# the HTTP/JSON gateway, on its own listener or mounted, and its caller, over the HTTP transport
+# (decisions 0037 and 0052)
+gateway = ["transcoding", "http", "dep:http-body"]
 # the MQTT 5 binding, a broker adapter of Bead's own over tokio's sockets, its TCP, its TLS and its
 # WebSocket of subprotocol mqtt (decision 0050)
 mqtt = [
@@ -101,11 +107,19 @@ hyper = { workspace = true, optional = true, features = ["server", "client", "ht
 hyper-util = { workspace = true, optional = true, features = ["tokio", "client-legacy", "http1"] }
 h2 = { workspace = true, optional = true }
 tower-service = { workspace = true, optional = true }
+# the gateway's alone
+http-body = { workspace = true, optional = true }
 
 [dev-dependencies]
 # the crate itself, with its test kit: one copy of bead for the unit tests and the players
-bead = { package = "francisdesjardins-bead", path = ".", features = ["testing", "websocket", "http", "mqtt"] }
-bead-interop = { workspace = true }
+bead = { package = "francisdesjardins-bead", path = ".", features = ["testing", "websocket", "http", "mqtt", "transcoding", "gateway"] }
+bead-interop = { workspace = true, features = ["transcoding"] }
+# the gateway's and the caller's tests: beadc's table of the Transcoding service, its messages
+# Buffa's, its JSON forms bead-protobuf's (decision 0052)
+bead-protobuf = { workspace = true, features = ["transcoding"] }
+buffa = { workspace = true }
+buffa-descriptor = { workspace = true }
+buffa-types = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 libtest-mimic = { workspace = true }
 # a session over HTTP/2 the tests open on the HTTP server
@@ -151,6 +165,14 @@ harness = false
 [[test]]
 name = "transports"
 harness = false
+
+# the gateway and its caller, the twins of http-gateway.test.ts and http-caller.test.ts, over
+# beadc's table of spec/transcoding.proto's Transcoding service (decision 0052)
+[[test]]
+name = "gateway"
+
+[[test]]
+name = "caller"
 
 # seeded mutations of the conformance files' bytes, fed to the envelope readers and the parcel's
 [[test]]

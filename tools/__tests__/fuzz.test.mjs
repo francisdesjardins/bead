@@ -41,6 +41,7 @@ const SEEDS = seedsOf({
   codecs: specOf('codecs.json'),
   conversations: specOf('conversations.json'),
   debugFilters: specOf('debug-filters.json'),
+  transcoding: specOf('transcoding.json'),
   transports: specOf('transports.json'),
   vectors: specOf('vectors.json'),
 });
@@ -84,6 +85,7 @@ describe('the targets', () => {
       'ws-handshake',
       'broker-parcel',
       'proto-codecs',
+      'json-form',
     ]);
     assert.deepEqual(TARGETS.csharp, TWINS);
     assert.deepEqual(TARGETS.typescript, [...TWINS, 'blueprint']);
@@ -355,6 +357,46 @@ describe('the seeds', () => {
     );
   });
 
+  test("seed the JSON form target with transcoding.json's readings of Everything and Edges, each after its message's byte", () => {
+    const messages = ['bead.transcoding.v1.Everything', 'bead.transcoding.v1.Edges'];
+    const readings = specOf('transcoding.json').readings.filter((entry) => {
+      return messages.includes(entry.message);
+    });
+
+    // * the first byte picks the message, even `Everything` and odd `Edges`, the rest its body
+    assert.equal(SEEDS['json-form'].length, readings.length);
+    readings.forEach((entry, index) => {
+      const seed = SEEDS['json-form'][index];
+
+      assert.equal(seed[0], messages.indexOf(entry.message), entry.name);
+      assert.ok(
+        seed
+          .subarray(1)
+          .equals(
+            entry.bodyBytes === undefined
+              ? Buffer.from(entry.body, 'utf8')
+              : hexBytesOf(entry.bodyBytes)
+          ),
+        entry.name
+      );
+    });
+    assert.ok(
+      SEEDS['json-form'].some((seed) => {
+        return seed[0] === 0;
+      }) &&
+        SEEDS['json-form'].some((seed) => {
+          return seed[0] === 1;
+        }),
+      'both messages are seeded'
+    );
+    assert.ok(
+      SEEDS['json-form'].some((seed) => {
+        return seed.equals(Buffer.of(1, 0xff));
+      }),
+      'a body that is not UTF-8 is a seed'
+    );
+  });
+
   test('name a seed by its SHA-1, as libFuzzer names an input it keeps', () => {
     assert.equal(seedNameOf(Buffer.from('bead')), createHash('sha1').update('bead').digest('hex'));
   });
@@ -394,6 +436,9 @@ describe('the command line', () => {
       ['rust', 'proto-codecs'],
       ['rust', 'mqtt-packets'],
       ['rust', 'mqtt-websocket-frames'],
+      ['typescript', 'json-form'],
+      ['csharp', 'json-form'],
+      ['rust', 'json-form'],
     ]) {
       assert.deepEqual(argumentsOf(['run', side, target]), {
         command: 'run',

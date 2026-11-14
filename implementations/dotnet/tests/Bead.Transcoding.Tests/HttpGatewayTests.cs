@@ -326,6 +326,47 @@ public sealed class HttpGatewayTests
     }
 
     [Fact]
+    public async Task Gives_each_exchange_s_client_the_router_limits_it_is_given()
+    {
+        var limited = await Started((options) =>
+        {
+            return options with { Limits = new RouterLimits { MaximumPayloadBytes = 16 } };
+        });
+        var unlimited = await Started();
+        var past = $"{{\"aString\":\"{new string('a', 40)}\"}}";
+
+        try
+        {
+            // a request within its client's bound goes
+            using var within = await limited.Client.SendAsync(Json("/api/Transcoding/echo", "{\"aString\":\"a\"}"), Cancelled);
+
+            Assert.Equal((HttpStatusCode.OK, "{\"aString\":\"a\"}"), (within.StatusCode, await within.Content.ReadAsStringAsync(Cancelled)));
+
+            // * one past it refused by its exchange's own client before it goes, each exchange alike
+            for (var count = 1; count <= 2; count += 1)
+            {
+                using var refused = await limited.Client.SendAsync(Json("/api/Transcoding/echo", past), Cancelled);
+                using var problem = JsonDocument.Parse(await refused.Content.ReadAsStringAsync(Cancelled));
+
+                Assert.Equal(HttpStatusCode.RequestEntityTooLarge, refused.StatusCode);
+                Assert.Equal(
+                    (34, "PAYLOAD_TOO_LARGE", "a payload is 16 bytes at most, not 42"),
+                    (problem.RootElement.GetProperty("code").GetInt32(), problem.RootElement.GetProperty("title").GetString(), problem.RootElement.GetProperty("detail").GetString()));
+            }
+
+            // a gateway given none holds by the defaults
+            using var echoed = await unlimited.Client.SendAsync(Json("/api/Transcoding/echo", past), Cancelled);
+
+            Assert.Equal((HttpStatusCode.OK, past), (echoed.StatusCode, await echoed.Content.ReadAsStringAsync(Cancelled)));
+        }
+        finally
+        {
+            await Stopped(limited);
+            await Stopped(unlimited);
+        }
+    }
+
+    [Fact]
     public async Task Presents_the_Authorization_field_ELSEWHERE_or_as_a_JWT_under_bearer_jwt()
     {
         var elsewhere = await Started();
@@ -446,6 +487,61 @@ public sealed class HttpGatewayTests
     }
 
     [Fact]
+    public async Task Refuses_a_HEAD_navigation_and_one_an_object_or_an_embed_makes_from_another_site_to_a_route_and_to_the_document()
+    {
+        var started = await Started();
+
+        static HttpRequestMessage Navigated(HttpMethod method, (string Path, string? Destination) to)
+        {
+            var request = new HttpRequestMessage(method, to.Path);
+
+            request.Headers.TryAddWithoutValidation("sec-fetch-site", "cross-site");
+            request.Headers.TryAddWithoutValidation("sec-fetch-mode", "navigate");
+
+            if (to.Destination is { } destination)
+            {
+                request.Headers.TryAddWithoutValidation("sec-fetch-dest", destination);
+            }
+
+            return request;
+        }
+
+        try
+        {
+            // a GET of a method marked NO_SIDE_EFFECTS, and the document
+            foreach (var path in new[] { "/v1/books/2", "/openapi.json" })
+            {
+                // * a GET a page or a frame navigates to, taken, as web.dev's resource isolation policy takes one
+                foreach (var destination in new[] { null, "document", "iframe" })
+                {
+                    using var taken = await started.Client.SendAsync(Navigated(HttpMethod.Get, (path, destination)), Cancelled);
+
+                    Assert.Equal((path, destination, HttpStatusCode.OK), (path, destination, taken.StatusCode));
+                }
+
+                // a HEAD navigation, and a GET an object or an embed makes, refused
+                foreach (var (method, destination) in new[] { (HttpMethod.Head, (string?)null), (HttpMethod.Head, "document"), (HttpMethod.Get, "object"), (HttpMethod.Get, "embed") })
+                {
+                    using var refused = await started.Client.SendAsync(Navigated(method, (path, destination)), Cancelled);
+
+                    Assert.Equal(
+                        (path, method, destination, HttpStatusCode.Forbidden, "origin-refused"),
+                        (path, method, destination, refused.StatusCode, refused.Headers.GetValues("bead-refusal").Single()));
+                }
+
+                // a HEAD from no page of another site, taken
+                using var own = await started.Client.SendAsync(new HttpRequestMessage(HttpMethod.Head, path), Cancelled);
+
+                Assert.Equal((path, HttpStatusCode.OK), (path, own.StatusCode));
+            }
+        }
+        finally
+        {
+            await Stopped(started);
+        }
+    }
+
+    [Fact]
     public async Task Answers_a_stream_s_request_that_carries_Last_Event_ID_with_204_and_no_call()
     {
         var started = await Started();
@@ -529,6 +625,75 @@ public sealed class HttpGatewayTests
         }
         finally
         {
+            await Stopped(started);
+        }
+    }
+
+    [Fact]
+    public async Task Answers_a_HEAD_that_asks_a_stream_as_its_GET_begins_and_ends_at_its_head_its_subscription_with_it()
+    {
+        // * on its own listener, and mounted on an application's server: each holds one stream an address
+        static HttpGatewayOptions OneStream(HttpGatewayOptions options)
+        {
+            return options with { MaximumConnectionsPerAddress = 1 };
+        }
+
+        var started = await Started(OneStream);
+        await using var service = await TranscodingService.Start();
+        await using var gateway = new HttpGateway(OneStream(Exchanges.OptionsOf(service.Memory, null)));
+        var (application, port) = await MountedBehindReader(gateway);
+
+        try
+        {
+            foreach (var (where, at, memory) in new[] { ("its own listener", started.Port, started.Service.Memory), ("mounted", port, service.Memory) })
+            {
+                var drawn = 0;
+                var closed = 0;
+
+                memory.Connection += (_) => { Interlocked.Increment(ref drawn); };
+                memory.Close += (_, _) => { Interlocked.Increment(ref closed); };
+
+                using var socket = await Opened(at, Encoding.ASCII.GetBytes($"HEAD /v1/watch HTTP/1.1\r\nhost: 127.0.0.1:{at}\r\naccept: text/event-stream\r\n\r\n"));
+                var head = await ReadUntil(socket, "\r\n\r\n");
+                var lines = head[..head.IndexOf("\r\n\r\n", StringComparison.Ordinal)].Split("\r\n");
+                var fields = lines.Skip(1).ToDictionary(
+                    (field) =>
+                    {
+                        return field[..field.IndexOf(':', StringComparison.Ordinal)].Trim();
+                    },
+                    (field) =>
+                    {
+                        return field[(field.IndexOf(':', StringComparison.Ordinal) + 1)..].Trim();
+                    },
+                    StringComparer.OrdinalIgnoreCase);
+
+                // its GET's head, its call made: 200 text/event-stream and 6.2's fields, with no content
+                Assert.Equal((where, "HTTP/1.1 200 OK"), (where, lines[0]));
+                Assert.Equal(
+                    (where, "text/event-stream", "no-store", "nosniff", "Origin"),
+                    (where, fields.GetValueOrDefault("content-type"), fields.GetValueOrDefault("cache-control"), fields.GetValueOrDefault("x-content-type-options"), fields.GetValueOrDefault("vary")));
+                Assert.False(fields.ContainsKey("content-length"), where);
+                Assert.False(fields.ContainsKey("transfer-encoding"), where);
+                Assert.EndsWith("\r\n\r\n", head, StringComparison.Ordinal);
+                Assert.Equal(1, Volatile.Read(ref drawn));
+
+                // * its exchange's connection closed with its response, and its subscription with it
+                await Until(() => { return Volatile.Read(ref closed) == 1; });
+
+                // its response ended at its head, and its place freed: the next request on its socket, a
+                // GET that opens the same stream, answered
+                await socket.SendAsync(Encoding.ASCII.GetBytes($"GET /v1/watch HTTP/1.1\r\nhost: 127.0.0.1:{at}\r\naccept: text/event-stream\r\nconnection: close\r\n\r\n"), Cancelled);
+
+                var stream = await ReadUntil(socket, "event: result\nid: 1\ndata: {}\n\n");
+
+                Assert.StartsWith("HTTP/1.1 200 OK\r\n", stream, StringComparison.Ordinal);
+                Assert.Contains("text/event-stream", stream, StringComparison.OrdinalIgnoreCase);
+            }
+        }
+        finally
+        {
+            await application.StopAsync(Cancelled);
+            await application.DisposeAsync();
             await Stopped(started);
         }
     }
@@ -934,6 +1099,12 @@ public sealed class HttpGatewayTests
 
             Assert.Equal((400, "application/problem+json"), (untouched.Status, untouched.Fields.GetValueOrDefault("content-type")));
 
+            // * a chunked body that came empty, untouched, read as the empty body: only a body its
+            // server tells begun is taken
+            var chunked = await Exchanged(port, EchoOctetsOf(port, (["transfer-encoding: chunked", "connection: close"], "0\r\n\r\n")));
+
+            Assert.Equal((untouched.Status, null, untouched.Body), (chunked.Status, chunked.Fields.GetValueOrDefault("bead-refusal"), chunked.Body));
+
             foreach (var reader in new[] { "taken", "peek", "examine" })
             {
                 var answered = await Exchanged(port, EchoOctetsOf(port, ([.. fields, $"x-reader: {reader}"], "")));
@@ -1017,6 +1188,41 @@ public sealed class HttpGatewayTests
             Assert.Equal(HttpStatusCode.InternalServerError, answered.StatusCode);
             Assert.Equal("{\"status\":500,\"title\":\"Internal Server Error\",\"type\":\"about:blank\"}", await answered.Content.ReadAsStringAsync(Cancelled));
             Assert.Equal(["the clock broke"], reported);
+        }
+        finally
+        {
+            await Stopped(started);
+        }
+    }
+
+    [Fact]
+    public async Task Answers_a_route_s_variable_that_names_no_field_500_reported_none_of_its_words_in_the_problem()
+    {
+        // * getBook's route told its path is /v1/{nope}, which no field of its request names: a
+        // programmer's error its binding meets, past every gate, before any connection is drawn
+        var started = await Started((options) =>
+        {
+            return options with
+            {
+                Routes = [.. options.Routes.Select((route) =>
+                {
+                    return route.Procedure == TranscodingProcedures.GetBook.Procedure ? route with { Routes = [new HttpRouteTemplate { Method = "GET", Template = "/v1/{nope}" }] } : route;
+                })],
+            };
+        });
+        var reported = ReportedBy(started.Gateway);
+        var drawn = 0;
+
+        started.Service.Memory.Connection += (_) => { Interlocked.Increment(ref drawn); };
+
+        try
+        {
+            using var answered = await started.Client.GetAsync(new Uri("/v1/x", UriKind.Relative), Cancelled);
+
+            Assert.Equal(HttpStatusCode.InternalServerError, answered.StatusCode);
+            Assert.Equal("{\"status\":500,\"title\":\"Internal Server Error\",\"type\":\"about:blank\"}", await answered.Content.ReadAsStringAsync(Cancelled));
+            Assert.Equal(0, drawn);
+            Assert.Contains("nope", Assert.Single(reported), StringComparison.Ordinal);
         }
         finally
         {

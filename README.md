@@ -35,16 +35,18 @@ This repository holds the protocol and its implementations, side by side:
   duration held as spec 1.4 holds it; the trace, the filter and the registry, and a participant's
   trace of its parcels; the WebSocket, HTTP and in-memory transports; the broker's core over an
   in-memory broker, MQTT 5 over a broker, and the joined transport; the `proto` payload's codec on
-  Buffa and the validators' runtime; and what beadc writes for it, each package's typed server and
-  client beside the messages Buffa writes — playing every conformance file it reaches, each part it
-  lacks a row of the support matrix ahead
+  Buffa and the validators' runtime; the same gateway, on its own listener or mounted on hyper, with
+  protobuf's JSON by Bead's mapping; and what beadc writes for it, each package's typed server and
+  client beside the messages Buffa writes, and an output's route table, document and HTTP client —
+  playing every conformance file it reaches, each part it lacks a row of the support matrix ahead
   ([0044](docs/decisions/0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md),
   [0049](docs/decisions/0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md),
   [0050](docs/decisions/0050-the-rust-sides-broker-bindings-are-features-of-its-core-and-mqtt-5-a-client-of-its-own-over-its-sockets.md),
-  [0051](docs/decisions/0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md));
+  [0051](docs/decisions/0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md),
+  [0052](docs/decisions/0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md));
 - **an interop service** every side offers, which each other side's client calls over WebSocket,
   HTTP and MQTT 5, and the TypeScript and C# sides' over AMQP 1.0 too, beside a gateway whose routes
-  the other side's generated HTTP client calls.
+  each other side's generated HTTP client calls.
 
 **Nothing is published.** No package goes to npm, NuGet or crates.io, and no image to a registry:
 build on a commit, pinned. Publication is ahead.
@@ -146,9 +148,9 @@ envelopes.
 
 ## Where Bead goes
 
-- **Next**: the Rust side's gateway, then its AMQP 1.0 binding, each a record of its own
+- **Next**: the Rust side's AMQP 1.0 binding, a record of its own
   ([0044](docs/decisions/0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)),
-  each a row of the [support matrix](docs/support.md#differences) ahead.
+  a row of the [support matrix](docs/support.md#differences) ahead.
 - **Then**: a payload's rules written in CEL, a total subset beadc compiles into each side beside
   the rules it compiles already
   ([0035](docs/decisions/0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md));
@@ -223,8 +225,8 @@ procedures, each under a version of its own. Beside them:
 | [`metrics.json`](spec/metrics.json)                             | 24 expositions, the text a registry writes for what it counts, byte for byte, and 54 exits of the interop service's server, the series each step moved                                                                                                                                                                                                                                                                                         |
 | [`validations.json`](spec/validations.json)                     | 180 verdicts, payloads judged by their message's rules, the violations each gives in their order, and 64 details, what `PAYLOAD_INVALID`'s detail writes and reads                                                                                                                                                                                                                                                                             |
 | [`validations.proto`](spec/validations.proto)                   | the messages the verdicts judge, their rules protovalidate's, which beadc generates every side's validators for                                                                                                                                                                                                                                                                                                                                |
-| [`transcoding.json`](spec/transcoding.json)                     | 26 templates, 192 readings, 78 writings, 66 bindings, 46 failures, 10 events and 79 exchanges: what a gateway answers over HTTP of a service's procedures, its routes and its bindings, protobuf's JSON read and written by Bead's mapping, its problems, its streams, and its exchanges over a real socket                                                                                                                                    |
-| [`transcoding.proto`](spec/transcoding.proto)                   | the messages and the service the entries play a gateway against, `google.api.http` rules among them, which beadc generates the TypeScript and C# sides' code, route table and document of                                                                                                                                                                                                                                                      |
+| [`transcoding.json`](spec/transcoding.json)                     | 26 templates, 192 readings, 78 writings, 66 bindings, 46 failures, 10 events and 83 exchanges: what a gateway answers over HTTP of a service's procedures, its routes and its bindings, protobuf's JSON read and written by Bead's mapping, its problems, its streams, and its exchanges over a real socket                                                                                                                                    |
+| [`transcoding.proto`](spec/transcoding.proto)                   | the messages and the service the entries play a gateway against, `google.api.http` rules among them, which beadc generates every side's code, route table and document of                                                                                                                                                                                                                                                                      |
 | [`transcoding-required.proto`](spec/transcoding-required.proto) | the messages of `edition = "2023"` that `transcoding.proto` imports, since a `proto3` file declares none of them: fields protobuf requires, `LEGACY_REQUIRED`, at every depth, and a closed enum                                                                                                                                                                                                                                               |
 | [`interop-blueprint.json`](spec/interop-blueprint.json)         | the interop service's API: its one service, its 19 procedures, each with its kind, its bindings, its admission and its failures, in the builder's blueprint's form                                                                                                                                                                                                                                                                             |
 | [`interop-service.json`](spec/interop-service.json)             | what each procedure of the interop service takes, answers, admits and notifies, by its name; what its relay admits and forwards; and the credentials it verifies                                                                                                                                                                                                                                                                               |
@@ -321,8 +323,8 @@ nothing it generates is committed.
 
 In `implementations/rust`. Rust 1.99.1 and edition 2024, as `rust-toolchain.toml` pins them, which
 rustup installs with clippy, rustfmt, llvm-tools and the browser's target, `wasm32-unknown-unknown`;
-on Windows, the MSVC build tools: the core pure Rust, its socket transports' and its MQTT 5
-binding's TLS, aws-lc-rs, built by the platform's C compiler
+on Windows, the MSVC build tools: the core pure Rust, its socket transports', its MQTT 5
+binding's and its gateway's TLS, aws-lc-rs, built by the platform's C compiler
 ([0049](docs/decisions/0049-the-rust-sides-sockets-are-features-of-its-core-and-a-target-is-read-as-a-pages-browser-writes-it.md)).
 Clippy's `pedantic`, `nursery` and `cargo` groups and chosen restriction lints are denied,
 `unsafe_code` forbidden, and every warning of rustc, clippy and rustdoc an error by its
@@ -343,7 +345,10 @@ cargo clippy -p francisdesjardins-bead --lib --locked
 cargo clippy -p francisdesjardins-bead --lib --features websocket --locked
 cargo clippy -p francisdesjardins-bead --lib --features http --locked
 cargo clippy -p francisdesjardins-bead --lib --features mqtt --locked
-cargo clippy -p francisdesjardins-bead --lib --features testing --locked --target wasm32-unknown-unknown
+cargo clippy -p francisdesjardins-bead --lib --features transcoding --locked
+cargo clippy -p francisdesjardins-bead --lib --features gateway --locked
+cargo clippy -p francisdesjardins-bead-protobuf --lib --features transcoding --locked
+cargo clippy -p francisdesjardins-bead --lib --features testing,transcoding --locked --target wasm32-unknown-unknown
 cargo test --workspace --all-features --locked
 cargo doc --workspace --no-deps --all-features --locked
 cargo build --workspace --locked
@@ -402,10 +407,10 @@ and Rust targets, the image and its wrappers, and what each option of `bead/opti
 [`examples/hello`](examples/hello/README.md) is a project written as a consumer writes one: a
 `.proto` of `proto` messages, a procedure that notifies at a window of 1, its request held to a
 rule, a command, a catalogue and a hook, generated by beadc into a TypeScript half, a C# half and
-a Rust half, the TypeScript and C# servers answering their routes over HTTP and JSON by a gateway
-beside them, the Rust half's gateway ahead
+a Rust half, each server answering its routes over HTTP and JSON by a gateway beside it
 ([0022](docs/decisions/0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md),
-[0051](docs/decisions/0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md)).
+[0051](docs/decisions/0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md),
+[0052](docs/decisions/0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md)).
 Each half reaches its runtime from its source, the TypeScript half by a Yarn `portal:`, the C#
 half by a `ProjectReference` and the Rust half by a path, takes the house's rules by reference
 where its platform can, a copy held to them where it cannot, and builds twice: its messages
@@ -473,12 +478,14 @@ other's over AMQP 1.0 too
   it, they are ignored, saying so. A trial is a case, a transport and a server, named by the
   TypeScript side's sentence in snake case.
 
-In the same runs, each side's generated HTTP client calls the gateway the other side's interop
+In the same runs, each side's generated HTTP client calls the gateway each other side's interop
 server serves beside it, of `spec/transcoding.proto`'s service: protobuf's JSON and every native
 encoding, its problems and the authorization it presents, a stream's result, notifications and
-ending failure, and the gateway's own refusals of a route, a size and a busy stream; and both
-served OpenAPI documents are compared byte for byte (`interop.test.ts`'s gateway tests under
-`the C# server of the interop service`; `HttpInteropTests.cs`).
+ending failure, and the gateway's own refusals of a route, a size and a busy stream; and the served
+OpenAPI documents are compared byte for byte (`interop.test.ts`'s gateway tests under `the C#
+server of the interop service` and the Rust server's; `HttpInteropTests.cs`, under `server=Rust`
+too; the Rust client's gateway trials of `bead-interop-server`)
+([0052](docs/decisions/0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md)).
 
 Where the other runtime is missing, each skips its interop, saying so. `BEAD_INTEROP_REQUIRED=1`
 turns that skip into a failure, as the CI sets it: there, a skip could only be a path to the other
@@ -721,8 +728,10 @@ over its in-memory transport, locally alone: calls, `call.p50`, `call.p95`, `cal
 `call.throughput`, on one connection kept, and exchanges, `exchange.p50` to `exchange.throughput`,
 each a client and its connection drawn, called once and closed, at 0 B, 1 KiB and 64 KiB, each
 measure after 500 calls of warm-up, its throughput in batches of 32. It measures no memory, since an
-allocator that counts takes unsafe code, which the side forbids, and no notification, large echo,
-interop or transcoding; its layers on the loopback, as the other sides measure theirs, are ahead.
+allocator that counts takes unsafe code, which the side forbids, and no notification, large echo or
+interop; and protobuf's JSON, `transcoding.read.bead`, `transcoding.read.stock`,
+`transcoding.write.bead` and `transcoding.write.stock`, Bead's mapping beside Buffa's own JSON. Its
+layers on the loopback, as the other sides measure theirs, are ahead.
 `node tools/bench-release.mjs rust` builds it once in release and runs it in fresh processes as it
 runs the others; its report names `rust` for its side and `rustc` for its runtime, and
 `tools/bench-compare.mjs` compares two of them. A release keeps its report, as it keeps the others'
@@ -813,7 +822,7 @@ machine.
 
 ## Fuzzing
 
-Every side fuzzes the same eight parsers, guided by coverage, each fed raw bytes:
+Every side fuzzes the same nine parsers, guided by coverage, each fed raw bytes:
 `envelope`, the envelope reader, header and body, and a failure's record; `payload-codecs`, the
 `json` and `text` codecs' readers, what they read written back; `http-fields`, the HTTP transport's
 field parsers, an Item of RFC 9651 for the `Bead-*` fields, `Authorization`, `X-Forwarded-For`, the
@@ -828,7 +837,12 @@ written again, its writer refusing exactly what it documents, and what it writes
 same parcel and the same bytes; `proto-codecs`, the `proto` codecs over `spec/codecs.proto`'s
 `Probe` (spec 17.9), the first three bytes drawing a path, a depth and a number of unknown groups to
 wrap what reads, which its writer then refuses as nested past 100 or writes so that its reader takes
-it back. The Rust side fuzzes all eight, over its core's judgement and codecs, with cargo-fuzz on
+it back; `json-form`, protobuf's JSON read by Bead's mapping over `spec/transcoding.proto`'s
+`Everything` and `Edges` (transcoding 5.2), the first byte picking the message, where what reads is
+written, what was written reads, and it writes again to the same text, byte for byte, never a
+message's bytes compared, since a map's entries are written in 17.7.6's order and a `-0` as `0` or
+left out (5.6). The Rust side fuzzes all nine, over its core's judgement and codecs and
+`bead-protobuf`'s JSON form, with cargo-fuzz on
 the nightly `tools/fuzz.mjs` pins by its date, on Linux or WSL, from `implementations/rust/fuzz/`,
 and two of its own, `mqtt-packets`, its MQTT 5 client's reader of a broker's packets, and
 `mqtt-websocket-frames`, its MQTT 5 client's reader of a WebSocket's frames, which the other sides
@@ -921,9 +935,11 @@ against each server.
   an entry of a conformance file a harness names at run time, a case's label or a row of the
   matrix, its bytes copied and `…` any run of them, or a literal the tool lists with its reason.
   Given files, those alone.
-- `node tools/check-details.mjs`: no exception's message goes into a failure's detail but at the few
-  sites that report alone (spec 9.0), on every side, each marked where it stands by
-  `// ! a detail of the side's own words: <why>`. Given files, those alone.
+- `node tools/check-details.mjs`: on every side, no exception's message goes into a failure's detail
+  but at a site that reports alone (spec 9.0) or whose words are the side's own, a built-in codec's
+  reason in spec 17.2's words or a gateway's mapping's refusal in transcoding.json's, each marked
+  where it stands by `// ! a detail of the side's own words: <why>` and counted by the tool. What
+  another generator writes is left unread, what beadc writes read. Given files, those alone.
 - `node tools/check-names.mjs`: each side's public names, read from its surface list — the
   TypeScript side's `surface.txt`, each C# project's `PublicAPI.Shipped.txt` with its Unshipped
   applied, the Rust side's `surfaces/` — are one on every side, or a row of `tools/names.tsv` says
@@ -1089,8 +1105,9 @@ its digest, its heartbeat lowered, and a password and TLS certificates drawn for
 `BEAD_AMQP_REQUIRED=1` and `BEAD_INTEROP_REQUIRED=1`: the cases over AMQP 1.0 on the TypeScript and
 C# sides, each adapter against it over TCP and over TLS with SASL EXTERNAL, and the interop over
 AMQP 1.0 both ways, with no page leg, since no page reaches an AMQP 1.0 broker); `rust` on Linux and Windows (on Linux, the toolchain its file pins, format, clippy, the
-core's library linted with no feature and with `websocket`, `http` and `mqtt` each alone, the
-core's clippy for the browser's target, the documentation, a build on the default features alone,
+core's library linted with no feature and with `websocket`, `http`, `mqtt`, `transcoding` and
+`gateway` each alone, `bead-protobuf`'s with `transcoding`, the core's clippy for the browser's
+target with `transcoding`, the documentation, a build on the default features alone,
 the interop's server and its trials' test binary built and handed on, cargo-deny, the tests'
 descriptor set held to what protoc writes at its pin, the tests under coverage, `bead-house`'s
 holding each library crate's public surface to its list among them, lines and regions held to the
@@ -1102,8 +1119,8 @@ of another origin in Chromium against every HTTP server, the Rust one among them
 `BEADC_WRAPPERS_REQUIRED=1`, the wrappers held to one contract against a stand-in engine, then beadc
 over the interop's blueprint, its rules and its form, `beadc generate --check` over the root's
 `beadc.yaml`, each side's interop, and over the demo's, and `tools/check-validations.mjs` and
-`tools/check-transcoding.mjs`, every side's validators of `spec/validations.proto` and the
-TypeScript and C# sides' route tables and documents of `spec/transcoding.proto` held to what beadc
+`tools/check-transcoding.mjs`, every side's validators of `spec/validations.proto` and every
+side's route table and document of `spec/transcoding.proto` held to what beadc
 writes, on Node 26 on Linux and Windows and on 24.9 on Linux; then `beadc breaking` over the interop's blueprint and
 `examples/hello`, against the last release, which carries both, on Linux; its types, the goldens'
 among them, lint and format, buf's among them, on Linux; and on the image's legs, Linux on Node 26,

@@ -464,11 +464,14 @@ public sealed class HttpGateway : IAsyncDisposable
         }
     }
 
-    // whether a navigation from another site with no origin is taken (10.1, step 5): to the
-    // document, to a default route's GET, or to a get rule of a method marked NO_SIDE_EFFECTS
+    // whether a navigation from another site with no origin is taken (10.1, step 5): a GET that no
+    // object or embed makes, as web.dev's resource isolation policy takes one, to the document, to a
+    // default route's GET, or to a get rule of a method marked NO_SIDE_EFFECTS
     private static bool IsNavigationTaken(HttpContext context, (bool IsDocument, Dictionary<string, Served> Matched) asked)
     {
-        if (HeaderOf(context.Request, "sec-fetch-mode") != "navigate")
+        var request = context.Request;
+
+        if (HeaderOf(request, "sec-fetch-mode") != "navigate" || !IsMethod(request, "GET") || HeaderOf(request, "sec-fetch-dest") is "object" or "embed")
         {
             return false;
         }
@@ -478,9 +481,7 @@ public sealed class HttpGateway : IAsyncDisposable
             return true;
         }
 
-        var isRead = IsMethod(context.Request, "GET") || IsMethod(context.Request, "HEAD");
-
-        return isRead && asked.Matched.TryGetValue("GET", out var served) && served.Route.NoSideEffects;
+        return asked.Matched.TryGetValue("GET", out var served) && served.Route.NoSideEffects;
     }
 
     // whether a request's method is the one named: a method is case-sensitive (RFC 9110 §9.1)
@@ -921,10 +922,10 @@ public sealed class HttpGateway : IAsyncDisposable
         }
 
         // its client declares no resolver: a command its server sends is answered SERVICE_UNKNOWN
-        // (transcoding 2.6). Its notifications' callbacks run on a scheduler of the exchange's own,
-        // which a stream's end follows
+        // (transcoding 2.6), and holds by the router limits the gateway is given. Its notifications'
+        // callbacks run on a scheduler of the exchange's own, which a stream's end follows
         var callbacks = new SerialScheduler();
-        using var router = new RouterClient(transport, new RouterClientOptions { Clock = _clock, ResolverScheduler = callbacks });
+        using var router = new RouterClient(transport, new RouterClientOptions { Clock = _clock, Limits = _options.Limits, ResolverScheduler = callbacks });
 
         using var aborted = context.RequestAborted.Register(() =>
         {
@@ -1243,6 +1244,21 @@ public sealed class HttpGateway : IAsyncDisposable
 
             events.Failure(problem.Body, out _);
             await Answer(context, problem);
+
+            return;
+        }
+
+        // * a HEAD that asks a stream: its GET's head, with no content, and its response ends there
+        // (8.1). Nothing written yet: its exchange's connection closes and its place is freed as this
+        // returns, before its server writes that head, so its next request finds both gone
+        if (IsMethod(context.Request, "HEAD"))
+        {
+            // ! ended before its result, so the notifications it held and any that come write nothing
+            events.Failure(ReadOnlyMemory<byte>.Empty, out _);
+            settled.TrySetResult();
+            context.Response.StatusCode = StatusCodes.Status200OK;
+            Stamp(context.Response);
+            context.Response.ContentType = EventStreamType;
 
             return;
         }
@@ -1759,7 +1775,8 @@ public sealed class HttpGateway : IAsyncDisposable
 
         public async Task<IReadOnlyList<Exception>> Trigger(ReadOnlyMemory<byte> payload)
         {
-            if (_isEnding)
+            // its own end begun, or its stream's ended without it, as a HEAD's ends at its head
+            if (_isEnding || stream.Events.IsEnded)
             {
                 return [];
             }

@@ -8,7 +8,7 @@
 
 import { createServer as createNodeServer } from 'node:http';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { FailureScope } from '../../router/shared/constants';
+import { EnvelopeKind, FailureScope } from '../../router/shared/constants';
 import { createServer } from '../../server/server';
 import { joinTransports } from '../../transport/server/joined-transport-server';
 import { createMemoryTransportServer } from '../../transport/server/memory-transport-server';
@@ -46,6 +46,9 @@ export const SESSION = 'ada';
 // how long `cancels` waits for the cancels it is asked for at most
 const CANCELS_PATIENCE = 1_000;
 
+// how long `ticks` waits for its notifications to leave before it ends its subscription, at most
+const TICKS_PATIENCE = 5_000;
+
 // definition
 
 /**
@@ -71,6 +74,59 @@ export const startTranscoding = async (
   const counts = { cancelled: 0, hanging: 0, reported: 0, requires: 0 };
   const refused: string[] = [];
   const service = new TranscodingServer();
+  // * the notifications the server sent, by connection, and the cancels it received, heard on its
+  // router's trace: a subscription ended by its service's failure drops what its queue still holds
+  // (spec 11.7), so `ticks` ends its own once its notifications left, or its client cancelled it
+  const sent = new Map<string, { cancelled: boolean; notifications: number }>();
+  const changed = new Set<() => void>();
+
+  server.router.on('debug', ({ connectionHandle, direction, header }) => {
+    const isSent = direction === 'tx' && header.kind === EnvelopeKind.NOTIFICATION;
+
+    if (!isSent && (direction !== 'rx' || header.kind !== EnvelopeKind.CANCEL)) {
+      return;
+    }
+
+    const outgoing = sent.get(connectionHandle) ?? { cancelled: false, notifications: 0 };
+
+    if (isSent) {
+      outgoing.notifications += 1;
+    } else {
+      outgoing.cancelled = true;
+    }
+
+    sent.set(connectionHandle, outgoing);
+
+    for (const wake of changed) {
+      wake();
+    }
+  });
+
+  // until `count` notifications left on a connection, its client cancelled, or its patience ran:
+  // past it, it ends the subscription as it would have
+  const untilSent = async (connectionHandle: string, count: number): Promise<void> => {
+    const deadline = Date.now() + TICKS_PATIENCE;
+
+    for (;;) {
+      const outgoing = sent.get(connectionHandle);
+
+      if (
+        outgoing?.cancelled === true ||
+        (outgoing?.notifications ?? 0) >= count ||
+        Date.now() >= deadline
+      ) {
+        return;
+      }
+
+      const woken = Promise.withResolvers<void>();
+      const timer = setTimeout(woken.resolve, deadline - Date.now());
+
+      changed.add(woken.resolve);
+      await woken.promise;
+      changed.delete(woken.resolve);
+      clearTimeout(timer);
+    }
+  };
 
   service.on('echo', (request, response) => {
     return response(request.payload);
@@ -110,6 +166,7 @@ export const startTranscoding = async (
   });
   service.on('ticks', async (request, response) => {
     const { connectionHandle, payload } = request;
+    const before = sent.get(connectionHandle)?.notifications ?? 0;
 
     await response({ ticks: payload.from });
 
@@ -124,7 +181,9 @@ export const startTranscoding = async (
       );
     }
 
-    // * the subscription ends with the service's own failure, on its call id
+    // * the subscription ends with the service's own failure, on its call id, once its
+    // notifications left its queue
+    await untilSent(connectionHandle, before + payload.from);
     await server.router.dropSubscriptions(connectionHandle, {
       code: 2,
       detail: '',

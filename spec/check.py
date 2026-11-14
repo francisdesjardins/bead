@@ -220,14 +220,6 @@ SIDES = {
 # the side plays fails, so the table only shrinks
 AHEAD = {
     'Rust': {
-        # the gateway's ways of 15.12's places, ahead with the gateway
-        "Rust's gateway": {
-            'files': ('transcoding',),
-            'documents': ('transcoding',),
-            'places': ('gateway',),
-            'ways': (('httpTransportServer.sendGracePeriod', 'gateway'), ('httpTransportServer.headersTimeout', 'gateway'),
-                     ('httpTransportServer.bodyGracePeriod', 'gateway')),
-        },
         "Rust's AMQP 1.0 binding": {
             'transports': ('amqp',),
             'groups': ('amqpMessages', 'amqpPublishBounds'),
@@ -609,6 +601,11 @@ for whole in ('codecs', 'identities'):
         for entry in named[group]:
             check_crossing(f'{whole}: {group}, {entry["name"]!r},', entry.get('differs', []), f'spec/{whole}.json',
                            entry['name'])
+
+# the transcoding's exchanges name their file beside themselves, as the codecs' entries do
+for entry in named['transcoding/exchanges']:
+    check_crossing(f'transcoding: exchanges, {entry["name"]!r},', entry.get('differs', []), 'spec/transcoding.json',
+                   entry['name'])
 
 # ── The durations ───────────────────────────────────────────────────────────────────────────────
 

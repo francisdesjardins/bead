@@ -396,3 +396,95 @@ async fn a_session_s_timer_that_fired_behind_the_touch_that_restarted_it_reaches
         "the timer the touch armed is the one that counts"
     );
 }
+
+// a stepping clock that refuses to arm one schedule, in its words
+struct Refusing {
+    clock: Arc<SteppingClock>,
+    refused: Schedule,
+}
+
+impl fmt::Debug for Refusing {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.debug_struct("Refusing").finish_non_exhaustive()
+    }
+}
+
+impl Clock for Refusing {
+    fn monotonic(&self) -> Duration {
+        self.clock.monotonic()
+    }
+
+    fn wall(&self) -> SystemTime {
+        self.clock.wall()
+    }
+
+    fn arm(
+        &self,
+        schedule: Schedule,
+        callback: TimerCallback,
+    ) -> Result<Arc<dyn Timer>, crate::errors::ProgrammerError> {
+        if schedule == self.refused {
+            return Err(crate::errors::ProgrammerError::new("the call timer broke"));
+        }
+
+        self.clock.arm(schedule, callback)
+    }
+
+    fn activity(&self) -> Option<Arc<crate::testing::Activity>> {
+        self.clock.activity()
+    }
+}
+
+// as the other sides' requesters throw before their delivery: its request whole, and one sent as
+// a transfer, whose inactivity's timer is its first
+#[tokio::test]
+async fn sends_nothing_of_a_call_whose_timer_its_clock_cannot_arm_no_request_and_no_cancel() {
+    const TIMEOUT: Duration = Duration::from_secs(60);
+    const INACTIVITY: Duration = Duration::from_secs(30);
+
+    for (size, refused) in [(8, TIMEOUT), (200, INACTIVITY)] {
+        let clock = Arc::new(Refusing {
+            clock: SteppingClock::new(super::january_first()),
+            refused: Schedule::Once(refused),
+        });
+        let shared: SharedClock = Arc::<Refusing>::clone(&clock);
+        let transport = ScriptedClient::new(shared);
+        let carried: Arc<dyn crate::transport::RouterClientTransport> =
+            Arc::<ScriptedClient>::clone(&transport);
+        let router = RouterClient::new(
+            carried,
+            &RouterClientOptions {
+                limits: Some(limits_of(Some(INACTIVITY))),
+                ..RouterClientOptions::default()
+            },
+        )
+        .expect("a router built");
+        let call = router
+            .request(
+                Bytes::from(vec![7; size]),
+                RouterRequest {
+                    procedure: crate::testing::pair::echo(),
+                    options: super::options_of(TIMEOUT),
+                    series: None,
+                    refusal: None,
+                    subscribes: None,
+                    on_call_id: None,
+                    on_sent: None,
+                },
+            )
+            .expect("a call");
+        let answered = super::answered(call).await;
+
+        clock.clock.settle().await;
+
+        assert!(
+            matches!(&answered, Err(crate::CallError::Refused(error)) if error.message() == "the call timer broke"),
+            "{size} bytes: {answered:?}"
+        );
+        assert_eq!(
+            transport.envelopes(),
+            Vec::<Envelope>::new(),
+            "{size} bytes: nothing sent"
+        );
+    }
+}

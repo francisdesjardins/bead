@@ -225,6 +225,9 @@ enum Carried {
     // * a sender dropped before its end cuts the exchange, a turn later: a head hyper still holds
     // goes out first, as a close sends the head of each request it cuts (spec 15.7)
     Streamed(mpsc::UnboundedReceiver<Piece>),
+    // a body of a gateway's own, paced by its polls, cut by its error
+    #[cfg(feature = "gateway")]
+    Given(Pin<Box<dyn Body<Data = Bytes, Error = Cut> + Send>>),
 }
 
 /// An answer's body, whole or streamed, telling once whether hyper took it whole.
@@ -277,6 +280,18 @@ impl AnswerBody {
             },
             sender,
         )
+    }
+
+    /// A body of a gateway's own, handed on as it gives its frames: one taken whole at its end.
+    #[cfg(feature = "gateway")]
+    pub(crate) fn given(body: Pin<Box<dyn Body<Data = Bytes, Error = Cut> + Send>>) -> Self {
+        Self {
+            is_whole: body.is_end_stream(),
+            carried: Carried::Given(body),
+            is_cut: false,
+            closed: None,
+            flow: None,
+        }
     }
 
     /// Itself, settling `flow` as hyper lets it go.
@@ -334,6 +349,16 @@ impl Body for AnswerBody {
                 return Poll::Ready(piece.map(|piece| Ok(Frame::data(piece))));
             }
             Carried::Streamed(receiver) => receiver.poll_recv(context),
+            #[cfg(feature = "gateway")]
+            Carried::Given(body) => {
+                let polled = body.as_mut().poll_frame(context);
+
+                if matches!(polled, Poll::Ready(None)) {
+                    this.ended();
+                }
+
+                return polled;
+            }
         };
 
         match polled {
@@ -355,7 +380,12 @@ impl Body for AnswerBody {
     }
 
     fn is_end_stream(&self) -> bool {
-        matches!(self.carried, Carried::Whole(None))
+        match &self.carried {
+            Carried::Whole(bytes) => bytes.is_none(),
+            Carried::Streamed(_) => false,
+            #[cfg(feature = "gateway")]
+            Carried::Given(body) => body.is_end_stream(),
+        }
     }
 
     fn size_hint(&self) -> SizeHint {
@@ -366,6 +396,8 @@ impl Body for AnswerBody {
                     .map_or(0, |bytes| u64::try_from(bytes.len()).unwrap_or(u64::MAX)),
             ),
             Carried::Streamed(_) => SizeHint::default(),
+            #[cfg(feature = "gateway")]
+            Carried::Given(body) => body.size_hint(),
         }
     }
 }

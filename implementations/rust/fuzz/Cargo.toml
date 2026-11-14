@@ -15,10 +15,11 @@ cargo-fuzz = true
 members = ["."]
 
 [dependencies]
-# the test kit: the parcel's codec, which the API does not offer, and the messages of spec/codecs.proto;
-# the MQTT 5 client's packet reader and its WebSocket's frame reader, under its feature
-bead = { package = "francisdesjardins-bead", path = "../crates/bead", features = ["testing", "mqtt"] }
-bead-protobuf = { package = "francisdesjardins-bead-protobuf", path = "../crates/bead-protobuf", features = ["testing"] }
+# the test kit: the parcel's codec, which the API does not offer, and the messages of spec/codecs.proto
+# and spec/transcoding.proto; the MQTT 5 client's packet reader and its WebSocket's frame reader,
+# under its feature; the JSON form, under the feature transcoding of both (decision 0052)
+bead = { package = "francisdesjardins-bead", path = "../crates/bead", features = ["testing", "mqtt", "transcoding"] }
+bead-protobuf = { package = "francisdesjardins-bead-protobuf", path = "../crates/bead-protobuf", features = ["testing", "transcoding"] }
 buffa = { version = "0.9.2", default-features = false, features = ["std"] }
 buffa-descriptor = { version = "0.9.2", default-features = false, features = ["std", "reflect"] }
 bytes = { version = "1.12.1", default-features = false, features = ["std"] }
@@ -86,6 +87,13 @@ bench = false
 [[bin]]
 name = "mqtt-packets"
 path = "fuzz_targets/mqtt_packets.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "json-form"
+path = "fuzz_targets/json_form.rs"
 test = false
 doc = false
 bench = false

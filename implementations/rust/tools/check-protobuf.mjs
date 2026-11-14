@@ -3,8 +3,9 @@
 // `crates/bead-protobuf/proto/tests.binpb`, the set bead-protobuf's build script generates its
 // tests' messages from, is committed: Buffa's generator is fed the set protoc writes at its pin,
 // builder/protoc.json's, and no Rust build runs protoc (decision 0044). So this writes it again,
-// apart, from spec/codecs.proto, spec/transcoding-required.proto and the crate's proto/codec.proto
-// and proto/requiring.proto, and fails on any difference: a set edited by hand, or a `.proto` or the
+// apart, from spec/codecs.proto, spec/transcoding-required.proto, spec/transcoding.proto,
+// spec/validations.proto and the crate's proto/codec.proto, proto/requiring.proto and
+// proto/patch_binding.proto, the imports of each among it, and fails on any difference: a set edited by hand, or a `.proto` or the
 // pin moved without it. protoc is `BEADC_PROTOC`, or the one builder/tools/fetch-protoc.mjs fetches;
 // the set is the same on every platform.
 //
@@ -24,8 +25,20 @@ const SET = 'crates/bead-protobuf/proto/tests.binpb';
 
 // * the files the set holds, as bead-protobuf's build script generates them, and the folders
 // protoc finds them in
-const FILES = ['codecs.proto', 'transcoding-required.proto', 'codec.proto', 'requiring.proto'];
-const INCLUDES = [join(ROOT, 'spec'), join(SIDE, 'crates', 'bead-protobuf', 'proto')];
+const FILES = [
+  'codecs.proto',
+  'transcoding-required.proto',
+  'codec.proto',
+  'requiring.proto',
+  'transcoding.proto',
+  'validations.proto',
+  'patch_binding.proto',
+];
+const INCLUDES = [
+  join(ROOT, 'spec'),
+  join(SIDE, 'crates', 'bead-protobuf', 'proto'),
+  join(ROOT, 'builder', 'proto'),
+];
 
 const WRITE = process.argv.includes('--write');
 
