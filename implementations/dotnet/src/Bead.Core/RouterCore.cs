@@ -322,6 +322,15 @@ internal sealed partial class RouterCore : IDisposable
             _failuresAnswered.AddOrUpdate(header, answeredWith);
         }
 
+        // ! marked in the turn it goes, before its transport has it: a close its answer brings about
+        // tells its resolver, which still owes the report of its failure (spec 9.0, 9.10)
+        if (!_isStateDisposed
+            && response.Failure is { Scope: FailureScope.Protocol } answeredFailed
+            && answeredFailed.Code == (ushort)ProtocolCode.ProcedureFailed)
+        {
+            answering.IsFailedAnswered = true;
+        }
+
         try
         {
             if (transfer is null)
@@ -584,8 +593,10 @@ internal sealed partial class RouterCore : IDisposable
     // hands a request to its resolver, where resolvers run, none if its call ended before that turn
     // came: one that throws before it returns fails as one whose task faults; one that fails before
     // it answers is reported and answered PROCEDURE_FAILED, its call id free once that answer goes; a
-    // call cancelled, or gone with its connection, is not reported, and answered nothing. One that
-    // runs on past its call's end outlives it until it settles (spec 9.2, steps 3 and 9)
+    // call cancelled, or gone with its connection, is not reported, and answered nothing, nor is one
+    // told by its signal before its failure came, unless this side answered its call
+    // PROCEDURE_FAILED. One that runs on past its call's end outlives it until it settles (spec 9.2,
+    // steps 3 and 9)
     private void Dispatch(IRequestHandler resolver, (AnswerTarget Target, AnsweringCall Answering, ReadOnlyMemory<byte> Payload) dispatched)
     {
         var (target, answering, payload) = dispatched;
@@ -631,7 +642,7 @@ internal sealed partial class RouterCore : IDisposable
 
                     var reason = handled.Exception?.InnerException ?? new TaskCanceledException(handled);
 
-                    if (!answering.IsAborted)
+                    if (!answering.IsAborted || answering.IsFailedAnswered)
                     {
                         _port.Report(reason, target.ConnectionHandle);
                     }

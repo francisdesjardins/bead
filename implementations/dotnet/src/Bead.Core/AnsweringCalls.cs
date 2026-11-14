@@ -37,6 +37,12 @@ internal sealed class AnsweringCall
     /// <summary>Whether its call ended, said at once on the router's scheduler, as its signal is; its signal's callbacks follow.</summary>
     public bool IsAborted { get; set; }
 
+    /// <summary>
+    /// Whether this side answered its call <c>PROCEDURE_FAILED</c>, its own failure: what its
+    /// resolver fails with is then reported, whatever tells it after (spec 9.0).
+    /// </summary>
+    public bool IsFailedAnswered { get; set; }
+
     /// <summary>What it receives of its payload as a transfer; none once the call leaves.</summary>
     public RequestReceiving? Receiving { get; set; }
 

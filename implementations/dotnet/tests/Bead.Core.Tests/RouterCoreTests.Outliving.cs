@@ -13,7 +13,8 @@ public sealed partial class RouterCoreTests
     // helpers
 
     // a server's core whose resolver of echo holds each call it is handed until the test settles it,
-    // deaf to its signal; one whose payload says answer answers first
+    // deaf to its signal; one whose payload says answer answers first, one whose payload says failed
+    // is answered PROCEDURE_FAILED first
     private static (Peer Server, Held Resolver, List<TaskCompletionSource> Held) HoldingOf(int maximumAnsweringCalls)
     {
         var server = new Peer(RouterSide.Server, Chunked with { MaximumAnsweringCalls = maximumAnsweringCalls, MaximumEnvelopeBytes = 1_024 });
@@ -30,6 +31,10 @@ public sealed partial class RouterCoreTests
             {
                 await server.Core.Respond(RouterAnswer.OfPayload(ReadOnlyMemory<byte>.Empty), new AnswerTarget(props.ConnectionHandle, props.Header));
             }
+            else if (props.Payload.Span.SequenceEqual(FailedBytes))
+            {
+                await server.Core.Respond(RouterAnswer.OfFailure(new Failure { Code = (ushort)ProtocolCode.ProcedureFailed, Scope = FailureScope.Protocol }), new AnswerTarget(props.ConnectionHandle, props.Header));
+            }
 
             await holding.Task;
         };
@@ -39,6 +44,10 @@ public sealed partial class RouterCoreTests
 
     // the payload that has a holding resolver answer first
     private static byte[] AnswerBytes { get; } = Encoding.UTF8.GetBytes("answer");
+
+    // the payload that has a holding resolver answered PROCEDURE_FAILED first, as a service's
+    // callback that fails is
+    private static byte[] FailedBytes { get; } = Encoding.UTF8.GetBytes("failed");
 
     // the counts of the calls a connection has it answer and of the resolvers that outlive them
     private static async Task<(long AnsweringCalls, long LargestTrackedCalls, long OutlivingResolvers)> TrackedOf(Peer peer)
@@ -450,5 +459,39 @@ public sealed partial class RouterCoreTests
             return (envelope.Kind, envelope.Header.CallId);
         }));
         Assert.Empty(server.Reports);
+    }
+
+    [Fact]
+    public async Task Reports_the_failure_of_a_resolver_its_side_answered_PROCEDURE_FAILED_once_its_connection_closed_and_none_of_one_answered_otherwise_or_cancelled()
+    {
+        var (server, _, held) = HoldingOf(4);
+
+        await server.Deliver(new Envelope { Header = RequestOf(1), Payload = FailedBytes }, "a");
+        await server.Deliver(new Envelope { Header = RequestOf(3), Payload = AnswerBytes }, "a");
+        await server.Deliver(new Envelope { Header = RequestOf(5) }, "a");
+        await server.Deliver(CancelOf(5), "a");
+        Assert.Equal(
+            [(EnvelopeKind.Failure, 1u, (ushort)ProtocolCode.ProcedureFailed), (EnvelopeKind.Result, 3u, (ushort)0)],
+            server.Sent.Select((envelope) =>
+            {
+                return (envelope.Kind, envelope.Header.CallId, envelope.Failure?.Code ?? 0);
+            }));
+
+        // * the close its answers bring about tells each before its failure comes
+        server.Core.RejectPending("a closed", "a");
+        await server.Settle();
+
+        foreach (var holding in held.Take(3))
+        {
+            holding.SetException(new InvalidOperationException("rejected"));
+        }
+
+        await server.Settle();
+        Assert.Equal(["rejected"], server.Reports.Select((reason) =>
+        {
+            return reason.Message;
+        }));
+        Assert.Equal(["a"], server.ReportedOn);
+        Assert.Equal((0L, 0L, 0L), await TrackedOf(server));
     }
 }
