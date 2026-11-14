@@ -139,12 +139,12 @@ it holds, so a message holds itself.
   references no Google.Protobuf: a project that binds `proto` references `Bead.Protobuf`, which
   carries the library its generated messages need.
 - **Rust**: the crate `bead-protobuf`, beside the core, which depends on no protobuf library,
-  `check_records(bytes: &[u8], schema: &ProtoSchema)`, which returns a `CodecRefusal`, as every
-  codec of `bead` does; its tests in `src/records/tests.rs`.
+  `check_proto_records(bytes: &[u8], schema: &ProtoSchema)`, which returns a `CodecRefusal`, as
+  every codec of `bead` does; its tests in `src/records/tests.rs`.
 
 The three map name for name, `./proto` and `checkProtoRecords`, `Bead.Protobuf` and
-`ProtoRecords.Check`, `bead-protobuf` and `check_records`. A request whose check refuses it is
-answered `PAYLOAD_UNDECODABLE`, as any codec's refusal is; a request's decoder that throws, or
+`ProtoRecords.Check`, `bead-protobuf` and `check_proto_records`. A request whose check refuses it
+is answered `PAYLOAD_UNDECODABLE`, as any codec's refusal is; a request's decoder that throws, or
 panics, other than by its refusal is its side's own error, answered `PROCEDURE_FAILED` with no
 detail and reported; a result's or a notification's fails as a refusal does (spec 9.0, 17.2). The
 target still writes data and types, the call and the descriptor its library gives, and the check
@@ -389,8 +389,8 @@ v36.2 does not reach; each side's twin tests of the check, `src/proto/__tests__/
 sentence each set of twins, hold what no entry of `Probe` reaches.
 
 **The Rust side** checks a payload's records by its message's descriptors, `bead-protobuf`'s
-`check_records` over the pool the code Buffa generates from protoc's set embeds, or the one its
-dynamic codec is given, plays the entries, and answers the suite through its testee
+`check_proto_records` over the pool the code Buffa generates from protoc's set embeds, or the one
+its dynamic codec is given, plays the entries, and answers the suite through its testee
 ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)); **each
 language after it** checks by its own library's descriptors, plays the entries, and adds its testee
 to the suite.

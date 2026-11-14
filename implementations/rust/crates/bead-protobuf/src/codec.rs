@@ -21,7 +21,7 @@ use buffa_descriptor::reflect::{DynamicMessage, ReflectMessage};
 use buffa_descriptor::{DescriptorPool, FieldKind, MessageIndex, SingularKind};
 use bytes::Bytes;
 
-use crate::records::{DEPTH, ProtoSchema, check_records, filtered};
+use crate::records::{DEPTH, ProtoSchema, check_proto_records, filtered};
 use crate::refusal::{NOT_ITS_MESSAGE, found, refusal};
 use crate::required::{Presence, bounded, checked};
 
@@ -55,7 +55,7 @@ fn unwritten(error: EncodeError) -> CodecRefusal {
 // them, its refusal the writer's, in its words; past the depth pass, it refuses what a reading
 // kept nesting past the bound, an unknown group or an extension's message
 fn read_back(bytes: Vec<u8>, schema: &ProtoSchema) -> Result<Bytes, CodecRefusal> {
-    check_records(&bytes, schema)?;
+    check_proto_records(&bytes, schema)?;
 
     Ok(Bytes::from(bytes))
 }

@@ -1,4 +1,4 @@
-# alone: typescript 271, csharp 50, rust 77
+# alone: typescript 271, csharp 50, rust 75
 # concept	typescript	csharp	rust	class
 ACCEPT_TIMEOUT	ACCEPT_TIMEOUT [constant]	-	ACCEPT_TIMEOUT [constant]	same
 AccessRefusal	IAccessRefusal [record]	AccessRefusal [record]	AccessRefusal [record]	same
@@ -385,9 +385,7 @@ CallEnding	-	-	CallEnding [choice]	alone
 CallFailure	ICallFailure [record]	-	-	alone
 CallId	CallId [scalar]	-	-	alone
 CapacityError	-	-	CapacityError [record]	alone
-check_records	-	-	check_records [function]	alone
-check_required	-	-	check_required [function]	alone
-checkProtoRecords	checkProtoRecords [function]	ProtoRecords.Check [function]	-	rendered: verb (0007, 0044)
+checkProtoRecords	checkProtoRecords [function]	ProtoRecords.Check [function]	check_proto_records [function]	rendered: verb (0007, 0044)
 CLIENT_FAILURES	CLIENT_FAILURES [constant]	-	-	alone
 ClientTransportLike	IClientTransportLike [record]	-	-	alone
 CLOSE_EVENT	CLOSE_EVENT [constant]	-	-	alone

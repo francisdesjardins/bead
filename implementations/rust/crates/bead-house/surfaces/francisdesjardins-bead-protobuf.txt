@@ -5,8 +5,7 @@ crate
   use codec::ProtoCodec
   use json_form::JsonForm #[cfg(feature = "transcoding")]
   use records::ProtoSchema
-  use records::check_records
-  use required::check_required
+  use records::check_proto_records
   use validate::MapEntry
   use validate::MapKey
   use validate::MessageRules
@@ -56,9 +55,7 @@ crate::records
     fn message(&self) -> MessageIndex
     implements Debug
     derives Clone
-  fn check_records(bytes: &[u8], schema: &ProtoSchema) -> Result<(), CodecRefusal>
-crate::required
-  fn check_required(message: &dyn ReflectMessage, schema: &ProtoSchema) -> Result<(), CodecRefusal>
+  fn check_proto_records(bytes: &[u8], schema: &ProtoSchema) -> Result<(), CodecRefusal>
 crate::validate
   use pattern::PatternTable
   use pattern::matches_pattern

@@ -44,35 +44,34 @@ pub(crate) enum Presence {
     Held,
 }
 
-/// Refuses `message` where it leaves a required field unset, at any depth.
-///
-/// Its reason is spec 17.2's, `a required field unset`; its cause names the first field the walk
-/// finds by its full name, a field of the schema, never a key a peer sent, and its way there.
-/// `message` is of `schema`'s message, and tells whether a field was given: a view Buffa decoded,
-/// or a [`DynamicMessage`](buffa_descriptor::reflect::DynamicMessage); never an owned message,
-/// which holds a required scalar bare. A closed enum's number its enum does not declare is no value
-/// of a required field, which only an application sets, since a reading of 17.9.8 sets none. The
-/// walk goes 100 messages deep below the top one at most, as a reader reads (17.9.3).
-///
-/// # Errors
-///
-/// A [`CodecRefusal`] for a message that leaves a field of `LEGACY_REQUIRED` presence unset, or
-/// that nests a message reaching one more than 100 deep below the top one, `nested past 100`.
-pub fn check_required(
-    message: &dyn ReflectMessage,
-    schema: &ProtoSchema,
-) -> Result<(), CodecRefusal> {
-    checked(message, (schema, Presence::Given))
-}
-
 /// The first field of `LEGACY_REQUIRED` presence the walk finds unset in `message`, and its way
-/// there, as [`check_required`] walks it; none where it leaves none, or nests past the bound.
+/// there, as [`checked`] walks it given [`Presence::Given`]; none where it leaves none, or nests
+/// past the bound.
 #[cfg(any(test, feature = "transcoding"))]
 pub(crate) fn unset_of(message: &dyn ReflectMessage, schema: &ProtoSchema) -> Option<Unset> {
     unset_in(message, (schema, Presence::Given)).ok().flatten()
 }
 
-/// [`check_required`] of a message whose `has` witnesses as `presence` says.
+/// Refuses `message` where it leaves a required field unset, at any depth, its `has` witnessing as
+/// `presence` says: the walk each codec runs on a read and on a write.
+///
+/// Its reason is spec 17.2's, `a required field unset`; its cause names the first field the walk
+/// finds by its full name, a field of the schema, never a key a peer sent, and its way there.
+/// `message` is of `schema`'s message. Given [`Presence::Read`] or [`Presence::Given`], it tells
+/// whether a field was given: a view Buffa decoded, or a
+/// [`DynamicMessage`](buffa_descriptor::reflect::DynamicMessage). Given [`Presence::Held`], it is
+/// an owned message, which holds a required scalar bare, so the walk judges only the messages it
+/// holds. A closed enum's number its enum does not declare is no value of a required field, which
+/// only an application sets, since a reading of 17.9.8 sets none. Given [`Presence::Given`] or
+/// [`Presence::Held`], the walk goes 100 messages deep below the top one at most, as a reader
+/// reads (17.9.3); given [`Presence::Read`], it judges no depth, the records' check having held
+/// the wire's to the bound.
+///
+/// # Errors
+///
+/// A [`CodecRefusal`] for a message that leaves a field of `LEGACY_REQUIRED` presence unset, or,
+/// given [`Presence::Given`] or [`Presence::Held`], that nests a message reaching one more than
+/// 100 deep below the top one, `nested past 100`.
 pub(crate) fn checked(
     message: &dyn ReflectMessage,
     (schema, presence): (&ProtoSchema, Presence),

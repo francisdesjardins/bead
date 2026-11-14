@@ -275,11 +275,11 @@ going to no subscription. The writer runs, in this order:
 3. **The library writes.**
 4. **The reader's own records check over the written bytes**
    ([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)),
-   `checkProtoRecords`, `ProtoRecords.Checked`, `check_records`. A refusal there is the writer's
-   refusal, its words the reader's reason. This layer is 17.2's judgment, for every rule of 17.9's
-   records: depth through kept unknown groups and delimited extensions, and anything the pass
-   counts short. It costs one linear pass over the bytes a write, the cost 0028 accepts for every
-   read.
+   `checkProtoRecords`, `ProtoRecords.Checked`, `check_proto_records`. A refusal there is the
+   writer's refusal, its words the reader's reason. This layer is 17.2's judgment, for every rule
+   of 17.9's records: depth through kept unknown groups and delimited extensions, and anything the
+   pass counts short. It costs one linear pass over the bytes a write, the cost 0028 accepts for
+   every read.
 
 A value nested past the bound in its known fields that also leaves a required field unset is
 refused for its depth, as the pass runs first. One residual is the application's: unknown fields it
