@@ -19,6 +19,28 @@ fn received((code, scope, relays): (u16, FailureScope, u8)) -> Failure {
 }
 
 #[test]
+fn makes_a_refusal_of_admission_access_denied_or_session_required_and_why() {
+    let denied =
+        Failure::protocol(ProtocolCode::ACCESS_DENIED, RouterSide::Server).saying("too quiet");
+    let required = Failure::protocol(ProtocolCode::SESSION_REQUIRED, RouterSide::Server);
+
+    assert_eq!((denied.code().get(), denied.detail()), (33, "too quiet"));
+    assert_eq!((required.code().get(), required.detail()), (32, ""));
+    assert_eq!(
+        denied.record(),
+        FailureRecord {
+            code: ProtocolCode::ACCESS_DENIED.get(),
+            scope: FailureScope::Protocol,
+            relays: 0,
+            detail: "too quiet".to_owned(),
+        },
+        "the underlying protocol failure"
+    );
+    assert_eq!(required.scope(), FailureScope::Protocol);
+    assert_eq!(required.relays(), 0);
+}
+
+#[test]
 fn is_of_no_known_side_through_a_relay_and_names_where_its_call_went() {
     let header = EnvelopeHeader::Failure(FailureHeader {
         call_id: 3,
