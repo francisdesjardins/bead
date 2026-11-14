@@ -777,7 +777,7 @@ script over the set `buf build` writes, Buffa's own generator, the feature `exte
 mount
 ([0051](decisions/0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md)).
 Each client calls each server over WebSocket and writes
-[`transcript.txt`](../examples/hello/transcript.txt), then the TypeScript and C# servers' gateway
+[`transcript.txt`](../examples/hello/transcript.txt), then each server's gateway
 answers what a person asks it with curl over HTTP/1.1, through the in-memory transport joined to
 its WebSocket one: CI's `examples` job, through `examples/hello/pairs.mjs`. What a consumer of the
 TypeScript runtime's sources must set, which the C# half never meets, is a row of the
@@ -786,7 +786,7 @@ TypeScript runtime's sources must set, which the C# half never meets, is a row o
 | Client               | Server               | Messages                | Transport                    | Pairs | Test                                                                          |
 | -------------------- | -------------------- | ----------------------- | ---------------------------- | ----: | ----------------------------------------------------------------------------- |
 | TypeScript, C#, Rust | TypeScript, C#, Rust | beadc's, the platform's | WebSocket                    |    36 | `examples/hello/pairs.mjs`                                                    |
-| curl's requests      | Rust                 | beadc's, the platform's | HTTP/1.1, the gateway        |     0 | ahead: `Rust's gateway`                                                       |
+| curl's requests      | TypeScript, C#, Rust | beadc's, the platform's | HTTP/1.1, the gateway        |    36 | `examples/hello/pairs.mjs`, the gateway's lines of `transcript.txt`           |
 | either               | either               | either                  | HTTP/1.1, the HTTP transport |     0 | not run: the interop holds HTTP; the example serves Bead over WebSocket alone |
 
 ## beadc's wrappers
