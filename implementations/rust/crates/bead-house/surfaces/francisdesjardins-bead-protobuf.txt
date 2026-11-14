@@ -1,7 +1,9 @@
 crate
+  use binding::HttpBinding #[cfg(feature = "transcoding")]
   use codec::DynamicCodec
   use codec::ENCODING
   use codec::ProtoCodec
+  use json_form::JsonForm #[cfg(feature = "transcoding")]
   use records::ProtoSchema
   use records::check_records
   use required::check_required
@@ -24,6 +26,11 @@ crate
   use validate::matches_pattern
   use validate::utf8_length
   use validate::validator_of
+crate::binding
+  struct HttpBinding #[cfg(feature = "transcoding")]
+    const fn new(form: JsonForm) -> Self
+    fn bind(&self, schema: &ProtoSchema, options: &BindingOptions<'_>) -> Result<Bytes, MessageFormError>
+    derives Clone, Debug #[cfg(feature = "transcoding")]
 crate::codec
   const ENCODING: &str
   struct ProtoCodec<M>
@@ -35,6 +42,12 @@ crate::codec
     fn schema(&self) -> &ProtoSchema
     implements PayloadCodec
     derives Clone, Debug
+crate::json_form
+  struct JsonForm #[cfg(feature = "transcoding")]
+    fn new(pool: Arc<DescriptorPool>) -> Self
+    fn form_of(&self, schema: ProtoSchema) -> Arc<dyn MessageForm>
+    implements Debug
+    derives Clone #[cfg(feature = "transcoding")]
 crate::records
   struct ProtoSchema
     fn new(pool: Arc<DescriptorPool>, message: MessageIndex) -> Self

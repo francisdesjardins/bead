@@ -67,7 +67,7 @@ pub fn check_required(
 
 /// The first field of `LEGACY_REQUIRED` presence the walk finds unset in `message`, and its way
 /// there, as [`check_required`] walks it; none where it leaves none, or nests past the bound.
-#[cfg(test)]
+#[cfg(any(test, feature = "transcoding"))]
 pub(crate) fn unset_of(message: &dyn ReflectMessage, schema: &ProtoSchema) -> Option<Unset> {
     unset_in(message, (schema, Presence::Given)).ok().flatten()
 }
@@ -128,9 +128,17 @@ fn unset_in(
 }
 
 /// The first field of `LEGACY_REQUIRED` presence the walk found unset, and its way there from the
-/// top message: a refusal's cause, which names them.
+/// top message: a refusal's cause, which names the field as every side names it, and its way, which
+/// a gateway places a refusal by (transcoding 7.4).
 #[derive(Debug, Clone)]
 pub(crate) struct Unset {
+    #[cfg_attr(
+        not(any(test, feature = "transcoding")),
+        expect(
+            dead_code,
+            reason = "its way places a gateway's refusal, under transcoding alone"
+        )
+    )]
     steps: Vec<UnsetStep>,
     field: FieldDescriptor,
     holder: String,
@@ -139,14 +147,14 @@ pub(crate) struct Unset {
 impl Unset {
     /// Each step from the top message to the one that leaves it unset.
     #[must_use]
-    #[cfg(test)]
+    #[cfg(any(test, feature = "transcoding"))]
     pub(crate) fn steps(&self) -> &[UnsetStep] {
         &self.steps
     }
 
     /// The field left unset.
     #[must_use]
-    #[cfg(test)]
+    #[cfg(any(test, feature = "transcoding"))]
     pub(crate) fn field(&self) -> &FieldDescriptor {
         &self.field
     }
@@ -158,48 +166,29 @@ impl Unset {
     }
 }
 
-// its full name, then its way there: each field by its name, an item's index or an entry's key
+// its full name, as the other sides word it; its way there is its steps', which place it (7.4)
 impl fmt::Display for Unset {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             formatter,
             "a proto message leaves {} unset",
             self.full_name()
-        )?;
-
-        for (at, step) in self.steps.iter().enumerate() {
-            formatter.write_str(if at == 0 { ", at " } else { "." })?;
-            formatter.write_str(step.field.name())?;
-
-            match &step.at {
-                Place::Field => {}
-                Place::Index(index) => write!(formatter, "[{index}]")?,
-                Place::Key(MapKey::String(key)) => write!(formatter, "[{key:?}]")?,
-                Place::Key(key) => write!(formatter, "[{}]", key_of(key))?,
-            }
-        }
-
-        Ok(())
+        )
     }
 }
 
 impl Error for Unset {}
 
-// a map's key that is no string, as protobuf's text format writes it
-fn key_of(key: &MapKey) -> String {
-    match key {
-        MapKey::Bool(key) => key.to_string(),
-        MapKey::I32(key) => key.to_string(),
-        MapKey::I64(key) => key.to_string(),
-        MapKey::U32(key) => key.to_string(),
-        MapKey::U64(key) => key.to_string(),
-        MapKey::String(key) => key.clone(),
-    }
-}
-
 /// A step of the walk's way to a field left unset: a field of a message, and the item's index of a
 /// repeated field, or the entry's key of a map.
 #[derive(Debug, Clone)]
+#[cfg_attr(
+    not(any(test, feature = "transcoding")),
+    expect(
+        dead_code,
+        reason = "its way places a gateway's refusal, under transcoding alone"
+    )
+)]
 pub(crate) struct UnsetStep {
     field: FieldDescriptor,
     at: Place,
@@ -208,14 +197,14 @@ pub(crate) struct UnsetStep {
 impl UnsetStep {
     /// The field the step takes.
     #[must_use]
-    #[cfg(test)]
+    #[cfg(any(test, feature = "transcoding"))]
     pub(crate) fn field(&self) -> &FieldDescriptor {
         &self.field
     }
 
     /// Where in its field it takes a message.
     #[must_use]
-    #[cfg(test)]
+    #[cfg(any(test, feature = "transcoding"))]
     pub(crate) fn place(&self) -> &Place {
         &self.at
     }

@@ -114,7 +114,7 @@ HealthCheck	IHealthCheck [record]	HealthCheck [record]	HealthCheck [record]	same
 HealthStatus	HealthStatus [choice]	HealthStatus [choice]	HealthStatus [choice]	same
 HEARTBEAT	HEARTBEAT [constant]	-	HEARTBEAT [constant]	same
 HTTP_REFUSALS	HTTP_REFUSALS [constant]	HttpRefusals [constant]	HTTP_REFUSALS [constant]	same
-HTTPBinding	IHTTPBinding [record], createHTTPBinding [function]	HttpBinding [record]	-	same
+HTTPBinding	IHTTPBinding [record], createHTTPBinding [function]	HttpBinding [record]	HttpBinding [record]	same
 HTTPCaller	IHTTPCaller [record], createHTTPCaller [function]	HttpCaller [record]	-	same
 HTTPCallerOptions	IHTTPCallerOptions [record]	HttpCallerOptions [record]	-	same
 HTTPCallOptions	IHTTPCallOptions [record]	HttpCallOptions [record]	-	same
@@ -143,7 +143,7 @@ IntakeLimitsOptions	IntakeLimitsOptions [record]	-	IntakeLimitsOptions [record]	
 isFieldValue	isFieldValue [function]	-	is_field_value [function]	same
 isUnique	isUnique [function]	Validators.IsUnique [function]	is_unique [function]	rendered: of (0007, 0044)
 JoinedServerTransport	-	JoinedServerTransport [record]	JoinedServerTransport [record]	same
-JsonForm	IJsonForm [record], createJsonForm [function]	JsonForm [record]	-	same
+JsonForm	IJsonForm [record], createJsonForm [function]	JsonForm [record]	JsonForm [record]	same
 JsonFormError	JsonFormError [record]	JsonFormException [record]	JsonFormError [record]	rendered: error (0007, 0044)
 JsonToken	IJsonToken [record]	JsonToken [record]	-	same
 Judged	IJudged [record]	Judged [record]	Judged [record]	same

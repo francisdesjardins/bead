@@ -30,13 +30,21 @@
 //!
 //! [`DynamicMessage`]: buffa_descriptor::reflect::DynamicMessage
 
+#[cfg(feature = "transcoding")]
+mod binding;
 mod codec;
+#[cfg(feature = "transcoding")]
+mod json_form;
 mod records;
 mod refusal;
 mod required;
 mod validate;
 
+#[cfg(feature = "transcoding")]
+pub use binding::HttpBinding;
 pub use codec::{DynamicCodec, ENCODING, ProtoCodec};
+#[cfg(feature = "transcoding")]
+pub use json_form::JsonForm;
 pub use records::{ProtoSchema, check_records};
 pub use required::check_required;
 pub use validate::{

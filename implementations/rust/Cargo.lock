@@ -630,6 +630,7 @@ dependencies = [
  "francisdesjardins-bead-protobuf",
  "francisdesjardins-bead-protobuf-build",
  "libtest-mimic",
+ "ryu-js",
  "serde",
  "serde_json",
  "tokio",
