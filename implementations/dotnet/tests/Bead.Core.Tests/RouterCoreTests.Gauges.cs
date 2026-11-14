@@ -34,9 +34,9 @@ public sealed partial class RouterCoreTests
         Assert.Equal(
             new Dictionary<string, long>
             {
-                ["bufferedBytes"] = RouterLimits.Default.BufferedBytesBudget,
                 ["largestAnsweringCalls"] = 64,
                 ["largestTrackedCalls"] = 128,
+                ["reservedBytes"] = RouterLimits.Default.BufferedBytesBudget,
             },
             gauges.Ceilings);
         Assert.Equal(["a", "b"], gauges.ConnectionHandles.Order());
@@ -53,8 +53,10 @@ public sealed partial class RouterCoreTests
                 ["outlivingTransfers"] = 0,
                 ["pendingCalls"] = 1,
                 ["receivingTransfers"] = 0,
+                ["reservedBytes"] = 0,
                 ["reservedCallIds"] = 0,
                 ["sendingTransfers"] = 0,
+                ["waitingTransfers"] = 0,
             },
             gauges.Counts);
         server.Core.RejectPending("all gone");

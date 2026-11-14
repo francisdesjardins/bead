@@ -612,7 +612,7 @@ async fn ends_a_result_it_receives_as_its_caller_ends_the_call_its_budget_and_pl
         let mut request = request_of("a");
         request.options.signal = Some(signal.clone());
         let asked = peer.request((Bytes::new(), request));
-        peer.receive((opening(2, (pattern(32), 200)), Arc::from("a")));
+        peer.receive((opening(2, (pattern(28), 200)), Arc::from("a")));
         peer.settle().await;
         assert_eq!(peer.clock.dues(), [Duration::from_millis(250)]);
         match ending {
@@ -633,7 +633,7 @@ async fn ends_a_result_it_receives_as_its_caller_ends_the_call_its_budget_and_pl
             .run(|state| {
                 assert!(state.core.pending.is_reserved(2, &Arc::from("a")));
                 assert_eq!(
-                    state.core.receivings.gauges().counts.get("bufferedBytes"),
+                    state.core.receivings.gauges().counts.get("reservedBytes"),
                     Some(&0)
                 );
                 assert_eq!(
@@ -649,7 +649,7 @@ async fn ends_a_result_it_receives_as_its_caller_ends_the_call_its_budget_and_pl
             .await
             .expect("the budget and place given back");
         let next = peer.request((Bytes::new(), request_of("a")));
-        peer.receive((opening(4, (pattern(32), 200)), Arc::from("a")));
+        peer.receive((opening(4, (pattern(28), 200)), Arc::from("a")));
         peer.settle().await;
         cancel(&peer, 4).await;
         assert!(matches!(
@@ -660,10 +660,10 @@ async fn ends_a_result_it_receives_as_its_caller_ends_the_call_its_budget_and_pl
             pieces(&peer).await,
             [
                 (EnvelopeKind::Request, 2, None, 0),
-                (EnvelopeKind::Credit, 2, Some(160), 0),
+                (EnvelopeKind::Credit, 2, Some(156), 0),
                 (EnvelopeKind::Cancel, 2, None, 0),
                 (EnvelopeKind::Request, 4, None, 0),
-                (EnvelopeKind::Credit, 4, Some(160), 0),
+                (EnvelopeKind::Credit, 4, Some(156), 0),
                 (EnvelopeKind::Cancel, 4, None, 0),
             ]
         );
@@ -701,16 +701,16 @@ async fn reserves_the_call_id_of_a_result_it_received_in_part_as_long_as_the_pee
         request.options.timeout = timeout.map_or(NEVER, Duration::from_millis);
         request.options.signal = Some(signal.clone());
         let asked = peer.request((Bytes::from_static(&[1]), request));
-        peer.receive((opening(2, (pattern(32), 40)), Arc::from("a")));
+        peer.receive((opening(2, (pattern(28), 36)), Arc::from("a")));
         peer.settle().await;
         let before = peer.armed().len();
         match ending {
-            "whole" => peer.receive((chunk(2, (pattern(8), 32, true)), Arc::from("a"))),
+            "whole" => peer.receive((chunk(2, (pattern(8), 28, true)), Arc::from("a"))),
             "failure" => peer.receive((
                 failed(2, (21, FailureScope::Application, 0, "")),
                 Arc::from("a"),
             )),
-            "invalid" => peer.receive((chunk(2, (pattern(9), 32, true)), Arc::from("a"))),
+            "invalid" => peer.receive((chunk(2, (pattern(9), 28, true)), Arc::from("a"))),
             "signal" => signal.cancel(),
             "cancel" | "cancel given time" => {
                 peer.owner
@@ -732,7 +732,7 @@ async fn reserves_the_call_id_of_a_result_it_received_in_part_as_long_as_the_pee
         match ending {
             "whole" => assert_eq!(
                 outcome.expect("the result is whole").payload,
-                [pattern(32), pattern(8)].concat()
+                [pattern(28), pattern(8)].concat()
             ),
             "failure" | "invalid" => {
                 let (code, origin) = if ending == "failure" {
@@ -778,7 +778,7 @@ async fn reserves_the_call_id_of_a_result_it_received_in_part_as_long_as_the_pee
     let mut request = request_of("a");
     request.options.signal = Some(signal.clone());
     let asked = client.request((Bytes::from_static(&[1]), request));
-    client.receive((opening(1, (pattern(32), 300)), Arc::from("a")));
+    client.receive((opening(1, (pattern(28), 300)), Arc::from("a")));
     client.settle().await;
     signal.cancel();
     assert!(matches!(
@@ -786,7 +786,7 @@ async fn reserves_the_call_id_of_a_result_it_received_in_part_as_long_as_the_pee
         Err(CallError::Cancelled(_))
     ));
     client.clock.advance(Duration::from_millis(1_500)).await;
-    client.receive((chunk(1, (pattern(48), 32, false)), Arc::from("a")));
+    client.receive((chunk(1, (pattern(48), 28, false)), Arc::from("a")));
     client.settle().await;
     quiet(&client).await;
     let mut request = request_of("a");
@@ -797,7 +797,7 @@ async fn reserves_the_call_id_of_a_result_it_received_in_part_as_long_as_the_pee
         matches!(client.sent().await.last(), Some((_, Envelope::Request { header, .. })) if header.call_id == 3)
     );
     client.clock.advance(Duration::from_millis(500)).await;
-    client.receive((chunk(1, (pattern(48), 32, false)), Arc::from("a")));
+    client.receive((chunk(1, (pattern(48), 28, false)), Arc::from("a")));
     client.settle().await;
     client.owner.run(|state| {
         assert!(matches!(state.reports.as_slice(), [(handle, crate::router::types::RouterError::Failure(failure))] if handle.as_ref() == "a" && failure.code() == ProtocolCode::CALL_UNKNOWN.get()));

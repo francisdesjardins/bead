@@ -165,7 +165,7 @@ The transport of the side that answers buries such a call id for the least a req
 
 **A connection that closes is torn down in one order on every side**, application code last: what
 it holds is released first, every transfer on it, the receiving ones before the sending ones so that
-the budget they give back grants no credit to one about to go, then the calls it made, its session's
+the budget they give back admits no opening about to go, then the calls it made, its session's
 announcements, and the calls it answers, taken out; each call it answers then ends, counted
 `closed`, none while another of the connection is held; then each call it made is rejected as
 closed and counted so, and each call it answers has its signal aborted, so that a resolver finds its
@@ -178,22 +178,81 @@ and 12.10); the support matrix keeps when each side's resolvers hear their signa
 **A payload is bounded by the router's limits, not by the envelope**: 16,777,216 bytes by default,
 and more when both ends are set so. One whose envelope would pass a chunk, 1 MiB, goes as a
 transfer, which costs one round trip more than a whole envelope, its throughput bounded by the
-window over the round trip: 4 MiB at 100 ms, some 40 MiB a second. A payload is whole in memory at
-both ends, and what a router receives holds a budget of its own, 256 MiB by default, reserved as the
-credit grants it: a transfer admitted may still stall should that budget not free. A payload of
-several gigabytes needs a stream, a decision of its own.
+window over the round trip: 4 MiB at 100 ms, some 40 MiB a second. The window is one transfer's
+share of its connection, so the envelopes beside it go between its chunks (RFC 9113 §5.2). A
+deployment that wants more throughput raises `windowBytes`. A payload is whole in memory at both
+ends. What a router receives holds a budget of its own, 256 MiB by default, and each transfer
+reserves its whole total of it. A payload of several gigabytes needs a stream, a decision of its
+own.
 
-**Transfers can share the budget out and none complete**, on every side. A transfer holds its
-opening's bytes and each credit's until it completes or closes, so several, each within the budget
-alone, can hold all of it between them before any completes: each then waits on a credit that only
-another's end would free, a wait in a circle, Coffman's hold and wait. At the defaults, some twenty
-uploads of 16 MiB under way at once can reach it. Each ends `TRANSFER_STALLED` once
-`transferInactivityTimeout` passes, which tells its sender stalled where its receiver held back the
-credit; and a credit the budget grants once it frees sets no transfer's inactivity going again,
-which section 12.8 has each credit that grants do.
+**A transfer received is admitted to the budget by its total, in the order the openings came**, on
+any connection. An opening is admitted at once when no opening waits and the budget left holds its
+total. Otherwise it waits behind every opening before it, even when the budget left would hold it.
+As the budget frees, the waiting openings are admitted in their order, up to the first the budget
+left does not hold. An admitted transfer keeps its total until its payload is whole or it ends.
 
-**Ahead, by a decision of its own that meets the Tenth Man**: a budget that sees every transfer it
-admits to its end, and a stall that names the side that caused it.
+**No transfer waits on another's credit.** A credit is the window's alone, never cut to the budget
+left. A transfer holds all it will hold of the budget, or none of it, so the hold and wait of
+Coffman, Elphick and Shoshani's conditions of a deadlock cannot form ("System Deadlocks", 1971).
+
+**A waiting opening holds its place and its bytes, and none of the budget.** It counts among its
+connection's transfers, and its opening's bytes stay outside the budget: `maximumTransfers` ×
+`chunkBytes` a connection, 4 MiB at the defaults. It is granted nothing while it waits.
+
+**An opening waits half of `transferInactivityTimeout` at most**, in whole milliseconds rounded
+down: 15 s by default. A requester's own timer starts before its opening goes (section 12.7), so a
+wait as long as the timeout would answer a call already ended. Both ends set the timeout alike, so
+its half needs no limit of its own. At a timeout of 1 ms the half is 0, and an opening that would
+wait is refused at once.
+
+**Past its wait, an opening is refused `CAPACITY_EXCEEDED`.** A request's opening is answered with
+it. No resolver ran, so its requester may send it again (RFC 9113 §8.7). A result's opening ends its
+call with it, after its procedure ran. The caller tells that case by the failure's `origin`, local,
+and its `header`, the result's, as it tells 12.3's `PAYLOAD_TOO_LARGE` of a result. A relay answers
+leg A `DESTINATION_LOST`, as section 14.5 answers any limit once its transport had the request.
+
+**The credit that admits a waiting opening sets its inactivity going** at both ends (section 12.8).
+Ending a transfer, waiting or admitted, gives back what it reserved, then admits the openings that
+wait.
+
+**The budget charges a transfer by its declared total.** HTTP's `bodyBytesBudget` charges a body as
+its bytes come ([0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)). A transfer's payload is
+whole in memory at its end, so its total is what it will hold. An HTTP request is admitted by its
+`Content-Length` the same way, before its content (RFC 9110 §10.1.1).
+
+**An opening carries exactly the bytes its sender places in it**, or is answered `CHUNK_INVALID`
+(section 12.3). That count is `chunkBytes` less the opening's header, and a result's is 20 bytes
+less, the room of an announcement. Every sender already fills its opening, so the rule costs no
+honest peer. On each side, one helper gives that count to the sender and to the receiver's check.
+
+**One address can hold the whole budget with 16 openings over 4 connections.** At the defaults, each
+opening declares 16 MiB and carries about 1 MiB. Each one's inactivity ends it after 30 s, so the
+hold costs about 16 MiB sent every 30 s. The receiving transfers' gauges tell that hold from the
+memory it takes: `reservedBytes` counts what the budget holds, `bufferedBytes` the bytes received,
+and `waitingTransfers` the openings that wait.
+
+**An opening is not refused at once.** A model in time gives the figures, with Poisson arrivals and
+the 30 s timer running. At 94 % of the budget, with large uploads at 4 MiB/s, a refusal at once
+fails 15.0 % of them. A wait of 15 s fails none at that rate, 0.1 % at 1 MiB/s and 2.1 % at
+0.5 MiB/s. Of twenty uploads of 16 MiB opened at once, a refusal at once refuses four, and a wait of
+15 s completes all twenty within 7.5 s at 4 MiB/s. A wait helps only where what is held turns over
+within it: at 1 MiB/s, such a burst is refused as much, 15 s later.
+
+**No opening passes one that waits.** Small totals would pass a large one again and again. Keeping a
+place for the large one against them needs the state of Dijkstra's banker's algorithm (EWD 108),
+which is refused too: it checks a safe state at every credit, on every side, and still holds the
+budget for transfers that send nothing.
+
+**The credit is not kept with the timer paused.** That turns a stall of 30 s into a wait without
+end.
+
+**A requester's queue of calls stays ahead**
+([0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)), since a call's own timeout would count a
+wait its caller cannot see. A transfer's wait runs under the inactivity that governs its call
+(section 12.8), and ends in an answer that names it.
+
+**Ahead**: a share of the budget per connection or per address, with
+[0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)'s byte bound per connection.
 
 **The why is here, the rule is in [`spec/spec.md`](../../spec/spec.md)**, sections 1 to 10, 12 and
 15, and the bytes are in `spec/vectors.json`, which every implementation reads
@@ -202,19 +261,20 @@ admits to its end, and a stall that names the side that caused it.
 ## The Tenth Man
 
 The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md))
-in four rounds. A transport's order and copies met it with sections 15.1 and 15.9 of the spec,
+in five rounds. A transport's order and copies met it with sections 15.1 and 15.9 of the spec,
 which [0020](0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md) points here for; the
 wire's edges met it with sections 7.3, 9.5, 12 and 14.3, a round
 [0010](0010-a-request-presents-a-credential-of-a-scheme.md) points here for; a closing connection's
 teardown met it with sections 9.10 and 12.10, and with debugging 9.7 and an exit of
 `spec/metrics.json`, which [0013](0013-every-language-debugs-alike-at-no-cost-when-off.md) points
-here for; the chunk that makes a payload whole met it with sections 12.6 and 12.7. A failure's
-detail for an error of the side's own met it in
+here for; the chunk that makes a payload whole met it with sections 12.6 and 12.7; the budget's
+admission met it with sections 8.2, 12.2, 12.3, 12.4, 12.8 and 12.10, and with debugging 9.4 and
+9.6. A failure's detail for an error of the side's own met it in
 [0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)'s round, on the answer leg A
 cannot carry, which keeps its objections and answers; a transfer's late refusal met it in
 [0004](0004-one-behaviour-in-every-language.md)'s round on the converse twins' divergences; and a
-closed connection's budget, credited to the transfers it starved on any connection (section 12.10),
-met it with an answer's step, whose round
+closed connection's budget, which admits the openings that wait for it on any connection (section
+12.10), met it with an answer's step, whose round
 [0013](0013-every-language-debugs-alike-at-no-cost-when-off.md#on-the-answers-step-the-limits-over-http-and-a-closed-connections-budget)
 keeps, On the answer's step, the limits over HTTP and a closed connection's budget. Their
 objections, each with the answer that holds:
@@ -293,3 +353,19 @@ each with the answer that holds:
 | 10  | The scope is narrower than stated, the server's receiving path alone, and a stop on Complete keeps the C# side's generation guard                     | Accepted: the server's receiving path alone, with a stop on Complete                                                                                                        |
 | 11  | No changelog line: an internal count of arms is nothing worth telling                                                                                 | Accepted for this change; the leveling of [0010](0010-a-request-presents-a-credential-of-a-scheme.md)'s round, which moves what the TypeScript side sends, has its line     |
 | 12  | No record holds transfer pacing but this one, and the TypeScript title is `stops a transfer’s timer once its payload is whole, and once it is closed` | Accepted: this record, and the title copied byte for byte, its curly apostrophe and comma included                                                                          |
+
+### On the budget's admission
+
+The round met a draft that admitted a transfer by its total and refused at once an opening the
+budget left could not hold, with one dissenting agent. Six objections, four accepted and two in
+part, turned it to an admission by total in opening order, within half the inactivity. Each
+objection, with the answer that holds:
+
+| Objection                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A design that refuses nothing the budget frees in time was passed over: admission by total in opening order, with a short wait that has its own row. An admitted transfer holds its whole total and never waits; a waiting opening holds none of the budget, so hold and wait is broken either way, and the draft is that design with a wait of 0. Havender's collective request reads as a task that waits for all it needs, not one refused. The burst: 20 × 16 MiB, none done as the budget was shared out, the draft four refused, the queue all done by 7.5 s. | In part: the mechanism is taken, its own row is not. Verified: the dissent's model gives those figures, and a run with a wait of half the timeout gives the same at 4 MiB/s. Havender's text was not reached by either party, and the design rests on Coffman's conditions alone: both forms break hold and wait. A received transfer is admitted by its total, in opening order across connections, with no bypass. One the budget left cannot hold waits, holding its place, its opening's bytes outside the budget, and none of the budget, for half of `transferInactivityTimeout`, then is refused `CAPACITY_EXCEEDED`. Half, since the requester's timer starts before its opening goes (12.7): a wait as long would answer a call already ended. The wait takes no row of its own: half of a limit both ends set alike holds together by construction, and `spec/durations.json` keeps the limit it derives from. A waiting opening's bytes are bounded as an opening's are while its admission settles, `maximumTransfers` × `chunkBytes` a connection, for the wait at most. The wait's credit sets the inactivity going (12.8). The queue's state is the walk `grantStarved` already makes, in the order it already keeps. A debugging step for the wait is refused: the trace tells a call's steps, and a request's `rx` step comes once its payload is whole (debugging 4.2); `waitingTransfers` tells it. 0033's reason for keeping a queue of calls ahead, a call's timeout counting a wait it cannot see, does not carry: a transfer's wait runs under the inactivity that governs its call, bounded within it, and ends in an answer that names it. |
+| The draft is priced by the burst alone. Under a steady load below the budget it refuses large uploads far more often than small, 12.1 % against 3.1 % at 82 %, where a budget shared out by credit refuses both alike; the draft's own random interleavings refuse uploads a budget shared out by credit completes. It drops 12.4's "the transfers opened first credited first".                                                                                                                                                                                    | Accepted. Verified in the draft's random interleavings (1.03 of 20 × 16 MiB refused, none when shared out by credit) and in the model in time. Opening order stays, as "the openings opened first admitted first", with no bypass, so a large total at the head is never passed by smaller ones: under the design's wait, the same loads fail 0 %, and at 102 % of the budget the failures fall from 12.6 % / 34.5 % to 8.6 % / 17.1 %, at 15 s. The rows in time stand beside the burst's. Kaufman's paper is cited as the dissent gives it; the decision rests on the figures.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| On the result path the refusal comes after the procedure ran, and nothing the caller reads says so; RFC 9113 §8.7's "safe to retry" does not hold there, and the threshold moves from an opening's bytes to a total's. At a relay it reads as a lost destination.                                                                                                                                                                                                                                                                                                   | In part. The result path gets the same wait, so a result the budget frees in time is taken. 8.2 names the result path, and so do the READMEs' rows 35. "Nothing the caller reads says so" does not hold: every side ends the call with a failure whose `origin` is local and whose `header` is the result's (`router/requester.rs`; `router-requester.ts`, its `header` the envelope's; `RouterCore.Requester.cs`, its `header` the envelope's). Its header's kind, `RESULT`, tells it from a requester's own refusal before its call went, which carries none, and the twins assert both; 12.3 item 2's `PAYLOAD_TOO_LARGE` of a result is the same case. A new code is refused: 8.1's blocks keep a code to how far its call went, and the result path's admission codes have that precedent. The relay's answer is refused: 14.5 answers a limit once the transport had the request `DESTINATION_LOST`, "the procedure may have run", which is what leg A must know, and the relay reports the cause. A conversation pins the relay's case, one each the requester's refusal and its late credit, and a twin of each on every side.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| The bounds the draft lists do not bound the cheaper hold: 16 openings of some 21 bytes, from 4 connections of one address, hold the whole budget every 30 s. A declared length charges nothing elsewhere before its bytes come (0033, 0050's round). Every sender fills its opening, so a receiver's full-opening rule costs no honest peer and prices the declaration.                                                                                                                                                                                             | Accepted. Verified: `maximumConnectionsPerAddress` is 64, and the three senders fill an opening to `chunkBytes` less its header, a result's less 20 more, its announcement attached only as the answer goes out (`router/parts.rs`, `payload-placement.ts`, `RouterCore.PayloadPlacement.cs`). An opening carries exactly what its sender places in it, or is answered `CHUNK_INVALID`, by one helper each side's sender and receiver share, in its own commits: 16 MiB declared then costs about 1 MiB sent. "The bounds already in place answer it" is struck. The record says why the budget charges by declaration where `bodyBytesBudget` does not (a payload is whole in memory at the end), and that one address holds it with 4 connections. A share of the budget per connection or per address is ahead, with 0033's per-connection byte bound.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| The window's reason goes unstated: once the reserved total bounds the receiver's memory, the window still costs throughput, 4 MiB over the round trip.                                                                                                                                                                                                                                                                                                                                                                                                              | Accepted. The window bounds one transfer's share of its connection, so the envelopes beside it go between its chunks, as RFC 9113 §5.2 has flow control keep streams on one connection from interfering. 12.2's `windowBytes` row and this record state it. Granting the whole total at the opening is not taken: it would let one transfer take its connection whole, and a deployment that wants more throughput raises `windowBytes`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| One gauge cannot debug both memory and refusals: under the change `bufferedBytes` reads 256 MiB for 16 openings of 21 bytes, and the budget's refusal, by code, cannot be told from one past `maximumTransfers`.                                                                                                                                                                                                                                                                                                                                                    | Accepted. Verified: no spec, companion, README or page names a gauge. `reservedBytes` counts what the budget holds, under its ceiling, which health watches. `bufferedBytes` counts the bytes received and held. `waitingTransfers` counts the openings waiting. Twins on every side. The refusal's detail names the wait: "a total of T bytes waited W milliseconds for the budget".                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |

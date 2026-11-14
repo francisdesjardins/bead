@@ -198,14 +198,24 @@ async fn holds_a_connection_of_its_own_to_the_routers_own_limits_and_passes_noth
             )
             .expect("the destination registered");
     }
+    let opening = RequestHeader {
+        destination_id: Some(9),
+        total: Some(past),
+        ..super::request_header_of(1)
+    };
+    // an opening its sender fills, as it places it
+    let opening_bytes = usize::try_from(LIMIT_DEFAULTS.chunk_bytes)
+        .expect("a size")
+        .saturating_sub(
+            crate::envelope::header_bytes_of(&crate::envelope::EnvelopeHeader::Request(
+                opening.clone(),
+            ))
+            .expect("a header"),
+        );
     served.transport.deliver(
         &Envelope::Request {
-            header: RequestHeader {
-                destination_id: Some(9),
-                total: Some(past),
-                ..super::request_header_of(1)
-            },
-            payload: Bytes::from_static(&[0; 16]),
+            header: opening,
+            payload: Bytes::from(vec![0; opening_bytes]),
         },
         &first(),
     );

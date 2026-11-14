@@ -342,12 +342,13 @@ its route (16 to 31), its admission (32 to 47), its payload (48 to 63), then its
 8.2. `CAPACITY_EXCEEDED` says that the receiver holds as much as a bound of its own lets it, and
 takes no more: a request past the calls it answers on its connection at once, or past twice as many
 with the calls whose resolvers outlive them (section 9.2, step 3), a notification past its
-subscription's queue (section 11.10), a transfer past those its connection receives at once, past
-twice as many with those whose resolvers outlive their calls, or past the budget left (section
-12.3), a call past those that wait for an issuer's deadline (section 13.9). A requester gives it,
-too, to a call of its own it has no call id free for, or that would pass the calls its peer answers
-at once (section 9.1). It says nothing against the call's credential, and withdraws none (section
-13.4).
+subscription's queue (section 11.10), a transfer past those its connection receives at once, or
+past twice as many with those whose resolvers outlive their calls (section 12.3), or that waited for
+the budget past its bound (section 12.4), a call past those that wait for an issuer's deadline
+(section 13.9). A requester gives it, too, to a call of its own it has no call id free for, or that
+would pass the calls its peer answers at once (section 9.1), and ends with it a call whose result's
+transfer waited for its budget past that bound, after its procedure ran (section 12.4). It says
+nothing against the call's credential, and withdraws none (section 13.4).
 
 ## 9. Calls and answers
 
@@ -664,18 +665,18 @@ its requester send it; any other envelope it holds to `maximumEnvelopeBytes`. Ea
 section 5.1's second step holds an envelope to, by the kind its prefix names, so a request past
 `chunkBytes` is answered as one too large (section 9.6, item 2), and nothing of it is held.
 
-| Limit                       | By default  | Bounds                                                                                                                                                                          |
-| --------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `maximumEnvelopeBytes`      | 16,778,240  | an envelope, as it comes in and as it goes out                                                                                                                                  |
-| `chunkBytes`                | 1,048,576   | a chunk's envelope, and the largest a payload goes whole in                                                                                                                     |
-| `windowBytes`               | 4,194,304   | how far past what it received from the start a receiver lets its sender send                                                                                                    |
-| `maximumPayloadBytes`       | 16,777,216  | a payload, whole or as a transfer; a procedure's own limit narrows it                                                                                                           |
-| `bufferedBytesBudget`       | 268,435,456 | the bytes a side reserves for the transfers it receives, together: each opening's, and each credit it grants past them                                                          |
-| `maximumTransfers`          | 4           | the transfers a connection receives at once, and twice as many with those whose resolvers outlive their calls (section 9.2, step 3); 0 takes none, and sends none               |
-| `maximumChunkRuns`          | 1,024       | the runs of bytes apart a transfer received holds before it is whole                                                                                                            |
-| `transferInactivityTimeout` | 30 s        | how long a transfer waits for its next chunk or credit                                                                                                                          |
-| `maximumDetailBytes`        | 1,024       | a failure's detail                                                                                                                                                              |
-| `maximumAnsweringCalls`     | 64          | the requests a connection's peer has it answer at once, and twice as many with the calls whose resolvers outlive them; the calls a requester has wait on it (sections 9.1, 9.2) |
+| Limit                       | By default  | Bounds                                                                                                                                                                                                              |
+| --------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `maximumEnvelopeBytes`      | 16,778,240  | an envelope, as it comes in and as it goes out                                                                                                                                                                      |
+| `chunkBytes`                | 1,048,576   | a chunk's envelope, and the largest a payload goes whole in                                                                                                                                                         |
+| `windowBytes`               | 4,194,304   | how far past what it received from the start a receiver lets its sender send: one transfer's share of its connection, so the envelopes beside it go between its chunks, the budget holding its total (section 12.4) |
+| `maximumPayloadBytes`       | 16,777,216  | a payload, whole or as a transfer; a procedure's own limit narrows it                                                                                                                                               |
+| `bufferedBytesBudget`       | 268,435,456 | the bytes a side reserves for the transfers it receives, together: each one's total, from its admission until its payload is whole or it ends (section 12.4)                                                        |
+| `maximumTransfers`          | 4           | the transfers a connection receives at once, and twice as many with those whose resolvers outlive their calls (section 9.2, step 3); 0 takes none, and sends none                                                   |
+| `maximumChunkRuns`          | 1,024       | the runs of bytes apart a transfer received holds before it is whole                                                                                                                                                |
+| `transferInactivityTimeout` | 30 s        | how long a transfer waits for its next chunk or credit; half of it, how long an opening waits for the budget (section 12.4)                                                                                         |
+| `maximumDetailBytes`        | 1,024       | a failure's detail                                                                                                                                                                                                  |
+| `maximumAnsweringCalls`     | 64          | the requests a connection's peer has it answer at once, and twice as many with the calls whose resolvers outlive them; the calls a requester has wait on it (sections 9.1, 9.2)                                     |
 
 They MUST hold together: an envelope of 64 bytes at least; a chunk from 64 bytes to an envelope; a
 window of two chunks at least, so a sender never waits for a credit it is owed; a payload within the
@@ -699,16 +700,26 @@ bytes or more, 993 or more beside a destination, goes whole only. A side receivi
 2. of a result, ends the call with `PAYLOAD_TOO_LARGE`, and cancels it, for a total past the
    call's limit;
 3. refuses, in this order, a total of 0, and a total past what it takes, with `PAYLOAD_TOO_LARGE`;
-   an opening past the transfers its connection receives at once, past twice as many with those
-   whose resolvers outlive their calls, or past the budget left, with `CAPACITY_EXCEEDED`; an opening that carries no byte of its payload, or holds its whole total,
-   which needed no transfer, with `CHUNK_INVALID`.
+   an opening past the transfers its connection receives at once, or past twice as many with those
+   whose resolvers outlive their calls, with `CAPACITY_EXCEEDED`; an opening that carries no byte of
+   its payload, or holds its whole total, which needed no transfer, or carries other than its sender
+   places in it — `chunkBytes` less its header, a result's counted with the 20 bytes of an
+   announcement in place of any it carries (section 12.1) — with `CHUNK_INVALID`. It admits any
+   other to the budget as section 12.4 says.
 
 12.4. A CREDIT without PACED, on the call id of a transfer, carries the end below which its sender
 may send: absolute, so a credit repeated, late or out of order never grants too much. A credit
 lower than one received grants nothing. The receiver grants as far as `windowBytes` past the bytes
 it holds from the start, once that is half a window past its last credit — or reaches the total,
-when less is left — and never past the budget left. A transfer the budget cannot credit waits until
-the budget frees, the transfers opened first credited first.
+when less is left. It admits a transfer to `bufferedBytesBudget` by its total, which the transfer
+holds from its admission until its payload is whole or it ends: at its opening, when no opening
+waits and the budget left holds it; otherwise once every opening before it, on any connection, is
+admitted or ended and the budget left holds it, the openings opened first admitted first. Until
+then it waits, holding its place and its opening's bytes and none of the budget, and is granted
+nothing. One still waiting once half of `transferInactivityTimeout` passed, in whole milliseconds
+rounded down, is refused `CAPACITY_EXCEEDED`: a request's opening is answered with it, and a
+result's ends its call with it, which is cancelled. No credit waits on the budget, so no transfer
+waits on another's.
 
 12.5. A CHUNK carries its offset on 8 bytes, and MORE on all but the last. A sender MUST send full
 chunks only — `chunkBytes` less the chunk's own 16 bytes of header, exactly — and the last,
@@ -749,7 +760,9 @@ whole ends its call as the stall above has it.
 
 12.8. While a payload or its result goes as a transfer, the transfer's inactivity governs the call:
 each chunk placed and each credit that grants sets it going again. The call's own timeout counts
-the wait for its answer, afresh once the last chunk of its request went.
+the wait for its answer, afresh once the last chunk of its request went. An opening that waits for
+the budget is held by its wait alone (section 12.4); its admission's credit sets its inactivity
+going.
 
 12.9. A call that received a transfer keeps its call id a while once it ends. The side that answered
 holds it abandoned for `transferInactivityTimeout`, `maximumTransfers` per connection at most, the
@@ -765,8 +778,9 @@ where it is known for late, and reported elsewhere:
 | `CREDIT`       | dropped               | dropped                                             | dropped: it may have crossed its transfer's or subscription's end |
 | `CANCEL`       | —                     | dropped                                             | dropped: it may have crossed its answer                           |
 
-12.10. A connection that closes ends every transfer on it, at both ends; what they held of the
-budget goes to the transfers it starved, on any connection, each credited then as section 12.4 says.
+12.10. A connection that closes ends every transfer on it, at both ends, admitted or waiting; what
+they reserved of the budget admits the openings that wait for it, on any connection, as section
+12.4 says.
 
 12.11. A transfer of 20 MiB, with the limits by default:
 

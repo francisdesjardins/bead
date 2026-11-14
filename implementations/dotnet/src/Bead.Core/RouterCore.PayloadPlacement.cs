@@ -41,6 +41,21 @@ internal sealed partial class RouterCore
             return ProtocolFailureOf(ProtocolCode.PayloadTooLarge, $"a payload is {limit} bytes at most, not {length}");
         }
 
+        // * the bytes of its payload an opening of `header` carries, as its sender places them: the
+        // largest envelope a payload goes whole in, less its header, and a result's less the 20 bytes
+        // of an announcement too, its header counted without the one it may carry, since its sender
+        // places it before any rides on it; the sender's placement and the receiver's check both ask
+        // here, so the two cannot drift (spec 12.3)
+        internal int OpeningBytesOf(IEnvelopeHeader header)
+        {
+            if (header is ResultHeader result)
+            {
+                return WholeBytes - EnvelopeCodec.UnboundedHeaderBytesOf(result with { Credential = null }) - Credential.AnnouncementBytes;
+            }
+
+            return WholeBytes - EnvelopeCodec.UnboundedHeaderBytesOf(header);
+        }
+
         // the bytes a payload of `handler` holds at most: its own limit, within the router's
         internal int PayloadLimitOf(int? maximumPayloadBytes)
         {
@@ -78,7 +93,7 @@ internal sealed partial class RouterCore
                 ? request with { Total = payload.Length }
                 : (ResultHeader)header with { Total = payload.Length };
             var openingHeaderBytes = EnvelopeCodec.UnboundedHeaderBytesOf(opening);
-            var openingBytes = WholeBytes - openingHeaderBytes - announcementBytes;
+            var openingBytes = OpeningBytesOf(opening);
 
             // ! a header past 1,020 bytes no reader takes, and an opening without a byte of its payload
             // none places: a payload that needs such a transfer goes whole or not at all (spec 12.3)

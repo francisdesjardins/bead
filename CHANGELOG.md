@@ -115,6 +115,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   TypeScript side keeps its own under a longer one; the C# side loses its link once a PINGREQ
   under a shorter one has no PINGRESP. The matrix's row of a Server Keep Alive of 0, or longer
   than a side's own, closes (decision 0041).
+- A transfer received is admitted to `bufferedBytesBudget` by its whole total, in the order the
+  openings came on any connection. An opening the budget left cannot hold waits for it, holding
+  none of it, and is refused `CAPACITY_EXCEEDED` once half of `transferInactivityTimeout` passed:
+  a request's, or a result's, which ends its call. Transfers no longer hold the budget between
+  them until each ends `TRANSFER_STALLED`, and the credit that admits one sets its inactivity going
+  (spec 8.2, 12.2, 12.3, 12.4, 12.8, 12.10; decision 0001).
+- A transfer's opening carries exactly the bytes its sender places in it, `chunkBytes` less its
+  header, or is answered `CHUNK_INVALID` (spec 12.3; decision 0001).
+- The receiving transfers' gauges: `reservedBytes` holds what `bufferedBytes` held, under the
+  budget's ceiling; `bufferedBytes` counts the bytes received and held; `waitingTransfers` is new.
 
 ### Fixed
 

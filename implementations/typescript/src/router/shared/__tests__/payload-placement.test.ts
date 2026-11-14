@@ -1,7 +1,8 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
-import { EnvelopeKind, ProtocolCode, SERVER_FAILURES } from '../constants';
+import { CredentialScheme, EnvelopeKind, ProtocolCode, SERVER_FAILURES } from '../constants';
 import { headerBytesOf } from '../header';
+import { toSessionToken } from '../identifiers';
 import { createPayloadPlacement, isPayloadLimit } from '../payload-placement';
 import { createRouterCore } from '../router-core';
 import { limitsOf } from '../router-limits';
@@ -242,6 +243,37 @@ test.describe('createPayloadPlacement', () => {
       false,
       false,
     ]);
+  });
+
+  // spec 12.3
+  test('places in an opening the bytes its receiver holds it to, a result’s counted with an announcement’s 20 bytes', () => {
+    const placement = createPayloadPlacement(SERVER_FAILURES, limitsOf(limits));
+    const jwt = { scheme: CredentialScheme.JWT, token: 'a.b.c' } as const;
+    const requests = [headerOf(1), { ...headerOf(1), credential: jwt, destinationId: 9 }];
+    const result = { callId: 1, kind: EnvelopeKind.RESULT } as const;
+
+    // a request's: its chunk less its header, the credential it presents among it
+    for (const header of requests) {
+      const outgoing = placement.transferOf(patternOf(300), { header, maximumPayloadBytes: 1_024 });
+      const opening = { ...header, total: 300 };
+
+      expect(outgoing).toMatchObject({ opening: { length: 64 - headerBytesOf(opening) } });
+      expect(placement.openingBytesOf(opening)).toBe(64 - headerBytesOf(opening));
+    }
+
+    // a result's: less the 20 bytes of an announcement too, whichever it carries as it goes, if any
+    expect(
+      placement.transferOf(patternOf(300), { header: result, maximumPayloadBytes: 1_024 })
+    ).toMatchObject({ opening: { length: 28 } });
+    expect(
+      [
+        undefined,
+        { scheme: CredentialScheme.NONE },
+        { scheme: CredentialScheme.OPAQUE, token: toSessionToken(new Uint8Array(16).fill(1)) },
+      ].map((credential) => {
+        return placement.openingBytesOf({ ...result, credential, total: 300 });
+      })
+    ).toEqual([28, 28, 28]);
   });
 
   // spec 12.3

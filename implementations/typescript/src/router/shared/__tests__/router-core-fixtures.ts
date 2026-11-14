@@ -4,7 +4,9 @@ import { CLIENT_FAILURES, CredentialScheme, EnvelopeKind, SERVER_FAILURES } from
 import { readEnvelope } from '../envelope';
 import { FailureError } from '../errors';
 import { toSessionToken } from '../identifiers';
+import { createPayloadPlacement } from '../payload-placement';
 import { createRouterCore } from '../router-core';
+import { limitsOf } from '../router-limits';
 import type {
   Credential,
   Envelope,
@@ -12,6 +14,7 @@ import type {
   IRequestHeader,
   IRequestResolver,
   IRequestResolverProps,
+  IResultHeader,
   IRouterCore,
   IRouterCorePort,
   RouterLimitsOptions,
@@ -108,13 +111,25 @@ export const creditOf = (callId: number, creditEnd = 8): Uint8Array => {
   });
 };
 
-// envelopes of 64 bytes: a chunk carries 48 bytes at most; a request's opening 44 and a result's 32
+// envelopes of 64 bytes: a chunk carries 48 bytes at most; a request's opening 44 and a result's
+// 28, as their senders place them
 export const limits = {
   bufferedBytesBudget: 1_024,
   chunkBytes: 64,
   maximumEnvelopeBytes: 64,
   maximumPayloadBytes: 1_024,
   windowBytes: 128,
+};
+
+/**
+ * The bytes of its payload an opening of `header` carries under `given`, `limits` unless given, as
+ * its sender places them and its receiver holds it to.
+ */
+export const openingBytesOf = (
+  header: (IRequestHeader | IResultHeader) & { total: number },
+  given: RouterLimitsOptions = limits
+): number => {
+  return createPayloadPlacement(SERVER_FAILURES, limitsOf(given)).openingBytesOf(header);
 };
 // a budget two transfers share
 export const narrow = { ...limits, bufferedBytesBudget: 200, maximumPayloadBytes: 200 };

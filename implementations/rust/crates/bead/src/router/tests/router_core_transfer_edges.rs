@@ -127,15 +127,15 @@ async fn assemble_a_requests_payload_from_full_chunks_in_any_order_credited_half
         .run(move |state| {
             receive(
                 state,
-                (opening(1, (sent_payload.slice(..40), 300)), "a", None),
+                (opening(1, (sent_payload.slice(..44), 300)), "a", None),
             );
             for (start, end) in [
-                (88, 136),
-                (40, 88),
-                (184, 232),
-                (136, 184),
-                (40, 88),
-                (280, 300),
+                (92, 140),
+                (44, 92),
+                (188, 236),
+                (140, 188),
+                (44, 92),
+                (284, 300),
             ] {
                 receive(
                     state,
@@ -158,7 +158,7 @@ async fn assemble_a_requests_payload_from_full_chunks_in_any_order_credited_half
         .expect("the chunks placed out of order");
     assert!(locked(&handed).is_empty());
     peer.receive((
-        chunk(1, (232, payload.slice(232..280), 300)),
+        chunk(1, (236, payload.slice(236..284), 300)),
         Arc::from("a"),
     ));
     peer.settle().await;
@@ -174,7 +174,7 @@ async fn assemble_a_requests_payload_from_full_chunks_in_any_order_credited_half
         .await
         .expect("answered");
     peer.receive((
-        chunk(1, (232, payload.slice(232..280), 300)),
+        chunk(1, (236, payload.slice(236..284), 300)),
         Arc::from("a"),
     ));
     peer.receive((
@@ -185,8 +185,8 @@ async fn assemble_a_requests_payload_from_full_chunks_in_any_order_credited_half
     assert_eq!(
         outgoing(&peer).await,
         [
-            ("a".to_owned(), Outgoing::Credit(1, 168)),
-            ("a".to_owned(), Outgoing::Credit(1, 264)),
+            ("a".to_owned(), Outgoing::Credit(1, 172)),
+            ("a".to_owned(), Outgoing::Credit(1, 268)),
             ("a".to_owned(), Outgoing::Credit(1, 300)),
             (
                 "a".to_owned(),
@@ -210,7 +210,7 @@ async fn assemble_a_requests_payload_from_full_chunks_in_any_order_credited_half
 #[tokio::test]
 #[expect(
     clippy::too_many_lines,
-    reason = "the twin plays both opening sizes and the refusal before, and acceptance after, the call ends"
+    reason = "the twin plays both totals and the refusal before, and acceptance after, the call ends"
 )]
 #[expect(
     clippy::disallowed_methods,
@@ -218,7 +218,9 @@ async fn assemble_a_requests_payload_from_full_chunks_in_any_order_credited_half
 )]
 async fn hold_a_connections_place_for_a_transfer_until_its_call_ends_not_once_its_payload_is_whole()
 {
-    for (first, middle, answer, next_total) in [(40, 88, 9, 8), (44, 92, 1, 100)] {
+    let (first, middle) = (44, 92);
+
+    for (answer, next_total) in [(9, 60), (1, 100)] {
         let (peer, handed) = serving(
             false,
             &RouterLimitsOptions {
@@ -266,11 +268,12 @@ async fn hold_a_connections_place_for_a_transfer_until_its_call_ends_not_once_it
                 );
                 receive(
                     state,
+                    // its place refused before its opening is read, a byte of it or the whole
                     (
                         opening(
                             3,
                             (
-                                if next_total == 8 {
+                                if next_total == 60 {
                                     Bytes::from_static(&[1])
                                 } else {
                                     payload.slice(..44)
@@ -297,17 +300,7 @@ async fn hold_a_connections_place_for_a_transfer_until_its_call_ends_not_once_it
             .await
             .expect("answered");
         peer.receive((
-            opening(
-                5,
-                (
-                    if next_total == 8 {
-                        Bytes::from_static(&[1])
-                    } else {
-                        pattern(100).slice(..44)
-                    },
-                    next_total,
-                ),
-            ),
+            opening(5, (pattern(100).slice(..44), next_total)),
             Arc::from("a"),
         ));
         peer.settle().await;
@@ -344,21 +337,25 @@ async fn hold_a_connections_place_for_a_transfer_until_its_call_ends_not_once_it
     clippy::disallowed_methods,
     reason = "the test slices its own fixed payload at offsets within its length"
 )]
-async fn give_the_budget_back_once_a_payload_is_whole_and_grant_the_transfer_it_starved() {
+async fn give_the_budget_back_once_a_payload_is_whole_and_admit_the_opening_that_waits_for_it_its_credit_setting_its_inactivity_going()
+ {
     let (peer, handed) = serving(false, &narrow()).await;
-    let payload = pattern(168);
+    let payload = pattern(150);
     peer.owner
         .run(move |state| {
-            receive(state, (opening(1, (payload.slice(..40), 168)), "a", None));
-            receive(
-                state,
-                (opening(3, (Bytes::from(vec![0; 32]), 100)), "b", None),
-            );
-            receive(
-                state,
-                (opening(5, (Bytes::from_static(&[1]), 8)), "a", None),
-            );
-            for offset in [40, 88, 136] {
+            receive(state, (opening(1, (payload.slice(..44), 100)), "a", None));
+            // past the 100 bytes left: it waits, granted nothing
+            receive(state, (opening(3, (payload.slice(..44), 150)), "b", None));
+            // within the 100 bytes left, it waits behind it all the same
+            receive(state, (opening(5, (payload.slice(..44), 60)), "a", None));
+        })
+        .await
+        .expect("two openings wait");
+    peer.clock.advance(Duration::from_secs(10)).await;
+    let payload = pattern(150);
+    peer.owner
+        .run(move |state| {
+            for offset in [44, 92] {
                 receive(
                     state,
                     (
@@ -366,8 +363,8 @@ async fn give_the_budget_back_once_a_payload_is_whole_and_grant_the_transfer_it_
                             1,
                             (
                                 u64::try_from(offset).expect("an offset"),
-                                payload.slice(offset..(offset + 48).min(168)),
-                                168,
+                                payload.slice(offset..(offset + 48).min(100)),
+                                100,
                             ),
                         ),
                         "a",
@@ -379,17 +376,34 @@ async fn give_the_budget_back_once_a_payload_is_whole_and_grant_the_transfer_it_
         .await
         .expect("the first transfer made whole");
     peer.settle().await;
+    // whole, its call not answered yet: its budget admits the first that waits, and the 50 bytes
+    // left not the second, refused once its wait passed half the inactivity allowed
     assert_eq!(locked(&handed).len(), 1);
     assert_eq!(
         outgoing(&peer).await,
         [
-            ("a".to_owned(), Outgoing::Credit(1, 168)),
-            (
-                "a".to_owned(),
-                Outgoing::Failure(5, ProtocolCode::CAPACITY_EXCEEDED.get().get())
-            ),
-            ("b".to_owned(), Outgoing::Credit(3, 100)),
+            ("a".to_owned(), Outgoing::Credit(1, 100)),
+            ("b".to_owned(), Outgoing::Credit(3, 150)),
         ]
+    );
+    peer.clock.advance(Duration::from_secs(5)).await;
+    assert_eq!(
+        outgoing(&peer).await.last(),
+        Some(&(
+            "a".to_owned(),
+            Outgoing::Failure(5, ProtocolCode::CAPACITY_EXCEEDED.get().get())
+        ))
+    );
+    // its inactivity counted from the credit that admitted it, not from its opening
+    peer.clock.advance(Duration::from_millis(24_999)).await;
+    assert_eq!(outgoing(&peer).await.len(), 3);
+    peer.clock.advance(Duration::from_millis(1)).await;
+    assert_eq!(
+        outgoing(&peer).await.last(),
+        Some(&(
+            "b".to_owned(),
+            Outgoing::Failure(3, ProtocolCode::TRANSFER_STALLED.get().get())
+        ))
     );
     let (same, _) = serving(
         false,
@@ -475,6 +489,70 @@ async fn give_the_budget_back_once_a_payload_is_whole_and_grant_the_transfer_it_
     );
 }
 
+// spec 12.3
+#[tokio::test]
+async fn answer_chunk_invalid_to_an_opening_that_carries_other_than_its_sender_places_in_it() {
+    // chunks of 64 bytes, in envelopes as large as by default, for a refusal's detail to go whole
+    let (peer, handed) = serving(
+        false,
+        &RouterLimitsOptions {
+            chunk_bytes: Some(64),
+            maximum_payload_bytes: Some(1_024),
+            window_bytes: Some(128),
+            ..RouterLimitsOptions::default()
+        },
+    )
+    .await;
+    peer.owner
+        .run(|state| {
+            // a byte short of what its sender places, all but a byte short, then just that
+            for (call_id, size) in [(1, 43), (3, 1), (5, 44)] {
+                receive(state, (opening(call_id, (pattern(size), 300)), "a", None));
+            }
+        })
+        .await
+        .expect("three openings");
+    peer.settle().await;
+    let sent: Vec<(u32, Option<(u16, String)>)> = peer
+        .sent()
+        .await
+        .into_iter()
+        .map(|(_, envelope)| match envelope {
+            Envelope::Failure { header, failure } => {
+                (header.call_id, Some((failure.code.get(), failure.detail)))
+            }
+            Envelope::Credit { header } => (header.call_id, None),
+            other @ (Envelope::Request { .. }
+            | Envelope::Result { .. }
+            | Envelope::Notification { .. }
+            | Envelope::Chunk { .. }
+            | Envelope::Cancel { .. }) => panic!("a refusal or a credit, not {other:?}"),
+        })
+        .collect();
+    let invalid = ProtocolCode::CHUNK_INVALID.get().get();
+    assert_eq!(
+        sent,
+        [
+            (
+                1,
+                Some((
+                    invalid,
+                    "an opening carries 44 bytes of its payload, not 43".to_owned()
+                ))
+            ),
+            (
+                3,
+                Some((
+                    invalid,
+                    "an opening carries 44 bytes of its payload, not 1".to_owned()
+                ))
+            ),
+            (5, None),
+        ]
+    );
+    assert!(locked(&handed).is_empty());
+}
+
 #[tokio::test]
 async fn end_a_requests_transfer_its_requester_cancels_giving_the_budget_back() {
     let (peer, handed) = serving(false, &narrow()).await;
@@ -482,7 +560,7 @@ async fn end_a_requests_transfer_its_requester_cancels_giving_the_budget_back() 
         .run(|state| {
             receive(
                 state,
-                (opening(1, (Bytes::from(vec![0; 40]), 200)), "a", None),
+                (opening(1, (Bytes::from(vec![0; 44]), 200)), "a", None),
             );
             receive(
                 state,
@@ -496,11 +574,12 @@ async fn end_a_requests_transfer_its_requester_cancels_giving_the_budget_back() 
             );
             receive(
                 state,
-                (chunk(1, (40, Bytes::from(vec![0; 48]), 200)), "a", None),
+                (chunk(1, (44, Bytes::from(vec![0; 48]), 200)), "a", None),
             );
+            // the whole budget its total reserved came back: admitted at once
             receive(
                 state,
-                (opening(3, (Bytes::from(vec![0; 40]), 200)), "a", None),
+                (opening(3, (Bytes::from(vec![0; 44]), 200)), "a", None),
             );
         })
         .await
@@ -509,8 +588,8 @@ async fn end_a_requests_transfer_its_requester_cancels_giving_the_budget_back() 
     assert_eq!(
         outgoing(&peer).await,
         [
-            ("a".to_owned(), Outgoing::Credit(1, 168)),
-            ("a".to_owned(), Outgoing::Credit(3, 168)),
+            ("a".to_owned(), Outgoing::Credit(1, 172)),
+            ("a".to_owned(), Outgoing::Credit(3, 172)),
         ]
     );
     assert!(locked(&handed).is_empty());
@@ -538,8 +617,8 @@ async fn stall_no_request_whose_payload_came_whole_however_long_its_resolver_tak
     .await;
     peer.owner
         .run(|state| {
-            receive(state, (opening(1, (pattern(40), 60)), "a", None));
-            receive(state, (chunk(1, (40, pattern(20), 60)), "a", None));
+            receive(state, (opening(1, (pattern(44), 60)), "a", None));
+            receive(state, (chunk(1, (44, pattern(16), 60)), "a", None));
         })
         .await
         .expect("the payload complete");

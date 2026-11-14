@@ -87,15 +87,15 @@ async fn simultaneous() {
     peer.owner
         .run(|state| {
             let payload = pattern((200, false));
-            receive(state, (opening(1, (payload.slice(..40), 200)), "a", None));
+            receive(state, (opening(1, (payload.slice(..44), 200)), "a", None));
             receive(
                 state,
-                (result_opening(2, (payload.slice(..32), 200)), "a", None),
+                (result_opening(2, (payload.slice(..28), 200)), "a", None),
             );
-            receive(state, (opening(3, (payload.slice(..40), 60)), "a", None));
+            receive(state, (opening(3, (payload.slice(..44), 60)), "a", None));
             receive(
                 state,
-                (chunk(3, (40, payload.slice(40..60), 60)), "a", None),
+                (chunk(3, (44, payload.slice(44..60), 60)), "a", None),
             );
             for call_id in [1, 1, 2, 2, 3, 5] {
                 raw(
@@ -132,8 +132,8 @@ async fn simultaneous() {
         traffic(&peer).await,
         [
             (EnvelopeKind::Request, 2, 0),
-            (EnvelopeKind::Credit, 1, 168),
-            (EnvelopeKind::Credit, 2, 160),
+            (EnvelopeKind::Credit, 1, 172),
+            (EnvelopeKind::Credit, 2, 156),
             (EnvelopeKind::Credit, 3, 60),
             (
                 EnvelopeKind::Failure,
@@ -173,7 +173,7 @@ async fn unreadable_result() {
             receive(
                 state,
                 (
-                    result_opening(1, (pattern((300, false)).slice(..32), 300)),
+                    result_opening(1, (pattern((300, false)).slice(..28), 300)),
                     "a",
                     None,
                 ),
@@ -187,7 +187,7 @@ async fn unreadable_result() {
         traffic(&peer).await,
         [
             (EnvelopeKind::Request, 1, 0),
-            (EnvelopeKind::Credit, 1, 160),
+            (EnvelopeKind::Credit, 1, 156),
             (EnvelopeKind::Cancel, 1, 0),
         ]
     );

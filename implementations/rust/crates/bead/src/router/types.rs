@@ -47,7 +47,9 @@ pub struct CallAddress {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct RouterLimits {
-    /// The bytes every transfer the router receives holds together.
+    /// The bytes the transfers the router receives reserve together: each transfer's whole total,
+    /// from its admission until its payload is whole or it ends. An opening it cannot hold waits for
+    /// it, in the order the openings came, for half of the transfer's inactivity at most.
     pub buffered_bytes_budget: u64,
     /// A chunk's envelope, its header included, in bytes.
     pub chunk_bytes: u64,
@@ -63,7 +65,8 @@ pub struct RouterLimits {
     pub maximum_payload_bytes: u64,
     /// The transfers a connection receives at once; 0 sends and takes none.
     pub maximum_transfers: u64,
-    /// How long a transfer waits for its next chunk or credit before it stalls.
+    /// How long a transfer waits for its next chunk or credit before it stalls; half of it,
+    /// rounded down to the millisecond, how long an opening waits for the budget.
     pub transfer_inactivity_timeout: Duration,
     /// How far past the bytes it received, contiguous, a receiver lets its sender send.
     pub window_bytes: u64,

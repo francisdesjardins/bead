@@ -25,6 +25,7 @@ async fn peer() -> Peer {
     );
     peer.owner
         .run(|state| {
+            super::place_a_byte_in_each_opening(state);
             router_core::register_resolver(
                 &state.core.resolvers,
                 (

@@ -324,6 +324,8 @@ def chunk_out(call_id, offset, data, last):
 
 ECHOED = json_string(100).encode('utf-8')
 LONG = json_string(300).encode('utf-8')
+# a payload of 176 bytes: an opening of 44 under chunks of 64, then two full chunks and the last 36
+ECHOED_176 = json_string(176).encode('utf-8')
 # the result bytes answers to a length of 35: 37 bytes, past what an envelope of 64 holds behind a
 # result's header and an announcement's 20 bytes
 RESULT_37 = ('"' + 'x' * 35 + '"').encode('utf-8')
@@ -1261,6 +1263,14 @@ conversations = [
         opening(1, 'echo', b'"ab"', 4), failure(1, CHUNK_INVALID)]),
     ('an opening that carries no byte of its payload is answered CHUNK_INVALID', ['12.3', '12.3.3'], CHUNKED, [
         opening(1, 'echo', b'', 100), failure(1, CHUNK_INVALID)]),
+    # 12.3.3: an opening carries what its sender places in it, 44 bytes here, and a result's 28, the
+    # 20 bytes of an announcement counted
+    ('an opening that carries other than its sender places in it is answered CHUNK_INVALID', ['12.3', '12.3.3'], CHUNKED, [
+        opening(1, 'echo', LONG[:43], 300), failure(1, CHUNK_INVALID),
+        opening(3, 'echo', LONG[:44], 300), credited(3, 172), cancel(3)]),
+    ('a result\'s opening that carries other than its sender places in it ends the command CHUNK_INVALID, and cancels it', ['12.3', '12.3.3', '12.7'], CHUNKED, [
+        json_request(1, 'ask', 'null'), command(2, 'clock', QUESTION),
+        result_opening_in(2, LONG[:27], 300), cancelled(2), failure(1, PROCEDURE_FAILED), report(CHUNK_INVALID)]),
     ('an opening that declares a total of 0 is answered PAYLOAD_TOO_LARGE', ['12.3.3'], CHUNKED, [
         opening(1, 'echo', b'', 0), failure(1, PAYLOAD_TOO_LARGE)]),
     ('a transfer past those a connection receives at once is answered CAPACITY_EXCEEDED', ['12.3.3'], {**CHUNKED, 'maximumTransfers': 1}, [
@@ -1270,18 +1280,57 @@ conversations = [
         opening(1, 'echo', LONG[:44], 300), credited(1, 172),
         opening(3, 'echo', b'', 0), failure(3, PAYLOAD_TOO_LARGE),
         opening(5, 'echo', b'"ab"', 4), failure(5, CAPACITY_EXCEEDED), cancel(1)]),
-    ('an opening past the budget left is answered CAPACITY_EXCEEDED, and a transfer it starves is credited once it frees', ['12.3.3', '12.4'], {
+    # 12.4: the budget, of 256 here, admits a transfer by its total, the openings in their order on
+    # any connection; one waits half the transfer's inactivity at most, holding none of it
+    ('an opening the budget left cannot hold waits, one after it waits behind it though it fits, and both are admitted in their turn once the budget frees', ['12.3.3', '12.4'], {
         **CHUNKED, 'bufferedBytesBudget': 256, 'maximumPayloadBytes': 256}, [
         opening(1, 'echo', LONG[:44], 200), credited(1, 172),
         opening(3, 'echo', LONG[:44], 200),
-        opening(5, 'echo', LONG[:44], 200), failure(5, CAPACITY_EXCEEDED),
-        cancel(1), credited(3, 172)]),
-    ("a connection that closes ends its transfers, and the budget they held credits a transfer another connection's opening starved", ['12.4', '12.10'], {
+        opening(5, 'echo', LONG[:44], 56),
+        cancel(1), credited(3, 172), credited(5, 56), cancel(3), cancel(5)]),
+    ('an opening still waiting for the budget at half the transfer\'s inactivity is answered CAPACITY_EXCEEDED, and the one behind it is admitted', ['12.2.8', '12.4'], {
+        **CHUNKED, 'bufferedBytesBudget': 256, 'maximumPayloadBytes': 256, 'transferInactivityTimeout': 20_000}, [
+        opening(1, 'echo', LONG[:44], 200), credited(1, 172),
+        opening(3, 'echo', LONG[:44], 200), armed(10_000), advance(5_000),
+        opening(5, 'echo', LONG[:44], 56), armed(10_000), advance(5_000),
+        failure(3, CAPACITY_EXCEEDED), credited(5, 56), cancel(1), cancel(5)]),
+    ('two transfers whose totals pass the budget together both complete: the second waits, holding none of it, and is admitted as the first\'s payload is whole, its credit setting its inactivity going', ['12.4', '12.8'], {
+        **CHUNKED, 'bufferedBytesBudget': 280, 'maximumPayloadBytes': 176}, [
+        opening(1, 'echo', ECHOED_176[:44], 176), credited(1, 172),
+        opening(3, 'echo', ECHOED_176[:44], 176),
+        chunk_in(1, 44, ECHOED_176[44:92], False), credited(1, 176),
+        chunk_in(1, 92, ECHOED_176[92:140], False), chunk_in(1, 140, ECHOED_176[140:], True),
+        credited(3, 172), armed(30_000),
+        result_opening(1, ECHOED_176[:28], 176), credit_in(1, 176),
+        chunk_out(1, 28, ECHOED_176[28:76], False), chunk_out(1, 76, ECHOED_176[76:124], False),
+        chunk_out(1, 124, ECHOED_176[124:172], False), chunk_out(1, 172, ECHOED_176[172:], True),
+        chunk_in(3, 44, ECHOED_176[44:92], False), credited(3, 176),
+        chunk_in(3, 92, ECHOED_176[92:140], False), chunk_in(3, 140, ECHOED_176[140:], True),
+        result_opening(3, ECHOED_176[:28], 176), credit_in(3, 176),
+        chunk_out(3, 28, ECHOED_176[28:76], False), chunk_out(3, 76, ECHOED_176[76:124], False),
+        chunk_out(3, 124, ECHOED_176[124:172], False), chunk_out(3, 172, ECHOED_176[172:], True)]),
+    ("a connection that closes ends its transfers, and the budget they reserved admits another connection's opening that waited for it", ['12.4', '12.10'], {
         **CHUNKED, 'bufferedBytesBudget': 256, 'maximumPayloadBytes': 256}, [
         opened('first'), opened('second'),
         on(opening(1, 'echo', LONG[:44], 200), 'first'), on(credited(1, 172), 'first'),
         on(opening(1, 'echo', LONG[:44], 200), 'second'),
         closed('first'), on(credited(1, 172), 'second')]),
+    # a result's opening waits as a request's does, its wait of 15 s, half the 30 s by default, taking
+    # over from the command's own 10 s; a timer due in 15 s is the wait's alone
+    ('a result\'s opening that waits for the budget past half its call\'s inactivity ends the command CAPACITY_EXCEEDED, and cancels it', ['8.2', '12.4'], {
+        **CHUNKED, 'bufferedBytesBudget': 256, 'maximumPayloadBytes': 256}, [
+        opening(1, 'echo', LONG[:44], 200), credited(1, 172),
+        json_request(3, 'ask', 'null'), command(2, 'clock', QUESTION),
+        result_opening_in(2, LONG[:28], 100), armed(15_000), advance(15_000),
+        cancelled(2), failure(3, PROCEDURE_FAILED), report(CAPACITY_EXCEEDED), cancel(1)]),
+    ('a result\'s opening that waits for the budget is credited once it frees, the credit setting its call\'s inactivity going again', ['12.4', '12.8'], {
+        **CHUNKED, 'bufferedBytesBudget': 256, 'maximumPayloadBytes': 256}, [
+        opening(1, 'echo', LONG[:44], 200), credited(1, 172),
+        json_request(3, 'ask', 'null'), command(2, 'clock', QUESTION),
+        result_opening_in(2, LONG[:28], 100), armed(15_000), advance(5_000),
+        cancel(1), credited(2, 100),
+        armed(30_000), advance(27_000), chunk_in(2, 28, LONG[28:76], False),
+        armed(30_000), advance(30_000), cancelled(2), failure(3, PROCEDURE_FAILED), report('exception')]),
     ('a cancel ends the transfer of a result, and a credit after it is dropped in silence', ['12.7', '12.9.5'], CHUNKED, [
         json_request(1, 'bytes', '{"length":98}'), result_opening(1, RESULT_100[:28], 100),
         cancel(1), credit_in(1, 100)]),
@@ -1431,6 +1480,16 @@ conversations += [
         on(relayed(3, 'echo', '"x"'), 'client'), leg_b(2, 'echo', '"x"'),
         armed(2_000), advance(2_000),
         on(cancelled(2), 'device'), on(failure(3, DESTINATION_LOST), 'client'), on(report('exception'), 'client')])),
+    # 14.5: a result leg B brings as a transfer waits for the relay's budget, which the client's upload
+    # holds, as any result's does; past half its inactivity leg B ends once its transport had it
+    sharing_leg_b(('a result leg B brings that the relay\'s budget does not admit within its wait ends leg B, cancelled, and leg A is answered DESTINATION_LOST',
+     ['12.4', '14.5.5'], {**CHUNKED, 'bufferedBytesBudget': 256, 'maximumPayloadBytes': 256, 'transferInactivityTimeout': 20_000}, [
+         opened('client'), opened('device'), *logged_in(), *registered(),
+         on(opening(3, 'echo', LONG[:44], 200), 'client'), on(credited(3, 172), 'client'),
+         on(relayed(5, 'echo', '"x"'), 'client'), leg_b(2, 'echo', '"x"'),
+         on(result_opening_in(2, LONG[:28], 100), 'device'), armed(10_000), advance(10_000),
+         on(cancelled(2), 'device'), on(failure(5, DESTINATION_LOST), 'client'),
+         on(report(CAPACITY_EXCEEDED), 'client'), on(cancel(3), 'client')])),
     # 14.5: a result leg B brought whole, 8 + 36 bytes, goes back to leg A counted with the 20 bytes of an
     # announcement: 64 fit chunkBytes; one byte more needs a transfer, which this server sends none of,
     # and is answered as section 12.1 answers a result its side cannot send, its reason reported with

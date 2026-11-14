@@ -333,7 +333,18 @@ async fn a_credential_resolving_its_calls_cancel_or_its_connections_close_tells_
 #[tokio::test]
 async fn a_credential_resolving_a_transfers_opening_gets_no_credit_until_its_resolution_and_its_admission_settle()
  {
-    for (total, opening) in [(100, 8), (300, 20)] {
+    for total in [100, 300] {
+        let header = RequestHeader {
+            total: Some(total),
+            credential: Some(jwt()),
+            ..scripted_header(1)
+        };
+        // as many bytes as its sender places in it, beside its credential
+        let opening = crate::router::parts::Placement::new(
+            crate::constants::RouterSide::Server,
+            crate::router::types::limits_of(&limits()).expect("the limits"),
+        )
+        .opening_bytes_of(&crate::envelope::EnvelopeHeader::Request(header.clone()));
         let peer = Peer::new(crate::constants::RouterSide::Server, &limits());
         let handed = Handed::default();
         let admitted = Arc::default();
@@ -357,12 +368,11 @@ async fn a_credential_resolving_a_transfers_opening_gets_no_credit_until_its_res
                     state,
                     (
                         Envelope::Request {
-                            header: RequestHeader {
-                                total: Some(total),
-                                credential: Some(jwt()),
-                                ..scripted_header(1)
-                            },
-                            payload: Bytes::from(vec![0; opening]),
+                            header,
+                            payload: Bytes::from(vec![
+                                0;
+                                usize::try_from(opening).expect("a size")
+                            ]),
                         },
                         "a",
                         None,
@@ -381,9 +391,11 @@ async fn a_credential_resolving_a_transfers_opening_gets_no_credit_until_its_res
         peer.settle().await;
         assert_eq!(locked(&admitted).len(), 1);
         assert!(locked(&handed).is_empty());
-        let expected = total.min(u64::try_from(opening).expect("small opening") + 128);
+        let expected = total.min(opening + 128);
+        let sent = peer.sent().await;
         assert!(
-            matches!(peer.sent().await.as_slice(), [(_, Envelope::Credit { header })] if header.call_id == 1 && header.credit_end == expected)
+            matches!(sent.as_slice(), [(_, Envelope::Credit { header })] if header.call_id == 1 && header.credit_end == expected),
+            "{opening}: {sent:?}"
         );
         quiet(&peer).await;
     }
