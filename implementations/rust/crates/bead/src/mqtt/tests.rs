@@ -3375,6 +3375,13 @@ async fn hands_on_what_came_before_a_packet_its_client_cannot_read_in_one_read_a
             (0..=payload).map(|each| vec![each]).collect::<Vec<_>>(),
             "{index}: its PUBLISH before it handed on"
         );
+        // ! nothing of its link handed on once its down was told
+        rest(Duration::from_millis(30)).await;
+        assert_eq!(
+            heard.messages().len(),
+            usize::from(payload) + 1,
+            "{index}: nothing handed on after its down"
+        );
         assert!(!link.kinds().contains(&Kind::Disconnect), "no DISCONNECT");
     }
 

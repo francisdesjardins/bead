@@ -96,6 +96,10 @@ public sealed partial class RouterCoreTests
             });
 
         await sent.Task.WaitAsync(Patience, TestContext.Current.CancellationToken);
+
+        // ! its resolver started before its call ends: a cancel that comes before its turn starts
+        // none, and counts no cancellation
+        await link.Settle();
         time.Advance(TimeSpan.FromSeconds(1));
         await Assert.ThrowsAsync<TimeoutException>(() =>
         {
@@ -130,6 +134,9 @@ public sealed partial class RouterCoreTests
             });
 
         await sent.Task.WaitAsync(Patience, TestContext.Current.CancellationToken);
+
+        // ! its resolver started before its call ends, as above
+        await link.Settle();
         await source.CancelAsync();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
         {

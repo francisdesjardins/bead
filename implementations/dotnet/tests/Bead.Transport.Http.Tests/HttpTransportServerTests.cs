@@ -2349,7 +2349,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         var told = new List<TransportServerRefusal>();
 
         // each head on a socket of its own, which the refusal names by its port
-        async Task<int> Refused(string head)
+        async Task<int> Answered(string head)
         {
             using var wire = await Wire.Open(_port);
 
@@ -2357,6 +2357,22 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
             await wire.Read();
 
             return wire.Port;
+        }
+
+        // ! told once its answer went, so the next head can be told first: each awaited in its turn
+        async Task<int> Refused(string head)
+        {
+            var port = await Answered(head);
+
+            await Until(() =>
+            {
+                return _refusals.Any((refusal) =>
+                {
+                    return refusal.Port == port;
+                });
+            });
+
+            return port;
         }
 
         // a host not taken, its Origin in two field lines joined by ", "; an absolute-form target's
@@ -2376,8 +2392,8 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         };
 
         // what HTTP refuses of its own, unmarked: an authority that is no host, two Host lines
-        await Refused("POST /bead HTTP/1.1\r\nHost: localhost:\r\nContent-Length: 0\r\n\r\n");
-        await Refused("POST /bead HTTP/1.1\r\nHost: a.test\r\nHost: b.test\r\nContent-Length: 0\r\n\r\n");
+        await Answered("POST /bead HTTP/1.1\r\nHost: localhost:\r\nContent-Length: 0\r\n\r\n");
+        await Answered("POST /bead HTTP/1.1\r\nHost: a.test\r\nHost: b.test\r\nContent-Length: 0\r\n\r\n");
 
         await Until(() =>
         {
@@ -4593,11 +4609,14 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
 
         await using var webSocket = new WebSockets.WebSocketTransportServer(new WebSockets.WebSocketTransportServerOptions { HeadersTimeout = timeout });
         var webSocketPort = (await webSocket.Start(new TransportServerStartOptions { Address = Host, FindOpenPort = true, CancellationToken = Cancelled })).Port;
+        var wirePorts = new List<int>();
 
         foreach (var (port, start) in new[] { (_port, "POST /bead HTTP/1.1"), (webSocketPort, "GET / HTTP/1.1") })
         {
             using var wire = await Wire.Open(port);
             var watch = Stopwatch.StartNew();
+
+            wirePorts.Add(wire.Port);
 
             // a head that never ends
             await wire.Write($"{start}\r\nHost: {Host}\r\n");
@@ -4614,7 +4633,12 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
             Assert.True(await wire.IsClosed());
         }
 
-        Assert.Empty(_refusals);
+        // ! none of its own wires' heads was refused: its port is any test's to dial, of another
+        // process's even, once the port that test meant was freed and given to it
+        Assert.DoesNotContain(_refusals, (refusal) =>
+        {
+            return wirePorts.Contains(refusal.Port);
+        });
     }
 
     [Fact]

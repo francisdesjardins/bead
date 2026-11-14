@@ -177,6 +177,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The Rust side's router ends a call whose timer its clock cannot arm before its request goes with
   nothing sent, no cancel and no call id reserved, as the TypeScript and C# sides end it, where it
   cancelled a request its peer never saw.
+- The C# MQTT adapter's stop sends no DISCONNECT once MQTTnet failed an UNSUBSCRIBE of its let-go
+  with its link, a packet it cannot decode among what came, as spec 15.29 states and the other
+  sides do: MQTTnet fails what awaits before it says the link disconnected, and in that moment the
+  stop read it connected and sent one.
+- The C# MQTT adapter hands nothing on of a link once its down was told: a PUBLISH MQTTnet
+  dispatched as the link ended could reach the participant after its down, which the TypeScript
+  and Rust sides never hand on; it is dropped, as theirs is.
+- The C# MQTT adapter's stop sends no DISCONNECT once its client's reads ended, a packet MQTTnet
+  cannot decode among them, in its drain as in its let-go (spec 15.29): MQTTnet says its link
+  connected a moment past that end, and a stop that held no filter read it so and sent one.
 
 ### Security
 

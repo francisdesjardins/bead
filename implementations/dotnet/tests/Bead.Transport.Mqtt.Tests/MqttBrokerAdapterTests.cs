@@ -1619,6 +1619,77 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Sends_no_DISCONNECT_at_its_stop_once_its_reads_ended_on_a_packet_its_client_cannot_decode_its_client_saying_it_connected_a_moment_more_spec_15_26_15_29()
+    {
+        byte[] unreadable = [0x30, 0x0F, 0x00, 0x0A, .. Encoding.UTF8.GetBytes("bead/i/ada"), 0x02, 0x7F, 0x00];
+
+        _script.IsHoldingUnsubscribes = true;
+
+        // an adapter up over a client held saying it connected once told, holding a subscription
+        // to each topic given
+        async Task<(MqttBrokerAdapter Adapter, ScriptedLink Link, HeldConnectedClient Client)> Up(string[][] topics)
+        {
+            HeldConnectedClient? held = null;
+            var adapter = AdapterOf((options) =>
+            {
+                return options with
+                {
+                    ClientOf = (client) =>
+                    {
+                        return held = new HeldConnectedClient(client);
+                    },
+                };
+            });
+            var link = await LinkUp((adapter, _script));
+
+            foreach (var topic in topics)
+            {
+                var subscribing = adapter.Subscribe(topic);
+
+                await SubAckOf((link, 1));
+                await subscribing.WaitAsync(Patience, Cancelled);
+            }
+
+            return (adapter, link, held!);
+        }
+
+        // * MQTTnet's moment held: what its stop awaited failed with its link, its client saying it
+        // connected all the same; its stop settles, no DISCONNECT asked
+        async Task IsEndedBy((MqttBrokerAdapter Adapter, ScriptedLink Link, HeldConnectedClient Client) up, Task stopping)
+        {
+            up.Client.IsHeld = true;
+            await up.Link.Write(unreadable);
+            await stopping.WaitAsync(Patience, Cancelled);
+            await up.Link.Closed.WaitAsync(Patience, Cancelled);
+            Assert.Equal(0, up.Client.Disconnects);
+            Assert.DoesNotContain(up.Link.Packets, (packet) =>
+            {
+                return packet is MqttDisconnectPacket;
+            });
+            up.Client.IsHeld = false;
+            await up.Adapter.DisposeAsync();
+        }
+
+        // * in its drain, no filter held: its publication's PUBACK awaited
+        var draining = await Up([]);
+        var published = draining.Adapter.Publish(new BrokerPublication { Topic = Name, Payload = (byte[])[1] });
+
+        await draining.Link.Next<MqttPublishPacket>();
+        await IsEndedBy(draining, draining.Adapter.Stop());
+        await Record.ExceptionAsync(() =>
+        {
+            return published;
+        });
+
+        // * in its let-go: its UNSUBACK withheld
+        var letting = await Up([Inbox]);
+        var stopping = letting.Adapter.Stop();
+
+        await letting.Link.Next<MqttUnsubscribePacket>();
+        await IsEndedBy(letting, stopping);
+    }
+
+    [Fact]
     public async Task Reads_an_acknowledgement_of_0x80_or_more_its_table_does_not_name_as_a_refusal_awaited_or_not_naming_its_code_its_link_kept_spec_15_27_15_28()
     {
         await using var adapter = AdapterOf();
@@ -1695,45 +1766,58 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
     {
         await using var adapter = AdapterOf();
         var (messages, downs) = HeardOf(adapter);
-        var inbox = EncodedOf(PublishOf(("bead/i/ada", [7], 9)));
         byte[] property = [0x30, 0x0F, 0x00, 0x0A, .. Encoding.UTF8.GetBytes("bead/i/ada"), 0x02, 0x7F, 0x00];
 
-        // in one write, a PUBACK of 0x00 to its publication and a PUBLISH to its inbox, then what it
-        // cannot read: what its publication gave
-        async Task<BrokerPublished> Before(byte[] unreadable)
+        // in one write, a PUBACK of 0x00 to its publication and a PUBLISH to its inbox of the payload
+        // given, then what it cannot read: what its publication gave, nothing handed on after its down
+        async Task<BrokerPublished> Before((byte[] Unreadable, byte Payload) read)
         {
             var link = await LinkUp((adapter, _script));
             var told = downs.Count;
             var publishing = adapter.Publish(new BrokerPublication { Topic = Name, Payload = (byte[])[1] });
             var publish = await link.Next<MqttPublishPacket>();
+            var inbox = EncodedOf(PublishOf(("bead/i/ada", [read.Payload], 9)));
 
-            await link.Write([0x40, 0x03, .. IdentifierOf(publish.PacketIdentifier), 0x00, .. inbox, .. unreadable]);
+            await link.Write([0x40, 0x03, .. IdentifierOf(publish.PacketIdentifier), 0x00, .. inbox, .. read.Unreadable]);
             await link.Closed.WaitAsync(Patience, Cancelled);
             await Until(() =>
             {
                 return downs.Count > told;
             });
+            var handed = messages.Count;
+
             Assert.Equal(told + 1, downs.Count);
             Assert.False(adapter.IsLinked);
 
-            return await publishing.WaitAsync(Patience, Cancelled);
+            var published = await publishing.WaitAsync(Patience, Cancelled);
+
+            // ! nothing of its link handed on once its down was told
+            await Task.Delay(TimeSpan.FromMilliseconds(200), Cancelled);
+            Assert.Equal(handed, messages.Count);
+
+            return published;
+        }
+
+        // the messages of the payload given handed on so far
+        int HandedOn(byte payload)
+        {
+            return messages.Count((message) =>
+            {
+                return message.Payload.Span.SequenceEqual([payload]);
+            });
         }
 
         // * (i) an UNSUBACK of 0x01 no request awaits, judged at its inspector: its publication
         // taken, its PUBLISH handed on or not by the scheduler
-        Assert.Equal(BrokerPublished.Taken, await Before([0xB0, 0x04, 0x77, 0x77, 0x00, 0x01]));
-        messages.Clear();
+        Assert.Equal(BrokerPublished.Taken, await Before(([0xB0, 0x04, 0x77, 0x77, 0x00, 0x01], 7)));
 
         // * (ii) a PUBLISH carrying property 0x7F, which MQTTnet refuses as it decodes it: its
         // publication taken, its PUBLISH handed on or not by the scheduler, MQTTnet dispatching it
         // as the decoder's refusal retires the link; once at most, and the one read before
-        Assert.Equal(BrokerPublished.Taken, await Before(property));
-        await Task.Delay(TimeSpan.FromMilliseconds(200), Cancelled);
-        Assert.True(messages.Count <= 1);
-        Assert.All(messages, (message) =>
-        {
-            Assert.Equal([7], message.Payload.ToArray());
-        });
+        Assert.Equal(BrokerPublished.Taken, await Before((property, 8)));
+        Assert.True(HandedOn(7) <= 1);
+        Assert.True(HandedOn(8) <= 1);
+        Assert.Equal(messages.Count, HandedOn(7) + HandedOn(8));
     }
 
     [Fact]

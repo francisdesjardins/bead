@@ -2079,6 +2079,7 @@ test.describe('createMqttBrokerAdapter', () => {
       await until(() => {
         return downs.length > index;
       });
+      // ! nothing of its link handed on once its down was told
       await sleep(30);
       expect(messages, 'the PUBLISH before it not handed on').toEqual([]);
       expect(downs).toHaveLength(index + 1);
