@@ -531,8 +531,7 @@ async fn refuses_a_start_once_disposed_its_state_kept_and_disposes_once_stopping
     server.dispose().await.unwrap();
 }
 
-#[tokio::test]
-async fn stops_at_once_when_never_started_stops_twice_then_starts_again_and_accepts() {
+async fn compares_restarting_after_two_stops() {
     let server = WebSocketTransportServer::new(&briefly_closing()).unwrap();
     let recorder = recorded(&server);
 
@@ -545,17 +544,66 @@ async fn stops_at_once_when_never_started_stops_twice_then_starts_again_and_acce
     );
 
     let first = server.start(&on_loopback()).await.unwrap();
+    let client =
+        crate::WebSocketTransportClient::new(&crate::WebSocketTransportClientOptions::default())
+            .unwrap();
+    let closes = Arc::new(ClientCloses::default());
+    client.listen(Arc::<ClientCloses>::clone(&closes));
+    patience(
+        PATIENCE,
+        client.connect(&crate::WebSocketTransportClientConnectOptions::new(
+            "127.0.0.1",
+            first.port,
+        )),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let before = recorder.connections(1).await.remove(0);
+    assert!(before.ends_with(";ordinal=1"));
 
     stopped(&server).await;
     stopped(&server).await;
 
+    assert_eq!(closes.wait().await, [(false, false)]);
+    assert_eq!(client.ready_state(), ReadyState::Closed);
     let second = server.start(&on_loopback()).await.unwrap();
 
     assert_ne!(first.port, second.port, "a new port");
 
-    let _client = client(second.port).await;
-
-    recorder.connections(1).await;
+    patience(
+        PATIENCE,
+        client.connect(&crate::WebSocketTransportClientConnectOptions::new(
+            "127.0.0.1",
+            second.port,
+        )),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let after = recorder.connections(2).await.remove(1);
+    assert!(
+        after.ends_with(";ordinal=2"),
+        "the next arrival is ranked after the old connection"
+    );
+    assert_ne!(before, after, "no handle is given twice");
+    assert_eq!(
+        server
+            .clients()
+            .into_iter()
+            .map(|peer| peer.connection_handle)
+            .collect::<Vec<_>>(),
+        [after],
+        "only the new connection"
+    );
+    patience(
+        PATIENCE,
+        client
+            .disconnect(&crate::TransportClientDisconnectOptions::default())
+            .unwrap(),
+    )
+    .await
+    .unwrap();
     stopped(&server).await;
 }
 
@@ -676,51 +724,93 @@ async fn refuses_to_start_on_an_address_that_is_no_bare_ip_address_ending_closed
     }
 }
 
-#[tokio::test]
-async fn listens_on_localhost_when_given_no_address_both_loopbacks_on_one_port_reached_by_127_0_0_1_by_the_ipv6_loopback_and_by_localhost_reports_localhost_and_is_secure_there()
- {
+async fn compares_every_localhost_name() {
+    use crate::websocket::client::{WebSocketTransportClient, WebSocketTransportClientOptions};
+
     let server = WebSocketTransportServer::new(&briefly_closing()).unwrap();
     let recorder = recorded(&server);
-    let bound = server
-        .start(&TransportServerStartOptions {
+    let bound = patience(
+        PATIENCE,
+        server.start(&TransportServerStartOptions {
             find_open_port: Some(true),
             ..TransportServerStartOptions::default()
-        })
-        .await
-        .unwrap();
-
-    // a host without the IPv6 loopback listens on 127.0.0.1 alone, and says so
+        }),
+    )
+    .await
+    .unwrap()
+    .unwrap();
     let has_ipv6 = bound.address == "localhost";
-
     assert!(
         has_ipv6 || bound.address == "127.0.0.1",
-        "where it listens: {}",
-        bound.address
+        "the actual listening address"
     );
-
-    let _ipv4 = client(bound.port).await;
-
-    recorder.connections(1).await;
-
+    let mut clients = Vec::new();
+    let names: &[&str] = if has_ipv6 {
+        &["127.0.0.1", "::1", "localhost"]
+    } else {
+        &["127.0.0.1", "localhost"]
+    };
+    for name in names {
+        let client =
+            WebSocketTransportClient::new(&WebSocketTransportClientOptions::default()).unwrap();
+        patience(
+            PATIENCE,
+            client.connect(&crate::WebSocketTransportClientConnectOptions::new(
+                *name, bound.port,
+            )),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(client.ready_state(), ReadyState::Open, "reached by {name}");
+        clients.push(client);
+    }
+    recorder.connections(names.len()).await;
+    let held = server.clients();
+    assert_eq!(held.len(), names.len());
+    assert_eq!(held[0].address, "127.0.0.1");
     if has_ipv6 {
-        let socket = TcpStream::connect(("::1", bound.port)).await.unwrap();
-        let (_ipv6, _) =
-            tokio_tungstenite::client_async(format!("ws://[::1]:{}/", bound.port), socket)
-                .await
-                .unwrap();
-        let handles = recorder.connections(2).await;
-
+        assert_eq!(held[1].address, "::1");
         assert!(
-            handles[1].starts_with("type=WS;ip=::1;"),
-            "the IPv6 loopback"
+            held[1].connection_handle.starts_with("type=WS;ip=::1;"),
+            "the IPv6 loopback handle"
         );
     }
-
     assert!(
-        server.is_secure(&recorder.connections(1).await[0]),
-        "secure on the loopback"
+        matches!(held.last().unwrap().address.as_str(), "127.0.0.1" | "::1"),
+        "localhost reaches a loopback"
     );
+    assert!(
+        held.iter()
+            .all(|peer| server.is_secure(&peer.connection_handle)),
+        "every actual connection is secure there"
+    );
+    for client in &clients {
+        patience(
+            PATIENCE,
+            client
+                .disconnect(&crate::TransportClientDisconnectOptions::default())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    }
     stopped(&server).await;
+    assert_eq!(
+        server.clients(),
+        Vec::<TransportServerClient>::new(),
+        "none held"
+    );
+    for address in if has_ipv6 {
+        &["127.0.0.1", "::1"][..]
+    } else {
+        &["127.0.0.1"][..]
+    } {
+        assert!(
+            crate::net::loopbacks::listener_on(address.parse().unwrap(), bound.port).is_ok(),
+            "{address} let go of the exact port"
+        );
+    }
 }
 
 #[tokio::test]
@@ -3047,8 +3137,7 @@ async fn beats_every_heartbeat_when_told_nothing() {
     reader.await.unwrap();
 }
 
-#[tokio::test]
-async fn pings_nothing_with_a_heartbeat_of_infinity() {
+async fn compares_infinite_and_finite_heartbeats() {
     for (heartbeat, dues) in [
         (Duration::from_millis(200), vec![Duration::from_millis(200)]),
         (NEVER, vec![]),
@@ -3062,11 +3151,37 @@ async fn pings_nothing_with_a_heartbeat_of_infinity() {
             },
         )
         .await;
-        let reader = reading(client(port).await);
+        let mut peer = client(port).await;
 
-        recorder.connections(1).await;
+        let handle = recorder.connections(1).await.remove(0);
 
         assert_eq!(stepping.dues(), dues, "beats of {heartbeat:?}");
+        stepping.advance(Duration::from_millis(200)).await;
+        if heartbeat == NEVER {
+            use futures_util::FutureExt;
+            assert!(
+                peer.next().now_or_never().is_none(),
+                "no ping without an armed interval"
+            );
+        } else {
+            assert!(
+                matches!(next_of(&mut peer).await, Some(Ok(Message::Ping(_)))),
+                "its one played beat sends a ping"
+            );
+            peer.flush().await.unwrap();
+        }
+        assert_eq!(
+            server
+                .clients()
+                .into_iter()
+                .map(|peer| peer.connection_handle)
+                .collect::<Vec<_>>(),
+            [handle],
+            "the ping does not drop its peer"
+        );
+        assert_eq!(recorder.count(|told| told.closes.len()), 0);
+        assert_eq!(recorder.count(|told| told.errors.len()), 0);
+        let reader = reading(peer);
         stopped(&server).await;
         reader.await.unwrap();
     }
@@ -3914,4 +4029,36 @@ async fn emits_error_with_the_handle_then_that_connection_s_close_on_a_protocol_
 #[tokio::test]
 async fn raises_an_error_with_the_handle_then_that_connection_s_close_on_a_protocol_error() {
     compares_protocol_error_events().await;
+}
+
+#[tokio::test]
+async fn stops_at_once_when_never_started_stops_twice_then_starts_again_and_accepts() {
+    compares_restarting_after_two_stops().await;
+}
+
+#[tokio::test]
+async fn stops_twice_then_starts_again_on_a_new_port() {
+    compares_restarting_after_two_stops().await;
+}
+
+#[tokio::test]
+async fn listens_on_localhost_when_given_no_address_both_loopbacks_on_one_port_reached_by_127_0_0_1_by_the_ipv6_loopback_and_by_localhost_reports_localhost_and_is_secure_there()
+ {
+    compares_every_localhost_name().await;
+}
+
+#[tokio::test]
+async fn listens_on_localhost_when_given_no_address_both_loopbacks_on_one_port_reached_by_127_0_0_1_by_1_and_by_localhost_reports_localhost_and_is_secure_there()
+ {
+    compares_every_localhost_name().await;
+}
+
+#[tokio::test]
+async fn pings_nothing_with_a_heartbeat_of_infinity() {
+    compares_infinite_and_finite_heartbeats().await;
+}
+
+#[tokio::test]
+async fn beats_nothing_with_a_heartbeat_of_infinity() {
+    compares_infinite_and_finite_heartbeats().await;
 }
