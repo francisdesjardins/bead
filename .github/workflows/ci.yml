@@ -158,7 +158,8 @@ jobs:
           name: coverage-typescript
           path: implementations/typescript/coverage/
           retention-days: 14
-      # The demo's static build, the folder francisdesjardins.ca serves: bundling it is the check.
+      # The demo's static build, the folder beadproto.dev serves at /playground/: bundling it is the
+      # check.
       - run: $YARN playground:build:file
       # The DevTools extension, built, then tested on the current line: its pure modules, and itself
       # loaded in Chromium against the static build above, the image's own browser.
@@ -1159,11 +1160,14 @@ jobs:
         run: node tools/check-citations.mjs
       - name: Check the details
         run: node tools/check-details.mjs
-      # The page francisdesjardins.ca serves at /bead/ is what its build writes from site/, byte for
-      # byte, and each diagram's SVG its source's render, by the hash it records: no browser, nothing
-      # installed.
+      # The page beadproto.dev serves is what its build writes from site/, byte for byte, each
+      # diagram's SVG its source's render and each icon its mark's, by the hashes they record: no
+      # browser, nothing installed.
       - name: Check the page
         run: node site/check.mjs
+      # What the page's deploy ships and refuses, by its own tests, in Node's runner: no dependency.
+      - name: Test the page's deploy
+        run: node --test "site/__tests__/*.test.mjs"
       # Each side's public names, read from its committed surface list, are one on every side or a
       # row of tools/names.tsv says how they render, why one is a side's own, or which row of the
       # support matrix's Differences holds it; the names no reading placed only fall (decision 0047).

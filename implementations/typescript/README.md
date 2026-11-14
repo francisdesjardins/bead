@@ -2069,8 +2069,8 @@ Prometheus text format 0.0.4. With `?transport=worker`, the Bead
 server and the identity provider run in a Web Worker of the page — `demo/worker.ts`, built to
 `dist/worker.js` beside `dist/page.js` — and no backend answers anything but the files: that pair is
 what a playground takes. `yarn playground:build:file` builds it, with the page, into
-`demo/dist/playground/`, every path relative and nothing started — the site publishes it at
-`/bead/playground/`, where the page, served as files alone, is its worker's and hides what needs a
+`demo/dist/playground/`, every path relative and nothing started — beadproto.dev publishes it at
+`/playground/`, where the page, served as files alone, is its worker's and hides what needs a
 server. In the console, `localStorage.setItem('bead:debug', 'd(rx), read')` sends the calls that filter
 keeps to the console — and the envelopes, when it asks for them by `e(…)` — with no reload, and
 `removeItem` stops it (`demo/debug.ts`). A listener only queues: the console is written when the

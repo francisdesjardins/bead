@@ -1,17 +1,20 @@
 {
   "name": "bead-site",
   "private": true,
-  "description": "The page francisdesjardins.ca serves at /bead/, in English and in French: its sources, its build and its check, which need nothing installed, and the render of its diagrams, which needs Mermaid and a Chromium.",
+  "description": "The page beadproto.dev serves, in English and in French: its sources, its build and its check, which need nothing installed; the render of its diagrams and its icons, which needs Mermaid and a Chromium; and its deploy, by Wrangler.",
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {
     "build": "node build.mjs",
     "check": "node check.mjs",
+    "deploy": "node deploy.mjs",
+    "icons": "node icons.mjs",
     "render": "node render.mjs"
   },
   "devDependencies": {
     "mermaid": "12.2.0",
-    "playwright-core": "1.64.1"
+    "playwright-core": "1.64.1",
+    "wrangler": "4.158.0"
   },
   "engines": {
     "node": ">=24.9"

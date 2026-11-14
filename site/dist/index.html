@@ -5,29 +5,31 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Bead: a binary protocol for calls between a client and a server</title>
     <meta name="description" content="Bead is a binary wire protocol for calls between a client and a server, both ways: a written specification, conformance files every implementation plays, TypeScript and C# at behavioural parity, and a Rust side with its core, its WebSocket and HTTP transports and its MQTT 5 binding." />
-    <link rel="alternate" hreflang="en" href="https://francisdesjardins.ca/bead/" />
-    <link rel="alternate" hreflang="fr" href="https://francisdesjardins.ca/bead/?lng=fr" />
-    <link rel="alternate" hreflang="x-default" href="https://francisdesjardins.ca/bead/" />
+    <link rel="alternate" hreflang="en" href="https://beadproto.dev/" />
+    <link rel="alternate" hreflang="fr" href="https://beadproto.dev/?lng=fr" />
+    <link rel="alternate" hreflang="x-default" href="https://beadproto.dev/" />
     <meta name="author" content="Francis Desjardins" />
     <meta name="theme-color" content="#c13584" />
     <meta property="og:type" content="website" />
-    <meta property="og:url" content="https://francisdesjardins.ca/bead/" />
+    <meta property="og:url" content="https://beadproto.dev/" />
     <meta property="og:title" content="Bead: a binary protocol for calls between a client and a server" />
     <meta property="og:description" content="Bead is a binary wire protocol for calls between a client and a server, both ways: a written specification, conformance files every implementation plays, TypeScript and C# at behavioural parity, and a Rust side with its core, its WebSocket and HTTP transports and its MQTT 5 binding." />
     <meta property="og:site_name" content="Francis Desjardins" />
     <meta name="twitter:card" content="summary" />
+    <link rel="icon" href="/favicon.ico" sizes="32x32" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="preload" href="/fonts/geist.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="/fonts/newsreader.woff2" as="font" type="font/woff2" crossorigin />
     <script>
-// Before the first paint: the language, as the site chooses it, and the theme, as the site keeps it.
+// Before the first paint: the language, as the page chooses it, and the theme, as the page keeps it.
 (function () {
   var root = document.documentElement;
   var isLanguage = function (value) {
     return value === 'en' || value === 'fr';
   };
-  // the address first, `?lng=`, then the visitor's choice the site's home stored, then the
-  // browser's languages, then English
+  // the address first, `?lng=`, then the visitor's choice this page stored under `language`, its
+  // origin's own, then the browser's languages, then English
   var language = null;
   try {
     var asked = new URLSearchParams(window.location.search).get('lng');
@@ -185,8 +187,7 @@
 
 /* Bead's own tokens beside penumbra's system half, which stays as penumbra writes it: what Bead adds
    to its scale or declares anyway, a deliberate act penumbra's README asks to read as one. The demo
-   links it under the two sheets, and francisdesjardins.ca's Bead page inlines it ahead of its own
-   styles. */
+   links it under the two sheets, and Bead's page inlines it ahead of its own styles. */
 
 :root {
   /* none today: the page and the demo share penumbra's content width as it is */
@@ -1380,7 +1381,7 @@ footer {
     <div id="page" data-lang="en">
 <a class="skip" href="#main">Skip to the content</a>
 <header class="topbar">
-  <a class="back" href="/?lng=en" title="Back to francisdesjardins.ca"><span aria-hidden="true">◂</span> francisdesjardins.ca</a>
+  <a class="back" href="https://francisdesjardins.ca/?lng=en" title="Back to francisdesjardins.ca"><span aria-hidden="true">◂</span> francisdesjardins.ca</a>
   <span class="brand"><span class="mark" aria-hidden="true"></span>Bead</span>
   <span class="tools">
     <button type="button" class="tool menu" data-action="menu" aria-expanded="false" aria-controls="toc" aria-label="Open the contents" data-open="Open the contents" data-close="Close the contents">≡</button>
@@ -1404,7 +1405,7 @@ footer {
       A page with a button for each kind of call, each call logged with its envelopes, against a
       server that runs in a Web Worker of the page.
     </p>
-    <div class="actions"><a class="button" href="/bead/playground/">Open the demo</a></div>
+    <div class="actions"><a class="button" href="/playground/">Open the demo</a></div>
   </div>
 </header>
 
@@ -3219,7 +3220,7 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
     <code>examples/hello</code> plays in CI in all three languages, each client against each server.
     One contract gives several packages, each its own selection of procedures, and each transport
     of a server takes the procedures it is given:
-    <a href="/bead/playground/#packages">the demo’s Packages tab</a> cuts a blueprint into them,
+    <a href="/playground/#packages">the demo’s Packages tab</a> cuts a blueprint into them,
     with <code>beadc</code>’s own code.
   </p>
   <figure class="figure">
@@ -3469,7 +3470,7 @@ disallowed-types = [
       specification, the three implementations and every decision.
     </p>
     <div class="actions">
-      <a class="button" href="/bead/playground/">Open the demo</a>
+      <a class="button" href="/playground/">Open the demo</a>
       <a href="https://github.com/francisdesjardins/bead">The source on GitHub</a>
     </div>
   </div>
@@ -3488,7 +3489,7 @@ disallowed-types = [
     <template id="page-other" data-lang="fr">
 <a class="skip" href="#main">Aller au contenu</a>
 <header class="topbar">
-  <a class="back" href="/?lng=fr" title="Retour à francisdesjardins.ca"><span aria-hidden="true">◂</span> francisdesjardins.ca</a>
+  <a class="back" href="https://francisdesjardins.ca/?lng=fr" title="Retour à francisdesjardins.ca"><span aria-hidden="true">◂</span> francisdesjardins.ca</a>
   <span class="brand"><span class="mark" aria-hidden="true"></span>Bead</span>
   <span class="tools">
     <button type="button" class="tool menu" data-action="menu" aria-expanded="false" aria-controls="toc" aria-label="Ouvrir le sommaire" data-open="Ouvrir le sommaire" data-close="Fermer le sommaire">≡</button>
@@ -3512,7 +3513,7 @@ disallowed-types = [
       Une page avec un bouton par genre d’appel, chaque appel noté avec ses enveloppes, face à un
       serveur qui tourne dans un Web Worker de la page.
     </p>
-    <div class="actions"><a class="button" href="/bead/playground/">Ouvrir la démo</a></div>
+    <div class="actions"><a class="button" href="/playground/">Ouvrir la démo</a></div>
   </div>
 </header>
 
@@ -5378,7 +5379,7 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
     <code>examples/hello</code> se joue dans la CI dans les trois langages, chaque client contre
     chaque serveur. Un contrat donne plusieurs paquets, chacun sa sélection de procédures, et
     chaque transport d’un serveur prend les procédures qu’on lui donne :
-    <a href="/bead/playground/#packages">l’onglet Packages de la démo</a> y découpe un blueprint,
+    <a href="/playground/#packages">l’onglet Packages de la démo</a> y découpe un blueprint,
     avec le code même de <code>beadc</code>.
   </p>
   <figure class="figure">
@@ -5635,7 +5636,7 @@ disallowed-types = [
       spécification, les trois implantations et chaque décision.
     </p>
     <div class="actions">
-      <a class="button" href="/bead/playground/">Ouvrir la démo</a>
+      <a class="button" href="/playground/">Ouvrir la démo</a>
       <a href="https://github.com/francisdesjardins/bead">Le code sur GitHub</a>
     </div>
   </div>
@@ -5658,7 +5659,7 @@ disallowed-types = [
 (() => {
   // each language's title and description, which the build writes beside this script
   const HEADS = JSON.parse(document.getElementById('heads').textContent);
-  const ADDRESS = 'https://francisdesjardins.ca/bead/';
+  const ADDRESS = 'https://beadproto.dev/';
   // the fixed bar, and a little air under it, above a section counted as the current one
   const READING_LINE = 96;
 

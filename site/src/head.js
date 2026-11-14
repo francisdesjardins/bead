@@ -1,11 +1,11 @@
-// Before the first paint: the language, as the site chooses it, and the theme, as the site keeps it.
+// Before the first paint: the language, as the page chooses it, and the theme, as the page keeps it.
 (function () {
   var root = document.documentElement;
   var isLanguage = function (value) {
     return value === 'en' || value === 'fr';
   };
-  // the address first, `?lng=`, then the visitor's choice the site's home stored, then the
-  // browser's languages, then English
+  // the address first, `?lng=`, then the visitor's choice this page stored under `language`, its
+  // origin's own, then the browser's languages, then English
   var language = null;
   try {
     var asked = new URLSearchParams(window.location.search).get('lng');
