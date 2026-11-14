@@ -82,6 +82,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Spec 15.3: a text message that is no UTF-8 fails its WebSocket with 1007 (RFC 6455 §8.1, §7.4.1),
   and never reaches its router; a page's `WebSocket` fails it as its browser does.
   `spec/transports.json` plays it over a WebSocket, every side; the spec's next version is a minor.
+- Spec 15.26: an MQTT 5 link's Keep Alive in force is the shorter of its CONNECT's and its
+  CONNACK's Server Keep Alive, its CONNECT's under 0, and a PINGREQ whose PINGRESP has not come
+  within half of it loses its link, on every side. The Rust side keeps its own under a Server Keep
+  Alive of 0 and no longer takes a longer one, and waits half its Keep Alive for a PINGRESP; the
+  TypeScript side keeps its own under a longer one; the C# side loses its link once a PINGREQ
+  under a shorter one has no PINGRESP. The matrix's row of a Server Keep Alive of 0, or longer
+  than a side's own, closes (decision 0041).
 
 ### Fixed
 
