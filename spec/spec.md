@@ -340,12 +340,14 @@ its route (16 to 31), its admission (32 to 47), its payload (48 to 63), then its
 |      |                            | 65   | `DESTINATION_LOST`       |
 
 8.2. `CAPACITY_EXCEEDED` says that the receiver holds as much as a bound of its own lets it, and
-takes no more: a request past the calls it answers on its connection at once (section 9.2,
-step 3), a notification past its subscription's queue (section 11.10), a transfer past those its
-connection receives at once or past the budget left (section 12.3), a call past those that wait for
-an issuer's deadline (section 13.9). A requester gives it, too, to a call of its own it has no call
-id free for, or that would pass the calls its peer answers at once (section 9.1). It says nothing
-against the call's credential, and withdraws none (section 13.4).
+takes no more: a request past the calls it answers on its connection at once, or past twice as many
+with the calls whose resolvers outlive them (section 9.2, step 3), a notification past its
+subscription's queue (section 11.10), a transfer past those its connection receives at once, past
+twice as many with those whose resolvers outlive their calls, or past the budget left (section
+12.3), a call past those that wait for an issuer's deadline (section 13.9). A requester gives it,
+too, to a call of its own it has no call id free for, or that would pass the calls its peer answers
+at once (section 9.1). It says nothing against the call's credential, and withdraws none (section
+13.4).
 
 ## 9. Calls and answers
 
@@ -389,16 +391,29 @@ first that applies:
 1. A call id of the receiver's own parity: the request would answer another call. It MUST NOT be
    answered, and is reported as `ENVELOPE_MALFORMED`.
 2. A call id open already — a call still to be answered, or one held as a subscription: the same.
-3. A request past the calls the receiver answers on its connection at once,
-   `maximumAnsweringCalls` (section 12.2), is answered with `CAPACITY_EXCEEDED`, before anything
-   else of it is read, as an HTTP/2 endpoint refuses a stream past those it lets its peer open
-   ([RFC 9113 §5.1.2](https://www.rfc-editor.org/rfc/rfc9113#section-5.1.2),
+3. A request that comes while the calls the receiver answers on its connection number
+   `maximumAnsweringCalls` (section 12.2), or while those calls and the calls on it whose
+   resolvers outlive them number twice as many, is answered with `CAPACITY_EXCEEDED`, before
+   anything else of it is read, as an HTTP/2 endpoint refuses a stream past those it lets its
+   peer open ([RFC 9113 §5.1.2](https://www.rfc-editor.org/rfc/rfc9113#section-5.1.2),
    [§8.7](https://www.rfc-editor.org/rfc/rfc9113#section-8.7)). A call is answered from the turn
    its request opens it until its answer is wholly sent — a whole answer handed to its transport,
    or the last chunk of its result's transfer — its cancel comes (section 10.2) or its connection
    closes (section 9.10), its credential resolving and its transfer coming among it; a
    subscription once answered, a call id reserved and a call abandoned (section 12.9) take no
-   place, which sections 11.3, 11.10 and 12.9 bound.
+   place there, which sections 11.3, 11.10 and 12.9 bound. A call's resolver, or its verifier
+   while its credential resolves, _outlives_ the call when it still runs once the call ended,
+   answered or cancelled, a subscription's among them, and counts on its connection until it
+   settles, as Go's HTTP/2 server counts a handler until it returns and Kestrel tracks a stream
+   until its request's processing ends, against HTTP/2's Rapid Reset (CVE-2023-44487): a peer
+   that sends a request then its cancel, again and again, has no more resolvers run on a
+   connection than twice the bound. A call whose resolver outlives it holds no call id and is
+   answered nothing. A receiver that answers `CAPACITY_EXCEEDED` past the second count to twice
+   `maximumAnsweringCalls` requests in a row on a connection, none admitted between them,
+   closes that connection once the last refusal is handed to its transport, and reports
+   it, as an HTTP/2 endpoint MAY treat activity that is suspicious as a connection error of type
+   `ENHANCE_YOUR_CALM`
+   ([RFC 9113 §10.5](https://www.rfc-editor.org/rfc/rfc9113#section-10.5)).
 4. A destination, named to a receiver that relays nothing (section 14.1): answered with
    `DESTINATION_UNKNOWN`.
 5. No resolver for its service among those its connection's transport takes (section 9.11):
@@ -439,8 +454,9 @@ first that applies:
 7. A subscription opened on a connection that carries nothing back: `SUBSCRIPTION_UNSUPPORTED`.
 8. A payload, or the total a transfer declares, past the procedure's limit or the receiver's:
    `PAYLOAD_TOO_LARGE`. A transfer the receiver takes none of: the same.
-9. Otherwise the request is dispatched once its payload is whole: read (section 17), judged by its
-   rules (section 18), then handed to its resolver, with its call's session.
+9. Otherwise the request is dispatched once its payload is whole: read (section 17), judged by
+   its rules (section 18), then handed to its resolver, with its call's session. A call that
+   ended before its resolver's turn came hands it nothing.
 
 A credential's resolution MAY wait — a `JWT` verified by Web Crypto, a key set asked for a key, a
 service asked whether a token holds — and the admission after it does not. A request presenting
@@ -500,9 +516,11 @@ section 1.4 allows, or without end. While a payload or its result goes as a tran
 inactivity counts instead. Past it, the call ends, and is cancelled.
 
 9.10. A connection that closes ends every call on it: each call waiting fails, and each call to
-answer is ended as cancelled — its resolver told, or, while its credential resolves (section 9.2),
-its verifier, by the call's signal — and answered by nothing. What a verifier settles to then is
-dropped in silence (section 10.2).
+answer is ended as cancelled — its resolver told, or, while its credential resolves (section
+9.2), its verifier, by the call's signal — and answered by nothing. Every resolver still running
+on it whose call ended before is told by its call's signal as well, and the connection's counts
+of section 9.2's step 3 end with it. What a verifier settles to then is dropped in silence
+(section 10.2).
 
 9.11. A server's transport MAY take only the procedures its application names, by their
 addresses — a service id and a procedure id each (section 16.7) — so that a connection it draws
@@ -539,12 +557,13 @@ prefix alone, and is never answered.
 
 10.2. A side receiving a cancel on a call id of its own parity MUST report it as
 `ENVELOPE_MALFORMED`. Otherwise it forgets the call, takes away what the call subscribed, then
-tells the resolver, so nothing more goes out on that call id. A call whose credential still
-resolves (section 9.2) ends alike, at once: its verifier is told by the call's signal, its call id
-is free again for a request that opens a new call, and whatever its verifier settles to after — a
-session, none, or a failure of its own — is dropped in silence: it opens no session, answers
-nothing, and reports nothing. A cancel for no call has crossed its answer, and is dropped in
-silence.
+tells the resolver, so nothing more goes out on that call id: a resolver whose turn had not come
+is handed nothing (section 9.2, step 9), and one that runs on outlives its call (section 9.2,
+step 3). A call whose credential still resolves (section 9.2) ends alike, at once: its verifier
+is told by the call's signal and outlives the call until it settles, its call id is free again
+for a request that opens a new call, and whatever its verifier settles to after — a session,
+none, or a failure of its own — is dropped in silence: it opens no session, answers nothing, and
+reports nothing. A cancel for no call has crossed its answer, and is dropped in silence.
 
 10.3. A requester MUST reserve a call id in three cases: when it sends a cancel on it; when the last
 chunk of a result that came as a transfer completes it; and when a failure ends a call whose result
@@ -645,18 +664,18 @@ its requester send it; any other envelope it holds to `maximumEnvelopeBytes`. Ea
 section 5.1's second step holds an envelope to, by the kind its prefix names, so a request past
 `chunkBytes` is answered as one too large (section 9.6, item 2), and nothing of it is held.
 
-| Limit                       | By default  | Bounds                                                                                                                 |
-| --------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `maximumEnvelopeBytes`      | 16,778,240  | an envelope, as it comes in and as it goes out                                                                         |
-| `chunkBytes`                | 1,048,576   | a chunk's envelope, and the largest a payload goes whole in                                                            |
-| `windowBytes`               | 4,194,304   | how far past what it received from the start a receiver lets its sender send                                           |
-| `maximumPayloadBytes`       | 16,777,216  | a payload, whole or as a transfer; a procedure's own limit narrows it                                                  |
-| `bufferedBytesBudget`       | 268,435,456 | the bytes a side reserves for the transfers it receives, together: each opening's, and each credit it grants past them |
-| `maximumTransfers`          | 4           | the transfers a connection receives at once; 0 takes none, and sends none                                              |
-| `maximumChunkRuns`          | 1,024       | the runs of bytes apart a transfer received holds before it is whole                                                   |
-| `transferInactivityTimeout` | 30 s        | how long a transfer waits for its next chunk or credit                                                                 |
-| `maximumDetailBytes`        | 1,024       | a failure's detail                                                                                                     |
-| `maximumAnsweringCalls`     | 64          | the requests a connection's peer has it answer at once, and the calls a requester has wait on it (sections 9.1, 9.2)   |
+| Limit                       | By default  | Bounds                                                                                                                                                                          |
+| --------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `maximumEnvelopeBytes`      | 16,778,240  | an envelope, as it comes in and as it goes out                                                                                                                                  |
+| `chunkBytes`                | 1,048,576   | a chunk's envelope, and the largest a payload goes whole in                                                                                                                     |
+| `windowBytes`               | 4,194,304   | how far past what it received from the start a receiver lets its sender send                                                                                                    |
+| `maximumPayloadBytes`       | 16,777,216  | a payload, whole or as a transfer; a procedure's own limit narrows it                                                                                                           |
+| `bufferedBytesBudget`       | 268,435,456 | the bytes a side reserves for the transfers it receives, together: each opening's, and each credit it grants past them                                                          |
+| `maximumTransfers`          | 4           | the transfers a connection receives at once, and twice as many with those whose resolvers outlive their calls (section 9.2, step 3); 0 takes none, and sends none               |
+| `maximumChunkRuns`          | 1,024       | the runs of bytes apart a transfer received holds before it is whole                                                                                                            |
+| `transferInactivityTimeout` | 30 s        | how long a transfer waits for its next chunk or credit                                                                                                                          |
+| `maximumDetailBytes`        | 1,024       | a failure's detail                                                                                                                                                              |
+| `maximumAnsweringCalls`     | 64          | the requests a connection's peer has it answer at once, and twice as many with the calls whose resolvers outlive them; the calls a requester has wait on it (sections 9.1, 9.2) |
 
 They MUST hold together: an envelope of 64 bytes at least; a chunk from 64 bytes to an envelope; a
 window of two chunks at least, so a sender never waits for a credit it is owed; a payload within the
@@ -680,8 +699,8 @@ bytes or more, 993 or more beside a destination, goes whole only. A side receivi
 2. of a result, ends the call with `PAYLOAD_TOO_LARGE`, and cancels it, for a total past the
    call's limit;
 3. refuses, in this order, a total of 0, and a total past what it takes, with `PAYLOAD_TOO_LARGE`;
-   an opening past the transfers its connection receives at once, or past the budget left, with
-   `CAPACITY_EXCEEDED`; an opening that carries no byte of its payload, or holds its whole total,
+   an opening past the transfers its connection receives at once, past twice as many with those
+   whose resolvers outlive their calls, or past the budget left, with `CAPACITY_EXCEEDED`; an opening that carries no byte of its payload, or holds its whole total,
    which needed no transfer, with `CHUNK_INVALID`.
 
 12.4. A CREDIT without PACED, on the call id of a transfer, carries the end below which its sender

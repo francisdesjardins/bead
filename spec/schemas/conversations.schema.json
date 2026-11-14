@@ -123,7 +123,7 @@
       }
     },
     "step": {
-      "description": "What the test does — open, send, close — or what the server under test does next — expect, report: one of them, on the connection it names, if any.",
+      "description": "What the test does — open, send, close — or what the server under test does next — expect, report, closed: one of them, on the connection it names, if any.",
       "type": "object",
       "additionalProperties": false,
       "oneOf": [
@@ -141,6 +141,9 @@
         },
         {
           "required": ["report"]
+        },
+        {
+          "required": ["closed"]
         },
         {
           "required": ["until"]
@@ -242,6 +245,10 @@
         "token": {
           "description": "Beside an expect whose answer announced OPAQUE, the name its token takes, which a later send writes between angle brackets.",
           "$ref": "#/$defs/tokenName"
+        },
+        "closed": {
+          "description": "The server under test closing the connection the step names, or the only one, of its own accord: nothing more comes on it.",
+          "const": true
         },
         "report": {
           "description": "A code, or exception for an error that carries none.",

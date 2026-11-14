@@ -33,6 +33,10 @@ CAPACITY_EXCEEDED = 35
 PROTOCOL, APPLICATION = 0, 1
 
 SLOW = '{"milliseconds":3600000}'
+# a slow deaf to its signal, which settles on its timer alone, and one that answers at once, then works
+# on deaf until its timer (interop-service.json): each a resolver that outlives its call (9.2, step 3)
+DEAF = '{"milliseconds":1000,"heeds":false}'
+FIRST_DEAF = '{"milliseconds":1000,"heeds":false,"answersFirst":true}'
 
 # a backslash, which opens a JSON escape, and a JSON string outside ASCII with what a lenient writer escapes
 BACKSLASH = chr(92)
@@ -130,6 +134,11 @@ def opened(connection, two_way=True):
 
 def closed(connection):
     return {'close': True, 'on': connection}
+
+
+def server_closes(connection=None):
+    """The server closes the connection itself (9.2, step 3)."""
+    return {'closed': True, **({'on': connection} if connection else {})}
 
 
 def opened_as(connection, procedures=None, **declared):
@@ -781,6 +790,27 @@ def elsewhere_conversations():
     ]
 
 TWO_CALLS = {'maximumAnsweringCalls': 2}
+ONE_CALL = {'maximumAnsweringCalls': 1}
+
+# a slow deaf to its signal, padded by a member it ignores to 100 bytes, which comes as a transfer under
+# chunks of 64: its opening carries 44 bytes, then a chunk 48, then the last 8
+PADDED_DEAF = (DEAF[:-1] + ',"pad":"' + 'a' * 56 + '"}').encode('utf-8')
+assert len(PADDED_DEAF) == 100
+
+
+def deaf_transfer(call_id):
+    # a request to slow, deaf to its signal, that comes as a transfer, credited to its total and whole
+    return [opening(call_id, 'slow', PADDED_DEAF[:44], 100), credited(call_id, 100),
+            chunk_in(call_id, 44, PADDED_DEAF[44:92], False), chunk_in(call_id, 92, PADDED_DEAF[92:], True)]
+
+
+def echoed_transfer(call_id):
+    # a request to echo that comes as a transfer, credited, whole, and answered by a transfer its client
+    # credits to its last chunk
+    return [opening(call_id, 'echo', ECHOED[:44], 100), credited(call_id, 100),
+            chunk_in(call_id, 44, ECHOED[44:92], False), chunk_in(call_id, 92, ECHOED[92:], True),
+            result_opening(call_id, ECHOED[:28], 100),
+            credit_in(call_id, 100), chunk_out(call_id, 28, ECHOED[28:76], False), chunk_out(call_id, 76, ECHOED[76:], True)]
 
 
 def answering_calls_conversations():
@@ -852,6 +882,59 @@ def answering_calls_conversations():
              json_request(1, 'echo', '"y"'), result(1, '"y"'),
              opening(3, 'echo', LONG[:45], 300), failure(3, TOO_LARGE),
              json_request(5, 'cancellations', json_string(52)), result(5, '0')]),
+        # 9.2, step 3: a resolver that outlives its call keeps a place on its connection until it
+        # settles, beside the calls answered, both within twice maximumAnsweringCalls; each slow's timer
+        # is armed at the same reading, due a second from it, and settles at the one advance
+        ('a call whose resolver outlives its cancel keeps a place until it settles: a request that comes while the calls answered and those outlived number twice the bound is answered CAPACITY_EXCEEDED',
+         ['9.2.3', '10.2'], ONE_CALL, [
+             json_request(1, 'slow', DEAF), armed(1000), cancel(1),
+             json_request(3, 'echo', '"x"'), result(3, '"x"'),
+             json_request(5, 'slow', DEAF), armed(1000), cancel(5),
+             json_request(7, 'echo', '"y"'), failure(7, CAPACITY_EXCEEDED),
+             armed(1000), advance(1000),
+             json_request(9, 'echo', '"z"'), result(9, '"z"')]),
+        ('a resolver that outlives its answer keeps its call\'s place until it settles', ['9.2.3'], ONE_CALL, [
+            json_request(1, 'slow', FIRST_DEAF), result(1, '1000'), armed(1000),
+            json_request(3, 'slow', FIRST_DEAF), result(3, '1000'), armed(1000),
+            json_request(5, 'echo', '"x"'), failure(5, CAPACITY_EXCEEDED),
+            armed(1000), advance(1000),
+            json_request(7, 'echo', '"y"'), result(7, '"y"')]),
+        # the verifier settles on the server's clock whatever its signal, and what it settles to is dropped
+        ('a call cancelled while its ELSEWHERE verifier resolves keeps a place until its verifier settles',
+         ['9.2.3', '10.2', '13.11'], ONE_CALL, [
+             elsewhere(1, 'whoami', 'null', 'Interop sub=ada, after=1000'), armed(1000), cancel(1),
+             elsewhere(3, 'whoami', 'null', 'Interop sub=bob, after=1000'), armed(1000), cancel(3),
+             json_request(5, 'echo', '"x"'), failure(5, CAPACITY_EXCEEDED),
+             armed(1000), advance(1000),
+             json_request(7, 'echo', '"y"'), result(7, '"y"')]),
+        # 5 is taken at none answered and 2 outlived, 7 at 1 and 2; the cancel of 9 is for no call
+        ('a peer that cancels each request it sends has no more resolvers run than twice the calls it has answered at once',
+         ['9.2.3', '10.2'], TWO_CALLS, [
+             json_request(1, 'slow', DEAF), json_request(3, 'slow', DEAF), armed(1000), cancel(1), cancel(3),
+             json_request(5, 'slow', DEAF), json_request(7, 'slow', DEAF), armed(1000), cancel(5), cancel(7),
+             json_request(9, 'slow', DEAF), failure(9, CAPACITY_EXCEEDED), cancel(9),
+             armed(1000), advance(1000),
+             json_request(11, 'echo', '"z"'), result(11, '"z"')]),
+        # twice maximumAnsweringCalls refusals in a row past the second count, nothing settling between,
+        # close the connection once the last goes; the resolvers then settle, their answers going nowhere
+        ('a connection refused twice maximumAnsweringCalls requests in a row past the resolvers that outlive its calls is closed, and the close reported',
+         ['9.2.3'], ONE_CALL, [
+             json_request(1, 'slow', DEAF), armed(1000), cancel(1),
+             json_request(3, 'slow', DEAF), armed(1000), cancel(3),
+             json_request(5, 'echo', '"x"'), failure(5, CAPACITY_EXCEEDED),
+             json_request(7, 'echo', '"y"'), failure(7, CAPACITY_EXCEEDED),
+             report(CAPACITY_EXCEEDED), server_closes(),
+             armed(1000), advance(1000)]),
+        # 12.3, item 3: a received transfer whose call's resolver outlives it keeps its place among twice
+        # maximumTransfers, one here; the calls answered and those outlived stay under four
+        ('a transfer received for a call whose resolver outlives it keeps a place among twice maximumTransfers until it settles',
+         ['9.2.3', '10.2', '12.2.6', '12.3.3'], {**CHUNKED, 'maximumTransfers': 1, **TWO_CALLS}, [
+             *deaf_transfer(1), armed(1000), cancel(1),
+             *echoed_transfer(3),
+             *deaf_transfer(5), armed(1000), cancel(5),
+             opening(7, 'echo', ECHOED[:44], 100), failure(7, CAPACITY_EXCEEDED),
+             armed(1000), advance(1000),
+             opening(9, 'echo', ECHOED[:44], 100), credited(9, 100), cancel(9)]),
     ]
 
 
@@ -1701,7 +1784,7 @@ document = {
         'carried, beside a send, is the credential the client\'s transport carried beside that envelope, as the transport hands it on: over HTTP, its Authorization\'s value, its surrounding whitespace removed; beside an expect of a request leg B sends to a destination\'s connection, what leg B\'s transport carried beside it. Absent, it carried none.',
         'token, beside an expect whose answer announced OPAQUE, names the token that answer carried, which is random; a later send of the conversation writes that token, its 16 bytes, as its name between angle brackets, <ada>.',
         'expect is the next envelope the server sends: its kind, its call id, and its payload or its failure; a request, its flags, its service and its procedure too, and credential, the CREDENTIAL block it presents, as vectors.json writes a header\'s, a JWT\'s token a character a byte; none, it presents none. A failure compares its code, its scope and the relays it crossed, and its detail where it gives one, the detail the spec states; elsewhere its detail is informative. credential, on an answer, is the scheme of the CREDENTIAL block it carried, what it announced: OPAQUE for a session\'s token, which is random, NONE for its end; none, it carried no block. A result that opens a transfer gives its total too; a chunk, its offset, whether it is the last, and its payload; a credit, paced, whether it is PACED, and its end.',
-        'report is the next thing the server reports to its application: a protocol code, or exception for an error that carries none.',
+        'report is the next thing the server reports to its application: a protocol code, or exception for an error that carries none. closed is the server closing that connection itself: nothing more comes on it, and the conversation\'s next steps name another connection, or none.',
         'A step may move time, on the clock the server is given (decision 0011): until timer waits, on the real clock and within a patience, for a timer armed on it, due exactly that many milliseconds from now; advance steps it that many milliseconds from due to due, as spec/clocks.json states and holds the test clocks of both sides to, and follows an until timer since the last send, expect or advance; wall moves the wall clock alone, forward or back. wallClock is where the wall clock starts.',
         'A conversation that opens its connections, open, plays them all at once: every other step names its connection, on, but a step that moves time, which is the server\'s, and each connection has its own expectations; one that opens none plays one connection, opened before its first step. twoWay false beside open declares a connection that carries nothing back, as an HTTP client that does not listen; carries false, one whose transport carries no credential beside an envelope it sends, as a WebSocket\'s toward its client or a listen\'s batch; secure false, one that reaches off the machine in the clear, neither over TLS nor within the machine. By default a connection carries a credential and is secure. procedures beside open declares the procedures that connection\'s transport takes, by service id and procedure id (section 9.11): absent, every one; empty, none. A connection closed and opened again is a new connection under the same name.',
         'Before each send, after close, and at the end, nothing more was sent or reported: what a conversation does not expect, a server does not do.',
