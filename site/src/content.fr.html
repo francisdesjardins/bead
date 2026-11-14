@@ -1039,7 +1039,7 @@
   <p class="gist">
     À côté du fil binaire, une passerelle répond les procédures d’un service en HTTP et en JSON. Une
     page, <code>curl</code> ou un client tiré d’un document OpenAPI les appellent sans rien savoir
-    de Bead. Les côtés TypeScript et C# en offrent chacun une ; celle du côté Rust est à venir.
+    de Bead. Chaque côté en offre une.
   </p>
   <p>
     La passerelle est un client de plus du serveur de son application, par le
@@ -1086,7 +1086,7 @@
       veut AIP-134.
     </p>
     <p>
-      <code>beadc</code> écrit la table des routes des côtés TypeScript et C#, et un document
+      <code>beadc</code> écrit la table des routes de chaque côté, et un document
       OpenAPI 3.1.1 des procédures que choisit la <code>gateway</code> d’une sortie, tout le blueprint par défaut, les
       mêmes octets quel que soit ce qui l’écrit. La passerelle le sert à
       <code>/openapi.json</code>, avec un <code>etag</code>. Les règles d’une charge y sont écrites
@@ -1098,11 +1098,10 @@
     Une charge <code>proto</code> s’écrit dans le mapping JSON de protobuf. Une charge
     <code>json</code> passe telle quelle, une <code>text</code> en <code>text/plain</code>, une
     <code>raw</code> en <code>application/octet-stream</code>. Les bibliothèques de référence ne
-    s’accordent pas sur ce mapping, alors Bead a son propre lecteur et son propre écrivain, côtés
-    TypeScript et C# ; celui du côté Rust viendra avec sa passerelle. Il écrit une seule forme :
-    aucun blanc, les membres dans l’ordre des numéros de champ, les entrées d’une map triées. Dans
-    la CI, la suite de conformité de protobuf, en binaire et en JSON, joue ce mapping de ces deux
-    côtés ; le côté Rust joue la suite aussi, son JSON par sa bibliothèque protobuf, Buffa.
+    s’accordent pas sur ce mapping, alors Bead a son propre lecteur et son propre écrivain, de
+    chaque côté. Il écrit une seule forme : aucun blanc, les membres dans l’ordre des numéros de
+    champ, les entrées d’une map triées. Dans la CI, la suite de conformité de protobuf, en binaire
+    et en JSON, joue ce mapping de chaque côté.
   </p>
   <h3 id="transcodage-echecs">Un échec, un problème</h3>
   <p>
@@ -1610,15 +1609,15 @@
   <p class="gist">
     Bead est un protocole : une spécification, des fichiers de conformance que chaque implantation
     joue, et un service d’interop. Le dépôt tient trois implantations. TypeScript et C# sont à
-    parité de comportement. Rust a son cœur, ses transports WebSocket et HTTP, sa liaison MQTT 5
-    et la cible Rust de <code>beadc</code>, et chaque partie qui lui manque est une ligne de la
-    matrice de support, à venir.
+    parité de comportement. Rust a son cœur, ses transports WebSocket et HTTP, sa liaison MQTT 5,
+    sa passerelle et la cible Rust de <code>beadc</code>, et chaque partie qui lui manque est une
+    ligne de la matrice de support, à venir.
   </p>
   {{implementations}}
   <p class="space">
-    Côté Rust, viennent ensuite la passerelle et la liaison sur AMQP 1.0, chacune par une décision à
-    elle. Ses transports WebSocket, HTTP et MQTT 5
-    rencontrent les deux autres côtés dans l’interop, dans les deux sens. Le cœur se compile aussi
+    Côté Rust, vient ensuite la liaison sur AMQP 1.0, par une décision à elle. Ses transports
+    WebSocket, HTTP et MQTT 5 et sa passerelle rencontrent les deux autres côtés dans l’interop,
+    dans les deux sens. Le cœur se compile aussi
     pour <code>wasm32-unknown-unknown</code>.
   </p>
   <p>
@@ -1661,8 +1660,8 @@
   <p>
     Chaque unité de la spécification est citée par un fichier de conformance, ou porte la raison
     pour laquelle aucun ne la cite. Les trois côtés s’appellent les uns les autres dans la CI sur
-    WebSocket, HTTP et MQTT 5, et les côtés TypeScript et C# aussi sur AMQP 1.0, et par leurs
-    passerelles.
+    WebSocket, HTTP et MQTT 5, et par leurs passerelles, et les côtés TypeScript et C# aussi sur
+    AMQP 1.0.
   </p>
   <details class="more">
     <summary>Les fichiers de conformance, en chiffres</summary>
@@ -1767,8 +1766,8 @@
   <ul class="rules">
     <li>
       <strong>Rust au complet</strong
-      ><span>Sa passerelle, sa liaison AMQP 1.0, et son gestionnaire de services sur un routeur
-        propre à l’application.</span>
+      ><span>Sa liaison AMQP 1.0, et son gestionnaire de services sur un routeur propre à
+        l’application.</span>
     </li>
     <li>
       <strong>Des règles en CEL</strong

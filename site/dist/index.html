@@ -2475,7 +2475,7 @@ offerHello(server);
   <p class="gist">
     Beside the binary wire, a gateway answers a service’s procedures in HTTP and JSON. A page,
     <code>curl</code> or a client generated from an OpenAPI document call them knowing nothing of
-    Bead. The TypeScript and C# sides each offer one; the Rust side’s is ahead.
+    Bead. Each side offers one.
   </p>
   <p>
     The gateway is one more client of its application’s server, through the
@@ -2522,7 +2522,7 @@ offerHello(server);
       <code>update_mask</code> gets one from its body’s keys, as AIP-134 has it.
     </p>
     <p>
-      <code>beadc</code> writes the route table of the TypeScript and C# sides, and one OpenAPI
+      <code>beadc</code> writes the route table of each side, and one OpenAPI
       3.1.1 document of the procedures an output’s <code>gateway</code> selects, the whole blueprint by default, the same
       bytes whatever writes it. The gateway serves it at
       <code>/openapi.json</code>, with an <code>etag</code>. A payload’s rules are written there in
@@ -2534,11 +2534,9 @@ offerHello(server);
     A <code>proto</code> payload is written in protobuf’s JSON mapping. A <code>json</code> payload
     passes as it is, a <code>text</code> one as <code>text/plain</code>, a <code>raw</code> one as
     <code>application/octet-stream</code>. The reference libraries do not agree on that mapping, so
-    Bead has its own reader and writer, on the TypeScript and C# sides; the Rust side’s comes with
-    its gateway. It writes one form: no white space, the members in the order of their field
-    numbers, a map’s entries sorted. In CI, protobuf’s conformance suite, in binary and in JSON,
-    plays that mapping on those two sides; the Rust side plays the suite too, its JSON through its
-    protobuf library, Buffa.
+    Bead has its own reader and writer, on each side. It writes one form: no white space, the
+    members in the order of their field numbers, a map’s entries sorted. In CI, protobuf’s
+    conformance suite, in binary and in JSON, plays that mapping on every side.
   </p>
   <h3 id="transcodage-echecs">A failure, a problem</h3>
   <p>
@@ -3183,14 +3181,15 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
   <p class="gist">
     Bead is a protocol: a specification, conformance files every implementation plays, and an
     interop service. The repository holds three implementations. TypeScript and C# are at
-    behavioural parity. Rust has its core, its WebSocket and HTTP transports, its MQTT 5 binding and
-    <code>beadc</code>’s Rust target, and each part it lacks is a row of the support matrix, ahead.
+    behavioural parity. Rust has its core, its WebSocket and HTTP transports, its MQTT 5 binding,
+    its gateway and <code>beadc</code>’s Rust target, and each part it lacks is a row of the support
+    matrix, ahead.
   </p>
   <div class="table-wrap"><table class="compare"><thead><tr><th scope="col"><span class="visually-hidden">Part</span></th><th scope="col">TypeScript</th><th scope="col">C#, on .NET 10</th><th scope="col">Rust</th></tr></thead><tbody><tr><th scope="row">The wire</th><td>The envelope, the headers, the failures</td><td>The same, byte for byte</td><td>The same, byte for byte, but AMQP 1.0’s messages, ahead with its binding</td></tr><tr><th scope="row">Above the wire</th><td colspan="2">The routers, the services, sessions and JWTs, a payload’s rules, subscriptions, transfers, relays, debugging and metrics</td><td>The same, but a service manager over a router of the application’s own</td></tr><tr><th scope="row">The transports</th><td>WebSocket, HTTP, Web Worker, in memory, a broker over MQTT 5 or AMQP 1.0, and joined</td><td>WebSocket, HTTP on Kestrel, in memory, a broker over MQTT 5 or AMQP 1.0, and joined</td><td>WebSocket on tungstenite, HTTP on hyper, in memory, a broker over MQTT 5, and joined</td></tr><tr><th scope="row">The HTTP/JSON gateway</th><td>On <code>node:http</code>, or mounted into a server</td><td>On Kestrel, or mounted by its <code>HttpContext</code></td><td>On hyper, or mounted by its <code>answer</code></td></tr></tbody></table></div>
   <p class="space">
-    On the Rust side, next come the gateway and the binding over AMQP 1.0, each by a decision of its
-    own. Its WebSocket, HTTP and MQTT 5 transports meet the other
-    two sides in the interop, both ways. The core also compiles for
+    On the Rust side, the binding over AMQP 1.0 comes next, by a decision of its own. Its WebSocket,
+    HTTP and MQTT 5 transports and its gateway meet the other two sides in the interop, both
+    ways. The core also compiles for
     <code>wasm32-unknown-unknown</code>.
   </p>
   <p>
@@ -3230,8 +3229,8 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
   <h3 id="implantations-conformite">What each implementation plays</h3>
   <p>
     Each unit of the specification is cited by a conformance file, or carries the reason none
-    cites it. The three sides call each other in CI over WebSocket, HTTP and MQTT 5, and the
-    TypeScript and C# sides over AMQP 1.0 too, and through their gateways.
+    cites it. The three sides call each other in CI over WebSocket, HTTP and MQTT 5, and through
+    their gateways, and the TypeScript and C# sides over AMQP 1.0 too.
   </p>
   <details class="more">
     <summary>The conformance files, in figures</summary>
@@ -3354,8 +3353,8 @@ disallowed-types = [
   <ul class="rules">
     <li>
       <strong>Rust in full</strong
-      ><span>Its gateway, its AMQP 1.0 binding, and its service manager over a router of the
-        application’s own.</span>
+      ><span>Its AMQP 1.0 binding, and its service manager over a router of the application’s
+        own.</span>
     </li>
     <li>
       <strong>Rules in CEL</strong
@@ -4616,7 +4615,7 @@ offerHello(server);
   <p class="gist">
     À côté du fil binaire, une passerelle répond les procédures d’un service en HTTP et en JSON. Une
     page, <code>curl</code> ou un client tiré d’un document OpenAPI les appellent sans rien savoir
-    de Bead. Les côtés TypeScript et C# en offrent chacun une ; celle du côté Rust est à venir.
+    de Bead. Chaque côté en offre une.
   </p>
   <p>
     La passerelle est un client de plus du serveur de son application, par le
@@ -4664,7 +4663,7 @@ offerHello(server);
       veut AIP-134.
     </p>
     <p>
-      <code>beadc</code> écrit la table des routes des côtés TypeScript et C#, et un document
+      <code>beadc</code> écrit la table des routes de chaque côté, et un document
       OpenAPI 3.1.1 des procédures que choisit la <code>gateway</code> d’une sortie, tout le blueprint par défaut, les
       mêmes octets quel que soit ce qui l’écrit. La passerelle le sert à
       <code>/openapi.json</code>, avec un <code>etag</code>. Les règles d’une charge y sont écrites
@@ -4676,11 +4675,10 @@ offerHello(server);
     Une charge <code>proto</code> s’écrit dans le mapping JSON de protobuf. Une charge
     <code>json</code> passe telle quelle, une <code>text</code> en <code>text/plain</code>, une
     <code>raw</code> en <code>application/octet-stream</code>. Les bibliothèques de référence ne
-    s’accordent pas sur ce mapping, alors Bead a son propre lecteur et son propre écrivain, côtés
-    TypeScript et C# ; celui du côté Rust viendra avec sa passerelle. Il écrit une seule forme :
-    aucun blanc, les membres dans l’ordre des numéros de champ, les entrées d’une map triées. Dans
-    la CI, la suite de conformité de protobuf, en binaire et en JSON, joue ce mapping de ces deux
-    côtés ; le côté Rust joue la suite aussi, son JSON par sa bibliothèque protobuf, Buffa.
+    s’accordent pas sur ce mapping, alors Bead a son propre lecteur et son propre écrivain, de
+    chaque côté. Il écrit une seule forme : aucun blanc, les membres dans l’ordre des numéros de
+    champ, les entrées d’une map triées. Dans la CI, la suite de conformité de protobuf, en binaire
+    et en JSON, joue ce mapping de chaque côté.
   </p>
   <h3 id="transcodage-echecs">Un échec, un problème</h3>
   <p>
@@ -5340,15 +5338,15 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
   <p class="gist">
     Bead est un protocole : une spécification, des fichiers de conformance que chaque implantation
     joue, et un service d’interop. Le dépôt tient trois implantations. TypeScript et C# sont à
-    parité de comportement. Rust a son cœur, ses transports WebSocket et HTTP, sa liaison MQTT 5
-    et la cible Rust de <code>beadc</code>, et chaque partie qui lui manque est une ligne de la
-    matrice de support, à venir.
+    parité de comportement. Rust a son cœur, ses transports WebSocket et HTTP, sa liaison MQTT 5,
+    sa passerelle et la cible Rust de <code>beadc</code>, et chaque partie qui lui manque est une
+    ligne de la matrice de support, à venir.
   </p>
   <div class="table-wrap"><table class="compare"><thead><tr><th scope="col"><span class="visually-hidden">Partie</span></th><th scope="col">TypeScript</th><th scope="col">C#, sur .NET 10</th><th scope="col">Rust</th></tr></thead><tbody><tr><th scope="row">Le fil</th><td>L’enveloppe, les en-têtes, les échecs</td><td>Les mêmes, octet pour octet</td><td>Les mêmes, octet pour octet, sauf les messages d’AMQP 1.0, à venir avec sa liaison</td></tr><tr><th scope="row">Au-dessus du fil</th><td colspan="2">Les routeurs, les services, les sessions et les JWT, les règles d’une charge, les abonnements, les transferts, les relais, le débogage et les métriques</td><td>Les mêmes, sauf un gestionnaire de services sur un routeur propre à l’application</td></tr><tr><th scope="row">Les transports</th><td>WebSocket, HTTP, Web Worker, en mémoire, un courtier sur MQTT 5 ou AMQP 1.0, et joints</td><td>WebSocket, HTTP sur Kestrel, en mémoire, un courtier sur MQTT 5 ou AMQP 1.0, et joints</td><td>WebSocket sur tungstenite, HTTP sur hyper, en mémoire, un courtier sur MQTT 5, et joints</td></tr><tr><th scope="row">La passerelle HTTP/JSON</th><td>Sur <code>node:http</code> ou montée dans un serveur</td><td>Sur Kestrel, ou montée par son <code>HttpContext</code></td><td>Sur hyper, ou montée par son <code>answer</code></td></tr></tbody></table></div>
   <p class="space">
-    Côté Rust, viennent ensuite la passerelle et la liaison sur AMQP 1.0, chacune par une décision à
-    elle. Ses transports WebSocket, HTTP et MQTT 5
-    rencontrent les deux autres côtés dans l’interop, dans les deux sens. Le cœur se compile aussi
+    Côté Rust, vient ensuite la liaison sur AMQP 1.0, par une décision à elle. Ses transports
+    WebSocket, HTTP et MQTT 5 et sa passerelle rencontrent les deux autres côtés dans l’interop,
+    dans les deux sens. Le cœur se compile aussi
     pour <code>wasm32-unknown-unknown</code>.
   </p>
   <p>
@@ -5391,8 +5389,8 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
   <p>
     Chaque unité de la spécification est citée par un fichier de conformance, ou porte la raison
     pour laquelle aucun ne la cite. Les trois côtés s’appellent les uns les autres dans la CI sur
-    WebSocket, HTTP et MQTT 5, et les côtés TypeScript et C# aussi sur AMQP 1.0, et par leurs
-    passerelles.
+    WebSocket, HTTP et MQTT 5, et par leurs passerelles, et les côtés TypeScript et C# aussi sur
+    AMQP 1.0.
   </p>
   <details class="more">
     <summary>Les fichiers de conformance, en chiffres</summary>
@@ -5521,8 +5519,8 @@ disallowed-types = [
   <ul class="rules">
     <li>
       <strong>Rust au complet</strong
-      ><span>Sa passerelle, sa liaison AMQP 1.0, et son gestionnaire de services sur un routeur
-        propre à l’application.</span>
+      ><span>Sa liaison AMQP 1.0, et son gestionnaire de services sur un routeur propre à
+        l’application.</span>
     </li>
     <li>
       <strong>Des règles en CEL</strong
