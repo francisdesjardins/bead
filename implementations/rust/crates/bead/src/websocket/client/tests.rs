@@ -726,17 +726,16 @@ async fn rejects_with_a_timeout_error_then_drops_a_socket_that_never_finished_it
     assert!(ends(&mut socket).await, "dropped");
 }
 
-#[tokio::test]
-async fn waits_on_its_handshake_without_end_with_an_infinite_timeout_until_its_signal_aborts() {
+async fn compares_an_infinite_handshake() {
     let mut held = holding().await;
     let clock = stepping();
     let client = stepping_client(&clock);
     let signal = CancellationToken::new();
-    let connecting = client.connect(&WebSocketTransportClientConnectOptions {
+    let mut connecting = pin!(client.connect(&WebSocketTransportClientConnectOptions {
         timeout: Some(NEVER),
         signal: Some(signal.clone()),
         ..to(held.port)
-    });
+    }));
     let _socket = held.next().await;
 
     // a day, where the 30 seconds a timeout left at its default would have passed: no timer
@@ -749,9 +748,18 @@ async fn waits_on_its_handshake_without_end_with_an_infinite_timeout_until_its_s
         "connecting, nothing armed"
     );
 
+    assert!(
+        poll_fn(|context| Poll::Ready(connecting.as_mut().poll(context)))
+            .await
+            .is_pending(),
+        "its future remains pending after the whole day"
+    );
     signal.cancel();
 
-    assert!(is_cancelled(&settled(connecting).await), "cancelled");
+    assert!(
+        is_cancelled(&patience(PATIENCE, connecting).await.unwrap()),
+        "cancelled"
+    );
     assert!(is_state(&client, ReadyState::Closed), "closed");
 }
 
@@ -2562,8 +2570,7 @@ async fn an_explicit_undefined_disconnect_option_falls_back_to_its_default() {
     assert_eq!(recorder.closes(), [(true, false)], "its defaults");
 }
 
-#[tokio::test]
-async fn dispose_on_a_client_never_connected_does_nothing() {
+fn compares_disposal_before_connecting() {
     let client = client();
 
     client.dispose();
@@ -2574,8 +2581,7 @@ async fn dispose_on_a_client_never_connected_does_nothing() {
     );
 }
 
-#[tokio::test]
-async fn dispose_on_an_open_client_leaves_it_closed_and_ready_to_connect_again() {
+async fn compares_disposal_while_open() {
     let server = hearing(None).await;
     let client = client();
 
@@ -2583,10 +2589,12 @@ async fn dispose_on_an_open_client_leaves_it_closed_and_ready_to_connect_again()
     client.dispose();
 
     assert!(is_state(&client, ReadyState::Closed), "closed");
-    assert!(
-        matches!(client.send(binary(b"x")), Err(RouterError::Disconnected(reason)) if reason == "the transport client is closed, not open"),
-        "refused as a disconnection, closed"
-    );
+    for bytes in [&b"x"[..], &[1][..]] {
+        assert!(
+            matches!(client.send(binary(bytes)), Err(RouterError::Disconnected(reason)) if reason == "the transport client is closed, not open"),
+            "refused as a disconnection, closed"
+        );
+    }
 
     settled(client.connect(&to(server.port))).await.unwrap();
 
@@ -3894,4 +3902,62 @@ async fn refuses_a_send_by_its_ready_state_before_the_open_and_as_a_disconnectio
         "each state's"
     );
     client.dispose();
+}
+
+#[tokio::test]
+async fn dispose_on_a_client_never_connected_does_nothing() {
+    compares_disposal_before_connecting();
+}
+
+#[tokio::test]
+async fn a_dispose_on_a_client_never_connected_does_nothing() {
+    compares_disposal_before_connecting();
+}
+
+#[tokio::test]
+async fn dispose_on_an_open_client_leaves_it_closed_and_ready_to_connect_again() {
+    compares_disposal_while_open().await;
+}
+
+#[tokio::test]
+async fn a_dispose_on_an_open_client_leaves_it_closed_refusing_a_send_and_ready_to_connect_again() {
+    compares_disposal_while_open().await;
+}
+
+#[tokio::test]
+async fn waits_on_its_handshake_without_end_with_an_infinite_timeout_until_its_signal_aborts() {
+    compares_an_infinite_handshake().await;
+}
+
+#[tokio::test]
+async fn waits_on_its_handshake_without_end_with_an_infinite_timeout_until_its_token_is_cancelled()
+{
+    compares_an_infinite_handshake().await;
+}
+
+#[tokio::test]
+async fn offers_its_protocols_in_the_handshake() {
+    let mut held = holding().await;
+    let client = client();
+    let signal = CancellationToken::new();
+    let connecting = client.connect(&WebSocketTransportClientConnectOptions {
+        protocols: Some(vec!["echo".to_owned()]),
+        signal: Some(signal.clone()),
+        ..to(held.port)
+    });
+    let mut socket = held.next().await;
+    let request_head = patience(PATIENCE, head_of(&mut socket)).await.unwrap();
+    assert!(
+        String::from_utf8(request_head)
+            .unwrap()
+            .to_ascii_lowercase()
+            .contains("\r\nsec-websocket-protocol: echo\r\n"),
+        "the actual offer before any handshake answer"
+    );
+    signal.cancel();
+    assert!(
+        is_cancelled(&settled(connecting).await),
+        "cancelled while unanswered"
+    );
+    assert_eq!(client.ready_state(), ReadyState::Closed);
 }
