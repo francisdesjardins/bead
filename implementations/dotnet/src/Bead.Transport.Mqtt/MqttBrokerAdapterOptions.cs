@@ -45,8 +45,9 @@ public sealed record MqttBrokerAdapterOptions
 
     /// <summary>
     /// Its CONNECT's Keep Alive, sent in whole seconds rounded up: 30 seconds unless told, from 1 ms
-    /// to 65,535 seconds, never without end; its broker counts its link lost silent for half again
-    /// as long (spec 15.30).
+    /// to 65,535 seconds, never without end. Its link runs it unless its CONNACK names a shorter
+    /// Server Keep Alive, and loses itself on a PINGREQ unanswered for half of it; its broker counts
+    /// its link lost silent for half again as long where its CONNACK names none (spec 15.26, 15.30).
     /// </summary>
     public TimeSpan KeepAlive { get; init; } = TimeSpan.FromSeconds(30);
 

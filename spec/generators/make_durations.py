@@ -478,14 +478,15 @@ places = [
         ],
         'observed': 'held',
     },
-    # MQTT 5's adapter (spec 15.26, 15.27, 15.30): its Keep Alive, on its library's timer, and the
-    # wait for its password, where it asks its provider, and its CONNACK, from its start's call; a
-    # subscription let go's, for its UNSUBACK from its UNSUBSCRIBE; and its stop's, for what it was
-    # handed and its UNSUBACKs from its call, then for its DISCONNECT, each observed by its refusal
-    # alone; a Keep Alive is held in whole seconds, 65,535 at most, a ceiling of its own below 1.4's
+    # MQTT 5's adapter (spec 15.26, 15.27, 15.30): its Keep Alive, on its library's timer, a shorter
+    # Server Keep Alive replacing it (spec 15.26), and the wait for its password, where it asks its
+    # provider, and its CONNACK, from its start's call; a subscription let go's, for its UNSUBACK from
+    # its UNSUBSCRIBE; and its stop's, for what it was handed and its UNSUBACKs from its call, then
+    # for its DISCONNECT, each observed by its refusal alone; a Keep Alive is held in whole seconds,
+    # 65,535 at most, a ceiling of its own below 1.4's
     {
         'id': 'mqttBrokerAdapter.keepAlive',
-        'name': "an MQTT 5 adapter's Keep Alive, which its broker counts its link lost by",
+        'name': "an MQTT 5 adapter's Keep Alive, its CONNECT's, which its broker counts its link lost by where its CONNACK names no Server Keep Alive",
         'kind': 'timeout',
         'never': 'refused',
         'neverClause': '15.30',
