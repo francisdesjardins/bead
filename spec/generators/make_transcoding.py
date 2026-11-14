@@ -3693,6 +3693,16 @@ def refused_own(status, reason, words, *, fields=None, on='a'):
                        'body': problem(status, detail=words)}, 'on': on}
 
 
+def refused_own_head(status, reason, words, *, on='a'):
+    """A refusal of the gateway's own (7.7) to a HEAD: its GET's status and fields, the content-length of
+    its GET's problem among them, and no content (RFC 9110 §9.3.2)."""
+    length = str(len(problem(status, detail=words).encode('utf-8')))
+
+    return {'expect': {'status': status, 'fields': {**CALL_FIELDS, 'content-type': 'application/problem+json',
+                                                    'bead-refusal': reason, 'content-length': length},
+                       'body': ''}, 'on': on}
+
+
 def own_failed(status, words, *, fields=None, on='a'):
     """A failure of the gateway's own (7.6): unmarked, about:blank, its detail its words."""
     return {'expect': {'status': status, 'fields': {**CALL_FIELDS, 'content-type': 'application/problem+json',
@@ -3981,6 +3991,21 @@ EXCHANGES = [
               {'expect': {'status': 200, 'fields': {'content-type': 'application/json', 'cache-control': 'no-cache',
                                                     'etag': {'shape': 'etag'}, 'x-content-type-options': 'nosniff',
                                                     'vary': 'Origin'}, 'body': DOCUMENT}, 'on': 'a'}]),
+    # web.dev's resource isolation policy takes a navigation as a GET alone, and none an object or an
+    # embed makes, which loads its resource as a subresource would
+    exchange("a HEAD navigation from another site is refused, to a marked read and to the document", ['10.1.5'],
+             [send('HEAD', '/api/Transcoding/getOperation?name=operations/a',
+                   ['sec-fetch-site: cross-site', 'sec-fetch-mode: navigate'], on='a'),
+              refused_own_head(403, 'origin-refused', ORIGINLESS, on='a'),
+              send('HEAD', '/openapi.json', ['sec-fetch-site: cross-site', 'sec-fetch-mode: navigate'], on='b'),
+              refused_own_head(403, 'origin-refused', ORIGINLESS, on='b')]),
+    exchange("a navigation from another site that an object or an embed makes is refused", ['10.1.5'],
+             [send('GET', '/api/Transcoding/getOperation?name=operations/a',
+                   ['sec-fetch-site: cross-site', 'sec-fetch-mode: navigate', 'sec-fetch-dest: object'], on='a'),
+              refused_own(403, 'origin-refused', ORIGINLESS, on='a'),
+              send('GET', '/openapi.json', ['sec-fetch-site: cross-site', 'sec-fetch-mode: navigate',
+                                            'sec-fetch-dest: embed'], on='b'),
+              refused_own(403, 'origin-refused', ORIGINLESS, on='b')]),
     exchange("a request of no sec-fetch-site is taken", ['10.1.5'],
              [send('GET', '/v1/shelves/s/books'),
               answered('[' + ','.join(result('Book', {'name': f'shelves/s/books/{name}', 'title': name.upper()})

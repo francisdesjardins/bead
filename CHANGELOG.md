@@ -37,12 +37,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   repeated or map field of a closed enum its generator left closed; `bead-protobuf` requires
   Buffa's crates exactly (decision 0051).
 - The support matrix and the records correct what they state: the Rust side's HTTP client comes
-  with its gateway (decision 0044); four more rows of the matrix's differences name where the sides
+  with its gateway (decision 0044); three more rows of the matrix's differences name where the sides
   part in shipped code: an MQTT 5 AUTH no CONNECT asked for, a DISCONNECT from a broker that keeps
-  its connection open, a password beside TLS that trusts an authority with no client certificate, and a
-  gateway's `HEAD` navigation from another site; and an
-  MQTT 5 acknowledgement no request awaits is named in the cells of its two rows (decisions 0041,
-  0050).
+  its connection open, and a password beside TLS that trusts an authority with no client
+  certificate; and an MQTT 5 acknowledgement no request awaits is named in the cells of its two
+  rows (decisions 0041, 0050).
 - The page's table of the three implementations is drawn from data and held to the support matrix
   by its build: each row of the matrix's Features and Transports in one part of the table or listed
   as off the page, a part ahead said in a side's cell by the token `` ahead: `<stage>` ``, an open
@@ -88,6 +87,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `spec/transcoding.md` has a `HEAD` that would open a stream answered as its `GET` begins, then
   ended at its head, its subscription with it, where both gateways held it while it lasted (8.1),
   the fixture's `watch` gaining a `get` rule, `/v1/watch`, to pin it (decision 0052).
+- `spec/transcoding.md` takes a navigation from another site only as a `GET` that no `object` or
+  `embed` makes, web.dev's resource isolation policy whole, where the TypeScript side refused a
+  `HEAD` one but to the document and the C# side took it (10.1) (decision 0052).
 
 ### Fixed
 

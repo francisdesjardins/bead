@@ -8265,6 +8265,108 @@
       ]
     },
     {
+      "name": "a HEAD navigation from another site is refused, to a marked read and to the document",
+      "clauses": [
+        "7.7",
+        "7.7.3",
+        "10.1.5"
+      ],
+      "steps": [
+        {
+          "send": {
+            "head": "HEAD /api/Transcoding/getOperation?name=operations/a HTTP/1.1\r\nhost: {host}\r\nsec-fetch-site: cross-site\r\nsec-fetch-mode: navigate\r\nconnection: close\r\n\r\n"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/problem+json",
+              "bead-refusal": "origin-refused",
+              "content-length": "125"
+            },
+            "body": ""
+          },
+          "on": "a"
+        },
+        {
+          "send": {
+            "head": "HEAD /openapi.json HTTP/1.1\r\nhost: {host}\r\nsec-fetch-site: cross-site\r\nsec-fetch-mode: navigate\r\nconnection: close\r\n\r\n"
+          },
+          "on": "b"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/problem+json",
+              "bead-refusal": "origin-refused",
+              "content-length": "125"
+            },
+            "body": ""
+          },
+          "on": "b"
+        }
+      ]
+    },
+    {
+      "name": "a navigation from another site that an object or an embed makes is refused",
+      "clauses": [
+        "7.7",
+        "7.7.3",
+        "10.1.5"
+      ],
+      "steps": [
+        {
+          "send": {
+            "head": "GET /api/Transcoding/getOperation?name=operations/a HTTP/1.1\r\nhost: {host}\r\nsec-fetch-site: cross-site\r\nsec-fetch-mode: navigate\r\nsec-fetch-dest: object\r\nconnection: close\r\n\r\n"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/problem+json",
+              "bead-refusal": "origin-refused"
+            },
+            "body": "{\"detail\":\"a request from a page of another site that shows no origin\",\"status\":403,\"title\":\"Forbidden\",\"type\":\"about:blank\"}"
+          },
+          "on": "a"
+        },
+        {
+          "send": {
+            "head": "GET /openapi.json HTTP/1.1\r\nhost: {host}\r\nsec-fetch-site: cross-site\r\nsec-fetch-mode: navigate\r\nsec-fetch-dest: embed\r\nconnection: close\r\n\r\n"
+          },
+          "on": "b"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/problem+json",
+              "bead-refusal": "origin-refused"
+            },
+            "body": "{\"detail\":\"a request from a page of another site that shows no origin\",\"status\":403,\"title\":\"Forbidden\",\"type\":\"about:blank\"}"
+          },
+          "on": "b"
+        }
+      ]
+    },
+    {
       "name": "a request of no sec-fetch-site is taken",
       "clauses": [
         "10.1.5"

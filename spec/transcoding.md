@@ -669,13 +669,14 @@ _Transcoding: `spec/transcoding.json`._
 3. a path no route matches, 404 `path-unknown` (section 3.10);
 4. an `origin` neither its own nor one `origins` names, 403 `origin-refused`;
 5. a request with no `origin` whose `sec-fetch-site` is `same-site` or `cross-site`, 403
-   `origin-refused`, unless its `sec-fetch-mode` is `navigate` and it asks `/openapi.json`, a
-   default route's `GET`, or a `get` rule on a method marked `NO_SIDE_EFFECTS`: a page of another
-   origin shows its `origin` on every request but a `GET` or a `HEAD` that is no CORS request
+   `origin-refused`, unless its `sec-fetch-mode` is `navigate`, its method `GET` and its
+   `sec-fetch-dest` neither `object` nor `embed`, and it asks `/openapi.json`, a default route's
+   `GET`, or a `get` rule on a method marked `NO_SIDE_EFFECTS`: a page of another origin shows its
+   `origin` on every request but a `GET` or a `HEAD` that is no CORS request
    ([Fetch §3.1](https://fetch.spec.whatwg.org/#origin-header)), so what comes from one without it
-   is a subresource or a navigation, which
-   [Fetch Metadata](https://www.w3.org/TR/fetch-metadata/)'s resource isolation policy refuses but
-   a navigation; a request with no `sec-fetch-site` is taken;
+   is a subresource or a navigation, which web.dev's
+   [resource isolation policy](https://web.dev/articles/fetch-metadata) refuses but a `GET`
+   navigation no `object` or `embed` makes; a request with no `sec-fetch-site` is taken;
 6. a preflight, an `OPTIONS` that carries `access-control-request-method`, from an origin `origins`
    names: 204, its `access-control-allow-methods` the methods its path's routes take in section
    3.10's order, and its `access-control-allow-headers` and `access-control-max-age` as section

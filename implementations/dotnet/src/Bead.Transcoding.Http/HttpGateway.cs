@@ -464,11 +464,14 @@ public sealed class HttpGateway : IAsyncDisposable
         }
     }
 
-    // whether a navigation from another site with no origin is taken (10.1, step 5): to the
-    // document, to a default route's GET, or to a get rule of a method marked NO_SIDE_EFFECTS
+    // whether a navigation from another site with no origin is taken (10.1, step 5): a GET that no
+    // object or embed makes, as web.dev's resource isolation policy takes one, to the document, to a
+    // default route's GET, or to a get rule of a method marked NO_SIDE_EFFECTS
     private static bool IsNavigationTaken(HttpContext context, (bool IsDocument, Dictionary<string, Served> Matched) asked)
     {
-        if (HeaderOf(context.Request, "sec-fetch-mode") != "navigate")
+        var request = context.Request;
+
+        if (HeaderOf(request, "sec-fetch-mode") != "navigate" || !IsMethod(request, "GET") || HeaderOf(request, "sec-fetch-dest") is "object" or "embed")
         {
             return false;
         }
@@ -478,9 +481,7 @@ public sealed class HttpGateway : IAsyncDisposable
             return true;
         }
 
-        var isRead = IsMethod(context.Request, "GET") || IsMethod(context.Request, "HEAD");
-
-        return isRead && asked.Matched.TryGetValue("GET", out var served) && served.Route.NoSideEffects;
+        return asked.Matched.TryGetValue("GET", out var served) && served.Route.NoSideEffects;
     }
 
     // whether a request's method is the one named: a method is case-sensitive (RFC 9110 §9.1)

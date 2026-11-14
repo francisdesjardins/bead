@@ -446,6 +446,61 @@ public sealed class HttpGatewayTests
     }
 
     [Fact]
+    public async Task Refuses_a_HEAD_navigation_and_one_an_object_or_an_embed_makes_from_another_site_to_a_route_and_to_the_document()
+    {
+        var started = await Started();
+
+        static HttpRequestMessage Navigated(HttpMethod method, (string Path, string? Destination) to)
+        {
+            var request = new HttpRequestMessage(method, to.Path);
+
+            request.Headers.TryAddWithoutValidation("sec-fetch-site", "cross-site");
+            request.Headers.TryAddWithoutValidation("sec-fetch-mode", "navigate");
+
+            if (to.Destination is { } destination)
+            {
+                request.Headers.TryAddWithoutValidation("sec-fetch-dest", destination);
+            }
+
+            return request;
+        }
+
+        try
+        {
+            // a GET of a method marked NO_SIDE_EFFECTS, and the document
+            foreach (var path in new[] { "/v1/books/2", "/openapi.json" })
+            {
+                // * a GET a page or a frame navigates to, taken, as web.dev's resource isolation policy takes one
+                foreach (var destination in new[] { null, "document", "iframe" })
+                {
+                    using var taken = await started.Client.SendAsync(Navigated(HttpMethod.Get, (path, destination)), Cancelled);
+
+                    Assert.Equal((path, destination, HttpStatusCode.OK), (path, destination, taken.StatusCode));
+                }
+
+                // a HEAD navigation, and a GET an object or an embed makes, refused
+                foreach (var (method, destination) in new[] { (HttpMethod.Head, (string?)null), (HttpMethod.Head, "document"), (HttpMethod.Get, "object"), (HttpMethod.Get, "embed") })
+                {
+                    using var refused = await started.Client.SendAsync(Navigated(method, (path, destination)), Cancelled);
+
+                    Assert.Equal(
+                        (path, method, destination, HttpStatusCode.Forbidden, "origin-refused"),
+                        (path, method, destination, refused.StatusCode, refused.Headers.GetValues("bead-refusal").Single()));
+                }
+
+                // a HEAD from no page of another site, taken
+                using var own = await started.Client.SendAsync(new HttpRequestMessage(HttpMethod.Head, path), Cancelled);
+
+                Assert.Equal((path, HttpStatusCode.OK), (path, own.StatusCode));
+            }
+        }
+        finally
+        {
+            await Stopped(started);
+        }
+    }
+
+    [Fact]
     public async Task Answers_a_stream_s_request_that_carries_Last_Event_ID_with_204_and_no_call()
     {
         var started = await Started();

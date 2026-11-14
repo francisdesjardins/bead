@@ -1759,13 +1759,18 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
       response.setHeader('access-control-expose-headers', '*');
     }
 
-    // 5: a request of no origin from another site, but a navigation to what reads alone
+    // 5: a request of no origin from another site, but a GET navigation no `object` or `embed`
+    // makes, to what reads alone (web.dev's resource isolation policy)
     const site = headerOf(request, 'sec-fetch-site');
 
     if (origin === undefined && (site === 'same-site' || site === 'cross-site')) {
-      const isNavigation = headerOf(request, 'sec-fetch-mode') === 'navigate';
-      const navigated =
-        path === undefined || request.method !== 'GET' ? undefined : chosenOf(path, 'GET');
+      const destination = headerOf(request, 'sec-fetch-dest');
+      const isNavigation =
+        headerOf(request, 'sec-fetch-mode') === 'navigate' &&
+        request.method === 'GET' &&
+        destination !== 'object' &&
+        destination !== 'embed';
+      const navigated = path === undefined || !isNavigation ? undefined : chosenOf(path, 'GET');
 
       if (!isNavigation || !(isDocument || navigated?.isNavigable === true)) {
         refuse(exchange, {

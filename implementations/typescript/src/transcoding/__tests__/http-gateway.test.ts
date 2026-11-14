@@ -564,6 +564,39 @@ test('refuses a request with no Origin from a page of another site, and a naviga
   ).toBe(200);
 });
 
+test('refuses a HEAD navigation, and one an object or an embed makes, from another site, to a route and to the document', async () => {
+  await using fixture = await startTranscoding({ origins: [ORIGIN] });
+  const navigation = { 'sec-fetch-mode': 'navigate', 'sec-fetch-site': 'cross-site' };
+
+  for (const path of ['/v1/books/2', '/openapi.json']) {
+    for (const [method, destination] of [
+      ['HEAD', 'document'],
+      ['GET', 'object'],
+      ['GET', 'embed'],
+    ] as const) {
+      const refused = await send(fixture.port, {
+        headers: { ...navigation, 'sec-fetch-dest': destination },
+        method,
+        path,
+      });
+
+      expect(refused.status, `${method} ${path}, ${destination}`).toBe(403);
+      expect(refused.headers['bead-refusal']).toBe('origin-refused');
+    }
+
+    // * a GET navigation any other destination makes, a frame's among them, is taken
+    for (const destination of ['document', 'iframe']) {
+      const taken = await send(fixture.port, {
+        headers: { ...navigation, 'sec-fetch-dest': destination },
+        method: 'GET',
+        path,
+      });
+
+      expect(taken.status, `GET ${path}, ${destination}`).toBe(200);
+    }
+  }
+});
+
 test('answers a call whose peer closes before its result with 502 and releases its place', async () => {
   await using memory = createMemoryTransportServer();
   await memory.start();
