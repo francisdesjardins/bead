@@ -714,6 +714,9 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             return;
         }
 
+        // whether an UNSUBSCRIBE of its let-go failed other than by its bound: its link lost
+        var isLost = false;
+
         try
         {
             // * one connectTimeout from its call: what it was handed, then its broker's let-go; and
@@ -744,22 +747,33 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
                     }).Distinct(StringComparer.Ordinal)];
                 }
 
-                await Quietly(Task.WhenAll(filters.Select((filter) =>
+                try
                 {
-                    // ! its link's client itself: LinkUp refuses a link stopping
-                    return Sent(() =>
+                    await Task.WhenAll(filters.Select((filter) =>
                     {
-                        return link.Client.UnsubscribeAsync(new MqttClientUnsubscribeOptionsBuilder().WithTopicFilter(filter).Build(), letting.Token);
-                    });
-                })).WaitAsync(letting.Token));
+                        // ! its link's client itself: LinkUp refuses a link stopping
+                        return Sent(() =>
+                        {
+                            return link.Client.UnsubscribeAsync(new MqttClientUnsubscribeOptionsBuilder().WithTopicFilter(filter).Build(), letting.Token);
+                        });
+                    })).WaitAsync(letting.Token);
+                }
+                // ! MQTTnet fails what awaits a link whose reads it cannot go on with before it says
+                // that link disconnected, a packet it cannot decode among them (spec 15.29): an
+                // UNSUBSCRIBE failed so, or refused as its link is down, is its link lost; one failed
+                // as its bound is spent, or its link ended, MQTTnet's timeout, is what follows reads
+                catch (Exception reason) when (reason is not OutOfMemoryException)
+                {
+                    isLost = !letting.IsCancellationRequested;
+                }
             }
 
             // ! a bound of its own: a drain that spent its time leaves its DISCONNECT one, or the
             // broker would read no DISCONNECT and publish its will; sent once MQTTnet says it
             // connected, its CONNACK read, even before its start's continuation counted it up, and
-            // never once its link ended, a packet its client cannot read ending it, which MQTTnet
-            // may say connected a moment more
-            if (link.Client.IsConnected && !IsEnded(link))
+            // never once its link ended or was lost, a packet its client cannot read ending it,
+            // which MQTTnet may say connected a moment more
+            if (!isLost && link.Client.IsConnected && !IsEnded(link))
             {
                 using var timeout = new CancellationTokenSource(_options.ConnectTimeout, TimeProvider.System);
 
