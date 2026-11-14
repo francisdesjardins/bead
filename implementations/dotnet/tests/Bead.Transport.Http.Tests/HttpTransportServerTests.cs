@@ -2349,7 +2349,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         var told = new List<TransportServerRefusal>();
 
         // each head on a socket of its own, which the refusal names by its port
-        async Task<int> Refused(string head)
+        async Task<int> Answered(string head)
         {
             using var wire = await Wire.Open(_port);
 
@@ -2357,6 +2357,22 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
             await wire.Read();
 
             return wire.Port;
+        }
+
+        // ! told once its answer went, so the next head can be told first: each awaited in its turn
+        async Task<int> Refused(string head)
+        {
+            var port = await Answered(head);
+
+            await Until(() =>
+            {
+                return _refusals.Any((refusal) =>
+                {
+                    return refusal.Port == port;
+                });
+            });
+
+            return port;
         }
 
         // a host not taken, its Origin in two field lines joined by ", "; an absolute-form target's
@@ -2376,8 +2392,8 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         };
 
         // what HTTP refuses of its own, unmarked: an authority that is no host, two Host lines
-        await Refused("POST /bead HTTP/1.1\r\nHost: localhost:\r\nContent-Length: 0\r\n\r\n");
-        await Refused("POST /bead HTTP/1.1\r\nHost: a.test\r\nHost: b.test\r\nContent-Length: 0\r\n\r\n");
+        await Answered("POST /bead HTTP/1.1\r\nHost: localhost:\r\nContent-Length: 0\r\n\r\n");
+        await Answered("POST /bead HTTP/1.1\r\nHost: a.test\r\nHost: b.test\r\nContent-Length: 0\r\n\r\n");
 
         await Until(() =>
         {
