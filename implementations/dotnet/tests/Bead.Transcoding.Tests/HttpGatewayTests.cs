@@ -1196,6 +1196,41 @@ public sealed class HttpGatewayTests
     }
 
     [Fact]
+    public async Task Answers_a_route_s_variable_that_names_no_field_500_reported_none_of_its_words_in_the_problem()
+    {
+        // * getBook's route told its path is /v1/{nope}, which no field of its request names: a
+        // programmer's error its binding meets, past every gate, before any connection is drawn
+        var started = await Started((options) =>
+        {
+            return options with
+            {
+                Routes = [.. options.Routes.Select((route) =>
+                {
+                    return route.Procedure == TranscodingProcedures.GetBook.Procedure ? route with { Routes = [new HttpRouteTemplate { Method = "GET", Template = "/v1/{nope}" }] } : route;
+                })],
+            };
+        });
+        var reported = ReportedBy(started.Gateway);
+        var drawn = 0;
+
+        started.Service.Memory.Connection += (_) => { Interlocked.Increment(ref drawn); };
+
+        try
+        {
+            using var answered = await started.Client.GetAsync(new Uri("/v1/x", UriKind.Relative), Cancelled);
+
+            Assert.Equal(HttpStatusCode.InternalServerError, answered.StatusCode);
+            Assert.Equal("{\"status\":500,\"title\":\"Internal Server Error\",\"type\":\"about:blank\"}", await answered.Content.ReadAsStringAsync(Cancelled));
+            Assert.Equal(0, drawn);
+            Assert.Contains("nope", Assert.Single(reported), StringComparison.Ordinal);
+        }
+        finally
+        {
+            await Stopped(started);
+        }
+    }
+
+    [Fact]
     public async Task Answers_500_a_connection_its_server_failed_to_draw_but_by_refusing_it_reported_with_no_detail()
     {
         await using var service = await TranscodingService.Start();
