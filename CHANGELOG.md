@@ -112,6 +112,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The Rust side's WebSocket, server and client, fails a text message that is no UTF-8 with 1007,
   as spec 15.3 says and the other sides do, where it sent 1002; a close whose reason is no UTF-8
   alike, since tungstenite raises one error for both.
+- The Rust side's router ends a call whose timer its clock cannot arm before its request goes with
+  nothing sent, no cancel and no call id reserved, as the TypeScript and C# sides end it, where it
+  cancelled a request its peer never saw.
 
 ## [0.13.0] - 2026-11-12
 

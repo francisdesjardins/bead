@@ -263,8 +263,22 @@ fn wait<S: Side>(state: &mut S, (delay, call, id): (Option<Duration>, &CallAddre
 
     let timer = match timer.transpose() {
         Ok(timer) => timer,
+        // ! a timer that cannot be armed before its request went ends the call with nothing sent,
+        // no cancel and no call id reserved, as the other sides' requesters throw before their
+        // delivery; once it went, the peer is told to cancel it
         Err(error) => {
-            end_pending(state, (CallError::Refused(error), call, id));
+            let is_sent = state
+                .core()
+                .pending
+                .get(call)
+                .is_some_and(|request| request.id == id && request.is_sent);
+
+            if is_sent {
+                end_pending(state, (CallError::Refused(error), call, id));
+            } else if let Some(mut request) = forget(state, (call, Some(id))) {
+                settle(&mut request, Err(CallError::Refused(error)));
+            }
+
             return;
         }
     };
@@ -568,6 +582,11 @@ pub(crate) fn request<S: Side>(
 
     wait(state, (Some(timeout), &call, id));
 
+    // ! a call its timer could not wait on is settled already: nothing of it goes out
+    if !state.core().pending.is(&call, id) {
+        return;
+    }
+
     let mut options = Deliver::to(&handle);
     let (handed, refused) = (call.clone(), call);
 
@@ -676,6 +695,11 @@ fn send_request<S: Side>(
     let total = outgoing.total();
 
     request_progress(state, (call, id));
+
+    // ! a call its timer could not wait on is settled already: nothing of it goes out
+    if !state.core().pending.is(call, id) {
+        return;
+    }
 
     // kept before its opening goes, so a credit that comes back as it goes finds it
     let core = state.core();
