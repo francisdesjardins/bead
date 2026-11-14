@@ -1263,6 +1263,14 @@ conversations = [
         opening(1, 'echo', b'"ab"', 4), failure(1, CHUNK_INVALID)]),
     ('an opening that carries no byte of its payload is answered CHUNK_INVALID', ['12.3', '12.3.3'], CHUNKED, [
         opening(1, 'echo', b'', 100), failure(1, CHUNK_INVALID)]),
+    # 12.3.3: an opening carries what its sender places in it, 44 bytes here, and a result's 28, the
+    # 20 bytes of an announcement counted
+    ('an opening that carries other than its sender places in it is answered CHUNK_INVALID', ['12.3', '12.3.3'], CHUNKED, [
+        opening(1, 'echo', LONG[:43], 300), failure(1, CHUNK_INVALID),
+        opening(3, 'echo', LONG[:44], 300), credited(3, 172), cancel(3)]),
+    ('a result\'s opening that carries other than its sender places in it ends the command CHUNK_INVALID, and cancels it', ['12.3', '12.3.3', '12.7'], CHUNKED, [
+        json_request(1, 'ask', 'null'), command(2, 'clock', QUESTION),
+        result_opening_in(2, LONG[:27], 300), cancelled(2), failure(1, PROCEDURE_FAILED), report(CHUNK_INVALID)]),
     ('an opening that declares a total of 0 is answered PAYLOAD_TOO_LARGE', ['12.3.3'], CHUNKED, [
         opening(1, 'echo', b'', 0), failure(1, PAYLOAD_TOO_LARGE)]),
     ('a transfer past those a connection receives at once is answered CAPACITY_EXCEEDED', ['12.3.3'], {**CHUNKED, 'maximumTransfers': 1}, [

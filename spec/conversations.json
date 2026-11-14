@@ -6632,6 +6632,97 @@
       ]
     },
     {
+      "name": "an opening that carries other than its sender places in it is answered CHUNK_INVALID",
+      "clauses": [
+        "12.3",
+        "12.3.3"
+      ],
+      "limits": {
+        "chunkBytes": 64,
+        "windowBytes": 128
+      },
+      "steps": [
+        {
+          "send": "A1 10 04 05  00 00 00 01  00 01 00 01  00 00 00 00 00 00 01 2C | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 48,
+              "scope": 0,
+              "relays": 0
+            }
+          }
+        },
+        {
+          "send": "A1 10 04 05  00 00 00 03  00 01 00 01  00 00 00 00 00 00 01 2C | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71"
+        },
+        {
+          "expect": {
+            "kind": 21,
+            "callId": 3,
+            "paced": false,
+            "creditEnd": 172
+          }
+        },
+        {
+          "send": "A1 16 00 02  00 00 00 03"
+        }
+      ]
+    },
+    {
+      "name": "a result's opening that carries other than its sender places in it ends the command CHUNK_INVALID, and cancels it",
+      "clauses": [
+        "12.3",
+        "12.3.3",
+        "12.7"
+      ],
+      "limits": {
+        "chunkBytes": 64,
+        "windowBytes": 128
+      },
+      "steps": [
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 08 | 6E 75 6C 6C"
+        },
+        {
+          "expect": {
+            "kind": 16,
+            "callId": 2,
+            "flags": 0,
+            "serviceId": 1,
+            "procedureId": 9,
+            "payload": "22 57 68 61 74 20 74 69 6D 65 20 69 73 20 69 74 20 77 68 65 72 65 20 79 6F 75 20 61 72 65 3F 22"
+          }
+        },
+        {
+          "send": "A1 11 04 04  00 00 00 02  00 00 00 00 00 00 01 2C | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A"
+        },
+        {
+          "expect": {
+            "kind": 22,
+            "callId": 2
+          }
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 64,
+              "scope": 0,
+              "relays": 0
+            }
+          }
+        },
+        {
+          "report": 48
+        }
+      ]
+    },
+    {
       "name": "an opening that declares a total of 0 is answered PAYLOAD_TOO_LARGE",
       "clauses": [
         "12.3.3"

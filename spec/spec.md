@@ -702,8 +702,10 @@ bytes or more, 993 or more beside a destination, goes whole only. A side receivi
 3. refuses, in this order, a total of 0, and a total past what it takes, with `PAYLOAD_TOO_LARGE`;
    an opening past the transfers its connection receives at once, or past twice as many with those
    whose resolvers outlive their calls, with `CAPACITY_EXCEEDED`; an opening that carries no byte of
-   its payload, or holds its whole total, which needed no transfer, with `CHUNK_INVALID`. It admits
-   any other to the budget as section 12.4 says.
+   its payload, or holds its whole total, which needed no transfer, or carries other than its sender
+   places in it — `chunkBytes` less its header, a result's counted with the 20 bytes of an
+   announcement in place of any it carries (section 12.1) — with `CHUNK_INVALID`. It admits any
+   other to the budget as section 12.4 says.
 
 12.4. A CREDIT without PACED, on the call id of a transfer, carries the end below which its sender
 may send: absolute, so a credit repeated, late or out of order never grants too much. A credit
